@@ -18,7 +18,9 @@ CONTAINER=kitazeit-it
 PORT=${KITAZEIT_TEST_PORT:-3137}
 BASE="http://127.0.0.1:$PORT"
 DATA_DIR="$ROOT/.it-data"
-IMG=zerf2-app:latest
+# Allow CI to pass a pre-built image via the IMG environment variable so the
+# build step below is skipped (the image is already present in the daemon).
+IMG=${IMG:-zerf2-app:latest}
 
 PASS=0; FAIL=0
 banner(){ printf "\n\033[1;36m== %s ==\033[0m\n" "$*"; }
@@ -31,9 +33,15 @@ cleanup(){
 }
 trap cleanup EXIT
 
-banner "Build app image (cached layers reused)"
-DOCKER_BUILDKIT=0 docker build -q -t "$IMG" "$ROOT" >/dev/null
-ok "image built"
+# Skip the build when a pre-built image is already present in the daemon
+# (e.g. loaded by CI via docker/build-push-action before calling this script).
+if docker image inspect "$IMG" >/dev/null 2>&1; then
+  ok "using pre-built image ($IMG)"
+else
+  banner "Build app image (cached layers reused)"
+  DOCKER_BUILDKIT=0 docker build -q -t "$IMG" "$ROOT" >/dev/null
+  ok "image built"
+fi
 
 banner "Start ephemeral container on :$PORT"
 cleanup
