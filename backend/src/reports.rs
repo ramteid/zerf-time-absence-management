@@ -280,8 +280,9 @@ pub async fn month_csv(
     let cd = format!("attachment; filename=\"report-{}-{}.csv\"", uid, safe_month);
     resp.headers_mut().insert(
         header::CONTENT_DISPOSITION,
-        axum::http::HeaderValue::from_str(&cd)
-            .unwrap_or_else(|_| axum::http::HeaderValue::from_static("attachment; filename=\"report.csv\"")),
+        axum::http::HeaderValue::from_str(&cd).unwrap_or_else(|_| {
+            axum::http::HeaderValue::from_static("attachment; filename=\"report.csv\"")
+        }),
     );
     Ok(resp)
 }
