@@ -243,7 +243,7 @@ pub async fn reset_password(
 
 /// Generate a 16-char temporary password with at least one of each class
 /// (lower / upper / digit / symbol) so it satisfies the strength policy.
-/// Uses the OS CSPRNG (`OsRng`) — never the thread RNG — for security.
+/// Uses the OS CSPRNG (`SysRng`) — never the thread RNG — for security.
 pub fn generate_password() -> String {
     use rand::rand_core::{Rng, UnwrapErr};
     use rand::rngs::SysRng;
