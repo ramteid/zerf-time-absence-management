@@ -96,42 +96,42 @@ async fn main() -> Result<()> {
                     post(time_entries::batch_approve),
                 )
                 .route(
-                    "/time-entries/:id",
+                    "/time-entries/{id}",
                     put(time_entries::update).delete(time_entries::delete),
                 )
-                .route("/time-entries/:id/approve", post(time_entries::approve))
-                .route("/time-entries/:id/reject", post(time_entries::reject))
+                .route("/time-entries/{id}/approve", post(time_entries::approve))
+                .route("/time-entries/{id}/reject", post(time_entries::reject))
                 .route("/absences", get(absences::list).post(absences::create))
                 .route("/absences/all", get(absences::list_all))
                 .route("/absences/calendar", get(absences::calendar))
                 .route(
-                    "/absences/:id",
+                    "/absences/{id}",
                     put(absences::update).delete(absences::cancel),
                 )
-                .route("/absences/:id/approve", post(absences::approve))
-                .route("/absences/:id/reject", post(absences::reject))
-                .route("/leave-balance/:uid", get(absences::balance))
+                .route("/absences/{id}/approve", post(absences::approve))
+                .route("/absences/{id}/reject", post(absences::reject))
+                .route("/leave-balance/{uid}", get(absences::balance))
                 .route(
                     "/change-requests",
                     get(change_requests::list).post(change_requests::create),
                 )
                 .route("/change-requests/all", get(change_requests::list_all))
                 .route(
-                    "/change-requests/:id/approve",
+                    "/change-requests/{id}/approve",
                     post(change_requests::approve),
                 )
-                .route("/change-requests/:id/reject", post(change_requests::reject))
+                .route("/change-requests/{id}/reject", post(change_requests::reject))
                 .route("/users", get(users::list).post(users::create))
-                .route("/users/:id", get(users::get_one).put(users::update))
-                .route("/users/:id/deactivate", post(users::deactivate))
-                .route("/users/:id/reset-password", post(users::reset_password))
+                .route("/users/{id}", get(users::get_one).put(users::update))
+                .route("/users/{id}/deactivate", post(users::deactivate))
+                .route("/users/{id}/reset-password", post(users::reset_password))
                 .route(
                     "/categories",
                     get(categories::list).post(categories::create),
                 )
-                .route("/categories/:id", put(categories::update))
+                .route("/categories/{id}", put(categories::update))
                 .route("/holidays", get(holidays::list).post(holidays::create))
-                .route("/holidays/:id", delete(holidays::delete))
+                .route("/holidays/{id}", delete(holidays::delete))
                 .route("/reports/month", get(reports::month))
                 .route("/reports/month/csv", get(reports::month_csv))
                 .route("/reports/team", get(reports::team))
