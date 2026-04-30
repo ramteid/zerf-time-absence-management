@@ -1,0 +1,40 @@
+{
+	# Global options.
+	# Uncomment and set if you want notification e-mails for cert issues:
+	# email ops@example.com
+	servers {
+		protocols h1 h2 h3
+	}
+}
+
+{$KITAZEIT_DOMAIN:localhost} {
+	encode zstd gzip
+
+	# Strict transport security: 2 years, all subdomains, preload-eligible.
+	header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+
+	# Belt-and-braces: backend already sets these, but Caddy overrides ensure
+	# they are present even on static assets and error pages.
+	header X-Content-Type-Options "nosniff"
+	header X-Frame-Options "DENY"
+	header Referrer-Policy "strict-origin-when-cross-origin"
+	header Permissions-Policy "accelerometer=(), camera=(), geolocation=(), gyroscope=(), microphone=(), payment=(), usb=()"
+	header Cross-Origin-Opener-Policy "same-origin"
+	header Cross-Origin-Resource-Policy "same-origin"
+	header -Server
+	header -X-Powered-By
+
+	# Reasonable client request limits — KitaZeit has no upload features.
+	request_body {
+		max_size 1MB
+	}
+
+	# Note: edge rate-limiting needs a Caddy build with the rate_limit module.
+	# The application itself enforces 5 failed attempts / 15 min per email.
+
+	reverse_proxy app:3000 {
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Real-IP {remote_host}
+	}
+}

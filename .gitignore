@@ -1,0 +1,14 @@
+.env
+.env.*
+!.env.example
+data/
+.it-data/
+backend/target/
+target/
+node_modules/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.log
+.DS_Store

@@ -1,0 +1,42 @@
+version: 2
+updates:
+  # Rust backend (Cargo.toml + Cargo.lock).
+  - package-ecosystem: "cargo"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
+      timezone: "Europe/Berlin"
+    open-pull-requests-limit: 10
+    labels: ["dependencies", "rust"]
+    commit-message:
+      prefix: "deps(cargo)"
+      include: "scope"
+    groups:
+      patch-and-minor:
+        update-types: ["patch", "minor"]
+
+  # Base images for the build.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
+      timezone: "Europe/Berlin"
+    labels: ["dependencies", "docker"]
+    commit-message:
+      prefix: "deps(docker)"
+
+  # GitHub Actions versions used by the workflows.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
+      timezone: "Europe/Berlin"
+    labels: ["dependencies", "ci"]
+    commit-message:
+      prefix: "deps(actions)"
