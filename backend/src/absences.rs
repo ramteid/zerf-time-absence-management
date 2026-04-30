@@ -269,6 +269,20 @@ pub async fn update(
     if !allowed {
         return Err(AppError::BadRequest("Cannot edit.".into()));
     }
+    if b.end_date < b.start_date {
+        return Err(AppError::BadRequest(
+            "end_date must be >= start_date.".into(),
+        ));
+    }
+    // Re-check overlap with *other* absences of the same user.
+    let overlap: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM absences WHERE id != ? AND user_id=? AND status IN ('requested','approved') AND end_date >= ? AND start_date <= ?",
+    )
+    .bind(id).bind(u.id).bind(b.start_date).bind(b.end_date)
+    .fetch_one(&s.pool).await?;
+    if overlap > 0 {
+        return Err(AppError::Conflict("Overlap with existing absence.".into()));
+    }
     sqlx::query("UPDATE absences SET start_date=?, end_date=?, half_day=?, comment=? WHERE id=?")
         .bind(b.start_date)
         .bind(b.end_date)
