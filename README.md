@@ -61,7 +61,7 @@ Everything lives in `.env`. The example file documents every variable; the
 ones you must set are:
 
 ```env
-KITAZEIT_DOMAIN=verwaltung.example.de
+KITAZEIT_DOMAIN=example.de
 KITAZEIT_SESSION_SECRET=$(openssl rand -hex 32)
 KITAZEIT_ADMIN_EMAIL=admin@example.de
 ```
