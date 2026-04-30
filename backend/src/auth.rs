@@ -215,11 +215,10 @@ pub async fn logout(State(s): State<AppState>, req: Request) -> AppResult<Respon
         // Per security policy: on logout, all sessions of the affected user are
         // deleted — not just the current one — so a user logging out from one
         // device invalidates all other open sessions too.
-        let uid: Option<i64> =
-            sqlx::query_scalar("SELECT user_id FROM sessions WHERE token = ?")
-                .bind(hash_token(&token))
-                .fetch_optional(&s.pool)
-                .await?;
+        let uid: Option<i64> = sqlx::query_scalar("SELECT user_id FROM sessions WHERE token = ?")
+            .bind(hash_token(&token))
+            .fetch_optional(&s.pool)
+            .await?;
         if let Some(user_id) = uid {
             sqlx::query("DELETE FROM sessions WHERE user_id = ?")
                 .bind(user_id)
