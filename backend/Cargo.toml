@@ -16,6 +16,7 @@ argon2 = "0.5"
 password-hash = { version = "0.5", features = ["getrandom"] }
 rand = "0.10"
 subtle = "2"
+sha2 = "0.10"
 uuid = { version = "1", features = ["v4"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

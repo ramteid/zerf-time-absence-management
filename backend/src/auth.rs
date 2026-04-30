@@ -12,6 +12,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use sqlx::FromRow;
 use subtle::ConstantTimeEq;
 
@@ -108,6 +109,13 @@ pub fn new_token() -> String {
     hex::encode(buf)
 }
 
+/// Hash a raw session token with SHA-256 before storing in the DB.
+/// The cookie always carries the raw token; only the hash is persisted,
+/// so a DB breach cannot be used to directly replay session cookies.
+pub fn hash_token(token: &str) -> String {
+    hex::encode(Sha256::digest(token.as_bytes()))
+}
+
 fn build_session_cookie(token: &str, max_age: i64, secure: bool) -> String {
     let secure_flag = if secure { "; Secure" } else { "" };
     format!(
@@ -176,7 +184,7 @@ pub async fn login(
     let token = new_token();
     let csrf = new_token();
     sqlx::query("INSERT INTO sessions(token, user_id, csrf_token) VALUES (?, ?, ?)")
-        .bind(&token)
+        .bind(hash_token(&token))
         .bind(user.id)
         .bind(&csrf)
         .execute(&s.pool)
@@ -204,10 +212,20 @@ pub async fn login(
 
 pub async fn logout(State(s): State<AppState>, req: Request) -> AppResult<Response> {
     if let Some(token) = extract_token(&req) {
-        sqlx::query("DELETE FROM sessions WHERE token = ?")
-            .bind(&token)
-            .execute(&s.pool)
-            .await?;
+        // Per security policy: on logout, all sessions of the affected user are
+        // deleted — not just the current one — so a user logging out from one
+        // device invalidates all other open sessions too.
+        let uid: Option<i64> =
+            sqlx::query_scalar("SELECT user_id FROM sessions WHERE token = ?")
+                .bind(hash_token(&token))
+                .fetch_optional(&s.pool)
+                .await?;
+        if let Some(user_id) = uid {
+            sqlx::query("DELETE FROM sessions WHERE user_id = ?")
+                .bind(user_id)
+                .execute(&s.pool)
+                .await?;
+        }
     }
     let cookie = build_session_cookie("", 0, s.cfg.secure_cookies);
     let mut resp = Json(serde_json::json!({"ok": true})).into_response();
@@ -226,7 +244,7 @@ pub async fn me(
     let token = extract_token(&req).unwrap_or_default();
     let csrf: Option<String> =
         sqlx::query_scalar("SELECT csrf_token FROM sessions WHERE token = ?")
-            .bind(&token)
+            .bind(hash_token(&token))
             .fetch_optional(&s.pool)
             .await?;
     Ok(Json(serde_json::json!({
@@ -248,13 +266,8 @@ pub struct PasswordReq {
 pub async fn change_password(
     State(s): State<AppState>,
     user: User,
-    headers: axum::http::HeaderMap,
     Json(body): Json<PasswordReq>,
-) -> AppResult<Json<serde_json::Value>> {
-    let req_token: Option<String> = headers
-        .get(header::COOKIE)
-        .and_then(|v| v.to_str().ok())
-        .and_then(extract_token_from_cookie_str);
+) -> AppResult<Response> {
     if !user.must_change_password {
         let cur = body
             .current_password
@@ -273,22 +286,25 @@ pub async fn change_password(
         ));
     }
     let h = hash_password(&body.new_password)?;
-    // Find the caller's current session token so we can preserve it.
-    let cur_token = req_token.clone().unwrap_or_default();
     let mut tx = s.pool.begin().await?;
     sqlx::query("UPDATE users SET password_hash=?, must_change_password=0 WHERE id=?")
         .bind(h)
         .bind(user.id)
         .execute(&mut *tx)
         .await?;
-    // Invalidate all OTHER sessions for this user; keep the caller's session.
-    sqlx::query("DELETE FROM sessions WHERE user_id=? AND token != ?")
+    // Per security policy: on password change, ALL sessions for this user are
+    // deleted — including the caller's — forcing re-authentication.
+    sqlx::query("DELETE FROM sessions WHERE user_id=?")
         .bind(user.id)
-        .bind(&cur_token)
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
-    Ok(Json(serde_json::json!({"ok": true})))
+    // Clear the session cookie so the client is immediately logged out.
+    let cookie = build_session_cookie("", 0, s.cfg.secure_cookies);
+    let mut resp = Json(serde_json::json!({"ok": true})).into_response();
+    resp.headers_mut()
+        .insert(header::SET_COOKIE, cookie.parse().unwrap());
+    Ok(resp)
 }
 
 fn extract_token(req: &Request) -> Option<String> {
@@ -380,7 +396,7 @@ pub async fn auth_middleware(
     let row: Option<(i64, DateTime<Utc>, DateTime<Utc>, String)> = sqlx::query_as(
         "SELECT user_id, last_active_at, created_at, csrf_token FROM sessions WHERE token = ?",
     )
-    .bind(&token)
+    .bind(hash_token(&token))
     .fetch_optional(&s.pool)
     .await?;
     let (uid, last, created, csrf) = row.ok_or(AppError::Unauthorized)?;
@@ -389,7 +405,7 @@ pub async fn auth_middleware(
         || now - created > Duration::hours(ABSOLUTE_TIMEOUT_HOURS)
     {
         sqlx::query("DELETE FROM sessions WHERE token=?")
-            .bind(&token)
+            .bind(hash_token(&token))
             .execute(&s.pool)
             .await?;
         return Err(AppError::Unauthorized);
@@ -398,7 +414,7 @@ pub async fn auth_middleware(
     enforce_csrf(&parts, &s, &csrf).await?;
 
     sqlx::query("UPDATE sessions SET last_active_at=CURRENT_TIMESTAMP WHERE token=?")
-        .bind(&token)
+        .bind(hash_token(&token))
         .execute(&s.pool)
         .await?;
     let user: User = sqlx::query_as("SELECT * FROM users WHERE id=? AND active=1")
