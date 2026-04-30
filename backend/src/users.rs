@@ -7,7 +7,6 @@ use axum::{
     Json,
 };
 use chrono::NaiveDate;
-use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 pub async fn list(State(s): State<AppState>, u: User) -> AppResult<Json<Vec<User>>> {
