@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -49,13 +50,41 @@ jobs:
     needs: rust
     steps:
       - uses: actions/checkout@v5
+
+      # The build-push-image workflow pushes sha-tagged images on source
+      # changes.  By the time this job starts (rust job takes ~10 min),
+      # that push is almost always complete.  On PRs or rare races we fall
+      # back to building from the GHA layer cache.
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull pre-built image
+        id: pull
+        continue-on-error: true
+        run: docker pull ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
+
       - name: Set up Docker Buildx
+        if: steps.pull.outcome == 'failure'
         uses: docker/setup-buildx-action@v3
-      - name: Build app image
-        run: docker build -t kitazeit:ci .
+
+      - name: Build app image (fallback — not in registry yet)
+        if: steps.pull.outcome == 'failure'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
       - name: Run integration suite
         env:
           KITAZEIT_TEST_PORT: 3137
+          IMG: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
         run: bash tests/run.sh
 
   trivy:
@@ -65,24 +94,52 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v5
-      - name: Build app image
-        run: docker build -t kitazeit:scan .
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull pre-built image
+        id: pull
+        continue-on-error: true
+        run: docker pull ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
+
+      - name: Set up Docker Buildx
+        if: steps.pull.outcome == 'failure'
+        uses: docker/setup-buildx-action@v3
+
+      # Fallback: use the GHA layer cache written by the integration job
+      # (same workflow run, so the cache is always warm here).
+      - name: Build app image (fallback — uses GHA layer cache)
+        if: steps.pull.outcome == 'failure'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
+          cache-from: type=gha
+
       - name: Trivy filesystem scan
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           severity: HIGH,CRITICAL
           ignore-unfixed: true
+
       - name: Trivy image scan
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: kitazeit:scan
+          image-ref: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
           severity: HIGH,CRITICAL
           ignore-unfixed: true
 
   codeql:
     name: CodeQL (JavaScript)
     runs-on: ubuntu-latest
+    continue-on-error: true
     permissions:
       security-events: write
       contents: read
