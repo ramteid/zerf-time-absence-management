@@ -59,9 +59,9 @@ pub fn holidays_bw(year: i32) -> Vec<(NaiveDate, &'static str)> {
     ]
 }
 
-pub async fn ensure_holidays(pool: &sqlx::SqlitePool, year: i32) -> AppResult<()> {
+pub async fn ensure_holidays(pool: &crate::db::DatabasePool, year: i32) -> AppResult<()> {
     for (d, name) in holidays_bw(year) {
-        sqlx::query("INSERT OR IGNORE INTO holidays(holiday_date, name, year) VALUES (?, ?, ?)")
+        sqlx::query("INSERT INTO holidays(holiday_date, name, year) VALUES ($1, $2, $3) ON CONFLICT (holiday_date) DO NOTHING")
             .bind(d)
             .bind(name)
             .bind(year)
@@ -91,7 +91,7 @@ pub async fn list(
 ) -> AppResult<Json<Vec<Holiday>>> {
     let year = q.year.unwrap_or_else(|| chrono::Local::now().year());
     let r =
-        sqlx::query_as::<_, Holiday>("SELECT * FROM holidays WHERE year=? ORDER BY holiday_date")
+        sqlx::query_as::<_, Holiday>("SELECT * FROM holidays WHERE year=$1 ORDER BY holiday_date")
             .bind(year)
             .fetch_all(&s.pool)
             .await?;
@@ -112,7 +112,7 @@ pub async fn create(
     if !u.is_admin() {
         return Err(AppError::Forbidden);
     }
-    sqlx::query("INSERT INTO holidays(holiday_date, name, year) VALUES (?,?,?)")
+    sqlx::query("INSERT INTO holidays(holiday_date, name, year) VALUES ($1,$2,$3)")
         .bind(b.holiday_date)
         .bind(&b.name)
         .bind(b.holiday_date.year())
@@ -130,7 +130,7 @@ pub async fn delete(
     if !u.is_admin() {
         return Err(AppError::Forbidden);
     }
-    sqlx::query("DELETE FROM holidays WHERE id=?")
+    sqlx::query("DELETE FROM holidays WHERE id=$1")
         .bind(id)
         .execute(&s.pool)
         .await?;

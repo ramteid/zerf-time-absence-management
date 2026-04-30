@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # KitaZeit automated integration test runner.
 #
-# Boots a clean app container on a private port (no Caddy, no public DNS),
+# Boots a clean PostgreSQL + app test stack on a private port (no Caddy,
+# no public DNS),
 # captures the auto-generated admin password from the logs, then runs:
 #
-#   1. API regression (curl + bash) against the local container
+#   1. API regression (curl + bash) against the local stack
 #   2. Headless browser smoke test (Puppeteer in Docker)
 #
 # Usage:  bash tests/run.sh
@@ -15,9 +16,14 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 CONTAINER=kitazeit-it
+DB_CONTAINER=kitazeit-it-postgres
+NETWORK=kitazeit-it
+DB_VOLUME=kitazeit-it-dbdata
+DB_NAME=kitazeit_it
+DB_USER=kitazeit_it
+DB_PASSWORD=integration-test-db-password-32-chars
 PORT=${KITAZEIT_TEST_PORT:-3137}
 BASE="http://127.0.0.1:$PORT"
-DATA_DIR="$ROOT/.it-data"
 # Allow CI to pass a pre-built image via the IMG environment variable so the
 # build step below is skipped (the image is already present in the daemon).
 IMG=${IMG:-zerf2-app:latest}
@@ -28,8 +34,9 @@ ok()    { PASS=$((PASS+1)); printf "  \033[32m✓\033[0m %s\n" "$*"; }
 bad()   { FAIL=$((FAIL+1)); printf "  \033[31m✗\033[0m %s\n" "$*"; }
 
 cleanup(){
-  docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
-  sudo rm -rf "$DATA_DIR" 2>/dev/null || rm -rf "$DATA_DIR" 2>/dev/null || true
+  docker rm -f "$CONTAINER" "$DB_CONTAINER" >/dev/null 2>&1 || true
+  docker volume rm -f "$DB_VOLUME" >/dev/null 2>&1 || true
+  docker network rm "$NETWORK" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -43,16 +50,33 @@ else
   ok "image built"
 fi
 
-banner "Start ephemeral container on :$PORT"
+banner "Start ephemeral PostgreSQL + app stack on :$PORT"
 cleanup
-mkdir -p "$DATA_DIR"
-sudo chown -R 10001:10001 "$DATA_DIR" 2>/dev/null || chown -R "$(id -u):$(id -g)" "$DATA_DIR" 2>/dev/null || true
+docker network create "$NETWORK" >/dev/null
+docker volume create "$DB_VOLUME" >/dev/null
+docker run -d --name "$DB_CONTAINER" \
+  --network "$NETWORK" \
+  -e POSTGRES_DB="$DB_NAME" \
+  -e POSTGRES_USER="$DB_USER" \
+  -e POSTGRES_PASSWORD="$DB_PASSWORD" \
+  -e POSTGRES_INITDB_ARGS="--auth-host=scram-sha-256 --auth-local=scram-sha-256 --data-checksums" \
+  -v "$DB_VOLUME:/var/lib/postgresql/data" \
+  postgres:16-alpine \
+  postgres -c password_encryption=scram-sha-256 -c ssl=off -c idle_in_transaction_session_timeout=30000 -c statement_timeout=30000 >/dev/null
+ok "database container started ($DB_CONTAINER)"
+for i in $(seq 1 60); do
+  if docker exec "$DB_CONTAINER" pg_isready -U "$DB_USER" -d "$DB_NAME" -h 127.0.0.1 >/dev/null 2>&1; then ok "database ready after ${i}x250ms"; break; fi
+  sleep 0.25
+  if [ "$i" = 60 ]; then bad "database did not become ready"; docker logs "$DB_CONTAINER"; exit 1; fi
+done
+
 docker run -d --name "$CONTAINER" \
+  --network "$NETWORK" \
   -p 127.0.0.1:$PORT:3000 \
   --user 10001:10001 \
   --read-only --tmpfs /tmp:size=16m \
   --cap-drop=ALL --security-opt=no-new-privileges:true \
-  -e KITAZEIT_DATABASE_PATH=/app/data/kitazeit.db \
+  -e KITAZEIT_DATABASE_URL="postgres://${DB_USER}:${DB_PASSWORD}@${DB_CONTAINER}:5432/${DB_NAME}?sslmode=disable" \
   -e KITAZEIT_SESSION_SECRET=integration-test-secret-do-not-use-in-prod-32-characters \
   -e KITAZEIT_ADMIN_EMAIL=admin@example.com \
   -e KITAZEIT_ORGANIZATION_NAME="Integration Test" \
@@ -61,9 +85,8 @@ docker run -d --name "$CONTAINER" \
   -e KITAZEIT_SECURE_COOKIES=false \
   -e KITAZEIT_ENFORCE_CSRF=false \
   -e KITAZEIT_ENFORCE_ORIGIN=false \
-  -v "$DATA_DIR:/app/data" \
   "$IMG" >/dev/null
-ok "container started ($CONTAINER)"
+ok "app container started ($CONTAINER)"
 
 # Wait for readiness
 for i in $(seq 1 40); do
@@ -228,6 +251,145 @@ o=$(call "$JAR_E" POST /api/v1/absences "{\"kind\":\"holiday\",\"start_date\":\"
 expect "invalid kind rejected" 400 "${o%%$'\n'*}" "${o#*$'\n'}"
 
 o=$(call "$JAR_L" POST "/api/v1/absences/$ABS/approve"); expect "approve vacation" 200 "${o%%$'\n'*}" ""
+
+# ---------------------------------------------------------------------------
+# General absence — full user journey + edge cases.
+#
+# Background: 'general_absence' covers personal reasons (parental leave, etc.)
+# which cannot be modelled via vacation/sick/training/special_leave/unpaid.
+# It must:
+#   • require team-lead approval (status=requested, NOT auto-approved)
+#   • not consume the vacation entitlement
+#   • follow the same overlap/edit/cancel/approve/reject rules
+#   • surface in the team calendar and the monthly report (as an absence day)
+#   • be persisted in the audit log for every state transition
+# ---------------------------------------------------------------------------
+banner "General absence — happy-path journey (Erin: parental leave)"
+GA_FROM=$(date -u -d "+30 days" +%F); GA_TO=$(date -u -d "+34 days" +%F)
+GA_MONTH=$(date -u -d "+30 days" +%Y-%m)
+
+# 1. Employee files the request.
+o=$(call "$JAR_E" POST /api/v1/absences "{\"kind\":\"general_absence\",\"start_date\":\"$GA_FROM\",\"end_date\":\"$GA_TO\",\"comment\":\"parental leave\"}")
+body=${o#*$'\n'}; expect "POST general_absence" 200 "${o%%$'\n'*}" "$body"
+GABS=$(echo "$body" | grep -oE '"id":[0-9]+' | head -1 | cut -d: -f2)
+echo "$body" | grep -q '"kind":"general_absence"' && ok "kind persisted" || bad "kind not stored: $body"
+echo "$body" | grep -q '"status":"requested"'    && ok "starts as requested (not auto-approved like sick)" || bad "wrong initial status: $body"
+echo "$body" | grep -q '"comment":"parental leave"' && ok "comment persisted" || bad "comment missing: $body"
+
+# 2. The request must be visible in the employee's own list.
+o=$(call "$JAR_E" GET "/api/v1/absences?year=$(echo $GA_FROM | cut -c1-4)"); body=${o#*$'\n'}
+echo "$body" | grep -q "\"id\":$GABS" && ok "shows in own list" || bad "not in list: $body"
+
+# 3. Lead's queue (list_all) shows the requested absence.
+o=$(call "$JAR_L" GET "/api/v1/absences/all?status=requested"); body=${o#*$'\n'}
+echo "$body" | grep -q "\"id\":$GABS" && ok "appears in lead queue" || bad "missing from lead queue: $body"
+
+# 4. Plain employees may NOT call /absences/all (lead-only).
+o=$(call "$JAR_E" GET /api/v1/absences/all); expect "emp /absences/all 403" 403 "${o%%$'\n'*}" "${o#*$'\n'}"
+
+# 5. While pending, employee can edit the request (e.g. extend the range).
+GA_TO2=$(date -u -d "+40 days" +%F)
+o=$(call "$JAR_E" PUT "/api/v1/absences/$GABS" "{\"kind\":\"general_absence\",\"start_date\":\"$GA_FROM\",\"end_date\":\"$GA_TO2\",\"half_day\":false,\"comment\":\"updated parental leave plan\"}")
+body=${o#*$'\n'}; expect "edit pending general_absence" 200 "${o%%$'\n'*}" "$body"
+echo "$body" | grep -q "\"end_date\":\"$GA_TO2\"" && ok "end_date updated" || bad "edit not applied: $body"
+
+# 6. Lead approves.
+o=$(call "$JAR_L" POST "/api/v1/absences/$GABS/approve"); expect "lead approve" 200 "${o%%$'\n'*}" ""
+o=$(call "$JAR_E" GET "/api/v1/absences?year=$(echo $GA_FROM | cut -c1-4)"); body=${o#*$'\n'}
+echo "$body" | tr '}' '\n' | grep "\"id\":$GABS," | grep -q '"status":"approved"' && ok "status now approved" || bad "status not approved: $body"
+
+# 7. Once approved the request can no longer be edited or cancelled by the employee.
+o=$(call "$JAR_E" PUT "/api/v1/absences/$GABS" "{\"kind\":\"general_absence\",\"start_date\":\"$GA_FROM\",\"end_date\":\"$GA_TO\",\"half_day\":false,\"comment\":\"x\"}")
+expect "edit approved general_absence rejected" 400 "${o%%$'\n'*}" ""
+o=$(call "$JAR_E" DELETE "/api/v1/absences/$GABS")
+expect "cancel approved general_absence rejected" 400 "${o%%$'\n'*}" ""
+
+# 8. Approved entry surfaces in the calendar with kind=general_absence.
+o=$(call "$JAR_L" GET "/api/v1/absences/calendar?month=$GA_MONTH"); body=${o#*$'\n'}
+echo "$body" | grep -q '"kind":"general_absence"' && ok "calendar shows general_absence" || bad "missing on calendar: $body"
+
+# 9. Vacation balance unchanged (general_absence does NOT consume entitlement).
+o=$(call "$JAR_E" GET "/api/v1/leave-balance/$EMP_ID?year=$YEAR"); body=${o#*$'\n'}
+echo "$body" | grep -q '"annual_entitlement":30' && ok "entitlement still 30" || bad "entitlement: $body"
+echo "$body" | grep -q '"available":28'          && ok "available still 28 (general_absence excluded)" || bad "available: $body"
+
+# 10. Approved general_absence shows up as 'absence' in the monthly report.
+o=$(call "$JAR_E" GET "/api/v1/reports/month?month=$GA_MONTH"); body=${o#*$'\n'}
+echo "$body" | grep -q '"absence":"general_absence"' && ok "monthly report flags day as general_absence" || bad "report missing absence: $(echo $body | head -c 400)"
+
+# 11. Audit log captures created/updated/approved transitions.
+o=$(call "$JAR_A" GET "/api/v1/audit-log?user_id=$EMP_ID"); body=${o#*$'\n'}
+GA_AUDIT=$(echo "$body" | tr '{' '\n' | grep -c "\"table_name\":\"absences\".*\"record_id\":$GABS")
+[ "$GA_AUDIT" -ge 3 ] && ok "audit log has $GA_AUDIT entries for absence $GABS" || bad "audit insufficient ($GA_AUDIT): $body"
+
+banner "General absence — overlap & validation edge cases"
+# a) Overlap with the just-approved general_absence (any later submission inside the range).
+o=$(call "$JAR_E" POST /api/v1/absences "{\"kind\":\"general_absence\",\"start_date\":\"$GA_FROM\",\"end_date\":\"$GA_FROM\"}")
+st=${o%%$'\n'*}; { [ "$st" = 400 ] || [ "$st" = 409 ]; } && ok "overlap with approved general_absence rejected ($st)" || bad "overlap got $st"
+
+# b) Cross-kind overlap: vacation request inside the parental leave range must also be rejected.
+o=$(call "$JAR_E" POST /api/v1/absences "{\"kind\":\"vacation\",\"start_date\":\"$GA_FROM\",\"end_date\":\"$GA_FROM\"}")
+st=${o%%$'\n'*}; { [ "$st" = 400 ] || [ "$st" = 409 ]; } && ok "vacation overlapping general_absence rejected ($st)" || bad "cross-kind overlap got $st"
+
+# c) end_date < start_date rejected (400).
+o=$(call "$JAR_E" POST /api/v1/absences "{\"kind\":\"general_absence\",\"start_date\":\"2099-01-10\",\"end_date\":\"2099-01-05\"}")
+expect "inverted range rejected" 400 "${o%%$'\n'*}" "${o#*$'\n'}"
+
+# d) Half-day flag is silently ignored for general_absence (only meaningful for single-day vacation).
+GA3_DAY=$(date -u -d "+90 days" +%F)
+o=$(call "$JAR_E" POST /api/v1/absences "{\"kind\":\"general_absence\",\"start_date\":\"$GA3_DAY\",\"end_date\":\"$GA3_DAY\",\"half_day\":true}")
+body=${o#*$'\n'}; expect "create one-day GA with half_day=true" 200 "${o%%$'\n'*}" "$body"
+GABS3=$(echo "$body" | grep -oE '"id":[0-9]+' | head -1 | cut -d: -f2)
+echo "$body" | grep -q '"half_day":false' && ok "half_day forced to false (only valid for vacation)" || bad "half_day kept truthy: $body"
+
+# e) Unauthenticated callers cannot create absences.
+JAR_X=/tmp/it_anon.cookies; rm -f "$JAR_X"
+o=$(call "$JAR_X" POST /api/v1/absences "{\"kind\":\"general_absence\",\"start_date\":\"$GA3_DAY\",\"end_date\":\"$GA3_DAY\"}")
+expect "anon create rejected" 401 "${o%%$'\n'*}" ""
+
+# f) Bogus kinds (typo of "parental") still rejected by the allow-list.
+o=$(call "$JAR_E" POST /api/v1/absences "{\"kind\":\"parental\",\"start_date\":\"$GA3_DAY\",\"end_date\":\"$GA3_DAY\"}")
+expect "non-allowlisted kind rejected" 400 "${o%%$'\n'*}" "${o#*$'\n'}"
+
+# g) Empty kind rejected.
+o=$(call "$JAR_E" POST /api/v1/absences "{\"kind\":\"\",\"start_date\":\"$GA3_DAY\",\"end_date\":\"$GA3_DAY\"}")
+expect "empty kind rejected" 400 "${o%%$'\n'*}" "${o#*$'\n'}"
+
+banner "General absence — cancel, reject & RBAC journeys"
+# Cancel-before-approval journey (employee changes their mind).
+GA4_FROM=$(date -u -d "+120 days" +%F); GA4_TO=$(date -u -d "+121 days" +%F)
+o=$(call "$JAR_E" POST /api/v1/absences "{\"kind\":\"general_absence\",\"start_date\":\"$GA4_FROM\",\"end_date\":\"$GA4_TO\"}")
+GABS4=$(echo "${o#*$'\n'}" | grep -oE '"id":[0-9]+' | head -1 | cut -d: -f2)
+o=$(call "$JAR_E" DELETE "/api/v1/absences/$GABS4")
+expect "employee cancels own pending request" 200 "${o%%$'\n'*}" ""
+# After cancellation, the same range can be re-used (no overlap).
+o=$(call "$JAR_E" POST /api/v1/absences "{\"kind\":\"general_absence\",\"start_date\":\"$GA4_FROM\",\"end_date\":\"$GA4_TO\"}")
+expect "re-request after cancel allowed" 200 "${o%%$'\n'*}" ""
+GABS4B=$(echo "${o#*$'\n'}" | grep -oE '"id":[0-9]+' | head -1 | cut -d: -f2)
+
+# Reject journey.
+GA5_FROM=$(date -u -d "+200 days" +%F); GA5_TO=$(date -u -d "+202 days" +%F)
+o=$(call "$JAR_E" POST /api/v1/absences "{\"kind\":\"general_absence\",\"start_date\":\"$GA5_FROM\",\"end_date\":\"$GA5_TO\"}")
+GABS5=$(echo "${o#*$'\n'}" | grep -oE '"id":[0-9]+' | head -1 | cut -d: -f2)
+
+# Employee may not approve their own request.
+o=$(call "$JAR_E" POST "/api/v1/absences/$GABS5/approve"); expect "emp self-approve 403" 403 "${o%%$'\n'*}" ""
+# Employee may not approve other people's requests.
+o=$(call "$JAR_E" POST "/api/v1/absences/$GABS5/reject" '{"reason":"nope"}'); expect "emp reject 403" 403 "${o%%$'\n'*}" ""
+# Lead must supply a reason when rejecting.
+o=$(call "$JAR_L" POST "/api/v1/absences/$GABS5/reject" '{"reason":""}'); expect "empty reject reason rejected" 400 "${o%%$'\n'*}" ""
+# Lead rejects with a real reason.
+o=$(call "$JAR_L" POST "/api/v1/absences/$GABS5/reject" '{"reason":"Need more documentation."}')
+expect "lead reject general_absence" 200 "${o%%$'\n'*}" ""
+# Rejected requests cannot be cancelled afterwards (only 'requested' may be cancelled).
+o=$(call "$JAR_E" DELETE "/api/v1/absences/$GABS5"); expect "cancel-after-reject rejected" 400 "${o%%$'\n'*}" ""
+# After rejection the same range becomes free again.
+o=$(call "$JAR_E" POST /api/v1/absences "{\"kind\":\"general_absence\",\"start_date\":\"$GA5_FROM\",\"end_date\":\"$GA5_TO\"}")
+expect "re-request after reject allowed" 200 "${o%%$'\n'*}" ""
+
+# Unknown id → 404/500-class (not silently 200).
+o=$(call "$JAR_L" POST "/api/v1/absences/9999999/approve")
+st=${o%%$'\n'*}; [ "$st" != 200 ] && ok "approve unknown id not 200 ($st)" || bad "approve unknown returned 200"
 
 banner "Vacation balance"
 o=$(call "$JAR_E" GET "/api/v1/leave-balance/$EMP_ID?year=$YEAR"); body=${o#*$'\n'}

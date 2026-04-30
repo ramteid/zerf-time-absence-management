@@ -8,6 +8,7 @@ mod db;
 mod error;
 mod holidays;
 mod reports;
+mod settings;
 mod time_entries;
 mod users;
 
@@ -20,7 +21,6 @@ use axum::{
     Router,
 };
 use chrono::Datelike;
-use sqlx::SqlitePool;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -33,7 +33,7 @@ use tower_http::trace::TraceLayer;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub pool: SqlitePool,
+    pub pool: db::DatabasePool,
     pub cfg: Arc<config::Config>,
 }
 
@@ -60,7 +60,7 @@ async fn main() -> Result<()> {
         let temp = users::generate_password();
         let hash = auth::hash_password(&temp)?;
         let today = chrono::Local::now().date_naive();
-        sqlx::query("INSERT INTO users(email,password_hash,first_name,last_name,role,weekly_hours,annual_leave_days,start_date,must_change_password) VALUES (?,?,?,?,'admin',39.0,30,?,1)")
+        sqlx::query("INSERT INTO users(email,password_hash,first_name,last_name,role,weekly_hours,annual_leave_days,start_date,must_change_password) VALUES ($1,$2,$3,$4,'admin',39.0,30,$5,TRUE)")
             .bind(cfg.admin_email.to_lowercase()).bind(hash).bind("Admin").bind("User").bind(today)
             .execute(&pool).await?;
         tracing::info!("==========================================================");
@@ -81,10 +81,15 @@ async fn main() -> Result<()> {
     let api = Router::new()
         .route("/auth/login", post(auth::login))
         .route("/auth/logout", post(auth::logout))
+        .route("/settings/public", get(settings::public_settings))
         .merge(
             Router::new()
                 .route("/auth/me", get(auth::me))
                 .route("/auth/password", put(auth::change_password))
+                .route(
+                    "/settings",
+                    get(settings::admin_settings).put(settings::update_admin_settings),
+                )
                 .route(
                     "/time-entries",
                     get(time_entries::list).post(time_entries::create),

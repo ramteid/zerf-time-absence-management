@@ -2,7 +2,7 @@ use std::env;
 
 #[derive(Clone, Debug)]
 pub struct Config {
-    pub database_path: String,
+    pub database_url: String,
     pub session_secret: String,
     pub admin_email: String,
     pub organization_name: String,
@@ -29,8 +29,8 @@ fn env_bool(key: &str, default: bool) -> bool {
 
 impl Config {
     pub fn from_env() -> Self {
-        let database_path =
-            env::var("KITAZEIT_DATABASE_PATH").unwrap_or_else(|_| "data/kitazeit.db".into());
+        let database_url = env::var("KITAZEIT_DATABASE_URL")
+            .expect("KITAZEIT_DATABASE_URL must be set");
         let session_secret = env::var("KITAZEIT_SESSION_SECRET")
             .expect("KITAZEIT_SESSION_SECRET must be set; generate one with: openssl rand -hex 32");
         if session_secret.len() < 32 {
@@ -64,7 +64,7 @@ impl Config {
         let trust_proxy = env_bool("KITAZEIT_TRUST_PROXY", true);
 
         Self {
-            database_path,
+            database_url,
             session_secret,
             admin_email,
             organization_name: env::var("KITAZEIT_ORGANIZATION_NAME")

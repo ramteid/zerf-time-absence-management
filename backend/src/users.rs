@@ -28,7 +28,7 @@ pub async fn get_one(
         return Err(AppError::Forbidden);
     }
     Ok(Json(
-        sqlx::query_as::<_, User>("SELECT * FROM users WHERE id=?")
+        sqlx::query_as::<_, User>("SELECT * FROM users WHERE id=$1")
             .bind(id)
             .fetch_one(&s.pool)
             .await?,
@@ -76,13 +76,12 @@ pub async fn create(
     };
     let hash = hash_password(&password)?;
     let must_change = temp.is_some();
-    let res = sqlx::query("INSERT INTO users(email,password_hash,first_name,last_name,role,weekly_hours,annual_leave_days,start_date,must_change_password) VALUES (?,?,?,?,?,?,?,?,?)")
+    let id: i64 = sqlx::query_scalar("INSERT INTO users(email,password_hash,first_name,last_name,role,weekly_hours,annual_leave_days,start_date,must_change_password) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id")
         .bind(b.email.to_lowercase()).bind(hash).bind(&b.first_name).bind(&b.last_name).bind(&b.role)
         .bind(b.weekly_hours).bind(b.annual_leave_days).bind(b.start_date).bind(must_change)
-        .execute(&s.pool).await
+        .fetch_one(&s.pool).await
         .map_err(|_| AppError::Conflict("Email already exists".into()))?;
-    let id = res.last_insert_rowid();
-    let user: User = sqlx::query_as("SELECT * FROM users WHERE id=?")
+    let user: User = sqlx::query_as("SELECT * FROM users WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
@@ -152,11 +151,11 @@ pub async fn update(
             return Err(AppError::BadRequest("Invalid email.".into()));
         }
     }
-    let prev: User = sqlx::query_as("SELECT * FROM users WHERE id=?")
+    let prev: User = sqlx::query_as("SELECT * FROM users WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
-    sqlx::query("UPDATE users SET email=COALESCE(?,email), first_name=COALESCE(?,first_name), last_name=COALESCE(?,last_name), role=COALESCE(?,role), weekly_hours=COALESCE(?,weekly_hours), annual_leave_days=COALESCE(?,annual_leave_days), start_date=COALESCE(?,start_date), active=COALESCE(?,active) WHERE id=?")
+    sqlx::query("UPDATE users SET email=COALESCE($1,email), first_name=COALESCE($2,first_name), last_name=COALESCE($3,last_name), role=COALESCE($4,role), weekly_hours=COALESCE($5,weekly_hours), annual_leave_days=COALESCE($6,annual_leave_days), start_date=COALESCE($7,start_date), active=COALESCE($8,active) WHERE id=$9")
         .bind(email_lc).bind(b.first_name).bind(b.last_name).bind(b.role.clone())
         .bind(b.weekly_hours).bind(b.annual_leave_days).bind(b.start_date).bind(b.active).bind(id)
         .execute(&s.pool).await
@@ -166,12 +165,12 @@ pub async fn update(
     let role_changed = b.role.as_deref().map(|r| r != prev.role).unwrap_or(false);
     let just_deactivated = matches!(b.active, Some(false)) && prev.active;
     if role_changed || just_deactivated {
-        let _ = sqlx::query("DELETE FROM sessions WHERE user_id=?")
+        let _ = sqlx::query("DELETE FROM sessions WHERE user_id=$1")
             .bind(id)
             .execute(&s.pool)
             .await;
     }
-    let next: User = sqlx::query_as("SELECT * FROM users WHERE id=?")
+    let next: User = sqlx::query_as("SELECT * FROM users WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
@@ -202,11 +201,11 @@ pub async fn deactivate(
         ));
     }
     let mut tx = s.pool.begin().await?;
-    sqlx::query("UPDATE users SET active=0 WHERE id=?")
+    sqlx::query("UPDATE users SET active=FALSE WHERE id=$1")
         .bind(id)
         .execute(&mut *tx)
         .await?;
-    sqlx::query("DELETE FROM sessions WHERE user_id=?")
+    sqlx::query("DELETE FROM sessions WHERE user_id=$1")
         .bind(id)
         .execute(&mut *tx)
         .await?;
@@ -226,13 +225,13 @@ pub async fn reset_password(
     let temp = generate_password();
     let hash = hash_password(&temp)?;
     let mut tx = s.pool.begin().await?;
-    sqlx::query("UPDATE users SET password_hash=?, must_change_password=1 WHERE id=?")
+    sqlx::query("UPDATE users SET password_hash=$1, must_change_password=TRUE WHERE id=$2")
         .bind(hash)
         .bind(id)
         .execute(&mut *tx)
         .await?;
     // Force re-authentication: kill any existing sessions for this user.
-    sqlx::query("DELETE FROM sessions WHERE user_id=?")
+    sqlx::query("DELETE FROM sessions WHERE user_id=$1")
         .bind(id)
         .execute(&mut *tx)
         .await?;

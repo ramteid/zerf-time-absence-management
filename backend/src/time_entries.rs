@@ -8,7 +8,7 @@ use axum::{
 };
 use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
+use sqlx::{FromRow, Postgres, QueryBuilder};
 
 #[derive(FromRow, Serialize, Clone)]
 pub struct TimeEntry {
@@ -58,22 +58,23 @@ pub async fn list(
     u: User,
     Query(q): Query<RangeQuery>,
 ) -> AppResult<Json<Vec<TimeEntry>>> {
-    let mut sql = String::from("SELECT * FROM time_entries WHERE user_id=?");
-    if q.from.is_some() {
-        sql += " AND entry_date >= ?";
-    }
-    if q.to.is_some() {
-        sql += " AND entry_date <= ?";
-    }
-    sql += " ORDER BY entry_date, start_time";
-    let mut qx = sqlx::query_as::<_, TimeEntry>(&sql).bind(u.id);
+    let mut builder = QueryBuilder::<Postgres>::new(
+        "SELECT * FROM time_entries WHERE user_id = ",
+    );
+    builder.push_bind(u.id);
     if let Some(v) = q.from {
-        qx = qx.bind(v);
+        builder.push(" AND entry_date >= ").push_bind(v);
     }
     if let Some(v) = q.to {
-        qx = qx.bind(v);
+        builder.push(" AND entry_date <= ").push_bind(v);
     }
-    Ok(Json(qx.fetch_all(&s.pool).await?))
+    builder.push(" ORDER BY entry_date, start_time");
+    Ok(Json(
+        builder
+            .build_query_as::<TimeEntry>()
+            .fetch_all(&s.pool)
+            .await?,
+    ))
 }
 
 pub async fn list_all(
@@ -84,34 +85,26 @@ pub async fn list_all(
     if !u.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let mut sql = String::from("SELECT * FROM time_entries WHERE 1=1");
-    if q.from.is_some() {
-        sql += " AND entry_date >= ?";
-    }
-    if q.to.is_some() {
-        sql += " AND entry_date <= ?";
-    }
-    if q.user_id.is_some() {
-        sql += " AND user_id = ?";
-    }
-    if q.status.is_some() {
-        sql += " AND status = ?";
-    }
-    sql += " ORDER BY entry_date DESC, start_time";
-    let mut qx = sqlx::query_as::<_, TimeEntry>(&sql);
+    let mut builder = QueryBuilder::<Postgres>::new("SELECT * FROM time_entries WHERE TRUE");
     if let Some(v) = q.from {
-        qx = qx.bind(v);
+        builder.push(" AND entry_date >= ").push_bind(v);
     }
     if let Some(v) = q.to {
-        qx = qx.bind(v);
+        builder.push(" AND entry_date <= ").push_bind(v);
     }
     if let Some(v) = q.user_id {
-        qx = qx.bind(v);
+        builder.push(" AND user_id = ").push_bind(v);
     }
     if let Some(v) = q.status {
-        qx = qx.bind(v);
+        builder.push(" AND status = ").push_bind(v);
     }
-    Ok(Json(qx.fetch_all(&s.pool).await?))
+    builder.push(" ORDER BY entry_date DESC, start_time");
+    Ok(Json(
+        builder
+            .build_query_as::<TimeEntry>()
+            .fetch_all(&s.pool)
+            .await?,
+    ))
 }
 
 #[derive(Deserialize)]
@@ -124,7 +117,7 @@ pub struct NewTimeEntry {
 }
 
 async fn validate(
-    pool: &sqlx::SqlitePool,
+    pool: &crate::db::DatabasePool,
     user_id: i64,
     te: &NewTimeEntry,
     exclude_id: Option<i64>,
@@ -139,7 +132,7 @@ async fn validate(
     let end_n = parse_time(&te.end_time)?;
 
     let existing: Vec<(i64, String, String)> = sqlx::query_as(
-        "SELECT id, start_time, end_time FROM time_entries WHERE user_id=? AND entry_date=?",
+        "SELECT id, start_time, end_time FROM time_entries WHERE user_id=$1 AND entry_date=$2",
     )
     .bind(user_id)
     .bind(te.entry_date)
@@ -172,11 +165,10 @@ pub async fn create(
     Json(b): Json<NewTimeEntry>,
 ) -> AppResult<Json<TimeEntry>> {
     validate(&s.pool, u.id, &b, None).await?;
-    let res = sqlx::query("INSERT INTO time_entries(user_id, entry_date, start_time, end_time, category_id, comment) VALUES (?,?,?,?,?,?)")
+    let id: i64 = sqlx::query_scalar("INSERT INTO time_entries(user_id, entry_date, start_time, end_time, category_id, comment) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id")
         .bind(u.id).bind(b.entry_date).bind(&b.start_time).bind(&b.end_time).bind(b.category_id).bind(&b.comment)
-        .execute(&s.pool).await?;
-    let id = res.last_insert_rowid();
-    let z: TimeEntry = sqlx::query_as("SELECT * FROM time_entries WHERE id=?")
+        .fetch_one(&s.pool).await?;
+    let z: TimeEntry = sqlx::query_as("SELECT * FROM time_entries WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
@@ -199,7 +191,7 @@ pub async fn update(
     Path(id): Path<i64>,
     Json(b): Json<NewTimeEntry>,
 ) -> AppResult<Json<TimeEntry>> {
-    let prev: TimeEntry = sqlx::query_as("SELECT * FROM time_entries WHERE id=?")
+    let prev: TimeEntry = sqlx::query_as("SELECT * FROM time_entries WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
@@ -215,10 +207,10 @@ pub async fn update(
         }
     }
     validate(&s.pool, prev.user_id, &b, Some(id)).await?;
-    sqlx::query("UPDATE time_entries SET entry_date=?, start_time=?, end_time=?, category_id=?, comment=?, updated_at=CURRENT_TIMESTAMP WHERE id=?")
+    sqlx::query("UPDATE time_entries SET entry_date=$1, start_time=$2, end_time=$3, category_id=$4, comment=$5, updated_at=CURRENT_TIMESTAMP WHERE id=$6")
         .bind(b.entry_date).bind(&b.start_time).bind(&b.end_time).bind(b.category_id).bind(&b.comment).bind(id)
         .execute(&s.pool).await?;
-    let next: TimeEntry = sqlx::query_as("SELECT * FROM time_entries WHERE id=?")
+    let next: TimeEntry = sqlx::query_as("SELECT * FROM time_entries WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
@@ -240,7 +232,7 @@ pub async fn delete(
     u: User,
     Path(id): Path<i64>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let z: TimeEntry = sqlx::query_as("SELECT * FROM time_entries WHERE id=?")
+    let z: TimeEntry = sqlx::query_as("SELECT * FROM time_entries WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
@@ -250,7 +242,7 @@ pub async fn delete(
     if z.status != "draft" {
         return Err(AppError::BadRequest("Only drafts can be deleted.".into()));
     }
-    sqlx::query("DELETE FROM time_entries WHERE id=?")
+    sqlx::query("DELETE FROM time_entries WHERE id=$1")
         .bind(id)
         .execute(&s.pool)
         .await?;
@@ -278,7 +270,7 @@ pub async fn submit(
     Json(b): Json<IdsBody>,
 ) -> AppResult<Json<serde_json::Value>> {
     for id in &b.ids {
-        let z: TimeEntry = sqlx::query_as("SELECT * FROM time_entries WHERE id=?")
+        let z: TimeEntry = sqlx::query_as("SELECT * FROM time_entries WHERE id=$1")
             .bind(id)
             .fetch_one(&s.pool)
             .await?;
@@ -289,7 +281,7 @@ pub async fn submit(
             continue;
         }
         sqlx::query(
-            "UPDATE time_entries SET status='submitted', submitted_at=CURRENT_TIMESTAMP WHERE id=?",
+            "UPDATE time_entries SET status='submitted', submitted_at=CURRENT_TIMESTAMP WHERE id=$1",
         )
         .bind(id)
         .execute(&s.pool)
@@ -316,14 +308,14 @@ pub async fn approve(
     if !u.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let z: TimeEntry = sqlx::query_as("SELECT * FROM time_entries WHERE id=?")
+    let z: TimeEntry = sqlx::query_as("SELECT * FROM time_entries WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
     if z.user_id == u.id && !u.is_admin() {
         return Err(AppError::Forbidden);
     }
-    sqlx::query("UPDATE time_entries SET status='approved', reviewed_by=?, reviewed_at=CURRENT_TIMESTAMP WHERE id=?")
+    sqlx::query("UPDATE time_entries SET status='approved', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP WHERE id=$2")
         .bind(u.id).bind(id).execute(&s.pool).await?;
     audit::log(&s.pool, u.id, "approved", "time_entries", id, None, None).await;
     Ok(Json(serde_json::json!({"ok":true})))
@@ -343,7 +335,7 @@ pub async fn reject(
     if !u.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let z: TimeEntry = sqlx::query_as("SELECT * FROM time_entries WHERE id=?")
+    let z: TimeEntry = sqlx::query_as("SELECT * FROM time_entries WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
@@ -353,7 +345,7 @@ pub async fn reject(
     if b.reason.trim().is_empty() {
         return Err(AppError::BadRequest("Reason required.".into()));
     }
-    sqlx::query("UPDATE time_entries SET status='rejected', reviewed_by=?, reviewed_at=CURRENT_TIMESTAMP, rejection_reason=? WHERE id=?")
+    sqlx::query("UPDATE time_entries SET status='rejected', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP, rejection_reason=$2 WHERE id=$3")
         .bind(u.id).bind(&b.reason).bind(id).execute(&s.pool).await?;
     audit::log(
         &s.pool,
@@ -379,7 +371,7 @@ pub async fn batch_approve(
     let mut count = 0;
     for id in &b.ids {
         let z: Option<TimeEntry> =
-            sqlx::query_as("SELECT * FROM time_entries WHERE id=? AND status='submitted'")
+            sqlx::query_as("SELECT * FROM time_entries WHERE id=$1 AND status='submitted'")
                 .bind(id)
                 .fetch_optional(&s.pool)
                 .await?;
@@ -387,7 +379,7 @@ pub async fn batch_approve(
         if z.user_id == u.id && !u.is_admin() {
             continue;
         }
-        sqlx::query("UPDATE time_entries SET status='approved', reviewed_by=?, reviewed_at=CURRENT_TIMESTAMP WHERE id=?")
+        sqlx::query("UPDATE time_entries SET status='approved', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP WHERE id=$2")
             .bind(u.id).bind(id).execute(&s.pool).await?;
         audit::log(&s.pool, u.id, "approved", "time_entries", *id, None, None).await;
         count += 1;

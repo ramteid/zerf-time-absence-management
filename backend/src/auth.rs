@@ -145,7 +145,7 @@ pub async fn login(
 
     let since: DateTime<Utc> = Utc::now() - Duration::minutes(LOCKOUT_MIN);
     let failures: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM login_attempts WHERE email = ? AND success = 0 AND attempted_at > ?",
+        "SELECT COUNT(*) FROM login_attempts WHERE email = $1 AND success = FALSE AND attempted_at > $2",
     )
     .bind(&email)
     .bind(since)
@@ -156,7 +156,7 @@ pub async fn login(
         return Err(AppError::BadRequest("Invalid email or password.".into()));
     }
 
-    let user: Option<User> = sqlx::query_as("SELECT * FROM users WHERE email = ? AND active = 1")
+    let user: Option<User> = sqlx::query_as("SELECT * FROM users WHERE email = $1 AND active = TRUE")
         .bind(&email)
         .fetch_optional(&s.pool)
         .await?;
@@ -169,7 +169,7 @@ pub async fn login(
             false
         }
     };
-    sqlx::query("INSERT INTO login_attempts(email, success) VALUES (?, ?)")
+    sqlx::query("INSERT INTO login_attempts(email, success) VALUES ($1, $2)")
         .bind(&email)
         .bind(ok)
         .execute(&s.pool)
@@ -183,7 +183,7 @@ pub async fn login(
     // is ignored; we always issue a fresh, random, never-reused token.
     let token = new_token();
     let csrf = new_token();
-    sqlx::query("INSERT INTO sessions(token, user_id, csrf_token) VALUES (?, ?, ?)")
+    sqlx::query("INSERT INTO sessions(token, user_id, csrf_token) VALUES ($1, $2, $3)")
         .bind(hash_token(&token))
         .bind(user.id)
         .bind(&csrf)
@@ -191,7 +191,7 @@ pub async fn login(
         .await?;
 
     // Best-effort: drop any failed-attempt rows for this email so the lockout window resets.
-    sqlx::query("DELETE FROM login_attempts WHERE email = ? AND success = 0")
+    sqlx::query("DELETE FROM login_attempts WHERE email = $1 AND success = FALSE")
         .bind(&email)
         .execute(&s.pool)
         .await
@@ -215,12 +215,12 @@ pub async fn logout(State(s): State<AppState>, req: Request) -> AppResult<Respon
         // Per security policy: on logout, all sessions of the affected user are
         // deleted — not just the current one — so a user logging out from one
         // device invalidates all other open sessions too.
-        let uid: Option<i64> = sqlx::query_scalar("SELECT user_id FROM sessions WHERE token = ?")
+        let uid: Option<i64> = sqlx::query_scalar("SELECT user_id FROM sessions WHERE token = $1")
             .bind(hash_token(&token))
             .fetch_optional(&s.pool)
             .await?;
         if let Some(user_id) = uid {
-            sqlx::query("DELETE FROM sessions WHERE user_id = ?")
+            sqlx::query("DELETE FROM sessions WHERE user_id = $1")
                 .bind(user_id)
                 .execute(&s.pool)
                 .await?;
@@ -242,7 +242,7 @@ pub async fn me(
     // state-changing requests as `X-CSRF-Token`.
     let token = extract_token(&req).unwrap_or_default();
     let csrf: Option<String> =
-        sqlx::query_scalar("SELECT csrf_token FROM sessions WHERE token = ?")
+        sqlx::query_scalar("SELECT csrf_token FROM sessions WHERE token = $1")
             .bind(hash_token(&token))
             .fetch_optional(&s.pool)
             .await?;
@@ -286,14 +286,14 @@ pub async fn change_password(
     }
     let h = hash_password(&body.new_password)?;
     let mut tx = s.pool.begin().await?;
-    sqlx::query("UPDATE users SET password_hash=?, must_change_password=0 WHERE id=?")
+    sqlx::query("UPDATE users SET password_hash=$1, must_change_password=FALSE WHERE id=$2")
         .bind(h)
         .bind(user.id)
         .execute(&mut *tx)
         .await?;
     // Per security policy: on password change, ALL sessions for this user are
     // deleted — including the caller's — forcing re-authentication.
-    sqlx::query("DELETE FROM sessions WHERE user_id=?")
+    sqlx::query("DELETE FROM sessions WHERE user_id=$1")
         .bind(user.id)
         .execute(&mut *tx)
         .await?;
@@ -393,7 +393,7 @@ pub async fn auth_middleware(
     .ok_or(AppError::Unauthorized)?;
 
     let row: Option<(i64, DateTime<Utc>, DateTime<Utc>, String)> = sqlx::query_as(
-        "SELECT user_id, last_active_at, created_at, csrf_token FROM sessions WHERE token = ?",
+        "SELECT user_id, last_active_at, created_at, csrf_token FROM sessions WHERE token = $1",
     )
     .bind(hash_token(&token))
     .fetch_optional(&s.pool)
@@ -403,7 +403,7 @@ pub async fn auth_middleware(
     if now - last > Duration::hours(IDLE_TIMEOUT_HOURS)
         || now - created > Duration::hours(ABSOLUTE_TIMEOUT_HOURS)
     {
-        sqlx::query("DELETE FROM sessions WHERE token=?")
+        sqlx::query("DELETE FROM sessions WHERE token=$1")
             .bind(hash_token(&token))
             .execute(&s.pool)
             .await?;
@@ -412,11 +412,11 @@ pub async fn auth_middleware(
 
     enforce_csrf(&parts, &s, &csrf).await?;
 
-    sqlx::query("UPDATE sessions SET last_active_at=CURRENT_TIMESTAMP WHERE token=?")
+    sqlx::query("UPDATE sessions SET last_active_at=CURRENT_TIMESTAMP WHERE token=$1")
         .bind(hash_token(&token))
         .execute(&s.pool)
         .await?;
-    let user: User = sqlx::query_as("SELECT * FROM users WHERE id=? AND active=1")
+    let user: User = sqlx::query_as("SELECT * FROM users WHERE id=$1 AND active=TRUE")
         .bind(uid)
         .fetch_optional(&s.pool)
         .await?
@@ -444,20 +444,21 @@ where
 
 /// Periodic cleanup of expired sessions and old login attempts.
 /// Matches the actual timeout policy: idle > 8 h OR absolute age > 24 h.
-pub async fn cleanup_loop(pool: sqlx::SqlitePool) {
+pub async fn cleanup_loop(pool: crate::db::DatabasePool) {
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
     loop {
         interval.tick().await;
         let _ = sqlx::query(
             "DELETE FROM sessions \
-             WHERE last_active_at < datetime('now','-8 hours') \
-                OR created_at < datetime('now','-24 hours')",
+             WHERE last_active_at < CURRENT_TIMESTAMP - INTERVAL '8 hours' \
+                OR created_at < CURRENT_TIMESTAMP - INTERVAL '24 hours'",
         )
         .execute(&pool)
         .await;
-        let _ =
-            sqlx::query("DELETE FROM login_attempts WHERE attempted_at < datetime('now','-1 day')")
-                .execute(&pool)
-                .await;
+        let _ = sqlx::query(
+            "DELETE FROM login_attempts WHERE attempted_at < CURRENT_TIMESTAMP - INTERVAL '1 day'",
+        )
+        .execute(&pool)
+        .await;
     }
 }

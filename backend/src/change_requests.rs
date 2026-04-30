@@ -31,7 +31,7 @@ pub struct ChangeRequest {
 pub async fn list(State(s): State<AppState>, u: User) -> AppResult<Json<Vec<ChangeRequest>>> {
     Ok(Json(
         sqlx::query_as::<_, ChangeRequest>(
-            "SELECT * FROM change_requests WHERE user_id=? ORDER BY created_at DESC",
+            "SELECT * FROM change_requests WHERE user_id=$1 ORDER BY created_at DESC",
         )
         .bind(u.id)
         .fetch_all(&s.pool)
@@ -71,7 +71,7 @@ pub async fn create(
     if b.reason.trim().is_empty() {
         return Err(AppError::BadRequest("Reason required.".into()));
     }
-    let z: (i64, String) = sqlx::query_as("SELECT user_id, status FROM time_entries WHERE id=?")
+    let z: (i64, String) = sqlx::query_as("SELECT user_id, status FROM time_entries WHERE id=$1")
         .bind(b.time_entry_id)
         .fetch_one(&s.pool)
         .await?;
@@ -81,11 +81,10 @@ pub async fn create(
     if z.1 == "draft" {
         return Err(AppError::BadRequest("Edit drafts directly.".into()));
     }
-    let res = sqlx::query("INSERT INTO change_requests(time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason) VALUES (?,?,?,?,?,?,?,?)")
+    let id: i64 = sqlx::query_scalar("INSERT INTO change_requests(time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id")
         .bind(b.time_entry_id).bind(u.id).bind(b.new_date).bind(&b.new_start_time).bind(&b.new_end_time).bind(b.new_category_id).bind(&b.new_comment).bind(&b.reason)
-        .execute(&s.pool).await?;
-    let id = res.last_insert_rowid();
-    let a: ChangeRequest = sqlx::query_as("SELECT * FROM change_requests WHERE id=?")
+        .fetch_one(&s.pool).await?;
+    let a: ChangeRequest = sqlx::query_as("SELECT * FROM change_requests WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
@@ -111,17 +110,17 @@ pub async fn approve(
         return Err(AppError::Forbidden);
     }
     let a: ChangeRequest =
-        sqlx::query_as("SELECT * FROM change_requests WHERE id=? AND status='open'")
+        sqlx::query_as("SELECT * FROM change_requests WHERE id=$1 AND status='open'")
             .bind(id)
             .fetch_one(&s.pool)
             .await?;
     if a.user_id == u.id && !u.is_admin() {
         return Err(AppError::Forbidden);
     }
-    sqlx::query("UPDATE time_entries SET entry_date=COALESCE(?,entry_date), start_time=COALESCE(?,start_time), end_time=COALESCE(?,end_time), category_id=COALESCE(?,category_id), comment=COALESCE(?,comment), updated_at=CURRENT_TIMESTAMP WHERE id=?")
+    sqlx::query("UPDATE time_entries SET entry_date=COALESCE($1,entry_date), start_time=COALESCE($2,start_time), end_time=COALESCE($3,end_time), category_id=COALESCE($4,category_id), comment=COALESCE($5,comment), updated_at=CURRENT_TIMESTAMP WHERE id=$6")
         .bind(a.new_date).bind(&a.new_start_time).bind(&a.new_end_time).bind(a.new_category_id).bind(&a.new_comment).bind(a.time_entry_id)
         .execute(&s.pool).await?;
-    sqlx::query("UPDATE change_requests SET status='approved', reviewed_by=?, reviewed_at=CURRENT_TIMESTAMP WHERE id=?")
+    sqlx::query("UPDATE change_requests SET status='approved', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP WHERE id=$2")
         .bind(u.id).bind(id).execute(&s.pool).await?;
     audit::log(&s.pool, u.id, "approved", "change_requests", id, None, None).await;
     Ok(Json(serde_json::json!({"ok":true})))
@@ -144,7 +143,7 @@ pub async fn reject(
     if b.reason.trim().is_empty() {
         return Err(AppError::BadRequest("Reason required.".into()));
     }
-    sqlx::query("UPDATE change_requests SET status='rejected', reviewed_by=?, reviewed_at=CURRENT_TIMESTAMP, rejection_reason=? WHERE id=?")
+    sqlx::query("UPDATE change_requests SET status='rejected', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP, rejection_reason=$2 WHERE id=$3")
         .bind(u.id).bind(&b.reason).bind(id).execute(&s.pool).await?;
     audit::log(
         &s.pool,

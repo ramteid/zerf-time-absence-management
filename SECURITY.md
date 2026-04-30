@@ -16,7 +16,7 @@ private GitHub Security Advisory. Do **not** open a public issue.
 |------------------------------|-----------------------------------------------|-------------------------------------------------------------------------|
 | Login credentials            | Credential stuffing, brute force              | Argon2id hashing, 5/15 min lockout, generic error messages              |
 | Session cookies              | XSS theft, MITM, fixation, replay             | HttpOnly, Secure, SameSite=Strict, rotated on login, 8 h idle / 24 h max|
-| Personal data in DB          | Disk theft, container escape                  | DB file 0600, container runs read-only as UID 10001, no capabilities    |
+| Personal data in DB          | Data theft, lateral movement, tampering       | Internal-only PostgreSQL network, SCRAM auth, checksums, app least privilege |
 | State-changing endpoints     | CSRF                                          | SameSite=Strict cookie + Origin/Referer check + X-CSRF-Token header     |
 | HTTP traffic                 | MITM, downgrade, sniffing                     | Caddy + Let's Encrypt + HSTS preload + CSP + COOP/CORP                  |
 | Account takeover via reset   | Reuse of leaked temp pw                       | Forced password change on first login, sessions cleared on reset/change |
@@ -107,6 +107,8 @@ Caddy also bumps to TLS 1.2+/H2/H3 and renews certificates via Let's Encrypt
 * `KITAZEIT_SESSION_SECRET` is **required**, ≥ 32 characters, must not be a
   known placeholder; the app refuses to start otherwise. Generate with
   `openssl rand -hex 32` and store in `.env` with `chmod 600`.
+* `KITAZEIT_POSTGRES_PASSWORD` is **required** for the bundled database and
+  should likewise be generated with `openssl rand -hex 32`.
 * `.env` is git-ignored. `.env.example` documents every variable.
 * `docker-compose.yml` references variables with `:?` so the stack refuses to
   start when a critical secret is missing.
@@ -118,16 +120,21 @@ Caddy also bumps to TLS 1.2+/H2/H3 and renews certificates via Let's Encrypt
 * **`read_only: true`** root filesystem; `tmpfs:/tmp`.
 * `cap_drop: [ALL]`; `security_opt: no-new-privileges:true`.
 * Caddy runs with only `NET_BIND_SERVICE` capability.
-* SQLite file is opened with WAL + foreign-keys + 5 s busy timeout, and the
-  app re-applies `0600` on the file every startup.
+* PostgreSQL is reachable only on an **internal Docker network**; no database
+  port is published on the host.
+* PostgreSQL initializes with `scram-sha-256` auth for local and host
+  connections, `password_encryption=scram-sha-256`, data checksums, and 30 s
+  statement / idle-in-transaction timeouts.
+* The application pool uses bounded connections, acquire timeouts, idle
+  timeouts, and connection health checks before reuse.
 * `HEALTHCHECK` against `/healthz` for orchestrators.
 * JSON-file logs are size-capped (10 MiB × 5).
 
 ## Backups
 
-`scripts/backup.sh` uses `sqlite3 .backup` (consistent online snapshot) into
-`./data/backups/` with `umask 077`. Setting `BACKUP_GPG_RECIPIENT=<keyid>`
-enables symmetric-style encryption per snapshot via `gpg --encrypt`; the
+`scripts/backup.sh` streams `pg_dump --format=custom` from the PostgreSQL
+container into `./backups/` with `umask 077`. Setting
+`BACKUP_GPG_RECIPIENT=<keyid>` encrypts each dump via `gpg --encrypt`; the
 plaintext copy is then `shred`-ed. Retention defaults to 30 days.
 
 ## Supply-chain & CI
@@ -152,7 +159,7 @@ updates after CI is green; major updates require a human review.
 ## Operational checklist
 
 1. `cp .env.example .env && chmod 600 .env`
-2. Replace `KITAZEIT_SESSION_SECRET` with `openssl rand -hex 32`.
+2. Replace `KITAZEIT_SESSION_SECRET` and `KITAZEIT_POSTGRES_PASSWORD` with `openssl rand -hex 32` outputs.
 3. Set `KITAZEIT_DOMAIN` and `KITAZEIT_ADMIN_EMAIL`.
 4. `docker compose up -d` — note the one-time admin password from the logs.
 5. Sign in, change the admin password (forced), create real users.

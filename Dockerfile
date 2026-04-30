@@ -15,25 +15,22 @@ FROM debian:bookworm-slim
 ARG APP_UID=10001
 ARG APP_GID=10001
 
-# Minimal runtime deps; sqlite3 is included so the backup helper works inside the image.
+# Minimal runtime deps: `tini` for signal handling and `wget` for health checks.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates sqlite3 tini && \
+    apt-get install -y --no-install-recommends ca-certificates tini wget && \
     rm -rf /var/lib/apt/lists/*
 
-# Non-root user owning /app/data only.
+# Non-root runtime user.
 RUN groupadd --gid ${APP_GID} kitazeit && \
     useradd --uid ${APP_UID} --gid ${APP_GID} --home /app --shell /usr/sbin/nologin kitazeit
 
 WORKDIR /app
 COPY --from=backend-builder /build/target/release/kitazeit /app/kitazeit
 COPY frontend /app/static
-RUN mkdir -p /app/data && \
-    chown -R kitazeit:kitazeit /app/data && \
-    chmod 0750 /app/data && \
-    chmod 0555 /app/kitazeit /app/static -R
+RUN chmod 0555 /app/kitazeit && \
+    chmod -R a=rX /app/static
 
 ENV KITAZEIT_STATIC_DIR=/app/static \
-    KITAZEIT_DATABASE_PATH=/app/data/kitazeit.db \
     KITAZEIT_BIND=0.0.0.0:3000 \
     RUST_BACKTRACE=0
 

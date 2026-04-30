@@ -2,7 +2,6 @@
 
 Self-hosted time tracking for kindergartens.
 
-> 👉 Live instance: <https://REDACTED_DOMAIN>
 
 KitaZeit lets a small team (5–50 people) record working hours, request leave,
 get approvals, and produce monthly reports — without the fuss of a payroll
@@ -15,7 +14,7 @@ suite. The whole thing runs from one `docker compose up`.
 - **Quick to learn.** German-style work-time forms, calm interface, sensible defaults.
 - **Mobile-first.** Educators record their hours from a phone in the cloakroom.
 - **Self-hosted.** Your data stays on your server. No SaaS, no telemetry.
-- **Lean.** A single SQLite file is the entire database; backups are file copies.
+- **Operable.** Caddy, the app, and PostgreSQL ship as one compose stack with hardened defaults.
 
 ## What you get
 
@@ -63,19 +62,24 @@ ones you must set are:
 ```env
 KITAZEIT_DOMAIN=example.de
 KITAZEIT_SESSION_SECRET=$(openssl rand -hex 32)
+KITAZEIT_POSTGRES_PASSWORD=$(openssl rand -hex 32)
 KITAZEIT_ADMIN_EMAIL=admin@example.de
 ```
 
-Caddy obtains a Let's Encrypt certificate automatically on first start.
+Caddy obtains a Let's Encrypt certificate automatically on first start. The
+bundled PostgreSQL service stays on an internal Docker network and is not
+published to the internet.
 
 ### Backups
 
 ```bash
 # Daily snapshot at 03:00:
-0 3 * * * /opt/kitazeit/scripts/backup.sh /opt/kitazeit/data
+0 3 * * * cd /opt/kitazeit && /opt/kitazeit/scripts/backup.sh /opt/kitazeit/backups
 ```
 
-Set `BACKUP_GPG_RECIPIENT=<your-key>` to encrypt every snapshot at rest.
+The helper streams a `pg_dump` custom-format snapshot from the internal
+PostgreSQL container. Set `BACKUP_GPG_RECIPIENT=<your-key>` to encrypt every
+snapshot at rest.
 
 ### Updates
 
@@ -93,6 +97,7 @@ KitaZeit is meant to live on the open internet. Hardening is documented in
 - Argon2id passwords, lockout after 5 failed attempts in 15 min.
 - Session cookies HttpOnly + Secure + SameSite=Strict; 8 h idle / 24 h hard cap.
 - CSRF: SameSite + Origin allow-list + double-submit `X-CSRF-Token`.
+- PostgreSQL stays on an internal Docker network with SCRAM auth and data checksums.
 - HSTS preload, full CSP, X-Frame-Options DENY, COOP/CORP same-origin.
 - Container runs non-root with read-only rootfs and all capabilities dropped.
 - 1 MiB body limit, 30 s request timeout, no sensitive data in logs.
@@ -107,10 +112,10 @@ on every push.
 
 | Path | What's there |
 |------|--------------|
-| [`backend/`](backend/) | Rust + Axum + SQLite |
+| [`backend/`](backend/) | Rust + Axum + PostgreSQL |
 | [`frontend/`](frontend/) | Single-page app (vanilla JS) |
 | [`tests/`](tests/) | End-to-end test runner |
-| [`scripts/`](scripts/) | Backup helper |
+| [`scripts/`](scripts/) | PostgreSQL backup helper |
 
 ## Roadmap (out of scope for v1)
 

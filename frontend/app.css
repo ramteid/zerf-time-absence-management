@@ -284,6 +284,7 @@ main{padding:1.6em 1.8em;max-width:1200px;width:100%}
 .abs-training{background:#FCD34D;color:#1F2937}
 .abs-special_leave{background:#9333EA}
 .abs-unpaid{background:#9CA3AF}
+.abs-general_absence{background:#0EA5E9}
 
 /* Login */
 .login-wrap{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:1em;background:radial-gradient(1200px 600px at 20% -10%, var(--brand-50), transparent 60%), radial-gradient(900px 500px at 110% 110%, #E0F2FE, transparent 60%), var(--bg)}

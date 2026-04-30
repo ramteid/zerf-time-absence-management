@@ -1,4 +1,40 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: kitazeit-postgres
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      - POSTGRES_DB=${KITAZEIT_POSTGRES_DB:-kitazeit}
+      - POSTGRES_USER=${KITAZEIT_POSTGRES_USER:-kitazeit}
+      - POSTGRES_PASSWORD=${KITAZEIT_POSTGRES_PASSWORD:?KITAZEIT_POSTGRES_PASSWORD must be set in .env (openssl rand -hex 32)}
+      - POSTGRES_INITDB_ARGS=--auth-host=scram-sha-256 --auth-local=scram-sha-256 --data-checksums
+    command:
+      - postgres
+      - -c
+      - password_encryption=scram-sha-256
+      - -c
+      - ssl=off
+      - -c
+      - idle_in_transaction_session_timeout=30000
+      - -c
+      - statement_timeout=30000
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\" -h 127.0.0.1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    networks:
+      - private
+
   app:
     build: .
     container_name: kitazeit-app
@@ -10,10 +46,11 @@ services:
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
-    volumes:
-      - ./data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
-      - KITAZEIT_DATABASE_PATH=/app/data/kitazeit.db
+      - KITAZEIT_DATABASE_URL=${KITAZEIT_DATABASE_URL:-postgres://${KITAZEIT_POSTGRES_USER:-kitazeit}:${KITAZEIT_POSTGRES_PASSWORD:?KITAZEIT_POSTGRES_PASSWORD must be set in .env (openssl rand -hex 32)}@postgres:5432/${KITAZEIT_POSTGRES_DB:-kitazeit}?sslmode=disable}
       - KITAZEIT_SESSION_SECRET=${KITAZEIT_SESSION_SECRET:?KITAZEIT_SESSION_SECRET must be set in .env (>=32 chars random)}
       - KITAZEIT_ADMIN_EMAIL=${KITAZEIT_ADMIN_EMAIL:?KITAZEIT_ADMIN_EMAIL must be set in .env}
       - KITAZEIT_ORGANIZATION_NAME=${KITAZEIT_ORGANIZATION_NAME:-Kindergarten}
@@ -36,6 +73,9 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+    networks:
+      - public
+      - private
 
   caddy:
     image: caddy:2-alpine
@@ -56,13 +96,22 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
-      - app
+      app:
+        condition: service_started
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "5"
+    networks:
+      - public
 
 volumes:
+  postgres_data:
   caddy_data:
   caddy_config:
+
+networks:
+  public:
+  private:
+    internal: true

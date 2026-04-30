@@ -7,8 +7,9 @@ use axum::{
     response::Response,
     Json,
 };
-use chrono::{Datelike, Duration, NaiveDate};
+use chrono::{Datelike, Duration, NaiveDate, NaiveTime};
 use serde::{Deserialize, Serialize};
+use sqlx::{Postgres, QueryBuilder};
 use std::collections::HashMap;
 
 #[derive(Deserialize)]
@@ -83,24 +84,28 @@ fn weekday_en(d: NaiveDate) -> &'static str {
     ][d.weekday().num_days_from_monday() as usize]
 }
 
-async fn build_month(pool: &sqlx::SqlitePool, user_id: i64, month: &str) -> AppResult<MonthReport> {
+async fn build_month(
+    pool: &crate::db::DatabasePool,
+    user_id: i64,
+    month: &str,
+) -> AppResult<MonthReport> {
     let (from, to) = month_bounds(month)?;
-    let user: crate::auth::User = sqlx::query_as("SELECT * FROM users WHERE id=?")
+    let user: crate::auth::User = sqlx::query_as("SELECT * FROM users WHERE id=$1")
         .bind(user_id)
         .fetch_one(pool)
         .await?;
     let target_per_day_min = (user.weekly_hours / 5.0 * 60.0) as i64;
 
     let te: Vec<(NaiveDate, String, String, String, String, i64, String, Option<String>)> = sqlx::query_as(
-        "SELECT z.entry_date, z.start_time, z.end_time, c.name, c.color, z.category_id, z.status, z.comment FROM time_entries z JOIN categories c ON c.id=z.category_id WHERE z.user_id=? AND z.entry_date BETWEEN ? AND ? ORDER BY z.entry_date, z.start_time"
+        "SELECT z.entry_date, z.start_time, z.end_time, c.name, c.color, z.category_id, z.status, z.comment FROM time_entries z JOIN categories c ON c.id=z.category_id WHERE z.user_id=$1 AND z.entry_date BETWEEN $2 AND $3 ORDER BY z.entry_date, z.start_time"
     ).bind(user_id).bind(from).bind(to).fetch_all(pool).await?;
 
     let abs: Vec<(NaiveDate, NaiveDate, String, bool)> = sqlx::query_as(
-        "SELECT start_date, end_date, kind, half_day FROM absences WHERE user_id=? AND status='approved' AND end_date >= ? AND start_date <= ?"
+        "SELECT start_date, end_date, kind, half_day FROM absences WHERE user_id=$1 AND status='approved' AND end_date >= $2 AND start_date <= $3"
     ).bind(user_id).bind(from).bind(to).fetch_all(pool).await?;
 
     let h: Vec<(NaiveDate, String)> = sqlx::query_as(
-        "SELECT holiday_date, name FROM holidays WHERE holiday_date BETWEEN ? AND ?",
+        "SELECT holiday_date, name FROM holidays WHERE holiday_date BETWEEN $1 AND $2",
     )
     .bind(from)
     .bind(to)
@@ -113,6 +118,7 @@ async fn build_month(pool: &sqlx::SqlitePool, user_id: i64, month: &str) -> AppR
     let mut actual_total = 0i64;
     let mut cat: HashMap<String, i64> = HashMap::new();
     let mut d = from;
+    let is_admin = user.role == "admin";
     while d <= to {
         let wd = d.weekday().num_days_from_monday();
         let weekday = wd < 5;
@@ -121,7 +127,8 @@ async fn build_month(pool: &sqlx::SqlitePool, user_id: i64, month: &str) -> AppR
             .iter()
             .find(|(s, e, _, _)| d >= *s && d <= *e)
             .map(|(_, _, k, _)| k.clone());
-        let target = if weekday && holiday.is_none() {
+        let before_start = d < user.start_date;
+        let target = if weekday && holiday.is_none() && !before_start && !is_admin {
             target_per_day_min
         } else {
             0
@@ -312,7 +319,7 @@ pub async fn team(
         return Err(AppError::Forbidden);
     }
     let users: Vec<crate::auth::User> =
-        sqlx::query_as("SELECT * FROM users WHERE active=1 ORDER BY last_name")
+        sqlx::query_as("SELECT * FROM users WHERE active=TRUE ORDER BY last_name")
             .fetch_all(&s.pool)
             .await?;
     let mut out = vec![];
@@ -341,11 +348,24 @@ pub struct CategoryQuery {
     pub user_id: Option<i64>,
 }
 
+#[derive(Serialize)]
+pub struct CategoryTotal {
+    pub category: String,
+    pub color: String,
+    pub minutes: i64,
+}
+
+fn parse_report_time(raw: &str) -> AppResult<NaiveTime> {
+    NaiveTime::parse_from_str(raw, "%H:%M")
+        .or_else(|_| NaiveTime::parse_from_str(raw, "%H:%M:%S"))
+        .map_err(|_| AppError::Internal("Invalid time value stored in database.".into()))
+}
+
 pub async fn categories(
     State(s): State<AppState>,
     u: User,
     Query(q): Query<CategoryQuery>,
-) -> AppResult<Json<Vec<serde_json::Value>>> {
+) -> AppResult<Json<Vec<CategoryTotal>>> {
     let uid = q.user_id;
     if let Some(id) = uid {
         if id != u.id && !u.is_lead() {
@@ -354,23 +374,39 @@ pub async fn categories(
     } else if !u.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let mut sql = String::from("SELECT c.name, c.color, COALESCE(SUM((strftime('%s', '2000-01-01 ' || z.end_time) - strftime('%s', '2000-01-01 ' || z.start_time))/60),0) AS m FROM time_entries z JOIN categories c ON c.id=z.category_id WHERE z.status='approved' AND z.entry_date BETWEEN ? AND ?");
-    if uid.is_some() {
-        sql += " AND z.user_id = ?";
-    }
-    sql += " GROUP BY c.id ORDER BY m DESC";
-    let mut qx = sqlx::query_as::<_, (String, String, i64)>(&sql)
-        .bind(q.from)
-        .bind(q.to);
+    let mut builder = QueryBuilder::<Postgres>::new(
+        "SELECT c.name, c.color, z.start_time, z.end_time \
+         FROM time_entries z \
+         JOIN categories c ON c.id=z.category_id \
+         WHERE z.status='approved' AND z.entry_date BETWEEN ",
+    );
+    builder.push_bind(q.from).push(" AND ").push_bind(q.to);
     if let Some(id) = uid {
-        qx = qx.bind(id);
+        builder.push(" AND z.user_id = ").push_bind(id);
     }
-    let rows = qx.fetch_all(&s.pool).await?;
-    Ok(Json(
-        rows.into_iter()
-            .map(|(n, c, m)| serde_json::json!({"category": n, "color": c, "minutes": m}))
-            .collect(),
-    ))
+    let rows: Vec<(String, String, String, String)> = builder
+        .build_query_as()
+        .fetch_all(&s.pool)
+        .await?;
+    let mut totals: HashMap<(String, String), i64> = HashMap::new();
+    for (category, color, start_time, end_time) in rows {
+        let minutes = (parse_report_time(&end_time)? - parse_report_time(&start_time)?).num_minutes();
+        *totals.entry((category, color)).or_insert(0) += minutes;
+    }
+    let mut out: Vec<CategoryTotal> = totals
+        .into_iter()
+        .map(|((category, color), minutes)| CategoryTotal {
+            category,
+            color,
+            minutes,
+        })
+        .collect();
+    out.sort_by(|a, b| {
+        b.minutes
+            .cmp(&a.minutes)
+            .then_with(|| a.category.cmp(&b.category))
+    });
+    Ok(Json(out))
 }
 
 #[derive(Deserialize)]
