@@ -120,7 +120,10 @@ async fn main() -> Result<()> {
                     "/change-requests/{id}/approve",
                     post(change_requests::approve),
                 )
-                .route("/change-requests/{id}/reject", post(change_requests::reject))
+                .route(
+                    "/change-requests/{id}/reject",
+                    post(change_requests::reject),
+                )
                 .route("/users", get(users::list).post(users::create))
                 .route("/users/{id}", get(users::get_one).put(users::update))
                 .route("/users/{id}/deactivate", post(users::deactivate))
