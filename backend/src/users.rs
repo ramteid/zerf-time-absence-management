@@ -124,14 +124,54 @@ pub async fn update(
     if !u.is_admin() {
         return Err(AppError::Forbidden);
     }
+    // Role allow-list — never trust the client.
+    if let Some(r) = &b.role {
+        if !["employee", "team_lead", "admin"].contains(&r.as_str()) {
+            return Err(AppError::BadRequest("Invalid role".into()));
+        }
+    }
+    // Anti-lockout: an admin cannot demote themselves out of admin or deactivate
+    // their own account; otherwise the only path back is fresh DB bootstrap.
+    if id == u.id {
+        if let Some(r) = &b.role {
+            if r != "admin" {
+                return Err(AppError::BadRequest(
+                    "You cannot remove your own admin role.".into(),
+                ));
+            }
+        }
+        if let Some(false) = b.active {
+            return Err(AppError::BadRequest(
+                "You cannot deactivate yourself.".into(),
+            ));
+        }
+    }
+    // Email format / length sanity (lowercase + minimal validation).
+    let email_lc = b.email.as_ref().map(|e| e.trim().to_lowercase());
+    if let Some(e) = &email_lc {
+        if e.is_empty() || e.len() > 254 || !e.contains('@') {
+            return Err(AppError::BadRequest("Invalid email.".into()));
+        }
+    }
     let prev: User = sqlx::query_as("SELECT * FROM users WHERE id=?")
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
     sqlx::query("UPDATE users SET email=COALESCE(?,email), first_name=COALESCE(?,first_name), last_name=COALESCE(?,last_name), role=COALESCE(?,role), weekly_hours=COALESCE(?,weekly_hours), annual_leave_days=COALESCE(?,annual_leave_days), start_date=COALESCE(?,start_date), active=COALESCE(?,active) WHERE id=?")
-        .bind(b.email.map(|e| e.to_lowercase())).bind(b.first_name).bind(b.last_name).bind(b.role)
+        .bind(email_lc).bind(b.first_name).bind(b.last_name).bind(b.role.clone())
         .bind(b.weekly_hours).bind(b.annual_leave_days).bind(b.start_date).bind(b.active).bind(id)
-        .execute(&s.pool).await?;
+        .execute(&s.pool).await
+        .map_err(|_| AppError::Conflict("Could not update user (e.g. email conflict).".into()))?;
+    // If role changed or user was deactivated, kill all sessions of that user
+    // so cached role/state cannot be (ab)used.
+    let role_changed = b.role.as_deref().map(|r| r != prev.role).unwrap_or(false);
+    let just_deactivated = matches!(b.active, Some(false)) && prev.active;
+    if role_changed || just_deactivated {
+        let _ = sqlx::query("DELETE FROM sessions WHERE user_id=?")
+            .bind(id)
+            .execute(&s.pool)
+            .await;
+    }
     let next: User = sqlx::query_as("SELECT * FROM users WHERE id=?")
         .bind(id)
         .fetch_one(&s.pool)

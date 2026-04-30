@@ -140,6 +140,20 @@ expect "login lead" 200 "${o%%$'\n'*}" ""
 o=$(call "$JAR_L" PUT /api/v1/auth/password "{\"current_password\":\"$LEAD_PW\",\"new_password\":\"TeamLeadPass!234\"}")
 expect "lead change pw" 200 "${o%%$'\n'*}" ""
 
+banner "Role-elevation hardening"
+# Employee may not promote themselves to admin via the (unauthorised) PUT /users/:id.
+o=$(call "$JAR_E" PUT "/api/v1/users/$EMP_ID" '{"role":"admin"}')
+expect "emp self-promote 403" 403 "${o%%$'\n'*}" "${o#*$'\n'}"
+# Admin cannot demote themselves out of admin role (would lock the system out).
+o=$(call "$JAR_A" PUT "/api/v1/users/1" '{"role":"employee"}')
+st=${o%%$'\n'*}; { [ "$st" = 400 ] || [ "$st" = 409 ]; } && ok "admin self-demote rejected ($st)" || bad "admin demote got $st"
+# Admin cannot deactivate themselves.
+o=$(call "$JAR_A" PUT "/api/v1/users/1" '{"active":false}')
+st=${o%%$'\n'*}; { [ "$st" = 400 ] || [ "$st" = 409 ]; } && ok "admin self-deactivate rejected ($st)" || bad "self-deactivate got $st"
+# Bogus role is rejected.
+o=$(call "$JAR_A" PUT "/api/v1/users/$EMP_ID" '{"role":"superuser"}')
+expect "bogus role rejected" 400 "${o%%$'\n'*}" "${o#*$'\n'}"
+
 banner "RBAC"
 o=$(call "$JAR_E" GET /api/v1/users);              expect "emp /users 403" 403 "${o%%$'\n'*}" "${o#*$'\n'}"
 o=$(call "$JAR_E" GET /api/v1/audit-log);          expect "emp /audit 403" 403 "${o%%$'\n'*}" "${o#*$'\n'}"

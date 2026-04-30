@@ -23,14 +23,19 @@ impl From<sqlx::Error> for AppError {
     fn from(e: sqlx::Error) -> Self {
         match e {
             sqlx::Error::RowNotFound => AppError::NotFound,
-            other => AppError::Internal(other.to_string()),
+            // Stringify privately for the log; do NOT surface SQL details to the client.
+            other => {
+                tracing::error!(target: "kitazeit::db", "sqlx error: {other}");
+                AppError::Internal("database error".into())
+            }
         }
     }
 }
 
 impl From<anyhow::Error> for AppError {
     fn from(e: anyhow::Error) -> Self {
-        AppError::Internal(e.to_string())
+        tracing::error!(target: "kitazeit::any", "anyhow error: {e:#}");
+        AppError::Internal("internal error".into())
     }
 }
 
@@ -43,7 +48,7 @@ impl IntoResponse for AppError {
             AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, self.to_string()),
             AppError::Conflict(_) => (StatusCode::CONFLICT, self.to_string()),
             AppError::Internal(_) => {
-                tracing::error!("Internal error: {self}");
+                // Already logged where it was created; hide details from the client.
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Internal server error".to_string(),

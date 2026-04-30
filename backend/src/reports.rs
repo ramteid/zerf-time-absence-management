@@ -199,7 +199,20 @@ pub async fn month_csv(
     if uid != u.id && !u.is_lead() {
         return Err(AppError::Forbidden);
     }
+    // Validate the month string before stuffing it into a header.
+    let _ = month_bounds(&q.month)?;
+    // Validate the month string up-front before it is reflected anywhere.
+    let _ = month_bounds(&q.month)?;
     let r = build_month(&s.pool, uid, &q.month).await?;
+    // CSV formula-injection guard: prefix any cell that begins with =, +, -, @ or
+    // a tab/CR with a leading single-quote so spreadsheets treat it as text.
+    fn safe(s: &str) -> String {
+        if s.starts_with(|c: char| matches!(c, '=' | '+' | '-' | '@' | '\t' | '\r')) {
+            format!("'{}", s)
+        } else {
+            s.to_string()
+        }
+    }
     let mut wtr = csv::Writer::from_writer(vec![]);
     wtr.write_record(&[
         "Date", "Weekday", "Start", "End", "Category", "Minutes", "Status", "Comment", "Absence",
@@ -228,12 +241,12 @@ pub async fn month_csv(
                     t.weekday.clone(),
                     e.start_time.clone(),
                     e.end_time.clone(),
-                    e.category.clone(),
+                    safe(&e.category),
                     e.minutes.to_string(),
                     e.status.clone(),
-                    e.comment.clone().unwrap_or_default(),
-                    t.absence.clone().unwrap_or_default(),
-                    t.holiday.clone().unwrap_or_default(),
+                    safe(&e.comment.clone().unwrap_or_default()),
+                    safe(&t.absence.clone().unwrap_or_default()),
+                    safe(&t.holiday.clone().unwrap_or_default()),
                 ])
                 .ok();
             }
@@ -258,11 +271,17 @@ pub async fn month_csv(
         header::CONTENT_TYPE,
         "text/csv; charset=utf-8".parse().unwrap(),
     );
+    let safe_month: String = q
+        .month
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+        .take(10)
+        .collect();
+    let cd = format!("attachment; filename=\"report-{}-{}.csv\"", uid, safe_month);
     resp.headers_mut().insert(
         header::CONTENT_DISPOSITION,
-        format!("attachment; filename=\"report-{}-{}.csv\"", uid, q.month)
-            .parse()
-            .unwrap(),
+        axum::http::HeaderValue::from_str(&cd)
+            .unwrap_or_else(|_| axum::http::HeaderValue::from_static("attachment; filename=\"report.csv\"")),
     );
     Ok(resp)
 }
