@@ -1,7 +1,6 @@
 services:
   app:
     build: .
-    image: kitazeit:local
     container_name: kitazeit-app
     restart: unless-stopped
     user: "10001:10001"
