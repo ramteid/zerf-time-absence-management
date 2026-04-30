@@ -37,11 +37,10 @@ jobs:
         run: cargo clippy --all-targets --all-features
       - name: Build (release)
         run: cargo build --release
-      - name: cargo-audit (advisory)
-        continue-on-error: true
+      - name: cargo-audit (RustSec advisories)
         run: |
-          cargo install --locked cargo-audit || true
-          cargo audit
+          cargo install --locked cargo-audit
+          cargo audit --deny warnings --deny unmaintained --deny unsound --deny yanked
 
   integration:
     name: Integration tests (Docker)

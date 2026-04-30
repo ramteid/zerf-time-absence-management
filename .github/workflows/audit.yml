@@ -1,0 +1,34 @@
+name: Security audit
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/Cargo.toml"
+      - "backend/Cargo.lock"
+      - ".github/workflows/audit.yml"
+  schedule:
+    # Daily at 04:00 UTC: catch new RustSec advisories quickly.
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write     # rustsec/audit-check opens / updates an issue on findings
+
+concurrency:
+  group: audit-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  cargo-audit:
+    name: cargo-audit (RustSec)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - name: rustsec/audit-check
+        uses: rustsec/audit-check@v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          working-directory: backend
