@@ -1,0 +1,16 @@
+# cargo-audit configuration.
+# See: https://github.com/rustsec/rustsec/blob/main/cargo-audit/audit.toml.example
+
+[advisories]
+# RUSTSEC-2023-0071: Marvin Attack timing sidechannel in the `rsa` crate.
+#
+# The `rsa` crate is pulled in transitively by `sqlx-mysql`, which appears
+# in our resolved Cargo.lock because the `sqlx` umbrella crate lists it as
+# a (feature-gated) dependency. We only enable the `postgres` feature of
+# sqlx, so the vulnerable `rsa` code is never compiled into our binary
+# (sqlx-mysql is gated behind the disabled `mysql` feature).
+#
+# There is currently no patched release of `rsa` (the fix requires a
+# constant-time bigint implementation that is still in development).
+# Re-evaluate once a patched version ships.
+ignore = ["RUSTSEC-2023-0071"]

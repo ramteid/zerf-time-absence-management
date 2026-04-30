@@ -6,6 +6,7 @@ on:
     paths:
       - "backend/Cargo.toml"
       - "backend/Cargo.lock"
+      - "backend/.cargo/audit.toml"
       - ".github/workflows/audit.yml"
   schedule:
     # Daily at 04:00 UTC: catch new RustSec advisories quickly.
@@ -15,6 +16,7 @@ on:
 permissions:
   contents: read
   issues: write     # rustsec/audit-check files / updates an issue on findings
+  checks: write     # rustsec/audit-check creates a check run with the results
 
 concurrency:
   group: audit-${{ github.ref }}
@@ -27,10 +29,17 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
-      # The action inspects the working directory's Cargo.lock; symlink it.
+      # The action inspects the working directory's Cargo.lock; copy it.
       - name: Stage Cargo.lock for audit-check
         run: cp backend/Cargo.lock Cargo.lock
       - name: rustsec/audit-check
         uses: rustsec/audit-check@v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          # Ignored advisories — keep in sync with backend/.cargo/audit.toml.
+          # RUSTSEC-2023-0071: Marvin Attack timing sidechannel in the `rsa`
+          # crate. Pulled in transitively via `sqlx-mysql`, but the `mysql`
+          # sqlx feature is disabled in our build, so the vulnerable code is
+          # not compiled into the binary. No patched `rsa` release exists
+          # yet — revisit when one ships.
+          ignore: RUSTSEC-2023-0071
