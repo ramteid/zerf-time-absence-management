@@ -539,9 +539,9 @@ route("/account", async () => {
   const card = h("div",{class:"card"});
   card.appendChild(h("h2",{},"Change password"));
   const cur = h("input",{type:"password",autocomplete:"current-password"});
-  const nw = h("input",{type:"password",autocomplete:"new-password",minlength:"8"});
+  const nw = h("input",{type:"password",autocomplete:"new-password",minlength:"12"});
   if (!u.must_change_password) card.appendChild(field("Current password", cur));
-  card.appendChild(field("New password (min 8 chars)", nw));
+  card.appendChild(field("New password (min 12 chars)", nw));
   const err = h("div",{class:"error"});
   card.appendChild(err);
   card.appendChild(h("button",{onclick:async ()=>{
