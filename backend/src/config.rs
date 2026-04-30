@@ -19,14 +19,18 @@ pub struct Config {
 
 fn env_bool(key: &str, default: bool) -> bool {
     match env::var(key) {
-        Ok(v) => matches!(v.trim().to_lowercase().as_str(), "1" | "true" | "yes" | "on"),
+        Ok(v) => matches!(
+            v.trim().to_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        ),
         Err(_) => default,
     }
 }
 
 impl Config {
     pub fn from_env() -> Self {
-        let database_path = env::var("KITAZEIT_DATABASE_PATH").unwrap_or_else(|_| "data/kitazeit.db".into());
+        let database_path =
+            env::var("KITAZEIT_DATABASE_PATH").unwrap_or_else(|_| "data/kitazeit.db".into());
         let session_secret = env::var("KITAZEIT_SESSION_SECRET")
             .expect("KITAZEIT_SESSION_SECRET must be set; generate one with: openssl rand -hex 32");
         if session_secret.len() < 32 {
@@ -36,11 +40,21 @@ impl Config {
             panic!("KITAZEIT_SESSION_SECRET is using a default/placeholder value — replace it with a real random secret");
         }
 
-        let admin_email = env::var("KITAZEIT_ADMIN_EMAIL").unwrap_or_else(|_| "admin@example.com".into());
-        let public_url = env::var("KITAZEIT_PUBLIC_URL").ok().filter(|s| !s.is_empty());
+        let admin_email =
+            env::var("KITAZEIT_ADMIN_EMAIL").unwrap_or_else(|_| "admin@example.com".into());
+        let public_url = env::var("KITAZEIT_PUBLIC_URL")
+            .ok()
+            .filter(|s| !s.is_empty());
         let allowed_origins: Vec<String> = match env::var("KITAZEIT_ALLOWED_ORIGINS").ok() {
-            Some(s) if !s.is_empty() => s.split(',').map(|x| x.trim().trim_end_matches('/').to_string()).filter(|x| !x.is_empty()).collect(),
-            _ => public_url.iter().map(|u| u.trim_end_matches('/').to_string()).collect(),
+            Some(s) if !s.is_empty() => s
+                .split(',')
+                .map(|x| x.trim().trim_end_matches('/').to_string())
+                .filter(|x| !x.is_empty())
+                .collect(),
+            _ => public_url
+                .iter()
+                .map(|u| u.trim_end_matches('/').to_string())
+                .collect(),
         };
         // Default secure-by-default in production; opt-out only when explicitly set.
         let dev_mode = env_bool("KITAZEIT_DEV", false);
@@ -53,7 +67,8 @@ impl Config {
             database_path,
             session_secret,
             admin_email,
-            organization_name: env::var("KITAZEIT_ORGANIZATION_NAME").unwrap_or_else(|_| "Kindergarten".into()),
+            organization_name: env::var("KITAZEIT_ORGANIZATION_NAME")
+                .unwrap_or_else(|_| "Kindergarten".into()),
             region: env::var("KITAZEIT_REGION").unwrap_or_else(|_| "BW".into()),
             bind: env::var("KITAZEIT_BIND").unwrap_or_else(|_| "0.0.0.0:3000".into()),
             static_dir: env::var("KITAZEIT_STATIC_DIR").unwrap_or_else(|_| "static".into()),

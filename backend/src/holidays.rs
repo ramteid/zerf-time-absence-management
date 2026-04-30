@@ -1,8 +1,11 @@
-use chrono::{Datelike, NaiveDate};
-use crate::error::{AppError, AppResult};
 use crate::auth::User;
+use crate::error::{AppError, AppResult};
 use crate::AppState;
-use axum::{extract::{State, Path, Query}, Json};
+use axum::{
+    extract::{Path, Query, State},
+    Json,
+};
+use chrono::{Datelike, NaiveDate};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
@@ -29,7 +32,10 @@ pub fn holidays_bw(year: i32) -> Vec<(NaiveDate, &'static str)> {
     let o = easter_sunday(year);
     let d = |off: i64| o + chrono::Duration::days(off);
     vec![
-        (NaiveDate::from_ymd_opt(year, 1, 1).unwrap(), "New Year's Day"),
+        (
+            NaiveDate::from_ymd_opt(year, 1, 1).unwrap(),
+            "New Year's Day",
+        ),
         (NaiveDate::from_ymd_opt(year, 1, 6).unwrap(), "Epiphany"),
         (d(-2), "Good Friday"),
         (d(1), "Easter Monday"),
@@ -37,9 +43,18 @@ pub fn holidays_bw(year: i32) -> Vec<(NaiveDate, &'static str)> {
         (d(39), "Ascension Day"),
         (d(50), "Whit Monday"),
         (d(60), "Corpus Christi"),
-        (NaiveDate::from_ymd_opt(year, 10, 3).unwrap(), "German Unity Day"),
-        (NaiveDate::from_ymd_opt(year, 11, 1).unwrap(), "All Saints' Day"),
-        (NaiveDate::from_ymd_opt(year, 12, 25).unwrap(), "Christmas Day"),
+        (
+            NaiveDate::from_ymd_opt(year, 10, 3).unwrap(),
+            "German Unity Day",
+        ),
+        (
+            NaiveDate::from_ymd_opt(year, 11, 1).unwrap(),
+            "All Saints' Day",
+        ),
+        (
+            NaiveDate::from_ymd_opt(year, 12, 25).unwrap(),
+            "Christmas Day",
+        ),
         (NaiveDate::from_ymd_opt(year, 12, 26).unwrap(), "Boxing Day"),
     ]
 }
@@ -47,7 +62,11 @@ pub fn holidays_bw(year: i32) -> Vec<(NaiveDate, &'static str)> {
 pub async fn ensure_holidays(pool: &sqlx::SqlitePool, year: i32) -> AppResult<()> {
     for (d, name) in holidays_bw(year) {
         sqlx::query("INSERT OR IGNORE INTO holidays(holiday_date, name, year) VALUES (?, ?, ?)")
-            .bind(d).bind(name).bind(year).execute(pool).await?;
+            .bind(d)
+            .bind(name)
+            .bind(year)
+            .execute(pool)
+            .await?;
     }
     Ok(())
 }
@@ -61,28 +80,59 @@ pub struct Holiday {
 }
 
 #[derive(Deserialize)]
-pub struct YearQuery { pub year: Option<i32> }
+pub struct YearQuery {
+    pub year: Option<i32>,
+}
 
-pub async fn list(State(s): State<AppState>, _u: User, Query(q): Query<YearQuery>) -> AppResult<Json<Vec<Holiday>>> {
+pub async fn list(
+    State(s): State<AppState>,
+    _u: User,
+    Query(q): Query<YearQuery>,
+) -> AppResult<Json<Vec<Holiday>>> {
     let year = q.year.unwrap_or_else(|| chrono::Local::now().year());
-    let r = sqlx::query_as::<_, Holiday>("SELECT * FROM holidays WHERE year=? ORDER BY holiday_date")
-        .bind(year).fetch_all(&s.pool).await?;
+    let r =
+        sqlx::query_as::<_, Holiday>("SELECT * FROM holidays WHERE year=? ORDER BY holiday_date")
+            .bind(year)
+            .fetch_all(&s.pool)
+            .await?;
     Ok(Json(r))
 }
 
 #[derive(Deserialize)]
-pub struct NewHoliday { pub holiday_date: NaiveDate, pub name: String }
+pub struct NewHoliday {
+    pub holiday_date: NaiveDate,
+    pub name: String,
+}
 
-pub async fn create(State(s): State<AppState>, u: User, Json(b): Json<NewHoliday>) -> AppResult<Json<serde_json::Value>> {
-    if !u.is_admin() { return Err(AppError::Forbidden); }
+pub async fn create(
+    State(s): State<AppState>,
+    u: User,
+    Json(b): Json<NewHoliday>,
+) -> AppResult<Json<serde_json::Value>> {
+    if !u.is_admin() {
+        return Err(AppError::Forbidden);
+    }
     sqlx::query("INSERT INTO holidays(holiday_date, name, year) VALUES (?,?,?)")
-        .bind(b.holiday_date).bind(&b.name).bind(b.holiday_date.year()).execute(&s.pool).await
+        .bind(b.holiday_date)
+        .bind(&b.name)
+        .bind(b.holiday_date.year())
+        .execute(&s.pool)
+        .await
         .map_err(|_| AppError::Conflict("Holiday already exists".into()))?;
     Ok(Json(serde_json::json!({"ok":true})))
 }
 
-pub async fn delete(State(s): State<AppState>, u: User, Path(id): Path<i64>) -> AppResult<Json<serde_json::Value>> {
-    if !u.is_admin() { return Err(AppError::Forbidden); }
-    sqlx::query("DELETE FROM holidays WHERE id=?").bind(id).execute(&s.pool).await?;
+pub async fn delete(
+    State(s): State<AppState>,
+    u: User,
+    Path(id): Path<i64>,
+) -> AppResult<Json<serde_json::Value>> {
+    if !u.is_admin() {
+        return Err(AppError::Forbidden);
+    }
+    sqlx::query("DELETE FROM holidays WHERE id=?")
+        .bind(id)
+        .execute(&s.pool)
+        .await?;
     Ok(Json(serde_json::json!({"ok":true})))
 }

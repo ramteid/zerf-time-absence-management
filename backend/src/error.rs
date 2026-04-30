@@ -29,7 +29,9 @@ impl From<sqlx::Error> for AppError {
 }
 
 impl From<anyhow::Error> for AppError {
-    fn from(e: anyhow::Error) -> Self { AppError::Internal(e.to_string()) }
+    fn from(e: anyhow::Error) -> Self {
+        AppError::Internal(e.to_string())
+    }
 }
 
 impl IntoResponse for AppError {
@@ -42,7 +44,10 @@ impl IntoResponse for AppError {
             AppError::Conflict(_) => (StatusCode::CONFLICT, self.to_string()),
             AppError::Internal(_) => {
                 tracing::error!("Internal error: {self}");
-                (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error".to_string())
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Internal server error".to_string(),
+                )
             }
         };
         (status, Json(json!({ "error": msg }))).into_response()
