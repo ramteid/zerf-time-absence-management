@@ -243,11 +243,11 @@ pub async fn reset_password(
 
 /// Generate a 16-char temporary password with at least one of each class
 /// (lower / upper / digit / symbol) so it satisfies the strength policy.
-/// Uses the OS CSPRNG (`OsRng`) — never the thread RNG — for security.
+/// Uses the OS CSPRNG (`SysRng`) — never the thread RNG — for security.
 pub fn generate_password() -> String {
-    use rand::rngs::OsRng;
+    use rand::rand_core::{Rng, UnwrapErr};
+    use rand::rngs::SysRng;
     use rand::seq::SliceRandom;
-    use rand::RngCore;
     let lower: &[u8] = b"abcdefghjkmnpqrstuvwxyz";
     let upper: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ";
     let digit: &[u8] = b"23456789";
@@ -255,7 +255,7 @@ pub fn generate_password() -> String {
     // backslash, quotes, $, &, ?, =, %, /
     let symbol: &[u8] = b"!@#*-_+";
     let pools = [lower, upper, digit, symbol];
-    let mut rng = OsRng;
+    let mut rng = UnwrapErr(SysRng);
     let mut out: Vec<u8> = pools
         .iter()
         .map(|p| {

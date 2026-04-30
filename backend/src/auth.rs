@@ -1,7 +1,8 @@
 use crate::error::{AppError, AppResult};
 use crate::AppState;
 use argon2::password_hash::{
-    rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString,
+    rand_core::{OsRng, RngCore},
+    PasswordHash, PasswordHasher, PasswordVerifier, SaltString,
 };
 use argon2::{Algorithm, Argon2, Params, Version};
 use axum::extract::{Request, State};
@@ -10,7 +11,6 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use chrono::{DateTime, Duration, Utc};
-use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use subtle::ConstantTimeEq;
@@ -410,7 +410,6 @@ pub async fn auth_middleware(
     Ok(next.run(Request::from_parts(parts, body)).await)
 }
 
-#[async_trait::async_trait]
 impl<S> axum::extract::FromRequestParts<S> for User
 where
     S: Send + Sync,

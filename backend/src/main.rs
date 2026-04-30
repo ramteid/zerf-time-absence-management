@@ -12,6 +12,7 @@ mod time_entries;
 mod users;
 
 use anyhow::Result;
+use axum::http::StatusCode;
 use axum::{
     http::{header, HeaderName, HeaderValue},
     middleware,
@@ -172,7 +173,10 @@ async fn main() -> Result<()> {
             HeaderValue::from_static("no-store"),
         ))
         .layer(RequestBodyLimitLayer::new(1024 * 1024))
-        .layer(TimeoutLayer::new(Duration::from_secs(30)))
+        .layer(TimeoutLayer::with_status_code(
+            StatusCode::REQUEST_TIMEOUT,
+            Duration::from_secs(30),
+        ))
         .layer(TraceLayer::new_for_http());
 
     let addr: SocketAddr = cfg.bind.parse().expect("invalid KITAZEIT_BIND");
