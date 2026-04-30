@@ -443,13 +443,18 @@ where
 }
 
 /// Periodic cleanup of expired sessions and old login attempts.
+/// Matches the actual timeout policy: idle > 8 h OR absolute age > 24 h.
 pub async fn cleanup_loop(pool: sqlx::SqlitePool) {
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
     loop {
         interval.tick().await;
-        let _ = sqlx::query("DELETE FROM sessions WHERE last_active_at < datetime('now','-1 day')")
-            .execute(&pool)
-            .await;
+        let _ = sqlx::query(
+            "DELETE FROM sessions \
+             WHERE last_active_at < datetime('now','-8 hours') \
+                OR created_at < datetime('now','-24 hours')",
+        )
+        .execute(&pool)
+        .await;
         let _ =
             sqlx::query("DELETE FROM login_attempts WHERE attempted_at < datetime('now','-1 day')")
                 .execute(&pool)
