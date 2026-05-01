@@ -27,12 +27,10 @@ fn normalize_language(value: &str) -> AppResult<&'static str> {
 }
 
 async fn load_ui_language(pool: &crate::db::DatabasePool) -> AppResult<String> {
-    let value: Option<String> = sqlx::query_scalar(
-        "SELECT value FROM app_settings WHERE key = $1",
-    )
-    .bind(UI_LANGUAGE_KEY)
-    .fetch_optional(pool)
-    .await?;
+    let value: Option<String> = sqlx::query_scalar("SELECT value FROM app_settings WHERE key = $1")
+        .bind(UI_LANGUAGE_KEY)
+        .fetch_optional(pool)
+        .await?;
 
     Ok(value.unwrap_or_else(|| DEFAULT_UI_LANGUAGE.to_string()))
 }

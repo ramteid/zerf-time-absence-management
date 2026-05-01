@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS users (
   last_name TEXT NOT NULL,
   role TEXT NOT NULL CHECK (role IN ('employee','team_lead','admin')),
   weekly_hours DOUBLE PRECISION NOT NULL CHECK (weekly_hours >= 0 AND weekly_hours <= 168),
-  annual_leave_days INTEGER NOT NULL CHECK (annual_leave_days >= 0 AND annual_leave_days <= 366),
+  annual_leave_days BIGINT NOT NULL CHECK (annual_leave_days >= 0 AND annual_leave_days <= 366),
   start_date DATE NOT NULL,
   active BOOLEAN NOT NULL DEFAULT TRUE,
   must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS categories (
   name TEXT NOT NULL UNIQUE,
   description TEXT,
   color TEXT NOT NULL CHECK (color ~ '^#[0-9A-Fa-f]{6}$'),
-  sort_order INTEGER NOT NULL DEFAULT 0,
+  sort_order BIGINT NOT NULL DEFAULT 0,
   active BOOLEAN NOT NULL DEFAULT TRUE
 );
 

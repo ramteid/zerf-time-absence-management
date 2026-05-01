@@ -64,6 +64,23 @@ pub async fn create(
     if !["employee", "team_lead", "admin"].contains(&b.role.as_str()) {
         return Err(AppError::BadRequest("Invalid role".into()));
     }
+    let email_norm = b.email.trim().to_lowercase();
+    if email_norm.is_empty() || email_norm.len() > 254 || !email_norm.contains('@') {
+        return Err(AppError::BadRequest("Invalid email.".into()));
+    }
+    if b.first_name.trim().is_empty()
+        || b.last_name.trim().is_empty()
+        || b.first_name.len() > 200
+        || b.last_name.len() > 200
+    {
+        return Err(AppError::BadRequest("Invalid name.".into()));
+    }
+    if !(0.0..=168.0).contains(&b.weekly_hours) {
+        return Err(AppError::BadRequest("Invalid weekly_hours.".into()));
+    }
+    if !(0..=366).contains(&b.annual_leave_days) {
+        return Err(AppError::BadRequest("Invalid annual_leave_days.".into()));
+    }
     let (password, temp) = match b.password {
         Some(p) if !p.is_empty() => {
             validate_password_strength(&p)?;
@@ -77,7 +94,7 @@ pub async fn create(
     let hash = hash_password(&password)?;
     let must_change = temp.is_some();
     let id: i64 = sqlx::query_scalar("INSERT INTO users(email,password_hash,first_name,last_name,role,weekly_hours,annual_leave_days,start_date,must_change_password) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id")
-        .bind(b.email.to_lowercase()).bind(hash).bind(&b.first_name).bind(&b.last_name).bind(&b.role)
+        .bind(&email_norm).bind(hash).bind(b.first_name.trim()).bind(b.last_name.trim()).bind(&b.role)
         .bind(b.weekly_hours).bind(b.annual_leave_days).bind(b.start_date).bind(must_change)
         .fetch_one(&s.pool).await
         .map_err(|_| AppError::Conflict("Email already exists".into()))?;

@@ -16,7 +16,25 @@ use sha2::{Digest, Sha256};
 use sqlx::FromRow;
 use subtle::ConstantTimeEq;
 
-const SESSION_COOKIE: &str = "kitazeit_session";
+// In production (Secure cookies), use the `__Host-` prefix so that:
+//   * the cookie is only sent over HTTPS,
+//   * the browser refuses any cookie with a `Domain=` attribute under this
+//     name, which prevents a sibling subdomain (or a network attacker that
+//     manages to inject Set-Cookie at the parent domain) from overwriting
+//     / fixating the session cookie for our origin,
+//   * Path is forced to "/".
+// In dev (plain HTTP) browsers reject `__Host-` cookies, so we fall back to
+// the plain name there.
+const SESSION_COOKIE_SECURE: &str = "__Host-kitazeit_session";
+const SESSION_COOKIE_PLAIN: &str = "kitazeit_session";
+
+fn cookie_name(secure: bool) -> &'static str {
+    if secure {
+        SESSION_COOKIE_SECURE
+    } else {
+        SESSION_COOKIE_PLAIN
+    }
+}
 const IDLE_TIMEOUT_HOURS: i64 = 8; // tightened from 24h spec to 8h idle
 const ABSOLUTE_TIMEOUT_HOURS: i64 = 24; // hard cap regardless of activity
 const MAX_FAILED_LOGINS: i64 = 5;
@@ -118,9 +136,8 @@ pub fn hash_token(token: &str) -> String {
 
 fn build_session_cookie(token: &str, max_age: i64, secure: bool) -> String {
     let secure_flag = if secure { "; Secure" } else { "" };
-    format!(
-        "{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={max_age}{secure_flag}"
-    )
+    let name = cookie_name(secure);
+    format!("{name}={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={max_age}{secure_flag}")
 }
 
 #[derive(Deserialize)]
@@ -156,10 +173,11 @@ pub async fn login(
         return Err(AppError::BadRequest("Invalid email or password.".into()));
     }
 
-    let user: Option<User> = sqlx::query_as("SELECT * FROM users WHERE email = $1 AND active = TRUE")
-        .bind(&email)
-        .fetch_optional(&s.pool)
-        .await?;
+    let user: Option<User> =
+        sqlx::query_as("SELECT * FROM users WHERE email = $1 AND active = TRUE")
+            .bind(&email)
+            .fetch_optional(&s.pool)
+            .await?;
     // Always perform a hash verification to keep timing constant for unknown emails.
     let dummy = "$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHRzYWx0c2FsdA$8ueQukxsrOwHPzjhsRTRppvNN0o3Qx0vg7HHmH64Bmw";
     let ok = match &user {
@@ -265,18 +283,24 @@ pub struct PasswordReq {
 pub async fn change_password(
     State(s): State<AppState>,
     user: User,
-    Json(body): Json<PasswordReq>,
+    req: Request,
 ) -> AppResult<Response> {
-    if !user.must_change_password {
-        let cur = body
-            .current_password
-            .as_deref()
-            .ok_or_else(|| AppError::BadRequest("Current password required.".into()))?;
-        if !verify_password(cur, &user.password_hash) {
-            return Err(AppError::BadRequest(
-                "Current password is incorrect.".into(),
-            ));
-        }
+    let token = extract_token(&req).ok_or(AppError::Unauthorized)?;
+    let (parts, body_b) = req.into_parts();
+    let body_bytes = axum::body::to_bytes(body_b, 1024 * 1024)
+        .await
+        .map_err(|_| AppError::BadRequest("Invalid body".into()))?;
+    let body: PasswordReq = serde_json::from_slice(&body_bytes)
+        .map_err(|_| AppError::BadRequest("Invalid JSON".into()))?;
+    let _ = parts;
+    let cur = body
+        .current_password
+        .as_deref()
+        .ok_or_else(|| AppError::BadRequest("Current password required.".into()))?;
+    if !verify_password(cur, &user.password_hash) {
+        return Err(AppError::BadRequest(
+            "Current password is incorrect.".into(),
+        ));
     }
     validate_password_strength(&body.new_password)?;
     if verify_password(&body.new_password, &user.password_hash) {
@@ -285,25 +309,22 @@ pub async fn change_password(
         ));
     }
     let h = hash_password(&body.new_password)?;
+    let cur_token_hash = hash_token(&token);
     let mut tx = s.pool.begin().await?;
     sqlx::query("UPDATE users SET password_hash=$1, must_change_password=FALSE WHERE id=$2")
         .bind(h)
         .bind(user.id)
         .execute(&mut *tx)
         .await?;
-    // Per security policy: on password change, ALL sessions for this user are
-    // deleted — including the caller's — forcing re-authentication.
-    sqlx::query("DELETE FROM sessions WHERE user_id=$1")
+    // On password change, all OTHER sessions for this user are revoked, but
+    // the caller's current session is preserved so they remain logged in.
+    sqlx::query("DELETE FROM sessions WHERE user_id=$1 AND token<>$2")
         .bind(user.id)
+        .bind(&cur_token_hash)
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
-    // Clear the session cookie so the client is immediately logged out.
-    let cookie = build_session_cookie("", 0, s.cfg.secure_cookies);
-    let mut resp = Json(serde_json::json!({"ok": true})).into_response();
-    resp.headers_mut()
-        .insert(header::SET_COOKIE, cookie.parse().unwrap());
-    Ok(resp)
+    Ok(Json(serde_json::json!({"ok": true})).into_response())
 }
 
 fn extract_token(req: &Request) -> Option<String> {
@@ -312,10 +333,19 @@ fn extract_token(req: &Request) -> Option<String> {
 }
 
 fn extract_token_from_cookie_str(h: &str) -> Option<String> {
+    // Accept both the `__Host-` prefixed (production) and the plain (dev) names
+    // so that an upgrade to secure cookies on a running deployment doesn't
+    // break already-issued sessions.
+    let prefixes = [
+        concat!("__Host-kitazeit_session", "="),
+        concat!("kitazeit_session", "="),
+    ];
     for part in h.split(';') {
         let p = part.trim();
-        if let Some(rest) = p.strip_prefix(&format!("{SESSION_COOKIE}=")) {
-            return Some(rest.to_string());
+        for pref in prefixes {
+            if let Some(rest) = p.strip_prefix(pref) {
+                return Some(rest.to_string());
+            }
         }
     }
     None

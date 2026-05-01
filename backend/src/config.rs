@@ -29,8 +29,8 @@ fn env_bool(key: &str, default: bool) -> bool {
 
 impl Config {
     pub fn from_env() -> Self {
-        let database_url = env::var("KITAZEIT_DATABASE_URL")
-            .expect("KITAZEIT_DATABASE_URL must be set");
+        let database_url =
+            env::var("KITAZEIT_DATABASE_URL").expect("KITAZEIT_DATABASE_URL must be set");
         let session_secret = env::var("KITAZEIT_SESSION_SECRET")
             .expect("KITAZEIT_SESSION_SECRET must be set; generate one with: openssl rand -hex 32");
         if session_secret.len() < 32 {

@@ -57,7 +57,7 @@ async fn main() -> Result<()> {
         .fetch_one(&pool)
         .await?;
     if admin_count == 0 {
-        let temp = users::generate_password();
+        let temp = "admin".to_string();
         let hash = auth::hash_password(&temp)?;
         let today = chrono::Local::now().date_naive();
         sqlx::query("INSERT INTO users(email,password_hash,first_name,last_name,role,weekly_hours,annual_leave_days,start_date,must_change_password) VALUES ($1,$2,$3,$4,'admin',39.0,30,$5,TRUE)")

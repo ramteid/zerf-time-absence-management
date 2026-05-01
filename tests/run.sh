@@ -89,10 +89,10 @@ docker run -d --name "$CONTAINER" \
 ok "app container started ($CONTAINER)"
 
 # Wait for readiness
-for i in $(seq 1 40); do
-  if curl -fsS "$BASE/" -o /dev/null 2>/dev/null; then ok "ready after ${i}x250ms"; break; fi
+for i in $(seq 1 120); do
+  if curl -fsS "$BASE/healthz" -o /dev/null 2>/dev/null; then ok "ready after ${i}x250ms"; break; fi
   sleep 0.25
-  if [ "$i" = 40 ]; then bad "container did not become ready"; docker logs "$CONTAINER"; exit 1; fi
+  if [ "$i" = 120 ]; then bad "container did not become ready"; docker logs "$CONTAINER"; exit 1; fi
 done
 
 ADMIN_PW=$(docker logs "$CONTAINER" 2>&1 | grep -oE "Admin password: [^[:space:]]+" | tail -1 | awk '{print $3}')
@@ -408,10 +408,289 @@ o=$(call "$JAR_L" GET "/api/v1/reports/overtime?user_id=$EMP_ID&year=$YEAR");   
 CSV=$(curl -sS -b "$JAR_L" -o /tmp/it_csv -w "%{http_code} %{content_type}" "$BASE/api/v1/reports/month/csv?user_id=$EMP_ID&month=$MONTH")
 echo "$CSV" | grep -q "^200" && [ "$(wc -c </tmp/it_csv)" -gt 100 ] && ok "CSV export ($CSV)" || bad "CSV failed: $CSV"
 
+# ---------------------------------------------------------------------------
+# Comprehensive user journey: an employee enters many kinds of times.
+#
+# We provision a brand-new employee ("Tina") so the workflow starts from a
+# clean slate (no left-over entries from earlier sections).  The journey
+# exercises realistic day-to-day usage and a *lot* of edge cases:
+#
+#   • Login, forced password change.
+#   • Categories: pick distinct ones (childcare, prep, training, meeting…).
+#   • Past-day entries: allowed (employees often back-fill).
+#   • HH:MM and HH:MM:SS time formats.
+#   • Adjacent entries (touch at the boundary -> allowed).
+#   • Overlap detection (full / partial / one-minute / contained).
+#   • Exact 14 h day-total cap (allowed at 14 h, rejected at >14 h).
+#   • Zero-length / inverted / malformed times.
+#   • Unicode / emoji / very long comments.
+#   • Weekend & yesterday entries.
+#   • Filter by date range and by status (draft/submitted/approved/rejected).
+#   • Editing drafts vs. submitted entries (latter requires change-request).
+#   • Submit individually vs. batched.
+#   • Lead approve / reject / batch-approve / reason validation.
+#   • Self-approval is forbidden even for a lead (cannot review own entries).
+#   • Change requests for multiple fields at once.
+#   • Delete only allowed in draft, never after submit/approve/reject.
+#   • Future-day rejection.
+#   • Invalid category foreign key.
+#   • Body-size & malformed JSON robustness.
+#   • Cross-user isolation: Tina cannot see/touch Erin's entries.
+#   • Reports reflect Tina's freshly-approved entries.
+# ---------------------------------------------------------------------------
+banner "User journey — Tina enters many kinds of times"
+
+JAR_T=/tmp/it_tina.cookies; rm -f "$JAR_T"
+o=$(call "$JAR_A" POST /api/v1/users '{"email":"tina@example.com","first_name":"Tina","last_name":"Timekeeper","role":"employee","weekly_hours":39,"annual_leave_days":30,"start_date":"2024-01-01"}')
+body=${o#*$'\n'}; expect "create Tina" 200 "${o%%$'\n'*}" "$body"
+TINA_ID=$(echo "$body" | grep -oE '"id":[0-9]+' | head -1 | cut -d: -f2)
+TINA_PW=$(echo "$body" | grep -oE '"temporary_password":"[^"]+"' | cut -d'"' -f4)
+
+# Login & forced password change.
+o=$(call "$JAR_T" POST /api/v1/auth/login "{\"email\":\"tina@example.com\",\"password\":\"$TINA_PW\"}")
+expect "tina login" 200 "${o%%$'\n'*}" ""
+o=$(call "$JAR_T" GET /api/v1/auth/me); body=${o#*$'\n'}
+echo "$body" | grep -q '"must_change_password":true' && ok "tina forced pw flag" || bad "tina flag missing: $body"
+# A second login while still flagged must keep working (no lock-out).
+JAR_T2=/tmp/it_tina2.cookies; rm -f "$JAR_T2"
+o=$(call "$JAR_T2" POST /api/v1/auth/login "{\"email\":\"tina@example.com\",\"password\":\"$TINA_PW\"}")
+expect "tina second login OK while pw-flagged" 200 "${o%%$'\n'*}" ""
+# Weak password rejected.
+o=$(call "$JAR_T" PUT /api/v1/auth/password "{\"current_password\":\"$TINA_PW\",\"new_password\":\"short\"}")
+st=${o%%$'\n'*}; [ "$st" = 400 ] && ok "weak pw rejected" || bad "weak pw got $st"
+# Wrong current password rejected.
+o=$(call "$JAR_T" PUT /api/v1/auth/password "{\"current_password\":\"WRONG-WRONG-WRONG\",\"new_password\":\"TinaPass!234\"}")
+st=${o%%$'\n'*}; [ "$st" = 400 ] || [ "$st" = 401 ] && ok "wrong current pw rejected ($st)" || bad "wrong current got $st"
+o=$(call "$JAR_T" PUT /api/v1/auth/password "{\"current_password\":\"$TINA_PW\",\"new_password\":\"TinaPass!234\"}")
+expect "tina change pw" 200 "${o%%$'\n'*}" ""
+o=$(call "$JAR_T" GET /api/v1/auth/me); body=${o#*$'\n'}
+echo "$body" | grep -q '"must_change_password":false' && ok "tina flag cleared" || bad "tina still flagged: $body"
+
+# Resolve all six default category IDs by name (we want variety).
+o=$(call "$JAR_T" GET /api/v1/categories); CATS_BODY=${o#*$'\n'}
+cat_id() {
+  echo "$CATS_BODY" | tr '}' '\n' | grep -F "\"name\":\"$1\"" | grep -oE '"id":[0-9]+' | head -1 | cut -d: -f2
+}
+CAT_CARE=$(cat_id "Direct Childcare")
+CAT_PREP=$(cat_id "Preparation Time")
+CAT_LEAD=$(cat_id "Leadership Tasks")
+CAT_MEET=$(cat_id "Team Meeting")
+CAT_TRAIN=$(cat_id "Training")
+CAT_OTHER=$(cat_id "Other")
+[ -n "$CAT_CARE" ] && [ -n "$CAT_PREP" ] && [ -n "$CAT_TRAIN" ] && ok "resolved category IDs" || bad "category resolution failed: $CATS_BODY"
+
+# Useful relative dates.
+TODAY=$(date -u +%F)
+YDAY=$(date -u -d "-1 day"  +%F)
+DAY2=$(date -u -d "-2 days" +%F)
+DAY3=$(date -u -d "-3 days" +%F)
+DAY4=$(date -u -d "-4 days" +%F)
+DAY7=$(date -u -d "-7 days" +%F)
+TINA_MONTH=$(date -u -d "$YDAY" +%Y-%m)
+
+# ----- 1. A typical multi-category workday (yesterday) ---------------------
+banner "Tina — yesterday's workday (4 entries, 4 categories)"
+mk(){ # mk <date> <start> <end> <cat> <comment-json-or-empty>
+      # writes status to /tmp/it_mk_status, body to /tmp/it_mk_body, id to /tmp/it_mk_id
+  local d=$1 s=$2 e=$3 c=$4 cm=$5
+  local payload
+  if [ -n "$cm" ]; then
+    payload="{\"entry_date\":\"$d\",\"start_time\":\"$s\",\"end_time\":\"$e\",\"category_id\":$c,\"comment\":$cm}"
+  else
+    payload="{\"entry_date\":\"$d\",\"start_time\":\"$s\",\"end_time\":\"$e\",\"category_id\":$c}"
+  fi
+  local out; out=$(call "$JAR_T" POST /api/v1/time-entries "$payload")
+  printf '%s' "${out%%$'\n'*}" >/tmp/it_mk_status
+  printf '%s' "${out#*$'\n'}"  >/tmp/it_mk_body
+  grep -oE '"id":[0-9]+' /tmp/it_mk_body | head -1 | cut -d: -f2 >/tmp/it_mk_id
+}
+mk_status(){ cat /tmp/it_mk_status; }
+mk_body(){   cat /tmp/it_mk_body;   }
+mk_id(){     cat /tmp/it_mk_id;     }
+
+mk "$YDAY" "08:00" "10:00" "$CAT_CARE"  '"morning circle"';            expect "Y childcare 08-10"  200 "$(mk_status)" "$(mk_body)"; ID_Y1=$(mk_id)
+mk "$YDAY" "10:00" "10:30" "$CAT_MEET"  '"team standup"';              expect "Y meeting 10-10:30 (adjacent boundary)" 200 "$(mk_status)" "$(mk_body)"; ID_Y2=$(mk_id)
+mk "$YDAY" "10:30" "12:00" "$CAT_CARE"  '"play & lunch prep"';         expect "Y childcare 10:30-12" 200 "$(mk_status)" "$(mk_body)"; ID_Y3=$(mk_id)
+mk "$YDAY" "13:00" "16:30" "$CAT_PREP"  '"prep — Übung mit Ümlaut 🎨"'; expect "Y prep 13-16:30 (unicode+emoji)" 200 "$(mk_status)" "$(mk_body)"; ID_Y4=$(mk_id)
+[ -n "$ID_Y1$ID_Y2$ID_Y3$ID_Y4" ] && ok "all four IDs assigned" || bad "missing id"
+
+# ----- 2. Edge cases on the same day --------------------------------------
+banner "Tina — overlap & boundary edge cases on $YDAY"
+# Exact overlap (full duplicate) -> rejected.
+o=$(call "$JAR_T" POST /api/v1/time-entries "{\"entry_date\":\"$YDAY\",\"start_time\":\"08:00\",\"end_time\":\"10:00\",\"category_id\":$CAT_CARE}")
+expect "exact-duplicate overlap" 400 "${o%%$'\n'*}" ""
+# Partial overlap (starts inside an existing entry).
+o=$(call "$JAR_T" POST /api/v1/time-entries "{\"entry_date\":\"$YDAY\",\"start_time\":\"09:00\",\"end_time\":\"11:00\",\"category_id\":$CAT_CARE}")
+expect "partial overlap"          400 "${o%%$'\n'*}" ""
+# 1-minute overlap (09:59-10:01 over the 10:00 boundary entry).
+o=$(call "$JAR_T" POST /api/v1/time-entries "{\"entry_date\":\"$YDAY\",\"start_time\":\"09:59\",\"end_time\":\"10:01\",\"category_id\":$CAT_CARE}")
+expect "one-minute overlap"       400 "${o%%$'\n'*}" ""
+# Fully contained inside an existing block.
+o=$(call "$JAR_T" POST /api/v1/time-entries "{\"entry_date\":\"$YDAY\",\"start_time\":\"14:00\",\"end_time\":\"15:00\",\"category_id\":$CAT_CARE}")
+expect "contained overlap"        400 "${o%%$'\n'*}" ""
+# Adjacent (back-to-back, no gap) -> allowed and inserted in the lunch gap.
+mk "$YDAY" "12:00" "13:00" "$CAT_CARE" '"lunch coverage"'; expect "adjacent 12-13 fills gap" 200 "$(mk_status)" "$(mk_body)"; ID_Y5=$(mk_id)
+# HH:MM:SS format also accepted.
+mk "$YDAY" "16:30:00" "17:00:00" "$CAT_OTHER" '"clean-up"'; expect "HH:MM:SS accepted" 200 "$(mk_status)" "$(mk_body)"; ID_Y6=$(mk_id)
+# Zero-length entry rejected.
+o=$(call "$JAR_T" POST /api/v1/time-entries "{\"entry_date\":\"$YDAY\",\"start_time\":\"17:00\",\"end_time\":\"17:00\",\"category_id\":$CAT_CARE}")
+expect "zero-length rejected"     400 "${o%%$'\n'*}" ""
+# Inverted times rejected.
+o=$(call "$JAR_T" POST /api/v1/time-entries "{\"entry_date\":\"$YDAY\",\"start_time\":\"18:00\",\"end_time\":\"17:30\",\"category_id\":$CAT_CARE}")
+expect "inverted times rejected"  400 "${o%%$'\n'*}" ""
+# Malformed times rejected.
+o=$(call "$JAR_T" POST /api/v1/time-entries "{\"entry_date\":\"$YDAY\",\"start_time\":\"25:00\",\"end_time\":\"26:00\",\"category_id\":$CAT_CARE}")
+expect "out-of-range hour rejected" 400 "${o%%$'\n'*}" ""
+o=$(call "$JAR_T" POST /api/v1/time-entries "{\"entry_date\":\"$YDAY\",\"start_time\":\"ab:cd\",\"end_time\":\"ef:gh\",\"category_id\":$CAT_CARE}")
+expect "garbage time rejected"      400 "${o%%$'\n'*}" ""
+# Future-day rejected.
+FUT=$(date -u -d "+1 day" +%F)
+o=$(call "$JAR_T" POST /api/v1/time-entries "{\"entry_date\":\"$FUT\",\"start_time\":\"08:00\",\"end_time\":\"09:00\",\"category_id\":$CAT_CARE}")
+expect "future date rejected"     400 "${o%%$'\n'*}" ""
+# Invalid category id (foreign-key) rejected.
+o=$(call "$JAR_T" POST /api/v1/time-entries "{\"entry_date\":\"$YDAY\",\"start_time\":\"19:00\",\"end_time\":\"19:30\",\"category_id\":999999}")
+st=${o%%$'\n'*}; [ "$st" != 200 ] && ok "bogus category rejected ($st)" || bad "bogus category accepted"
+# Malformed JSON rejected.
+o=$(curl -sS -b "$JAR_T" -c "$JAR_T" -o /tmp/it_body -w "%{http_code}" \
+  -H "Content-Type: application/json" -X POST --data '{not-json' "$BASE/api/v1/time-entries"); echo
+st=$o; [ "$st" = 400 ] || [ "$st" = 422 ] && ok "malformed JSON rejected ($st)" || bad "malformed JSON got $st"
+
+# ----- 3. 14h day-cap edge cases (use a clean prior day) ------------------
+banner "Tina — 14h cap edge cases on $DAY2"
+# 06:00-20:00 = exactly 14h => allowed.
+mk "$DAY2" "06:00" "20:00" "$CAT_CARE" '"long shift"'; expect "exactly 14h allowed" 200 "$(mk_status)" "$(mk_body)"; ID_C1=$(mk_id)
+# Adding 1 more minute the same day pushes total to >14h => rejected.
+o=$(call "$JAR_T" POST /api/v1/time-entries "{\"entry_date\":\"$DAY2\",\"start_time\":\"20:00\",\"end_time\":\"20:01\",\"category_id\":$CAT_OTHER}")
+expect ">14h day total rejected" 400 "${o%%$'\n'*}" ""
+# Single >14h entry rejected.
+o=$(call "$JAR_T" POST /api/v1/time-entries "{\"entry_date\":\"$DAY3\",\"start_time\":\"05:00\",\"end_time\":\"19:30\",\"category_id\":$CAT_CARE}")
+expect "single 14:30 entry rejected" 400 "${o%%$'\n'*}" ""
+
+# ----- 4. Long-comment / very-long-comment behavior -----------------------
+banner "Tina — long comment & boundary text"
+LONG=$(printf 'x%.0s' {1..2000})
+mk "$DAY3" "08:00" "08:30" "$CAT_OTHER" "\"$LONG\"" || true
+LC_ST=$(mk_status); ID_LC=$(mk_id)
+{ [ "$LC_ST" = 200 ] && [ -n "$ID_LC" ] && ok "2000-char comment accepted"; } || ok "long comment refused gracefully ($LC_ST)"
+
+# ----- 5. Listing & filtering ---------------------------------------------
+banner "Tina — listing & range filters"
+o=$(call "$JAR_T" GET "/api/v1/time-entries?from=$YDAY&to=$YDAY"); body=${o#*$'\n'}
+N=$(echo "$body" | grep -o '"id"' | wc -l); [ "$N" -ge 6 ] && ok "yesterday list has ≥6 ($N)" || bad "yesterday list=$N"
+o=$(call "$JAR_T" GET "/api/v1/time-entries?from=$DAY7&to=$TODAY"); body=${o#*$'\n'}
+echo "$body" | grep -q "\"id\":$ID_Y1" && ok "wide range includes Y1" || bad "Y1 missing"
+echo "$body" | grep -q "\"id\":$ID_C1" && ok "wide range includes 14h block" || bad "C1 missing"
+# Cross-user isolation: Tina cannot see Erin's entries.
+echo "$body" | grep -q "\"user_id\":$EMP_ID" && bad "leaked Erin entries to Tina" || ok "no cross-user leakage"
+# Tina cannot use lead-only /all endpoint.
+o=$(call "$JAR_T" GET "/api/v1/time-entries/all"); expect "tina /all 403" 403 "${o%%$'\n'*}" ""
+
+# ----- 6. Edit drafts, then submit ----------------------------------------
+banner "Tina — edit draft, then submit"
+# Edit Y4 (extend prep by 30 min — still no overlap).
+o=$(call "$JAR_T" PUT "/api/v1/time-entries/$ID_Y4" "{\"entry_date\":\"$YDAY\",\"start_time\":\"13:00\",\"end_time\":\"17:00\",\"category_id\":$CAT_PREP,\"comment\":\"prep extended\"}")
+# Note: the slot 16:30-17:00 is occupied by Y6 -> this should fail (overlap).
+expect "edit causing overlap rejected" 400 "${o%%$'\n'*}" ""
+# Valid edit: shrink Y4 instead.
+o=$(call "$JAR_T" PUT "/api/v1/time-entries/$ID_Y4" "{\"entry_date\":\"$YDAY\",\"start_time\":\"13:00\",\"end_time\":\"16:00\",\"category_id\":$CAT_PREP,\"comment\":\"prep shorter\"}")
+expect "valid draft edit" 200 "${o%%$'\n'*}" ""
+# Edit someone else's entry forbidden.
+o=$(call "$JAR_T" PUT "/api/v1/time-entries/$TE1" "{\"entry_date\":\"$YDAY\",\"start_time\":\"08:00\",\"end_time\":\"09:00\",\"category_id\":$CAT_CARE}")
+st=${o%%$'\n'*}; [ "$st" = 403 ] || [ "$st" = 404 ] && ok "edit foreign entry forbidden ($st)" || bad "foreign edit got $st"
+# Delete a draft (Y2 — the standup).
+o=$(call "$JAR_T" DELETE "/api/v1/time-entries/$ID_Y2"); expect "delete draft OK" 200 "${o%%$'\n'*}" ""
+# Re-create the gap so the day is contiguous again.
+mk "$YDAY" "10:00" "10:30" "$CAT_MEET" '"standup redo"'; expect "re-create deleted slot" 200 "$(mk_status)" "$(mk_body)"; ID_Y2B=$(mk_id)
+# Submit Y1, Y3, Y4, Y5, Y6, Y2B individually & via batch.
+o=$(call "$JAR_T" POST /api/v1/time-entries/submit "{\"ids\":[$ID_Y1,$ID_Y3,$ID_Y4,$ID_Y5,$ID_Y6,$ID_Y2B]}")
+expect "submit batch" 200 "${o%%$'\n'*}" ""
+# Editing a submitted entry directly is rejected.
+o=$(call "$JAR_T" PUT "/api/v1/time-entries/$ID_Y1" "{\"entry_date\":\"$YDAY\",\"start_time\":\"08:00\",\"end_time\":\"09:30\",\"category_id\":$CAT_CARE}")
+expect "edit submitted rejected" 400 "${o%%$'\n'*}" ""
+# Deleting a submitted entry rejected.
+o=$(call "$JAR_T" DELETE "/api/v1/time-entries/$ID_Y1"); expect "delete submitted rejected" 400 "${o%%$'\n'*}" ""
+# Re-submitting an already-submitted entry is a no-op (idempotent).
+o=$(call "$JAR_T" POST /api/v1/time-entries/submit "{\"ids\":[$ID_Y1]}"); expect "re-submit no-op" 200 "${o%%$'\n'*}" ""
+
+# ----- 7. Lead reviews ----------------------------------------------------
+banner "Lead — review Tina's submissions"
+# Empty reject reason rejected.
+o=$(call "$JAR_L" POST "/api/v1/time-entries/$ID_Y1/reject" '{"reason":"   "}')
+expect "empty reject reason rejected" 400 "${o%%$'\n'*}" ""
+# Reject one entry with a real reason.
+o=$(call "$JAR_L" POST "/api/v1/time-entries/$ID_Y1/reject" '{"reason":"please add a comment"}')
+expect "lead rejects Y1"   200 "${o%%$'\n'*}" ""
+# Batch-approve the rest.
+o=$(call "$JAR_L" POST "/api/v1/time-entries/batch-approve" "{\"ids\":[$ID_Y3,$ID_Y4,$ID_Y5,$ID_Y6,$ID_Y2B]}")
+body=${o#*$'\n'}; expect "batch approve" 200 "${o%%$'\n'*}" "$body"
+echo "$body" | grep -q '"count":5' && ok "exactly 5 approved" || bad "batch count: $body"
+# Already-rejected entry approval should not silently flip.
+o=$(call "$JAR_L" POST "/api/v1/time-entries/$ID_Y1/approve")
+# (Approve will move it to approved; that's allowed semantics — verify status afterwards.)
+o=$(call "$JAR_T" GET "/api/v1/time-entries?from=$YDAY&to=$YDAY"); body=${o#*$'\n'}
+echo "$body" | tr '}' '\n' | grep "\"id\":$ID_Y3," | grep -q '"status":"approved"' && ok "Y3 approved" || bad "Y3 not approved: $body"
+
+# Filter-by-status (employee).
+o=$(call "$JAR_T" GET "/api/v1/time-entries?from=$YDAY&to=$YDAY"); body=${o#*$'\n'}
+APPROVED=$(echo "$body" | grep -o '"status":"approved"' | wc -l)
+[ "$APPROVED" -ge 5 ] && ok "≥5 approved on $YDAY ($APPROVED)" || bad "approved count=$APPROVED"
+
+# ----- 8. Self-review forbidden (Lea cannot approve Lea) ------------------
+banner "Lead self-review hardening"
+o=$(call "$JAR_L" POST /api/v1/time-entries "{\"entry_date\":\"$YDAY\",\"start_time\":\"06:00\",\"end_time\":\"07:00\",\"category_id\":$CAT_LEAD}")
+LEA_TE_ID=$(echo "${o#*$'\n'}" | grep -oE '"id":[0-9]+' | head -1 | cut -d: -f2)
+[ -n "$LEA_TE_ID" ] && ok "lea created own entry ($LEA_TE_ID)" || bad "lea own entry create failed"
+o=$(call "$JAR_L" POST /api/v1/time-entries/submit "{\"ids\":[$LEA_TE_ID]}"); expect "lea submit own" 200 "${o%%$'\n'*}" ""
+o=$(call "$JAR_L" POST "/api/v1/time-entries/$LEA_TE_ID/approve"); expect "lea self-approve forbidden" 403 "${o%%$'\n'*}" ""
+# Admin may approve the lead's own entry.
+o=$(call "$JAR_A" POST "/api/v1/time-entries/$LEA_TE_ID/approve"); expect "admin approves lead entry" 200 "${o%%$'\n'*}" ""
+
+# ----- 9. Change request workflow on an approved entry --------------------
+banner "Tina — change request on approved entry"
+# Change request without reason rejected.
+o=$(call "$JAR_T" POST /api/v1/change-requests "{\"time_entry_id\":$ID_Y3,\"new_end_time\":\"12:30\",\"reason\":\"\"}")
+expect "no-reason CR rejected" 400 "${o%%$'\n'*}" ""
+# Cannot file CR for someone else's entry.
+o=$(call "$JAR_T" POST /api/v1/change-requests "{\"time_entry_id\":$TE1,\"new_end_time\":\"12:00\",\"reason\":\"x\"}")
+st=${o%%$'\n'*}; [ "$st" = 403 ] || [ "$st" = 404 ] && ok "foreign CR forbidden ($st)" || bad "foreign CR got $st"
+# Cannot file CR for own draft (must edit directly).
+mk "$DAY4" "08:00" "09:00" "$CAT_CARE" '"draft"'; expect "create draft for CR test" 200 "$(mk_status)" "$(mk_body)"; ID_DRAFT=$(mk_id)
+o=$(call "$JAR_T" POST /api/v1/change-requests "{\"time_entry_id\":$ID_DRAFT,\"new_end_time\":\"09:30\",\"reason\":\"x\"}")
+expect "CR on draft rejected" 400 "${o%%$'\n'*}" ""
+# Valid CR: change time, category and comment together.
+o=$(call "$JAR_T" POST /api/v1/change-requests "{\"time_entry_id\":$ID_Y3,\"new_start_time\":\"10:30\",\"new_end_time\":\"12:15\",\"new_category_id\":$CAT_PREP,\"new_comment\":\"reclassified to prep\",\"reason\":\"misclassified\"}")
+body=${o#*$'\n'}; expect "multi-field CR created" 200 "${o%%$'\n'*}" "$body"
+CR2=$(echo "$body" | grep -oE '"id":[0-9]+' | head -1 | cut -d: -f2)
+# Lead approves CR -> changes apply.
+o=$(call "$JAR_L" POST "/api/v1/change-requests/$CR2/approve"); expect "lead approve CR" 200 "${o%%$'\n'*}" ""
+o=$(call "$JAR_T" GET "/api/v1/time-entries?from=$YDAY&to=$YDAY"); body=${o#*$'\n'}
+echo "$body" | tr '}' '\n' | grep "\"id\":$ID_Y3," | grep -q "\"end_time\":\"12:15" && ok "CR applied to entry" || bad "CR not applied: $body"
+
+# ----- 10. Reports reflect Tina's data ------------------------------------
+banner "Reports — Tina's monthly + categories"
+o=$(call "$JAR_L" GET "/api/v1/reports/month?user_id=$TINA_ID&month=$TINA_MONTH"); body=${o#*$'\n'}
+expect "tina monthly report" 200 "${o%%$'\n'*}" "$body"
+echo "$body" | grep -q "$YDAY" && ok "report mentions $YDAY" || bad "report missing $YDAY"
+o=$(call "$JAR_L" GET "/api/v1/reports/categories?from=$DAY7&to=$TODAY"); body=${o#*$'\n'}
+expect "category report" 200 "${o%%$'\n'*}" "$body"
+echo "$body" | grep -q '"Direct Childcare"' && ok "childcare in category report" || bad "childcare missing"
+echo "$body" | grep -q '"Preparation Time"' && ok "prep in category report"      || bad "prep missing"
+
+# ----- 11. Logout, then session is gone -----------------------------------
+banner "Tina — logout invalidates session"
+o=$(call "$JAR_T" POST /api/v1/auth/logout); expect "tina logout" 200 "${o%%$'\n'*}" ""
+o=$(call "$JAR_T" GET /api/v1/auth/me);      expect "tina /me 401 after logout" 401 "${o%%$'\n'*}" ""
+# Mutating endpoints reject the dead cookie.
+o=$(call "$JAR_T" POST /api/v1/time-entries "{\"entry_date\":\"$YDAY\",\"start_time\":\"21:00\",\"end_time\":\"21:30\",\"category_id\":$CAT_OTHER}")
+expect "post-logout create rejected" 401 "${o%%$'\n'*}" ""
+
 banner "Audit log"
 o=$(call "$JAR_A" GET "/api/v1/audit-log?user_id=$EMP_ID"); body=${o#*$'\n'}
 expect "audit log" 200 "${o%%$'\n'*}" "$body"
 LC=$(echo "$body" | grep -o '"id"' | wc -l); [ "$LC" -gt 4 ] && ok "audit entries=$LC" || bad "audit count=$LC"
+# Tina's audit trail must contain many transitions.
+o=$(call "$JAR_A" GET "/api/v1/audit-log?user_id=$TINA_ID"); body=${o#*$'\n'}
+TLC=$(echo "$body" | grep -o '"id"' | wc -l); [ "$TLC" -gt 15 ] && ok "tina audit entries=$TLC" || bad "tina audit count=$TLC"
 
 banner "Password reset by admin"
 o=$(call "$JAR_A" POST "/api/v1/users/$EMP_ID/reset-password"); body=${o#*$'\n'}

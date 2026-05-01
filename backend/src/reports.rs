@@ -96,6 +96,7 @@ async fn build_month(
         .await?;
     let target_per_day_min = (user.weekly_hours / 5.0 * 60.0) as i64;
 
+    #[allow(clippy::type_complexity)]
     let te: Vec<(NaiveDate, String, String, String, String, i64, String, Option<String>)> = sqlx::query_as(
         "SELECT z.entry_date, z.start_time, z.end_time, c.name, c.color, z.category_id, z.status, z.comment FROM time_entries z JOIN categories c ON c.id=z.category_id WHERE z.user_id=$1 AND z.entry_date BETWEEN $2 AND $3 ORDER BY z.entry_date, z.start_time"
     ).bind(user_id).bind(from).bind(to).fetch_all(pool).await?;
@@ -139,12 +140,11 @@ async fn build_month(
             if *dd != d {
                 continue;
             }
-            let bn = chrono::NaiveTime::parse_from_str(b, "%H:%M")
-                .or_else(|_| chrono::NaiveTime::parse_from_str(b, "%H:%M:%S"))
-                .unwrap();
-            let en = chrono::NaiveTime::parse_from_str(e, "%H:%M")
-                .or_else(|_| chrono::NaiveTime::parse_from_str(e, "%H:%M:%S"))
-                .unwrap();
+            // Defensive: never panic on malformed time data — surface a 500 with
+            // a generic message instead. The DB schema does not constrain the
+            // text format, so a corrupted row must not take the process down.
+            let bn = parse_report_time(b)?;
+            let en = parse_report_time(e)?;
             let m = (en - bn).num_minutes();
             if st == "approved" {
                 actual += m;
@@ -172,7 +172,7 @@ async fn build_month(
             absence,
             holiday,
         });
-        d = d + Duration::days(1);
+        d += Duration::days(1);
     }
     Ok(MonthReport {
         user_id,
@@ -214,21 +214,21 @@ pub async fn month_csv(
     // CSV formula-injection guard: prefix any cell that begins with =, +, -, @ or
     // a tab/CR with a leading single-quote so spreadsheets treat it as text.
     fn safe(s: &str) -> String {
-        if s.starts_with(|c: char| matches!(c, '=' | '+' | '-' | '@' | '\t' | '\r')) {
+        if s.starts_with(['=', '+', '-', '@', '\t', '\r']) {
             format!("'{}", s)
         } else {
             s.to_string()
         }
     }
     let mut wtr = csv::Writer::from_writer(vec![]);
-    wtr.write_record(&[
+    wtr.write_record([
         "Date", "Weekday", "Start", "End", "Category", "Minutes", "Status", "Comment", "Absence",
         "Holiday",
     ])
     .ok();
     for t in &r.days {
         if t.entries.is_empty() {
-            wtr.write_record(&[
+            wtr.write_record([
                 t.date.to_string(),
                 t.weekday.clone(),
                 "".into(),
@@ -243,7 +243,7 @@ pub async fn month_csv(
             .ok();
         } else {
             for e in &t.entries {
-                wtr.write_record(&[
+                wtr.write_record([
                     t.date.to_string(),
                     t.weekday.clone(),
                     e.start_time.clone(),
@@ -259,7 +259,7 @@ pub async fn month_csv(
             }
         }
     }
-    wtr.write_record(&[
+    wtr.write_record([
         "",
         "Total",
         "",
@@ -384,13 +384,12 @@ pub async fn categories(
     if let Some(id) = uid {
         builder.push(" AND z.user_id = ").push_bind(id);
     }
-    let rows: Vec<(String, String, String, String)> = builder
-        .build_query_as()
-        .fetch_all(&s.pool)
-        .await?;
+    let rows: Vec<(String, String, String, String)> =
+        builder.build_query_as().fetch_all(&s.pool).await?;
     let mut totals: HashMap<(String, String), i64> = HashMap::new();
     for (category, color, start_time, end_time) in rows {
-        let minutes = (parse_report_time(&end_time)? - parse_report_time(&start_time)?).num_minutes();
+        let minutes =
+            (parse_report_time(&end_time)? - parse_report_time(&start_time)?).num_minutes();
         *totals.entry((category, color)).or_insert(0) += minutes;
     }
     let mut out: Vec<CategoryTotal> = totals

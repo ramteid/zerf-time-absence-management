@@ -58,9 +58,7 @@ pub async fn list(
     u: User,
     Query(q): Query<RangeQuery>,
 ) -> AppResult<Json<Vec<TimeEntry>>> {
-    let mut builder = QueryBuilder::<Postgres>::new(
-        "SELECT * FROM time_entries WHERE user_id = ",
-    );
+    let mut builder = QueryBuilder::<Postgres>::new("SELECT * FROM time_entries WHERE user_id = ");
     builder.push_bind(u.id);
     if let Some(v) = q.from {
         builder.push(" AND entry_date >= ").push_bind(v);
@@ -122,6 +120,11 @@ async fn validate(
     te: &NewTimeEntry,
     exclude_id: Option<i64>,
 ) -> AppResult<()> {
+    if let Some(c) = &te.comment {
+        if c.len() > 2000 {
+            return Err(AppError::BadRequest("Comment too long (max 2000).".into()));
+        }
+    }
     if te.entry_date > chrono::Local::now().date_naive() {
         return Err(AppError::BadRequest(
             "Entries in the future are not allowed.".into(),

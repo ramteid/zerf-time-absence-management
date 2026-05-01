@@ -58,7 +58,7 @@ pub async fn workdays(
         if wd < 5 && !h.contains(&d) {
             count += 1.0;
         }
-        d = d + Duration::days(1);
+        d += Duration::days(1);
     }
     if half_day && from == to && count == 1.0 {
         count = 0.5;
@@ -183,12 +183,23 @@ pub async fn calendar(
         "SELECT a.id, a.user_id, u.first_name, u.last_name, a.kind, a.start_date, a.end_date, a.half_day, a.comment, a.status FROM absences a JOIN users u ON u.id=a.user_id WHERE a.status IN ('requested','approved') AND a.end_date >= $1 AND a.start_date <= $2 ORDER BY a.start_date"
     ).bind(from).bind(to).fetch_all(&s.pool).await?;
     let lead = u.is_lead();
-    Ok(Json(rows.into_iter().map(|e| serde_json::json!({
-        "id": e.id, "user_id": e.user_id, "name": format!("{} {}", e.first_name, e.last_name),
-        "kind": e.kind, "start_date": e.start_date, "end_date": e.end_date, "half_day": e.half_day,
-        "status": e.status,
-        "comment": if lead { e.comment.clone() } else { None }
-    })).collect()))
+    // Privacy: only team leads / admins see the actual absence kind. For peers
+    // we collapse to a coarse label so that sensitive categories (sick leave —
+    // health data under GDPR Art. 9 — training, special leave, unpaid leave)
+    // are not disclosed across the team. Vacation stays visible because it is
+    // operationally needed to coordinate cover and is not health-related.
+    Ok(Json(rows.into_iter().map(|e| {
+        let own = e.user_id == u.id;
+        let kind_visible = lead || own || e.kind == "vacation";
+        let kind_out = if kind_visible { e.kind.clone() } else { "absent".to_string() };
+        serde_json::json!({
+            "id": e.id, "user_id": e.user_id, "name": format!("{} {}", e.first_name, e.last_name),
+            "kind": kind_out,
+            "start_date": e.start_date, "end_date": e.end_date, "half_day": e.half_day,
+            "status": e.status,
+            "comment": if lead || own { e.comment.clone() } else { None }
+        })
+    }).collect()))
 }
 
 #[derive(Deserialize)]
@@ -216,6 +227,17 @@ pub async fn create(
     .contains(&b.kind.as_str())
     {
         return Err(AppError::BadRequest("Invalid kind".into()));
+    }
+    if let Some(c) = &b.comment {
+        if c.len() > 2000 {
+            return Err(AppError::BadRequest("Comment too long (max 2000).".into()));
+        }
+    }
+    // Reject absurdly long ranges to bound work in `workdays_total`.
+    if (b.end_date - b.start_date).num_days() > 366 {
+        return Err(AppError::BadRequest(
+            "Absence range exceeds one year.".into(),
+        ));
     }
     if b.end_date < b.start_date {
         return Err(AppError::BadRequest(
@@ -286,14 +308,16 @@ pub async fn update(
     if overlap > 0 {
         return Err(AppError::Conflict("Overlap with existing absence.".into()));
     }
-    sqlx::query("UPDATE absences SET start_date=$1, end_date=$2, half_day=$3, comment=$4 WHERE id=$5")
-        .bind(b.start_date)
-        .bind(b.end_date)
-        .bind(b.half_day.unwrap_or(false))
-        .bind(&b.comment)
-        .bind(id)
-        .execute(&s.pool)
-        .await?;
+    sqlx::query(
+        "UPDATE absences SET start_date=$1, end_date=$2, half_day=$3, comment=$4 WHERE id=$5",
+    )
+    .bind(b.start_date)
+    .bind(b.end_date)
+    .bind(b.half_day.unwrap_or(false))
+    .bind(&b.comment)
+    .bind(id)
+    .execute(&s.pool)
+    .await?;
     let next: Absence = sqlx::query_as("SELECT * FROM absences WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
@@ -354,6 +378,9 @@ pub async fn approve(
     sqlx::query("UPDATE absences SET status='approved', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP WHERE id=$2")
         .bind(u.id).bind(id).execute(&s.pool).await?;
     audit::log(&s.pool, u.id, "approved", "absences", id, None, None).await;
+    if a.user_id != u.id {
+        audit::log(&s.pool, a.user_id, "approved", "absences", id, None, None).await;
+    }
     Ok(Json(serde_json::json!({"ok":true})))
 }
 
@@ -447,7 +474,11 @@ pub async fn balance(
             requested += days;
         }
     }
-    let entitled = if target.role == "admin" { 0.0 } else { target.annual_leave_days as f64 };
+    let entitled = if target.role == "admin" {
+        0.0
+    } else {
+        target.annual_leave_days as f64
+    };
     Ok(Json(LeaveBalance {
         annual_entitlement: entitled,
         already_taken: taken,

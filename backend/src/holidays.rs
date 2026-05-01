@@ -76,7 +76,7 @@ pub struct Holiday {
     pub id: i64,
     pub holiday_date: NaiveDate,
     pub name: String,
-    pub year: i64,
+    pub year: i32,
 }
 
 #[derive(Deserialize)]

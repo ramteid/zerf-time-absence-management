@@ -71,6 +71,37 @@ pub async fn create(
     if b.reason.trim().is_empty() {
         return Err(AppError::BadRequest("Reason required.".into()));
     }
+    if b.reason.len() > 2000 {
+        return Err(AppError::BadRequest("Reason too long.".into()));
+    }
+    if let Some(c) = &b.new_comment {
+        if c.len() > 2000 {
+            return Err(AppError::BadRequest("Comment too long.".into()));
+        }
+    }
+    // Validate proposed time fields up-front so we never store a malformed
+    // value that would later crash the reports / validation path. Times must
+    // match HH:MM(:SS) and end > start when both are supplied. Future dates
+    // are rejected — same rule as direct entry creation.
+    let parse_t = |s: &str| -> AppResult<chrono::NaiveTime> {
+        chrono::NaiveTime::parse_from_str(s, "%H:%M")
+            .or_else(|_| chrono::NaiveTime::parse_from_str(s, "%H:%M:%S"))
+            .map_err(|_| AppError::BadRequest("Invalid time format (HH:MM).".into()))
+    };
+    let new_start = b.new_start_time.as_deref().map(parse_t).transpose()?;
+    let new_end = b.new_end_time.as_deref().map(parse_t).transpose()?;
+    if let (Some(s2), Some(e2)) = (new_start, new_end) {
+        if e2 <= s2 {
+            return Err(AppError::BadRequest(
+                "End time must be after start time.".into(),
+            ));
+        }
+    }
+    if let Some(d) = b.new_date {
+        if d > chrono::Local::now().date_naive() {
+            return Err(AppError::BadRequest("Date cannot be in the future.".into()));
+        }
+    }
     let z: (i64, String) = sqlx::query_as("SELECT user_id, status FROM time_entries WHERE id=$1")
         .bind(b.time_entry_id)
         .fetch_one(&s.pool)
