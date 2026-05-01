@@ -591,17 +591,20 @@ route("/account", async () => {
   card.appendChild(h("h2",{},t("Change password")));
   const cur = h("input",{type:"password",autocomplete:"current-password"});
   const nw = h("input",{type:"password",autocomplete:"new-password",minlength:"12"});
+  const nw2 = h("input",{type:"password",autocomplete:"new-password",minlength:"12"});
   if (!u.must_change_password) card.appendChild(field(t("Current password"), cur));
   card.appendChild(field(t("New password (min 12 chars)"), nw));
+  card.appendChild(field(t("Confirm new password"), nw2));
   const err = h("div",{class:"error"});
   card.appendChild(err);
   card.appendChild(h("button",{onclick:async ()=>{
     err.textContent = "";
+    if (nw.value !== nw2.value) { err.textContent = t("Passwords do not match."); return; }
     try {
-      await api("/auth/password",{method:"PUT",body:{current_password: u.must_change_password?null:cur.value, new_password: nw.value}});
+      await api("/auth/password",{method:"PUT",body:{current_password: u.must_change_password?undefined:cur.value, new_password: nw.value}});
       CURRENT_USER.must_change_password = false;
       toast(t("Password changed."), "ok");
-      cur.value = ""; nw.value = "";
+      cur.value = ""; nw.value = ""; nw2.value = "";
     } catch(e){ err.textContent = errorMessage(e); }
   }},t("Save")));
   wrap.appendChild(card);

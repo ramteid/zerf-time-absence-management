@@ -150,6 +150,8 @@ const TRANSLATIONS = {
     "Change password": "Passwort aendern",
     "Current password": "Aktuelles Passwort",
     "New password (min 12 chars)": "Neues Passwort (mind. 12 Zeichen)",
+    "Confirm new password": "Neues Passwort bestaetigen",
+    "Passwords do not match.": "Passwoerter stimmen nicht ueberein.",
     "Password changed.": "Passwort geaendert.",
     "Overtime balance {year}": "Ueberstundenkonto {year}",
     "Balance": "Saldo",

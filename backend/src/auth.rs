@@ -293,14 +293,22 @@ pub async fn change_password(
     let body: PasswordReq = serde_json::from_slice(&body_bytes)
         .map_err(|_| AppError::BadRequest("Invalid JSON".into()))?;
     let _ = parts;
-    let cur = body
-        .current_password
-        .as_deref()
-        .ok_or_else(|| AppError::BadRequest("Current password required.".into()))?;
-    if !verify_password(cur, &user.password_hash) {
-        return Err(AppError::BadRequest(
-            "Current password is incorrect.".into(),
-        ));
+    // When the user is forced to change a temporary password, skip
+    // the current-password check (they may not even know the generated
+    // string).  Otherwise, require and verify the current password.
+    if user.must_change_password {
+        // No current password needed for forced change.
+    } else {
+        let cur = body
+            .current_password
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| AppError::BadRequest("Current password required.".into()))?;
+        if !verify_password(cur, &user.password_hash) {
+            return Err(AppError::BadRequest(
+                "Current password is incorrect.".into(),
+            ));
+        }
     }
     validate_password_strength(&body.new_password)?;
     if verify_password(&body.new_password, &user.password_hash) {

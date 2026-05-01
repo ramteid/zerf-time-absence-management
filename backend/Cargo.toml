@@ -27,6 +27,11 @@ hex = "0.4"
 cookie = "0.18"
 csv = "1"
 
+[dev-dependencies]
+reqwest = { version = "0.12", features = ["json", "cookies"] }
+tokio = { version = "1", features = ["full", "test-util"] }
+uuid = { version = "1", features = ["v4"] }
+
 [profile.release]
 strip = true
 lto = "thin"

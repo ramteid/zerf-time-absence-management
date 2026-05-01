@@ -106,8 +106,7 @@ If you find a vulnerability, please report it privately — see [`SECURITY.md`](
 
 ## Development
 
-`bash tests/run.sh` spins up an isolated, hardened container and runs the full
-API + browser regression (~70 assertions) against it. CI runs the same suite
+`bash tests/run.sh` spins up an isolated, hardened container and runs the full API + browser regression  against it. CI runs the same suite
 on every push.
 
 | Path | What's there |
