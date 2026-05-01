@@ -7,7 +7,7 @@ const puppeteer = require('puppeteer');
   const errors = [], logs = [], fails = [];
   page.on('console', m => logs.push(`[${m.type()}] ${m.text()}`));
   page.on('pageerror', e => errors.push(`pageerror: ${e.message}`));
-  page.on('requestfailed', r => fails.push(`failed ${r.url()} -> ${r.failure().errorText}`));
+  page.on('requestfailed', r => fails.push(`failed ${r.url()} -> ${r.failure()?.errorText ?? 'unknown'}`));
   const resp = await page.goto(url, { waitUntil: 'networkidle0', timeout: 20000 });
   console.log('HTTP', resp.status());
   await new Promise(r => setTimeout(r, 1000));

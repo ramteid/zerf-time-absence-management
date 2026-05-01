@@ -3,7 +3,7 @@
 Self-hosted time tracking for kindergartens.
 
 
-KitaZeit lets a small team (5–50 people) record working hours, request leave,
+KitaZeit lets a team record working hours, request leave,
 get approvals, and produce monthly reports — without the fuss of a payroll
 suite. The whole thing runs from one `docker compose up`.
 
@@ -48,10 +48,10 @@ cp .env.example .env
 chmod 600 .env
 $EDITOR .env                       # set domain, admin email, generate secret
 docker compose up -d
-docker compose logs app | grep "Admin password"
+docker compose logs app
 ```
 
-The first line of the logs prints a one-time admin password. Sign in at
+The initial admin credentials are the email set in `KITAZEIT_ADMIN_EMAIL` (defaults to `admin@example.com`) and the password `admin`. Sign in at
 `https://<your-domain>` — you will be required to change it on first login.
 
 ### Configuration
