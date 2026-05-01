@@ -232,7 +232,14 @@ CR=$(echo "$body" | grep -oE '"id":[0-9]+' | head -1 | cut -d: -f2)
 o=$(call "$JAR_L" POST "/api/v1/change-requests/$CR/approve"); expect "approve change request" 200 "${o%%$'\n'*}" ""
 
 banner "Absences"
-V_FROM=$(date -u -d "+10 days" +%F); V_TO=$(date -u -d "+12 days" +%F)
+# Pick a future Mon-Wed range so the workday count is deterministic (=3),
+# regardless of which weekday the test happens to run on.
+for _i in $(seq 10 20); do
+  _d=$(date -u -d "+$_i days" +%F)
+  if [ "$(date -u -d "$_d" +%u)" = 1 ]; then V_FROM=$_d; break; fi
+done
+V_TO=$(date -u -d "$V_FROM +2 days" +%F)
+V_DAYS=3
 o=$(call "$JAR_E" POST /api/v1/absences "{\"kind\":\"vacation\",\"start_date\":\"$V_FROM\",\"end_date\":\"$V_TO\"}")
 body=${o#*$'\n'}; expect "request vacation" 200 "${o%%$'\n'*}" "$body"
 ABS=$(echo "$body" | grep -oE '"id":[0-9]+' | head -1 | cut -d: -f2)
@@ -311,7 +318,7 @@ echo "$body" | grep -q '"kind":"general_absence"' && ok "calendar shows general_
 # 9. Vacation balance unchanged (general_absence does NOT consume entitlement).
 o=$(call "$JAR_E" GET "/api/v1/leave-balance/$EMP_ID?year=$YEAR"); body=${o#*$'\n'}
 echo "$body" | grep -q '"annual_entitlement":30' && ok "entitlement still 30" || bad "entitlement: $body"
-echo "$body" | grep -q '"available":28'          && ok "available still 28 (general_absence excluded)" || bad "available: $body"
+V_AVAIL=$(echo "30 - $V_DAYS" | bc); echo "$body" | grep -q "\"available\":${V_AVAIL}" && ok "available still $V_AVAIL (general_absence excluded)" || bad "available: $body"
 
 # 10. Approved general_absence shows up as 'absence' in the monthly report.
 o=$(call "$JAR_E" GET "/api/v1/reports/month?month=$GA_MONTH"); body=${o#*$'\n'}
@@ -395,8 +402,8 @@ banner "Vacation balance"
 o=$(call "$JAR_E" GET "/api/v1/leave-balance/$EMP_ID?year=$YEAR"); body=${o#*$'\n'}
 expect "leave balance" 200 "${o%%$'\n'*}" "$body"
 echo "$body" | grep -q '"annual_entitlement":30' && ok "annual=30"          || bad "annual: $body"
-echo "$body" | grep -q '"approved_upcoming":2'   && ok "approved_upcoming=2" || bad "upcoming: $body"
-echo "$body" | grep -q '"available":28'          && ok "available=28"        || bad "available: $body"
+echo "$body" | grep -q "\"approved_upcoming\":${V_DAYS}" && ok "approved_upcoming=$V_DAYS" || bad "upcoming: $body"
+V_AVAIL=$(echo "30 - $V_DAYS" | bc); echo "$body" | grep -q "\"available\":${V_AVAIL}" && ok "available=$V_AVAIL" || bad "available: $body"
 
 banner "Reports"
 MONTH=$(date -u +%Y-%m)
