@@ -13,7 +13,10 @@
 
   // SVG layout constants
   const H = 230;
-  const ML = 54, MR = 16, MT = 16, MB = 46;
+  const ML = 54,
+    MR = 16,
+    MT = 16,
+    MB = 46;
 
   let containerW = 640;
   $: PW = Math.max(1, containerW - ML - MR);
@@ -54,7 +57,10 @@
     pts.length < 2
       ? ""
       : pts
-          .map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`)
+          .map(
+            (p, i) =>
+              `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`,
+          )
           .join(" ");
 
   $: areaPath =
@@ -197,12 +203,7 @@
       <defs>
         <!-- clip above zero-line → positive area (green) -->
         <clipPath id="clip-above-{uid}">
-          <rect
-            x={ML}
-            y={MT}
-            width={PW}
-            height={clampedZeroY - MT}
-          />
+          <rect x={ML} y={MT} width={PW} height={clampedZeroY - MT} />
         </clipPath>
         <!-- clip below zero-line → negative area (red) -->
         <clipPath id="clip-below-{uid}">

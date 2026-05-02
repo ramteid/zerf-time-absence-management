@@ -2,7 +2,13 @@
   import { api } from "../api.js";
   import { currentUser, toast } from "../stores.js";
   import { t, statusLabel, absenceKindLabel } from "../i18n.js";
-  import { fmtDate, fmtDateShort, minToHM, isoDate, addDays } from "../format.js";
+  import {
+    fmtDate,
+    fmtDateShort,
+    minToHM,
+    isoDate,
+    addDays,
+  } from "../format.js";
   import Icon from "../Icons.svelte";
   import { confirmDialog } from "../confirm.js";
   import FlextimeChart from "../FlextimeChart.svelte";
@@ -26,6 +32,7 @@
   let chartLoading = false;
 
   async function loadChart() {
+    if (chartFrom > chartTo) return;
     chartLoading = true;
     try {
       chartData = await api(
@@ -231,6 +238,7 @@
           class="kz-input"
           style="font-size:12px;padding:3px 6px;height:28px"
           bind:value={chartFrom}
+          max={chartTo}
         />
         <span style="font-size:12px;color:var(--text-tertiary)">–</span>
         <input
@@ -238,6 +246,7 @@
           class="kz-input"
           style="font-size:12px;padding:3px 6px;height:28px"
           bind:value={chartTo}
+          min={chartFrom}
         />
         <button class="kz-btn kz-btn-sm" on:click={loadChart}>
           <Icon name="Search" size={13} />{$t("Show")}
