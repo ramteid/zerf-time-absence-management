@@ -273,7 +273,7 @@ const TRANSLATIONS = {
     "Reject this change request?": "Diese Änderungsanfrage ablehnen?",
     Request: "Anfrage",
     // Default category names
-    "Direct Childcare": "Direkte Kinderbetreuung",
+    "Direct Childcare": "Arbeit am Kind",
     "Preparation Time": "Vorbereitungszeit",
     "Leadership Tasks": "Leitungsaufgaben",
     "Team Meeting": "Teambesprechung",
@@ -300,10 +300,8 @@ const TRANSLATIONS = {
       "möchte die Woche ab {date} wieder bearbeiten",
     TeamPolicy: "Team-Richtlinie",
     "Team Policy": "Team-Richtlinie",
-    "Allow employees to reopen weeks without my approval":
-      "Mitarbeitende dürfen Wochen ohne meine Genehmigung wieder bearbeiten",
-    "When enabled, your team's reopen requests are auto-approved.":
-      "Wenn aktiviert, werden Wiederfreigabe-Anfragen Ihres Teams automatisch genehmigt.",
+    "Allow employees to reopen weeks without approval":
+      "Mitarbeitende dürfen Wochen ohne Genehmigung wieder bearbeiten",
     Notifications: "Benachrichtigungen",
     "No notifications.": "Keine Benachrichtigungen.",
     "Mark all as read": "Alle als gelesen markieren",

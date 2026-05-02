@@ -152,6 +152,22 @@
     return (durMin(start, end) / 60).toFixed(1);
   }
 
+  function upsertEntry(entry) {
+    if (!entry) return;
+    const next = entries.filter((item) => item.id !== entry.id);
+    next.push(entry);
+    entries = next.sort((a, b) => {
+      const byDate = dateKey(a.entry_date).localeCompare(dateKey(b.entry_date));
+      if (byDate !== 0) return byDate;
+      return a.start_time.localeCompare(b.start_time);
+    });
+  }
+
+  function removeEntry(id) {
+    if (id == null) return;
+    entries = entries.filter((entry) => entry.id !== id);
+  }
+
   $: currentWeekMo = monday(new Date());
   $: isCurrentWeek = mo && isoDate(mo) >= isoDate(currentWeekMo);
 
@@ -402,9 +418,12 @@
 {#if showEntry}
   <EntryDialog
     template={showEntry}
-    onClose={(changed) => {
+    onClose={({ changed, entry, deletedId }) => {
       showEntry = null;
-      if (changed) load();
+      if (!changed) return;
+      removeEntry(deletedId);
+      upsertEntry(entry);
+      load();
     }}
   />
 {/if}

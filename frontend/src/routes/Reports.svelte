@@ -2,7 +2,7 @@
   import { api } from "../api.js";
   import { currentUser } from "../stores.js";
   import { t, absenceKindLabel, language } from "../i18n.js";
-  import { isoDate, minToHM } from "../format.js";
+  import { isoDate, minToHM, fmtDate } from "../format.js";
   import { normalizeMonthReport } from "../apiMappers.js";
   import Icon from "../Icons.svelte";
 
@@ -133,7 +133,7 @@
             <tbody>
               {#each monthReport.entries as e}
                 <tr>
-                  <td class="tab-num">{e.entry_date}</td>
+                  <td class="tab-num">{fmtDate(e.entry_date)}</td>
                   <td class="tab-num">{e.start_time?.slice(0, 5)}</td>
                   <td class="tab-num">{e.end_time?.slice(0, 5)}</td>
                   <td class="tab-num">{minToHM(e.minutes || 0)}</td>
@@ -167,8 +167,8 @@
               {#each monthReport.absences as a}
                 <tr>
                   <td>{absenceKindLabel(a.kind)}</td>
-                  <td class="tab-num">{a.start_date}</td>
-                  <td class="tab-num">{a.end_date}</td>
+                  <td class="tab-num">{fmtDate(a.start_date)}</td>
+                  <td class="tab-num">{fmtDate(a.end_date)}</td>
                   <td class="tab-num">{a.days}</td>
                 </tr>
               {/each}

@@ -48,7 +48,6 @@
   <div class="top-bar-title">
     <h1>{$t("Team Policy")}</h1>
     <div class="top-bar-subtitle">
-      {$t("When enabled, your team's reopen requests are auto-approved.")}
     </div>
   </div>
 </div>
@@ -98,7 +97,7 @@
       {/if}
     </div>
     <div style="font-size:11.5px;color:var(--text-tertiary);margin-top:12px">
-      {$t("Allow employees to reopen weeks without my approval")}
+      {$t("Allow employees to reopen weeks without approval")}
     </div>
   {/if}
 </div>

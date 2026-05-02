@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { api } from "../api.js";
   import { toast } from "../stores.js";
-  import { t } from "../i18n.js";
+  import { t, language } from "../i18n.js";
   import { isoDate } from "../format.js";
   import Icon from "../Icons.svelte";
 
@@ -138,6 +138,7 @@
           id="user-start-date"
           class="kz-input"
           type="date"
+          lang={$language}
           bind:value={start_date}
         />
       </div>

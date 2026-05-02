@@ -34,10 +34,11 @@
         category_id: Number(category_id),
         comment: comment || null,
       };
-      if (isNew) await api("/time-entries", { method: "POST", body });
-      else await api("/time-entries/" + template.id, { method: "PUT", body });
+      const saved = isNew
+        ? await api("/time-entries", { method: "POST", body })
+        : await api("/time-entries/" + template.id, { method: "PUT", body });
       dlg.close();
-      onClose(true);
+      onClose({ changed: true, entry: saved, deletedId: null });
     } catch (e) {
       error = e.message;
     }
@@ -54,7 +55,7 @@
     try {
       await api("/time-entries/" + template.id, { method: "DELETE" });
       dlg.close();
-      onClose(true);
+      onClose({ changed: true, entry: null, deletedId: template.id });
     } catch (e) {
       error = e.message;
     }
@@ -62,7 +63,7 @@
 
   function cancel() {
     dlg.close();
-    onClose(false);
+    onClose({ changed: false, entry: null, deletedId: null });
   }
 </script>
 
