@@ -7,7 +7,10 @@
   let usersById = new Map();
 
   async function load() {
-    const [entries, users] = await Promise.all([api("/audit-log"), api("/users")]);
+    const [entries, users] = await Promise.all([
+      api("/audit-log"),
+      api("/users"),
+    ]);
     log = entries;
     usersById = new Map(users.map((user) => [user.id, user.email]));
   }

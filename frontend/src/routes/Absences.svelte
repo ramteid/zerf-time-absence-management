@@ -19,14 +19,18 @@
       balance = await api("/leave-balance/" + $currentUser.id);
     } catch {}
 
-    const years = [...new Set(
-      absences.flatMap((absence) => [
-        new Date(absence.start_date).getFullYear(),
-        new Date(absence.end_date).getFullYear(),
-      ]),
-    )];
+    const years = [
+      ...new Set(
+        absences.flatMap((absence) => [
+          new Date(absence.start_date).getFullYear(),
+          new Date(absence.end_date).getFullYear(),
+        ]),
+      ),
+    ];
     holidayDates = holidayDateSet(
-      (await Promise.all(years.map((year) => api(`/holidays?year=${year}`)))).flat(),
+      (
+        await Promise.all(years.map((year) => api(`/holidays?year=${year}`)))
+      ).flat(),
     );
   }
   load();

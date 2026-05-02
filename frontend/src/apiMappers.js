@@ -1,7 +1,5 @@
 function parseIsoDate(value) {
-  const [year, month, day] = String(value)
-    .split("-")
-    .map(Number);
+  const [year, month, day] = String(value).split("-").map(Number);
   return new Date(year, month - 1, day);
 }
 
@@ -36,12 +34,20 @@ export function countWorkdays(
 ) {
   const start = parseIsoDate(startDate);
   const end = parseIsoDate(endDate);
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) {
+  if (
+    Number.isNaN(start.getTime()) ||
+    Number.isNaN(end.getTime()) ||
+    end < start
+  ) {
     return 0;
   }
 
   let days = 0;
-  for (let current = new Date(start); current <= end; current = addCalendarDays(current, 1)) {
+  for (
+    let current = new Date(start);
+    current <= end;
+    current = addCalendarDays(current, 1)
+  ) {
     const currentDate = formatIsoDate(current);
     if (!isWeekend(current) && !holidays.has(currentDate)) {
       days += 1;
@@ -85,7 +91,8 @@ export function normalizeMonthReport(report) {
       continue;
     }
 
-    const countedDay = !["Saturday", "Sunday"].includes(day.weekday) && !day.holiday;
+    const countedDay =
+      !["Saturday", "Sunday"].includes(day.weekday) && !day.holiday;
     if (!activeAbsence || activeAbsence.kind !== day.absence) {
       if (activeAbsence) {
         absences.push(activeAbsence);
