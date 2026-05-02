@@ -23,8 +23,8 @@ COPY backend/migrations ./migrations
 RUN mkdir -p src && \
     echo 'fn main() {}' > src/main.rs && \
     cargo build --release --locked && \
-    rm -f target/release/deps/kitazeit* \
-          target/release/.fingerprint/kitazeit-*
+    rm -f target/release/deps/kitazeit* && \
+    rm -rf target/release/.fingerprint/kitazeit-*
 
 # Layer 3: compile the real application source.
 COPY backend/src ./src
