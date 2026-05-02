@@ -7,7 +7,7 @@ use axum::{
     Json,
 };
 use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use sqlx::{FromRow, Postgres, QueryBuilder};
 use std::collections::HashSet;
 
@@ -423,12 +423,27 @@ pub async fn reject(
     Ok(Json(serde_json::json!({"ok":true})))
 }
 
+fn serialize_day_count<S>(value: &f64, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    if (*value - value.round()).abs() < 1e-9 {
+        serializer.serialize_i64(value.round() as i64)
+    } else {
+        serializer.serialize_f64(*value)
+    }
+}
+
 #[derive(Serialize)]
 pub struct LeaveBalance {
-    pub annual_entitlement: f64,
+    pub annual_entitlement: i64,
+    #[serde(serialize_with = "serialize_day_count")]
     pub already_taken: f64,
+    #[serde(serialize_with = "serialize_day_count")]
     pub approved_upcoming: f64,
+    #[serde(serialize_with = "serialize_day_count")]
     pub requested: f64,
+    #[serde(serialize_with = "serialize_day_count")]
     pub available: f64,
 }
 
@@ -475,15 +490,15 @@ pub async fn balance(
         }
     }
     let entitled = if target.role == "admin" {
-        0.0
+        0
     } else {
-        target.annual_leave_days as f64
+        target.annual_leave_days
     };
     Ok(Json(LeaveBalance {
         annual_entitlement: entitled,
         already_taken: taken,
         approved_upcoming: upcoming,
         requested,
-        available: entitled - taken - upcoming - requested,
+        available: entitled as f64 - taken - upcoming - requested,
     }))
 }

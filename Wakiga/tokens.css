@@ -1,0 +1,175 @@
+/* KitaZeit design tokens */
+:root {
+  --bg-canvas: #f6f5f2;
+  --bg-surface: #ffffff;
+  --bg-muted: #f1efeb;
+  --bg-subtle: #faf9f6;
+
+  --border: #e8e5df;
+  --border-strong: #d8d4cc;
+
+  --text-primary: #1c1d1a;
+  --text-secondary: #4f5048;
+  --text-tertiary: #82847b;
+  --text-disabled: #b1b3a8;
+
+  --nav-bg: #14161a;
+  --nav-bg-hover: #1f2228;
+  --nav-bg-active: #292d35;
+  --nav-text: #c5c8cd;
+  --nav-text-muted: #7d8089;
+  --nav-text-active: #ffffff;
+  --nav-border: #24272d;
+
+  --accent: #0d8a7a;          /* teal */
+  --accent-hover: #0a7468;
+  --accent-soft: #e3f3ef;
+  --accent-text: #075e55;
+
+  --success: #2f9e6e;
+  --success-soft: #e4f4ec;
+  --success-text: #1f6b4a;
+
+  --warning: #c08217;
+  --warning-soft: #faf0d9;
+  --warning-text: #8a5d10;
+
+  --danger: #c64a3f;
+  --danger-soft: #fbe8e5;
+  --danger-text: #8a3128;
+
+  --info: #2f6cb5;
+  --info-soft: #e6eef8;
+  --info-text: #234d80;
+
+  /* category colors */
+  --cat-gruppe: #5b8def;
+  --cat-vorbereitung: #c08217;
+  --cat-elterngespraech: #9b6bc4;
+  --cat-team: #0d8a7a;
+  --cat-fortbildung: #c64a3f;
+  --cat-pause: #82847b;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+
+  --shadow-sm: 0 1px 2px rgba(20,22,26,0.04);
+  --shadow-md: 0 1px 3px rgba(20,22,26,0.06), 0 4px 12px rgba(20,22,26,0.04);
+  --shadow-lg: 0 8px 28px rgba(20,22,26,0.10), 0 2px 6px rgba(20,22,26,0.06);
+
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+}
+
+.kz {
+  font-family: var(--font-sans);
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.45;
+  font-feature-settings: 'cv11', 'ss01';
+  -webkit-font-smoothing: antialiased;
+}
+.kz, .kz * { box-sizing: border-box; }
+.kz button { font-family: inherit; }
+.tab-num { font-variant-numeric: tabular-nums; }
+
+/* buttons */
+.kz-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 34px; padding: 0 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: 13.5px; font-weight: 500;
+  cursor: pointer;
+  transition: background .12s, border-color .12s, color .12s;
+}
+.kz-btn:hover { background: var(--bg-muted); }
+.kz-btn-primary {
+  background: var(--accent); color: #fff;
+  border-color: var(--accent);
+}
+.kz-btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.kz-btn-ghost { border-color: transparent; background: transparent; color: var(--text-secondary); }
+.kz-btn-ghost:hover { background: var(--bg-muted); color: var(--text-primary); }
+.kz-btn-danger { color: var(--danger-text); }
+.kz-btn-danger:hover { background: var(--danger-soft); border-color: var(--danger-soft); }
+.kz-btn-sm { height: 28px; padding: 0 10px; font-size: 12.5px; }
+.kz-btn-icon { width: 34px; padding: 0; justify-content: center; }
+.kz-btn-icon-sm { width: 28px; height: 28px; padding: 0; justify-content: center; }
+
+/* chip / badge */
+.kz-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 22px; padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11.5px; font-weight: 500;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+.kz-chip-dot { width: 6px; height: 6px; border-radius: 50%; }
+
+.kz-chip-draft { background: var(--bg-muted); color: var(--text-secondary); }
+.kz-chip-submitted { background: var(--info-soft); color: var(--info-text); }
+.kz-chip-approved { background: var(--success-soft); color: var(--success-text); }
+.kz-chip-rejected { background: var(--danger-soft); color: var(--danger-text); }
+.kz-chip-pending { background: var(--warning-soft); color: var(--warning-text); }
+
+/* card */
+.kz-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+/* input */
+.kz-input, .kz-select {
+  height: 36px; padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  font-family: inherit;
+  font-size: 13.5px;
+  color: var(--text-primary);
+  width: 100%;
+  transition: border-color .12s, box-shadow .12s;
+}
+.kz-input:focus, .kz-select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(13,138,122,0.15);
+}
+.kz-label {
+  font-size: 12px; font-weight: 500; color: var(--text-secondary);
+  display: block; margin-bottom: 6px;
+  letter-spacing: 0.01em;
+}
+
+/* nav */
+.kz-nav-item {
+  display: flex; align-items: center; gap: 10px;
+  height: 34px; padding: 0 10px; margin: 1px 8px;
+  border-radius: var(--radius-md);
+  color: var(--nav-text);
+  font-size: 13.5px;
+  cursor: pointer;
+  transition: background .12s, color .12s;
+}
+.kz-nav-item:hover { background: var(--nav-bg-hover); color: var(--nav-text-active); }
+.kz-nav-item.active { background: var(--nav-bg-active); color: var(--nav-text-active); }
+.kz-nav-section {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--nav-text-muted); padding: 18px 18px 6px;
+  font-weight: 500;
+}
+
+/* divider */
+.kz-divider { height: 1px; background: var(--border); }
+
+/* scrollbar in artboards */
+.kz-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.kz-scroll::-webkit-scrollbar-track { background: transparent; }
+.kz-scroll::-webkit-scrollbar-thumb { background: rgba(0,0,0,.12); border-radius: 4px; }

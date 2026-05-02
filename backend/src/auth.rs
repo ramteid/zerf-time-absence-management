@@ -264,6 +264,36 @@ pub async fn me(
             .bind(hash_token(&token))
             .fetch_optional(&s.pool)
             .await?;
+    let permissions = serde_json::json!({
+        "is_admin": user.is_admin(),
+        "is_lead": user.is_lead(),
+        "can_manage_users": user.is_admin(),
+        "can_manage_categories": user.is_admin(),
+        "can_manage_holidays": user.is_admin(),
+        "can_view_audit_log": user.is_admin(),
+        "can_manage_settings": user.is_admin(),
+        "can_approve": user.is_lead(),
+        "can_view_team_reports": user.is_lead(),
+        "can_view_dashboard": user.is_lead(),
+    });
+    let mut nav = vec![
+        serde_json::json!({"href":"/time","key":"Time","icon":"⏱"}),
+        serde_json::json!({"href":"/absences","key":"Absences","icon":"📅"}),
+        serde_json::json!({"href":"/calendar","key":"Calendar","icon":"🗓"}),
+        serde_json::json!({"href":"/account","key":"Account","icon":"👤"}),
+    ];
+    if user.is_lead() {
+        nav.push(serde_json::json!({"href":"/dashboard","key":"Dashboard","icon":"🔔"}));
+        nav.push(serde_json::json!({"href":"/reports","key":"Reports","icon":"📊"}));
+    }
+    if user.is_admin() {
+        nav.push(serde_json::json!({"href":"/admin/users","key":"Admin","icon":"⚙"}));
+    }
+    let home = if user.role == "employee" {
+        "/time"
+    } else {
+        "/dashboard"
+    };
     Ok(Json(serde_json::json!({
         "id": user.id, "email": user.email,
         "first_name": user.first_name, "last_name": user.last_name,
@@ -271,6 +301,9 @@ pub async fn me(
         "annual_leave_days": user.annual_leave_days, "start_date": user.start_date,
         "active": user.active, "must_change_password": user.must_change_password,
         "csrf_token": csrf.unwrap_or_default(),
+        "permissions": permissions,
+        "nav": nav,
+        "home": home,
     })))
 }
 

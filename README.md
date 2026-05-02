@@ -106,14 +106,30 @@ If you find a vulnerability, please report it privately — see [`SECURITY.md`](
 
 ## Development
 
-`bash tests/run.sh` spins up an isolated, hardened container and runs the full API + browser regression  against it. CI runs the same suite
-on every push.
+The canonical regression suite is the Rust integration test in
+[`backend/tests/integration.rs`](backend/tests/integration.rs:1) — every
+business rule (validation, permissions, workflow transitions, response
+shapes) is asserted there. The frontend has its own quality gates via
+[Vitest](https://vitest.dev) under [`frontend/src/`](frontend/src/).
+
+```bash
+# Backend integration suite (requires DATABASE_URL)
+cd backend && DATABASE_URL=postgres://localhost/postgres cargo test --test integration
+
+# Frontend lint + format + tests + production build
+cd frontend && npm install && npm run lint && npm run format && npm test && npm run build
+
+```
+
+CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml:1)) runs both on
+every push: backend (fmt, clippy, build, integration tests, cargo-audit),
+frontend (lint, format, Vitest, build, npm audit), plus Docker smoke, Trivy,
+and CodeQL (JavaScript) jobs.
 
 | Path | What's there |
 |------|--------------|
-| [`backend/`](backend/) | Rust + Axum + PostgreSQL |
-| [`frontend/`](frontend/) | Single-page app (vanilla JS) |
-| [`tests/`](tests/) | End-to-end test runner |
+| [`backend/`](backend/) | Rust + Axum + PostgreSQL — owns all business rules |
+| [`frontend/`](frontend/) | Svelte + Vite SPA — thin client that renders backend-shaped state |
 | [`scripts/`](scripts/) | PostgreSQL backup helper |
 
 ## Roadmap (out of scope for v1)

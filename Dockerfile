@@ -1,8 +1,17 @@
 # syntax=docker/dockerfile:1
-# ---------- Build stage ----------
+# ---------- Frontend build stage ----------
+FROM node:22-bookworm-slim AS frontend-builder
+WORKDIR /build
+ENV CI=1
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; \
+    else npm install --no-audit --no-fund; fi
+COPY frontend/ ./
+RUN npm run build
+
+# ---------- Backend build stage ----------
 FROM rust:1-bookworm AS backend-builder
 WORKDIR /build
-# Reproducible-ish build
 ENV CARGO_TERM_COLOR=always RUSTFLAGS="-C strip=symbols"
 COPY backend/Cargo.toml backend/Cargo.lock* ./
 COPY backend/migrations ./migrations
@@ -26,7 +35,7 @@ RUN groupadd --gid ${APP_GID} kitazeit && \
 
 WORKDIR /app
 COPY --from=backend-builder /build/target/release/kitazeit /app/kitazeit
-COPY frontend /app/static
+COPY --from=frontend-builder /build/dist /app/static
 RUN chmod 0555 /app/kitazeit && \
     chmod -R a=rX /app/static
 

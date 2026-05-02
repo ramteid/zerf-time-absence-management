@@ -7,6 +7,8 @@ on:
       - "backend/Cargo.toml"
       - "backend/Cargo.lock"
       - "backend/.cargo/audit.toml"
+      - "frontend/package.json"
+      - "frontend/package-lock.json"
       - ".github/workflows/audit.yml"
   schedule:
     # Daily at 04:00 UTC: catch new RustSec advisories quickly.
@@ -43,3 +45,23 @@ jobs:
           # not compiled into the binary. No patched `rsa` release exists
           # yet — revisit when one ships.
           ignore: RUSTSEC-2023-0071
+
+  npm-audit:
+    name: npm audit (frontend)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies (no scripts, no audit)
+        run: |
+          if [ -f package-lock.json ]; then npm ci --ignore-scripts --no-audit --no-fund;
+          else npm install --ignore-scripts --no-audit --no-fund; fi
+      - name: npm audit (production deps, high+)
+        run: npm audit --omit=dev --audit-level=high

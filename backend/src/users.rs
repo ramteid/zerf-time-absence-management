@@ -49,6 +49,7 @@ pub struct NewUser {
 
 #[derive(Serialize)]
 pub struct CreateResponse {
+    pub id: i64,
     pub user: User,
     pub temporary_password: Option<String>,
 }
@@ -113,6 +114,7 @@ pub async fn create(
     )
     .await;
     Ok(Json(CreateResponse {
+        id,
         user,
         temporary_password: temp,
     }))

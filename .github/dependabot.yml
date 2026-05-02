@@ -40,3 +40,20 @@ updates:
     labels: ["dependencies", "ci"]
     commit-message:
       prefix: "deps(actions)"
+
+  # Svelte/Vite frontend (package.json + package-lock.json).
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
+      timezone: "Europe/Berlin"
+    open-pull-requests-limit: 10
+    labels: ["dependencies", "javascript"]
+    commit-message:
+      prefix: "deps(npm)"
+      include: "scope"
+    groups:
+      patch-and-minor:
+        update-types: ["patch", "minor"]

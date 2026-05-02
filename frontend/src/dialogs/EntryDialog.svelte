@@ -1,0 +1,137 @@
+<script>
+  import { onMount } from "svelte";
+  import { api } from "../api.js";
+  import { categories } from "../stores.js";
+  import { t } from "../i18n.js";
+  import { isoDate } from "../format.js";
+  import { confirmDialog } from "../confirm.js";
+  import Icon from "../Icons.svelte";
+
+  export let template;
+  export let onClose;
+  let dlg;
+  $: isNew = !template.id;
+  let entry_date = template.entry_date || isoDate(new Date());
+  let start_time = template.start_time?.slice(0, 5) || "08:00";
+  let end_time = template.end_time?.slice(0, 5) || "12:00";
+  let category_id = template.category_id || ($categories[0]?.id ?? "");
+  let comment = template.comment || "";
+  let error = "";
+
+  onMount(() => dlg.showModal());
+
+  async function save() {
+    error = "";
+    try {
+      const body = {
+        entry_date,
+        start_time,
+        end_time,
+        category_id: Number(category_id),
+        comment: comment || null,
+      };
+      if (isNew) await api("/time-entries", { method: "POST", body });
+      else await api("/time-entries/" + template.id, { method: "PUT", body });
+      dlg.close();
+      onClose(true);
+    } catch (e) {
+      error = e.message;
+    }
+  }
+
+  async function remove() {
+    if (
+      !(await confirmDialog($t("Delete?"), $t("Delete this entry?"), {
+        danger: true,
+        confirm: $t("Delete"),
+      }))
+    )
+      return;
+    try {
+      await api("/time-entries/" + template.id, { method: "DELETE" });
+      dlg.close();
+      onClose(true);
+    } catch (e) {
+      error = e.message;
+    }
+  }
+
+  function cancel() {
+    dlg.close();
+    onClose(false);
+  }
+</script>
+
+<dialog bind:this={dlg}>
+  <header>
+    <span style="flex:1">{$t(isNew ? "Add Entry" : "Edit Entry")}</span>
+    <button class="kz-btn-icon-sm kz-btn-ghost" on:click={cancel}>
+      <Icon name="X" size={16} />
+    </button>
+  </header>
+  <div class="dialog-body">
+    <div>
+      <label class="kz-label" for="entry-date">{$t("Date")}</label>
+      <input
+        id="entry-date"
+        class="kz-input"
+        type="date"
+        bind:value={entry_date}
+        max={isoDate(new Date())}
+        required
+      />
+    </div>
+    <div class="field-row">
+      <div>
+        <label class="kz-label" for="entry-start-time">{$t("Start")}</label>
+        <input
+          id="entry-start-time"
+          class="kz-input"
+          type="time"
+          bind:value={start_time}
+          required
+        />
+      </div>
+      <div>
+        <label class="kz-label" for="entry-end-time">{$t("End")}</label>
+        <input
+          id="entry-end-time"
+          class="kz-input"
+          type="time"
+          bind:value={end_time}
+          required
+        />
+      </div>
+    </div>
+    <div>
+      <label class="kz-label" for="entry-category">{$t("Category")}</label>
+      <select id="entry-category" class="kz-select" bind:value={category_id}>
+        {#each $categories as c}<option value={c.id}>{c.name}</option>{/each}
+      </select>
+    </div>
+    <div>
+      <label class="kz-label" for="entry-comment"
+        >{$t("Comment (optional)")}</label
+      >
+      <textarea
+        id="entry-comment"
+        class="kz-textarea"
+        rows="2"
+        bind:value={comment}
+      ></textarea>
+    </div>
+    <div class="error-text">{error}</div>
+  </div>
+  <footer>
+    {#if !isNew}
+      <button class="kz-btn kz-btn-danger" on:click={remove}>
+        <Icon name="Trash" size={14} />{$t("Delete")}
+      </button>
+    {/if}
+    <span style="flex:1"></span>
+    <button class="kz-btn" on:click={cancel}>{$t("Cancel")}</button>
+    <button class="kz-btn kz-btn-primary" on:click={save}>
+      {$t(isNew ? "Add Entry" : "Save")}
+    </button>
+  </footer>
+</dialog>

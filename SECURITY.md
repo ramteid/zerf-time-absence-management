@@ -149,7 +149,7 @@ plaintext copy is then `shred`-ed. Retention defaults to 30 days.
 
 * `cargo fmt --check`, `cargo clippy -D warnings`, `cargo build --release --locked`
 * `rustsec/audit-check` (RustSec advisories)
-* full `tests/run.sh` integration suite inside Docker
+* Rust integration test suite (`backend/tests/integration.rs`) + Docker smoke test
 * Trivy filesystem **and** image scan (HIGH/CRITICAL ⇒ failure)
 * CodeQL JavaScript analysis on the SPA
 
