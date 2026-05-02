@@ -194,7 +194,7 @@ const TRANSLATIONS = {
     Friday: "Freitag",
     Saturday: "Samstag",
     Sunday: "Sonntag",
-    // Wakiga redesign keys
+    // Redesign keys
     "Time Entry": "Zeiterfassung",
     contract: "Vertrag",
     Logged: "Erfasst",

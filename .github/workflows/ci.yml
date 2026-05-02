@@ -95,6 +95,20 @@ jobs:
     name: Docker smoke tests
     runs-on: ubuntu-latest
     needs: [rust, frontend]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: kitazeit_smoke
+          POSTGRES_PASSWORD: kitazeit_smoke
+          POSTGRES_DB: kitazeit_smoke
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U kitazeit_smoke -d kitazeit_smoke"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v5
 
@@ -134,11 +148,11 @@ jobs:
           IMG: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
         run: |
           docker run -d --name smoke \
+            --add-host=host.docker.internal:host-gateway \
             -p ${KITAZEIT_TEST_PORT}:3000 \
-            -e DATABASE_URL=sqlite::memory: \
-            -e SESSION_SECRET=ci-test-secret-at-least-32-bytes-long \
-            -e ADMIN_EMAIL=admin@test.local \
-            -e ADMIN_PASSWORD=TestPassword123! \
+            -e KITAZEIT_DATABASE_URL=postgres://kitazeit_smoke:kitazeit_smoke@host.docker.internal:5432/kitazeit_smoke \
+            -e KITAZEIT_SESSION_SECRET=ci-test-secret-at-least-32-bytes-long \
+            -e KITAZEIT_ADMIN_EMAIL=admin@test.local \
             "$IMG"
           # Wait for the container to become ready (up to 30 s)
           for i in $(seq 1 30); do
