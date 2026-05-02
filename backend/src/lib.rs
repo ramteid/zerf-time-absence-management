@@ -5,8 +5,11 @@ pub mod categories;
 pub mod change_requests;
 pub mod config;
 pub mod db;
+pub mod email;
 pub mod error;
 pub mod holidays;
+pub mod notifications;
+pub mod reopen_requests;
 pub mod reports;
 pub mod settings;
 pub mod time_entries;
@@ -126,6 +129,37 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                 .route("/reports/categories", get(reports::categories))
                 .route("/reports/overtime", get(reports::overtime))
                 .route("/audit-log", get(audit::list))
+                .route(
+                    "/reopen-requests",
+                    get(reopen_requests::list_mine).post(reopen_requests::create),
+                )
+                .route(
+                    "/reopen-requests/pending",
+                    get(reopen_requests::list_pending),
+                )
+                .route(
+                    "/reopen-requests/{id}/approve",
+                    post(reopen_requests::approve),
+                )
+                .route(
+                    "/reopen-requests/{id}/reject",
+                    post(reopen_requests::reject),
+                )
+                .route(
+                    "/notifications",
+                    get(notifications::list).delete(notifications::delete_all),
+                )
+                .route(
+                    "/notifications/unread-count",
+                    get(notifications::unread_count),
+                )
+                .route("/notifications/{id}/read", post(notifications::mark_read))
+                .route(
+                    "/notifications/read-all",
+                    post(notifications::mark_all_read),
+                )
+                .route("/team-policy", get(users::team_policy_list))
+                .route("/team-policy/{id}", put(users::team_policy_update))
                 .layer(middleware::from_fn_with_state(
                     state.clone(),
                     auth::auth_middleware,

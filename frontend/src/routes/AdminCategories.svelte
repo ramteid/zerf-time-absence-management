@@ -35,7 +35,8 @@
           class="cat-dot"
           style="width:10px;height:10px;background:{cat.color}"
         ></span>
-        <span style="font-size:13px;font-weight:500;flex:1">{cat.name}</span>
+        <span style="font-size:13px;font-weight:500;flex:1">{$t(cat.name)}</span
+        >
         <button
           class="kz-btn kz-btn-ghost kz-btn-sm"
           on:click={() => (showDialog = cat)}

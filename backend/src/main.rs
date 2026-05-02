@@ -33,8 +33,19 @@ async fn main() -> Result<()> {
         cfg: Arc::new(cfg.clone()),
     };
 
-    // Background hygiene: clean expired sessions and old login attempts.
+    // Background hygiene: clean expired sessions, old login attempts, and
+    // old notifications (>90 days).
     tokio::spawn(kitazeit::auth::cleanup_loop(pool.clone()));
+    {
+        let p = pool.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(86_400));
+            loop {
+                interval.tick().await;
+                kitazeit::notifications::cleanup_old(&p).await;
+            }
+        });
+    }
 
     let app = build_app(state);
 

@@ -121,11 +121,10 @@ pub async fn ensure_holidays(pool: &crate::db::DatabasePool, year: i32) -> AppRe
             .fetch_optional(pool)
             .await?
             .unwrap_or_else(|| "DE".to_string());
-    let region: String =
-        sqlx::query_scalar("SELECT value FROM app_settings WHERE key = 'region'")
-            .fetch_optional(pool)
-            .await?
-            .unwrap_or_else(|| "DE-BW".to_string());
+    let region: String = sqlx::query_scalar("SELECT value FROM app_settings WHERE key = 'region'")
+        .fetch_optional(pool)
+        .await?
+        .unwrap_or_else(|| "DE-BW".to_string());
 
     match fetch_holidays_from_api(&country, &region, year).await {
         Ok(list) => {
@@ -180,12 +179,10 @@ pub async fn list(
     // Load UI language from settings if not passed as query param
     let lang = match q.lang {
         Some(l) => l,
-        None => {
-            sqlx::query_scalar("SELECT value FROM app_settings WHERE key = 'ui_language'")
-                .fetch_optional(&s.pool)
-                .await?
-                .unwrap_or_else(|| "en".to_string())
-        }
+        None => sqlx::query_scalar("SELECT value FROM app_settings WHERE key = 'ui_language'")
+            .fetch_optional(&s.pool)
+            .await?
+            .unwrap_or_else(|| "en".to_string()),
     };
 
     let rows = sqlx::query_as::<_, Holiday>(
@@ -232,15 +229,13 @@ pub async fn create(
     if !u.is_admin() {
         return Err(AppError::Forbidden);
     }
-    sqlx::query(
-        "INSERT INTO holidays(holiday_date, name, year, is_auto) VALUES ($1,$2,$3, FALSE)",
-    )
-    .bind(b.holiday_date)
-    .bind(&b.name)
-    .bind(b.holiday_date.year())
-    .execute(&s.pool)
-    .await
-    .map_err(|_| AppError::Conflict("Holiday already exists".into()))?;
+    sqlx::query("INSERT INTO holidays(holiday_date, name, year, is_auto) VALUES ($1,$2,$3, FALSE)")
+        .bind(b.holiday_date)
+        .bind(&b.name)
+        .bind(b.holiday_date.year())
+        .execute(&s.pool)
+        .await
+        .map_err(|_| AppError::Conflict("Holiday already exists".into()))?;
     Ok(Json(serde_json::json!({"ok":true})))
 }
 

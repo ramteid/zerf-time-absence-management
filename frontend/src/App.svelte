@@ -1,5 +1,5 @@
 <script>
-  import { onMount } from "svelte";
+  import { onMount, onDestroy } from "svelte";
   import { api, csrfToken } from "./api.js";
   import {
     currentUser,
@@ -8,6 +8,8 @@
     path,
     go,
     toasts,
+    notifications,
+    notificationsUnread,
   } from "./stores.js";
   import { setLanguage, t } from "./i18n.js";
   import Layout from "./Layout.svelte";
@@ -24,6 +26,7 @@
   import AdminAuditLog from "./routes/AdminAuditLog.svelte";
   import AdminSettings from "./routes/AdminSettings.svelte";
   import AdminTabs from "./routes/AdminTabs.svelte";
+  import TeamPolicy from "./routes/TeamPolicy.svelte";
   import NotFound from "./routes/NotFound.svelte";
 
   let booting = true;
@@ -51,10 +54,35 @@
     }
   }
 
+  // Notification polling: 60s default, paused when tab is hidden.
+  let notifTimer = null;
+  async function pollNotifications() {
+    if (!$currentUser || $currentUser === false) return;
+    if (typeof document !== "undefined" && document.hidden) return;
+    try {
+      const list = await api("/notifications");
+      notifications.set(list);
+      notificationsUnread.set(list.filter((n) => !n.is_read).length);
+    } catch {}
+  }
+
   onMount(async () => {
     await loadSettings();
     await loadMe();
     booting = false;
+    if ($currentUser) {
+      pollNotifications();
+      notifTimer = setInterval(pollNotifications, 60_000);
+      if (typeof document !== "undefined") {
+        document.addEventListener("visibilitychange", () => {
+          if (!document.hidden) pollNotifications();
+        });
+      }
+    }
+  });
+
+  onDestroy(() => {
+    if (notifTimer) clearInterval(notifTimer);
   });
 
   $: pathname = (() => {
@@ -62,18 +90,18 @@
     return idx >= 0 ? $path.slice(0, idx) : $path;
   })();
 
-  $: route = matchRoute(pathname);
+  $: route = matchRoute(pathname, $currentUser);
   $: isAdmin = pathname.startsWith("/admin");
 
-  function matchRoute(p) {
+  function matchRoute(p, user) {
     if (p === "/" || p === "") {
-      if ($currentUser && $currentUser.home) {
-        go($currentUser.home, false);
+      if (user && user.home) {
+        go(user.home, false);
         return null;
       }
     }
-    if (!$currentUser) return null;
-    if ($currentUser.must_change_password && p !== "/account") {
+    if (!user) return null;
+    if (user.must_change_password && p !== "/account") {
       go("/account", false);
       return null;
     }
@@ -90,6 +118,7 @@
       "/admin/holidays": AdminHolidays,
       "/admin/audit-log": AdminAuditLog,
       "/admin/settings": AdminSettings,
+      "/team-policy": TeamPolicy,
     };
     return map[p] || NotFound;
   }

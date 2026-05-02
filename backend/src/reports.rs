@@ -106,10 +106,11 @@ async fn build_month(
     ).bind(user_id).bind(from).bind(to).fetch_all(pool).await?;
 
     // Load UI language to decide which holiday name to display
-    let ui_lang: String = sqlx::query_scalar("SELECT value FROM app_settings WHERE key = 'ui_language'")
-        .fetch_optional(pool)
-        .await?
-        .unwrap_or_else(|| "en".to_string());
+    let ui_lang: String =
+        sqlx::query_scalar("SELECT value FROM app_settings WHERE key = 'ui_language'")
+            .fetch_optional(pool)
+            .await?
+            .unwrap_or_else(|| "en".to_string());
 
     let h: Vec<(NaiveDate, String, Option<String>)> = sqlx::query_as(
         "SELECT holiday_date, name, local_name FROM holidays WHERE holiday_date BETWEEN $1 AND $2",
@@ -118,14 +119,17 @@ async fn build_month(
     .bind(to)
     .fetch_all(pool)
     .await?;
-    let h: Vec<(NaiveDate, String)> = h.into_iter().map(|(d, name, local_name)| {
-        let display = if ui_lang != "en" {
-            local_name.unwrap_or(name)
-        } else {
-            name
-        };
-        (d, display)
-    }).collect();
+    let h: Vec<(NaiveDate, String)> = h
+        .into_iter()
+        .map(|(d, name, local_name)| {
+            let display = if ui_lang != "en" {
+                local_name.unwrap_or(name)
+            } else {
+                name
+            };
+            (d, display)
+        })
+        .collect();
     let h_map: HashMap<NaiveDate, String> = h.into_iter().collect();
 
     let mut days: Vec<DayDetail> = vec![];

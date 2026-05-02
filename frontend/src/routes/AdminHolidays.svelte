@@ -1,7 +1,7 @@
 <script>
   import { api } from "../api.js";
   import { toast } from "../stores.js";
-  import { t } from "../i18n.js";
+  import { t, language } from "../i18n.js";
   import { fmtDate } from "../format.js";
   import Icon from "../Icons.svelte";
   import { confirmDialog } from "../confirm.js";
@@ -87,6 +87,7 @@
           id="holiday-date"
           class="kz-input"
           type="date"
+          lang={$language}
           bind:value={newDate}
         />
       </div>
@@ -117,7 +118,10 @@
         >
         <span style="font-size:13px;font-weight:500;flex:1">{h.name}</span>
         {#if h.is_auto}
-          <span style="font-size:10px;padding:1px 6px;border-radius:8px;background:var(--bg-tertiary);color:var(--text-tertiary)">API</span>
+          <span
+            style="font-size:10px;padding:1px 6px;border-radius:8px;background:var(--bg-muted);color:var(--text-tertiary)"
+            >API</span
+          >
         {/if}
         <button
           class="kz-btn kz-btn-ghost kz-btn-sm kz-btn-danger"

@@ -9,21 +9,46 @@
   let pendingEntries = [];
   let pendingAbsences = [];
   let changeRequests = [];
+  let pendingReopens = [];
   let users = [];
 
   async function load() {
-    const [e, a, c, u] = await Promise.all([
+    const [e, a, c, r, u] = await Promise.all([
       api("/time-entries/all?status=submitted"),
       api("/absences/all?status=requested"),
       api("/change-requests/all?status=open"),
+      api("/reopen-requests/pending"),
       api("/users"),
     ]);
     pendingEntries = e;
     pendingAbsences = a;
     changeRequests = c;
+    pendingReopens = r;
     users = u;
   }
   load();
+
+  async function approveReopen(id) {
+    await api(`/reopen-requests/${id}/approve`, {
+      method: "POST",
+      body: {},
+    });
+    toast($t("Approved."), "ok");
+    load();
+  }
+  async function rejectReopen(id) {
+    const reason = await confirmDialog(
+      $t("Reject?"),
+      $t("Reject this request?"),
+      { danger: true, confirm: $t("Reject"), reason: true },
+    );
+    if (!reason) return;
+    await api(`/reopen-requests/${id}/reject`, {
+      method: "POST",
+      body: { reason },
+    });
+    load();
+  }
 
   function userName(uid) {
     const u = users.find((x) => x.id === uid);
@@ -267,6 +292,60 @@
       {/if}
     </div>
   </div>
+
+  <!-- Reopen requests (week-level) -->
+  {#if pendingReopens.length > 0}
+    <div class="kz-card" style="overflow:hidden;margin-top:16px">
+      <div class="card-header">
+        <Icon name="Edit" size={15} sw={1.5} />
+        <span class="card-header-title">{$t("Week reopen requests")}</span>
+        <span class="kz-chip kz-chip-pending" style="font-size:10.5px">
+          {pendingReopens.length}
+          {$t("open")}
+        </span>
+      </div>
+      {#each pendingReopens as r}
+        <div
+          style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px"
+        >
+          <div class="avatar" style="width:30px;height:30px;font-size:11px">
+            {userInitials(r.user_id)}
+          </div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:13px;font-weight:500">
+              {userName(r.user_id)}
+            </div>
+            <div
+              class="tab-num"
+              style="font-size:11.5px;color:var(--text-tertiary)"
+            >
+              {$t("wants to edit week of {date}", {
+                date: fmtDateShort(r.week_start),
+              })}
+            </div>
+          </div>
+          <div style="display:flex;gap:4px">
+            <button
+              class="kz-btn-icon-sm"
+              style="color:var(--success-text);background:var(--success-soft)"
+              title={$t("Approve")}
+              on:click={() => approveReopen(r.id)}
+            >
+              <Icon name="Check" size={14} />
+            </button>
+            <button
+              class="kz-btn-icon-sm"
+              style="color:var(--danger-text);background:var(--danger-soft)"
+              title={$t("Reject")}
+              on:click={() => rejectReopen(r.id)}
+            >
+              <Icon name="X" size={14} />
+            </button>
+          </div>
+        </div>
+      {/each}
+    </div>
+  {/if}
 
   <!-- Change requests -->
   {#if changeRequests.length > 0}

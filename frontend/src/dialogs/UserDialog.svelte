@@ -17,9 +17,26 @@
   let weekly_hours = template.weekly_hours || 39;
   let annual_leave_days = template.annual_leave_days || 30;
   let start_date = template.start_date || isoDate(new Date());
+  // approver_id is mandatory for employees, ignored for leads/admins.
+  let approver_id =
+    template.approver_id == null ? "" : String(template.approver_id);
   let error = "";
+  let approvers = [];
 
-  onMount(() => dlg.showModal());
+  onMount(async () => {
+    dlg.showModal();
+    try {
+      const all = await api("/users");
+      approvers = all.filter(
+        (u) =>
+          u.active &&
+          (u.role === "team_lead" || u.role === "admin") &&
+          u.id !== template.id,
+      );
+    } catch {
+      approvers = [];
+    }
+  });
 
   async function save() {
     error = "";
@@ -33,6 +50,16 @@
         annual_leave_days: Number(annual_leave_days),
         start_date,
       };
+      // Only send approver_id when it's relevant (employee role).
+      // Sending null for leads/admins would explicitly clear it; we want
+      // "leave untouched" so omit the key entirely there.
+      if (role === "employee") {
+        body.approver_id = approver_id ? Number(approver_id) : null;
+      } else if (!isNew && template.approver_id != null) {
+        // When promoting an employee → lead, clear the now-meaningless
+        // approver to keep data tidy.
+        body.approver_id = null;
+      }
       if (isNew) {
         const r = await api("/users", { method: "POST", body });
         toast(
@@ -140,6 +167,30 @@
         />
       </div>
     </div>
+    {#if role === "employee"}
+      <div>
+        <label class="kz-label" for="user-approver"
+          >{$t("Approver (Team lead / Admin)")}</label
+        >
+        <select
+          id="user-approver"
+          class="kz-select"
+          bind:value={approver_id}
+          required
+        >
+          <option value="">{$t("— None —")}</option>
+          {#each approvers as a}
+            <option value={String(a.id)}>
+              {a.first_name}
+              {a.last_name} ({a.email})
+            </option>
+          {/each}
+        </select>
+        <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
+          {$t("Required for employees.")}
+        </div>
+      </div>
+    {/if}
     <div class="error-text">{error}</div>
   </div>
   <footer>

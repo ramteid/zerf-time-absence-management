@@ -155,7 +155,7 @@ async fn full_integration_suite() {
         let (st, body) = admin
             .post(
                 "/api/v1/users",
-                &json!({"email":"erin@example.com","first_name":"Erin","last_name":"Worker","role":"employee","weekly_hours":39,"annual_leave_days":30,"start_date":"2024-01-01"}),
+                &json!({"email":"erin@example.com","first_name":"Erin","last_name":"Worker","role":"employee","weekly_hours":39,"annual_leave_days":30,"start_date":"2024-01-01","approver_id":1}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "create employee");
@@ -870,7 +870,7 @@ async fn full_integration_suite() {
         let (st, body) = admin
             .post(
                 "/api/v1/users",
-                &json!({"email":"tina@example.com","first_name":"Tina","last_name":"Timekeeper","role":"employee","weekly_hours":39,"annual_leave_days":30,"start_date":"2024-01-01"}),
+                &json!({"email":"tina@example.com","first_name":"Tina","last_name":"Timekeeper","role":"employee","weekly_hours":39,"annual_leave_days":30,"start_date":"2024-01-01","approver_id":1}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "create Tina");
@@ -1605,7 +1605,7 @@ async fn me_payload_provides_role_shaped_view_data() {
             &json!({
                 "email":"emp-me@example.com","first_name":"E","last_name":"M",
                 "role":"employee","weekly_hours":39.0,"annual_leave_days":30,
-                "start_date": today()
+                "start_date": today(), "approver_id": 1
             }),
         )
         .await;
@@ -1642,5 +1642,538 @@ async fn public_settings_are_anonymously_readable() {
     let (st, body) = anon.get("/api/v1/settings/public").await;
     assert_eq!(st, StatusCode::OK);
     assert!(body["ui_language"].is_string());
+    app.cleanup().await;
+}
+
+// =========================================================================
+//  Reopen-week feature tests
+// =========================================================================
+
+/// Helper: bootstrap admin (id 1, AdminPass!234), one lead, one employee.
+/// Returns (lead_id, lead_pw, emp_id, emp_pw, monday_iso, cat_id).
+async fn bootstrap_team(
+    _app: &TestApp,
+    admin: &common::TestClient,
+    lead_policy_auto: bool,
+) -> (i64, String, i64, String, String, i64) {
+    // Take the first existing category for time entries.
+    let (_, body) = admin.get("/api/v1/categories").await;
+    let cat_id = body.as_array().unwrap()[0]["id"].as_i64().unwrap();
+
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({"email":"lead-r@example.com","first_name":"Lara","last_name":"Lead",
+                "role":"team_lead","weekly_hours":39,"annual_leave_days":30,
+                "start_date":"2024-01-01"}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create lead");
+    let lead_id = id(&body);
+    let lead_pw = temp_pw(&body);
+
+    if lead_policy_auto {
+        let (st, _) = admin
+            .put(
+                &format!("/api/v1/team-policy/{}", lead_id),
+                &json!({"allow_reopen_without_approval": true}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "set lead policy auto");
+    }
+
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({"email":"emp-r@example.com","first_name":"Emil","last_name":"Emp",
+                "role":"employee","weekly_hours":39,"annual_leave_days":30,
+                "start_date":"2024-01-01","approver_id": lead_id}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create emp");
+    let emp_id = id(&body);
+    let emp_pw = temp_pw(&body);
+
+    // Past Monday in same ISO-week as last Monday.
+    let last_mon = next_monday(-14); // Monday 2 weeks ago
+    let monday_iso = last_mon.format("%Y-%m-%d").to_string();
+
+    (lead_id, lead_pw, emp_id, emp_pw, monday_iso, cat_id)
+}
+
+async fn login_change_pw(app: &TestApp, email: &str, temp: &str) -> common::TestClient {
+    let c = app.client();
+    let (st, _) = c.login(email, temp).await;
+    assert_eq!(st, StatusCode::OK);
+    let (st, _) = c.change_password(temp, "GoodPass!234").await;
+    assert_eq!(st, StatusCode::OK);
+    c
+}
+
+async fn create_and_submit_entry(c: &common::TestClient, monday_iso: &str, cat_id: i64) -> i64 {
+    let (st, body) = c
+        .post(
+            "/api/v1/time-entries",
+            &json!({
+                "entry_date": monday_iso, "start_time":"08:00","end_time":"12:00",
+                "category_id": cat_id, "comment":"work"
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create entry");
+    let eid = id(&body);
+    let (st, _) = c
+        .post("/api/v1/time-entries/submit", &json!({"ids":[eid]}))
+        .await;
+    assert_eq!(st, StatusCode::OK, "submit entry");
+    eid
+}
+
+#[tokio::test]
+async fn reopen_employee_must_have_approver() {
+    let app = TestApp::spawn().await;
+    let admin = app.client();
+    let (st, _) = admin.login("admin@example.com", &app.admin_password).await;
+    assert_eq!(st, StatusCode::OK);
+    let (st, _) = admin
+        .change_password(&app.admin_password, "AdminPass!234")
+        .await;
+    assert_eq!(st, StatusCode::OK);
+
+    // Missing approver_id is rejected.
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({"email":"a@example.com","first_name":"A","last_name":"A",
+                "role":"employee","weekly_hours":39,"annual_leave_days":30,
+                "start_date":"2024-01-01"}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST, "missing approver rejected");
+    assert!(body["error"]
+        .as_str()
+        .unwrap()
+        .to_lowercase()
+        .contains("approver"));
+
+    // Approver = self is rejected (the admin's own id is 1).
+    // Use the route with admin as approver — that works.
+    let (st, _) = admin
+        .post(
+            "/api/v1/users",
+            &json!({"email":"b@example.com","first_name":"B","last_name":"B",
+                "role":"employee","weekly_hours":39,"annual_leave_days":30,
+                "start_date":"2024-01-01","approver_id": 1}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "with approver works");
+
+    // Approver pointing at non-existent user.
+    let (st, _) = admin
+        .post(
+            "/api/v1/users",
+            &json!({"email":"c@example.com","first_name":"C","last_name":"C",
+                "role":"employee","weekly_hours":39,"annual_leave_days":30,
+                "start_date":"2024-01-01","approver_id": 99999}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST, "missing approver row rejected");
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn reopen_auto_approve_when_policy_set() {
+    let app = TestApp::spawn().await;
+    let admin = app.client();
+    admin.login("admin@example.com", &app.admin_password).await;
+    admin
+        .change_password(&app.admin_password, "AdminPass!234")
+        .await;
+
+    let (_lead_id, _lead_pw, _emp_id, emp_pw, monday_iso, cat_id) =
+        bootstrap_team(&app, &admin, true).await;
+    let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
+    let _eid = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
+
+    // Reopen request → should be auto-approved + entries back to draft.
+    let (st, body) = emp
+        .post(
+            "/api/v1/reopen-requests",
+            &json!({"week_start": monday_iso}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "auto reopen");
+    assert_eq!(body["status"], "auto_approved");
+    assert_eq!(body["entries_reopened"], 1);
+
+    // Entry now editable again.
+    let (st, body) = emp.get("/api/v1/time-entries").await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(body[0]["status"], "draft");
+
+    // Notification was created for the employee.
+    let (_, body) = emp.get("/api/v1/notifications").await;
+    assert!(
+        body.as_array()
+            .unwrap()
+            .iter()
+            .any(|n| n["kind"] == "reopen_auto_approved"),
+        "notification created: {body:?}"
+    );
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn reopen_pending_then_approve() {
+    let app = TestApp::spawn().await;
+    let admin = app.client();
+    admin.login("admin@example.com", &app.admin_password).await;
+    admin
+        .change_password(&app.admin_password, "AdminPass!234")
+        .await;
+
+    let (_lead_id, lead_pw, _emp_id, emp_pw, monday_iso, cat_id) =
+        bootstrap_team(&app, &admin, false).await;
+    let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
+    let lead = login_change_pw(&app, "lead-r@example.com", &lead_pw).await;
+
+    let _eid = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
+
+    let (st, body) = emp
+        .post(
+            "/api/v1/reopen-requests",
+            &json!({"week_start": monday_iso}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(body["status"], "pending");
+    let req_id = id(&body);
+
+    // Duplicate pending rejected.
+    let (st, _) = emp
+        .post(
+            "/api/v1/reopen-requests",
+            &json!({"week_start": monday_iso}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::CONFLICT, "duplicate rejected");
+
+    // Lead sees it in their queue.
+    let (_, body) = lead.get("/api/v1/reopen-requests/pending").await;
+    assert!(has_id(&body, req_id), "lead sees request: {body:?}");
+
+    // Lead approves.
+    let (st, body) = lead
+        .post(
+            &format!("/api/v1/reopen-requests/{}/approve", req_id),
+            &json!({}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "approve");
+    assert_eq!(body["entries_reopened"], 1);
+
+    // Entry back to draft.
+    let (_, body) = emp.get("/api/v1/time-entries").await;
+    assert_eq!(body[0]["status"], "draft");
+
+    // Employee got an "approved" notification.
+    let (_, body) = emp.get("/api/v1/notifications").await;
+    assert!(body
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|n| n["kind"] == "reopen_approved"));
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn reopen_pending_then_reject() {
+    let app = TestApp::spawn().await;
+    let admin = app.client();
+    admin.login("admin@example.com", &app.admin_password).await;
+    admin
+        .change_password(&app.admin_password, "AdminPass!234")
+        .await;
+
+    let (_lead_id, lead_pw, _emp_id, emp_pw, monday_iso, cat_id) =
+        bootstrap_team(&app, &admin, false).await;
+    let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
+    let lead = login_change_pw(&app, "lead-r@example.com", &lead_pw).await;
+
+    let eid = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
+
+    let (_, body) = emp
+        .post(
+            "/api/v1/reopen-requests",
+            &json!({"week_start": monday_iso}),
+        )
+        .await;
+    let req_id = id(&body);
+
+    // Reject without reason → 400
+    let (st, _) = lead
+        .post(
+            &format!("/api/v1/reopen-requests/{}/reject", req_id),
+            &json!({"reason": ""}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
+
+    let (st, _) = lead
+        .post(
+            &format!("/api/v1/reopen-requests/{}/reject", req_id),
+            &json!({"reason": "Not necessary"}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK);
+
+    // Entry remains submitted.
+    let (_, body) = emp.get("/api/v1/time-entries").await;
+    assert_eq!(body[0]["status"], "submitted", "entry stays submitted");
+    let _ = eid;
+
+    // Notification "rejected".
+    let (_, body) = emp.get("/api/v1/notifications").await;
+    assert!(body
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|n| n["kind"] == "reopen_rejected"));
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn reopen_empty_week_rejected() {
+    let app = TestApp::spawn().await;
+    let admin = app.client();
+    admin.login("admin@example.com", &app.admin_password).await;
+    admin
+        .change_password(&app.admin_password, "AdminPass!234")
+        .await;
+
+    let (_lead_id, _lead_pw, _emp_id, emp_pw, monday_iso, _cat_id) =
+        bootstrap_team(&app, &admin, true).await;
+    let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
+
+    let (st, body) = emp
+        .post(
+            "/api/v1/reopen-requests",
+            &json!({"week_start": monday_iso}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST, "empty week rejected");
+    assert!(body["error"]
+        .as_str()
+        .unwrap()
+        .to_lowercase()
+        .contains("nothing"));
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn reopen_not_monday_rejected() {
+    let app = TestApp::spawn().await;
+    let admin = app.client();
+    admin.login("admin@example.com", &app.admin_password).await;
+    admin
+        .change_password(&app.admin_password, "AdminPass!234")
+        .await;
+
+    let (_lead_id, _lead_pw, _emp_id, emp_pw, _monday_iso, _cat_id) =
+        bootstrap_team(&app, &admin, true).await;
+    let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
+
+    let tuesday = (next_monday(-14) + chrono::Duration::days(1))
+        .format("%Y-%m-%d")
+        .to_string();
+    let (st, _) = emp
+        .post("/api/v1/reopen-requests", &json!({"week_start": tuesday}))
+        .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST, "tuesday rejected");
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn reopen_cancels_open_change_requests() {
+    let app = TestApp::spawn().await;
+    let admin = app.client();
+    admin.login("admin@example.com", &app.admin_password).await;
+    admin
+        .change_password(&app.admin_password, "AdminPass!234")
+        .await;
+
+    let (_lead_id, _lead_pw, _emp_id, emp_pw, monday_iso, cat_id) =
+        bootstrap_team(&app, &admin, true).await;
+    let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
+    let eid = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
+
+    // File a change request on that entry.
+    let (st, body) = emp
+        .post(
+            "/api/v1/change-requests",
+            &json!({"time_entry_id": eid, "reason": "fix typo", "new_comment": "edited"}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK);
+    let cr_id = id(&body);
+
+    // Auto-reopen the week.
+    let (st, _) = emp
+        .post(
+            "/api/v1/reopen-requests",
+            &json!({"week_start": monday_iso}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK);
+
+    // Open change request must now be auto-rejected.
+    let (_, body) = emp.get("/api/v1/change-requests").await;
+    let cr = find_by_id(&body, cr_id).expect("cr present");
+    assert_eq!(cr["status"], "rejected");
+    assert!(cr["rejection_reason"]
+        .as_str()
+        .unwrap()
+        .to_lowercase()
+        .contains("auto"));
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn reopen_lead_self_service() {
+    let app = TestApp::spawn().await;
+    let admin = app.client();
+    admin.login("admin@example.com", &app.admin_password).await;
+    admin
+        .change_password(&app.admin_password, "AdminPass!234")
+        .await;
+
+    // Create a lead with no approver.
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({"email":"solo@example.com","first_name":"Sol","last_name":"O",
+                "role":"team_lead","weekly_hours":39,"annual_leave_days":30,
+                "start_date":"2024-01-01"}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK);
+    let pw = temp_pw(&body);
+    let lead = login_change_pw(&app, "solo@example.com", &pw).await;
+    let (_, body) = admin.get("/api/v1/categories").await;
+    let cat_id = body.as_array().unwrap()[0]["id"].as_i64().unwrap();
+
+    let monday_iso = next_monday(-14).format("%Y-%m-%d").to_string();
+    let _ = create_and_submit_entry(&lead, &monday_iso, cat_id).await;
+
+    let (st, body) = lead
+        .post(
+            "/api/v1/reopen-requests",
+            &json!({"week_start": monday_iso}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "lead self-service auto");
+    assert_eq!(body["status"], "auto_approved");
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn notifications_endpoints() {
+    let app = TestApp::spawn().await;
+    let admin = app.client();
+    admin.login("admin@example.com", &app.admin_password).await;
+    admin
+        .change_password(&app.admin_password, "AdminPass!234")
+        .await;
+
+    let (_lead_id, _lead_pw, _emp_id, emp_pw, monday_iso, cat_id) =
+        bootstrap_team(&app, &admin, true).await;
+    let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
+    let _ = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
+    emp.post(
+        "/api/v1/reopen-requests",
+        &json!({"week_start": monday_iso}),
+    )
+    .await;
+
+    let (st, body) = emp.get("/api/v1/notifications/unread-count").await;
+    assert_eq!(st, StatusCode::OK);
+    assert!(body["count"].as_i64().unwrap() >= 1);
+
+    let (st, list) = emp.get("/api/v1/notifications").await;
+    assert_eq!(st, StatusCode::OK);
+    let nid = list[0]["id"].as_i64().unwrap();
+
+    let (st, _) = emp
+        .post(&format!("/api/v1/notifications/{}/read", nid), &json!({}))
+        .await;
+    assert_eq!(st, StatusCode::OK);
+
+    let (st, _) = emp.post("/api/v1/notifications/read-all", &json!({})).await;
+    assert_eq!(st, StatusCode::OK);
+
+    let (st, body) = emp.get("/api/v1/notifications/unread-count").await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(body["count"], 0);
+
+    let (st, _) = emp.delete("/api/v1/notifications").await;
+    assert_eq!(st, StatusCode::OK);
+    let (_, list) = emp.get("/api/v1/notifications").await;
+    assert_eq!(list.as_array().unwrap().len(), 0);
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn team_policy_lead_can_only_set_own() {
+    let app = TestApp::spawn().await;
+    let admin = app.client();
+    admin.login("admin@example.com", &app.admin_password).await;
+    admin
+        .change_password(&app.admin_password, "AdminPass!234")
+        .await;
+
+    let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, _cat) =
+        bootstrap_team(&app, &admin, false).await;
+    let lead = login_change_pw(&app, "lead-r@example.com", &lead_pw).await;
+
+    // Lead can update own.
+    let (st, _) = lead
+        .put(
+            &format!("/api/v1/team-policy/{}", lead_id),
+            &json!({"allow_reopen_without_approval": true}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK);
+
+    // Lead cannot update admin (id 1).
+    let (st, _) = lead
+        .put(
+            "/api/v1/team-policy/1",
+            &json!({"allow_reopen_without_approval": true}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::FORBIDDEN);
+
+    // Admin can update any.
+    let (st, _) = admin
+        .put(
+            &format!("/api/v1/team-policy/{}", lead_id),
+            &json!({"allow_reopen_without_approval": false}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK);
+
+    // Lead sees only own row.
+    let (_, body) = lead.get("/api/v1/team-policy").await;
+    assert_eq!(body.as_array().unwrap().len(), 1);
+    // Admin sees both (admin + lead).
+    let (_, body) = admin.get("/api/v1/team-policy").await;
+    assert!(body.as_array().unwrap().len() >= 2);
+
     app.cleanup().await;
 }

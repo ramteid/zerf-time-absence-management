@@ -60,8 +60,6 @@ impl TestApp {
             database_url: test_db_url.clone(),
             session_secret: "integration-test-secret-do-not-use-in-prod-32-characters".into(),
             admin_email: "admin@example.com".into(),
-            organization_name: "Integration Test".into(),
-            region: "BW".into(),
             bind: "127.0.0.1:0".into(),
             static_dir: "static".into(),
             public_url: None,
@@ -70,6 +68,7 @@ impl TestApp {
             enforce_origin: false,
             enforce_csrf: false,
             trust_proxy: false,
+            smtp: None,
         };
 
         let pool = db::init(&cfg).await.expect("failed to init test database");

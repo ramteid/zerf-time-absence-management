@@ -35,7 +35,11 @@ fn normalize_language(value: &str) -> AppResult<&'static str> {
     }
 }
 
-async fn load_setting(pool: &crate::db::DatabasePool, key: &str, default: &str) -> AppResult<String> {
+async fn load_setting(
+    pool: &crate::db::DatabasePool,
+    key: &str,
+    default: &str,
+) -> AppResult<String> {
     let value: Option<String> = sqlx::query_scalar("SELECT value FROM app_settings WHERE key = $1")
         .bind(key)
         .fetch_optional(pool)
@@ -92,7 +96,9 @@ pub async fn update_admin_settings(
     let region = body.region.trim().to_string();
 
     if country.len() != 2 {
-        return Err(AppError::BadRequest("Country must be a 2-letter ISO code.".into()));
+        return Err(AppError::BadRequest(
+            "Country must be a 2-letter ISO code.".into(),
+        ));
     }
 
     let saved_lang = save_setting(&s.pool, UI_LANGUAGE_KEY, language).await?;

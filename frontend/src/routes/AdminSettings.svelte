@@ -136,9 +136,7 @@
       </div>
       <div class="field-row">
         <div>
-          <label class="kz-label" for="settings-country"
-            >{$t("Country")}</label
-          >
+          <label class="kz-label" for="settings-country">{$t("Country")}</label>
           <select
             id="settings-country"
             class="kz-select"
@@ -153,9 +151,7 @@
           </select>
         </div>
         <div>
-          <label class="kz-label" for="settings-region"
-            >{$t("Region")}</label
-          >
+          <label class="kz-label" for="settings-region">{$t("Region")}</label>
           {#if availableRegions.length > 0}
             <select
               id="settings-region"
@@ -176,20 +172,14 @@
           {/if}
         </div>
       </div>
-      <div
-        style="font-size:11px;color:var(--text-tertiary);margin-top:4px"
-      >
+      <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
         {$t(
-          "Saving will re-fetch holidays from the Nager.Date API for the selected country and region."
+          "Saving will re-fetch holidays from the Nager.Date API for the selected country and region.",
         )}
       </div>
 
       <div style="display:flex;justify-content:flex-end;padding-top:16px">
-        <button
-          class="kz-btn kz-btn-primary"
-          on:click={save}
-          disabled={saving}
-        >
+        <button class="kz-btn kz-btn-primary" on:click={save} disabled={saving}>
           {#if saving}
             {$t("Saving...")}
           {:else}

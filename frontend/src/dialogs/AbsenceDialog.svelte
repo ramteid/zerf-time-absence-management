@@ -1,7 +1,7 @@
 <script>
   import { onMount } from "svelte";
   import { api } from "../api.js";
-  import { t } from "../i18n.js";
+  import { t, language } from "../i18n.js";
   import { isoDate } from "../format.js";
   import Icon from "../Icons.svelte";
 
@@ -74,6 +74,7 @@
           id="absence-start-date"
           class="kz-input"
           type="date"
+          lang={$language}
           bind:value={start_date}
           required
         />
@@ -84,6 +85,7 @@
           id="absence-end-date"
           class="kz-input"
           type="date"
+          lang={$language}
           bind:value={end_date}
           required
         />

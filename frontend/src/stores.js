@@ -67,3 +67,7 @@ export function toast(message, type = "info") {
     3500,
   );
 }
+
+// In-app notification center.
+export const notifications = writable([]);
+export const notificationsUnread = writable(0);

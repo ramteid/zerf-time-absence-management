@@ -13,10 +13,23 @@ RUN npm run build
 FROM rust:1-bookworm AS backend-builder
 WORKDIR /build
 ENV CARGO_TERM_COLOR=always RUSTFLAGS="-C strip=symbols"
+
+# Layer 1: manifests only — cached until Cargo.toml / Cargo.lock change.
 COPY backend/Cargo.toml backend/Cargo.lock* ./
 COPY backend/migrations ./migrations
+
+# Layer 2: compile all dependencies via a placeholder binary.
+# This expensive step is re-run only when the manifest/lock changes.
+RUN mkdir -p src && \
+    echo 'fn main() {}' > src/main.rs && \
+    cargo build --release --locked && \
+    rm -f target/release/deps/kitazeit* \
+          target/release/.fingerprint/kitazeit-*
+
+# Layer 3: compile the real application source.
 COPY backend/src ./src
-RUN cargo build --release && \
+RUN touch src/main.rs && \
+    cargo build --release --locked && \
     strip target/release/kitazeit || true
 
 # ---------- Runtime stage ----------

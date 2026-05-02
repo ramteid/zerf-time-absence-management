@@ -2,6 +2,7 @@
   import { api } from "../api.js";
   import { categories, currentUser, path, go, toast } from "../stores.js";
   import { t, statusLabel } from "../i18n.js";
+  import { confirmDialog } from "../confirm.js";
   import {
     monday,
     addDays,
@@ -31,6 +32,7 @@
   let mo, su;
   let showEntry = null;
   let showChange = null;
+  let myReopens = [];
 
   $: weekParam = (() => {
     const q = $path.includes("?") ? $path.split("?")[1] : "";
@@ -42,6 +44,11 @@
     mo = monday(date);
     su = addDays(mo, 6);
     entries = await api(`/time-entries?from=${isoDate(mo)}&to=${isoDate(su)}`);
+    try {
+      myReopens = await api("/reopen-requests");
+    } catch {
+      myReopens = [];
+    }
   }
   $: $path && load().catch(() => (entries = []));
 
@@ -79,6 +86,32 @@
     await api("/time-entries/submit", { method: "POST", body: { ids } });
     toast($t("Week submitted."), "ok");
     load();
+  }
+
+  async function requestReopen() {
+    if (!mo) return;
+    const ok = await confirmDialog(
+      $t("Reopen this week?"),
+      $t(
+        "Your team lead will be notified and must approve before the week becomes editable again.",
+      ),
+      { confirm: $t("Request edit") },
+    );
+    if (!ok) return;
+    try {
+      const r = await api("/reopen-requests", {
+        method: "POST",
+        body: { week_start: isoDate(mo) },
+      });
+      if (r.status === "auto_approved") {
+        toast($t("Week reopened."), "ok");
+      } else {
+        toast($t("Reopen request sent."), "ok");
+      }
+      load();
+    } catch (e) {
+      toast(e.message || $t("Error"), "err");
+    }
   }
 
   function catOf(id) {
@@ -129,6 +162,19 @@
     if (entries.some((e) => e.status === "rejected")) return "rejected";
     return "draft";
   })();
+
+  $: pendingReopen = (() => {
+    if (!mo) return null;
+    const ws = isoDate(mo);
+    return (
+      myReopens.find((r) => r.week_start === ws && r.status === "pending") ||
+      null
+    );
+  })();
+  $: canRequestReopen =
+    !pendingReopen &&
+    !drafts.length &&
+    entries.some((e) => e.status !== "draft");
 </script>
 
 <div class="top-bar">
@@ -182,6 +228,22 @@
     {:else if weekStatus !== "draft"}
       <span class="kz-chip kz-chip-{weekStatus}">{statusLabel(weekStatus)}</span
       >
+      {#if pendingReopen}
+        <span
+          class="kz-chip kz-chip-pending"
+          title={$t("Reopen pending approval.")}
+        >
+          {$t("Reopen pending approval.")}
+        </span>
+      {:else if canRequestReopen}
+        <button
+          class="kz-btn kz-btn-sm"
+          on:click={requestReopen}
+          title={$t("Request edit")}
+        >
+          <Icon name="Edit" size={13} />{$t("Request edit")}
+        </button>
+      {/if}
     {/if}
   </div>
 </div>
@@ -228,7 +290,11 @@
         )}
         {@const totalH = (total / 60).toFixed(1)}
         {@const dailyTarget = ($currentUser.weekly_hours || 0) / 5}
-        <div class="kz-card day-card">
+        <div
+          class="kz-card day-card"
+          class:day-card--locked={weekStatus === "submitted" ||
+            weekStatus === "approved"}
+        >
           <div class="day-header">
             <div>
               <div class="day-name">{$t(day.dayName)}</div>

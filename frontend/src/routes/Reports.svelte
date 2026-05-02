@@ -1,7 +1,7 @@
 <script>
   import { api } from "../api.js";
   import { currentUser } from "../stores.js";
-  import { t, absenceKindLabel } from "../i18n.js";
+  import { t, absenceKindLabel, language } from "../i18n.js";
   import { isoDate, minToHM } from "../format.js";
   import { normalizeMonthReport } from "../apiMappers.js";
   import Icon from "../Icons.svelte";
@@ -80,6 +80,7 @@
           id="reports-month"
           class="kz-input"
           type="month"
+          lang={$language}
           bind:value={month}
         />
       </div>
@@ -192,6 +193,7 @@
             id="reports-team-month"
             class="kz-input"
             type="month"
+            lang={$language}
             bind:value={teamMonth}
           />
         </div>
@@ -255,6 +257,7 @@
           id="reports-category-from"
           class="kz-input"
           type="date"
+          lang={$language}
           bind:value={catFrom}
         />
       </div>
@@ -264,6 +267,7 @@
           id="reports-category-to"
           class="kz-input"
           type="date"
+          lang={$language}
           bind:value={catTo}
         />
       </div>

@@ -56,6 +56,13 @@ pub struct User {
     pub active: bool,
     pub must_change_password: bool,
     pub created_at: DateTime<Utc>,
+    /// Lead/admin who reviews this user's reopen requests.
+    /// Mandatory for active employees (DB CHECK constraint),
+    /// optional for leads/admins (they may self-service).
+    pub approver_id: Option<i64>,
+    /// When TRUE, reopen requests authored by employees whose
+    /// `approver_id` is this user are auto-approved without manual review.
+    pub allow_reopen_without_approval: bool,
 }
 
 impl User {
@@ -272,6 +279,7 @@ pub async fn me(
         "can_manage_holidays": user.is_admin(),
         "can_view_audit_log": user.is_admin(),
         "can_manage_settings": user.is_admin(),
+        "can_manage_team_policy": user.is_lead(),
         "can_approve": user.is_lead(),
         "can_view_team_reports": user.is_lead(),
         "can_view_dashboard": user.is_lead(),
@@ -285,6 +293,7 @@ pub async fn me(
     if user.is_lead() {
         nav.push(serde_json::json!({"href":"/dashboard","key":"Dashboard","icon":"🔔"}));
         nav.push(serde_json::json!({"href":"/reports","key":"Reports","icon":"📊"}));
+        nav.push(serde_json::json!({"href":"/team-policy","key":"TeamPolicy","icon":"🛡"}));
     }
     if user.is_admin() {
         nav.push(serde_json::json!({"href":"/admin/users","key":"Admin","icon":"⚙"}));
@@ -300,6 +309,8 @@ pub async fn me(
         "role": user.role, "weekly_hours": user.weekly_hours,
         "annual_leave_days": user.annual_leave_days, "start_date": user.start_date,
         "active": user.active, "must_change_password": user.must_change_password,
+        "approver_id": user.approver_id,
+        "allow_reopen_without_approval": user.allow_reopen_without_approval,
         "csrf_token": csrf.unwrap_or_default(),
         "permissions": permissions,
         "nav": nav,

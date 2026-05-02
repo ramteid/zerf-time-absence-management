@@ -5,9 +5,9 @@ edition = "2021"
 
 [dependencies]
 axum = { version = "0.8", features = ["macros"] }
-tokio = { version = "1", features = ["full"] }
-tower = { version = "0.5", features = ["limit", "timeout"] }
-tower-http = { version = "0.6", features = ["fs", "trace", "cors", "limit", "timeout", "set-header"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "macros"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["fs", "trace", "limit", "timeout", "set-header"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "chrono", "macros", "migrate"] }
@@ -17,22 +17,23 @@ password-hash = { version = "0.5", features = ["getrandom"] }
 rand = "0.10"
 subtle = "2"
 sha2 = "0.11"
-uuid = { version = "1", features = ["v4"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1"
 thiserror = "2"
 hex = "0.4"
-
-cookie = "0.18"
 csv = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+lettre = { version = "0.11", default-features = false, features = ["tokio1-rustls-tls", "smtp-transport", "builder", "hostname"] }
 
 [dev-dependencies]
 reqwest = { version = "0.12", features = ["json", "cookies"] }
-tokio = { version = "1", features = ["full", "test-util"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "macros", "test-util"] }
 uuid = { version = "1", features = ["v4"] }
 
 [profile.release]
 strip = true
 lto = "thin"
+
+[profile.dev]
+debug = 1    # line tables only; faster than full DWARF (default 2)

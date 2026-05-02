@@ -280,6 +280,35 @@ const TRANSLATIONS = {
     Other: "Sonstiges",
     "Switch to dark mode": "Dunkelmodus aktivieren",
     "Switch to light mode": "Hellmodus aktivieren",
+    // Reopen-week feature
+    "Approver (Team lead / Admin)": "Verantwortliche Teamleitung / Admin",
+    "Required for employees.": "Pflichtfeld für Mitarbeitende.",
+    "— None —": "— Keine —",
+    "Request edit": "Bearbeitung anfordern",
+    "Reopen this week?": "Diese Woche wieder bearbeiten?",
+    "Your team lead will be notified and must approve before the week becomes editable again.":
+      "Ihre Teamleitung wird benachrichtigt und muss zustimmen, bevor die Woche wieder bearbeitet werden kann.",
+    "This week will be reopened immediately for editing.":
+      "Diese Woche wird sofort wieder zur Bearbeitung freigegeben.",
+    "Reopen request sent.": "Anfrage zur Wiederfreigabe gesendet.",
+    "Week reopened.": "Woche wieder freigegeben.",
+    "Reopen pending approval.": "Wiederfreigabe wartet auf Genehmigung.",
+    "Reopen approved.": "Wiederfreigabe genehmigt.",
+    "Reopen rejected.": "Wiederfreigabe abgelehnt.",
+    "Week reopen requests": "Wochen-Wiederfreigaben",
+    "wants to edit week of {date}":
+      "möchte die Woche ab {date} wieder bearbeiten",
+    TeamPolicy: "Team-Richtlinie",
+    "Team Policy": "Team-Richtlinie",
+    "Allow employees to reopen weeks without my approval":
+      "Mitarbeitende dürfen Wochen ohne meine Genehmigung wieder bearbeiten",
+    "When enabled, your team's reopen requests are auto-approved.":
+      "Wenn aktiviert, werden Wiederfreigabe-Anfragen Ihres Teams automatisch genehmigt.",
+    Notifications: "Benachrichtigungen",
+    "No notifications.": "Keine Benachrichtigungen.",
+    "Mark all as read": "Alle als gelesen markieren",
+    "Clear all": "Alle löschen",
+    "Auto-approve reopens": "Wiederfreigabe ohne Bestätigung",
   },
 };
 

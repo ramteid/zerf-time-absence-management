@@ -2,10 +2,13 @@
 /* Inter via system or fallback to system-ui stack */
 
 :root {
+  color-scheme: light;
+
   --bg-canvas: #f6f5f2;
   --bg-surface: #ffffff;
   --bg-muted: #f1efeb;
   --bg-subtle: #faf9f6;
+  --bg-elevated: rgba(0, 0, 0, 0.04);
 
   --border: #e8e5df;
   --border-strong: #d8d4cc;
@@ -60,10 +63,13 @@
 }
 
 [data-theme="dark"] {
+  color-scheme: dark;
+
   --bg-canvas: #0f1117;
   --bg-surface: #1a1d24;
   --bg-muted: #1f2228;
   --bg-subtle: #14161c;
+  --bg-elevated: rgba(255, 255, 255, 0.06);
 
   --border: #2a2e38;
   --border-strong: #363b48;
@@ -89,10 +95,8 @@
   --info-text: #5a8fd4;
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
-  --shadow-md:
-    0 1px 3px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.2);
-  --shadow-lg:
-    0 8px 28px rgba(0, 0, 0, 0.4), 0 2px 6px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 1px 3px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.2);
+  --shadow-lg: 0 8px 28px rgba(0, 0, 0, 0.4), 0 2px 6px rgba(0, 0, 0, 0.3);
 }
 
 /* ── Reset ── */
@@ -528,6 +532,7 @@ dialog {
   max-width: 480px;
   width: 90vw;
   background: var(--bg-surface);
+  color: var(--text-primary);
   position: fixed;
   top: 50%;
   left: 50%;
@@ -587,6 +592,11 @@ dialog footer {
 
 .day-card {
   overflow: hidden;
+}
+
+.day-card--locked {
+  opacity: 0.6;
+  background: var(--bg-muted);
 }
 
 .day-header {
@@ -860,6 +870,10 @@ dialog footer {
 .content-area::-webkit-scrollbar-thumb {
   background: rgba(0, 0, 0, 0.12);
   border-radius: 4px;
+}
+
+[data-theme="dark"] .content-area::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
 }
 
 /* ── Responsive: mobile ── */
