@@ -3,7 +3,7 @@
   import { currentUser, toast } from "../stores.js";
   import { countWorkdays, holidayDateSet } from "../apiMappers.js";
   import { t, absenceKindLabel, statusLabel } from "../i18n.js";
-  import { fmtDate } from "../format.js";
+  import { fmtDate, parseDate } from "../format.js";
   import Icon from "../Icons.svelte";
   import AbsenceDialog from "../dialogs/AbsenceDialog.svelte";
   import { confirmDialog } from "../confirm.js";
@@ -22,8 +22,8 @@
     const years = [
       ...new Set(
         absences.flatMap((absence) => [
-          new Date(absence.start_date).getFullYear(),
-          new Date(absence.end_date).getFullYear(),
+          parseDate(absence.start_date).getFullYear(),
+          parseDate(absence.end_date).getFullYear(),
         ]),
       ),
     ];

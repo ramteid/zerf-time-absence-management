@@ -6,6 +6,7 @@
     monday,
     addDays,
     isoDate,
+    parseDate,
     fmtDateShort,
     isoWeek,
     durMin,
@@ -36,7 +37,7 @@
   })();
 
   async function load() {
-    const date = weekParam ? new Date(weekParam) : new Date();
+    const date = weekParam ? parseDate(weekParam) : new Date();
     mo = monday(date);
     su = addDays(mo, 6);
     entries = await api(`/time-entries?from=${isoDate(mo)}&to=${isoDate(su)}`);
@@ -53,8 +54,8 @@
     );
     let n = 0;
     for (const e of v) {
-      const d = isoDate(addDays(new Date(e.entry_date), 7));
-      if (new Date(d) > new Date()) continue;
+      const d = isoDate(addDays(parseDate(e.entry_date), 7));
+      if (parseDate(d) > new Date()) continue;
       try {
         await api("/time-entries", {
           method: "POST",
