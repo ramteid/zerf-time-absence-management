@@ -19,6 +19,7 @@ const TRANSLATIONS = {
     Dashboard: "Dashboard",
     Reports: "Berichte",
     Admin: "Admin",
+    More: "Mehr",
     "Sign out": "Abmelden",
     "Sign in": "Anmelden",
     "Sign in to your time-tracking workspace.":

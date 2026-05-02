@@ -13,6 +13,63 @@
   import { fmtDate } from "./format.js";
   import Icon from "./Icons.svelte";
 
+  // Mobile menu
+  let mobileMoreOpen = false;
+
+  // Pull-to-refresh
+  let pullStartY = 0;
+  let pulling = false;
+  let pullDistance = 0;
+  let refreshing = false;
+  const PULL_THRESHOLD = 80;
+
+  function onTouchStart(e) {
+    if (window.scrollY === 0 && e.touches.length === 1) {
+      pullStartY = e.touches[0].clientY;
+      pulling = true;
+    }
+  }
+  function onTouchMove(e) {
+    if (!pulling) return;
+    const dy = e.touches[0].clientY - pullStartY;
+    if (dy > 0) {
+      pullDistance = Math.min(dy * 0.5, 120);
+    } else {
+      pulling = false;
+      pullDistance = 0;
+    }
+  }
+  async function onTouchEnd() {
+    if (!pulling) return;
+    if (pullDistance >= PULL_THRESHOLD && !refreshing) {
+      refreshing = true;
+      pullDistance = PULL_THRESHOLD;
+      // reload current page
+      await new Promise((r) => setTimeout(r, 300));
+      location.reload();
+      return;
+    }
+    pulling = false;
+    pullDistance = 0;
+  }
+
+  // Bottom nav: show max 4 primary items + "More"
+  $: mobileNavItems = (() => {
+    const all = nav || [];
+    // Priority order for bottom bar
+    const primary = ["Time", "Absences", "Calendar", "Account"];
+    const shown = [];
+    const overflow = [];
+    for (const link of all) {
+      if (primary.includes(link.key) && shown.length < 4) {
+        shown.push(link);
+      } else {
+        overflow.push(link);
+      }
+    }
+    return { shown, overflow };
+  })();
+
   async function logout() {
     try {
       await api("/auth/logout", { method: "POST" });
@@ -122,7 +179,26 @@
 
 <svelte:window on:click={onDocClick} />
 
-<div class="app-layout">
+<div
+  class="app-layout"
+  on:touchstart={onTouchStart}
+  on:touchmove={onTouchMove}
+  on:touchend={onTouchEnd}
+>
+  <!-- Pull-to-refresh indicator -->
+  {#if pullDistance > 0}
+    <div class="pull-to-refresh" style="height:{pullDistance}px">
+      <div class="pull-spinner" class:active={pullDistance >= PULL_THRESHOLD}>
+        {#if refreshing}
+          <Icon name="Clock" size={20} />
+        {:else}
+          <span style="transform:rotate({pullDistance * 3}deg);display:inline-block">
+            ↓
+          </span>
+        {/if}
+      </div>
+    </div>
+  {/if}
   <div class="sidebar">
     <div class="sidebar-logo">
       <div class="sidebar-logo-icon">
@@ -307,4 +383,79 @@
   <div class="main-content">
     <slot />
   </div>
+
+  <!-- Mobile bottom navigation -->
+  <nav class="mobile-bottom-nav">
+    {#each mobileNavItems.shown as link}
+      <a
+        href={link.href}
+        data-link="1"
+        class="mobile-nav-item"
+        class:active={pathname === link.href || pathname.startsWith(link.href + "/")}
+      >
+        <Icon name={iconMap[link.key] || "FileText"} size={20} />
+        <span>{$t(link.key)}</span>
+      </a>
+    {/each}
+    {#if mobileNavItems.overflow.length > 0}
+      <button
+        class="mobile-nav-item"
+        class:active={mobileMoreOpen}
+        on:click|stopPropagation={() => (mobileMoreOpen = !mobileMoreOpen)}
+      >
+        <Icon name="Menu" size={20} />
+        <span>{$t("More")}</span>
+      </button>
+    {/if}
+  </nav>
+
+  <!-- Mobile "More" overlay -->
+  {#if mobileMoreOpen}
+    <!-- svelte-ignore a11y-click-events-have-key-events -->
+    <!-- svelte-ignore a11y-no-static-element-interactions -->
+    <div class="mobile-more-overlay" on:click={() => (mobileMoreOpen = false)}>
+      <div class="mobile-more-sheet" on:click|stopPropagation>
+        <div class="mobile-more-header">
+          <div class="avatar" style="width:32px;height:32px;font-size:11px;background:var(--primary);color:white">
+            {initials($currentUser)}
+          </div>
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:600;font-size:14px">{$currentUser.first_name} {$currentUser.last_name}</div>
+            <div style="font-size:12px;color:var(--text-secondary)">{roleLabel($currentUser.role)}</div>
+          </div>
+          <button class="kz-btn-icon-sm" on:click={() => (mobileMoreOpen = false)}>
+            <Icon name="X" size={18} />
+          </button>
+        </div>
+        {#each mobileNavItems.overflow as link}
+          <a
+            href={link.href}
+            data-link="1"
+            class="mobile-more-item"
+            class:active={link.key === "Admin"
+              ? pathname.startsWith("/admin")
+              : pathname === link.href || pathname.startsWith(link.href + "/")}
+            on:click={() => (mobileMoreOpen = false)}
+          >
+            <Icon name={iconMap[link.key] || "FileText"} size={18} />
+            <span>{$t(link.key)}</span>
+          </a>
+        {/each}
+        <div style="border-top:1px solid var(--border);margin-top:8px;padding-top:8px">
+          <button class="mobile-more-item" on:click={theme.toggle}>
+            <Icon name={$theme === "dark" ? "Sun" : "Moon"} size={18} />
+            <span>{$theme === "dark" ? $t("Switch to light mode") : $t("Switch to dark mode")}</span>
+          </button>
+          <button class="mobile-more-item" on:click={() => { mobileMoreOpen = false; toggleBell(); }}>
+            <Icon name="Bell" size={18} />
+            <span>{$t("Notifications")}{$notificationsUnread > 0 ? ` (${$notificationsUnread})` : ""}</span>
+          </button>
+          <button class="mobile-more-item" style="color:var(--danger-text)" on:click={logout}>
+            <Icon name="LogOut" size={18} />
+            <span>{$t("Sign out")}</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
 </div>
