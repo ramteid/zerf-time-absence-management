@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   parseDate,
   isoDate,
+  dateKey,
   monday,
   addDays,
   minToHM,
@@ -43,6 +44,21 @@ describe("isoDate", () => {
   it("round-trips ISO date strings", () => {
     expect(isoDate("2024-03-11")).toBe("2024-03-11");
     expect(isoDate("2024-12-31")).toBe("2024-12-31");
+  });
+});
+
+describe("dateKey", () => {
+  it("keeps plain ISO dates unchanged", () => {
+    expect(dateKey("2026-05-01")).toBe("2026-05-01");
+  });
+
+  it("extracts the calendar date from ISO date-time strings", () => {
+    expect(dateKey("2026-05-01T00:00:00Z")).toBe("2026-05-01");
+    expect(dateKey("2026-05-01 08:15:00")).toBe("2026-05-01");
+  });
+
+  it("formats Date instances from local date parts", () => {
+    expect(dateKey(new Date(2026, 4, 1, 23, 59))).toBe("2026-05-01");
   });
 });
 

@@ -6,6 +6,7 @@
     monday,
     addDays,
     isoDate,
+    dateKey,
     parseDate,
     fmtDateShort,
     isoWeek,
@@ -109,7 +110,7 @@
       ds,
       dayName: DAYS_FULL[i],
       items: entries
-        .filter((e) => e.entry_date === ds)
+        .filter((e) => dateKey(e.entry_date) === ds)
         .sort((a, b) => a.start_time.localeCompare(b.start_time)),
     };
   }

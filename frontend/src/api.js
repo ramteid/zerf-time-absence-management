@@ -16,6 +16,9 @@ export async function api(path, opts = {}) {
   }
   const r = await fetch(API + path, {
     headers,
+    cache: ["GET", "HEAD", "OPTIONS"].includes(method)
+      ? "no-store"
+      : undefined,
     credentials: "same-origin",
     ...opts,
     body: opts.body ? JSON.stringify(opts.body) : undefined,

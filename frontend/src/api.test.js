@@ -25,7 +25,10 @@ describe("api", () => {
     expect(result).toEqual({ data: 1 });
     expect(fetchSpy).toHaveBeenCalledWith(
       "/api/v1/users",
-      expect.objectContaining({ credentials: "same-origin" }),
+      expect.objectContaining({
+        credentials: "same-origin",
+        cache: "no-store",
+      }),
     );
   });
 

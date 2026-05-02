@@ -2,7 +2,6 @@
 .env.*
 !.env.example
 data/
-.it-data/
 backend/target/
 target/
 node_modules/

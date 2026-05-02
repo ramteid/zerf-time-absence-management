@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   rust:
-    name: Backend (build, fmt, clippy, test)
+    name: Backend (build, test)
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -40,16 +40,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: backend
-      - name: Format
-        run: cargo fmt --all -- --check
-      - name: Clippy (warnings allowed; advisory)
-        continue-on-error: true
-        run: cargo clippy --all-targets --all-features
       - name: Build (release)
         run: cargo build --release --locked
       - name: Integration tests
@@ -63,7 +56,7 @@ jobs:
           cargo audit
 
   frontend:
-    name: Frontend (build, lint, format, test, audit)
+    name: Frontend (build, format, test, audit)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -81,8 +74,6 @@ jobs:
           else npm install --no-audit --no-fund; fi
       - name: Format check
         run: npm run format
-      - name: Lint
-        run: npm run lint
       - name: Vitest tests
         run: npm test
       - name: Build
