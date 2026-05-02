@@ -1,6 +1,43 @@
 import { writable } from "svelte/store";
 
 export const currentUser = writable(null);
+
+const THEME_KEY = "kitazeit.theme";
+
+function readStoredTheme() {
+  try {
+    return localStorage.getItem(THEME_KEY) || "light";
+  } catch {
+    return "light";
+  }
+}
+
+function applyTheme(t) {
+  if (typeof document !== "undefined") {
+    document.documentElement.setAttribute("data-theme", t);
+  }
+}
+
+function createThemeStore() {
+  const initial = readStoredTheme();
+  applyTheme(initial);
+  const { subscribe, update } = writable(initial);
+  return {
+    subscribe,
+    toggle() {
+      update((current) => {
+        const next = current === "dark" ? "light" : "dark";
+        try {
+          localStorage.setItem(THEME_KEY, next);
+        } catch {}
+        applyTheme(next);
+        return next;
+      });
+    },
+  };
+}
+
+export const theme = createThemeStore();
 export const categories = writable([]);
 export const settings = writable({ ui_language: "en" });
 export const path = writable(

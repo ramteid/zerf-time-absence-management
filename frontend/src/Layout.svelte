@@ -1,6 +1,6 @@
 <script>
   import { api } from "./api.js";
-  import { currentUser, path, go } from "./stores.js";
+  import { currentUser, path, go, theme } from "./stores.js";
   import { t, roleLabel } from "./i18n.js";
   import Icon from "./Icons.svelte";
 
@@ -63,6 +63,14 @@
         <Icon name="Clock" size={16} />
       </div>
       <span class="sidebar-logo-text">KitaZeit</span>
+      <button
+        class="kz-btn-icon-sm"
+        style="color:var(--nav-text-muted);margin-left:auto"
+        on:click={theme.toggle}
+        title={$theme === "dark" ? $t("Switch to light mode") : $t("Switch to dark mode")}
+      >
+        <Icon name={$theme === "dark" ? "Sun" : "Moon"} size={15} />
+      </button>
     </div>
 
     <div class="sidebar-nav">

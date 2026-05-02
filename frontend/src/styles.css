@@ -59,6 +59,42 @@
     "Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
 }
 
+[data-theme="dark"] {
+  --bg-canvas: #0f1117;
+  --bg-surface: #1a1d24;
+  --bg-muted: #1f2228;
+  --bg-subtle: #14161c;
+
+  --border: #2a2e38;
+  --border-strong: #363b48;
+
+  --text-primary: #e8eaed;
+  --text-secondary: #9ea3ad;
+  --text-tertiary: #6b7180;
+  --text-disabled: #4a4f5c;
+
+  --accent-soft: #0f2e28;
+  --accent-text: #4ecbb8;
+
+  --success-soft: #0f2e1e;
+  --success-text: #5dba8a;
+
+  --warning-soft: #2e2106;
+  --warning-text: #d4a444;
+
+  --danger-soft: #2e0f0a;
+  --danger-text: #e06e62;
+
+  --info-soft: #0c1e38;
+  --info-text: #5a8fd4;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-md:
+    0 1px 3px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.2);
+  --shadow-lg:
+    0 8px 28px rgba(0, 0, 0, 0.4), 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
 /* ── Reset ── */
 *,
 *::before,

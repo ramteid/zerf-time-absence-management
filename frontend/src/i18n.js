@@ -278,6 +278,8 @@ const TRANSLATIONS = {
     "Leadership Tasks": "Leitungsaufgaben",
     "Team Meeting": "Teambesprechung",
     Other: "Sonstiges",
+    "Switch to dark mode": "Dunkelmodus aktivieren",
+    "Switch to light mode": "Hellmodus aktivieren",
   },
 };
 
