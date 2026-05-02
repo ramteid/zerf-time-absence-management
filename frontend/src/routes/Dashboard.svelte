@@ -2,15 +2,49 @@
   import { api } from "../api.js";
   import { currentUser, toast } from "../stores.js";
   import { t, statusLabel, absenceKindLabel } from "../i18n.js";
-  import { fmtDate, fmtDateShort, minToHM } from "../format.js";
+  import { fmtDate, fmtDateShort, minToHM, isoDate, addDays } from "../format.js";
   import Icon from "../Icons.svelte";
   import { confirmDialog } from "../confirm.js";
+  import FlextimeChart from "../FlextimeChart.svelte";
 
   let pendingEntries = [];
   let pendingAbsences = [];
   let changeRequests = [];
   let pendingReopens = [];
   let users = [];
+
+  // ── Flextime chart ────────────────────────────────────────────────────────
+  const today = new Date();
+
+  function daysAgo(n) {
+    return isoDate(addDays(today, -n));
+  }
+
+  let chartFrom = daysAgo(29);
+  let chartTo = isoDate(today);
+  let chartData = [];
+  let chartLoading = false;
+
+  async function loadChart() {
+    chartLoading = true;
+    try {
+      chartData = await api(
+        `/reports/flextime?from=${chartFrom}&to=${chartTo}`,
+      );
+    } catch {
+      chartData = [];
+    } finally {
+      chartLoading = false;
+    }
+  }
+
+  function setRange(days) {
+    chartFrom = daysAgo(days - 1);
+    chartTo = isoDate(today);
+    loadChart();
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
 
   async function load() {
     const [e, a, c, r, u] = await Promise.all([
@@ -27,6 +61,7 @@
     users = u;
   }
   load();
+  loadChart();
 
   async function approveReopen(id) {
     await api(`/reopen-requests/${id}/approve`, {
@@ -163,6 +198,61 @@
       <div class="stat-card-label">{$t("Team Members")}</div>
       <div class="stat-card-value tab-num">{users.length}</div>
     </div>
+  </div>
+
+  <!-- Flextime balance chart -->
+  <div class="kz-card" style="padding:16px 20px;margin-bottom:16px">
+    <div
+      style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px"
+    >
+      <Icon name="TrendingUp" size={15} sw={1.5} />
+      <span style="font-size:14px;font-weight:600;flex:1"
+        >{$t("Flextime balance")}</span
+      >
+      <!-- Quick-range buttons -->
+      <div style="display:flex;gap:4px;flex-wrap:wrap">
+        <button class="kz-btn kz-btn-sm" on:click={() => setRange(30)}
+          >{$t("Last 30 days")}</button
+        >
+        <button class="kz-btn kz-btn-sm" on:click={() => setRange(90)}
+          >{$t("Last 90 days")}</button
+        >
+        <button class="kz-btn kz-btn-sm" on:click={() => setRange(182)}
+          >{$t("Last 6 months")}</button
+        >
+        <button class="kz-btn kz-btn-sm" on:click={() => setRange(365)}
+          >{$t("Last year")}</button
+        >
+      </div>
+      <!-- Custom date range -->
+      <div style="display:flex;align-items:center;gap:4px">
+        <input
+          type="date"
+          class="kz-input"
+          style="font-size:12px;padding:3px 6px;height:28px"
+          bind:value={chartFrom}
+        />
+        <span style="font-size:12px;color:var(--text-tertiary)">–</span>
+        <input
+          type="date"
+          class="kz-input"
+          style="font-size:12px;padding:3px 6px;height:28px"
+          bind:value={chartTo}
+        />
+        <button class="kz-btn kz-btn-sm" on:click={loadChart}>
+          <Icon name="Search" size={13} />{$t("Show")}
+        </button>
+      </div>
+    </div>
+    {#if chartLoading}
+      <div
+        style="text-align:center;padding:40px 0;font-size:13px;color:var(--text-tertiary)"
+      >
+        {$t("Loading...")}
+      </div>
+    {:else}
+      <FlextimeChart data={chartData} />
+    {/if}
   </div>
 
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">

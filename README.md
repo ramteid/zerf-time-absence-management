@@ -20,22 +20,42 @@ suite. The whole thing runs from one `docker compose up`.
 
 | Role | What they can do |
 |------|------------------|
-| Employee | Log hours per category, request vacation, report sick days, see own balance |
-| Team lead | Approve/decline timesheets, leave, change requests; team calendar; reports |
-| Admin | Manage users, categories, holidays; audit log; reset passwords |
+| Employee | Log hours per category, request vacation, report sick days, ask to reopen a submitted week, see own balance |
+| Team lead | Approve/decline timesheets, leave, change & reopen requests; team calendar; reports; manage own approval policy |
+| Admin | Manage users, categories, holidays; audit log; reset passwords; manage all approval policies |
 
 Built-in workflows include weekly time-entry submission, approvals, change
-requests for already-submitted entries, vacation balance tracking, public
-holidays for Baden-Württemberg, an overtime ledger, and CSV exports.
+requests for already-submitted entries, week reopen requests with
+optional auto-approval per approver, persistent in-app notifications
+(plus opt-in email), vacation balance tracking, public holidays for
+Baden-Württemberg, an overtime ledger, and CSV exports.
 
 A short tour of the UI:
 
-- **Time** — week view, one row per category, today highlighted, single-tap "submit week".
+- **Time** — week view, one row per category, today highlighted, single-tap "submit week"; once submitted, a **Request edit** button lets the employee ask to reopen the week for corrections.
 - **Absences** — one form per type (vacation, sick, training, special leave, unpaid).
 - **Calendar** — month view of who is away, colour-coded by type.
-- **Dashboard** — team leads see all open approvals in one place.
+- **Dashboard** — team leads see all open approvals in one place, including a dedicated *Week reopen requests* queue.
 - **Reports** — monthly per-employee, team summary, category breakdown, CSV.
+- **Team Policy** *(team leads & admins)* — toggle "auto-approve reopens" per approver to skip manual review.
 - **Admin** — users, categories, holidays, audit log.
+- **Notification center** — bell in the sidebar with unread count; lists reopen-request events, approvals, rejections.
+
+### How week reopen works
+
+1. After an employee submits a week, the **Submit Week** button is replaced
+   by a **Request edit** action.
+2. If the employee's assigned approver has *Auto-approve reopens* enabled
+   (set under **Team Policy**), the week is reopened immediately — every
+   non-draft entry returns to `draft` and any open per-entry change
+   requests for that week are auto-cancelled.
+3. Otherwise the request is queued. The approver receives an in-app
+   notification (and an email when SMTP is configured), and can
+   approve or reject from the Dashboard. The employee gets the
+   corresponding follow-up notification.
+
+Each employee **must** have an approver assigned (Team lead or Admin); the
+selector in the user dialog is mandatory and the schema enforces this.
 
 ## Install
 
@@ -65,6 +85,12 @@ KITAZEIT_SESSION_SECRET=$(openssl rand -hex 32)
 KITAZEIT_POSTGRES_PASSWORD=$(openssl rand -hex 32)
 KITAZEIT_ADMIN_EMAIL=admin@example.de
 ```
+
+Optional SMTP variables (`KITAZEIT_SMTP_HOST`, `KITAZEIT_SMTP_PORT`,
+`KITAZEIT_SMTP_USERNAME`, `KITAZEIT_SMTP_PASSWORD`, `KITAZEIT_SMTP_FROM`,
+`KITAZEIT_SMTP_ENCRYPTION`) enable outbound email for notifications. When
+unset, the in-app notification center keeps working unchanged; only the
+email side-channel is disabled.
 
 Caddy obtains a Let's Encrypt certificate automatically on first start. The
 bundled PostgreSQL service stays on an internal Docker network and is not

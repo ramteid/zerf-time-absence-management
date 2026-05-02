@@ -128,6 +128,7 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                 .route("/reports/team", get(reports::team))
                 .route("/reports/categories", get(reports::categories))
                 .route("/reports/overtime", get(reports::overtime))
+                .route("/reports/flextime", get(reports::flextime))
                 .route("/audit-log", get(audit::list))
                 .route(
                     "/reopen-requests",

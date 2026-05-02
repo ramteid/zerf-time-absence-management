@@ -467,3 +467,143 @@ pub async fn overtime(
     }
     Ok(Json(out))
 }
+
+#[derive(Deserialize)]
+pub struct FlextimeQuery {
+    pub user_id: Option<i64>,
+    pub from: NaiveDate,
+    pub to: NaiveDate,
+}
+
+#[derive(Serialize)]
+pub struct FlextimeDay {
+    pub date: NaiveDate,
+    pub actual_min: i64,
+    pub target_min: i64,
+    pub diff_min: i64,
+    pub cumulative_min: i64,
+    pub absence: Option<String>,
+    pub holiday: Option<String>,
+}
+
+pub async fn flextime(
+    State(s): State<AppState>,
+    u: User,
+    Query(q): Query<FlextimeQuery>,
+) -> AppResult<Json<Vec<FlextimeDay>>> {
+    let uid = q.user_id.unwrap_or(u.id);
+    if uid != u.id && !u.is_lead() {
+        return Err(AppError::Forbidden);
+    }
+    if q.from > q.to {
+        return Err(AppError::BadRequest("from must not be after to.".into()));
+    }
+    if (q.to - q.from).num_days() > 366 {
+        return Err(AppError::BadRequest(
+            "Date range must not exceed 366 days.".into(),
+        ));
+    }
+
+    let user: crate::auth::User = sqlx::query_as("SELECT * FROM users WHERE id=$1")
+        .bind(uid)
+        .fetch_one(&s.pool)
+        .await?;
+    let target_per_day_min = (user.weekly_hours / 5.0 * 60.0) as i64;
+    let is_admin = user.role == "admin";
+
+    // Start accumulating from the user's first day so the running balance at
+    // q.from already reflects all prior over/under-time.
+    let loop_start = user.start_date.min(q.from);
+
+    let te: Vec<(NaiveDate, String, String, String)> = sqlx::query_as(
+        "SELECT entry_date, start_time, end_time, status \
+         FROM time_entries WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3",
+    )
+    .bind(uid)
+    .bind(loop_start)
+    .bind(q.to)
+    .fetch_all(&s.pool)
+    .await?;
+
+    let abs: Vec<(NaiveDate, NaiveDate, String)> = sqlx::query_as(
+        "SELECT start_date, end_date, kind FROM absences \
+         WHERE user_id=$1 AND status='approved' AND end_date >= $2 AND start_date <= $3",
+    )
+    .bind(uid)
+    .bind(loop_start)
+    .bind(q.to)
+    .fetch_all(&s.pool)
+    .await?;
+
+    let ui_lang: String =
+        sqlx::query_scalar("SELECT value FROM app_settings WHERE key = 'ui_language'")
+            .fetch_optional(&s.pool)
+            .await?
+            .unwrap_or_else(|| "en".to_string());
+
+    let h: Vec<(NaiveDate, String, Option<String>)> = sqlx::query_as(
+        "SELECT holiday_date, name, local_name FROM holidays WHERE holiday_date BETWEEN $1 AND $2",
+    )
+    .bind(loop_start)
+    .bind(q.to)
+    .fetch_all(&s.pool)
+    .await?;
+    let h_map: HashMap<NaiveDate, String> = h
+        .into_iter()
+        .map(|(d, name, local_name)| {
+            let display = if ui_lang != "en" {
+                local_name.unwrap_or(name)
+            } else {
+                name
+            };
+            (d, display)
+        })
+        .collect();
+
+    let mut out = vec![];
+    let mut cum = 0i64;
+    let mut d = loop_start;
+    while d <= q.to {
+        let wd = d.weekday().num_days_from_monday();
+        let weekday = wd < 5;
+        let holiday = h_map.get(&d).cloned();
+        let absence = abs
+            .iter()
+            .find(|(s, e, _)| d >= *s && d <= *e)
+            .map(|(_, _, k)| k.clone());
+        let before_start = d < user.start_date;
+        let target = if weekday && holiday.is_none() && !before_start && !is_admin {
+            target_per_day_min
+        } else {
+            0
+        };
+        let mut actual = 0i64;
+        for (dd, b, e, st) in &te {
+            if *dd != d {
+                continue;
+            }
+            if st == "approved" {
+                let bn = parse_report_time(b)?;
+                let en = parse_report_time(e)?;
+                actual += (en - bn).num_minutes();
+            }
+        }
+        let actual_eff = if absence.is_some() { target } else { actual };
+        let diff = actual_eff - target;
+        cum += diff;
+        // Only emit days within the requested display range
+        if d >= q.from {
+            out.push(FlextimeDay {
+                date: d,
+                actual_min: actual_eff,
+                target_min: target,
+                diff_min: diff,
+                cumulative_min: cum,
+                absence,
+                holiday,
+            });
+        }
+        d += Duration::days(1);
+    }
+    Ok(Json(out))
+}

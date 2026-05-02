@@ -54,36 +54,64 @@
     }
   }
 
-  // Notification polling: 60s default, paused when tab is hidden.
+  // Notification polling: 60s default, paused when tab is hidden. The
+  // polling is started/stopped reactively against `currentUser` so it also
+  // kicks in after a fresh login (not only when the user was authenticated
+  // at app boot) and is torn down on logout.
   let notifTimer = null;
+  let visibilityHandler = null;
+
   async function pollNotifications() {
-    if (!$currentUser || $currentUser === false) return;
     if (typeof document !== "undefined" && document.hidden) return;
     try {
-      const list = await api("/notifications");
+      // Use the dedicated counter endpoint so the badge stays accurate
+      // even when the user has more than 100 unread notifications (the
+      // list endpoint is capped at 100).
+      const [list, count] = await Promise.all([
+        api("/notifications"),
+        api("/notifications/unread-count"),
+      ]);
       notifications.set(list);
-      notificationsUnread.set(list.filter((n) => !n.is_read).length);
+      notificationsUnread.set(count?.count ?? 0);
     } catch {}
+  }
+
+  function startPolling() {
+    if (notifTimer) return;
+    pollNotifications();
+    notifTimer = setInterval(pollNotifications, 60_000);
+    if (typeof document !== "undefined" && !visibilityHandler) {
+      visibilityHandler = () => {
+        if (!document.hidden) pollNotifications();
+      };
+      document.addEventListener("visibilitychange", visibilityHandler);
+    }
+  }
+  function stopPolling() {
+    if (notifTimer) {
+      clearInterval(notifTimer);
+      notifTimer = null;
+    }
+    if (visibilityHandler && typeof document !== "undefined") {
+      document.removeEventListener("visibilitychange", visibilityHandler);
+      visibilityHandler = null;
+    }
+    notifications.set([]);
+    notificationsUnread.set(0);
+  }
+
+  $: if (!booting) {
+    if ($currentUser) startPolling();
+    else stopPolling();
   }
 
   onMount(async () => {
     await loadSettings();
     await loadMe();
     booting = false;
-    if ($currentUser) {
-      pollNotifications();
-      notifTimer = setInterval(pollNotifications, 60_000);
-      if (typeof document !== "undefined") {
-        document.addEventListener("visibilitychange", () => {
-          if (!document.hidden) pollNotifications();
-        });
-      }
-    }
   });
 
-  onDestroy(() => {
-    if (notifTimer) clearInterval(notifTimer);
-  });
+  onDestroy(stopPolling);
 
   $: pathname = (() => {
     const idx = $path.indexOf("?");

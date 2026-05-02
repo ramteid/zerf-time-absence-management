@@ -140,15 +140,18 @@ async fn resolve_approver(
     requester: &User,
 ) -> AppResult<Option<(i64, bool)>> {
     if let Some(aid) = requester.approver_id {
-        let row: Option<(bool, bool)> =
-            sqlx::query_as("SELECT active, allow_reopen_without_approval FROM users WHERE id=$1")
-                .bind(aid)
-                .fetch_optional(pool)
-                .await?;
+        let row: Option<(bool, String, bool)> = sqlx::query_as(
+            "SELECT active, role, allow_reopen_without_approval FROM users WHERE id=$1",
+        )
+        .bind(aid)
+        .fetch_optional(pool)
+        .await?;
         match row {
-            Some((true, policy)) => Ok(Some((aid, policy))),
+            Some((true, role, policy)) if role == "team_lead" || role == "admin" => {
+                Ok(Some((aid, policy)))
+            }
             _ => Err(AppError::BadRequest(
-                "Your approver is no longer active. Please contact an admin.".into(),
+                "Your approver is no longer available. Please contact an admin.".into(),
             )),
         }
     } else if requester.role == "team_lead" || requester.role == "admin" {
@@ -214,6 +217,17 @@ pub async fn create(
         Some((aid, false)) => ("pending", aid),
     };
 
+    // For the auto-approve flow we MUST reset the entries before persisting
+    // the request row.  Otherwise a failure in `perform_reopen` (e.g. a
+    // transient DB error) would leave an `auto_approved` row referencing a
+    // week whose entries were never actually reopened — confusing the user
+    // and bypassing the duplicate-pending guard for retries.
+    let count = if status == "auto_approved" {
+        perform_reopen(&s.pool, u.id, u.id, b.week_start).await?
+    } else {
+        0
+    };
+
     let row: (i64, DateTime<Utc>) = sqlx::query_as(
         "INSERT INTO reopen_requests(user_id, week_start, approver_id, status, reviewed_at) \
          VALUES ($1,$2,$3,$4, CASE WHEN $4 IN ('auto_approved') THEN CURRENT_TIMESTAMP ELSE NULL END) \
@@ -247,7 +261,6 @@ pub async fn create(
     .await;
 
     if status == "auto_approved" {
-        let count = perform_reopen(&s.pool, u.id, u.id, b.week_start).await?;
         notifications::create(
             &s,
             u.id,
@@ -360,13 +373,23 @@ pub async fn approve(
     if !u.is_admin() && r.approver_id != u.id {
         return Err(AppError::Forbidden);
     }
-    let count = perform_reopen(&s.pool, u.id, r.user_id, r.week_start).await?;
-    sqlx::query(
-        "UPDATE reopen_requests SET status='approved', reviewed_at=CURRENT_TIMESTAMP WHERE id=$1",
+    // Atomically claim the request before doing the (idempotent-ish) reopen.
+    // The status guard prevents a TOCTOU race where two approvers click at
+    // the same time and both run perform_reopen.
+    let claimed = sqlx::query(
+        "UPDATE reopen_requests SET status='approved', reviewed_at=CURRENT_TIMESTAMP \
+         WHERE id=$1 AND status='pending'",
     )
     .bind(id)
     .execute(&s.pool)
-    .await?;
+    .await?
+    .rows_affected();
+    if claimed == 0 {
+        return Err(AppError::Conflict(
+            "Request was already resolved by someone else.".into(),
+        ));
+    }
+    let count = perform_reopen(&s.pool, u.id, r.user_id, r.week_start).await?;
     audit::log(&s.pool, u.id, "approved", "reopen_requests", id, None, None).await;
     notifications::create(
         &s,
@@ -409,14 +432,20 @@ pub async fn reject(
     if !u.is_admin() && r.approver_id != u.id {
         return Err(AppError::Forbidden);
     }
-    sqlx::query(
+    let claimed = sqlx::query(
         "UPDATE reopen_requests SET status='rejected', reviewed_at=CURRENT_TIMESTAMP, \
-         rejection_reason=$2 WHERE id=$1",
+         rejection_reason=$2 WHERE id=$1 AND status='pending'",
     )
     .bind(id)
     .bind(reason)
     .execute(&s.pool)
-    .await?;
+    .await?
+    .rows_affected();
+    if claimed == 0 {
+        return Err(AppError::Conflict(
+            "Request was already resolved by someone else.".into(),
+        ));
+    }
     audit::log(
         &s.pool,
         u.id,

@@ -32,9 +32,12 @@
   }
   async function reloadNotifications() {
     try {
-      const list = await api("/notifications");
+      const [list, count] = await Promise.all([
+        api("/notifications"),
+        api("/notifications/unread-count"),
+      ]);
       notifications.set(list);
-      notificationsUnread.set(list.filter((n) => !n.is_read).length);
+      notificationsUnread.set(count?.count ?? 0);
     } catch {}
   }
   async function markRead(n) {

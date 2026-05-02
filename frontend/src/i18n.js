@@ -309,6 +309,14 @@ const TRANSLATIONS = {
     "Mark all as read": "Alle als gelesen markieren",
     "Clear all": "Alle löschen",
     "Auto-approve reopens": "Wiederfreigabe ohne Bestätigung",
+    // Flextime chart
+    "Flextime balance": "Gleitzeitkontostand",
+    "Daily diff": "Tagesdifferenz",
+    "Last 30 days": "Letzte 30 Tage",
+    "Last 90 days": "Letzte 90 Tage",
+    "Last 6 months": "Letzte 6 Monate",
+    "Last year": "Letztes Jahr",
+    "Custom range": "Benutzerdefinierter Zeitraum",
   },
 };
 
