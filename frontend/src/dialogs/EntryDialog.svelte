@@ -106,7 +106,7 @@
     <div>
       <label class="kz-label" for="entry-category">{$t("Category")}</label>
       <select id="entry-category" class="kz-select" bind:value={category_id}>
-        {#each $categories as c}<option value={c.id}>{c.name}</option>{/each}
+        {#each $categories as c}<option value={c.id}>{$t(c.name)}</option>{/each}
       </select>
     </div>
     <div>

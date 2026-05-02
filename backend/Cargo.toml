@@ -26,6 +26,7 @@ hex = "0.4"
 
 cookie = "0.18"
 csv = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 [dev-dependencies]
 reqwest = { version = "0.12", features = ["json", "cookies"] }

@@ -22,7 +22,7 @@ private GitHub Security Advisory. Do **not** open a public issue.
 | Account takeover via reset   | Reuse of leaked temp pw                       | Forced password change on first login, sessions cleared on reset/change |
 | Logs                         | Sensitive data leakage                        | Passwords/secrets never logged; tracing on info; JSON-file 10MB rotation|
 
-Out of scope (v1): payroll integrations, e-mail, SSO, multi-tenant isolation.
+Out of scope (v1): payroll integrations, SSO, multi-tenant isolation.
 
 ## Authentication
 

@@ -135,7 +135,7 @@
                   <td class="tab-num">{e.start_time?.slice(0, 5)}</td>
                   <td class="tab-num">{e.end_time?.slice(0, 5)}</td>
                   <td class="tab-num">{minToHM(e.minutes || 0)}</td>
-                  <td>{e.category_name || "–"}</td>
+                  <td>{e.category_name ? $t(e.category_name) : "–"}</td>
                   <td
                     ><span class="kz-chip kz-chip-{e.status}">{e.status}</span
                     ></td

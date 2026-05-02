@@ -5,8 +5,7 @@ pub struct Config {
     pub database_url: String,
     pub session_secret: String,
     pub admin_email: String,
-    pub organization_name: String,
-    pub region: String,
+
     pub bind: String,
     pub static_dir: String,
     pub public_url: Option<String>,
@@ -67,9 +66,8 @@ impl Config {
             database_url,
             session_secret,
             admin_email,
-            organization_name: env::var("KITAZEIT_ORGANIZATION_NAME")
-                .unwrap_or_else(|_| "Kindergarten".into()),
-            region: env::var("KITAZEIT_REGION").unwrap_or_else(|_| "BW".into()),
+
+
             bind: env::var("KITAZEIT_BIND").unwrap_or_else(|_| "0.0.0.0:3000".into()),
             static_dir: env::var("KITAZEIT_STATIC_DIR").unwrap_or_else(|_| "static".into()),
             public_url,

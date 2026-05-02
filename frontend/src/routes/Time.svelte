@@ -118,6 +118,9 @@
     return (durMin(start, end) / 60).toFixed(1);
   }
 
+  $: currentWeekMo = monday(new Date());
+  $: isCurrentWeek = mo && isoDate(mo) >= isoDate(currentWeekMo);
+
   $: weekStatus = (() => {
     if (entries.length === 0) return "draft";
     if (entries.every((e) => e.status === "approved")) return "approved";
@@ -155,12 +158,17 @@
         <button
           class="kz-btn kz-btn-icon-sm kz-btn-ghost"
           on:click={() => gotoWeek(7)}
+          disabled={isCurrentWeek}
         >
           <Icon name="ChevRight" size={16} />
         </button>
       </div>
     {/if}
-    <button class="kz-btn kz-btn-ghost kz-btn-sm" on:click={copyLast}>
+    <button
+      class="kz-btn kz-btn-ghost kz-btn-sm"
+      on:click={copyLast}
+      disabled={weekStatus === "submitted" || weekStatus === "approved"}
+    >
       {$t("Copy last week")}
     </button>
     {#if drafts.length}
@@ -251,7 +259,7 @@
               >
                 <div class="time-block-cat">
                   <span class="cat-dot" style="background:{c.color}"></span>
-                  <span class="time-block-cat-name">{c.name}</span>
+                  <span class="time-block-cat-name">{$t(c.name)}</span>
                   {#if e.status !== "draft"}
                     <span
                       class="kz-chip kz-chip-{e.status}"
@@ -308,7 +316,7 @@
               <div class="time-block">
                 <div class="time-block-cat">
                   <span class="cat-dot" style="background:{c.color}"></span>
-                  <span class="time-block-cat-name">{c.name}</span>
+                  <span class="time-block-cat-name">{$t(c.name)}</span>
                 </div>
                 <div class="time-block-times tab-num">
                   <span

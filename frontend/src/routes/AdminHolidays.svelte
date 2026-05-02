@@ -116,6 +116,9 @@
           >{fmtDate(h.holiday_date)}</span
         >
         <span style="font-size:13px;font-weight:500;flex:1">{h.name}</span>
+        {#if h.is_auto}
+          <span style="font-size:10px;padding:1px 6px;border-radius:8px;background:var(--bg-tertiary);color:var(--text-tertiary)">API</span>
+        {/if}
         <button
           class="kz-btn kz-btn-ghost kz-btn-sm kz-btn-danger"
           on:click={() => del(h.id)}

@@ -239,7 +239,15 @@ const TRANSLATIONS = {
     General: "Allgemein",
     "Kita name": "Kita-Name",
     "Save Changes": "Änderungen speichern",
+    "Saving...": "Speichert...",
     "Settings saved.": "Einstellungen gespeichert.",
+    "Settings saved. Holidays have been refreshed.":
+      "Einstellungen gespeichert. Feiertage wurden aktualisiert.",
+    Country: "Land",
+    Region: "Region",
+    "e.g. US-CA": "z.B. US-CA",
+    "Saving will re-fetch holidays from the Nager.Date API for the selected country and region.":
+      "Beim Speichern werden die Feiertage über die Nager.Date-API für das gewählte Land und die Region neu abgerufen.",
     "Audit Log": "Audit-Protokoll",
     "Holiday name": "Feiertagsname",
     "Holiday added.": "Feiertag hinzugefügt.",
@@ -264,6 +272,12 @@ const TRANSLATIONS = {
     "Reject this request?": "Diese Anfrage ablehnen?",
     "Reject this change request?": "Diese Änderungsanfrage ablehnen?",
     Request: "Anfrage",
+    // Default category names
+    "Direct Childcare": "Direkte Kinderbetreuung",
+    "Preparation Time": "Vorbereitungszeit",
+    "Leadership Tasks": "Leitungsaufgaben",
+    "Team Meeting": "Teambesprechung",
+    Other: "Sonstiges",
   },
 };
 

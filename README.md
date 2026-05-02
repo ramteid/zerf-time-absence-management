@@ -134,7 +134,7 @@ and CodeQL (JavaScript) jobs.
 
 ## Roadmap (out of scope for v1)
 
-Payroll integration, e-mail notifications, SSO/LDAP, native mobile app,
+Payroll integration, SSO/LDAP, native mobile app,
 multi-tenant — all deliberately *not* built. The whole point is to stay small
 and easy to operate.
 
