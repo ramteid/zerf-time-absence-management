@@ -16,6 +16,11 @@
   let comment = template.comment || "";
   let error = "";
 
+  $: canUseHalfDay = kind === "vacation" && start_date === end_date;
+  $: if (!canUseHalfDay && half_day) {
+    half_day = false;
+  }
+
   onMount(() => dlg.showModal());
 
   async function save() {
@@ -85,7 +90,12 @@
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px">
-      <input type="checkbox" id="half-day" bind:checked={half_day} />
+      <input
+        type="checkbox"
+        id="half-day"
+        bind:checked={half_day}
+        disabled={!canUseHalfDay}
+      />
       <label for="half-day" style="font-size:13px">{$t("Half day")}</label>
     </div>
     <div>

@@ -5,7 +5,6 @@ import {
   resolveLanguage,
   DEFAULT_LANGUAGE,
   LANGUAGES,
-  language,
   setLanguage,
   getLanguage,
   getLocale,

@@ -11,6 +11,15 @@ use serde::{Deserialize, Serialize, Serializer};
 use sqlx::{FromRow, Postgres, QueryBuilder};
 use std::collections::HashSet;
 
+const ALLOWED_ABSENCE_KINDS: &[&str] = &[
+    "vacation",
+    "sick",
+    "training",
+    "special_leave",
+    "unpaid",
+    "general_absence",
+];
+
 #[derive(FromRow, Serialize, Clone)]
 pub struct Absence {
     pub id: i64,
@@ -211,39 +220,55 @@ pub struct NewAbsence {
     pub comment: Option<String>,
 }
 
+struct NormalizedAbsence<'a> {
+    kind: &'a str,
+    half_day: bool,
+}
+
+fn normalize_absence(input: &NewAbsence) -> AppResult<NormalizedAbsence<'_>> {
+    if !ALLOWED_ABSENCE_KINDS.contains(&input.kind.as_str()) {
+        return Err(AppError::BadRequest("Invalid kind".into()));
+    }
+    if let Some(comment) = &input.comment {
+        if comment.len() > 2000 {
+            return Err(AppError::BadRequest(
+                "Comment too long (max 2000).".into(),
+            ));
+        }
+    }
+    if input.end_date < input.start_date {
+        return Err(AppError::BadRequest(
+            "end_date must be >= start_date.".into(),
+        ));
+    }
+    if (input.end_date - input.start_date).num_days() > 366 {
+        return Err(AppError::BadRequest(
+            "Absence range exceeds one year.".into(),
+        ));
+    }
+
+    Ok(NormalizedAbsence {
+        kind: &input.kind,
+        half_day: input.half_day.unwrap_or(false)
+            && input.kind == "vacation"
+            && input.start_date == input.end_date,
+    })
+}
+
+fn status_for_kind(kind: &str) -> &'static str {
+    if kind == "sick" {
+        "approved"
+    } else {
+        "requested"
+    }
+}
+
 pub async fn create(
     State(s): State<AppState>,
     u: User,
     Json(b): Json<NewAbsence>,
 ) -> AppResult<Json<Absence>> {
-    if ![
-        "vacation",
-        "sick",
-        "training",
-        "special_leave",
-        "unpaid",
-        "general_absence",
-    ]
-    .contains(&b.kind.as_str())
-    {
-        return Err(AppError::BadRequest("Invalid kind".into()));
-    }
-    if let Some(c) = &b.comment {
-        if c.len() > 2000 {
-            return Err(AppError::BadRequest("Comment too long (max 2000).".into()));
-        }
-    }
-    // Reject absurdly long ranges to bound work in `workdays_total`.
-    if (b.end_date - b.start_date).num_days() > 366 {
-        return Err(AppError::BadRequest(
-            "Absence range exceeds one year.".into(),
-        ));
-    }
-    if b.end_date < b.start_date {
-        return Err(AppError::BadRequest(
-            "end_date must be >= start_date.".into(),
-        ));
-    }
+    let normalized = normalize_absence(&b)?;
     let overlap: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM absences WHERE user_id=$1 AND status IN ('requested','approved') AND end_date >= $2 AND start_date <= $3"
     ).bind(u.id).bind(b.start_date).bind(b.end_date).fetch_one(&s.pool).await?;
@@ -251,14 +276,9 @@ pub async fn create(
         return Err(AppError::Conflict("Overlap with existing absence.".into()));
     }
 
-    let half = b.half_day.unwrap_or(false) && b.kind == "vacation" && b.start_date == b.end_date;
-    let status = if b.kind == "sick" {
-        "approved"
-    } else {
-        "requested"
-    };
+    let status = status_for_kind(normalized.kind);
     let id: i64 = sqlx::query_scalar("INSERT INTO absences(user_id, kind, start_date, end_date, half_day, comment, status) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id")
-        .bind(u.id).bind(&b.kind).bind(b.start_date).bind(b.end_date).bind(half).bind(&b.comment).bind(status)
+        .bind(u.id).bind(normalized.kind).bind(b.start_date).bind(b.end_date).bind(normalized.half_day).bind(&b.comment).bind(status)
         .fetch_one(&s.pool).await?;
     let a: Absence = sqlx::query_as("SELECT * FROM absences WHERE id=$1")
         .bind(id)
@@ -283,6 +303,7 @@ pub async fn update(
     Path(id): Path<i64>,
     Json(b): Json<NewAbsence>,
 ) -> AppResult<Json<Absence>> {
+    let normalized = normalize_absence(&b)?;
     let prev: Absence = sqlx::query_as("SELECT * FROM absences WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
@@ -294,9 +315,9 @@ pub async fn update(
     if !allowed {
         return Err(AppError::BadRequest("Cannot edit.".into()));
     }
-    if b.end_date < b.start_date {
+    if prev.status == "approved" && b.kind != prev.kind {
         return Err(AppError::BadRequest(
-            "end_date must be >= start_date.".into(),
+            "Approved absences cannot change type.".into(),
         ));
     }
     // Re-check overlap with *other* absences of the same user.
@@ -308,13 +329,28 @@ pub async fn update(
     if overlap > 0 {
         return Err(AppError::Conflict("Overlap with existing absence.".into()));
     }
+    let (status, reviewed_by, reviewed_at, rejection_reason) = if prev.status == "requested" {
+        (status_for_kind(normalized.kind), None, None, None)
+    } else {
+        (
+            prev.status.as_str(),
+            prev.reviewed_by,
+            prev.reviewed_at,
+            prev.rejection_reason.clone(),
+        )
+    };
     sqlx::query(
-        "UPDATE absences SET start_date=$1, end_date=$2, half_day=$3, comment=$4 WHERE id=$5",
+        "UPDATE absences SET kind=$1, start_date=$2, end_date=$3, half_day=$4, comment=$5, status=$6, reviewed_by=$7, reviewed_at=$8, rejection_reason=$9 WHERE id=$10",
     )
+    .bind(normalized.kind)
     .bind(b.start_date)
     .bind(b.end_date)
-    .bind(b.half_day.unwrap_or(false))
+    .bind(normalized.half_day)
     .bind(&b.comment)
+    .bind(status)
+    .bind(reviewed_by)
+    .bind(reviewed_at)
+    .bind(rejection_reason)
     .bind(id)
     .execute(&s.pool)
     .await?;

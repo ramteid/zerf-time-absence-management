@@ -616,6 +616,49 @@ async fn full_integration_suite() {
             "half_day forced to false (only valid for vacation)"
         );
 
+        // d2) Pending absences can change type, and valid half-days persist.
+        let editable_day = date_offset(100);
+        let (st, body) = emp
+            .post(
+                "/api/v1/absences",
+                &json!({"kind":"general_absence","start_date": &editable_day,"end_date": &editable_day}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "create editable pending absence");
+        let editable_absence = id(&body);
+
+        let (st, body) = emp
+            .put(
+                &format!("/api/v1/absences/{}", editable_absence),
+                &json!({"kind":"vacation","start_date": &editable_day,"end_date": &editable_day,"half_day":true,"comment":"converted to vacation"}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "edit pending absence kind");
+        assert_eq!(body["kind"], "vacation", "kind updated on edit");
+        assert_eq!(body["half_day"], true, "valid vacation half_day persisted");
+
+        let (st, _) = emp.delete(&format!("/api/v1/absences/{}", editable_absence)).await;
+        assert_eq!(st, StatusCode::OK, "cancel edited pending absence");
+
+        // d3) Approved sick absences may be adjusted, but not converted.
+        let sick_edit_day = date_offset(110);
+        let (st, body) = emp
+            .post(
+                "/api/v1/absences",
+                &json!({"kind":"sick","start_date": &sick_edit_day,"end_date": &sick_edit_day}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "create editable sick absence");
+        let editable_sick = id(&body);
+
+        let (st, _) = emp
+            .put(
+                &format!("/api/v1/absences/{}", editable_sick),
+                &json!({"kind":"vacation","start_date": &sick_edit_day,"end_date": &sick_edit_day,"half_day":true}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "approved sick kind change rejected");
+
         // e) Unauthenticated callers cannot create absences.
         let anon = app.client();
         let (st, _) = anon

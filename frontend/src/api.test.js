@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { get } from "svelte/store";
 import { api, csrfToken } from "./api.js";
 
 describe("api", () => {

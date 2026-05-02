@@ -44,6 +44,13 @@
     );
   }
 
+  function canEdit(absence) {
+    return (
+      absence.status === "requested" ||
+      (absence.kind === "sick" && absence.status === "approved")
+    );
+  }
+
   async function cancel(id) {
     const reason = await confirmDialog(
       $t("Cancel?"),
@@ -131,7 +138,7 @@
               ></td
             >
             <td style="text-align:right">
-              {#if a.status === "requested" || a.status === "draft"}
+              {#if a.status === "requested"}
                 <button
                   class="kz-btn kz-btn-ghost kz-btn-sm kz-btn-danger"
                   on:click={() => cancel(a.id)}
@@ -139,7 +146,7 @@
                   {$t("Cancel")}
                 </button>
               {/if}
-              {#if a.status === "draft"}
+              {#if canEdit(a)}
                 <button
                   class="kz-btn kz-btn-ghost kz-btn-sm"
                   on:click={() => (showDialog = a)}
