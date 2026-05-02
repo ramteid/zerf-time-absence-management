@@ -58,21 +58,21 @@
     <div class="stat-cards">
       <div class="kz-card stat-card">
         <div class="stat-card-label">{$t("Total Days")}</div>
-        <div class="stat-card-value tab-num">{balance.total_days}</div>
+        <div class="stat-card-value tab-num">{balance.annual_entitlement}</div>
       </div>
       <div class="kz-card stat-card">
         <div class="stat-card-label">{$t("Used")}</div>
-        <div class="stat-card-value tab-num">{balance.used_days}</div>
+        <div class="stat-card-value tab-num">{balance.already_taken}</div>
       </div>
       <div class="kz-card stat-card">
         <div class="stat-card-label">{$t("Pending")}</div>
-        <div class="stat-card-value tab-num">{balance.pending_days || 0}</div>
+        <div class="stat-card-value tab-num">{balance.requested || 0}</div>
         <div class="stat-card-sub">{$t("awaiting approval")}</div>
       </div>
       <div class="kz-card stat-card">
         <div class="stat-card-label">{$t("Remaining")}</div>
         <div class="stat-card-value accent tab-num">
-          {balance.remaining_days}
+          {balance.available}
         </div>
       </div>
     </div>
