@@ -8,21 +8,21 @@
   export let entry;
   export let onClose;
   let dlg;
-  let description = "";
+  let reason = "";
   let error = "";
 
   onMount(() => dlg.showModal());
 
   async function submit() {
     error = "";
-    if (!description.trim()) {
+    if (!reason.trim()) {
       error = $t("Reason required");
       return;
     }
     try {
       await api("/change-requests", {
         method: "POST",
-        body: { time_entry_id: entry.id, description },
+        body: { time_entry_id: entry.id, reason },
       });
       toast($t("Change request submitted."), "ok");
       dlg.close();
@@ -56,7 +56,7 @@
         id="change-request-reason"
         class="kz-textarea"
         rows="4"
-        bind:value={description}
+        bind:value={reason}
         required
       ></textarea>
     </div>

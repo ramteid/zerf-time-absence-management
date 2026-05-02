@@ -1,6 +1,7 @@
 <script>
   import { api } from "../api.js";
   import { currentUser, toast } from "../stores.js";
+  import { countWorkdays, holidayDateSet } from "../apiMappers.js";
   import { t, absenceKindLabel, statusLabel } from "../i18n.js";
   import { fmtDate } from "../format.js";
   import Icon from "../Icons.svelte";
@@ -9,6 +10,7 @@
 
   let absences = [];
   let balance = null;
+  let holidayDates = new Set();
   let showDialog = null;
 
   async function load() {
@@ -16,8 +18,27 @@
     try {
       balance = await api("/leave-balance/" + $currentUser.id);
     } catch {}
+
+    const years = [...new Set(
+      absences.flatMap((absence) => [
+        new Date(absence.start_date).getFullYear(),
+        new Date(absence.end_date).getFullYear(),
+      ]),
+    )];
+    holidayDates = holidayDateSet(
+      (await Promise.all(years.map((year) => api(`/holidays?year=${year}`)))).flat(),
+    );
   }
   load();
+
+  function absenceDays(absence) {
+    return countWorkdays(
+      absence.start_date,
+      absence.end_date,
+      absence.half_day,
+      holidayDates,
+    );
+  }
 
   async function cancel(id) {
     const reason = await confirmDialog(
@@ -99,7 +120,7 @@
             <td style="font-weight:500">{absenceKindLabel(a.kind)}</td>
             <td class="tab-num">{fmtDate(a.start_date)}</td>
             <td class="tab-num">{fmtDate(a.end_date)}</td>
-            <td class="tab-num">{a.days || "–"}</td>
+            <td class="tab-num">{absenceDays(a) || "–"}</td>
             <td
               ><span class="kz-chip kz-chip-{a.status}"
                 >{statusLabel(a.status)}</span

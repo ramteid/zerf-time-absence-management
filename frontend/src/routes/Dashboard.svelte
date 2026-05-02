@@ -296,7 +296,7 @@
               <td
                 style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
               >
-                {cr.description || cr.reason || "–"}
+                {cr.reason || "–"}
               </td>
               <td style="text-align:right">
                 <div style="display:flex;gap:4px;justify-content:flex-end">

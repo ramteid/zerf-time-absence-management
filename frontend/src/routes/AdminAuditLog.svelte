@@ -4,11 +4,18 @@
   import { fmtDateTime } from "../format.js";
 
   let log = [];
+  let usersById = new Map();
 
   async function load() {
-    log = await api("/audit-log");
+    const [entries, users] = await Promise.all([api("/audit-log"), api("/users")]);
+    log = entries;
+    usersById = new Map(users.map((user) => [user.id, user.email]));
   }
   load();
+
+  function userLabel(userId) {
+    return usersById.get(userId) || `#${userId}`;
+  }
 </script>
 
 <div class="top-bar">
@@ -33,9 +40,9 @@
         {#each log as e}
           <tr>
             <td class="tab-num" style="white-space:nowrap"
-              >{fmtDateTime(e.created_at)}</td
+              >{fmtDateTime(e.occurred_at)}</td
             >
-            <td>{e.user_email || "–"}</td>
+            <td>{userLabel(e.user_id)}</td>
             <td>{e.table_name}</td>
             <td class="tab-num">{e.record_id}</td>
             <td>{e.action}</td>

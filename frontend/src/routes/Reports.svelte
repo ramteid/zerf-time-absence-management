@@ -3,6 +3,7 @@
   import { currentUser } from "../stores.js";
   import { t, absenceKindLabel } from "../i18n.js";
   import { isoDate, minToHM } from "../format.js";
+  import { normalizeMonthReport } from "../apiMappers.js";
   import Icon from "../Icons.svelte";
 
   const today = new Date();
@@ -28,7 +29,9 @@
   init();
 
   async function showMonth() {
-    monthReport = await api(`/reports/month?user_id=${userId}&month=${month}`);
+    monthReport = normalizeMonthReport(
+      await api(`/reports/month?user_id=${userId}&month=${month}`),
+    );
   }
   async function showTeam() {
     teamReport = await api(`/reports/team?month=${teamMonth}`);
@@ -212,7 +215,7 @@
               {#each teamReport as r}
                 {@const diff = r.actual_min - r.target_min}
                 <tr>
-                  <td style="font-weight:500">{r.first_name} {r.last_name}</td>
+                  <td style="font-weight:500">{r.name}</td>
                   <td
                     class="tab-num"
                     style="text-align:right;color:var(--text-tertiary)"
@@ -285,7 +288,7 @@
                   <span style="display:inline-flex;align-items:center;gap:6px">
                     <span class="cat-dot" style="background:{c.color || '#999'}"
                     ></span>
-                    {c.category_name}
+                    {c.category}
                   </span>
                 </td>
                 <td class="tab-num" style="text-align:right"
