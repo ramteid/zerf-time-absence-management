@@ -25,6 +25,10 @@
 
   async function save() {
     error = "";
+    if (start_date > end_date) {
+      error = $t("From cannot be after To.");
+      return;
+    }
     try {
       const body = {
         kind,
@@ -76,6 +80,7 @@
           type="date"
           lang={$language}
           bind:value={start_date}
+          max={end_date}
           required
         />
       </div>
@@ -87,6 +92,7 @@
           type="date"
           lang={$language}
           bind:value={end_date}
+          min={start_date}
           required
         />
       </div>

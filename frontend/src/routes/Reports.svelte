@@ -37,6 +37,7 @@
     teamReport = await api(`/reports/team?month=${teamMonth}`);
   }
   async function showCat() {
+    if (catFrom > catTo) return;
     const params = new URLSearchParams({ from: catFrom, to: catTo });
     if ($currentUser.role === "employee")
       params.set("user_id", $currentUser.id);
@@ -259,6 +260,7 @@
           type="date"
           lang={$language}
           bind:value={catFrom}
+          max={catTo}
         />
       </div>
       <div>
@@ -269,6 +271,7 @@
           type="date"
           lang={$language}
           bind:value={catTo}
+          min={catFrom}
         />
       </div>
     </div>

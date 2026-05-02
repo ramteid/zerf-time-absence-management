@@ -59,41 +59,58 @@ selector in the user dialog is mandatory and the schema enforces this.
 
 ## Install
 
-You need a Linux host with Docker, a domain name pointing at it, and ports
-80/443 open.
+**Prerequisites:** a Linux host with Docker, a domain name pointing at it,
+and ports 80 and 443 open.
+
+**Step 1 — Clone and copy the config template**
 
 ```bash
 git clone <repo-url> kitazeit && cd kitazeit
-cp .env.example .env
-chmod 600 .env
-$EDITOR .env                       # set domain, admin email, generate secret
-docker compose up -d
-docker compose logs app
+cp .env.example .env && chmod 600 .env
 ```
 
-The initial admin credentials are the email set in `KITAZEIT_ADMIN_EMAIL` (defaults to `admin@example.com`) and the password `admin`. Sign in at
-`https://<your-domain>` — you will be required to change it on first login.
+**Step 2 — Generate secrets** (copy-paste as-is; the shell fills in random values)
+
+```bash
+sed -i "s|KITAZEIT_SESSION_SECRET=.*|KITAZEIT_SESSION_SECRET=$(openssl rand -hex 32)|" .env
+sed -i "s|KITAZEIT_POSTGRES_PASSWORD=.*|KITAZEIT_POSTGRES_PASSWORD=$(openssl rand -hex 32)|" .env
+```
+
+**Step 3 — Set your domain and admin e-mail**
+
+Open `.env` and replace `example.com` with your domain and
+`admin@example.com` with your e-mail — those are the only two lines you need
+to touch manually.
+
+```bash
+$EDITOR .env
+```
+
+**Step 4 — Start**
+
+```bash
+docker compose up -d
+docker compose logs -f app   # watch until "listening on …"
+```
+
+Sign in at `https://<your-domain>` with your admin e-mail and password `admin`.
+You will be prompted to change the password on first login.
 
 ### Configuration
 
-Everything lives in `.env`. The example file documents every variable; the
-ones you must set are:
+All settings live in `.env`; every variable is documented there. Summary of
+what matters:
 
-```env
-KITAZEIT_DOMAIN=example.de
-KITAZEIT_SESSION_SECRET=$(openssl rand -hex 32)
-KITAZEIT_POSTGRES_PASSWORD=$(openssl rand -hex 32)
-KITAZEIT_ADMIN_EMAIL=admin@example.de
-```
-
-Optional SMTP variables (`KITAZEIT_SMTP_HOST`, `KITAZEIT_SMTP_PORT`,
-`KITAZEIT_SMTP_USERNAME`, `KITAZEIT_SMTP_PASSWORD`, `KITAZEIT_SMTP_FROM`,
-`KITAZEIT_SMTP_ENCRYPTION`) enable outbound email for notifications. When
-unset, the in-app notification center keeps working unchanged; only the
-email side-channel is disabled.
+| Variable | Required | Notes |
+|---|---|---|
+| `KITAZEIT_DOMAIN` | yes | Your public hostname |
+| `KITAZEIT_ADMIN_EMAIL` | yes | Bootstrap admin account |
+| `KITAZEIT_SESSION_SECRET` | yes | `openssl rand -hex 32` |
+| `KITAZEIT_POSTGRES_PASSWORD` | yes | `openssl rand -hex 32` |
+| `KITAZEIT_SMTP_HOST` | no | Leave unset to disable e-mail |
 
 Caddy obtains a Let's Encrypt certificate automatically on first start. The
-bundled PostgreSQL service stays on an internal Docker network and is not
+bundled PostgreSQL service stays on an internal Docker network and is never
 published to the internet.
 
 ### Backups

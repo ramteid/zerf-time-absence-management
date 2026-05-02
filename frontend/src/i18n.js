@@ -317,6 +317,8 @@ const TRANSLATIONS = {
     "Last 6 months": "Letzte 6 Monate",
     "Last year": "Letztes Jahr",
     "Custom range": "Benutzerdefinierter Zeitraum",
+    "From cannot be after To.": "Von kann nicht nach Bis liegen.",
+    "Start cannot be after End.": "Start kann nicht nach Ende liegen.",
   },
 };
 

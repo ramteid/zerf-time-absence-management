@@ -22,6 +22,10 @@
 
   async function save() {
     error = "";
+    if (start_time >= end_time) {
+      error = $t("Start cannot be after End.");
+      return;
+    }
     try {
       const body = {
         entry_date,
@@ -90,6 +94,7 @@
           class="kz-input"
           type="time"
           bind:value={start_time}
+          max={end_time}
           required
         />
       </div>
@@ -100,6 +105,7 @@
           class="kz-input"
           type="time"
           bind:value={end_time}
+          min={start_time}
           required
         />
       </div>
