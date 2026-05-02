@@ -140,10 +140,19 @@ jobs:
             -e ADMIN_EMAIL=admin@test.local \
             -e ADMIN_PASSWORD=TestPassword123! \
             "$IMG"
-          sleep 3
-          curl -sf http://localhost:${KITAZEIT_TEST_PORT}/api/v1/settings/public | grep -q ui_language
-          echo "Smoke test passed"
+          # Wait for the container to become ready (up to 30 s)
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:${KITAZEIT_TEST_PORT}/api/v1/settings/public | grep -q ui_language; then
+              echo "Smoke test passed (container ready after ${i}s)"
+              docker stop smoke && docker rm smoke
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Smoke test failed — container not ready after 30 s"
+          docker logs smoke
           docker stop smoke && docker rm smoke
+          exit 1
 
   trivy:
     name: Trivy container scan
