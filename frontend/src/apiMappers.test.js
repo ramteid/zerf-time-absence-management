@@ -122,23 +122,58 @@ describe("normalizeMonthReport", () => {
   it("groups consecutive same-kind absences into spans", () => {
     const report = {
       days: [
-        { date: "2026-05-04", weekday: "Monday", holiday: null, absence: "vacation", entries: [] },
-        { date: "2026-05-05", weekday: "Tuesday", holiday: null, absence: "vacation", entries: [] },
-        { date: "2026-05-06", weekday: "Wednesday", holiday: null, absence: null, entries: [] },
+        {
+          date: "2026-05-04",
+          weekday: "Monday",
+          holiday: null,
+          absence: "vacation",
+          entries: [],
+        },
+        {
+          date: "2026-05-05",
+          weekday: "Tuesday",
+          holiday: null,
+          absence: "vacation",
+          entries: [],
+        },
+        {
+          date: "2026-05-06",
+          weekday: "Wednesday",
+          holiday: null,
+          absence: null,
+          entries: [],
+        },
       ],
     };
 
     const result = normalizeMonthReport(report);
     expect(result.absences).toEqual([
-      { kind: "vacation", start_date: "2026-05-04", end_date: "2026-05-05", days: 2 },
+      {
+        kind: "vacation",
+        start_date: "2026-05-04",
+        end_date: "2026-05-05",
+        days: 2,
+      },
     ]);
   });
 
   it("splits different absence kinds into separate spans", () => {
     const report = {
       days: [
-        { date: "2026-05-04", weekday: "Monday", holiday: null, absence: "vacation", entries: [] },
-        { date: "2026-05-05", weekday: "Tuesday", holiday: null, absence: "sick", entries: [] },
+        {
+          date: "2026-05-04",
+          weekday: "Monday",
+          holiday: null,
+          absence: "vacation",
+          entries: [],
+        },
+        {
+          date: "2026-05-05",
+          weekday: "Tuesday",
+          holiday: null,
+          absence: "sick",
+          entries: [],
+        },
       ],
     };
 
@@ -151,16 +186,45 @@ describe("normalizeMonthReport", () => {
   it("does not count weekends or holidays toward absence days", () => {
     const report = {
       days: [
-        { date: "2026-05-01", weekday: "Friday", holiday: "Labour Day", absence: "vacation", entries: [] },
-        { date: "2026-05-02", weekday: "Saturday", holiday: null, absence: "vacation", entries: [] },
-        { date: "2026-05-03", weekday: "Sunday", holiday: null, absence: "vacation", entries: [] },
-        { date: "2026-05-04", weekday: "Monday", holiday: null, absence: "vacation", entries: [] },
+        {
+          date: "2026-05-01",
+          weekday: "Friday",
+          holiday: "Labour Day",
+          absence: "vacation",
+          entries: [],
+        },
+        {
+          date: "2026-05-02",
+          weekday: "Saturday",
+          holiday: null,
+          absence: "vacation",
+          entries: [],
+        },
+        {
+          date: "2026-05-03",
+          weekday: "Sunday",
+          holiday: null,
+          absence: "vacation",
+          entries: [],
+        },
+        {
+          date: "2026-05-04",
+          weekday: "Monday",
+          holiday: null,
+          absence: "vacation",
+          entries: [],
+        },
       ],
     };
 
     const result = normalizeMonthReport(report);
     expect(result.absences).toEqual([
-      { kind: "vacation", start_date: "2026-05-01", end_date: "2026-05-04", days: 1 },
+      {
+        kind: "vacation",
+        start_date: "2026-05-01",
+        end_date: "2026-05-04",
+        days: 1,
+      },
     ]);
   });
 
@@ -173,13 +237,24 @@ describe("normalizeMonthReport", () => {
   it("flushes trailing absence at end of days", () => {
     const report = {
       days: [
-        { date: "2026-05-04", weekday: "Monday", holiday: null, absence: "sick", entries: [] },
+        {
+          date: "2026-05-04",
+          weekday: "Monday",
+          holiday: null,
+          absence: "sick",
+          entries: [],
+        },
       ],
     };
 
     const result = normalizeMonthReport(report);
     expect(result.absences).toEqual([
-      { kind: "sick", start_date: "2026-05-04", end_date: "2026-05-04", days: 1 },
+      {
+        kind: "sick",
+        start_date: "2026-05-04",
+        end_date: "2026-05-04",
+        days: 1,
+      },
     ]);
   });
 });

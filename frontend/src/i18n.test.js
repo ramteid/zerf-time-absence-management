@@ -36,9 +36,9 @@ describe("translate", () => {
   });
 
   it("interpolates multiple parameters", () => {
-    expect(
-      translate("de", "Reason: {reason}", { reason: "Arzttermin" }),
-    ).toBe("Begründung: Arzttermin");
+    expect(translate("de", "Reason: {reason}", { reason: "Arzttermin" })).toBe(
+      "Begründung: Arzttermin",
+    );
   });
 
   it("keeps placeholder when param is missing", () => {

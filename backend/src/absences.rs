@@ -231,9 +231,7 @@ fn normalize_absence(input: &NewAbsence) -> AppResult<NormalizedAbsence<'_>> {
     }
     if let Some(comment) = &input.comment {
         if comment.len() > 2000 {
-            return Err(AppError::BadRequest(
-                "Comment too long (max 2000).".into(),
-            ));
+            return Err(AppError::BadRequest("Comment too long (max 2000).".into()));
         }
     }
     if input.end_date < input.start_date {

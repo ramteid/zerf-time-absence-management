@@ -637,7 +637,9 @@ async fn full_integration_suite() {
         assert_eq!(body["kind"], "vacation", "kind updated on edit");
         assert_eq!(body["half_day"], true, "valid vacation half_day persisted");
 
-        let (st, _) = emp.delete(&format!("/api/v1/absences/{}", editable_absence)).await;
+        let (st, _) = emp
+            .delete(&format!("/api/v1/absences/{}", editable_absence))
+            .await;
         assert_eq!(st, StatusCode::OK, "cancel edited pending absence");
 
         // d3) Approved sick absences may be adjusted, but not converted.
@@ -657,7 +659,11 @@ async fn full_integration_suite() {
                 &json!({"kind":"vacation","start_date": &sick_edit_day,"end_date": &sick_edit_day,"half_day":true}),
             )
             .await;
-        assert_eq!(st, StatusCode::BAD_REQUEST, "approved sick kind change rejected");
+        assert_eq!(
+            st,
+            StatusCode::BAD_REQUEST,
+            "approved sick kind change rejected"
+        );
 
         // e) Unauthenticated callers cannot create absences.
         let anon = app.client();

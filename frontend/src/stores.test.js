@@ -1,6 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { get } from "svelte/store";
-import { currentUser, categories, settings, path, go, toasts, toast } from "./stores.js";
+import {
+  currentUser,
+  categories,
+  settings,
+  path,
+  go,
+  toasts,
+  toast,
+} from "./stores.js";
 
 describe("store defaults", () => {
   it("currentUser defaults to null", () => {
