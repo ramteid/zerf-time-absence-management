@@ -877,6 +877,33 @@ dialog footer {
   background: rgba(255, 255, 255, 0.12);
 }
 
+/* ── Notification panel ── */
+.kz-notif-panel {
+  position: fixed;
+  top: 60px;
+  right: 16px;
+  width: min(320px, calc(100vw - 32px));
+  max-height: 480px;
+  overflow-y: auto;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-lg);
+  z-index: 300;
+}
+
+@media (max-width: 768px) {
+  .kz-notif-panel {
+    top: auto;
+    bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+    right: 12px;
+    left: 12px;
+    width: auto;
+    max-height: 60vh;
+    border-radius: var(--radius-lg);
+  }
+}
+
 /* ── Mobile bottom navigation ── */
 .mobile-bottom-nav {
   display: none;

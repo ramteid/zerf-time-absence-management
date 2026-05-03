@@ -32,7 +32,7 @@
       });
       toast($t("Settings saved."), "ok");
     } catch (e) {
-      toast(e.message || $t("Error"), "err");
+      toast(e.message || $t("Error"), "error");
       // Revert visual state on failure.
       row.allow_reopen_without_approval = !row.allow_reopen_without_approval;
       rows = rows;

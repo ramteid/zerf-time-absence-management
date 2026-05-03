@@ -80,7 +80,7 @@
 <div class="content-area" style="max-width:600px">
   <!-- Add form -->
   <div class="kz-card" style="padding:16px;margin-bottom:16px">
-    <div style="display:flex;gap:12px;align-items:flex-end">
+    <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
       <div style="flex:1">
         <label class="kz-label" for="holiday-date">{$t("Date")}</label>
         <input

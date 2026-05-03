@@ -114,7 +114,7 @@
       notifications.update((arr) => arr.map((n) => ({ ...n, is_read: true })));
       notificationsUnread.set(0);
     } catch (e) {
-      toast(e.message || $t("Error"), "err");
+      toast(e.message || $t("Error"), "error");
     }
   }
   async function clearAll() {
@@ -123,12 +123,12 @@
       notifications.set([]);
       notificationsUnread.set(0);
     } catch (e) {
-      toast(e.message || $t("Error"), "err");
+      toast(e.message || $t("Error"), "error");
     }
   }
   function onDocClick(e) {
     if (!bellOpen) return;
-    if (!e.target.closest(".kz-bell-wrapper")) bellOpen = false;
+    if (!e.target.closest(".kz-bell-wrapper") && !e.target.closest(".kz-notif-panel")) bellOpen = false;
   }
 
   $: pathname = (() => {
@@ -223,76 +223,6 @@
             </span>
           {/if}
         </button>
-        {#if bellOpen}
-          <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
-          <div
-            style="position:absolute;top:28px;right:0;width:min(320px, calc(100vw - 24px));max-height:480px;overflow:auto;background:var(--bg-surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.18);z-index:200"
-            on:click|stopPropagation
-            on:keydown={() => {}}
-            role="dialog"
-            tabindex="-1"
-          >
-            <div
-              style="padding:8px 12px;display:flex;align-items:center;gap:6px;border-bottom:1px solid var(--border)"
-            >
-              <strong style="flex:1;font-size:13px"
-                >{$t("Notifications")}</strong
-              >
-              <button
-                class="kz-btn kz-btn-sm kz-btn-ghost"
-                on:click={markAllRead}
-                disabled={$notificationsUnread === 0}
-                title={$t("Mark all as read")}
-                style="font-size:11px"
-              >
-                <Icon name="Check" size={12} />
-              </button>
-              <button
-                class="kz-btn kz-btn-sm kz-btn-ghost"
-                on:click={clearAll}
-                disabled={$notifications.length === 0}
-                title={$t("Clear all")}
-                style="font-size:11px"
-              >
-                <Icon name="X" size={12} />
-              </button>
-            </div>
-            {#if $notifications.length === 0}
-              <div
-                style="padding:24px;text-align:center;color:var(--text-tertiary);font-size:12px"
-              >
-                {$t("No notifications.")}
-              </div>
-            {:else}
-              {#each $notifications as n}
-                <div
-                  on:click={() => markRead(n)}
-                  on:keydown={() => {}}
-                  role="button"
-                  tabindex="0"
-                  style="padding:10px 12px;border-bottom:1px solid var(--border);cursor:pointer;background:{n.is_read
-                    ? 'transparent'
-                    : 'var(--bg-elevated, rgba(0,0,0,.03))'}"
-                >
-                  <div style="font-size:12.5px;font-weight:500">{n.title}</div>
-                  {#if n.body}
-                    <div
-                      style="font-size:11.5px;color:var(--text-secondary);margin-top:2px;line-height:1.4"
-                    >
-                      {n.body}
-                    </div>
-                  {/if}
-                  <div
-                    class="tab-num"
-                    style="font-size:10.5px;color:var(--text-tertiary);margin-top:4px"
-                  >
-                    {fmtDate(n.created_at)}
-                  </div>
-                </div>
-              {/each}
-            {/if}
-          </div>
-        {/if}
       </div>
       <button
         class="kz-btn-icon-sm"
@@ -458,6 +388,83 @@
           </button>
         </div>
       </div>
+    </div>
+  {/if}
+
+  <!-- Notification panel: rendered at app-root level so it's visible on mobile too -->
+  {#if bellOpen}
+    <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+    <div
+      class="kz-notif-panel"
+      on:click|stopPropagation
+      on:keydown={() => {}}
+      role="dialog"
+      tabindex="-1"
+    >
+      <div
+        style="padding:8px 12px;display:flex;align-items:center;gap:6px;border-bottom:1px solid var(--border)"
+      >
+        <strong style="flex:1;font-size:13px">{$t("Notifications")}</strong>
+        <button
+          class="kz-btn kz-btn-sm kz-btn-ghost"
+          on:click={markAllRead}
+          disabled={$notificationsUnread === 0}
+          title={$t("Mark all as read")}
+          style="font-size:11px"
+        >
+          <Icon name="Check" size={12} />
+        </button>
+        <button
+          class="kz-btn kz-btn-sm kz-btn-ghost"
+          on:click={clearAll}
+          disabled={$notifications.length === 0}
+          title={$t("Clear all")}
+          style="font-size:11px"
+        >
+          <Icon name="X" size={12} />
+        </button>
+        <button
+          class="kz-btn kz-btn-sm kz-btn-ghost"
+          on:click={() => (bellOpen = false)}
+          style="font-size:11px"
+        >
+          <Icon name="X" size={14} />
+        </button>
+      </div>
+      {#if $notifications.length === 0}
+        <div
+          style="padding:24px;text-align:center;color:var(--text-tertiary);font-size:12px"
+        >
+          {$t("No notifications.")}
+        </div>
+      {:else}
+        {#each $notifications as n}
+          <div
+            on:click={() => markRead(n)}
+            on:keydown={() => {}}
+            role="button"
+            tabindex="0"
+            style="padding:10px 12px;border-bottom:1px solid var(--border);cursor:pointer;background:{n.is_read
+              ? 'transparent'
+              : 'var(--bg-elevated, rgba(0,0,0,.03))'}"
+          >
+            <div style="font-size:12.5px;font-weight:500">{n.title}</div>
+            {#if n.body}
+              <div
+                style="font-size:11.5px;color:var(--text-secondary);margin-top:2px;line-height:1.4"
+              >
+                {n.body}
+              </div>
+            {/if}
+            <div
+              class="tab-num"
+              style="font-size:10.5px;color:var(--text-tertiary);margin-top:4px"
+            >
+              {fmtDate(n.created_at)}
+            </div>
+          </div>
+        {/each}
+      {/if}
     </div>
   {/if}
 </div>

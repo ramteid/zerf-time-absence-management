@@ -118,7 +118,22 @@
     hoverIdx = Math.round(Math.max(0, Math.min(data.length - 1, raw)));
   }
 
-  function onMouseLeave() {
+  function onTouchMove(e) {
+    if (!data.length) return;
+    e.preventDefault();
+    const touch = e.touches[0];
+    const rect = e.currentTarget.getBoundingClientRect();
+    const svgX = touch.clientX - rect.left;
+    const plotX = svgX - ML;
+    if (plotX < 0 || plotX > PW) {
+      hoverIdx = null;
+      return;
+    }
+    const raw = data.length > 1 ? (plotX / PW) * (data.length - 1) : 0;
+    hoverIdx = Math.round(Math.max(0, Math.min(data.length - 1, raw)));
+  }
+
+  function onTouchEnd() {
     hoverIdx = null;
   }
 
@@ -199,6 +214,8 @@
       style="display:block;overflow:visible"
       on:mousemove={onMouseMove}
       on:mouseleave={onMouseLeave}
+      on:touchmove={onTouchMove}
+      on:touchend={onTouchEnd}
     >
       <defs>
         <!-- clip above zero-line → positive area (green) -->

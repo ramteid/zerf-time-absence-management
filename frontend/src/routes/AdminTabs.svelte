@@ -24,7 +24,7 @@
     <a
       href={tab.href}
       data-link="1"
-      style="padding:10px 14px;font-size:13px;font-weight:500;color:{pathname ===
+      style="padding:10px 14px;font-size:13px;font-weight:500;white-space:nowrap;color:{pathname ===
       tab.href
         ? 'var(--accent)'
         : 'var(--text-secondary)'};border-bottom:2px solid {pathname ===

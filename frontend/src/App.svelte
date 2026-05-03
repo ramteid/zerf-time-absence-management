@@ -77,8 +77,7 @@
     categories.set([]);
     currentUser.set(false);
     go("/", false);
-    toast($t("Your session has expired. Please sign in again."), "err");
-    // Attempt a best-effort server-side logout to clear the stale cookie.
+    toast($t("Your session has expired. Please sign in again."), "error"); to clear the stale cookie.
     fetch("/api/v1/auth/logout", { method: "POST", credentials: "same-origin" }).catch(() => {});
     // Notify other tabs so they also return to login immediately.
     broadcastSession("session-expired");
@@ -179,7 +178,7 @@
           currentUser.set(false);
           go("/", false);
           if (msg.type === "session-expired") {
-            toast($t("Your session has expired. Please sign in again."), "err");
+            toast($t("Your session has expired. Please sign in again."), "error");
           }
         }
       }

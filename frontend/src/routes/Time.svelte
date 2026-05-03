@@ -110,7 +110,7 @@
       }
       load();
     } catch (e) {
-      toast(e.message || $t("Error"), "err");
+      toast(e.message || $t("Error"), "error");
     }
   }
 
