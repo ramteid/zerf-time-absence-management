@@ -118,7 +118,7 @@
       </div>
 
       {#if monthReport.entries?.length}
-        <div class="kz-card" style="overflow:hidden;margin-top:12px">
+        <div class="kz-card" style="overflow-x:auto;margin-top:12px">
           <table class="kz-table">
             <thead>
               <tr>
@@ -150,7 +150,7 @@
       {/if}
 
       {#if monthReport.absences?.length}
-        <div class="kz-card" style="overflow:hidden;margin-top:12px">
+        <div class="kz-card" style="overflow-x:auto;margin-top:12px">
           <div class="card-header">
             <span class="card-header-title">{$t("Absences")}</span>
           </div>
@@ -204,7 +204,7 @@
       </div>
 
       {#if teamReport}
-        <div class="kz-card" style="overflow:hidden">
+        <div class="kz-card" style="overflow-x:auto">
           <table class="kz-table">
             <thead>
               <tr>
@@ -279,7 +279,7 @@
     >
 
     {#if catReport}
-      <div class="kz-card" style="overflow:hidden;margin-top:12px">
+      <div class="kz-card" style="overflow-x:auto;margin-top:12px">
         <table class="kz-table">
           <thead>
             <tr>
