@@ -1,124 +1,65 @@
 <script>
-  import { onMount, onDestroy, createEventDispatcher } from "svelte";
+  import { onMount, onDestroy } from "svelte";
   import flatpickr from "flatpickr";
   import { German } from "flatpickr/dist/l10n/de.js";
+  import monthSelectPlugin from "flatpickr/dist/plugins/monthSelect/index.js";
   import "flatpickr/dist/flatpickr.min.css";
+  import "flatpickr/dist/plugins/monthSelect/style.css";
   import { language } from "./i18n.js";
 
-  export let value = ""; // ISO yyyy-mm-dd, or yyyy-mm for month
+  export let value = "";
   export let mode = "date"; // "date" | "month"
   export let min = "";
   export let max = "";
-  export let disabled = false;
-  export let placeholder = "";
   export let id = "";
-  export let className = "kz-input";
-  export let lang = ""; // optional override
+  export let style = "";
+  let cls = "kz-input";
+  export { cls as class };
 
-  const dispatch = createEventDispatcher();
-
-  let inputEl;
+  let el;
   let fp;
-  let lastValue = value;
 
-  function localeFor(l) {
-    return l === "de" ? German : "default";
-  }
-
-  function buildOptions() {
+  function build(lang) {
+    if (fp) fp.destroy();
     const isMonth = mode === "month";
     const opts = {
-      locale: localeFor(lang || $language),
+      locale: lang === "de" ? German : "default",
       allowInput: true,
       disableMobile: true,
       dateFormat: isMonth ? "Y-m" : "Y-m-d",
       altInput: true,
-      altFormat: isMonth
-        ? $language === "de"
-          ? "F Y"
-          : "F Y"
-        : $language === "de"
-          ? "d.m.Y"
-          : "Y-m-d",
+      altInputClass: cls,
+      altFormat: isMonth ? "F Y" : lang === "de" ? "d.m.Y" : "Y-m-d",
+      defaultDate: value || null,
+      minDate: min || null,
+      maxDate: max || null,
       onChange: (_, str) => {
-        if (str !== value) {
-          value = str;
-          lastValue = str;
-          dispatch("change", str);
-        }
+        if (str !== value) value = str;
       },
-      onClose: (_, str) => {
-        if (str !== value) {
-          value = str;
-          lastValue = str;
-          dispatch("change", str);
-        }
-      },
+      plugins: isMonth
+        ? [monthSelectPlugin({ shorthand: false, dateFormat: "Y-m", altFormat: "F Y" })]
+        : [],
     };
-    if (isMonth) {
-      // Use the monthSelect plugin
-      // Lazy-required below in onMount
-    }
-    if (min) opts.minDate = min;
-    if (max) opts.maxDate = max;
-    return opts;
+    fp = flatpickr(el, opts);
+    if (id && fp.altInput) fp.altInput.id = id;
+    if (style && fp.altInput) fp.altInput.setAttribute("style", style);
   }
 
-  async function init() {
-    if (!inputEl) return;
-    const opts = buildOptions();
-    if (mode === "month") {
-      const mod = await import("flatpickr/dist/plugins/monthSelect/index.js");
-      await import("flatpickr/dist/plugins/monthSelect/style.css");
-      opts.plugins = [
-        mod.default({
-          shorthand: false,
-          dateFormat: "Y-m",
-          altFormat: $language === "de" ? "F Y" : "F Y",
-        }),
-      ];
-    }
-    fp = flatpickr(inputEl, opts);
-    if (value) fp.setDate(value, false);
-  }
+  onMount(() => build($language));
+  onDestroy(() => fp && fp.destroy());
 
-  onMount(() => {
-    init();
-  });
-
-  onDestroy(() => {
-    if (fp) fp.destroy();
-  });
-
-  // Reactively update min/max/value on the picker.
-  $: if (fp && value !== lastValue) {
-    lastValue = value;
-    fp.setDate(value || null, false);
-  }
-  $: if (fp && min !== undefined) {
-    fp.set("minDate", min || null);
-  }
-  $: if (fp && max !== undefined) {
-    fp.set("maxDate", max || null);
-  }
-
-  // Re-create when language or mode changes
-  let lastLang = $language;
+  // Rebuild on language/mode change
+  let lastLang;
   let lastMode = mode;
   $: if (fp && ($language !== lastLang || mode !== lastMode)) {
     lastLang = $language;
     lastMode = mode;
-    fp.destroy();
-    fp = null;
-    init();
+    build($language);
   }
+  // Reactive value/min/max sync
+  $: if (fp && fp.input.value !== value) fp.setDate(value || null, false);
+  $: if (fp) fp.set("minDate", min || null);
+  $: if (fp) fp.set("maxDate", max || null);
 </script>
 
-<input
-  bind:this={inputEl}
-  {id}
-  class={className}
-  type="text"
-  {placeholder}
-  {disabled}
-/>
+<input bind:this={el} type="text" />

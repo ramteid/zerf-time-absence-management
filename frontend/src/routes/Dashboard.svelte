@@ -263,20 +263,16 @@
       </div>
       <!-- Custom date range -->
       <div style="display:flex;align-items:center;gap:4px">
-        <input
-          type="date"
-          class="kz-input"
-          style="font-size:12px;padding:3px 6px;height:28px"
+        <DatePicker
           bind:value={chartFrom}
           max={chartTo}
+          style="font-size:12px;padding:3px 6px;height:28px"
         />
         <span style="font-size:12px;color:var(--text-tertiary)">–</span>
-        <input
-          type="date"
-          class="kz-input"
-          style="font-size:12px;padding:3px 6px;height:28px"
+        <DatePicker
           bind:value={chartTo}
           min={chartFrom}
+          style="font-size:12px;padding:3px 6px;height:28px"
         />
         <button class="kz-btn kz-btn-sm" on:click={loadChart}>
           <Icon name="Search" size={13} />{$t("Show")}

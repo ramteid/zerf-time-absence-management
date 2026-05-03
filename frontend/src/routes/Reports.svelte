@@ -1,7 +1,7 @@
 <script>
   import { api } from "../api.js";
   import { currentUser } from "../stores.js";
-  import { t, absenceKindLabel, language } from "../i18n.js";
+  import { t, absenceKindLabel } from "../i18n.js";
   import { isoDate, minToHM, fmtDate } from "../format.js";
   import { normalizeMonthReport } from "../apiMappers.js";
   import Icon from "../Icons.svelte";
