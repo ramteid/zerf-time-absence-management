@@ -1,7 +1,7 @@
 <script>
   import { api } from "../api.js";
   import { currentUser } from "../stores.js";
-  import { t, absenceKindLabel, statusLabel, hoursUnit } from "../i18n.js";
+  import { t, absenceKindLabel, statusLabel } from "../i18n.js";
   import { isoDate, minToHM, fmtDate } from "../format.js";
   import { normalizeMonthReport } from "../apiMappers.js";
   import Icon from "../Icons.svelte";
@@ -25,10 +25,9 @@
 
   // CSV export state
   let csvUserId = $currentUser.id;
-  let csvMonth = monthStr;
-  let csvMode = "month";
   let csvFrom = isoDate(new Date(today.getFullYear(), today.getMonth(), 1));
   let csvTo = isoDate(today);
+  let csvError = "";
 
   // Help tooltip state
   let activeHelp = null;
@@ -58,14 +57,21 @@
     catReport = await api(`/reports/categories?${params}`);
   }
   function exportCsv() {
-    const params = new URLSearchParams({ user_id: String(csvUserId) });
-    if (csvMode === "range") {
-      params.set("from", csvFrom);
-      params.set("to", csvTo);
-    } else {
-      params.set("month", csvMonth);
+    csvError = "";
+    if (!csvFrom || !csvTo) {
+      csvError = $t("Invalid date.");
+      return;
     }
-    window.open(`/api/v1/reports/month/csv?${params}`);
+    if (csvFrom > csvTo) {
+      csvError = $t("From cannot be after To.");
+      return;
+    }
+    const params = new URLSearchParams({
+      user_id: String(csvUserId),
+      from: csvFrom,
+      to: csvTo,
+    });
+    window.open(`/api/v1/reports/csv?${params}`);
   }
 </script>
 
@@ -85,8 +91,10 @@
         class="kz-btn-icon-sm kz-btn-ghost"
         title={$t("help_monthly_report")}
         on:click={() => toggleHelp("monthly")}
-        style="color:var(--text-tertiary);font-size:14px;cursor:help">ⓘ</button
+        style="color:var(--text-tertiary);font-size:14px;cursor:help"
       >
+        <Icon name="Info" size={14} />
+      </button>
     </div>
     {#if activeHelp === "monthly"}
       <div
@@ -213,8 +221,9 @@
           title={$t("help_team_report")}
           on:click={() => toggleHelp("team")}
           style="color:var(--text-tertiary);font-size:14px;cursor:help"
-          >ⓘ</button
         >
+          <Icon name="Info" size={14} />
+        </button>
       </div>
       {#if activeHelp === "team"}
         <div
@@ -292,8 +301,10 @@
         class="kz-btn-icon-sm kz-btn-ghost"
         title={$t("help_category_breakdown")}
         on:click={() => toggleHelp("cat")}
-        style="color:var(--text-tertiary);font-size:14px;cursor:help">ⓘ</button
+        style="color:var(--text-tertiary);font-size:14px;cursor:help"
       >
+        <Icon name="Info" size={14} />
+      </button>
     </div>
     {#if activeHelp === "cat"}
       <div
@@ -373,8 +384,10 @@
         class="kz-btn-icon-sm kz-btn-ghost"
         title={$t("help_csv_export")}
         on:click={() => toggleHelp("csv")}
-        style="color:var(--text-tertiary);font-size:14px;cursor:help">ⓘ</button
+        style="color:var(--text-tertiary);font-size:14px;cursor:help"
       >
+        <Icon name="Info" size={14} />
+      </button>
     </div>
     {#if activeHelp === "csv"}
       <div
@@ -393,30 +406,15 @@
         </select>
       </div>
       <div>
-        <label class="kz-label" for="csv-mode">{$t("Range")}</label>
-        <select id="csv-mode" class="kz-select" bind:value={csvMode}>
-          <option value="month">{$t("Month")}</option>
-          <option value="range">{$t("Custom range")}</option>
-        </select>
+        <label class="kz-label" for="csv-from">{$t("From")}</label>
+        <DatePicker id="csv-from" bind:value={csvFrom} max={csvTo} />
+      </div>
+      <div>
+        <label class="kz-label" for="csv-to">{$t("To")}</label>
+        <DatePicker id="csv-to" bind:value={csvTo} min={csvFrom} />
       </div>
     </div>
-    <div class="field-row" style="margin-bottom:12px">
-      {#if csvMode === "month"}
-        <div>
-          <label class="kz-label" for="csv-month">{$t("Month")}</label>
-          <DatePicker id="csv-month" mode="month" bind:value={csvMonth} />
-        </div>
-      {:else}
-        <div>
-          <label class="kz-label" for="csv-from">{$t("From")}</label>
-          <DatePicker id="csv-from" bind:value={csvFrom} />
-        </div>
-        <div>
-          <label class="kz-label" for="csv-to">{$t("To")}</label>
-          <DatePicker id="csv-to" bind:value={csvTo} />
-        </div>
-      {/if}
-    </div>
+    <div class="error-text">{csvError}</div>
     <button class="kz-btn kz-btn-primary" on:click={exportCsv}>
       <Icon name="Download" size={14} />{$t("Export CSV")}
     </button>

@@ -1,7 +1,7 @@
 <script>
   import { tick } from "svelte";
   import { api } from "../api.js";
-  import { path, go, currentUser } from "../stores.js";
+  import { path, go, currentUser, categories } from "../stores.js";
   import { t, absenceKindLabel } from "../i18n.js";
   import {
     fmtMonthYear,
@@ -43,6 +43,13 @@
     } catch {
       timeEntries = [];
     }
+    if ($categories.length === 0) {
+      try {
+        categories.set(await api("/categories"));
+      } catch {
+        categories.set([]);
+      }
+    }
   }
   $: year && month && load().catch(() => {});
 
@@ -68,9 +75,26 @@
     return map;
   })();
 
+  $: categoryById = new Map(
+    $categories.map((category) => [category.id, category]),
+  );
+
   // Distinct, accessible palette. Red is reserved for error states only.
   const HOLIDAY_COLOR = "#f59e0b";
-  const WORK_COLOR = "#3b82f6";
+  const FALLBACK_COLORS = [
+    "#2563eb",
+    "#10b981",
+    "#8b5cf6",
+    "#14b8a6",
+    "#ec4899",
+    "#64748b",
+    "#0f766e",
+    "#7c3aed",
+    "#0891b2",
+    "#ca8a04",
+    "#4f46e5",
+    "#0d9488",
+  ];
   const absColorMap = {
     vacation: "#10b981",
     sick: "#8b5cf6",
@@ -85,44 +109,46 @@
     return absColorMap[kind] || "#9ca3af";
   }
 
-  // Stable legend ordering matching visual priority.
-  const LEGEND_ORDER = [
-    "holiday",
-    "vacation",
-    "sick",
-    "training",
-    "special_leave",
-    "unpaid",
-    "work",
-  ];
-
-  // One color per day. Priority: public holiday > absence > work time.
-  function dayEvent(c) {
-    if (c.hol) {
-      return { type: "holiday", color: HOLIDAY_COLOR, label: $t("Holiday") };
-    }
-    if (c.absences.length > 0) {
-      const a = c.absences[0];
-      return {
-        type: a.kind,
-        color: absColor(a.kind),
-        label: absenceKindLabel(a.kind),
-      };
-    }
-    if ((teMap.get(c.ds) || []).length > 0) {
-      return { type: "work", color: WORK_COLOR, label: $t("Work time") };
-    }
-    return null;
+  function normalizeColor(color) {
+    return /^#[0-9a-f]{6}$/i.test(color || "") ? color.toLowerCase() : null;
   }
 
-  // Build all events for a cell (for the day-detail modal).
-  function cellEvents(c) {
+  function fallbackColor(offset = 0, used = new Set()) {
+    for (let i = 0; i < FALLBACK_COLORS.length; i++) {
+      const color = FALLBACK_COLORS[(offset + i) % FALLBACK_COLORS.length];
+      if (!used.has(color.toLowerCase())) return color;
+    }
+    const hue = (offset * 47) % 360;
+    return `hsl(${hue} 70% 38%)`;
+  }
+
+  function categoryForEntry(entry) {
+    return categoryById.get(entry.category_id) || null;
+  }
+
+  function workLabel(entry) {
+    return categoryForEntry(entry)?.name || "Work time";
+  }
+
+  function workBaseColor(entry, offset) {
+    return (
+      normalizeColor(categoryForEntry(entry)?.color) || fallbackColor(offset)
+    );
+  }
+
+  function rawCellEvents(c) {
     const evts = [];
     if (c.hol) {
-      evts.push({ color: HOLIDAY_COLOR, label: $t("Holiday"), detail: c.hol });
+      evts.push({
+        key: "holiday",
+        color: HOLIDAY_COLOR,
+        label: $t("Holiday"),
+        detail: c.hol,
+      });
     }
     for (const a of c.absences) {
       evts.push({
+        key: `absence:${a.kind}`,
         color: absColor(a.kind),
         label: absenceKindLabel(a.kind),
         detail: a.comment || "",
@@ -132,11 +158,42 @@
       const start = e.start_time?.slice(0, 5) || "";
       const end = e.end_time?.slice(0, 5) || "";
       const dur = start && end ? minToHM(durMin(start, end)) : "";
-      const range = start && end ? `${start}–${end}` : "";
+      const range = start && end ? `${start} - ${end}` : "";
       const detail = dur ? `${range} (${dur})` : range;
-      evts.push({ color: WORK_COLOR, label: $t("Work time"), detail });
+      evts.push({
+        key: `work:${e.category_id ?? "unknown"}`,
+        color: workBaseColor(e, evts.length),
+        label: $t(workLabel(e)),
+        detail,
+      });
     }
     return evts;
+  }
+
+  function buildColorMap() {
+    const used = new Set();
+    const assigned = new Map();
+    for (const c of cells) {
+      if (c.other) continue;
+      for (const ev of rawCellEvents(c)) {
+        if (assigned.has(ev.key)) continue;
+        let color =
+          normalizeColor(ev.color) || fallbackColor(assigned.size, used);
+        if (used.has(color)) color = fallbackColor(assigned.size, used);
+        assigned.set(ev.key, color);
+        used.add(color);
+      }
+    }
+    return assigned;
+  }
+
+  $: colorByKey = buildColorMap(cells, categoryById);
+
+  function cellEvents(c) {
+    return rawCellEvents(c).map((ev) => ({
+      ...ev,
+      color: colorByKey.get(ev.key) || ev.color,
+    }));
   }
 
   $: prev =
@@ -175,28 +232,17 @@
     return out;
   })();
 
-  // One legend entry per event type currently visible in the month,
-  // sorted in stable priority order matching LEGEND_ORDER.
   $: legendItems = (() => {
     const seen = new Map();
     for (const c of cells) {
       if (c.other) continue;
-      if (c.hol && !seen.has("holiday")) {
-        seen.set("holiday", { color: HOLIDAY_COLOR, label: $t("Holiday") });
-      }
-      for (const a of c.absences) {
-        if (!seen.has(a.kind)) {
-          seen.set(a.kind, {
-            color: absColor(a.kind),
-            label: absenceKindLabel(a.kind),
-          });
+      for (const ev of cellEvents(c)) {
+        if (!seen.has(ev.key)) {
+          seen.set(ev.key, { color: ev.color, label: ev.label });
         }
       }
-      if ((teMap.get(c.ds) || []).length > 0 && !seen.has("work")) {
-        seen.set("work", { color: WORK_COLOR, label: $t("Work time") });
-      }
     }
-    return LEGEND_ORDER.filter((k) => seen.has(k)).map((k) => seen.get(k));
+    return [...seen.values()];
   })();
 
   async function clickDay(c) {
@@ -253,29 +299,34 @@
     </div>
     <div class="cal-grid">
       {#each cells as c}
-        {@const ev = dayEvent(c)}
-        <div
+        {@const evts = cellEvents(c)}
+        <button
+          type="button"
           class="cal-day"
+          class:has-events={evts.length > 0}
           class:today={c.today}
           class:weekend={c.weekend && !c.today}
           class:other-month={c.other}
-          style={ev
-            ? `border-left:3px solid ${ev.color};cursor:pointer`
+          style={evts.length
+            ? `border-left:3px solid ${evts[0].color};cursor:pointer`
             : "cursor:default"}
           on:click={() => clickDay(c)}
-          on:keydown={(e) => {
-            if (e.key === "Enter" || e.key === " ") clickDay(c);
-          }}
-          role="button"
-          tabindex="0"
+          disabled={evts.length === 0}
         >
           <div class="cal-day-number tab-num">{c.d.getDate()}</div>
-          {#if ev}
-            <div class="cal-event" style="background:{ev.color}">
-              {ev.label}
+          {#if evts.length}
+            <div class="cal-events">
+              {#each evts.slice(0, 3) as ev}
+                <div class="cal-event" style="background:{ev.color}">
+                  {ev.label}
+                </div>
+              {/each}
+              {#if evts.length > 3}
+                <div class="cal-more">+{evts.length - 3}</div>
+              {/if}
             </div>
           {/if}
-        </div>
+        </button>
       {/each}
     </div>
   </div>

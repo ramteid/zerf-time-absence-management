@@ -149,6 +149,7 @@ pub struct NewUser {
     pub annual_leave_days: i64,
     pub start_date: NaiveDate,
     pub password: Option<String>,
+    pub generated_password: Option<bool>,
     /// Mandatory for `role == "employee"`. The approver must be an active
     /// `team_lead` or `admin` and cannot be the user themselves.
     pub approver_id: Option<i64>,
@@ -228,10 +229,16 @@ pub async fn create(
     if !(0..=366).contains(&b.annual_leave_days) {
         return Err(AppError::BadRequest("Invalid annual_leave_days.".into()));
     }
+    let generated_by_admin = b.generated_password.unwrap_or(false);
     let (password, temp) = match b.password {
         Some(p) if !p.is_empty() => {
             validate_password_strength(&p)?;
-            (p, None)
+            let temp = if generated_by_admin {
+                Some(p.clone())
+            } else {
+                None
+            };
+            (p, temp)
         }
         _ => {
             let t = generate_password();

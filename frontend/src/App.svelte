@@ -15,11 +15,13 @@
     go,
     toast,
     toasts,
-    notifications,
-    notificationsUnread,
     broadcastSession,
     onSessionBroadcast,
   } from "./stores.js";
+  import {
+    startNotifications,
+    stopNotifications,
+  } from "./notificationService.js";
   import { setLanguage, t } from "./i18n.js";
   import Layout from "./Layout.svelte";
   import Login from "./routes/Login.svelte";
@@ -110,7 +112,7 @@
     });
     if (_sessionExpiredHandling) return;
     _sessionExpiredHandling = true;
-    stopPolling();
+    stopNotifications();
     csrfToken.set(null);
     categories.set([]);
     currentUser.set(false);
@@ -128,55 +130,9 @@
     // also resets this flag via the onGateReset hook registered below.
   }
 
-  // Notification polling: 60s default, paused when tab is hidden. The
-  // polling is started/stopped reactively against `currentUser` so it also
-  // kicks in after a fresh login (not only when the user was authenticated
-  // at app boot) and is torn down on logout.
-  let notifTimer = null;
-  let visibilityHandler = null;
-
-  async function pollNotifications() {
-    if (typeof document !== "undefined" && document.hidden) return;
-    try {
-      // Use the dedicated counter endpoint so the badge stays accurate
-      // even when the user has more than 100 unread notifications (the
-      // list endpoint is capped at 100).
-      const [list, count] = await Promise.all([
-        api("/notifications"),
-        api("/notifications/unread-count"),
-      ]);
-      notifications.set(list);
-      notificationsUnread.set(count?.count ?? 0);
-    } catch {}
-  }
-
-  function startPolling() {
-    if (notifTimer) return;
-    pollNotifications();
-    notifTimer = setInterval(pollNotifications, 60_000);
-    if (typeof document !== "undefined" && !visibilityHandler) {
-      visibilityHandler = () => {
-        if (!document.hidden) pollNotifications();
-      };
-      document.addEventListener("visibilitychange", visibilityHandler);
-    }
-  }
-  function stopPolling() {
-    if (notifTimer) {
-      clearInterval(notifTimer);
-      notifTimer = null;
-    }
-    if (visibilityHandler && typeof document !== "undefined") {
-      document.removeEventListener("visibilitychange", visibilityHandler);
-      visibilityHandler = null;
-    }
-    notifications.set([]);
-    notificationsUnread.set(0);
-  }
-
   $: if (!booting) {
-    if ($currentUser) startPolling();
-    else stopPolling();
+    if ($currentUser) startNotifications();
+    else stopNotifications();
   }
 
   // Listeners registered in onMount and cleaned up in onDestroy.
@@ -219,7 +175,7 @@
       });
       if (msg.type === "session-expired" || msg.type === "logout") {
         if ($currentUser) {
-          stopPolling();
+          stopNotifications();
           csrfToken.set(null);
           categories.set([]);
           currentUser.set(false);
@@ -244,7 +200,7 @@
   });
 
   onDestroy(() => {
-    stopPolling();
+    stopNotifications();
     if (_unsubBroadcast) {
       _unsubBroadcast();
       _unsubBroadcast = null;

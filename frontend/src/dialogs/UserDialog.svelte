@@ -27,18 +27,43 @@
   let password = "";
   let confirmPassword = "";
   let showTempPassword = null;
+  let generatedPassword = false;
+
+  function secureIndex(max) {
+    const buf = new Uint32Array(1);
+    crypto.getRandomValues(buf);
+    return buf[0] % max;
+  }
+
+  function pick(chars) {
+    return chars[secureIndex(chars.length)];
+  }
+
+  function shuffle(chars) {
+    const out = [...chars];
+    for (let i = out.length - 1; i > 0; i--) {
+      const j = secureIndex(i + 1);
+      [out[i], out[j]] = [out[j], out[i]];
+    }
+    return out.join("");
+  }
+
+  function markManualPassword() {
+    generatedPassword = false;
+  }
 
   function generatePassword() {
-    const chars =
-      "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%";
-    const buf = new Uint32Array(16);
-    crypto.getRandomValues(buf);
-    let pw = "";
-    for (let i = 0; i < 16; i++) {
-      pw += chars[buf[i] % chars.length];
-    }
+    const lower = "abcdefghijkmnpqrstuvwxyz";
+    const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+    const digits = "23456789";
+    const symbols = "!@#$%";
+    const all = lower + upper + digits + symbols;
+    let pw = pick(lower) + pick(upper) + pick(digits) + pick(symbols);
+    while (pw.length < 16) pw += pick(all);
+    pw = shuffle(pw);
     password = pw;
     confirmPassword = pw;
+    generatedPassword = true;
   }
 
   onMount(async () => {
@@ -78,6 +103,10 @@
       error = $t("Passwords do not match.");
       return;
     }
+    if (!start_date) {
+      error = $t("Invalid date.");
+      return;
+    }
     try {
       const body = {
         email,
@@ -95,11 +124,16 @@
       }
       if (isNew && password) {
         body.password = password;
+        body.generated_password = generatedPassword;
       }
       if (isNew) {
         const r = await api("/users", { method: "POST", body });
-        // Always show the plaintext password once in a dedicated modal.
-        showTempPassword = password || r.temporary_password;
+        showTempPassword = generatedPassword ? password : r.temporary_password;
+        if (!showTempPassword) {
+          toast($t("User created."), "ok");
+          dlg.close();
+          onClose(true);
+        }
       } else {
         await api("/users/" + template.id, { method: "PUT", body });
         toast($t("User updated."), "ok");
@@ -208,7 +242,11 @@
           <label class="kz-label" for="user-start-date"
             >{$t("Start date")}</label
           >
-          <DatePicker id="user-start-date" bind:value={start_date} />
+          <DatePicker
+            id="user-start-date"
+            bind:value={start_date}
+            container={dlg}
+          />
         </div>
       </div>
       <div class="field-row">
@@ -253,6 +291,7 @@
               bind:value={password}
               minlength="12"
               autocomplete="new-password"
+              on:input={markManualPassword}
             />
           </div>
           <div>
@@ -266,6 +305,7 @@
               bind:value={confirmPassword}
               minlength="12"
               autocomplete="new-password"
+              on:input={markManualPassword}
             />
           </div>
         </div>

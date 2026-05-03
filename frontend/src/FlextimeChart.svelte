@@ -1,5 +1,5 @@
 <script>
-  import { t, absenceKindLabel } from "./i18n.js";
+  import { t, absenceKindLabel, formatHours } from "./i18n.js";
   import { fmtDateShort } from "./format.js";
 
   /**
@@ -164,7 +164,9 @@
     const abs = Math.abs(min);
     const h = Math.floor(abs / 60);
     const m = abs % 60;
-    return (neg ? "−" : "+") + h + ":" + String(m).padStart(2, "0") + "h";
+    return formatHours(
+      (neg ? "-" : "+") + h + ":" + String(m).padStart(2, "0"),
+    );
   }
 
   const ABSENCE_COLORS = {
@@ -271,9 +273,10 @@
           font-size="10"
           fill={tick === 0 ? "var(--text-secondary)" : "var(--text-tertiary)"}
         >
-          {(tick >= 0 ? "+" : "") +
-            (tick / 60).toFixed(tick % 60 === 0 ? 0 : 1) +
-            "h"}
+          {formatHours(
+            (tick >= 0 ? "+" : "") +
+              (tick / 60).toFixed(tick % 60 === 0 ? 0 : 1),
+          )}
         </text>
       {/each}
 

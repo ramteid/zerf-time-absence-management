@@ -1,5 +1,5 @@
 use anyhow::Result;
-use chrono::{Datelike, Timelike};
+use chrono::Datelike;
 use kitazeit::{build_app, categories, config, db, holidays, seed_admin, AppState};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -31,6 +31,7 @@ async fn main() -> Result<()> {
     let state = AppState {
         pool: pool.clone(),
         cfg: Arc::new(cfg.clone()),
+        notifications: kitazeit::notifications::broadcaster(),
     };
 
     // Background hygiene: clean expired sessions, old login attempts, and
@@ -48,25 +49,12 @@ async fn main() -> Result<()> {
     }
 
     // Weekly holiday scheduler: every Monday at 12:00, check if next year holidays exist.
-    // Computes exact duration to the next Monday 12:00 local time on every iteration.
     {
         let p = pool.clone();
         tokio::spawn(async move {
             loop {
                 let now = chrono::Local::now();
-                let weekday = now.weekday().num_days_from_monday(); // 0=Mon
-                                                                    // Days until next Monday: if today is Monday before noon, target today;
-                                                                    // otherwise advance to next Monday.
-                let days_ahead = if weekday == 0 && now.hour() < 12 {
-                    0u32
-                } else {
-                    7 - weekday
-                };
-                let target_date = now.date_naive() + chrono::Duration::days(days_ahead as i64);
-                let target_naive = target_date.and_hms_opt(12, 0, 0).unwrap();
-                let target = target_naive.and_local_timezone(chrono::Local).unwrap();
-                let wait = (target - now)
-                    .to_std()
+                let wait = holidays::duration_until_next_monday_noon(now)
                     .unwrap_or(std::time::Duration::from_secs(3600));
                 tokio::time::sleep(wait).await;
 

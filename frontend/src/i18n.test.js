@@ -11,6 +11,9 @@ import {
   roleLabel,
   statusLabel,
   absenceKindLabel,
+  auditActionLabel,
+  auditTableLabel,
+  formatHours,
   t,
 } from "./i18n.js";
 
@@ -126,5 +129,20 @@ describe("label helpers", () => {
 
   it("absenceKindLabel falls back for unknown kinds", () => {
     expect(absenceKindLabel("other")).toBe("other");
+  });
+
+  it("formats localized hour units", () => {
+    setLanguage("en");
+    expect(formatHours("39")).toBe("39h");
+    setLanguage("de");
+    expect(formatHours("39")).toBe("39 Std.");
+  });
+
+  it("translates audit aliases and actions", () => {
+    setLanguage("de");
+    expect(auditTableLabel("change_requests")).toBe("Änderungsanfrage");
+    expect(auditActionLabel("password_reset")).toBe("Passwort zurückgesetzt");
+    expect(auditActionLabel("deactivated")).toBe("Deaktiviert");
+    expect(auditActionLabel("reopened")).toBe("Wieder geöffnet");
   });
 });

@@ -10,6 +10,12 @@
     toast,
     broadcastSession,
   } from "./stores.js";
+  import {
+    clearNotifications,
+    markAllNotificationsRead,
+    markNotificationRead,
+    refreshNotifications,
+  } from "./notificationService.js";
   import { t, roleLabel } from "./i18n.js";
   import { fmtDate } from "./format.js";
   import Icon from "./Icons.svelte";
@@ -88,42 +94,24 @@
       // Close the mobile more sheet if open.
       mobileMoreOpen = false;
       // Refresh on open so the list is current.
-      reloadNotifications();
+      refreshNotifications().catch(() => {});
     }
   }
-  async function reloadNotifications() {
-    try {
-      const [list, count] = await Promise.all([
-        api("/notifications"),
-        api("/notifications/unread-count"),
-      ]);
-      notifications.set(list);
-      notificationsUnread.set(count?.count ?? 0);
-    } catch {}
-  }
   async function markRead(n) {
-    if (n.is_read) return;
     try {
-      await api(`/notifications/${n.id}/read`, { method: "POST", body: {} });
-      n.is_read = true;
-      notifications.update((arr) => arr.slice());
-      notificationsUnread.update((c) => Math.max(0, c - 1));
+      await markNotificationRead(n);
     } catch {}
   }
   async function markAllRead() {
     try {
-      await api("/notifications/read-all", { method: "POST", body: {} });
-      notifications.update((arr) => arr.map((n) => ({ ...n, is_read: true })));
-      notificationsUnread.set(0);
+      await markAllNotificationsRead();
     } catch (e) {
       toast(e.message || $t("Error"), "error");
     }
   }
   async function clearAll() {
     try {
-      await api("/notifications", { method: "DELETE" });
-      notifications.set([]);
-      notificationsUnread.set(0);
+      await clearNotifications();
     } catch (e) {
       toast(e.message || $t("Error"), "error");
     }

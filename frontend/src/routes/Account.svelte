@@ -1,7 +1,7 @@
 <script>
   import { api } from "../api.js";
   import { currentUser, toast } from "../stores.js";
-  import { t, roleLabel, hoursUnit } from "../i18n.js";
+  import { t, roleLabel, formatHours } from "../i18n.js";
   import { fmtDate, minToHM } from "../format.js";
 
   let cur = "",
@@ -10,7 +10,6 @@
     error = "";
   let overtime = [];
   $: cumulative = overtime.reduce((s, m) => s + m.diff_min, 0);
-  $: hu = hoursUnit();
 
   function initials(u) {
     return ((u.first_name?.[0] || "") + (u.last_name?.[0] || "")).toUpperCase();
@@ -109,7 +108,7 @@
           id="account-weekly-hours"
           class="kz-input"
           value={$t("{hours} / week", {
-            hours: $currentUser.weekly_hours + hu,
+            hours: formatHours($currentUser.weekly_hours),
           })}
           readonly
           style="color:var(--text-secondary)"

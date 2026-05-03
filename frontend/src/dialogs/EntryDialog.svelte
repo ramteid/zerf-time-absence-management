@@ -23,6 +23,10 @@
 
   async function save() {
     error = "";
+    if (!entry_date) {
+      error = $t("Invalid date.");
+      return;
+    }
     if (start_time >= end_time) {
       error = $t("Start cannot be after End.");
       return;
@@ -86,6 +90,7 @@
         id="entry-date"
         bind:value={entry_date}
         max={isoDate(new Date())}
+        container={dlg}
       />
     </div>
     <div class="field-row">

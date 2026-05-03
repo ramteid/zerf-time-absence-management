@@ -102,9 +102,6 @@
         </div>
       {/if}
     </div>
-
-    <!-- Placeholder for future settings sections -->
-    <!-- Add additional .kz-card sections here as new team settings are needed -->
   {/if}
 </div>
 

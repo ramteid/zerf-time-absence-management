@@ -20,6 +20,10 @@
 
   async function save() {
     error = "";
+    if (!start_date || !end_date) {
+      error = $t("Invalid date.");
+      return;
+    }
     if (start_date > end_date) {
       error = $t("From cannot be after To.");
       return;

@@ -8,11 +8,27 @@ use crate::error::{AppError, AppResult};
 use crate::AppState;
 use axum::{
     extract::{Path, State},
+    response::sse::{Event, KeepAlive, Sse},
     Json,
 };
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use sqlx::FromRow;
+use std::{convert::Infallible, time::Duration};
+use tokio::sync::broadcast;
+use tokio_stream::{wrappers::BroadcastStream, StreamExt};
+
+#[derive(Clone, Debug)]
+pub struct NotificationSignal {
+    pub user_id: i64,
+}
+
+pub type NotificationBroadcaster = broadcast::Sender<NotificationSignal>;
+
+pub fn broadcaster() -> NotificationBroadcaster {
+    let (tx, _) = broadcast::channel(256);
+    tx
+}
 
 #[derive(FromRow, Serialize)]
 pub struct Notification {
@@ -55,6 +71,7 @@ pub async fn create(
         tracing::warn!(target:"kitazeit::notifications", "insert failed: {e}");
         return;
     }
+    let _ = state.notifications.send(NotificationSignal { user_id });
     // Resolve recipient email and dispatch SMTP best-effort.
     if let Ok(Some(email)) =
         sqlx::query_scalar::<_, String>("SELECT email FROM users WHERE id=$1 AND active=TRUE")
@@ -89,6 +106,32 @@ pub async fn unread_count(
             .fetch_one(&s.pool)
             .await?;
     Ok(Json(serde_json::json!({ "count": n })))
+}
+
+pub async fn stream(
+    State(s): State<AppState>,
+    u: User,
+) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
+    let user_id = u.id;
+    let stream = BroadcastStream::new(s.notifications.subscribe()).filter_map(move |message| {
+        let should_refresh = match message {
+            Ok(signal) => signal.user_id == user_id,
+            Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(_)) => true,
+        };
+        if should_refresh {
+            Some(Ok(Event::default()
+                .event("notification")
+                .data(r#"{"type":"refresh"}"#)))
+        } else {
+            None
+        }
+    });
+
+    Sse::new(stream).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(30))
+            .text("keep-alive"),
+    )
 }
 
 pub async fn mark_read(

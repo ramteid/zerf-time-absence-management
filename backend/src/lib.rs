@@ -35,6 +35,7 @@ use tower_http::trace::TraceLayer;
 pub struct AppState {
     pub pool: db::DatabasePool,
     pub cfg: Arc<config::Config>,
+    pub notifications: notifications::NotificationBroadcaster,
 }
 
 /// Seed the admin user if no admin exists yet.  Returns the temporary
@@ -124,6 +125,7 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                 .route("/holidays", get(holidays::list).post(holidays::create))
                 .route("/holidays/{id}", delete(holidays::delete))
                 .route("/reports/month", get(reports::month))
+                .route("/reports/csv", get(reports::range_csv))
                 .route("/reports/month/csv", get(reports::month_csv))
                 .route("/reports/team", get(reports::team))
                 .route("/reports/categories", get(reports::categories))
@@ -154,6 +156,7 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                     "/notifications/unread-count",
                     get(notifications::unread_count),
                 )
+                .route("/notifications/stream", get(notifications::stream))
                 .route("/notifications/{id}/read", post(notifications::mark_read))
                 .route(
                     "/notifications/read-all",

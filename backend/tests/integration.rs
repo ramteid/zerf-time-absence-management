@@ -651,6 +651,7 @@ async fn full_integration_suite() {
         );
 
         // e) Unauthenticated callers cannot create absences.
+        let ga3_day = date_offset(90);
         let anon = app.client();
         let (st, _) = anon
             .post(
@@ -1084,8 +1085,8 @@ async fn full_integration_suite() {
             .await;
         assert_eq!(st, StatusCode::BAD_REQUEST, "garbage time rejected");
 
-        // Future day.
-        let fut = date_offset(1);
+        // Future day (use +2 to avoid UTC vs local-time edge cases near midnight).
+        let fut = date_offset(2);
         let (st, _) = tina
             .post(
                 "/api/v1/time-entries",
@@ -2309,6 +2310,268 @@ async fn change_request_approval_overlap_rejected() {
         StatusCode::BAD_REQUEST,
         "approving overlapping change request → 400"
     );
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn reports_range_csv_and_category_totals_include_drafts() {
+    let app = TestApp::spawn().await;
+    let admin = app.client();
+    admin.login("admin@example.com", &app.admin_password).await;
+    admin
+        .change_password(&app.admin_password, "AdminPass!234")
+        .await;
+
+    let (lead_id, lead_pw, emp_id, emp_pw, monday, cat_id) =
+        bootstrap_team(&app, &admin, false).await;
+    let lead = login_change_pw(&app, "lead-r@example.com", &lead_pw).await;
+    let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
+
+    let (st, body) = emp
+        .post(
+            "/api/v1/time-entries",
+            &json!({
+                "entry_date": monday,
+                "start_time": "08:00",
+                "end_time": "12:00",
+                "category_id": cat_id,
+                "comment": "=draft formula"
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create draft report entry");
+    let _entry_id = id(&body);
+
+    let (st, body) = lead
+        .get(&format!(
+            "/api/v1/reports/categories?user_id={}&from={}&to={}",
+            emp_id, monday, monday
+        ))
+        .await;
+    assert_eq!(st, StatusCode::OK, "category report with draft");
+    assert_eq!(body.as_array().unwrap()[0]["minutes"], 240);
+
+    let (st, csv_body) = lead
+        .get_raw(&format!(
+            "/api/v1/reports/csv?user_id={}&from={}&to={}",
+            emp_id, monday, monday
+        ))
+        .await;
+    assert_eq!(st, StatusCode::OK, "range CSV export");
+    assert!(csv_body.contains("08:00"));
+    assert!(csv_body.contains("'=draft formula"));
+
+    let (st, _) = lead
+        .get(&format!(
+            "/api/v1/reports/csv?user_id={}&from=2026-05-02&to=2026-05-01",
+            emp_id
+        ))
+        .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST, "CSV inverted range rejected");
+
+    let too_far = (chrono::NaiveDate::parse_from_str(&monday, "%Y-%m-%d").unwrap()
+        + chrono::Duration::days(366))
+    .format("%Y-%m-%d")
+    .to_string();
+    let (st, _) = lead
+        .get(&format!(
+            "/api/v1/reports/csv?user_id={}&from={}&to={}",
+            emp_id, monday, too_far
+        ))
+        .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST, "CSV max range rejected");
+
+    let (st, _) = emp
+        .get(&format!(
+            "/api/v1/reports/csv?user_id={}&from={}&to={}",
+            lead_id, monday, monday
+        ))
+        .await;
+    assert_eq!(st, StatusCode::FORBIDDEN, "employee cannot export lead CSV");
+
+    let month = &monday[..7];
+    let (st, _) = lead
+        .get_raw(&format!(
+            "/api/v1/reports/month/csv?user_id={}&month={}",
+            emp_id, month
+        ))
+        .await;
+    assert_eq!(st, StatusCode::OK, "legacy month CSV remains available");
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn user_creation_password_modes_set_must_change_correctly() {
+    let app = TestApp::spawn().await;
+    let admin = app.client();
+    admin.login("admin@example.com", &app.admin_password).await;
+    admin
+        .change_password(&app.admin_password, "AdminPass!234")
+        .await;
+
+    let manual_password = "ManualPass!234";
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "manual@example.com",
+                "first_name": "Manual",
+                "last_name": "User",
+                "role": "team_lead",
+                "weekly_hours": 39,
+                "annual_leave_days": 30,
+                "start_date": "2024-01-01",
+                "password": manual_password,
+                "generated_password": false
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create user with manual password");
+    assert!(body["temporary_password"].is_null());
+    assert_eq!(body["user"]["must_change_password"], false);
+
+    let manual = app.client();
+    let (st, _) = manual.login("manual@example.com", manual_password).await;
+    assert_eq!(st, StatusCode::OK, "manual password login");
+    let (st, body) = manual.get("/api/v1/auth/me").await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(body["must_change_password"], false);
+
+    let generated_password = "GeneratedPass!234";
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "generated@example.com",
+                "first_name": "Generated",
+                "last_name": "User",
+                "role": "employee",
+                "weekly_hours": 39,
+                "annual_leave_days": 30,
+                "start_date": "2024-01-01",
+                "approver_id": 1,
+                "password": generated_password,
+                "generated_password": true
+            }),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::OK,
+        "create user with generated password flag"
+    );
+    assert_eq!(body["temporary_password"], generated_password);
+    assert_eq!(body["user"]["must_change_password"], true);
+
+    let generated = app.client();
+    let (st, _) = generated
+        .login("generated@example.com", generated_password)
+        .await;
+    assert_eq!(st, StatusCode::OK, "generated password login");
+    let (st, body) = generated.get("/api/v1/auth/me").await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(body["must_change_password"], true);
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn admin_self_submission_is_visible_and_notifies_admin() {
+    let app = TestApp::spawn().await;
+    let admin = app.client();
+    admin.login("admin@example.com", &app.admin_password).await;
+    admin
+        .change_password(&app.admin_password, "AdminPass!234")
+        .await;
+
+    let (_, body) = admin.get("/api/v1/categories").await;
+    let cat_id = body.as_array().unwrap()[0]["id"].as_i64().unwrap();
+    let monday = next_monday(-14).format("%Y-%m-%d").to_string();
+    let entry_id = create_and_submit_entry(&admin, &monday, cat_id).await;
+
+    let (st, body) = admin.get("/api/v1/notifications").await;
+    assert_eq!(st, StatusCode::OK, "admin notifications");
+    assert!(
+        body.as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["kind"] == "timesheet_submitted"),
+        "admin received self-submission notification"
+    );
+
+    let (st, body) = admin.get("/api/v1/time-entries/all?status=submitted").await;
+    assert_eq!(st, StatusCode::OK, "admin submitted entries visible");
+    assert!(has_id(&body, entry_id));
+
+    let (st, _) = admin
+        .post(
+            &format!("/api/v1/time-entries/{}/approve", entry_id),
+            &json!({}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "admin can approve self-submitted entry");
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn notification_stream_requires_authentication() {
+    let app = TestApp::spawn().await;
+    let anon = app.client();
+    let (st, _) = anon.get("/api/v1/notifications/stream").await;
+    assert_eq!(st, StatusCode::UNAUTHORIZED);
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn admin_settings_validate_and_persist_user_defaults() {
+    let app = TestApp::spawn().await;
+    let admin = app.client();
+    admin.login("admin@example.com", &app.admin_password).await;
+    admin
+        .change_password(&app.admin_password, "AdminPass!234")
+        .await;
+
+    let (st, _) = admin
+        .put(
+            "/api/v1/settings",
+            &json!({
+                "ui_language": "en",
+                "country": "DE",
+                "region": "DE-BW",
+                "default_weekly_hours": 169,
+                "default_annual_leave_days": 30
+            }),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::BAD_REQUEST,
+        "invalid default hours rejected"
+    );
+
+    let (st, _) = admin
+        .put(
+            "/api/v1/settings",
+            &json!({
+                "ui_language": "de",
+                "country": "DE",
+                "region": "DE-BW",
+                "default_weekly_hours": 35.5,
+                "default_annual_leave_days": 28
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "valid defaults saved");
+
+    let anon = app.client();
+    let (st, body) = anon.get("/api/v1/settings/public").await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(body["ui_language"], "de");
+    assert_eq!(body["default_weekly_hours"], 35.5);
+    assert_eq!(body["default_annual_leave_days"], 28);
 
     app.cleanup().await;
 }

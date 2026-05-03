@@ -233,36 +233,19 @@ pub struct CsvQuery {
     pub to: Option<NaiveDate>,
 }
 
-pub async fn month_csv(
-    State(s): State<AppState>,
-    u: User,
-    Query(q): Query<CsvQuery>,
-) -> AppResult<Response> {
-    let uid = q.user_id.unwrap_or(u.id);
-    if uid != u.id && !u.is_lead() {
-        return Err(AppError::Forbidden);
+fn validate_range(from: NaiveDate, to: NaiveDate) -> AppResult<()> {
+    if from > to {
+        return Err(AppError::BadRequest("from must not be after to.".into()));
     }
-    let (r, file_label) = if let (Some(from), Some(to)) = (q.from, q.to) {
-        if from > to {
-            return Err(AppError::BadRequest("from must not be after to.".into()));
-        }
-        if (to - from).num_days() > 366 {
-            return Err(AppError::BadRequest(
-                "Date range must not exceed 366 days.".into(),
-            ));
-        }
-        let label = format!("{}_to_{}", from, to);
-        let r = build_range(&s.pool, uid, from, to, &label).await?;
-        (r, label)
-    } else if let Some(ref month) = q.month {
-        let _ = month_bounds(month)?;
-        let r = build_month(&s.pool, uid, month).await?;
-        (r, month.clone())
-    } else {
+    if (to - from).num_days() > 365 {
         return Err(AppError::BadRequest(
-            "Provide 'month' or 'from'+'to'.".into(),
+            "Date range must not exceed 366 days.".into(),
         ));
-    };
+    }
+    Ok(())
+}
+
+fn csv_response(r: MonthReport, uid: i64, file_label: &str) -> AppResult<Response> {
     // CSV formula-injection guard: prefix any cell that begins with =, +, -, @ or
     // a tab/CR with a leading single-quote so spreadsheets treat it as text.
     fn safe(s: &str) -> String {
@@ -272,12 +255,16 @@ pub async fn month_csv(
             s.to_string()
         }
     }
+    fn csv_err(error: csv::Error) -> AppError {
+        tracing::error!(target: "kitazeit::reports", "CSV export failed: {error}");
+        AppError::Internal("CSV export failed.".into())
+    }
     let mut wtr = csv::Writer::from_writer(vec![]);
     wtr.write_record([
         "Date", "Weekday", "Start", "End", "Category", "Minutes", "Status", "Comment", "Absence",
         "Holiday",
     ])
-    .ok();
+    .map_err(csv_err)?;
     for t in &r.days {
         if t.entries.is_empty() {
             wtr.write_record([
@@ -289,10 +276,10 @@ pub async fn month_csv(
                 "0".into(),
                 "".into(),
                 "".into(),
-                t.absence.clone().unwrap_or_default(),
-                t.holiday.clone().unwrap_or_default(),
+                safe(&t.absence.clone().unwrap_or_default()),
+                safe(&t.holiday.clone().unwrap_or_default()),
             ])
-            .ok();
+            .map_err(csv_err)?;
         } else {
             for e in &t.entries {
                 wtr.write_record([
@@ -307,7 +294,7 @@ pub async fn month_csv(
                     safe(&t.absence.clone().unwrap_or_default()),
                     safe(&t.holiday.clone().unwrap_or_default()),
                 ])
-                .ok();
+                .map_err(csv_err)?;
             }
         }
     }
@@ -323,8 +310,11 @@ pub async fn month_csv(
         "",
         "",
     ])
-    .ok();
-    let data = wtr.into_inner().unwrap();
+    .map_err(csv_err)?;
+    let data = wtr.into_inner().map_err(|error| {
+        tracing::error!(target: "kitazeit::reports", "CSV export finalize failed: {error}");
+        AppError::Internal("CSV export failed.".into())
+    })?;
     let mut resp = Response::new(axum::body::Body::from(data));
     resp.headers_mut().insert(
         header::CONTENT_TYPE,
@@ -335,7 +325,10 @@ pub async fn month_csv(
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
         .take(30)
         .collect();
-    let cd = format!("attachment; filename=\"report-{}-{}.csv\"", uid, safe_label);
+    let cd = format!(
+        "attachment; filename=\"report-user-{}-{}.csv\"",
+        uid, safe_label
+    );
     resp.headers_mut().insert(
         header::CONTENT_DISPOSITION,
         axum::http::HeaderValue::from_str(&cd).unwrap_or_else(|_| {
@@ -343,6 +336,43 @@ pub async fn month_csv(
         }),
     );
     Ok(resp)
+}
+
+pub async fn month_csv(
+    State(s): State<AppState>,
+    u: User,
+    Query(q): Query<CsvQuery>,
+) -> AppResult<Response> {
+    let uid = q.user_id.unwrap_or(u.id);
+    if uid != u.id && !u.is_lead() {
+        return Err(AppError::Forbidden);
+    }
+    let month = q
+        .month
+        .as_ref()
+        .ok_or_else(|| AppError::BadRequest("month=YYYY-MM".into()))?;
+    let r = build_month(&s.pool, uid, month).await?;
+    csv_response(r, uid, month)
+}
+
+pub async fn range_csv(
+    State(s): State<AppState>,
+    u: User,
+    Query(q): Query<CsvQuery>,
+) -> AppResult<Response> {
+    let uid = q.user_id.unwrap_or(u.id);
+    if uid != u.id && !u.is_lead() {
+        return Err(AppError::Forbidden);
+    }
+    let from = q
+        .from
+        .ok_or_else(|| AppError::BadRequest("from is required.".into()))?;
+    let to =
+        q.to.ok_or_else(|| AppError::BadRequest("to is required.".into()))?;
+    validate_range(from, to)?;
+    let label = format!("{}_to_{}", from, to);
+    let r = build_range(&s.pool, uid, from, to, &label).await?;
+    csv_response(r, uid, &label)
 }
 
 #[derive(Serialize)]
@@ -429,7 +459,7 @@ pub async fn categories(
         "SELECT c.name, c.color, z.start_time, z.end_time \
          FROM time_entries z \
          JOIN categories c ON c.id=z.category_id \
-         WHERE z.status = 'approved' AND z.entry_date BETWEEN ",
+         WHERE z.status IN ('draft','submitted','approved') AND z.entry_date BETWEEN ",
     );
     builder.push_bind(q.from).push(" AND ").push_bind(q.to);
     if let Some(id) = uid {

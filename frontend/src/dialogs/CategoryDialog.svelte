@@ -8,8 +8,9 @@
   export let onClose;
   let dlg;
   $: isNew = !template.id;
-  // Show translated name for system categories when editing
-  let name = template.id ? $t(template.name) : template.name || "";
+  let canonicalName = template.name || "";
+  let name = template.id ? $t(canonicalName) : canonicalName;
+  let nameChanged = false;
   let color = template.color || "#5b8def";
   let sort_order = template.sort_order || 0;
   let description = template.description || "";
@@ -21,7 +22,7 @@
     error = "";
     try {
       const body = {
-        name,
+        name: !isNew && !nameChanged ? canonicalName : name,
         color,
         sort_order: Number(sort_order),
         description: description || null,
@@ -51,7 +52,13 @@
   <div class="dialog-body">
     <div>
       <label class="kz-label" for="cat-name">{$t("Name")}</label>
-      <input id="cat-name" class="kz-input" bind:value={name} required />
+      <input
+        id="cat-name"
+        class="kz-input"
+        bind:value={name}
+        on:input={() => (nameChanged = true)}
+        required
+      />
     </div>
     <div>
       <label class="kz-label" for="cat-description">{$t("Description")}</label>

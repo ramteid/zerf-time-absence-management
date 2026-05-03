@@ -102,6 +102,7 @@ pub async fn update_admin_settings(
     }
 
     let language = normalize_language(&body.ui_language)?;
+    let previous = load_all_settings(&s.pool).await?;
     let country = body.country.trim().to_uppercase();
     let region = body.region.trim().to_string();
 
@@ -110,12 +111,23 @@ pub async fn update_admin_settings(
             "Country must be a 2-letter ISO code.".into(),
         ));
     }
+    if let Some(dwh) = body.default_weekly_hours {
+        if !(0.0..=168.0).contains(&dwh) {
+            return Err(AppError::BadRequest("Invalid default_weekly_hours.".into()));
+        }
+    }
+    if let Some(dal) = body.default_annual_leave_days {
+        if !(0..=366).contains(&dal) {
+            return Err(AppError::BadRequest(
+                "Invalid default_annual_leave_days.".into(),
+            ));
+        }
+    }
 
     save_setting(&s.pool, UI_LANGUAGE_KEY, language).await?;
     let saved_country = save_setting(&s.pool, COUNTRY_KEY, &country).await?;
     let saved_region = save_setting(&s.pool, REGION_KEY, &region).await?;
 
-    // Save default hours/leave if provided
     if let Some(dwh) = body.default_weekly_hours {
         save_setting(&s.pool, DEFAULT_WEEKLY_HOURS_KEY, &dwh.to_string()).await?;
     }
@@ -123,9 +135,10 @@ pub async fn update_admin_settings(
         save_setting(&s.pool, DEFAULT_ANNUAL_LEAVE_DAYS_KEY, &dal.to_string()).await?;
     }
 
-    // Refresh holidays from API with new country/region
-    if let Err(e) = holidays::refresh_holidays(&s.pool, &saved_country, &saved_region).await {
-        tracing::warn!("Failed to refresh holidays: {:?}", e);
+    if previous.country != saved_country || previous.region != saved_region {
+        if let Err(e) = holidays::refresh_holidays(&s.pool, &saved_country, &saved_region).await {
+            tracing::warn!("Failed to refresh holidays: {:?}", e);
+        }
     }
 
     Ok(Json(load_all_settings(&s.pool).await?))

@@ -5,7 +5,7 @@ use axum::{
     extract::{Path, Query, State},
     Json,
 };
-use chrono::{Datelike, NaiveDate};
+use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, TimeZone, Timelike};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
@@ -150,6 +150,29 @@ pub async fn ensure_holidays(pool: &crate::db::DatabasePool, year: i32) -> AppRe
     Ok(())
 }
 
+pub fn next_monday_noon(now: DateTime<Local>) -> AppResult<DateTime<Local>> {
+    let weekday = now.weekday().num_days_from_monday();
+    let days_ahead = if weekday == 0 && now.hour() < 12 {
+        0
+    } else {
+        7 - weekday
+    };
+    let target_date = now.date_naive() + Duration::days(i64::from(days_ahead));
+    let target_naive = target_date.and_hms_opt(12, 0, 0).ok_or_else(|| {
+        AppError::Internal("Failed to calculate holiday scheduler target.".into())
+    })?;
+    Local
+        .from_local_datetime(&target_naive)
+        .single()
+        .ok_or_else(|| AppError::Internal("Failed to resolve local scheduler time.".into()))
+}
+
+pub fn duration_until_next_monday_noon(now: DateTime<Local>) -> AppResult<std::time::Duration> {
+    (next_monday_noon(now)? - now)
+        .to_std()
+        .map_err(|_| AppError::Internal("Holiday scheduler target is in the past.".into()))
+}
+
 #[derive(FromRow, Serialize)]
 pub struct Holiday {
     pub id: i64,
@@ -252,4 +275,46 @@ pub async fn delete(
         .execute(&s.pool)
         .await?;
     Ok(Json(serde_json::json!({"ok":true})))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn local_at(year: i32, month: u32, day: u32, hour: u32) -> DateTime<Local> {
+        Local
+            .with_ymd_and_hms(year, month, day, hour, 0, 0)
+            .single()
+            .unwrap()
+    }
+
+    #[test]
+    fn next_monday_noon_uses_same_day_before_noon() {
+        let now = local_at(2026, 5, 4, 11);
+        let target = next_monday_noon(now).unwrap();
+        assert_eq!(target.date_naive(), now.date_naive());
+        assert_eq!(target.hour(), 12);
+    }
+
+    #[test]
+    fn next_monday_noon_advances_after_monday_noon() {
+        let now = local_at(2026, 5, 4, 12);
+        let target = next_monday_noon(now).unwrap();
+        assert_eq!(
+            target.date_naive(),
+            NaiveDate::from_ymd_opt(2026, 5, 11).unwrap()
+        );
+        assert_eq!(target.hour(), 12);
+    }
+
+    #[test]
+    fn next_monday_noon_advances_from_midweek() {
+        let now = local_at(2026, 5, 6, 9);
+        let target = next_monday_noon(now).unwrap();
+        assert_eq!(
+            target.date_naive(),
+            NaiveDate::from_ymd_opt(2026, 5, 11).unwrap()
+        );
+        assert_eq!(target.hour(), 12);
+    }
 }

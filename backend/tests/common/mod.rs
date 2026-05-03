@@ -1,22 +1,23 @@
 //! Shared test infrastructure for KitaZeit integration tests.
 //!
-//! Provides [`TestApp`] which spins up an ephemeral Postgres database,
-//! runs migrations, seeds initial data, and starts the Axum server on a
-//! random port.  Each test session gets a fully isolated database.
+//! Provides [`TestApp`] which spins up an ephemeral Postgres container via
+//! testcontainers, runs migrations, seeds initial data, and starts the Axum
+//! server on a random port. Each test session gets a fully isolated database.
 
 use kitazeit::{build_app, categories, config::Config, db, holidays, seed_admin, AppState};
 use reqwest::{Client, StatusCode};
 use serde_json::Value;
 use std::sync::Arc;
+use testcontainers::runners::AsyncRunner;
+use testcontainers::ContainerAsync;
+use testcontainers_modules::postgres::Postgres;
 
 /// A running test application with its own database and HTTP client.
 pub struct TestApp {
     pub base_url: String,
     pub admin_password: String,
-    /// The unique test database name (for cleanup).
-    db_name: String,
-    /// Connection to the *admin* database (for DROP on cleanup).
-    admin_pool: sqlx::PgPool,
+    /// Keep the container alive for the duration of the test.
+    _container: ContainerAsync<Postgres>,
 }
 
 /// A cookie-jar-equipped HTTP client that targets a specific [`TestApp`].
@@ -29,35 +30,26 @@ pub struct TestClient {
 impl TestApp {
     /// Boot a fully isolated test application.
     ///
-    /// Requires `DATABASE_URL` env var pointing to a Postgres instance
-    /// (e.g. `postgres://user:pass@localhost/postgres`).  A unique
-    /// database is created for every call.
+    /// Starts a Postgres container via testcontainers, creates the schema,
+    /// seeds initial data, and starts the Axum server on a random port.
     pub async fn spawn() -> Self {
-        let base_url =
-            std::env::var("DATABASE_URL").expect("DATABASE_URL must be set for integration tests");
-
-        // Connect to the default database to create a unique test DB.
-        let admin_pool = sqlx::PgPool::connect(&base_url)
+        let container = Postgres::default()
+            .start()
             .await
-            .expect("cannot connect to admin database");
+            .expect("failed to start Postgres container");
 
-        let db_name = format!("kitazeit_test_{}", uuid::Uuid::new_v4().simple());
-        sqlx::query(&format!("CREATE DATABASE \"{}\"", db_name))
-            .execute(&admin_pool)
+        let host_port = container
+            .get_host_port_ipv4(5432)
             .await
-            .expect("failed to create test database");
+            .expect("failed to get container port");
 
-        // Build a connection URL for the test database.
-        let test_db_url = if base_url.contains('?') {
-            base_url.replace(&extract_dbname(&base_url), &db_name)
-        } else {
-            let trimmed = base_url.trim_end_matches('/');
-            let prefix = &trimmed[..trimmed.rfind('/').unwrap() + 1];
-            format!("{}{}", prefix, db_name)
-        };
+        let database_url = format!(
+            "postgres://postgres:postgres@127.0.0.1:{}/postgres",
+            host_port
+        );
 
         let cfg = Config {
-            database_url: test_db_url.clone(),
+            database_url: database_url.clone(),
             session_secret: "integration-test-secret-do-not-use-in-prod-32-characters".into(),
             admin_email: "admin@example.com".into(),
             bind: "127.0.0.1:0".into(),
@@ -91,6 +83,7 @@ impl TestApp {
         let state = AppState {
             pool: pool.clone(),
             cfg: Arc::new(cfg),
+            notifications: kitazeit::notifications::broadcaster(),
         };
 
         let app = build_app(state);
@@ -122,8 +115,7 @@ impl TestApp {
         Self {
             base_url: server_url,
             admin_password,
-            db_name,
-            admin_pool,
+            _container: container,
         }
     }
 
@@ -132,18 +124,10 @@ impl TestApp {
         TestClient::new(&self.base_url)
     }
 
-    /// Cleanup: drop the test database.
+    /// Cleanup: container is dropped automatically when TestApp is dropped.
     pub async fn cleanup(self) {
-        // Terminate connections then drop the database.
-        let _ = sqlx::query(&format!(
-            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '{}'",
-            self.db_name
-        ))
-        .execute(&self.admin_pool)
-        .await;
-        let _ = sqlx::query(&format!("DROP DATABASE IF EXISTS \"{}\"", self.db_name))
-            .execute(&self.admin_pool)
-            .await;
+        // Container is dropped when `self` goes out of scope, which stops
+        // and removes the Postgres container automatically.
     }
 }
 
@@ -271,12 +255,4 @@ impl TestClient {
         )
         .await
     }
-}
-
-/// Extract the database name from a Postgres URL.
-fn extract_dbname(url: &str) -> String {
-    // postgres://user:pass@host:port/dbname?params
-    let without_params = url.split('?').next().unwrap();
-    let dbname = without_params.rsplit('/').next().unwrap();
-    dbname.to_string()
 }

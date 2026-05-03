@@ -1,7 +1,7 @@
 <script>
   import { api } from "../api.js";
   import { categories, currentUser, path, go, toast } from "../stores.js";
-  import { t, statusLabel, hoursUnit } from "../i18n.js";
+  import { t, statusLabel, formatHours } from "../i18n.js";
   import { confirmDialog } from "../confirm.js";
   import {
     monday,
@@ -96,8 +96,6 @@
     return $categories.find((c) => c.id === id) || { name: "?", color: "#999" };
   }
 
-  $: hu = hoursUnit();
-
   $: weekActual = entries.reduce(
     (s, e) =>
       s +
@@ -106,10 +104,10 @@
         : 0),
     0,
   );
-  $: weekTarget = Math.round(($currentUser.weekly_hours || 0) * 60);
   $: drafts = entries.filter((e) => e.status === "draft");
   $: weekHours = (weekActual / 60).toFixed(1);
-  $: targetHours = ($currentUser.weekly_hours || 0).toFixed(1);
+  $: contractHours = formatHours($currentUser.weekly_hours || 0);
+  $: targetHours = formatHours(($currentUser.weekly_hours || 0).toFixed(1));
   $: overtime = Math.max(
     0,
     weekActual / 60 - ($currentUser.weekly_hours || 0),
@@ -131,10 +129,6 @@
         .sort((a, b) => a.start_time.localeCompare(b.start_time)),
     };
   }
-
-  // Reactive day lists so Svelte re-renders when entries or mo change
-  $: weekdays = mo ? [0, 1, 2, 3, 4].map(buildDay) : [];
-  $: weekendDays = mo ? [5, 6].map(buildDay) : [];
 
   function durHours(start, end) {
     return (durMin(start, end) / 60).toFixed(1);
@@ -186,7 +180,7 @@
     <h1>{$t("Time Entry")}</h1>
     {#if mo}
       <div class="top-bar-subtitle">
-        {$t("Week {week}", { week: isoWeek(mo) })} · {$currentUser.weekly_hours}{hu}
+        {$t("Week {week}", { week: isoWeek(mo) })} · {contractHours}
         {$t("contract")}
       </div>
     {/if}
@@ -251,19 +245,21 @@
     <div class="stat-cards">
       <div class="kz-card stat-card">
         <div class="stat-card-label">{$t("Logged")}</div>
-        <div class="stat-card-value accent tab-num">{weekHours}{hu}</div>
+        <div class="stat-card-value accent tab-num">
+          {formatHours(weekHours)}
+        </div>
         <div class="stat-card-sub">
-          {$t("of {target}h target", { target: targetHours })}
+          {$t("of {target} target", { target: targetHours })}
         </div>
       </div>
       <div class="kz-card stat-card">
         <div class="stat-card-label">{$t("Overtime")}</div>
-        <div class="stat-card-value tab-num">{overtime}{hu}</div>
+        <div class="stat-card-value tab-num">{formatHours(overtime)}</div>
         <div class="stat-card-sub">{$t("this week")}</div>
       </div>
       <div class="kz-card stat-card">
         <div class="stat-card-label">{$t("Remaining")}</div>
-        <div class="stat-card-value tab-num">{remaining}{hu}</div>
+        <div class="stat-card-value tab-num">{formatHours(remaining)}</div>
         <div class="stat-card-sub">{$t("to target")}</div>
       </div>
       <div class="kz-card stat-card">
@@ -303,7 +299,7 @@
                 ? 'var(--accent)'
                 : 'var(--text-primary)'}"
             >
-              {totalH}{hu}
+              {formatHours(totalH)}
             </div>
           </div>
 
@@ -338,10 +334,12 @@
                     >{e.start_time.slice(0, 5)} – {e.end_time.slice(0, 5)}</span
                   >
                   <span
-                    >{durHours(
-                      e.start_time.slice(0, 5),
-                      e.end_time.slice(0, 5),
-                    )}{hu}</span
+                    >{formatHours(
+                      durHours(
+                        e.start_time.slice(0, 5),
+                        e.end_time.slice(0, 5),
+                      ),
+                    )}</span
                   >
                 </div>
               </div>

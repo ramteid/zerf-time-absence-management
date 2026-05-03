@@ -19,7 +19,7 @@ const TRANSLATIONS = {
     help_category_breakdown:
       "Shows how tracked hours are distributed across the different categories.",
     help_csv_export:
-      "Exports the monthly report for the selected employee as a CSV file.",
+      "Exports the selected employee and date range as a CSV file.",
     audit_table_users: "User",
     audit_table_absences: "Absence",
     audit_table_time_entries: "Time Entry",
@@ -29,6 +29,7 @@ const TRANSLATIONS = {
     audit_table_notifications: "Notification",
     audit_table_app_settings: "Setting",
     audit_table_reopen_requests: "Reopen Request",
+    audit_table_change_requests: "Change Request",
     audit_action_created: "Created",
     audit_action_updated: "Updated",
     audit_action_deleted: "Deleted",
@@ -37,6 +38,13 @@ const TRANSLATIONS = {
     audit_action_cancelled: "Cancelled",
     audit_action_status_changed: "Status Changed",
     audit_action_team_settings_updated: "Team Setting Updated",
+    audit_action_password_reset: "Password Reset",
+    audit_action_deactivated: "Deactivated",
+    audit_action_reopened: "Reopened",
+    "of {target} target": "of {target} target",
+    "Open calendar": "Open calendar",
+    "Invalid date.": "Invalid date.",
+    you: "you",
     "Public holiday": "Public holiday",
     Holiday: "Holiday",
     Work: "Work",
@@ -240,7 +248,7 @@ const TRANSLATIONS = {
     "Time Entry": "Zeiterfassung",
     contract: "Vertrag",
     Logged: "Erfasst",
-    "of {target}h target": "von {target}h Soll",
+    "of {target} target": "von {target} Soll",
     Overtime: "Überstunden",
     Remaining: "Verbleibend",
     Pending: "Ausstehend",
@@ -283,13 +291,9 @@ const TRANSLATIONS = {
     "Save Changes": "Änderungen speichern",
     "Saving...": "Speichert...",
     "Settings saved.": "Einstellungen gespeichert.",
-    "Settings saved. Holidays have been refreshed.":
-      "Einstellungen gespeichert. Feiertage wurden aktualisiert.",
     Country: "Land",
     Region: "Region",
     "e.g. US-CA": "z.B. US-CA",
-    "Saving will re-fetch holidays from the Nager.Date API for the selected country and region.":
-      "Beim Speichern werden die Feiertage über die Nager.Date-API für das gewählte Land und die Region neu abgerufen.",
     "Audit Log": "Audit-Protokoll",
     "Holiday name": "Feiertagsname",
     "Holiday added.": "Feiertag hinzugefügt.",
@@ -362,8 +366,11 @@ const TRANSLATIONS = {
     "Start cannot be after End.": "Start kann nicht nach Ende liegen.",
     // Hours unit
     hours_unit: "Std.",
-    "{value}{unit}": "{value}{unit}",
+    "{value}{unit}": "{value} {unit}",
     "{hours} / week": "{hours} / Woche",
+    "Open calendar": "Kalender öffnen",
+    "Invalid date.": "Ungültiges Datum.",
+    you: "Sie",
     // Overlap / absence conflict
     "Conflict: Overlap with existing absence.":
       "Konflikt: Überschneidung mit bestehender Abwesenheit.",
@@ -380,7 +387,7 @@ const TRANSLATIONS = {
     help_category_breakdown:
       "Zeigt die Verteilung der erfassten Stunden auf die verschiedenen Kategorien.",
     help_csv_export:
-      "Exportiert den Monatsbericht des gewählten Mitarbeiters als CSV-Datei.",
+      "Exportiert den gewählten Mitarbeiter und Zeitraum als CSV-Datei.",
     // Reports help (English defaults)
     // (English keys fall through)
     // Audit log
@@ -393,6 +400,7 @@ const TRANSLATIONS = {
     audit_table_notifications: "Benachrichtigung",
     audit_table_app_settings: "Einstellung",
     audit_table_reopen_requests: "Wiederfreigabe",
+    audit_table_change_requests: "Änderungsanfrage",
     audit_action_created: "Erstellt",
     audit_action_updated: "Bearbeitet",
     audit_action_deleted: "Gelöscht",
@@ -401,6 +409,9 @@ const TRANSLATIONS = {
     audit_action_cancelled: "Storniert",
     audit_action_status_changed: "Status geändert",
     audit_action_team_settings_updated: "Team-Einstellung geändert",
+    audit_action_password_reset: "Passwort zurückgesetzt",
+    audit_action_deactivated: "Deaktiviert",
+    audit_action_reopened: "Wieder geöffnet",
     Data: "Daten",
     Summary: "Zusammenfassung",
     // Admin settings
@@ -500,6 +511,13 @@ export function statusLabel(status) {
 export function hoursUnit() {
   const result = translate(get(language), "hours_unit");
   return result === "hours_unit" ? "h" : result;
+}
+
+export function formatHours(value) {
+  return translate(get(language), "{value}{unit}", {
+    value,
+    unit: hoursUnit(),
+  });
 }
 
 export function auditTableLabel(tableName) {

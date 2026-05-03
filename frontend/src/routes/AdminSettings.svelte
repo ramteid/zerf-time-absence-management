@@ -93,7 +93,7 @@
     saving = true;
     try {
       await api("/settings", { method: "PUT", body: s });
-      toast($t("Settings saved. Holidays have been refreshed."), "ok");
+      toast($t("Settings saved."), "ok");
     } catch (e) {
       toast(e.message || $t("Error"), "error");
     } finally {

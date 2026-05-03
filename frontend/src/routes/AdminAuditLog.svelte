@@ -13,13 +13,16 @@
     ]);
     log = entries;
     usersById = new Map(
-      users.map((user) => [user.id, `${user.first_name} ${user.last_name}`]),
+      users.map((user) => [
+        user.id,
+        `${user.first_name || ""} ${user.last_name || ""}`.trim(),
+      ]),
     );
   }
   load();
 
   function userLabel(userId) {
-    return usersById.get(userId) || `#${userId}`;
+    return usersById.get(userId) || (userId == null ? "System" : `#${userId}`);
   }
 
   function dataSummary(entry) {
@@ -38,6 +41,9 @@
         "entry_date",
         "start_date",
         "end_date",
+        "start_time",
+        "end_time",
+        "role",
         "key",
         "value",
       ];
@@ -45,11 +51,9 @@
       for (const k of keys) {
         if (obj[k] != null) parts.push(`${k}: ${obj[k]}`);
       }
-      return parts.length > 0
-        ? parts.join(", ")
-        : JSON.stringify(obj).slice(0, 80);
+      return parts.length > 0 ? parts.join(", ") : $t("Data");
     } catch {
-      return String(raw).slice(0, 80);
+      return $t("Data");
     }
   }
 </script>
