@@ -99,42 +99,39 @@
 
 <div class="content-area">
   <div class="kz-card" style="padding:16px">
-    <div class="cal-scroll-wrap">
-      <div class="cal-grid" style="margin-bottom:8px">
-        {#each weekdayLabels() as wd}
-          <div class="cal-head">{wd}</div>
-        {/each}
-      </div>
-      <div class="cal-grid">
-        {#each cells as c}
-          <div
-            class="cal-day"
-            class:today={c.today}
-            class:weekend={c.weekend && !c.today}
-            class:other-month={c.other}
-            title={c.hol || ""}
-          >
-            <div class="cal-day-number tab-num">{c.d.getDate()}</div>
-            {#if c.hol}
-              <div class="cal-event" style="background:var(--danger)">
-                {c.hol}
-              </div>
-            {/if}
-            {#each c.absences as e}
-              <div
-                class="cal-event abs-{e.kind}"
-                title="{e.name} · {absenceKindLabel(e.kind)}{e.comment
-                  ? ' · ' + e.comment
-                  : ''}"
-              >
-                {e.name}{e.half_day ? " ½" : ""}
-              </div>
-            {/each}
-          </div>
-        {/each}
-      </div>
+    <div class="cal-grid" style="margin-bottom:8px">
+      {#each weekdayLabels() as wd}
+        <div class="cal-head">{wd}</div>
+      {/each}
     </div>
-    <!-- end cal-scroll-wrap -->
+    <div class="cal-grid">
+      {#each cells as c}
+        <div
+          class="cal-day"
+          class:today={c.today}
+          class:weekend={c.weekend && !c.today}
+          class:other-month={c.other}
+          title={c.hol || ""}
+        >
+          <div class="cal-day-number tab-num">{c.d.getDate()}</div>
+          {#if c.hol}
+            <div class="cal-event" style="background:var(--danger)">
+              {c.hol}
+            </div>
+          {/if}
+          {#each c.absences as e}
+            <div
+              class="cal-event abs-{e.kind}"
+              title="{e.name} · {absenceKindLabel(e.kind)}{e.comment
+                ? ' · ' + e.comment
+                : ''}"
+            >
+              {e.name}{e.half_day ? " ½" : ""}
+            </div>
+          {/each}
+        </div>
+      {/each}
+    </div>
   </div>
 
   <div style="display:flex;gap:12px;margin-top:16px;flex-wrap:wrap">

@@ -85,6 +85,8 @@
   function toggleBell() {
     bellOpen = !bellOpen;
     if (bellOpen) {
+      // Close the mobile more sheet if open.
+      mobileMoreOpen = false;
       // Refresh on open so the list is current.
       reloadNotifications();
     }

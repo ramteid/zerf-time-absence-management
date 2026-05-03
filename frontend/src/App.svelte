@@ -41,6 +41,18 @@
   let booting = true;
   let bootNetworkError = false;
 
+  function debugLog(event, data = {}) {
+    console.debug("[app-debug]", event, {
+      path: $path,
+      pathname,
+      hasUser: !!$currentUser,
+      userId: $currentUser?.id ?? null,
+      booting,
+      bootNetworkError,
+      ...data,
+    });
+  }
+
   async function loadSettings() {
     try {
       const s = await api("/settings/public");
@@ -50,15 +62,23 @@
   }
 
   async function loadMe() {
+    debugLog("loadMe:start");
     try {
       const me = await api("/auth/me");
+      debugLog("loadMe:success", {
+        meId: me?.id ?? null,
+        meHome: me?.home ?? null,
+        mustChangePassword: !!me?.must_change_password,
+      });
       currentUser.set(me);
       csrfToken.set(me.csrf_token || null);
       bootNetworkError = false;
       if (!$categories.length) {
         try {
           categories.set(await api("/categories"));
+          debugLog("loadMe:categories-loaded");
         } catch (e) {
+          debugLog("loadMe:categories-failed", { message: e?.message ?? null });
           toast(
             $t("Failed to load categories. Some features may be unavailable."),
             "error",
@@ -66,6 +86,10 @@
         }
       }
     } catch (err) {
+      debugLog("loadMe:error", {
+        message: err?.message ?? null,
+        isNetworkError: !!err?.isNetworkError,
+      });
       if (err.isNetworkError) {
         // Don't log out on a network hiccup — keep showing boot screen
         // with a retry option rather than forcing the user to log in again.
@@ -81,6 +105,9 @@
   // endpoints. Clears all client state and redirects to login.
   let _sessionExpiredHandling = false;
   function handleSessionExpired() {
+    debugLog("sessionExpired:handle", {
+      alreadyHandling: _sessionExpiredHandling,
+    });
     if (_sessionExpiredHandling) return;
     _sessionExpiredHandling = true;
     stopPolling();
@@ -187,6 +214,9 @@
 
     // Cross-tab: if another tab logs out or expires, mirror that here immediately.
     _unsubBroadcast = onSessionBroadcast((msg) => {
+      debugLog("sessionBroadcast:received", {
+        type: msg?.type ?? null,
+      });
       if (msg.type === "session-expired" || msg.type === "logout") {
         if ($currentUser) {
           stopPolling();
@@ -250,6 +280,11 @@
   $: isAdmin = pathname.startsWith("/admin");
 
   function resolveRoute(p, user) {
+    debugLog("route:resolve", {
+      inputPath: p,
+      userHome: user?.home ?? null,
+      mustChangePassword: !!user?.must_change_password,
+    });
     if (!user) return null;
 
     // Resolve redirects without side-effects — just return the target component
@@ -259,15 +294,22 @@
         user.home && user.home !== "/" && user.home !== ""
           ? user.home
           : "/time";
+      debugLog("route:redirect-home", { dest });
       // Update the URL bar (deferred so we don't mutate stores mid-reactive-cycle)
       setTimeout(() => go(dest, false), 0);
       return routeMap[dest] || NotFound;
     }
     if (user.must_change_password && p !== "/account") {
+      debugLog("route:redirect-password-change");
       setTimeout(() => go("/account", false), 0);
       return Account;
     }
-    return routeMap[p] || NotFound;
+    const resolved = routeMap[p] || NotFound;
+    debugLog("route:resolved", {
+      inputPath: p,
+      resolved: resolved?.name ?? "anonymous-component",
+    });
+    return resolved;
   }
 
   // Intercept data-link clicks

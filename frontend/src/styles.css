@@ -695,12 +695,12 @@ dialog footer {
 /* ── Calendar ── */
 .cal-grid {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(7, minmax(28px, 1fr));
   gap: 1px;
 }
 
 .cal-head {
-  text-align: center;
+  text-align: left;
   font-size: 11px;
   font-weight: 500;
   color: var(--text-tertiary);
@@ -714,6 +714,7 @@ dialog footer {
   padding: 4px 6px;
   border-radius: var(--radius-sm);
   border: 1px solid transparent;
+  min-width: 0;
 }
 
 .cal-day.today {
@@ -880,7 +881,7 @@ dialog footer {
 /* ── Notification panel ── */
 .kz-notif-panel {
   position: fixed;
-  top: 14px;
+  top: 20px;
   left: 226px;
   width: 320px;
   max-height: 480px;
@@ -974,6 +975,7 @@ dialog footer {
   }
 }
 
+
 /* ── Responsive: mobile ── */
 @media (max-width: 768px) {
   /* Prevent the whole page from scrolling horizontally */
@@ -1056,16 +1058,19 @@ dialog footer {
     padding-bottom: 6px;
   }
 
-  /* Calendar: allow horizontal scroll on mobile */
-  .cal-scroll-wrap {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    margin: 0 -14px;
-    padding: 0 14px;
+  /* Calendar: compact cells on narrow screens */
+  .cal-day {
+    min-height: 48px;
+    padding: 2px 3px;
   }
 
-  .cal-grid {
-    min-width: 560px;
+  .cal-day-number {
+    font-size: 11px;
+  }
+
+  .cal-head {
+    font-size: 9px;
+    padding: 3px 0;
   }
 
   /* Field rows: single column */

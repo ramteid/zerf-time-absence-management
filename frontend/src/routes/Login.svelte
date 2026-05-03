@@ -14,31 +14,54 @@
     if (submitting) return;
     error = "";
     submitting = true;
+    console.debug("[login-debug]", "submit:start");
     try {
       const r = await api("/auth/login", {
         method: "POST",
         body: { email, password },
       });
+      console.debug("[login-debug]", "submit:login-success", {
+        hasCsrf: !!r?.csrf_token,
+      });
       // Always take the CSRF token from the login response first...
       csrfToken.set(r.csrf_token || null);
       const me = await api("/auth/me");
+      console.debug("[login-debug]", "submit:me-success", {
+        meId: me?.id ?? null,
+        meHome: me?.home ?? null,
+        mustChangePassword: !!me?.must_change_password,
+      });
       // ...then overwrite with the one from /me (authoritative, fresher).
       csrfToken.set(me.csrf_token || null);
       // Set the path BEFORE currentUser so that when the reactive chain fires
       // in App.svelte, matchRoute already sees the correct pathname instead of
       // "/" — which would return null and flash "Wird geladen...".
       const dest = me.must_change_password ? "/account" : me.home || "/time";
+      console.debug("[login-debug]", "submit:navigate", { dest });
       go(dest);
       currentUser.set(me);
+      console.debug("[login-debug]", "submit:user-set", {
+        currentPath: typeof location !== "undefined" ? location.pathname : null,
+      });
       // Re-arm the session-expiry gates only after login is fully committed.
       resetUnauthorizedGate();
+      console.debug("[login-debug]", "submit:gate-reset");
       try {
         categories.set(await api("/categories"));
-      } catch {}
+        console.debug("[login-debug]", "submit:categories-loaded");
+      } catch (categoryErr) {
+        console.debug("[login-debug]", "submit:categories-failed", {
+          message: categoryErr?.message ?? null,
+        });
+      }
     } catch (err) {
+      console.debug("[login-debug]", "submit:error", {
+        message: err?.message ?? null,
+      });
       error = err.message || "Error";
     } finally {
       submitting = false;
+      console.debug("[login-debug]", "submit:end", { submitting });
     }
   }
 </script>

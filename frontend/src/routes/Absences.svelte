@@ -112,11 +112,11 @@
     </div>
   {/if}
 
-  <div class="kz-card" style="overflow-x:auto">
+  <div class="kz-card">
     <div class="card-header">
       <span class="card-header-title">{$t("Absence History")}</span>
     </div>
-    <table class="kz-table">
+    <table class="kz-table absence-table">
       <thead>
         <tr>
           <th>{$t("Type")}</th>
@@ -130,16 +130,24 @@
       <tbody>
         {#each absences as a}
           <tr>
-            <td style="font-weight:500">{absenceKindLabel(a.kind)}</td>
-            <td class="tab-num">{fmtDate(a.start_date)}</td>
-            <td class="tab-num">{fmtDate(a.end_date)}</td>
-            <td class="tab-num">{absenceDays(a) || "–"}</td>
-            <td
+            <td data-label={$t("Type")} style="font-weight:500"
+              >{absenceKindLabel(a.kind)}</td
+            >
+            <td data-label={$t("From")} class="tab-num"
+              >{fmtDate(a.start_date)}</td
+            >
+            <td data-label={$t("To")} class="tab-num"
+              >{fmtDate(a.end_date)}</td
+            >
+            <td data-label={$t("Days")} class="tab-num"
+              >{absenceDays(a) || "–"}</td
+            >
+            <td data-label={$t("Status")}
               ><span class="kz-chip kz-chip-{a.status}"
                 >{statusLabel(a.status)}</span
               ></td
             >
-            <td style="text-align:right">
+            <td class="absence-actions">
               {#if a.status === "requested"}
                 <button
                   class="kz-btn kz-btn-ghost kz-btn-sm kz-btn-danger"
@@ -163,7 +171,8 @@
           <tr>
             <td
               colspan="6"
-              style="text-align:center;padding:32px;color:var(--text-tertiary)"
+              class="absence-empty"
+              style="padding:32px;color:var(--text-tertiary)"
             >
               {$t("No absences yet.")}
             </td>
@@ -183,3 +192,58 @@
     }}
   />
 {/if}
+
+<style>
+  /* Mobile: collapse table rows into labeled cards */
+  @media (max-width: 640px) {
+    .absence-table thead {
+      display: none;
+    }
+
+    .absence-table tbody tr {
+      display: block;
+      border-bottom: 1px solid var(--border);
+      padding: 12px 16px;
+    }
+
+    .absence-table tbody tr:last-child {
+      border-bottom: none;
+    }
+
+    .absence-table td {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 4px 0;
+      border: none;
+    }
+
+    .absence-table td::before {
+      content: attr(data-label);
+      font-weight: 500;
+      color: var(--text-secondary);
+      flex-shrink: 0;
+      margin-right: 12px;
+    }
+
+    .absence-table td:not([data-label]):not(.absence-empty) {
+      justify-content: flex-end;
+    }
+
+    .absence-table td.absence-empty {
+      display: block;
+      text-align: center;
+    }
+
+    .absence-actions {
+      padding-top: 8px;
+    }
+  }
+
+  /* Desktop: keep actions right-aligned */
+  @media (min-width: 641px) {
+    .absence-actions {
+      text-align: right;
+    }
+  }
+</style>
