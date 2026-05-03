@@ -226,7 +226,7 @@
         {#if bellOpen}
           <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
           <div
-            style="position:absolute;top:28px;right:0;width:320px;max-height:480px;overflow:auto;background:var(--bg-surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.18);z-index:200"
+            style="position:absolute;top:28px;right:0;width:min(320px, calc(100vw - 24px));max-height:480px;overflow:auto;background:var(--bg-surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.18);z-index:200"
             on:click|stopPropagation
             on:keydown={() => {}}
             role="dialog"
@@ -418,7 +418,7 @@
     <div class="mobile-more-overlay" on:click={() => (mobileMoreOpen = false)}>
       <div class="mobile-more-sheet" on:click|stopPropagation>
         <div class="mobile-more-header">
-          <div class="avatar" style="width:32px;height:32px;font-size:11px;background:var(--primary);color:white">
+          <div class="avatar" style="width:32px;height:32px;font-size:11px;background:var(--accent);color:white">
             {initials($currentUser)}
           </div>
           <div style="flex:1;min-width:0">

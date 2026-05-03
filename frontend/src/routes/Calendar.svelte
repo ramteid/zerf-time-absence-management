@@ -99,6 +99,7 @@
 
 <div class="content-area">
   <div class="kz-card" style="padding:16px">
+    <div class="cal-scroll-wrap">
     <div class="cal-grid" style="margin-bottom:8px">
       {#each weekdayLabels() as wd}
         <div class="cal-head">{wd}</div>
@@ -132,6 +133,7 @@
         </div>
       {/each}
     </div>
+    </div><!-- end cal-scroll-wrap -->
   </div>
 
   <div style="display:flex;gap:12px;margin-top:16px;flex-wrap:wrap">

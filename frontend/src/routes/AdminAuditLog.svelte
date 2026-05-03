@@ -28,7 +28,7 @@
 </div>
 
 <div class="content-area">
-  <div class="kz-card" style="overflow:hidden">
+  <div class="kz-card" style="overflow-x:auto">
     <table class="kz-table">
       <thead>
         <tr>

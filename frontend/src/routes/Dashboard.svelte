@@ -266,7 +266,7 @@
 
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
     <!-- Timesheet approvals -->
-    <div class="kz-card" style="overflow:hidden">
+    <div class="kz-card" style="overflow-x:auto">
       <div class="card-header">
         <Icon name="FileText" size={15} sw={1.5} />
         <span class="card-header-title">{$t("Timesheet Approvals")}</span>
@@ -332,7 +332,7 @@
     </div>
 
     <!-- Absence requests -->
-    <div class="kz-card" style="overflow:hidden">
+    <div class="kz-card" style="overflow-x:auto">
       <div class="card-header">
         <Icon name="Plane" size={15} sw={1.5} />
         <span class="card-header-title">{$t("Absence Requests")}</span>
@@ -394,7 +394,7 @@
 
   <!-- Reopen requests (week-level) -->
   {#if pendingReopens.length > 0}
-    <div class="kz-card" style="overflow:hidden;margin-top:16px">
+    <div class="kz-card" style="overflow-x:auto;margin-top:16px">
       <div class="card-header">
         <Icon name="Edit" size={15} sw={1.5} />
         <span class="card-header-title">{$t("Week reopen requests")}</span>
@@ -448,7 +448,7 @@
 
   <!-- Change requests -->
   {#if changeRequests.length > 0}
-    <div class="kz-card" style="overflow:hidden;margin-top:16px">
+    <div class="kz-card" style="overflow-x:auto;margin-top:16px">
       <div class="card-header">
         <Icon name="Edit" size={15} sw={1.5} />
         <span class="card-header-title">{$t("Change Requests")}</span>

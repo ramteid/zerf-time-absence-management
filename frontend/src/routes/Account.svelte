@@ -195,7 +195,7 @@
   </div>
 
   <!-- Overtime -->
-  <div class="kz-card" style="overflow:hidden">
+  <div class="kz-card" style="overflow-x:auto">
     <div class="card-header">
       <span class="card-header-title">
         {$t("Overtime balance {year}", { year: new Date().getFullYear() })}
