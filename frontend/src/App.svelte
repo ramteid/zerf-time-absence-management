@@ -255,7 +255,10 @@
     // Resolve redirects without side-effects — just return the target component
     // directly so the reactive chain never yields null for a logged-in user.
     if (p === "/" || p === "") {
-      const dest = user.home && user.home !== "/" && user.home !== "" ? user.home : "/time";
+      const dest =
+        user.home && user.home !== "/" && user.home !== ""
+          ? user.home
+          : "/time";
       // Update the URL bar (deferred so we don't mutate stores mid-reactive-cycle)
       setTimeout(() => go(dest, false), 0);
       return routeMap[dest] || NotFound;

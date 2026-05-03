@@ -37,7 +37,13 @@
         if (str !== value) value = str;
       },
       plugins: isMonth
-        ? [monthSelectPlugin({ shorthand: false, dateFormat: "Y-m", altFormat: "F Y" })]
+        ? [
+            monthSelectPlugin({
+              shorthand: false,
+              dateFormat: "Y-m",
+              altFormat: "F Y",
+            }),
+          ]
         : [],
     };
     fp = flatpickr(el, opts);

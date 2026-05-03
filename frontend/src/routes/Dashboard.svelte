@@ -274,8 +274,12 @@
           min={chartFrom}
           style="font-size:12px;padding:3px 6px;height:28px"
         />
-        <button class="kz-btn kz-btn-sm" on:click={loadChart}>
-          <Icon name="Search" size={13} />{$t("Show")}
+        <button
+          class="kz-btn kz-btn-sm"
+          on:click={loadChart}
+          aria-label={$t("Show")}
+        >
+          <Icon name="Search" size={13} />
         </button>
       </div>
     </div>
