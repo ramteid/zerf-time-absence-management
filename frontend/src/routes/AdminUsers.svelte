@@ -64,7 +64,7 @@
 </div>
 
 <div class="content-area" style="max-width:760px">
-  <div class="kz-card" style="overflow:hidden">
+  <div class="kz-card" style="overflow-x:auto">
     {#each users as u, i}
       <div
         style="padding:10px 16px;{i < users.length - 1

@@ -106,7 +106,7 @@
     </div>
   </div>
 
-  <div class="kz-card" style="overflow:hidden">
+  <div class="kz-card" style="overflow-x:auto">
     {#each holidays as h, i}
       <div
         style="padding:10px 16px;{i < holidays.length - 1

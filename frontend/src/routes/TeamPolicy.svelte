@@ -56,7 +56,7 @@
   {#if loading}
     <p>{$t("Loading...")}</p>
   {:else}
-    <div class="kz-card" style="overflow:hidden">
+    <div class="kz-card" style="overflow-x:auto">
       {#each rows as row, i}
         <div
           style="padding:14px 16px;{i < rows.length - 1

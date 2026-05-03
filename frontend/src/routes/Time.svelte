@@ -386,7 +386,7 @@
     {#each [5, 6] as i}
       {@const day = dayList(i)}
       {#if day.items.length > 0}
-        <div class="kz-card" style="margin-top:12px;overflow:hidden">
+        <div class="kz-card" style="margin-top:12px;overflow-x:auto">
           <div class="day-header">
             <div>
               <div class="day-name">{$t(day.dayName)}</div>

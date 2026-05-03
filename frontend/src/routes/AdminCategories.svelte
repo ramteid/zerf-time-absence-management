@@ -24,7 +24,7 @@
 </div>
 
 <div class="content-area" style="max-width:600px">
-  <div class="kz-card" style="overflow:hidden">
+  <div class="kz-card" style="overflow-x:auto">
     {#each $categories as cat, i}
       <div
         style="padding:10px 16px;{i < $categories.length - 1
