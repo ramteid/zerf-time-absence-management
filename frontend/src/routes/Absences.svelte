@@ -121,24 +121,34 @@
           <div class="absence-entry">
             <div class="absence-entry-row">
               <span class="absence-entry-label">{$t("Type")}</span>
-              <span class="absence-entry-value" style="font-weight:500">{absenceKindLabel(a.kind)}</span>
+              <span class="absence-entry-value" style="font-weight:500"
+                >{absenceKindLabel(a.kind)}</span
+              >
             </div>
             <div class="absence-entry-row">
               <span class="absence-entry-label">{$t("From")}</span>
-              <span class="absence-entry-value tab-num">{fmtDate(a.start_date)}</span>
+              <span class="absence-entry-value tab-num"
+                >{fmtDate(a.start_date)}</span
+              >
             </div>
             <div class="absence-entry-row">
               <span class="absence-entry-label">{$t("To")}</span>
-              <span class="absence-entry-value tab-num">{fmtDate(a.end_date)}</span>
+              <span class="absence-entry-value tab-num"
+                >{fmtDate(a.end_date)}</span
+              >
             </div>
             <div class="absence-entry-row">
               <span class="absence-entry-label">{$t("Days")}</span>
-              <span class="absence-entry-value tab-num">{absenceDays(a) || "–"}</span>
+              <span class="absence-entry-value tab-num"
+                >{absenceDays(a) || "–"}</span
+              >
             </div>
             <div class="absence-entry-row">
               <span class="absence-entry-label">{$t("Status")}</span>
               <span class="absence-entry-value">
-                <span class="kz-chip kz-chip-{a.status}">{statusLabel(a.status)}</span>
+                <span class="kz-chip kz-chip-{a.status}"
+                  >{statusLabel(a.status)}</span
+                >
               </span>
             </div>
             <div class="absence-entry-actions">

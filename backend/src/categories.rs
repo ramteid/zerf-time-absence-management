@@ -80,10 +80,12 @@ pub async fn create(
     .await
     .map_err(|_| AppError::Conflict("Name already exists".into()))?;
     Ok(Json(
-        sqlx::query_as("SELECT id, name, description, color, sort_order, active FROM categories WHERE id=$1")
-            .bind(id)
-            .fetch_one(&s.pool)
-            .await?,
+        sqlx::query_as(
+            "SELECT id, name, description, color, sort_order, active FROM categories WHERE id=$1",
+        )
+        .bind(id)
+        .fetch_one(&s.pool)
+        .await?,
     ))
 }
 
@@ -109,9 +111,11 @@ pub async fn update(
         .bind(b.name).bind(b.description).bind(b.color).bind(b.sort_order).bind(b.active).bind(id)
         .execute(&s.pool).await?;
     Ok(Json(
-        sqlx::query_as("SELECT id, name, description, color, sort_order, active FROM categories WHERE id=$1")
-            .bind(id)
-            .fetch_one(&s.pool)
-            .await?,
+        sqlx::query_as(
+            "SELECT id, name, description, color, sort_order, active FROM categories WHERE id=$1",
+        )
+        .bind(id)
+        .fetch_one(&s.pool)
+        .await?,
     ))
 }

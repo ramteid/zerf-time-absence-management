@@ -237,9 +237,7 @@ fn normalize_absence(input: &NewAbsence) -> AppResult<NormalizedAbsence<'_>> {
         ));
     }
 
-    Ok(NormalizedAbsence {
-        kind: &input.kind,
-    })
+    Ok(NormalizedAbsence { kind: &input.kind })
 }
 
 fn status_for_kind(kind: &str) -> &'static str {
@@ -410,9 +408,27 @@ pub async fn approve(
         .bind(u.id).bind(id).execute(&s.pool).await?;
     let before = serde_json::to_value(&a).unwrap();
     let after = serde_json::json!({"status": "approved", "reviewed_by": u.id});
-    audit::log(&s.pool, u.id, "approved", "absences", id, Some(before.clone()), Some(after.clone())).await;
+    audit::log(
+        &s.pool,
+        u.id,
+        "approved",
+        "absences",
+        id,
+        Some(before.clone()),
+        Some(after.clone()),
+    )
+    .await;
     if a.user_id != u.id {
-        audit::log(&s.pool, a.user_id, "approved", "absences", id, Some(before), Some(after)).await;
+        audit::log(
+            &s.pool,
+            a.user_id,
+            "approved",
+            "absences",
+            id,
+            Some(before),
+            Some(after),
+        )
+        .await;
     }
     Ok(Json(serde_json::json!({"ok":true})))
 }

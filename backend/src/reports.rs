@@ -247,7 +247,9 @@ pub async fn month_csv(
             return Err(AppError::BadRequest("from must not be after to.".into()));
         }
         if (to - from).num_days() > 366 {
-            return Err(AppError::BadRequest("Date range must not exceed 366 days.".into()));
+            return Err(AppError::BadRequest(
+                "Date range must not exceed 366 days.".into(),
+            ));
         }
         let label = format!("{}_to_{}", from, to);
         let r = build_range(&s.pool, uid, from, to, &label).await?;
@@ -257,7 +259,9 @@ pub async fn month_csv(
         let r = build_month(&s.pool, uid, month).await?;
         (r, month.clone())
     } else {
-        return Err(AppError::BadRequest("Provide 'month' or 'from'+'to'.".into()));
+        return Err(AppError::BadRequest(
+            "Provide 'month' or 'from'+'to'.".into(),
+        ));
     };
     // CSV formula-injection guard: prefix any cell that begins with =, +, -, @ or
     // a tab/CR with a leading single-quote so spreadsheets treat it as text.

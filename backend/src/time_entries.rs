@@ -312,13 +312,11 @@ pub async fn submit(
         .await;
     }
     // Notify the approver (or self if admin with no approver) about the submission.
-    let approver_id: Option<i64> = sqlx::query_scalar(
-        "SELECT approver_id FROM users WHERE id=$1",
-    )
-    .bind(u.id)
-    .fetch_optional(&s.pool)
-    .await?
-    .flatten();
+    let approver_id: Option<i64> = sqlx::query_scalar("SELECT approver_id FROM users WHERE id=$1")
+        .bind(u.id)
+        .fetch_optional(&s.pool)
+        .await?
+        .flatten();
     let notify_id = approver_id.unwrap_or(u.id);
     crate::notifications::create(
         &s,

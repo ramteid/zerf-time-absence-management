@@ -29,7 +29,8 @@
   let showTempPassword = null;
 
   function generatePassword() {
-    const chars = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%";
+    const chars =
+      "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%";
     const buf = new Uint32Array(16);
     crypto.getRandomValues(buf);
     let pw = "";
@@ -137,7 +138,9 @@
       <span style="flex:1">{$t("User created.")}</span>
     </header>
     <div class="dialog-body">
-      <div style="padding:12px;background:var(--bg-muted);border-radius:var(--radius-sm);font-family:monospace;font-size:14px;word-break:break-all">
+      <div
+        style="padding:12px;background:var(--bg-muted);border-radius:var(--radius-sm);font-family:monospace;font-size:14px;word-break:break-all"
+      >
         {$t("Temporary password:")} <strong>{showTempPassword}</strong>
       </div>
       <div style="font-size:12px;color:var(--text-tertiary);margin-top:8px">
@@ -148,7 +151,9 @@
       <button class="kz-btn" on:click={copyPassword}>
         {copied ? $t("Copied!") : $t("Copy")}
       </button>
-      <button class="kz-btn kz-btn-primary" on:click={dismissTempPassword}>{$t("OK")}</button>
+      <button class="kz-btn kz-btn-primary" on:click={dismissTempPassword}
+        >{$t("OK")}</button
+      >
     </footer>
   {:else}
     <header>
@@ -160,7 +165,9 @@
     <div class="dialog-body">
       <div class="field-row">
         <div>
-          <label class="kz-label" for="user-first-name">{$t("First name")}</label>
+          <label class="kz-label" for="user-first-name"
+            >{$t("First name")}</label
+          >
           <input
             id="user-first-name"
             class="kz-input"
@@ -198,7 +205,9 @@
           </select>
         </div>
         <div>
-          <label class="kz-label" for="user-start-date">{$t("Start date")}</label>
+          <label class="kz-label" for="user-start-date"
+            >{$t("Start date")}</label
+          >
           <DatePicker id="user-start-date" bind:value={start_date} />
         </div>
       </div>
@@ -234,7 +243,9 @@
       {#if isNew}
         <div class="field-row">
           <div>
-            <label class="kz-label" for="user-password">{$t("Password (min 12 chars)")}</label>
+            <label class="kz-label" for="user-password"
+              >{$t("Password (min 12 chars)")}</label
+            >
             <input
               id="user-password"
               class="kz-input"
@@ -245,7 +256,9 @@
             />
           </div>
           <div>
-            <label class="kz-label" for="user-confirm-password">{$t("Confirm password")}</label>
+            <label class="kz-label" for="user-confirm-password"
+              >{$t("Confirm password")}</label
+            >
             <input
               id="user-confirm-password"
               class="kz-input"

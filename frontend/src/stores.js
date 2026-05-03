@@ -46,7 +46,10 @@ export const path = writable(
 
 export function go(href, push = true) {
   if (typeof history === "undefined") return;
-  const before = typeof location !== "undefined" ? location.pathname + location.search : null;
+  const before =
+    typeof location !== "undefined"
+      ? location.pathname + location.search
+      : null;
   if (push) history.pushState({}, "", href);
   else history.replaceState({}, "", href);
   const after = location.pathname + location.search;

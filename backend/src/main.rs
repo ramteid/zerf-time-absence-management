@@ -55,8 +55,8 @@ async fn main() -> Result<()> {
             loop {
                 let now = chrono::Local::now();
                 let weekday = now.weekday().num_days_from_monday(); // 0=Mon
-                // Days until next Monday: if today is Monday before noon, target today;
-                // otherwise advance to next Monday.
+                                                                    // Days until next Monday: if today is Monday before noon, target today;
+                                                                    // otherwise advance to next Monday.
                 let days_ahead = if weekday == 0 && now.hour() < 12 {
                     0u32
                 } else {
@@ -72,7 +72,9 @@ async fn main() -> Result<()> {
 
                 let next_year = chrono::Local::now().year() + 1;
                 if let Err(e) = holidays::ensure_holidays(&p, next_year).await {
-                    tracing::warn!("Holiday scheduler: failed to ensure holidays for {next_year}: {e:?}");
+                    tracing::warn!(
+                        "Holiday scheduler: failed to ensure holidays for {next_year}: {e:?}"
+                    );
                 } else {
                     tracing::info!("Holiday scheduler: ensured holidays for {next_year}");
                 }

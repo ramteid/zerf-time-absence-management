@@ -12,31 +12,31 @@ const TRANSLATIONS = {
   en: {
     hours_unit: "h",
     "{hours} / week": "{hours} / week",
-    "help_monthly_report":
+    help_monthly_report:
       "Shows the monthly report for a team member with target/actual hours and daily details.",
-    "help_team_report":
+    help_team_report:
       "Compares target and actual hours for all active team members in the selected month.",
-    "help_category_breakdown":
+    help_category_breakdown:
       "Shows how tracked hours are distributed across the different categories.",
-    "help_csv_export":
+    help_csv_export:
       "Exports the monthly report for the selected employee as a CSV file.",
-    "audit_table_users": "User",
-    "audit_table_absences": "Absence",
-    "audit_table_time_entries": "Time Entry",
-    "audit_table_categories": "Category",
-    "audit_table_holidays": "Holiday",
-    "audit_table_sessions": "Session",
-    "audit_table_notifications": "Notification",
-    "audit_table_app_settings": "Setting",
-    "audit_table_reopen_requests": "Reopen Request",
-    "audit_action_created": "Created",
-    "audit_action_updated": "Updated",
-    "audit_action_deleted": "Deleted",
-    "audit_action_approved": "Approved",
-    "audit_action_rejected": "Rejected",
-    "audit_action_cancelled": "Cancelled",
-    "audit_action_status_changed": "Status Changed",
-    "audit_action_team_settings_updated": "Team Setting Updated",
+    audit_table_users: "User",
+    audit_table_absences: "Absence",
+    audit_table_time_entries: "Time Entry",
+    audit_table_categories: "Category",
+    audit_table_holidays: "Holiday",
+    audit_table_sessions: "Session",
+    audit_table_notifications: "Notification",
+    audit_table_app_settings: "Setting",
+    audit_table_reopen_requests: "Reopen Request",
+    audit_action_created: "Created",
+    audit_action_updated: "Updated",
+    audit_action_deleted: "Deleted",
+    audit_action_approved: "Approved",
+    audit_action_rejected: "Rejected",
+    audit_action_cancelled: "Cancelled",
+    audit_action_status_changed: "Status Changed",
+    audit_action_team_settings_updated: "Team Setting Updated",
     "Public holiday": "Public holiday",
     Holiday: "Holiday",
     Work: "Work",
@@ -358,8 +358,6 @@ const TRANSLATIONS = {
     "Last year": "Letztes Jahr",
     "Custom range": "Benutzerdefinierter Zeitraum",
     Range: "Bereich",
-    From: "Von",
-    To: "Bis",
     "From cannot be after To.": "Von kann nicht nach Bis liegen.",
     "Start cannot be after End.": "Start kann nicht nach Ende liegen.",
     // Hours unit
@@ -375,34 +373,34 @@ const TRANSLATIONS = {
     "Public holiday": "Feiertag",
     Absent: "Abwesend",
     // Reports help tooltips
-    "help_monthly_report":
+    help_monthly_report:
       "Zeigt den Monatsbericht eines Mitarbeiters mit Soll-/Ist-Stunden und Details pro Tag.",
-    "help_team_report":
+    help_team_report:
       "Vergleicht Soll- und Ist-Stunden aller aktiven Teammitglieder für den gewählten Monat.",
-    "help_category_breakdown":
+    help_category_breakdown:
       "Zeigt die Verteilung der erfassten Stunden auf die verschiedenen Kategorien.",
-    "help_csv_export":
+    help_csv_export:
       "Exportiert den Monatsbericht des gewählten Mitarbeiters als CSV-Datei.",
     // Reports help (English defaults)
     // (English keys fall through)
     // Audit log
-    "audit_table_users": "Benutzer",
-    "audit_table_absences": "Abwesenheit",
-    "audit_table_time_entries": "Zeiteintrag",
-    "audit_table_categories": "Kategorie",
-    "audit_table_holidays": "Feiertag",
-    "audit_table_sessions": "Sitzung",
-    "audit_table_notifications": "Benachrichtigung",
-    "audit_table_app_settings": "Einstellung",
-    "audit_table_reopen_requests": "Wiederfreigabe",
-    "audit_action_created": "Erstellt",
-    "audit_action_updated": "Bearbeitet",
-    "audit_action_deleted": "Gelöscht",
-    "audit_action_approved": "Genehmigt",
-    "audit_action_rejected": "Abgelehnt",
-    "audit_action_cancelled": "Storniert",
-    "audit_action_status_changed": "Status geändert",
-    "audit_action_team_settings_updated": "Team-Einstellung geändert",
+    audit_table_users: "Benutzer",
+    audit_table_absences: "Abwesenheit",
+    audit_table_time_entries: "Zeiteintrag",
+    audit_table_categories: "Kategorie",
+    audit_table_holidays: "Feiertag",
+    audit_table_sessions: "Sitzung",
+    audit_table_notifications: "Benachrichtigung",
+    audit_table_app_settings: "Einstellung",
+    audit_table_reopen_requests: "Wiederfreigabe",
+    audit_action_created: "Erstellt",
+    audit_action_updated: "Bearbeitet",
+    audit_action_deleted: "Gelöscht",
+    audit_action_approved: "Genehmigt",
+    audit_action_rejected: "Abgelehnt",
+    audit_action_cancelled: "Storniert",
+    audit_action_status_changed: "Status geändert",
+    audit_action_team_settings_updated: "Team-Einstellung geändert",
     Data: "Daten",
     Summary: "Zusammenfassung",
     // Admin settings

@@ -138,7 +138,9 @@
       </div>
       <div class="field-row">
         <div>
-          <label class="kz-label" for="settings-default-hours">{$t("Default weekly hours")}</label>
+          <label class="kz-label" for="settings-default-hours"
+            >{$t("Default weekly hours")}</label
+          >
           <input
             id="settings-default-hours"
             class="kz-input"
@@ -150,7 +152,9 @@
           />
         </div>
         <div>
-          <label class="kz-label" for="settings-default-leave">{$t("Default annual leave days")}</label>
+          <label class="kz-label" for="settings-default-leave"
+            >{$t("Default annual leave days")}</label
+          >
           <input
             id="settings-default-leave"
             class="kz-input"

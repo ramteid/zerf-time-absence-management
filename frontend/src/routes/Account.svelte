@@ -108,7 +108,9 @@
         <input
           id="account-weekly-hours"
           class="kz-input"
-          value={$t("{hours} / week", { hours: $currentUser.weekly_hours + hu })}
+          value={$t("{hours} / week", {
+            hours: $currentUser.weekly_hours + hu,
+          })}
           readonly
           style="color:var(--text-secondary)"
         />
@@ -260,22 +262,38 @@
           .slice(0, i + 1)
           .reduce((s, x) => s + x.diff_min, 0)}
         <div class="overtime-tile">
-          <div style="font-weight:600;font-size:13px;margin-bottom:4px">{m.month}</div>
-          <div class="overtime-tile-row">
-            <span>{$t("Target")}</span><span class="tab-num">{minToHM(m.target_min)}</span>
+          <div style="font-weight:600;font-size:13px;margin-bottom:4px">
+            {m.month}
           </div>
           <div class="overtime-tile-row">
-            <span>{$t("Actual")}</span><span class="tab-num">{minToHM(m.actual_min)}</span>
+            <span>{$t("Target")}</span><span class="tab-num"
+              >{minToHM(m.target_min)}</span
+            >
+          </div>
+          <div class="overtime-tile-row">
+            <span>{$t("Actual")}</span><span class="tab-num"
+              >{minToHM(m.actual_min)}</span
+            >
           </div>
           <div class="overtime-tile-row">
             <span>{$t("Diff")}</span>
-            <span class="tab-num" style="color:{m.diff_min < 0 ? 'var(--danger-text)' : 'var(--success-text)'}">
+            <span
+              class="tab-num"
+              style="color:{m.diff_min < 0
+                ? 'var(--danger-text)'
+                : 'var(--success-text)'}"
+            >
               {minToHM(m.diff_min)}
             </span>
           </div>
           <div class="overtime-tile-row">
             <span>{$t("Cumulative")}</span>
-            <span class="tab-num" style="color:{cum < 0 ? 'var(--danger-text)' : 'var(--success-text)'}">
+            <span
+              class="tab-num"
+              style="color:{cum < 0
+                ? 'var(--danger-text)'
+                : 'var(--success-text)'}"
+            >
               {minToHM(cum)}
             </span>
           </div>

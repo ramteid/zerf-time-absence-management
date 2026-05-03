@@ -85,11 +85,13 @@
         class="kz-btn-icon-sm kz-btn-ghost"
         title={$t("help_monthly_report")}
         on:click={() => toggleHelp("monthly")}
-        style="color:var(--text-tertiary);font-size:14px;cursor:help"
-      >ⓘ</button>
+        style="color:var(--text-tertiary);font-size:14px;cursor:help">ⓘ</button
+      >
     </div>
     {#if activeHelp === "monthly"}
-      <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)">
+      <div
+        style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)"
+      >
         {$t("help_monthly_report")}
       </div>
     {/if}
@@ -211,10 +213,13 @@
           title={$t("help_team_report")}
           on:click={() => toggleHelp("team")}
           style="color:var(--text-tertiary);font-size:14px;cursor:help"
-        >ⓘ</button>
+          >ⓘ</button
+        >
       </div>
       {#if activeHelp === "team"}
-        <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)">
+        <div
+          style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)"
+        >
           {$t("help_team_report")}
         </div>
       {/if}
@@ -280,16 +285,20 @@
   <!-- Category report -->
   <div class="kz-card" style="padding:20px;margin-bottom:16px">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
-      <span style="font-size:14px;font-weight:600">{$t("Category breakdown")}</span>
+      <span style="font-size:14px;font-weight:600"
+        >{$t("Category breakdown")}</span
+      >
       <button
         class="kz-btn-icon-sm kz-btn-ghost"
         title={$t("help_category_breakdown")}
         on:click={() => toggleHelp("cat")}
-        style="color:var(--text-tertiary);font-size:14px;cursor:help"
-      >ⓘ</button>
+        style="color:var(--text-tertiary);font-size:14px;cursor:help">ⓘ</button
+      >
     </div>
     {#if activeHelp === "cat"}
-      <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)">
+      <div
+        style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)"
+      >
         {$t("help_category_breakdown")}
       </div>
     {/if}
@@ -312,7 +321,9 @@
 
     {#if catReport}
       {#if catReport.length === 0}
-        <div style="padding:16px;color:var(--text-tertiary);font-size:13px">{$t("No data.")}</div>
+        <div style="padding:16px;color:var(--text-tertiary);font-size:13px">
+          {$t("No data.")}
+        </div>
       {:else}
         <div class="kz-card" style="overflow-x:auto;margin-top:12px">
           <table class="kz-table">
@@ -327,8 +338,12 @@
               {#each catReport as c}
                 <tr>
                   <td style="font-weight:500">
-                    <span style="display:inline-flex;align-items:center;gap:6px">
-                      <span class="cat-dot" style="background:{c.color || '#999'}"
+                    <span
+                      style="display:inline-flex;align-items:center;gap:6px"
+                    >
+                      <span
+                        class="cat-dot"
+                        style="background:{c.color || '#999'}"
                       ></span>
                       {$t(c.category)}
                     </span>
@@ -358,11 +373,13 @@
         class="kz-btn-icon-sm kz-btn-ghost"
         title={$t("help_csv_export")}
         on:click={() => toggleHelp("csv")}
-        style="color:var(--text-tertiary);font-size:14px;cursor:help"
-      >ⓘ</button>
+        style="color:var(--text-tertiary);font-size:14px;cursor:help">ⓘ</button
+      >
     </div>
     {#if activeHelp === "csv"}
-      <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)">
+      <div
+        style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)"
+      >
         {$t("help_csv_export")}
       </div>
     {/if}

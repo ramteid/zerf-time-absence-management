@@ -30,12 +30,24 @@
     try {
       const obj = typeof raw === "string" ? JSON.parse(raw) : raw;
       // Pick a few meaningful fields for summary
-      const keys = ["name", "email", "kind", "status", "entry_date", "start_date", "end_date", "key", "value"];
+      const keys = [
+        "name",
+        "email",
+        "kind",
+        "status",
+        "entry_date",
+        "start_date",
+        "end_date",
+        "key",
+        "value",
+      ];
       const parts = [];
       for (const k of keys) {
         if (obj[k] != null) parts.push(`${k}: ${obj[k]}`);
       }
-      return parts.length > 0 ? parts.join(", ") : JSON.stringify(obj).slice(0, 80);
+      return parts.length > 0
+        ? parts.join(", ")
+        : JSON.stringify(obj).slice(0, 80);
     } catch {
       return String(raw).slice(0, 80);
     }
@@ -70,9 +82,10 @@
               <td>{userLabel(e.user_id)}</td>
               <td>{auditActionLabel(e.action)}</td>
               <td>{auditTableLabel(e.table_name)}</td>
-              <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--text-tertiary)"
-                title={dataSummary(e)}
-              >{dataSummary(e)}</td>
+              <td
+                style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--text-tertiary)"
+                title={dataSummary(e)}>{dataSummary(e)}</td
+              >
             </tr>
           {/each}
         </tbody>

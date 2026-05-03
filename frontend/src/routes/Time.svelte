@@ -314,10 +314,7 @@
                 class="time-block"
                 on:click={() => {
                   if (e.status === "draft") showEntry = e;
-                  else if (
-                    e.status === "submitted" ||
-                    e.status === "approved"
-                  )
+                  else if (e.status === "submitted" || e.status === "approved")
                     showChange = e;
                 }}
                 on:keydown={() => {}}
@@ -338,10 +335,7 @@
                 </div>
                 <div class="time-block-times tab-num">
                   <span
-                    >{e.start_time.slice(0, 5)} – {e.end_time.slice(
-                      0,
-                      5,
-                    )}</span
+                    >{e.start_time.slice(0, 5)} – {e.end_time.slice(0, 5)}</span
                   >
                   <span
                     >{durHours(
