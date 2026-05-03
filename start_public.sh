@@ -1,0 +1,5 @@
+#!/bin/bash
+
+# Start the application in production mode with Docker Compose.
+# Make sure to have the .env file configured with the correct environment variables.
+docker compose -f docker/docker-compose-http.yml -f docker/docker-compose-https.yml --env-file .env up -d --build
