@@ -8,6 +8,7 @@
     notifications,
     notificationsUnread,
     toast,
+    broadcastSession,
   } from "./stores.js";
   import { t, roleLabel } from "./i18n.js";
   import { fmtDate } from "./format.js";
@@ -75,8 +76,9 @@
       await api("/auth/logout", { method: "POST" });
     } catch {}
     currentUser.set(false);
-    go("/login");
-    location.reload();
+    go("/", false);
+    // Tell every other open tab to also return to login.
+    broadcastSession("logout");
   }
 
   let bellOpen = false;

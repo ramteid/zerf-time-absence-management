@@ -1,15 +1,18 @@
 <script>
   import { onMount, onDestroy } from "svelte";
-  import { api, csrfToken } from "./api.js";
+  import { api, csrfToken, setUnauthorizedHandler, setGateResetHandler, resetUnauthorizedGate } from "./api.js";
   import {
     currentUser,
     categories,
     settings,
     path,
     go,
+    toast,
     toasts,
     notifications,
     notificationsUnread,
+    broadcastSession,
+    onSessionBroadcast,
   } from "./stores.js";
   import { setLanguage, t } from "./i18n.js";
   import Layout from "./Layout.svelte";
@@ -30,6 +33,7 @@
   import NotFound from "./routes/NotFound.svelte";
 
   let booting = true;
+  let bootNetworkError = false;
 
   async function loadSettings() {
     try {
@@ -44,14 +48,43 @@
       const me = await api("/auth/me");
       currentUser.set(me);
       csrfToken.set(me.csrf_token || null);
+      bootNetworkError = false;
       if (!$categories.length) {
         try {
           categories.set(await api("/categories"));
         } catch {}
       }
-    } catch {
-      currentUser.set(false);
+    } catch (err) {
+      if (err.isNetworkError) {
+        // Don't log out on a network hiccup — keep showing boot screen
+        // with a retry option rather than forcing the user to log in again.
+        bootNetworkError = true;
+      } else {
+        currentUser.set(false);
+        csrfToken.set(null);
+      }
     }
+  }
+
+  // Called whenever any API response returns 401/403 outside the auth
+  // endpoints. Clears all client state and redirects to login.
+  let _sessionExpiredHandling = false;
+  function handleSessionExpired() {
+    if (_sessionExpiredHandling) return;
+    _sessionExpiredHandling = true;
+    stopPolling();
+    csrfToken.set(null);
+    categories.set([]);
+    currentUser.set(false);
+    go("/", false);
+    toast($t("Your session has expired. Please sign in again."), "err");
+    // Attempt a best-effort server-side logout to clear the stale cookie.
+    fetch("/api/v1/auth/logout", { method: "POST", credentials: "same-origin" }).catch(() => {});
+    // Notify other tabs so they also return to login immediately.
+    broadcastSession("session-expired");
+    // NOTE: _sessionExpiredHandling is intentionally NOT reset here.
+    // resetUnauthorizedGate() (called by Login.svelte after successful re-login)
+    // also resets this flag via the onGateReset hook registered below.
   }
 
   // Notification polling: 60s default, paused when tab is hidden. The
@@ -105,13 +138,68 @@
     else stopPolling();
   }
 
+  // Listeners registered in onMount and cleaned up in onDestroy.
+  let _unsubBroadcast = null;
+  let _focusListener = null;
+
+  async function onFocus() {
+    if (!$currentUser) return;
+    try {
+      const me = await api("/auth/me");
+      // Refresh CSRF token in case it rotated while the tab was hidden.
+      csrfToken.set(me.csrf_token || null);
+    } catch (err) {
+      // api("/auth/me") is excluded from the global 401 interceptor to prevent
+      // redirect loops during normal boot. So we must handle session expiry
+      // explicitly here: if the re-validation call gets a 401/403, treat it
+      // as an expired session and trigger the full expiry flow.
+      if (!err.isNetworkError) {
+        handleSessionExpired();
+      }
+      // Network errors during tab-focus check are intentionally ignored.
+    }
+  }
+
   onMount(async () => {
+    setUnauthorizedHandler(handleSessionExpired);
+    // When Login.svelte calls resetUnauthorizedGate() after re-login,
+    // also reset our local gate so the next session expiry is handled.
+    setGateResetHandler(() => { _sessionExpiredHandling = false; });
     await loadSettings();
     await loadMe();
     booting = false;
+
+    // Cross-tab: if another tab logs out or expires, mirror that here immediately.
+    _unsubBroadcast = onSessionBroadcast((msg) => {
+      if (msg.type === "session-expired" || msg.type === "logout") {
+        if ($currentUser) {
+          stopPolling();
+          csrfToken.set(null);
+          categories.set([]);
+          currentUser.set(false);
+          go("/", false);
+          if (msg.type === "session-expired") {
+            toast($t("Your session has expired. Please sign in again."), "err");
+          }
+        }
+      }
+    });
+
+    // Tab-focus re-validation: silently re-check the session whenever the user
+    // returns to this tab after it was hidden/suspended. If the cookie has
+    // expired the 401 triggers handleSessionExpired before the user interacts.
+    _focusListener = () => { if (!document.hidden) onFocus(); };
+    document.addEventListener("visibilitychange", _focusListener);
   });
 
-  onDestroy(stopPolling);
+  onDestroy(() => {
+    stopPolling();
+    if (_unsubBroadcast) { _unsubBroadcast(); _unsubBroadcast = null; }
+    if (_focusListener) {
+      document.removeEventListener("visibilitychange", _focusListener);
+      _focusListener = null;
+    }
+  });
 
   $: pathname = (() => {
     const idx = $path.indexOf("?");
@@ -165,6 +253,23 @@
 
 {#if booting}
   <p style="padding: 2em">{$t("Loading...")}</p>
+{:else if bootNetworkError}
+  <div style="padding: 2em; text-align: center">
+    <p style="color: var(--danger-text); margin-bottom: 1em">
+      {$t("Could not reach the server. Please check your connection.")}
+    </p>
+    <button
+      class="kz-btn kz-btn-primary"
+      on:click={async () => {
+        booting = true;
+        bootNetworkError = false;
+        await loadMe();
+        booting = false;
+      }}
+    >
+      {$t("Retry")}
+    </button>
+  </div>
 {:else if !$currentUser}
   <Login />
 {:else if route}

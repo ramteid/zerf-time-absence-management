@@ -1,5 +1,5 @@
 <script>
-  import { api, csrfToken } from "../api.js";
+  import { api, csrfToken, resetUnauthorizedGate } from "../api.js";
   import { currentUser, categories, go } from "../stores.js";
   import { t } from "../i18n.js";
   import Icon from "../Icons.svelte";
@@ -7,24 +7,34 @@
   let email = "";
   let password = "";
   let error = "";
+  let submitting = false;
 
   async function submit(e) {
     e.preventDefault();
+    if (submitting) return;
     error = "";
+    submitting = true;
     try {
       const r = await api("/auth/login", {
         method: "POST",
         body: { email, password },
       });
+      // Always take the CSRF token from the login response first...
       csrfToken.set(r.csrf_token || null);
       const me = await api("/auth/me");
+      // ...then overwrite with the one from /me (authoritative, fresher).
+      csrfToken.set(me.csrf_token || null);
       currentUser.set(me);
+      // Re-arm the session-expiry gates only after login is fully committed.
+      resetUnauthorizedGate();
       try {
         categories.set(await api("/categories"));
       } catch {}
       go(me.must_change_password ? "/account" : me.home || "/time");
     } catch (err) {
       error = err.message || "Error";
+    } finally {
+      submitting = false;
     }
   }
 </script>
@@ -71,9 +81,10 @@
       <button
         class="kz-btn kz-btn-primary"
         type="submit"
+        disabled={submitting}
         style="width:100%;justify-content:center;height:38px"
       >
-        {$t("Sign in")}
+        {submitting ? $t("Signing in…") : $t("Sign in")}
       </button>
     </form>
   </div>

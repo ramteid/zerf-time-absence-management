@@ -71,3 +71,31 @@ export function toast(message, type = "info") {
 // In-app notification center.
 export const notifications = writable([]);
 export const notificationsUnread = writable(0);
+
+// ── Cross-tab session coordination ──────────────────────────────────────────
+// Uses BroadcastChannel so that a logout or session expiry in one tab
+// immediately propagates to every other open tab of the same origin.
+// Message shape: { type: 'session-expired' | 'logout' }
+let _sessionChannel = null;
+try {
+  if (typeof BroadcastChannel !== "undefined") {
+    _sessionChannel = new BroadcastChannel("kitazeit-session");
+  }
+} catch {}
+
+export function broadcastSession(type) {
+  try {
+    _sessionChannel?.postMessage({ type });
+  } catch {}
+}
+
+/**
+ * Register a handler for cross-tab session messages.
+ * Returns an unsubscribe function.
+ */
+export function onSessionBroadcast(fn) {
+  if (!_sessionChannel) return () => {};
+  const handler = (e) => fn(e.data);
+  _sessionChannel.addEventListener("message", handler);
+  return () => _sessionChannel.removeEventListener("message", handler);
+}
