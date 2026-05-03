@@ -62,7 +62,7 @@ export async function api(path, opts = {}) {
       ...opts,
       body: opts.body ? JSON.stringify(opts.body) : undefined,
     });
-  } catch (networkErr) {
+  } catch {
     // Distinguish a real network failure (offline, DNS, etc.) from an auth
     // failure. Re-throw as a typed error so callers can handle it differently
     // from business-logic errors. Does NOT trigger the session-expiry handler.

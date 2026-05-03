@@ -1422,7 +1422,7 @@ async fn full_integration_suite() {
         let (st, body) = tina
             .post(
                 "/api/v1/change-requests",
-                &json!({"time_entry_id": id_y3, "new_start_time":"10:30","new_end_time":"12:15","new_category_id": cat_prep, "new_comment":"reclassified to prep", "reason":"misclassified"}),
+                &json!({"time_entry_id": id_y3, "new_start_time":"10:30","new_end_time":"11:45","new_category_id": cat_prep, "new_comment":"reclassified to prep", "reason":"misclassified"}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "multi-field CR created");
@@ -1444,7 +1444,7 @@ async fn full_integration_suite() {
         let y3_obj = find_by_id(&body, id_y3).expect("Y3 not in list after CR");
         let end_time = y3_obj["end_time"].as_str().unwrap_or("");
         assert!(
-            end_time.starts_with("12:15"),
+            end_time.starts_with("11:45"),
             "CR applied to entry (end_time={})",
             end_time
         );
