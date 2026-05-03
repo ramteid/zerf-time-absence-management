@@ -208,6 +208,7 @@
         {minToHM(cumulative)}
       </span>
     </div>
+    <div class="kz-table-wrap">
     <table class="kz-table">
       <thead>
         <tr>
@@ -245,5 +246,6 @@
         {/each}
       </tbody>
     </table>
+    </div><!-- end kz-table-wrap -->
   </div>
 </div>

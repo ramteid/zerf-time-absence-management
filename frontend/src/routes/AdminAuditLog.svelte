@@ -29,6 +29,7 @@
 
 <div class="content-area">
   <div class="kz-card" style="overflow-x:auto">
+    <div class="kz-table-wrap">
     <table class="kz-table">
       <thead>
         <tr>
@@ -53,5 +54,6 @@
         {/each}
       </tbody>
     </table>
+    </div><!-- end kz-table-wrap -->
   </div>
 </div>

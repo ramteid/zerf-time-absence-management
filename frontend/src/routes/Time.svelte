@@ -306,7 +306,7 @@
     </div>
 
     <!-- Week grid -->
-    <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
+    <div class="week-grid-scroll-wrap">
     <div class="week-grid">
       {#each [0, 1, 2, 3, 4] as i}
         {@const day = dayList(i)}
