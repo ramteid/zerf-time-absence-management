@@ -897,11 +897,11 @@ dialog footer {
 @media (max-width: 768px) {
   /* Prevent the whole page from scrolling horizontally */
   html, body, #app {
-    overflow-x: clip;
+    overflow-x: hidden;
   }
 
   .app-layout {
-    overflow-x: clip;
+    overflow-x: hidden;
   }
 
   .sidebar {
@@ -911,12 +911,10 @@ dialog footer {
   .main-content {
     /* Account for bottom nav height + safe-area */
     padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px));
-    overflow-x: clip;
   }
 
   .content-area {
     padding: 12px 14px;
-    overflow-x: clip;
   }
 
   /* Stat cards: 2 per row */
@@ -1006,15 +1004,6 @@ dialog footer {
     flex-wrap: nowrap;
   }
 
-  /* Reports filter row: wrap on mobile */
-  .reports-filter-row {
-    flex-wrap: wrap;
-  }
-  .reports-filter-row .kz-btn {
-    width: 100%;
-    justify-content: center;
-  }
-
   /* Login card */
   .login-card {
     width: min(380px, calc(100vw - 32px));
@@ -1058,7 +1047,7 @@ dialog footer {
     font-size: 10px;
     text-decoration: none;
     cursor: pointer;
-    padding: 4px 0 calc(4px + env(safe-area-inset-bottom, 0px));
+    padding: 4px 0;
     transition: color 0.15s;
   }
 

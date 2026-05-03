@@ -296,6 +296,7 @@
     </div>
 
     <!-- Week grid -->
+    <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
     <div class="week-grid">
       {#each [0, 1, 2, 3, 4] as i}
         {@const day = dayList(i)}
@@ -381,6 +382,7 @@
         </div>
       {/each}
     </div>
+    </div><!-- end week-grid scroll wrapper -->
 
     <!-- Weekend (Sat/Sun) if entries exist -->
     {#each [5, 6] as i}
