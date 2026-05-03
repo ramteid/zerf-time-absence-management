@@ -63,9 +63,13 @@
       },
     );
     if (!ok) return;
-    await api("/absences/" + id, { method: "DELETE" });
-    toast($t("Absence cancelled."), "ok");
-    load();
+    try {
+      await api("/absences/" + id, { method: "DELETE" });
+      toast($t("Absence cancelled."), "ok");
+      load();
+    } catch (e) {
+      toast(e.message || $t("Error"), "error");
+    }
   }
 </script>
 

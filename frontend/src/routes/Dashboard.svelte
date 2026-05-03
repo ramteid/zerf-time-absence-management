@@ -12,6 +12,7 @@
   import Icon from "../Icons.svelte";
   import { confirmDialog } from "../confirm.js";
   import FlextimeChart from "../FlextimeChart.svelte";
+  import DatePicker from "../DatePicker.svelte";
 
   let pendingEntries = [];
   let pendingAbsences = [];

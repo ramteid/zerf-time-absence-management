@@ -93,7 +93,9 @@
         "error",
       );
     }
-    toast($t("Copied {count} entries.", { count: n }), "ok");
+    if (n > 0) {
+      toast($t("Copied {count} entries.", { count: n }), "ok");
+    }
     load();
   }
 

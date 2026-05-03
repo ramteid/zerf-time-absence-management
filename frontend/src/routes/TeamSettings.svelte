@@ -14,7 +14,7 @@
   async function load() {
     loading = true;
     try {
-      rows = await api("/team-policy");
+      rows = await api("/team-settings");
     } finally {
       loading = false;
     }
@@ -24,7 +24,7 @@
   async function toggle(row) {
     saving[row.approver_id] = true;
     try {
-      await api(`/team-policy/${row.approver_id}`, {
+      await api(`/team-settings/${row.approver_id}`, {
         method: "PUT",
         body: {
           allow_reopen_without_approval: row.allow_reopen_without_approval,
@@ -46,7 +46,7 @@
 
 <div class="top-bar">
   <div class="top-bar-title">
-    <h1>{$t("Team Policy")}</h1>
+    <h1>{$t("Team Settings")}</h1>
     <div class="top-bar-subtitle"></div>
   </div>
 </div>

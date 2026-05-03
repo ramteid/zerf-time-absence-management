@@ -1675,7 +1675,7 @@ async fn bootstrap_team(
     if lead_policy_auto {
         let (st, _) = admin
             .put(
-                &format!("/api/v1/team-policy/{}", lead_id),
+                &format!("/api/v1/team-settings/{}", lead_id),
                 &json!({"allow_reopen_without_approval": true}),
             )
             .await;
@@ -2129,7 +2129,7 @@ async fn notifications_endpoints() {
 }
 
 #[tokio::test]
-async fn team_policy_lead_can_only_set_own() {
+async fn team_settings_lead_can_only_set_own() {
     let app = TestApp::spawn().await;
     let admin = app.client();
     admin.login("admin@example.com", &app.admin_password).await;
@@ -2144,7 +2144,7 @@ async fn team_policy_lead_can_only_set_own() {
     // Lead can update own.
     let (st, _) = lead
         .put(
-            &format!("/api/v1/team-policy/{}", lead_id),
+            &format!("/api/v1/team-settings/{}", lead_id),
             &json!({"allow_reopen_without_approval": true}),
         )
         .await;
@@ -2153,7 +2153,7 @@ async fn team_policy_lead_can_only_set_own() {
     // Lead cannot update admin (id 1).
     let (st, _) = lead
         .put(
-            "/api/v1/team-policy/1",
+            "/api/v1/team-settings/1",
             &json!({"allow_reopen_without_approval": true}),
         )
         .await;
@@ -2162,17 +2162,17 @@ async fn team_policy_lead_can_only_set_own() {
     // Admin can update any.
     let (st, _) = admin
         .put(
-            &format!("/api/v1/team-policy/{}", lead_id),
+            &format!("/api/v1/team-settings/{}", lead_id),
             &json!({"allow_reopen_without_approval": false}),
         )
         .await;
     assert_eq!(st, StatusCode::OK);
 
     // Lead sees only own row.
-    let (_, body) = lead.get("/api/v1/team-policy").await;
+    let (_, body) = lead.get("/api/v1/team-settings").await;
     assert_eq!(body.as_array().unwrap().len(), 1);
     // Admin sees both (admin + lead).
-    let (_, body) = admin.get("/api/v1/team-policy").await;
+    let (_, body) = admin.get("/api/v1/team-settings").await;
     assert!(body.as_array().unwrap().len() >= 2);
 
     app.cleanup().await;

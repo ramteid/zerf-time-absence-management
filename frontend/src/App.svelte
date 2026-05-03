@@ -258,7 +258,7 @@
       "/admin/holidays": AdminHolidays,
       "/admin/audit-log": AdminAuditLog,
       "/admin/settings": AdminSettings,
-      "/team-policy": TeamSettings,
+      "/team-settings": TeamSettings,
     };
     return map[p] || NotFound;
   }

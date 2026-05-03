@@ -5,6 +5,7 @@
   import { isoDate, minToHM, fmtDate } from "../format.js";
   import { normalizeMonthReport } from "../apiMappers.js";
   import Icon from "../Icons.svelte";
+  import DatePicker from "../DatePicker.svelte";
 
   const today = new Date();
   const monthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
@@ -77,13 +78,7 @@
       </div>
       <div>
         <label class="kz-label" for="reports-month">{$t("Month")}</label>
-        <input
-          id="reports-month"
-          class="kz-input"
-          type="month"
-          lang={$language}
-          bind:value={month}
-        />
+        <DatePicker id="reports-month" mode="month" bind:value={month} />
       </div>
     </div>
     <button class="kz-btn kz-btn-primary" on:click={showMonth}
@@ -190,11 +185,9 @@
       >
         <div style="flex:1">
           <label class="kz-label" for="reports-team-month">{$t("Month")}</label>
-          <input
+          <DatePicker
             id="reports-team-month"
-            class="kz-input"
-            type="month"
-            lang={$language}
+            mode="month"
             bind:value={teamMonth}
           />
         </div>
@@ -254,25 +247,15 @@
     <div class="field-row" style="margin-bottom:12px">
       <div>
         <label class="kz-label" for="reports-category-from">{$t("From")}</label>
-        <input
+        <DatePicker
           id="reports-category-from"
-          class="kz-input"
-          type="date"
-          lang={$language}
           bind:value={catFrom}
           max={catTo}
         />
       </div>
       <div>
         <label class="kz-label" for="reports-category-to">{$t("To")}</label>
-        <input
-          id="reports-category-to"
-          class="kz-input"
-          type="date"
-          lang={$language}
-          bind:value={catTo}
-          min={catFrom}
-        />
+        <DatePicker id="reports-category-to" bind:value={catTo} min={catFrom} />
       </div>
     </div>
     <button class="kz-btn kz-btn-primary" on:click={showCat}>{$t("Run")}</button

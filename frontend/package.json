@@ -23,5 +23,8 @@
     "svelte": "^4.2.19",
     "vite": "^5.4.10",
     "vitest": "^2.1.5"
+  },
+  "dependencies": {
+    "flatpickr": "^4.6.13"
   }
 }

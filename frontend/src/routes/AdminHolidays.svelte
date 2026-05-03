@@ -1,10 +1,11 @@
 <script>
   import { api } from "../api.js";
   import { toast } from "../stores.js";
-  import { t, language } from "../i18n.js";
+  import { t } from "../i18n.js";
   import { fmtDate } from "../format.js";
   import Icon from "../Icons.svelte";
   import { confirmDialog } from "../confirm.js";
+  import DatePicker from "../DatePicker.svelte";
 
   let holidays = [];
   let year = new Date().getFullYear();
@@ -83,13 +84,7 @@
     <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
       <div style="flex:1">
         <label class="kz-label" for="holiday-date">{$t("Date")}</label>
-        <input
-          id="holiday-date"
-          class="kz-input"
-          type="date"
-          lang={$language}
-          bind:value={newDate}
-        />
+        <DatePicker id="holiday-date" bind:value={newDate} />
       </div>
       <div style="flex:2">
         <label class="kz-label" for="holiday-name">{$t("Name")}</label>

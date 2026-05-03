@@ -2,9 +2,10 @@
   import { onMount } from "svelte";
   import { api } from "../api.js";
   import { toast } from "../stores.js";
-  import { t, language } from "../i18n.js";
+  import { t } from "../i18n.js";
   import { isoDate } from "../format.js";
   import Icon from "../Icons.svelte";
+  import DatePicker from "../DatePicker.svelte";
 
   export let template;
   export let onClose;
@@ -138,13 +139,7 @@
       </div>
       <div>
         <label class="kz-label" for="user-start-date">{$t("Start date")}</label>
-        <input
-          id="user-start-date"
-          class="kz-input"
-          type="date"
-          lang={$language}
-          bind:value={start_date}
-        />
+        <DatePicker id="user-start-date" bind:value={start_date} />
       </div>
     </div>
     <div class="field-row">

@@ -279,7 +279,7 @@ pub async fn me(
         "can_manage_holidays": user.is_admin(),
         "can_view_audit_log": user.is_admin(),
         "can_manage_settings": user.is_admin(),
-        "can_manage_team_policy": user.is_lead(),
+        "can_manage_team_settings": user.is_lead(),
         "can_approve": user.is_lead(),
         "can_view_team_reports": user.is_lead(),
         "can_view_dashboard": user.is_lead(),
@@ -293,7 +293,7 @@ pub async fn me(
     if user.is_lead() {
         nav.push(serde_json::json!({"href":"/dashboard","key":"Dashboard","icon":"🔔"}));
         nav.push(serde_json::json!({"href":"/reports","key":"Reports","icon":"📊"}));
-        nav.push(serde_json::json!({"href":"/team-policy","key":"TeamSettings","icon":"🛡"}));
+        nav.push(serde_json::json!({"href":"/team-settings","key":"TeamSettings","icon":"🛡"}));
     }
     if user.is_admin() {
         nav.push(serde_json::json!({"href":"/admin/users","key":"Admin","icon":"⚙"}));

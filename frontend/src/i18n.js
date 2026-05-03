@@ -299,8 +299,8 @@ const TRANSLATIONS = {
     "Week reopen requests": "Wochen-Wiederfreigaben",
     "wants to edit week of {date}":
       "möchte die Woche ab {date} wieder bearbeiten",
-    TeamPolicy: "Team-Richtlinie",
-    "Team Policy": "Team-Richtlinie",
+    TeamSettings: "Team-Einstellungen",
+    "Team Settings": "Team-Einstellungen",
     "Allow employees to reopen weeks without approval":
       "Mitarbeitende dürfen Wochen ohne Genehmigung wieder bearbeiten",
     Notifications: "Benachrichtigungen",

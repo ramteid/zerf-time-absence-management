@@ -9,7 +9,7 @@ use axum::{
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 
-/// Per-approver self-service policy. Returned by `GET /team-policy` for the
+/// Per-approver self-service policy. Returned by `GET /team-settings` for the
 /// current user (lead/admin) or for all approvers (admin only).
 #[derive(Serialize)]
 pub struct TeamSettings {
@@ -20,7 +20,7 @@ pub struct TeamSettings {
     pub allow_reopen_without_approval: bool,
 }
 
-pub async fn team_policy_list(
+pub async fn team_settings_list(
     State(s): State<AppState>,
     u: User,
 ) -> AppResult<Json<Vec<TeamSettings>>> {
@@ -65,15 +65,15 @@ pub async fn team_policy_list(
 }
 
 #[derive(Deserialize)]
-pub struct UpdateTeamPolicy {
+pub struct UpdateTeamSettings {
     pub allow_reopen_without_approval: bool,
 }
 
-pub async fn team_policy_update(
+pub async fn team_settings_update(
     State(s): State<AppState>,
     u: User,
     Path(approver_id): Path<i64>,
-    Json(b): Json<UpdateTeamPolicy>,
+    Json(b): Json<UpdateTeamSettings>,
 ) -> AppResult<Json<serde_json::Value>> {
     if !u.is_lead() {
         return Err(AppError::Forbidden);
@@ -103,7 +103,7 @@ pub async fn team_policy_update(
     audit::log(
         &s.pool,
         u.id,
-        "team_policy_updated",
+        "team_settings_updated",
         "users",
         approver_id,
         None,

@@ -159,8 +159,8 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                     "/notifications/read-all",
                     post(notifications::mark_all_read),
                 )
-                .route("/team-policy", get(users::team_policy_list))
-                .route("/team-policy/{id}", put(users::team_policy_update))
+                .route("/team-settings", get(users::team_settings_list))
+                .route("/team-settings/{id}", put(users::team_settings_update))
                 .layer(middleware::from_fn_with_state(
                     state.clone(),
                     auth::auth_middleware,

@@ -1,9 +1,10 @@
 <script>
   import { onMount } from "svelte";
   import { api } from "../api.js";
-  import { t, language } from "../i18n.js";
+  import { t } from "../i18n.js";
   import { isoDate } from "../format.js";
   import Icon from "../Icons.svelte";
+  import DatePicker from "../DatePicker.svelte";
 
   export let template;
   export let onClose;
@@ -74,26 +75,18 @@
     <div class="field-row">
       <div>
         <label class="kz-label" for="absence-start-date">{$t("From")}</label>
-        <input
+        <DatePicker
           id="absence-start-date"
-          class="kz-input"
-          type="date"
-          lang={$language}
           bind:value={start_date}
           max={end_date}
-          required
         />
       </div>
       <div>
         <label class="kz-label" for="absence-end-date">{$t("To")}</label>
-        <input
+        <DatePicker
           id="absence-end-date"
-          class="kz-input"
-          type="date"
-          lang={$language}
           bind:value={end_date}
           min={start_date}
-          required
         />
       </div>
     </div>

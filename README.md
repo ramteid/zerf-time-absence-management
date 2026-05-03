@@ -37,7 +37,7 @@ A short tour of the UI:
 - **Calendar** — month view of who is away, colour-coded by type.
 - **Dashboard** — team leads see all open approvals in one place, including a dedicated *Week reopen requests* queue.
 - **Reports** — monthly per-employee, team summary, category breakdown, CSV.
-- **Team Policy** *(team leads & admins)* — toggle "auto-approve reopens" per approver to skip manual review.
+- **Team Settings** *(team leads & admins)* — toggle "auto-approve reopens" per approver to skip manual review.
 - **Admin** — users, categories, holidays, audit log.
 - **Notification center** — bell in the sidebar with unread count; lists reopen-request events, approvals, rejections.
 
@@ -46,7 +46,7 @@ A short tour of the UI:
 1. After an employee submits a week, the **Submit Week** button is replaced
    by a **Request edit** action.
 2. If the employee's assigned approver has *Auto-approve reopens* enabled
-   (set under **Team Policy**), the week is reopened immediately — every
+   (set under **Team Settings**), the week is reopened immediately — every
    non-draft entry returns to `draft` and any open per-entry change
    requests for that week are auto-cancelled.
 3. Otherwise the request is queued. The approver receives an in-app

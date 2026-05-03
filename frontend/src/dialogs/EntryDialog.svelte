@@ -2,10 +2,11 @@
   import { onMount } from "svelte";
   import { api } from "../api.js";
   import { categories } from "../stores.js";
-  import { t, language } from "../i18n.js";
+  import { t } from "../i18n.js";
   import { isoDate } from "../format.js";
   import { confirmDialog } from "../confirm.js";
   import Icon from "../Icons.svelte";
+  import DatePicker from "../DatePicker.svelte";
 
   export let template;
   export let onClose;
@@ -81,14 +82,10 @@
   <div class="dialog-body">
     <div>
       <label class="kz-label" for="entry-date">{$t("Date")}</label>
-      <input
+      <DatePicker
         id="entry-date"
-        class="kz-input"
-        type="date"
-        lang={$language}
         bind:value={entry_date}
         max={isoDate(new Date())}
-        required
       />
     </div>
     <div class="field-row">
