@@ -17,6 +17,7 @@
 </script>
 
 <div
+  class="admin-tabs"
   style="display:flex;gap:2px;padding:0 28px;border-bottom:1px solid var(--border);background:var(--bg-surface)"
 >
   {#each tabs as tab}

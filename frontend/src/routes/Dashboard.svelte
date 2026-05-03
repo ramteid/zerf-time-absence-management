@@ -264,7 +264,7 @@
     {/if}
   </div>
 
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+  <div class="dashboard-approval-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
     <!-- Timesheet approvals -->
     <div class="kz-card" style="overflow-x:auto">
       <div class="card-header">

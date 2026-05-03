@@ -897,11 +897,11 @@ dialog footer {
 @media (max-width: 768px) {
   /* Prevent the whole page from scrolling horizontally */
   html, body, #app {
-    overflow-x: hidden;
+    overflow-x: clip;
   }
 
   .app-layout {
-    overflow-x: hidden;
+    overflow-x: clip;
   }
 
   .sidebar {
@@ -911,12 +911,12 @@ dialog footer {
   .main-content {
     /* Account for bottom nav height + safe-area */
     padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px));
-    overflow-x: hidden;
+    overflow-x: clip;
   }
 
   .content-area {
     padding: 12px 14px;
-    overflow-x: hidden;
+    overflow-x: clip;
   }
 
   /* Stat cards: 2 per row */
@@ -990,6 +990,29 @@ dialog footer {
   /* Field rows: single column */
   .field-row {
     grid-template-columns: 1fr;
+  }
+
+  /* Dashboard 2-col approval grid → single column */
+  .dashboard-approval-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Admin tabs: smaller padding, allow scrolling */
+  .admin-tabs {
+    padding-left: 14px !important;
+    padding-right: 14px !important;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    flex-wrap: nowrap;
+  }
+
+  /* Reports filter row: wrap on mobile */
+  .reports-filter-row {
+    flex-wrap: wrap;
+  }
+  .reports-filter-row .kz-btn {
+    width: 100%;
+    justify-content: center;
   }
 
   /* Login card */

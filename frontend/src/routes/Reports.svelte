@@ -186,7 +186,7 @@
         {$t("Team report")}
       </div>
       <div
-        style="display:flex;gap:12px;align-items:flex-end;margin-bottom:12px"
+        style="display:flex;gap:12px;align-items:flex-end;margin-bottom:12px;flex-wrap:wrap"
       >
         <div style="flex:1">
           <label class="kz-label" for="reports-team-month">{$t("Month")}</label>
