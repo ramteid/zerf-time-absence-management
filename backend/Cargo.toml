@@ -31,8 +31,8 @@ lettre = { version = "0.11", default-features = false, features = ["tokio1-rustl
 reqwest = { version = "0.12", features = ["json", "cookies"] }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "macros", "test-util"] }
 uuid = { version = "1", features = ["v4"] }
-testcontainers = "0.23"
-testcontainers-modules = { version = "0.11", features = ["postgres"] }
+testcontainers = "0.27"
+testcontainers-modules = { version = "0.15", features = ["postgres"] }
 
 [profile.release]
 strip = true
