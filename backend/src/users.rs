@@ -117,7 +117,7 @@ pub async fn list(State(s): State<AppState>, u: User) -> AppResult<Json<Vec<User
     if !u.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let r = sqlx::query_as::<_, User>("SELECT * FROM users ORDER BY last_name, first_name")
+    let r = sqlx::query_as::<_, User>("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users ORDER BY last_name, first_name")
         .fetch_all(&s.pool)
         .await?;
     Ok(Json(r))
@@ -132,7 +132,7 @@ pub async fn get_one(
         return Err(AppError::Forbidden);
     }
     Ok(Json(
-        sqlx::query_as::<_, User>("SELECT * FROM users WHERE id=$1")
+        sqlx::query_as::<_, User>("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE id=$1")
             .bind(id)
             .fetch_one(&s.pool)
             .await?,
@@ -249,7 +249,7 @@ pub async fn create(
             tracing::warn!(target:"kitazeit::users", "create user insert failed: {e}");
             AppError::Conflict("Email already exists or invalid approver.".into())
         })?;
-    let user: User = sqlx::query_as("SELECT * FROM users WHERE id=$1")
+    let user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
@@ -263,6 +263,18 @@ pub async fn create(
         Some(serde_json::to_value(&user).unwrap()),
     )
     .await;
+    // Send registration email best-effort
+    {
+        let smtp = s.cfg.smtp.clone().map(std::sync::Arc::new);
+        let email_to = email_norm.clone();
+        let display_pw = temp.clone().unwrap_or_else(|| "(set by admin)".into());
+        let subject = "Welcome to KitaZeit".to_string();
+        let body_text = format!(
+            "Hello {} {},\n\nYour KitaZeit account has been created.\n\nEmail: {}\nPassword: {}\n\nPlease log in and change your password immediately.",
+            b.first_name.trim(), b.last_name.trim(), email_to, display_pw
+        );
+        crate::email::send_async(smtp, email_to, subject, body_text);
+    }
     Ok(Json(CreateResponse {
         id,
         user,
@@ -334,7 +346,7 @@ pub async fn update(
             return Err(AppError::BadRequest("Invalid email.".into()));
         }
     }
-    let prev: User = sqlx::query_as("SELECT * FROM users WHERE id=$1")
+    let prev: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
@@ -373,7 +385,7 @@ pub async fn update(
             .execute(&s.pool)
             .await;
     }
-    let next: User = sqlx::query_as("SELECT * FROM users WHERE id=$1")
+    let next: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
@@ -403,6 +415,10 @@ pub async fn deactivate(
             "You cannot deactivate yourself.".into(),
         ));
     }
+    let prev: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE id=$1")
+        .bind(id)
+        .fetch_one(&s.pool)
+        .await?;
     let mut tx = s.pool.begin().await?;
     sqlx::query("UPDATE users SET active=FALSE WHERE id=$1")
         .bind(id)
@@ -413,7 +429,16 @@ pub async fn deactivate(
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
-    audit::log(&s.pool, u.id, "deactivated", "users", id, None, None).await;
+    audit::log(
+        &s.pool,
+        u.id,
+        "deactivated",
+        "users",
+        id,
+        Some(serde_json::to_value(&prev).unwrap()),
+        Some(serde_json::json!({"active": false})),
+    )
+    .await;
     Ok(Json(serde_json::json!({"ok":true})))
 }
 
@@ -439,7 +464,16 @@ pub async fn reset_password(
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
-    audit::log(&s.pool, u.id, "password_reset", "users", id, None, None).await;
+    audit::log(
+        &s.pool,
+        u.id,
+        "password_reset",
+        "users",
+        id,
+        None,
+        Some(serde_json::json!({"password_reset": true})),
+    )
+    .await;
     Ok(Json(serde_json::json!({"temporary_password": temp})))
 }
 

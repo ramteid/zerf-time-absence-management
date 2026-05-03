@@ -181,7 +181,7 @@ pub async fn login(
     }
 
     let user: Option<User> =
-        sqlx::query_as("SELECT * FROM users WHERE email = $1 AND active = TRUE")
+        sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE email = $1 AND active = TRUE")
             .bind(&email)
             .fetch_optional(&s.pool)
             .await?;
@@ -498,7 +498,7 @@ pub async fn auth_middleware(
         .bind(hash_token(&token))
         .execute(&s.pool)
         .await?;
-    let user: User = sqlx::query_as("SELECT * FROM users WHERE id=$1 AND active=TRUE")
+    let user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE id=$1 AND active=TRUE")
         .bind(uid)
         .fetch_optional(&s.pool)
         .await?

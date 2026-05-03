@@ -70,7 +70,7 @@ pub async fn create(
 pub async fn list(State(s): State<AppState>, u: User) -> AppResult<Json<Vec<Notification>>> {
     Ok(Json(
         sqlx::query_as::<_, Notification>(
-            "SELECT * FROM notifications WHERE user_id=$1 \
+            "SELECT id, user_id, kind, title, body, reference_type, reference_id, is_read, created_at FROM notifications WHERE user_id=$1 \
              ORDER BY created_at DESC LIMIT 100",
         )
         .bind(u.id)

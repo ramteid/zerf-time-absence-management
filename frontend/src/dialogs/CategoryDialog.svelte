@@ -8,7 +8,8 @@
   export let onClose;
   let dlg;
   $: isNew = !template.id;
-  let name = template.name || "";
+  // Show translated name for system categories when editing
+  let name = template.id ? $t(template.name) : (template.name || "");
   let color = template.color || "#5b8def";
   let sort_order = template.sort_order || 0;
   let description = template.description || "";

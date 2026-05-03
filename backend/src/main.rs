@@ -1,5 +1,5 @@
 use anyhow::Result;
-use chrono::Datelike;
+use chrono::{Datelike, Timelike};
 use kitazeit::{build_app, categories, config, db, holidays, seed_admin, AppState};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -43,6 +43,39 @@ async fn main() -> Result<()> {
             loop {
                 interval.tick().await;
                 kitazeit::notifications::cleanup_old(&p).await;
+            }
+        });
+    }
+
+    // Weekly holiday scheduler: every Monday at 12:00, check if next year holidays exist.
+    // Computes exact duration to the next Monday 12:00 local time on every iteration.
+    {
+        let p = pool.clone();
+        tokio::spawn(async move {
+            loop {
+                let now = chrono::Local::now();
+                let weekday = now.weekday().num_days_from_monday(); // 0=Mon
+                // Days until next Monday: if today is Monday before noon, target today;
+                // otherwise advance to next Monday.
+                let days_ahead = if weekday == 0 && now.hour() < 12 {
+                    0u32
+                } else {
+                    7 - weekday
+                };
+                let target_date = now.date_naive() + chrono::Duration::days(days_ahead as i64);
+                let target_naive = target_date.and_hms_opt(12, 0, 0).unwrap();
+                let target = target_naive.and_local_timezone(chrono::Local).unwrap();
+                let wait = (target - now)
+                    .to_std()
+                    .unwrap_or(std::time::Duration::from_secs(3600));
+                tokio::time::sleep(wait).await;
+
+                let next_year = chrono::Local::now().year() + 1;
+                if let Err(e) = holidays::ensure_holidays(&p, next_year).await {
+                    tracing::warn!("Holiday scheduler: failed to ensure holidays for {next_year}: {e:?}");
+                } else {
+                    tracing::info!("Holiday scheduler: ensured holidays for {next_year}");
+                }
             }
         });
     }

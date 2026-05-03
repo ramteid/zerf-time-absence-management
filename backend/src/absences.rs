@@ -27,7 +27,6 @@ pub struct Absence {
     pub kind: String,
     pub start_date: NaiveDate,
     pub end_date: NaiveDate,
-    pub half_day: bool,
     pub comment: Option<String>,
     pub status: String,
     pub reviewed_by: Option<i64>,
@@ -54,7 +53,6 @@ pub async fn workdays(
     pool: &crate::db::DatabasePool,
     from: NaiveDate,
     to: NaiveDate,
-    half_day: bool,
 ) -> AppResult<f64> {
     if to < from {
         return Ok(0.0);
@@ -69,9 +67,6 @@ pub async fn workdays(
         }
         d += Duration::days(1);
     }
-    if half_day && from == to && count == 1.0 {
-        count = 0.5;
-    }
     Ok(count)
 }
 
@@ -82,14 +77,14 @@ pub async fn workdays_total(
     from: NaiveDate,
     to: NaiveDate,
 ) -> AppResult<f64> {
-    let r: Vec<(NaiveDate, NaiveDate, bool)> = sqlx::query_as(
-        "SELECT start_date, end_date, half_day FROM absences WHERE user_id=$1 AND kind=$2 AND status='approved' AND end_date >= $3 AND start_date <= $4"
+    let r: Vec<(NaiveDate, NaiveDate)> = sqlx::query_as(
+        "SELECT start_date, end_date FROM absences WHERE user_id=$1 AND kind=$2 AND status='approved' AND end_date >= $3 AND start_date <= $4"
     ).bind(user_id).bind(kind).bind(from).bind(to).fetch_all(pool).await?;
     let mut total = 0.0;
-    for (s, e, h) in r {
+    for (s, e) in r {
         let s2 = std::cmp::max(s, from);
         let e2 = std::cmp::min(e, to);
-        total += workdays(pool, s2, e2, h).await?;
+        total += workdays(pool, s2, e2).await?;
     }
     Ok(total)
 }
@@ -108,7 +103,7 @@ pub async fn list(
     let from = NaiveDate::from_ymd_opt(year, 1, 1).unwrap();
     let to = NaiveDate::from_ymd_opt(year, 12, 31).unwrap();
     let r = sqlx::query_as::<_, Absence>(
-        "SELECT * FROM absences WHERE user_id=$1 AND end_date >= $2 AND start_date <= $3 ORDER BY start_date DESC"
+        "SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE user_id=$1 AND end_date >= $2 AND start_date <= $3 ORDER BY start_date DESC"
     ).bind(u.id).bind(from).bind(to).fetch_all(&s.pool).await?;
     Ok(Json(r))
 }
@@ -128,7 +123,7 @@ pub async fn list_all(
     if !u.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let mut builder = QueryBuilder::<Postgres>::new("SELECT * FROM absences WHERE TRUE");
+    let mut builder = QueryBuilder::<Postgres>::new("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE TRUE");
     if let Some(v) = q.from {
         builder.push(" AND end_date >= ").push_bind(v);
     }
@@ -161,7 +156,6 @@ pub struct CalendarEntry {
     pub kind: String,
     pub start_date: NaiveDate,
     pub end_date: NaiveDate,
-    pub half_day: bool,
     pub comment: Option<String>,
     pub status: String,
 }
@@ -189,7 +183,7 @@ pub async fn calendar(
         NaiveDate::from_ymd_opt(year, month + 1, 1).unwrap()
     } - Duration::days(1);
     let rows = sqlx::query_as::<_, CalendarEntry>(
-        "SELECT a.id, a.user_id, u.first_name, u.last_name, a.kind, a.start_date, a.end_date, a.half_day, a.comment, a.status FROM absences a JOIN users u ON u.id=a.user_id WHERE a.status IN ('requested','approved') AND a.end_date >= $1 AND a.start_date <= $2 ORDER BY a.start_date"
+        "SELECT a.id, a.user_id, u.first_name, u.last_name, a.kind, a.start_date, a.end_date, a.comment, a.status FROM absences a JOIN users u ON u.id=a.user_id WHERE a.status IN ('requested','approved') AND a.end_date >= $1 AND a.start_date <= $2 ORDER BY a.start_date"
     ).bind(from).bind(to).fetch_all(&s.pool).await?;
     let lead = u.is_lead();
     // Privacy: only team leads / admins see the actual absence kind. For peers
@@ -204,7 +198,7 @@ pub async fn calendar(
         serde_json::json!({
             "id": e.id, "user_id": e.user_id, "name": format!("{} {}", e.first_name, e.last_name),
             "kind": kind_out,
-            "start_date": e.start_date, "end_date": e.end_date, "half_day": e.half_day,
+            "start_date": e.start_date, "end_date": e.end_date,
             "status": e.status,
             "comment": if lead || own { e.comment.clone() } else { None }
         })
@@ -216,13 +210,11 @@ pub struct NewAbsence {
     pub kind: String,
     pub start_date: NaiveDate,
     pub end_date: NaiveDate,
-    pub half_day: Option<bool>,
     pub comment: Option<String>,
 }
 
 struct NormalizedAbsence<'a> {
     kind: &'a str,
-    half_day: bool,
 }
 
 fn normalize_absence(input: &NewAbsence) -> AppResult<NormalizedAbsence<'_>> {
@@ -247,9 +239,6 @@ fn normalize_absence(input: &NewAbsence) -> AppResult<NormalizedAbsence<'_>> {
 
     Ok(NormalizedAbsence {
         kind: &input.kind,
-        half_day: input.half_day.unwrap_or(false)
-            && input.kind == "vacation"
-            && input.start_date == input.end_date,
     })
 }
 
@@ -275,10 +264,10 @@ pub async fn create(
     }
 
     let status = status_for_kind(normalized.kind);
-    let id: i64 = sqlx::query_scalar("INSERT INTO absences(user_id, kind, start_date, end_date, half_day, comment, status) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id")
-        .bind(u.id).bind(normalized.kind).bind(b.start_date).bind(b.end_date).bind(normalized.half_day).bind(&b.comment).bind(status)
+    let id: i64 = sqlx::query_scalar("INSERT INTO absences(user_id, kind, start_date, end_date, comment, status) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id")
+        .bind(u.id).bind(normalized.kind).bind(b.start_date).bind(b.end_date).bind(&b.comment).bind(status)
         .fetch_one(&s.pool).await?;
-    let a: Absence = sqlx::query_as("SELECT * FROM absences WHERE id=$1")
+    let a: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
@@ -302,7 +291,7 @@ pub async fn update(
     Json(b): Json<NewAbsence>,
 ) -> AppResult<Json<Absence>> {
     let normalized = normalize_absence(&b)?;
-    let prev: Absence = sqlx::query_as("SELECT * FROM absences WHERE id=$1")
+    let prev: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
@@ -338,12 +327,11 @@ pub async fn update(
         )
     };
     sqlx::query(
-        "UPDATE absences SET kind=$1, start_date=$2, end_date=$3, half_day=$4, comment=$5, status=$6, reviewed_by=$7, reviewed_at=$8, rejection_reason=$9 WHERE id=$10",
+        "UPDATE absences SET kind=$1, start_date=$2, end_date=$3, comment=$4, status=$5, reviewed_by=$6, reviewed_at=$7, rejection_reason=$8 WHERE id=$9",
     )
     .bind(normalized.kind)
     .bind(b.start_date)
     .bind(b.end_date)
-    .bind(normalized.half_day)
     .bind(&b.comment)
     .bind(status)
     .bind(reviewed_by)
@@ -352,7 +340,7 @@ pub async fn update(
     .bind(id)
     .execute(&s.pool)
     .await?;
-    let next: Absence = sqlx::query_as("SELECT * FROM absences WHERE id=$1")
+    let next: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
@@ -374,7 +362,7 @@ pub async fn cancel(
     u: User,
     Path(id): Path<i64>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let a: Absence = sqlx::query_as("SELECT * FROM absences WHERE id=$1")
+    let a: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
@@ -390,7 +378,16 @@ pub async fn cancel(
         .bind(id)
         .execute(&s.pool)
         .await?;
-    audit::log(&s.pool, u.id, "cancelled", "absences", id, None, None).await;
+    audit::log(
+        &s.pool,
+        u.id,
+        "cancelled",
+        "absences",
+        id,
+        Some(serde_json::to_value(&a).unwrap()),
+        Some(serde_json::json!({"status": "cancelled"})),
+    )
+    .await;
     Ok(Json(serde_json::json!({"ok":true})))
 }
 
@@ -402,7 +399,7 @@ pub async fn approve(
     if !u.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let a: Absence = sqlx::query_as("SELECT * FROM absences WHERE id=$1")
+    let a: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
@@ -411,9 +408,11 @@ pub async fn approve(
     }
     sqlx::query("UPDATE absences SET status='approved', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP WHERE id=$2")
         .bind(u.id).bind(id).execute(&s.pool).await?;
-    audit::log(&s.pool, u.id, "approved", "absences", id, None, None).await;
+    let before = serde_json::to_value(&a).unwrap();
+    let after = serde_json::json!({"status": "approved", "reviewed_by": u.id});
+    audit::log(&s.pool, u.id, "approved", "absences", id, Some(before.clone()), Some(after.clone())).await;
     if a.user_id != u.id {
-        audit::log(&s.pool, a.user_id, "approved", "absences", id, None, None).await;
+        audit::log(&s.pool, a.user_id, "approved", "absences", id, Some(before), Some(after)).await;
     }
     Ok(Json(serde_json::json!({"ok":true})))
 }
@@ -435,7 +434,7 @@ pub async fn reject(
     if b.reason.trim().is_empty() {
         return Err(AppError::BadRequest("Reason required.".into()));
     }
-    let a: Absence = sqlx::query_as("SELECT * FROM absences WHERE id=$1")
+    let a: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
@@ -450,8 +449,8 @@ pub async fn reject(
         "rejected",
         "absences",
         id,
-        None,
-        Some(serde_json::json!({"reason": b.reason})),
+        Some(serde_json::to_value(&a).unwrap()),
+        Some(serde_json::json!({"status": "rejected", "reason": b.reason})),
     )
     .await;
     Ok(Json(serde_json::json!({"ok":true})))
@@ -496,7 +495,7 @@ pub async fn balance(
         return Err(AppError::Forbidden);
     }
     let year = q.year.unwrap_or_else(|| chrono::Local::now().year());
-    let target: crate::auth::User = sqlx::query_as("SELECT * FROM users WHERE id=$1")
+    let target: crate::auth::User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE id=$1")
         .bind(uid)
         .fetch_one(&s.pool)
         .await?;
@@ -504,7 +503,7 @@ pub async fn balance(
     let to = NaiveDate::from_ymd_opt(year, 12, 31).unwrap();
     let today = chrono::Local::now().date_naive();
     let vacations = sqlx::query_as::<_, Absence>(
-        "SELECT * FROM absences WHERE user_id=$1 AND kind='vacation' AND status IN ('requested','approved') AND end_date >= $2 AND start_date <= $3"
+        "SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE user_id=$1 AND kind='vacation' AND status IN ('requested','approved') AND end_date >= $2 AND start_date <= $3"
     ).bind(uid).bind(from).bind(to).fetch_all(&s.pool).await?;
     let mut taken = 0.0;
     let mut upcoming = 0.0;
@@ -512,7 +511,7 @@ pub async fn balance(
     for a in &vacations {
         let s2 = std::cmp::max(a.start_date, from);
         let e2 = std::cmp::min(a.end_date, to);
-        let days = workdays(&s.pool, s2, e2, a.half_day).await?;
+        let days = workdays(&s.pool, s2, e2).await?;
         if a.status == "approved" {
             if a.end_date < today {
                 taken += days;

@@ -90,7 +90,7 @@
             {u.last_name}
           </div>
           <div style="font-size:11.5px;color:var(--text-tertiary)">
-            {roleLabel(u.role)} · {u.weekly_hours}h/week
+            {roleLabel(u.role)}
             {#if !u.active}
               · <span style="color:var(--danger-text)">{$t("Inactive")}</span>
             {/if}

@@ -19,7 +19,6 @@
     { code: "GB", name: "United Kingdom" },
   ];
 
-  // Region lists per country (Nager.Date county codes)
   const regions = {
     DE: [
       { code: "", label: "– Alle / All –" },
@@ -110,7 +109,7 @@
 </div>
 
 <div class="content-area" style="max-width:600px">
-  <div class="kz-card" style="padding:20px">
+  <div class="kz-card" style="padding:20px;margin-bottom:16px">
     <div style="font-size:14px;font-weight:600;margin-bottom:14px">
       {$t("General")}
     </div>
@@ -128,6 +127,38 @@
             <option value="en">English</option>
             <option value="de">Deutsch</option>
           </select>
+        </div>
+      </div>
+
+      <!-- Default user settings -->
+      <div
+        style="font-size:14px;font-weight:600;margin-top:20px;margin-bottom:14px"
+      >
+        {$t("Default weekly hours")} / {$t("Default annual leave days")}
+      </div>
+      <div class="field-row">
+        <div>
+          <label class="kz-label" for="settings-default-hours">{$t("Default weekly hours")}</label>
+          <input
+            id="settings-default-hours"
+            class="kz-input"
+            type="number"
+            step="0.5"
+            min="0"
+            max="168"
+            bind:value={s.default_weekly_hours}
+          />
+        </div>
+        <div>
+          <label class="kz-label" for="settings-default-leave">{$t("Default annual leave days")}</label>
+          <input
+            id="settings-default-leave"
+            class="kz-input"
+            type="number"
+            min="0"
+            max="366"
+            bind:value={s.default_annual_leave_days}
+          />
         </div>
       </div>
 
@@ -173,11 +204,6 @@
             />
           {/if}
         </div>
-      </div>
-      <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
-        {$t(
-          "Saving will re-fetch holidays from the Nager.Date API for the selected country and region.",
-        )}
       </div>
 
       <div style="display:flex;justify-content:flex-end;padding-top:16px">

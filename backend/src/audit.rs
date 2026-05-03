@@ -53,7 +53,7 @@ pub async fn list(
     if !u.is_admin() {
         return Err(AppError::Forbidden);
     }
-    let mut builder = QueryBuilder::<Postgres>::new("SELECT * FROM audit_log WHERE TRUE");
+    let mut builder = QueryBuilder::<Postgres>::new("SELECT id, user_id, action, table_name, record_id, before_data, after_data, occurred_at FROM audit_log WHERE TRUE");
     if q.table_name.is_some() {
         builder.push(" AND table_name = ").push_bind(q.table_name);
     }

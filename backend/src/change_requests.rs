@@ -31,7 +31,7 @@ pub struct ChangeRequest {
 pub async fn list(State(s): State<AppState>, u: User) -> AppResult<Json<Vec<ChangeRequest>>> {
     Ok(Json(
         sqlx::query_as::<_, ChangeRequest>(
-            "SELECT * FROM change_requests WHERE user_id=$1 ORDER BY created_at DESC",
+            "SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE user_id=$1 ORDER BY created_at DESC",
         )
         .bind(u.id)
         .fetch_all(&s.pool)
@@ -45,7 +45,7 @@ pub async fn list_all(State(s): State<AppState>, u: User) -> AppResult<Json<Vec<
     }
     Ok(Json(
         sqlx::query_as::<_, ChangeRequest>(
-            "SELECT * FROM change_requests WHERE status='open' ORDER BY created_at",
+            "SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE status='open' ORDER BY created_at",
         )
         .fetch_all(&s.pool)
         .await?,
@@ -129,7 +129,7 @@ pub async fn create(
     let id: i64 = sqlx::query_scalar("INSERT INTO change_requests(time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id")
         .bind(b.time_entry_id).bind(u.id).bind(b.new_date).bind(&b.new_start_time).bind(&b.new_end_time).bind(b.new_category_id).bind(&b.new_comment).bind(&b.reason)
         .fetch_one(&s.pool).await?;
-    let a: ChangeRequest = sqlx::query_as("SELECT * FROM change_requests WHERE id=$1")
+    let a: ChangeRequest = sqlx::query_as("SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
@@ -155,7 +155,7 @@ pub async fn approve(
         return Err(AppError::Forbidden);
     }
     let a: ChangeRequest =
-        sqlx::query_as("SELECT * FROM change_requests WHERE id=$1 AND status='open'")
+        sqlx::query_as("SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE id=$1 AND status='open'")
             .bind(id)
             .fetch_one(&s.pool)
             .await?;
@@ -165,7 +165,7 @@ pub async fn approve(
     // Fetch the existing entry and build effective post-change values so we can
     // run the same overlap / 14-hour / category validation as direct edits do.
     let entry: crate::time_entries::TimeEntry =
-        sqlx::query_as("SELECT * FROM time_entries WHERE id=$1")
+        sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1")
             .bind(a.time_entry_id)
             .fetch_one(&s.pool)
             .await?;
@@ -189,7 +189,16 @@ pub async fn approve(
         .execute(&s.pool).await?;
     sqlx::query("UPDATE change_requests SET status='approved', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP WHERE id=$2")
         .bind(u.id).bind(id).execute(&s.pool).await?;
-    audit::log(&s.pool, u.id, "approved", "change_requests", id, None, None).await;
+    audit::log(
+        &s.pool,
+        u.id,
+        "approved",
+        "change_requests",
+        id,
+        Some(serde_json::to_value(&a).unwrap()),
+        Some(serde_json::json!({"status": "approved", "reviewed_by": u.id})),
+    )
+    .await;
     Ok(Json(serde_json::json!({"ok":true})))
 }
 
@@ -210,6 +219,10 @@ pub async fn reject(
     if b.reason.trim().is_empty() {
         return Err(AppError::BadRequest("Reason required.".into()));
     }
+    let prev: ChangeRequest = sqlx::query_as("SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE id=$1")
+        .bind(id)
+        .fetch_one(&s.pool)
+        .await?;
     sqlx::query("UPDATE change_requests SET status='rejected', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP, rejection_reason=$2 WHERE id=$3")
         .bind(u.id).bind(&b.reason).bind(id).execute(&s.pool).await?;
     audit::log(
@@ -218,8 +231,8 @@ pub async fn reject(
         "rejected",
         "change_requests",
         id,
-        None,
-        Some(serde_json::json!({"reason": b.reason})),
+        Some(serde_json::to_value(&prev).unwrap()),
+        Some(serde_json::json!({"status": "rejected", "reason": b.reason})),
     )
     .await;
     Ok(Json(serde_json::json!({"ok":true})))

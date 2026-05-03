@@ -586,9 +586,8 @@ dialog footer {
 /* ── Week grid (Time Entry) ── */
 .week-grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 12px;
-  min-width: 680px;
 }
 
 .day-card {
@@ -755,22 +754,25 @@ dialog footer {
 
 /* ── Absence kind colors ── */
 .abs-vacation {
-  background: var(--success);
+  background: #3b82f6;
 }
 .abs-sick {
-  background: var(--danger);
+  background: #ef4444;
 }
 .abs-training {
-  background: var(--info);
+  background: #0d9488;
 }
 .abs-special_leave {
-  background: var(--warning);
+  background: #d97706;
 }
 .abs-unpaid {
-  background: var(--text-tertiary);
+  background: #6b7280;
 }
 .abs-general_absence {
-  background: var(--text-secondary);
+  background: #475569;
+}
+.abs-absent {
+  background: #9ca3af;
 }
 
 /* ── Toast ── */
@@ -1046,16 +1048,12 @@ dialog footer {
     min-width: 480px;
   }
 
-  /* Week grid: horizontal snap-scroll carousel */
+  /* Week grid: stack vertically on mobile */
   .week-grid {
     display: flex;
-    flex-direction: row;
-    overflow-x: auto;
-    scroll-snap-type: x mandatory;
-    -webkit-overflow-scrolling: touch;
+    flex-direction: column;
     gap: 10px;
     min-width: 0;
-    padding-bottom: 6px;
   }
 
   /* Calendar: compact cells on narrow screens */

@@ -9,6 +9,41 @@ export const LANGUAGES = Object.freeze({
 });
 
 const TRANSLATIONS = {
+  en: {
+    hours_unit: "h",
+    "{hours} / week": "{hours} / week",
+    "help_monthly_report":
+      "Shows the monthly report for a team member with target/actual hours and daily details.",
+    "help_team_report":
+      "Compares target and actual hours for all active team members in the selected month.",
+    "help_category_breakdown":
+      "Shows how tracked hours are distributed across the different categories.",
+    "help_csv_export":
+      "Exports the monthly report for the selected employee as a CSV file.",
+    "audit_table_users": "User",
+    "audit_table_absences": "Absence",
+    "audit_table_time_entries": "Time Entry",
+    "audit_table_categories": "Category",
+    "audit_table_holidays": "Holiday",
+    "audit_table_sessions": "Session",
+    "audit_table_notifications": "Notification",
+    "audit_table_app_settings": "Setting",
+    "audit_table_reopen_requests": "Reopen Request",
+    "audit_action_created": "Created",
+    "audit_action_updated": "Updated",
+    "audit_action_deleted": "Deleted",
+    "audit_action_approved": "Approved",
+    "audit_action_rejected": "Rejected",
+    "audit_action_cancelled": "Cancelled",
+    "audit_action_status_changed": "Status Changed",
+    "audit_action_team_settings_updated": "Team Setting Updated",
+    "Public holiday": "Public holiday",
+    Holiday: "Holiday",
+    Work: "Work",
+    "Work time": "Work time",
+    Close: "Close",
+    Absent: "Absent",
+  },
   de: {
     "Loading...": "Wird geladen...",
     Error: "Fehler",
@@ -54,7 +89,7 @@ const TRANSLATIONS = {
     Type: "Typ",
     From: "Von",
     To: "Bis",
-    "Half day": "Halber Tag",
+
     Name: "Name",
     Role: "Rolle",
     Hours: "Stunden",
@@ -85,7 +120,7 @@ const TRANSLATIONS = {
     "Next week": "Nächste Woche",
     "Week {week}: {from} - {to}": "Woche {week}: {from} - {to}",
     "Week {week}": "Woche {week}",
-    "Copy last week": "Letzte Woche kopieren",
+
     "Copied {count} entries.": "{count} Einträge kopiert.",
     Target: "Soll",
     Actual: "Ist",
@@ -122,6 +157,12 @@ const TRANSLATIONS = {
     "Next month": "Nächster Monat",
     Vacation: "Urlaub",
     Sick: "Krank",
+    Holiday: "Feiertag",
+    Work: "Arbeitszeit",
+    "Work time": "Arbeitszeit",
+    Copy: "Kopieren",
+    "Copied!": "Kopiert!",
+    Close: "Schließen",
     "My account": "Mein Konto",
     "Please change your password.": "Bitte ändern Sie Ihr Passwort.",
     "You are using a temporary password.":
@@ -316,8 +357,71 @@ const TRANSLATIONS = {
     "Last 6 months": "Letzte 6 Monate",
     "Last year": "Letztes Jahr",
     "Custom range": "Benutzerdefinierter Zeitraum",
+    Range: "Bereich",
+    From: "Von",
+    To: "Bis",
     "From cannot be after To.": "Von kann nicht nach Bis liegen.",
     "Start cannot be after End.": "Start kann nicht nach Ende liegen.",
+    // Hours unit
+    hours_unit: "Std.",
+    "{value}{unit}": "{value}{unit}",
+    "{hours} / week": "{hours} / Woche",
+    // Overlap / absence conflict
+    "Conflict: Overlap with existing absence.":
+      "Konflikt: Überschneidung mit bestehender Abwesenheit.",
+    "Overlap with existing absence.":
+      "Überschneidung mit bestehender Abwesenheit.",
+    // Calendar: work-time categories + public holiday
+    "Public holiday": "Feiertag",
+    Absent: "Abwesend",
+    // Reports help tooltips
+    "help_monthly_report":
+      "Zeigt den Monatsbericht eines Mitarbeiters mit Soll-/Ist-Stunden und Details pro Tag.",
+    "help_team_report":
+      "Vergleicht Soll- und Ist-Stunden aller aktiven Teammitglieder für den gewählten Monat.",
+    "help_category_breakdown":
+      "Zeigt die Verteilung der erfassten Stunden auf die verschiedenen Kategorien.",
+    "help_csv_export":
+      "Exportiert den Monatsbericht des gewählten Mitarbeiters als CSV-Datei.",
+    // Reports help (English defaults)
+    // (English keys fall through)
+    // Audit log
+    "audit_table_users": "Benutzer",
+    "audit_table_absences": "Abwesenheit",
+    "audit_table_time_entries": "Zeiteintrag",
+    "audit_table_categories": "Kategorie",
+    "audit_table_holidays": "Feiertag",
+    "audit_table_sessions": "Sitzung",
+    "audit_table_notifications": "Benachrichtigung",
+    "audit_table_app_settings": "Einstellung",
+    "audit_table_reopen_requests": "Wiederfreigabe",
+    "audit_action_created": "Erstellt",
+    "audit_action_updated": "Bearbeitet",
+    "audit_action_deleted": "Gelöscht",
+    "audit_action_approved": "Genehmigt",
+    "audit_action_rejected": "Abgelehnt",
+    "audit_action_cancelled": "Storniert",
+    "audit_action_status_changed": "Status geändert",
+    "audit_action_team_settings_updated": "Team-Einstellung geändert",
+    Data: "Daten",
+    Summary: "Zusammenfassung",
+    // Admin settings
+    "Default weekly hours": "Standard-Wochenstunden",
+    "Default annual leave days": "Standard-Urlaubstage",
+    "Confirm password": "Passwort bestätigen",
+    "Generate password": "Passwort generieren",
+    "Password (min 12 chars)": "Passwort (mind. 12 Zeichen)",
+    "Registration email will be sent.":
+      "Es wird eine Registrierungs-E-Mail gesendet.",
+    "User created.": "Benutzer erstellt.",
+    "Temporary password:": "Temporäres Passwort:",
+    Team: "Team",
+    // Team Settings
+    "Reopen Requests": "Wiederfreigabe-Anträge",
+    "When enabled, employees can reopen submitted weeks without waiting for approval.":
+      "Wenn aktiviert, können Mitarbeitende eingereichte Wochen ohne Genehmigungswartung wieder öffnen.",
+    // Notification polling
+    // (no new keys needed)
   },
 };
 
@@ -395,6 +499,28 @@ export function statusLabel(status) {
   };
   return translate(get(language), labels[status] || status);
 }
+export function hoursUnit() {
+  const result = translate(get(language), "hours_unit");
+  return result === "hours_unit" ? "h" : result;
+}
+
+export function auditTableLabel(tableName) {
+  const key = `audit_table_${tableName}`;
+  const result = translate(get(language), key);
+  // If no translation found, key is returned as-is; fallback to capitalized name
+  return result === key
+    ? tableName.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+    : result;
+}
+
+export function auditActionLabel(action) {
+  const key = `audit_action_${action}`;
+  const result = translate(get(language), key);
+  return result === key
+    ? action.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+    : result;
+}
+
 export function absenceKindLabel(kind) {
   const labels = {
     vacation: "Vacation",

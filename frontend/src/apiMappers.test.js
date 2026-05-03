@@ -37,7 +37,7 @@ describe("countWorkdays", () => {
   it("skips holidays", () => {
     const holidays = holidayDateSet([{ holiday_date: "2026-05-01" }]);
     // Thu Apr 30 - Mon May 4: workdays are Apr 30, May 4 (May 1 is holiday, May 2-3 weekend)
-    expect(countWorkdays("2026-04-30", "2026-05-04", false, holidays)).toBe(2);
+    expect(countWorkdays("2026-04-30", "2026-05-04", holidays)).toBe(2);
   });
 
   it("returns 1 for a single weekday", () => {
@@ -46,18 +46,6 @@ describe("countWorkdays", () => {
 
   it("returns 0 for a single weekend day", () => {
     expect(countWorkdays("2026-05-09", "2026-05-09")).toBe(0); // Saturday
-  });
-
-  it("supports half-day for single day", () => {
-    expect(countWorkdays("2026-05-04", "2026-05-04", true)).toBe(0.5);
-  });
-
-  it("half-day flag has no effect on multi-day ranges", () => {
-    expect(countWorkdays("2026-05-04", "2026-05-05", true)).toBe(2);
-  });
-
-  it("half-day on weekend returns 0", () => {
-    expect(countWorkdays("2026-05-09", "2026-05-09", true)).toBe(0);
   });
 
   it("returns 0 when end < start", () => {

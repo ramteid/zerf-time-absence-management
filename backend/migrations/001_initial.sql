@@ -10,8 +10,15 @@ CREATE TABLE IF NOT EXISTS users (
   start_date DATE NOT NULL,
   active BOOLEAN NOT NULL DEFAULT TRUE,
   must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+  approver_id BIGINT REFERENCES users(id),
+  allow_reopen_without_approval BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT users_employee_has_approver
+    CHECK (role <> 'employee' OR active = FALSE OR approver_id IS NOT NULL),
+  CONSTRAINT users_approver_not_self
+    CHECK (approver_id IS NULL OR approver_id <> id)
 );
+CREATE INDEX IF NOT EXISTS idx_users_approver ON users(approver_id);
 
 CREATE TABLE IF NOT EXISTS sessions (
   token TEXT PRIMARY KEY,
@@ -64,7 +71,6 @@ CREATE TABLE IF NOT EXISTS absences (
   kind TEXT NOT NULL CHECK (kind IN ('vacation','sick','training','special_leave','unpaid','general_absence')),
   start_date DATE NOT NULL,
   end_date DATE NOT NULL,
-  half_day BOOLEAN NOT NULL DEFAULT FALSE,
   comment TEXT,
   status TEXT NOT NULL DEFAULT 'requested' CHECK (status IN ('requested','approved','rejected','cancelled')),
   reviewed_by BIGINT REFERENCES users(id),
@@ -99,8 +105,44 @@ CREATE TABLE IF NOT EXISTS holidays (
   id BIGSERIAL PRIMARY KEY,
   holiday_date DATE NOT NULL UNIQUE,
   name TEXT NOT NULL,
-  year INTEGER NOT NULL
+  year INTEGER NOT NULL,
+  is_auto BOOLEAN NOT NULL DEFAULT FALSE,
+  local_name TEXT
 );
+
+CREATE TABLE IF NOT EXISTS reopen_requests (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id),
+    week_start DATE NOT NULL,
+    approver_id BIGINT NOT NULL REFERENCES users(id),
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending','approved','auto_approved','rejected')),
+    reviewed_at TIMESTAMPTZ,
+    rejection_reason TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK (EXTRACT(ISODOW FROM week_start) = 1)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_reopen_requests_pending_unique
+    ON reopen_requests(user_id, week_start)
+    WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_reopen_requests_approver_status
+    ON reopen_requests(approver_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_reopen_requests_user
+    ON reopen_requests(user_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS notifications (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id),
+    kind TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT,
+    reference_type TEXT,
+    reference_id BIGINT,
+    is_read BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_notifications_user_unread
+    ON notifications(user_id, is_read, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS app_settings (
   key TEXT PRIMARY KEY,
@@ -111,6 +153,9 @@ CREATE TABLE IF NOT EXISTS app_settings (
 INSERT INTO app_settings(key, value)
 VALUES ('ui_language', 'en')
 ON CONFLICT (key) DO NOTHING;
+
+INSERT INTO app_settings(key, value) VALUES ('country', 'DE') ON CONFLICT (key) DO NOTHING;
+INSERT INTO app_settings(key, value) VALUES ('region', 'DE-BW') ON CONFLICT (key) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS audit_log (
   id BIGSERIAL PRIMARY KEY,

@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 const UI_LANGUAGE_KEY: &str = "ui_language";
 const COUNTRY_KEY: &str = "country";
 const REGION_KEY: &str = "region";
+const DEFAULT_WEEKLY_HOURS_KEY: &str = "default_weekly_hours";
+const DEFAULT_ANNUAL_LEAVE_DAYS_KEY: &str = "default_annual_leave_days";
 const DEFAULT_UI_LANGUAGE: &str = "en";
 const DEFAULT_COUNTRY: &str = "DE";
 const DEFAULT_REGION: &str = "DE-BW";
@@ -18,6 +20,8 @@ pub struct PublicSettings {
     pub ui_language: String,
     pub country: String,
     pub region: String,
+    pub default_weekly_hours: Option<f64>,
+    pub default_annual_leave_days: Option<i32>,
 }
 
 #[derive(Deserialize)]
@@ -25,6 +29,8 @@ pub struct UpdateSettings {
     pub ui_language: String,
     pub country: String,
     pub region: String,
+    pub default_weekly_hours: Option<f64>,
+    pub default_annual_leave_days: Option<i32>,
 }
 
 fn normalize_language(value: &str) -> AppResult<&'static str> {
@@ -61,10 +67,14 @@ async fn save_setting(pool: &crate::db::DatabasePool, key: &str, value: &str) ->
 }
 
 async fn load_all_settings(pool: &crate::db::DatabasePool) -> AppResult<PublicSettings> {
+    let dwh = load_setting(pool, DEFAULT_WEEKLY_HOURS_KEY, "").await?;
+    let dal = load_setting(pool, DEFAULT_ANNUAL_LEAVE_DAYS_KEY, "").await?;
     Ok(PublicSettings {
         ui_language: load_setting(pool, UI_LANGUAGE_KEY, DEFAULT_UI_LANGUAGE).await?,
         country: load_setting(pool, COUNTRY_KEY, DEFAULT_COUNTRY).await?,
         region: load_setting(pool, REGION_KEY, DEFAULT_REGION).await?,
+        default_weekly_hours: dwh.parse().ok(),
+        default_annual_leave_days: dal.parse().ok(),
     })
 }
 
@@ -101,18 +111,22 @@ pub async fn update_admin_settings(
         ));
     }
 
-    let saved_lang = save_setting(&s.pool, UI_LANGUAGE_KEY, language).await?;
+    save_setting(&s.pool, UI_LANGUAGE_KEY, language).await?;
     let saved_country = save_setting(&s.pool, COUNTRY_KEY, &country).await?;
     let saved_region = save_setting(&s.pool, REGION_KEY, &region).await?;
+
+    // Save default hours/leave if provided
+    if let Some(dwh) = body.default_weekly_hours {
+        save_setting(&s.pool, DEFAULT_WEEKLY_HOURS_KEY, &dwh.to_string()).await?;
+    }
+    if let Some(dal) = body.default_annual_leave_days {
+        save_setting(&s.pool, DEFAULT_ANNUAL_LEAVE_DAYS_KEY, &dal.to_string()).await?;
+    }
 
     // Refresh holidays from API with new country/region
     if let Err(e) = holidays::refresh_holidays(&s.pool, &saved_country, &saved_region).await {
         tracing::warn!("Failed to refresh holidays: {:?}", e);
     }
 
-    Ok(Json(PublicSettings {
-        ui_language: saved_lang,
-        country: saved_country,
-        region: saved_region,
-    }))
+    Ok(Json(load_all_settings(&s.pool).await?))
 }

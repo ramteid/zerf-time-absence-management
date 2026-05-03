@@ -13,14 +13,8 @@
   let kind = template.kind || "vacation";
   let start_date = template.start_date || isoDate(new Date());
   let end_date = template.end_date || isoDate(new Date());
-  let half_day = template.half_day || false;
   let comment = template.comment || "";
   let error = "";
-
-  $: canUseHalfDay = kind === "vacation" && start_date === end_date;
-  $: if (!canUseHalfDay && half_day) {
-    half_day = false;
-  }
 
   onMount(() => dlg.showModal());
 
@@ -35,7 +29,6 @@
         kind,
         start_date,
         end_date,
-        half_day,
         comment: comment || null,
       };
       if (isNew) await api("/absences", { method: "POST", body });
@@ -43,7 +36,7 @@
       dlg.close();
       onClose(true);
     } catch (e) {
-      error = e.message;
+      error = $t(e.message) || e.message;
     }
   }
 
@@ -79,6 +72,7 @@
           id="absence-start-date"
           bind:value={start_date}
           max={end_date}
+          container={dlg}
         />
       </div>
       <div>
@@ -87,17 +81,9 @@
           id="absence-end-date"
           bind:value={end_date}
           min={start_date}
+          container={dlg}
         />
       </div>
-    </div>
-    <div style="display:flex;align-items:center;gap:8px">
-      <input
-        type="checkbox"
-        id="half-day"
-        bind:checked={half_day}
-        disabled={!canUseHalfDay}
-      />
-      <label for="half-day" style="font-size:13px">{$t("Half day")}</label>
     </div>
     <div>
       <label class="kz-label" for="absence-comment"

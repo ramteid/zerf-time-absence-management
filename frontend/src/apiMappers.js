@@ -26,12 +26,7 @@ export function holidayDateSet(holidays = []) {
   return new Set(holidays.map((holiday) => holiday.holiday_date));
 }
 
-export function countWorkdays(
-  startDate,
-  endDate,
-  halfDay = false,
-  holidays = new Set(),
-) {
+export function countWorkdays(startDate, endDate, holidays = new Set()) {
   const start = parseIsoDate(startDate);
   const end = parseIsoDate(endDate);
   if (
@@ -52,10 +47,6 @@ export function countWorkdays(
     if (!isWeekend(current) && !holidays.has(currentDate)) {
       days += 1;
     }
-  }
-
-  if (halfDay && startDate === endDate && days === 1) {
-    return 0.5;
   }
 
   return days;

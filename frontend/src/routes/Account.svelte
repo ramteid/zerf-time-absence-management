@@ -1,7 +1,7 @@
 <script>
   import { api } from "../api.js";
   import { currentUser, toast } from "../stores.js";
-  import { t, roleLabel } from "../i18n.js";
+  import { t, roleLabel, hoursUnit } from "../i18n.js";
   import { fmtDate, minToHM } from "../format.js";
 
   let cur = "",
@@ -10,6 +10,7 @@
     error = "";
   let overtime = [];
   $: cumulative = overtime.reduce((s, m) => s + m.diff_min, 0);
+  $: hu = hoursUnit();
 
   function initials(u) {
     return ((u.first_name?.[0] || "") + (u.last_name?.[0] || "")).toUpperCase();
@@ -107,7 +108,7 @@
         <input
           id="account-weekly-hours"
           class="kz-input"
-          value="{$currentUser.weekly_hours}h / week"
+          value={$t("{hours} / week", { hours: $currentUser.weekly_hours + hu })}
           readonly
           style="color:var(--text-secondary)"
         />
@@ -197,7 +198,7 @@
   </div>
 
   <!-- Overtime -->
-  <div class="kz-card" style="overflow-x:auto">
+  <div class="kz-card overtime-card">
     <div class="card-header">
       <span class="card-header-title">
         {$t("Overtime balance {year}", { year: new Date().getFullYear() })}
@@ -210,7 +211,9 @@
         {minToHM(cumulative)}
       </span>
     </div>
-    <div class="kz-table-wrap">
+
+    <!-- Desktop: table -->
+    <div class="overtime-table-desktop">
       <table class="kz-table">
         <thead>
           <tr>
@@ -249,6 +252,66 @@
         </tbody>
       </table>
     </div>
-    <!-- end kz-table-wrap -->
+
+    <!-- Mobile: stacked tiles -->
+    <div class="overtime-tiles-mobile">
+      {#each overtime as m, i}
+        {@const cum = overtime
+          .slice(0, i + 1)
+          .reduce((s, x) => s + x.diff_min, 0)}
+        <div class="overtime-tile">
+          <div style="font-weight:600;font-size:13px;margin-bottom:4px">{m.month}</div>
+          <div class="overtime-tile-row">
+            <span>{$t("Target")}</span><span class="tab-num">{minToHM(m.target_min)}</span>
+          </div>
+          <div class="overtime-tile-row">
+            <span>{$t("Actual")}</span><span class="tab-num">{minToHM(m.actual_min)}</span>
+          </div>
+          <div class="overtime-tile-row">
+            <span>{$t("Diff")}</span>
+            <span class="tab-num" style="color:{m.diff_min < 0 ? 'var(--danger-text)' : 'var(--success-text)'}">
+              {minToHM(m.diff_min)}
+            </span>
+          </div>
+          <div class="overtime-tile-row">
+            <span>{$t("Cumulative")}</span>
+            <span class="tab-num" style="color:{cum < 0 ? 'var(--danger-text)' : 'var(--success-text)'}">
+              {minToHM(cum)}
+            </span>
+          </div>
+        </div>
+      {/each}
+    </div>
   </div>
 </div>
+
+<style>
+  .overtime-table-desktop {
+    overflow-x: auto;
+  }
+  .overtime-tiles-mobile {
+    display: none;
+  }
+  .overtime-tile {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .overtime-tile:last-child {
+    border-bottom: none;
+  }
+  .overtime-tile-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    padding: 2px 0;
+  }
+
+  @media (max-width: 640px) {
+    .overtime-table-desktop {
+      display: none;
+    }
+    .overtime-tiles-mobile {
+      display: block;
+    }
+  }
+</style>

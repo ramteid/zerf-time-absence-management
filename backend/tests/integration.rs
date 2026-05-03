@@ -481,7 +481,7 @@ async fn full_integration_suite() {
         let (st, body) = emp
             .put(
                 &format!("/api/v1/absences/{}", gabs),
-                &json!({"kind":"general_absence","start_date": &ga_from,"end_date": &ga_to2,"half_day":false,"comment":"updated parental leave plan"}),
+                &json!({"kind":"general_absence","start_date": &ga_from,"end_date": &ga_to2,"comment":"updated parental leave plan"}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "edit pending general_absence");
@@ -501,7 +501,7 @@ async fn full_integration_suite() {
         let (st, _) = emp
             .put(
                 &format!("/api/v1/absences/{}", gabs),
-                &json!({"kind":"general_absence","start_date": &ga_from,"end_date": &ga_to,"half_day":false,"comment":"x"}),
+                &json!({"kind":"general_absence","start_date": &ga_from,"end_date": &ga_to,"comment":"x"}),
             )
             .await;
         assert_eq!(
@@ -602,21 +602,7 @@ async fn full_integration_suite() {
             .await;
         assert_eq!(st, StatusCode::BAD_REQUEST, "inverted range rejected");
 
-        // d) Half-day flag silently ignored for general_absence.
-        let ga3_day = date_offset(90);
-        let (st, body) = emp
-            .post(
-                "/api/v1/absences",
-                &json!({"kind":"general_absence","start_date": &ga3_day,"end_date": &ga3_day,"half_day":true}),
-            )
-            .await;
-        assert_eq!(st, StatusCode::OK, "create one-day GA with half_day=true");
-        assert_eq!(
-            body["half_day"], false,
-            "half_day forced to false (only valid for vacation)"
-        );
-
-        // d2) Pending absences can change type, and valid half-days persist.
+        // d) Pending absences can change type.
         let editable_day = date_offset(100);
         let (st, body) = emp
             .post(
@@ -630,12 +616,11 @@ async fn full_integration_suite() {
         let (st, body) = emp
             .put(
                 &format!("/api/v1/absences/{}", editable_absence),
-                &json!({"kind":"vacation","start_date": &editable_day,"end_date": &editable_day,"half_day":true,"comment":"converted to vacation"}),
+                &json!({"kind":"vacation","start_date": &editable_day,"end_date": &editable_day,"comment":"converted to vacation"}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "edit pending absence kind");
         assert_eq!(body["kind"], "vacation", "kind updated on edit");
-        assert_eq!(body["half_day"], true, "valid vacation half_day persisted");
 
         let (st, _) = emp
             .delete(&format!("/api/v1/absences/{}", editable_absence))
@@ -656,7 +641,7 @@ async fn full_integration_suite() {
         let (st, _) = emp
             .put(
                 &format!("/api/v1/absences/{}", editable_sick),
-                &json!({"kind":"vacation","start_date": &sick_edit_day,"end_date": &sick_edit_day,"half_day":true}),
+                &json!({"kind":"vacation","start_date": &sick_edit_day,"end_date": &sick_edit_day}),
             )
             .await;
         assert_eq!(

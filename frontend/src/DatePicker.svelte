@@ -13,6 +13,7 @@
   export let max = "";
   export let id = "";
   export let style = "";
+  export let container = null;
   let cls = "kz-input";
   export { cls as class };
 
@@ -46,6 +47,9 @@
           ]
         : [],
     };
+    // When rendered inside a <dialog>, append the calendar to the dialog
+    // so it stays in the top layer and is not hidden behind the backdrop.
+    if (container) opts.appendTo = container;
     fp = flatpickr(el, opts);
     if (id && fp.altInput) fp.altInput.id = id;
     if (style && fp.altInput) fp.altInput.setAttribute("style", style);

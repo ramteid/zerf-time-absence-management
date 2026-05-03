@@ -84,13 +84,14 @@ fn weekday_en(d: NaiveDate) -> &'static str {
     ][d.weekday().num_days_from_monday() as usize]
 }
 
-async fn build_month(
+async fn build_range(
     pool: &crate::db::DatabasePool,
     user_id: i64,
-    month: &str,
+    from: NaiveDate,
+    to: NaiveDate,
+    label: &str,
 ) -> AppResult<MonthReport> {
-    let (from, to) = month_bounds(month)?;
-    let user: crate::auth::User = sqlx::query_as("SELECT * FROM users WHERE id=$1")
+    let user: crate::auth::User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE id=$1")
         .bind(user_id)
         .fetch_one(pool)
         .await?;
@@ -101,8 +102,8 @@ async fn build_month(
         "SELECT z.entry_date, z.start_time, z.end_time, c.name, c.color, z.category_id, z.status, z.comment FROM time_entries z JOIN categories c ON c.id=z.category_id WHERE z.user_id=$1 AND z.entry_date BETWEEN $2 AND $3 ORDER BY z.entry_date, z.start_time"
     ).bind(user_id).bind(from).bind(to).fetch_all(pool).await?;
 
-    let abs: Vec<(NaiveDate, NaiveDate, String, bool)> = sqlx::query_as(
-        "SELECT start_date, end_date, kind, half_day FROM absences WHERE user_id=$1 AND status='approved' AND end_date >= $2 AND start_date <= $3"
+    let abs: Vec<(NaiveDate, NaiveDate, String)> = sqlx::query_as(
+        "SELECT start_date, end_date, kind FROM absences WHERE user_id=$1 AND status='approved' AND end_date >= $2 AND start_date <= $3"
     ).bind(user_id).bind(from).bind(to).fetch_all(pool).await?;
 
     // Load UI language to decide which holiday name to display
@@ -144,8 +145,8 @@ async fn build_month(
         let holiday = h_map.get(&d).cloned();
         let absence = abs
             .iter()
-            .find(|(s, e, _, _)| d >= *s && d <= *e)
-            .map(|(_, _, k, _)| k.clone());
+            .find(|(s, e, _)| d >= *s && d <= *e)
+            .map(|(_, _, k)| k.clone());
         let before_start = d < user.start_date;
         let target = if weekday && holiday.is_none() && !before_start && !is_admin {
             target_per_day_min
@@ -194,13 +195,22 @@ async fn build_month(
     }
     Ok(MonthReport {
         user_id,
-        month: month.into(),
+        month: label.into(),
         days,
         target_min: target_total,
         actual_min: actual_total,
         diff_min: actual_total - target_total,
         category_totals: cat,
     })
+}
+
+async fn build_month(
+    pool: &crate::db::DatabasePool,
+    user_id: i64,
+    month: &str,
+) -> AppResult<MonthReport> {
+    let (from, to) = month_bounds(month)?;
+    build_range(pool, user_id, from, to, month).await
 }
 
 pub async fn month(
@@ -215,20 +225,40 @@ pub async fn month(
     Ok(Json(build_month(&s.pool, uid, &q.month).await?))
 }
 
+#[derive(Deserialize)]
+pub struct CsvQuery {
+    pub user_id: Option<i64>,
+    pub month: Option<String>,
+    pub from: Option<NaiveDate>,
+    pub to: Option<NaiveDate>,
+}
+
 pub async fn month_csv(
     State(s): State<AppState>,
     u: User,
-    Query(q): Query<MonthQuery>,
+    Query(q): Query<CsvQuery>,
 ) -> AppResult<Response> {
     let uid = q.user_id.unwrap_or(u.id);
     if uid != u.id && !u.is_lead() {
         return Err(AppError::Forbidden);
     }
-    // Validate the month string before stuffing it into a header.
-    let _ = month_bounds(&q.month)?;
-    // Validate the month string up-front before it is reflected anywhere.
-    let _ = month_bounds(&q.month)?;
-    let r = build_month(&s.pool, uid, &q.month).await?;
+    let (r, file_label) = if let (Some(from), Some(to)) = (q.from, q.to) {
+        if from > to {
+            return Err(AppError::BadRequest("from must not be after to.".into()));
+        }
+        if (to - from).num_days() > 366 {
+            return Err(AppError::BadRequest("Date range must not exceed 366 days.".into()));
+        }
+        let label = format!("{}_to_{}", from, to);
+        let r = build_range(&s.pool, uid, from, to, &label).await?;
+        (r, label)
+    } else if let Some(ref month) = q.month {
+        let _ = month_bounds(month)?;
+        let r = build_month(&s.pool, uid, month).await?;
+        (r, month.clone())
+    } else {
+        return Err(AppError::BadRequest("Provide 'month' or 'from'+'to'.".into()));
+    };
     // CSV formula-injection guard: prefix any cell that begins with =, +, -, @ or
     // a tab/CR with a leading single-quote so spreadsheets treat it as text.
     fn safe(s: &str) -> String {
@@ -296,13 +326,12 @@ pub async fn month_csv(
         header::CONTENT_TYPE,
         "text/csv; charset=utf-8".parse().unwrap(),
     );
-    let safe_month: String = q
-        .month
+    let safe_label: String = file_label
         .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
-        .take(10)
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .take(30)
         .collect();
-    let cd = format!("attachment; filename=\"report-{}-{}.csv\"", uid, safe_month);
+    let cd = format!("attachment; filename=\"report-{}-{}.csv\"", uid, safe_label);
     resp.headers_mut().insert(
         header::CONTENT_DISPOSITION,
         axum::http::HeaderValue::from_str(&cd).unwrap_or_else(|_| {
@@ -337,7 +366,7 @@ pub async fn team(
         return Err(AppError::Forbidden);
     }
     let users: Vec<crate::auth::User> =
-        sqlx::query_as("SELECT * FROM users WHERE active=TRUE ORDER BY last_name")
+        sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE active=TRUE ORDER BY last_name")
             .fetch_all(&s.pool)
             .await?;
     let mut out = vec![];
@@ -396,7 +425,7 @@ pub async fn categories(
         "SELECT c.name, c.color, z.start_time, z.end_time \
          FROM time_entries z \
          JOIN categories c ON c.id=z.category_id \
-         WHERE z.status='approved' AND z.entry_date BETWEEN ",
+         WHERE z.status = 'approved' AND z.entry_date BETWEEN ",
     );
     builder.push_bind(q.from).push(" AND ").push_bind(q.to);
     if let Some(id) = uid {
@@ -504,7 +533,7 @@ pub async fn flextime(
         ));
     }
 
-    let user: crate::auth::User = sqlx::query_as("SELECT * FROM users WHERE id=$1")
+    let user: crate::auth::User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE id=$1")
         .bind(uid)
         .fetch_one(&s.pool)
         .await?;

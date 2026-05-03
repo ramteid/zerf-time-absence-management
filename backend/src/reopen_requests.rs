@@ -402,7 +402,16 @@ pub async fn approve(
             return Err(e);
         }
     };
-    audit::log(&s.pool, u.id, "approved", "reopen_requests", id, None, None).await;
+    audit::log(
+        &s.pool,
+        u.id,
+        "approved",
+        "reopen_requests",
+        id,
+        Some(serde_json::to_value(&r).unwrap()),
+        Some(serde_json::json!({"status": "approved"})),
+    )
+    .await;
     notifications::create(
         &s,
         r.user_id,
@@ -464,8 +473,8 @@ pub async fn reject(
         "rejected",
         "reopen_requests",
         id,
-        None,
-        Some(serde_json::json!({ "reason": reason })),
+        Some(serde_json::to_value(&r).unwrap()),
+        Some(serde_json::json!({ "status": "rejected", "reason": reason })),
     )
     .await;
     notifications::create(

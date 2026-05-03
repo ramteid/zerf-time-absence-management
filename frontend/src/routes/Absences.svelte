@@ -38,12 +38,7 @@
   load();
 
   function absenceDays(absence) {
-    return countWorkdays(
-      absence.start_date,
-      absence.end_date,
-      absence.half_day,
-      holidayDates,
-    );
+    return countWorkdays(absence.start_date, absence.end_date, holidayDates);
   }
 
   function canEdit(absence) {
@@ -87,7 +82,7 @@
   </div>
 </div>
 
-<div class="content-area">
+<div class="content-area" style="overflow-x:hidden">
   {#if balance}
     <div class="stat-cards">
       <div class="kz-card stat-card">
@@ -116,38 +111,37 @@
     <div class="card-header">
       <span class="card-header-title">{$t("Absence History")}</span>
     </div>
-    <table class="kz-table absence-table">
-      <thead>
-        <tr>
-          <th>{$t("Type")}</th>
-          <th>{$t("From")}</th>
-          <th>{$t("To")}</th>
-          <th>{$t("Days")}</th>
-          <th>{$t("Status")}</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
+    {#if absences.length === 0}
+      <div style="padding:32px;text-align:center;color:var(--text-tertiary)">
+        {$t("No absences yet.")}
+      </div>
+    {:else}
+      <div class="absence-list">
         {#each absences as a}
-          <tr>
-            <td data-label={$t("Type")} style="font-weight:500"
-              >{absenceKindLabel(a.kind)}</td
-            >
-            <td data-label={$t("From")} class="tab-num"
-              >{fmtDate(a.start_date)}</td
-            >
-            <td data-label={$t("To")} class="tab-num"
-              >{fmtDate(a.end_date)}</td
-            >
-            <td data-label={$t("Days")} class="tab-num"
-              >{absenceDays(a) || "–"}</td
-            >
-            <td data-label={$t("Status")}
-              ><span class="kz-chip kz-chip-{a.status}"
-                >{statusLabel(a.status)}</span
-              ></td
-            >
-            <td class="absence-actions">
+          <div class="absence-entry">
+            <div class="absence-entry-row">
+              <span class="absence-entry-label">{$t("Type")}</span>
+              <span class="absence-entry-value" style="font-weight:500">{absenceKindLabel(a.kind)}</span>
+            </div>
+            <div class="absence-entry-row">
+              <span class="absence-entry-label">{$t("From")}</span>
+              <span class="absence-entry-value tab-num">{fmtDate(a.start_date)}</span>
+            </div>
+            <div class="absence-entry-row">
+              <span class="absence-entry-label">{$t("To")}</span>
+              <span class="absence-entry-value tab-num">{fmtDate(a.end_date)}</span>
+            </div>
+            <div class="absence-entry-row">
+              <span class="absence-entry-label">{$t("Days")}</span>
+              <span class="absence-entry-value tab-num">{absenceDays(a) || "–"}</span>
+            </div>
+            <div class="absence-entry-row">
+              <span class="absence-entry-label">{$t("Status")}</span>
+              <span class="absence-entry-value">
+                <span class="kz-chip kz-chip-{a.status}">{statusLabel(a.status)}</span>
+              </span>
+            </div>
+            <div class="absence-entry-actions">
               {#if a.status === "requested"}
                 <button
                   class="kz-btn kz-btn-ghost kz-btn-sm kz-btn-danger"
@@ -164,22 +158,11 @@
                   <Icon name="Edit" size={13} />
                 </button>
               {/if}
-            </td>
-          </tr>
+            </div>
+          </div>
         {/each}
-        {#if absences.length === 0}
-          <tr>
-            <td
-              colspan="6"
-              class="absence-empty"
-              style="padding:32px;color:var(--text-tertiary)"
-            >
-              {$t("No absences yet.")}
-            </td>
-          </tr>
-        {/if}
-      </tbody>
-    </table>
+      </div>
+    {/if}
   </div>
 </div>
 
@@ -194,56 +177,62 @@
 {/if}
 
 <style>
-  /* Mobile: collapse table rows into labeled cards */
-  @media (max-width: 640px) {
-    .absence-table thead {
-      display: none;
-    }
-
-    .absence-table tbody tr {
-      display: block;
-      border-bottom: 1px solid var(--border);
-      padding: 12px 16px;
-    }
-
-    .absence-table tbody tr:last-child {
-      border-bottom: none;
-    }
-
-    .absence-table td {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 4px 0;
-      border: none;
-    }
-
-    .absence-table td::before {
-      content: attr(data-label);
-      font-weight: 500;
-      color: var(--text-secondary);
-      flex-shrink: 0;
-      margin-right: 12px;
-    }
-
-    .absence-table td:not([data-label]):not(.absence-empty) {
-      justify-content: flex-end;
-    }
-
-    .absence-table td.absence-empty {
-      display: block;
-      text-align: center;
-    }
-
-    .absence-actions {
-      padding-top: 8px;
-    }
+  .absence-list {
+    display: flex;
+    flex-direction: column;
   }
 
-  /* Desktop: keep actions right-aligned */
-  @media (min-width: 641px) {
-    .absence-actions {
-      text-align: right;
+  .absence-entry {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    align-items: center;
+  }
+
+  .absence-entry:last-child {
+    border-bottom: none;
+  }
+
+  .absence-entry-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .absence-entry-label {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    min-width: 40px;
+  }
+
+  .absence-entry-value {
+    font-size: 13px;
+    text-align: left;
+  }
+
+  .absence-entry-actions {
+    margin-left: auto;
+    display: flex;
+    gap: 4px;
+  }
+
+  @media (max-width: 640px) {
+    .absence-entry {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 4px;
+    }
+
+    .absence-entry-row {
+      width: 100%;
+      justify-content: space-between;
+    }
+
+    .absence-entry-actions {
+      margin-left: 0;
+      padding-top: 4px;
     }
   }
 </style>
