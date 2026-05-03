@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 /// Per-approver self-service policy. Returned by `GET /team-policy` for the
 /// current user (lead/admin) or for all approvers (admin only).
 #[derive(Serialize)]
-pub struct TeamPolicy {
+pub struct TeamSettings {
     pub approver_id: i64,
     pub email: String,
     pub first_name: String,
@@ -23,11 +23,11 @@ pub struct TeamPolicy {
 pub async fn team_policy_list(
     State(s): State<AppState>,
     u: User,
-) -> AppResult<Json<Vec<TeamPolicy>>> {
+) -> AppResult<Json<Vec<TeamSettings>>> {
     if !u.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let rows: Vec<TeamPolicy> = if u.is_admin() {
+    let rows: Vec<TeamSettings> = if u.is_admin() {
         sqlx::query_as::<_, (i64, String, String, String, bool)>(
             "SELECT id, email, first_name, last_name, allow_reopen_without_approval \
              FROM users WHERE active=TRUE AND role IN ('team_lead','admin') \
@@ -36,7 +36,7 @@ pub async fn team_policy_list(
         .fetch_all(&s.pool)
         .await?
         .into_iter()
-        .map(|(id, email, fi, la, p)| TeamPolicy {
+        .map(|(id, email, fi, la, p)| TeamSettings {
             approver_id: id,
             email,
             first_name: fi,
@@ -53,7 +53,7 @@ pub async fn team_policy_list(
         .bind(u.id)
         .fetch_one(&s.pool)
         .await?;
-        vec![TeamPolicy {
+        vec![TeamSettings {
             approver_id: u.id,
             email: row.0,
             first_name: row.1,

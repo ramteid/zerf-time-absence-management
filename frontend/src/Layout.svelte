@@ -128,7 +128,11 @@
   }
   function onDocClick(e) {
     if (!bellOpen) return;
-    if (!e.target.closest(".kz-bell-wrapper") && !e.target.closest(".kz-notif-panel")) bellOpen = false;
+    if (
+      !e.target.closest(".kz-bell-wrapper") &&
+      !e.target.closest(".kz-notif-panel")
+    )
+      bellOpen = false;
   }
 
   $: pathname = (() => {
@@ -146,7 +150,7 @@
     Dashboard: "Home",
     Reports: "BarChart",
     Admin: "Settings",
-    TeamPolicy: "Shield",
+    TeamSettings: "Shield",
   };
 
   // Section grouping
@@ -158,7 +162,7 @@
       if (
         link.key === "Dashboard" ||
         link.key === "Reports" ||
-        link.key === "TeamPolicy"
+        link.key === "TeamSettings"
       ) {
         lead.push(link);
       } else if (link.key === "Admin") {
@@ -194,7 +198,9 @@
         {#if refreshing}
           <Icon name="Clock" size={20} />
         {:else}
-          <span style="transform:rotate({pullDistance * 3}deg);display:inline-block">
+          <span
+            style="transform:rotate({pullDistance * 3}deg);display:inline-block"
+          >
             ↓
           </span>
         {/if}
@@ -323,7 +329,8 @@
         href={link.href}
         data-link="1"
         class="mobile-nav-item"
-        class:active={pathname === link.href || pathname.startsWith(link.href + "/")}
+        class:active={pathname === link.href ||
+          pathname.startsWith(link.href + "/")}
       >
         <Icon name={iconMap[link.key] || "FileText"} size={20} />
         <span>{$t(link.key)}</span>
@@ -348,14 +355,25 @@
     <div class="mobile-more-overlay" on:click={() => (mobileMoreOpen = false)}>
       <div class="mobile-more-sheet" on:click|stopPropagation>
         <div class="mobile-more-header">
-          <div class="avatar" style="width:32px;height:32px;font-size:11px;background:var(--accent);color:white">
+          <div
+            class="avatar"
+            style="width:32px;height:32px;font-size:11px;background:var(--accent);color:white"
+          >
             {initials($currentUser)}
           </div>
           <div style="flex:1;min-width:0">
-            <div style="font-weight:600;font-size:14px">{$currentUser.first_name} {$currentUser.last_name}</div>
-            <div style="font-size:12px;color:var(--text-secondary)">{roleLabel($currentUser.role)}</div>
+            <div style="font-weight:600;font-size:14px">
+              {$currentUser.first_name}
+              {$currentUser.last_name}
+            </div>
+            <div style="font-size:12px;color:var(--text-secondary)">
+              {roleLabel($currentUser.role)}
+            </div>
           </div>
-          <button class="kz-btn-icon-sm" on:click={() => (mobileMoreOpen = false)}>
+          <button
+            class="kz-btn-icon-sm"
+            on:click={() => (mobileMoreOpen = false)}
+          >
             <Icon name="X" size={18} />
           </button>
         </div>
@@ -373,16 +391,36 @@
             <span>{$t(link.key)}</span>
           </a>
         {/each}
-        <div style="border-top:1px solid var(--border);margin-top:8px;padding-top:8px">
+        <div
+          style="border-top:1px solid var(--border);margin-top:8px;padding-top:8px"
+        >
           <button class="mobile-more-item" on:click={theme.toggle}>
             <Icon name={$theme === "dark" ? "Sun" : "Moon"} size={18} />
-            <span>{$theme === "dark" ? $t("Switch to light mode") : $t("Switch to dark mode")}</span>
+            <span
+              >{$theme === "dark"
+                ? $t("Switch to light mode")
+                : $t("Switch to dark mode")}</span
+            >
           </button>
-          <button class="mobile-more-item" on:click={() => { mobileMoreOpen = false; toggleBell(); }}>
+          <button
+            class="mobile-more-item"
+            on:click={() => {
+              mobileMoreOpen = false;
+              toggleBell();
+            }}
+          >
             <Icon name="Bell" size={18} />
-            <span>{$t("Notifications")}{$notificationsUnread > 0 ? ` (${$notificationsUnread})` : ""}</span>
+            <span
+              >{$t("Notifications")}{$notificationsUnread > 0
+                ? ` (${$notificationsUnread})`
+                : ""}</span
+            >
           </button>
-          <button class="mobile-more-item" style="color:var(--danger-text)" on:click={logout}>
+          <button
+            class="mobile-more-item"
+            style="color:var(--danger-text)"
+            on:click={logout}
+          >
             <Icon name="LogOut" size={18} />
             <span>{$t("Sign out")}</span>
           </button>

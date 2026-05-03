@@ -67,6 +67,7 @@
       return;
     }
     let n = 0;
+    let failed = 0;
     for (const e of v) {
       const d = isoDate(addDays(parseDate(e.entry_date), 7));
       if (parseDate(d) > new Date()) continue;
@@ -82,7 +83,15 @@
           },
         });
         n++;
-      } catch {}
+      } catch {
+        failed++;
+      }
+    }
+    if (failed > 0) {
+      toast(
+        $t("{count} entries could not be copied.", { count: failed }),
+        "error",
+      );
     }
     toast($t("Copied {count} entries.", { count: n }), "ok");
     load();
@@ -129,7 +138,11 @@
   }
 
   $: weekActual = entries.reduce(
-    (s, e) => s + durMin(e.start_time.slice(0, 5), e.end_time.slice(0, 5)),
+    (s, e) =>
+      s +
+      (e.start_time && e.end_time
+        ? durMin(e.start_time.slice(0, 5), e.end_time.slice(0, 5))
+        : 0),
     0,
   );
   $: weekTarget = Math.round(($currentUser.weekly_hours || 0) * 60);
@@ -307,92 +320,99 @@
 
     <!-- Week grid -->
     <div class="week-grid-scroll-wrap">
-    <div class="week-grid">
-      {#each [0, 1, 2, 3, 4] as i}
-        {@const day = dayList(i)}
-        {@const total = day.items.reduce(
-          (s, e) =>
-            s + durMin(e.start_time.slice(0, 5), e.end_time.slice(0, 5)),
-          0,
-        )}
-        {@const totalH = (total / 60).toFixed(1)}
-        {@const dailyTarget = ($currentUser.weekly_hours || 0) / 5}
-        <div
-          class="kz-card day-card"
-          class:day-card--locked={weekStatus === "submitted" ||
-            weekStatus === "approved"}
-        >
-          <div class="day-header">
-            <div>
-              <div class="day-name">{$t(day.dayName)}</div>
-              <div class="day-date tab-num">{fmtDateShort(day.d)}</div>
-            </div>
-            <div
-              class="day-total tab-num"
-              style="color: {total / 60 >= dailyTarget
-                ? 'var(--accent)'
-                : 'var(--text-primary)'}"
-            >
-              {totalH}h
-            </div>
-          </div>
-
-          <div class="day-entries">
-            {#each day.items as e}
-              {@const c = catOf(e.category_id)}
-              <div
-                class="time-block"
-                on:click={() => {
-                  if (e.status === "draft") showEntry = e;
-                  else if (e.status === "submitted" || e.status === "approved")
-                    showChange = e;
-                }}
-                on:keydown={() => {}}
-                role="button"
-                tabindex="0"
-              >
-                <div class="time-block-cat">
-                  <span class="cat-dot" style="background:{c.color}"></span>
-                  <span class="time-block-cat-name">{$t(c.name)}</span>
-                  {#if e.status !== "draft"}
-                    <span
-                      class="kz-chip kz-chip-{e.status}"
-                      style="height:18px;font-size:10px"
-                    >
-                      {statusLabel(e.status)}
-                    </span>
-                  {/if}
-                </div>
-                <div class="time-block-times tab-num">
-                  <span
-                    >{e.start_time.slice(0, 5)} – {e.end_time.slice(0, 5)}</span
-                  >
-                  <span
-                    >{durHours(
-                      e.start_time.slice(0, 5),
-                      e.end_time.slice(0, 5),
-                    )}h</span
-                  >
-                </div>
+      <div class="week-grid">
+        {#each [0, 1, 2, 3, 4] as i}
+          {@const day = dayList(i)}
+          {@const total = day.items.reduce(
+            (s, e) =>
+              s + durMin(e.start_time.slice(0, 5), e.end_time.slice(0, 5)),
+            0,
+          )}
+          {@const totalH = (total / 60).toFixed(1)}
+          {@const dailyTarget = ($currentUser.weekly_hours || 0) / 5}
+          <div
+            class="kz-card day-card"
+            class:day-card--locked={weekStatus === "submitted" ||
+              weekStatus === "approved"}
+          >
+            <div class="day-header">
+              <div>
+                <div class="day-name">{$t(day.dayName)}</div>
+                <div class="day-date tab-num">{fmtDateShort(day.d)}</div>
               </div>
-            {/each}
-          </div>
-
-          {#if weekStatus === "draft" || drafts.length > 0}
-            <div class="day-add-btn">
-              <button
-                class="kz-btn kz-btn-ghost kz-btn-sm"
-                style="width:100%;justify-content:center;border-style:dashed;border-color:var(--border)"
-                on:click={() => (showEntry = { entry_date: day.ds })}
+              <div
+                class="day-total tab-num"
+                style="color: {total / 60 >= dailyTarget
+                  ? 'var(--accent)'
+                  : 'var(--text-primary)'}"
               >
-                <Icon name="Plus" size={13} />{$t("Add")}
-              </button>
+                {totalH}h
+              </div>
             </div>
-          {/if}
-        </div>
-      {/each}
+
+            <div class="day-entries">
+              {#each day.items as e}
+                {@const c = catOf(e.category_id)}
+                <div
+                  class="time-block"
+                  on:click={() => {
+                    if (e.status === "draft") showEntry = e;
+                    else if (
+                      e.status === "submitted" ||
+                      e.status === "approved"
+                    )
+                      showChange = e;
+                  }}
+                  on:keydown={() => {}}
+                  role="button"
+                  tabindex="0"
+                >
+                  <div class="time-block-cat">
+                    <span class="cat-dot" style="background:{c.color}"></span>
+                    <span class="time-block-cat-name">{$t(c.name)}</span>
+                    {#if e.status !== "draft"}
+                      <span
+                        class="kz-chip kz-chip-{e.status}"
+                        style="height:18px;font-size:10px"
+                      >
+                        {statusLabel(e.status)}
+                      </span>
+                    {/if}
+                  </div>
+                  <div class="time-block-times tab-num">
+                    <span
+                      >{e.start_time.slice(0, 5)} – {e.end_time.slice(
+                        0,
+                        5,
+                      )}</span
+                    >
+                    <span
+                      >{durHours(
+                        e.start_time.slice(0, 5),
+                        e.end_time.slice(0, 5),
+                      )}h</span
+                    >
+                  </div>
+                </div>
+              {/each}
+            </div>
+
+            {#if weekStatus === "draft" || drafts.length > 0}
+              <div class="day-add-btn">
+                <button
+                  class="kz-btn kz-btn-ghost kz-btn-sm"
+                  style="width:100%;justify-content:center;border-style:dashed;border-color:var(--border)"
+                  on:click={() => (showEntry = { entry_date: day.ds })}
+                >
+                  <Icon name="Plus" size={13} />{$t("Add")}
+                </button>
+              </div>
+            {/if}
+          </div>
+        {/each}
+      </div>
     </div>
-    </div><!-- end week-grid scroll wrapper -->
+    <!-- end week-grid scroll wrapper -->
 
     <!-- Weekend (Sat/Sun) if entries exist -->
     {#each [5, 6] as i}

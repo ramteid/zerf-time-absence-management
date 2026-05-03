@@ -293,7 +293,7 @@ pub async fn me(
     if user.is_lead() {
         nav.push(serde_json::json!({"href":"/dashboard","key":"Dashboard","icon":"🔔"}));
         nav.push(serde_json::json!({"href":"/reports","key":"Reports","icon":"📊"}));
-        nav.push(serde_json::json!({"href":"/team-policy","key":"TeamPolicy","icon":"🛡"}));
+        nav.push(serde_json::json!({"href":"/team-policy","key":"TeamSettings","icon":"🛡"}));
     }
     if user.is_admin() {
         nav.push(serde_json::json!({"href":"/admin/users","key":"Admin","icon":"⚙"}));

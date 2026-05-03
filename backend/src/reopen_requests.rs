@@ -389,7 +389,19 @@ pub async fn approve(
             "Request was already resolved by someone else.".into(),
         ));
     }
-    let count = perform_reopen(&s.pool, u.id, r.user_id, r.week_start).await?;
+    let count = match perform_reopen(&s.pool, u.id, r.user_id, r.week_start).await {
+        Ok(c) => c,
+        Err(e) => {
+            // Revert the approval claim so the request can be retried.
+            let _ = sqlx::query(
+                "UPDATE reopen_requests SET status='pending', reviewed_at=NULL WHERE id=$1",
+            )
+            .bind(id)
+            .execute(&s.pool)
+            .await;
+            return Err(e);
+        }
+    };
     audit::log(&s.pool, u.id, "approved", "reopen_requests", id, None, None).await;
     notifications::create(
         &s,

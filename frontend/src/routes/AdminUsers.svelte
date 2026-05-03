@@ -26,7 +26,9 @@
     try {
       const r = await api(`/users/${id}/reset-password`, { method: "POST" });
       toast(
-        $t("Temporary password: {password}", { password: r.temporary_password }),
+        $t("Temporary password: {password}", {
+          password: r.temporary_password,
+        }),
         "info",
       );
     } catch (e) {

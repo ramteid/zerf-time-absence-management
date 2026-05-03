@@ -47,8 +47,7 @@
 <div class="top-bar">
   <div class="top-bar-title">
     <h1>{$t("Team Policy")}</h1>
-    <div class="top-bar-subtitle">
-    </div>
+    <div class="top-bar-subtitle"></div>
   </div>
 </div>
 

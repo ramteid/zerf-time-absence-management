@@ -925,7 +925,6 @@ dialog footer {
   -webkit-overflow-scrolling: touch;
 }
 
-
 /* ── Responsive: tablet (769px – 1024px) ── */
 @media (min-width: 769px) and (max-width: 1024px) {
   .sidebar {
@@ -959,7 +958,9 @@ dialog footer {
 /* ── Responsive: mobile ── */
 @media (max-width: 768px) {
   /* Prevent the whole page from scrolling horizontally */
-  html, body, #app {
+  html,
+  body,
+  #app {
     overflow-x: hidden;
   }
 

@@ -17,7 +17,9 @@
     absences = await api("/absences");
     try {
       balance = await api("/leave-balance/" + $currentUser.id);
-    } catch {}
+    } catch (e) {
+      toast(e.message || $t("Leave balance unavailable."), "error");
+    }
 
     const years = [
       ...new Set(
@@ -52,20 +54,16 @@
   }
 
   async function cancel(id) {
-    const reason = await confirmDialog(
+    const ok = await confirmDialog(
       $t("Cancel?"),
       $t("Cancel this absence request?"),
       {
         danger: true,
         confirm: $t("Cancel"),
-        reason: true,
       },
     );
-    if (!reason) return;
-    await api("/absences/" + id, {
-      method: "DELETE",
-      body: { reason },
-    });
+    if (!ok) return;
+    await api("/absences/" + id, { method: "DELETE" });
     toast($t("Absence cancelled."), "ok");
     load();
   }

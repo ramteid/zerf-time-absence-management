@@ -14,7 +14,7 @@
   let entry_date = template.entry_date || isoDate(new Date());
   let start_time = template.start_time?.slice(0, 5) || "08:00";
   let end_time = template.end_time?.slice(0, 5) || "12:00";
-  let category_id = template.category_id || ($categories[0]?.id ?? "");
+  let category_id = template.category_id ?? $categories[0]?.id ?? null;
   let comment = template.comment || "";
   let error = "";
 
@@ -24,6 +24,10 @@
     error = "";
     if (start_time >= end_time) {
       error = $t("Start cannot be after End.");
+      return;
+    }
+    if (category_id == null) {
+      error = $t("Category required.");
       return;
     }
     try {
@@ -113,9 +117,18 @@
     </div>
     <div>
       <label class="kz-label" for="entry-category">{$t("Category")}</label>
-      <select id="entry-category" class="kz-select" bind:value={category_id}>
-        {#each $categories as c}<option value={c.id}>{$t(c.name)}</option
-          >{/each}
+      <select
+        id="entry-category"
+        class="kz-select"
+        bind:value={category_id}
+        disabled={$categories.length === 0}
+      >
+        {#if $categories.length === 0}
+          <option value={null}>{$t("No categories available.")}</option>
+        {:else}
+          {#each $categories as c}<option value={c.id}>{$t(c.name)}</option
+            >{/each}
+        {/if}
       </select>
     </div>
     <div>

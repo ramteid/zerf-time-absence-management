@@ -55,7 +55,9 @@ export async function api(path, opts = {}) {
   try {
     r = await fetch(API + path, {
       headers,
-      cache: ["GET", "HEAD", "OPTIONS"].includes(method) ? "no-store" : undefined,
+      cache: ["GET", "HEAD", "OPTIONS"].includes(method)
+        ? "no-store"
+        : undefined,
       credentials: "same-origin",
       ...opts,
       body: opts.body ? JSON.stringify(opts.body) : undefined,
@@ -73,10 +75,7 @@ export async function api(path, opts = {}) {
 
   // Session is gone or CSRF token is stale — force the user back to login.
   // Skip this for the auth endpoints themselves to avoid redirect loops.
-  if (
-    (r.status === 401 || r.status === 403) &&
-    !path.startsWith("/auth/")
-  ) {
+  if ((r.status === 401 || r.status === 403) && !path.startsWith("/auth/")) {
     handleUnauthorized();
     throw new Error("Session expired. Please sign in again.");
   }

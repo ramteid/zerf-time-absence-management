@@ -40,6 +40,10 @@
 
   async function save() {
     error = "";
+    if (role === "employee" && !approver_id) {
+      error = $t("An approver is required for employees.");
+      return;
+    }
     try {
       const body = {
         email,
@@ -153,6 +157,8 @@
           class="kz-input"
           type="number"
           step="0.5"
+          min="0"
+          max="168"
           bind:value={weekly_hours}
         />
       </div>
@@ -164,6 +170,8 @@
           id="user-annual-leave-days"
           class="kz-input"
           type="number"
+          min="0"
+          max="366"
           bind:value={annual_leave_days}
         />
       </div>

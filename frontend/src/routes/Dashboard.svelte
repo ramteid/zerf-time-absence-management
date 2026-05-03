@@ -91,7 +91,10 @@
     );
     if (!reason) return;
     try {
-      await api(`/reopen-requests/${id}/reject`, { method: "POST", body: { reason } });
+      await api(`/reopen-requests/${id}/reject`, {
+        method: "POST",
+        body: { reason },
+      });
       toast($t("Rejected."), "ok");
       load();
     } catch (e) {
@@ -127,7 +130,10 @@
     );
     if (!reason) return;
     try {
-      await api(`/time-entries/${id}/reject`, { method: "POST", body: { reason } });
+      await api(`/time-entries/${id}/reject`, {
+        method: "POST",
+        body: { reason },
+      });
       toast($t("Rejected."), "ok");
       load();
     } catch (e) {
@@ -137,7 +143,10 @@
   async function batchApprove() {
     const ids = pendingEntries.map((e) => e.id);
     try {
-      await api("/time-entries/batch-approve", { method: "POST", body: { ids } });
+      await api("/time-entries/batch-approve", {
+        method: "POST",
+        body: { ids },
+      });
       toast($t("All approved."), "ok");
       load();
     } catch (e) {
@@ -185,7 +194,10 @@
     );
     if (!reason) return;
     try {
-      await api(`/change-requests/${id}/reject`, { method: "POST", body: { reason } });
+      await api(`/change-requests/${id}/reject`, {
+        method: "POST",
+        body: { reason },
+      });
       toast($t("Rejected."), "ok");
       load();
     } catch (e) {
@@ -281,7 +293,10 @@
     {/if}
   </div>
 
-  <div class="dashboard-approval-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+  <div
+    class="dashboard-approval-grid"
+    style="display:grid;grid-template-columns:1fr 1fr;gap:16px"
+  >
     <!-- Timesheet approvals -->
     <div class="kz-card" style="overflow-x:auto">
       <div class="card-header">

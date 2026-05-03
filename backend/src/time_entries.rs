@@ -114,7 +114,7 @@ pub struct NewTimeEntry {
     pub comment: Option<String>,
 }
 
-async fn validate(
+pub(crate) async fn validate(
     pool: &crate::db::DatabasePool,
     user_id: i64,
     te: &NewTimeEntry,
@@ -124,6 +124,17 @@ async fn validate(
         if c.len() > 2000 {
             return Err(AppError::BadRequest("Comment too long (max 2000).".into()));
         }
+    }
+    // Validate that the category exists and is active.
+    let cat_active: Option<bool> =
+        sqlx::query_scalar("SELECT active FROM categories WHERE id = $1")
+            .bind(te.category_id)
+            .fetch_optional(pool)
+            .await?;
+    match cat_active {
+        None => return Err(AppError::BadRequest("Category not found.".into())),
+        Some(false) => return Err(AppError::BadRequest("Category is inactive.".into())),
+        Some(true) => {}
     }
     if te.entry_date > chrono::Local::now().date_naive() {
         return Err(AppError::BadRequest(

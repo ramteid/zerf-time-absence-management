@@ -2177,3 +2177,153 @@ async fn team_policy_lead_can_only_set_own() {
 
     app.cleanup().await;
 }
+
+// ---------------------------------------------------------------------------
+// Regression: nonexistent category_id must return 400, not a 500 FK crash.
+// ---------------------------------------------------------------------------
+#[tokio::test]
+async fn invalid_category_rejected() {
+    let app = TestApp::spawn().await;
+    let admin = app.client();
+    admin.login("admin@example.com", &app.admin_password).await;
+    admin
+        .change_password(&app.admin_password, "AdminPass!234")
+        .await;
+
+    let (st, _) = admin
+        .post(
+            "/api/v1/time-entries",
+            &json!({
+                "entry_date": today(),
+                "start_time": "08:00",
+                "end_time": "10:00",
+                "category_id": 999_999_i64,
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST, "nonexistent category → 400");
+
+    app.cleanup().await;
+}
+
+// ---------------------------------------------------------------------------
+// Regression: change-request with nonexistent new_category_id must be
+// rejected with 400 at create time, not stored and crash later.
+// ---------------------------------------------------------------------------
+#[tokio::test]
+async fn change_request_invalid_category_rejected() {
+    let app = TestApp::spawn().await;
+    let admin = app.client();
+    admin.login("admin@example.com", &app.admin_password).await;
+    admin
+        .change_password(&app.admin_password, "AdminPass!234")
+        .await;
+
+    let (_lead_id, _lead_pw, _emp_id, emp_pw, monday, cat) =
+        bootstrap_team(&app, &admin, false).await;
+    let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
+
+    let eid = create_and_submit_entry(&emp, &monday, cat).await;
+
+    let (st, _) = emp
+        .post(
+            "/api/v1/change-requests",
+            &json!({
+                "time_entry_id": eid,
+                "new_category_id": 999_999_i64,
+                "reason": "wrong category",
+            }),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::BAD_REQUEST,
+        "change request with nonexistent category → 400"
+    );
+
+    app.cleanup().await;
+}
+
+// ---------------------------------------------------------------------------
+// Regression: approving a change request that would create an overlap must
+// be rejected (400), not silently written through.
+// ---------------------------------------------------------------------------
+#[tokio::test]
+async fn change_request_approval_overlap_rejected() {
+    let app = TestApp::spawn().await;
+    let admin = app.client();
+    admin.login("admin@example.com", &app.admin_password).await;
+    admin
+        .change_password(&app.admin_password, "AdminPass!234")
+        .await;
+
+    let (_lead_id, lead_pw, _emp_id, emp_pw, monday, cat) =
+        bootstrap_team(&app, &admin, false).await;
+    let lead = login_change_pw(&app, "lead-r@example.com", &lead_pw).await;
+    let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
+
+    // Entry A: 08:00–12:00 — submitted and approved.
+    let eid_a = create_and_submit_entry(&emp, &monday, cat).await;
+    let (st, _) = lead
+        .post(
+            &format!("/api/v1/time-entries/{}/approve", eid_a),
+            &json!({}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "approve entry A");
+
+    // Entry B: 13:00–17:00 — submitted and approved.
+    let (st, body) = emp
+        .post(
+            "/api/v1/time-entries",
+            &json!({
+                "entry_date": monday,
+                "start_time": "13:00",
+                "end_time": "17:00",
+                "category_id": cat,
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create entry B");
+    let eid_b = id(&body);
+    let (st, _) = emp
+        .post("/api/v1/time-entries/submit", &json!({"ids": [eid_b]}))
+        .await;
+    assert_eq!(st, StatusCode::OK, "submit entry B");
+    let (st, _) = lead
+        .post(
+            &format!("/api/v1/time-entries/{}/approve", eid_b),
+            &json!({}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "approve entry B");
+
+    // Change request for B: shift start to 09:00, which overlaps with A (08:00–12:00).
+    let (st, cr_body) = emp
+        .post(
+            "/api/v1/change-requests",
+            &json!({
+                "time_entry_id": eid_b,
+                "new_start_time": "09:00",
+                "reason": "came in early",
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create overlapping change request");
+    let cr_id = id(&cr_body);
+
+    // Approving the CR must fail because the resulting entry would overlap A.
+    let (st, _) = lead
+        .post(
+            &format!("/api/v1/change-requests/{}/approve", cr_id),
+            &json!({}),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::BAD_REQUEST,
+        "approving overlapping change request → 400"
+    );
+
+    app.cleanup().await;
+}

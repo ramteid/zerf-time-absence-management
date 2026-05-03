@@ -1,6 +1,12 @@
 <script>
   import { onMount, onDestroy } from "svelte";
-  import { api, csrfToken, setUnauthorizedHandler, setGateResetHandler, resetUnauthorizedGate } from "./api.js";
+  import {
+    api,
+    csrfToken,
+    setUnauthorizedHandler,
+    setGateResetHandler,
+    resetUnauthorizedGate,
+  } from "./api.js";
   import {
     currentUser,
     categories,
@@ -29,7 +35,7 @@
   import AdminAuditLog from "./routes/AdminAuditLog.svelte";
   import AdminSettings from "./routes/AdminSettings.svelte";
   import AdminTabs from "./routes/AdminTabs.svelte";
-  import TeamPolicy from "./routes/TeamPolicy.svelte";
+  import TeamSettings from "./routes/TeamSettings.svelte";
   import NotFound from "./routes/NotFound.svelte";
 
   let booting = true;
@@ -52,7 +58,12 @@
       if (!$categories.length) {
         try {
           categories.set(await api("/categories"));
-        } catch {}
+        } catch (e) {
+          toast(
+            $t("Failed to load categories. Some features may be unavailable."),
+            "error",
+          );
+        }
       }
     } catch (err) {
       if (err.isNetworkError) {
@@ -79,7 +90,10 @@
     go("/", false);
     toast($t("Your session has expired. Please sign in again."), "error");
     // Also call logout to clear the stale cookie.
-    fetch("/api/v1/auth/logout", { method: "POST", credentials: "same-origin" }).catch(() => {});
+    fetch("/api/v1/auth/logout", {
+      method: "POST",
+      credentials: "same-origin",
+    }).catch(() => {});
     // Notify other tabs so they also return to login immediately.
     broadcastSession("session-expired");
     // NOTE: _sessionExpiredHandling is intentionally NOT reset here.
@@ -164,7 +178,9 @@
     setUnauthorizedHandler(handleSessionExpired);
     // When Login.svelte calls resetUnauthorizedGate() after re-login,
     // also reset our local gate so the next session expiry is handled.
-    setGateResetHandler(() => { _sessionExpiredHandling = false; });
+    setGateResetHandler(() => {
+      _sessionExpiredHandling = false;
+    });
     await loadSettings();
     await loadMe();
     booting = false;
@@ -179,7 +195,10 @@
           currentUser.set(false);
           go("/", false);
           if (msg.type === "session-expired") {
-            toast($t("Your session has expired. Please sign in again."), "error");
+            toast(
+              $t("Your session has expired. Please sign in again."),
+              "error",
+            );
           }
         }
       }
@@ -188,13 +207,18 @@
     // Tab-focus re-validation: silently re-check the session whenever the user
     // returns to this tab after it was hidden/suspended. If the cookie has
     // expired the 401 triggers handleSessionExpired before the user interacts.
-    _focusListener = () => { if (!document.hidden) onFocus(); };
+    _focusListener = () => {
+      if (!document.hidden) onFocus();
+    };
     document.addEventListener("visibilitychange", _focusListener);
   });
 
   onDestroy(() => {
     stopPolling();
-    if (_unsubBroadcast) { _unsubBroadcast(); _unsubBroadcast = null; }
+    if (_unsubBroadcast) {
+      _unsubBroadcast();
+      _unsubBroadcast = null;
+    }
     if (_focusListener) {
       document.removeEventListener("visibilitychange", _focusListener);
       _focusListener = null;
@@ -234,7 +258,7 @@
       "/admin/holidays": AdminHolidays,
       "/admin/audit-log": AdminAuditLog,
       "/admin/settings": AdminSettings,
-      "/team-policy": TeamPolicy,
+      "/team-policy": TeamSettings,
     };
     return map[p] || NotFound;
   }

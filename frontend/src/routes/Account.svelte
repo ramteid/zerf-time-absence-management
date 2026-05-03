@@ -20,7 +20,9 @@
       overtime = await api(
         `/reports/overtime?year=${new Date().getFullYear()}`,
       );
-    } catch {}
+    } catch (e) {
+      toast(e.message || $t("Overtime data unavailable."), "error");
+    }
   }
   loadOvertime();
 
@@ -209,43 +211,44 @@
       </span>
     </div>
     <div class="kz-table-wrap">
-    <table class="kz-table">
-      <thead>
-        <tr>
-          {#each ["Month", "Target", "Actual", "Diff", "Cumulative"] as c}
-            <th>{$t(c)}</th>
-          {/each}
-        </tr>
-      </thead>
-      <tbody>
-        {#each overtime as m, i}
-          {@const cum = overtime
-            .slice(0, i + 1)
-            .reduce((s, x) => s + x.diff_min, 0)}
+      <table class="kz-table">
+        <thead>
           <tr>
-            <td class="tab-num">{m.month}</td>
-            <td class="tab-num">{minToHM(m.target_min)}</td>
-            <td class="tab-num">{minToHM(m.actual_min)}</td>
-            <td
-              class="tab-num"
-              style="color:{m.diff_min < 0
-                ? 'var(--danger-text)'
-                : 'var(--success-text)'}"
-            >
-              {minToHM(m.diff_min)}
-            </td>
-            <td
-              class="tab-num"
-              style="color:{cum < 0
-                ? 'var(--danger-text)'
-                : 'var(--success-text)'}"
-            >
-              {minToHM(cum)}
-            </td>
+            {#each ["Month", "Target", "Actual", "Diff", "Cumulative"] as c}
+              <th>{$t(c)}</th>
+            {/each}
           </tr>
-        {/each}
-      </tbody>
-    </table>
-    </div><!-- end kz-table-wrap -->
+        </thead>
+        <tbody>
+          {#each overtime as m, i}
+            {@const cum = overtime
+              .slice(0, i + 1)
+              .reduce((s, x) => s + x.diff_min, 0)}
+            <tr>
+              <td class="tab-num">{m.month}</td>
+              <td class="tab-num">{minToHM(m.target_min)}</td>
+              <td class="tab-num">{minToHM(m.actual_min)}</td>
+              <td
+                class="tab-num"
+                style="color:{m.diff_min < 0
+                  ? 'var(--danger-text)'
+                  : 'var(--success-text)'}"
+              >
+                {minToHM(m.diff_min)}
+              </td>
+              <td
+                class="tab-num"
+                style="color:{cum < 0
+                  ? 'var(--danger-text)'
+                  : 'var(--success-text)'}"
+              >
+                {minToHM(cum)}
+              </td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
+    <!-- end kz-table-wrap -->
   </div>
 </div>

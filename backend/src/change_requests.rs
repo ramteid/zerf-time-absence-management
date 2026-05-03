@@ -112,6 +112,20 @@ pub async fn create(
     if z.1 == "draft" {
         return Err(AppError::BadRequest("Edit drafts directly.".into()));
     }
+    // Validate new_category_id if provided — reject nonexistent/inactive categories
+    // before storing so malformed data never reaches the approval path.
+    if let Some(cat_id) = b.new_category_id {
+        let cat_active: Option<bool> =
+            sqlx::query_scalar("SELECT active FROM categories WHERE id = $1")
+                .bind(cat_id)
+                .fetch_optional(&s.pool)
+                .await?;
+        match cat_active {
+            None => return Err(AppError::BadRequest("Category not found.".into())),
+            Some(false) => return Err(AppError::BadRequest("Category is inactive.".into())),
+            Some(true) => {}
+        }
+    }
     let id: i64 = sqlx::query_scalar("INSERT INTO change_requests(time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id")
         .bind(b.time_entry_id).bind(u.id).bind(b.new_date).bind(&b.new_start_time).bind(&b.new_end_time).bind(b.new_category_id).bind(&b.new_comment).bind(&b.reason)
         .fetch_one(&s.pool).await?;
@@ -148,6 +162,28 @@ pub async fn approve(
     if a.user_id == u.id && !u.is_admin() {
         return Err(AppError::Forbidden);
     }
+    // Fetch the existing entry and build effective post-change values so we can
+    // run the same overlap / 14-hour / category validation as direct edits do.
+    let entry: crate::time_entries::TimeEntry =
+        sqlx::query_as("SELECT * FROM time_entries WHERE id=$1")
+            .bind(a.time_entry_id)
+            .fetch_one(&s.pool)
+            .await?;
+    let effective = crate::time_entries::NewTimeEntry {
+        entry_date: a.new_date.unwrap_or(entry.entry_date),
+        start_time: a
+            .new_start_time
+            .clone()
+            .unwrap_or_else(|| entry.start_time.clone()),
+        end_time: a
+            .new_end_time
+            .clone()
+            .unwrap_or_else(|| entry.end_time.clone()),
+        category_id: a.new_category_id.unwrap_or(entry.category_id),
+        comment: a.new_comment.clone().or(entry.comment.clone()),
+    };
+    crate::time_entries::validate(&s.pool, entry.user_id, &effective, Some(a.time_entry_id))
+        .await?;
     sqlx::query("UPDATE time_entries SET entry_date=COALESCE($1,entry_date), start_time=COALESCE($2,start_time), end_time=COALESCE($3,end_time), category_id=COALESCE($4,category_id), comment=COALESCE($5,comment), updated_at=CURRENT_TIMESTAMP WHERE id=$6")
         .bind(a.new_date).bind(&a.new_start_time).bind(&a.new_end_time).bind(a.new_category_id).bind(&a.new_comment).bind(a.time_entry_id)
         .execute(&s.pool).await?;
