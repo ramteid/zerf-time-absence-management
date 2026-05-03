@@ -118,6 +118,10 @@
     hoverIdx = Math.round(Math.max(0, Math.min(data.length - 1, raw)));
   }
 
+  function onMouseLeave() {
+    hoverIdx = null;
+  }
+
   function onTouchMove(e) {
     if (!data.length) return;
     e.preventDefault();
