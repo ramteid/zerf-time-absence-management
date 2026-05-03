@@ -230,37 +230,41 @@
     return idx >= 0 ? $path.slice(0, idx) : $path;
   })();
 
-  $: route = matchRoute(pathname, $currentUser);
+  const routeMap = {
+    "/time": Time,
+    "/absences": Absences,
+    "/calendar": Calendar,
+    "/account": Account,
+    "/dashboard": Dashboard,
+    "/reports": Reports,
+    "/admin": AdminUsers,
+    "/admin/users": AdminUsers,
+    "/admin/categories": AdminCategories,
+    "/admin/holidays": AdminHolidays,
+    "/admin/audit-log": AdminAuditLog,
+    "/admin/settings": AdminSettings,
+    "/team-settings": TeamSettings,
+  };
+
+  $: route = resolveRoute(pathname, $currentUser);
   $: isAdmin = pathname.startsWith("/admin");
 
-  function matchRoute(p, user) {
-    if (p === "/" || p === "") {
-      if (user && user.home && user.home !== "/" && user.home !== "") {
-        go(user.home, false);
-        return null;
-      }
-    }
+  function resolveRoute(p, user) {
     if (!user) return null;
-    if (user.must_change_password && p !== "/account") {
-      go("/account", false);
-      return null;
+
+    // Resolve redirects without side-effects — just return the target component
+    // directly so the reactive chain never yields null for a logged-in user.
+    if (p === "/" || p === "") {
+      const dest = user.home && user.home !== "/" && user.home !== "" ? user.home : "/time";
+      // Update the URL bar (deferred so we don't mutate stores mid-reactive-cycle)
+      setTimeout(() => go(dest, false), 0);
+      return routeMap[dest] || NotFound;
     }
-    const map = {
-      "/time": Time,
-      "/absences": Absences,
-      "/calendar": Calendar,
-      "/account": Account,
-      "/dashboard": Dashboard,
-      "/reports": Reports,
-      "/admin": AdminUsers,
-      "/admin/users": AdminUsers,
-      "/admin/categories": AdminCategories,
-      "/admin/holidays": AdminHolidays,
-      "/admin/audit-log": AdminAuditLog,
-      "/admin/settings": AdminSettings,
-      "/team-settings": TeamSettings,
-    };
-    return map[p] || NotFound;
+    if (user.must_change_password && p !== "/account") {
+      setTimeout(() => go("/account", false), 0);
+      return Account;
+    }
+    return routeMap[p] || NotFound;
   }
 
   // Intercept data-link clicks

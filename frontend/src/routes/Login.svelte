@@ -24,13 +24,17 @@
       const me = await api("/auth/me");
       // ...then overwrite with the one from /me (authoritative, fresher).
       csrfToken.set(me.csrf_token || null);
+      // Set the path BEFORE currentUser so that when the reactive chain fires
+      // in App.svelte, matchRoute already sees the correct pathname instead of
+      // "/" — which would return null and flash "Wird geladen...".
+      const dest = me.must_change_password ? "/account" : me.home || "/time";
+      go(dest);
       currentUser.set(me);
       // Re-arm the session-expiry gates only after login is fully committed.
       resetUnauthorizedGate();
       try {
         categories.set(await api("/categories"));
       } catch {}
-      go(me.must_change_password ? "/account" : me.home || "/time");
     } catch (err) {
       error = err.message || "Error";
     } finally {

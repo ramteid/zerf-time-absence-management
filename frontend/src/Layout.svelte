@@ -130,6 +130,7 @@
     if (!bellOpen) return;
     if (
       !e.target.closest(".kz-bell-wrapper") &&
+      !e.target.closest(".kz-mobile-bell-wrapper") &&
       !e.target.closest(".kz-notif-panel")
     )
       bellOpen = false;
@@ -404,20 +405,6 @@
           </button>
           <button
             class="mobile-more-item"
-            on:click={() => {
-              mobileMoreOpen = false;
-              toggleBell();
-            }}
-          >
-            <Icon name="Bell" size={18} />
-            <span
-              >{$t("Notifications")}{$notificationsUnread > 0
-                ? ` (${$notificationsUnread})`
-                : ""}</span
-            >
-          </button>
-          <button
-            class="mobile-more-item"
             style="color:var(--danger-text)"
             on:click={logout}
           >
@@ -429,7 +416,26 @@
     </div>
   {/if}
 
-  <!-- Notification panel: rendered at app-root level so it's visible on mobile too -->
+  <!-- Mobile bell button: fixed top-right, visible only on mobile -->
+  <div class="kz-mobile-bell-wrapper">
+    <button
+      class="kz-btn-icon-sm"
+      style="color:var(--text-secondary);position:relative;background:var(--bg-surface);border:1px solid var(--border);border-radius:8px;padding:6px;box-shadow:var(--shadow-md)"
+      on:click|stopPropagation={toggleBell}
+      title={$t("Notifications")}
+    >
+      <Icon name="Bell" size={18} />
+      {#if $notificationsUnread > 0}
+        <span
+          style="position:absolute;top:-4px;right:-4px;background:var(--danger-text);color:white;border-radius:10px;font-size:9px;padding:1px 4px;line-height:1;min-width:14px;text-align:center;font-weight:600"
+        >
+          {$notificationsUnread > 99 ? "99+" : $notificationsUnread}
+        </span>
+      {/if}
+    </button>
+  </div>
+
+  <!-- Notification panel -->
   {#if bellOpen}
     <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
     <div
@@ -484,7 +490,7 @@
             tabindex="0"
             style="padding:10px 12px;border-bottom:1px solid var(--border);cursor:pointer;background:{n.is_read
               ? 'transparent'
-              : 'var(--bg-elevated, rgba(0,0,0,.03))'}"
+              : 'var(--accent-soft)'}"
           >
             <div style="font-size:12.5px;font-weight:500">{n.title}</div>
             {#if n.body}
