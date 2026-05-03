@@ -23,11 +23,15 @@
       ))
     )
       return;
-    const r = await api(`/users/${id}/reset-password`, { method: "POST" });
-    toast(
-      $t("Temporary password: {password}", { password: r.temporary_password }),
-      "info",
-    );
+    try {
+      const r = await api(`/users/${id}/reset-password`, { method: "POST" });
+      toast(
+        $t("Temporary password: {password}", { password: r.temporary_password }),
+        "info",
+      );
+    } catch (e) {
+      toast(e.message || $t("Error"), "error");
+    }
   }
 
   async function deactivate(id) {
@@ -38,9 +42,13 @@
       }))
     )
       return;
-    await api(`/users/${id}/deactivate`, { method: "POST" });
-    toast($t("User deactivated."), "ok");
-    load();
+    try {
+      await api(`/users/${id}/deactivate`, { method: "POST" });
+      toast($t("User deactivated."), "ok");
+      load();
+    } catch (e) {
+      toast(e.message || $t("Error"), "error");
+    }
   }
 
   function initials(u) {

@@ -54,29 +54,34 @@
   // ─────────────────────────────────────────────────────────────────────────
 
   async function load() {
-    const [e, a, c, r, u] = await Promise.all([
-      api("/time-entries/all?status=submitted"),
-      api("/absences/all?status=requested"),
-      api("/change-requests/all?status=open"),
-      api("/reopen-requests/pending"),
-      api("/users"),
-    ]);
-    pendingEntries = e;
-    pendingAbsences = a;
-    changeRequests = c;
-    pendingReopens = r;
-    users = u;
+    try {
+      const [e, a, c, r, u] = await Promise.all([
+        api("/time-entries/all?status=submitted"),
+        api("/absences/all?status=requested"),
+        api("/change-requests/all?status=open"),
+        api("/reopen-requests/pending"),
+        api("/users"),
+      ]);
+      pendingEntries = e;
+      pendingAbsences = a;
+      changeRequests = c;
+      pendingReopens = r;
+      users = u;
+    } catch (e) {
+      toast(e.message || $t("Error"), "error");
+    }
   }
   load();
   loadChart();
 
   async function approveReopen(id) {
-    await api(`/reopen-requests/${id}/approve`, {
-      method: "POST",
-      body: {},
-    });
-    toast($t("Approved."), "ok");
-    load();
+    try {
+      await api(`/reopen-requests/${id}/approve`, { method: "POST", body: {} });
+      toast($t("Approved."), "ok");
+      load();
+    } catch (e) {
+      toast(e.message || $t("Error"), "error");
+    }
   }
   async function rejectReopen(id) {
     const reason = await confirmDialog(
@@ -85,11 +90,13 @@
       { danger: true, confirm: $t("Reject"), reason: true },
     );
     if (!reason) return;
-    await api(`/reopen-requests/${id}/reject`, {
-      method: "POST",
-      body: { reason },
-    });
-    load();
+    try {
+      await api(`/reopen-requests/${id}/reject`, { method: "POST", body: { reason } });
+      toast($t("Rejected."), "ok");
+      load();
+    } catch (e) {
+      toast(e.message || $t("Error"), "error");
+    }
   }
 
   function userName(uid) {
@@ -104,76 +111,86 @@
   }
 
   async function approveEntry(id) {
-    await api(`/time-entries/${id}/approve`, { method: "POST" });
-    toast($t("Approved."), "ok");
-    load();
+    try {
+      await api(`/time-entries/${id}/approve`, { method: "POST" });
+      toast($t("Approved."), "ok");
+      load();
+    } catch (e) {
+      toast(e.message || $t("Error"), "error");
+    }
   }
   async function rejectEntry(id) {
     const reason = await confirmDialog(
       $t("Reject?"),
       $t("Reject this entry?"),
-      {
-        danger: true,
-        confirm: $t("Reject"),
-        reason: true,
-      },
+      { danger: true, confirm: $t("Reject"), reason: true },
     );
     if (!reason) return;
-    await api(`/time-entries/${id}/reject`, {
-      method: "POST",
-      body: { reason },
-    });
-    load();
+    try {
+      await api(`/time-entries/${id}/reject`, { method: "POST", body: { reason } });
+      toast($t("Rejected."), "ok");
+      load();
+    } catch (e) {
+      toast(e.message || $t("Error"), "error");
+    }
   }
   async function batchApprove() {
     const ids = pendingEntries.map((e) => e.id);
-    await api("/time-entries/batch-approve", { method: "POST", body: { ids } });
-    toast($t("All approved."), "ok");
-    load();
+    try {
+      await api("/time-entries/batch-approve", { method: "POST", body: { ids } });
+      toast($t("All approved."), "ok");
+      load();
+    } catch (e) {
+      toast(e.message || $t("Error"), "error");
+    }
   }
   async function approveAbsence(id) {
-    await api(`/absences/${id}/approve`, { method: "POST" });
-    toast($t("Approved."), "ok");
-    load();
+    try {
+      await api(`/absences/${id}/approve`, { method: "POST" });
+      toast($t("Approved."), "ok");
+      load();
+    } catch (e) {
+      toast(e.message || $t("Error"), "error");
+    }
   }
   async function rejectAbsence(id) {
     const reason = await confirmDialog(
       $t("Reject?"),
       $t("Reject this request?"),
-      {
-        danger: true,
-        confirm: $t("Reject"),
-        reason: true,
-      },
+      { danger: true, confirm: $t("Reject"), reason: true },
     );
     if (!reason) return;
-    await api(`/absences/${id}/reject`, {
-      method: "POST",
-      body: { reason },
-    });
-    load();
+    try {
+      await api(`/absences/${id}/reject`, { method: "POST", body: { reason } });
+      toast($t("Rejected."), "ok");
+      load();
+    } catch (e) {
+      toast(e.message || $t("Error"), "error");
+    }
   }
   async function approveCR(id) {
-    await api(`/change-requests/${id}/approve`, { method: "POST" });
-    toast($t("Approved."), "ok");
-    load();
+    try {
+      await api(`/change-requests/${id}/approve`, { method: "POST" });
+      toast($t("Approved."), "ok");
+      load();
+    } catch (e) {
+      toast(e.message || $t("Error"), "error");
+    }
   }
   async function rejectCR(id) {
     const reason = await confirmDialog(
       $t("Reject?"),
       $t("Reject this change request?"),
-      {
-        danger: true,
-        confirm: $t("Reject"),
-        reason: true,
-      },
+      { danger: true, confirm: $t("Reject"), reason: true },
     );
     if (!reason) return;
-    await api(`/change-requests/${id}/reject`, {
-      method: "POST",
-      body: { reason },
-    });
-    load();
+    try {
+      await api(`/change-requests/${id}/reject`, { method: "POST", body: { reason } });
+      toast($t("Rejected."), "ok");
+      load();
+    } catch (e) {
+      toast(e.message || $t("Error"), "error");
+    }
   }
 </script>
 

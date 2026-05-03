@@ -211,7 +211,7 @@
 
   function matchRoute(p, user) {
     if (p === "/" || p === "") {
-      if (user && user.home) {
+      if (user && user.home && user.home !== "/" && user.home !== "") {
         go(user.home, false);
         return null;
       }

@@ -57,9 +57,15 @@
   }
 
   async function copyLast() {
-    const v = await api(
-      `/time-entries?from=${isoDate(addDays(mo, -7))}&to=${isoDate(addDays(mo, -1))}`,
-    );
+    let v;
+    try {
+      v = await api(
+        `/time-entries?from=${isoDate(addDays(mo, -7))}&to=${isoDate(addDays(mo, -1))}`,
+      );
+    } catch (e) {
+      toast(e.message || $t("Error"), "error");
+      return;
+    }
     let n = 0;
     for (const e of v) {
       const d = isoDate(addDays(parseDate(e.entry_date), 7));
@@ -83,9 +89,13 @@
   }
 
   async function submitWeek(ids) {
-    await api("/time-entries/submit", { method: "POST", body: { ids } });
-    toast($t("Week submitted."), "ok");
-    load();
+    try {
+      await api("/time-entries/submit", { method: "POST", body: { ids } });
+      toast($t("Week submitted."), "ok");
+      load();
+    } catch (e) {
+      toast(e.message || $t("Error"), "error");
+    }
   }
 
   async function requestReopen() {
