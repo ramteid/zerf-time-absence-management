@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # ---------- Frontend build stage ----------
-FROM node:25-bookworm-slim AS frontend-builder
+FROM node:25-trixie-slim AS frontend-builder
 WORKDIR /build
 ENV CI=1
 COPY frontend/package.json frontend/package-lock.json* ./
@@ -10,7 +10,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # ---------- Backend build stage ----------
-FROM rust:1-bookworm AS backend-builder
+FROM rust:1-trixie AS backend-builder
 WORKDIR /build
 ENV CARGO_TERM_COLOR=always RUSTFLAGS="-C strip=symbols"
 
@@ -33,7 +33,7 @@ RUN touch src/main.rs && \
     strip target/release/kitazeit || true
 
 # ---------- Runtime stage ----------
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 ARG APP_UID=10001
 ARG APP_GID=10001
 
