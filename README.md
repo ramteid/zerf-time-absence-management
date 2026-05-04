@@ -35,7 +35,7 @@ The default reporting structure is many employees to one assigned team lead, and
 
 ```mermaid
 flowchart TD
-	Admin[Admin fallback]
+	Admin[Admin]
 	LeadB[Approver team lead]
 	LeadA[Team lead]
 
@@ -63,7 +63,6 @@ flowchart LR
 	Employee[Employee submits request]
 	Lead[Assigned team lead]
 	LeadApprover[Approver team lead]
-	Admin[Admin fallback]
 	Approved[Approved]
 	Rejected[Rejected]
 	LeadOwn[Team lead submits own request]
@@ -75,10 +74,6 @@ flowchart LR
 	LeadOwn -->|default review path| LeadApprover
 	LeadApprover -->|approve| Approved
 	LeadApprover -->|reject| Rejected
-
-	LeadOwn -. fallback only .-> Admin
-	Admin -->|approve if needed| Approved
-	Admin -->|reject if needed| Rejected
 ```
 
 ## Quick setup
