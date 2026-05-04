@@ -36,7 +36,7 @@ function createThemeStore() {
 
 export const theme = createThemeStore();
 export const categories = writable([]);
-export const settings = writable({ ui_language: "en" });
+export const settings = writable({ ui_language: "en", time_format: "24h" });
 export const path = writable(
   typeof location !== "undefined" ? location.pathname + location.search : "/",
 );
@@ -75,7 +75,6 @@ export function toast(message, type = "info") {
 export const notifications = writable([]);
 export const notificationsUnread = writable(0);
 
-// ── Cross-tab session coordination ──────────────────────────────────────────
 // Uses BroadcastChannel so that a logout or session expiry in one tab
 // immediately propagates to every other open tab of the same origin.
 // Message shape: { type: 'session-expired' | 'logout' }

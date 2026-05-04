@@ -5,6 +5,7 @@
 
   let log = [];
   let usersById = new Map();
+  let rows = [];
 
   async function load() {
     const [entries, users] = await Promise.all([
@@ -21,11 +22,11 @@
   }
   load();
 
-  function userLabel(userId) {
-    return usersById.get(userId) || (userId == null ? "System" : `#${userId}`);
+  function userLabel(userId, userMap) {
+    return userMap.get(userId) || (userId == null ? "System" : `#${userId}`);
   }
 
-  function dataSummary(entry) {
+  function dataSummary(entry, translate) {
     // For delete: show before_data; for create/update: show after_data
     const raw =
       entry.action === "deleted" ? entry.before_data : entry.after_data;
@@ -51,11 +52,17 @@
       for (const k of keys) {
         if (obj[k] != null) parts.push(`${k}: ${obj[k]}`);
       }
-      return parts.length > 0 ? parts.join(", ") : $t("Data");
+      return parts.length > 0 ? parts.join(", ") : translate("Data");
     } catch {
-      return $t("Data");
+      return translate("Data");
     }
   }
+
+  $: rows = log.map((entry) => ({
+    ...entry,
+    user_label: userLabel(entry.user_id, usersById),
+    data_summary: dataSummary(entry, $t),
+  }));
 </script>
 
 <div class="top-bar">
@@ -78,17 +85,17 @@
           </tr>
         </thead>
         <tbody>
-          {#each log as e}
+          {#each rows as e}
             <tr>
               <td class="tab-num" style="white-space:nowrap"
                 >{fmtDateTime(e.occurred_at)}</td
               >
-              <td>{userLabel(e.user_id)}</td>
+              <td>{e.user_label}</td>
               <td>{auditActionLabel(e.action)}</td>
               <td>{auditTableLabel(e.table_name)}</td>
               <td
                 style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--text-tertiary)"
-                title={dataSummary(e)}>{dataSummary(e)}</td
+                title={e.data_summary}>{e.data_summary}</td
               >
             </tr>
           {/each}

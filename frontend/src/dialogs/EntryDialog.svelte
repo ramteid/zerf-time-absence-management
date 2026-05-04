@@ -7,6 +7,7 @@
   import { confirmDialog } from "../confirm.js";
   import Icon from "../Icons.svelte";
   import DatePicker from "../DatePicker.svelte";
+  import TimePicker from "../TimePicker.svelte";
 
   export let template;
   export let onClose;
@@ -96,23 +97,21 @@
     <div class="field-row">
       <div>
         <label class="kz-label" for="entry-start-time">{$t("Start")}</label>
-        <input
+        <TimePicker
           id="entry-start-time"
-          class="kz-input"
-          type="time"
           bind:value={start_time}
           max={end_time}
+          container={dlg}
           required
         />
       </div>
       <div>
         <label class="kz-label" for="entry-end-time">{$t("End")}</label>
-        <input
+        <TimePicker
           id="entry-end-time"
-          class="kz-input"
-          type="time"
           bind:value={end_time}
           min={start_time}
+          container={dlg}
           required
         />
       </div>

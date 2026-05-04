@@ -1,5 +1,7 @@
 // Pure presentation helpers — no business rules.
 import { getLocale } from "./i18n.js";
+import { get } from "svelte/store";
+import { settings } from "./stores.js";
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -137,4 +139,27 @@ export function isoWeek(d) {
   return (
     1 + Math.round(((t - j1) / 86400000 - 3 + ((j1.getUTCDay() + 6) % 7)) / 7)
   );
+}
+
+export function getTimeFormat() {
+  return get(settings).time_format === "12h" ? "12h" : "24h";
+}
+
+export function formatTimeValue(value, timeFormat = getTimeFormat()) {
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  const match = value.match(/^([01]\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?$/);
+  if (!match) return value;
+
+  const [, hoursRaw, minutes] = match;
+  const hours = Number(hoursRaw);
+  if (timeFormat !== "12h") {
+    return `${String(hours).padStart(2, "0")}:${minutes}`;
+  }
+
+  const suffix = hours >= 12 ? "PM" : "AM";
+  const hour12 = hours % 12 || 12;
+  return `${String(hour12).padStart(2, "0")}:${minutes} ${suffix}`;
 }

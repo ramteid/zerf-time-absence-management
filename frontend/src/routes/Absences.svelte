@@ -9,6 +9,7 @@
   import { confirmDialog } from "../confirm.js";
 
   let absences = [];
+  let absenceRows = [];
   let balance = null;
   let holidayDates = new Set();
   let showDialog = null;
@@ -82,16 +83,18 @@
     load();
   }
 
-  function absenceDays(absence) {
-    return countWorkdays(absence.start_date, absence.end_date, holidayDates);
-  }
-
   function canEdit(absence) {
     return (
       absence.status === "requested" ||
       (absence.kind === "sick" && absence.status === "approved")
     );
   }
+
+  $: absenceRows = absences.map((absence) => ({
+    ...absence,
+    days: countWorkdays(absence.start_date, absence.end_date, holidayDates),
+    editable: canEdit(absence),
+  }));
 
   async function cancel(id) {
     const ok = await confirmDialog(
@@ -178,7 +181,7 @@
       </div>
     {:else}
       <div class="absence-list">
-        {#each absences as a}
+        {#each absenceRows as a}
           <div class="absence-entry">
             <div class="absence-entry-row">
               <span class="absence-entry-label">{$t("Type")}</span>
@@ -200,9 +203,7 @@
             </div>
             <div class="absence-entry-row">
               <span class="absence-entry-label">{$t("Days")}</span>
-              <span class="absence-entry-value tab-num"
-                >{absenceDays(a) || "–"}</span
-              >
+              <span class="absence-entry-value tab-num">{a.days || "–"}</span>
             </div>
             <div class="absence-entry-row">
               <span class="absence-entry-label">{$t("Status")}</span>
@@ -221,7 +222,7 @@
                   {$t("Cancel")}
                 </button>
               {/if}
-              {#if canEdit(a)}
+              {#if a.editable}
                 <button
                   class="kz-btn kz-btn-ghost kz-btn-sm"
                   on:click={() => (showDialog = a)}

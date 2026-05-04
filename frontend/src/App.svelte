@@ -59,6 +59,7 @@
   async function loadSettings() {
     try {
       const s = await api("/settings/public");
+      if (!s.time_format) s.time_format = "24h";
       settings.set(s);
       if (s.ui_language) setLanguage(s.ui_language);
     } catch {}
@@ -362,7 +363,9 @@
     {#if isAdmin}
       <AdminTabs />
     {/if}
-    <svelte:component this={route} />
+    {#key $path}
+      <svelte:component this={route} />
+    {/key}
   </Layout>
 {:else}
   <p style="padding: 2em">{$t("Loading...")}</p>

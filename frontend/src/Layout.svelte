@@ -64,16 +64,13 @@
   $: mobileNavItems = (() => {
     const all = nav || [];
     // Priority order for bottom bar
-    const primary = ["Time", "Absences", "Calendar", "Dashboard"];
-    const shown = [];
-    const overflow = [];
-    for (const link of all) {
-      if (primary.includes(link.key) && shown.length < 4) {
-        shown.push(link);
-      } else {
-        overflow.push(link);
-      }
-    }
+    const primary = ["Dashboard", "Time", "Absences", "Calendar"];
+    const shown = primary
+      .map((key) => all.find((link) => link.key === key))
+      .filter(Boolean)
+      .slice(0, 4);
+    const shownKeys = new Set(shown.map((link) => link.key));
+    const overflow = all.filter((link) => !shownKeys.has(link.key));
     return { shown, overflow };
   })();
 
@@ -247,16 +244,6 @@
           {/if}
         </button>
       </div>
-      <button
-        class="kz-btn-icon-sm"
-        style="color:var(--nav-text-muted);margin-left:4px"
-        on:click={theme.toggle}
-        title={$theme === "dark"
-          ? $t("Switch to light mode")
-          : $t("Switch to dark mode")}
-      >
-        <Icon name={$theme === "dark" ? "Sun" : "Moon"} size={15} />
-      </button>
     </div>
 
     <div class="sidebar-nav">

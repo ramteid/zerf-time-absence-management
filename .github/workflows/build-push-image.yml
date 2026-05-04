@@ -5,6 +5,7 @@ name: Build & Push Docker Image
 # pre-built image rather than rebuilding from scratch every run.
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths:

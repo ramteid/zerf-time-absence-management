@@ -164,7 +164,12 @@
     return isoDate(monday(parseDate(day)));
   }
 
-  function buildPendingWeeks(entries) {
+  function userNameFromRows(uid, userRows) {
+    const u = userRows.find((x) => x.id === uid);
+    return u ? `${u.first_name} ${u.last_name}` : `#${uid}`;
+  }
+
+  function buildPendingWeeks(entries, userRows) {
     const grouped = new Map();
 
     for (const entry of entries) {
@@ -200,7 +205,9 @@
     out.sort((a, b) => {
       const weekCmp = b.week_start.localeCompare(a.week_start);
       if (weekCmp !== 0) return weekCmp;
-      return userName(a.user_id).localeCompare(userName(b.user_id));
+      return userNameFromRows(a.user_id, userRows).localeCompare(
+        userNameFromRows(b.user_id, userRows),
+      );
     });
 
     return out;
@@ -230,7 +237,7 @@
   loadOvertimeSummary();
   loadPastMonthSubmissionStatus();
 
-  $: pendingWeeks = buildPendingWeeks(pendingEntries);
+  $: pendingWeeks = buildPendingWeeks(pendingEntries, users);
   $: currentOvertimeRow =
     overtimeRows.find((row) => row.month === currentMonthKey) || null;
   $: overtimeBalanceMin = currentOvertimeRow?.cumulative_min || 0;
@@ -254,13 +261,13 @@
     else if (next !== selectedWeek) selectedWeek = next;
   }
 
-  function userName(uid) {
-    const u = users.find((x) => x.id === uid);
+  function userName(uid, userRows) {
+    const u = userRows.find((x) => x.id === uid);
     return u ? `${u.first_name} ${u.last_name}` : `#${uid}`;
   }
 
-  function userInitials(uid) {
-    const u = users.find((x) => x.id === uid);
+  function userInitials(uid, userRows) {
+    const u = userRows.find((x) => x.id === uid);
     return u
       ? ((u.first_name?.[0] || "") + (u.last_name?.[0] || "")).toUpperCase()
       : "?";
@@ -600,11 +607,11 @@
           title={$t("Show")}
         >
           <div class="avatar" style="width:30px;height:30px;font-size:11px">
-            {userInitials(week.user_id)}
+            {userInitials(week.user_id, users)}
           </div>
           <div style="flex:1;min-width:0">
             <div style="font-size:13px;font-weight:500">
-              {userName(week.user_id)}
+              {userName(week.user_id, users)}
             </div>
             <div
               class="tab-num"
@@ -669,11 +676,11 @@
           style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px"
         >
           <div class="avatar" style="width:30px;height:30px;font-size:11px">
-            {userInitials(a.user_id)}
+            {userInitials(a.user_id, users)}
           </div>
           <div style="flex:1;min-width:0">
             <div style="font-size:13px;font-weight:500">
-              {userName(a.user_id)}
+              {userName(a.user_id, users)}
             </div>
             <div
               class="tab-num"
@@ -787,11 +794,11 @@
           style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px"
         >
           <div class="avatar" style="width:30px;height:30px;font-size:11px">
-            {userInitials(r.user_id)}
+            {userInitials(r.user_id, users)}
           </div>
           <div style="flex:1;min-width:0">
             <div style="font-size:13px;font-weight:500">
-              {userName(r.user_id)}
+              {userName(r.user_id, users)}
             </div>
             <div
               class="tab-num"
@@ -852,7 +859,7 @@
         <tbody>
           {#each changeRequests as cr}
             <tr>
-              <td style="font-weight:500">{userName(cr.user_id)}</td>
+              <td style="font-weight:500">{userName(cr.user_id, users)}</td>
               <td class="tab-num">{fmtDate(cr.created_at)}</td>
               <td
                 style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
@@ -889,7 +896,7 @@
   <dialog bind:this={weekDialog} on:close={closeWeekDialog}>
     <header>
       <span style="flex:1">
-        {$t("Timesheet Approvals")} · {userName(selectedWeek.user_id)}
+        {$t("Timesheet Approvals")} · {userName(selectedWeek.user_id, users)}
       </span>
       <button class="kz-btn-icon-sm kz-btn-ghost" on:click={closeWeekDialog}>
         <Icon name="X" size={16} />

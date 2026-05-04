@@ -43,6 +43,7 @@ const TRANSLATIONS = {
     audit_action_reopened: "Reopened",
     "of {target} target": "of {target} target",
     "Open calendar": "Open calendar",
+    "Open time picker": "Open time picker",
     Year: "Year",
     "Invalid date": "Invalid date.",
     "Invalid date.": "Invalid date.",
@@ -58,7 +59,8 @@ const TRANSLATIONS = {
     "Approved days not yet taken": "Approved days not yet taken",
     "Vacation pending ({year})": "Vacation pending ({year})",
     "Vacation remaining ({year})": "Vacation remaining ({year})",
-    "Vacation requests awaiting approval": "Vacation requests awaiting approval",
+    "Vacation requests awaiting approval":
+      "Vacation requests awaiting approval",
     you: "you",
     "Public holiday": "Public holiday",
     Holiday: "Holiday",
@@ -290,6 +292,9 @@ const TRANSLATIONS = {
     "Team Members": "Teammitglieder",
     "Timesheet Approvals": "Stundenzettel-Genehmigungen",
     "Approve All": "Alle genehmigen",
+    "Approve all?": "Alle genehmigen?",
+    "Approve all {n} submitted entries across all users?":
+      "Alle {n} eingereichten Einträge aller Benutzer genehmigen?",
     "All caught up!": "Alles erledigt!",
     "No pending requests": "Keine ausstehenden Anträge",
     "Team hours overview": "Teamstunden-Übersicht",
@@ -315,10 +320,12 @@ const TRANSLATIONS = {
     "Please configure the country, region, default weekly hours and default annual leave days before using the application.":
       "Bitte Land, Region, Standard-Wochenstunden und Standard-Urlaubstage konfigurieren, bevor die Anwendung genutzt wird.",
     "Please select a country.": "Bitte ein Land auswählen.",
-    "Please enter default weekly hours.": "Bitte Standard-Wochenstunden eingeben.",
+    "Please enter default weekly hours.":
+      "Bitte Standard-Wochenstunden eingeben.",
     "Please enter default annual leave days.":
       "Bitte Standard-Urlaubstage eingeben.",
     "- Please select -": "- Bitte auswählen -",
+    "- All -": "- Alle -",
     Country: "Land",
     Region: "Region",
     "e.g. US-CA": "z.B. US-CA",
@@ -400,6 +407,88 @@ const TRANSLATIONS = {
       "Sitzung abgelaufen. Bitte erneut anmelden.",
     "Your session has expired. Please sign in again.":
       "Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.",
+    "Invalid email or password.":
+      "Ungültige E-Mail-Adresse oder ungültiges Passwort.",
+    "Not authenticated": "Nicht angemeldet.",
+    "Not found": "Nicht gefunden.",
+    "Internal server error": "Interner Serverfehler.",
+    "Invalid body": "Ungültiger Anfrageinhalt.",
+    "Invalid JSON": "Ungültiges JSON.",
+    "Current password required.": "Aktuelles Passwort erforderlich.",
+    "Current password is incorrect.": "Aktuelles Passwort ist falsch.",
+    "New password must differ from the current one.":
+      "Neues Passwort muss sich vom aktuellen Passwort unterscheiden.",
+    "Password must be at least {min} characters.":
+      "Passwort muss mindestens {min} Zeichen lang sein.",
+    "Password is too long (max 256 chars).":
+      "Passwort ist zu lang (max. 256 Zeichen).",
+    "Password must include at least 3 of: lowercase, uppercase, digit, symbol.":
+      "Passwort muss mindestens 3 davon enthalten: Kleinbuchstabe, Großbuchstabe, Ziffer, Symbol.",
+    "Invalid language.": "Ungültige Sprache.",
+    "Invalid time format.": "Ungültiges Uhrzeitformat.",
+    "Country must be a 2-letter ISO code (or empty to clear).":
+      "Land muss ein zweistelliger ISO-Code sein (oder leer zum Zurücksetzen).",
+    "Region code must be at most 20 characters.":
+      "Regionscode darf höchstens 20 Zeichen lang sein.",
+    "Invalid default_weekly_hours.": "Ungültige Standard-Wochenstunden.",
+    "Invalid default_annual_leave_days.": "Ungültige Standard-Urlaubstage.",
+    "Invalid role": "Ungültige Rolle.",
+    "Invalid email.": "Ungültige E-Mail-Adresse.",
+    "Invalid name.": "Ungültiger Name.",
+    "Invalid weekly_hours.": "Ungültige Wochenstunden.",
+    "Invalid annual_leave_days.": "Ungültige Urlaubstage.",
+    "An approver (Team lead or Admin) is required for employees.":
+      "Für Mitarbeitende ist eine Teamleitung oder ein Admin als verantwortliche Person erforderlich.",
+    "Approver cannot be the user themselves.":
+      "Verantwortliche Person darf nicht dieselbe Person sein.",
+    "Approver must be an active Team lead or Admin.":
+      "Verantwortliche Person muss eine aktive Teamleitung oder ein Admin sein.",
+    "Approver not found.": "Verantwortliche Person nicht gefunden.",
+    "Email already exists or invalid approver.":
+      "E-Mail existiert bereits oder verantwortliche Person ist ungültig.",
+    "Could not update user (e.g. email conflict).":
+      "Benutzer konnte nicht aktualisiert werden (z.B. E-Mail-Konflikt).",
+    "Could not update approver.":
+      "Verantwortliche Person konnte nicht aktualisiert werden.",
+    "You cannot remove your own admin role.":
+      "Sie können Ihre eigene Admin-Rolle nicht entfernen.",
+    "You cannot deactivate yourself.":
+      "Sie können sich nicht selbst deaktivieren.",
+    "Cannot deactivate: {count} active user(s) still have this person as their approver. Reassign them first.":
+      "Deaktivierung nicht möglich: {count} aktive Benutzer haben diese Person noch als verantwortliche Person. Weisen Sie sie zuerst neu zu.",
+    "User not found or inactive.": "Benutzer nicht gefunden oder inaktiv.",
+    "Cannot log time on a day with an approved absence ({kind}). Please cancel or adjust the absence first.":
+      "An einem Tag mit genehmigter Abwesenheit ({kind}) kann keine Zeit erfasst werden. Bitte stornieren oder ändern Sie zuerst die Abwesenheit.",
+    "Invalid time: {time}": "Ungültige Uhrzeit: {time}",
+    "Invalid kind": "Ungültiger Typ.",
+    "month=YYYY-MM required": "Monat im Format JJJJ-MM erforderlich.",
+    "month=YYYY-MM": "Monat im Format JJJJ-MM erforderlich.",
+    "Invalid year": "Ungültiges Jahr.",
+    "Invalid month": "Ungültiger Monat.",
+    year: "Ungültiges Jahr.",
+    month: "Ungültiger Monat.",
+    date: "Ungültiges Datum.",
+    "from must not be after to.": "Von darf nicht nach Bis liegen.",
+    "Date range must not exceed 366 days.":
+      "Der Zeitraum darf 366 Tage nicht überschreiten.",
+    "from is required.": "Von ist erforderlich.",
+    "to is required.": "Bis ist erforderlich.",
+    "CSV export failed.": "CSV-Export fehlgeschlagen.",
+    "Name already exists": "Name existiert bereits.",
+    "Holiday already exists": "Feiertag existiert bereits.",
+    "Conflict: {message}": "Konflikt: {message}",
+    "week_start must be a Monday (ISO).":
+      "Wochenbeginn muss ein Montag sein (ISO).",
+    "Nothing to reopen - this week has no submitted or approved entries.":
+      "Keine Wiederfreigabe möglich: Diese Woche enthält keine eingereichten oder genehmigten Einträge.",
+    "A pending reopen request already exists (id {id}).":
+      "Eine offene Wiederfreigabe-Anfrage existiert bereits (ID {id}).",
+    "A pending request for this week already exists.":
+      "Für diese Woche existiert bereits eine offene Anfrage.",
+    "Request was already resolved by someone else.":
+      "Anfrage wurde bereits von jemand anderem bearbeitet.",
+    "An open change request already exists for this entry (id {id}).":
+      "Für diesen Eintrag existiert bereits eine offene Änderungsanfrage (ID {id}).",
     "Leave balance unavailable.": "Urlaubsstand nicht verfügbar.",
     "Overtime data unavailable.": "Überstundendaten nicht verfügbar.",
     "Overtime overview": "Überstundenübersicht",
@@ -428,6 +517,7 @@ const TRANSLATIONS = {
     "{value}{unit}": "{value} {unit}",
     "{hours} / week": "{hours} / Woche",
     "Open calendar": "Kalender öffnen",
+    "Open time picker": "Uhrzeitauswahl öffnen",
     "Invalid date": "Ungültiges Datum.",
     "Invalid date.": "Ungültiges Datum.",
     "end_date must be >= start_date.": "Von kann nicht nach Bis liegen.",
@@ -443,6 +533,59 @@ const TRANSLATIONS = {
       "Überschneidung mit bestehender Abwesenheit.",
     "Overlap with existing absence.":
       "Überschneidung mit bestehender Abwesenheit.",
+    // Time entry errors
+    "Overlap with an existing entry.":
+      "Überschneidung mit einem bestehenden Eintrag.",
+    "Entries in the future are not allowed.":
+      "Einträge in der Zukunft sind nicht erlaubt.",
+    "Day total exceeds 14 hours.": "Tagestotal überschreitet 14 Stunden.",
+    "End time must be after start time.":
+      "Endzeit muss nach der Startzeit liegen.",
+    "Comment too long (max 2000).": "Kommentar zu lang (max. 2000).",
+    "Comment too long.": "Kommentar zu lang.",
+    "Category not found.": "Kategorie nicht gefunden.",
+    "Category is inactive.": "Kategorie ist inaktiv.",
+    "Only drafts can be deleted.": "Nur Entwürfe können gelöscht werden.",
+    "Only drafts can be edited directly. Please file a change request.":
+      "Nur Entwürfe können direkt bearbeitet werden. Bitte stellen Sie eine Änderungsanfrage.",
+    "Only submitted entries can be approved.":
+      "Nur eingereichte Einträge können genehmigt werden.",
+    "Only submitted entries can be rejected.":
+      "Nur eingereichte Einträge können abgelehnt werden.",
+    "Entry was already reviewed by someone else.":
+      "Eintrag wurde bereits von jemand anderem geprüft.",
+    "Reason too long.": "Begründung zu lang.",
+    "Reason required.": "Begründung erforderlich.",
+    // Change request errors
+    "Date cannot be in the future.": "Datum darf nicht in der Zukunft liegen.",
+    "Edit drafts directly.": "Entwürfe können direkt bearbeitet werden.",
+    "Invalid time format (HH:MM).": "Ungültiges Zeitformat (HH:MM).",
+    "Change request could no longer be applied because the entry changed.":
+      "Änderungsanfrage konnte nicht mehr angewendet werden, da sich der Eintrag geändert hat.",
+    "Change request was already resolved by someone else.":
+      "Änderungsanfrage wurde bereits von jemand anderem bearbeitet.",
+    "Rejected entries cannot have change requests. Use the reopen workflow to edit.":
+      "Abgelehnte Einträge können keine Änderungsanfragen haben. Nutzen Sie die Wiederfreigabe.",
+    // Absence errors
+    "Cannot edit.": "Bearbeitung nicht möglich.",
+    "Absence was already reviewed by someone else.":
+      "Abwesenheit wurde bereits von jemand anderem geprüft.",
+    "Only requested absences can be approved.":
+      "Nur beantragte Abwesenheiten können genehmigt werden.",
+    "Only requested absences can be rejected.":
+      "Nur beantragte Abwesenheiten können abgelehnt werden.",
+    "Only requested absences can be cancelled.":
+      "Nur beantragte Abwesenheiten können storniert werden.",
+    "Only approved absences can be revoked.":
+      "Nur genehmigte Abwesenheiten können widerrufen werden.",
+    "Approved absences cannot change type.":
+      "Genehmigte Abwesenheiten können den Typ nicht ändern.",
+    "Sick absences cannot change type.":
+      "Krankmeldungen können den Typ nicht ändern.",
+    "Sick leave cannot be backdated more than 30 days.":
+      "Krankmeldungen können nicht mehr als 30 Tage rückdatiert werden.",
+    // Reopen request errors
+    "Request is not pending.": "Anfrage ist nicht ausstehend.",
     "Yes, cancel absence": "Ja, Abwesenheit stornieren",
     "Vacation days ({year})": "Urlaubstage ({year})",
     "Vacation used ({year})": "Genommene Urlaubstage ({year})",
@@ -491,6 +634,7 @@ const TRANSLATIONS = {
     Data: "Daten",
     Summary: "Zusammenfassung",
     // Admin settings
+    "Time format": "Uhrzeitformat",
     "Default weekly hours": "Standard-Wochenstunden",
     "Default annual leave days": "Standard-Urlaubstage",
     "Confirm password": "Passwort bestätigen",
@@ -547,6 +691,97 @@ function interpolate(template, params) {
 export function translate(lang, key, params = {}) {
   const tpl = TRANSLATIONS[lang]?.[key] ?? key;
   return interpolate(tpl, params);
+}
+
+const ABSENCE_KIND_LABELS = Object.freeze({
+  vacation: "Vacation",
+  sick: "Sick",
+  training: "Training",
+  special_leave: "Special leave",
+  unpaid: "Unpaid",
+  general_absence: "General absence",
+});
+
+function translatedAbsenceKind(lang, kind) {
+  return translate(lang, ABSENCE_KIND_LABELS[kind] || kind);
+}
+
+const ERROR_PATTERNS = Object.freeze([
+  {
+    pattern: /^Password must be at least (?<min>\d+) characters\.$/,
+    key: "Password must be at least {min} characters.",
+  },
+  {
+    pattern:
+      /^Cannot deactivate: (?<count>\d+) active user\(s\) still have this person as their approver\. Reassign them first\.$/,
+    key: "Cannot deactivate: {count} active user(s) still have this person as their approver. Reassign them first.",
+  },
+  {
+    pattern:
+      /^Cannot log time on a day with an approved absence \((?<kind>[^)]+)\)\. Please cancel or adjust the absence first\.$/,
+    key: "Cannot log time on a day with an approved absence ({kind}). Please cancel or adjust the absence first.",
+    params(match, lang) {
+      return { kind: translatedAbsenceKind(lang, match.groups.kind) };
+    },
+  },
+  {
+    pattern: /^Invalid time: (?<time>.+)$/,
+    key: "Invalid time: {time}",
+  },
+  {
+    pattern:
+      /^An open change request already exists for this entry \(id (?<id>\d+)\)\.$/,
+    key: "An open change request already exists for this entry (id {id}).",
+  },
+  {
+    pattern: /^A pending reopen request already exists \(id (?<id>\d+)\)\.$/,
+    key: "A pending reopen request already exists (id {id}).",
+  },
+  {
+    pattern:
+      /^Nothing to reopen [-\u2013\u2014] this week has no submitted or approved entries\.$/,
+    key: "Nothing to reopen - this week has no submitted or approved entries.",
+  },
+]);
+
+function normalizedErrorMessage(message) {
+  return String(message || "Error")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function translateDirectOrPattern(lang, message) {
+  const direct = translate(lang, message);
+  if (direct !== message) return direct;
+
+  for (const item of ERROR_PATTERNS) {
+    const match = message.match(item.pattern);
+    if (!match) continue;
+    return translate(
+      lang,
+      item.key,
+      item.params ? item.params(match, lang) : match.groups,
+    );
+  }
+
+  return null;
+}
+
+export function localizeErrorMessage(message, lang = get(language)) {
+  const normalized = normalizedErrorMessage(message);
+  const translated = translateDirectOrPattern(lang, normalized);
+  if (translated) return translated;
+
+  const conflictPrefix = "Conflict: ";
+  if (normalized.startsWith(conflictPrefix)) {
+    const detail = normalized.slice(conflictPrefix.length).trim();
+    const translatedDetail = translateDirectOrPattern(lang, detail) || detail;
+    return translate(lang, "Conflict: {message}", {
+      message: translatedDetail,
+    });
+  }
+
+  return normalized;
 }
 
 export const t = derived(
@@ -615,13 +850,5 @@ export function auditActionLabel(action) {
 }
 
 export function absenceKindLabel(kind) {
-  const labels = {
-    vacation: "Vacation",
-    sick: "Sick",
-    training: "Training",
-    special_leave: "Special leave",
-    unpaid: "Unpaid",
-    general_absence: "General absence",
-  };
-  return translate(get(language), labels[kind] || kind);
+  return translatedAbsenceKind(get(language), kind);
 }
