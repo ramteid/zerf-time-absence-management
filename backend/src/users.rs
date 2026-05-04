@@ -375,11 +375,12 @@ pub async fn update(
     };
     validate_approver(&s.pool, &next_role, Some(id), next_active, next_approver).await?;
 
+    let mut tx = s.pool.begin().await?;
     sqlx::query("UPDATE users SET email=COALESCE($1,email), first_name=COALESCE($2,first_name), last_name=COALESCE($3,last_name), role=COALESCE($4,role), weekly_hours=COALESCE($5,weekly_hours), annual_leave_days=COALESCE($6,annual_leave_days), start_date=COALESCE($7,start_date), active=COALESCE($8,active), allow_reopen_without_approval=COALESCE($9,allow_reopen_without_approval) WHERE id=$10")
         .bind(email_lc).bind(b.first_name).bind(b.last_name).bind(b.role.clone())
         .bind(b.weekly_hours).bind(b.annual_leave_days).bind(b.start_date).bind(b.active)
         .bind(b.allow_reopen_without_approval).bind(id)
-        .execute(&s.pool).await
+        .execute(&mut *tx).await
         .map_err(|_| AppError::Conflict("Could not update user (e.g. email conflict).".into()))?;
     // Approver_id requires special handling because we want to support
     // explicit clearing (Some(None)) which COALESCE cannot express.
@@ -387,7 +388,7 @@ pub async fn update(
         sqlx::query("UPDATE users SET approver_id=$1 WHERE id=$2")
             .bind(v)
             .bind(id)
-            .execute(&s.pool)
+            .execute(&mut *tx)
             .await
             .map_err(|_| AppError::Conflict("Could not update approver.".into()))?;
     }
@@ -398,9 +399,10 @@ pub async fn update(
     if role_changed || just_deactivated {
         let _ = sqlx::query("DELETE FROM sessions WHERE user_id=$1")
             .bind(id)
-            .execute(&s.pool)
+            .execute(&mut *tx)
             .await;
     }
+    tx.commit().await?;
     let next: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode FROM users WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)

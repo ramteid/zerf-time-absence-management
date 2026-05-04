@@ -178,6 +178,12 @@ pub async fn login(
     .fetch_one(&s.pool)
     .await?;
     if failures >= MAX_FAILED_LOGINS {
+        // Record the blocked attempt so the lockout window extends under
+        // sustained attack (the window is sliding, based on recent failures).
+        let _ = sqlx::query("INSERT INTO login_attempts(email, success) VALUES ($1, FALSE)")
+            .bind(&email)
+            .execute(&s.pool)
+            .await;
         // Generic message — never reveal that the account exists/is locked.
         return Err(AppError::BadRequest("Invalid email or password.".into()));
     }

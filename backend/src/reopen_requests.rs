@@ -236,17 +236,9 @@ pub async fn create(
     // insert, so we can reuse the result for both auto and pending paths).
     let notify_approvers = approver_ids_to_notify(&s.pool, &u).await;
 
-    // For the auto-approve flow we MUST reset the entries before persisting
-    // the request row.  Otherwise a failure in `perform_reopen` (e.g. a
-    // transient DB error) would leave an `auto_approved` row referencing a
-    // week whose entries were never actually reopened — confusing the user
-    // and bypassing the duplicate-pending guard for retries.
-    let count = if auto_approve {
-        perform_reopen(&s.pool, u.id, u.id, b.week_start).await?
-    } else {
-        0
-    };
-
+    // Insert the request row FIRST so that if perform_reopen fails, the row
+    // can be cleaned up — but if only the INSERT succeeded, we won't have
+    // entries silently reopened without a record.
     let row: (i64, DateTime<Utc>) = sqlx::query_as(
         "INSERT INTO reopen_requests(user_id, week_start, approver_id, status, reviewed_at) \
          VALUES ($1,$2,$3,$4, CASE WHEN $4 IN ('auto_approved') THEN CURRENT_TIMESTAMP ELSE NULL END) \
@@ -263,6 +255,23 @@ pub async fn create(
         AppError::Conflict("A pending request for this week already exists.".into())
     })?;
     let req_id = row.0;
+
+    // For the auto-approve flow, now perform the actual reopen. If it fails,
+    // delete the request row so the user can retry cleanly.
+    let count = if auto_approve {
+        match perform_reopen(&s.pool, u.id, u.id, b.week_start).await {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = sqlx::query("DELETE FROM reopen_requests WHERE id=$1")
+                    .bind(req_id)
+                    .execute(&s.pool)
+                    .await;
+                return Err(e);
+            }
+        }
+    } else {
+        0
+    };
 
     audit::log(
         &s.pool,

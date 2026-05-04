@@ -129,14 +129,16 @@
     return $categories.find((c) => c.id === id) || { name: "?", color: "#999" };
   }
 
-  $: weekActual = entries.reduce(
-    (s, e) =>
-      s +
-      (e.start_time && e.end_time
-        ? durMin(e.start_time.slice(0, 5), e.end_time.slice(0, 5))
-        : 0),
-    0,
-  );
+  $: weekActual = entries
+    .filter((e) => e.status !== "rejected")
+    .reduce(
+      (s, e) =>
+        s +
+        (e.start_time && e.end_time
+          ? durMin(e.start_time.slice(0, 5), e.end_time.slice(0, 5))
+          : 0),
+      0,
+    );
   $: drafts = entries.filter((e) => e.status === "draft");
   $: weekHours = (weekActual / 60).toFixed(1);
   $: contractHours = formatHours($currentUser.weekly_hours || 0);
