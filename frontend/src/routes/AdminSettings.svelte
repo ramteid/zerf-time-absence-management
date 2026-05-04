@@ -1,99 +1,57 @@
 <script>
   import { api } from "../api.js";
-  import { toast } from "../stores.js";
+  import { currentUser, toast } from "../stores.js";
   import { t } from "../i18n.js";
 
   let s = {};
   let saving = false;
+  $: isFirstSetup = !!$currentUser?.must_configure_settings;
 
-  const countries = [
-    { code: "AT", name: "Österreich / Austria" },
-    { code: "CH", name: "Schweiz / Switzerland" },
-    { code: "DE", name: "Deutschland / Germany" },
-    { code: "FR", name: "France" },
-    { code: "IT", name: "Italia / Italy" },
-    { code: "NL", name: "Nederland / Netherlands" },
-    { code: "PL", name: "Polska / Poland" },
-    { code: "CZ", name: "Česko / Czech Republic" },
-    { code: "US", name: "United States" },
-    { code: "GB", name: "United Kingdom" },
-  ];
+  let countries = [];
+  let countryRegions = [];
 
-  const regions = {
-    DE: [
-      { code: "", label: "– Alle / All –" },
-      { code: "DE-BW", label: "Baden-Württemberg" },
-      { code: "DE-BY", label: "Bayern" },
-      { code: "DE-BE", label: "Berlin" },
-      { code: "DE-BB", label: "Brandenburg" },
-      { code: "DE-HB", label: "Bremen" },
-      { code: "DE-HH", label: "Hamburg" },
-      { code: "DE-HE", label: "Hessen" },
-      { code: "DE-MV", label: "Mecklenburg-Vorpommern" },
-      { code: "DE-NI", label: "Niedersachsen" },
-      { code: "DE-NW", label: "Nordrhein-Westfalen" },
-      { code: "DE-RP", label: "Rheinland-Pfalz" },
-      { code: "DE-SL", label: "Saarland" },
-      { code: "DE-SN", label: "Sachsen" },
-      { code: "DE-ST", label: "Sachsen-Anhalt" },
-      { code: "DE-SH", label: "Schleswig-Holstein" },
-      { code: "DE-TH", label: "Thüringen" },
-    ],
-    AT: [
-      { code: "", label: "– Alle / All –" },
-      { code: "AT-1", label: "Burgenland" },
-      { code: "AT-2", label: "Kärnten" },
-      { code: "AT-3", label: "Niederösterreich" },
-      { code: "AT-4", label: "Oberösterreich" },
-      { code: "AT-5", label: "Salzburg" },
-      { code: "AT-6", label: "Steiermark" },
-      { code: "AT-7", label: "Tirol" },
-      { code: "AT-8", label: "Vorarlberg" },
-      { code: "AT-9", label: "Wien" },
-    ],
-    CH: [
-      { code: "", label: "– Alle / All –" },
-      { code: "CH-AG", label: "Aargau" },
-      { code: "CH-AR", label: "Appenzell Ausserrhoden" },
-      { code: "CH-AI", label: "Appenzell Innerrhoden" },
-      { code: "CH-BL", label: "Basel-Landschaft" },
-      { code: "CH-BS", label: "Basel-Stadt" },
-      { code: "CH-BE", label: "Bern" },
-      { code: "CH-FR", label: "Freiburg" },
-      { code: "CH-GE", label: "Genf" },
-      { code: "CH-GL", label: "Glarus" },
-      { code: "CH-GR", label: "Graubünden" },
-      { code: "CH-JU", label: "Jura" },
-      { code: "CH-LU", label: "Luzern" },
-      { code: "CH-NE", label: "Neuenburg" },
-      { code: "CH-NW", label: "Nidwalden" },
-      { code: "CH-OW", label: "Obwalden" },
-      { code: "CH-SG", label: "St. Gallen" },
-      { code: "CH-SH", label: "Schaffhausen" },
-      { code: "CH-SZ", label: "Schwyz" },
-      { code: "CH-SO", label: "Solothurn" },
-      { code: "CH-TG", label: "Thurgau" },
-      { code: "CH-TI", label: "Tessin" },
-      { code: "CH-UR", label: "Uri" },
-      { code: "CH-VD", label: "Waadt" },
-      { code: "CH-VS", label: "Wallis" },
-      { code: "CH-ZG", label: "Zug" },
-      { code: "CH-ZH", label: "Zürich" },
-    ],
-  };
-
-  $: availableRegions = regions[s.country] || [];
+  async function loadRegionsFor(country) {
+    if (!country) return [];
+    try {
+      return await api(`/holidays/regions/${country}`);
+    } catch {
+      return [];
+    }
+  }
 
   async function load() {
-    s = await api("/settings");
+    const [settings, allCountries] = await Promise.all([
+      api("/settings"),
+      api("/holidays/countries"),
+    ]);
+    s = settings;
+    countries = allCountries;
+    if (s.country) {
+      countryRegions = await loadRegionsFor(s.country);
+    }
   }
   load();
 
   async function save() {
+    if (!s.country) {
+      toast($t("Please select a country."), "error");
+      return;
+    }
+    if (s.default_weekly_hours == null || s.default_weekly_hours === "") {
+      toast($t("Please enter default weekly hours."), "error");
+      return;
+    }
+    if (s.default_annual_leave_days == null || s.default_annual_leave_days === "") {
+      toast($t("Please enter default annual leave days."), "error");
+      return;
+    }
     saving = true;
     try {
       await api("/settings", { method: "PUT", body: s });
       toast($t("Settings saved."), "ok");
+      if (isFirstSetup) {
+        currentUser.update((u) => ({ ...u, must_configure_settings: false }));
+      }
     } catch (e) {
       toast(e.message || $t("Error"), "error");
     } finally {
@@ -109,6 +67,17 @@
 </div>
 
 <div class="content-area" style="max-width:600px">
+  {#if isFirstSetup}
+    <div
+      class="kz-card"
+      style="padding:16px 20px;margin-bottom:16px;border-color:var(--warning)"
+    >
+      <strong style="color:var(--warning-text)">{$t("Initial setup required.")}</strong>
+      <p style="font-size:13px;color:var(--text-tertiary);margin-top:4px">
+        {$t("Please configure the country, region, default weekly hours and default annual leave days before using the application.")}
+      </p>
+    </div>
+  {/if}
   <div class="kz-card" style="padding:20px;margin-bottom:16px">
     <div style="font-size:14px;font-weight:600;margin-bottom:14px">
       {$t("General")}
@@ -178,25 +147,28 @@
             id="settings-country"
             class="kz-select"
             bind:value={s.country}
-            on:change={() => {
+            on:change={async () => {
               s.region = "";
+              countryRegions = await loadRegionsFor(s.country);
             }}
           >
+            <option value="">{$t("– Please select –")}</option>
             {#each countries as c}
-              <option value={c.code}>{c.name}</option>
+              <option value={c.countryCode}>{c.name}</option>
             {/each}
           </select>
         </div>
         <div>
           <label class="kz-label" for="settings-region">{$t("Region")}</label>
-          {#if availableRegions.length > 0}
+          {#if countryRegions.length > 0}
             <select
               id="settings-region"
               class="kz-select"
               bind:value={s.region}
             >
-              {#each availableRegions as r}
-                <option value={r.code}>{r.label}</option>
+              <option value="">{$t("– All –")}</option>
+              {#each countryRegions as r}
+                <option value={r}>{r}</option>
               {/each}
             </select>
           {:else}

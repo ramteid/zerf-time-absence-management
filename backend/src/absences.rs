@@ -231,7 +231,7 @@ fn normalize_absence(input: &NewAbsence) -> AppResult<NormalizedAbsence<'_>> {
             "end_date must be >= start_date.".into(),
         ));
     }
-    if (input.end_date - input.start_date).num_days() > 366 {
+    if (input.end_date - input.start_date).num_days() > 365 {
         return Err(AppError::BadRequest(
             "Absence range exceeds one year.".into(),
         ));
@@ -240,13 +240,6 @@ fn normalize_absence(input: &NewAbsence) -> AppResult<NormalizedAbsence<'_>> {
     Ok(NormalizedAbsence { kind: &input.kind })
 }
 
-fn status_for_kind(kind: &str) -> &'static str {
-    if kind == "sick" {
-        "approved"
-    } else {
-        "requested"
-    }
-}
 
 pub async fn create(
     State(s): State<AppState>,
@@ -260,8 +253,14 @@ pub async fn create(
     if overlap > 0 {
         return Err(AppError::Conflict("Overlap with existing absence.".into()));
     }
-
-    let status = status_for_kind(normalized.kind);
+    // Sick leave is auto-approved only when it has already started (or starts today).
+    // Future-dated sick leave requires review like any other request.
+    let today_date = chrono::Local::now().date_naive();
+    let status = if normalized.kind == "sick" && b.start_date <= today_date {
+        "approved"
+    } else {
+        "requested"
+    };
     let id: i64 = sqlx::query_scalar("INSERT INTO absences(user_id, kind, start_date, end_date, comment, status) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id")
         .bind(u.id).bind(normalized.kind).bind(b.start_date).bind(b.end_date).bind(&b.comment).bind(status)
         .fetch_one(&s.pool).await?;
@@ -315,7 +314,13 @@ pub async fn update(
         return Err(AppError::Conflict("Overlap with existing absence.".into()));
     }
     let (status, reviewed_by, reviewed_at, rejection_reason) = if prev.status == "requested" {
-        (status_for_kind(normalized.kind), None, None, None)
+        let today_date = chrono::Local::now().date_naive();
+        let new_status = if normalized.kind == "sick" && b.start_date <= today_date {
+            "approved"
+        } else {
+            "requested"
+        };
+        (new_status, None, None, None)
     } else {
         (
             prev.status.as_str(),
@@ -404,6 +409,11 @@ pub async fn approve(
     if a.user_id == u.id && !u.is_admin() {
         return Err(AppError::Forbidden);
     }
+    if a.status != "requested" {
+        return Err(AppError::BadRequest(
+            "Only requested absences can be approved.".into(),
+        ));
+    }
     sqlx::query("UPDATE absences SET status='approved', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP WHERE id=$2")
         .bind(u.id).bind(id).execute(&s.pool).await?;
     let before = serde_json::to_value(&a).unwrap();
@@ -427,6 +437,19 @@ pub async fn approve(
             id,
             Some(before),
             Some(after),
+        )
+        .await;
+        crate::notifications::create(
+            &s,
+            a.user_id,
+            "absence_approved",
+            "Absence approved",
+            &format!(
+                "Your absence ({} to {}) has been approved.",
+                a.start_date, a.end_date
+            ),
+            Some("absences"),
+            Some(id),
         )
         .await;
     }
@@ -457,6 +480,11 @@ pub async fn reject(
     if a.user_id == u.id && !u.is_admin() {
         return Err(AppError::Forbidden);
     }
+    if a.status != "requested" {
+        return Err(AppError::BadRequest(
+            "Only requested absences can be rejected.".into(),
+        ));
+    }
     sqlx::query("UPDATE absences SET status='rejected', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP, rejection_reason=$2 WHERE id=$3")
         .bind(u.id).bind(&b.reason).bind(id).execute(&s.pool).await?;
     audit::log(
@@ -469,6 +497,21 @@ pub async fn reject(
         Some(serde_json::json!({"status": "rejected", "reason": b.reason})),
     )
     .await;
+    if a.user_id != u.id {
+        crate::notifications::create(
+            &s,
+            a.user_id,
+            "absence_rejected",
+            "Absence rejected",
+            &format!(
+                "Your absence ({} to {}) was rejected: {}",
+                a.start_date, a.end_date, b.reason
+            ),
+            Some("absences"),
+            Some(id),
+        )
+        .await;
+    }
     Ok(Json(serde_json::json!({"ok":true})))
 }
 
@@ -529,7 +572,10 @@ pub async fn balance(
         let e2 = std::cmp::min(a.end_date, to);
         let days = workdays(&s.pool, s2, e2).await?;
         if a.status == "approved" {
-            if a.end_date < today {
+            // Use the clamped date (e2) rather than a.end_date to correctly
+            // classify year-spanning absences: only the portion that is
+            // already in the past counts as taken.
+            if e2 < today {
                 taken += days;
             } else {
                 upcoming += days;

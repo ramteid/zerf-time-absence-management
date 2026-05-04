@@ -2434,20 +2434,19 @@ async fn user_creation_password_modes_set_must_change_correctly() {
                 "annual_leave_days": 30,
                 "start_date": "2024-01-01",
                 "password": manual_password,
-                "generated_password": false
             }),
         )
         .await;
     assert_eq!(st, StatusCode::OK, "create user with manual password");
-    assert!(body["temporary_password"].is_null());
-    assert_eq!(body["user"]["must_change_password"], false);
+    assert_eq!(body["temporary_password"], manual_password);
+    assert_eq!(body["user"]["must_change_password"], true);
 
     let manual = app.client();
     let (st, _) = manual.login("manual@example.com", manual_password).await;
     assert_eq!(st, StatusCode::OK, "manual password login");
     let (st, body) = manual.get("/api/v1/auth/me").await;
     assert_eq!(st, StatusCode::OK);
-    assert_eq!(body["must_change_password"], false);
+    assert_eq!(body["must_change_password"], true);
 
     let generated_password = "GeneratedPass!234";
     let (st, body) = admin
@@ -2463,14 +2462,13 @@ async fn user_creation_password_modes_set_must_change_correctly() {
                 "start_date": "2024-01-01",
                 "approver_id": 1,
                 "password": generated_password,
-                "generated_password": true
             }),
         )
         .await;
     assert_eq!(
         st,
         StatusCode::OK,
-        "create user with generated password flag"
+        "create user with explicit password always requires change"
     );
     assert_eq!(body["temporary_password"], generated_password);
     assert_eq!(body["user"]["must_change_password"], true);

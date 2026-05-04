@@ -151,7 +151,18 @@ async fn approver_ids_to_notify(
 ) -> Vec<i64> {
     let mut ids: std::collections::BTreeSet<i64> = Default::default();
     if let Some(aid) = requester.approver_id {
-        ids.insert(aid);
+        // Only include the designated approver if they are still active;
+        // a deactivated approver cannot log in to review the request.
+        let is_active: bool = sqlx::query_scalar("SELECT active FROM users WHERE id=$1")
+            .bind(aid)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or(false);
+        if is_active {
+            ids.insert(aid);
+        }
     }
     if requester.role != "admin" {
         if let Ok(admins) = sqlx::query_scalar::<_, i64>(

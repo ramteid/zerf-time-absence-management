@@ -191,10 +191,14 @@
 
   $: weekStatus = (() => {
     if (entries.length === 0) return "draft";
-    if (entries.every((e) => e.status === "approved")) return "approved";
-    if (entries.some((e) => e.status === "submitted")) return "submitted";
-    if (entries.some((e) => e.status === "rejected")) return "rejected";
-    return "draft";
+    const nonDraft = entries.filter((e) => e.status !== "draft");
+    if (nonDraft.length === 0) return "draft";
+    if (nonDraft.every((e) => e.status === "approved")) return "approved";
+    if (nonDraft.some((e) => e.status === "submitted")) return "submitted";
+    if (nonDraft.every((e) => e.status === "rejected")) return "rejected";
+    // Mix of approved + rejected with nothing pending: surface as "partial" so
+    // the user knows there are rejected entries without hiding the approvals.
+    return "partial";
   })();
 
   $: pendingReopen = (() => {

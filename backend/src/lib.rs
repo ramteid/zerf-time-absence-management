@@ -86,6 +86,10 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                     post(time_entries::batch_approve),
                 )
                 .route(
+                    "/time-entries/batch-reject",
+                    post(time_entries::batch_reject),
+                )
+                .route(
                     "/time-entries/{id}",
                     put(time_entries::update).delete(time_entries::delete),
                 )
@@ -124,6 +128,11 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                 )
                 .route("/categories/{id}", put(categories::update))
                 .route("/holidays", get(holidays::list).post(holidays::create))
+                .route("/holidays/countries", get(holidays::available_countries))
+                .route(
+                    "/holidays/regions/{country}",
+                    get(holidays::available_regions),
+                )
                 .route("/holidays/{id}", delete(holidays::delete))
                 .route("/reports/month", get(reports::month))
                 .route("/reports/csv", get(reports::range_csv))

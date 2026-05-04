@@ -75,7 +75,7 @@ export async function api(path, opts = {}) {
 
   // Session is gone or CSRF token is stale — force the user back to login.
   // Skip this for the auth endpoints themselves to avoid redirect loops.
-  if ((r.status === 401 || r.status === 403) && !path.startsWith("/auth/")) {
+  if (r.status === 401 && !path.startsWith("/auth/")) {
     handleUnauthorized();
     throw new Error("Session expired. Please sign in again.");
   }

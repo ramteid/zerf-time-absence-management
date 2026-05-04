@@ -165,7 +165,6 @@ pub struct NewUser {
     pub annual_leave_days: i64,
     pub start_date: NaiveDate,
     pub password: Option<String>,
-    pub generated_password: Option<bool>,
     /// Mandatory for `role == "employee"`. The approver must be an active
     /// `team_lead` or `admin` and cannot be the user themselves.
     pub approver_id: Option<i64>,
@@ -214,7 +213,7 @@ async fn validate_approver(
 pub struct CreateResponse {
     pub id: i64,
     pub user: User,
-    pub temporary_password: Option<String>,
+    pub temporary_password: String,
 }
 
 pub async fn create(
@@ -245,28 +244,21 @@ pub async fn create(
     if !(0..=366).contains(&b.annual_leave_days) {
         return Err(AppError::BadRequest("Invalid annual_leave_days.".into()));
     }
-    let generated_by_admin = b.generated_password.unwrap_or(false);
     let (password, temp) = match b.password {
         Some(p) if !p.is_empty() => {
             validate_password_strength(&p)?;
-            let temp = if generated_by_admin {
-                Some(p.clone())
-            } else {
-                None
-            };
-            (p, temp)
+            (p.clone(), p)
         }
         _ => {
             let t = generate_password();
-            (t.clone(), Some(t))
+            (t.clone(), t)
         }
     };
     let hash = hash_password(&password)?;
-    let must_change = temp.is_some();
     validate_approver(&s.pool, &b.role, None, true, b.approver_id).await?;
     let id: i64 = sqlx::query_scalar("INSERT INTO users(email,password_hash,first_name,last_name,role,weekly_hours,annual_leave_days,start_date,must_change_password,approver_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id")
         .bind(&email_norm).bind(hash).bind(b.first_name.trim()).bind(b.last_name.trim()).bind(&b.role)
-        .bind(b.weekly_hours).bind(b.annual_leave_days).bind(b.start_date).bind(must_change).bind(b.approver_id)
+        .bind(b.weekly_hours).bind(b.annual_leave_days).bind(b.start_date).bind(true).bind(b.approver_id)
         .fetch_one(&s.pool).await
         .map_err(|e| {
             tracing::warn!(target:"kitazeit::users", "create user insert failed: {e}");
@@ -290,10 +282,10 @@ pub async fn create(
     {
         let smtp = s.cfg.smtp.clone().map(std::sync::Arc::new);
         let email_to = email_norm.clone();
-        let display_pw = temp.clone().unwrap_or_else(|| "(set by admin)".into());
+        let display_pw = temp.clone();
         let subject = "Welcome to KitaZeit".to_string();
         let body_text = format!(
-            "Hello {} {},\n\nYour KitaZeit account has been created.\n\nEmail: {}\nPassword: {}\n\nPlease log in and change your password immediately.",
+            "Hello {} {},\n\nYour account has been created.\n\nEmail: {}\nPassword: {}\n\nPlease log in and change your password immediately.",
             b.first_name.trim(), b.last_name.trim(), email_to, display_pw
         );
         crate::email::send_async(smtp, email_to, subject, body_text);
@@ -303,6 +295,7 @@ pub async fn create(
         user,
         temporary_password: temp,
     }))
+
 }
 
 #[derive(Deserialize)]
@@ -442,6 +435,19 @@ pub async fn deactivate(
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
+    // Block deactivation if this person is the assigned approver for active users.
+    // Orphaned approver_id references would leave those employees in a broken state.
+    let reports_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE approver_id=$1 AND active=TRUE")
+            .bind(id)
+            .fetch_one(&s.pool)
+            .await?;
+    if reports_count > 0 {
+        return Err(AppError::BadRequest(format!(
+            "Cannot deactivate: {} active user(s) still have this person as their approver. Reassign them first.",
+            reports_count
+        )));
+    }
     let mut tx = s.pool.begin().await?;
     sqlx::query("UPDATE users SET active=FALSE WHERE id=$1")
         .bind(id)

@@ -217,13 +217,6 @@ pub async fn login(
         .execute(&s.pool)
         .await?;
 
-    // Best-effort: drop any failed-attempt rows for this email so the lockout window resets.
-    sqlx::query("DELETE FROM login_attempts WHERE email = $1 AND success = FALSE")
-        .bind(&email)
-        .execute(&s.pool)
-        .await
-        .ok();
-
     let cookie = build_session_cookie(&token, IDLE_TIMEOUT_HOURS * 3600, s.cfg.secure_cookies);
     let body = Json(serde_json::json!({
         "ok": true,
@@ -305,12 +298,35 @@ pub async fn me(
     } else {
         "/dashboard"
     };
+    // For admins: flag whether initial setup (country + working-time defaults)
+    // has been completed. Until it is, the SPA redirects to /admin/settings.
+    let must_configure_settings = if user.is_admin() {
+        let country: Option<String> =
+            sqlx::query_scalar("SELECT value FROM app_settings WHERE key = 'country'")
+                .fetch_optional(&s.pool)
+                .await?;
+        let dwh: Option<String> =
+            sqlx::query_scalar("SELECT value FROM app_settings WHERE key = 'default_weekly_hours'")
+                .fetch_optional(&s.pool)
+                .await?;
+        let dal: Option<String> = sqlx::query_scalar(
+            "SELECT value FROM app_settings WHERE key = 'default_annual_leave_days'",
+        )
+        .fetch_optional(&s.pool)
+        .await?;
+        country.map_or(true, |v| v.is_empty())
+            || dwh.map_or(true, |v| v.is_empty())
+            || dal.map_or(true, |v| v.is_empty())
+    } else {
+        false
+    };
     Ok(Json(serde_json::json!({
         "id": user.id, "email": user.email,
         "first_name": user.first_name, "last_name": user.last_name,
         "role": user.role, "weekly_hours": user.weekly_hours,
         "annual_leave_days": user.annual_leave_days, "start_date": user.start_date,
         "active": user.active, "must_change_password": user.must_change_password,
+        "must_configure_settings": must_configure_settings,
         "approver_id": user.approver_id,
         "allow_reopen_without_approval": user.allow_reopen_without_approval,
         "dark_mode": user.dark_mode,

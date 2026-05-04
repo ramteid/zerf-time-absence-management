@@ -244,6 +244,7 @@
       inputPath: p,
       userHome: user?.home ?? null,
       mustChangePassword: !!user?.must_change_password,
+      mustConfigureSettings: !!user?.must_configure_settings,
     });
     if (!user) return null;
 
@@ -253,12 +254,15 @@
       const dashboardAvailable = (user?.nav || []).some(
         (item) => item?.key === "Dashboard" || item?.href === "/dashboard",
       );
-      const dest =
-        dashboardAvailable && !user.must_change_password
-          ? "/dashboard"
-          : user.home && user.home !== "/" && user.home !== ""
-            ? user.home
-            : "/time";
+      const dest = user.must_change_password
+        ? "/account"
+        : user.must_configure_settings
+          ? "/admin/settings"
+          : dashboardAvailable
+            ? "/dashboard"
+            : user.home && user.home !== "/" && user.home !== ""
+              ? user.home
+              : "/time";
       debugLog("route:redirect-home", { dest });
       // Update the URL bar (deferred so we don't mutate stores mid-reactive-cycle)
       setTimeout(() => go(dest, false), 0);
@@ -268,6 +272,17 @@
       debugLog("route:redirect-password-change");
       setTimeout(() => go("/account", false), 0);
       return Account;
+    }
+    // Only redirect to settings setup when the password is already in order,
+    // so an admin with both flags can complete the password change first.
+    if (
+      user.must_configure_settings &&
+      !user.must_change_password &&
+      p !== "/admin/settings"
+    ) {
+      debugLog("route:redirect-configure-settings");
+      setTimeout(() => go("/admin/settings", false), 0);
+      return AdminSettings;
     }
     const resolved = routeMap[p] || NotFound;
     debugLog("route:resolved", {
