@@ -1,4 +1,5 @@
 use crate::auth::User;
+use crate::db::sql;
 use crate::error::{AppError, AppResult};
 use crate::holidays;
 use crate::AppState;
@@ -46,7 +47,7 @@ async fn load_setting(
     key: &str,
     default: &str,
 ) -> AppResult<String> {
-    let value: Option<String> = sqlx::query_scalar("SELECT value FROM app_settings WHERE key = $1")
+    let value: Option<String> = sqlx::query_scalar(&sql("SELECT value FROM app_settings WHERE key = $1"))
         .bind(key)
         .fetch_optional(pool)
         .await?;
@@ -55,9 +56,9 @@ async fn load_setting(
 
 async fn save_setting(pool: &crate::db::DatabasePool, key: &str, value: &str) -> AppResult<String> {
     let saved: String = sqlx::query_scalar(
-        "INSERT INTO app_settings(key, value) VALUES ($1, $2) \
+        &sql("INSERT INTO app_settings(key, value) VALUES ($1, $2) \
          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP \
-         RETURNING value",
+         RETURNING value"),
     )
     .bind(key)
     .bind(value)

@@ -1,4 +1,5 @@
 use crate::auth::User;
+use crate::db::{sql, DbType};
 use crate::error::{AppError, AppResult};
 use crate::AppState;
 use axum::{
@@ -8,7 +9,7 @@ use axum::{
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
-use sqlx::{Postgres, QueryBuilder};
+use sqlx::QueryBuilder;
 
 pub async fn log(
     pool: &crate::db::DatabasePool,
@@ -21,7 +22,7 @@ pub async fn log(
 ) {
     let v = before.map(|x| x.to_string());
     let n = after.map(|x| x.to_string());
-    let _ = sqlx::query("INSERT INTO audit_log(user_id, action, table_name, record_id, before_data, after_data) VALUES ($1,$2,$3,$4,$5,$6)")
+    let _ = sqlx::query(&sql("INSERT INTO audit_log(user_id, action, table_name, record_id, before_data, after_data) VALUES ($1,$2,$3,$4,$5,$6)"))
         .bind(user_id).bind(action).bind(table_name).bind(record_id).bind(v).bind(n)
         .execute(pool).await;
 }
@@ -53,7 +54,7 @@ pub async fn list(
     if !u.is_admin() {
         return Err(AppError::Forbidden);
     }
-    let mut builder = QueryBuilder::<Postgres>::new("SELECT id, user_id, action, table_name, record_id, before_data, after_data, occurred_at FROM audit_log WHERE TRUE");
+    let mut builder = QueryBuilder::<DbType>::new("SELECT id, user_id, action, table_name, record_id, before_data, after_data, occurred_at FROM audit_log WHERE TRUE");
     if q.table_name.is_some() {
         builder.push(" AND table_name = ").push_bind(q.table_name);
     }

@@ -1,5 +1,6 @@
 use crate::audit;
 use crate::auth::{hash_password, validate_password_strength, User};
+use crate::db::sql;
 use crate::error::{AppError, AppResult};
 use crate::AppState;
 use axum::{
@@ -29,9 +30,9 @@ pub async fn team_settings_list(
     }
     let rows: Vec<TeamSettings> = if u.is_admin() {
         sqlx::query_as::<_, (i64, String, String, String, bool)>(
-            "SELECT id, email, first_name, last_name, allow_reopen_without_approval \
+            &sql("SELECT id, email, first_name, last_name, allow_reopen_without_approval \
              FROM users WHERE active=TRUE AND role IN ('team_lead','admin') \
-             ORDER BY last_name, first_name",
+             ORDER BY last_name, first_name"),
         )
         .fetch_all(&s.pool)
         .await?
@@ -47,8 +48,8 @@ pub async fn team_settings_list(
     } else {
         // Team leads see only their own row.
         let row: (String, String, String, bool) = sqlx::query_as(
-            "SELECT email, first_name, last_name, allow_reopen_without_approval \
-             FROM users WHERE id=$1",
+            &sql("SELECT email, first_name, last_name, allow_reopen_without_approval \
+             FROM users WHERE id=$1"),
         )
         .bind(u.id)
         .fetch_one(&s.pool)
@@ -83,7 +84,7 @@ pub async fn team_settings_update(
         return Err(AppError::Forbidden);
     }
     // Target must be an active lead/admin.
-    let role: Option<(String, bool)> = sqlx::query_as("SELECT role, active FROM users WHERE id=$1")
+    let role: Option<(String, bool)> = sqlx::query_as(&sql("SELECT role, active FROM users WHERE id=$1"))
         .bind(approver_id)
         .fetch_optional(&s.pool)
         .await?;
@@ -95,7 +96,7 @@ pub async fn team_settings_update(
             ))
         }
     }
-    sqlx::query("UPDATE users SET allow_reopen_without_approval=$1 WHERE id=$2")
+    sqlx::query(&sql("UPDATE users SET allow_reopen_without_approval=$1 WHERE id=$2"))
         .bind(b.allow_reopen_without_approval)
         .bind(approver_id)
         .execute(&s.pool)
@@ -117,7 +118,7 @@ pub async fn list(State(s): State<AppState>, u: User) -> AppResult<Json<Vec<User
     if !u.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let r = sqlx::query_as::<_, User>("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users ORDER BY last_name, first_name")
+    let r = sqlx::query_as::<_, User>(&sql("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users ORDER BY last_name, first_name"))
         .fetch_all(&s.pool)
         .await?;
     Ok(Json(r))
@@ -132,7 +133,7 @@ pub async fn get_one(
         return Err(AppError::Forbidden);
     }
     Ok(Json(
-        sqlx::query_as::<_, User>("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE id=$1")
+        sqlx::query_as::<_, User>(&sql("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE id=$1"))
             .bind(id)
             .fetch_one(&s.pool)
             .await?,
@@ -177,7 +178,7 @@ async fn validate_approver(
             ));
         }
         let row: Option<(String, bool)> =
-            sqlx::query_as("SELECT role, active FROM users WHERE id=$1")
+            sqlx::query_as(&sql("SELECT role, active FROM users WHERE id=$1"))
                 .bind(aid)
                 .fetch_optional(pool)
                 .await?;
@@ -248,7 +249,7 @@ pub async fn create(
     let hash = hash_password(&password)?;
     let must_change = temp.is_some();
     validate_approver(&s.pool, &b.role, None, true, b.approver_id).await?;
-    let id: i64 = sqlx::query_scalar("INSERT INTO users(email,password_hash,first_name,last_name,role,weekly_hours,annual_leave_days,start_date,must_change_password,approver_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id")
+    let id: i64 = sqlx::query_scalar(&sql("INSERT INTO users(email,password_hash,first_name,last_name,role,weekly_hours,annual_leave_days,start_date,must_change_password,approver_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id"))
         .bind(&email_norm).bind(hash).bind(b.first_name.trim()).bind(b.last_name.trim()).bind(&b.role)
         .bind(b.weekly_hours).bind(b.annual_leave_days).bind(b.start_date).bind(must_change).bind(b.approver_id)
         .fetch_one(&s.pool).await
@@ -256,7 +257,7 @@ pub async fn create(
             tracing::warn!(target:"kitazeit::users", "create user insert failed: {e}");
             AppError::Conflict("Email already exists or invalid approver.".into())
         })?;
-    let user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE id=$1")
+    let user: User = sqlx::query_as(&sql("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE id=$1"))
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
@@ -353,7 +354,7 @@ pub async fn update(
             return Err(AppError::BadRequest("Invalid email.".into()));
         }
     }
-    let prev: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE id=$1")
+    let prev: User = sqlx::query_as(&sql("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE id=$1"))
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
@@ -366,7 +367,7 @@ pub async fn update(
     };
     validate_approver(&s.pool, &next_role, Some(id), next_active, next_approver).await?;
 
-    sqlx::query("UPDATE users SET email=COALESCE($1,email), first_name=COALESCE($2,first_name), last_name=COALESCE($3,last_name), role=COALESCE($4,role), weekly_hours=COALESCE($5,weekly_hours), annual_leave_days=COALESCE($6,annual_leave_days), start_date=COALESCE($7,start_date), active=COALESCE($8,active), allow_reopen_without_approval=COALESCE($9,allow_reopen_without_approval) WHERE id=$10")
+    sqlx::query(&sql("UPDATE users SET email=COALESCE($1,email), first_name=COALESCE($2,first_name), last_name=COALESCE($3,last_name), role=COALESCE($4,role), weekly_hours=COALESCE($5,weekly_hours), annual_leave_days=COALESCE($6,annual_leave_days), start_date=COALESCE($7,start_date), active=COALESCE($8,active), allow_reopen_without_approval=COALESCE($9,allow_reopen_without_approval) WHERE id=$10"))
         .bind(email_lc).bind(b.first_name).bind(b.last_name).bind(b.role.clone())
         .bind(b.weekly_hours).bind(b.annual_leave_days).bind(b.start_date).bind(b.active)
         .bind(b.allow_reopen_without_approval).bind(id)
@@ -375,7 +376,7 @@ pub async fn update(
     // Approver_id requires special handling because we want to support
     // explicit clearing (Some(None)) which COALESCE cannot express.
     if let Some(v) = b.approver_id {
-        sqlx::query("UPDATE users SET approver_id=$1 WHERE id=$2")
+        sqlx::query(&sql("UPDATE users SET approver_id=$1 WHERE id=$2"))
             .bind(v)
             .bind(id)
             .execute(&s.pool)
@@ -387,12 +388,12 @@ pub async fn update(
     let role_changed = b.role.as_deref().map(|r| r != prev.role).unwrap_or(false);
     let just_deactivated = matches!(b.active, Some(false)) && prev.active;
     if role_changed || just_deactivated {
-        let _ = sqlx::query("DELETE FROM sessions WHERE user_id=$1")
+        let _ = sqlx::query(&sql("DELETE FROM sessions WHERE user_id=$1"))
             .bind(id)
             .execute(&s.pool)
             .await;
     }
-    let next: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE id=$1")
+    let next: User = sqlx::query_as(&sql("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE id=$1"))
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
@@ -422,16 +423,16 @@ pub async fn deactivate(
             "You cannot deactivate yourself.".into(),
         ));
     }
-    let prev: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE id=$1")
+    let prev: User = sqlx::query_as(&sql("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE id=$1"))
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
     let mut tx = s.pool.begin().await?;
-    sqlx::query("UPDATE users SET active=FALSE WHERE id=$1")
+    sqlx::query(&sql("UPDATE users SET active=FALSE WHERE id=$1"))
         .bind(id)
         .execute(&mut *tx)
         .await?;
-    sqlx::query("DELETE FROM sessions WHERE user_id=$1")
+    sqlx::query(&sql("DELETE FROM sessions WHERE user_id=$1"))
         .bind(id)
         .execute(&mut *tx)
         .await?;
@@ -460,13 +461,13 @@ pub async fn reset_password(
     let temp = generate_password();
     let hash = hash_password(&temp)?;
     let mut tx = s.pool.begin().await?;
-    sqlx::query("UPDATE users SET password_hash=$1, must_change_password=TRUE WHERE id=$2")
+    sqlx::query(&sql("UPDATE users SET password_hash=$1, must_change_password=TRUE WHERE id=$2"))
         .bind(hash)
         .bind(id)
         .execute(&mut *tx)
         .await?;
     // Force re-authentication: kill any existing sessions for this user.
-    sqlx::query("DELETE FROM sessions WHERE user_id=$1")
+    sqlx::query(&sql("DELETE FROM sessions WHERE user_id=$1"))
         .bind(id)
         .execute(&mut *tx)
         .await?;

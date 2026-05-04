@@ -1,23 +1,19 @@
 //! Shared test infrastructure for KitaZeit integration tests.
 //!
-//! Provides [`TestApp`] which spins up an ephemeral Postgres container via
-//! testcontainers, runs migrations, seeds initial data, and starts the Axum
-//! server on a random port. Each test session gets a fully isolated database.
+//! Provides [`TestApp`] which creates an in-memory SQLite database (via the
+//! `test-sqlite` feature flag), runs migrations, seeds initial data, and
+//! starts the Axum server on a random port. Each test session gets a fully
+//! isolated database — no Docker or Postgres required.
 
 use kitazeit::{build_app, categories, config::Config, db, holidays, seed_admin, AppState};
 use reqwest::{Client, StatusCode};
 use serde_json::Value;
 use std::sync::Arc;
-use testcontainers::runners::AsyncRunner;
-use testcontainers::ContainerAsync;
-use testcontainers_modules::postgres::Postgres;
 
 /// A running test application with its own database and HTTP client.
 pub struct TestApp {
     pub base_url: String,
     pub admin_password: String,
-    /// Keep the container alive for the duration of the test.
-    _container: ContainerAsync<Postgres>,
 }
 
 /// A cookie-jar-equipped HTTP client that targets a specific [`TestApp`].
@@ -30,26 +26,11 @@ pub struct TestClient {
 impl TestApp {
     /// Boot a fully isolated test application.
     ///
-    /// Starts a Postgres container via testcontainers, creates the schema,
-    /// seeds initial data, and starts the Axum server on a random port.
+    /// Creates an in-memory SQLite database, applies the schema, seeds
+    /// initial data, and starts the Axum server on a random port.
     pub async fn spawn() -> Self {
-        let container = Postgres::default()
-            .start()
-            .await
-            .expect("failed to start Postgres container");
-
-        let host_port = container
-            .get_host_port_ipv4(5432)
-            .await
-            .expect("failed to get container port");
-
-        let database_url = format!(
-            "postgres://postgres:postgres@127.0.0.1:{}/postgres",
-            host_port
-        );
-
         let cfg = Config {
-            database_url: database_url.clone(),
+            database_url: "sqlite::memory:".into(),
             session_secret: "integration-test-secret-do-not-use-in-prod-32-characters".into(),
             admin_email: "admin@example.com".into(),
             bind: "127.0.0.1:0".into(),
@@ -115,7 +96,6 @@ impl TestApp {
         Self {
             base_url: server_url,
             admin_password,
-            _container: container,
         }
     }
 
@@ -124,11 +104,8 @@ impl TestApp {
         TestClient::new(&self.base_url)
     }
 
-    /// Cleanup: container is dropped automatically when TestApp is dropped.
-    pub async fn cleanup(self) {
-        // Container is dropped when `self` goes out of scope, which stops
-        // and removes the Postgres container automatically.
-    }
+    /// No-op cleanup (the in-memory SQLite DB is dropped with the pool).
+    pub async fn cleanup(self) {}
 }
 
 use chrono::Datelike;

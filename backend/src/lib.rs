@@ -15,6 +15,8 @@ pub mod settings;
 pub mod time_entries;
 pub mod users;
 
+use db::sql;
+
 use axum::http::StatusCode;
 use axum::{
     http::{header, HeaderName, HeaderValue},
@@ -44,14 +46,14 @@ pub async fn seed_admin(
     pool: &db::DatabasePool,
     admin_email: &str,
 ) -> anyhow::Result<Option<String>> {
-    let admin_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE role='admin'")
+    let admin_count: i64 = sqlx::query_scalar(&sql("SELECT COUNT(*) FROM users WHERE role='admin'"))
         .fetch_one(pool)
         .await?;
     if admin_count == 0 {
         let temp = "admin".to_string();
         let hash = auth::hash_password(&temp)?;
         let today = chrono::Local::now().date_naive();
-        sqlx::query("INSERT INTO users(email,password_hash,first_name,last_name,role,weekly_hours,annual_leave_days,start_date,must_change_password) VALUES ($1,$2,$3,$4,'admin',39.0,30,$5,TRUE)")
+        sqlx::query(&sql("INSERT INTO users(email,password_hash,first_name,last_name,role,weekly_hours,annual_leave_days,start_date,must_change_password) VALUES ($1,$2,$3,$4,'admin',39.0,30,$5,TRUE)"))
             .bind(admin_email.to_lowercase()).bind(hash).bind("Admin").bind("User").bind(today)
             .execute(pool).await?;
         Ok(Some(temp))

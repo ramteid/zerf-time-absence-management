@@ -1,5 +1,6 @@
 use crate::audit;
 use crate::auth::User;
+use crate::db::{sql, DbType};
 use crate::error::{AppError, AppResult};
 use crate::AppState;
 use axum::{
@@ -8,7 +9,7 @@ use axum::{
 };
 use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc};
 use serde::{Deserialize, Serialize, Serializer};
-use sqlx::{FromRow, Postgres, QueryBuilder};
+use sqlx::{FromRow, QueryBuilder};
 use std::collections::HashSet;
 
 const ALLOWED_ABSENCE_KINDS: &[&str] = &[
@@ -41,7 +42,7 @@ async fn holidays_set(
     to: NaiveDate,
 ) -> AppResult<HashSet<NaiveDate>> {
     let r: Vec<(NaiveDate,)> =
-        sqlx::query_as("SELECT holiday_date FROM holidays WHERE holiday_date BETWEEN $1 AND $2")
+        sqlx::query_as(&sql("SELECT holiday_date FROM holidays WHERE holiday_date BETWEEN $1 AND $2"))
             .bind(from)
             .bind(to)
             .fetch_all(pool)
@@ -78,7 +79,7 @@ pub async fn workdays_total(
     to: NaiveDate,
 ) -> AppResult<f64> {
     let r: Vec<(NaiveDate, NaiveDate)> = sqlx::query_as(
-        "SELECT start_date, end_date FROM absences WHERE user_id=$1 AND kind=$2 AND status='approved' AND end_date >= $3 AND start_date <= $4"
+        &sql("SELECT start_date, end_date FROM absences WHERE user_id=$1 AND kind=$2 AND status='approved' AND end_date >= $3 AND start_date <= $4")
     ).bind(user_id).bind(kind).bind(from).bind(to).fetch_all(pool).await?;
     let mut total = 0.0;
     for (s, e) in r {
@@ -103,7 +104,7 @@ pub async fn list(
     let from = NaiveDate::from_ymd_opt(year, 1, 1).unwrap();
     let to = NaiveDate::from_ymd_opt(year, 12, 31).unwrap();
     let r = sqlx::query_as::<_, Absence>(
-        "SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE user_id=$1 AND end_date >= $2 AND start_date <= $3 ORDER BY start_date DESC"
+        &sql("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE user_id=$1 AND end_date >= $2 AND start_date <= $3 ORDER BY start_date DESC")
     ).bind(u.id).bind(from).bind(to).fetch_all(&s.pool).await?;
     Ok(Json(r))
 }
@@ -123,7 +124,7 @@ pub async fn list_all(
     if !u.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let mut builder = QueryBuilder::<Postgres>::new("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE TRUE");
+    let mut builder = QueryBuilder::<DbType>::new("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE TRUE");
     if let Some(v) = q.from {
         builder.push(" AND end_date >= ").push_bind(v);
     }
@@ -183,7 +184,7 @@ pub async fn calendar(
         NaiveDate::from_ymd_opt(year, month + 1, 1).unwrap()
     } - Duration::days(1);
     let rows = sqlx::query_as::<_, CalendarEntry>(
-        "SELECT a.id, a.user_id, u.first_name, u.last_name, a.kind, a.start_date, a.end_date, a.comment, a.status FROM absences a JOIN users u ON u.id=a.user_id WHERE a.status IN ('requested','approved') AND a.end_date >= $1 AND a.start_date <= $2 ORDER BY a.start_date"
+        &sql("SELECT a.id, a.user_id, u.first_name, u.last_name, a.kind, a.start_date, a.end_date, a.comment, a.status FROM absences a JOIN users u ON u.id=a.user_id WHERE a.status IN ('requested','approved') AND a.end_date >= $1 AND a.start_date <= $2 ORDER BY a.start_date")
     ).bind(from).bind(to).fetch_all(&s.pool).await?;
     let lead = u.is_lead();
     // Privacy: only team leads / admins see the actual absence kind. For peers
@@ -255,17 +256,17 @@ pub async fn create(
 ) -> AppResult<Json<Absence>> {
     let normalized = normalize_absence(&b)?;
     let overlap: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM absences WHERE user_id=$1 AND status IN ('requested','approved') AND end_date >= $2 AND start_date <= $3"
+        &sql("SELECT COUNT(*) FROM absences WHERE user_id=$1 AND status IN ('requested','approved') AND end_date >= $2 AND start_date <= $3")
     ).bind(u.id).bind(b.start_date).bind(b.end_date).fetch_one(&s.pool).await?;
     if overlap > 0 {
         return Err(AppError::Conflict("Overlap with existing absence.".into()));
     }
 
     let status = status_for_kind(normalized.kind);
-    let id: i64 = sqlx::query_scalar("INSERT INTO absences(user_id, kind, start_date, end_date, comment, status) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id")
+    let id: i64 = sqlx::query_scalar(&sql("INSERT INTO absences(user_id, kind, start_date, end_date, comment, status) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id"))
         .bind(u.id).bind(normalized.kind).bind(b.start_date).bind(b.end_date).bind(&b.comment).bind(status)
         .fetch_one(&s.pool).await?;
-    let a: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1")
+    let a: Absence = sqlx::query_as(&sql("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1"))
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
@@ -289,7 +290,7 @@ pub async fn update(
     Json(b): Json<NewAbsence>,
 ) -> AppResult<Json<Absence>> {
     let normalized = normalize_absence(&b)?;
-    let prev: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1")
+    let prev: Absence = sqlx::query_as(&sql("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1"))
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
@@ -307,7 +308,7 @@ pub async fn update(
     }
     // Re-check overlap with *other* absences of the same user.
     let overlap: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM absences WHERE id != $1 AND user_id=$2 AND status IN ('requested','approved') AND end_date >= $3 AND start_date <= $4",
+        &sql("SELECT COUNT(*) FROM absences WHERE id != $1 AND user_id=$2 AND status IN ('requested','approved') AND end_date >= $3 AND start_date <= $4"),
     )
     .bind(id).bind(u.id).bind(b.start_date).bind(b.end_date)
     .fetch_one(&s.pool).await?;
@@ -325,7 +326,7 @@ pub async fn update(
         )
     };
     sqlx::query(
-        "UPDATE absences SET kind=$1, start_date=$2, end_date=$3, comment=$4, status=$5, reviewed_by=$6, reviewed_at=$7, rejection_reason=$8 WHERE id=$9",
+        &sql("UPDATE absences SET kind=$1, start_date=$2, end_date=$3, comment=$4, status=$5, reviewed_by=$6, reviewed_at=$7, rejection_reason=$8 WHERE id=$9"),
     )
     .bind(normalized.kind)
     .bind(b.start_date)
@@ -338,7 +339,7 @@ pub async fn update(
     .bind(id)
     .execute(&s.pool)
     .await?;
-    let next: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1")
+    let next: Absence = sqlx::query_as(&sql("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1"))
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
@@ -360,7 +361,7 @@ pub async fn cancel(
     u: User,
     Path(id): Path<i64>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let a: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1")
+    let a: Absence = sqlx::query_as(&sql("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1"))
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
@@ -372,7 +373,7 @@ pub async fn cancel(
             "Only requested absences can be cancelled.".into(),
         ));
     }
-    sqlx::query("UPDATE absences SET status='cancelled' WHERE id=$1")
+    sqlx::query(&sql("UPDATE absences SET status='cancelled' WHERE id=$1"))
         .bind(id)
         .execute(&s.pool)
         .await?;
@@ -397,14 +398,14 @@ pub async fn approve(
     if !u.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let a: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1")
+    let a: Absence = sqlx::query_as(&sql("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1"))
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
     if a.user_id == u.id && !u.is_admin() {
         return Err(AppError::Forbidden);
     }
-    sqlx::query("UPDATE absences SET status='approved', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP WHERE id=$2")
+    sqlx::query(&sql("UPDATE absences SET status='approved', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP WHERE id=$2"))
         .bind(u.id).bind(id).execute(&s.pool).await?;
     let before = serde_json::to_value(&a).unwrap();
     let after = serde_json::json!({"status": "approved", "reviewed_by": u.id});
@@ -450,14 +451,14 @@ pub async fn reject(
     if b.reason.trim().is_empty() {
         return Err(AppError::BadRequest("Reason required.".into()));
     }
-    let a: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1")
+    let a: Absence = sqlx::query_as(&sql("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1"))
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
     if a.user_id == u.id && !u.is_admin() {
         return Err(AppError::Forbidden);
     }
-    sqlx::query("UPDATE absences SET status='rejected', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP, rejection_reason=$2 WHERE id=$3")
+    sqlx::query(&sql("UPDATE absences SET status='rejected', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP, rejection_reason=$2 WHERE id=$3"))
         .bind(u.id).bind(&b.reason).bind(id).execute(&s.pool).await?;
     audit::log(
         &s.pool,
@@ -511,7 +512,7 @@ pub async fn balance(
         return Err(AppError::Forbidden);
     }
     let year = q.year.unwrap_or_else(|| chrono::Local::now().year());
-    let target: crate::auth::User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE id=$1")
+    let target: crate::auth::User = sqlx::query_as(&sql("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE id=$1"))
         .bind(uid)
         .fetch_one(&s.pool)
         .await?;
@@ -519,7 +520,7 @@ pub async fn balance(
     let to = NaiveDate::from_ymd_opt(year, 12, 31).unwrap();
     let today = chrono::Local::now().date_naive();
     let vacations = sqlx::query_as::<_, Absence>(
-        "SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE user_id=$1 AND kind='vacation' AND status IN ('requested','approved') AND end_date >= $2 AND start_date <= $3"
+        &sql("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE user_id=$1 AND kind='vacation' AND status IN ('requested','approved') AND end_date >= $2 AND start_date <= $3")
     ).bind(uid).bind(from).bind(to).fetch_all(&s.pool).await?;
     let mut taken = 0.0;
     let mut upcoming = 0.0;

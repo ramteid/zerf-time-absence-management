@@ -3,6 +3,11 @@ name = "kitazeit"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = ["postgres"]
+postgres = ["sqlx/postgres"]
+test-sqlite = ["sqlx/sqlite"]
+
 [dependencies]
 axum = { version = "0.8", features = ["macros"] }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "macros"] }
@@ -11,7 +16,7 @@ tower = "0.5"
 tower-http = { version = "0.6", features = ["fs", "trace", "limit", "timeout", "set-header"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "chrono", "macros", "migrate"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "chrono", "macros", "migrate"] }
 chrono = { version = "0.4", features = ["serde"] }
 argon2 = "0.5"
 password-hash = { version = "0.5", features = ["getrandom"] }
@@ -30,9 +35,6 @@ lettre = { version = "0.11", default-features = false, features = ["tokio1-rustl
 [dev-dependencies]
 reqwest = { version = "0.12", features = ["json", "cookies"] }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "macros", "test-util"] }
-uuid = { version = "1", features = ["v4"] }
-testcontainers = "0.27"
-testcontainers-modules = { version = "0.15", features = ["postgres"] }
 
 [profile.release]
 strip = true
