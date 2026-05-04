@@ -306,7 +306,7 @@ const TRANSLATIONS = {
     "Edit Category": "Kategorie bearbeiten",
     "General Settings": "Allgemeine Einstellungen",
     General: "Allgemein",
-    "Kita name": "Kita-Name",
+    "Organization name": "Organisationsname",
     "Save Changes": "Änderungen speichern",
     "Saving...": "Speichert...",
     "Signing in…": "Anmeldung läuft…",
@@ -318,7 +318,7 @@ const TRANSLATIONS = {
     "Please enter default weekly hours.": "Bitte Standard-Wochenstunden eingeben.",
     "Please enter default annual leave days.":
       "Bitte Standard-Urlaubstage eingeben.",
-    "– Please select –": "– Bitte auswählen –",
+    "- Please select -": "- Bitte auswählen -",
     Country: "Land",
     Region: "Region",
     "e.g. US-CA": "z.B. US-CA",
@@ -349,7 +349,7 @@ const TRANSLATIONS = {
     "Rejected.": "Abgelehnt.",
     Retry: "Erneut versuchen",
     // Default category names
-    "Direct Childcare": "Arbeit am Kind",
+    "Core Duties": "Kernaufgaben",
     "Preparation Time": "Vorbereitungszeit",
     "Leadership Tasks": "Leitungsaufgaben",
     "Team Meeting": "Teambesprechung",

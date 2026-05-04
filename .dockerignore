@@ -17,3 +17,5 @@ README.md
 SECURITY.md
 tests
 scripts
+!scripts/
+!scripts/backup.sh

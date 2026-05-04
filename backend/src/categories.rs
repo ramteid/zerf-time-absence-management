@@ -8,6 +8,8 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
+const LEGACY_CORE_DUTIES_NAME_HEX: &str = "446972656374204368696c6463617265";
+
 #[derive(FromRow, Serialize, Deserialize, Clone)]
 pub struct Category {
     pub id: i64,
@@ -19,6 +21,14 @@ pub struct Category {
 }
 
 pub async fn ensure_initial(pool: &crate::db::DatabasePool) -> AppResult<()> {
+    sqlx::query(
+        "UPDATE categories SET name = $1 WHERE name = convert_from(decode($2, 'hex'), 'UTF8')",
+    )
+        .bind("Core Duties")
+        .bind(LEGACY_CORE_DUTIES_NAME_HEX)
+        .execute(pool)
+        .await?;
+
     let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM categories")
         .fetch_one(pool)
         .await?;
@@ -26,7 +36,7 @@ pub async fn ensure_initial(pool: &crate::db::DatabasePool) -> AppResult<()> {
         return Ok(());
     }
     let init = [
-        ("Direct Childcare", "#4CAF50", 1),
+        ("Core Duties", "#4CAF50", 1),
         ("Preparation Time", "#2196F3", 2),
         ("Leadership Tasks", "#FF9800", 3),
         ("Team Meeting", "#9C27B0", 4),

@@ -236,8 +236,38 @@
     "/team-settings": TeamSettings,
   };
 
+  const routeAccess = {
+    "/dashboard": (user) => !!user?.permissions?.can_view_dashboard,
+    "/reports": (user) => !!user?.permissions?.can_view_team_reports,
+    "/team-settings": (user) => !!user?.permissions?.can_manage_team_settings,
+    "/admin": (user) => !!user?.permissions?.can_manage_users,
+    "/admin/users": (user) => !!user?.permissions?.can_manage_users,
+    "/admin/categories": (user) => !!user?.permissions?.can_manage_categories,
+    "/admin/holidays": (user) => !!user?.permissions?.can_manage_holidays,
+    "/admin/audit-log": (user) => !!user?.permissions?.can_view_audit_log,
+    "/admin/settings": (user) => !!user?.permissions?.can_manage_settings,
+  };
+
   $: route = resolveRoute(pathname, $currentUser);
-  $: isAdmin = pathname.startsWith("/admin");
+  $: isAdmin =
+    pathname.startsWith("/admin") &&
+    !!$currentUser?.permissions?.can_manage_users;
+
+  function preferredHome(user) {
+    const dashboardAvailable = (user?.nav || []).some(
+      (item) => item?.key === "Dashboard" || item?.href === "/dashboard",
+    );
+    return user?.home && user.home !== "/" && user.home !== ""
+      ? user.home
+      : dashboardAvailable
+        ? "/dashboard"
+        : "/time";
+  }
+
+  function canAccessRoute(path, user) {
+    const check = routeAccess[path];
+    return check ? check(user) : true;
+  }
 
   function resolveRoute(p, user) {
     debugLog("route:resolve", {
@@ -251,18 +281,11 @@
     // Resolve redirects without side-effects — just return the target component
     // directly so the reactive chain never yields null for a logged-in user.
     if (p === "/" || p === "") {
-      const dashboardAvailable = (user?.nav || []).some(
-        (item) => item?.key === "Dashboard" || item?.href === "/dashboard",
-      );
       const dest = user.must_change_password
         ? "/account"
         : user.must_configure_settings
           ? "/admin/settings"
-          : dashboardAvailable
-            ? "/dashboard"
-            : user.home && user.home !== "/" && user.home !== ""
-              ? user.home
-              : "/time";
+          : preferredHome(user);
       debugLog("route:redirect-home", { dest });
       // Update the URL bar (deferred so we don't mutate stores mid-reactive-cycle)
       setTimeout(() => go(dest, false), 0);
@@ -283,6 +306,15 @@
       debugLog("route:redirect-configure-settings");
       setTimeout(() => go("/admin/settings", false), 0);
       return AdminSettings;
+    }
+    if (routeMap[p] && !canAccessRoute(p, user)) {
+      const dest = preferredHome(user);
+      debugLog("route:redirect-unauthorized", {
+        inputPath: p,
+        dest,
+      });
+      setTimeout(() => go(dest, false), 0);
+      return routeMap[dest] || NotFound;
     }
     const resolved = routeMap[p] || NotFound;
     debugLog("route:resolved", {

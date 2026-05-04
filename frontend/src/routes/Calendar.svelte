@@ -59,7 +59,7 @@
   // server-side to the current user, but we double-check defensively.
   $: myAbsences = entries.filter((e) => e.user_id === $currentUser?.id);
   $: myTimeEntries = timeEntries.filter(
-    (e) => !$currentUser || e.user_id === $currentUser.id,
+    (e) => e.user_id === $currentUser?.id,
   );
 
   $: teMap = (() => {

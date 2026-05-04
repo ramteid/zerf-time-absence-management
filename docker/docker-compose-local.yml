@@ -78,9 +78,41 @@ services:
       - public
       - private
 
+  backup:
+    build:
+      context: ..
+      dockerfile: docker/backup.Dockerfile
+    container_name: kitazeit-backup
+    restart: unless-stopped
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - PGHOST=postgres
+      - PGPORT=5432
+      - PGDATABASE=${KITAZEIT_POSTGRES_DB:?KITAZEIT_POSTGRES_DB must be set in .env}
+      - PGUSER=${KITAZEIT_POSTGRES_USER:?KITAZEIT_POSTGRES_USER must be set in .env}
+      - PGPASSWORD=${KITAZEIT_POSTGRES_PASSWORD:?KITAZEIT_POSTGRES_PASSWORD must be set in .env}
+      - BACKUP_INTERVAL_SECONDS=${BACKUP_INTERVAL_SECONDS:-86400}
+      - BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-30}
+    volumes:
+      - backup_data:/backups
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    networks:
+      - private
+
 volumes:
   postgres_data:
     name: kitazeit_postgres_data
+  backup_data:
+    name: kitazeit_backup_data
 
 networks:
   public:

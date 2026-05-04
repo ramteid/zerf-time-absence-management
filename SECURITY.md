@@ -132,10 +132,10 @@ Caddy also bumps to TLS 1.2+/H2/H3 and renews certificates via Let's Encrypt
 
 ## Backups
 
-`scripts/backup.sh` streams `pg_dump --format=custom` from the PostgreSQL
-container into `./backups/` with `umask 077`. Setting
-`BACKUP_GPG_RECIPIENT=<keyid>` encrypts each dump via `gpg --encrypt`; the
-plaintext copy is then `shred`-ed. Retention defaults to 30 days.
+The dedicated `backup` compose service runs `scripts/backup.sh` on the
+`BACKUP_INTERVAL_SECONDS` schedule and stores `pg_dump --format=custom`
+snapshots in the `kitazeit_backup_data` named volume with `umask 077`.
+Retention defaults to 30 days.
 
 ## Supply-chain & CI
 
@@ -163,5 +163,5 @@ updates after CI is green; major updates require a human review.
 3. Set `KITAZEIT_DOMAIN` and `KITAZEIT_ADMIN_EMAIL` in `.env`.
 4. `./start_public.sh` — note the one-time admin password from the logs.
 5. Sign in, change the admin password (forced), create real users.
-6. Schedule `scripts/backup.sh` via cron and copy snapshots off-host.
+6. Configure the `backup` service schedule via `BACKUP_INTERVAL_SECONDS` and copy snapshots off-host.
 7. Subscribe to release notes; let Dependabot keep dependencies fresh.
