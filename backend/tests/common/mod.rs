@@ -67,6 +67,16 @@ impl TestApp {
         categories::ensure_initial(&pool)
             .await
             .expect("failed to seed categories");
+        // Seed country/region so that ensure_holidays can fetch from the API.
+        // A fresh database has no app_settings rows for country or region.
+        sqlx::query(
+            "INSERT INTO app_settings(key, value) \
+             VALUES ('country', 'DE'), ('region', 'DE-BW') \
+             ON CONFLICT (key) DO NOTHING",
+        )
+        .execute(&pool)
+        .await
+        .expect("failed to seed country settings");
         let year = chrono::Local::now().year_ce().1 as i32;
         holidays::ensure_holidays(&pool, year)
             .await
