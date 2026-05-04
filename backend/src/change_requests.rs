@@ -102,15 +102,32 @@ pub async fn create(
             return Err(AppError::BadRequest("Date cannot be in the future.".into()));
         }
     }
-    let z: (i64, String) = sqlx::query_as("SELECT user_id, status FROM time_entries WHERE id=$1")
-        .bind(b.time_entry_id)
-        .fetch_one(&s.pool)
-        .await?;
+    let z: (i64, String, String, String) = sqlx::query_as(
+        "SELECT user_id, status, start_time, end_time FROM time_entries WHERE id=$1",
+    )
+    .bind(b.time_entry_id)
+    .fetch_one(&s.pool)
+    .await?;
     if z.0 != u.id {
         return Err(AppError::Forbidden);
     }
     if z.1 == "draft" {
         return Err(AppError::BadRequest("Edit drafts directly.".into()));
+    }
+    // When only one of start/end is proposed, validate the combination against
+    // the existing entry's other time field to prevent storing impossible CRs.
+    if new_start.is_some() || new_end.is_some() {
+        let eff_start = new_start
+            .or_else(|| parse_t(&z.2).ok())
+            .unwrap_or(chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap());
+        let eff_end = new_end
+            .or_else(|| parse_t(&z.3).ok())
+            .unwrap_or(chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap());
+        if eff_end <= eff_start {
+            return Err(AppError::BadRequest(
+                "End time must be after start time.".into(),
+            ));
+        }
     }
     // Guard against duplicate open change requests for the same entry.
     let open_cr: Option<i64> = sqlx::query_scalar(

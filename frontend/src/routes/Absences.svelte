@@ -150,6 +150,11 @@
         <div class="stat-card-value tab-num">{balance.already_taken}</div>
       </div>
       <div class="kz-card stat-card">
+        <div class="stat-card-label">{$t("Approved upcoming ({year})", { year: selectedYear })}</div>
+        <div class="stat-card-value tab-num">{balance.approved_upcoming || 0}</div>
+        <div class="stat-card-sub">{$t("Approved days not yet taken")}</div>
+      </div>
+      <div class="kz-card stat-card">
         <div class="stat-card-label">{$t("Vacation pending ({year})", { year: selectedYear })}</div>
         <div class="stat-card-value tab-num">{balance.requested || 0}</div>
         <div class="stat-card-sub">{$t("Vacation requests awaiting approval")}</div>

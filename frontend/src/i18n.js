@@ -54,6 +54,8 @@ const TRANSLATIONS = {
     "Yes, cancel absence": "Yes, cancel absence",
     "Vacation days ({year})": "Vacation days ({year})",
     "Vacation used ({year})": "Vacation used ({year})",
+    "Approved upcoming ({year})": "Approved upcoming ({year})",
+    "Approved days not yet taken": "Approved days not yet taken",
     "Vacation pending ({year})": "Vacation pending ({year})",
     "Vacation remaining ({year})": "Vacation remaining ({year})",
     "Vacation requests awaiting approval": "Vacation requests awaiting approval",
@@ -444,6 +446,8 @@ const TRANSLATIONS = {
     "Yes, cancel absence": "Ja, Abwesenheit stornieren",
     "Vacation days ({year})": "Urlaubstage ({year})",
     "Vacation used ({year})": "Genommene Urlaubstage ({year})",
+    "Approved upcoming ({year})": "Genehmigte bevorstehende ({year})",
+    "Approved days not yet taken": "Genehmigte Tage noch nicht genommen",
     "Vacation pending ({year})": "Offene Urlaubstage ({year})",
     "Vacation remaining ({year})": "Verbleibende Urlaubstage ({year})",
     "Vacation requests awaiting approval":

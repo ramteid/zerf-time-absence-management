@@ -101,6 +101,9 @@ CREATE TABLE IF NOT EXISTS change_requests (
 );
 CREATE INDEX IF NOT EXISTS idx_cr_user_created ON change_requests(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_cr_status_created ON change_requests(status, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cr_entry_open
+    ON change_requests(time_entry_id)
+    WHERE status = 'open';
 
 CREATE TABLE IF NOT EXISTS holidays (
   id BIGSERIAL PRIMARY KEY,

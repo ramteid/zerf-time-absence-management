@@ -91,7 +91,13 @@
       if (day.absence) return true;
       const entries = Array.isArray(day.entries) ? day.entries : [];
       if (!entries.length) return false;
-      return entries.every((entry) => entry.status && entry.status !== "draft");
+      // A day counts as submitted only when it has at least one
+      // submitted/approved entry and none are still in draft.
+      const hasSubmittedOrApproved = entries.some(
+        (entry) => entry.status === "submitted" || entry.status === "approved",
+      );
+      const hasDraft = entries.some((entry) => entry.status === "draft");
+      return hasSubmittedOrApproved && !hasDraft;
     });
   }
 

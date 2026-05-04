@@ -214,7 +214,7 @@ pub async fn update(
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
-    let admin_correction = u.is_admin() && prev.status == "approved";
+    let admin_correction = u.is_admin() && (prev.status == "approved" || prev.status == "submitted");
     if !admin_correction {
         if prev.user_id != u.id {
             return Err(AppError::Forbidden);
