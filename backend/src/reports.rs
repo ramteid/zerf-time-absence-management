@@ -459,7 +459,7 @@ pub async fn categories(
         "SELECT c.name, c.color, z.start_time, z.end_time \
          FROM time_entries z \
          JOIN categories c ON c.id=z.category_id \
-         WHERE z.status IN ('draft','submitted','approved') AND z.entry_date BETWEEN ",
+         WHERE z.status = 'approved' AND z.entry_date BETWEEN ",
     );
     builder.push_bind(q.from).push(" AND ").push_bind(q.to);
     if let Some(id) = uid {
@@ -514,9 +514,21 @@ pub async fn overtime(
         return Err(AppError::Forbidden);
     }
     let year = q.year.unwrap_or_else(|| chrono::Local::now().year());
+    let now = chrono::Local::now();
+    let current_year = now.year();
+    // Cap the loop so future months (with zero actuals but full targets) do not
+    // produce large artificial deficits in the cumulative balance.
+    let max_month: u32 = if year < current_year {
+        12
+    } else if year == current_year {
+        now.month()
+    } else {
+        // Future year — nothing has been worked yet.
+        return Ok(Json(vec![]));
+    };
     let mut out = vec![];
     let mut cum = 0i64;
-    for m in 1..=12u32 {
+    for m in 1..=max_month {
         let mstr = format!("{:04}-{:02}", year, m);
         let r = build_month(&s.pool, uid, &mstr).await?;
         cum += r.diff_min;

@@ -112,6 +112,18 @@ pub async fn create(
     if z.1 == "draft" {
         return Err(AppError::BadRequest("Edit drafts directly.".into()));
     }
+    // Guard against duplicate open change requests for the same entry.
+    let open_cr: Option<i64> = sqlx::query_scalar(
+        "SELECT id FROM change_requests WHERE time_entry_id=$1 AND status='open'",
+    )
+    .bind(b.time_entry_id)
+    .fetch_optional(&s.pool)
+    .await?;
+    if let Some(existing_id) = open_cr {
+        return Err(AppError::Conflict(format!(
+            "An open change request already exists for this entry (id {existing_id})."
+        )));
+    }
     // Validate new_category_id if provided — reject nonexistent/inactive categories
     // before storing so malformed data never reaches the approval path.
     if let Some(cat_id) = b.new_category_id {
@@ -184,7 +196,7 @@ pub async fn approve(
     };
     crate::time_entries::validate(&s.pool, entry.user_id, &effective, Some(a.time_entry_id))
         .await?;
-    sqlx::query("UPDATE time_entries SET entry_date=COALESCE($1,entry_date), start_time=COALESCE($2,start_time), end_time=COALESCE($3,end_time), category_id=COALESCE($4,category_id), comment=COALESCE($5,comment), updated_at=CURRENT_TIMESTAMP WHERE id=$6")
+    sqlx::query("UPDATE time_entries SET entry_date=COALESCE($1,entry_date), start_time=COALESCE($2,start_time), end_time=COALESCE($3,end_time), category_id=COALESCE($4,category_id), comment=CASE WHEN $5 IS NOT NULL THEN NULLIF($5,'') ELSE comment END, updated_at=CURRENT_TIMESTAMP WHERE id=$6")
         .bind(a.new_date).bind(&a.new_start_time).bind(&a.new_end_time).bind(a.new_category_id).bind(&a.new_comment).bind(a.time_entry_id)
         .execute(&s.pool).await?;
     sqlx::query("UPDATE change_requests SET status='approved', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP WHERE id=$2")

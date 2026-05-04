@@ -145,8 +145,8 @@ pub(crate) async fn validate(
     let start_n = parse_time(&te.start_time)?;
     let end_n = parse_time(&te.end_time)?;
 
-    let existing: Vec<(i64, String, String)> = sqlx::query_as(
-        "SELECT id, start_time, end_time FROM time_entries WHERE user_id=$1 AND entry_date=$2",
+    let existing: Vec<(i64, String, String, String)> = sqlx::query_as(
+        "SELECT id, start_time, end_time, status FROM time_entries WHERE user_id=$1 AND entry_date=$2",
     )
     .bind(user_id)
     .bind(te.entry_date)
@@ -154,8 +154,13 @@ pub(crate) async fn validate(
     .await?;
 
     let mut day_total = new_min;
-    for (id, b, e) in &existing {
+    for (id, b, e, status) in &existing {
         if Some(*id) == exclude_id {
+            continue;
+        }
+        // Rejected entries are effectively void: they do not occupy a time slot
+        // and must not count toward the daily 14-hour cap.
+        if status == "rejected" {
             continue;
         }
         let bb = parse_time(b)?;
@@ -283,6 +288,11 @@ pub async fn submit(
     u: User,
     Json(b): Json<IdsBody>,
 ) -> AppResult<Json<serde_json::Value>> {
+    if b.ids.is_empty() {
+        return Ok(Json(serde_json::json!({"ok": true, "count": 0})));
+    }
+    // Phase 1: validate ownership for ALL entries before any writes, so a
+    // mixed-ownership batch never partially submits.
     for id in &b.ids {
         let z: TimeEntry = sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1")
             .bind(id)
@@ -291,44 +301,60 @@ pub async fn submit(
         if z.user_id != u.id {
             return Err(AppError::Forbidden);
         }
-        if z.status != "draft" {
-            continue;
-        }
-        sqlx::query(
-            "UPDATE time_entries SET status='submitted', submitted_at=CURRENT_TIMESTAMP WHERE id=$1",
+    }
+    // Phase 2: atomically submit all draft entries in a single transaction.
+    let mut tx = s.pool.begin().await?;
+    let mut submitted: Vec<i64> = vec![];
+    for id in &b.ids {
+        let rows = sqlx::query(
+            "UPDATE time_entries SET status='submitted', submitted_at=CURRENT_TIMESTAMP \
+             WHERE id=$1 AND status='draft' AND user_id=$2",
         )
         .bind(id)
-        .execute(&s.pool)
-        .await?;
+        .bind(u.id)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if rows > 0 {
+            submitted.push(*id);
+        }
+    }
+    tx.commit().await?;
+    // Phase 3: audit logs (best-effort, after commit).
+    for id in &submitted {
         audit::log(
             &s.pool,
             u.id,
             "status_changed",
             "time_entries",
             *id,
-            Some(serde_json::json!({"status":"draft"})),
-            Some(serde_json::json!({"status":"submitted"})),
+            Some(serde_json::json!({"status": "draft"})),
+            Some(serde_json::json!({"status": "submitted"})),
         )
         .await;
     }
-    // Notify the approver (or self if admin with no approver) about the submission.
-    let approver_id: Option<i64> = sqlx::query_scalar("SELECT approver_id FROM users WHERE id=$1")
-        .bind(u.id)
-        .fetch_optional(&s.pool)
-        .await?
-        .flatten();
-    let notify_id = approver_id.unwrap_or(u.id);
-    crate::notifications::create(
-        &s,
-        notify_id,
-        "timesheet_submitted",
-        &format!("{} {} submitted a timesheet", u.first_name, u.last_name),
-        &format!("{} entries submitted for approval", b.ids.len()),
-        Some("time_entries"),
-        None,
-    )
-    .await;
-    Ok(Json(serde_json::json!({"ok":true, "count": b.ids.len()})))
+    let count = submitted.len();
+    // Phase 4: notify the approver with the actual submitted count.
+    if count > 0 {
+        let approver_id: Option<i64> =
+            sqlx::query_scalar("SELECT approver_id FROM users WHERE id=$1")
+                .bind(u.id)
+                .fetch_optional(&s.pool)
+                .await?
+                .flatten();
+        let notify_id = approver_id.unwrap_or(u.id);
+        crate::notifications::create(
+            &s,
+            notify_id,
+            "timesheet_submitted",
+            &format!("{} {} submitted a timesheet", u.first_name, u.last_name),
+            &format!("{} entries submitted for approval", count),
+            Some("time_entries"),
+            None,
+        )
+        .await;
+    }
+    Ok(Json(serde_json::json!({"ok": true, "count": count})))
 }
 
 pub async fn approve(
@@ -346,6 +372,11 @@ pub async fn approve(
     if z.user_id == u.id && !u.is_admin() {
         return Err(AppError::Forbidden);
     }
+    if z.status != "submitted" {
+        return Err(AppError::BadRequest(
+            "Only submitted entries can be approved.".into(),
+        ));
+    }
     sqlx::query("UPDATE time_entries SET status='approved', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP WHERE id=$2")
         .bind(u.id).bind(id).execute(&s.pool).await?;
     audit::log(
@@ -356,6 +387,16 @@ pub async fn approve(
         id,
         Some(serde_json::to_value(&z).unwrap()),
         Some(serde_json::json!({"status": "approved", "reviewed_by": u.id})),
+    )
+    .await;
+    crate::notifications::create(
+        &s,
+        z.user_id,
+        "timesheet_approved",
+        "Timesheet approved",
+        &format!("Your timesheet entry for {} has been approved.", z.entry_date),
+        Some("time_entries"),
+        Some(id),
     )
     .await;
     Ok(Json(serde_json::json!({"ok":true})))
@@ -382,6 +423,11 @@ pub async fn reject(
     if z.user_id == u.id && !u.is_admin() {
         return Err(AppError::Forbidden);
     }
+    if z.status != "submitted" {
+        return Err(AppError::BadRequest(
+            "Only submitted entries can be rejected.".into(),
+        ));
+    }
     if b.reason.trim().is_empty() {
         return Err(AppError::BadRequest("Reason required.".into()));
     }
@@ -395,6 +441,19 @@ pub async fn reject(
         id,
         Some(serde_json::to_value(&z).unwrap()),
         Some(serde_json::json!({"status": "rejected", "reason": b.reason})),
+    )
+    .await;
+    crate::notifications::create(
+        &s,
+        z.user_id,
+        "timesheet_rejected",
+        "Timesheet rejected",
+        &format!(
+            "Your timesheet entry for {} was rejected: {}",
+            z.entry_date, b.reason
+        ),
+        Some("time_entries"),
+        Some(id),
     )
     .await;
     Ok(Json(serde_json::json!({"ok":true})))
@@ -431,7 +490,105 @@ pub async fn batch_approve(
             Some(serde_json::json!({"status": "approved", "reviewed_by": u.id})),
         )
         .await;
+        crate::notifications::create(
+            &s,
+            z.user_id,
+            "timesheet_approved",
+            "Timesheet approved",
+            &format!("Your timesheet entry for {} has been approved.", z.entry_date),
+            Some("time_entries"),
+            Some(*id),
+        )
+        .await;
         count += 1;
     }
     Ok(Json(serde_json::json!({"ok":true, "count": count})))
+}
+
+#[derive(Deserialize)]
+pub struct BatchRejectBody {
+    pub ids: Vec<i64>,
+    pub reason: String,
+}
+
+pub async fn batch_reject(
+    State(s): State<AppState>,
+    u: User,
+    Json(b): Json<BatchRejectBody>,
+) -> AppResult<Json<serde_json::Value>> {
+    if !u.is_lead() {
+        return Err(AppError::Forbidden);
+    }
+    let reason = b.reason.trim().to_string();
+    if reason.is_empty() {
+        return Err(AppError::BadRequest("Reason required.".into()));
+    }
+    if reason.len() > 2000 {
+        return Err(AppError::BadRequest("Reason too long.".into()));
+    }
+    if b.ids.is_empty() {
+        return Ok(Json(serde_json::json!({"ok": true, "count": 0})));
+    }
+    // Fetch all submitted entries that this lead is allowed to reject.
+    let mut to_reject: Vec<TimeEntry> = vec![];
+    for id in &b.ids {
+        let z: Option<TimeEntry> = sqlx::query_as(
+            "SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, \
+             status, submitted_at, reviewed_by, reviewed_at, rejection_reason, \
+             created_at, updated_at FROM time_entries WHERE id=$1 AND status='submitted'"
+        )
+        .bind(id)
+        .fetch_optional(&s.pool)
+        .await?;
+        let Some(z) = z else { continue };
+        if z.user_id == u.id && !u.is_admin() {
+            continue;
+        }
+        to_reject.push(z);
+    }
+    if to_reject.is_empty() {
+        return Ok(Json(serde_json::json!({"ok": true, "count": 0})));
+    }
+    // Atomically reject all eligible entries.
+    let mut tx = s.pool.begin().await?;
+    for z in &to_reject {
+        sqlx::query(
+            "UPDATE time_entries SET status='rejected', reviewed_by=$1, \
+             reviewed_at=CURRENT_TIMESTAMP, rejection_reason=$2 WHERE id=$3",
+        )
+        .bind(u.id)
+        .bind(&reason)
+        .bind(z.id)
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+    let count = to_reject.len();
+    // Audit + notify each affected employee (best-effort, after commit).
+    for z in &to_reject {
+        audit::log(
+            &s.pool,
+            u.id,
+            "rejected",
+            "time_entries",
+            z.id,
+            Some(serde_json::to_value(z).unwrap()),
+            Some(serde_json::json!({"status": "rejected", "reason": reason})),
+        )
+        .await;
+        crate::notifications::create(
+            &s,
+            z.user_id,
+            "timesheet_rejected",
+            "Timesheet rejected",
+            &format!(
+                "Your timesheet entry for {} was rejected: {}",
+                z.entry_date, reason
+            ),
+            Some("time_entries"),
+            Some(z.id),
+        )
+        .await;
+    }
+    Ok(Json(serde_json::json!({"ok": true, "count": count})))
 }

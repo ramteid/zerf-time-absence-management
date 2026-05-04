@@ -27,7 +27,6 @@
   let password = "";
   let confirmPassword = "";
   let showTempPassword = null;
-  let generatedPassword = false;
 
   function secureIndex(max) {
     const buf = new Uint32Array(1);
@@ -48,10 +47,6 @@
     return out.join("");
   }
 
-  function markManualPassword() {
-    generatedPassword = false;
-  }
-
   function generatePassword() {
     const lower = "abcdefghijkmnpqrstuvwxyz";
     const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
@@ -63,7 +58,6 @@
     pw = shuffle(pw);
     password = pw;
     confirmPassword = pw;
-    generatedPassword = true;
   }
 
   onMount(async () => {
@@ -124,16 +118,10 @@
       }
       if (isNew && password) {
         body.password = password;
-        body.generated_password = generatedPassword;
       }
       if (isNew) {
         const r = await api("/users", { method: "POST", body });
-        showTempPassword = generatedPassword ? password : r.temporary_password;
-        if (!showTempPassword) {
-          toast($t("User created."), "ok");
-          dlg.close();
-          onClose(true);
-        }
+        showTempPassword = r.temporary_password;
       } else {
         await api("/users/" + template.id, { method: "PUT", body });
         toast($t("User updated."), "ok");
@@ -291,7 +279,6 @@
               bind:value={password}
               minlength="12"
               autocomplete="new-password"
-              on:input={markManualPassword}
             />
           </div>
           <div>
@@ -305,13 +292,12 @@
               bind:value={confirmPassword}
               minlength="12"
               autocomplete="new-password"
-              on:input={markManualPassword}
             />
           </div>
         </div>
         <div>
           <button
-            class="kz-btn kz-btn-ghost kz-btn-sm"
+            class="kz-btn kz-btn-sm"
             type="button"
             on:click={generatePassword}
           >

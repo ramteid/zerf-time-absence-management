@@ -232,6 +232,10 @@ body {
   background: var(--danger-soft);
   color: var(--danger-text);
 }
+.kz-chip-partial {
+  background: var(--warning-soft);
+  color: var(--warning-text);
+}
 .kz-chip-pending {
   background: var(--warning-soft);
   color: var(--warning-text);

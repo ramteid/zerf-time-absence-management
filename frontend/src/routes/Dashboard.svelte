@@ -351,12 +351,10 @@
 
     weekActionBusy = true;
     try {
-      for (const entry of week.entries) {
-        await api(`/time-entries/${entry.id}/reject`, {
-          method: "POST",
-          body: { reason },
-        });
-      }
+      await api("/time-entries/batch-reject", {
+        method: "POST",
+        body: { ids: week.entries.map((entry) => entry.id), reason },
+      });
       toast($t("Rejected."), "ok");
       closeWeekDialog();
       await load();
@@ -370,6 +368,12 @@
   async function batchApprove() {
     const ids = pendingEntries.map((entry) => entry.id);
     if (!ids.length) return;
+    const ok = await confirmDialog(
+      $t("Approve all?"),
+      $t("Approve all {n} submitted entries across all users?", { n: ids.length }),
+      { confirm: $t("Approve all") },
+    );
+    if (!ok) return;
     try {
       await api("/time-entries/batch-approve", {
         method: "POST",

@@ -12,8 +12,8 @@ const REGION_KEY: &str = "region";
 const DEFAULT_WEEKLY_HOURS_KEY: &str = "default_weekly_hours";
 const DEFAULT_ANNUAL_LEAVE_DAYS_KEY: &str = "default_annual_leave_days";
 const DEFAULT_UI_LANGUAGE: &str = "en";
-const DEFAULT_COUNTRY: &str = "DE";
-const DEFAULT_REGION: &str = "DE-BW";
+const DEFAULT_COUNTRY: &str = "";
+const DEFAULT_REGION: &str = "";
 
 #[derive(Serialize)]
 pub struct PublicSettings {
@@ -106,9 +106,17 @@ pub async fn update_admin_settings(
     let country = body.country.trim().to_uppercase();
     let region = body.region.trim().to_string();
 
-    if country.len() != 2 {
+    // Allow an empty string to clear the country (resetting to "no country
+    // configured"). Only reject values that are neither empty nor exactly 2
+    // letters, as those cannot be valid ISO 3166-1 alpha-2 codes.
+    if !country.is_empty() && country.len() != 2 {
         return Err(AppError::BadRequest(
-            "Country must be a 2-letter ISO code.".into(),
+            "Country must be a 2-letter ISO code (or empty to clear).".into(),
+        ));
+    }
+    if region.len() > 20 {
+        return Err(AppError::BadRequest(
+            "Region code must be at most 20 characters.".into(),
         ));
     }
     if let Some(dwh) = body.default_weekly_hours {
@@ -128,14 +136,23 @@ pub async fn update_admin_settings(
     let saved_country = save_setting(&s.pool, COUNTRY_KEY, &country).await?;
     let saved_region = save_setting(&s.pool, REGION_KEY, &region).await?;
 
-    if let Some(dwh) = body.default_weekly_hours {
-        save_setting(&s.pool, DEFAULT_WEEKLY_HOURS_KEY, &dwh.to_string()).await?;
-    }
-    if let Some(dal) = body.default_annual_leave_days {
-        save_setting(&s.pool, DEFAULT_ANNUAL_LEAVE_DAYS_KEY, &dal.to_string()).await?;
-    }
+    // `None` means the admin explicitly cleared the field (left it blank).
+    // Save "" so that `load_all_settings` returns `None` via `.parse().ok()`.
+    let dwh_str = body
+        .default_weekly_hours
+        .map(|v| v.to_string())
+        .unwrap_or_default();
+    save_setting(&s.pool, DEFAULT_WEEKLY_HOURS_KEY, &dwh_str).await?;
 
-    if previous.country != saved_country || previous.region != saved_region {
+    let dal_str = body
+        .default_annual_leave_days
+        .map(|v| v.to_string())
+        .unwrap_or_default();
+    save_setting(&s.pool, DEFAULT_ANNUAL_LEAVE_DAYS_KEY, &dal_str).await?;
+
+    if !saved_country.is_empty()
+        && (previous.country != saved_country || previous.region != saved_region)
+    {
         if let Err(e) = holidays::refresh_holidays(&s.pool, &saved_country, &saved_region).await {
             tracing::warn!("Failed to refresh holidays: {:?}", e);
         }

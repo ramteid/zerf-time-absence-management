@@ -41,7 +41,9 @@
       );
       const dest = me.must_change_password
         ? "/account"
-        : dashboardAvailable
+        : me.must_configure_settings
+          ? "/admin/settings"
+          : dashboardAvailable
           ? "/dashboard"
           : me.home || "/time";
       console.debug("[login-debug]", "submit:navigate", { dest });

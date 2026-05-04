@@ -1,0 +1,79 @@
+name: Nager.Date API contract
+
+# Runs on every push/PR so that a broken external API is caught immediately,
+# AND on a weekly schedule so that silent breakage (no code changes) is also
+# detected before Dependabot PRs land (Dependabot opens at 04:00 UTC Mondays).
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Every Monday at 03:00 UTC — one hour before Dependabot opens its PRs.
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write   # needed to open an issue when the job fails
+
+jobs:
+  nager-contract:
+    name: Nager.Date API contract tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2.9.1
+        with:
+          workspaces: backend
+
+      - name: Run Nager.Date contract tests
+        id: tests
+        run: cargo test --test nager_contract -- --nocapture
+
+      # Open a GitHub issue when the contract tests fail on the scheduled run
+      # so the team is alerted without needing to watch workflow emails.
+      - name: Open issue on failure
+        if: failure() && github.event_name == 'schedule'
+        uses: actions/github-script@v9.0.0
+        with:
+          script: |
+            const title = 'Nager.Date API contract tests failed';
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'nager-contract-failure',
+            });
+            // Avoid duplicate issues if one is already open.
+            if (issues.length > 0) {
+              console.log(`Issue already open: #${issues[0].number}`);
+              return;
+            }
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body: [
+                '## Nager.Date API contract tests failed',
+                '',
+                'The weekly contract test run detected that the Nager.Date public',
+                'holiday API may have changed its response structure or become',
+                'unavailable.',
+                '',
+                `**Workflow run:** ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+                '',
+                '**Likely impact:** The admin settings country/region dropdowns and',
+                'automatic holiday imports may stop working.',
+                '',
+                'Please check the failed test output and update the integration if',
+                'the API has changed.',
+              ].join('\n'),
+              labels: ['nager-contract-failure', 'bug'],
+            });

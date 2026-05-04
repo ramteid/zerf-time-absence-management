@@ -20,6 +20,72 @@ struct NagerHoliday {
     counties: Option<Vec<String>>,
 }
 
+/// A country entry from the Nager.Date AvailableCountries API.
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NagerCountry {
+    pub country_code: String,
+    pub name: String,
+}
+
+const NAGER_BASE_URL: &str = "https://date.nager.at/api/v3";
+
+/// Fetch raw holidays from the Nager.Date API for a given country and year.
+async fn fetch_nager_holidays(country: &str, year: i32) -> Result<Vec<NagerHoliday>, AppError> {
+    let url = format!("{}/PublicHolidays/{}/{}", NAGER_BASE_URL, year, country);
+    let resp = reqwest::get(&url)
+        .await
+        .map_err(|e| AppError::Internal(format!("Nager API request failed: {e}")))?;
+    if !resp.status().is_success() {
+        return Err(AppError::Internal(format!(
+            "Nager API returned status {}",
+            resp.status()
+        )));
+    }
+    resp.json()
+        .await
+        .map_err(|e| AppError::Internal(format!("Nager parse failed: {e}")))
+}
+
+/// Proxy: returns all countries supported by Nager.Date (compatible country codes).
+pub async fn available_countries(_u: User) -> AppResult<Json<Vec<NagerCountry>>> {
+    let url = format!("{}/AvailableCountries", NAGER_BASE_URL);
+    let resp = reqwest::get(&url)
+        .await
+        .map_err(|e| AppError::Internal(format!("Nager API request failed: {e}")))?;
+    if !resp.status().is_success() {
+        return Err(AppError::Internal(format!(
+            "Nager API returned status {}",
+            resp.status()
+        )));
+    }
+    let countries: Vec<NagerCountry> = resp
+        .json()
+        .await
+        .map_err(|e| AppError::Internal(format!("Nager parse failed: {e}")))?;
+    Ok(Json(countries))
+}
+
+/// Proxy: returns the ISO 3166-2 subdivision codes used by Nager for a given country,
+/// derived from the county fields of the current year's public holidays.
+pub async fn available_regions(
+    Path(country): Path<String>,
+    _u: User,
+) -> AppResult<Json<Vec<String>>> {
+    let year = chrono::Local::now().year();
+    let holidays = fetch_nager_holidays(&country, year).await?;
+
+    let mut codes: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for h in &holidays {
+        if let Some(counties) = &h.counties {
+            for c in counties {
+                codes.insert(c.clone());
+            }
+        }
+    }
+    Ok(Json(codes.into_iter().collect()))
+}
+
 /// Fetch holidays from https://date.nager.at for a given year and country.
 /// Optionally filter by region (e.g. "DE-BW").
 pub async fn fetch_holidays_from_api(
@@ -27,25 +93,7 @@ pub async fn fetch_holidays_from_api(
     region: &str,
     year: i32,
 ) -> Result<Vec<(NaiveDate, String, String)>, AppError> {
-    let url = format!(
-        "https://date.nager.at/api/v3/PublicHolidays/{}/{}",
-        year, country
-    );
-    let resp = reqwest::get(&url)
-        .await
-        .map_err(|e| AppError::Internal(format!("Holiday API request failed: {e}")))?;
-
-    if !resp.status().is_success() {
-        return Err(AppError::Internal(format!(
-            "Holiday API returned status {}",
-            resp.status()
-        )));
-    }
-
-    let holidays: Vec<NagerHoliday> = resp
-        .json()
-        .await
-        .map_err(|e| AppError::Internal(format!("Holiday API parse failed: {e}")))?;
+    let holidays = fetch_nager_holidays(country, year).await?;
 
     // Filter by region if set: keep nation-wide (counties=null) and matching region
     let filtered: Vec<(NaiveDate, String, String)> = holidays
@@ -120,11 +168,16 @@ pub async fn ensure_holidays(pool: &crate::db::DatabasePool, year: i32) -> AppRe
         sqlx::query_scalar("SELECT value FROM app_settings WHERE key = 'country'")
             .fetch_optional(pool)
             .await?
-            .unwrap_or_else(|| "DE".to_string());
+            .unwrap_or_default();
     let region: String = sqlx::query_scalar("SELECT value FROM app_settings WHERE key = 'region'")
         .fetch_optional(pool)
         .await?
-        .unwrap_or_else(|| "DE-BW".to_string());
+        .unwrap_or_default();
+
+    // Country not yet configured — skip silently until admin sets it up.
+    if country.is_empty() {
+        return Ok(());
+    }
 
     match fetch_holidays_from_api(&country, &region, year).await {
         Ok(list) => {

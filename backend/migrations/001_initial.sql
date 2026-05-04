@@ -155,9 +155,6 @@ INSERT INTO app_settings(key, value)
 VALUES ('ui_language', 'en')
 ON CONFLICT (key) DO NOTHING;
 
-INSERT INTO app_settings(key, value) VALUES ('country', 'DE') ON CONFLICT (key) DO NOTHING;
-INSERT INTO app_settings(key, value) VALUES ('region', 'DE-BW') ON CONFLICT (key) DO NOTHING;
-
 CREATE TABLE IF NOT EXISTS audit_log (
   id BIGSERIAL PRIMARY KEY,
   user_id BIGINT NOT NULL REFERENCES users(id),
