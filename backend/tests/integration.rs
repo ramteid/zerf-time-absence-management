@@ -149,19 +149,9 @@ async fn full_integration_suite() {
     // --- User management --------------------------------------------------
     let emp_id: i64;
     let emp_pw: String;
-    let _lead_id: i64;
+    let lead_id: i64;
     let lead_pw: String;
     {
-        let (st, body) = admin
-            .post(
-                "/api/v1/users",
-                &json!({"email":"erin@example.com","first_name":"Erin","last_name":"Worker","role":"employee","weekly_hours":39,"annual_leave_days":30,"start_date":"2024-01-01","approver_id":1}),
-            )
-            .await;
-        assert_eq!(st, StatusCode::OK, "create employee");
-        emp_id = id(&body);
-        emp_pw = temp_pw(&body);
-
         let (st, body) = admin
             .post(
                 "/api/v1/users",
@@ -169,8 +159,18 @@ async fn full_integration_suite() {
             )
             .await;
         assert_eq!(st, StatusCode::OK, "create team_lead");
-        _lead_id = id(&body);
+        lead_id = id(&body);
         lead_pw = temp_pw(&body);
+
+        let (st, body) = admin
+            .post(
+                "/api/v1/users",
+                &json!({"email":"erin@example.com","first_name":"Erin","last_name":"Worker","role":"employee","weekly_hours":39,"annual_leave_days":30,"start_date":"2024-01-01","approver_id": lead_id}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "create employee");
+        emp_id = id(&body);
+        emp_pw = temp_pw(&body);
 
         // Duplicate email rejected
         let (st, _) = admin

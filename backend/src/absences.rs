@@ -124,6 +124,10 @@ pub async fn list_all(
         return Err(AppError::Forbidden);
     }
     let mut builder = QueryBuilder::<Postgres>::new("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE TRUE");
+    // Team leads only see absences from their direct reports; admins see all.
+    if !u.is_admin() {
+        builder.push(" AND user_id IN (SELECT id FROM users WHERE approver_id = ").push_bind(u.id).push(")");
+    }
     if let Some(v) = q.from {
         builder.push(" AND end_date >= ").push_bind(v);
     }
@@ -247,9 +251,17 @@ pub async fn create(
     Json(b): Json<NewAbsence>,
 ) -> AppResult<Json<Absence>> {
     let normalized = normalize_absence(&b)?;
+    // Use an advisory lock on the user_id to serialize absence creation per
+    // user, preventing the TOCTOU race where two concurrent requests both pass
+    // the overlap check before either insert commits.
+    let mut tx = s.pool.begin().await?;
+    sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(u.id)
+        .execute(&mut *tx)
+        .await?;
     let overlap: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM absences WHERE user_id=$1 AND status IN ('requested','approved') AND end_date >= $2 AND start_date <= $3"
-    ).bind(u.id).bind(b.start_date).bind(b.end_date).fetch_one(&s.pool).await?;
+    ).bind(u.id).bind(b.start_date).bind(b.end_date).fetch_one(&mut *tx).await?;
     if overlap > 0 {
         return Err(AppError::Conflict("Overlap with existing absence.".into()));
     }
@@ -263,7 +275,8 @@ pub async fn create(
     };
     let id: i64 = sqlx::query_scalar("INSERT INTO absences(user_id, kind, start_date, end_date, comment, status) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id")
         .bind(u.id).bind(normalized.kind).bind(b.start_date).bind(b.end_date).bind(&b.comment).bind(status)
-        .fetch_one(&s.pool).await?;
+        .fetch_one(&mut *tx).await?;
+    tx.commit().await?;
     let a: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
@@ -310,12 +323,18 @@ pub async fn update(
             "Approved absences cannot change type.".into(),
         ));
     }
-    // Re-check overlap with *other* absences of the same user.
+    // Re-check overlap with *other* absences of the same user (under advisory
+    // lock to prevent TOCTOU race).
+    let mut tx = s.pool.begin().await?;
+    sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(u.id)
+        .execute(&mut *tx)
+        .await?;
     let overlap: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM absences WHERE id != $1 AND user_id=$2 AND status IN ('requested','approved') AND end_date >= $3 AND start_date <= $4",
     )
     .bind(id).bind(u.id).bind(b.start_date).bind(b.end_date)
-    .fetch_one(&s.pool).await?;
+    .fetch_one(&mut *tx).await?;
     if overlap > 0 {
         return Err(AppError::Conflict("Overlap with existing absence.".into()));
     }
@@ -347,8 +366,9 @@ pub async fn update(
     .bind(reviewed_at)
     .bind(rejection_reason)
     .bind(id)
-    .execute(&s.pool)
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
     let next: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
@@ -642,11 +662,24 @@ pub async fn balance(
         }
     }
     let entitled = target.annual_leave_days;
+    // Pro-rate entitlement for mid-year starts: if the user's start_date is
+    // within the queried year, they are only entitled to the fraction of the
+    // year they were employed (rounded up to be generous).
+    let year_start = NaiveDate::from_ymd_opt(year, 1, 1).unwrap();
+    let year_end = NaiveDate::from_ymd_opt(year, 12, 31).unwrap();
+    let effective_entitlement = if target.start_date > year_start && target.start_date <= year_end {
+        // Months remaining (inclusive of start month), standard German pro-rata
+        // calculation: full months from start_date.month through December.
+        let months_remaining = (13 - target.start_date.month()) as f64;
+        ((entitled as f64) * months_remaining / 12.0).ceil() as i64
+    } else {
+        entitled
+    };
     Ok(Json(LeaveBalance {
-        annual_entitlement: entitled,
+        annual_entitlement: effective_entitlement,
         already_taken: taken,
         approved_upcoming: upcoming,
         requested,
-        available: entitled as f64 - taken - upcoming - requested,
+        available: effective_entitlement as f64 - taken - upcoming - requested,
     }))
 }
