@@ -91,7 +91,7 @@ async fn build_range(
     to: NaiveDate,
     label: &str,
 ) -> AppResult<MonthReport> {
-    let user: crate::auth::User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE id=$1")
+    let user: crate::auth::User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode FROM users WHERE id=$1")
         .bind(user_id)
         .fetch_one(pool)
         .await?;
@@ -400,7 +400,7 @@ pub async fn team(
         return Err(AppError::Forbidden);
     }
     let users: Vec<crate::auth::User> =
-        sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE active=TRUE ORDER BY last_name")
+        sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode FROM users WHERE active=TRUE ORDER BY last_name")
             .fetch_all(&s.pool)
             .await?;
     let mut out = vec![];
@@ -567,7 +567,7 @@ pub async fn flextime(
         ));
     }
 
-    let user: crate::auth::User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE id=$1")
+    let user: crate::auth::User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode FROM users WHERE id=$1")
         .bind(uid)
         .fetch_one(&s.pool)
         .await?;

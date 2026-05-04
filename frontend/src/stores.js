@@ -21,18 +21,15 @@ function applyTheme(t) {
 function createThemeStore() {
   const initial = readStoredTheme();
   applyTheme(initial);
-  const { subscribe, update } = writable(initial);
+  const { subscribe, set: _set } = writable(initial);
   return {
     subscribe,
-    toggle() {
-      update((current) => {
-        const next = current === "dark" ? "light" : "dark";
-        try {
-          localStorage.setItem(THEME_KEY, next);
-        } catch {}
-        applyTheme(next);
-        return next;
-      });
+    set(value) {
+      try {
+        localStorage.setItem(THEME_KEY, value);
+      } catch {}
+      applyTheme(value);
+      _set(value);
     },
   };
 }

@@ -64,7 +64,7 @@
   $: mobileNavItems = (() => {
     const all = nav || [];
     // Priority order for bottom bar
-    const primary = ["Time", "Absences", "Calendar", "Account"];
+    const primary = ["Time", "Absences", "Calendar", "Dashboard"];
     const shown = [];
     const overflow = [];
     for (const link of all) {
@@ -97,11 +97,36 @@
       refreshNotifications().catch(() => {});
     }
   }
-  async function markRead(n) {
-    try {
-      await markNotificationRead(n);
-    } catch {}
+
+  function notificationTarget(notification) {
+    const query = `n=${notification.id}-${Date.now()}`;
+    if (
+      notification.kind === "timesheet_submitted" ||
+      notification.reference_type === "time_entries"
+    ) {
+      return `/dashboard?focus=timesheets&${query}`;
+    }
+    if (
+      notification.kind === "reopen_request_created" ||
+      notification.reference_type === "reopen_request"
+    ) {
+      return `/dashboard?focus=reopen&${query}`;
+    }
+    return "";
   }
+
+  async function openNotification(notification) {
+    bellOpen = false;
+    try {
+      await markNotificationRead(notification);
+    } catch {}
+
+    const target = notificationTarget(notification);
+    if (target) {
+      go(target);
+    }
+  }
+
   async function markAllRead() {
     try {
       await markAllNotificationsRead();
@@ -131,6 +156,7 @@
     return i >= 0 ? $path.slice(0, i) : $path;
   })();
   $: nav = $currentUser?.nav || [];
+  $: desktopNav = nav.filter((link) => link.key !== "Account");
 
   // Map nav keys to icon names
   const iconMap = {
@@ -165,7 +191,7 @@
     return { employee, lead, admin };
   }
 
-  $: sections = navSections(nav);
+  $: sections = navSections(desktopNav);
 
   function initials(user) {
     return (
@@ -174,14 +200,14 @@
   }
 </script>
 
-<svelte:window on:click={onDocClick} />
-
-<div
-  class="app-layout"
+<svelte:window
+  on:click={onDocClick}
   on:touchstart={onTouchStart}
   on:touchmove={onTouchMove}
   on:touchend={onTouchEnd}
->
+/>
+
+<div class="app-layout">
   <!-- Pull-to-refresh indicator -->
   {#if pullDistance > 0}
     <div class="pull-to-refresh" style="height:{pullDistance}px">
@@ -298,6 +324,16 @@
         </div>
         <div class="sidebar-user-role">{roleLabel($currentUser.role)}</div>
       </div>
+      <a
+        href="/account"
+        data-link="1"
+        class="kz-btn-icon-sm"
+        class:active={pathname === "/account" || pathname.startsWith("/account/")}
+        style="color:var(--nav-text-muted)"
+        title={$t("Account")}
+      >
+        <Icon name="User" size={15} />
+      </a>
       <button
         class="kz-btn-icon-sm"
         style="color:var(--nav-text-muted)"
@@ -474,8 +510,13 @@
       {:else}
         {#each $notifications as n}
           <div
-            on:click={() => markRead(n)}
-            on:keydown={() => {}}
+            on:click={() => openNotification(n)}
+            on:keydown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                openNotification(n);
+              }
+            }}
             role="button"
             tabindex="0"
             style="padding:10px 12px;border-bottom:1px solid var(--border);cursor:pointer;background:{n.is_read

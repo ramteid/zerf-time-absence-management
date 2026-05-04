@@ -49,7 +49,7 @@
       dlg.close();
       onClose({ changed: true, entry: saved, deletedId: null });
     } catch (e) {
-      error = e.message;
+      error = $t(e?.message || "Error");
     }
   }
 
@@ -66,7 +66,7 @@
       dlg.close();
       onClose({ changed: true, entry: null, deletedId: template.id });
     } catch (e) {
-      error = e.message;
+      error = $t(e?.message || "Error");
     }
   }
 

@@ -11,6 +11,7 @@
     currentUser,
     categories,
     settings,
+    theme,
     path,
     go,
     toast,
@@ -74,6 +75,7 @@
       });
       currentUser.set(me);
       csrfToken.set(me.csrf_token || null);
+      theme.set(me.dark_mode ? "dark" : "light");
       bootNetworkError = false;
       if (!$categories.length) {
         try {
@@ -145,6 +147,8 @@
       const me = await api("/auth/me");
       // Refresh CSRF token in case it rotated while the tab was hidden.
       csrfToken.set(me.csrf_token || null);
+      // Sync dark mode preference in case it changed on another device.
+      theme.set(me.dark_mode ? "dark" : "light");
     } catch (err) {
       // api("/auth/me") is excluded from the global 401 interceptor to prevent
       // redirect loops during normal boot. So we must handle session expiry
@@ -246,10 +250,15 @@
     // Resolve redirects without side-effects — just return the target component
     // directly so the reactive chain never yields null for a logged-in user.
     if (p === "/" || p === "") {
+      const dashboardAvailable = (user?.nav || []).some(
+        (item) => item?.key === "Dashboard" || item?.href === "/dashboard",
+      );
       const dest =
-        user.home && user.home !== "/" && user.home !== ""
-          ? user.home
-          : "/time";
+        dashboardAvailable && !user.must_change_password
+          ? "/dashboard"
+          : user.home && user.home !== "/" && user.home !== ""
+            ? user.home
+            : "/time";
       debugLog("route:redirect-home", { dest });
       // Update the URL bar (deferred so we don't mutate stores mid-reactive-cycle)
       setTimeout(() => go(dest, false), 0);

@@ -1,7 +1,7 @@
 <script>
   import { api } from "../api.js";
   import { toast, currentUser } from "../stores.js";
-  import { t } from "../i18n.js";
+  import { t, roleLabel } from "../i18n.js";
 
   let rows = [];
   let loading = true;
@@ -18,9 +18,9 @@
   load();
 
   async function toggle(row) {
-    saving[row.approver_id] = true;
+    saving[row.user_id] = true;
     try {
-      await api(`/team-settings/${row.approver_id}`, {
+      await api(`/team-settings/${row.user_id}`, {
         method: "PUT",
         body: {
           allow_reopen_without_approval: row.allow_reopen_without_approval,
@@ -32,11 +32,9 @@
       row.allow_reopen_without_approval = !row.allow_reopen_without_approval;
       rows = rows;
     } finally {
-      saving[row.approver_id] = false;
+      saving[row.user_id] = false;
     }
   }
-
-  $: isAdmin = $currentUser?.permissions?.is_admin;
 </script>
 
 <div class="top-bar">
@@ -56,7 +54,7 @@
       </div>
       <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:14px">
         {$t(
-          "When enabled, employees can reopen submitted weeks without waiting for approval.",
+          "When enabled for a user, their reopen requests are automatically approved. Their approver and all admins still receive a notification.",
         )}
       </div>
 
@@ -71,14 +69,14 @@
             <div style="font-size:13px;font-weight:500">
               {row.first_name}
               {row.last_name}
-              {#if !isAdmin}
+              {#if $currentUser?.id === row.user_id}
                 <span style="color:var(--text-tertiary);font-weight:400"
                   >· {$t("you")}</span
                 >
               {/if}
             </div>
             <div style="font-size:11.5px;color:var(--text-tertiary)">
-              {row.email}
+              {roleLabel(row.role)} · {row.email}
             </div>
           </div>
           <label
@@ -88,7 +86,7 @@
               type="checkbox"
               bind:checked={row.allow_reopen_without_approval}
               on:change={() => toggle(row)}
-              disabled={saving[row.approver_id]}
+              disabled={saving[row.user_id]}
             />
             <span class="team-setting-checkbox-label"
               >{$t("Auto-approve reopens")}</span

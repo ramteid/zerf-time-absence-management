@@ -70,6 +70,7 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
             Router::new()
                 .route("/auth/me", get(auth::me))
                 .route("/auth/password", put(auth::change_password))
+                .route("/auth/preferences", put(auth::update_preferences))
                 .route(
                     "/settings",
                     get(settings::admin_settings).put(settings::update_admin_settings),

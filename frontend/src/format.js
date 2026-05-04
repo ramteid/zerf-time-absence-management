@@ -50,6 +50,9 @@ export function weekdayLabels() {
 }
 export function isoDate(d) {
   const x = parseDate(d);
+  if (Number.isNaN(x.getTime())) {
+    return "";
+  }
   return (
     x.getFullYear() +
     "-" +
@@ -60,9 +63,45 @@ export function isoDate(d) {
 }
 export function dateKey(value) {
   if (typeof value === "string") {
-    const match = value.match(/^\d{4}-\d{2}-\d{2}/);
-    if (match) {
-      return match[0];
+    const raw = value.trim();
+    const isoPrefix = raw.match(/^\d{4}-\d{2}-\d{2}/);
+    if (isoPrefix) {
+      return isoPrefix[0];
+    }
+
+    const de = raw.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+    if (de) {
+      return `${de[3]}-${String(Number(de[2])).padStart(2, "0")}-${String(
+        Number(de[1]),
+      ).padStart(2, "0")}`;
+    }
+
+    const ymdSlash = raw.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
+    if (ymdSlash) {
+      return `${ymdSlash[1]}-${String(Number(ymdSlash[2])).padStart(2, "0")}-${String(
+        Number(ymdSlash[3]),
+      ).padStart(2, "0")}`;
+    }
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return isoDate(new Date(value));
+  }
+
+  if (value && typeof value === "object") {
+    const year = Number(value.year);
+    const month = Number(value.month);
+    const day = Number(value.day);
+    if (
+      Number.isInteger(year) &&
+      Number.isInteger(month) &&
+      Number.isInteger(day) &&
+      month >= 1 &&
+      month <= 12 &&
+      day >= 1 &&
+      day <= 31
+    ) {
+      return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
     }
   }
 

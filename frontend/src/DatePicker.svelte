@@ -23,7 +23,6 @@
   let lastLang;
   let lastMode = mode;
   let lastContainer = container;
-  let lastDisplayValue = "";
 
   function validDate(year, monthIndex, day) {
     const parsed = new Date(year, monthIndex, day);
@@ -72,49 +71,37 @@
   }
 
   function openPicker() {
-    fp?.open();
-    fp?.altInput?.focus();
+    if (!fp) return;
+    if (fp.isOpen) {
+      fp.close();
+      return;
+    }
+    fp.open();
   }
 
-  function clearInvalid(input) {
-    input.setCustomValidity("");
+  function handleInputClick() {
+    openPicker();
   }
 
-  function validateManualInput() {
+  function removeAltInputListeners() {
     const input = fp?.altInput;
     if (!input) return;
-    const raw = input.value.trim();
-    if (raw === lastDisplayValue && value) {
-      clearInvalid(input);
-      return;
-    }
-    if (!raw) {
-      clearInvalid(input);
-      if (value !== "") value = "";
-      lastDisplayValue = "";
-      return;
-    }
-    const parsed = parseInputDate(raw);
-    if (!parsed) {
-      input.setCustomValidity($t("Invalid date."));
-      value = "";
-      input.reportValidity();
-      return;
-    }
-    clearInvalid(input);
-    fp.setDate(parsed, true);
-    lastDisplayValue = fp.altInput?.value || "";
+    input.removeEventListener("click", handleInputClick);
   }
 
   function build(lang) {
-    if (fp) fp.destroy();
+    if (fp) {
+      removeAltInputListeners();
+      fp.destroy();
+    }
     const isMonth = mode === "month";
     lastLang = lang;
     lastMode = mode;
     lastContainer = container;
     const opts = {
       locale: lang === "de" ? German : "default",
-      allowInput: true,
+      allowInput: false,
+      clickOpens: false,
       disableMobile: true,
       dateFormat: isMonth ? "Y-m" : "Y-m-d",
       altInput: true,
@@ -126,7 +113,6 @@
       parseDate: parseInputDate,
       onChange: (_, str) => {
         if (str !== value) value = str;
-        lastDisplayValue = fp?.altInput?.value || "";
       },
       plugins: isMonth
         ? [
@@ -140,18 +126,28 @@
     };
     // When rendered inside a <dialog>, append the calendar to the dialog
     // so it stays in the top layer and is not hidden behind the backdrop.
-    if (container) opts.appendTo = container;
+    if (container) {
+      opts.appendTo = container;
+      // Static mode keeps the calendar anchored to the input inside dialogs,
+      // avoiding position offsets on small screens.
+      opts.static = true;
+    }
     fp = flatpickr(el, opts);
     if (id && fp.altInput) fp.altInput.id = id;
     if (fp.altInput) {
       if (style) fp.altInput.setAttribute("style", style);
-      lastDisplayValue = fp.altInput.value || "";
-      fp.altInput.addEventListener("blur", validateManualInput);
+      // Keep native mobile keyboard closed while still allowing date selection.
+      fp.altInput.readOnly = true;
+      fp.altInput.setAttribute("inputmode", "none");
+      fp.altInput.addEventListener("click", handleInputClick);
     }
   }
 
   onMount(() => build($language));
-  onDestroy(() => fp && fp.destroy());
+  onDestroy(() => {
+    removeAltInputListeners();
+    if (fp) fp.destroy();
+  });
 
   // Rebuild on language/mode change
   $: if (
@@ -194,6 +190,18 @@
     padding-right: 34px;
   }
 
+  .date-picker-wrap :global(.flatpickr-wrapper) {
+    display: block;
+    width: 100%;
+  }
+
+  .date-picker-wrap :global(.flatpickr-calendar.static) {
+    top: calc(100% + 6px);
+    left: 0;
+    margin-top: 0;
+    box-shadow: var(--shadow-md);
+  }
+
   .date-picker-button {
     position: absolute;
     right: 4px;
@@ -215,5 +223,11 @@
   .date-picker-button:focus-visible {
     background: var(--bg-muted);
     color: var(--text-primary);
+  }
+
+  @media (max-width: 768px) {
+    .date-picker-wrap :global(.flatpickr-calendar.static) {
+      top: calc(100% + 8px);
+    }
   }
 </style>

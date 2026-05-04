@@ -1,30 +1,35 @@
 <script>
   import { api } from "../api.js";
-  import { currentUser, toast } from "../stores.js";
+  import { currentUser, theme, toast } from "../stores.js";
   import { t, roleLabel, formatHours } from "../i18n.js";
-  import { fmtDate, minToHM } from "../format.js";
+  import { fmtDate } from "../format.js";
 
   let cur = "",
     nw = "",
     nw2 = "",
     error = "";
-  let overtime = [];
-  $: cumulative = overtime.reduce((s, m) => s + m.diff_min, 0);
-
+  let savingTheme = false;
   function initials(u) {
     return ((u.first_name?.[0] || "") + (u.last_name?.[0] || "")).toUpperCase();
   }
 
-  async function loadOvertime() {
+  async function toggleDarkMode() {
+    if (savingTheme) return;
+    savingTheme = true;
+    const next = $theme === "dark" ? false : true;
     try {
-      overtime = await api(
-        `/reports/overtime?year=${new Date().getFullYear()}`,
-      );
+      await api("/auth/preferences", {
+        method: "PUT",
+        body: { dark_mode: next },
+      });
+      theme.set(next ? "dark" : "light");
+      currentUser.update((u) => ({ ...u, dark_mode: next }));
     } catch (e) {
-      toast(e.message || $t("Overtime data unavailable."), "error");
+      toast($t(e?.message || "Error"), "error");
+    } finally {
+      savingTheme = false;
     }
   }
-  loadOvertime();
 
   async function changePassword() {
     error = "";
@@ -46,7 +51,7 @@
       nw = "";
       nw2 = "";
     } catch (e) {
-      error = e.message;
+      error = $t(e?.message || "Error");
     }
   }
 </script>
@@ -198,137 +203,26 @@
     </div>
   </div>
 
-  <!-- Overtime -->
-  <div class="kz-card overtime-card">
-    <div class="card-header">
-      <span class="card-header-title">
-        {$t("Overtime balance {year}", { year: new Date().getFullYear() })}
-      </span>
-      <span
-        class="kz-chip"
-        class:kz-chip-approved={cumulative >= 0}
-        class:kz-chip-rejected={cumulative < 0}
-      >
-        {minToHM(cumulative)}
-      </span>
+  <!-- Appearance -->
+  <div class="kz-card" style="padding:20px;margin-bottom:16px">
+    <div style="font-size:14px;font-weight:600;margin-bottom:14px">
+      {$t("Appearance")}
     </div>
-
-    <!-- Desktop: table -->
-    <div class="overtime-table-desktop">
-      <table class="kz-table">
-        <thead>
-          <tr>
-            {#each ["Month", "Target", "Actual", "Diff", "Cumulative"] as c}
-              <th>{$t(c)}</th>
-            {/each}
-          </tr>
-        </thead>
-        <tbody>
-          {#each overtime as m, i}
-            {@const cum = overtime
-              .slice(0, i + 1)
-              .reduce((s, x) => s + x.diff_min, 0)}
-            <tr>
-              <td class="tab-num">{m.month}</td>
-              <td class="tab-num">{minToHM(m.target_min)}</td>
-              <td class="tab-num">{minToHM(m.actual_min)}</td>
-              <td
-                class="tab-num"
-                style="color:{m.diff_min < 0
-                  ? 'var(--danger-text)'
-                  : 'var(--success-text)'}"
-              >
-                {minToHM(m.diff_min)}
-              </td>
-              <td
-                class="tab-num"
-                style="color:{cum < 0
-                  ? 'var(--danger-text)'
-                  : 'var(--success-text)'}"
-              >
-                {minToHM(cum)}
-              </td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
-    </div>
-
-    <!-- Mobile: stacked tiles -->
-    <div class="overtime-tiles-mobile">
-      {#each overtime as m, i}
-        {@const cum = overtime
-          .slice(0, i + 1)
-          .reduce((s, x) => s + x.diff_min, 0)}
-        <div class="overtime-tile">
-          <div style="font-weight:600;font-size:13px;margin-bottom:4px">
-            {m.month}
-          </div>
-          <div class="overtime-tile-row">
-            <span>{$t("Target")}</span><span class="tab-num"
-              >{minToHM(m.target_min)}</span
-            >
-          </div>
-          <div class="overtime-tile-row">
-            <span>{$t("Actual")}</span><span class="tab-num"
-              >{minToHM(m.actual_min)}</span
-            >
-          </div>
-          <div class="overtime-tile-row">
-            <span>{$t("Diff")}</span>
-            <span
-              class="tab-num"
-              style="color:{m.diff_min < 0
-                ? 'var(--danger-text)'
-                : 'var(--success-text)'}"
-            >
-              {minToHM(m.diff_min)}
-            </span>
-          </div>
-          <div class="overtime-tile-row">
-            <span>{$t("Cumulative")}</span>
-            <span
-              class="tab-num"
-              style="color:{cum < 0
-                ? 'var(--danger-text)'
-                : 'var(--success-text)'}"
-            >
-              {minToHM(cum)}
-            </span>
-          </div>
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <div>
+        <div style="font-size:14px">{$t("Dark mode")}</div>
+        <div style="font-size:12px;color:var(--text-tertiary);margin-top:2px">
+          {$t("Use dark colour scheme")}
         </div>
-      {/each}
+      </div>
+      <button
+        class="kz-btn"
+        on:click={toggleDarkMode}
+        aria-pressed={$theme === "dark"}
+        disabled={savingTheme}
+      >
+        {$theme === "dark" ? $t("Enabled") : $t("Disabled")}
+      </button>
     </div>
   </div>
 </div>
-
-<style>
-  .overtime-table-desktop {
-    overflow-x: auto;
-  }
-  .overtime-tiles-mobile {
-    display: none;
-  }
-  .overtime-tile {
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--border);
-  }
-  .overtime-tile:last-child {
-    border-bottom: none;
-  }
-  .overtime-tile-row {
-    display: flex;
-    justify-content: space-between;
-    font-size: 12px;
-    padding: 2px 0;
-  }
-
-  @media (max-width: 640px) {
-    .overtime-table-desktop {
-      display: none;
-    }
-    .overtime-tiles-mobile {
-      display: block;
-    }
-  }
-</style>

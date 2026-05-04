@@ -12,12 +12,38 @@
   let balance = null;
   let holidayDates = new Set();
   let showDialog = null;
+  let loadToken = 0;
+  const baseYear = new Date().getFullYear();
+  let selectedYear = baseYear;
+
+  $: yearOptions = [
+    ...new Set([
+      baseYear - 1,
+      baseYear,
+      baseYear + 1,
+      selectedYear,
+      ...absences.flatMap((absence) => [
+        parseDate(absence.start_date).getFullYear(),
+        parseDate(absence.end_date).getFullYear(),
+      ]),
+    ]),
+  ].sort((a, b) => b - a);
 
   async function load() {
-    absences = await api("/absences");
+    const token = ++loadToken;
+    const year = selectedYear;
+    const nextAbsences = await api(`/absences?year=${year}`);
+    if (token !== loadToken) return;
+    absences = nextAbsences;
+
     try {
-      balance = await api("/leave-balance/" + $currentUser.id);
+      const nextBalance = await api(
+        `/leave-balance/${$currentUser.id}?year=${year}`,
+      );
+      if (token !== loadToken) return;
+      balance = nextBalance;
     } catch (e) {
+      if (token !== loadToken) return;
       toast(e.message || $t("Leave balance unavailable."), "error");
     }
 
@@ -29,13 +55,32 @@
         ]),
       ),
     ];
-    holidayDates = holidayDateSet(
-      (
-        await Promise.all(years.map((year) => api(`/holidays?year=${year}`)))
-      ).flat(),
+    const holidayLists = await Promise.all(
+      years.map((year) => api(`/holidays?year=${year}`)),
     );
+    if (token !== loadToken) return;
+    holidayDates = holidayDateSet(holidayLists.flat());
   }
-  load();
+
+  $: if (selectedYear) {
+    load();
+  }
+
+  function handleDialogClose(changed, savedAbsence = null) {
+    showDialog = null;
+    if (!changed) return;
+
+    const savedYear = savedAbsence?.start_date
+      ? parseDate(savedAbsence.start_date).getFullYear()
+      : null;
+
+    if (savedYear && savedYear !== selectedYear) {
+      selectedYear = savedYear;
+      return;
+    }
+
+    load();
+  }
 
   function absenceDays(absence) {
     return countWorkdays(absence.start_date, absence.end_date, holidayDates);
@@ -54,7 +99,7 @@
       $t("Cancel this absence request?"),
       {
         danger: true,
-        confirm: $t("Cancel"),
+        confirm: $t("Yes, cancel absence"),
       },
     );
     if (!ok) return;
@@ -76,6 +121,17 @@
     </div>
   </div>
   <div class="top-bar-actions">
+    <select
+      class="kz-select absence-year-select"
+      aria-label={$t("Year")}
+      value={selectedYear}
+      on:change={(event) =>
+        (selectedYear = Number(event.currentTarget.value))}
+    >
+      {#each yearOptions as yearOption}
+        <option value={yearOption}>{yearOption}</option>
+      {/each}
+    </select>
     <button class="kz-btn kz-btn-primary" on:click={() => (showDialog = {})}>
       <Icon name="Plus" size={14} />{$t("Request Absence")}
     </button>
@@ -86,20 +142,20 @@
   {#if balance}
     <div class="stat-cards">
       <div class="kz-card stat-card">
-        <div class="stat-card-label">{$t("Total Days")}</div>
+        <div class="stat-card-label">{$t("Vacation days ({year})", { year: selectedYear })}</div>
         <div class="stat-card-value tab-num">{balance.annual_entitlement}</div>
       </div>
       <div class="kz-card stat-card">
-        <div class="stat-card-label">{$t("Used")}</div>
+        <div class="stat-card-label">{$t("Vacation used ({year})", { year: selectedYear })}</div>
         <div class="stat-card-value tab-num">{balance.already_taken}</div>
       </div>
       <div class="kz-card stat-card">
-        <div class="stat-card-label">{$t("Pending")}</div>
+        <div class="stat-card-label">{$t("Vacation pending ({year})", { year: selectedYear })}</div>
         <div class="stat-card-value tab-num">{balance.requested || 0}</div>
-        <div class="stat-card-sub">{$t("awaiting approval")}</div>
+        <div class="stat-card-sub">{$t("Vacation requests awaiting approval")}</div>
       </div>
       <div class="kz-card stat-card">
-        <div class="stat-card-label">{$t("Remaining")}</div>
+        <div class="stat-card-label">{$t("Vacation remaining ({year})", { year: selectedYear })}</div>
         <div class="stat-card-value accent tab-num">
           {balance.available}
         </div>
@@ -177,13 +233,7 @@
 </div>
 
 {#if showDialog}
-  <AbsenceDialog
-    template={showDialog}
-    onClose={(changed) => {
-      showDialog = null;
-      if (changed) load();
-    }}
-  />
+  <AbsenceDialog template={showDialog} onClose={handleDialogClose} />
 {/if}
 
 <style>
@@ -226,6 +276,10 @@
     margin-left: auto;
     display: flex;
     gap: 4px;
+  }
+
+  .absence-year-select {
+    min-width: 92px;
   }
 
   @media (max-width: 640px) {

@@ -1640,7 +1640,7 @@ async fn public_settings_are_anonymously_readable() {
 async fn bootstrap_team(
     _app: &TestApp,
     admin: &common::TestClient,
-    lead_policy_auto: bool,
+    emp_policy_auto: bool,
 ) -> (i64, String, i64, String, String, i64) {
     // Take the first existing category for time entries.
     let (_, body) = admin.get("/api/v1/categories").await;
@@ -1658,16 +1658,6 @@ async fn bootstrap_team(
     let lead_id = id(&body);
     let lead_pw = temp_pw(&body);
 
-    if lead_policy_auto {
-        let (st, _) = admin
-            .put(
-                &format!("/api/v1/team-settings/{}", lead_id),
-                &json!({"allow_reopen_without_approval": true}),
-            )
-            .await;
-        assert_eq!(st, StatusCode::OK, "set lead policy auto");
-    }
-
     let (st, body) = admin
         .post(
             "/api/v1/users",
@@ -1679,6 +1669,17 @@ async fn bootstrap_team(
     assert_eq!(st, StatusCode::OK, "create emp");
     let emp_id = id(&body);
     let emp_pw = temp_pw(&body);
+
+    // The auto-approve flag is set on the *employee* (the requester), not the approver.
+    if emp_policy_auto {
+        let (st, _) = admin
+            .put(
+                &format!("/api/v1/team-settings/{}", emp_id),
+                &json!({"allow_reopen_without_approval": true}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "set emp policy auto");
+    }
 
     // Past Monday in same ISO-week as last Monday.
     let last_mon = next_monday(-14); // Monday 2 weeks ago
@@ -2123,7 +2124,7 @@ async fn team_settings_lead_can_only_set_own() {
         .change_password(&app.admin_password, "AdminPass!234")
         .await;
 
-    let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, _cat) =
+    let (lead_id, lead_pw, emp_id, _emp_pw, _monday, _cat) =
         bootstrap_team(&app, &admin, false).await;
     let lead = login_change_pw(&app, "lead-r@example.com", &lead_pw).await;
 
@@ -2136,7 +2137,16 @@ async fn team_settings_lead_can_only_set_own() {
         .await;
     assert_eq!(st, StatusCode::OK);
 
-    // Lead cannot update admin (id 1).
+    // Lead can update their direct report (the employee).
+    let (st, _) = lead
+        .put(
+            &format!("/api/v1/team-settings/{}", emp_id),
+            &json!({"allow_reopen_without_approval": true}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK);
+
+    // Lead cannot update admin (id 1 — not a direct report).
     let (st, _) = lead
         .put(
             "/api/v1/team-settings/1",
@@ -2154,12 +2164,12 @@ async fn team_settings_lead_can_only_set_own() {
         .await;
     assert_eq!(st, StatusCode::OK);
 
-    // Lead sees only own row.
+    // Lead sees themselves + their direct report (the employee).
     let (_, body) = lead.get("/api/v1/team-settings").await;
-    assert_eq!(body.as_array().unwrap().len(), 1);
-    // Admin sees both (admin + lead).
+    assert_eq!(body.as_array().unwrap().len(), 2);
+    // Admin sees all (admin + lead + employee = 3).
     let (_, body) = admin.get("/api/v1/team-settings").await;
-    assert!(body.as_array().unwrap().len() >= 2);
+    assert!(body.as_array().unwrap().len() >= 3);
 
     app.cleanup().await;
 }
