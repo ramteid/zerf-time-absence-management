@@ -84,6 +84,10 @@ pub async fn list_all(
         return Err(AppError::Forbidden);
     }
     let mut builder = QueryBuilder::<Postgres>::new("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE TRUE");
+    // Team leads only see entries from their direct reports; admins see all.
+    if !u.is_admin() {
+        builder.push(" AND user_id IN (SELECT id FROM users WHERE approver_id = ").push_bind(u.id).push(")");
+    }
     if let Some(v) = q.from {
         builder.push(" AND entry_date >= ").push_bind(v);
     }
@@ -175,6 +179,23 @@ pub(crate) async fn validate(
     if day_total > 14 * 60 {
         return Err(AppError::BadRequest("Day total exceeds 14 hours.".into()));
     }
+    // Prevent time entries on days with approved absences (vacation, unpaid,
+    // training, special_leave, general_absence). Sick days are excluded from
+    // this check because partial sick days with work are common.
+    let absence_on_day: Option<String> = sqlx::query_scalar(
+        "SELECT kind FROM absences WHERE user_id=$1 AND status='approved' \
+         AND start_date <= $2 AND end_date >= $2 AND kind <> 'sick' LIMIT 1",
+    )
+    .bind(user_id)
+    .bind(te.entry_date)
+    .fetch_optional(pool)
+    .await?;
+    if let Some(kind) = absence_on_day {
+        return Err(AppError::BadRequest(format!(
+            "Cannot log time on a day with an approved absence ({kind}). \
+             Please cancel or adjust the absence first."
+        )));
+    }
     Ok(())
 }
 
@@ -214,7 +235,9 @@ pub async fn update(
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
-    let admin_correction = u.is_admin() && (prev.status == "approved" || prev.status == "submitted");
+    let admin_correction = u.is_admin()
+        && prev.user_id != u.id
+        && (prev.status == "approved" || prev.status == "submitted");
     if !admin_correction {
         if prev.user_id != u.id {
             return Err(AppError::Forbidden);
@@ -467,7 +490,11 @@ pub async fn batch_approve(
     if !u.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let mut count = 0;
+    if b.ids.is_empty() {
+        return Ok(Json(serde_json::json!({"ok": true, "count": 0})));
+    }
+    // Fetch all submitted entries that this lead is allowed to approve.
+    let mut to_approve: Vec<TimeEntry> = vec![];
     for id in &b.ids {
         let z: Option<TimeEntry> =
             sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1 AND status='submitted'")
@@ -478,15 +505,28 @@ pub async fn batch_approve(
         if z.user_id == u.id && !u.is_admin() {
             continue;
         }
+        to_approve.push(z);
+    }
+    if to_approve.is_empty() {
+        return Ok(Json(serde_json::json!({"ok": true, "count": 0})));
+    }
+    // Atomically approve all eligible entries.
+    let mut tx = s.pool.begin().await?;
+    for z in &to_approve {
         sqlx::query("UPDATE time_entries SET status='approved', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP WHERE id=$2")
-            .bind(u.id).bind(id).execute(&s.pool).await?;
+            .bind(u.id).bind(z.id).execute(&mut *tx).await?;
+    }
+    tx.commit().await?;
+    let count = to_approve.len();
+    // Audit + notify each affected employee (best-effort, after commit).
+    for z in &to_approve {
         audit::log(
             &s.pool,
             u.id,
             "approved",
             "time_entries",
-            *id,
-            Some(serde_json::to_value(&z).unwrap()),
+            z.id,
+            Some(serde_json::to_value(z).unwrap()),
             Some(serde_json::json!({"status": "approved", "reviewed_by": u.id})),
         )
         .await;
@@ -497,10 +537,9 @@ pub async fn batch_approve(
             "Timesheet approved",
             &format!("Your timesheet entry for {} has been approved.", z.entry_date),
             Some("time_entries"),
-            Some(*id),
+            Some(z.id),
         )
         .await;
-        count += 1;
     }
     Ok(Json(serde_json::json!({"ok":true, "count": count})))
 }

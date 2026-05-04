@@ -114,6 +114,11 @@ pub async fn create(
     if z.1 == "draft" {
         return Err(AppError::BadRequest("Edit drafts directly.".into()));
     }
+    if z.1 == "rejected" {
+        return Err(AppError::BadRequest(
+            "Rejected entries cannot have change requests. Use the reopen workflow to edit.".into(),
+        ));
+    }
     // When only one of start/end is proposed, validate the combination against
     // the existing entry's other time field to prevent storing impossible CRs.
     if new_start.is_some() || new_end.is_some() {

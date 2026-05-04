@@ -138,7 +138,6 @@ async fn build_range(
     let mut actual_total = 0i64;
     let mut cat: HashMap<String, i64> = HashMap::new();
     let mut d = from;
-    let is_admin = user.role == "admin";
     while d <= to {
         let wd = d.weekday().num_days_from_monday();
         let weekday = wd < 5;
@@ -148,7 +147,7 @@ async fn build_range(
             .find(|(s, e, _)| d >= *s && d <= *e)
             .map(|(_, _, k)| k.clone());
         let before_start = d < user.start_date;
-        let target = if weekday && holiday.is_none() && !before_start && !is_admin {
+        let target = if weekday && holiday.is_none() && !before_start {
             target_per_day_min
         } else {
             0
@@ -585,7 +584,6 @@ pub async fn flextime(
         .fetch_one(&s.pool)
         .await?;
     let target_per_day_min = (user.weekly_hours / 5.0 * 60.0) as i64;
-    let is_admin = user.role == "admin";
 
     // Start accumulating from the user's first day so the running balance at
     // q.from already reflects all prior over/under-time.
@@ -648,7 +646,7 @@ pub async fn flextime(
             .find(|(s, e, _)| d >= *s && d <= *e)
             .map(|(_, _, k)| k.clone());
         let before_start = d < user.start_date;
-        let target = if weekday && holiday.is_none() && !before_start && !is_admin {
+        let target = if weekday && holiday.is_none() && !before_start {
             target_per_day_min
         } else {
             0
