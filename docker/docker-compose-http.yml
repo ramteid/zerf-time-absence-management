@@ -78,6 +78,7 @@ services:
 
 volumes:
   postgres_data:
+    name: kitazeit_postgres_data
 
 networks:
   public:
