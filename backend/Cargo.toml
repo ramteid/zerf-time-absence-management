@@ -14,7 +14,7 @@ serde_json = "1"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "chrono", "macros", "migrate"] }
 chrono = { version = "0.4", features = ["serde"] }
 argon2 = "0.5"
-password-hash = { version = "0.5", features = ["getrandom"] }
+password-hash = { version = "0.6", features = ["getrandom"] }
 rand = "0.10"
 subtle = "2"
 sha2 = "0.11"
@@ -24,11 +24,11 @@ anyhow = "1"
 thiserror = "2"
 hex = "0.4"
 csv = "1"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 lettre = { version = "0.11", default-features = false, features = ["tokio1-rustls-tls", "smtp-transport", "builder", "hostname"] }
 
 [dev-dependencies]
-reqwest = { version = "0.12", features = ["json", "cookies"] }
+reqwest = { version = "0.13", features = ["json", "cookies"] }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "macros", "test-util"] }
 uuid = { version = "1", features = ["v4"] }
 testcontainers = "0.27"
