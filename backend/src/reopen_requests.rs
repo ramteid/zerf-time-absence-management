@@ -101,11 +101,11 @@ async fn perform_reopen(
         return Ok(0);
     }
 
-    sqlx::query(
-        &sql("UPDATE time_entries SET status='draft', submitted_at=NULL, reviewed_by=NULL, \
+    sqlx::query(&sql(
+        "UPDATE time_entries SET status='draft', submitted_at=NULL, reviewed_by=NULL, \
          reviewed_at=NULL, rejection_reason=NULL, updated_at=CURRENT_TIMESTAMP \
-         WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3 AND status<>'draft'"),
-    )
+         WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3 AND status<>'draft'",
+    ))
     .bind(subject_id)
     .bind(week_start)
     .bind(week_end)
@@ -178,9 +178,9 @@ async fn resolve_approver(
     requester: &User,
 ) -> AppResult<Option<(i64, bool)>> {
     if let Some(aid) = requester.approver_id {
-        let row: Option<(bool, String, bool)> = sqlx::query_as(
-            &sql("SELECT active, role, allow_reopen_without_approval FROM users WHERE id=$1"),
-        )
+        let row: Option<(bool, String, bool)> = sqlx::query_as(&sql(
+            "SELECT active, role, allow_reopen_without_approval FROM users WHERE id=$1",
+        ))
         .bind(aid)
         .fetch_optional(pool)
         .await?;
@@ -214,10 +214,8 @@ pub async fn create(
 
     // Empty-week / nothing-to-reopen guard: only weeks with at least one
     // non-draft entry are eligible.
-    let n: i64 = sqlx::query_scalar(
-        &sql("SELECT COUNT(*) FROM time_entries \
-         WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3 AND status<>'draft'"),
-    )
+    let n: i64 = sqlx::query_scalar(&sql("SELECT COUNT(*) FROM time_entries \
+         WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3 AND status<>'draft'"))
     .bind(u.id)
     .bind(b.week_start)
     .bind(week_end)
@@ -230,9 +228,9 @@ pub async fn create(
     }
 
     // Reject duplicate pending request (DB also has a unique partial index).
-    let pending: Option<i64> = sqlx::query_scalar(
-        &sql("SELECT id FROM reopen_requests WHERE user_id=$1 AND week_start=$2 AND status='pending'"),
-    )
+    let pending: Option<i64> = sqlx::query_scalar(&sql(
+        "SELECT id FROM reopen_requests WHERE user_id=$1 AND week_start=$2 AND status='pending'",
+    ))
     .bind(u.id)
     .bind(b.week_start)
     .fetch_optional(&s.pool)
@@ -344,11 +342,11 @@ pub async fn create(
 
 pub async fn list_mine(State(s): State<AppState>, u: User) -> AppResult<Json<Vec<ReopenRequest>>> {
     Ok(Json(
-        sqlx::query_as::<_, ReopenRequest>(
-            &sql("SELECT id, user_id, week_start, approver_id, status, reviewed_at, \
+        sqlx::query_as::<_, ReopenRequest>(&sql(
+            "SELECT id, user_id, week_start, approver_id, status, reviewed_at, \
              rejection_reason, created_at \
-             FROM reopen_requests WHERE user_id=$1 ORDER BY created_at DESC LIMIT 100"),
-        )
+             FROM reopen_requests WHERE user_id=$1 ORDER BY created_at DESC LIMIT 100",
+        ))
         .bind(u.id)
         .fetch_all(&s.pool)
         .await?,
@@ -364,19 +362,19 @@ pub async fn list_pending(
     }
     // Admins see all pending, leads see only their own queue.
     let rows: Vec<ReopenRequest> = if u.is_admin() {
-        sqlx::query_as(
-            &sql("SELECT id, user_id, week_start, approver_id, status, reviewed_at, \
+        sqlx::query_as(&sql(
+            "SELECT id, user_id, week_start, approver_id, status, reviewed_at, \
              rejection_reason, created_at \
-             FROM reopen_requests WHERE status='pending' ORDER BY created_at"),
-        )
+             FROM reopen_requests WHERE status='pending' ORDER BY created_at",
+        ))
         .fetch_all(&s.pool)
         .await?
     } else {
-        sqlx::query_as(
-            &sql("SELECT id, user_id, week_start, approver_id, status, reviewed_at, \
+        sqlx::query_as(&sql(
+            "SELECT id, user_id, week_start, approver_id, status, reviewed_at, \
              rejection_reason, created_at \
-             FROM reopen_requests WHERE status='pending' AND approver_id=$1 ORDER BY created_at"),
-        )
+             FROM reopen_requests WHERE status='pending' AND approver_id=$1 ORDER BY created_at",
+        ))
         .bind(u.id)
         .fetch_all(&s.pool)
         .await?
@@ -385,11 +383,11 @@ pub async fn list_pending(
 }
 
 async fn load_pending(pool: &crate::db::DatabasePool, id: i64) -> AppResult<ReopenRequest> {
-    sqlx::query_as::<_, ReopenRequest>(
-        &sql("SELECT id, user_id, week_start, approver_id, status, reviewed_at, \
+    sqlx::query_as::<_, ReopenRequest>(&sql(
+        "SELECT id, user_id, week_start, approver_id, status, reviewed_at, \
          rejection_reason, created_at \
-         FROM reopen_requests WHERE id=$1"),
-    )
+         FROM reopen_requests WHERE id=$1",
+    ))
     .bind(id)
     .fetch_optional(pool)
     .await?
@@ -414,10 +412,10 @@ pub async fn approve(
     // Atomically claim the request before doing the (idempotent-ish) reopen.
     // The status guard prevents a TOCTOU race where two approvers click at
     // the same time and both run perform_reopen.
-    let claimed = sqlx::query(
-        &sql("UPDATE reopen_requests SET status='approved', reviewed_at=CURRENT_TIMESTAMP \
-         WHERE id=$1 AND status='pending'"),
-    )
+    let claimed = sqlx::query(&sql(
+        "UPDATE reopen_requests SET status='approved', reviewed_at=CURRENT_TIMESTAMP \
+         WHERE id=$1 AND status='pending'",
+    ))
     .bind(id)
     .execute(&s.pool)
     .await?
@@ -431,9 +429,9 @@ pub async fn approve(
         Ok(c) => c,
         Err(e) => {
             // Revert the approval claim so the request can be retried.
-            let _ = sqlx::query(
-                &sql("UPDATE reopen_requests SET status='pending', reviewed_at=NULL WHERE id=$1"),
-            )
+            let _ = sqlx::query(&sql(
+                "UPDATE reopen_requests SET status='pending', reviewed_at=NULL WHERE id=$1",
+            ))
             .bind(id)
             .execute(&s.pool)
             .await;
@@ -491,10 +489,10 @@ pub async fn reject(
     if !u.is_admin() && r.approver_id != u.id {
         return Err(AppError::Forbidden);
     }
-    let claimed = sqlx::query(
-        &sql("UPDATE reopen_requests SET status='rejected', reviewed_at=CURRENT_TIMESTAMP, \
-         rejection_reason=$2 WHERE id=$1 AND status='pending'"),
-    )
+    let claimed = sqlx::query(&sql(
+        "UPDATE reopen_requests SET status='rejected', reviewed_at=CURRENT_TIMESTAMP, \
+         rejection_reason=$2 WHERE id=$1 AND status='pending'",
+    ))
     .bind(id)
     .bind(reason)
     .execute(&s.pool)

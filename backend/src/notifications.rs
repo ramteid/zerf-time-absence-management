@@ -56,10 +56,10 @@ pub async fn create(
     reference_type: Option<&str>,
     reference_id: Option<i64>,
 ) {
-    if let Err(e) = sqlx::query(
-        &sql("INSERT INTO notifications(user_id,kind,title,body,reference_type,reference_id) \
-         VALUES ($1,$2,$3,$4,$5,$6)"),
-    )
+    if let Err(e) = sqlx::query(&sql(
+        "INSERT INTO notifications(user_id,kind,title,body,reference_type,reference_id) \
+         VALUES ($1,$2,$3,$4,$5,$6)",
+    ))
     .bind(user_id)
     .bind(kind)
     .bind(title)
@@ -101,11 +101,12 @@ pub async fn unread_count(
     State(s): State<AppState>,
     u: User,
 ) -> AppResult<Json<serde_json::Value>> {
-    let n: i64 =
-        sqlx::query_scalar(&sql("SELECT COUNT(*) FROM notifications WHERE user_id=$1 AND is_read=FALSE"))
-            .bind(u.id)
-            .fetch_one(&s.pool)
-            .await?;
+    let n: i64 = sqlx::query_scalar(&sql(
+        "SELECT COUNT(*) FROM notifications WHERE user_id=$1 AND is_read=FALSE",
+    ))
+    .bind(u.id)
+    .fetch_one(&s.pool)
+    .await?;
     Ok(Json(serde_json::json!({ "count": n })))
 }
 
@@ -140,12 +141,14 @@ pub async fn mark_read(
     u: User,
     Path(id): Path<i64>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let updated = sqlx::query(&sql("UPDATE notifications SET is_read=TRUE WHERE id=$1 AND user_id=$2"))
-        .bind(id)
-        .bind(u.id)
-        .execute(&s.pool)
-        .await?
-        .rows_affected();
+    let updated = sqlx::query(&sql(
+        "UPDATE notifications SET is_read=TRUE WHERE id=$1 AND user_id=$2",
+    ))
+    .bind(id)
+    .bind(u.id)
+    .execute(&s.pool)
+    .await?
+    .rows_affected();
     if updated == 0 {
         return Err(AppError::NotFound);
     }
@@ -156,12 +159,13 @@ pub async fn mark_all_read(
     State(s): State<AppState>,
     u: User,
 ) -> AppResult<Json<serde_json::Value>> {
-    let updated =
-        sqlx::query(&sql("UPDATE notifications SET is_read=TRUE WHERE user_id=$1 AND is_read=FALSE"))
-            .bind(u.id)
-            .execute(&s.pool)
-            .await?
-            .rows_affected();
+    let updated = sqlx::query(&sql(
+        "UPDATE notifications SET is_read=TRUE WHERE user_id=$1 AND is_read=FALSE",
+    ))
+    .bind(u.id)
+    .execute(&s.pool)
+    .await?
+    .rows_affected();
     Ok(Json(serde_json::json!({ "ok": true, "count": updated })))
 }
 

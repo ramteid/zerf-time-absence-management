@@ -20,20 +20,6 @@ jobs:
   rust:
     name: Backend (build, test)
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: kitazeit_test
-          POSTGRES_PASSWORD: kitazeit_test
-          POSTGRES_DB: kitazeit_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U kitazeit_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
     defaults:
       run:
         working-directory: backend
@@ -51,10 +37,8 @@ jobs:
         run: cargo clippy -- -D warnings
       - name: Build (release)
         run: cargo build --release --locked
-      - name: Integration tests
-        env:
-          DATABASE_URL: postgres://kitazeit_test:kitazeit_test@localhost:5432/kitazeit_test
-        run: cargo test --test integration -- --nocapture
+      - name: Integration tests (SQLite in-memory)
+        run: cargo test --no-default-features --features test-sqlite --test integration -- --nocapture --test-threads=1
       - name: cargo-audit (RustSec advisories — advisory; daily 'audit' workflow files an issue on findings)
         continue-on-error: true
         run: |

@@ -108,15 +108,16 @@ async fn build_range(
     ).bind(user_id).bind(from).bind(to).fetch_all(pool).await?;
 
     // Load UI language to decide which holiday name to display
-    let ui_lang: String =
-        sqlx::query_scalar(&sql("SELECT value FROM app_settings WHERE key = 'ui_language'"))
-            .fetch_optional(pool)
-            .await?
-            .unwrap_or_else(|| "en".to_string());
+    let ui_lang: String = sqlx::query_scalar(&sql(
+        "SELECT value FROM app_settings WHERE key = 'ui_language'",
+    ))
+    .fetch_optional(pool)
+    .await?
+    .unwrap_or_else(|| "en".to_string());
 
-    let h: Vec<(NaiveDate, String, Option<String>)> = sqlx::query_as(
-        &sql("SELECT holiday_date, name, local_name FROM holidays WHERE holiday_date BETWEEN $1 AND $2"),
-    )
+    let h: Vec<(NaiveDate, String, Option<String>)> = sqlx::query_as(&sql(
+        "SELECT holiday_date, name, local_name FROM holidays WHERE holiday_date BETWEEN $1 AND $2",
+    ))
     .bind(from)
     .bind(to)
     .fetch_all(pool)
@@ -579,35 +580,35 @@ pub async fn flextime(
     // q.from already reflects all prior over/under-time.
     let loop_start = user.start_date.min(q.from);
 
-    let te: Vec<(NaiveDate, String, String, String)> = sqlx::query_as(
-        &sql("SELECT entry_date, start_time, end_time, status \
-         FROM time_entries WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3"),
-    )
+    let te: Vec<(NaiveDate, String, String, String)> =
+        sqlx::query_as(&sql("SELECT entry_date, start_time, end_time, status \
+         FROM time_entries WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3"))
+        .bind(uid)
+        .bind(loop_start)
+        .bind(q.to)
+        .fetch_all(&s.pool)
+        .await?;
+
+    let abs: Vec<(NaiveDate, NaiveDate, String)> = sqlx::query_as(&sql(
+        "SELECT start_date, end_date, kind FROM absences \
+         WHERE user_id=$1 AND status='approved' AND end_date >= $2 AND start_date <= $3",
+    ))
     .bind(uid)
     .bind(loop_start)
     .bind(q.to)
     .fetch_all(&s.pool)
     .await?;
 
-    let abs: Vec<(NaiveDate, NaiveDate, String)> = sqlx::query_as(
-        &sql("SELECT start_date, end_date, kind FROM absences \
-         WHERE user_id=$1 AND status='approved' AND end_date >= $2 AND start_date <= $3"),
-    )
-    .bind(uid)
-    .bind(loop_start)
-    .bind(q.to)
-    .fetch_all(&s.pool)
-    .await?;
+    let ui_lang: String = sqlx::query_scalar(&sql(
+        "SELECT value FROM app_settings WHERE key = 'ui_language'",
+    ))
+    .fetch_optional(&s.pool)
+    .await?
+    .unwrap_or_else(|| "en".to_string());
 
-    let ui_lang: String =
-        sqlx::query_scalar(&sql("SELECT value FROM app_settings WHERE key = 'ui_language'"))
-            .fetch_optional(&s.pool)
-            .await?
-            .unwrap_or_else(|| "en".to_string());
-
-    let h: Vec<(NaiveDate, String, Option<String>)> = sqlx::query_as(
-        &sql("SELECT holiday_date, name, local_name FROM holidays WHERE holiday_date BETWEEN $1 AND $2"),
-    )
+    let h: Vec<(NaiveDate, String, Option<String>)> = sqlx::query_as(&sql(
+        "SELECT holiday_date, name, local_name FROM holidays WHERE holiday_date BETWEEN $1 AND $2",
+    ))
     .bind(loop_start)
     .bind(q.to)
     .fetch_all(&s.pool)

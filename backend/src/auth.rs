@@ -195,11 +195,13 @@ pub async fn login(
             false
         }
     };
-    sqlx::query(&sql("INSERT INTO login_attempts(email, success) VALUES ($1, $2)"))
-        .bind(&email)
-        .bind(ok)
-        .execute(&s.pool)
-        .await?;
+    sqlx::query(&sql(
+        "INSERT INTO login_attempts(email, success) VALUES ($1, $2)",
+    ))
+    .bind(&email)
+    .bind(ok)
+    .execute(&s.pool)
+    .await?;
     let user = user.ok_or_else(|| AppError::BadRequest("Invalid email or password.".into()))?;
     if !ok {
         return Err(AppError::BadRequest("Invalid email or password.".into()));
@@ -209,19 +211,23 @@ pub async fn login(
     // is ignored; we always issue a fresh, random, never-reused token.
     let token = new_token();
     let csrf = new_token();
-    sqlx::query(&sql("INSERT INTO sessions(token, user_id, csrf_token) VALUES ($1, $2, $3)"))
-        .bind(hash_token(&token))
-        .bind(user.id)
-        .bind(&csrf)
-        .execute(&s.pool)
-        .await?;
+    sqlx::query(&sql(
+        "INSERT INTO sessions(token, user_id, csrf_token) VALUES ($1, $2, $3)",
+    ))
+    .bind(hash_token(&token))
+    .bind(user.id)
+    .bind(&csrf)
+    .execute(&s.pool)
+    .await?;
 
     // Best-effort: drop any failed-attempt rows for this email so the lockout window resets.
-    sqlx::query(&sql("DELETE FROM login_attempts WHERE email = $1 AND success = FALSE"))
-        .bind(&email)
-        .execute(&s.pool)
-        .await
-        .ok();
+    sqlx::query(&sql(
+        "DELETE FROM login_attempts WHERE email = $1 AND success = FALSE",
+    ))
+    .bind(&email)
+    .execute(&s.pool)
+    .await
+    .ok();
 
     let cookie = build_session_cookie(&token, IDLE_TIMEOUT_HOURS * 3600, s.cfg.secure_cookies);
     let body = Json(serde_json::json!({
@@ -241,10 +247,11 @@ pub async fn logout(State(s): State<AppState>, req: Request) -> AppResult<Respon
         // Per security policy: on logout, all sessions of the affected user are
         // deleted -- not just the current one -- so a user logging out from one
         // device invalidates all other open sessions too.
-        let uid: Option<i64> = sqlx::query_scalar(&sql("SELECT user_id FROM sessions WHERE token = $1"))
-            .bind(hash_token(&token))
-            .fetch_optional(&s.pool)
-            .await?;
+        let uid: Option<i64> =
+            sqlx::query_scalar(&sql("SELECT user_id FROM sessions WHERE token = $1"))
+                .bind(hash_token(&token))
+                .fetch_optional(&s.pool)
+                .await?;
         if let Some(user_id) = uid {
             sqlx::query(&sql("DELETE FROM sessions WHERE user_id = $1"))
                 .bind(user_id)
@@ -364,11 +371,13 @@ pub async fn change_password(
     let h = hash_password(&body.new_password)?;
     let cur_token_hash = hash_token(&token);
     let mut tx = s.pool.begin().await?;
-    sqlx::query(&sql("UPDATE users SET password_hash=$1, must_change_password=FALSE WHERE id=$2"))
-        .bind(h)
-        .bind(user.id)
-        .execute(&mut *tx)
-        .await?;
+    sqlx::query(&sql(
+        "UPDATE users SET password_hash=$1, must_change_password=FALSE WHERE id=$2",
+    ))
+    .bind(h)
+    .bind(user.id)
+    .execute(&mut *tx)
+    .await?;
     // On password change, all OTHER sessions for this user are revoked, but
     // the caller's current session is preserved so they remain logged in.
     sqlx::query(&sql("DELETE FROM sessions WHERE user_id=$1 AND token<>$2"))
@@ -475,9 +484,9 @@ pub async fn auth_middleware(
     )
     .ok_or(AppError::Unauthorized)?;
 
-    let row: Option<(i64, DateTime<Utc>, DateTime<Utc>, String)> = sqlx::query_as(
-        &sql("SELECT user_id, last_active_at, created_at, csrf_token FROM sessions WHERE token = $1"),
-    )
+    let row: Option<(i64, DateTime<Utc>, DateTime<Utc>, String)> = sqlx::query_as(&sql(
+        "SELECT user_id, last_active_at, created_at, csrf_token FROM sessions WHERE token = $1",
+    ))
     .bind(hash_token(&token))
     .fetch_optional(&s.pool)
     .await?;
@@ -495,10 +504,12 @@ pub async fn auth_middleware(
 
     enforce_csrf(&parts, &s, &csrf).await?;
 
-    sqlx::query(&sql("UPDATE sessions SET last_active_at=CURRENT_TIMESTAMP WHERE token=$1"))
-        .bind(hash_token(&token))
-        .execute(&s.pool)
-        .await?;
+    sqlx::query(&sql(
+        "UPDATE sessions SET last_active_at=CURRENT_TIMESTAMP WHERE token=$1",
+    ))
+    .bind(hash_token(&token))
+    .execute(&s.pool)
+    .await?;
     let user: User = sqlx::query_as(&sql("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE id=$1 AND active=TRUE"))
         .bind(uid)
         .fetch_optional(&s.pool)

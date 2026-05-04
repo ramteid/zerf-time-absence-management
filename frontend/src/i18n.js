@@ -129,7 +129,6 @@ const TRANSLATIONS = {
     "Week {week}: {from} - {to}": "Woche {week}: {from} - {to}",
     "Week {week}": "Woche {week}",
 
-    "Copied {count} entries.": "{count} Einträge kopiert.",
     Target: "Soll",
     Actual: "Ist",
     Difference: "Differenz",

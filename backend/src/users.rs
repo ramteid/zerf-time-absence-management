@@ -29,11 +29,11 @@ pub async fn team_settings_list(
         return Err(AppError::Forbidden);
     }
     let rows: Vec<TeamSettings> = if u.is_admin() {
-        sqlx::query_as::<_, (i64, String, String, String, bool)>(
-            &sql("SELECT id, email, first_name, last_name, allow_reopen_without_approval \
+        sqlx::query_as::<_, (i64, String, String, String, bool)>(&sql(
+            "SELECT id, email, first_name, last_name, allow_reopen_without_approval \
              FROM users WHERE active=TRUE AND role IN ('team_lead','admin') \
-             ORDER BY last_name, first_name"),
-        )
+             ORDER BY last_name, first_name",
+        ))
         .fetch_all(&s.pool)
         .await?
         .into_iter()
@@ -47,10 +47,10 @@ pub async fn team_settings_list(
         .collect()
     } else {
         // Team leads see only their own row.
-        let row: (String, String, String, bool) = sqlx::query_as(
-            &sql("SELECT email, first_name, last_name, allow_reopen_without_approval \
-             FROM users WHERE id=$1"),
-        )
+        let row: (String, String, String, bool) = sqlx::query_as(&sql(
+            "SELECT email, first_name, last_name, allow_reopen_without_approval \
+             FROM users WHERE id=$1",
+        ))
         .bind(u.id)
         .fetch_one(&s.pool)
         .await?;
@@ -84,10 +84,11 @@ pub async fn team_settings_update(
         return Err(AppError::Forbidden);
     }
     // Target must be an active lead/admin.
-    let role: Option<(String, bool)> = sqlx::query_as(&sql("SELECT role, active FROM users WHERE id=$1"))
-        .bind(approver_id)
-        .fetch_optional(&s.pool)
-        .await?;
+    let role: Option<(String, bool)> =
+        sqlx::query_as(&sql("SELECT role, active FROM users WHERE id=$1"))
+            .bind(approver_id)
+            .fetch_optional(&s.pool)
+            .await?;
     match role {
         Some((r, true)) if r == "team_lead" || r == "admin" => {}
         _ => {
@@ -96,11 +97,13 @@ pub async fn team_settings_update(
             ))
         }
     }
-    sqlx::query(&sql("UPDATE users SET allow_reopen_without_approval=$1 WHERE id=$2"))
-        .bind(b.allow_reopen_without_approval)
-        .bind(approver_id)
-        .execute(&s.pool)
-        .await?;
+    sqlx::query(&sql(
+        "UPDATE users SET allow_reopen_without_approval=$1 WHERE id=$2",
+    ))
+    .bind(b.allow_reopen_without_approval)
+    .bind(approver_id)
+    .execute(&s.pool)
+    .await?;
     audit::log(
         &s.pool,
         u.id,
@@ -461,11 +464,13 @@ pub async fn reset_password(
     let temp = generate_password();
     let hash = hash_password(&temp)?;
     let mut tx = s.pool.begin().await?;
-    sqlx::query(&sql("UPDATE users SET password_hash=$1, must_change_password=TRUE WHERE id=$2"))
-        .bind(hash)
-        .bind(id)
-        .execute(&mut *tx)
-        .await?;
+    sqlx::query(&sql(
+        "UPDATE users SET password_hash=$1, must_change_password=TRUE WHERE id=$2",
+    ))
+    .bind(hash)
+    .bind(id)
+    .execute(&mut *tx)
+    .await?;
     // Force re-authentication: kill any existing sessions for this user.
     sqlx::query(&sql("DELETE FROM sessions WHERE user_id=$1"))
         .bind(id)

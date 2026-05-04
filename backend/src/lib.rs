@@ -46,9 +46,10 @@ pub async fn seed_admin(
     pool: &db::DatabasePool,
     admin_email: &str,
 ) -> anyhow::Result<Option<String>> {
-    let admin_count: i64 = sqlx::query_scalar(&sql("SELECT COUNT(*) FROM users WHERE role='admin'"))
-        .fetch_one(pool)
-        .await?;
+    let admin_count: i64 =
+        sqlx::query_scalar(&sql("SELECT COUNT(*) FROM users WHERE role='admin'"))
+            .fetch_one(pool)
+            .await?;
     if admin_count == 0 {
         let temp = "admin".to_string();
         let hash = auth::hash_password(&temp)?;

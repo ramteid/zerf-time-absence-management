@@ -35,12 +35,14 @@ pub async fn ensure_initial(pool: &crate::db::DatabasePool) -> AppResult<()> {
         ("Other", "#607D8B", 6),
     ];
     for (n, c, s) in init {
-        sqlx::query(&sql("INSERT INTO categories(name, color, sort_order) VALUES ($1,$2,$3)"))
-            .bind(n)
-            .bind(c)
-            .bind(s)
-            .execute(pool)
-            .await?;
+        sqlx::query(&sql(
+            "INSERT INTO categories(name, color, sort_order) VALUES ($1,$2,$3)",
+        ))
+        .bind(n)
+        .bind(c)
+        .bind(s)
+        .execute(pool)
+        .await?;
     }
     Ok(())
 }
@@ -81,9 +83,9 @@ pub async fn create(
     .await
     .map_err(|_| AppError::Conflict("Name already exists".into()))?;
     Ok(Json(
-        sqlx::query_as(
-            &sql("SELECT id, name, description, color, sort_order, active FROM categories WHERE id=$1"),
-        )
+        sqlx::query_as(&sql(
+            "SELECT id, name, description, color, sort_order, active FROM categories WHERE id=$1",
+        ))
         .bind(id)
         .fetch_one(&s.pool)
         .await?,
@@ -112,9 +114,9 @@ pub async fn update(
         .bind(b.name).bind(b.description).bind(b.color).bind(b.sort_order).bind(b.active).bind(id)
         .execute(&s.pool).await?;
     Ok(Json(
-        sqlx::query_as(
-            &sql("SELECT id, name, description, color, sort_order, active FROM categories WHERE id=$1"),
-        )
+        sqlx::query_as(&sql(
+            "SELECT id, name, description, color, sort_order, active FROM categories WHERE id=$1",
+        ))
         .bind(id)
         .fetch_one(&s.pool)
         .await?,

@@ -41,12 +41,13 @@ async fn holidays_set(
     from: NaiveDate,
     to: NaiveDate,
 ) -> AppResult<HashSet<NaiveDate>> {
-    let r: Vec<(NaiveDate,)> =
-        sqlx::query_as(&sql("SELECT holiday_date FROM holidays WHERE holiday_date BETWEEN $1 AND $2"))
-            .bind(from)
-            .bind(to)
-            .fetch_all(pool)
-            .await?;
+    let r: Vec<(NaiveDate,)> = sqlx::query_as(&sql(
+        "SELECT holiday_date FROM holidays WHERE holiday_date BETWEEN $1 AND $2",
+    ))
+    .bind(from)
+    .bind(to)
+    .fetch_all(pool)
+    .await?;
     Ok(r.into_iter().map(|(d,)| d).collect())
 }
 

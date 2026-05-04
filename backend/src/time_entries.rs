@@ -146,9 +146,9 @@ pub(crate) async fn validate(
     let start_n = parse_time(&te.start_time)?;
     let end_n = parse_time(&te.end_time)?;
 
-    let existing: Vec<(i64, String, String)> = sqlx::query_as(
-        &sql("SELECT id, start_time, end_time FROM time_entries WHERE user_id=$1 AND entry_date=$2"),
-    )
+    let existing: Vec<(i64, String, String)> = sqlx::query_as(&sql(
+        "SELECT id, start_time, end_time FROM time_entries WHERE user_id=$1 AND entry_date=$2",
+    ))
     .bind(user_id)
     .bind(te.entry_date)
     .fetch_all(pool)
@@ -313,11 +313,12 @@ pub async fn submit(
         .await;
     }
     // Notify the approver (or self if admin with no approver) about the submission.
-    let approver_id: Option<i64> = sqlx::query_scalar(&sql("SELECT approver_id FROM users WHERE id=$1"))
-        .bind(u.id)
-        .fetch_optional(&s.pool)
-        .await?
-        .flatten();
+    let approver_id: Option<i64> =
+        sqlx::query_scalar(&sql("SELECT approver_id FROM users WHERE id=$1"))
+            .bind(u.id)
+            .fetch_optional(&s.pool)
+            .await?
+            .flatten();
     let notify_id = approver_id.unwrap_or(u.id);
     crate::notifications::create(
         &s,

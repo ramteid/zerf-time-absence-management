@@ -47,19 +47,20 @@ async fn load_setting(
     key: &str,
     default: &str,
 ) -> AppResult<String> {
-    let value: Option<String> = sqlx::query_scalar(&sql("SELECT value FROM app_settings WHERE key = $1"))
-        .bind(key)
-        .fetch_optional(pool)
-        .await?;
+    let value: Option<String> =
+        sqlx::query_scalar(&sql("SELECT value FROM app_settings WHERE key = $1"))
+            .bind(key)
+            .fetch_optional(pool)
+            .await?;
     Ok(value.unwrap_or_else(|| default.to_string()))
 }
 
 async fn save_setting(pool: &crate::db::DatabasePool, key: &str, value: &str) -> AppResult<String> {
-    let saved: String = sqlx::query_scalar(
-        &sql("INSERT INTO app_settings(key, value) VALUES ($1, $2) \
+    let saved: String = sqlx::query_scalar(&sql(
+        "INSERT INTO app_settings(key, value) VALUES ($1, $2) \
          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP \
-         RETURNING value"),
-    )
+         RETURNING value",
+    ))
     .bind(key)
     .bind(value)
     .fetch_one(pool)

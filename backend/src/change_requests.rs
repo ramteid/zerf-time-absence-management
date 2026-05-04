@@ -103,10 +103,11 @@ pub async fn create(
             return Err(AppError::BadRequest("Date cannot be in the future.".into()));
         }
     }
-    let z: (i64, String) = sqlx::query_as(&sql("SELECT user_id, status FROM time_entries WHERE id=$1"))
-        .bind(b.time_entry_id)
-        .fetch_one(&s.pool)
-        .await?;
+    let z: (i64, String) =
+        sqlx::query_as(&sql("SELECT user_id, status FROM time_entries WHERE id=$1"))
+            .bind(b.time_entry_id)
+            .fetch_one(&s.pool)
+            .await?;
     if z.0 != u.id {
         return Err(AppError::Forbidden);
     }
