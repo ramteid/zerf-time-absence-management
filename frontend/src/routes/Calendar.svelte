@@ -272,9 +272,9 @@
 <div class="top-bar">
   <div class="top-bar-title">
     <h1>{$t("Calendar")}</h1>
-    <div class="top-bar-subtitle">
-      {fmtMonthYear(new Date(year, month - 1, 1))}
-    </div>
+  </div>
+  <div class="top-bar-subtitle">
+    {fmtMonthYear(new Date(year, month - 1, 1))}
   </div>
   <div class="top-bar-actions">
     <div style="display:flex;align-items:center;gap:4px">

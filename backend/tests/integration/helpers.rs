@@ -48,14 +48,14 @@ pub fn next_monday(offset_days: i64) -> chrono::NaiveDate {
 }
 
 pub fn today() -> String {
-    chrono::Utc::now()
+    chrono::Local::now()
         .date_naive()
         .format("%Y-%m-%d")
         .to_string()
 }
 
 pub fn date_offset(days: i64) -> String {
-    (chrono::Utc::now().date_naive() + chrono::Duration::days(days))
+    (chrono::Local::now().date_naive() + chrono::Duration::days(days))
         .format("%Y-%m-%d")
         .to_string()
 }

@@ -12,6 +12,14 @@ async fn self_submission_is_visible_and_notifies_admin() {
     let (_, body) = admin.get("/api/v1/categories").await;
     let cat_id = body.as_array().unwrap()[0]["id"].as_i64().unwrap();
     let monday = next_monday(-14).format("%Y-%m-%d").to_string();
+    // Admin is seeded with start_date=today; move it back so past entries work.
+    let (st, _) = admin
+        .put(
+            "/api/v1/users/1",
+            &json!({"start_date": "2024-01-01"}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "update admin start_date");
     let entry_id = create_and_submit_entry(&admin, &monday, cat_id).await;
 
     let (st, body) = admin.get("/api/v1/notifications").await;

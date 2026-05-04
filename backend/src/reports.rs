@@ -124,6 +124,7 @@ async fn build_range(
         .fetch_one(pool)
         .await?;
     let target_per_day_min = (user.weekly_hours / 5.0 * 60.0) as i64;
+    let today = chrono::Local::now().date_naive();
 
     #[allow(clippy::type_complexity)]
     let te: Vec<(NaiveDate, String, String, String, String, i64, String, Option<String>)> = sqlx::query_as(
@@ -175,7 +176,8 @@ async fn build_range(
             .find(|(s, e, _)| d >= *s && d <= *e)
             .map(|(_, _, k)| k.clone());
         let before_start = d < user.start_date;
-        let target = if weekday && holiday.is_none() && !before_start {
+        let after_today = d > today;
+        let target = if weekday && holiday.is_none() && !before_start && !after_today {
             target_per_day_min
         } else {
             0
@@ -554,12 +556,25 @@ pub async fn overtime(
     } else if year == current_year {
         now.month()
     } else {
-        // Future year — nothing has been worked yet.
+        // Future year - nothing has been worked yet.
         return Ok(Json(vec![]));
+    };
+    // Determine the user's start_date so we skip months entirely before it.
+    let user_start: NaiveDate = sqlx::query_scalar("SELECT start_date FROM users WHERE id=$1")
+        .bind(uid)
+        .fetch_one(&s.pool)
+        .await?;
+    let start_month = if user_start.year() == year {
+        user_start.month()
+    } else if user_start.year() > year {
+        // User hasn't started yet in this year.
+        return Ok(Json(vec![]));
+    } else {
+        1
     };
     let mut out = vec![];
     let mut cum = 0i64;
-    for m in 1..=max_month {
+    for m in start_month..=max_month {
         let mstr = format!("{:04}-{:02}", year, m);
         let r = build_month(&s.pool, uid, &mstr).await?;
         cum += r.diff_min;
@@ -663,6 +678,7 @@ pub async fn flextime(
         })
         .collect();
 
+    let today = chrono::Local::now().date_naive();
     let mut out = vec![];
     let mut cum = 0i64;
     let mut d = loop_start;
@@ -675,7 +691,8 @@ pub async fn flextime(
             .find(|(s, e, _)| d >= *s && d <= *e)
             .map(|(_, _, k)| k.clone());
         let before_start = d < user.start_date;
-        let target = if weekday && holiday.is_none() && !before_start {
+        let after_today = d > today;
+        let target = if weekday && holiday.is_none() && !before_start && !after_today {
             target_per_day_min
         } else {
             0

@@ -119,9 +119,9 @@
 <div class="top-bar">
   <div class="top-bar-title">
     <h1>{$t("Absences")}</h1>
-    <div class="top-bar-subtitle">
-      {$t("Vacation, sick leave & training days")}
-    </div>
+  </div>
+  <div class="top-bar-subtitle">
+    {$t("Vacation, sick leave & training days")}
   </div>
   <div class="top-bar-actions">
     <select

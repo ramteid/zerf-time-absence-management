@@ -23,6 +23,7 @@ mod full_suite;
 mod notifications;
 mod reopen;
 mod reports;
+mod start_date;
 mod team_settings;
 mod time_entries;
 mod users;

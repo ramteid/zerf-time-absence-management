@@ -61,8 +61,8 @@
 <div class="top-bar">
   <div class="top-bar-title">
     <h1>{$t("Team Members")}</h1>
-    <div class="top-bar-subtitle">{$t("Manage your team")}</div>
   </div>
+  <div class="top-bar-subtitle">{$t("Manage your team")}</div>
   <div class="top-bar-actions">
     <button
       class="kz-btn kz-btn-primary kz-btn-sm"

@@ -1,6 +1,7 @@
 use crate::audit;
 use crate::auth::User;
 use crate::error::{AppError, AppResult};
+use crate::i18n::{self, TextKey};
 use crate::AppState;
 use axum::{
     extract::{Path, Query, State},
@@ -9,6 +10,16 @@ use axum::{
 use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, Postgres, QueryBuilder};
+
+async fn notification_language(pool: &crate::db::DatabasePool) -> i18n::Language {
+    match i18n::load_ui_language(pool).await {
+        Ok(language) => language,
+        Err(e) => {
+            tracing::warn!(target:"zerf::time_entries", "load notification language failed: {e}");
+            i18n::Language::default()
+        }
+    }
+}
 
 #[derive(FromRow, Serialize, Clone)]
 pub struct TimeEntry {
@@ -128,6 +139,17 @@ pub(crate) async fn validate(
         if c.len() > 2000 {
             return Err(AppError::BadRequest("Comment too long (max 2000).".into()));
         }
+    }
+    // Reject entries before the user's start_date.
+    let user_start: chrono::NaiveDate =
+        sqlx::query_scalar("SELECT start_date FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_one(pool)
+            .await?;
+    if te.entry_date < user_start {
+        return Err(AppError::BadRequest(
+            "Entry date is before user start date.".into(),
+        ));
     }
     // Validate that the category exists and is active.
     let cat_active: Option<bool> =
@@ -366,12 +388,24 @@ pub async fn submit(
                 .await?
                 .flatten();
         let notify_id = approver_id.unwrap_or(u.id);
-        crate::notifications::create(
+        let language = notification_language(&s.pool).await;
+        crate::notifications::create_translated(
             &s,
+            language,
             notify_id,
             "timesheet_submitted",
-            &format!("{} {} submitted a timesheet", u.first_name, u.last_name),
-            &format!("{} entries submitted for approval", count),
+            TextKey::TimesheetSubmittedTitle,
+            TextKey::TimesheetSubmittedBody,
+            vec![
+                (
+                    "submitter_name",
+                    format!("{} {}", u.first_name, u.last_name),
+                ),
+                (
+                    "entry_count",
+                    i18n::entry_count(language, count as i64),
+                ),
+            ],
             Some("time_entries"),
             None,
         )
@@ -437,12 +471,15 @@ pub async fn approve(
         Some(serde_json::json!({"status": "approved", "reviewed_by": u.id})),
     )
     .await;
-    crate::notifications::create(
+    let language = notification_language(&s.pool).await;
+    crate::notifications::create_translated(
         &s,
+        language,
         z.user_id,
         "timesheet_approved",
-        "Timesheet approved",
-        &format!("Your timesheet entry for {} has been approved.", z.entry_date),
+        TextKey::TimesheetApprovedTitle,
+        TextKey::TimesheetApprovedBody,
+        vec![("entry_date", i18n::format_date(language, z.entry_date))],
         Some("time_entries"),
         Some(id),
     )
@@ -517,15 +554,18 @@ pub async fn reject(
         Some(serde_json::json!({"status": "rejected", "reason": b.reason})),
     )
     .await;
-    crate::notifications::create(
+    let language = notification_language(&s.pool).await;
+    crate::notifications::create_translated(
         &s,
+        language,
         z.user_id,
         "timesheet_rejected",
-        "Timesheet rejected",
-        &format!(
-            "Your timesheet entry for {} was rejected: {}",
-            z.entry_date, b.reason
-        ),
+        TextKey::TimesheetRejectedTitle,
+        TextKey::TimesheetRejectedBody,
+        vec![
+            ("entry_date", i18n::format_date(language, z.entry_date)),
+            ("reason", b.reason.clone()),
+        ],
         Some("time_entries"),
         Some(id),
     )
@@ -603,12 +643,15 @@ pub async fn batch_approve(
             Some(serde_json::json!({"status": "approved", "reviewed_by": u.id})),
         )
         .await;
-        crate::notifications::create(
+        let language = notification_language(&s.pool).await;
+        crate::notifications::create_translated(
             &s,
+            language,
             z.user_id,
             "timesheet_approved",
-            "Timesheet approved",
-            &format!("Your timesheet entry for {} has been approved.", z.entry_date),
+            TextKey::TimesheetApprovedTitle,
+            TextKey::TimesheetApprovedBody,
+            vec![("entry_date", i18n::format_date(language, z.entry_date))],
             Some("time_entries"),
             Some(z.id),
         )
@@ -705,15 +748,18 @@ pub async fn batch_reject(
             Some(serde_json::json!({"status": "rejected", "reason": reason})),
         )
         .await;
-        crate::notifications::create(
+        let language = notification_language(&s.pool).await;
+        crate::notifications::create_translated(
             &s,
+            language,
             z.user_id,
             "timesheet_rejected",
-            "Timesheet rejected",
-            &format!(
-                "Your timesheet entry for {} was rejected: {}",
-                z.entry_date, reason
-            ),
+            TextKey::TimesheetRejectedTitle,
+            TextKey::TimesheetRejectedBody,
+            vec![
+                ("entry_date", i18n::format_date(language, z.entry_date)),
+                ("reason", reason.clone()),
+            ],
             Some("time_entries"),
             Some(z.id),
         )

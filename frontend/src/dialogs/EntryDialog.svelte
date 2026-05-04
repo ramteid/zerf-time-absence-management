@@ -1,7 +1,7 @@
 <script>
   import { onMount } from "svelte";
   import { api } from "../api.js";
-  import { categories } from "../stores.js";
+  import { currentUser, categories } from "../stores.js";
   import { t } from "../i18n.js";
   import { isoDate } from "../format.js";
   import { confirmDialog } from "../confirm.js";
@@ -90,6 +90,7 @@
       <DatePicker
         id="entry-date"
         bind:value={entry_date}
+        min={$currentUser?.start_date}
         max={isoDate(new Date())}
         container={dlg}
       />
@@ -101,7 +102,6 @@
           id="entry-start-time"
           bind:value={start_time}
           max={end_time}
-          container={dlg}
           required
         />
       </div>
@@ -111,7 +111,6 @@
           id="entry-end-time"
           bind:value={end_time}
           min={start_time}
-          container={dlg}
           required
         />
       </div>

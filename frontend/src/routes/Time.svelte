@@ -252,13 +252,13 @@
 <div class="top-bar">
   <div class="top-bar-title">
     <h1>{$t("Time Entry")}</h1>
-    {#if mo}
-      <div class="top-bar-subtitle">
-        {$t("Week {week}", { week: isoWeek(mo) })} · {contractHours}
-        {$t("contract")}
-      </div>
-    {/if}
   </div>
+  {#if mo}
+    <div class="top-bar-subtitle">
+      {$t("Week {week}", { week: isoWeek(mo) })} · {contractHours}
+      {$t("contract")}
+    </div>
+  {/if}
   <div class="top-bar-actions">
     {#if mo}
       <div style="display:flex;align-items:center;gap:4px">
@@ -283,16 +283,14 @@
         </button>
       </div>
     {/if}
-    {#if drafts.length}
-      <button
-        class="kz-btn kz-btn-primary"
-        on:click={() => submitWeek(drafts.map((x) => x.id))}
-      >
-        <Icon name="Send" size={14} />{$t("Submit Week")}
-      </button>
-    {:else if weekStatus !== "draft"}
-      <span class="kz-chip kz-chip-{weekStatus}">{statusLabel(weekStatus)}</span
-      >
+    <button
+      class="kz-btn kz-btn-primary"
+      on:click={() => submitWeek(drafts.map((x) => x.id))}
+      disabled={!drafts.length}
+    >
+      <Icon name="Send" size={14} />{$t("Submit Week")}
+    </button>
+    {#if !drafts.length && weekStatus !== "draft"}
       {#if pendingReopen}
         <span
           class="kz-chip kz-chip-pending"

@@ -112,6 +112,11 @@ pub async fn create(
         if d > chrono::Local::now().date_naive() {
             return Err(AppError::BadRequest("Date cannot be in the future.".into()));
         }
+        if d < u.start_date {
+            return Err(AppError::BadRequest(
+                "Date cannot be before user start date.".into(),
+            ));
+        }
     }
     let z: (i64, String, String, String) = sqlx::query_as(
         "SELECT user_id, status, start_time, end_time FROM time_entries WHERE id=$1",

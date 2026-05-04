@@ -91,8 +91,8 @@
     input.removeEventListener("click", handleInputClick);
   }
 
-  function clamp(value, min, max) {
-    return Math.min(Math.max(value, min), max);
+  function clamp(val, lo, hi) {
+    return Math.min(Math.max(val, lo), hi);
   }
 
   function measureCalendarHeight(calendar) {
@@ -103,12 +103,16 @@
     return childHeight || calendar.offsetHeight;
   }
 
-  function positionInContainer(instance, positionElement) {
+  // Position the calendar using viewport-fixed coordinates so it floats above
+  // the dialog without affecting its layout or being clipped by it.
+  // The calendar is appended to the dialog element (which is in the top layer),
+  // so using position:fixed keeps it in the top-layer stacking context while
+  // not contributing to the dialog's scrollable height.
+  function positionFixed(instance, positionElement) {
     const calendar = instance.calendarContainer;
     const anchor = positionElement || instance.altInput || instance._input;
-    if (!calendar || !anchor || !container) return;
+    if (!calendar || !anchor) return;
 
-    const containerRect = container.getBoundingClientRect();
     const anchorRect = anchor.getBoundingClientRect();
     const calendarWidth = calendar.offsetWidth;
     const calendarHeight = measureCalendarHeight(calendar);
@@ -117,29 +121,15 @@
     const showAbove =
       spaceBelow < calendarHeight + overlayGap &&
       spaceAbove > calendarHeight + overlayGap;
-    const maxLeft = Math.max(
-      overlayMargin,
-      containerRect.width - calendarWidth - overlayMargin,
-    );
-    const left = clamp(
-      anchorRect.left - containerRect.left + container.scrollLeft,
-      overlayMargin,
-      maxLeft,
-    );
-    const belowTop =
-      anchorRect.bottom - containerRect.top + container.scrollTop + overlayGap;
-    const aboveTop =
-      anchorRect.top -
-      containerRect.top +
-      container.scrollTop -
-      calendarHeight -
-      overlayGap;
+
+    const maxLeft = window.innerWidth - calendarWidth - overlayMargin;
+    const left = clamp(anchorRect.left, overlayMargin, maxLeft);
+    const top = showAbove
+      ? anchorRect.top - calendarHeight - overlayGap
+      : anchorRect.bottom + overlayGap;
+
     const arrowLeft = clamp(
-      anchorRect.left -
-        containerRect.left +
-        container.scrollLeft -
-        left +
-        anchorRect.width / 2,
+      anchorRect.left - left + anchorRect.width / 2,
       16,
       Math.max(16, calendarWidth - 16),
     );
@@ -154,7 +144,8 @@
       "arrowRight",
     );
     calendar.classList.add(showAbove ? "arrowBottom" : "arrowTop");
-    calendar.style.top = `${Math.round(showAbove ? aboveTop : belowTop)}px`;
+    calendar.style.position = "fixed";
+    calendar.style.top = `${Math.round(top)}px`;
     calendar.style.left = `${Math.round(left)}px`;
     calendar.style.right = "auto";
     calendar.style.setProperty(
@@ -198,11 +189,13 @@
           ]
         : [],
     };
-    // When rendered inside a <dialog>, append the calendar to the dialog
-    // so it stays in the top layer and is not hidden behind the backdrop.
+    // When rendered inside a <dialog>, append the calendar to the dialog so it
+    // participates in the top-layer stacking context. Use position:fixed so the
+    // calendar is placed relative to the viewport and does not push the dialog's
+    // content area or get hidden behind its backdrop.
     if (container) {
       opts.appendTo = container;
-      opts.position = positionInContainer;
+      opts.position = positionFixed;
     }
     fp = flatpickr(el, opts);
     fp.calendarContainer?.classList.add("kz-date-picker-calendar");

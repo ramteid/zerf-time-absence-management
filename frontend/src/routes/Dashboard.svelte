@@ -1,7 +1,7 @@
 <script>
   import { tick } from "svelte";
   import { api } from "../api.js";
-  import { path, toast } from "../stores.js";
+  import { currentUser, path, toast } from "../stores.js";
   import { t, absenceKindLabel, formatHours } from "../i18n.js";
   import {
     fmtDate,
@@ -116,7 +116,13 @@
 
   async function loadPastMonthSubmissionStatus() {
     const months = [];
-    for (let month = 1; month < currentMonthIndex; month += 1) {
+    // Only check months from the user's start_date onward.
+    const userStart = $currentUser?.start_date;
+    const startYear = userStart ? parseInt(userStart.slice(0, 4), 10) : 0;
+    const startMonth = userStart ? parseInt(userStart.slice(5, 7), 10) : 1;
+    const firstMonth =
+      reportYear === startYear ? Math.max(startMonth, 1) : reportYear > startYear ? 1 : currentMonthIndex;
+    for (let month = firstMonth; month < currentMonthIndex; month += 1) {
       months.push(monthKey(reportYear, month));
     }
 
@@ -242,7 +248,15 @@
     overtimeRows.find((row) => row.month === currentMonthKey) || null;
   $: overtimeBalanceMin = currentOvertimeRow?.cumulative_min || 0;
   $: currentMonthDiffMin = currentOvertimeRow?.diff_min || 0;
-  $: previousMonthsTotal = Math.max(0, currentMonthIndex - 1);
+  $: previousMonthsTotal = (() => {
+    const userStart = $currentUser?.start_date;
+    if (!userStart) return 0;
+    const startYear = parseInt(userStart.slice(0, 4), 10);
+    const startMonth = parseInt(userStart.slice(5, 7), 10);
+    if (reportYear < startYear) return 0;
+    const firstMonth = reportYear === startYear ? startMonth : 1;
+    return Math.max(0, currentMonthIndex - firstMonth);
+  })();
   $: previousMonthsSubmitted = monthSubmissionChecks.filter(
     (month) => month.submitted,
   ).length;
@@ -487,9 +501,9 @@
 <div class="top-bar">
   <div class="top-bar-title">
     <h1>{$t("Dashboard")}</h1>
-    <div class="top-bar-subtitle">
-      {$t("Approve timesheets & manage requests")}
-    </div>
+  </div>
+  <div class="top-bar-subtitle">
+    {$t("Approve timesheets & manage requests")}
   </div>
 </div>
 
@@ -720,60 +734,6 @@
     </div>
   </div>
 
-  <div class="kz-card" style="padding:16px 20px;margin:16px 0">
-    <div
-      style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px"
-    >
-      <Icon name="TrendingUp" size={15} sw={1.5} />
-      <span style="font-size:14px;font-weight:600;flex:1"
-        >{$t("Flextime balance")}</span
-      >
-      <div style="display:flex;gap:4px;flex-wrap:wrap">
-        <button class="kz-btn kz-btn-sm" on:click={() => setRange(30)}
-          >{$t("Last 30 days")}</button
-        >
-        <button class="kz-btn kz-btn-sm" on:click={() => setRange(90)}
-          >{$t("Last 90 days")}</button
-        >
-        <button class="kz-btn kz-btn-sm" on:click={() => setRange(182)}
-          >{$t("Last 6 months")}</button
-        >
-        <button class="kz-btn kz-btn-sm" on:click={() => setRange(365)}
-          >{$t("Last year")}</button
-        >
-      </div>
-      <div style="display:flex;align-items:center;gap:4px">
-        <DatePicker
-          bind:value={chartFrom}
-          max={chartTo}
-          style="font-size:12px;padding:3px 6px;height:28px"
-        />
-        <span style="font-size:12px;color:var(--text-tertiary)">-</span>
-        <DatePicker
-          bind:value={chartTo}
-          min={chartFrom}
-          style="font-size:12px;padding:3px 6px;height:28px"
-        />
-        <button
-          class="kz-btn kz-btn-sm"
-          on:click={loadChart}
-          aria-label={$t("Show")}
-        >
-          <Icon name="Search" size={13} />
-        </button>
-      </div>
-    </div>
-    {#if chartLoading}
-      <div
-        style="text-align:center;padding:40px 0;font-size:13px;color:var(--text-tertiary)"
-      >
-        {$t("Loading...")}
-      </div>
-    {:else}
-      <FlextimeChart data={chartData} />
-    {/if}
-  </div>
-
   {#if pendingReopens.length > 0}
     <div
       class="kz-card"
@@ -831,6 +791,60 @@
       {/each}
     </div>
   {/if}
+
+  <div class="kz-card" style="padding:16px 20px;margin:16px 0">
+    <div
+      style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px"
+    >
+      <Icon name="TrendingUp" size={15} sw={1.5} />
+      <span style="font-size:14px;font-weight:600;flex:1"
+        >{$t("Flextime balance")}</span
+      >
+      <div style="display:flex;gap:4px;flex-wrap:wrap">
+        <button class="kz-btn kz-btn-sm" on:click={() => setRange(30)}
+          >{$t("Last 30 days")}</button
+        >
+        <button class="kz-btn kz-btn-sm" on:click={() => setRange(90)}
+          >{$t("Last 90 days")}</button
+        >
+        <button class="kz-btn kz-btn-sm" on:click={() => setRange(182)}
+          >{$t("Last 6 months")}</button
+        >
+        <button class="kz-btn kz-btn-sm" on:click={() => setRange(365)}
+          >{$t("Last year")}</button
+        >
+      </div>
+      <div style="display:flex;align-items:center;gap:4px">
+        <DatePicker
+          bind:value={chartFrom}
+          max={chartTo}
+          style="font-size:12px;padding:3px 6px;height:28px"
+        />
+        <span style="font-size:12px;color:var(--text-tertiary)">-</span>
+        <DatePicker
+          bind:value={chartTo}
+          min={chartFrom}
+          style="font-size:12px;padding:3px 6px;height:28px"
+        />
+        <button
+          class="kz-btn kz-btn-sm"
+          on:click={loadChart}
+          aria-label={$t("Show")}
+        >
+          <Icon name="Search" size={13} />
+        </button>
+      </div>
+    </div>
+    {#if chartLoading}
+      <div
+        style="text-align:center;padding:40px 0;font-size:13px;color:var(--text-tertiary)"
+      >
+        {$t("Loading...")}
+      </div>
+    {:else}
+      <FlextimeChart data={chartData} />
+    {/if}
+  </div>
 
   {#if changeRequests.length > 0}
     <div
