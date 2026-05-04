@@ -212,9 +212,9 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v5
-      - uses: github/codeql-action/init@v3
+      - uses: github/codeql-action/init@v4
         with:
           languages: javascript
           # Restrict to the new Svelte frontend so the analysis is meaningful.
           source-root: frontend
-      - uses: github/codeql-action/analyze@v3
+      - uses: github/codeql-action/analyze@v4
