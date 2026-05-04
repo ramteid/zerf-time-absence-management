@@ -1199,6 +1199,12 @@ dialog footer {
     justify-content: center;
     overflow: hidden;
     background: var(--bg-surface);
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    z-index: 400;
   }
 
   .pull-spinner {
