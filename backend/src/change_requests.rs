@@ -43,10 +43,21 @@ pub async fn list_all(State(s): State<AppState>, u: User) -> AppResult<Json<Vec<
     if !u.is_lead() {
         return Err(AppError::Forbidden);
     }
+    if u.is_admin() {
+        return Ok(Json(
+            sqlx::query_as::<_, ChangeRequest>(
+                "SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE status='open' ORDER BY created_at",
+            )
+            .fetch_all(&s.pool)
+            .await?,
+        ));
+    }
+    // Non-admin leads see only open change requests from their direct reports.
     Ok(Json(
         sqlx::query_as::<_, ChangeRequest>(
-            "SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE status='open' ORDER BY created_at",
+            "SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE status='open' AND user_id IN (SELECT id FROM users WHERE approver_id = $1) ORDER BY created_at",
         )
+        .bind(u.id)
         .fetch_all(&s.pool)
         .await?,
     ))
@@ -193,8 +204,22 @@ pub async fn approve(
             .bind(id)
             .fetch_one(&s.pool)
             .await?;
+    // A lead may not review their own request; admins may.
     if a.user_id == u.id && !u.is_admin() {
         return Err(AppError::Forbidden);
+    }
+    // Non-admin leads may only act on requests from their direct reports.
+    if !u.is_admin() {
+        let is_report: Option<bool> = sqlx::query_scalar(
+            "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2",
+        )
+        .bind(a.user_id)
+        .bind(u.id)
+        .fetch_optional(&s.pool)
+        .await?;
+        if is_report.is_none() {
+            return Err(AppError::Forbidden);
+        }
     }
     // Fetch the existing entry and build effective post-change values so we can
     // run the same overlap / 14-hour / category validation as direct edits do.
@@ -218,11 +243,30 @@ pub async fn approve(
     };
     crate::time_entries::validate(&s.pool, entry.user_id, &effective, Some(a.time_entry_id))
         .await?;
-    sqlx::query("UPDATE time_entries SET entry_date=COALESCE($1,entry_date), start_time=COALESCE($2,start_time), end_time=COALESCE($3,end_time), category_id=COALESCE($4,category_id), comment=CASE WHEN $5 IS NOT NULL THEN NULLIF($5,'') ELSE comment END, updated_at=CURRENT_TIMESTAMP WHERE id=$6")
-        .bind(a.new_date).bind(&a.new_start_time).bind(&a.new_end_time).bind(a.new_category_id).bind(&a.new_comment).bind(a.time_entry_id)
-        .execute(&s.pool).await?;
-    sqlx::query("UPDATE change_requests SET status='approved', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP WHERE id=$2")
-        .bind(u.id).bind(id).execute(&s.pool).await?;
+    let mut tx = s.pool.begin().await?;
+    let claimed = sqlx::query(
+        "UPDATE change_requests SET status='approved', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP WHERE id=$2 AND status='open'",
+    )
+    .bind(u.id)
+    .bind(id)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    if claimed == 0 {
+        return Err(AppError::Conflict(
+            "Change request was already resolved by someone else.".into(),
+        ));
+    }
+    let updated_entry = sqlx::query("UPDATE time_entries SET entry_date=COALESCE($1,entry_date), start_time=COALESCE($2,start_time), end_time=COALESCE($3,end_time), category_id=COALESCE($4,category_id), comment=CASE WHEN $5 IS NOT NULL THEN NULLIF($5,'') ELSE comment END, updated_at=CURRENT_TIMESTAMP WHERE id=$6 AND status=$7")
+        .bind(a.new_date).bind(&a.new_start_time).bind(&a.new_end_time).bind(a.new_category_id).bind(&a.new_comment).bind(a.time_entry_id).bind(&entry.status)
+        .execute(&mut *tx).await?
+        .rows_affected();
+    if updated_entry == 0 {
+        return Err(AppError::Conflict(
+            "Change request could no longer be applied because the entry changed.".into(),
+        ));
+    }
+    tx.commit().await?;
     audit::log(
         &s.pool,
         u.id,
@@ -257,11 +301,37 @@ pub async fn reject(
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
+    // A lead may not reject their own request; admins may.
     if prev.user_id == u.id && !u.is_admin() {
         return Err(AppError::Forbidden);
     }
-    sqlx::query("UPDATE change_requests SET status='rejected', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP, rejection_reason=$2 WHERE id=$3")
-        .bind(u.id).bind(&b.reason).bind(id).execute(&s.pool).await?;
+    // Non-admin leads may only act on requests from their direct reports.
+    if !u.is_admin() {
+        let is_report: Option<bool> = sqlx::query_scalar(
+            "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2",
+        )
+        .bind(prev.user_id)
+        .bind(u.id)
+        .fetch_optional(&s.pool)
+        .await?;
+        if is_report.is_none() {
+            return Err(AppError::Forbidden);
+        }
+    }
+    let updated = sqlx::query(
+        "UPDATE change_requests SET status='rejected', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP, rejection_reason=$2 WHERE id=$3 AND status='open'",
+    )
+    .bind(u.id)
+    .bind(&b.reason)
+    .bind(id)
+    .execute(&s.pool)
+    .await?
+    .rows_affected();
+    if updated == 0 {
+        return Err(AppError::Conflict(
+            "Change request was already resolved by someone else.".into(),
+        ));
+    }
     audit::log(
         &s.pool,
         u.id,

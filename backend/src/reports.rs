@@ -12,6 +12,34 @@ use serde::{Deserialize, Serialize};
 use sqlx::{Postgres, QueryBuilder};
 use std::collections::HashMap;
 
+/// Verify that `requester` is allowed to read data for `target_uid`.
+/// Admins may access any user. Non-admin leads may only access their direct
+/// reports (users whose `approver_id` matches the lead's id). Every user may
+/// always access their own data.
+async fn assert_can_access_user(
+    pool: &crate::db::DatabasePool,
+    requester: &User,
+    target_uid: i64,
+) -> AppResult<()> {
+    if requester.id == target_uid || requester.is_admin() {
+        return Ok(());
+    }
+    if !requester.is_lead() {
+        return Err(AppError::Forbidden);
+    }
+    let is_report: Option<bool> = sqlx::query_scalar(
+        "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2",
+    )
+    .bind(target_uid)
+    .bind(requester.id)
+    .fetch_optional(pool)
+    .await?;
+    if is_report.is_none() {
+        return Err(AppError::Forbidden);
+    }
+    Ok(())
+}
+
 #[derive(Deserialize)]
 pub struct MonthQuery {
     pub user_id: Option<i64>,
@@ -218,9 +246,7 @@ pub async fn month(
     Query(q): Query<MonthQuery>,
 ) -> AppResult<Json<MonthReport>> {
     let uid = q.user_id.unwrap_or(u.id);
-    if uid != u.id && !u.is_lead() {
-        return Err(AppError::Forbidden);
-    }
+    assert_can_access_user(&s.pool, &u, uid).await?;
     Ok(Json(build_month(&s.pool, uid, &q.month).await?))
 }
 
@@ -343,9 +369,7 @@ pub async fn month_csv(
     Query(q): Query<CsvQuery>,
 ) -> AppResult<Response> {
     let uid = q.user_id.unwrap_or(u.id);
-    if uid != u.id && !u.is_lead() {
-        return Err(AppError::Forbidden);
-    }
+    assert_can_access_user(&s.pool, &u, uid).await?;
     let month = q
         .month
         .as_ref()
@@ -360,9 +384,7 @@ pub async fn range_csv(
     Query(q): Query<CsvQuery>,
 ) -> AppResult<Response> {
     let uid = q.user_id.unwrap_or(u.id);
-    if uid != u.id && !u.is_lead() {
-        return Err(AppError::Forbidden);
-    }
+    assert_can_access_user(&s.pool, &u, uid).await?;
     let from = q
         .from
         .ok_or_else(|| AppError::BadRequest("from is required.".into()))?;
@@ -398,10 +420,17 @@ pub async fn team(
     if !u.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let users: Vec<crate::auth::User> =
+    // Admins see all active users; non-admin leads see only their direct reports.
+    let users: Vec<crate::auth::User> = if u.is_admin() {
         sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode FROM users WHERE active=TRUE ORDER BY last_name")
             .fetch_all(&s.pool)
-            .await?;
+            .await?
+    } else {
+        sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode FROM users WHERE active=TRUE AND approver_id=$1 ORDER BY last_name")
+            .bind(u.id)
+            .fetch_all(&s.pool)
+            .await?
+    };
     let mut out = vec![];
     let (from, to) = month_bounds(&q.month)?;
     for usr in users {
@@ -449,9 +478,7 @@ pub async fn categories(
     validate_range(q.from, q.to)?;
     let uid = q.user_id;
     if let Some(id) = uid {
-        if id != u.id && !u.is_lead() {
-            return Err(AppError::Forbidden);
-        }
+        assert_can_access_user(&s.pool, &u, id).await?;
     } else if !u.is_lead() {
         return Err(AppError::Forbidden);
     }
@@ -464,6 +491,12 @@ pub async fn categories(
     builder.push_bind(q.from).push(" AND ").push_bind(q.to);
     if let Some(id) = uid {
         builder.push(" AND z.user_id = ").push_bind(id);
+    } else if !u.is_admin() {
+        // Non-admin lead with no specific user: restrict to direct reports.
+        builder
+            .push(" AND z.user_id IN (SELECT id FROM users WHERE approver_id = ")
+            .push_bind(u.id)
+            .push(")");
     }
     let rows: Vec<(String, String, String, String)> =
         builder.build_query_as().fetch_all(&s.pool).await?;
@@ -510,9 +543,7 @@ pub async fn overtime(
     Query(q): Query<OvertimeQuery>,
 ) -> AppResult<Json<Vec<MonthRow>>> {
     let uid = q.user_id.unwrap_or(u.id);
-    if uid != u.id && !u.is_lead() {
-        return Err(AppError::Forbidden);
-    }
+    assert_can_access_user(&s.pool, &u, uid).await?;
     let year = q.year.unwrap_or_else(|| chrono::Local::now().year());
     let now = chrono::Local::now();
     let current_year = now.year();
@@ -567,9 +598,7 @@ pub async fn flextime(
     Query(q): Query<FlextimeQuery>,
 ) -> AppResult<Json<Vec<FlextimeDay>>> {
     let uid = q.user_id.unwrap_or(u.id);
-    if uid != u.id && !u.is_lead() {
-        return Err(AppError::Forbidden);
-    }
+    assert_can_access_user(&s.pool, &u, uid).await?;
     if q.from > q.to {
         return Err(AppError::BadRequest("from must not be after to.".into()));
     }

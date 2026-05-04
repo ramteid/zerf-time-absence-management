@@ -251,6 +251,16 @@ pub async fn create(
     Json(b): Json<NewAbsence>,
 ) -> AppResult<Json<Absence>> {
     let normalized = normalize_absence(&b)?;
+    // Sick leave may not be backdated more than 30 days on initial creation.
+    // Updates to an existing record are not subject to this limit.
+    if normalized.kind == "sick" {
+        let earliest = chrono::Local::now().date_naive() - Duration::days(30);
+        if b.start_date < earliest {
+            return Err(AppError::BadRequest(
+                "Sick leave cannot be backdated more than 30 days.".into(),
+            ));
+        }
+    }
     // Use an advisory lock on the user_id to serialize absence creation per
     // user, preventing the TOCTOU race where two concurrent requests both pass
     // the overlap check before either insert commits.
@@ -428,20 +438,47 @@ pub async fn approve(
     if !u.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let a: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1")
+    let mut tx = s.pool.begin().await?;
+    let a: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1 FOR UPDATE")
         .bind(id)
-        .fetch_one(&s.pool)
+        .fetch_one(&mut *tx)
         .await?;
+    // A lead may not approve their own absence; admins may.
     if a.user_id == u.id && !u.is_admin() {
         return Err(AppError::Forbidden);
+    }
+    // Non-admin leads may only act on absences of their direct reports.
+    if !u.is_admin() {
+        let is_report: Option<bool> = sqlx::query_scalar(
+            "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2",
+        )
+        .bind(a.user_id)
+        .bind(u.id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if is_report.is_none() {
+            return Err(AppError::Forbidden);
+        }
     }
     if a.status != "requested" {
         return Err(AppError::BadRequest(
             "Only requested absences can be approved.".into(),
         ));
     }
-    sqlx::query("UPDATE absences SET status='approved', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP WHERE id=$2")
-        .bind(u.id).bind(id).execute(&s.pool).await?;
+    let updated = sqlx::query(
+        "UPDATE absences SET status='approved', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP WHERE id=$2 AND status='requested'",
+    )
+    .bind(u.id)
+    .bind(id)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    if updated == 0 {
+        return Err(AppError::Conflict(
+            "Absence was already reviewed by someone else.".into(),
+        ));
+    }
+    tx.commit().await?;
     let before = serde_json::to_value(&a).unwrap();
     let after = serde_json::json!({"status": "approved", "reviewed_by": u.id});
     audit::log(
@@ -499,20 +536,48 @@ pub async fn reject(
     if b.reason.trim().is_empty() {
         return Err(AppError::BadRequest("Reason required.".into()));
     }
-    let a: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1")
+    let mut tx = s.pool.begin().await?;
+    let a: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1 FOR UPDATE")
         .bind(id)
-        .fetch_one(&s.pool)
+        .fetch_one(&mut *tx)
         .await?;
+    // A lead may not reject their own absence; admins may.
     if a.user_id == u.id && !u.is_admin() {
         return Err(AppError::Forbidden);
+    }
+    // Non-admin leads may only act on absences of their direct reports.
+    if !u.is_admin() {
+        let is_report: Option<bool> = sqlx::query_scalar(
+            "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2",
+        )
+        .bind(a.user_id)
+        .bind(u.id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if is_report.is_none() {
+            return Err(AppError::Forbidden);
+        }
     }
     if a.status != "requested" {
         return Err(AppError::BadRequest(
             "Only requested absences can be rejected.".into(),
         ));
     }
-    sqlx::query("UPDATE absences SET status='rejected', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP, rejection_reason=$2 WHERE id=$3")
-        .bind(u.id).bind(&b.reason).bind(id).execute(&s.pool).await?;
+    let updated = sqlx::query(
+        "UPDATE absences SET status='rejected', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP, rejection_reason=$2 WHERE id=$3 AND status='requested'",
+    )
+    .bind(u.id)
+    .bind(&b.reason)
+    .bind(id)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    if updated == 0 {
+        return Err(AppError::Conflict(
+            "Absence was already reviewed by someone else.".into(),
+        ));
+    }
+    tx.commit().await?;
     audit::log(
         &s.pool,
         u.id,
@@ -619,15 +684,37 @@ pub struct BalanceQuery {
     pub year: Option<i32>,
 }
 
+async fn assert_can_access_user(
+    pool: &crate::db::DatabasePool,
+    requester: &User,
+    target_uid: i64,
+) -> AppResult<()> {
+    if requester.id == target_uid || requester.is_admin() {
+        return Ok(());
+    }
+    if !requester.is_lead() {
+        return Err(AppError::Forbidden);
+    }
+    let is_report: Option<bool> = sqlx::query_scalar(
+        "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2",
+    )
+    .bind(target_uid)
+    .bind(requester.id)
+    .fetch_optional(pool)
+    .await?;
+    if is_report.is_none() {
+        return Err(AppError::Forbidden);
+    }
+    Ok(())
+}
+
 pub async fn balance(
     State(s): State<AppState>,
     u: User,
     Path(uid): Path<i64>,
     Query(q): Query<BalanceQuery>,
 ) -> AppResult<Json<LeaveBalance>> {
-    if u.id != uid && !u.is_lead() {
-        return Err(AppError::Forbidden);
-    }
+    assert_can_access_user(&s.pool, &u, uid).await?;
     let year = q.year.unwrap_or_else(|| chrono::Local::now().year());
     let target: crate::auth::User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode FROM users WHERE id=$1")
         .bind(uid)

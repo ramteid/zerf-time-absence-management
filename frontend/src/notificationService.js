@@ -36,7 +36,14 @@ function startStream() {
     refreshNotifications().catch(() => {});
   });
   eventSource.onerror = () => {
+    eventSource.close();
+    eventSource = null;
     startPolling();
+    // Attempt to re-establish the SSE stream after a back-off period so
+    // real-time delivery resumes once the connection recovers.
+    setTimeout(() => {
+      if (active) startStream();
+    }, 30_000);
   };
 }
 

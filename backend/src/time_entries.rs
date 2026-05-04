@@ -395,13 +395,36 @@ pub async fn approve(
     if z.user_id == u.id && !u.is_admin() {
         return Err(AppError::Forbidden);
     }
+    if !u.is_admin() {
+        let is_report: Option<bool> = sqlx::query_scalar(
+            "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2",
+        )
+        .bind(z.user_id)
+        .bind(u.id)
+        .fetch_optional(&s.pool)
+        .await?;
+        if is_report.is_none() {
+            return Err(AppError::Forbidden);
+        }
+    }
     if z.status != "submitted" {
         return Err(AppError::BadRequest(
             "Only submitted entries can be approved.".into(),
         ));
     }
-    sqlx::query("UPDATE time_entries SET status='approved', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP WHERE id=$2")
-        .bind(u.id).bind(id).execute(&s.pool).await?;
+    let updated = sqlx::query(
+        "UPDATE time_entries SET status='approved', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP WHERE id=$2 AND status='submitted'",
+    )
+    .bind(u.id)
+    .bind(id)
+    .execute(&s.pool)
+    .await?
+    .rows_affected();
+    if updated == 0 {
+        return Err(AppError::Conflict(
+            "Entry was already reviewed by someone else.".into(),
+        ));
+    }
     audit::log(
         &s.pool,
         u.id,
@@ -446,6 +469,18 @@ pub async fn reject(
     if z.user_id == u.id && !u.is_admin() {
         return Err(AppError::Forbidden);
     }
+    if !u.is_admin() {
+        let is_report: Option<bool> = sqlx::query_scalar(
+            "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2",
+        )
+        .bind(z.user_id)
+        .bind(u.id)
+        .fetch_optional(&s.pool)
+        .await?;
+        if is_report.is_none() {
+            return Err(AppError::Forbidden);
+        }
+    }
     if z.status != "submitted" {
         return Err(AppError::BadRequest(
             "Only submitted entries can be rejected.".into(),
@@ -454,8 +489,20 @@ pub async fn reject(
     if b.reason.trim().is_empty() {
         return Err(AppError::BadRequest("Reason required.".into()));
     }
-    sqlx::query("UPDATE time_entries SET status='rejected', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP, rejection_reason=$2 WHERE id=$3")
-        .bind(u.id).bind(&b.reason).bind(id).execute(&s.pool).await?;
+    let updated = sqlx::query(
+        "UPDATE time_entries SET status='rejected', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP, rejection_reason=$2 WHERE id=$3 AND status='submitted'",
+    )
+    .bind(u.id)
+    .bind(&b.reason)
+    .bind(id)
+    .execute(&s.pool)
+    .await?
+    .rows_affected();
+    if updated == 0 {
+        return Err(AppError::Conflict(
+            "Entry was already reviewed by someone else.".into(),
+        ));
+    }
     audit::log(
         &s.pool,
         u.id,
@@ -505,6 +552,18 @@ pub async fn batch_approve(
         if z.user_id == u.id && !u.is_admin() {
             continue;
         }
+        if !u.is_admin() {
+            let is_report: Option<bool> = sqlx::query_scalar(
+                "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2",
+            )
+            .bind(z.user_id)
+            .bind(u.id)
+            .fetch_optional(&s.pool)
+            .await?;
+            if is_report.is_none() {
+                continue;
+            }
+        }
         to_approve.push(z);
     }
     if to_approve.is_empty() {
@@ -512,14 +571,24 @@ pub async fn batch_approve(
     }
     // Atomically approve all eligible entries.
     let mut tx = s.pool.begin().await?;
+    let mut approved_entries: Vec<TimeEntry> = Vec::with_capacity(to_approve.len());
     for z in &to_approve {
-        sqlx::query("UPDATE time_entries SET status='approved', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP WHERE id=$2")
-            .bind(u.id).bind(z.id).execute(&mut *tx).await?;
+        let updated = sqlx::query(
+            "UPDATE time_entries SET status='approved', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP WHERE id=$2 AND status='submitted'",
+        )
+        .bind(u.id)
+        .bind(z.id)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if updated > 0 {
+            approved_entries.push(z.clone());
+        }
     }
     tx.commit().await?;
-    let count = to_approve.len();
+    let count = approved_entries.len();
     // Audit + notify each affected employee (best-effort, after commit).
-    for z in &to_approve {
+    for z in &approved_entries {
         audit::log(
             &s.pool,
             u.id,
@@ -583,6 +652,18 @@ pub async fn batch_reject(
         if z.user_id == u.id && !u.is_admin() {
             continue;
         }
+        if !u.is_admin() {
+            let is_report: Option<bool> = sqlx::query_scalar(
+                "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2",
+            )
+            .bind(z.user_id)
+            .bind(u.id)
+            .fetch_optional(&s.pool)
+            .await?;
+            if is_report.is_none() {
+                continue;
+            }
+        }
         to_reject.push(z);
     }
     if to_reject.is_empty() {
@@ -590,21 +671,26 @@ pub async fn batch_reject(
     }
     // Atomically reject all eligible entries.
     let mut tx = s.pool.begin().await?;
+    let mut rejected_entries: Vec<TimeEntry> = Vec::with_capacity(to_reject.len());
     for z in &to_reject {
-        sqlx::query(
+        let updated = sqlx::query(
             "UPDATE time_entries SET status='rejected', reviewed_by=$1, \
-             reviewed_at=CURRENT_TIMESTAMP, rejection_reason=$2 WHERE id=$3",
+             reviewed_at=CURRENT_TIMESTAMP, rejection_reason=$2 WHERE id=$3 AND status='submitted'",
         )
         .bind(u.id)
         .bind(&reason)
         .bind(z.id)
         .execute(&mut *tx)
-        .await?;
+        .await?
+        .rows_affected();
+        if updated > 0 {
+            rejected_entries.push(z.clone());
+        }
     }
     tx.commit().await?;
-    let count = to_reject.len();
+    let count = rejected_entries.len();
     // Audit + notify each affected employee (best-effort, after commit).
-    for z in &to_reject {
+    for z in &rejected_entries {
         audit::log(
             &s.pool,
             u.id,

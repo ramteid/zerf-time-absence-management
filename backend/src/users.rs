@@ -21,6 +21,30 @@ pub struct TeamSettings {
     pub allow_reopen_without_approval: bool,
 }
 
+async fn assert_can_access_user(
+    pool: &crate::db::DatabasePool,
+    requester: &User,
+    target_id: i64,
+) -> AppResult<()> {
+    if requester.is_admin() || requester.id == target_id {
+        return Ok(());
+    }
+    if !requester.is_lead() {
+        return Err(AppError::Forbidden);
+    }
+    let is_direct_report: Option<bool> = sqlx::query_scalar(
+        "SELECT TRUE FROM users WHERE id=$1 AND approver_id=$2",
+    )
+    .bind(target_id)
+    .bind(requester.id)
+    .fetch_optional(pool)
+    .await?;
+    if is_direct_report.is_none() {
+        return Err(AppError::Forbidden);
+    }
+    Ok(())
+}
+
 pub async fn team_settings_list(
     State(s): State<AppState>,
     u: User,
@@ -133,9 +157,16 @@ pub async fn list(State(s): State<AppState>, u: User) -> AppResult<Json<Vec<User
     if !u.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let r = sqlx::query_as::<_, User>("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode FROM users ORDER BY last_name, first_name")
-        .fetch_all(&s.pool)
-        .await?;
+    let r = if u.is_admin() {
+        sqlx::query_as::<_, User>("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode FROM users ORDER BY last_name, first_name")
+            .fetch_all(&s.pool)
+            .await?
+    } else {
+        sqlx::query_as::<_, User>("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode FROM users WHERE id=$1 OR approver_id=$1 ORDER BY last_name, first_name")
+            .bind(u.id)
+            .fetch_all(&s.pool)
+            .await?
+    };
     Ok(Json(r))
 }
 
@@ -144,9 +175,7 @@ pub async fn get_one(
     u: User,
     Path(id): Path<i64>,
 ) -> AppResult<Json<User>> {
-    if !u.is_lead() && u.id != id {
-        return Err(AppError::Forbidden);
-    }
+    assert_can_access_user(&s.pool, &u, id).await?;
     Ok(Json(
         sqlx::query_as::<_, User>("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode FROM users WHERE id=$1")
             .bind(id)
