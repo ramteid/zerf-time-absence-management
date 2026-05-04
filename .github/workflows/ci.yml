@@ -37,8 +37,8 @@ jobs:
         run: cargo clippy -- -D warnings
       - name: Build (release)
         run: cargo build --release --locked
-      - name: Integration tests (SQLite in-memory)
-        run: cargo test --no-default-features --features test-sqlite --test integration -- --nocapture --test-threads=1
+      - name: Integration tests (testcontainers)
+        run: cargo test --test integration -- --nocapture
       - name: cargo-audit (RustSec advisories — advisory; daily 'audit' workflow files an issue on findings)
         continue-on-error: true
         run: |

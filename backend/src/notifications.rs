@@ -4,7 +4,6 @@
 //! Cleanup beyond 90 days happens in the background loop in `lib.rs`.
 
 use crate::auth::User;
-use crate::db::sql;
 use crate::error::{AppError, AppResult};
 use crate::AppState;
 use axum::{
@@ -56,10 +55,10 @@ pub async fn create(
     reference_type: Option<&str>,
     reference_id: Option<i64>,
 ) {
-    if let Err(e) = sqlx::query(&sql(
+    if let Err(e) = sqlx::query(
         "INSERT INTO notifications(user_id,kind,title,body,reference_type,reference_id) \
          VALUES ($1,$2,$3,$4,$5,$6)",
-    ))
+    )
     .bind(user_id)
     .bind(kind)
     .bind(title)
@@ -75,7 +74,7 @@ pub async fn create(
     let _ = state.notifications.send(NotificationSignal { user_id });
     // Resolve recipient email and dispatch SMTP best-effort.
     if let Ok(Some(email)) =
-        sqlx::query_scalar::<_, String>(&sql("SELECT email FROM users WHERE id=$1 AND active=TRUE"))
+        sqlx::query_scalar::<_, String>("SELECT email FROM users WHERE id=$1 AND active=TRUE")
             .bind(user_id)
             .fetch_optional(&state.pool)
             .await
@@ -88,8 +87,8 @@ pub async fn create(
 pub async fn list(State(s): State<AppState>, u: User) -> AppResult<Json<Vec<Notification>>> {
     Ok(Json(
         sqlx::query_as::<_, Notification>(
-            &sql("SELECT id, user_id, kind, title, body, reference_type, reference_id, is_read, created_at FROM notifications WHERE user_id=$1 \
-             ORDER BY created_at DESC LIMIT 100"),
+            "SELECT id, user_id, kind, title, body, reference_type, reference_id, is_read, created_at FROM notifications WHERE user_id=$1 \
+             ORDER BY created_at DESC LIMIT 100",
         )
         .bind(u.id)
         .fetch_all(&s.pool)
@@ -101,12 +100,11 @@ pub async fn unread_count(
     State(s): State<AppState>,
     u: User,
 ) -> AppResult<Json<serde_json::Value>> {
-    let n: i64 = sqlx::query_scalar(&sql(
-        "SELECT COUNT(*) FROM notifications WHERE user_id=$1 AND is_read=FALSE",
-    ))
-    .bind(u.id)
-    .fetch_one(&s.pool)
-    .await?;
+    let n: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM notifications WHERE user_id=$1 AND is_read=FALSE")
+            .bind(u.id)
+            .fetch_one(&s.pool)
+            .await?;
     Ok(Json(serde_json::json!({ "count": n })))
 }
 
@@ -141,14 +139,12 @@ pub async fn mark_read(
     u: User,
     Path(id): Path<i64>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let updated = sqlx::query(&sql(
-        "UPDATE notifications SET is_read=TRUE WHERE id=$1 AND user_id=$2",
-    ))
-    .bind(id)
-    .bind(u.id)
-    .execute(&s.pool)
-    .await?
-    .rows_affected();
+    let updated = sqlx::query("UPDATE notifications SET is_read=TRUE WHERE id=$1 AND user_id=$2")
+        .bind(id)
+        .bind(u.id)
+        .execute(&s.pool)
+        .await?
+        .rows_affected();
     if updated == 0 {
         return Err(AppError::NotFound);
     }
@@ -159,18 +155,17 @@ pub async fn mark_all_read(
     State(s): State<AppState>,
     u: User,
 ) -> AppResult<Json<serde_json::Value>> {
-    let updated = sqlx::query(&sql(
-        "UPDATE notifications SET is_read=TRUE WHERE user_id=$1 AND is_read=FALSE",
-    ))
-    .bind(u.id)
-    .execute(&s.pool)
-    .await?
-    .rows_affected();
+    let updated =
+        sqlx::query("UPDATE notifications SET is_read=TRUE WHERE user_id=$1 AND is_read=FALSE")
+            .bind(u.id)
+            .execute(&s.pool)
+            .await?
+            .rows_affected();
     Ok(Json(serde_json::json!({ "ok": true, "count": updated })))
 }
 
 pub async fn delete_all(State(s): State<AppState>, u: User) -> AppResult<Json<serde_json::Value>> {
-    let deleted = sqlx::query(&sql("DELETE FROM notifications WHERE user_id=$1"))
+    let deleted = sqlx::query("DELETE FROM notifications WHERE user_id=$1")
         .bind(u.id)
         .execute(&s.pool)
         .await?
@@ -180,9 +175,9 @@ pub async fn delete_all(State(s): State<AppState>, u: User) -> AppResult<Json<se
 
 /// Trim notifications older than 90 days; called from the background loop.
 pub async fn cleanup_old(pool: &crate::db::DatabasePool) {
-    #[cfg(not(feature = "test-sqlite"))]
-    let q = "DELETE FROM notifications WHERE created_at < CURRENT_TIMESTAMP - INTERVAL '90 days'";
-    #[cfg(feature = "test-sqlite")]
-    let q = "DELETE FROM notifications WHERE created_at < datetime('now', '-90 days')";
-    let _ = sqlx::query(q).execute(pool).await;
+    let _ = sqlx::query(
+        "DELETE FROM notifications WHERE created_at < CURRENT_TIMESTAMP - INTERVAL '90 days'",
+    )
+    .execute(pool)
+    .await;
 }

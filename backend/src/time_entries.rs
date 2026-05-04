@@ -1,6 +1,5 @@
 use crate::audit;
 use crate::auth::User;
-use crate::db::{sql, DbType};
 use crate::error::{AppError, AppResult};
 use crate::AppState;
 use axum::{
@@ -9,7 +8,7 @@ use axum::{
 };
 use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::{FromRow, QueryBuilder};
+use sqlx::{FromRow, Postgres, QueryBuilder};
 
 #[derive(FromRow, Serialize, Clone)]
 pub struct TimeEntry {
@@ -59,7 +58,7 @@ pub async fn list(
     u: User,
     Query(q): Query<RangeQuery>,
 ) -> AppResult<Json<Vec<TimeEntry>>> {
-    let mut builder = QueryBuilder::<DbType>::new("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE user_id = ");
+    let mut builder = QueryBuilder::<Postgres>::new("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE user_id = ");
     builder.push_bind(u.id);
     if let Some(v) = q.from {
         builder.push(" AND entry_date >= ").push_bind(v);
@@ -84,7 +83,7 @@ pub async fn list_all(
     if !u.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let mut builder = QueryBuilder::<DbType>::new("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE TRUE");
+    let mut builder = QueryBuilder::<Postgres>::new("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE TRUE");
     if let Some(v) = q.from {
         builder.push(" AND entry_date >= ").push_bind(v);
     }
@@ -128,7 +127,7 @@ pub(crate) async fn validate(
     }
     // Validate that the category exists and is active.
     let cat_active: Option<bool> =
-        sqlx::query_scalar(&sql("SELECT active FROM categories WHERE id = $1"))
+        sqlx::query_scalar("SELECT active FROM categories WHERE id = $1")
             .bind(te.category_id)
             .fetch_optional(pool)
             .await?;
@@ -146,9 +145,9 @@ pub(crate) async fn validate(
     let start_n = parse_time(&te.start_time)?;
     let end_n = parse_time(&te.end_time)?;
 
-    let existing: Vec<(i64, String, String)> = sqlx::query_as(&sql(
+    let existing: Vec<(i64, String, String)> = sqlx::query_as(
         "SELECT id, start_time, end_time FROM time_entries WHERE user_id=$1 AND entry_date=$2",
-    ))
+    )
     .bind(user_id)
     .bind(te.entry_date)
     .fetch_all(pool)
@@ -180,10 +179,10 @@ pub async fn create(
     Json(b): Json<NewTimeEntry>,
 ) -> AppResult<Json<TimeEntry>> {
     validate(&s.pool, u.id, &b, None).await?;
-    let id: i64 = sqlx::query_scalar(&sql("INSERT INTO time_entries(user_id, entry_date, start_time, end_time, category_id, comment) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id"))
+    let id: i64 = sqlx::query_scalar("INSERT INTO time_entries(user_id, entry_date, start_time, end_time, category_id, comment) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id")
         .bind(u.id).bind(b.entry_date).bind(&b.start_time).bind(&b.end_time).bind(b.category_id).bind(&b.comment)
         .fetch_one(&s.pool).await?;
-    let z: TimeEntry = sqlx::query_as(&sql("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1"))
+    let z: TimeEntry = sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
@@ -206,7 +205,7 @@ pub async fn update(
     Path(id): Path<i64>,
     Json(b): Json<NewTimeEntry>,
 ) -> AppResult<Json<TimeEntry>> {
-    let prev: TimeEntry = sqlx::query_as(&sql("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1"))
+    let prev: TimeEntry = sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
@@ -222,10 +221,10 @@ pub async fn update(
         }
     }
     validate(&s.pool, prev.user_id, &b, Some(id)).await?;
-    sqlx::query(&sql("UPDATE time_entries SET entry_date=$1, start_time=$2, end_time=$3, category_id=$4, comment=$5, updated_at=CURRENT_TIMESTAMP WHERE id=$6"))
+    sqlx::query("UPDATE time_entries SET entry_date=$1, start_time=$2, end_time=$3, category_id=$4, comment=$5, updated_at=CURRENT_TIMESTAMP WHERE id=$6")
         .bind(b.entry_date).bind(&b.start_time).bind(&b.end_time).bind(b.category_id).bind(&b.comment).bind(id)
         .execute(&s.pool).await?;
-    let next: TimeEntry = sqlx::query_as(&sql("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1"))
+    let next: TimeEntry = sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
@@ -247,7 +246,7 @@ pub async fn delete(
     u: User,
     Path(id): Path<i64>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let z: TimeEntry = sqlx::query_as(&sql("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1"))
+    let z: TimeEntry = sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
@@ -257,7 +256,7 @@ pub async fn delete(
     if z.status != "draft" {
         return Err(AppError::BadRequest("Only drafts can be deleted.".into()));
     }
-    sqlx::query(&sql("DELETE FROM time_entries WHERE id=$1"))
+    sqlx::query("DELETE FROM time_entries WHERE id=$1")
         .bind(id)
         .execute(&s.pool)
         .await?;
@@ -285,7 +284,7 @@ pub async fn submit(
     Json(b): Json<IdsBody>,
 ) -> AppResult<Json<serde_json::Value>> {
     for id in &b.ids {
-        let z: TimeEntry = sqlx::query_as(&sql("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1"))
+        let z: TimeEntry = sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1")
             .bind(id)
             .fetch_one(&s.pool)
             .await?;
@@ -296,7 +295,7 @@ pub async fn submit(
             continue;
         }
         sqlx::query(
-            &sql("UPDATE time_entries SET status='submitted', submitted_at=CURRENT_TIMESTAMP WHERE id=$1"),
+            "UPDATE time_entries SET status='submitted', submitted_at=CURRENT_TIMESTAMP WHERE id=$1",
         )
         .bind(id)
         .execute(&s.pool)
@@ -313,12 +312,11 @@ pub async fn submit(
         .await;
     }
     // Notify the approver (or self if admin with no approver) about the submission.
-    let approver_id: Option<i64> =
-        sqlx::query_scalar(&sql("SELECT approver_id FROM users WHERE id=$1"))
-            .bind(u.id)
-            .fetch_optional(&s.pool)
-            .await?
-            .flatten();
+    let approver_id: Option<i64> = sqlx::query_scalar("SELECT approver_id FROM users WHERE id=$1")
+        .bind(u.id)
+        .fetch_optional(&s.pool)
+        .await?
+        .flatten();
     let notify_id = approver_id.unwrap_or(u.id);
     crate::notifications::create(
         &s,
@@ -341,14 +339,14 @@ pub async fn approve(
     if !u.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let z: TimeEntry = sqlx::query_as(&sql("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1"))
+    let z: TimeEntry = sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
     if z.user_id == u.id && !u.is_admin() {
         return Err(AppError::Forbidden);
     }
-    sqlx::query(&sql("UPDATE time_entries SET status='approved', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP WHERE id=$2"))
+    sqlx::query("UPDATE time_entries SET status='approved', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP WHERE id=$2")
         .bind(u.id).bind(id).execute(&s.pool).await?;
     audit::log(
         &s.pool,
@@ -377,7 +375,7 @@ pub async fn reject(
     if !u.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let z: TimeEntry = sqlx::query_as(&sql("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1"))
+    let z: TimeEntry = sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
@@ -387,7 +385,7 @@ pub async fn reject(
     if b.reason.trim().is_empty() {
         return Err(AppError::BadRequest("Reason required.".into()));
     }
-    sqlx::query(&sql("UPDATE time_entries SET status='rejected', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP, rejection_reason=$2 WHERE id=$3"))
+    sqlx::query("UPDATE time_entries SET status='rejected', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP, rejection_reason=$2 WHERE id=$3")
         .bind(u.id).bind(&b.reason).bind(id).execute(&s.pool).await?;
     audit::log(
         &s.pool,
@@ -413,7 +411,7 @@ pub async fn batch_approve(
     let mut count = 0;
     for id in &b.ids {
         let z: Option<TimeEntry> =
-            sqlx::query_as(&sql("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1 AND status='submitted'"))
+            sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1 AND status='submitted'")
                 .bind(id)
                 .fetch_optional(&s.pool)
                 .await?;
@@ -421,7 +419,7 @@ pub async fn batch_approve(
         if z.user_id == u.id && !u.is_admin() {
             continue;
         }
-        sqlx::query(&sql("UPDATE time_entries SET status='approved', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP WHERE id=$2"))
+        sqlx::query("UPDATE time_entries SET status='approved', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP WHERE id=$2")
             .bind(u.id).bind(id).execute(&s.pool).await?;
         audit::log(
             &s.pool,

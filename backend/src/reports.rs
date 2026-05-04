@@ -1,5 +1,4 @@
 use crate::auth::User;
-use crate::db::{sql, DbType};
 use crate::error::{AppError, AppResult};
 use crate::AppState;
 use axum::{
@@ -10,7 +9,7 @@ use axum::{
 };
 use chrono::{Datelike, Duration, NaiveDate, NaiveTime};
 use serde::{Deserialize, Serialize};
-use sqlx::QueryBuilder;
+use sqlx::{Postgres, QueryBuilder};
 use std::collections::HashMap;
 
 #[derive(Deserialize)]
@@ -92,7 +91,7 @@ async fn build_range(
     to: NaiveDate,
     label: &str,
 ) -> AppResult<MonthReport> {
-    let user: crate::auth::User = sqlx::query_as(&sql("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE id=$1"))
+    let user: crate::auth::User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE id=$1")
         .bind(user_id)
         .fetch_one(pool)
         .await?;
@@ -100,24 +99,23 @@ async fn build_range(
 
     #[allow(clippy::type_complexity)]
     let te: Vec<(NaiveDate, String, String, String, String, i64, String, Option<String>)> = sqlx::query_as(
-        &sql("SELECT z.entry_date, z.start_time, z.end_time, c.name, c.color, z.category_id, z.status, z.comment FROM time_entries z JOIN categories c ON c.id=z.category_id WHERE z.user_id=$1 AND z.entry_date BETWEEN $2 AND $3 ORDER BY z.entry_date, z.start_time")
+        "SELECT z.entry_date, z.start_time, z.end_time, c.name, c.color, z.category_id, z.status, z.comment FROM time_entries z JOIN categories c ON c.id=z.category_id WHERE z.user_id=$1 AND z.entry_date BETWEEN $2 AND $3 ORDER BY z.entry_date, z.start_time"
     ).bind(user_id).bind(from).bind(to).fetch_all(pool).await?;
 
     let abs: Vec<(NaiveDate, NaiveDate, String)> = sqlx::query_as(
-        &sql("SELECT start_date, end_date, kind FROM absences WHERE user_id=$1 AND status='approved' AND end_date >= $2 AND start_date <= $3")
+        "SELECT start_date, end_date, kind FROM absences WHERE user_id=$1 AND status='approved' AND end_date >= $2 AND start_date <= $3"
     ).bind(user_id).bind(from).bind(to).fetch_all(pool).await?;
 
     // Load UI language to decide which holiday name to display
-    let ui_lang: String = sqlx::query_scalar(&sql(
-        "SELECT value FROM app_settings WHERE key = 'ui_language'",
-    ))
-    .fetch_optional(pool)
-    .await?
-    .unwrap_or_else(|| "en".to_string());
+    let ui_lang: String =
+        sqlx::query_scalar("SELECT value FROM app_settings WHERE key = 'ui_language'")
+            .fetch_optional(pool)
+            .await?
+            .unwrap_or_else(|| "en".to_string());
 
-    let h: Vec<(NaiveDate, String, Option<String>)> = sqlx::query_as(&sql(
+    let h: Vec<(NaiveDate, String, Option<String>)> = sqlx::query_as(
         "SELECT holiday_date, name, local_name FROM holidays WHERE holiday_date BETWEEN $1 AND $2",
-    ))
+    )
     .bind(from)
     .bind(to)
     .fetch_all(pool)
@@ -402,7 +400,7 @@ pub async fn team(
         return Err(AppError::Forbidden);
     }
     let users: Vec<crate::auth::User> =
-        sqlx::query_as(&sql("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE active=TRUE ORDER BY last_name"))
+        sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE active=TRUE ORDER BY last_name")
             .fetch_all(&s.pool)
             .await?;
     let mut out = vec![];
@@ -457,7 +455,7 @@ pub async fn categories(
     } else if !u.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let mut builder = QueryBuilder::<DbType>::new(
+    let mut builder = QueryBuilder::<Postgres>::new(
         "SELECT c.name, c.color, z.start_time, z.end_time \
          FROM time_entries z \
          JOIN categories c ON c.id=z.category_id \
@@ -569,7 +567,7 @@ pub async fn flextime(
         ));
     }
 
-    let user: crate::auth::User = sqlx::query_as(&sql("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE id=$1"))
+    let user: crate::auth::User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE id=$1")
         .bind(uid)
         .fetch_one(&s.pool)
         .await?;
@@ -580,35 +578,35 @@ pub async fn flextime(
     // q.from already reflects all prior over/under-time.
     let loop_start = user.start_date.min(q.from);
 
-    let te: Vec<(NaiveDate, String, String, String)> =
-        sqlx::query_as(&sql("SELECT entry_date, start_time, end_time, status \
-         FROM time_entries WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3"))
-        .bind(uid)
-        .bind(loop_start)
-        .bind(q.to)
-        .fetch_all(&s.pool)
-        .await?;
-
-    let abs: Vec<(NaiveDate, NaiveDate, String)> = sqlx::query_as(&sql(
-        "SELECT start_date, end_date, kind FROM absences \
-         WHERE user_id=$1 AND status='approved' AND end_date >= $2 AND start_date <= $3",
-    ))
+    let te: Vec<(NaiveDate, String, String, String)> = sqlx::query_as(
+        "SELECT entry_date, start_time, end_time, status \
+         FROM time_entries WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3",
+    )
     .bind(uid)
     .bind(loop_start)
     .bind(q.to)
     .fetch_all(&s.pool)
     .await?;
 
-    let ui_lang: String = sqlx::query_scalar(&sql(
-        "SELECT value FROM app_settings WHERE key = 'ui_language'",
-    ))
-    .fetch_optional(&s.pool)
-    .await?
-    .unwrap_or_else(|| "en".to_string());
+    let abs: Vec<(NaiveDate, NaiveDate, String)> = sqlx::query_as(
+        "SELECT start_date, end_date, kind FROM absences \
+         WHERE user_id=$1 AND status='approved' AND end_date >= $2 AND start_date <= $3",
+    )
+    .bind(uid)
+    .bind(loop_start)
+    .bind(q.to)
+    .fetch_all(&s.pool)
+    .await?;
 
-    let h: Vec<(NaiveDate, String, Option<String>)> = sqlx::query_as(&sql(
+    let ui_lang: String =
+        sqlx::query_scalar("SELECT value FROM app_settings WHERE key = 'ui_language'")
+            .fetch_optional(&s.pool)
+            .await?
+            .unwrap_or_else(|| "en".to_string());
+
+    let h: Vec<(NaiveDate, String, Option<String>)> = sqlx::query_as(
         "SELECT holiday_date, name, local_name FROM holidays WHERE holiday_date BETWEEN $1 AND $2",
-    ))
+    )
     .bind(loop_start)
     .bind(q.to)
     .fetch_all(&s.pool)

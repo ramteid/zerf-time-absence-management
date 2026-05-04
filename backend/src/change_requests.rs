@@ -1,6 +1,5 @@
 use crate::audit;
 use crate::auth::User;
-use crate::db::sql;
 use crate::error::{AppError, AppResult};
 use crate::AppState;
 use axum::{
@@ -32,7 +31,7 @@ pub struct ChangeRequest {
 pub async fn list(State(s): State<AppState>, u: User) -> AppResult<Json<Vec<ChangeRequest>>> {
     Ok(Json(
         sqlx::query_as::<_, ChangeRequest>(
-            &sql("SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE user_id=$1 ORDER BY created_at DESC"),
+            "SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE user_id=$1 ORDER BY created_at DESC",
         )
         .bind(u.id)
         .fetch_all(&s.pool)
@@ -46,7 +45,7 @@ pub async fn list_all(State(s): State<AppState>, u: User) -> AppResult<Json<Vec<
     }
     Ok(Json(
         sqlx::query_as::<_, ChangeRequest>(
-            &sql("SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE status='open' ORDER BY created_at"),
+            "SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE status='open' ORDER BY created_at",
         )
         .fetch_all(&s.pool)
         .await?,
@@ -103,11 +102,10 @@ pub async fn create(
             return Err(AppError::BadRequest("Date cannot be in the future.".into()));
         }
     }
-    let z: (i64, String) =
-        sqlx::query_as(&sql("SELECT user_id, status FROM time_entries WHERE id=$1"))
-            .bind(b.time_entry_id)
-            .fetch_one(&s.pool)
-            .await?;
+    let z: (i64, String) = sqlx::query_as("SELECT user_id, status FROM time_entries WHERE id=$1")
+        .bind(b.time_entry_id)
+        .fetch_one(&s.pool)
+        .await?;
     if z.0 != u.id {
         return Err(AppError::Forbidden);
     }
@@ -118,7 +116,7 @@ pub async fn create(
     // before storing so malformed data never reaches the approval path.
     if let Some(cat_id) = b.new_category_id {
         let cat_active: Option<bool> =
-            sqlx::query_scalar(&sql("SELECT active FROM categories WHERE id = $1"))
+            sqlx::query_scalar("SELECT active FROM categories WHERE id = $1")
                 .bind(cat_id)
                 .fetch_optional(&s.pool)
                 .await?;
@@ -128,10 +126,10 @@ pub async fn create(
             Some(true) => {}
         }
     }
-    let id: i64 = sqlx::query_scalar(&sql("INSERT INTO change_requests(time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id"))
+    let id: i64 = sqlx::query_scalar("INSERT INTO change_requests(time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id")
         .bind(b.time_entry_id).bind(u.id).bind(b.new_date).bind(&b.new_start_time).bind(&b.new_end_time).bind(b.new_category_id).bind(&b.new_comment).bind(&b.reason)
         .fetch_one(&s.pool).await?;
-    let a: ChangeRequest = sqlx::query_as(&sql("SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE id=$1"))
+    let a: ChangeRequest = sqlx::query_as("SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
@@ -157,7 +155,7 @@ pub async fn approve(
         return Err(AppError::Forbidden);
     }
     let a: ChangeRequest =
-        sqlx::query_as(&sql("SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE id=$1 AND status='open'"))
+        sqlx::query_as("SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE id=$1 AND status='open'")
             .bind(id)
             .fetch_one(&s.pool)
             .await?;
@@ -167,7 +165,7 @@ pub async fn approve(
     // Fetch the existing entry and build effective post-change values so we can
     // run the same overlap / 14-hour / category validation as direct edits do.
     let entry: crate::time_entries::TimeEntry =
-        sqlx::query_as(&sql("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1"))
+        sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1")
             .bind(a.time_entry_id)
             .fetch_one(&s.pool)
             .await?;
@@ -186,10 +184,10 @@ pub async fn approve(
     };
     crate::time_entries::validate(&s.pool, entry.user_id, &effective, Some(a.time_entry_id))
         .await?;
-    sqlx::query(&sql("UPDATE time_entries SET entry_date=COALESCE($1,entry_date), start_time=COALESCE($2,start_time), end_time=COALESCE($3,end_time), category_id=COALESCE($4,category_id), comment=COALESCE($5,comment), updated_at=CURRENT_TIMESTAMP WHERE id=$6"))
+    sqlx::query("UPDATE time_entries SET entry_date=COALESCE($1,entry_date), start_time=COALESCE($2,start_time), end_time=COALESCE($3,end_time), category_id=COALESCE($4,category_id), comment=COALESCE($5,comment), updated_at=CURRENT_TIMESTAMP WHERE id=$6")
         .bind(a.new_date).bind(&a.new_start_time).bind(&a.new_end_time).bind(a.new_category_id).bind(&a.new_comment).bind(a.time_entry_id)
         .execute(&s.pool).await?;
-    sqlx::query(&sql("UPDATE change_requests SET status='approved', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP WHERE id=$2"))
+    sqlx::query("UPDATE change_requests SET status='approved', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP WHERE id=$2")
         .bind(u.id).bind(id).execute(&s.pool).await?;
     audit::log(
         &s.pool,
@@ -221,11 +219,11 @@ pub async fn reject(
     if b.reason.trim().is_empty() {
         return Err(AppError::BadRequest("Reason required.".into()));
     }
-    let prev: ChangeRequest = sqlx::query_as(&sql("SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE id=$1"))
+    let prev: ChangeRequest = sqlx::query_as("SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
-    sqlx::query(&sql("UPDATE change_requests SET status='rejected', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP, rejection_reason=$2 WHERE id=$3"))
+    sqlx::query("UPDATE change_requests SET status='rejected', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP, rejection_reason=$2 WHERE id=$3")
         .bind(u.id).bind(&b.reason).bind(id).execute(&s.pool).await?;
     audit::log(
         &s.pool,

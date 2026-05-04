@@ -1,5 +1,4 @@
 use crate::auth::User;
-use crate::db::sql;
 use crate::error::{AppError, AppResult};
 use crate::AppState;
 use axum::{
@@ -82,11 +81,11 @@ pub async fn refresh_holidays(
         match fetch_holidays_from_api(country, region, y).await {
             Ok(list) => {
                 for (date, name, local_name) in list {
-                    sqlx::query(&sql(
+                    sqlx::query(
                         "INSERT INTO holidays(holiday_date, name, local_name, year, is_auto) \
                          VALUES ($1, $2, $3, $4, TRUE) \
                          ON CONFLICT (holiday_date) DO NOTHING",
-                    ))
+                    )
                     .bind(date)
                     .bind(&name)
                     .bind(&local_name)
@@ -107,36 +106,34 @@ pub async fn refresh_holidays(
 /// Ensure holidays exist for a given year (called on startup).
 pub async fn ensure_holidays(pool: &crate::db::DatabasePool, year: i32) -> AppResult<()> {
     // Check if any auto holidays exist for this year
-    let count: i64 = sqlx::query_scalar(&sql(
-        "SELECT COUNT(*) FROM holidays WHERE year = $1 AND is_auto = TRUE",
-    ))
-    .bind(year)
-    .fetch_one(pool)
-    .await?;
+    let count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM holidays WHERE year = $1 AND is_auto = TRUE")
+            .bind(year)
+            .fetch_one(pool)
+            .await?;
     if count > 0 {
         return Ok(());
     }
 
     // Load country/region from settings
     let country: String =
-        sqlx::query_scalar(&sql("SELECT value FROM app_settings WHERE key = 'country'"))
+        sqlx::query_scalar("SELECT value FROM app_settings WHERE key = 'country'")
             .fetch_optional(pool)
             .await?
             .unwrap_or_else(|| "DE".to_string());
-    let region: String =
-        sqlx::query_scalar(&sql("SELECT value FROM app_settings WHERE key = 'region'"))
-            .fetch_optional(pool)
-            .await?
-            .unwrap_or_else(|| "DE-BW".to_string());
+    let region: String = sqlx::query_scalar("SELECT value FROM app_settings WHERE key = 'region'")
+        .fetch_optional(pool)
+        .await?
+        .unwrap_or_else(|| "DE-BW".to_string());
 
     match fetch_holidays_from_api(&country, &region, year).await {
         Ok(list) => {
             for (date, name, local_name) in list {
-                sqlx::query(&sql(
+                sqlx::query(
                     "INSERT INTO holidays(holiday_date, name, local_name, year, is_auto) \
                      VALUES ($1, $2, $3, $4, TRUE) \
                      ON CONFLICT (holiday_date) DO NOTHING",
-                ))
+                )
                 .bind(date)
                 .bind(&name)
                 .bind(&local_name)
@@ -205,16 +202,14 @@ pub async fn list(
     // Load UI language from settings if not passed as query param
     let lang = match q.lang {
         Some(l) => l,
-        None => sqlx::query_scalar(&sql(
-            "SELECT value FROM app_settings WHERE key = 'ui_language'",
-        ))
-        .fetch_optional(&s.pool)
-        .await?
-        .unwrap_or_else(|| "en".to_string()),
+        None => sqlx::query_scalar("SELECT value FROM app_settings WHERE key = 'ui_language'")
+            .fetch_optional(&s.pool)
+            .await?
+            .unwrap_or_else(|| "en".to_string()),
     };
 
     let rows = sqlx::query_as::<_, Holiday>(
-        &sql("SELECT id, holiday_date, name, local_name, year, is_auto FROM holidays WHERE year=$1 ORDER BY holiday_date"),
+        "SELECT id, holiday_date, name, local_name, year, is_auto FROM holidays WHERE year=$1 ORDER BY holiday_date",
     )
     .bind(year)
     .fetch_all(&s.pool)
@@ -257,15 +252,13 @@ pub async fn create(
     if !u.is_admin() {
         return Err(AppError::Forbidden);
     }
-    sqlx::query(&sql(
-        "INSERT INTO holidays(holiday_date, name, year, is_auto) VALUES ($1,$2,$3, FALSE)",
-    ))
-    .bind(b.holiday_date)
-    .bind(&b.name)
-    .bind(b.holiday_date.year())
-    .execute(&s.pool)
-    .await
-    .map_err(|_| AppError::Conflict("Holiday already exists".into()))?;
+    sqlx::query("INSERT INTO holidays(holiday_date, name, year, is_auto) VALUES ($1,$2,$3, FALSE)")
+        .bind(b.holiday_date)
+        .bind(&b.name)
+        .bind(b.holiday_date.year())
+        .execute(&s.pool)
+        .await
+        .map_err(|_| AppError::Conflict("Holiday already exists".into()))?;
     Ok(Json(serde_json::json!({"ok":true})))
 }
 
@@ -277,7 +270,7 @@ pub async fn delete(
     if !u.is_admin() {
         return Err(AppError::Forbidden);
     }
-    sqlx::query(&sql("DELETE FROM holidays WHERE id=$1"))
+    sqlx::query("DELETE FROM holidays WHERE id=$1")
         .bind(id)
         .execute(&s.pool)
         .await?;

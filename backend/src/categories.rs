@@ -1,5 +1,4 @@
 use crate::auth::User;
-use crate::db::sql;
 use crate::error::{AppError, AppResult};
 use crate::AppState;
 use axum::{
@@ -35,14 +34,12 @@ pub async fn ensure_initial(pool: &crate::db::DatabasePool) -> AppResult<()> {
         ("Other", "#607D8B", 6),
     ];
     for (n, c, s) in init {
-        sqlx::query(&sql(
-            "INSERT INTO categories(name, color, sort_order) VALUES ($1,$2,$3)",
-        ))
-        .bind(n)
-        .bind(c)
-        .bind(s)
-        .execute(pool)
-        .await?;
+        sqlx::query("INSERT INTO categories(name, color, sort_order) VALUES ($1,$2,$3)")
+            .bind(n)
+            .bind(c)
+            .bind(s)
+            .execute(pool)
+            .await?;
     }
     Ok(())
 }
@@ -73,7 +70,7 @@ pub async fn create(
         return Err(AppError::Forbidden);
     }
     let id: i64 = sqlx::query_scalar(
-        &sql("INSERT INTO categories(name, description, color, sort_order) VALUES ($1,$2,$3,$4) RETURNING id"),
+        "INSERT INTO categories(name, description, color, sort_order) VALUES ($1,$2,$3,$4) RETURNING id",
     )
     .bind(&b.name)
     .bind(&b.description)
@@ -83,9 +80,9 @@ pub async fn create(
     .await
     .map_err(|_| AppError::Conflict("Name already exists".into()))?;
     Ok(Json(
-        sqlx::query_as(&sql(
+        sqlx::query_as(
             "SELECT id, name, description, color, sort_order, active FROM categories WHERE id=$1",
-        ))
+        )
         .bind(id)
         .fetch_one(&s.pool)
         .await?,
@@ -110,13 +107,13 @@ pub async fn update(
     if !u.is_admin() {
         return Err(AppError::Forbidden);
     }
-    sqlx::query(&sql("UPDATE categories SET name=COALESCE($1,name), description=COALESCE($2,description), color=COALESCE($3,color), sort_order=COALESCE($4,sort_order), active=COALESCE($5,active) WHERE id=$6"))
+    sqlx::query("UPDATE categories SET name=COALESCE($1,name), description=COALESCE($2,description), color=COALESCE($3,color), sort_order=COALESCE($4,sort_order), active=COALESCE($5,active) WHERE id=$6")
         .bind(b.name).bind(b.description).bind(b.color).bind(b.sort_order).bind(b.active).bind(id)
         .execute(&s.pool).await?;
     Ok(Json(
-        sqlx::query_as(&sql(
+        sqlx::query_as(
             "SELECT id, name, description, color, sort_order, active FROM categories WHERE id=$1",
-        ))
+        )
         .bind(id)
         .fetch_one(&s.pool)
         .await?,
