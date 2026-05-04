@@ -750,7 +750,7 @@ async fn full_integration_suite() {
         let (st, body) = admin
             .post(
                 "/api/v1/users",
-                &json!({"email":"tina@example.com","first_name":"Tina","last_name":"Timekeeper","role":"employee","weekly_hours":39,"annual_leave_days":30,"start_date":"2024-01-01","approver_id":1}),
+                &json!({"email":"tina@example.com","first_name":"Tina","last_name":"Timekeeper","role":"employee","weekly_hours":39,"annual_leave_days":30,"start_date":"2024-01-01","approver_id": lead_id}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "create Tina");

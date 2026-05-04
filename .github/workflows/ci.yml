@@ -70,7 +70,7 @@ jobs:
     needs: [rust, frontend]
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:18
         env:
           POSTGRES_USER: kitazeit_smoke
           POSTGRES_PASSWORD: kitazeit_smoke

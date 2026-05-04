@@ -450,7 +450,7 @@ pub async fn approve(
     // Non-admin leads may only act on absences of their direct reports.
     if !u.is_admin() {
         let is_report: Option<bool> = sqlx::query_scalar(
-            "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2",
+            "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2 FOR UPDATE",
         )
         .bind(a.user_id)
         .bind(u.id)
@@ -548,7 +548,7 @@ pub async fn reject(
     // Non-admin leads may only act on absences of their direct reports.
     if !u.is_admin() {
         let is_report: Option<bool> = sqlx::query_scalar(
-            "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2",
+            "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2 FOR UPDATE",
         )
         .bind(a.user_id)
         .bind(u.id)
