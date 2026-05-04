@@ -15,18 +15,19 @@ pub mod settings;
 pub mod time_entries;
 pub mod users;
 
-use axum::http::StatusCode;
 use axum::{
+    extract::State,
     http::{header, HeaderName, HeaderValue},
     middleware,
     routing::{delete, get, post, put},
     Router,
 };
+use axum::http::{Method, StatusCode, Uri};
 use std::sync::Arc;
 use std::time::Duration;
 use tower::ServiceBuilder;
 use tower_http::limit::RequestBodyLimitLayer;
-use tower_http::services::{ServeDir, ServeFile};
+use tower_http::services::ServeDir;
 use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
@@ -182,11 +183,46 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
         )
 }
 
+async fn serve_spa_index(static_dir: &str) -> Result<([(HeaderName, HeaderValue); 1], Vec<u8>), StatusCode> {
+    let body = tokio::fs::read(format!("{static_dir}/index.html"))
+        .await
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+
+    Ok((
+        [(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("text/html; charset=utf-8"),
+        )],
+        body,
+    ))
+}
+
+async fn spa_index(State(state): State<AppState>) -> Result<([(HeaderName, HeaderValue); 1], Vec<u8>), StatusCode> {
+    serve_spa_index(&state.cfg.static_dir).await
+}
+
+async fn spa_fallback(
+    State(state): State<AppState>,
+    method: Method,
+    uri: Uri,
+) -> Result<([(HeaderName, HeaderValue); 1], Vec<u8>), StatusCode> {
+    if method != Method::GET && method != Method::HEAD {
+        return Err(StatusCode::METHOD_NOT_ALLOWED);
+    }
+
+    let last_segment = uri.path().rsplit('/').next().unwrap_or_default();
+    if last_segment.contains('.') {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    serve_spa_index(&state.cfg.static_dir).await
+}
+
 /// Build the complete application (API + static files + middleware).
 pub fn build_app(state: AppState) -> Router {
     let api = build_api_router(state.clone());
     let static_dir = state.cfg.static_dir.clone();
-    let index = format!("{}/index.html", static_dir);
+    let assets_dir = format!("{}/assets", static_dir);
 
     let security_headers = ServiceBuilder::new()
         .layer(SetResponseHeaderLayer::overriding(HeaderName::from_static("x-content-type-options"), HeaderValue::from_static("nosniff")))
@@ -202,7 +238,10 @@ pub fn build_app(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(|| async { "ok" }))
         .nest("/api/v1", api)
-        .fallback_service(ServeDir::new(&static_dir).not_found_service(ServeFile::new(index)))
+        .nest_service("/assets", ServeDir::new(assets_dir))
+        .route("/", get(spa_index))
+        .route("/index.html", get(spa_index))
+        .fallback(spa_fallback)
         .with_state(state)
         .layer(security_headers)
         .layer(SetResponseHeaderLayer::overriding(
