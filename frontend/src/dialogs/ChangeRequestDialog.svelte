@@ -28,7 +28,7 @@
       dlg.close();
       onClose();
     } catch (e) {
-      error = e.message;
+      error = $t(e?.message || "Error");
     }
   }
 

@@ -2,10 +2,11 @@
 //!
 //! An employee whose week is fully `submitted` or partially `approved` can
 //! request to make the week editable again.  The approver (admin or the
-//! configured team-lead) reviews the request.  When the approver's policy
-//! `allow_reopen_without_approval` is TRUE, the request is auto-approved
-//! at creation time.  When the requester is themselves a lead/admin and
-//! has no approver set, the same auto-approve path applies.
+//! configured team-lead) reviews the request.  When the **requester's own**
+//! flag `allow_reopen_without_approval` is TRUE, the request is auto-approved
+//! immediately and all relevant approvers (designated approver + all admins)
+//! receive an informational notification.  When the requester is a lead/admin
+//! with no designated approver, the same self-service auto-approve path applies.
 //!
 //! Approval / auto-approval reopens the week atomically:
 //!   * all non-draft entries for `[week_start, week_start+6 days]` are reset
@@ -132,38 +133,40 @@ async fn perform_reopen(
     Ok(affected.len() as i64)
 }
 
-/// Determine the approver to be recorded on a new request.  For employees
-/// the column `approver_id` is mandatory (DB-level check); for leads/admins
-/// who self-service, this returns `Ok(None)` indicating "auto-approve".
-async fn resolve_approver(
+/// Collect all user-ids that should be notified as "approver" for a reopen
+/// request created by `requester`.  Rules:
+///
+/// | Requester role | Scenario                            | Notified set                          |
+/// |----------------|-------------------------------------|---------------------------------------|
+/// | employee       | any                                 | designated approver + all admins      |
+/// | team_lead      | has designated approver             | that approver + all admins            |
+/// | team_lead      | no approver (self-service)          | all admins                            |
+/// | admin          | any (always auto-approved)          | nobody (admin is their own authority) |
+///
+/// BTreeSet deduplicates (e.g. when the designated approver IS an admin).
+/// The requester is always excluded from the result.
+async fn approver_ids_to_notify(
     pool: &crate::db::DatabasePool,
     requester: &User,
-) -> AppResult<Option<(i64, bool)>> {
+) -> Vec<i64> {
+    let mut ids: std::collections::BTreeSet<i64> = Default::default();
     if let Some(aid) = requester.approver_id {
-        let row: Option<(bool, String, bool)> = sqlx::query_as(
-            "SELECT active, role, allow_reopen_without_approval FROM users WHERE id=$1",
-        )
-        .bind(aid)
-        .fetch_optional(pool)
-        .await?;
-        match row {
-            Some((true, role, policy)) if role == "team_lead" || role == "admin" => {
-                Ok(Some((aid, policy)))
-            }
-            _ => Err(AppError::BadRequest(
-                "Your approver is no longer available. Please contact an admin.".into(),
-            )),
-        }
-    } else if requester.role == "team_lead" || requester.role == "admin" {
-        // Self-service for leads/admins.
-        Ok(None)
-    } else {
-        // Should never happen because of the DB CHECK, but keep a
-        // friendly error rather than a 500 if it does.
-        Err(AppError::BadRequest(
-            "No approver assigned. Please contact an admin.".into(),
-        ))
+        ids.insert(aid);
     }
+    if requester.role != "admin" {
+        if let Ok(admins) = sqlx::query_scalar::<_, i64>(
+            "SELECT id FROM users WHERE active=TRUE AND role='admin'",
+        )
+        .fetch_all(pool)
+        .await
+        {
+            for id in admins {
+                ids.insert(id);
+            }
+        }
+    }
+    ids.remove(&requester.id);
+    ids.into_iter().collect()
 }
 
 pub async fn create(
@@ -205,24 +208,29 @@ pub async fn create(
         )));
     }
 
-    let approver = resolve_approver(&s.pool, &u).await?;
-
     // Determine flow:
-    //   * Self-service lead/admin without approver_id  → auto_approved
-    //   * Approver with policy `allow_reopen_without_approval=TRUE` → auto_approved
-    //   * Otherwise → pending, notify approver
-    let (status, recorded_approver) = match approver {
-        None => ("auto_approved", u.id),
-        Some((aid, true)) => ("auto_approved", aid),
-        Some((aid, false)) => ("pending", aid),
-    };
+    //   * User has `allow_reopen_without_approval=TRUE` → auto_approved
+    //   * Lead/admin with no approver_id (self-service) → auto_approved
+    //   * Otherwise → pending, notify all approvers
+    let auto_approve = u.allow_reopen_without_approval
+        || (u.approver_id.is_none() && (u.role == "team_lead" || u.role == "admin"));
+
+    // `recorded_approver` is stored as the primary approver on the request row.
+    // For self-service leads/admins (no designated approver) we record themselves.
+    let recorded_approver: i64 = u.approver_id.unwrap_or(u.id);
+
+    let status = if auto_approve { "auto_approved" } else { "pending" };
+
+    // Collect all users that should be notified as approvers (before the DB
+    // insert, so we can reuse the result for both auto and pending paths).
+    let notify_approvers = approver_ids_to_notify(&s.pool, &u).await;
 
     // For the auto-approve flow we MUST reset the entries before persisting
     // the request row.  Otherwise a failure in `perform_reopen` (e.g. a
     // transient DB error) would leave an `auto_approved` row referencing a
     // week whose entries were never actually reopened — confusing the user
     // and bypassing the duplicate-pending guard for retries.
-    let count = if status == "auto_approved" {
+    let count = if auto_approve {
         perform_reopen(&s.pool, u.id, u.id, b.week_start).await?
     } else {
         0
@@ -260,7 +268,8 @@ pub async fn create(
     )
     .await;
 
-    if status == "auto_approved" {
+    if auto_approve {
+        // Notify the requester.
         notifications::create(
             &s,
             u.id,
@@ -274,6 +283,22 @@ pub async fn create(
             Some(req_id),
         )
         .await;
+        // Notify each approver that the reopen was auto-approved.
+        for aid in &notify_approvers {
+            notifications::create(
+                &s,
+                *aid,
+                "reopen_auto_approved_notice",
+                "Wochenfreigabe automatisch genehmigt / Week reopen auto-approved",
+                &format!(
+                    "{} {} hat die Woche ab {} zur Bearbeitung freigegeben (automatisch genehmigt, {} Einträge).",
+                    u.first_name, u.last_name, b.week_start, count
+                ),
+                Some("reopen_request"),
+                Some(req_id),
+            )
+            .await;
+        }
         Ok(Json(serde_json::json!({
             "ok": true,
             "id": req_id,
@@ -282,19 +307,22 @@ pub async fn create(
             "entries_reopened": count,
         })))
     } else {
-        notifications::create(
-            &s,
-            recorded_approver,
-            "reopen_request_created",
-            "Neue Anfrage zur Wochenfreigabe / New week reopen request",
-            &format!(
-                "{} {} möchte die Woche ab {} wieder bearbeiten.",
-                u.first_name, u.last_name, b.week_start
-            ),
-            Some("reopen_request"),
-            Some(req_id),
-        )
-        .await;
+        // Notify all approvers that a manual reopen request is pending.
+        for aid in &notify_approvers {
+            notifications::create(
+                &s,
+                *aid,
+                "reopen_request_created",
+                "Neue Anfrage zur Wochenfreigabe / New week reopen request",
+                &format!(
+                    "{} {} möchte die Woche ab {} wieder bearbeiten.",
+                    u.first_name, u.last_name, b.week_start
+                ),
+                Some("reopen_request"),
+                Some(req_id),
+            )
+            .await;
+        }
         Ok(Json(serde_json::json!({
             "ok": true,
             "id": req_id,
@@ -425,6 +453,44 @@ pub async fn approve(
         Some(id),
     )
     .await;
+    // If the approving user is an admin but NOT the recorded approver on the
+    // request (i.e. a different admin stepped in), notify the original approver
+    // so they know the item left their queue.
+    if u.is_admin() && r.approver_id != u.id {
+        // Only notify if the original approver is an active non-admin lead
+        // (admins see all pending anyway and don't need a secondary nudge).
+        let is_lead: Option<bool> = sqlx::query_scalar(
+            "SELECT TRUE FROM users WHERE id=$1 AND active=TRUE AND role='team_lead'",
+        )
+        .bind(r.approver_id)
+        .fetch_optional(&s.pool)
+        .await
+        .unwrap_or(None);
+        if is_lead.is_some() {
+            // Load the requester's name for the notification body (best-effort).
+            let requester_name: String = sqlx::query_scalar(
+                "SELECT first_name || ' ' || last_name FROM users WHERE id=$1",
+            )
+            .bind(r.user_id)
+            .fetch_optional(&s.pool)
+            .await
+            .unwrap_or(None)
+            .unwrap_or_else(|| format!("User {}", r.user_id));
+            notifications::create(
+                &s,
+                r.approver_id,
+                "reopen_approved_by_admin",
+                "Wochenfreigabe durch Admin genehmigt / Week reopen approved by admin",
+                &format!(
+                    "Die Wiederfreigabe-Anfrage von {} für die Woche ab {} wurde von einem Admin genehmigt.",
+                    requester_name, r.week_start
+                ),
+                Some("reopen_request"),
+                Some(id),
+            )
+            .await;
+        }
+    }
     Ok(Json(
         serde_json::json!({ "ok": true, "entries_reopened": count }),
     ))
@@ -490,5 +556,39 @@ pub async fn reject(
         Some(id),
     )
     .await;
+    // Symmetric with approve: if an admin rejected a request from a team lead's
+    // queue, notify that team lead so they know the item left their queue.
+    if u.is_admin() && r.approver_id != u.id {
+        let is_lead: Option<bool> = sqlx::query_scalar(
+            "SELECT TRUE FROM users WHERE id=$1 AND active=TRUE AND role='team_lead'",
+        )
+        .bind(r.approver_id)
+        .fetch_optional(&s.pool)
+        .await
+        .unwrap_or(None);
+        if is_lead.is_some() {
+            let requester_name: String = sqlx::query_scalar(
+                "SELECT first_name || ' ' || last_name FROM users WHERE id=$1",
+            )
+            .bind(r.user_id)
+            .fetch_optional(&s.pool)
+            .await
+            .unwrap_or(None)
+            .unwrap_or_else(|| format!("User {}", r.user_id));
+            notifications::create(
+                &s,
+                r.approver_id,
+                "reopen_rejected_by_admin",
+                "Wochenfreigabe durch Admin abgelehnt / Week reopen rejected by admin",
+                &format!(
+                    "Die Wiederfreigabe-Anfrage von {} für die Woche ab {} wurde von einem Admin abgelehnt: {}",
+                    requester_name, r.week_start, reason
+                ),
+                Some("reopen_request"),
+                Some(id),
+            )
+            .await;
+        }
+    }
     Ok(Json(serde_json::json!({ "ok": true })))
 }

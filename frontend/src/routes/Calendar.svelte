@@ -196,6 +196,11 @@
     }));
   }
 
+  function calendarEventTitle(event) {
+    const detail = String(event?.detail || "").trim();
+    return detail;
+  }
+
   $: prev =
     month === 1
       ? `?year=${year - 1}&month=12`
@@ -318,7 +323,7 @@
             <div class="cal-events">
               {#each evts.slice(0, 3) as ev}
                 <div class="cal-event" style="background:{ev.color}">
-                  {ev.label}
+                  {calendarEventTitle(ev)}
                 </div>
               {/each}
               {#if evts.length > 3}

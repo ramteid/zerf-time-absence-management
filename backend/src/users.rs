@@ -9,14 +9,15 @@ use axum::{
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 
-/// Per-approver self-service policy. Returned by `GET /team-settings` for the
-/// current user (lead/admin) or for all approvers (admin only).
+/// Per-user reopen policy. Returned by `GET /team-settings` for every active
+/// user; visible and editable by any lead/admin.
 #[derive(Serialize)]
 pub struct TeamSettings {
-    pub approver_id: i64,
+    pub user_id: i64,
     pub email: String,
     pub first_name: String,
     pub last_name: String,
+    pub role: String,
     pub allow_reopen_without_approval: bool,
 }
 
@@ -28,38 +29,44 @@ pub async fn team_settings_list(
         return Err(AppError::Forbidden);
     }
     let rows: Vec<TeamSettings> = if u.is_admin() {
-        sqlx::query_as::<_, (i64, String, String, String, bool)>(
-            "SELECT id, email, first_name, last_name, allow_reopen_without_approval \
-             FROM users WHERE active=TRUE AND role IN ('team_lead','admin') \
+        // Admins see all active users.
+        sqlx::query_as::<_, (i64, String, String, String, String, bool)>(
+            "SELECT id, email, first_name, last_name, role, allow_reopen_without_approval \
+             FROM users WHERE active=TRUE \
              ORDER BY last_name, first_name",
         )
         .fetch_all(&s.pool)
         .await?
         .into_iter()
-        .map(|(id, email, fi, la, p)| TeamSettings {
-            approver_id: id,
+        .map(|(id, email, fi, la, role, p)| TeamSettings {
+            user_id: id,
             email,
             first_name: fi,
             last_name: la,
+            role,
             allow_reopen_without_approval: p,
         })
         .collect()
     } else {
-        // Team leads see only their own row.
-        let row: (String, String, String, bool) = sqlx::query_as(
-            "SELECT email, first_name, last_name, allow_reopen_without_approval \
-             FROM users WHERE id=$1",
+        // Team leads see themselves + their direct reports.
+        sqlx::query_as::<_, (i64, String, String, String, String, bool)>(
+            "SELECT id, email, first_name, last_name, role, allow_reopen_without_approval \
+             FROM users WHERE active=TRUE AND (id=$1 OR approver_id=$1) \
+             ORDER BY last_name, first_name",
         )
         .bind(u.id)
-        .fetch_one(&s.pool)
-        .await?;
-        vec![TeamSettings {
-            approver_id: u.id,
-            email: row.0,
-            first_name: row.1,
-            last_name: row.2,
-            allow_reopen_without_approval: row.3,
-        }]
+        .fetch_all(&s.pool)
+        .await?
+        .into_iter()
+        .map(|(id, email, fi, la, role, p)| TeamSettings {
+            user_id: id,
+            email,
+            first_name: fi,
+            last_name: la,
+            role,
+            allow_reopen_without_approval: p,
+        })
+        .collect()
     };
     Ok(Json(rows))
 }
@@ -72,32 +79,41 @@ pub struct UpdateTeamSettings {
 pub async fn team_settings_update(
     State(s): State<AppState>,
     u: User,
-    Path(approver_id): Path<i64>,
+    Path(target_id): Path<i64>,
     Json(b): Json<UpdateTeamSettings>,
 ) -> AppResult<Json<serde_json::Value>> {
     if !u.is_lead() {
         return Err(AppError::Forbidden);
     }
-    // Leads may only edit their own policy.
-    if !u.is_admin() && approver_id != u.id {
-        return Err(AppError::Forbidden);
-    }
-    // Target must be an active lead/admin.
-    let role: Option<(String, bool)> = sqlx::query_as("SELECT role, active FROM users WHERE id=$1")
-        .bind(approver_id)
+    // Team leads may only edit themselves or their direct reports.
+    if !u.is_admin() && target_id != u.id {
+        let is_direct_report: Option<bool> = sqlx::query_scalar(
+            "SELECT TRUE FROM users WHERE id=$1 AND approver_id=$2 AND active=TRUE",
+        )
+        .bind(target_id)
+        .bind(u.id)
         .fetch_optional(&s.pool)
         .await?;
-    match role {
-        Some((r, true)) if r == "team_lead" || r == "admin" => {}
+        if is_direct_report.is_none() {
+            return Err(AppError::Forbidden);
+        }
+    }
+    // Target must be an active user.
+    let active: Option<bool> = sqlx::query_scalar("SELECT active FROM users WHERE id=$1")
+        .bind(target_id)
+        .fetch_optional(&s.pool)
+        .await?;
+    match active {
+        Some(true) => {}
         _ => {
             return Err(AppError::BadRequest(
-                "Policy can only be set on an active Team lead or Admin.".into(),
+                "User not found or inactive.".into(),
             ))
         }
     }
     sqlx::query("UPDATE users SET allow_reopen_without_approval=$1 WHERE id=$2")
         .bind(b.allow_reopen_without_approval)
-        .bind(approver_id)
+        .bind(target_id)
         .execute(&s.pool)
         .await?;
     audit::log(
@@ -105,7 +121,7 @@ pub async fn team_settings_update(
         u.id,
         "team_settings_updated",
         "users",
-        approver_id,
+        target_id,
         None,
         Some(serde_json::json!({"allow_reopen_without_approval": b.allow_reopen_without_approval})),
     )
@@ -117,7 +133,7 @@ pub async fn list(State(s): State<AppState>, u: User) -> AppResult<Json<Vec<User
     if !u.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let r = sqlx::query_as::<_, User>("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users ORDER BY last_name, first_name")
+    let r = sqlx::query_as::<_, User>("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode FROM users ORDER BY last_name, first_name")
         .fetch_all(&s.pool)
         .await?;
     Ok(Json(r))
@@ -132,7 +148,7 @@ pub async fn get_one(
         return Err(AppError::Forbidden);
     }
     Ok(Json(
-        sqlx::query_as::<_, User>("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE id=$1")
+        sqlx::query_as::<_, User>("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode FROM users WHERE id=$1")
             .bind(id)
             .fetch_one(&s.pool)
             .await?,
@@ -256,7 +272,7 @@ pub async fn create(
             tracing::warn!(target:"kitazeit::users", "create user insert failed: {e}");
             AppError::Conflict("Email already exists or invalid approver.".into())
         })?;
-    let user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE id=$1")
+    let user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode FROM users WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
@@ -353,7 +369,7 @@ pub async fn update(
             return Err(AppError::BadRequest("Invalid email.".into()));
         }
     }
-    let prev: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE id=$1")
+    let prev: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode FROM users WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
@@ -392,7 +408,7 @@ pub async fn update(
             .execute(&s.pool)
             .await;
     }
-    let next: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE id=$1")
+    let next: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode FROM users WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
@@ -422,7 +438,7 @@ pub async fn deactivate(
             "You cannot deactivate yourself.".into(),
         ));
     }
-    let prev: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE id=$1")
+    let prev: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode FROM users WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
         .await?;

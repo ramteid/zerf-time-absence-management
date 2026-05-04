@@ -43,7 +43,20 @@ const TRANSLATIONS = {
     audit_action_reopened: "Reopened",
     "of {target} target": "of {target} target",
     "Open calendar": "Open calendar",
+    Year: "Year",
+    "Invalid date": "Invalid date.",
     "Invalid date.": "Invalid date.",
+    "end_date must be >= start_date.": "From cannot be after To.",
+    "Absence range exceeds one year.": "Absence range exceeds one year.",
+    "Conflict: Overlap with existing absence":
+      "Conflict: Overlap with existing absence.",
+    "Overlap with existing absence": "Overlap with existing absence.",
+    "Yes, cancel absence": "Yes, cancel absence",
+    "Vacation days ({year})": "Vacation days ({year})",
+    "Vacation used ({year})": "Vacation used ({year})",
+    "Vacation pending ({year})": "Vacation pending ({year})",
+    "Vacation remaining ({year})": "Vacation remaining ({year})",
+    "Vacation requests awaiting approval": "Vacation requests awaiting approval",
     you: "you",
     "Public holiday": "Public holiday",
     Holiday: "Holiday",
@@ -138,6 +151,9 @@ const TRANSLATIONS = {
     "Delete this entry?": "Diesen Eintrag löschen?",
     "Request change": "Änderung anfordern",
     "Submit week ({count})": "Woche einreichen ({count})",
+    "Submit this week?": "Diese Woche einreichen?",
+    "All draft entries of this week will be submitted for approval.":
+      "Alle Entwurfs-Einträge dieser Woche werden zur Genehmigung eingereicht.",
     "Week submitted.": "Woche eingereicht.",
     "Original: {date} {start}-{end}": "Original: {date} {start}-{end}",
     "Why is the change needed?": "Warum ist die Änderung nötig?",
@@ -184,6 +200,7 @@ const TRANSLATIONS = {
     "Overtime balance {year}": "Überstundenkonto {year}",
     Balance: "Saldo",
     Month: "Monat",
+    Year: "Jahr",
     Diff: "Diff.",
     Cumulative: "Kumuliert",
     "Submitted entries": "Eingereichte Einträge",
@@ -289,6 +306,7 @@ const TRANSLATIONS = {
     "Kita name": "Kita-Name",
     "Save Changes": "Änderungen speichern",
     "Saving...": "Speichert...",
+    "Signing in…": "Anmeldung läuft…",
     "Settings saved.": "Einstellungen gespeichert.",
     Country: "Land",
     Region: "Region",
@@ -317,6 +335,8 @@ const TRANSLATIONS = {
     "Reject this request?": "Diese Anfrage ablehnen?",
     "Reject this change request?": "Diese Änderungsanfrage ablehnen?",
     Request: "Anfrage",
+    "Rejected.": "Abgelehnt.",
+    Retry: "Erneut versuchen",
     // Default category names
     "Direct Childcare": "Arbeit am Kind",
     "Preparation Time": "Vorbereitungszeit",
@@ -325,9 +345,16 @@ const TRANSLATIONS = {
     Other: "Sonstiges",
     "Switch to dark mode": "Dunkelmodus aktivieren",
     "Switch to light mode": "Hellmodus aktivieren",
+    Appearance: "Erscheinungsbild",
+    "Dark mode": "Dunkelmodus",
+    "Use dark colour scheme": "Dunkles Farbschema verwenden",
+    Enabled: "Aktiviert",
+    Disabled: "Deaktiviert",
     // Reopen-week feature
     "Approver (Team lead / Admin)": "Verantwortliche Teamleitung / Admin",
     "Required for employees.": "Pflichtfeld für Mitarbeitende.",
+    "An approver is required for employees.":
+      "Für Mitarbeitende ist eine verantwortliche Person erforderlich.",
     "— None —": "— Keine —",
     "Request edit": "Bearbeitung anfordern",
     "Reopen this week?": "Diese Woche wieder bearbeiten?",
@@ -349,8 +376,29 @@ const TRANSLATIONS = {
       "Mitarbeitende dürfen Wochen ohne Genehmigung wieder bearbeiten",
     Notifications: "Benachrichtigungen",
     "No notifications.": "Keine Benachrichtigungen.",
+    "No categories available.": "Keine Kategorien verfügbar.",
     "Mark all as read": "Alle als gelesen markieren",
     "Clear all": "Alle löschen",
+    "Failed to load categories. Some features may be unavailable.":
+      "Kategorien konnten nicht geladen werden. Einige Funktionen sind möglicherweise nicht verfügbar.",
+    "Could not reach the server. Please check your connection.":
+      "Server nicht erreichbar. Bitte prüfen Sie Ihre Verbindung.",
+    "Network error. Please check your connection.":
+      "Netzwerkfehler. Bitte prüfen Sie Ihre Verbindung.",
+    "Session expired. Please sign in again.":
+      "Sitzung abgelaufen. Bitte erneut anmelden.",
+    "Your session has expired. Please sign in again.":
+      "Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.",
+    "Leave balance unavailable.": "Urlaubsstand nicht verfügbar.",
+    "Overtime data unavailable.": "Überstundendaten nicht verfügbar.",
+    "Overtime overview": "Überstundenübersicht",
+    "This month: {value}": "Diesen Monat: {value}",
+    "Submission status": "Einreichungsstatus",
+    "All previous months submitted": "Alle vergangenen Monate eingereicht",
+    "{count} month(s) incomplete": "{count} Monat(e) unvollständig",
+    "No previous months yet": "Noch keine vergangenen Monate",
+    "Could not check submission status.":
+      "Einreichungsstatus konnte nicht geprüft werden.",
     "Auto-approve reopens": "Wiederfreigabe ohne Bestätigung",
     // Flextime chart
     "Flextime balance": "Gleitzeitkontostand",
@@ -363,18 +411,34 @@ const TRANSLATIONS = {
     Range: "Bereich",
     "From cannot be after To.": "Von kann nicht nach Bis liegen.",
     "Start cannot be after End.": "Start kann nicht nach Ende liegen.",
+    "Category required.": "Kategorie erforderlich.",
     // Hours unit
     hours_unit: "Std.",
     "{value}{unit}": "{value} {unit}",
     "{hours} / week": "{hours} / Woche",
     "Open calendar": "Kalender öffnen",
+    "Invalid date": "Ungültiges Datum.",
     "Invalid date.": "Ungültiges Datum.",
+    "end_date must be >= start_date.": "Von kann nicht nach Bis liegen.",
+    "Absence range exceeds one year.":
+      "Der Abwesenheitszeitraum darf ein Jahr nicht überschreiten.",
     you: "Sie",
     // Overlap / absence conflict
+    "Conflict: Overlap with existing absence":
+      "Konflikt: Überschneidung mit bestehender Abwesenheit.",
     "Conflict: Overlap with existing absence.":
       "Konflikt: Überschneidung mit bestehender Abwesenheit.",
+    "Overlap with existing absence":
+      "Überschneidung mit bestehender Abwesenheit.",
     "Overlap with existing absence.":
       "Überschneidung mit bestehender Abwesenheit.",
+    "Yes, cancel absence": "Ja, Abwesenheit stornieren",
+    "Vacation days ({year})": "Urlaubstage ({year})",
+    "Vacation used ({year})": "Genommene Urlaubstage ({year})",
+    "Vacation pending ({year})": "Offene Urlaubstage ({year})",
+    "Vacation remaining ({year})": "Verbleibende Urlaubstage ({year})",
+    "Vacation requests awaiting approval":
+      "Urlaubsanträge warten auf Genehmigung",
     // Calendar: work-time categories + public holiday
     "Public holiday": "Feiertag",
     Absent: "Abwesend",
@@ -426,8 +490,8 @@ const TRANSLATIONS = {
     Team: "Team",
     // Team Settings
     "Reopen Requests": "Wiederfreigabe-Anträge",
-    "When enabled, employees can reopen submitted weeks without waiting for approval.":
-      "Wenn aktiviert, können Mitarbeitende eingereichte Wochen ohne Genehmigungswartung wieder öffnen.",
+    "When enabled for a user, their reopen requests are automatically approved. Their approver and all admins still receive a notification.":
+      "Wenn aktiviert, werden die Wiederfreigabe-Anträge des Benutzers automatisch genehmigt. Der Verantwortliche und alle Admins erhalten trotzdem eine Benachrichtigung.",
     // Notification polling
     // (no new keys needed)
   },

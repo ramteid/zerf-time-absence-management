@@ -33,34 +33,67 @@
   let showEntry = null;
   let showChange = null;
   let myReopens = [];
+  let loadSeq = 0;
+  let weekdays = [];
+  let weekendDays = [];
 
   $: weekParam = (() => {
     const q = $path.includes("?") ? $path.split("?")[1] : "";
     return new URLSearchParams(q).get("week");
   })();
 
-  async function load() {
-    const date = weekParam ? parseDate(weekParam) : new Date();
-    mo = monday(date);
-    su = addDays(mo, 6);
-    entries = await api(`/time-entries?from=${isoDate(mo)}&to=${isoDate(su)}`);
+  function setWeek(dateLike) {
+    const start = monday(parseDate(dateLike || new Date()));
+    mo = start;
+    su = addDays(start, 6);
+    return start;
+  }
+
+  async function loadWeek(dateLike = weekParam || new Date()) {
+    const seq = ++loadSeq;
+    const start = setWeek(dateLike);
+    const from = isoDate(start);
+    const to = isoDate(addDays(start, 6));
+
     try {
-      myReopens = await api("/reopen-requests");
+      const [weekEntries, reopenRows] = await Promise.all([
+        api(`/time-entries?from=${from}&to=${to}`),
+        api("/reopen-requests").catch(() => []),
+      ]);
+      if (seq !== loadSeq) return;
+      entries = weekEntries;
+      myReopens = reopenRows;
     } catch {
+      if (seq !== loadSeq) return;
+      entries = [];
       myReopens = [];
     }
   }
-  $: $path && load().catch(() => (entries = []));
+
+  $: if ($path) {
+    loadWeek(weekParam || new Date());
+  }
 
   function gotoWeek(offset) {
-    go("/time?week=" + isoDate(addDays(mo, offset)));
+    if (!mo) return;
+    const next = addDays(mo, offset);
+    setWeek(next);
+    entries = [];
+    go("/time?week=" + isoDate(next));
   }
 
   async function submitWeek(ids) {
+    if (!ids?.length) return;
+    const ok = await confirmDialog(
+      "Submit this week?",
+      "All draft entries of this week will be submitted for approval.",
+      { confirm: "Submit Week" },
+    );
+    if (!ok) return;
     try {
       await api("/time-entries/submit", { method: "POST", body: { ids } });
       toast($t("Week submitted."), "ok");
-      load();
+      await loadWeek(mo || new Date());
     } catch (e) {
       toast(e.message || $t("Error"), "error");
     }
@@ -86,7 +119,7 @@
       } else {
         toast($t("Reopen request sent."), "ok");
       }
-      load();
+      await loadWeek(mo || new Date());
     } catch (e) {
       toast(e.message || $t("Error"), "error");
     }
@@ -130,6 +163,9 @@
     };
   }
 
+  $: weekdays = mo ? [0, 1, 2, 3, 4].map((i) => buildDay(i)) : [];
+  $: weekendDays = mo ? [5, 6].map((i) => buildDay(i)) : [];
+
   function durHours(start, end) {
     return (durMin(start, end) / 60).toFixed(1);
   }
@@ -165,7 +201,9 @@
     if (!mo) return null;
     const ws = isoDate(mo);
     return (
-      myReopens.find((r) => r.week_start === ws && r.status === "pending") ||
+      myReopens.find(
+        (r) => dateKey(r.week_start) === ws && r.status === "pending",
+      ) ||
       null
     );
   })();
@@ -274,8 +312,7 @@
 
     <!-- Week grid -->
     <div class="week-grid">
-      {#each [0, 1, 2, 3, 4] as i}
-        {@const day = buildDay(i)}
+      {#each weekdays as day (day.ds)}
         {@const total = day.items.reduce(
           (s, e) =>
             s + durMin(e.start_time.slice(0, 5), e.end_time.slice(0, 5)),
@@ -362,8 +399,7 @@
     </div>
 
     <!-- Weekend (Sat/Sun) if entries exist -->
-    {#each [5, 6] as i}
-      {@const day = buildDay(i)}
+    {#each weekendDays as day (day.ds)}
       {#if day.items.length > 0}
         <div class="kz-card" style="margin-top:12px;overflow-x:auto">
           <div class="day-header">
@@ -402,7 +438,7 @@
       if (!changed) return;
       removeEntry(deletedId);
       upsertEntry(entry);
-      load();
+      loadWeek(mo || new Date());
     }}
   />
 {/if}
@@ -411,7 +447,7 @@
     entry={showChange}
     onClose={() => {
       showChange = null;
-      load();
+      loadWeek(mo || new Date());
     }}
   />
 {/if}

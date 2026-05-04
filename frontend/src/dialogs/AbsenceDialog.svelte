@@ -16,6 +16,29 @@
   let comment = template.comment || "";
   let error = "";
 
+  function localizeAbsenceError(message) {
+    const text = String(message || "").trim();
+    if (!text) return $t("Error");
+    if (text.includes("Overlap with existing absence")) {
+      return $t("Conflict: Overlap with existing absence.");
+    }
+    if (text.includes("end_date must be >= start_date")) {
+      return $t("From cannot be after To.");
+    }
+    if (text.includes("Absence range exceeds one year")) {
+      return $t("Absence range exceeds one year.");
+    }
+    if (text === "Invalid date" || text === "Invalid date.") {
+      return $t("Invalid date.");
+    }
+    if (text.includes("Failed to deserialize")) {
+      return $t("Invalid date.");
+    }
+
+    const translated = $t(text);
+    return translated === text ? text : translated;
+  }
+
   onMount(() => dlg.showModal());
 
   async function save() {
@@ -35,18 +58,19 @@
         end_date,
         comment: comment || null,
       };
-      if (isNew) await api("/absences", { method: "POST", body });
-      else await api("/absences/" + template.id, { method: "PUT", body });
+      const saved = isNew
+        ? await api("/absences", { method: "POST", body })
+        : await api("/absences/" + template.id, { method: "PUT", body });
       dlg.close();
-      onClose(true);
+      onClose(true, saved);
     } catch (e) {
-      error = $t(e.message) || e.message;
+      error = localizeAbsenceError(e?.message);
     }
   }
 
   function cancel() {
     dlg.close();
-    onClose(false);
+    onClose(false, null);
   }
 </script>
 
@@ -72,21 +96,11 @@
     <div class="field-row">
       <div>
         <label class="kz-label" for="absence-start-date">{$t("From")}</label>
-        <DatePicker
-          id="absence-start-date"
-          bind:value={start_date}
-          max={end_date}
-          container={dlg}
-        />
+        <DatePicker id="absence-start-date" bind:value={start_date} container={dlg} />
       </div>
       <div>
         <label class="kz-label" for="absence-end-date">{$t("To")}</label>
-        <DatePicker
-          id="absence-end-date"
-          bind:value={end_date}
-          min={start_date}
-          container={dlg}
-        />
+        <DatePicker id="absence-end-date" bind:value={end_date} container={dlg} />
       </div>
     </div>
     <div>

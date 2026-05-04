@@ -60,9 +60,11 @@ pub struct User {
     /// Mandatory for active employees (DB CHECK constraint),
     /// optional for leads/admins (they may self-service).
     pub approver_id: Option<i64>,
-    /// When TRUE, reopen requests authored by employees whose
-    /// `approver_id` is this user are auto-approved without manual review.
+    /// When TRUE, this user's reopen requests are auto-approved without waiting
+    /// for manual review.  The designated approver and all admins still receive
+    /// an in-app + email notification that the auto-approval happened.
     pub allow_reopen_without_approval: bool,
+    pub dark_mode: bool,
 }
 
 impl User {
@@ -181,7 +183,7 @@ pub async fn login(
     }
 
     let user: Option<User> =
-        sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE email = $1 AND active = TRUE")
+        sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode FROM users WHERE email = $1 AND active = TRUE")
             .bind(&email)
             .fetch_optional(&s.pool)
             .await?;
@@ -311,6 +313,7 @@ pub async fn me(
         "active": user.active, "must_change_password": user.must_change_password,
         "approver_id": user.approver_id,
         "allow_reopen_without_approval": user.allow_reopen_without_approval,
+        "dark_mode": user.dark_mode,
         "csrf_token": csrf.unwrap_or_default(),
         "permissions": permissions,
         "nav": nav,
@@ -322,6 +325,24 @@ pub async fn me(
 pub struct PasswordReq {
     pub current_password: Option<String>,
     pub new_password: String,
+}
+
+#[derive(Deserialize)]
+pub struct PreferencesReq {
+    pub dark_mode: bool,
+}
+
+pub async fn update_preferences(
+    State(s): State<AppState>,
+    user: User,
+    Json(body): Json<PreferencesReq>,
+) -> AppResult<Json<serde_json::Value>> {
+    sqlx::query("UPDATE users SET dark_mode=$1 WHERE id=$2")
+        .bind(body.dark_mode)
+        .bind(user.id)
+        .execute(&s.pool)
+        .await?;
+    Ok(Json(serde_json::json!({"ok": true})))
 }
 
 pub async fn change_password(
@@ -498,7 +519,7 @@ pub async fn auth_middleware(
         .bind(hash_token(&token))
         .execute(&s.pool)
         .await?;
-    let user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE id=$1 AND active=TRUE")
+    let user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode FROM users WHERE id=$1 AND active=TRUE")
         .bind(uid)
         .fetch_optional(&s.pool)
         .await?

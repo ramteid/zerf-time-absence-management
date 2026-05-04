@@ -511,7 +511,7 @@ pub async fn balance(
         return Err(AppError::Forbidden);
     }
     let year = q.year.unwrap_or_else(|| chrono::Local::now().year());
-    let target: crate::auth::User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval FROM users WHERE id=$1")
+    let target: crate::auth::User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode FROM users WHERE id=$1")
         .bind(uid)
         .fetch_one(&s.pool)
         .await?;
@@ -538,11 +538,7 @@ pub async fn balance(
             requested += days;
         }
     }
-    let entitled = if target.role == "admin" {
-        0
-    } else {
-        target.annual_leave_days
-    };
+    let entitled = target.annual_leave_days;
     Ok(Json(LeaveBalance {
         annual_entitlement: entitled,
         already_taken: taken,

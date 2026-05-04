@@ -12,7 +12,17 @@
   export let onResolve;
   let dlg;
   let reason = "";
-  onMount(() => dlg.showModal());
+  onMount(() => {
+    try {
+      if (typeof dlg?.showModal === "function") {
+        dlg.showModal();
+      } else {
+        dlg?.setAttribute("open", "open");
+      }
+    } catch {
+      dlg?.setAttribute("open", "open");
+    }
+  });
 
   function ok() {
     if (needReason && !reason.trim()) {

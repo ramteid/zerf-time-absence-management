@@ -43,7 +43,7 @@ A short tour of the UI:
 - **Calendar** — month view of who is away, colour-coded by type.
 - **Dashboard** — team leads see all open approvals in one place, including a dedicated *Week reopen requests* queue.
 - **Reports** — monthly per-employee, team summary, category breakdown, CSV.
-- **Team Settings** *(team leads & admins)* — toggle "auto-approve reopens" per approver to skip manual review.
+- **Team Settings** *(team leads & admins)* — toggle "auto-approve reopens" per user to skip manual review for that person's reopen requests.
 - **Admin** — users, categories, holidays, audit log.
 - **Notification center** — bell in the sidebar with unread count; lists reopen-request events, approvals, rejections.
 
@@ -51,14 +51,15 @@ A short tour of the UI:
 
 1. After an employee submits a week, the **Submit Week** button is replaced
    by a **Request edit** action.
-2. If the employee's assigned approver has *Auto-approve reopens* enabled
-   (set under **Team Settings**), the week is reopened immediately — every
-   non-draft entry returns to `draft` and any open per-entry change
-   requests for that week are auto-cancelled.
-3. Otherwise the request is queued. The approver receives an in-app
-   notification (and an email when SMTP is configured), and can
-   approve or reject from the Dashboard. The employee gets the
-   corresponding follow-up notification.
+2. If the employee has *Auto-approve reopens* enabled (set under **Team
+   Settings** by a team lead or admin), the week is reopened immediately —
+   every non-draft entry returns to `draft` and any open per-entry change
+   requests for that week are auto-cancelled.  The designated approver and
+   all admins receive an informational notification.
+3. Otherwise the request is queued. The designated approver and all admins
+   receive an in-app notification (and an email when SMTP is configured),
+   and any of them can approve or reject from the Dashboard. The employee
+   gets the corresponding follow-up notification.
 
 Each employee **must** have an approver assigned (Team lead or Admin); the
 selector in the user dialog is mandatory and the schema enforces this.
@@ -231,3 +232,42 @@ and easy to operate.
 ## License
 
 MIT — see [`LICENSE`](LICENSE).
+
+---
+
+## Changelog
+
+### Per-user auto-approve reopens (2026-05-04)
+
+The "Auto-approve reopens" setting has been reworked. Previously the flag
+lived on the **approver** and controlled whether *all of that approver's
+employees* could skip the manual review step. It now lives on every individual
+**user** and expresses whether *that person's* own reopen requests are
+auto-approved.
+
+**What changed**
+
+| Area | Before | After |
+|------|--------|-------|
+| Flag owner | Approver (team lead / admin) | Every active user |
+| Who can set it | Admin only (own row) / lead (own row only) | Admin (any user) / team lead (themselves + their direct reports) |
+| Team Settings view | Admins: lead + admin rows only; leads: own row only | Admins: all active users; leads: themselves + their direct reports |
+| Auto-approve trigger | Approver's flag is `true` | Requester's own flag is `true` |
+| Who is notified on auto-approve | Requester only | Requester + designated approver + all admins |
+| Who is notified on pending request | Single designated approver | Designated approver + all admins |
+| Admin approves/rejects a lead's queue item | Lead not notified | Lead receives an informational notification |
+
+**Notification behaviour**
+
+All reopen-workflow notifications are delivered both **in-app** (notification
+center) and **via email** when SMTP is configured, consistent with all other
+notification events in the app.
+
+**Approver resolution for access control**
+
+An admin is implicitly an approver for every non-admin user, regardless of
+whether they are the user's explicitly assigned `approver_id`. This means:
+
+- Any admin can approve or reject any pending reopen request.
+- Any admin can set the auto-approve flag for any user.
+- Team leads can only manage themselves and the users whose `approver_id` is set to them.

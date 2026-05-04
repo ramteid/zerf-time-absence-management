@@ -36,7 +36,14 @@
       // Set the path BEFORE currentUser so that when the reactive chain fires
       // in App.svelte, matchRoute already sees the correct pathname instead of
       // "/" — which would return null and flash "Wird geladen...".
-      const dest = me.must_change_password ? "/account" : me.home || "/time";
+      const dashboardAvailable = (me?.nav || []).some(
+        (item) => item?.key === "Dashboard" || item?.href === "/dashboard",
+      );
+      const dest = me.must_change_password
+        ? "/account"
+        : dashboardAvailable
+          ? "/dashboard"
+          : me.home || "/time";
       console.debug("[login-debug]", "submit:navigate", { dest });
       go(dest);
       currentUser.set(me);
@@ -58,7 +65,7 @@
       console.debug("[login-debug]", "submit:error", {
         message: err?.message ?? null,
       });
-      error = err.message || "Error";
+      error = $t(err?.message || "Error");
     } finally {
       submitting = false;
       console.debug("[login-debug]", "submit:end", { submitting });
