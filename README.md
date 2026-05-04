@@ -17,6 +17,7 @@ Employees capture hours and absences, team leads review requests and submitted w
 - Team calendar and monthly reporting with CSV export.
 - Role-based administration for users, categories, holidays, settings, and audit history.
 - In-app notifications with optional SMTP-based email delivery.
+- Automatic backup to a local Docker volume
 
 ## How it differs from comparable software
 
@@ -50,9 +51,6 @@ flowchart TD
 	LeadB -->|primary approver for| LeadA
 
 	Admin -->|manages platform and users| LeadB
-	Admin -. fallback approval only .-> E1
-	Admin -. fallback approval only .-> E2
-	Admin -. fallback approval only .-> EN
 	Admin -. fallback approval only .-> LeadA
 ```
 
@@ -71,7 +69,6 @@ flowchart LR
 	LeadOwn[Team lead submits own request]
 
 	Employee -->|default review path| Lead
-	Employee -. fallback only .-> Admin
 	Lead -->|approve| Approved
 	Lead -->|reject| Rejected
 
