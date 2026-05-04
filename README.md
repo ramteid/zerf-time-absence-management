@@ -1,23 +1,27 @@
-# KitaZeit
+# ZERF Work Time Tracking
 
 Simple but powerful self-hosted time tracking and absence management for teams.
 
-KitaZeit helps teams record working time, request leave, manage approvals, and produce monthly reports without adopting a full HR or payroll suite. 
+Zerf covers working hours, leave and absence requests, approvals, and monthly reports in one operational tool. It supports the daily workflow between employees, team leads, and admins without expanding into a full HR or payroll suite.
+
+`Zerf` is derived from the German word "Zeiterfassung" which means "time tracking".
 
 ## Overview
 
-KitaZeit is built for day-to-day team operations.
+Zerf is built for day-to-day team operations.
 Employees capture hours and absences, team leads review requests and submitted work, and admins manage the people and rules behind the process. The focus is on clear workflows, fast daily use on desktop or phone, and predictable self-hosted operation.
 
 ## Key features
 
-- Time tracking with category-based entries, weekly submission, and overtime visibility.
+- Time tracking with category-based entries, weekly submission, overtime visibility, and change requests.
 - Absence workflows for vacation, sick leave, training, special leave, and unpaid leave.
-- Approval flows for submitted time, absence requests, change requests, and week reopen requests.
-- Team calendar and monthly reporting with CSV export.
+- Approval dashboard for submitted time, absence requests, change requests, and week reopen requests.
+- Team calendar with shared absence visibility and holiday context.
+- Reports for monthly employee breakdowns and team-level reporting.
+- CSV export for report data and downstream processing.
 - Role-based administration for users, categories, holidays, settings, and audit history.
 - In-app notifications with optional SMTP-based email delivery.
-- Automatic backup to a local Docker volume
+- Self-hosted Docker deployment with automatic backup to a local Docker volume.
 
 ## How it differs from comparable software
 
@@ -90,14 +94,14 @@ The application is deliberately small in scope and operationally simple: a Rust 
 
 ```bash
 cp .env.example .env && chmod 600 .env
-sed -i "s|KITAZEIT_SESSION_SECRET=.*|KITAZEIT_SESSION_SECRET=$(openssl rand -hex 32)|" .env
-sed -i "s|KITAZEIT_POSTGRES_PASSWORD=.*|KITAZEIT_POSTGRES_PASSWORD=$(openssl rand -hex 32)|" .env
+sed -i "s|ZERF_SESSION_SECRET=.*|ZERF_SESSION_SECRET=$(openssl rand -hex 32)|" .env
+sed -i "s|ZERF_POSTGRES_PASSWORD=.*|ZERF_POSTGRES_PASSWORD=$(openssl rand -hex 32)|" .env
 ```
 
 Edit `.env` and set these values:
 
-- `KITAZEIT_ADMIN_EMAIL` is required in every deployment mode.
-- `KITAZEIT_DOMAIN` is required for public deployment.
+- `ZERF_ADMIN_EMAIL` is required in every deployment mode.
+- `ZERF_DOMAIN` is required for public deployment.
 
 ### 2. Start the stack
 

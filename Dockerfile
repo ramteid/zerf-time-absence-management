@@ -2,9 +2,9 @@
 # ---------- Frontend build stage ----------
 FROM node:25-trixie-slim AS frontend-builder
 WORKDIR /build
-ARG KITAZEIT_FRONTEND_DEBUG_BUILD=false
+ARG ZERF_FRONTEND_DEBUG_BUILD=false
 ENV CI=1
-ENV KITAZEIT_FRONTEND_DEBUG_BUILD=${KITAZEIT_FRONTEND_DEBUG_BUILD}
+ENV ZERF_FRONTEND_DEBUG_BUILD=${ZERF_FRONTEND_DEBUG_BUILD}
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; \
     else npm install --no-audit --no-fund; fi
@@ -14,7 +14,7 @@ RUN npm run build
 # ---------- Backend build stage ----------
 FROM rust:1-trixie AS backend-builder
 WORKDIR /build
-ARG KITAZEIT_BUILD_PROFILE=release
+ARG ZERF_BUILD_PROFILE=release
 ENV CARGO_TERM_COLOR=always
 
 # Layer 1: manifests only — cached until Cargo.toml / Cargo.lock change.
@@ -25,26 +25,26 @@ COPY backend/migrations ./migrations
 # This expensive step is re-run only when the manifest/lock changes.
 RUN mkdir -p src && \
         echo 'fn main() {}' > src/main.rs && \
-        if [ "$KITAZEIT_BUILD_PROFILE" = "debug" ]; then \
+        if [ "$ZERF_BUILD_PROFILE" = "debug" ]; then \
             cargo build --locked && \
-            rm -f target/debug/deps/kitazeit* && \
-            rm -rf target/debug/.fingerprint/kitazeit-*; \
+            rm -f target/debug/deps/zerf* && \
+            rm -rf target/debug/.fingerprint/zerf-*; \
         else \
             cargo build --release --locked && \
-            rm -f target/release/deps/kitazeit* && \
-            rm -rf target/release/.fingerprint/kitazeit-*; \
+            rm -f target/release/deps/zerf* && \
+            rm -rf target/release/.fingerprint/zerf-*; \
         fi
 
 # Layer 3: compile the real application source.
 COPY backend/src ./src
 RUN touch src/main.rs && \
-        if [ "$KITAZEIT_BUILD_PROFILE" = "debug" ]; then \
+        if [ "$ZERF_BUILD_PROFILE" = "debug" ]; then \
             cargo build --locked && \
-            install -D target/debug/kitazeit /out/kitazeit; \
+            install -D target/debug/zerf /out/zerf; \
         else \
             cargo build --release --locked && \
-            strip target/release/kitazeit || true && \
-            install -D target/release/kitazeit /out/kitazeit; \
+            strip target/release/zerf || true && \
+            install -D target/release/zerf /out/zerf; \
         fi
 
 # ---------- Runtime stage ----------
@@ -58,23 +58,23 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Non-root runtime user.
-RUN groupadd --gid ${APP_GID} kitazeit && \
-    useradd --uid ${APP_UID} --gid ${APP_GID} --home /app --shell /usr/sbin/nologin kitazeit
+RUN groupadd --gid ${APP_GID} zerf && \
+    useradd --uid ${APP_UID} --gid ${APP_GID} --home /app --shell /usr/sbin/nologin zerf
 
 WORKDIR /app
-COPY --from=backend-builder /out/kitazeit /app/kitazeit
+COPY --from=backend-builder /out/zerf /app/zerf
 COPY --from=frontend-builder /build/dist /app/static
-RUN chmod 0555 /app/kitazeit && \
+RUN chmod 0555 /app/zerf && \
     chmod -R a=rX /app/static
 
-ENV KITAZEIT_STATIC_DIR=/app/static \
-    KITAZEIT_BIND=0.0.0.0:3000 \
+ENV ZERF_STATIC_DIR=/app/static \
+    ZERF_BIND=0.0.0.0:3000 \
     RUST_BACKTRACE=0
 
-USER kitazeit:kitazeit
+USER zerf:zerf
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD ["/bin/sh", "-c", "wget -qO- --timeout=3 http://127.0.0.1:3000/healthz | grep -q ok"]
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["/app/kitazeit"]
+CMD ["/app/zerf"]

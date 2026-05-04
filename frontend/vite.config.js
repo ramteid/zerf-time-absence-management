@@ -1,7 +1,7 @@
 import { defineConfig } from "vite";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 
-const frontendDebugBuild = process.env.KITAZEIT_FRONTEND_DEBUG_BUILD === "true";
+const frontendDebugBuild = process.env.ZERF_FRONTEND_DEBUG_BUILD === "true";
 
 export default defineConfig({
   plugins: [svelte()],

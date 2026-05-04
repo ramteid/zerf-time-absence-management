@@ -72,13 +72,13 @@ jobs:
       postgres:
         image: postgres:18
         env:
-          POSTGRES_USER: kitazeit_smoke
-          POSTGRES_PASSWORD: kitazeit_smoke
-          POSTGRES_DB: kitazeit_smoke
+          POSTGRES_USER: zerf_smoke
+          POSTGRES_PASSWORD: zerf_smoke
+          POSTGRES_DB: zerf_smoke
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U kitazeit_smoke -d kitazeit_smoke"
+          --health-cmd "pg_isready -U zerf_smoke -d zerf_smoke"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
@@ -125,19 +125,19 @@ jobs:
 
       - name: Run container smoke test
         env:
-          KITAZEIT_TEST_PORT: 3137
+          ZERF_TEST_PORT: 3137
           IMG: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
         run: |
           docker run -d --name smoke \
             --add-host=host.docker.internal:host-gateway \
-            -p ${KITAZEIT_TEST_PORT}:3000 \
-            -e KITAZEIT_DATABASE_URL=postgres://kitazeit_smoke:kitazeit_smoke@host.docker.internal:5432/kitazeit_smoke \
-            -e KITAZEIT_SESSION_SECRET=ci-test-secret-at-least-32-bytes-long \
-            -e KITAZEIT_ADMIN_EMAIL=admin@test.local \
+            -p ${ZERF_TEST_PORT}:3000 \
+            -e ZERF_DATABASE_URL=postgres://zerf_smoke:zerf_smoke@host.docker.internal:5432/zerf_smoke \
+            -e ZERF_SESSION_SECRET=ci-test-secret-at-least-32-bytes-long \
+            -e ZERF_ADMIN_EMAIL=admin@test.local \
             "$IMG"
           # Wait for the container to become ready (up to 30 s)
           for i in $(seq 1 30); do
-            if curl -sf http://localhost:${KITAZEIT_TEST_PORT}/api/v1/settings/public | grep -q ui_language; then
+            if curl -sf http://localhost:${ZERF_TEST_PORT}/api/v1/settings/public | grep -q ui_language; then
               echo "Smoke test passed (container ready after ${i}s)"
               docker stop smoke && docker rm smoke
               exit 0

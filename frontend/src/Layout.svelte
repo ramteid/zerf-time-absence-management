@@ -229,7 +229,7 @@
       <div class="sidebar-logo-icon">
         <Icon name="Clock" size={16} />
       </div>
-      <span class="sidebar-logo-text">KitaZeit</span>
+      <span class="sidebar-logo-text">Zerf</span>
       <div class="kz-bell-wrapper" style="margin-left:auto;position:relative">
         <button
           class="kz-btn-icon-sm"

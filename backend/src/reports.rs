@@ -281,7 +281,7 @@ fn csv_response(r: MonthReport, uid: i64, file_label: &str) -> AppResult<Respons
         }
     }
     fn csv_err(error: csv::Error) -> AppError {
-        tracing::error!(target: "kitazeit::reports", "CSV export failed: {error}");
+        tracing::error!(target: "zerf::reports", "CSV export failed: {error}");
         AppError::Internal("CSV export failed.".into())
     }
     let mut wtr = csv::Writer::from_writer(vec![]);
@@ -337,7 +337,7 @@ fn csv_response(r: MonthReport, uid: i64, file_label: &str) -> AppResult<Respons
     ])
     .map_err(csv_err)?;
     let data = wtr.into_inner().map_err(|error| {
-        tracing::error!(target: "kitazeit::reports", "CSV export finalize failed: {error}");
+        tracing::error!(target: "zerf::reports", "CSV export finalize failed: {error}");
         AppError::Internal("CSV export failed.".into())
     })?;
     let mut resp = Response::new(axum::body::Body::from(data));

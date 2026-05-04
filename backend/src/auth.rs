@@ -25,8 +25,8 @@ use subtle::ConstantTimeEq;
 //   * Path is forced to "/".
 // In dev (plain HTTP) browsers reject `__Host-` cookies, so we fall back to
 // the plain name there.
-const SESSION_COOKIE_SECURE: &str = "__Host-kitazeit_session";
-const SESSION_COOKIE_PLAIN: &str = "kitazeit_session";
+const SESSION_COOKIE_SECURE: &str = "__Host-zerf_session";
+const SESSION_COOKIE_PLAIN: &str = "zerf_session";
 
 fn cookie_name(secure: bool) -> &'static str {
     if secure {
@@ -432,8 +432,8 @@ fn extract_token_from_cookie_str(h: &str) -> Option<String> {
     // so that an upgrade to secure cookies on a running deployment doesn't
     // break already-issued sessions.
     let prefixes = [
-        concat!("__Host-kitazeit_session", "="),
-        concat!("kitazeit_session", "="),
+        concat!("__Host-zerf_session", "="),
+        concat!("zerf_session", "="),
     ];
     for part in h.split(';') {
         let p = part.trim();

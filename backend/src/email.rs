@@ -21,7 +21,7 @@ pub fn send_async(smtp: Option<Arc<SmtpConfig>>, to: String, subject: String, bo
     }
     tokio::spawn(async move {
         if let Err(e) = send_now(&cfg, &to, &subject, &body_text).await {
-            tracing::warn!(target:"kitazeit::email", "failed to send email to {}: {}", to, e);
+            tracing::warn!(target:"zerf::email", "failed to send email to {}: {}", to, e);
         }
     });
 }
