@@ -68,7 +68,7 @@ pub async fn create(
     .execute(&state.pool)
     .await
     {
-        tracing::warn!(target:"kitazeit::notifications", "insert failed: {e}");
+        tracing::warn!(target:"zerf::notifications", "insert failed: {e}");
         return;
     }
     let _ = state.notifications.send(NotificationSignal { user_id });

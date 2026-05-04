@@ -1,6 +1,6 @@
-# KitaZeit — Security Model
+# Zerf — Security Model
 
-KitaZeit handles personal data of staff (names, working hours, sick leave,
+Zerf handles personal data of staff (names, working hours, sick leave,
 holiday balance) and is therefore deployed with a defence-in-depth posture.
 This document summarises the controls in place and how to operate the system
 safely on a public, internet-facing server.
@@ -54,8 +54,8 @@ Out of scope (v1): payroll integrations, SSO, multi-tenant isolation.
 `SameSite=Strict` already prevents cross-site cookie attachment for the modern
 threat model. We add two layers of defence-in-depth:
 
-1. **Origin / Referer** allow-list (`KITAZEIT_ALLOWED_ORIGINS`, derived from
-   `KITAZEIT_PUBLIC_URL` by default). All non-GET requests must originate from
+1. **Origin / Referer** allow-list (`ZERF_ALLOWED_ORIGINS`, derived from
+   `ZERF_PUBLIC_URL` by default). All non-GET requests must originate from
    an allowed origin. The login endpoint is checked the same way.
 2. **Double-submit token**: each session carries a random `csrf_token`.
    The SPA reads it from `/api/v1/auth/me` and on the login response, then
@@ -104,10 +104,10 @@ Caddy also bumps to TLS 1.2+/H2/H3 and renews certificates via Let's Encrypt
 
 ## Secrets & configuration
 
-* `KITAZEIT_SESSION_SECRET` is **required**, ≥ 32 characters, must not be a
+* `ZERF_SESSION_SECRET` is **required**, ≥ 32 characters, must not be a
   known placeholder; the app refuses to start otherwise. Generate with
   `openssl rand -hex 32` and store in `.env` with `chmod 600`.
-* `KITAZEIT_POSTGRES_PASSWORD` is **required** for the bundled database and
+* `ZERF_POSTGRES_PASSWORD` is **required** for the bundled database and
   should likewise be generated with `openssl rand -hex 32`.
 * `.env` is git-ignored. `.env.example` documents every variable.
 * `docker-compose.yml` references variables with `:?` so the stack refuses to
@@ -134,7 +134,7 @@ Caddy also bumps to TLS 1.2+/H2/H3 and renews certificates via Let's Encrypt
 
 The dedicated `backup` compose service runs `scripts/backup.sh` on the
 `BACKUP_INTERVAL_SECONDS` schedule and stores `pg_dump --format=custom`
-snapshots in the `kitazeit_backup_data` named volume with `umask 077`.
+snapshots in the `zerf_backup_data` named volume with `umask 077`.
 Retention defaults to 30 days.
 
 ## Supply-chain & CI
@@ -159,8 +159,8 @@ updates after CI is green; major updates require a human review.
 ## Operational checklist
 
 1. `cp .env.example .env && chmod 600 .env`
-2. Replace `KITAZEIT_SESSION_SECRET` and `KITAZEIT_POSTGRES_PASSWORD` with `openssl rand -hex 32` outputs.
-3. Set `KITAZEIT_DOMAIN` and `KITAZEIT_ADMIN_EMAIL` in `.env`.
+2. Replace `ZERF_SESSION_SECRET` and `ZERF_POSTGRES_PASSWORD` with `openssl rand -hex 32` outputs.
+3. Set `ZERF_DOMAIN` and `ZERF_ADMIN_EMAIL` in `.env`.
 4. `./start_public.sh` — note the one-time admin password from the logs.
 5. Sign in, change the admin password (forced), create real users.
 6. Configure the `backup` service schedule via `BACKUP_INTERVAL_SECONDS` and copy snapshots off-host.

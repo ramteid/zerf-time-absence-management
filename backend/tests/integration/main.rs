@@ -1,4 +1,4 @@
-//! KitaZeit integration tests.
+//! Zerf integration tests.
 //!
 //! Tests are organized by domain area. Each module focuses on a specific
 //! feature or API surface. The `full_suite` module contains an end-to-end

@@ -1,6 +1,6 @@
 use anyhow::Result;
 use chrono::Datelike;
-use kitazeit::{build_app, categories, config, db, holidays, seed_admin, AppState};
+use zerf::{build_app, categories, config, db, holidays, seed_admin, AppState};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -31,19 +31,19 @@ async fn main() -> Result<()> {
     let state = AppState {
         pool: pool.clone(),
         cfg: Arc::new(cfg.clone()),
-        notifications: kitazeit::notifications::broadcaster(),
+        notifications: zerf::notifications::broadcaster(),
     };
 
     // Background hygiene: clean expired sessions, old login attempts, and
     // old notifications (>90 days).
-    tokio::spawn(kitazeit::auth::cleanup_loop(pool.clone()));
+    tokio::spawn(zerf::auth::cleanup_loop(pool.clone()));
     {
         let p = pool.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(86_400));
             loop {
                 interval.tick().await;
-                kitazeit::notifications::cleanup_old(&p).await;
+                zerf::notifications::cleanup_old(&p).await;
             }
         });
     }
@@ -72,9 +72,9 @@ async fn main() -> Result<()> {
 
     let app = build_app(state);
 
-    let addr: SocketAddr = cfg.bind.parse().expect("invalid KITAZEIT_BIND");
+    let addr: SocketAddr = cfg.bind.parse().expect("invalid ZERF_BIND");
     tracing::info!(
-        "KitaZeit listening on http://{} (secure_cookies={}, csrf={}, origin={})",
+        "Zerf listening on http://{} (secure_cookies={}, csrf={}, origin={})",
         addr,
         cfg.secure_cookies,
         cfg.enforce_csrf,

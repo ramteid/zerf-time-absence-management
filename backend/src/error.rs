@@ -25,7 +25,7 @@ impl From<sqlx::Error> for AppError {
             sqlx::Error::RowNotFound => AppError::NotFound,
             // Stringify privately for the log; do NOT surface SQL details to the client.
             other => {
-                tracing::error!(target: "kitazeit::db", "sqlx error: {other}");
+                tracing::error!(target: "zerf::db", "sqlx error: {other}");
                 AppError::Internal("database error".into())
             }
         }
@@ -34,7 +34,7 @@ impl From<sqlx::Error> for AppError {
 
 impl From<anyhow::Error> for AppError {
     fn from(e: anyhow::Error) -> Self {
-        tracing::error!(target: "kitazeit::any", "anyhow error: {e:#}");
+        tracing::error!(target: "zerf::any", "anyhow error: {e:#}");
         AppError::Internal("internal error".into())
     }
 }

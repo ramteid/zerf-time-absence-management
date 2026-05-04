@@ -290,7 +290,7 @@ pub async fn create(
         .bind(b.weekly_hours).bind(b.annual_leave_days).bind(b.start_date).bind(true).bind(b.approver_id)
         .fetch_one(&s.pool).await
         .map_err(|e| {
-            tracing::warn!(target:"kitazeit::users", "create user insert failed: {e}");
+            tracing::warn!(target:"zerf::users", "create user insert failed: {e}");
             AppError::Conflict("Email already exists or invalid approver.".into())
         })?;
     let user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode FROM users WHERE id=$1")
@@ -312,7 +312,7 @@ pub async fn create(
         let smtp = s.cfg.smtp.clone().map(std::sync::Arc::new);
         let email_to = email_norm.clone();
         let display_pw = temp.clone();
-        let subject = "Welcome to KitaZeit".to_string();
+        let subject = "Welcome to Zerf".to_string();
         let body_text = format!(
             "Hello {} {},\n\nYour account has been created.\n\nEmail: {}\nPassword: {}\n\nPlease log in and change your password immediately.",
             b.first_name.trim(), b.last_name.trim(), email_to, display_pw

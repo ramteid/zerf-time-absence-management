@@ -7,7 +7,7 @@
 	}
 }
 
-{$KITAZEIT_DOMAIN:localhost} {
+{$ZERF_DOMAIN:localhost} {
 	encode zstd gzip
 
 	# Strict transport security: 2 years, all subdomains, preload-eligible.
@@ -24,7 +24,7 @@
 	header -Server
 	header -X-Powered-By
 
-	# Reasonable client request limits — KitaZeit has no upload features.
+	# Reasonable client request limits — Zerf has no upload features.
 	request_body {
 		max_size 1MB
 	}

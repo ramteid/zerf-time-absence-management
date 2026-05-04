@@ -1,15 +1,15 @@
 services:
   app:
     environment:
-      - KITAZEIT_PUBLIC_URL=https://${KITAZEIT_DOMAIN:?KITAZEIT_DOMAIN must be set in .env}
-      - KITAZEIT_ALLOWED_ORIGINS=https://${KITAZEIT_DOMAIN:?KITAZEIT_DOMAIN must be set in .env}
-      - KITAZEIT_SECURE_COOKIES=true
-      - KITAZEIT_ENFORCE_CSRF=true
-      - KITAZEIT_ENFORCE_ORIGIN=true
+      - ZERF_PUBLIC_URL=https://${ZERF_DOMAIN:?ZERF_DOMAIN must be set in .env}
+      - ZERF_ALLOWED_ORIGINS=https://${ZERF_DOMAIN:?ZERF_DOMAIN must be set in .env}
+      - ZERF_SECURE_COOKIES=true
+      - ZERF_ENFORCE_CSRF=true
+      - ZERF_ENFORCE_ORIGIN=true
 
   caddy:
     image: caddy:2-alpine
-    container_name: kitazeit-caddy
+    container_name: zerf-caddy
     restart: unless-stopped
     cap_drop: [ALL]
     cap_add: [NET_BIND_SERVICE]
@@ -20,7 +20,7 @@ services:
       - "443:443"
       - "443:443/udp"
     environment:
-      - KITAZEIT_DOMAIN=${KITAZEIT_DOMAIN:?KITAZEIT_DOMAIN must be set in .env}
+      - ZERF_DOMAIN=${ZERF_DOMAIN:?ZERF_DOMAIN must be set in .env}
     volumes:
       - ../Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
@@ -38,6 +38,6 @@ services:
 
 volumes:
   caddy_data:
-    name: kitazeit_caddy_data
+    name: zerf_caddy_data
   caddy_config:
-    name: kitazeit_caddy_config
+    name: zerf_caddy_config

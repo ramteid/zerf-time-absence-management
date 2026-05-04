@@ -1,5 +1,5 @@
 #!/bin/sh
-# KitaZeit PostgreSQL backup helper.
+# Zerf PostgreSQL backup helper.
 #
 # Usage:  sh scripts/backup.sh [OUTPUT_DIR]
 # Intended for the dedicated backup container service or other one-off runs
@@ -10,8 +10,8 @@
 #                             create a new backup after each interval.
 #   BACKUP_RETENTION_DAYS   - delete older snapshots (default 30)
 #   PGHOST / PGPORT / PGDATABASE / PGUSER / PGPASSWORD
-#   KITAZEIT_POSTGRES_HOST / KITAZEIT_POSTGRES_PORT / KITAZEIT_POSTGRES_DB
-#   KITAZEIT_POSTGRES_USER / KITAZEIT_POSTGRES_PASSWORD
+#   ZERF_POSTGRES_HOST / ZERF_POSTGRES_PORT / ZERF_POSTGRES_DB
+#   ZERF_POSTGRES_USER / ZERF_POSTGRES_PASSWORD
 set -eu
 umask 077
 
@@ -58,11 +58,11 @@ validate_retention() {
 }
 
 resolve_direct_connection() {
-  DIRECT_HOST="${PGHOST:-${KITAZEIT_POSTGRES_HOST:-${POSTGRES_HOST:-}}}"
-  DIRECT_PORT="${PGPORT:-${KITAZEIT_POSTGRES_PORT:-${POSTGRES_PORT:-5432}}}"
-  DIRECT_DB="${PGDATABASE:-${KITAZEIT_POSTGRES_DB:-${POSTGRES_DB:-}}}"
-  DIRECT_USER="${PGUSER:-${KITAZEIT_POSTGRES_USER:-${POSTGRES_USER:-}}}"
-  DIRECT_PASSWORD="${PGPASSWORD:-${KITAZEIT_POSTGRES_PASSWORD:-${POSTGRES_PASSWORD:-}}}"
+  DIRECT_HOST="${PGHOST:-${ZERF_POSTGRES_HOST:-${POSTGRES_HOST:-}}}"
+  DIRECT_PORT="${PGPORT:-${ZERF_POSTGRES_PORT:-${POSTGRES_PORT:-5432}}}"
+  DIRECT_DB="${PGDATABASE:-${ZERF_POSTGRES_DB:-${POSTGRES_DB:-}}}"
+  DIRECT_USER="${PGUSER:-${ZERF_POSTGRES_USER:-${POSTGRES_USER:-}}}"
+  DIRECT_PASSWORD="${PGPASSWORD:-${ZERF_POSTGRES_PASSWORD:-${POSTGRES_PASSWORD:-}}}"
 
   [ -n "$DIRECT_HOST" ] &&
     [ -n "$DIRECT_DB" ] &&
@@ -86,7 +86,7 @@ run_direct_pg_dump() {
 }
 
 apply_retention() {
-  find "$OUT_DIR" -type f -name 'kitazeit-*.dump' \
+  find "$OUT_DIR" -type f -name 'zerf-*.dump' \
     -mtime "+$RETENTION" \
     -exec rm -f {} \;
 }
@@ -95,7 +95,7 @@ run_backup_once() {
   validate_retention || return 1
 
   ts="$(date -u +%Y%m%dT%H%M%SZ)"
-  output_file="$OUT_DIR/kitazeit-$ts.dump"
+  output_file="$OUT_DIR/zerf-$ts.dump"
   temp_file="$output_file.tmp"
 
   rm -f "$temp_file"

@@ -1,6 +1,6 @@
 import { writable, derived, get } from "svelte/store";
 
-const STORAGE_KEY = "kitazeit.ui-language";
+const STORAGE_KEY = "zerf.ui-language";
 export const DEFAULT_LANGUAGE = "en";
 
 export const LANGUAGES = Object.freeze({

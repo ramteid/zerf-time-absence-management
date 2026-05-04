@@ -2,7 +2,7 @@ import { writable } from "svelte/store";
 
 export const currentUser = writable(null);
 
-const THEME_KEY = "kitazeit.theme";
+const THEME_KEY = "zerf.theme";
 
 function readStoredTheme() {
   try {
@@ -82,7 +82,7 @@ export const notificationsUnread = writable(0);
 let _sessionChannel = null;
 try {
   if (typeof BroadcastChannel !== "undefined") {
-    _sessionChannel = new BroadcastChannel("kitazeit-session");
+    _sessionChannel = new BroadcastChannel("zerf-session");
   }
 } catch {}
 

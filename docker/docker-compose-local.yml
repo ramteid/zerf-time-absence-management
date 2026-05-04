@@ -1,14 +1,14 @@
 services:
   postgres:
     image: postgres:18
-    container_name: kitazeit-postgres
+    container_name: zerf-postgres
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
     environment:
-      - POSTGRES_DB=${KITAZEIT_POSTGRES_DB:-kitazeit}
-      - POSTGRES_USER=${KITAZEIT_POSTGRES_USER:-kitazeit}
-      - POSTGRES_PASSWORD=${KITAZEIT_POSTGRES_PASSWORD:?KITAZEIT_POSTGRES_PASSWORD must be set in .env (openssl rand -hex 32)}
+      - POSTGRES_DB=${ZERF_POSTGRES_DB:-zerf}
+      - POSTGRES_USER=${ZERF_POSTGRES_USER:-zerf}
+      - POSTGRES_PASSWORD=${ZERF_POSTGRES_PASSWORD:?ZERF_POSTGRES_PASSWORD must be set in .env (openssl rand -hex 32)}
       - POSTGRES_INITDB_ARGS=--auth-host=scram-sha-256 --auth-local=scram-sha-256 --data-checksums
     command:
       - postgres
@@ -38,7 +38,7 @@ services:
   app:
     build:
       context: ..
-    container_name: kitazeit-app
+    container_name: zerf-app
     restart: unless-stopped
     user: "10001:10001"
     read_only: true
@@ -51,15 +51,15 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      - KITAZEIT_DATABASE_URL=${KITAZEIT_DATABASE_URL:-postgres://${KITAZEIT_POSTGRES_USER:-kitazeit}:${KITAZEIT_POSTGRES_PASSWORD:?KITAZEIT_POSTGRES_PASSWORD must be set in .env (openssl rand -hex 32)}@postgres:5432/${KITAZEIT_POSTGRES_DB:-kitazeit}?sslmode=disable}
-      - KITAZEIT_SESSION_SECRET=${KITAZEIT_SESSION_SECRET:?KITAZEIT_SESSION_SECRET must be set in .env (>=32 chars random)}
-      - KITAZEIT_ADMIN_EMAIL=${KITAZEIT_ADMIN_EMAIL:?KITAZEIT_ADMIN_EMAIL must be set in .env}
-      - KITAZEIT_BIND=0.0.0.0:3000
-      - KITAZEIT_PUBLIC_URL=http://localhost:3000
-      - KITAZEIT_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
-      - KITAZEIT_SECURE_COOKIES=false
-      - KITAZEIT_ENFORCE_CSRF=true
-      - KITAZEIT_ENFORCE_ORIGIN=true
+      - ZERF_DATABASE_URL=${ZERF_DATABASE_URL:-postgres://${ZERF_POSTGRES_USER:-zerf}:${ZERF_POSTGRES_PASSWORD:?ZERF_POSTGRES_PASSWORD must be set in .env (openssl rand -hex 32)}@postgres:5432/${ZERF_POSTGRES_DB:-zerf}?sslmode=disable}
+      - ZERF_SESSION_SECRET=${ZERF_SESSION_SECRET:?ZERF_SESSION_SECRET must be set in .env (>=32 chars random)}
+      - ZERF_ADMIN_EMAIL=${ZERF_ADMIN_EMAIL:?ZERF_ADMIN_EMAIL must be set in .env}
+      - ZERF_BIND=0.0.0.0:3000
+      - ZERF_PUBLIC_URL=http://localhost:3000
+      - ZERF_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+      - ZERF_SECURE_COOKIES=false
+      - ZERF_ENFORCE_CSRF=true
+      - ZERF_ENFORCE_ORIGIN=true
     ports:
       - "127.0.0.1:3000:3000"
     expose:
@@ -80,7 +80,7 @@ services:
 
   backup:
     image: postgres:18
-    container_name: kitazeit-backup
+    container_name: zerf-backup
     restart: unless-stopped
     cap_drop: [ALL]
     security_opt:
@@ -91,9 +91,9 @@ services:
     environment:
       - PGHOST=postgres
       - PGPORT=5432
-      - PGDATABASE=${KITAZEIT_POSTGRES_DB:?KITAZEIT_POSTGRES_DB must be set in .env}
-      - PGUSER=${KITAZEIT_POSTGRES_USER:?KITAZEIT_POSTGRES_USER must be set in .env}
-      - PGPASSWORD=${KITAZEIT_POSTGRES_PASSWORD:?KITAZEIT_POSTGRES_PASSWORD must be set in .env}
+      - PGDATABASE=${ZERF_POSTGRES_DB:?ZERF_POSTGRES_DB must be set in .env}
+      - PGUSER=${ZERF_POSTGRES_USER:?ZERF_POSTGRES_USER must be set in .env}
+      - PGPASSWORD=${ZERF_POSTGRES_PASSWORD:?ZERF_POSTGRES_PASSWORD must be set in .env}
       - BACKUP_INTERVAL_SECONDS=${BACKUP_INTERVAL_SECONDS:-86400}
       - BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-30}
     volumes:
@@ -110,9 +110,9 @@ services:
 
 volumes:
   postgres_data:
-    name: kitazeit_postgres_data_pg18
+    name: zerf_postgres_data_pg18
   backup_data:
-    name: kitazeit_backup_data
+    name: zerf_backup_data
 
 networks:
   public:

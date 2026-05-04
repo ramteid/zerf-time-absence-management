@@ -1,10 +1,10 @@
-//! Shared test infrastructure for KitaZeit integration tests.
+//! Shared test infrastructure for Zerf integration tests.
 //!
 //! Provides [`TestApp`] which spins up an ephemeral Postgres container via
 //! testcontainers, runs migrations, seeds initial data, and starts the Axum
 //! server on a random port. Each test session gets a fully isolated database.
 
-use kitazeit::{build_app, categories, config::Config, db, holidays, seed_admin, AppState};
+use zerf::{build_app, categories, config::Config, db, holidays, seed_admin, AppState};
 use reqwest::{Client, StatusCode};
 use serde_json::Value;
 use std::sync::Arc;
@@ -93,7 +93,7 @@ impl TestApp {
         let state = AppState {
             pool: pool.clone(),
             cfg: Arc::new(cfg),
-            notifications: kitazeit::notifications::broadcaster(),
+            notifications: zerf::notifications::broadcaster(),
         };
 
         let app = build_app(state);

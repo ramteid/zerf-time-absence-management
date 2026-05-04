@@ -251,7 +251,7 @@ pub async fn create(
     .fetch_one(&s.pool)
     .await
     .map_err(|e| {
-        tracing::warn!(target:"kitazeit::reopen", "create reopen failed: {e}");
+        tracing::warn!(target:"zerf::reopen", "create reopen failed: {e}");
         AppError::Conflict("A pending request for this week already exists.".into())
     })?;
     let req_id = row.0;

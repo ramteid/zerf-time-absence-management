@@ -2,7 +2,7 @@ services:
   app:
     build:
       args:
-        KITAZEIT_BUILD_PROFILE: debug
-        KITAZEIT_FRONTEND_DEBUG_BUILD: "true"
+        ZERF_BUILD_PROFILE: debug
+        ZERF_FRONTEND_DEBUG_BUILD: "true"
     environment:
       - RUST_BACKTRACE=1
