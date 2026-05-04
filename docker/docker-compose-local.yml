@@ -21,7 +21,7 @@ services:
       - -c
       - statement_timeout=30000
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\" -h 127.0.0.1 || exit 1"]
       interval: 15s
@@ -99,24 +99,7 @@ services:
     volumes:
       - ../scripts/backup.sh:/usr/local/bin/backup.sh:ro
       - backup_data:/backups
-    entrypoint:
-      - /bin/sh
-      - -ec
-      - |
-          case "$${BACKUP_INTERVAL_SECONDS}" in
-            *[!0-9]*|'')
-              echo "BACKUP_INTERVAL_SECONDS must be a positive integer." >&2
-              exit 1
-              ;;
-          esac
-          if [ "$${BACKUP_INTERVAL_SECONDS}" -le 0 ]; then
-            echo "BACKUP_INTERVAL_SECONDS must be greater than zero." >&2
-            exit 1
-          fi
-          while :; do
-            /bin/sh /usr/local/bin/backup.sh /backups
-            sleep "$${BACKUP_INTERVAL_SECONDS}"
-          done
+    entrypoint: ["/bin/sh", "/usr/local/bin/backup.sh", "/backups"]
     logging:
       driver: json-file
       options:
@@ -127,7 +110,7 @@ services:
 
 volumes:
   postgres_data:
-    name: kitazeit_postgres_data
+    name: kitazeit_postgres_data_pg18
   backup_data:
     name: kitazeit_backup_data
 
