@@ -464,6 +464,9 @@ pub async fn reject(
     if !u.is_lead() {
         return Err(AppError::Forbidden);
     }
+    if b.reason.trim().is_empty() {
+        return Err(AppError::BadRequest("Reason required.".into()));
+    }
     let mut tx = s.pool.begin().await?;
     let z: TimeEntry = sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1 FOR UPDATE")
         .bind(id)
@@ -488,9 +491,6 @@ pub async fn reject(
         return Err(AppError::BadRequest(
             "Only submitted entries can be rejected.".into(),
         ));
-    }
-    if b.reason.trim().is_empty() {
-        return Err(AppError::BadRequest("Reason required.".into()));
     }
     let updated = sqlx::query(
         "UPDATE time_entries SET status='rejected', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP, rejection_reason=$2 WHERE id=$3 AND status='submitted'",
