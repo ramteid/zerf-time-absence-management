@@ -21,6 +21,7 @@
   let year, month;
   let dlg;
   let popupCell = null;
+  let loadSeq = 0;
 
   $: {
     const q = $path.includes("?") ? $path.split("?")[1] : "";
@@ -31,25 +32,26 @@
   }
 
   async function load() {
-    const ms = `${year}-${String(month).padStart(2, "0")}`;
-    entries = await api(`/absences/calendar?month=${ms}`);
-    holidays = await api(`/holidays?year=${year}`);
-    const first = new Date(year, month - 1, 1);
-    const last = new Date(year, month, 0);
-    try {
-      timeEntries = await api(
-        `/time-entries?from=${isoDate(first)}&to=${isoDate(last)}`,
-      );
-    } catch {
-      timeEntries = [];
-    }
-    if ($categories.length === 0) {
-      try {
-        categories.set(await api("/categories"));
-      } catch {
-        categories.set([]);
-      }
-    }
+    const seq = ++loadSeq;
+    const loadYear = year;
+    const loadMonth = month;
+    const ms = `${loadYear}-${String(loadMonth).padStart(2, "0")}`;
+    const first = new Date(loadYear, loadMonth - 1, 1);
+    const last = new Date(loadYear, loadMonth, 0);
+    const [nextEntries, nextHolidays, nextTimeEntries, nextCategories] =
+      await Promise.all([
+        api(`/absences/calendar?month=${ms}`),
+        api(`/holidays?year=${loadYear}`),
+        api(`/time-entries?from=${isoDate(first)}&to=${isoDate(last)}`).catch(
+          () => [],
+        ),
+        api("/categories").catch(() => $categories),
+      ]);
+    if (seq !== loadSeq) return;
+    entries = nextEntries;
+    holidays = nextHolidays;
+    timeEntries = nextTimeEntries;
+    categories.set(nextCategories);
   }
   $: year && month && load().catch(() => {});
 
@@ -58,9 +60,7 @@
   // Strict own-user filter for absences. Time entries are already scoped
   // server-side to the current user, but we double-check defensively.
   $: myAbsences = entries.filter((e) => e.user_id === $currentUser?.id);
-  $: myTimeEntries = timeEntries.filter(
-    (e) => e.user_id === $currentUser?.id,
-  );
+  $: myTimeEntries = timeEntries.filter((e) => e.user_id === $currentUser?.id);
 
   $: teMap = (() => {
     const map = new Map();
@@ -122,27 +122,28 @@
     return `hsl(${hue} 70% 38%)`;
   }
 
-  function categoryForEntry(entry) {
-    return categoryById.get(entry.category_id) || null;
+  function categoryForEntry(entry, categoryMap) {
+    return categoryMap.get(entry.category_id) || null;
   }
 
-  function workLabel(entry) {
-    return categoryForEntry(entry)?.name || "Work time";
+  function workLabel(entry, categoryMap) {
+    return categoryForEntry(entry, categoryMap)?.name || "Work time";
   }
 
-  function workBaseColor(entry, offset) {
+  function workBaseColor(entry, offset, categoryMap) {
     return (
-      normalizeColor(categoryForEntry(entry)?.color) || fallbackColor(offset)
+      normalizeColor(categoryForEntry(entry, categoryMap)?.color) ||
+      fallbackColor(offset)
     );
   }
 
-  function rawCellEvents(c) {
+  function rawCellEvents(c, entryMap, categoryMap, translate) {
     const evts = [];
     if (c.hol) {
       evts.push({
         key: "holiday",
         color: HOLIDAY_COLOR,
-        label: $t("Holiday"),
+        label: translate("Holiday"),
         detail: c.hol,
       });
     }
@@ -154,7 +155,7 @@
         detail: a.comment || "",
       });
     }
-    for (const e of teMap.get(c.ds) || []) {
+    for (const e of entryMap.get(c.ds) || []) {
       const start = e.start_time?.slice(0, 5) || "";
       const end = e.end_time?.slice(0, 5) || "";
       const dur = start && end ? minToHM(durMin(start, end)) : "";
@@ -162,20 +163,20 @@
       const detail = dur ? `${range} (${dur})` : range;
       evts.push({
         key: `work:${e.category_id ?? "unknown"}`,
-        color: workBaseColor(e, evts.length),
-        label: $t(workLabel(e)),
+        color: workBaseColor(e, evts.length, categoryMap),
+        label: translate(workLabel(e, categoryMap)),
         detail,
       });
     }
     return evts;
   }
 
-  function buildColorMap() {
+  function buildColorMap(baseCells, entryMap, categoryMap, translate) {
     const used = new Set();
     const assigned = new Map();
-    for (const c of cells) {
+    for (const c of baseCells) {
       if (c.other) continue;
-      for (const ev of rawCellEvents(c)) {
+      for (const ev of rawCellEvents(c, entryMap, categoryMap, translate)) {
         if (assigned.has(ev.key)) continue;
         let color =
           normalizeColor(ev.color) || fallbackColor(assigned.size, used);
@@ -187,12 +188,10 @@
     return assigned;
   }
 
-  $: colorByKey = buildColorMap(cells, categoryById);
-
-  function cellEvents(c) {
-    return rawCellEvents(c).map((ev) => ({
+  function cellEvents(c, entryMap, categoryMap, colorMap, translate) {
+    return rawCellEvents(c, entryMap, categoryMap, translate).map((ev) => ({
       ...ev,
-      color: colorByKey.get(ev.key) || ev.color,
+      color: colorMap.get(ev.key) || ev.color,
     }));
   }
 
@@ -237,11 +236,17 @@
     return out;
   })();
 
+  $: colorByKey = buildColorMap(cells, teMap, categoryById, $t);
+  $: eventCells = cells.map((cell) => ({
+    ...cell,
+    events: cellEvents(cell, teMap, categoryById, colorByKey, $t),
+  }));
+
   $: legendItems = (() => {
     const seen = new Map();
-    for (const c of cells) {
+    for (const c of eventCells) {
       if (c.other) continue;
-      for (const ev of cellEvents(c)) {
+      for (const ev of c.events) {
         if (!seen.has(ev.key)) {
           seen.set(ev.key, { color: ev.color, label: ev.label });
         }
@@ -251,7 +256,7 @@
   })();
 
   async function clickDay(c) {
-    const evts = cellEvents(c);
+    const evts = c.events;
     if (evts.length === 0) return;
     popupCell = { ...c, events: evts };
     await tick();
@@ -303,8 +308,8 @@
       {/each}
     </div>
     <div class="cal-grid">
-      {#each cells as c}
-        {@const evts = cellEvents(c)}
+      {#each eventCells as c}
+        {@const evts = c.events}
         <button
           type="button"
           class="cal-day"

@@ -1,4 +1,5 @@
 # syntax=docker/dockerfile:1
+#
 # ---------- Frontend build stage ----------
 FROM node:25-trixie-slim AS frontend-builder
 WORKDIR /build

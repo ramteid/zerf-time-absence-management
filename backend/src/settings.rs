@@ -7,17 +7,20 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 
 const UI_LANGUAGE_KEY: &str = "ui_language";
+const TIME_FORMAT_KEY: &str = "time_format";
 const COUNTRY_KEY: &str = "country";
 const REGION_KEY: &str = "region";
 const DEFAULT_WEEKLY_HOURS_KEY: &str = "default_weekly_hours";
 const DEFAULT_ANNUAL_LEAVE_DAYS_KEY: &str = "default_annual_leave_days";
 const DEFAULT_UI_LANGUAGE: &str = "en";
+const DEFAULT_TIME_FORMAT: &str = "24h";
 const DEFAULT_COUNTRY: &str = "";
 const DEFAULT_REGION: &str = "";
 
 #[derive(Serialize)]
 pub struct PublicSettings {
     pub ui_language: String,
+    pub time_format: String,
     pub country: String,
     pub region: String,
     pub default_weekly_hours: Option<f64>,
@@ -27,6 +30,7 @@ pub struct PublicSettings {
 #[derive(Deserialize)]
 pub struct UpdateSettings {
     pub ui_language: String,
+    pub time_format: String,
     pub country: String,
     pub region: String,
     pub default_weekly_hours: Option<f64>,
@@ -38,6 +42,14 @@ fn normalize_language(value: &str) -> AppResult<&'static str> {
         "en" => Ok("en"),
         "de" => Ok("de"),
         _ => Err(AppError::BadRequest("Invalid language.".into())),
+    }
+}
+
+fn normalize_time_format(value: &str) -> AppResult<&'static str> {
+    match value.trim() {
+        "24h" => Ok("24h"),
+        "12h" => Ok("12h"),
+        _ => Err(AppError::BadRequest("Invalid time format.".into())),
     }
 }
 
@@ -71,6 +83,7 @@ async fn load_all_settings(pool: &crate::db::DatabasePool) -> AppResult<PublicSe
     let dal = load_setting(pool, DEFAULT_ANNUAL_LEAVE_DAYS_KEY, "").await?;
     Ok(PublicSettings {
         ui_language: load_setting(pool, UI_LANGUAGE_KEY, DEFAULT_UI_LANGUAGE).await?,
+        time_format: load_setting(pool, TIME_FORMAT_KEY, DEFAULT_TIME_FORMAT).await?,
         country: load_setting(pool, COUNTRY_KEY, DEFAULT_COUNTRY).await?,
         region: load_setting(pool, REGION_KEY, DEFAULT_REGION).await?,
         default_weekly_hours: dwh.parse().ok(),
@@ -102,13 +115,11 @@ pub async fn update_admin_settings(
     }
 
     let language = normalize_language(&body.ui_language)?;
+    let time_format = normalize_time_format(&body.time_format)?;
     let previous = load_all_settings(&s.pool).await?;
     let country = body.country.trim().to_uppercase();
     let region = body.region.trim().to_string();
 
-    // Allow an empty string to clear the country (resetting to "no country
-    // configured"). Only reject values that are neither empty nor exactly 2
-    // letters, as those cannot be valid ISO 3166-1 alpha-2 codes.
     if !country.is_empty() && country.len() != 2 {
         return Err(AppError::BadRequest(
             "Country must be a 2-letter ISO code (or empty to clear).".into(),
@@ -133,11 +144,10 @@ pub async fn update_admin_settings(
     }
 
     save_setting(&s.pool, UI_LANGUAGE_KEY, language).await?;
+    save_setting(&s.pool, TIME_FORMAT_KEY, time_format).await?;
     let saved_country = save_setting(&s.pool, COUNTRY_KEY, &country).await?;
     let saved_region = save_setting(&s.pool, REGION_KEY, &region).await?;
 
-    // `None` means the admin explicitly cleared the field (left it blank).
-    // Save "" so that `load_all_settings` returns `None` via `.parse().ok()`.
     let dwh_str = body
         .default_weekly_hours
         .map(|v| v.to_string())

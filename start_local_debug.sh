@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 # Start the application in debug mode with Docker Compose.
 # Make sure to have the .env file configured with the correct environment variables.

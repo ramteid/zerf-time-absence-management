@@ -18,7 +18,7 @@
   load();
 
   async function toggle(row) {
-    saving[row.user_id] = true;
+    saving = { ...saving, [row.user_id]: true };
     try {
       await api(`/team-settings/${row.user_id}`, {
         method: "PUT",
@@ -32,7 +32,7 @@
       row.allow_reopen_without_approval = !row.allow_reopen_without_approval;
       rows = rows;
     } finally {
-      saving[row.user_id] = false;
+      saving = { ...saving, [row.user_id]: false };
     }
   }
 </script>

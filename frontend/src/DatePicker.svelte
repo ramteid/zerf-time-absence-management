@@ -23,6 +23,8 @@
   let lastLang;
   let lastMode = mode;
   let lastContainer = container;
+  const overlayGap = 6;
+  const overlayMargin = 8;
 
   function validDate(year, monthIndex, day) {
     const parsed = new Date(year, monthIndex, day);
@@ -89,6 +91,78 @@
     input.removeEventListener("click", handleInputClick);
   }
 
+  function clamp(value, min, max) {
+    return Math.min(Math.max(value, min), max);
+  }
+
+  function measureCalendarHeight(calendar) {
+    const childHeight = Array.from(calendar.children).reduce(
+      (total, child) => total + child.offsetHeight,
+      0,
+    );
+    return childHeight || calendar.offsetHeight;
+  }
+
+  function positionInContainer(instance, positionElement) {
+    const calendar = instance.calendarContainer;
+    const anchor = positionElement || instance.altInput || instance._input;
+    if (!calendar || !anchor || !container) return;
+
+    const containerRect = container.getBoundingClientRect();
+    const anchorRect = anchor.getBoundingClientRect();
+    const calendarWidth = calendar.offsetWidth;
+    const calendarHeight = measureCalendarHeight(calendar);
+    const spaceBelow = window.innerHeight - anchorRect.bottom;
+    const spaceAbove = anchorRect.top;
+    const showAbove =
+      spaceBelow < calendarHeight + overlayGap &&
+      spaceAbove > calendarHeight + overlayGap;
+    const maxLeft = Math.max(
+      overlayMargin,
+      containerRect.width - calendarWidth - overlayMargin,
+    );
+    const left = clamp(
+      anchorRect.left - containerRect.left + container.scrollLeft,
+      overlayMargin,
+      maxLeft,
+    );
+    const belowTop =
+      anchorRect.bottom - containerRect.top + container.scrollTop + overlayGap;
+    const aboveTop =
+      anchorRect.top -
+      containerRect.top +
+      container.scrollTop -
+      calendarHeight -
+      overlayGap;
+    const arrowLeft = clamp(
+      anchorRect.left -
+        containerRect.left +
+        container.scrollLeft -
+        left +
+        anchorRect.width / 2,
+      16,
+      Math.max(16, calendarWidth - 16),
+    );
+
+    calendar.classList.remove(
+      "arrowTop",
+      "arrowBottom",
+      "rightMost",
+      "centerMost",
+      "arrowLeft",
+      "arrowCenter",
+      "arrowRight",
+    );
+    calendar.classList.add(showAbove ? "arrowBottom" : "arrowTop");
+    calendar.style.top = `${Math.round(showAbove ? aboveTop : belowTop)}px`;
+    calendar.style.left = `${Math.round(left)}px`;
+    calendar.style.right = "auto";
+    calendar.style.setProperty(
+      "--kz-date-picker-arrow-left",
+      `${Math.round(arrowLeft)}px`,
+    );
+  }
+
   function build(lang) {
     if (fp) {
       removeAltInputListeners();
@@ -128,11 +202,12 @@
     // so it stays in the top layer and is not hidden behind the backdrop.
     if (container) {
       opts.appendTo = container;
-      // Static mode keeps the calendar anchored to the input inside dialogs,
-      // avoiding position offsets on small screens.
-      opts.static = true;
+      opts.position = positionInContainer;
     }
     fp = flatpickr(el, opts);
+    fp.calendarContainer?.classList.add("kz-date-picker-calendar");
+    if (container)
+      fp.calendarContainer?.classList.add("kz-date-picker-overlay");
     if (id && fp.altInput) fp.altInput.id = id;
     if (fp.altInput) {
       if (style) fp.altInput.setAttribute("style", style);
@@ -190,16 +265,15 @@
     padding-right: 34px;
   }
 
-  .date-picker-wrap :global(.flatpickr-wrapper) {
-    display: block;
-    width: 100%;
+  :global(.kz-date-picker-overlay) {
+    box-shadow: var(--shadow-md);
+    z-index: 999;
   }
 
-  .date-picker-wrap :global(.flatpickr-calendar.static) {
-    top: calc(100% + 6px);
-    left: 0;
-    margin-top: 0;
-    box-shadow: var(--shadow-md);
+  :global(.kz-date-picker-calendar:before),
+  :global(.kz-date-picker-calendar:after) {
+    left: var(--kz-date-picker-arrow-left, 22px);
+    right: auto;
   }
 
   .date-picker-button {
@@ -223,11 +297,5 @@
   .date-picker-button:focus-visible {
     background: var(--bg-muted);
     color: var(--text-primary);
-  }
-
-  @media (max-width: 768px) {
-    .date-picker-wrap :global(.flatpickr-calendar.static) {
-      top: calc(100% + 8px);
-    }
   }
 </style>

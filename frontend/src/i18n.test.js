@@ -14,6 +14,7 @@ import {
   auditActionLabel,
   auditTableLabel,
   formatHours,
+  localizeErrorMessage,
   t,
 } from "./i18n.js";
 
@@ -46,6 +47,24 @@ describe("translate", () => {
 
   it("keeps placeholder when param is missing", () => {
     expect(translate("en", "Week {week}", {})).toBe("Week {week}");
+  });
+
+  it("localizes direct error messages", () => {
+    setLanguage("de");
+    expect(localizeErrorMessage("Invalid email or password.")).toBe(
+      "Ungültige E-Mail-Adresse oder ungültiges Passwort.",
+    );
+  });
+
+  it("localizes parameterized error messages", () => {
+    setLanguage("de");
+    expect(
+      localizeErrorMessage(
+        "Cannot deactivate: 2 active user(s) still have this person as their approver. Reassign them first.",
+      ),
+    ).toBe(
+      "Deaktivierung nicht möglich: 2 aktive Benutzer haben diese Person noch als verantwortliche Person. Weisen Sie sie zuerst neu zu.",
+    );
   });
 });
 

@@ -1,7 +1,7 @@
 <script>
   import { api } from "../api.js";
-  import { currentUser, toast } from "../stores.js";
-  import { t } from "../i18n.js";
+  import { currentUser, settings as appSettings, toast } from "../stores.js";
+  import { setLanguage, t } from "../i18n.js";
 
   let s = {};
   let saving = false;
@@ -20,11 +20,13 @@
   }
 
   async function load() {
-    const [settings, allCountries] = await Promise.all([
+    const [loadedSettings, allCountries] = await Promise.all([
       api("/settings"),
       api("/holidays/countries"),
     ]);
-    s = settings;
+    s = loadedSettings;
+    appSettings.set(loadedSettings);
+    if (s.ui_language) setLanguage(s.ui_language);
     countries = allCountries;
     if (s.country) {
       countryRegions = await loadRegionsFor(s.country);
@@ -41,13 +43,19 @@
       toast($t("Please enter default weekly hours."), "error");
       return;
     }
-    if (s.default_annual_leave_days == null || s.default_annual_leave_days === "") {
+    if (
+      s.default_annual_leave_days == null ||
+      s.default_annual_leave_days === ""
+    ) {
       toast($t("Please enter default annual leave days."), "error");
       return;
     }
     saving = true;
     try {
-      await api("/settings", { method: "PUT", body: s });
+      const saved = await api("/settings", { method: "PUT", body: s });
+      s = saved;
+      appSettings.set(saved);
+      if (saved.ui_language) setLanguage(saved.ui_language);
       toast($t("Settings saved."), "ok");
       if (isFirstSetup) {
         currentUser.update((u) => ({ ...u, must_configure_settings: false }));
@@ -72,9 +80,13 @@
       class="kz-card"
       style="padding:16px 20px;margin-bottom:16px;border-color:var(--warning)"
     >
-      <strong style="color:var(--warning-text)">{$t("Initial setup required.")}</strong>
+      <strong style="color:var(--warning-text)"
+        >{$t("Initial setup required.")}</strong
+      >
       <p style="font-size:13px;color:var(--text-tertiary);margin-top:4px">
-        {$t("Please configure the country, region, default weekly hours and default annual leave days before using the application.")}
+        {$t(
+          "Please configure the country, region, default weekly hours and default annual leave days before using the application.",
+        )}
       </p>
     </div>
   {/if}
@@ -92,9 +104,28 @@
             id="settings-language"
             class="kz-select"
             bind:value={s.ui_language}
+            on:change={() => {
+              if (s.ui_language === "de" && !s.time_format)
+                s.time_format = "24h";
+              if (s.ui_language === "en" && !s.time_format)
+                s.time_format = "12h";
+            }}
           >
             <option value="en">English</option>
             <option value="de">Deutsch</option>
+          </select>
+        </div>
+        <div>
+          <label class="kz-label" for="settings-time-format"
+            >{$t("Time format")}</label
+          >
+          <select
+            id="settings-time-format"
+            class="kz-select"
+            bind:value={s.time_format}
+          >
+            <option value="24h">24h (14:30)</option>
+            <option value="12h">12h (2:30 PM)</option>
           </select>
         </div>
       </div>
@@ -152,7 +183,7 @@
               countryRegions = await loadRegionsFor(s.country);
             }}
           >
-            <option value="">{$t("– Please select –")}</option>
+            <option value="">{$t("- Please select -")}</option>
             {#each countries as c}
               <option value={c.countryCode}>{c.name}</option>
             {/each}
@@ -166,7 +197,7 @@
               class="kz-select"
               bind:value={s.region}
             >
-              <option value="">{$t("– All –")}</option>
+              <option value="">{$t("- All -")}</option>
               {#each countryRegions as r}
                 <option value={r}>{r}</option>
               {/each}

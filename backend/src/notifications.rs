@@ -5,6 +5,7 @@
 
 use crate::auth::User;
 use crate::error::{AppError, AppResult};
+use crate::i18n::{Language, TextKey};
 use crate::AppState;
 use axum::{
     extract::{Path, State},
@@ -82,6 +83,31 @@ pub async fn create(
         let smtp = state.cfg.smtp.clone().map(std::sync::Arc::new);
         crate::email::send_async(smtp, email, title.to_string(), body.to_string());
     }
+}
+
+pub async fn create_translated(
+    state: &AppState,
+    language: Language,
+    user_id: i64,
+    kind: &str,
+    title_key: TextKey,
+    body_key: TextKey,
+    params: Vec<(&str, String)>,
+    reference_type: Option<&str>,
+    reference_id: Option<i64>,
+) {
+    let title = crate::i18n::translate(language, title_key, &params);
+    let body = crate::i18n::translate(language, body_key, &params);
+    create(
+        state,
+        user_id,
+        kind,
+        &title,
+        &body,
+        reference_type,
+        reference_id,
+    )
+    .await;
 }
 
 pub async fn list(State(s): State<AppState>, u: User) -> AppResult<Json<Vec<Notification>>> {

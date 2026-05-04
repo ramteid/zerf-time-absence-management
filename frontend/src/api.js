@@ -1,6 +1,7 @@
 // Thin API client. Business rules live on the backend; this client just
 // renders forms, navigates, and submits HTTP calls.
 import { writable } from "svelte/store";
+import { localizeErrorMessage } from "./i18n.js";
 
 const API = "/api/v1";
 
@@ -8,7 +9,7 @@ export const csrfToken = writable(null);
 let _csrf = null;
 csrfToken.subscribe((v) => (_csrf = v));
 
-// ── Session-expiry handler ───────────────────────────────────────────────────
+// Session-expiry handler
 // App.svelte registers handleSessionExpired here.  We use a Promise-based
 // "in-flight" gate so that if many concurrent requests all return 401 at once
 // only the first one triggers the redirect; the rest resolve silently once
@@ -43,7 +44,14 @@ function handleUnauthorized() {
   }
 }
 
-// ── Main fetch wrapper ───────────────────────────────────────────────────────
+function apiError(message) {
+  const rawMessage = message || "Error";
+  const error = new Error(localizeErrorMessage(rawMessage));
+  error.apiMessage = rawMessage;
+  return error;
+}
+
+// Main fetch wrapper
 export async function api(path, opts = {}) {
   const headers = opts.body ? { "Content-Type": "application/json" } : {};
   const method = (opts.method || "GET").toUpperCase();
@@ -66,7 +74,7 @@ export async function api(path, opts = {}) {
     // Distinguish a real network failure (offline, DNS, etc.) from an auth
     // failure. Re-throw as a typed error so callers can handle it differently
     // from business-logic errors. Does NOT trigger the session-expiry handler.
-    const e = new Error("Network error. Please check your connection.");
+    const e = apiError("Network error. Please check your connection.");
     e.isNetworkError = true;
     throw e;
   }
@@ -77,15 +85,15 @@ export async function api(path, opts = {}) {
   // Skip this for the auth endpoints themselves to avoid redirect loops.
   if (r.status === 401 && !path.startsWith("/auth/")) {
     handleUnauthorized();
-    throw new Error("Session expired. Please sign in again.");
+    throw apiError("Session expired. Please sign in again.");
   }
 
   const ct = r.headers.get("content-type") || "";
   if (!ct.includes("json")) {
-    if (!r.ok) throw new Error((await r.text()) || "Error");
+    if (!r.ok) throw apiError((await r.text()) || "Error");
     return r;
   }
   const d = await r.json();
-  if (!r.ok) throw new Error(d.error || "Error");
+  if (!r.ok) throw apiError(d.error || "Error");
   return d;
 }

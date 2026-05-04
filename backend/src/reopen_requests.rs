@@ -5,8 +5,7 @@
 //! configured team-lead) reviews the request.  When the **requester's own**
 //! flag `allow_reopen_without_approval` is TRUE, the request is auto-approved
 //! immediately and all relevant approvers (designated approver + all admins)
-//! receive an informational notification.  When the requester is a lead/admin
-//! with no designated approver, the same self-service auto-approve path applies.
+//! receive an informational notification.
 //!
 //! Approval / auto-approval reopens the week atomically:
 //!   * all non-draft entries for `[week_start, week_start+6 days]` are reset
@@ -17,6 +16,7 @@
 use crate::audit;
 use crate::auth::User;
 use crate::error::{AppError, AppResult};
+use crate::i18n::{self, TextKey};
 use crate::notifications;
 use crate::AppState;
 use axum::{
@@ -140,15 +140,12 @@ async fn perform_reopen(
 /// |----------------|-------------------------------------|---------------------------------------|
 /// | employee       | any                                 | designated approver + all admins      |
 /// | team_lead      | has designated approver             | that approver + all admins            |
-/// | team_lead      | no approver (self-service)          | all admins                            |
-/// | admin          | any (always auto-approved)          | nobody (admin is their own authority) |
+/// | team_lead      | no approver                         | all admins                            |
+/// | admin          | any                                 | all other admins                      |
 ///
 /// BTreeSet deduplicates (e.g. when the designated approver IS an admin).
 /// The requester is always excluded from the result.
-async fn approver_ids_to_notify(
-    pool: &crate::db::DatabasePool,
-    requester: &User,
-) -> Vec<i64> {
+async fn approver_ids_to_notify(pool: &crate::db::DatabasePool, requester: &User) -> Vec<i64> {
     let mut ids: std::collections::BTreeSet<i64> = Default::default();
     if let Some(aid) = requester.approver_id {
         // Only include the designated approver if they are still active;
@@ -164,20 +161,27 @@ async fn approver_ids_to_notify(
             ids.insert(aid);
         }
     }
-    if requester.role != "admin" {
-        if let Ok(admins) = sqlx::query_scalar::<_, i64>(
-            "SELECT id FROM users WHERE active=TRUE AND role='admin'",
-        )
-        .fetch_all(pool)
-        .await
-        {
-            for id in admins {
-                ids.insert(id);
-            }
+    if let Ok(admins) =
+        sqlx::query_scalar::<_, i64>("SELECT id FROM users WHERE active=TRUE AND role='admin'")
+            .fetch_all(pool)
+            .await
+    {
+        for id in admins {
+            ids.insert(id);
         }
     }
     ids.remove(&requester.id);
     ids.into_iter().collect()
+}
+
+async fn notification_language(pool: &crate::db::DatabasePool) -> i18n::Language {
+    match i18n::load_ui_language(pool).await {
+        Ok(language) => language,
+        Err(e) => {
+            tracing::warn!(target:"zerf::reopen", "load notification language failed: {e}");
+            i18n::Language::default()
+        }
+    }
 }
 
 pub async fn create(
@@ -221,16 +225,18 @@ pub async fn create(
 
     // Determine flow:
     //   * User has `allow_reopen_without_approval=TRUE` → auto_approved
-    //   * Lead/admin with no approver_id (self-service) → auto_approved
     //   * Otherwise → pending, notify all approvers
-    let auto_approve = u.allow_reopen_without_approval
-        || (u.approver_id.is_none() && (u.role == "team_lead" || u.role == "admin"));
+    let auto_approve = u.allow_reopen_without_approval;
 
     // `recorded_approver` is stored as the primary approver on the request row.
     // For self-service leads/admins (no designated approver) we record themselves.
     let recorded_approver: i64 = u.approver_id.unwrap_or(u.id);
 
-    let status = if auto_approve { "auto_approved" } else { "pending" };
+    let status = if auto_approve {
+        "auto_approved"
+    } else {
+        "pending"
+    };
 
     // Collect all users that should be notified as approvers (before the DB
     // insert, so we can reuse the result for both auto and pending paths).
@@ -288,32 +294,40 @@ pub async fn create(
     )
     .await;
 
+    let language = notification_language(&s.pool).await;
+
     if auto_approve {
         // Notify the requester.
-        notifications::create(
+        notifications::create_translated(
             &s,
+            language,
             u.id,
             "reopen_auto_approved",
-            "Woche zur Bearbeitung freigegeben / Week reopened for editing",
-            &format!(
-                "Die Woche ab {} wurde wieder zur Bearbeitung freigegeben ({} Einträge).",
-                b.week_start, count
-            ),
+            TextKey::ReopenAutoApprovedTitle,
+            TextKey::ReopenAutoApprovedBody,
+            vec![
+                ("week_start", b.week_start.to_string()),
+                ("entry_count", i18n::entry_count(language, count)),
+            ],
             Some("reopen_request"),
             Some(req_id),
         )
         .await;
         // Notify each approver that the reopen was auto-approved.
+        let requester_name = format!("{} {}", u.first_name, u.last_name);
         for aid in &notify_approvers {
-            notifications::create(
+            notifications::create_translated(
                 &s,
+                language,
                 *aid,
                 "reopen_auto_approved_notice",
-                "Wochenfreigabe automatisch genehmigt / Week reopen auto-approved",
-                &format!(
-                    "{} {} hat die Woche ab {} zur Bearbeitung freigegeben (automatisch genehmigt, {} Einträge).",
-                    u.first_name, u.last_name, b.week_start, count
-                ),
+                TextKey::ReopenAutoApprovedNoticeTitle,
+                TextKey::ReopenAutoApprovedNoticeBody,
+                vec![
+                    ("requester_name", requester_name.clone()),
+                    ("week_start", b.week_start.to_string()),
+                    ("entry_count", i18n::entry_count(language, count)),
+                ],
                 Some("reopen_request"),
                 Some(req_id),
             )
@@ -328,16 +342,19 @@ pub async fn create(
         })))
     } else {
         // Notify all approvers that a manual reopen request is pending.
+        let requester_name = format!("{} {}", u.first_name, u.last_name);
         for aid in &notify_approvers {
-            notifications::create(
+            notifications::create_translated(
                 &s,
+                language,
                 *aid,
                 "reopen_request_created",
-                "Neue Anfrage zur Wochenfreigabe / New week reopen request",
-                &format!(
-                    "{} {} möchte die Woche ab {} wieder bearbeiten.",
-                    u.first_name, u.last_name, b.week_start
-                ),
+                TextKey::ReopenRequestCreatedTitle,
+                TextKey::ReopenRequestCreatedBody,
+                vec![
+                    ("requester_name", requester_name.clone()),
+                    ("week_start", b.week_start.to_string()),
+                ],
                 Some("reopen_request"),
                 Some(req_id),
             )
@@ -460,15 +477,15 @@ pub async fn approve(
         Some(serde_json::json!({"status": "approved"})),
     )
     .await;
-    notifications::create(
+    let language = notification_language(&s.pool).await;
+    notifications::create_translated(
         &s,
+        language,
         r.user_id,
         "reopen_approved",
-        "Wochenfreigabe genehmigt / Week reopen approved",
-        &format!(
-            "Ihre Woche ab {} wurde zur Bearbeitung freigegeben.",
-            r.week_start
-        ),
+        TextKey::ReopenApprovedTitle,
+        TextKey::ReopenApprovedBody,
+        vec![("week_start", r.week_start.to_string())],
         Some("reopen_request"),
         Some(id),
     )
@@ -488,23 +505,24 @@ pub async fn approve(
         .unwrap_or(None);
         if is_lead.is_some() {
             // Load the requester's name for the notification body (best-effort).
-            let requester_name: String = sqlx::query_scalar(
-                "SELECT first_name || ' ' || last_name FROM users WHERE id=$1",
-            )
-            .bind(r.user_id)
-            .fetch_optional(&s.pool)
-            .await
-            .unwrap_or(None)
-            .unwrap_or_else(|| format!("User {}", r.user_id));
-            notifications::create(
+            let requester_name: String =
+                sqlx::query_scalar("SELECT first_name || ' ' || last_name FROM users WHERE id=$1")
+                    .bind(r.user_id)
+                    .fetch_optional(&s.pool)
+                    .await
+                    .unwrap_or(None)
+                    .unwrap_or_else(|| format!("User {}", r.user_id));
+            notifications::create_translated(
                 &s,
+                language,
                 r.approver_id,
                 "reopen_approved_by_admin",
-                "Wochenfreigabe durch Admin genehmigt / Week reopen approved by admin",
-                &format!(
-                    "Die Wiederfreigabe-Anfrage von {} für die Woche ab {} wurde von einem Admin genehmigt.",
-                    requester_name, r.week_start
-                ),
+                TextKey::ReopenApprovedByAdminTitle,
+                TextKey::ReopenApprovedByAdminBody,
+                vec![
+                    ("requester_name", requester_name),
+                    ("week_start", r.week_start.to_string()),
+                ],
                 Some("reopen_request"),
                 Some(id),
             )
@@ -563,15 +581,18 @@ pub async fn reject(
         Some(serde_json::json!({ "status": "rejected", "reason": reason })),
     )
     .await;
-    notifications::create(
+    let language = notification_language(&s.pool).await;
+    notifications::create_translated(
         &s,
+        language,
         r.user_id,
         "reopen_rejected",
-        "Wochenfreigabe abgelehnt / Week reopen rejected",
-        &format!(
-            "Ihre Anfrage zur Bearbeitung der Woche ab {} wurde abgelehnt: {}",
-            r.week_start, reason
-        ),
+        TextKey::ReopenRejectedTitle,
+        TextKey::ReopenRejectedBody,
+        vec![
+            ("week_start", r.week_start.to_string()),
+            ("reason", reason.to_string()),
+        ],
         Some("reopen_request"),
         Some(id),
     )
@@ -587,23 +608,25 @@ pub async fn reject(
         .await
         .unwrap_or(None);
         if is_lead.is_some() {
-            let requester_name: String = sqlx::query_scalar(
-                "SELECT first_name || ' ' || last_name FROM users WHERE id=$1",
-            )
-            .bind(r.user_id)
-            .fetch_optional(&s.pool)
-            .await
-            .unwrap_or(None)
-            .unwrap_or_else(|| format!("User {}", r.user_id));
-            notifications::create(
+            let requester_name: String =
+                sqlx::query_scalar("SELECT first_name || ' ' || last_name FROM users WHERE id=$1")
+                    .bind(r.user_id)
+                    .fetch_optional(&s.pool)
+                    .await
+                    .unwrap_or(None)
+                    .unwrap_or_else(|| format!("User {}", r.user_id));
+            notifications::create_translated(
                 &s,
+                language,
                 r.approver_id,
                 "reopen_rejected_by_admin",
-                "Wochenfreigabe durch Admin abgelehnt / Week reopen rejected by admin",
-                &format!(
-                    "Die Wiederfreigabe-Anfrage von {} für die Woche ab {} wurde von einem Admin abgelehnt: {}",
-                    requester_name, r.week_start, reason
-                ),
+                TextKey::ReopenRejectedByAdminTitle,
+                TextKey::ReopenRejectedByAdminBody,
+                vec![
+                    ("requester_name", requester_name),
+                    ("week_start", r.week_start.to_string()),
+                    ("reason", reason.to_string()),
+                ],
                 Some("reopen_request"),
                 Some(id),
             )

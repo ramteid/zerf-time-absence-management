@@ -1,15 +1,17 @@
+import { mount, unmount } from "svelte";
 import Confirm from "./Confirm.svelte";
 
 export function confirmDialog(title, text, opts = {}) {
   return new Promise((resolve) => {
     const target = document.createElement("div");
     document.body.appendChild(target);
+    let cmp;
     const onResolve = (v) => {
       resolve(v);
-      cmp.$destroy();
+      unmount(cmp);
       target.remove();
     };
-    const cmp = new Confirm({
+    cmp = mount(Confirm, {
       target,
       props: {
         title,

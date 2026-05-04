@@ -1,6 +1,6 @@
 <script>
   import { api } from "../api.js";
-  import { categories, toast } from "../stores.js";
+  import { categories } from "../stores.js";
   import { t } from "../i18n.js";
   import Icon from "../Icons.svelte";
   import CategoryDialog from "../dialogs/CategoryDialog.svelte";
@@ -10,6 +10,7 @@
   async function load() {
     categories.set(await api("/categories"));
   }
+  load();
 </script>
 
 <div class="top-bar">

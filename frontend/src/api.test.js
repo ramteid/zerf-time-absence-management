@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { api, csrfToken } from "./api.js";
+import { setLanguage } from "./i18n.js";
 
 describe("api", () => {
   let fetchSpy;
 
   beforeEach(() => {
+    setLanguage("en");
     csrfToken.set(null);
     fetchSpy = vi.spyOn(globalThis, "fetch");
   });
@@ -52,6 +54,20 @@ describe("api", () => {
     });
 
     await expect(api("/bad")).rejects.toThrow("Bad request");
+  });
+
+  it("localizes non-ok JSON responses", async () => {
+    setLanguage("de");
+    fetchSpy.mockResolvedValue({
+      ok: false,
+      status: 400,
+      headers: new Headers({ "content-type": "application/json" }),
+      json: () => Promise.resolve({ error: "Invalid email or password." }),
+    });
+
+    await expect(api("/auth/login")).rejects.toThrow(
+      "Ungültige E-Mail-Adresse oder ungültiges Passwort.",
+    );
   });
 
   it("throws on non-ok text responses", async () => {

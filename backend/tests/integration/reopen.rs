@@ -8,6 +8,20 @@ use crate::helpers::*;
 async fn auto_approve_when_policy_set() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
+    let (st, _) = admin
+        .put(
+            "/api/v1/settings",
+            &json!({
+                "ui_language": "de",
+                "time_format": "24h",
+                "country": "DE",
+                "region": "DE-BW",
+                "default_weekly_hours": 39,
+                "default_annual_leave_days": 30
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "set German UI language");
 
     let (_lead_id, _lead_pw, _emp_id, emp_pw, monday_iso, cat_id) =
         bootstrap_team(&app, &admin, true).await;
@@ -29,13 +43,20 @@ async fn auto_approve_when_policy_set() {
     assert_eq!(body[0]["status"], "draft");
 
     let (_, body) = emp.get("/api/v1/notifications").await;
-    assert!(
-        body.as_array()
-            .unwrap()
-            .iter()
-            .any(|n| n["kind"] == "reopen_auto_approved"),
-        "notification created: {body:?}"
+    let notification = body
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["kind"] == "reopen_auto_approved")
+        .expect("notification created");
+    let expected_body =
+        format!("Die Woche ab {monday_iso} wurde wieder zur Bearbeitung freigegeben (1 Eintrag).");
+    assert_eq!(
+        notification["title"].as_str(),
+        Some("Woche zur Bearbeitung freigegeben")
     );
+    assert_eq!(notification["body"].as_str(), Some(expected_body.as_str()));
+    assert!(!notification["title"].as_str().unwrap().contains(" / "));
 
     app.cleanup().await;
 }

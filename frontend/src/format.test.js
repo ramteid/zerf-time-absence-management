@@ -8,6 +8,7 @@ import {
   minToHM,
   durMin,
   isoWeek,
+  formatTimeValue,
 } from "./format.js";
 
 describe("parseDate", () => {
@@ -149,5 +150,24 @@ describe("isoWeek", () => {
   it("handles week 53 years", () => {
     // 2020-12-31 is Thursday in ISO week 53
     expect(isoWeek(new Date(2020, 11, 31))).toBe(53);
+  });
+});
+
+describe("formatTimeValue", () => {
+  it("keeps 24-hour values zero-padded", () => {
+    expect(formatTimeValue("08:05", "24h")).toBe("08:05");
+    expect(formatTimeValue("14:30:00", "24h")).toBe("14:30");
+  });
+
+  it("formats 12-hour values with AM and PM", () => {
+    expect(formatTimeValue("00:05", "12h")).toBe("12:05 AM");
+    expect(formatTimeValue("12:00", "12h")).toBe("12:00 PM");
+    expect(formatTimeValue("14:30", "12h")).toBe("02:30 PM");
+  });
+
+  it("returns invalid values unchanged", () => {
+    expect(formatTimeValue("", "12h")).toBe("");
+    expect(formatTimeValue("24:00", "12h")).toBe("24:00");
+    expect(formatTimeValue("bad", "24h")).toBe("bad");
   });
 });

@@ -1,6 +1,13 @@
 <script>
   import { api } from "../api.js";
-  import { categories, currentUser, path, go, toast } from "../stores.js";
+  import {
+    categories,
+    currentUser,
+    path,
+    go,
+    toast,
+    settings,
+  } from "../stores.js";
   import { t, statusLabel, formatHours } from "../i18n.js";
   import { confirmDialog } from "../confirm.js";
   import {
@@ -12,7 +19,7 @@
     fmtDateShort,
     isoWeek,
     durMin,
-    minToHM,
+    formatTimeValue,
   } from "../format.js";
   import Icon from "../Icons.svelte";
   import EntryDialog from "../dialogs/EntryDialog.svelte";
@@ -41,6 +48,8 @@
     const q = $path.includes("?") ? $path.split("?")[1] : "";
     return new URLSearchParams(q).get("week");
   })();
+  $: requestedWeek = weekParam || isoDate(new Date());
+  $: timeFormat = $settings.time_format === "12h" ? "12h" : "24h";
 
   function setWeek(dateLike) {
     const start = monday(parseDate(dateLike || new Date()));
@@ -49,19 +58,27 @@
     return start;
   }
 
-  async function loadWeek(dateLike = weekParam || new Date()) {
+  async function loadWeek(dateLike = requestedWeek) {
     const seq = ++loadSeq;
     const start = setWeek(dateLike);
     const from = isoDate(start);
     const to = isoDate(addDays(start, 6));
 
     try {
-      const [weekEntries, reopenRows] = await Promise.all([
+      const [weekEntries, reopenRows, categoryRows] = await Promise.all([
         api(`/time-entries?from=${from}&to=${to}`),
         api("/reopen-requests").catch(() => []),
+        api("/categories").catch(() => $categories),
       ]);
       if (seq !== loadSeq) return;
-      entries = weekEntries;
+      categories.set(categoryRows);
+      entries = [...weekEntries].sort((a, b) => {
+        const byDate = dateKey(a.entry_date).localeCompare(
+          dateKey(b.entry_date),
+        );
+        if (byDate !== 0) return byDate;
+        return a.start_time.localeCompare(b.start_time);
+      });
       myReopens = reopenRows;
     } catch {
       if (seq !== loadSeq) return;
@@ -70,8 +87,8 @@
     }
   }
 
-  $: if ($path) {
-    loadWeek(weekParam || new Date());
+  $: if ($path.startsWith("/time")) {
+    loadWeek(requestedWeek);
   }
 
   function gotoWeek(offset) {
@@ -125,8 +142,10 @@
     }
   }
 
-  function catOf(id) {
-    return $categories.find((c) => c.id === id) || { name: "?", color: "#999" };
+  function catOf(id, categoryRows) {
+    return (
+      categoryRows.find((c) => c.id === id) || { name: "?", color: "#999" }
+    );
   }
 
   $: weekActual = entries
@@ -152,24 +171,35 @@
     ($currentUser.weekly_hours || 0) - weekActual / 60,
   ).toFixed(1);
 
-  function buildDay(i) {
+  function buildDay(i, entryRows) {
     const d = addDays(mo, i);
     const ds = isoDate(d);
     return {
       d,
       ds,
       dayName: DAYS_FULL[i],
-      items: entries
+      items: entryRows
         .filter((e) => dateKey(e.entry_date) === ds)
         .sort((a, b) => a.start_time.localeCompare(b.start_time)),
     };
   }
 
-  $: weekdays = mo ? [0, 1, 2, 3, 4].map((i) => buildDay(i)) : [];
-  $: weekendDays = mo ? [5, 6].map((i) => buildDay(i)) : [];
+  $: weekdays = mo ? [0, 1, 2, 3, 4].map((i) => buildDay(i, entries)) : [];
+  $: weekendDays = mo ? [5, 6].map((i) => buildDay(i, entries)) : [];
 
   function durHours(start, end) {
     return (durMin(start, end) / 60).toFixed(1);
+  }
+
+  function displayTime(value, format) {
+    return formatTimeValue(value?.slice(0, 5) || "", format);
+  }
+
+  function entryTimeRange(entry, format) {
+    return `${displayTime(entry.start_time, format)} - ${displayTime(
+      entry.end_time,
+      format,
+    )}`;
   }
 
   function upsertEntry(entry) {
@@ -188,6 +218,7 @@
     entries = entries.filter((entry) => entry.id !== id);
   }
 
+  $: today = isoDate(new Date());
   $: currentWeekMo = monday(new Date());
   $: isCurrentWeek = mo && isoDate(mo) >= isoDate(currentWeekMo);
 
@@ -209,8 +240,7 @@
     return (
       myReopens.find(
         (r) => dateKey(r.week_start) === ws && r.status === "pending",
-      ) ||
-      null
+      ) || null
     );
   })();
   $: canRequestReopen =
@@ -348,7 +378,7 @@
 
           <div class="day-entries">
             {#each day.items as e}
-              {@const c = catOf(e.category_id)}
+              {@const c = catOf(e.category_id, $categories)}
               <div
                 class="time-block"
                 on:click={() => {
@@ -373,9 +403,7 @@
                   {/if}
                 </div>
                 <div class="time-block-times tab-num">
-                  <span
-                    >{e.start_time.slice(0, 5)} – {e.end_time.slice(0, 5)}</span
-                  >
+                  <span>{entryTimeRange(e, timeFormat)}</span>
                   <span
                     >{formatHours(
                       durHours(
@@ -389,7 +417,7 @@
             {/each}
           </div>
 
-          {#if weekStatus === "draft" || drafts.length > 0}
+          {#if (weekStatus === "draft" || drafts.length > 0) && day.ds <= today}
             <div class="day-add-btn">
               <button
                 class="kz-btn kz-btn-ghost kz-btn-sm"
@@ -416,16 +444,14 @@
           </div>
           <div class="day-entries">
             {#each day.items as e}
-              {@const c = catOf(e.category_id)}
+              {@const c = catOf(e.category_id, $categories)}
               <div class="time-block">
                 <div class="time-block-cat">
                   <span class="cat-dot" style="background:{c.color}"></span>
                   <span class="time-block-cat-name">{$t(c.name)}</span>
                 </div>
                 <div class="time-block-times tab-num">
-                  <span
-                    >{e.start_time.slice(0, 5)} – {e.end_time.slice(0, 5)}</span
-                  >
+                  <span>{entryTimeRange(e, timeFormat)}</span>
                 </div>
               </div>
             {/each}

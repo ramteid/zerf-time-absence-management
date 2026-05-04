@@ -20,7 +20,7 @@ describe("store defaults", () => {
   });
 
   it("settings defaults with ui_language", () => {
-    expect(get(settings)).toEqual({ ui_language: "en" });
+    expect(get(settings)).toEqual({ ui_language: "en", time_format: "24h" });
   });
 
   it("path defaults to current location", () => {

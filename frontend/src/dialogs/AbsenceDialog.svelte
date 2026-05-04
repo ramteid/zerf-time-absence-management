@@ -15,6 +15,8 @@
   let end_date = template.end_date || isoDate(new Date());
   let comment = template.comment || "";
   let error = "";
+  let closeHandled = false;
+  let closeResult = { changed: false, savedAbsence: null };
 
   function localizeAbsenceError(message) {
     const text = String(message || "").trim();
@@ -39,7 +41,38 @@
     return translated === text ? text : translated;
   }
 
-  onMount(() => dlg.showModal());
+  onMount(() => {
+    const timer = setTimeout(openDialog, 0);
+    return () => clearTimeout(timer);
+  });
+
+  function openDialog() {
+    if (!dlg || dlg.open) return;
+    try {
+      dlg.showModal();
+    } catch {
+      dlg.setAttribute("open", "open");
+    }
+  }
+
+  function completeClose(changed, savedAbsence = null) {
+    if (closeHandled) return;
+    closeHandled = true;
+    onClose(changed, savedAbsence);
+  }
+
+  function closeDialog(changed, savedAbsence = null) {
+    closeResult = { changed, savedAbsence };
+    if (dlg?.open) {
+      dlg.close();
+      return;
+    }
+    completeClose(changed, savedAbsence);
+  }
+
+  function handleNativeClose() {
+    completeClose(closeResult.changed, closeResult.savedAbsence);
+  }
 
   async function save() {
     error = "";
@@ -61,20 +94,18 @@
       const saved = isNew
         ? await api("/absences", { method: "POST", body })
         : await api("/absences/" + template.id, { method: "PUT", body });
-      dlg.close();
-      onClose(true, saved);
+      closeDialog(true, saved);
     } catch (e) {
       error = localizeAbsenceError(e?.message);
     }
   }
 
   function cancel() {
-    dlg.close();
-    onClose(false, null);
+    closeDialog(false, null);
   }
 </script>
 
-<dialog bind:this={dlg}>
+<dialog bind:this={dlg} on:close={handleNativeClose}>
   <header>
     <span style="flex:1">{$t(isNew ? "Request Absence" : "Edit Absence")}</span>
     <button class="kz-btn-icon-sm kz-btn-ghost" on:click={cancel}>
@@ -96,11 +127,19 @@
     <div class="field-row">
       <div>
         <label class="kz-label" for="absence-start-date">{$t("From")}</label>
-        <DatePicker id="absence-start-date" bind:value={start_date} container={dlg} />
+        <DatePicker
+          id="absence-start-date"
+          bind:value={start_date}
+          container={dlg}
+        />
       </div>
       <div>
         <label class="kz-label" for="absence-end-date">{$t("To")}</label>
-        <DatePicker id="absence-end-date" bind:value={end_date} container={dlg} />
+        <DatePicker
+          id="absence-end-date"
+          bind:value={end_date}
+          container={dlg}
+        />
       </div>
     </div>
     <div>

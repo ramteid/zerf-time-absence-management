@@ -8,6 +8,7 @@ pub mod db;
 pub mod email;
 pub mod error;
 pub mod holidays;
+pub mod i18n;
 pub mod notifications;
 pub mod reopen_requests;
 pub mod reports;
