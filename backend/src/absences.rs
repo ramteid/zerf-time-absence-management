@@ -1,6 +1,7 @@
 use crate::audit;
 use crate::auth::User;
 use crate::error::{AppError, AppResult};
+use crate::i18n::{self, TextKey};
 use crate::AppState;
 use axum::{
     extract::{Path, Query, State},
@@ -10,6 +11,16 @@ use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc};
 use serde::{Deserialize, Serialize, Serializer};
 use sqlx::{FromRow, Postgres, QueryBuilder};
 use std::collections::HashSet;
+
+async fn notification_language(pool: &crate::db::DatabasePool) -> i18n::Language {
+    match i18n::load_ui_language(pool).await {
+        Ok(language) => language,
+        Err(e) => {
+            tracing::warn!(target:"zerf::absences", "load notification language failed: {e}");
+            i18n::Language::default()
+        }
+    }
+}
 
 const ALLOWED_ABSENCE_KINDS: &[&str] = &[
     "vacation",
@@ -251,6 +262,12 @@ pub async fn create(
     Json(b): Json<NewAbsence>,
 ) -> AppResult<Json<Absence>> {
     let normalized = normalize_absence(&b)?;
+    // Reject absences that start before the user's start_date.
+    if b.start_date < u.start_date {
+        return Err(AppError::BadRequest(
+            "Absence start date is before user start date.".into(),
+        ));
+    }
     // Sick leave may not be backdated more than 30 days on initial creation.
     // Updates to an existing record are not subject to this limit.
     if normalized.kind == "sick" {
@@ -311,6 +328,12 @@ pub async fn update(
     Json(b): Json<NewAbsence>,
 ) -> AppResult<Json<Absence>> {
     let normalized = normalize_absence(&b)?;
+    // Reject absences that start before the user's start_date.
+    if b.start_date < u.start_date {
+        return Err(AppError::BadRequest(
+            "Absence start date is before user start date.".into(),
+        ));
+    }
     let prev: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
@@ -502,15 +525,18 @@ pub async fn approve(
             Some(after),
         )
         .await;
-        crate::notifications::create(
+        let language = notification_language(&s.pool).await;
+        crate::notifications::create_translated(
             &s,
+            language,
             a.user_id,
             "absence_approved",
-            "Absence approved",
-            &format!(
-                "Your absence ({} to {}) has been approved.",
-                a.start_date, a.end_date
-            ),
+            TextKey::AbsenceApprovedTitle,
+            TextKey::AbsenceApprovedBody,
+            vec![
+                ("start_date", i18n::format_date(language, a.start_date)),
+                ("end_date", i18n::format_date(language, a.end_date)),
+            ],
             Some("absences"),
             Some(id),
         )
@@ -589,15 +615,19 @@ pub async fn reject(
     )
     .await;
     if a.user_id != u.id {
-        crate::notifications::create(
+        let language = notification_language(&s.pool).await;
+        crate::notifications::create_translated(
             &s,
+            language,
             a.user_id,
             "absence_rejected",
-            "Absence rejected",
-            &format!(
-                "Your absence ({} to {}) was rejected: {}",
-                a.start_date, a.end_date, b.reason
-            ),
+            TextKey::AbsenceRejectedTitle,
+            TextKey::AbsenceRejectedBody,
+            vec![
+                ("start_date", i18n::format_date(language, a.start_date)),
+                ("end_date", i18n::format_date(language, a.end_date)),
+                ("reason", b.reason.clone()),
+            ],
             Some("absences"),
             Some(id),
         )
@@ -638,15 +668,18 @@ pub async fn revoke(
     )
     .await;
     if a.user_id != u.id {
-        crate::notifications::create(
+        let language = notification_language(&s.pool).await;
+        crate::notifications::create_translated(
             &s,
+            language,
             a.user_id,
             "absence_revoked",
-            "Absence revoked",
-            &format!(
-                "Your absence ({} to {}) has been revoked by an administrator.",
-                a.start_date, a.end_date
-            ),
+            TextKey::AbsenceRevokedTitle,
+            TextKey::AbsenceRevokedBody,
+            vec![
+                ("start_date", i18n::format_date(language, a.start_date)),
+                ("end_date", i18n::format_date(language, a.end_date)),
+            ],
             Some("absences"),
             Some(id),
         )

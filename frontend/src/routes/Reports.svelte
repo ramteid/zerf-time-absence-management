@@ -92,8 +92,8 @@
 <div class="top-bar">
   <div class="top-bar-title">
     <h1>{$t("Reports")}</h1>
-    <div class="top-bar-subtitle">{$t("Team hours overview")}</div>
   </div>
+  <div class="top-bar-subtitle">{$t("Team hours overview")}</div>
 </div>
 
 <div class="content-area">

@@ -41,6 +41,18 @@ pub enum TextKey {
     ReopenRejectedBody,
     ReopenRejectedByAdminTitle,
     ReopenRejectedByAdminBody,
+    AbsenceApprovedTitle,
+    AbsenceApprovedBody,
+    AbsenceRejectedTitle,
+    AbsenceRejectedBody,
+    AbsenceRevokedTitle,
+    AbsenceRevokedBody,
+    TimesheetSubmittedTitle,
+    TimesheetSubmittedBody,
+    TimesheetApprovedTitle,
+    TimesheetApprovedBody,
+    TimesheetRejectedTitle,
+    TimesheetRejectedBody,
 }
 
 pub async fn load_ui_language(pool: &DatabasePool) -> Result<Language, sqlx::Error> {
@@ -53,6 +65,16 @@ pub async fn load_ui_language(pool: &DatabasePool) -> Result<Language, sqlx::Err
         .as_deref()
         .map(Language::from_setting)
         .unwrap_or_default())
+}
+
+/// Format a `NaiveDate` according to the display language.
+/// - English: MM/DD/YYYY (e.g. 04/27/2026)
+/// - German:  DD.MM.YYYY (e.g. 27.04.2026)
+pub fn format_date(language: Language, date: chrono::NaiveDate) -> String {
+    match language {
+        Language::De => date.format("%d.%m.%Y").to_string(),
+        Language::En => date.format("%m/%d/%Y").to_string(),
+    }
 }
 
 pub fn entry_count(language: Language, count: i64) -> String {
@@ -99,6 +121,28 @@ fn template(language: Language, key: TextKey) -> &'static str {
             TextKey::ReopenRejectedByAdminBody => {
                 "The week reopen request from {requester_name} for the week starting {week_start} was rejected by an admin: {reason}"
             }
+            TextKey::AbsenceApprovedTitle => "Absence approved",
+            TextKey::AbsenceApprovedBody => {
+                "Your absence ({start_date} to {end_date}) has been approved."
+            }
+            TextKey::AbsenceRejectedTitle => "Absence rejected",
+            TextKey::AbsenceRejectedBody => {
+                "Your absence ({start_date} to {end_date}) was rejected: {reason}"
+            }
+            TextKey::AbsenceRevokedTitle => "Absence revoked",
+            TextKey::AbsenceRevokedBody => {
+                "Your absence ({start_date} to {end_date}) has been revoked by an administrator."
+            }
+            TextKey::TimesheetSubmittedTitle => "{submitter_name} submitted a timesheet",
+            TextKey::TimesheetSubmittedBody => "{entry_count} submitted for approval",
+            TextKey::TimesheetApprovedTitle => "Timesheet approved",
+            TextKey::TimesheetApprovedBody => {
+                "Your timesheet entry for {entry_date} has been approved."
+            }
+            TextKey::TimesheetRejectedTitle => "Timesheet rejected",
+            TextKey::TimesheetRejectedBody => {
+                "Your timesheet entry for {entry_date} was rejected: {reason}"
+            }
         },
         Language::De => match key {
             TextKey::ReopenAutoApprovedTitle => "Woche zur Bearbeitung freigegeben",
@@ -135,6 +179,28 @@ fn template(language: Language, key: TextKey) -> &'static str {
             TextKey::ReopenRejectedByAdminBody => {
                 "Die Wiederfreigabe-Anfrage von {requester_name} für die Woche ab {week_start} wurde von einem Admin abgelehnt: {reason}"
             }
+            TextKey::AbsenceApprovedTitle => "Abwesenheit genehmigt",
+            TextKey::AbsenceApprovedBody => {
+                "Ihre Abwesenheit ({start_date} bis {end_date}) wurde genehmigt."
+            }
+            TextKey::AbsenceRejectedTitle => "Abwesenheit abgelehnt",
+            TextKey::AbsenceRejectedBody => {
+                "Ihre Abwesenheit ({start_date} bis {end_date}) wurde abgelehnt: {reason}"
+            }
+            TextKey::AbsenceRevokedTitle => "Abwesenheit widerrufen",
+            TextKey::AbsenceRevokedBody => {
+                "Ihre Abwesenheit ({start_date} bis {end_date}) wurde von einem Administrator widerrufen."
+            }
+            TextKey::TimesheetSubmittedTitle => "{submitter_name} hat eine Zeiterfassung eingereicht",
+            TextKey::TimesheetSubmittedBody => "{entry_count} zur Genehmigung eingereicht",
+            TextKey::TimesheetApprovedTitle => "Zeiterfassung genehmigt",
+            TextKey::TimesheetApprovedBody => {
+                "Ihr Zeiterfassungseintrag für {entry_date} wurde genehmigt."
+            }
+            TextKey::TimesheetRejectedTitle => "Zeiterfassung abgelehnt",
+            TextKey::TimesheetRejectedBody => {
+                "Ihr Zeiterfassungseintrag für {entry_date} wurde abgelehnt: {reason}"
+            }
         },
     }
 }
@@ -153,19 +219,32 @@ mod tests {
 
     #[test]
     fn translates_with_parameters() {
+        let date = chrono::NaiveDate::from_ymd_opt(2026, 4, 27).unwrap();
         let text = translate(
             Language::De,
             TextKey::ReopenAutoApprovedBody,
             &[
-                ("week_start", "2026-04-27".to_string()),
+                ("week_start", format_date(Language::De, date)),
                 ("entry_count", entry_count(Language::De, 1)),
             ],
         );
 
         assert_eq!(
             text,
-            "Die Woche ab 2026-04-27 wurde wieder zur Bearbeitung freigegeben (1 Eintrag)."
+            "Die Woche ab 27.04.2026 wurde wieder zur Bearbeitung freigegeben (1 Eintrag)."
         );
+    }
+
+    #[test]
+    fn format_date_english() {
+        let date = chrono::NaiveDate::from_ymd_opt(2026, 4, 27).unwrap();
+        assert_eq!(format_date(Language::En, date), "04/27/2026");
+    }
+
+    #[test]
+    fn format_date_german() {
+        let date = chrono::NaiveDate::from_ymd_opt(2026, 4, 27).unwrap();
+        assert_eq!(format_date(Language::De, date), "27.04.2026");
     }
 
     #[test]

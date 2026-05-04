@@ -1,6 +1,7 @@
 <script>
   import { onMount } from "svelte";
   import { api } from "../api.js";
+  import { currentUser } from "../stores.js";
   import { t } from "../i18n.js";
   import { isoDate } from "../format.js";
   import Icon from "../Icons.svelte";
@@ -130,6 +131,7 @@
         <DatePicker
           id="absence-start-date"
           bind:value={start_date}
+          min={$currentUser?.start_date}
           container={dlg}
         />
       </div>

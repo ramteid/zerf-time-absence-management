@@ -170,7 +170,13 @@ async fn approver_ids_to_notify(pool: &crate::db::DatabasePool, requester: &User
             ids.insert(id);
         }
     }
-    ids.remove(&requester.id);
+    // Only exclude the requester when they are NOT an admin.  An admin who
+    // requests a reopen for their own week still needs a notification so
+    // they can approve it from the dashboard (especially when they are the
+    // only admin).
+    if !requester.is_admin() {
+        ids.remove(&requester.id);
+    }
     ids.into_iter().collect()
 }
 
@@ -306,7 +312,7 @@ pub async fn create(
             TextKey::ReopenAutoApprovedTitle,
             TextKey::ReopenAutoApprovedBody,
             vec![
-                ("week_start", b.week_start.to_string()),
+                ("week_start", i18n::format_date(language, b.week_start)),
                 ("entry_count", i18n::entry_count(language, count)),
             ],
             Some("reopen_request"),
@@ -325,7 +331,7 @@ pub async fn create(
                 TextKey::ReopenAutoApprovedNoticeBody,
                 vec![
                     ("requester_name", requester_name.clone()),
-                    ("week_start", b.week_start.to_string()),
+                    ("week_start", i18n::format_date(language, b.week_start)),
                     ("entry_count", i18n::entry_count(language, count)),
                 ],
                 Some("reopen_request"),
@@ -353,7 +359,7 @@ pub async fn create(
                 TextKey::ReopenRequestCreatedBody,
                 vec![
                     ("requester_name", requester_name.clone()),
-                    ("week_start", b.week_start.to_string()),
+                    ("week_start", i18n::format_date(language, b.week_start)),
                 ],
                 Some("reopen_request"),
                 Some(req_id),
@@ -485,7 +491,7 @@ pub async fn approve(
         "reopen_approved",
         TextKey::ReopenApprovedTitle,
         TextKey::ReopenApprovedBody,
-        vec![("week_start", r.week_start.to_string())],
+        vec![("week_start", i18n::format_date(language, r.week_start))],
         Some("reopen_request"),
         Some(id),
     )
@@ -521,7 +527,7 @@ pub async fn approve(
                 TextKey::ReopenApprovedByAdminBody,
                 vec![
                     ("requester_name", requester_name),
-                    ("week_start", r.week_start.to_string()),
+                    ("week_start", i18n::format_date(language, r.week_start)),
                 ],
                 Some("reopen_request"),
                 Some(id),
@@ -590,7 +596,7 @@ pub async fn reject(
         TextKey::ReopenRejectedTitle,
         TextKey::ReopenRejectedBody,
         vec![
-            ("week_start", r.week_start.to_string()),
+            ("week_start", i18n::format_date(language, r.week_start)),
             ("reason", reason.to_string()),
         ],
         Some("reopen_request"),
@@ -624,7 +630,7 @@ pub async fn reject(
                 TextKey::ReopenRejectedByAdminBody,
                 vec![
                     ("requester_name", requester_name),
-                    ("week_start", r.week_start.to_string()),
+                    ("week_start", i18n::format_date(language, r.week_start)),
                     ("reason", reason.to_string()),
                 ],
                 Some("reopen_request"),
