@@ -1,5 +1,11 @@
 # KitaZeit
 
+[![CI](https://github.com/ramteid/kitazeit/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ramteid/kitazeit/actions/workflows/ci.yml)
+[![Security audit](https://github.com/ramteid/kitazeit/actions/workflows/audit.yml/badge.svg?branch=main)](https://github.com/ramteid/kitazeit/actions/workflows/audit.yml)
+[![Build & Push Docker Image](https://github.com/ramteid/kitazeit/actions/workflows/build-push-image.yml/badge.svg?branch=main)](https://github.com/ramteid/kitazeit/actions/workflows/build-push-image.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Last commit](https://img.shields.io/github/last-commit/ramteid/kitazeit/main)](https://github.com/ramteid/kitazeit/commits/main)
+
 Self-hosted time tracking for kindergartens.
 
 
@@ -11,7 +17,7 @@ suite. The whole thing runs from one `docker compose up`.
 
 ## Why use it
 
-- **Quick to learn.** German-style work-time forms, calm interface, sensible defaults.
+- **Quick to learn.** Simple work-time forms, calm interface, sensible defaults.
 - **Mobile-first.** Educators record their hours from a phone in the cloakroom.
 - **Self-hosted.** Your data stays on your server. No SaaS, no telemetry.
 - **Operable.** Caddy, the app, and PostgreSQL ship as one compose stack with hardened defaults.
@@ -59,41 +65,68 @@ selector in the user dialog is mandatory and the schema enforces this.
 
 ## Install
 
-**Prerequisites:** a Linux host with Docker, a domain name pointing at it,
-and ports 80 and 443 open.
+**Prerequisites:**
 
-**Step 1 — Clone and copy the config template**
+- Linux host with Docker
+- For public mode: a domain name pointing at the host, with ports 80 and 443 open
+
+### Local vs Public operation
+
+KitaZeit supports two compose modes:
+
+| Mode | Command | What runs | When to use |
+|---|---|---|---|
+| Local (no internet edge) | `./start_local.sh` | App + PostgreSQL (`docker/docker-compose-http.yml`) | Local smoke tests, internal environments, or when you provide your own reverse proxy/TLS outside this repo |
+| Public (internet-facing) | `./start_public.sh` | App + PostgreSQL + Caddy (`docker/docker-compose-http.yml` + `docker/docker-compose-https.yml`) | Normal production deployment on a public host |
+
+Important differences:
+
+- **Public mode** publishes ports `80` and `443` via Caddy and handles automatic Let's Encrypt certificates.
+- **Local mode** does not start Caddy and does not publish 80/443 from this stack.
+- In both modes, PostgreSQL stays on an internal Docker network.
+
+### 1) Common setup (both modes)
+
+Clone and create `.env`:
 
 ```bash
 git clone <repo-url> kitazeit && cd kitazeit
 cp .env.example .env && chmod 600 .env
 ```
 
-**Step 2 — Generate secrets** (copy-paste as-is; the shell fills in random values)
+Generate secrets:
 
 ```bash
 sed -i "s|KITAZEIT_SESSION_SECRET=.*|KITAZEIT_SESSION_SECRET=$(openssl rand -hex 32)|" .env
 sed -i "s|KITAZEIT_POSTGRES_PASSWORD=.*|KITAZEIT_POSTGRES_PASSWORD=$(openssl rand -hex 32)|" .env
 ```
 
-**Step 3 — Set your domain and admin e-mail**
+Set required values in `.env`:
 
-Open `.env` and replace `example.com` with your domain and
-`admin@example.com` with your e-mail — those are the only two lines you need
-to touch manually.
+- `KITAZEIT_ADMIN_EMAIL` is required in all modes.
+- `KITAZEIT_DOMAIN` is required for public mode.
 
 ```bash
 $EDITOR .env
 ```
 
-**Step 4 — Start**
+### 2) Start in your mode
+
+Public mode (internet-facing, HTTPS via Caddy):
 
 ```bash
-docker compose up -d
+./start_public.sh
 docker compose logs -f app   # watch until "listening on …"
 ```
 
-Sign in at `https://<your-domain>` with your admin e-mail and password `admin`.
+Local mode (internal/local operation without Caddy):
+
+```bash
+./start_local.sh
+docker compose logs -f app
+```
+
+In public mode, sign in at `https://<your-domain>` with your admin e-mail and password `admin`.
 You will be prompted to change the password on first login.
 
 ### Configuration
@@ -127,7 +160,8 @@ snapshot at rest.
 ### Updates
 
 ```bash
-git pull && docker compose up -d --build
+git pull && ./start_public.sh   # public mode
+git pull && ./start_local.sh    # local mode
 ```
 
 The schema migrates itself; no manual steps required.
