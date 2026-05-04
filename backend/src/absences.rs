@@ -299,6 +299,12 @@ pub async fn update(
     if !allowed {
         return Err(AppError::BadRequest("Cannot edit.".into()));
     }
+    // Sick absences must remain sick: changing kind is never allowed.
+    if prev.kind == "sick" && b.kind != "sick" {
+        return Err(AppError::BadRequest(
+            "Sick absences cannot change type.".into(),
+        ));
+    }
     if prev.status == "approved" && b.kind != prev.kind {
         return Err(AppError::BadRequest(
             "Approved absences cannot change type.".into(),
@@ -515,6 +521,55 @@ pub async fn reject(
     Ok(Json(serde_json::json!({"ok":true})))
 }
 
+/// Admin-only: revoke an already-approved absence (e.g. mistaken approval).
+/// Transitions the absence to 'cancelled' with an audit trail.
+pub async fn revoke(
+    State(s): State<AppState>,
+    u: User,
+    Path(id): Path<i64>,
+) -> AppResult<Json<serde_json::Value>> {
+    if !u.is_admin() {
+        return Err(AppError::Forbidden);
+    }
+    let a: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1")
+        .bind(id)
+        .fetch_one(&s.pool)
+        .await?;
+    if a.status != "approved" {
+        return Err(AppError::BadRequest(
+            "Only approved absences can be revoked.".into(),
+        ));
+    }
+    sqlx::query("UPDATE absences SET status='cancelled', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP WHERE id=$2")
+        .bind(u.id).bind(id).execute(&s.pool).await?;
+    audit::log(
+        &s.pool,
+        u.id,
+        "revoked",
+        "absences",
+        id,
+        Some(serde_json::to_value(&a).unwrap()),
+        Some(serde_json::json!({"status": "cancelled", "revoked_by": u.id})),
+    )
+    .await;
+    if a.user_id != u.id {
+        crate::notifications::create(
+            &s,
+            a.user_id,
+            "absence_revoked",
+            "Absence revoked",
+            &format!(
+                "Your absence ({} to {}) has been revoked by an administrator.",
+                a.start_date, a.end_date
+            ),
+            Some("absences"),
+            Some(id),
+        )
+        .await;
+    }
+    Ok(Json(serde_json::json!({"ok":true})))
+}
+
 fn serialize_day_count<S>(value: &f64, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
@@ -570,18 +625,20 @@ pub async fn balance(
     for a in &vacations {
         let s2 = std::cmp::max(a.start_date, from);
         let e2 = std::cmp::min(a.end_date, to);
-        let days = workdays(&s.pool, s2, e2).await?;
         if a.status == "approved" {
-            // Use the clamped date (e2) rather than a.end_date to correctly
-            // classify year-spanning absences: only the portion that is
-            // already in the past counts as taken.
+            // Split at today: the portion in the past counts as taken,
+            // the portion from today onward counts as upcoming.
             if e2 < today {
-                taken += days;
+                taken += workdays(&s.pool, s2, e2).await?;
+            } else if s2 >= today {
+                upcoming += workdays(&s.pool, s2, e2).await?;
             } else {
-                upcoming += days;
+                let yesterday = today - Duration::days(1);
+                taken += workdays(&s.pool, s2, yesterday).await?;
+                upcoming += workdays(&s.pool, today, e2).await?;
             }
         } else if a.status == "requested" {
-            requested += days;
+            requested += workdays(&s.pool, s2, e2).await?;
         }
     }
     let entitled = target.annual_leave_days;

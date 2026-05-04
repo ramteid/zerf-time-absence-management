@@ -447,6 +447,7 @@ pub async fn categories(
     u: User,
     Query(q): Query<CategoryQuery>,
 ) -> AppResult<Json<Vec<CategoryTotal>>> {
+    validate_range(q.from, q.to)?;
     let uid = q.user_id;
     if let Some(id) = uid {
         if id != u.id && !u.is_lead() {
@@ -459,7 +460,7 @@ pub async fn categories(
         "SELECT c.name, c.color, z.start_time, z.end_time \
          FROM time_entries z \
          JOIN categories c ON c.id=z.category_id \
-         WHERE z.status = 'approved' AND z.entry_date BETWEEN ",
+         WHERE z.status IN ('draft','submitted','approved') AND z.entry_date BETWEEN ",
     );
     builder.push_bind(q.from).push(" AND ").push_bind(q.to);
     if let Some(id) = uid {
