@@ -199,10 +199,11 @@ pub async fn approve(
     if !u.is_lead() {
         return Err(AppError::Forbidden);
     }
+    let mut tx = s.pool.begin().await?;
     let a: ChangeRequest =
-        sqlx::query_as("SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE id=$1 AND status='open'")
+        sqlx::query_as("SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE id=$1 AND status='open' FOR UPDATE")
             .bind(id)
-            .fetch_one(&s.pool)
+            .fetch_one(&mut *tx)
             .await?;
     // A lead may not review their own request; admins may.
     if a.user_id == u.id && !u.is_admin() {
@@ -211,11 +212,11 @@ pub async fn approve(
     // Non-admin leads may only act on requests from their direct reports.
     if !u.is_admin() {
         let is_report: Option<bool> = sqlx::query_scalar(
-            "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2",
+            "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2 FOR UPDATE",
         )
         .bind(a.user_id)
         .bind(u.id)
-        .fetch_optional(&s.pool)
+        .fetch_optional(&mut *tx)
         .await?;
         if is_report.is_none() {
             return Err(AppError::Forbidden);
@@ -226,7 +227,7 @@ pub async fn approve(
     let entry: crate::time_entries::TimeEntry =
         sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1")
             .bind(a.time_entry_id)
-            .fetch_one(&s.pool)
+            .fetch_one(&mut *tx)
             .await?;
     let effective = crate::time_entries::NewTimeEntry {
         entry_date: a.new_date.unwrap_or(entry.entry_date),
@@ -243,7 +244,6 @@ pub async fn approve(
     };
     crate::time_entries::validate(&s.pool, entry.user_id, &effective, Some(a.time_entry_id))
         .await?;
-    let mut tx = s.pool.begin().await?;
     let claimed = sqlx::query(
         "UPDATE change_requests SET status='approved', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP WHERE id=$2 AND status='open'",
     )
@@ -297,9 +297,10 @@ pub async fn reject(
     if b.reason.trim().is_empty() {
         return Err(AppError::BadRequest("Reason required.".into()));
     }
+    let mut tx = s.pool.begin().await?;
     let prev: ChangeRequest = sqlx::query_as("SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE id=$1 AND status='open'")
         .bind(id)
-        .fetch_one(&s.pool)
+        .fetch_one(&mut *tx)
         .await?;
     // A lead may not reject their own request; admins may.
     if prev.user_id == u.id && !u.is_admin() {
@@ -308,11 +309,11 @@ pub async fn reject(
     // Non-admin leads may only act on requests from their direct reports.
     if !u.is_admin() {
         let is_report: Option<bool> = sqlx::query_scalar(
-            "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2",
+            "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2 FOR UPDATE",
         )
         .bind(prev.user_id)
         .bind(u.id)
-        .fetch_optional(&s.pool)
+        .fetch_optional(&mut *tx)
         .await?;
         if is_report.is_none() {
             return Err(AppError::Forbidden);
@@ -324,7 +325,7 @@ pub async fn reject(
     .bind(u.id)
     .bind(&b.reason)
     .bind(id)
-    .execute(&s.pool)
+    .execute(&mut *tx)
     .await?
     .rows_affected();
     if updated == 0 {
@@ -332,6 +333,7 @@ pub async fn reject(
             "Change request was already resolved by someone else.".into(),
         ));
     }
+    tx.commit().await?;
     audit::log(
         &s.pool,
         u.id,

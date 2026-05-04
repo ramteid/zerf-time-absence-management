@@ -2,7 +2,7 @@
 
 Simple but powerful self-hosted time tracking and absence management for teams.
 
-KitaZeit helps teams record working time, request leave, manage approvals, and produce monthly reports without adopting a full HR or payroll suite. The application is deliberately small in scope and operationally simple: a Rust backend, a Svelte frontend, PostgreSQL, and Docker-based deployment.
+KitaZeit helps teams record working time, request leave, manage approvals, and produce monthly reports without adopting a full HR or payroll suite. 
 
 ## Overview
 
@@ -26,7 +26,67 @@ Employees capture hours and absences, team leads review requests and submitted w
 - It is easy to operate: the provided Docker Compose entrypoints cover local, debug, and public deployments.
 - It keeps the workflow opinionated and small, which reduces setup overhead for teams that want a practical operational tool instead of a broad platform.
 
+## Roles and approval model
+
+The default reporting structure is many employees to one assigned team lead, and team leads can themselves report to another team lead for approval. Admins are primarily technical and organizational administrators. They can approve requests as a fallback, but they are not intended to be the regular approval path.
+
+### Role organigram
+
+```mermaid
+flowchart TD
+	Admin[Admin fallback]
+	LeadB[Approver team lead]
+	LeadA[Team lead]
+
+	subgraph TeamGroup[Operational team]
+		E1[Employee 1]
+		E2[Employee 2]
+		EN[Employee n]
+	end
+
+	LeadA -->|primary approver for| E1
+	LeadA -->|primary approver for| E2
+	LeadA -->|primary approver for| EN
+	LeadB -->|primary approver for| LeadA
+
+	Admin -->|manages platform and users| LeadB
+	Admin -. fallback approval only .-> E1
+	Admin -. fallback approval only .-> E2
+	Admin -. fallback approval only .-> EN
+	Admin -. fallback approval only .-> LeadA
+```
+
+### Example approval flow
+
+Admins can still approve requests for any user when needed, even though the normal operational approval path runs through assigned team leads.
+
+```mermaid
+flowchart LR
+	Employee[Employee submits request]
+	Lead[Assigned team lead]
+	LeadApprover[Approver team lead]
+	Admin[Admin fallback]
+	Approved[Approved]
+	Rejected[Rejected]
+	LeadOwn[Team lead submits own request]
+
+	Employee -->|default review path| Lead
+	Employee -. fallback only .-> Admin
+	Lead -->|approve| Approved
+	Lead -->|reject| Rejected
+
+	LeadOwn -->|default review path| LeadApprover
+	LeadApprover -->|approve| Approved
+	LeadApprover -->|reject| Rejected
+
+	LeadOwn -. fallback only .-> Admin
+	Admin -->|approve if needed| Approved
+	Admin -->|reject if needed| Rejected
+```
+
 ## Quick setup
+
+The application is deliberately small in scope and operationally simple: a Rust backend, a Svelte frontend, PostgreSQL, and Docker-based deployment.
 
 ### Prerequisites
 

@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18
     container_name: kitazeit-postgres
     restart: unless-stopped
     security_opt:
@@ -79,9 +79,7 @@ services:
       - private
 
   backup:
-    build:
-      context: ..
-      dockerfile: docker/backup.Dockerfile
+    image: postgres:18
     container_name: kitazeit-backup
     restart: unless-stopped
     cap_drop: [ALL]
@@ -99,7 +97,26 @@ services:
       - BACKUP_INTERVAL_SECONDS=${BACKUP_INTERVAL_SECONDS:-86400}
       - BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-30}
     volumes:
+      - ../scripts/backup.sh:/usr/local/bin/backup.sh:ro
       - backup_data:/backups
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+          case "$${BACKUP_INTERVAL_SECONDS}" in
+            *[!0-9]*|'')
+              echo "BACKUP_INTERVAL_SECONDS must be a positive integer." >&2
+              exit 1
+              ;;
+          esac
+          if [ "$${BACKUP_INTERVAL_SECONDS}" -le 0 ]; then
+            echo "BACKUP_INTERVAL_SECONDS must be greater than zero." >&2
+            exit 1
+          fi
+          while :; do
+            /bin/sh /usr/local/bin/backup.sh /backups
+            sleep "$${BACKUP_INTERVAL_SECONDS}"
+          done
     logging:
       driver: json-file
       options:

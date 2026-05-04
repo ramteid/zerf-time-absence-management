@@ -388,20 +388,21 @@ pub async fn approve(
     if !u.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let z: TimeEntry = sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1")
+    let mut tx = s.pool.begin().await?;
+    let z: TimeEntry = sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1 FOR UPDATE")
         .bind(id)
-        .fetch_one(&s.pool)
+        .fetch_one(&mut *tx)
         .await?;
     if z.user_id == u.id && !u.is_admin() {
         return Err(AppError::Forbidden);
     }
     if !u.is_admin() {
         let is_report: Option<bool> = sqlx::query_scalar(
-            "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2",
+            "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2 FOR UPDATE",
         )
         .bind(z.user_id)
         .bind(u.id)
-        .fetch_optional(&s.pool)
+        .fetch_optional(&mut *tx)
         .await?;
         if is_report.is_none() {
             return Err(AppError::Forbidden);
@@ -417,7 +418,7 @@ pub async fn approve(
     )
     .bind(u.id)
     .bind(id)
-    .execute(&s.pool)
+    .execute(&mut *tx)
     .await?
     .rows_affected();
     if updated == 0 {
@@ -425,6 +426,7 @@ pub async fn approve(
             "Entry was already reviewed by someone else.".into(),
         ));
     }
+    tx.commit().await?;
     audit::log(
         &s.pool,
         u.id,
@@ -462,20 +464,21 @@ pub async fn reject(
     if !u.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let z: TimeEntry = sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1")
+    let mut tx = s.pool.begin().await?;
+    let z: TimeEntry = sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1 FOR UPDATE")
         .bind(id)
-        .fetch_one(&s.pool)
+        .fetch_one(&mut *tx)
         .await?;
     if z.user_id == u.id && !u.is_admin() {
         return Err(AppError::Forbidden);
     }
     if !u.is_admin() {
         let is_report: Option<bool> = sqlx::query_scalar(
-            "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2",
+            "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2 FOR UPDATE",
         )
         .bind(z.user_id)
         .bind(u.id)
-        .fetch_optional(&s.pool)
+        .fetch_optional(&mut *tx)
         .await?;
         if is_report.is_none() {
             return Err(AppError::Forbidden);
@@ -495,7 +498,7 @@ pub async fn reject(
     .bind(u.id)
     .bind(&b.reason)
     .bind(id)
-    .execute(&s.pool)
+    .execute(&mut *tx)
     .await?
     .rows_affected();
     if updated == 0 {
@@ -503,6 +506,7 @@ pub async fn reject(
             "Entry was already reviewed by someone else.".into(),
         ));
     }
+    tx.commit().await?;
     audit::log(
         &s.pool,
         u.id,
