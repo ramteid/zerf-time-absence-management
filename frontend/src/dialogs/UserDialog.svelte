@@ -18,6 +18,7 @@
   let weekly_hours = template.weekly_hours || 39;
   let annual_leave_days = template.annual_leave_days || 30;
   let start_date = template.start_date || isoDate(new Date());
+  let overtime_start_balance_min = template.overtime_start_balance_min || 0;
   let approver_id =
     template.approver_id == null ? "" : String(template.approver_id);
   let error = "";
@@ -110,6 +111,7 @@
         weekly_hours: Number(weekly_hours),
         annual_leave_days: Number(annual_leave_days),
         start_date,
+        overtime_start_balance_min: Number(overtime_start_balance_min),
       };
       if (role === "employee") {
         body.approver_id = approver_id ? Number(approver_id) : null;
@@ -264,6 +266,20 @@
             max="366"
             bind:value={annual_leave_days}
           />
+        </div>
+      </div>
+      <div>
+        <label class="kz-label" for="user-overtime-balance"
+          >{$t("Overtime start balance (minutes)")}</label
+        >
+        <input
+          id="user-overtime-balance"
+          class="kz-input"
+          type="number"
+          bind:value={overtime_start_balance_min}
+        />
+        <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
+          {$t("Initial overtime balance in minutes when the user starts. Negative = deficit.")}
         </div>
       </div>
       {#if isNew}

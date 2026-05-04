@@ -49,8 +49,10 @@ async fn auto_approve_when_policy_set() {
         .iter()
         .find(|n| n["kind"] == "reopen_auto_approved")
         .expect("notification created");
+    let monday = next_monday(-14);
+    let monday_de = monday.format("%d.%m.%Y").to_string();
     let expected_body =
-        format!("Die Woche ab {monday_iso} wurde wieder zur Bearbeitung freigegeben (1 Eintrag).");
+        format!("Die Woche ab {monday_de} wurde wieder zur Bearbeitung freigegeben (1 Eintrag).");
     assert_eq!(
         notification["title"].as_str(),
         Some("Woche zur Bearbeitung freigegeben")
@@ -264,8 +266,18 @@ async fn lead_self_service() {
         )
         .await;
     assert_eq!(st, StatusCode::OK);
+    let lead_id = id(&body);
     let pw = temp_pw(&body);
     let lead = login_change_pw(&app, "solo@example.com", &pw).await;
+
+    let (st, _) = admin
+        .put(
+            &format!("/api/v1/team-settings/{}", lead_id),
+            &json!({"allow_reopen_without_approval": true}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "set lead policy auto");
+
     let (_, body) = admin.get("/api/v1/categories").await;
     let cat_id = body.as_array().unwrap()[0]["id"].as_i64().unwrap();
 

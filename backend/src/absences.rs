@@ -749,7 +749,7 @@ pub async fn balance(
 ) -> AppResult<Json<LeaveBalance>> {
     assert_can_access_user(&s.pool, &u, uid).await?;
     let year = q.year.unwrap_or_else(|| chrono::Local::now().year());
-    let target: crate::auth::User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode FROM users WHERE id=$1")
+    let target: crate::auth::User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1")
         .bind(uid)
         .fetch_one(&s.pool)
         .await?;

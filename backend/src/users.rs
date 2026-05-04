@@ -158,11 +158,11 @@ pub async fn list(State(s): State<AppState>, u: User) -> AppResult<Json<Vec<User
         return Err(AppError::Forbidden);
     }
     let r = if u.is_admin() {
-        sqlx::query_as::<_, User>("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode FROM users ORDER BY last_name, first_name")
+        sqlx::query_as::<_, User>("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users ORDER BY last_name, first_name")
             .fetch_all(&s.pool)
             .await?
     } else {
-        sqlx::query_as::<_, User>("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode FROM users WHERE id=$1 OR approver_id=$1 ORDER BY last_name, first_name")
+        sqlx::query_as::<_, User>("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1 OR approver_id=$1 ORDER BY last_name, first_name")
             .bind(u.id)
             .fetch_all(&s.pool)
             .await?
@@ -177,7 +177,7 @@ pub async fn get_one(
 ) -> AppResult<Json<User>> {
     assert_can_access_user(&s.pool, &u, id).await?;
     Ok(Json(
-        sqlx::query_as::<_, User>("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode FROM users WHERE id=$1")
+        sqlx::query_as::<_, User>("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1")
             .bind(id)
             .fetch_one(&s.pool)
             .await?,
@@ -193,6 +193,7 @@ pub struct NewUser {
     pub weekly_hours: f64,
     pub annual_leave_days: i64,
     pub start_date: NaiveDate,
+    pub overtime_start_balance_min: Option<i64>,
     pub password: Option<String>,
     /// Mandatory for `role == "employee"`. The approver must be an active
     /// `team_lead` or `admin` and cannot be the user themselves.
@@ -285,15 +286,17 @@ pub async fn create(
     };
     let hash = hash_password(&password)?;
     validate_approver(&s.pool, &b.role, None, true, b.approver_id).await?;
-    let id: i64 = sqlx::query_scalar("INSERT INTO users(email,password_hash,first_name,last_name,role,weekly_hours,annual_leave_days,start_date,must_change_password,approver_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id")
+    let overtime_balance = b.overtime_start_balance_min.unwrap_or(0);
+    let id: i64 = sqlx::query_scalar("INSERT INTO users(email,password_hash,first_name,last_name,role,weekly_hours,annual_leave_days,start_date,must_change_password,approver_id,overtime_start_balance_min) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id")
         .bind(&email_norm).bind(hash).bind(b.first_name.trim()).bind(b.last_name.trim()).bind(&b.role)
         .bind(b.weekly_hours).bind(b.annual_leave_days).bind(b.start_date).bind(true).bind(b.approver_id)
+        .bind(overtime_balance)
         .fetch_one(&s.pool).await
         .map_err(|e| {
             tracing::warn!(target:"zerf::users", "create user insert failed: {e}");
             AppError::Conflict("Email already exists or invalid approver.".into())
         })?;
-    let user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode FROM users WHERE id=$1")
+    let user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
@@ -343,6 +346,7 @@ pub struct UpdateUser {
     #[serde(default, deserialize_with = "deserialize_double_option")]
     pub approver_id: Option<Option<i64>>,
     pub allow_reopen_without_approval: Option<bool>,
+    pub overtime_start_balance_min: Option<i64>,
 }
 
 fn deserialize_double_option<'de, D, T>(de: D) -> Result<Option<Option<T>>, D::Error>
@@ -391,7 +395,7 @@ pub async fn update(
             return Err(AppError::BadRequest("Invalid email.".into()));
         }
     }
-    let prev: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode FROM users WHERE id=$1")
+    let prev: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
@@ -405,10 +409,10 @@ pub async fn update(
     validate_approver(&s.pool, &next_role, Some(id), next_active, next_approver).await?;
 
     let mut tx = s.pool.begin().await?;
-    sqlx::query("UPDATE users SET email=COALESCE($1,email), first_name=COALESCE($2,first_name), last_name=COALESCE($3,last_name), role=COALESCE($4,role), weekly_hours=COALESCE($5,weekly_hours), annual_leave_days=COALESCE($6,annual_leave_days), start_date=COALESCE($7,start_date), active=COALESCE($8,active), allow_reopen_without_approval=COALESCE($9,allow_reopen_without_approval) WHERE id=$10")
+    sqlx::query("UPDATE users SET email=COALESCE($1,email), first_name=COALESCE($2,first_name), last_name=COALESCE($3,last_name), role=COALESCE($4,role), weekly_hours=COALESCE($5,weekly_hours), annual_leave_days=COALESCE($6,annual_leave_days), start_date=COALESCE($7,start_date), active=COALESCE($8,active), allow_reopen_without_approval=COALESCE($9,allow_reopen_without_approval), overtime_start_balance_min=COALESCE($10,overtime_start_balance_min) WHERE id=$11")
         .bind(email_lc).bind(b.first_name).bind(b.last_name).bind(b.role.clone())
         .bind(b.weekly_hours).bind(b.annual_leave_days).bind(b.start_date).bind(b.active)
-        .bind(b.allow_reopen_without_approval).bind(id)
+        .bind(b.allow_reopen_without_approval).bind(b.overtime_start_balance_min).bind(id)
         .execute(&mut *tx).await
         .map_err(|_| AppError::Conflict("Could not update user (e.g. email conflict).".into()))?;
     // Approver_id requires special handling because we want to support
@@ -432,7 +436,7 @@ pub async fn update(
             .await;
     }
     tx.commit().await?;
-    let next: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode FROM users WHERE id=$1")
+    let next: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
@@ -462,7 +466,7 @@ pub async fn deactivate(
             "You cannot deactivate yourself.".into(),
         ));
     }
-    let prev: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode FROM users WHERE id=$1")
+    let prev: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
