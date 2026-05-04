@@ -2,7 +2,9 @@
 # ---------- Frontend build stage ----------
 FROM node:25-trixie-slim AS frontend-builder
 WORKDIR /build
+ARG KITAZEIT_FRONTEND_DEBUG_BUILD=false
 ENV CI=1
+ENV KITAZEIT_FRONTEND_DEBUG_BUILD=${KITAZEIT_FRONTEND_DEBUG_BUILD}
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; \
     else npm install --no-audit --no-fund; fi
@@ -12,7 +14,8 @@ RUN npm run build
 # ---------- Backend build stage ----------
 FROM rust:1-trixie AS backend-builder
 WORKDIR /build
-ENV CARGO_TERM_COLOR=always RUSTFLAGS="-C strip=symbols"
+ARG KITAZEIT_BUILD_PROFILE=release
+ENV CARGO_TERM_COLOR=always
 
 # Layer 1: manifests only — cached until Cargo.toml / Cargo.lock change.
 COPY backend/Cargo.toml backend/Cargo.lock* ./
@@ -21,16 +24,28 @@ COPY backend/migrations ./migrations
 # Layer 2: compile all dependencies via a placeholder binary.
 # This expensive step is re-run only when the manifest/lock changes.
 RUN mkdir -p src && \
-    echo 'fn main() {}' > src/main.rs && \
-    cargo build --release --locked && \
-    rm -f target/release/deps/kitazeit* && \
-    rm -rf target/release/.fingerprint/kitazeit-*
+        echo 'fn main() {}' > src/main.rs && \
+        if [ "$KITAZEIT_BUILD_PROFILE" = "debug" ]; then \
+            cargo build --locked && \
+            rm -f target/debug/deps/kitazeit* && \
+            rm -rf target/debug/.fingerprint/kitazeit-*; \
+        else \
+            cargo build --release --locked && \
+            rm -f target/release/deps/kitazeit* && \
+            rm -rf target/release/.fingerprint/kitazeit-*; \
+        fi
 
 # Layer 3: compile the real application source.
 COPY backend/src ./src
 RUN touch src/main.rs && \
-    cargo build --release --locked && \
-    strip target/release/kitazeit || true
+        if [ "$KITAZEIT_BUILD_PROFILE" = "debug" ]; then \
+            cargo build --locked && \
+            install -D target/debug/kitazeit /out/kitazeit; \
+        else \
+            cargo build --release --locked && \
+            strip target/release/kitazeit || true && \
+            install -D target/release/kitazeit /out/kitazeit; \
+        fi
 
 # ---------- Runtime stage ----------
 FROM debian:trixie-slim
@@ -47,7 +62,7 @@ RUN groupadd --gid ${APP_GID} kitazeit && \
     useradd --uid ${APP_UID} --gid ${APP_GID} --home /app --shell /usr/sbin/nologin kitazeit
 
 WORKDIR /app
-COPY --from=backend-builder /build/target/release/kitazeit /app/kitazeit
+COPY --from=backend-builder /out/kitazeit /app/kitazeit
 COPY --from=frontend-builder /build/dist /app/static
 RUN chmod 0555 /app/kitazeit && \
     chmod -R a=rX /app/static

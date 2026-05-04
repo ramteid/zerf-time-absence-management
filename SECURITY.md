@@ -160,8 +160,8 @@ updates after CI is green; major updates require a human review.
 
 1. `cp .env.example .env && chmod 600 .env`
 2. Replace `KITAZEIT_SESSION_SECRET` and `KITAZEIT_POSTGRES_PASSWORD` with `openssl rand -hex 32` outputs.
-3. Set `KITAZEIT_DOMAIN` and `KITAZEIT_ADMIN_EMAIL`.
-4. `docker compose up -d` — note the one-time admin password from the logs.
+3. Set `KITAZEIT_DOMAIN` and `KITAZEIT_ADMIN_EMAIL` in `.env`.
+4. `./start_public.sh` — note the one-time admin password from the logs.
 5. Sign in, change the admin password (forced), create real users.
 6. Schedule `scripts/backup.sh` via cron and copy snapshots off-host.
 7. Subscribe to release notes; let Dependabot keep dependencies fresh.

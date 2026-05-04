@@ -1,4 +1,12 @@
 services:
+  app:
+    environment:
+      - KITAZEIT_PUBLIC_URL=https://${KITAZEIT_DOMAIN:?KITAZEIT_DOMAIN must be set in .env}
+      - KITAZEIT_ALLOWED_ORIGINS=https://${KITAZEIT_DOMAIN:?KITAZEIT_DOMAIN must be set in .env}
+      - KITAZEIT_SECURE_COOKIES=true
+      - KITAZEIT_ENFORCE_CSRF=true
+      - KITAZEIT_ENFORCE_ORIGIN=true
+
   caddy:
     image: caddy:2-alpine
     container_name: kitazeit-caddy
@@ -12,7 +20,7 @@ services:
       - "443:443"
       - "443:443/udp"
     environment:
-      - KITAZEIT_DOMAIN=${KITAZEIT_DOMAIN:-localhost}
+      - KITAZEIT_DOMAIN=${KITAZEIT_DOMAIN:?KITAZEIT_DOMAIN must be set in .env}
     volumes:
       - ../Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

@@ -76,13 +76,14 @@ KitaZeit supports two compose modes:
 
 | Mode | Command | What runs | When to use |
 |---|---|---|---|
-| Local (no internet edge) | `./start_local.sh` | App + PostgreSQL (`docker/docker-compose-http.yml`) | Local smoke tests, internal environments, or when you provide your own reverse proxy/TLS outside this repo |
-| Public (internet-facing) | `./start_public.sh` | App + PostgreSQL + Caddy (`docker/docker-compose-http.yml` + `docker/docker-compose-https.yml`) | Normal production deployment on a public host |
+| Local (no internet edge) | `./start_local.sh` | App + PostgreSQL (`docker/docker-compose-local.yml`) | Local smoke tests, internal environments, or when you provide your own reverse proxy/TLS outside this repo |
+| Local debug | `./start_local_debug.sh` | App + PostgreSQL (`docker/docker-compose-local.yml` + `docker/docker-compose-local-debug.yml`) | Local browser/backend debugging with a debug Rust binary and unminified frontend assets |
+| Public (internet-facing) | `./start_public.sh` | App + PostgreSQL + Caddy (`docker/docker-compose-local.yml` + `docker/docker-compose-public.yml`) | Normal production deployment on a public host |
 
 Important differences:
 
 - **Public mode** publishes ports `80` and `443` via Caddy and handles automatic Let's Encrypt certificates.
-- **Local mode** does not start Caddy and does not publish 80/443 from this stack.
+- **Local mode** does not start Caddy, publishes the app directly on `http://localhost:3000`, and does not publish 80/443 from this stack.
 - In both modes, PostgreSQL stays on an internal Docker network.
 
 ### 1) Common setup (both modes)
@@ -126,13 +127,25 @@ Local mode (internal/local operation without Caddy):
 docker compose logs -f app
 ```
 
+Local debug mode (debug Rust build, frontend sourcemaps, no frontend minification):
+
+```bash
+./start_local_debug.sh
+docker compose logs -f app
+```
+
+In local mode, open `http://localhost:3000` and sign in with your admin e-mail and password `admin`.
+
+In local debug mode, open `http://localhost:3000`; backend symbols are kept, `RUST_BACKTRACE=1` is enabled, and the frontend build keeps readable JS chunks with sourcemaps.
+
 In public mode, sign in at `https://<your-domain>` with your admin e-mail and password `admin`.
 You will be prompted to change the password on first login.
 
 ### Configuration
 
-All settings live in `.env`; every variable is documented there. Summary of
-what matters:
+Shared secrets and the bootstrap admin account live in `.env`; mode-specific
+local/public behavior lives in the compose files. Summary of what matters in
+`.env`:
 
 | Variable | Required | Notes |
 |---|---|---|
