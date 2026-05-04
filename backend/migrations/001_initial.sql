@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS users (
   approver_id BIGINT REFERENCES users(id),
   allow_reopen_without_approval BOOLEAN NOT NULL DEFAULT FALSE,
   dark_mode BOOLEAN NOT NULL DEFAULT FALSE,
+  overtime_start_balance_min BIGINT NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT users_employee_has_approver
     CHECK (role <> 'employee' OR active = FALSE OR approver_id IS NOT NULL),

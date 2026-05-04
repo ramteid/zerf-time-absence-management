@@ -101,7 +101,6 @@
         <TimePicker
           id="entry-start-time"
           bind:value={start_time}
-          max={end_time}
           required
         />
       </div>
@@ -110,7 +109,6 @@
         <TimePicker
           id="entry-end-time"
           bind:value={end_time}
-          min={start_time}
           required
         />
       </div>

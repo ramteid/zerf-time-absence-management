@@ -65,6 +65,7 @@ pub struct User {
     /// an in-app + email notification that the auto-approval happened.
     pub allow_reopen_without_approval: bool,
     pub dark_mode: bool,
+    pub overtime_start_balance_min: i64,
 }
 
 impl User {
@@ -189,7 +190,7 @@ pub async fn login(
     }
 
     let user: Option<User> =
-        sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode FROM users WHERE email = $1 AND active = TRUE")
+        sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE email = $1 AND active = TRUE")
             .bind(&email)
             .fetch_optional(&s.pool)
             .await?;
@@ -331,6 +332,7 @@ pub async fn me(
         "first_name": user.first_name, "last_name": user.last_name,
         "role": user.role, "weekly_hours": user.weekly_hours,
         "annual_leave_days": user.annual_leave_days, "start_date": user.start_date,
+        "overtime_start_balance_min": user.overtime_start_balance_min,
         "active": user.active, "must_change_password": user.must_change_password,
         "must_configure_settings": must_configure_settings,
         "approver_id": user.approver_id,
@@ -541,7 +543,7 @@ pub async fn auth_middleware(
         .bind(hash_token(&token))
         .execute(&s.pool)
         .await?;
-    let user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode FROM users WHERE id=$1 AND active=TRUE")
+    let user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1 AND active=TRUE")
         .bind(uid)
         .fetch_optional(&s.pool)
         .await?

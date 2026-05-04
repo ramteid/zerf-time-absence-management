@@ -119,7 +119,7 @@ async fn build_range(
     to: NaiveDate,
     label: &str,
 ) -> AppResult<MonthReport> {
-    let user: crate::auth::User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode FROM users WHERE id=$1")
+    let user: crate::auth::User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1")
         .bind(user_id)
         .fetch_one(pool)
         .await?;
@@ -424,11 +424,11 @@ pub async fn team(
     }
     // Admins see all active users; non-admin leads see only their direct reports.
     let users: Vec<crate::auth::User> = if u.is_admin() {
-        sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode FROM users WHERE active=TRUE ORDER BY last_name")
+        sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE active=TRUE ORDER BY last_name")
             .fetch_all(&s.pool)
             .await?
     } else {
-        sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode FROM users WHERE active=TRUE AND approver_id=$1 ORDER BY last_name")
+        sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE active=TRUE AND approver_id=$1 ORDER BY last_name")
             .bind(u.id)
             .fetch_all(&s.pool)
             .await?
@@ -559,11 +559,13 @@ pub async fn overtime(
         // Future year - nothing has been worked yet.
         return Ok(Json(vec![]));
     };
-    // Determine the user's start_date so we skip months entirely before it.
-    let user_start: NaiveDate = sqlx::query_scalar("SELECT start_date FROM users WHERE id=$1")
-        .bind(uid)
-        .fetch_one(&s.pool)
-        .await?;
+    // Determine the user's start_date and overtime start balance.
+    let (user_start, overtime_start_balance_min): (NaiveDate, i64) = sqlx::query_as(
+        "SELECT start_date, overtime_start_balance_min FROM users WHERE id=$1",
+    )
+    .bind(uid)
+    .fetch_one(&s.pool)
+    .await?;
     let start_month = if user_start.year() == year {
         user_start.month()
     } else if user_start.year() > year {
@@ -573,7 +575,9 @@ pub async fn overtime(
         1
     };
     let mut out = vec![];
-    let mut cum = 0i64;
+    // Seed cumulative with start balance for the year the user started.
+    // For subsequent years, the balance carries forward through actual data.
+    let mut cum = if user_start.year() == year { overtime_start_balance_min } else { 0i64 };
     for m in start_month..=max_month {
         let mstr = format!("{:04}-{:02}", year, m);
         let r = build_month(&s.pool, uid, &mstr).await?;
@@ -623,7 +627,7 @@ pub async fn flextime(
         ));
     }
 
-    let user: crate::auth::User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode FROM users WHERE id=$1")
+    let user: crate::auth::User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1")
         .bind(uid)
         .fetch_one(&s.pool)
         .await?;
@@ -680,7 +684,8 @@ pub async fn flextime(
 
     let today = chrono::Local::now().date_naive();
     let mut out = vec![];
-    let mut cum = 0i64;
+    // Seed cumulative with the user's overtime start balance.
+    let mut cum = user.overtime_start_balance_min;
     let mut d = loop_start;
     while d <= q.to {
         let wd = d.weekday().num_days_from_monday();

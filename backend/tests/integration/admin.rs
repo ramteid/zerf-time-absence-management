@@ -57,6 +57,7 @@ async fn settings_validate_and_persist_user_defaults() {
             "/api/v1/settings",
             &json!({
                 "ui_language": "en",
+                "time_format": "24h",
                 "country": "DE",
                 "region": "DE-BW",
                 "default_weekly_hours": 169,
@@ -75,6 +76,7 @@ async fn settings_validate_and_persist_user_defaults() {
             "/api/v1/settings",
             &json!({
                 "ui_language": "de",
+                "time_format": "24h",
                 "country": "DE",
                 "region": "DE-BW",
                 "default_weekly_hours": 35.5,

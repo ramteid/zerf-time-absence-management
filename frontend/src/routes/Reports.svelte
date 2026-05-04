@@ -11,7 +11,7 @@
   const monthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
 
   let overtime = [];
-  $: cumulative = overtime.reduce((s, m) => s + m.diff_min, 0);
+  $: cumulative = overtime.length > 0 ? overtime[overtime.length - 1].cumulative_min : 0;
 
   async function loadOvertime() {
     try {
@@ -98,7 +98,7 @@
 
 <div class="content-area">
   <!-- Overtime balance -->
-  <div class="kz-card overtime-card">
+  <div class="kz-card overtime-card" style="margin-bottom:16px">
     <div class="card-header">
       <span class="card-header-title">
         {$t("Overtime balance {year}", { year: new Date().getFullYear() })}
@@ -124,9 +124,7 @@
         </thead>
         <tbody>
           {#each overtime as m, i}
-            {@const cum = overtime
-              .slice(0, i + 1)
-              .reduce((s, x) => s + x.diff_min, 0)}
+            {@const cum = m.cumulative_min}
             <tr>
               <td class="tab-num">{m.month}</td>
               <td class="tab-num">{minToHM(m.target_min)}</td>
@@ -156,9 +154,7 @@
     <!-- Mobile: stacked tiles -->
     <div class="overtime-tiles-mobile">
       {#each overtime as m, i}
-        {@const cum = overtime
-          .slice(0, i + 1)
-          .reduce((s, x) => s + x.diff_min, 0)}
+        {@const cum = m.cumulative_min}
         <div class="overtime-tile">
           <div style="font-weight:600;font-size:13px;margin-bottom:4px">
             {m.month}
