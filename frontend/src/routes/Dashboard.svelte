@@ -234,7 +234,7 @@
       pendingReopens = r;
       users = u;
     } catch (e) {
-      toast(e.message || $t("Error"), "error");
+      toast($t(e?.message || "Error"), "error");
     }
   }
 
@@ -392,7 +392,7 @@
       closeWeekDialog();
       await load();
     } catch (e) {
-      toast(e.message || $t("Error"), "error");
+      toast($t(e?.message || "Error"), "error");
     } finally {
       weekActionBusy = false;
     }
@@ -417,7 +417,7 @@
       closeWeekDialog();
       await load();
     } catch (e) {
-      toast(e.message || $t("Error"), "error");
+      toast($t(e?.message || "Error"), "error");
     } finally {
       weekActionBusy = false;
     }
@@ -440,7 +440,7 @@
       toast($t("All approved."), "ok");
       load();
     } catch (e) {
-      toast(e.message || $t("Error"), "error");
+      toast($t(e?.message || "Error"), "error");
     }
   }
 
@@ -450,7 +450,7 @@
       toast($t("Approved."), "ok");
       load();
     } catch (e) {
-      toast(e.message || $t("Error"), "error");
+      toast($t(e?.message || "Error"), "error");
     }
   }
 
@@ -466,7 +466,7 @@
       toast($t("Rejected."), "ok");
       load();
     } catch (e) {
-      toast(e.message || $t("Error"), "error");
+      toast($t(e?.message || "Error"), "error");
     }
   }
 
@@ -476,7 +476,7 @@
       toast($t("Approved."), "ok");
       load();
     } catch (e) {
-      toast(e.message || $t("Error"), "error");
+      toast($t(e?.message || "Error"), "error");
     }
   }
 
@@ -495,7 +495,7 @@
       toast($t("Rejected."), "ok");
       load();
     } catch (e) {
-      toast(e.message || $t("Error"), "error");
+      toast($t(e?.message || "Error"), "error");
     }
   }
 
@@ -505,7 +505,7 @@
       toast($t("Approved."), "ok");
       load();
     } catch (e) {
-      toast(e.message || $t("Error"), "error");
+      toast($t(e?.message || "Error"), "error");
     }
   }
 
@@ -524,7 +524,7 @@
       toast($t("Rejected."), "ok");
       load();
     } catch (e) {
-      toast(e.message || $t("Error"), "error");
+      toast($t(e?.message || "Error"), "error");
     }
   }
 </script>

@@ -28,7 +28,7 @@
       });
       toast($t("Settings saved."), "ok");
     } catch (e) {
-      toast(e.message || $t("Error"), "error");
+      toast($t(e?.message || "Error"), "error");
       row.allow_reopen_without_approval = !row.allow_reopen_without_approval;
       rows = rows;
     } finally {
