@@ -125,7 +125,12 @@ async fn load_all_settings(pool: &crate::db::DatabasePool) -> AppResult<PublicSe
         region: load_setting(pool, REGION_KEY, DEFAULT_REGION).await?,
         default_weekly_hours: dwh.parse().ok(),
         default_annual_leave_days: dal.parse().ok(),
-        carryover_expiry_date: load_setting(pool, CARRYOVER_EXPIRY_DATE_KEY, DEFAULT_CARRYOVER_EXPIRY_DATE).await?,
+        carryover_expiry_date: load_setting(
+            pool,
+            CARRYOVER_EXPIRY_DATE_KEY,
+            DEFAULT_CARRYOVER_EXPIRY_DATE,
+        )
+        .await?,
     })
 }
 
@@ -167,7 +172,15 @@ async fn load_smtp_admin(
     let from = load_setting(pool, SMTP_FROM_KEY, "").await?;
     let encryption = load_setting(pool, SMTP_ENCRYPTION_KEY, "starttls").await?;
     let password_set = !load_setting(pool, SMTP_PASSWORD_KEY, "").await?.is_empty();
-    Ok((enabled, host, port, username, from, encryption, password_set))
+    Ok((
+        enabled,
+        host,
+        port,
+        username,
+        from,
+        encryption,
+        password_set,
+    ))
 }
 
 /// Load the active SMTP config from the database. Returns `None` when SMTP
@@ -233,20 +246,26 @@ pub async fn update_smtp_settings(
         ));
     }
     let port = body.smtp_port.unwrap_or(587);
-    let username = body.smtp_username.as_deref().unwrap_or("").trim().to_string();
+    let username = body
+        .smtp_username
+        .as_deref()
+        .unwrap_or("")
+        .trim()
+        .to_string();
 
     if body.smtp_enabled {
         if host.is_empty() {
             return Err(AppError::BadRequest("SMTP host is required.".into()));
         }
         if from.is_empty() {
-            return Err(AppError::BadRequest("SMTP from address is required.".into()));
+            return Err(AppError::BadRequest(
+                "SMTP from address is required.".into(),
+            ));
         }
         // Validate from address is parseable as a mailbox.
         use lettre::message::Mailbox;
-        from.parse::<Mailbox>().map_err(|_| {
-            AppError::BadRequest("Invalid SMTP from address.".into())
-        })?;
+        from.parse::<Mailbox>()
+            .map_err(|_| AppError::BadRequest("Invalid SMTP from address.".into()))?;
     }
 
     save_setting(&s.pool, SMTP_HOST_KEY, &host).await?;
@@ -268,7 +287,11 @@ pub async fn update_smtp_settings(
             body.smtp_password.clone()
         } else {
             let stored = load_setting(&s.pool, SMTP_PASSWORD_KEY, "").await?;
-            if stored.is_empty() { None } else { Some(stored) }
+            if stored.is_empty() {
+                None
+            } else {
+                Some(stored)
+            }
         };
 
         let test_cfg = SmtpConfig {
@@ -283,9 +306,9 @@ pub async fn update_smtp_settings(
             from: from.clone(),
             encryption: encryption.clone(),
         };
-        crate::email::test_connection(&test_cfg).await.map_err(|e| {
-            AppError::BadRequest(format!("SMTP connection test failed: {e}"))
-        })?;
+        crate::email::test_connection(&test_cfg)
+            .await
+            .map_err(|e| AppError::BadRequest(format!("SMTP_CONNECTION_FAILED:{e}")))?;
     }
 
     save_setting(
@@ -327,7 +350,9 @@ pub async fn test_smtp_connection(
         return Err(AppError::BadRequest("SMTP host is required.".into()));
     }
     if from.is_empty() {
-        return Err(AppError::BadRequest("SMTP from address is required.".into()));
+        return Err(AppError::BadRequest(
+            "SMTP from address is required.".into(),
+        ));
     }
 
     let encryption = body
@@ -337,26 +362,39 @@ pub async fn test_smtp_connection(
         .trim()
         .to_lowercase();
     let port = body.smtp_port.unwrap_or(587);
-    let username = body.smtp_username.as_deref().unwrap_or("").trim().to_string();
+    let username = body
+        .smtp_username
+        .as_deref()
+        .unwrap_or("")
+        .trim()
+        .to_string();
 
     let password = if body.smtp_password.as_ref().is_some_and(|p| !p.is_empty()) {
         body.smtp_password.clone()
     } else {
         let stored = load_setting(&s.pool, SMTP_PASSWORD_KEY, "").await?;
-        if stored.is_empty() { None } else { Some(stored) }
+        if stored.is_empty() {
+            None
+        } else {
+            Some(stored)
+        }
     };
 
     let test_cfg = SmtpConfig {
         host,
         port,
-        username: if username.is_empty() { None } else { Some(username) },
+        username: if username.is_empty() {
+            None
+        } else {
+            Some(username)
+        },
         password,
         from,
         encryption,
     };
-    crate::email::test_connection(&test_cfg).await.map_err(|e| {
-        AppError::BadRequest(format!("SMTP connection test failed: {e}"))
-    })?;
+    crate::email::test_connection(&test_cfg)
+        .await
+        .map_err(|e| AppError::BadRequest(format!("SMTP_CONNECTION_FAILED:{e}")))?;
 
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -404,16 +442,26 @@ pub async fn update_admin_settings(
         let ced = ced.trim();
         let parts: Vec<&str> = ced.split('-').collect();
         if parts.len() != 2 {
-            return Err(AppError::BadRequest("carryover_expiry_date must be MM-DD.".into()));
+            return Err(AppError::BadRequest(
+                "carryover_expiry_date must be MM-DD.".into(),
+            ));
         }
-        let month: u32 = parts[0].parse().map_err(|_| AppError::BadRequest("Invalid month in carryover_expiry_date.".into()))?;
-        let day: u32 = parts[1].parse().map_err(|_| AppError::BadRequest("Invalid day in carryover_expiry_date.".into()))?;
+        let month: u32 = parts[0]
+            .parse()
+            .map_err(|_| AppError::BadRequest("Invalid month in carryover_expiry_date.".into()))?;
+        let day: u32 = parts[1]
+            .parse()
+            .map_err(|_| AppError::BadRequest("Invalid day in carryover_expiry_date.".into()))?;
         if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
-            return Err(AppError::BadRequest("Invalid carryover_expiry_date.".into()));
+            return Err(AppError::BadRequest(
+                "Invalid carryover_expiry_date.".into(),
+            ));
         }
         // Validate that the date actually exists (use a non-leap year to be strict).
         if chrono::NaiveDate::from_ymd_opt(2025, month, day).is_none() {
-            return Err(AppError::BadRequest("Invalid carryover_expiry_date.".into()));
+            return Err(AppError::BadRequest(
+                "Invalid carryover_expiry_date.".into(),
+            ));
         }
         save_setting(&s.pool, CARRYOVER_EXPIRY_DATE_KEY, ced).await?;
     }

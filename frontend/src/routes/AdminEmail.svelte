@@ -32,8 +32,8 @@
       testResult = body.smtp_enabled ? { ok: true } : null;
       toast($t("SMTP settings saved."), "ok");
     } catch (e) {
-      testResult = { ok: false, message: e?.message || "Error" };
-      toast($t(e?.message || "Error"), "error");
+      testResult = { ok: false, message: e?.message || $t("Error") };
+      toast(e?.message || $t("Error"), "error");
     } finally {
       saving = false;
     }
@@ -56,8 +56,8 @@
       testResult = { ok: true };
       toast($t("SMTP connection successful."), "ok");
     } catch (e) {
-      testResult = { ok: false, message: e?.message || "Error" };
-      toast($t(e?.message || "Error"), "error");
+      testResult = { ok: false, message: e?.message || $t("Error") };
+      toast(e?.message || $t("Error"), "error");
     } finally {
       testing = false;
     }
@@ -75,16 +75,15 @@
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
       <span
         class="smtp-status-dot"
-        style="width:10px;height:10px;border-radius:50%;flex-shrink:0;background:{s.smtp_enabled ? 'var(--success, #22c55e)' : 'var(--text-tertiary, #888)'}"
+        style="width:10px;height:10px;border-radius:50%;flex-shrink:0;background:{testResult ? (testResult.ok ? 'var(--success, #22c55e)' : 'var(--error, #ef4444)') : 'var(--text-tertiary, #888)'}"
       ></span>
       <span style="font-size:13px;font-weight:500;color:var(--text-secondary)">
-        {s.smtp_enabled ? $t("SMTP enabled") : $t("SMTP disabled")}
-      </span>
-      {#if testResult}
-        <span style="font-size:12px;margin-left:8px;color:{testResult.ok ? 'var(--success, #22c55e)' : 'var(--error, #ef4444)'}">
+        {#if testResult}
           {testResult.ok ? $t("Connection OK") : testResult.message}
-        </span>
-      {/if}
+        {:else}
+          {$t("Not tested")}
+        {/if}
+      </span>
     </div>
     <div class="field-group">
       <div class="field-row">

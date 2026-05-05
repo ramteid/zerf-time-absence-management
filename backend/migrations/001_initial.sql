@@ -15,12 +15,21 @@ CREATE TABLE IF NOT EXISTS users (
   dark_mode BOOLEAN NOT NULL DEFAULT FALSE,
   overtime_start_balance_min BIGINT NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT users_employee_has_approver
-    CHECK (role <> 'employee' OR active = FALSE OR approver_id IS NOT NULL),
+  CONSTRAINT users_non_admin_has_approver
+    CHECK (role = 'admin' OR approver_id IS NOT NULL),
   CONSTRAINT users_approver_not_self
     CHECK (approver_id IS NULL OR approver_id <> id)
 );
 CREATE INDEX IF NOT EXISTS idx_users_approver ON users(approver_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_first_last_name_unique
+  ON users(first_name, last_name);
+
+CREATE TABLE IF NOT EXISTS user_annual_leave_overrides (
+  user_id BIGINT NOT NULL REFERENCES users(id),
+  year INTEGER NOT NULL CHECK (year >= 2000 AND year <= 2100),
+  days BIGINT NOT NULL CHECK (days >= 0 AND days <= 366),
+  PRIMARY KEY (user_id, year)
+);
 
 CREATE TABLE IF NOT EXISTS sessions (
   token TEXT PRIMARY KEY,
@@ -157,6 +166,10 @@ CREATE TABLE IF NOT EXISTS app_settings (
 
 INSERT INTO app_settings(key, value)
 VALUES ('ui_language', 'en')
+ON CONFLICT (key) DO NOTHING;
+
+INSERT INTO app_settings(key, value)
+VALUES ('carryover_expiry_date', '03-31')
 ON CONFLICT (key) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS audit_log (

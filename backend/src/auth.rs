@@ -317,27 +317,24 @@ pub async fn me(
         "can_manage_team_settings": user.is_lead(),
         "can_approve": user.is_lead(),
         "can_view_team_reports": user.is_lead(),
-        "can_view_dashboard": user.is_lead(),
+        "can_view_dashboard": true,
+        "can_view_reports": true,
     });
     let mut nav = vec![
         serde_json::json!({"href":"/time","key":"Time","icon":"⏱"}),
         serde_json::json!({"href":"/absences","key":"Absences","icon":"📅"}),
         serde_json::json!({"href":"/calendar","key":"Calendar","icon":"🗓"}),
+        serde_json::json!({"href":"/dashboard","key":"Dashboard","icon":"🔔"}),
+        serde_json::json!({"href":"/reports","key":"Reports","icon":"📊"}),
         serde_json::json!({"href":"/account","key":"Account","icon":"👤"}),
     ];
     if user.is_lead() {
-        nav.push(serde_json::json!({"href":"/dashboard","key":"Dashboard","icon":"🔔"}));
-        nav.push(serde_json::json!({"href":"/reports","key":"Reports","icon":"📊"}));
         nav.push(serde_json::json!({"href":"/team-settings","key":"TeamSettings","icon":"🛡"}));
     }
     if user.is_admin() {
         nav.push(serde_json::json!({"href":"/admin/users","key":"Admin","icon":"⚙"}));
     }
-    let home = if user.role == "employee" {
-        "/time"
-    } else {
-        "/dashboard"
-    };
+    let home = "/dashboard";
     // For admins: flag whether initial setup (country, working-time defaults,
     // and admin profile name) has been completed. Until it is, the SPA
     // redirects to /admin/settings.
@@ -612,18 +609,24 @@ pub async fn cleanup_loop(pool: crate::db::DatabasePool) {
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
     loop {
         interval.tick().await;
-        let _ = sqlx::query(
+        if let Err(e) = sqlx::query(
             "DELETE FROM sessions \
              WHERE last_active_at < CURRENT_TIMESTAMP - INTERVAL '8 hours' \
                 OR created_at < CURRENT_TIMESTAMP - INTERVAL '24 hours'",
         )
         .execute(&pool)
-        .await;
-        let _ = sqlx::query(
+        .await
+        {
+            tracing::warn!(target: "zerf::cleanup", "session cleanup failed: {e}");
+        }
+        if let Err(e) = sqlx::query(
             "DELETE FROM login_attempts WHERE attempted_at < CURRENT_TIMESTAMP - INTERVAL '1 day'",
         )
         .execute(&pool)
-        .await;
+        .await
+        {
+            tracing::warn!(target: "zerf::cleanup", "login_attempts cleanup failed: {e}");
+        }
     }
 }
 

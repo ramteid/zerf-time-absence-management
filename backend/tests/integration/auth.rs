@@ -28,6 +28,7 @@ async fn me_payload_provides_role_shaped_view_data() {
         "can_approve",
         "can_view_team_reports",
         "can_view_dashboard",
+        "can_view_reports",
     ] {
         assert_eq!(perms[key], serde_json::Value::Bool(true), "{key} for admin");
     }
@@ -61,10 +62,13 @@ async fn me_payload_provides_role_shaped_view_data() {
     assert_eq!(st, StatusCode::OK);
     let (_, eme) = emp.get("/api/v1/auth/me").await;
     assert_eq!(eme["role"], "employee");
-    assert_eq!(eme["home"], "/time");
+    assert_eq!(eme["home"], "/dashboard");
     assert_eq!(eme["permissions"]["is_admin"], false);
     assert_eq!(eme["permissions"]["is_lead"], false);
-    assert_eq!(eme["permissions"]["can_view_dashboard"], false);
+    assert_eq!(eme["permissions"]["can_view_dashboard"], true);
+    assert_eq!(eme["permissions"]["can_view_reports"], true);
+    assert_eq!(eme["permissions"]["can_approve"], false);
+    assert_eq!(eme["permissions"]["can_view_team_reports"], false);
 
     let nav: Vec<&str> = eme["nav"]
         .as_array()
@@ -73,7 +77,8 @@ async fn me_payload_provides_role_shaped_view_data() {
         .map(|n| n["href"].as_str().unwrap())
         .collect();
     assert!(!nav.contains(&"/admin/users"));
-    assert!(!nav.contains(&"/dashboard"));
+    assert!(nav.contains(&"/dashboard"));
+    assert!(nav.contains(&"/reports"));
     assert!(nav.contains(&"/time"));
     assert!(nav.contains(&"/account"));
 
