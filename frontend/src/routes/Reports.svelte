@@ -120,7 +120,7 @@
           for (const e of day.entries) {
             rows.push(csvEncode([
               day.date, weekday, e.start_time, e.end_time,
-              csvSafe(e.category), e.minutes, statusLabel(e.status),
+              csvSafe($t(e.category)), e.minutes, statusLabel(e.status),
               csvSafe(e.comment || ""), csvSafe(absence), csvSafe(holiday),
             ]));
           }
