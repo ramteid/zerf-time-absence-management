@@ -112,7 +112,7 @@
       toast($t("Week submitted."), "ok");
       await loadWeek(mo || new Date());
     } catch (e) {
-      toast(e.message || $t("Error"), "error");
+      toast($t(e?.message || "Error"), "error");
     }
   }
 
@@ -138,7 +138,7 @@
       }
       await loadWeek(mo || new Date());
     } catch (e) {
-      toast(e.message || $t("Error"), "error");
+      toast($t(e?.message || "Error"), "error");
     }
   }
 

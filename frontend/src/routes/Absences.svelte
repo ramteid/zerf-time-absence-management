@@ -45,7 +45,7 @@
       balance = nextBalance;
     } catch (e) {
       if (token !== loadToken) return;
-      toast(e.message || $t("Leave balance unavailable."), "error");
+      toast($t(e?.message || "Leave balance unavailable."), "error");
     }
 
     const years = [
@@ -119,7 +119,7 @@
       toast($t("Absence cancelled."), "ok");
       load();
     } catch (e) {
-      toast(e.message || $t("Error"), "error");
+      toast($t(e?.message || "Error"), "error");
     }
   }
 </script>

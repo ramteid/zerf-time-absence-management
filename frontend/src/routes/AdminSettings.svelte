@@ -10,6 +10,10 @@
   let countries = [];
   let countryRegions = [];
 
+  function sortCountriesByNameDescending(items) {
+    return [...items].sort((a, b) => b.name.localeCompare(a.name));
+  }
+
   async function loadRegionsFor(country) {
     if (!country) return [];
     try {
@@ -27,7 +31,7 @@
     s = loadedSettings;
     appSettings.set(loadedSettings);
     if (s.ui_language) setLanguage(s.ui_language);
-    countries = allCountries;
+    countries = sortCountriesByNameDescending(allCountries);
     if (s.country) {
       countryRegions = await loadRegionsFor(s.country);
     }
@@ -61,7 +65,7 @@
         currentUser.update((u) => ({ ...u, must_configure_settings: false }));
       }
     } catch (e) {
-      toast(e.message || $t("Error"), "error");
+      toast($t(e?.message || "Error"), "error");
     } finally {
       saving = false;
     }

@@ -32,7 +32,7 @@
         "info",
       );
     } catch (e) {
-      toast(e.message || $t("Error"), "error");
+      toast($t(e?.message || "Error"), "error");
     }
   }
 
@@ -49,7 +49,7 @@
       toast($t("User deactivated."), "ok");
       load();
     } catch (e) {
-      toast(e.message || $t("Error"), "error");
+      toast($t(e?.message || "Error"), "error");
     }
   }
 

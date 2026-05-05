@@ -128,14 +128,14 @@
     try {
       await markAllNotificationsRead();
     } catch (e) {
-      toast(e.message || $t("Error"), "error");
+      toast($t(e?.message || "Error"), "error");
     }
   }
   async function clearAll() {
     try {
       await clearNotifications();
     } catch (e) {
-      toast(e.message || $t("Error"), "error");
+      toast($t(e?.message || "Error"), "error");
     }
   }
   function onDocClick(e) {
