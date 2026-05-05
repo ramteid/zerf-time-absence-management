@@ -291,49 +291,17 @@ pub async fn approve(
     if !u.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let a_preview: ChangeRequest =
-        sqlx::query_as("SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE id=$1 AND status='open'")
-            .bind(id)
-            .fetch_one(&s.pool)
-            .await?;
-    // A lead may not review their own request; admins may.
-    if a_preview.user_id == u.id && !u.is_admin() {
-        return Err(AppError::Forbidden);
-    }
-    if !u.is_admin() {
-        let is_report: Option<bool> =
-            sqlx::query_scalar("SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2")
-                .bind(a_preview.user_id)
-                .bind(u.id)
-                .fetch_optional(&s.pool)
-                .await?;
-        if is_report.is_none() {
-            return Err(AppError::Forbidden);
-        }
-    }
-
     let mut tx = s.pool.begin().await?;
-    // Fetch the existing entry and build effective post-change values so we can
-    // run the same overlap / 14-hour / category validation as direct edits do.
-    sqlx::query("SELECT pg_advisory_xact_lock($1)")
-        .bind(a_preview.user_id)
-        .execute(&mut *tx)
-        .await?;
-    let entry: crate::time_entries::TimeEntry =
-        sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1 FOR UPDATE")
-            .bind(a_preview.time_entry_id)
-            .fetch_one(&mut *tx)
-            .await?;
+    // Fetch the change request first, then lock and validate.
     let a: ChangeRequest =
         sqlx::query_as("SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE id=$1 AND status='open' FOR UPDATE")
             .bind(id)
             .fetch_optional(&mut *tx)
             .await?
             .ok_or_else(|| AppError::Conflict("Change request was already resolved by someone else.".into()))?;
-    if entry.user_id != a.user_id {
-        return Err(AppError::Conflict(
-            "Change request target no longer matches the entry owner.".into(),
-        ));
+    // A lead may not review their own request; admins may.
+    if a.user_id == u.id && !u.is_admin() {
+        return Err(AppError::Forbidden);
     }
     if !u.is_admin() {
         let is_report: Option<bool> = sqlx::query_scalar(
@@ -346,6 +314,22 @@ pub async fn approve(
         if is_report.is_none() {
             return Err(AppError::Forbidden);
         }
+    }
+    // Fetch the existing entry and build effective post-change values so we can
+    // run the same overlap / 14-hour / category validation as direct edits do.
+    sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(a.user_id)
+        .execute(&mut *tx)
+        .await?;
+    let entry: crate::time_entries::TimeEntry =
+        sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1 FOR UPDATE")
+            .bind(a.time_entry_id)
+            .fetch_one(&mut *tx)
+            .await?;
+    if entry.user_id != a.user_id {
+        return Err(AppError::Conflict(
+            "Change request target no longer matches the entry owner.".into(),
+        ));
     }
     if entry.status == "draft" {
         return Err(AppError::BadRequest("Edit drafts directly.".into()));
@@ -396,7 +380,7 @@ pub async fn approve(
         category_id: a.new_category_id.unwrap_or(entry.category_id),
         comment: a.new_comment.clone().or(entry.comment.clone()),
     };
-    crate::time_entries::validate(&s.pool, entry.user_id, &effective, Some(a.time_entry_id))
+    crate::time_entries::validate(&mut *tx, entry.user_id, &effective, Some(a.time_entry_id))
         .await?;
     let claimed = sqlx::query(
         "UPDATE change_requests SET status='approved', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP WHERE id=$2 AND status='open'",
@@ -450,6 +434,9 @@ pub async fn reject(
     }
     if b.reason.trim().is_empty() {
         return Err(AppError::BadRequest("Reason required.".into()));
+    }
+    if b.reason.len() > 2000 {
+        return Err(AppError::BadRequest("Reason too long.".into()));
     }
     let mut tx = s.pool.begin().await?;
     let prev: ChangeRequest = sqlx::query_as("SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE id=$1 AND status='open'")

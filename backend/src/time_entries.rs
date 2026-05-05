@@ -133,7 +133,7 @@ pub struct NewTimeEntry {
 }
 
 pub(crate) async fn validate(
-    pool: &crate::db::DatabasePool,
+    conn: &mut sqlx::PgConnection,
     user_id: i64,
     te: &NewTimeEntry,
     exclude_id: Option<i64>,
@@ -147,7 +147,7 @@ pub(crate) async fn validate(
     let user_start: chrono::NaiveDate =
         sqlx::query_scalar("SELECT start_date FROM users WHERE id = $1")
             .bind(user_id)
-            .fetch_one(pool)
+            .fetch_one(&mut *conn)
             .await?;
     if te.entry_date < user_start {
         return Err(AppError::BadRequest(
@@ -158,7 +158,7 @@ pub(crate) async fn validate(
     let cat_active: Option<bool> =
         sqlx::query_scalar("SELECT active FROM categories WHERE id = $1")
             .bind(te.category_id)
-            .fetch_optional(pool)
+            .fetch_optional(&mut *conn)
             .await?;
     match cat_active {
         None => return Err(AppError::BadRequest("Category not found.".into())),
@@ -179,7 +179,7 @@ pub(crate) async fn validate(
     )
     .bind(user_id)
     .bind(te.entry_date)
-    .fetch_all(pool)
+    .fetch_all(&mut *conn)
     .await?;
 
     let mut day_total = new_min;
@@ -213,7 +213,7 @@ pub(crate) async fn validate(
     )
     .bind(user_id)
     .bind(te.entry_date)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *conn)
     .await?;
     if let Some(kind) = absence_on_day {
         return Err(AppError::BadRequest(format!(
@@ -234,7 +234,7 @@ pub async fn create(
         .bind(u.id)
         .execute(&mut *tx)
         .await?;
-    validate(&s.pool, u.id, &b, None).await?;
+    validate(&mut *tx, u.id, &b, None).await?;
     let id: i64 = sqlx::query_scalar("INSERT INTO time_entries(user_id, entry_date, start_time, end_time, category_id, comment) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id")
         .bind(u.id).bind(b.entry_date).bind(&b.start_time).bind(&b.end_time).bind(b.category_id).bind(&b.comment)
         .fetch_one(&mut *tx).await?;
@@ -288,7 +288,7 @@ pub async fn update(
             ));
         }
     }
-    validate(&s.pool, prev.user_id, &b, Some(id)).await?;
+    validate(&mut *tx, prev.user_id, &b, Some(id)).await?;
     sqlx::query("UPDATE time_entries SET entry_date=$1, start_time=$2, end_time=$3, category_id=$4, comment=$5, updated_at=CURRENT_TIMESTAMP WHERE id=$6")
         .bind(b.entry_date).bind(&b.start_time).bind(&b.end_time).bind(b.category_id).bind(&b.comment).bind(id)
         .execute(&mut *tx).await?;

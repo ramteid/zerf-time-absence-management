@@ -280,11 +280,8 @@ pub struct NewAbsence {
     pub comment: Option<String>,
 }
 
-struct NormalizedAbsence<'a> {
-    kind: &'a str,
-}
-
-fn normalize_absence(input: &NewAbsence) -> AppResult<NormalizedAbsence<'_>> {
+/// Validate common absence fields and return the kind as a `&str`.
+fn validate_absence(input: &NewAbsence) -> AppResult<&str> {
     if !ALLOWED_ABSENCE_KINDS.contains(&input.kind.as_str()) {
         return Err(AppError::BadRequest("Invalid kind".into()));
     }
@@ -304,7 +301,7 @@ fn normalize_absence(input: &NewAbsence) -> AppResult<NormalizedAbsence<'_>> {
         ));
     }
 
-    Ok(NormalizedAbsence { kind: &input.kind })
+    Ok(&input.kind)
 }
 
 fn validate_sick_start_date(kind: &str, start_date: NaiveDate) -> AppResult<()> {
@@ -382,8 +379,8 @@ pub async fn create(
     u: User,
     Json(b): Json<NewAbsence>,
 ) -> AppResult<Json<Absence>> {
-    let normalized = normalize_absence(&b)?;
-    validate_sick_start_date(normalized.kind, b.start_date)?;
+    let kind = validate_absence(&b)?;
+    validate_sick_start_date(kind, b.start_date)?;
     // Reject absences that start before the user's start_date.
     if b.start_date < u.start_date {
         return Err(AppError::BadRequest(
@@ -401,18 +398,18 @@ pub async fn create(
     if overlap > 0 {
         return Err(AppError::Conflict("Overlap with existing absence.".into()));
     }
-    ensure_no_logged_time_conflict(&mut *tx, u.id, normalized.kind, b.start_date, b.end_date)
+    ensure_no_logged_time_conflict(&mut *tx, u.id, kind, b.start_date, b.end_date)
         .await?;
     // Sick leave is auto-approved only when it has already started (or starts today).
     // Future-dated sick leave requires review like any other request.
     let today_date = chrono::Local::now().date_naive();
-    let status = if normalized.kind == "sick" && b.start_date <= today_date {
+    let status = if kind == "sick" && b.start_date <= today_date {
         "approved"
     } else {
         "requested"
     };
     let id: i64 = sqlx::query_scalar("INSERT INTO absences(user_id, kind, start_date, end_date, comment, status) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id")
-        .bind(u.id).bind(normalized.kind).bind(b.start_date).bind(b.end_date).bind(&b.comment).bind(status)
+        .bind(u.id).bind(kind).bind(b.start_date).bind(b.end_date).bind(&b.comment).bind(status)
         .fetch_one(&mut *tx).await?;
     tx.commit().await?;
     let a: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1")
@@ -461,8 +458,8 @@ pub async fn update(
     Path(id): Path<i64>,
     Json(b): Json<NewAbsence>,
 ) -> AppResult<Json<Absence>> {
-    let normalized = normalize_absence(&b)?;
-    validate_sick_start_date(normalized.kind, b.start_date)?;
+    let kind = validate_absence(&b)?;
+    validate_sick_start_date(kind, b.start_date)?;
     // Reject absences that start before the user's start_date.
     if b.start_date < u.start_date {
         return Err(AppError::BadRequest(
@@ -479,19 +476,13 @@ pub async fn update(
     if prev.user_id != u.id {
         return Err(AppError::Forbidden);
     }
-    let allowed = prev.status == "requested";
-    if !allowed {
+    if prev.status != "requested" {
         return Err(AppError::BadRequest("Cannot edit.".into()));
     }
     // Sick absences must remain sick: changing kind is never allowed.
     if prev.kind == "sick" && b.kind != "sick" {
         return Err(AppError::BadRequest(
             "Sick absences cannot change type.".into(),
-        ));
-    }
-    if prev.status == "approved" && b.kind != prev.kind {
-        return Err(AppError::BadRequest(
-            "Approved absences cannot change type.".into(),
         ));
     }
     // Re-check overlap with *other* absences of the same user (under advisory
@@ -504,35 +495,22 @@ pub async fn update(
     if overlap > 0 {
         return Err(AppError::Conflict("Overlap with existing absence.".into()));
     }
-    ensure_no_logged_time_conflict(&mut *tx, u.id, normalized.kind, b.start_date, b.end_date)
+    ensure_no_logged_time_conflict(&mut *tx, u.id, kind, b.start_date, b.end_date)
         .await?;
-    let (status, reviewed_by, reviewed_at, rejection_reason) = if prev.status == "requested" {
-        let today_date = chrono::Local::now().date_naive();
-        let new_status = if normalized.kind == "sick" && b.start_date <= today_date {
-            "approved"
-        } else {
-            "requested"
-        };
-        (new_status, None, None, None)
+    let today_date = chrono::Local::now().date_naive();
+    let status = if kind == "sick" && b.start_date <= today_date {
+        "approved"
     } else {
-        (
-            prev.status.as_str(),
-            prev.reviewed_by,
-            prev.reviewed_at,
-            prev.rejection_reason.clone(),
-        )
+        "requested"
     };
     sqlx::query(
-        "UPDATE absences SET kind=$1, start_date=$2, end_date=$3, comment=$4, status=$5, reviewed_by=$6, reviewed_at=$7, rejection_reason=$8 WHERE id=$9",
+        "UPDATE absences SET kind=$1, start_date=$2, end_date=$3, comment=$4, status=$5, reviewed_by=NULL, reviewed_at=NULL, rejection_reason=NULL WHERE id=$6",
     )
-    .bind(normalized.kind)
+    .bind(kind)
     .bind(b.start_date)
     .bind(b.end_date)
     .bind(&b.comment)
     .bind(status)
-    .bind(reviewed_by)
-    .bind(reviewed_at)
-    .bind(rejection_reason)
     .bind(id)
     .execute(&mut *tx)
     .await?;
