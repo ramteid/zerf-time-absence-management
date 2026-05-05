@@ -51,7 +51,6 @@ impl TestApp {
         let cfg = Config {
             database_url: database_url.clone(),
             session_secret: "integration-test-secret-do-not-use-in-prod-32-characters".into(),
-            admin_email: "admin@example.com".into(),
             bind: "127.0.0.1:0".into(),
             static_dir: "static".into(),
             public_url: None,
@@ -84,7 +83,7 @@ impl TestApp {
             .await
             .expect("failed to seed holidays+1");
 
-        let admin_password = seed_admin(&pool, &cfg.admin_email)
+        let admin_password = seed_admin(&pool, "admin@example.com")
             .await
             .expect("failed to seed admin")
             .expect("admin should have been created");

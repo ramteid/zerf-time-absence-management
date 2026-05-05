@@ -4,7 +4,6 @@ use std::env;
 pub struct Config {
     pub database_url: String,
     pub session_secret: String,
-    pub admin_email: String,
 
     pub bind: String,
     pub static_dir: String,
@@ -51,8 +50,6 @@ impl Config {
             panic!("ZERF_SESSION_SECRET is using a default/placeholder value — replace it with a real random secret");
         }
 
-        let admin_email =
-            env::var("ZERF_ADMIN_EMAIL").unwrap_or_else(|_| "admin@example.com".into());
         let public_url = env::var("ZERF_PUBLIC_URL").ok().filter(|s| !s.is_empty());
         let allowed_origins: Vec<String> = match env::var("ZERF_ALLOWED_ORIGINS").ok() {
             Some(s) if !s.is_empty() => s
@@ -74,7 +71,6 @@ impl Config {
         Self {
             database_url,
             session_secret,
-            admin_email,
             bind: env::var("ZERF_BIND").unwrap_or_else(|_| "0.0.0.0:3000".into()),
             static_dir: env::var("ZERF_STATIC_DIR").unwrap_or_else(|_| "static".into()),
             public_url,

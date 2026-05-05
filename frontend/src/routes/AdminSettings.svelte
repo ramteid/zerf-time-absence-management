@@ -10,6 +10,9 @@
   let adminFirstName = "";
   let adminLastName = "";
   $: isFirstSetup = !!$currentUser?.must_configure_settings;
+  $: needsName =
+    isFirstSetup &&
+    (!$currentUser?.first_name?.trim() || !$currentUser?.last_name?.trim());
 
   let countries = [];
   let countryRegions = [];
@@ -43,7 +46,7 @@
   load();
 
   async function save() {
-    if (isFirstSetup) {
+    if (needsName) {
       if (!adminFirstName.trim() || !adminLastName.trim()) {
         toast($t("Please enter your first name and last name."), "error");
         return;
@@ -70,7 +73,7 @@
       s = saved;
       appSettings.set(saved);
       if (saved.ui_language) setLanguage(saved.ui_language);
-      if (isFirstSetup) {
+      if (needsName) {
         await api(`/users/${$currentUser.id}`, {
           method: "PUT",
           body: {
@@ -80,10 +83,12 @@
         });
         currentUser.update((u) => ({
           ...u,
-          must_configure_settings: false,
           first_name: adminFirstName.trim(),
           last_name: adminLastName.trim(),
         }));
+      }
+      if (isFirstSetup) {
+        currentUser.update((u) => ({ ...u, must_configure_settings: false }));
       }
       toast($t("Settings saved."), "ok");
     } catch (e) {
@@ -134,12 +139,14 @@
       >
       <p style="font-size:13px;color:var(--text-tertiary);margin-top:4px">
         {$t(
-          "Please enter your name and configure the country, region, default weekly hours and default annual leave days before using the application.",
+          needsName
+            ? "Please enter your name and configure the country, region, default weekly hours and default annual leave days before using the application."
+            : "Please configure the country, region, default weekly hours and default annual leave days before using the application.",
         )}
       </p>
     </div>
   {/if}
-  {#if isFirstSetup}
+  {#if needsName}
     <div class="kz-card" style="padding:20px;margin-bottom:16px">
       <div style="font-size:14px;font-weight:600;margin-bottom:14px">
         {$t("Your Name")}

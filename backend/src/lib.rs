@@ -67,6 +67,8 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
     Router::new()
         .route("/auth/login", post(auth::login))
         .route("/auth/logout", post(auth::logout))
+        .route("/auth/setup-status", get(auth::setup_status))
+        .route("/auth/setup", post(auth::setup))
         .route("/settings/public", get(settings::public_settings))
         .merge(
             Router::new()

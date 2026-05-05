@@ -53,7 +53,6 @@ services:
     environment:
       - ZERF_DATABASE_URL=${ZERF_DATABASE_URL:-postgres://${ZERF_POSTGRES_USER:-zerf}:${ZERF_POSTGRES_PASSWORD:?ZERF_POSTGRES_PASSWORD must be set in .env (openssl rand -hex 32)}@postgres:5432/${ZERF_POSTGRES_DB:-zerf}?sslmode=disable}
       - ZERF_SESSION_SECRET=${ZERF_SESSION_SECRET:?ZERF_SESSION_SECRET must be set in .env (>=32 chars random)}
-      - ZERF_ADMIN_EMAIL=${ZERF_ADMIN_EMAIL:?ZERF_ADMIN_EMAIL must be set in .env}
       - ZERF_BIND=0.0.0.0:3000
       - ZERF_PUBLIC_URL=http://localhost:3000
       - ZERF_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000

@@ -627,3 +627,82 @@ pub async fn cleanup_loop(pool: crate::db::DatabasePool) {
         .await;
     }
 }
+
+// ---------------------------------------------------------------------------
+// Initial setup (first-boot admin creation)
+// ---------------------------------------------------------------------------
+
+/// Returns whether the application needs initial setup (no users exist yet).
+pub async fn setup_status(State(s): State<AppState>) -> AppResult<Json<serde_json::Value>> {
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+        .fetch_one(&s.pool)
+        .await?;
+    Ok(Json(serde_json::json!({ "needs_setup": count == 0 })))
+}
+
+#[derive(Deserialize)]
+pub struct SetupRequest {
+    pub email: String,
+    pub password: String,
+    pub first_name: String,
+    pub last_name: String,
+}
+
+/// Create the initial admin user. Only works when no users exist yet.
+pub async fn setup(
+    State(s): State<AppState>,
+    Json(body): Json<SetupRequest>,
+) -> AppResult<Json<serde_json::Value>> {
+    // Validate inputs before acquiring a transaction.
+    let email = body.email.trim().to_lowercase();
+    if email.is_empty() || email.len() > 254 || !email.contains('@') {
+        return Err(AppError::BadRequest("Invalid email address.".into()));
+    }
+    let first_name = body.first_name.trim().to_string();
+    let last_name = body.last_name.trim().to_string();
+    if first_name.is_empty() || last_name.is_empty() {
+        return Err(AppError::BadRequest(
+            "First name and last name are required.".into(),
+        ));
+    }
+    if first_name.len() > 200 || last_name.len() > 200 {
+        return Err(AppError::BadRequest("Name too long.".into()));
+    }
+    let password = &body.password;
+    if password.len() < 8 || password.len() > 128 {
+        return Err(AppError::BadRequest(
+            "Password must be between 8 and 128 characters.".into(),
+        ));
+    }
+
+    let hash = hash_password(password)?;
+    let today = chrono::Local::now().date_naive();
+
+    // Use a serialized transaction to prevent race conditions where two
+    // concurrent requests both see zero users and both insert an admin.
+    let mut tx = s.pool.begin().await?;
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+        .fetch_one(&mut *tx)
+        .await?;
+    if count > 0 {
+        return Err(AppError::BadRequest(
+            "Setup has already been completed.".into(),
+        ));
+    }
+    sqlx::query(
+        "INSERT INTO users(email, password_hash, first_name, last_name, role, \
+         weekly_hours, annual_leave_days, start_date, must_change_password, \
+         overtime_start_balance_min) \
+         VALUES ($1, $2, $3, $4, 'admin', 39.0, 30, $5, FALSE, 0)",
+    )
+    .bind(&email)
+    .bind(&hash)
+    .bind(&first_name)
+    .bind(&last_name)
+    .bind(today)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+
+    Ok(Json(serde_json::json!({ "ok": true })))
+}

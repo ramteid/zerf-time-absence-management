@@ -2,7 +2,7 @@ use anyhow::Result;
 use chrono::Datelike;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use zerf::{build_app, categories, config, db, holidays, seed_admin, AppState};
+use zerf::{build_app, categories, config, db, holidays, AppState};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -20,11 +20,15 @@ async fn main() -> Result<()> {
     holidays::ensure_holidays(&pool, year).await?;
     holidays::ensure_holidays(&pool, year + 1).await?;
 
-    if let Some(temp) = seed_admin(&pool, &cfg.admin_email).await? {
+    // Check if initial setup is needed (no users exist).
+    let user_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+        .fetch_one(&pool)
+        .await?;
+    if user_count == 0 {
         tracing::info!("==========================================================");
-        tracing::info!("Admin email:    {}", cfg.admin_email);
-        tracing::info!("Admin password: {}", temp);
-        tracing::info!("Please change immediately after first login.");
+        tracing::info!("No admin account found.");
+        tracing::info!("Please open the application in your browser to complete");
+        tracing::info!("the initial setup.");
         tracing::info!("==========================================================");
     }
 
