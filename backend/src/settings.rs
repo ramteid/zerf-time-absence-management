@@ -314,7 +314,7 @@ pub async fn update_admin_settings(
     State(s): State<AppState>,
     user: User,
     Json(body): Json<UpdateSettings>,
-) -> AppResult<Json<PublicSettings>> {
+) -> AppResult<Json<AdminSettingsResponse>> {
     if !user.is_admin() {
         return Err(AppError::Forbidden);
     }
@@ -392,5 +392,16 @@ pub async fn update_admin_settings(
         }
     }
 
-    Ok(Json(load_all_settings(&s.pool).await?))
+    let base = load_all_settings(&s.pool).await?;
+    let smtp = load_smtp_admin(&s.pool).await?;
+    Ok(Json(AdminSettingsResponse {
+        base,
+        smtp_enabled: smtp.0,
+        smtp_host: smtp.1,
+        smtp_port: smtp.2,
+        smtp_username: smtp.3,
+        smtp_from: smtp.4,
+        smtp_encryption: smtp.5,
+        smtp_password_set: smtp.6,
+    }))
 }
