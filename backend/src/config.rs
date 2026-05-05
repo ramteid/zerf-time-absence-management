@@ -13,7 +13,6 @@ pub struct Config {
     pub enforce_origin: bool,
     pub enforce_csrf: bool,
     pub trust_proxy: bool,
-
 }
 
 #[derive(Clone, Debug)]
@@ -36,7 +35,6 @@ fn env_bool(key: &str, default: bool) -> bool {
         Err(_) => default,
     }
 }
-
 
 impl Config {
     pub fn from_env() -> Self {

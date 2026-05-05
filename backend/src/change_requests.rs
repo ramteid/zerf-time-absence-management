@@ -66,7 +66,7 @@ pub async fn list_all(State(s): State<AppState>, u: User) -> AppResult<Json<Vec<
     // Non-admin leads see only open change requests from their direct reports.
     Ok(Json(
         sqlx::query_as::<_, ChangeRequest>(
-            "SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE status='open' AND user_id IN (SELECT id FROM users WHERE approver_id = $1) ORDER BY created_at",
+            "SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE status='open' AND user_id IN (SELECT id FROM users WHERE approver_id = $1 AND role != 'admin') ORDER BY created_at",
         )
         .bind(u.id)
         .fetch_all(&s.pool)
@@ -305,7 +305,7 @@ pub async fn approve(
     }
     if !u.is_admin() {
         let is_report: Option<bool> = sqlx::query_scalar(
-            "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2 FOR UPDATE",
+            "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2 AND role != 'admin' FOR UPDATE",
         )
         .bind(a.user_id)
         .bind(u.id)
@@ -450,7 +450,7 @@ pub async fn reject(
     // Non-admin leads may only act on requests from their direct reports.
     if !u.is_admin() {
         let is_report: Option<bool> = sqlx::query_scalar(
-            "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2 FOR UPDATE",
+            "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2 AND role != 'admin' FOR UPDATE",
         )
         .bind(prev.user_id)
         .bind(u.id)

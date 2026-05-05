@@ -100,7 +100,7 @@ pub async fn list_all(
         builder
             .push(" AND user_id IN (SELECT id FROM users WHERE approver_id = ")
             .push_bind(u.id)
-            .push(")");
+            .push(" AND role != 'admin')");
     }
     if let Some(v) = q.from {
         builder.push(" AND entry_date >= ").push_bind(v);
@@ -444,7 +444,7 @@ pub async fn approve(
     }
     if !u.is_admin() {
         let is_report: Option<bool> = sqlx::query_scalar(
-            "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2 FOR UPDATE",
+            "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2 AND role != 'admin' FOR UPDATE",
         )
         .bind(z.user_id)
         .bind(u.id)
@@ -526,7 +526,7 @@ pub async fn reject(
     }
     if !u.is_admin() {
         let is_report: Option<bool> = sqlx::query_scalar(
-            "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2 FOR UPDATE",
+            "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2 AND role != 'admin' FOR UPDATE",
         )
         .bind(z.user_id)
         .bind(u.id)
@@ -609,12 +609,13 @@ pub async fn batch_approve(
             continue;
         }
         if !u.is_admin() {
-            let is_report: Option<bool> =
-                sqlx::query_scalar("SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2")
-                    .bind(z.user_id)
-                    .bind(u.id)
-                    .fetch_optional(&s.pool)
-                    .await?;
+            let is_report: Option<bool> = sqlx::query_scalar(
+                "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2 AND role != 'admin'",
+            )
+            .bind(z.user_id)
+            .bind(u.id)
+            .fetch_optional(&s.pool)
+            .await?;
             if is_report.is_none() {
                 continue;
             }
@@ -711,12 +712,13 @@ pub async fn batch_reject(
             continue;
         }
         if !u.is_admin() {
-            let is_report: Option<bool> =
-                sqlx::query_scalar("SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2")
-                    .bind(z.user_id)
-                    .bind(u.id)
-                    .fetch_optional(&s.pool)
-                    .await?;
+            let is_report: Option<bool> = sqlx::query_scalar(
+                "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2 AND role != 'admin'",
+            )
+            .bind(z.user_id)
+            .bind(u.id)
+            .fetch_optional(&s.pool)
+            .await?;
             if is_report.is_none() {
                 continue;
             }

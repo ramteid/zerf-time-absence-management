@@ -43,7 +43,9 @@ pub async fn test_connection(
     if let (Some(u), Some(p)) = (&cfg.username, &cfg.password) {
         builder = builder.credentials(Credentials::new(u.clone(), p.clone()));
     }
-    let mailer: AsyncSmtpTransport<Tokio1Executor> = builder.timeout(Some(std::time::Duration::from_secs(10))).build();
+    let mailer: AsyncSmtpTransport<Tokio1Executor> = builder
+        .timeout(Some(std::time::Duration::from_secs(10)))
+        .build();
     mailer.test_connection().await?;
     Ok(())
 }
