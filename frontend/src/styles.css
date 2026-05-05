@@ -471,7 +471,6 @@ body {
   order: 3;
   font-size: 13px;
   color: var(--text-tertiary);
-  margin-top: -12px;
 }
 
 .top-bar-actions {
