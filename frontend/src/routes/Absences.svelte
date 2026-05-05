@@ -480,14 +480,6 @@
   }
 
   @media (max-width: 640px) {
-    .absence-year-select {
-      min-width: 80px;
-      max-width: 100px;
-      height: 85%;
-    }
-  }
-
-  @media (max-width: 640px) {
     .absence-entry-summary {
       width: 100%;
       display: grid;

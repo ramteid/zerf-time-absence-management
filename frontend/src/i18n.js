@@ -160,6 +160,9 @@ const TRANSLATIONS = {
     Order: "Reihenfolge",
     "First name": "Vorname",
     "Last name": "Nachname",
+    "Your Name": "Ihr Name",
+    "Please enter your first name and last name.":
+      "Bitte geben Sie Ihren Vornamen und Nachnamen ein.",
     "Weekly hours": "Wochenstunden",
     "Annual leave days": "Urlaubstage pro Jahr",
     "Overtime start balance (hours)": "Überstunden-Startsaldo (Stunden)",
@@ -369,6 +372,8 @@ const TRANSLATIONS = {
     "Initial setup required.": "Ersteinrichtung erforderlich.",
     "Please configure the country, region, default weekly hours and default annual leave days before using the application.":
       "Bitte Land, Region, Standard-Wochenstunden und Standard-Urlaubstage konfigurieren, bevor die Anwendung genutzt wird.",
+    "Please enter your name and configure the country, region, default weekly hours and default annual leave days before using the application.":
+      "Bitte geben Sie Ihren Namen ein und konfigurieren Sie Land, Region, Standard-Wochenstunden und Standard-Urlaubstage, bevor die Anwendung genutzt wird.",
     "Please select a country.": "Bitte ein Land auswählen.",
     "Please enter default weekly hours.":
       "Bitte Standard-Wochenstunden eingeben.",

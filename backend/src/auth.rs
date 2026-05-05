@@ -339,8 +339,9 @@ pub async fn me(
     } else {
         "/dashboard"
     };
-    // For admins: flag whether initial setup (country + working-time defaults)
-    // has been completed. Until it is, the SPA redirects to /admin/settings.
+    // For admins: flag whether initial setup (country, working-time defaults,
+    // and admin profile name) has been completed. Until it is, the SPA
+    // redirects to /admin/settings.
     let must_configure_settings = if user.is_admin() {
         let country: Option<String> =
             sqlx::query_scalar("SELECT value FROM app_settings WHERE key = 'country'")
@@ -355,9 +356,11 @@ pub async fn me(
         )
         .fetch_optional(&s.pool)
         .await?;
+        let needs_name = user.first_name.is_empty() || user.last_name.is_empty();
         country.map_or(true, |v| v.is_empty())
             || dwh.map_or(true, |v| v.is_empty())
             || dal.map_or(true, |v| v.is_empty())
+            || needs_name
     } else {
         false
     };

@@ -7,6 +7,8 @@
   let saving = false;
   let savingSmtp = false;
   let smtpPassword = "";
+  let adminFirstName = "";
+  let adminLastName = "";
   $: isFirstSetup = !!$currentUser?.must_configure_settings;
 
   let countries = [];
@@ -41,6 +43,12 @@
   load();
 
   async function save() {
+    if (isFirstSetup) {
+      if (!adminFirstName.trim() || !adminLastName.trim()) {
+        toast($t("Please enter your first name and last name."), "error");
+        return;
+      }
+    }
     if (!s.country) {
       toast($t("Please select a country."), "error");
       return;
@@ -62,10 +70,22 @@
       s = saved;
       appSettings.set(saved);
       if (saved.ui_language) setLanguage(saved.ui_language);
-      toast($t("Settings saved."), "ok");
       if (isFirstSetup) {
-        currentUser.update((u) => ({ ...u, must_configure_settings: false }));
+        await api(`/users/${$currentUser.id}`, {
+          method: "PUT",
+          body: {
+            first_name: adminFirstName.trim(),
+            last_name: adminLastName.trim(),
+          },
+        });
+        currentUser.update((u) => ({
+          ...u,
+          must_configure_settings: false,
+          first_name: adminFirstName.trim(),
+          last_name: adminLastName.trim(),
+        }));
       }
+      toast($t("Settings saved."), "ok");
     } catch (e) {
       toast($t(e?.message || "Error"), "error");
     } finally {
@@ -114,9 +134,46 @@
       >
       <p style="font-size:13px;color:var(--text-tertiary);margin-top:4px">
         {$t(
-          "Please configure the country, region, default weekly hours and default annual leave days before using the application.",
+          "Please enter your name and configure the country, region, default weekly hours and default annual leave days before using the application.",
         )}
       </p>
+    </div>
+  {/if}
+  {#if isFirstSetup}
+    <div class="kz-card" style="padding:20px;margin-bottom:16px">
+      <div style="font-size:14px;font-weight:600;margin-bottom:14px">
+        {$t("Your Name")}
+      </div>
+      <div class="field-group">
+        <div class="field-row">
+          <div>
+            <label class="kz-label" for="admin-first-name"
+              >{$t("First name")}</label
+            >
+            <input
+              id="admin-first-name"
+              class="kz-input"
+              type="text"
+              maxlength="200"
+              bind:value={adminFirstName}
+              required
+            />
+          </div>
+          <div>
+            <label class="kz-label" for="admin-last-name"
+              >{$t("Last name")}</label
+            >
+            <input
+              id="admin-last-name"
+              class="kz-input"
+              type="text"
+              maxlength="200"
+              bind:value={adminLastName}
+              required
+            />
+          </div>
+        </div>
+      </div>
     </div>
   {/if}
   <div class="kz-card" style="padding:20px;margin-bottom:16px">
