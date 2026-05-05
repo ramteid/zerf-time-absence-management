@@ -136,6 +136,10 @@
     );
   }
 
+  function absenceDetail(absence) {
+    return [absence.name, absence.comment].filter(Boolean).join(" - ");
+  }
+
   function rawCellEvents(c, entryMap, categoryMap, translate) {
     const evts = [];
     if (c.hol) {
@@ -147,13 +151,13 @@
       });
     }
     for (const a of c.absences) {
+      const label = absenceKindLabel(a.kind);
       evts.push({
         key: `absence:${a.kind}`,
         color: absColor(a.kind),
-        label: absenceKindLabel(a.kind),
-        popupLabel: `${a.name}: ${absenceKindLabel(a.kind)}`,
-        title: a.name,
-        detail: a.comment || "",
+        label,
+        title: label,
+        detail: absenceDetail(a),
       });
     }
     for (const e of entryMap.get(c.ds) || []) {
@@ -227,9 +231,7 @@
         weekend: wd >= 5,
         today: ds === todayStr,
         hol: hMap.get(ds),
-        absences: entries.filter(
-          (e) => ds >= e.start_date && ds <= e.end_date,
-        ),
+        absences: entries.filter((e) => ds >= e.start_date && ds <= e.end_date),
       });
       if (i >= 34 && other && (i + 1) % 7 === 0) break;
     }

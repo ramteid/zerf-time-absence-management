@@ -1218,6 +1218,10 @@ dialog footer {
     justify-content: flex-end;
   }
 
+  .top-bar-actions.absence-top-actions {
+    justify-content: space-between;
+  }
+
   /* Pull-to-refresh */
   .pull-to-refresh {
     display: flex;

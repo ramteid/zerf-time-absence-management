@@ -12,10 +12,12 @@ const COUNTRY_KEY: &str = "country";
 const REGION_KEY: &str = "region";
 const DEFAULT_WEEKLY_HOURS_KEY: &str = "default_weekly_hours";
 const DEFAULT_ANNUAL_LEAVE_DAYS_KEY: &str = "default_annual_leave_days";
+const CARRYOVER_EXPIRY_DATE_KEY: &str = "carryover_expiry_date";
 const DEFAULT_UI_LANGUAGE: &str = "en";
 const DEFAULT_TIME_FORMAT: &str = "24h";
 const DEFAULT_COUNTRY: &str = "";
 const DEFAULT_REGION: &str = "";
+const DEFAULT_CARRYOVER_EXPIRY_DATE: &str = "03-31";
 
 #[derive(Serialize)]
 pub struct PublicSettings {
@@ -25,6 +27,7 @@ pub struct PublicSettings {
     pub region: String,
     pub default_weekly_hours: Option<f64>,
     pub default_annual_leave_days: Option<i32>,
+    pub carryover_expiry_date: String,
 }
 
 #[derive(Deserialize)]
@@ -35,6 +38,7 @@ pub struct UpdateSettings {
     pub region: String,
     pub default_weekly_hours: Option<f64>,
     pub default_annual_leave_days: Option<i32>,
+    pub carryover_expiry_date: Option<String>,
 }
 
 fn normalize_language(value: &str) -> AppResult<&'static str> {
@@ -53,7 +57,7 @@ fn normalize_time_format(value: &str) -> AppResult<&'static str> {
     }
 }
 
-async fn load_setting(
+pub async fn load_setting(
     pool: &crate::db::DatabasePool,
     key: &str,
     default: &str,
@@ -88,6 +92,7 @@ async fn load_all_settings(pool: &crate::db::DatabasePool) -> AppResult<PublicSe
         region: load_setting(pool, REGION_KEY, DEFAULT_REGION).await?,
         default_weekly_hours: dwh.parse().ok(),
         default_annual_leave_days: dal.parse().ok(),
+        carryover_expiry_date: load_setting(pool, CARRYOVER_EXPIRY_DATE_KEY, DEFAULT_CARRYOVER_EXPIRY_DATE).await?,
     })
 }
 
@@ -141,6 +146,25 @@ pub async fn update_admin_settings(
                 "Invalid default_annual_leave_days.".into(),
             ));
         }
+    }
+
+    // Validate and save carryover expiry date (MM-DD format).
+    if let Some(ref ced) = body.carryover_expiry_date {
+        let ced = ced.trim();
+        let parts: Vec<&str> = ced.split('-').collect();
+        if parts.len() != 2 {
+            return Err(AppError::BadRequest("carryover_expiry_date must be MM-DD.".into()));
+        }
+        let month: u32 = parts[0].parse().map_err(|_| AppError::BadRequest("Invalid month in carryover_expiry_date.".into()))?;
+        let day: u32 = parts[1].parse().map_err(|_| AppError::BadRequest("Invalid day in carryover_expiry_date.".into()))?;
+        if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+            return Err(AppError::BadRequest("Invalid carryover_expiry_date.".into()));
+        }
+        // Validate that the date actually exists (use a non-leap year to be strict).
+        if chrono::NaiveDate::from_ymd_opt(2025, month, day).is_none() {
+            return Err(AppError::BadRequest("Invalid carryover_expiry_date.".into()));
+        }
+        save_setting(&s.pool, CARRYOVER_EXPIRY_DATE_KEY, ced).await?;
     }
 
     save_setting(&s.pool, UI_LANGUAGE_KEY, language).await?;

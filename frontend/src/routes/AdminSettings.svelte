@@ -170,6 +170,30 @@
         </div>
       </div>
 
+      <!-- Carryover expiry date -->
+      <div
+        style="font-size:14px;font-weight:600;margin-top:20px;margin-bottom:14px"
+      >
+        {$t("Vacation carryover")}
+      </div>
+      <div class="field-row">
+        <div>
+          <label class="kz-label" for="settings-carryover-expiry"
+            >{$t("Carryover expiry date (MM-DD)")}</label
+          >
+          <input
+            id="settings-carryover-expiry"
+            class="kz-input"
+            bind:value={s.carryover_expiry_date}
+            placeholder="03-31"
+            maxlength="5"
+          />
+          <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
+            {$t("Unused vacation from the previous year expires on this date.")}
+          </div>
+        </div>
+      </div>
+
       <div
         style="font-size:14px;font-weight:600;margin-top:20px;margin-bottom:14px"
       >

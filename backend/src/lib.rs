@@ -126,6 +126,10 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                 .route("/users/{id}/deactivate", post(users::deactivate))
                 .route("/users/{id}/reset-password", post(users::reset_password))
                 .route(
+                    "/users/{id}/leave-overrides",
+                    get(users::get_leave_overrides).put(users::set_leave_override),
+                )
+                .route(
                     "/categories",
                     get(categories::list).post(categories::create),
                 )

@@ -131,13 +131,12 @@
   <div class="top-bar-subtitle">
     {$t("Vacation, sick leave & training days")}
   </div>
-  <div class="top-bar-actions">
+  <div class="top-bar-actions absence-top-actions">
     <select
       class="kz-select absence-year-select"
       aria-label={$t("Year")}
       value={selectedYear}
-      on:change={(event) =>
-        (selectedYear = Number(event.currentTarget.value))}
+      on:change={(event) => (selectedYear = Number(event.currentTarget.value))}
     >
       {#each yearOptions as yearOption}
         <option value={yearOption}>{yearOption}</option>
@@ -153,29 +152,80 @@
   {#if balance}
     <div class="stat-cards">
       <div class="kz-card stat-card">
-        <div class="stat-card-label">{$t("Vacation days ({year})", { year: selectedYear })}</div>
+        <div class="stat-card-label">
+          {$t("Vacation days ({year})", { year: selectedYear })}
+        </div>
         <div class="stat-card-value tab-num">{balance.annual_entitlement}</div>
       </div>
       <div class="kz-card stat-card">
-        <div class="stat-card-label">{$t("Vacation used ({year})", { year: selectedYear })}</div>
+        <div class="stat-card-label">
+          {$t("Vacation used ({year})", { year: selectedYear })}
+        </div>
         <div class="stat-card-value tab-num">{balance.already_taken}</div>
       </div>
       <div class="kz-card stat-card">
-        <div class="stat-card-label">{$t("Approved upcoming ({year})", { year: selectedYear })}</div>
-        <div class="stat-card-value tab-num">{balance.approved_upcoming || 0}</div>
+        <div class="stat-card-label">
+          {$t("Approved upcoming ({year})", { year: selectedYear })}
+        </div>
+        <div class="stat-card-value tab-num">
+          {balance.approved_upcoming || 0}
+        </div>
         <div class="stat-card-sub">{$t("Approved days not yet taken")}</div>
       </div>
       <div class="kz-card stat-card">
-        <div class="stat-card-label">{$t("Vacation pending ({year})", { year: selectedYear })}</div>
+        <div class="stat-card-label">
+          {$t("Vacation pending ({year})", { year: selectedYear })}
+        </div>
         <div class="stat-card-value tab-num">{balance.requested || 0}</div>
-        <div class="stat-card-sub">{$t("Vacation requests awaiting approval")}</div>
+        <div class="stat-card-sub">
+          {$t("Vacation requests awaiting approval")}
+        </div>
       </div>
       <div class="kz-card stat-card">
-        <div class="stat-card-label">{$t("Vacation remaining ({year})", { year: selectedYear })}</div>
+        <div class="stat-card-label">
+          {$t("Vacation remaining ({year})", { year: selectedYear })}
+        </div>
         <div class="stat-card-value accent tab-num">
           {balance.available}
         </div>
       </div>
+      {#if balance.carryover_days > 0}
+        <div
+          class="kz-card stat-card"
+          style="border-color:{balance.carryover_expired
+            ? 'var(--danger)'
+            : 'var(--warning)'}"
+        >
+          <div class="stat-card-label">
+            {$t("Carryover from {year}", { year: selectedYear - 1 })}
+          </div>
+          <div
+            class="stat-card-value tab-num"
+            style="color:{balance.carryover_expired
+              ? 'var(--danger-text)'
+              : 'var(--warning-text)'}"
+          >
+            {balance.carryover_expired ? 0 : balance.carryover_remaining}
+            <span
+              style="font-size:11px;font-weight:400;color:var(--text-tertiary)"
+              >/ {balance.carryover_days}</span
+            >
+          </div>
+          {#if balance.carryover_expiry}
+            <div class="stat-card-sub">
+              {#if balance.carryover_expired}
+                {$t("Expired on {date}", {
+                  date: fmtDate(balance.carryover_expiry),
+                })}
+              {:else}
+                {$t("Expires on {date}", {
+                  date: fmtDate(balance.carryover_expiry),
+                })}
+              {/if}
+            </div>
+          {/if}
+        </div>
+      {/if}
     </div>
   {/if}
 
@@ -191,29 +241,35 @@
       <div class="absence-list">
         {#each absenceRows as a}
           <div class="absence-entry">
-            <div class="absence-entry-row">
-              <span class="absence-entry-label">{$t("Type")}</span>
-              <span class="absence-entry-value" style="font-weight:500"
-                >{absenceKindLabel(a.kind)}</span
-              >
+            <div class="absence-entry-summary">
+              <div class="absence-entry-field absence-entry-type">
+                <span class="absence-entry-label">{$t("Type")}</span>
+                <span class="absence-entry-value absence-entry-type-value"
+                  >{absenceKindLabel(a.kind)}</span
+                >
+              </div>
+              <div class="absence-entry-field absence-entry-from">
+                <span class="absence-entry-label">{$t("From")}</span>
+                <span class="absence-entry-value tab-num"
+                  >{fmtDate(a.start_date)}</span
+                >
+              </div>
+              <div class="absence-entry-field absence-entry-to">
+                <span class="absence-entry-label">{$t("To")}</span>
+                <span class="absence-entry-value tab-num"
+                  >{fmtDate(a.end_date)}</span
+                >
+              </div>
+              <div class="absence-entry-field absence-entry-days">
+                <span class="absence-entry-label">{$t("Days")}</span>
+                <span class="absence-entry-value tab-num">{a.days || "-"}</span>
+              </div>
             </div>
-            <div class="absence-entry-row">
-              <span class="absence-entry-label">{$t("From")}</span>
-              <span class="absence-entry-value tab-num"
-                >{fmtDate(a.start_date)}</span
-              >
+            <div class="absence-entry-detail absence-entry-comment">
+              <span class="absence-entry-label">{$t("Comment")}</span>
+              <span class="absence-entry-value">{a.comment || "-"}</span>
             </div>
-            <div class="absence-entry-row">
-              <span class="absence-entry-label">{$t("To")}</span>
-              <span class="absence-entry-value tab-num"
-                >{fmtDate(a.end_date)}</span
-              >
-            </div>
-            <div class="absence-entry-row">
-              <span class="absence-entry-label">{$t("Days")}</span>
-              <span class="absence-entry-value tab-num">{a.days || "–"}</span>
-            </div>
-            <div class="absence-entry-row">
+            <div class="absence-entry-detail absence-entry-status">
               <span class="absence-entry-label">{$t("Status")}</span>
               <span class="absence-entry-value">
                 <span class="kz-chip kz-chip-{a.status}"
@@ -269,10 +325,20 @@
     border-bottom: none;
   }
 
-  .absence-entry-row {
+  .absence-entry-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    align-items: center;
+    min-width: 0;
+  }
+
+  .absence-entry-field,
+  .absence-entry-detail {
     display: flex;
     align-items: center;
     gap: 6px;
+    min-width: 0;
   }
 
   .absence-entry-label {
@@ -286,6 +352,18 @@
     text-align: left;
   }
 
+  .absence-entry-type-value {
+    font-weight: 500;
+  }
+
+  .absence-entry-comment {
+    flex: 1 1 180px;
+  }
+
+  .absence-entry-comment .absence-entry-value {
+    overflow-wrap: anywhere;
+  }
+
   .absence-entry-actions {
     margin-left: auto;
     display: flex;
@@ -297,22 +375,67 @@
   }
 
   @media (max-width: 640px) {
+    .absence-year-select {
+      min-width: 80px;
+      max-width: 100px;
+    }
+  }
+
+  @media (max-width: 640px) {
     .absence-entry {
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 4px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      align-items: stretch;
+      gap: 10px;
     }
 
-    .absence-entry-row {
+    .absence-entry-summary {
       width: 100%;
+      display: grid;
+      grid-template-areas:
+        "type from"
+        "days to";
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 10px 16px;
+    }
+
+    .absence-entry-field,
+    .absence-entry-detail {
+      min-width: 0;
       align-items: flex-start;
       flex-direction: column;
       gap: 1px;
     }
 
+    .absence-entry-type {
+      grid-area: type;
+    }
+
+    .absence-entry-days {
+      grid-area: days;
+    }
+
+    .absence-entry-from {
+      grid-area: from;
+      align-items: flex-end;
+      text-align: right;
+    }
+
+    .absence-entry-to {
+      grid-area: to;
+      align-items: flex-end;
+      text-align: right;
+    }
+
+    .absence-entry-detail {
+      width: 100%;
+    }
+
     .absence-entry-actions {
       margin-left: 0;
       padding-top: 4px;
+      justify-content: flex-end;
+      width: 100%;
     }
   }
 </style>

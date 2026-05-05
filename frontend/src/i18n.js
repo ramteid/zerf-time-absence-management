@@ -73,6 +73,24 @@ const TRANSLATIONS = {
     "Please change at least one field.": "Please change at least one field.",
     "At least one actual change is required.":
       "At least one actual change is required.",
+    "Carryover from {year}": "Carryover from {year}",
+    "Expired on {date}": "Expired on {date}",
+    "Expires on {date}": "Expires on {date}",
+    "Vacation carryover": "Vacation carryover",
+    "Carryover expiry date (MM-DD)": "Carryover expiry date (MM-DD)",
+    "Unused vacation from the previous year expires on this date.":
+      "Unused vacation from the previous year expires on this date.",
+    "Vacation days per year": "Vacation days per year",
+    days: "days",
+    Set: "Set",
+    "Overrides the default annual leave days for this user in the selected year.":
+      "Overrides the default annual leave days for this user in the selected year.",
+    "Not enough remaining vacation days.":
+      "Not enough remaining vacation days.",
+    "Please enter vacation days.": "Please enter vacation days.",
+    "Absence Request Details": "Absence Request Details",
+    "Show details": "Show details",
+    "Requested at": "Requested at",
   },
   de: {
     "Loading...": "Wird geladen...",
@@ -669,6 +687,25 @@ const TRANSLATIONS = {
       "Wenn aktiviert, werden die Wiederfreigabe-Anträge des Benutzers automatisch genehmigt. Der Verantwortliche und alle Admins erhalten trotzdem eine Benachrichtigung.",
     // Notification polling
     // (no new keys needed)
+    // Vacation carryover
+    "Carryover from {year}": "Übertrag aus {year}",
+    "Expired on {date}": "Verfallen am {date}",
+    "Expires on {date}": "Verfällt am {date}",
+    "Vacation carryover": "Urlaubsübertrag",
+    "Carryover expiry date (MM-DD)": "Stichtag Urlaubsverfall (MM-TT)",
+    "Unused vacation from the previous year expires on this date.":
+      "Nicht genommener Urlaub aus dem Vorjahr verfällt an diesem Stichtag.",
+    "Vacation days per year": "Urlaubstage pro Jahr",
+    days: "Tage",
+    Set: "Setzen",
+    "Overrides the default annual leave days for this user in the selected year.":
+      "Überschreibt die Standard-Urlaubstage für diesen Benutzer im gewählten Jahr.",
+    "Not enough remaining vacation days.":
+      "Nicht genügend verbleibende Urlaubstage.",
+    "Please enter vacation days.": "Bitte Urlaubstage eingeben.",
+    "Absence Request Details": "Details des Abwesenheitsantrags",
+    "Show details": "Details anzeigen",
+    "Requested at": "Beantragt am",
   },
 };
 

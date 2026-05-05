@@ -37,6 +37,9 @@
     if (text.includes("Failed to deserialize")) {
       return $t("Invalid date.");
     }
+    if (text.includes("Not enough remaining vacation days")) {
+      return $t("Not enough remaining vacation days.");
+    }
 
     const translated = $t(text);
     return translated === text ? text : translated;

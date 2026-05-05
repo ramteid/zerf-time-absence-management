@@ -6,6 +6,7 @@
   import {
     fmtDate,
     fmtDateShort,
+    fmtDateTime,
     isoDate,
     addDays,
     parseDate,
@@ -25,6 +26,8 @@
   let changeRequests = [];
   let pendingReopens = [];
   let users = [];
+  let absenceDetail = null;
+  let absenceDetailDlg;
 
   let selectedWeek = null;
   let weekDialog;
@@ -444,6 +447,23 @@
     }
   }
 
+  function showAbsenceDetail(absence) {
+    absenceDetail = absence;
+    tick().then(() => {
+      if (absenceDetailDlg && !absenceDetailDlg.open) {
+        try {
+          absenceDetailDlg.showModal();
+        } catch {
+          absenceDetailDlg.setAttribute("open", "open");
+        }
+      }
+    });
+  }
+
+  function closeAbsenceDetail() {
+    absenceDetail = null;
+  }
+
   async function approveAbsence(id) {
     try {
       await api(`/absences/${id}/approve`, { method: "POST" });
@@ -723,7 +743,14 @@
           <div class="avatar" style="width:30px;height:30px;font-size:11px">
             {userInitials(a.user_id, users)}
           </div>
-          <div style="flex:1;min-width:0">
+          <div
+            style="flex:1;min-width:0;cursor:pointer"
+            on:click={() => showAbsenceDetail(a)}
+            on:keydown={(e) => { if (e.key === "Enter") showAbsenceDetail(a); }}
+            role="button"
+            tabindex="0"
+            title={$t("Show details")}
+          >
             <div style="font-size:13px;font-weight:500">
               {userName(a.user_id, users)}
             </div>
@@ -943,6 +970,65 @@
     </div>
   {/if}
 </div>
+
+{#if absenceDetail}
+  <dialog bind:this={absenceDetailDlg} on:close={closeAbsenceDetail}>
+    <header>
+      <span style="flex:1">{$t("Absence Request Details")}</span>
+      <button class="kz-btn-icon-sm kz-btn-ghost" on:click={closeAbsenceDetail}>
+        <Icon name="X" size={16} />
+      </button>
+    </header>
+    <div class="dialog-body">
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div>
+          <div class="kz-label">{$t("Employee")}</div>
+          <div style="font-weight:500">{userName(absenceDetail.user_id, users)}</div>
+        </div>
+        <div>
+          <div class="kz-label">{$t("Type")}</div>
+          <div>{absenceKindLabel(absenceDetail.kind)}</div>
+        </div>
+        <div class="field-row">
+          <div>
+            <div class="kz-label">{$t("From")}</div>
+            <div class="tab-num">{fmtDate(absenceDetail.start_date)}</div>
+          </div>
+          <div>
+            <div class="kz-label">{$t("To")}</div>
+            <div class="tab-num">{fmtDate(absenceDetail.end_date)}</div>
+          </div>
+        </div>
+        {#if absenceDetail.comment}
+          <div>
+            <div class="kz-label">{$t("Comment")}</div>
+            <div style="white-space:pre-wrap;font-size:13px">{absenceDetail.comment}</div>
+          </div>
+        {/if}
+        <div>
+          <div class="kz-label">{$t("Requested at")}</div>
+          <div class="tab-num" style="font-size:12px">{fmtDateTime(absenceDetail.created_at)}</div>
+        </div>
+      </div>
+    </div>
+    <footer>
+      <button class="kz-btn" on:click={closeAbsenceDetail}>{$t("Close")}</button>
+      <span style="flex:1"></span>
+      <button
+        class="kz-btn kz-btn-danger"
+        on:click={() => { const id = absenceDetail.id; closeAbsenceDetail(); rejectAbsence(id); }}
+      >
+        <Icon name="X" size={14} />{$t("Reject")}
+      </button>
+      <button
+        class="kz-btn kz-btn-primary"
+        on:click={() => { const id = absenceDetail.id; closeAbsenceDetail(); approveAbsence(id); }}
+      >
+        <Icon name="Check" size={14} />{$t("Approve")}
+      </button>
+    </footer>
+  </dialog>
+{/if}
 
 {#if selectedWeek}
   <dialog bind:this={weekDialog} on:close={closeWeekDialog}>
