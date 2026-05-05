@@ -1076,6 +1076,20 @@ dialog footer {
     width: 100%;
   }
 
+  .time-top-bar-actions {
+    justify-content: flex-start;
+  }
+
+  .time-top-bar-actions .time-submit-button {
+    margin-left: auto;
+  }
+
+  .time-top-bar-actions .time-reopen-action {
+    display: flex;
+    flex-basis: 100%;
+    justify-content: flex-end;
+  }
+
   /* Tables: allow horizontal scroll */
   .kz-table-wrap {
     overflow-x: auto;
