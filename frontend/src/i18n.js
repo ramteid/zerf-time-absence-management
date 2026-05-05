@@ -156,9 +156,9 @@ const TRANSLATIONS = {
     "Last name": "Nachname",
     "Weekly hours": "Wochenstunden",
     "Annual leave days": "Urlaubstage pro Jahr",
-    "Overtime start balance (minutes)": "Überstunden-Startsaldo (Minuten)",
-    "Initial overtime balance in minutes when the user starts. Negative = deficit.":
-      "Anfangssaldo der Überstunden in Minuten zum Startdatum. Negativ = Defizit.",
+    "Overtime start balance (hours)": "Überstunden-Startsaldo (Stunden)",
+    "Initial overtime balance in hours when the user starts. Negative = deficit.":
+      "Anfangssaldo der Überstunden in Stunden zum Startdatum. Negativ = Defizit.",
     "Start date": "Startdatum",
     Settings: "Einstellungen",
     "Language settings": "Spracheinstellungen",

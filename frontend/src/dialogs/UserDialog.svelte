@@ -18,7 +18,8 @@
   let weekly_hours = template.weekly_hours || 39;
   let annual_leave_days = template.annual_leave_days || 30;
   let start_date = template.start_date || isoDate(new Date());
-  let overtime_start_balance_min = template.overtime_start_balance_min || 0;
+  let overtime_start_balance_hours =
+    (template.overtime_start_balance_min || 0) / 60;
   let approver_id =
     template.approver_id == null ? "" : String(template.approver_id);
   let error = "";
@@ -125,7 +126,9 @@
         weekly_hours: Number(weekly_hours),
         annual_leave_days: Number(annual_leave_days),
         start_date,
-        overtime_start_balance_min: Number(overtime_start_balance_min),
+        overtime_start_balance_min: Math.round(
+          Number(overtime_start_balance_hours) * 60,
+        ),
       };
       if (role === "employee") {
         body.approver_id = approver_id ? Number(approver_id) : null;
@@ -305,16 +308,17 @@
       </div>
       <div>
         <label class="kz-label" for="user-overtime-balance"
-          >{$t("Overtime start balance (minutes)")}</label
+          >{$t("Overtime start balance (hours)")}</label
         >
         <input
           id="user-overtime-balance"
           class="kz-input"
           type="number"
-          bind:value={overtime_start_balance_min}
+          step="0.5"
+          bind:value={overtime_start_balance_hours}
         />
         <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
-          {$t("Initial overtime balance in minutes when the user starts. Negative = deficit.")}
+          {$t("Initial overtime balance in hours when the user starts. Negative = deficit.")}
         </div>
       </div>
       {#if !isNew}
