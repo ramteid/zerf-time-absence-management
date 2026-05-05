@@ -16,6 +16,7 @@ pub mod settings;
 pub mod time_entries;
 pub mod users;
 
+use axum::http::{Method, StatusCode, Uri};
 use axum::{
     extract::State,
     http::{header, HeaderName, HeaderValue},
@@ -23,7 +24,6 @@ use axum::{
     routing::{delete, get, post, put},
     Router,
 };
-use axum::http::{Method, StatusCode, Uri};
 use std::sync::Arc;
 use std::time::Duration;
 use tower::ServiceBuilder;
@@ -184,7 +184,9 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
         )
 }
 
-async fn serve_spa_index(static_dir: &str) -> Result<([(HeaderName, HeaderValue); 1], Vec<u8>), StatusCode> {
+async fn serve_spa_index(
+    static_dir: &str,
+) -> Result<([(HeaderName, HeaderValue); 1], Vec<u8>), StatusCode> {
     let body = tokio::fs::read(format!("{static_dir}/index.html"))
         .await
         .map_err(|_| StatusCode::NOT_FOUND)?;
@@ -198,7 +200,9 @@ async fn serve_spa_index(static_dir: &str) -> Result<([(HeaderName, HeaderValue)
     ))
 }
 
-async fn spa_index(State(state): State<AppState>) -> Result<([(HeaderName, HeaderValue); 1], Vec<u8>), StatusCode> {
+async fn spa_index(
+    State(state): State<AppState>,
+) -> Result<([(HeaderName, HeaderValue); 1], Vec<u8>), StatusCode> {
     serve_spa_index(&state.cfg.static_dir).await
 }
 

@@ -57,9 +57,8 @@
 
   $: hMap = new Map(holidays.map((f) => [f.holiday_date, f.name]));
 
-  // Strict own-user filter for absences. Time entries are already scoped
-  // server-side to the current user, but we double-check defensively.
-  $: myAbsences = entries.filter((e) => e.user_id === $currentUser?.id);
+  // The calendar API is already team-scoped. Time entries remain personal,
+  // so we still filter those defensively.
   $: myTimeEntries = timeEntries.filter((e) => e.user_id === $currentUser?.id);
 
   $: teMap = (() => {
@@ -152,6 +151,8 @@
         key: `absence:${a.kind}`,
         color: absColor(a.kind),
         label: absenceKindLabel(a.kind),
+        popupLabel: `${a.name}: ${absenceKindLabel(a.kind)}`,
+        title: a.name,
         detail: a.comment || "",
       });
     }
@@ -196,8 +197,7 @@
   }
 
   function calendarEventTitle(event) {
-    const detail = String(event?.detail || "").trim();
-    return detail;
+    return String(event?.title || event?.detail || event?.label || "").trim();
   }
 
   $: prev =
@@ -227,7 +227,7 @@
         weekend: wd >= 5,
         today: ds === todayStr,
         hol: hMap.get(ds),
-        absences: myAbsences.filter(
+        absences: entries.filter(
           (e) => ds >= e.start_date && ds <= e.end_date,
         ),
       });
@@ -369,7 +369,7 @@
           <span
             style="display:inline-block;width:10px;height:10px;border-radius:2px;background:{ev.color};flex-shrink:0"
           ></span>
-          <span style="font-weight:500">{ev.label}</span>
+          <span style="font-weight:500">{ev.popupLabel || ev.label}</span>
           {#if ev.detail}
             <span style="color:var(--text-muted)">{ev.detail}</span>
           {/if}

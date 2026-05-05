@@ -27,13 +27,12 @@ async fn assert_can_access_user(
     if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let is_report: Option<bool> = sqlx::query_scalar(
-        "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2",
-    )
-    .bind(target_uid)
-    .bind(requester.id)
-    .fetch_optional(pool)
-    .await?;
+    let is_report: Option<bool> =
+        sqlx::query_scalar("SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2")
+            .bind(target_uid)
+            .bind(requester.id)
+            .fetch_optional(pool)
+            .await?;
     if is_report.is_none() {
         return Err(AppError::Forbidden);
     }
@@ -110,6 +109,14 @@ fn weekday_en(d: NaiveDate) -> &'static str {
         "Saturday",
         "Sunday",
     ][d.weekday().num_days_from_monday() as usize]
+}
+
+fn credited_actual_minutes(actual: i64, target: i64, absence: Option<&str>) -> i64 {
+    match absence {
+        Some("sick") if actual > 0 => actual,
+        Some(_) => target,
+        None => actual,
+    }
 }
 
 async fn build_range(
@@ -208,7 +215,7 @@ async fn build_range(
                 comment: km.clone(),
             });
         }
-        let actual_eff = if absence.is_some() { target } else { actual };
+        let actual_eff = credited_actual_minutes(actual, target, absence.as_deref());
         target_total += target;
         actual_total += actual_eff;
         days.push(DayDetail {
@@ -560,12 +567,11 @@ pub async fn overtime(
         return Ok(Json(vec![]));
     };
     // Determine the user's start_date and overtime start balance.
-    let (user_start, overtime_start_balance_min): (NaiveDate, i64) = sqlx::query_as(
-        "SELECT start_date, overtime_start_balance_min FROM users WHERE id=$1",
-    )
-    .bind(uid)
-    .fetch_one(&s.pool)
-    .await?;
+    let (user_start, overtime_start_balance_min): (NaiveDate, i64) =
+        sqlx::query_as("SELECT start_date, overtime_start_balance_min FROM users WHERE id=$1")
+            .bind(uid)
+            .fetch_one(&s.pool)
+            .await?;
     let start_month = if user_start.year() == year {
         user_start.month()
     } else if user_start.year() > year {
@@ -575,9 +581,19 @@ pub async fn overtime(
         1
     };
     let mut out = vec![];
-    // Seed cumulative with start balance for the year the user started.
-    // For subsequent years, the balance carries forward through actual data.
-    let mut cum = if user_start.year() == year { overtime_start_balance_min } else { 0i64 };
+    let mut cum = overtime_start_balance_min;
+    for prior_year in user_start.year()..year {
+        let prior_start_month = if prior_year == user_start.year() {
+            user_start.month()
+        } else {
+            1
+        };
+        for prior_month in prior_start_month..=12 {
+            let mstr = format!("{:04}-{:02}", prior_year, prior_month);
+            let r = build_month(&s.pool, uid, &mstr).await?;
+            cum += r.diff_min;
+        }
+    }
     for m in start_month..=max_month {
         let mstr = format!("{:04}-{:02}", year, m);
         let r = build_month(&s.pool, uid, &mstr).await?;
@@ -684,10 +700,16 @@ pub async fn flextime(
 
     let today = chrono::Local::now().date_naive();
     let mut out = vec![];
-    // Seed cumulative with the user's overtime start balance.
-    let mut cum = user.overtime_start_balance_min;
+    let mut cum = if loop_start < user.start_date {
+        0
+    } else {
+        user.overtime_start_balance_min
+    };
     let mut d = loop_start;
     while d <= q.to {
+        if d == user.start_date && loop_start < user.start_date {
+            cum += user.overtime_start_balance_min;
+        }
         let wd = d.weekday().num_days_from_monday();
         let weekday = wd < 5;
         let holiday = h_map.get(&d).cloned();
@@ -713,7 +735,7 @@ pub async fn flextime(
                 actual += (en - bn).num_minutes();
             }
         }
-        let actual_eff = if absence.is_some() { target } else { actual };
+        let actual_eff = credited_actual_minutes(actual, target, absence.as_deref());
         let diff = actual_eff - target;
         cum += diff;
         // Only emit days within the requested display range

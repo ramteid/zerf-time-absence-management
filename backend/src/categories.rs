@@ -24,10 +24,10 @@ pub async fn ensure_initial(pool: &crate::db::DatabasePool) -> AppResult<()> {
     sqlx::query(
         "UPDATE categories SET name = $1 WHERE name = convert_from(decode($2, 'hex'), 'UTF8')",
     )
-        .bind("Core Duties")
-        .bind(LEGACY_CORE_DUTIES_NAME_HEX)
-        .execute(pool)
-        .await?;
+    .bind("Core Duties")
+    .bind(LEGACY_CORE_DUTIES_NAME_HEX)
+    .execute(pool)
+    .await?;
 
     let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM categories")
         .fetch_one(pool)

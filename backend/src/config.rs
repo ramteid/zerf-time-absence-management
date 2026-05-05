@@ -51,8 +51,7 @@ fn env_opt(key: &str) -> Option<String> {
 
 impl Config {
     pub fn from_env() -> Self {
-        let database_url =
-            env::var("ZERF_DATABASE_URL").expect("ZERF_DATABASE_URL must be set");
+        let database_url = env::var("ZERF_DATABASE_URL").expect("ZERF_DATABASE_URL must be set");
         let session_secret = env::var("ZERF_SESSION_SECRET")
             .expect("ZERF_SESSION_SECRET must be set; generate one with: openssl rand -hex 32");
         if session_secret.len() < 32 {
@@ -64,9 +63,7 @@ impl Config {
 
         let admin_email =
             env::var("ZERF_ADMIN_EMAIL").unwrap_or_else(|_| "admin@example.com".into());
-        let public_url = env::var("ZERF_PUBLIC_URL")
-            .ok()
-            .filter(|s| !s.is_empty());
+        let public_url = env::var("ZERF_PUBLIC_URL").ok().filter(|s| !s.is_empty());
         let allowed_origins: Vec<String> = match env::var("ZERF_ALLOWED_ORIGINS").ok() {
             Some(s) if !s.is_empty() => s
                 .split(',')

@@ -68,6 +68,11 @@ const TRANSLATIONS = {
     "Work time": "Work time",
     Close: "Close",
     Absent: "Absent",
+    Created: "Created",
+    Cleared: "Cleared",
+    "Please change at least one field.": "Please change at least one field.",
+    "At least one actual change is required.":
+      "At least one actual change is required.",
   },
   de: {
     "Loading...": "Wird geladen...",
@@ -114,6 +119,12 @@ const TRANSLATIONS = {
     Type: "Typ",
     From: "Von",
     To: "Bis",
+    Created: "Erstellt",
+    Cleared: "Gelöscht",
+    "Please change at least one field.":
+      "Bitte ändern Sie mindestens ein Feld.",
+    "At least one actual change is required.":
+      "Mindestens eine tatsächliche Änderung ist erforderlich.",
 
     Name: "Name",
     Role: "Rolle",
@@ -526,6 +537,8 @@ const TRANSLATIONS = {
     "end_date must be >= start_date.": "Von kann nicht nach Bis liegen.",
     "Absence range exceeds one year.":
       "Der Abwesenheitszeitraum darf ein Jahr nicht überschreiten.",
+    "Non-sick absences cannot overlap days with logged time. Please remove or reject the time entries first.":
+      "Nicht-Krank-Abwesenheiten dürfen sich nicht mit Tagen mit gebuchter Zeit überschneiden. Bitte entfernen oder verwerfen Sie die Zeiteinträge zuerst.",
     you: "Sie",
     // Overlap / absence conflict
     "Conflict: Overlap with existing absence":
@@ -577,6 +590,8 @@ const TRANSLATIONS = {
       "Nur beantragte Abwesenheiten können genehmigt werden.",
     "Only requested absences can be rejected.":
       "Nur beantragte Abwesenheiten können abgelehnt werden.",
+    "Only requested absences and auto-approved sick absences can be cancelled.":
+      "Nur beantragte Abwesenheiten und automatisch genehmigte Krankmeldungen können storniert werden.",
     "Only requested absences can be cancelled.":
       "Nur beantragte Abwesenheiten können storniert werden.",
     "Only approved absences can be revoked.":

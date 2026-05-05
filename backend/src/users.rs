@@ -32,13 +32,12 @@ async fn assert_can_access_user(
     if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let is_direct_report: Option<bool> = sqlx::query_scalar(
-        "SELECT TRUE FROM users WHERE id=$1 AND approver_id=$2",
-    )
-    .bind(target_id)
-    .bind(requester.id)
-    .fetch_optional(pool)
-    .await?;
+    let is_direct_report: Option<bool> =
+        sqlx::query_scalar("SELECT TRUE FROM users WHERE id=$1 AND approver_id=$2")
+            .bind(target_id)
+            .bind(requester.id)
+            .fetch_optional(pool)
+            .await?;
     if is_direct_report.is_none() {
         return Err(AppError::Forbidden);
     }
@@ -129,11 +128,7 @@ pub async fn team_settings_update(
         .await?;
     match active {
         Some(true) => {}
-        _ => {
-            return Err(AppError::BadRequest(
-                "User not found or inactive.".into(),
-            ))
-        }
+        _ => return Err(AppError::BadRequest("User not found or inactive.".into())),
     }
     sqlx::query("UPDATE users SET allow_reopen_without_approval=$1 WHERE id=$2")
         .bind(b.allow_reopen_without_approval)
@@ -327,7 +322,6 @@ pub async fn create(
         user,
         temporary_password: temp,
     }))
-
 }
 
 #[derive(Deserialize)]

@@ -84,9 +84,16 @@
   }
 
   function canEdit(absence) {
+    return absence.status === "requested";
+  }
+
+  function canCancel(absence) {
     return (
       absence.status === "requested" ||
-      (absence.kind === "sick" && absence.status === "approved")
+      (absence.kind === "sick" &&
+        absence.status === "approved" &&
+        absence.reviewed_by == null &&
+        absence.reviewed_at == null)
     );
   }
 
@@ -94,6 +101,7 @@
     ...absence,
     days: countWorkdays(absence.start_date, absence.end_date, holidayDates),
     editable: canEdit(absence),
+    cancellable: canCancel(absence),
   }));
 
   async function cancel(id) {
@@ -214,7 +222,7 @@
               </span>
             </div>
             <div class="absence-entry-actions">
-              {#if a.status === "requested"}
+              {#if a.cancellable}
                 <button
                   class="kz-btn kz-btn-ghost kz-btn-sm kz-btn-danger"
                   on:click={() => cancel(a.id)}

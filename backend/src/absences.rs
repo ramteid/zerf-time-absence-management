@@ -9,7 +9,7 @@ use axum::{
 };
 use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc};
 use serde::{Deserialize, Serialize, Serializer};
-use sqlx::{FromRow, Postgres, QueryBuilder};
+use sqlx::{Executor, FromRow, Postgres, QueryBuilder};
 use std::collections::HashSet;
 
 async fn notification_language(pool: &crate::db::DatabasePool) -> i18n::Language {
@@ -137,7 +137,10 @@ pub async fn list_all(
     let mut builder = QueryBuilder::<Postgres>::new("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE TRUE");
     // Team leads only see absences from their direct reports; admins see all.
     if !u.is_admin() {
-        builder.push(" AND user_id IN (SELECT id FROM users WHERE approver_id = ").push_bind(u.id).push(")");
+        builder
+            .push(" AND user_id IN (SELECT id FROM users WHERE approver_id = ")
+            .push_bind(u.id)
+            .push(")");
     }
     if let Some(v) = q.from {
         builder.push(" AND end_date >= ").push_bind(v);
@@ -175,6 +178,38 @@ pub struct CalendarEntry {
     pub status: String,
 }
 
+async fn calendar_scope_user_ids(
+    pool: &crate::db::DatabasePool,
+    requester: &User,
+) -> AppResult<Option<Vec<i64>>> {
+    if requester.is_admin() {
+        return Ok(None);
+    }
+
+    let mut user_ids = vec![requester.id];
+
+    if requester.is_lead() {
+        let mut reports: Vec<i64> =
+            sqlx::query_scalar("SELECT id FROM users WHERE active=TRUE AND approver_id=$1")
+                .bind(requester.id)
+                .fetch_all(pool)
+                .await?;
+        user_ids.append(&mut reports);
+    } else if let Some(approver_id) = requester.approver_id {
+        let mut team: Vec<i64> = sqlx::query_scalar(
+            "SELECT id FROM users WHERE active=TRUE AND (id=$1 OR approver_id=$1)",
+        )
+        .bind(approver_id)
+        .fetch_all(pool)
+        .await?;
+        user_ids.append(&mut team);
+    }
+
+    user_ids.sort_unstable();
+    user_ids.dedup();
+    Ok(Some(user_ids))
+}
+
 pub async fn calendar(
     State(s): State<AppState>,
     u: User,
@@ -197,9 +232,26 @@ pub async fn calendar(
     } else {
         NaiveDate::from_ymd_opt(year, month + 1, 1).unwrap()
     } - Duration::days(1);
-    let rows = sqlx::query_as::<_, CalendarEntry>(
-        "SELECT a.id, a.user_id, u.first_name, u.last_name, a.kind, a.start_date, a.end_date, a.comment, a.status FROM absences a JOIN users u ON u.id=a.user_id WHERE a.status IN ('requested','approved') AND a.end_date >= $1 AND a.start_date <= $2 ORDER BY a.start_date"
-    ).bind(from).bind(to).fetch_all(&s.pool).await?;
+    let scope_user_ids = calendar_scope_user_ids(&s.pool, &u).await?;
+    let mut builder = QueryBuilder::<Postgres>::new(
+        "SELECT a.id, a.user_id, u.first_name, u.last_name, a.kind, a.start_date, a.end_date, a.comment, a.status FROM absences a JOIN users u ON u.id=a.user_id WHERE a.status IN ('requested','approved') AND a.end_date >= ",
+    );
+    builder.push_bind(from);
+    builder.push(" AND a.start_date <= ");
+    builder.push_bind(to);
+    if let Some(user_ids) = scope_user_ids {
+        builder.push(" AND a.user_id IN (");
+        let mut separated = builder.separated(", ");
+        for user_id in user_ids {
+            separated.push_bind(user_id);
+        }
+        separated.push_unseparated(")");
+    }
+    builder.push(" ORDER BY a.start_date");
+    let rows = builder
+        .build_query_as::<CalendarEntry>()
+        .fetch_all(&s.pool)
+        .await?;
     let lead = u.is_lead();
     // Privacy: only team leads / admins see the actual absence kind. For peers
     // we collapse to a coarse label so that sensitive categories (sick leave —
@@ -255,6 +307,75 @@ fn normalize_absence(input: &NewAbsence) -> AppResult<NormalizedAbsence<'_>> {
     Ok(NormalizedAbsence { kind: &input.kind })
 }
 
+fn validate_sick_start_date(kind: &str, start_date: NaiveDate) -> AppResult<()> {
+    if kind != "sick" {
+        return Ok(());
+    }
+
+    let earliest = chrono::Local::now().date_naive() - Duration::days(30);
+    if start_date < earliest {
+        return Err(AppError::BadRequest(
+            "Sick leave cannot be backdated more than 30 days.".into(),
+        ));
+    }
+
+    Ok(())
+}
+
+fn absence_blocks_logged_time(kind: &str) -> bool {
+    kind != "sick"
+}
+
+async fn ensure_no_logged_time_conflict<'e, E>(
+    executor: E,
+    user_id: i64,
+    kind: &str,
+    start_date: NaiveDate,
+    end_date: NaiveDate,
+) -> AppResult<()>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    if !absence_blocks_logged_time(kind) {
+        return Ok(());
+    }
+
+    let existing_entry_day: Option<NaiveDate> = sqlx::query_scalar(
+        "SELECT entry_date FROM time_entries WHERE user_id=$1 AND status <> 'rejected' \
+         AND entry_date BETWEEN $2 AND $3 ORDER BY entry_date LIMIT 1",
+    )
+    .bind(user_id)
+    .bind(start_date)
+    .bind(end_date)
+    .fetch_optional(executor)
+    .await?;
+
+    if existing_entry_day.is_some() {
+        return Err(AppError::BadRequest(
+            "Non-sick absences cannot overlap days with logged time. Please remove or reject the time entries first.".into(),
+        ));
+    }
+
+    Ok(())
+}
+
+async fn lock_absence_scope<'e, E>(executor: E, user_id: i64) -> AppResult<()>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(user_id)
+        .execute(executor)
+        .await?;
+    Ok(())
+}
+
+async fn absence_owner_id(pool: &crate::db::DatabasePool, absence_id: i64) -> AppResult<i64> {
+    Ok(sqlx::query_scalar("SELECT user_id FROM absences WHERE id=$1")
+        .bind(absence_id)
+        .fetch_one(pool)
+        .await?)
+}
 
 pub async fn create(
     State(s): State<AppState>,
@@ -262,36 +383,26 @@ pub async fn create(
     Json(b): Json<NewAbsence>,
 ) -> AppResult<Json<Absence>> {
     let normalized = normalize_absence(&b)?;
+    validate_sick_start_date(normalized.kind, b.start_date)?;
     // Reject absences that start before the user's start_date.
     if b.start_date < u.start_date {
         return Err(AppError::BadRequest(
             "Absence start date is before user start date.".into(),
         ));
     }
-    // Sick leave may not be backdated more than 30 days on initial creation.
-    // Updates to an existing record are not subject to this limit.
-    if normalized.kind == "sick" {
-        let earliest = chrono::Local::now().date_naive() - Duration::days(30);
-        if b.start_date < earliest {
-            return Err(AppError::BadRequest(
-                "Sick leave cannot be backdated more than 30 days.".into(),
-            ));
-        }
-    }
     // Use an advisory lock on the user_id to serialize absence creation per
     // user, preventing the TOCTOU race where two concurrent requests both pass
     // the overlap check before either insert commits.
     let mut tx = s.pool.begin().await?;
-    sqlx::query("SELECT pg_advisory_xact_lock($1)")
-        .bind(u.id)
-        .execute(&mut *tx)
-        .await?;
+    lock_absence_scope(&mut *tx, u.id).await?;
     let overlap: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM absences WHERE user_id=$1 AND status IN ('requested','approved') AND end_date >= $2 AND start_date <= $3"
     ).bind(u.id).bind(b.start_date).bind(b.end_date).fetch_one(&mut *tx).await?;
     if overlap > 0 {
         return Err(AppError::Conflict("Overlap with existing absence.".into()));
     }
+    ensure_no_logged_time_conflict(&mut *tx, u.id, normalized.kind, b.start_date, b.end_date)
+        .await?;
     // Sick leave is auto-approved only when it has already started (or starts today).
     // Future-dated sick leave requires review like any other request.
     let today_date = chrono::Local::now().date_naive();
@@ -318,6 +429,29 @@ pub async fn create(
         Some(serde_json::to_value(&a).unwrap()),
     )
     .await;
+    if a.status == "requested" {
+        let requester_name = format!("{} {}", u.first_name, u.last_name);
+        let recipients = crate::auth::approval_recipient_ids(&s.pool, &u).await;
+        let language = notification_language(&s.pool).await;
+        for recipient_id in recipients {
+            crate::notifications::create_translated(
+                &s,
+                language,
+                recipient_id,
+                "absence_requested",
+                TextKey::AbsenceRequestedTitle,
+                TextKey::AbsenceRequestedBody,
+                vec![
+                    ("requester_name", requester_name.clone()),
+                    ("start_date", i18n::format_date(language, a.start_date)),
+                    ("end_date", i18n::format_date(language, a.end_date)),
+                ],
+                Some("absences"),
+                Some(id),
+            )
+            .await;
+        }
+    }
     Ok(Json(a))
 }
 
@@ -328,20 +462,24 @@ pub async fn update(
     Json(b): Json<NewAbsence>,
 ) -> AppResult<Json<Absence>> {
     let normalized = normalize_absence(&b)?;
+    validate_sick_start_date(normalized.kind, b.start_date)?;
     // Reject absences that start before the user's start_date.
     if b.start_date < u.start_date {
         return Err(AppError::BadRequest(
             "Absence start date is before user start date.".into(),
         ));
     }
-    let prev: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1")
+    let prev_owner = absence_owner_id(&s.pool, id).await?;
+    let mut tx = s.pool.begin().await?;
+    lock_absence_scope(&mut *tx, prev_owner).await?;
+    let prev: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1 FOR UPDATE")
         .bind(id)
-        .fetch_one(&s.pool)
+        .fetch_one(&mut *tx)
         .await?;
     if prev.user_id != u.id {
         return Err(AppError::Forbidden);
     }
-    let allowed = prev.status == "requested" || (prev.kind == "sick" && prev.status == "approved");
+    let allowed = prev.status == "requested";
     if !allowed {
         return Err(AppError::BadRequest("Cannot edit.".into()));
     }
@@ -358,11 +496,6 @@ pub async fn update(
     }
     // Re-check overlap with *other* absences of the same user (under advisory
     // lock to prevent TOCTOU race).
-    let mut tx = s.pool.begin().await?;
-    sqlx::query("SELECT pg_advisory_xact_lock($1)")
-        .bind(u.id)
-        .execute(&mut *tx)
-        .await?;
     let overlap: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM absences WHERE id != $1 AND user_id=$2 AND status IN ('requested','approved') AND end_date >= $3 AND start_date <= $4",
     )
@@ -371,6 +504,8 @@ pub async fn update(
     if overlap > 0 {
         return Err(AppError::Conflict("Overlap with existing absence.".into()));
     }
+    ensure_no_logged_time_conflict(&mut *tx, u.id, normalized.kind, b.start_date, b.end_date)
+        .await?;
     let (status, reviewed_by, reviewed_at, rejection_reason) = if prev.status == "requested" {
         let today_date = chrono::Local::now().date_naive();
         let new_status = if normalized.kind == "sick" && b.start_date <= today_date {
@@ -419,27 +554,39 @@ pub async fn update(
     Ok(Json(next))
 }
 
+fn can_self_cancel(absence: &Absence) -> bool {
+    absence.status == "requested"
+        || (absence.kind == "sick"
+            && absence.status == "approved"
+            && absence.reviewed_by.is_none()
+            && absence.reviewed_at.is_none())
+}
+
 pub async fn cancel(
     State(s): State<AppState>,
     u: User,
     Path(id): Path<i64>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let a: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1")
+    let owner_id = absence_owner_id(&s.pool, id).await?;
+    let mut tx = s.pool.begin().await?;
+    lock_absence_scope(&mut *tx, owner_id).await?;
+    let a: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1 FOR UPDATE")
         .bind(id)
-        .fetch_one(&s.pool)
+        .fetch_one(&mut *tx)
         .await?;
     if a.user_id != u.id {
         return Err(AppError::Forbidden);
     }
-    if a.status != "requested" {
+    if !can_self_cancel(&a) {
         return Err(AppError::BadRequest(
-            "Only requested absences can be cancelled.".into(),
+            "Only requested absences and auto-approved sick absences can be cancelled.".into(),
         ));
     }
     sqlx::query("UPDATE absences SET status='cancelled' WHERE id=$1")
         .bind(id)
-        .execute(&s.pool)
+        .execute(&mut *tx)
         .await?;
+    tx.commit().await?;
     audit::log(
         &s.pool,
         u.id,
@@ -461,7 +608,9 @@ pub async fn approve(
     if !u.is_lead() {
         return Err(AppError::Forbidden);
     }
+    let owner_id = absence_owner_id(&s.pool, id).await?;
     let mut tx = s.pool.begin().await?;
+    lock_absence_scope(&mut *tx, owner_id).await?;
     let a: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1 FOR UPDATE")
         .bind(id)
         .fetch_one(&mut *tx)
@@ -488,6 +637,7 @@ pub async fn approve(
             "Only requested absences can be approved.".into(),
         ));
     }
+    ensure_no_logged_time_conflict(&mut *tx, a.user_id, &a.kind, a.start_date, a.end_date).await?;
     let updated = sqlx::query(
         "UPDATE absences SET status='approved', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP WHERE id=$2 AND status='requested'",
     )
@@ -562,7 +712,9 @@ pub async fn reject(
     if b.reason.trim().is_empty() {
         return Err(AppError::BadRequest("Reason required.".into()));
     }
+    let owner_id = absence_owner_id(&s.pool, id).await?;
     let mut tx = s.pool.begin().await?;
+    lock_absence_scope(&mut *tx, owner_id).await?;
     let a: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1 FOR UPDATE")
         .bind(id)
         .fetch_one(&mut *tx)
@@ -646,9 +798,12 @@ pub async fn revoke(
     if !u.is_admin() {
         return Err(AppError::Forbidden);
     }
-    let a: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1")
+    let owner_id = absence_owner_id(&s.pool, id).await?;
+    let mut tx = s.pool.begin().await?;
+    lock_absence_scope(&mut *tx, owner_id).await?;
+    let a: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1 FOR UPDATE")
         .bind(id)
-        .fetch_one(&s.pool)
+        .fetch_one(&mut *tx)
         .await?;
     if a.status != "approved" {
         return Err(AppError::BadRequest(
@@ -656,7 +811,11 @@ pub async fn revoke(
         ));
     }
     sqlx::query("UPDATE absences SET status='cancelled', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP WHERE id=$2")
-        .bind(u.id).bind(id).execute(&s.pool).await?;
+        .bind(u.id)
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
     audit::log(
         &s.pool,
         u.id,
@@ -728,13 +887,12 @@ async fn assert_can_access_user(
     if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let is_report: Option<bool> = sqlx::query_scalar(
-        "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2",
-    )
-    .bind(target_uid)
-    .bind(requester.id)
-    .fetch_optional(pool)
-    .await?;
+    let is_report: Option<bool> =
+        sqlx::query_scalar("SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2")
+            .bind(target_uid)
+            .bind(requester.id)
+            .fetch_optional(pool)
+            .await?;
     if is_report.is_none() {
         return Err(AppError::Forbidden);
     }

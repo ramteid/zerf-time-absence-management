@@ -2,7 +2,7 @@ use reqwest::StatusCode;
 use serde_json::json;
 
 use crate::common::TestApp;
-use crate::helpers::{admin_login, today, date_offset};
+use crate::helpers::{admin_login, date_offset, today};
 
 /// Admin's start_date is set to today during seed. Verify that creating a time
 /// entry before that date is rejected.
@@ -26,7 +26,11 @@ async fn time_entry_before_start_date_rejected() {
             }),
         )
         .await;
-    assert_eq!(st, StatusCode::BAD_REQUEST, "entry before start_date: {body}");
+    assert_eq!(
+        st,
+        StatusCode::BAD_REQUEST,
+        "entry before start_date: {body}"
+    );
     assert!(
         body.to_string().contains("before user start date"),
         "error message: {body}"
@@ -73,7 +77,11 @@ async fn absence_before_start_date_rejected() {
             }),
         )
         .await;
-    assert_eq!(st, StatusCode::BAD_REQUEST, "absence before start_date: {body}");
+    assert_eq!(
+        st,
+        StatusCode::BAD_REQUEST,
+        "absence before start_date: {body}"
+    );
     assert!(
         body.to_string().contains("before user start date"),
         "error message: {body}"
@@ -134,6 +142,105 @@ async fn overtime_no_months_before_start_date() {
     }
 }
 
+#[tokio::test]
+async fn overtime_start_balance_carries_into_later_years() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+
+    let current_year: i32 = chrono::Local::now()
+        .format("%Y")
+        .to_string()
+        .parse()
+        .unwrap();
+    let start_date = chrono::NaiveDate::from_ymd_opt(current_year - 1, 1, 1)
+        .unwrap()
+        .to_string();
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "carry@example.com",
+                "first_name": "Carry",
+                "last_name": "Balance",
+                "role": "admin",
+                "weekly_hours": 0,
+                "annual_leave_days": 0,
+                "start_date": start_date,
+                "overtime_start_balance_min": 120
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create carry-balance user: {body}");
+    let uid = body["id"].as_i64().unwrap();
+
+    let (st, body) = admin
+        .get(&format!(
+            "/api/v1/reports/overtime?user_id={uid}&year={current_year}"
+        ))
+        .await;
+    assert_eq!(st, StatusCode::OK);
+    let rows = body.as_array().expect("overtime should be array");
+    assert!(!rows.is_empty(), "current year should have overtime rows");
+    assert_eq!(
+        rows[0]["cumulative_min"].as_i64(),
+        Some(120),
+        "start balance should carry into the next year"
+    );
+    assert_eq!(
+        rows.last().unwrap()["cumulative_min"].as_i64(),
+        Some(120),
+        "zero-hour user should keep the carried balance"
+    );
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn flextime_start_balance_begins_on_start_date() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "flex-carry@example.com",
+                "first_name": "Flex",
+                "last_name": "Carry",
+                "role": "admin",
+                "weekly_hours": 0,
+                "annual_leave_days": 0,
+                "start_date": today(),
+                "overtime_start_balance_min": 120
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create flex carry user: {body}");
+    let uid = body["id"].as_i64().unwrap();
+
+    let from = date_offset(-1);
+    let to = today();
+    let (st, body) = admin
+        .get(&format!(
+            "/api/v1/reports/flextime?user_id={uid}&from={from}&to={to}"
+        ))
+        .await;
+    assert_eq!(st, StatusCode::OK, "flextime report");
+    let rows = body.as_array().expect("flextime should be array");
+    assert_eq!(
+        rows.first().unwrap()["cumulative_min"].as_i64(),
+        Some(0),
+        "balance should not apply before the user's start date"
+    );
+    assert_eq!(
+        rows.last().unwrap()["cumulative_min"].as_i64(),
+        Some(120),
+        "balance should apply on the user's start date"
+    );
+
+    app.cleanup().await;
+}
+
 /// A newly created user with a future-ish start_date should not be able to
 /// create entries before that date.
 #[tokio::test]
@@ -182,7 +289,11 @@ async fn new_user_start_date_enforced() {
             }),
         )
         .await;
-    assert_eq!(st, StatusCode::BAD_REQUEST, "entry before start_date for new user");
+    assert_eq!(
+        st,
+        StatusCode::BAD_REQUEST,
+        "entry before start_date for new user"
+    );
 
     // Entry today should succeed
     let (st, _) = new_client

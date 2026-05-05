@@ -1,7 +1,7 @@
 <script>
   import { tick } from "svelte";
   import { api } from "../api.js";
-  import { currentUser, path, toast } from "../stores.js";
+  import { categories, currentUser, path, toast } from "../stores.js";
   import { t, absenceKindLabel, formatHours } from "../i18n.js";
   import {
     fmtDate,
@@ -289,6 +289,37 @@
 
   function weekHours(week) {
     return formatHours((week.total_min / 60).toFixed(1));
+  }
+
+  function categoryName(categoryId) {
+    const category = $categories.find((item) => item.id === categoryId);
+    return category ? $t(category.name) : `#${categoryId}`;
+  }
+
+  function changeRequestChanges(changeRequest) {
+    const lines = [];
+    if (changeRequest.new_date) {
+      lines.push(`${$t("Date")}: ${fmtDateShort(changeRequest.new_date)}`);
+    }
+    if (changeRequest.new_start_time) {
+      lines.push(`${$t("Start")}: ${changeRequest.new_start_time.slice(0, 5)}`);
+    }
+    if (changeRequest.new_end_time) {
+      lines.push(`${$t("End")}: ${changeRequest.new_end_time.slice(0, 5)}`);
+    }
+    if (changeRequest.new_category_id) {
+      lines.push(
+        `${$t("Category")}: ${categoryName(changeRequest.new_category_id)}`,
+      );
+    }
+    if (changeRequest.new_comment !== null && changeRequest.new_comment !== undefined) {
+      lines.push(
+        changeRequest.new_comment === ""
+          ? `${$t("Comment")}: ${$t("Cleared")}`
+          : `${$t("Comment")}: ${changeRequest.new_comment}`,
+      );
+    }
+    return lines;
   }
 
   function sectionByFocus(focus) {
@@ -865,7 +896,7 @@
         <thead>
           <tr>
             <th>{$t("Employee")}</th>
-            <th>{$t("Date")}</th>
+            <th>{$t("Created")}</th>
             <th>{$t("Request")}</th>
             <th></th>
           </tr>
@@ -878,7 +909,14 @@
               <td
                 style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
               >
-                {cr.reason || "-"}
+                <div style="display:flex;flex-direction:column;gap:4px;white-space:normal">
+                  <div>{cr.reason || "-"}</div>
+                  {#each changeRequestChanges(cr) as change}
+                    <div style="font-size:11.5px;color:var(--text-tertiary)">
+                      {change}
+                    </div>
+                  {/each}
+                </div>
               </td>
               <td style="text-align:right">
                 <div style="display:flex;gap:4px;justify-content:flex-end">

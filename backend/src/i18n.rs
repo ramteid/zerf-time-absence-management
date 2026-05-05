@@ -41,12 +41,16 @@ pub enum TextKey {
     ReopenRejectedBody,
     ReopenRejectedByAdminTitle,
     ReopenRejectedByAdminBody,
+    AbsenceRequestedTitle,
+    AbsenceRequestedBody,
     AbsenceApprovedTitle,
     AbsenceApprovedBody,
     AbsenceRejectedTitle,
     AbsenceRejectedBody,
     AbsenceRevokedTitle,
     AbsenceRevokedBody,
+    ChangeRequestCreatedTitle,
+    ChangeRequestCreatedBody,
     TimesheetSubmittedTitle,
     TimesheetSubmittedBody,
     TimesheetApprovedTitle,
@@ -121,6 +125,10 @@ fn template(language: Language, key: TextKey) -> &'static str {
             TextKey::ReopenRejectedByAdminBody => {
                 "The week reopen request from {requester_name} for the week starting {week_start} was rejected by an admin: {reason}"
             }
+            TextKey::AbsenceRequestedTitle => "New absence request",
+            TextKey::AbsenceRequestedBody => {
+                "{requester_name} requested an absence from {start_date} to {end_date}."
+            }
             TextKey::AbsenceApprovedTitle => "Absence approved",
             TextKey::AbsenceApprovedBody => {
                 "Your absence ({start_date} to {end_date}) has been approved."
@@ -132,6 +140,10 @@ fn template(language: Language, key: TextKey) -> &'static str {
             TextKey::AbsenceRevokedTitle => "Absence revoked",
             TextKey::AbsenceRevokedBody => {
                 "Your absence ({start_date} to {end_date}) has been revoked by an administrator."
+            }
+            TextKey::ChangeRequestCreatedTitle => "New change request",
+            TextKey::ChangeRequestCreatedBody => {
+                "{requester_name} requested a change for the time entry on {entry_date}."
             }
             TextKey::TimesheetSubmittedTitle => "{submitter_name} submitted a timesheet",
             TextKey::TimesheetSubmittedBody => "{entry_count} submitted for approval",
@@ -179,6 +191,10 @@ fn template(language: Language, key: TextKey) -> &'static str {
             TextKey::ReopenRejectedByAdminBody => {
                 "Die Wiederfreigabe-Anfrage von {requester_name} für die Woche ab {week_start} wurde von einem Admin abgelehnt: {reason}"
             }
+            TextKey::AbsenceRequestedTitle => "Neue Abwesenheitsanfrage",
+            TextKey::AbsenceRequestedBody => {
+                "{requester_name} hat eine Abwesenheit von {start_date} bis {end_date} beantragt."
+            }
             TextKey::AbsenceApprovedTitle => "Abwesenheit genehmigt",
             TextKey::AbsenceApprovedBody => {
                 "Ihre Abwesenheit ({start_date} bis {end_date}) wurde genehmigt."
@@ -190,6 +206,10 @@ fn template(language: Language, key: TextKey) -> &'static str {
             TextKey::AbsenceRevokedTitle => "Abwesenheit widerrufen",
             TextKey::AbsenceRevokedBody => {
                 "Ihre Abwesenheit ({start_date} bis {end_date}) wurde von einem Administrator widerrufen."
+            }
+            TextKey::ChangeRequestCreatedTitle => "Neue Aenderungsanfrage",
+            TextKey::ChangeRequestCreatedBody => {
+                "{requester_name} hat eine Aenderung fuer den Zeiteintrag am {entry_date} beantragt."
             }
             TextKey::TimesheetSubmittedTitle => "{submitter_name} hat eine Zeiterfassung eingereicht",
             TextKey::TimesheetSubmittedBody => "{entry_count} zur Genehmigung eingereicht",

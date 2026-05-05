@@ -97,7 +97,10 @@ pub async fn list_all(
     let mut builder = QueryBuilder::<Postgres>::new("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE TRUE");
     // Team leads only see entries from their direct reports; admins see all.
     if !u.is_admin() {
-        builder.push(" AND user_id IN (SELECT id FROM users WHERE approver_id = ").push_bind(u.id).push(")");
+        builder
+            .push(" AND user_id IN (SELECT id FROM users WHERE approver_id = ")
+            .push_bind(u.id)
+            .push(")");
     }
     if let Some(v) = q.from {
         builder.push(" AND entry_date >= ").push_bind(v);
@@ -226,10 +229,16 @@ pub async fn create(
     u: User,
     Json(b): Json<NewTimeEntry>,
 ) -> AppResult<Json<TimeEntry>> {
+    let mut tx = s.pool.begin().await?;
+    sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(u.id)
+        .execute(&mut *tx)
+        .await?;
     validate(&s.pool, u.id, &b, None).await?;
     let id: i64 = sqlx::query_scalar("INSERT INTO time_entries(user_id, entry_date, start_time, end_time, category_id, comment) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id")
         .bind(u.id).bind(b.entry_date).bind(&b.start_time).bind(&b.end_time).bind(b.category_id).bind(&b.comment)
-        .fetch_one(&s.pool).await?;
+        .fetch_one(&mut *tx).await?;
+    tx.commit().await?;
     let z: TimeEntry = sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
@@ -253,9 +262,18 @@ pub async fn update(
     Path(id): Path<i64>,
     Json(b): Json<NewTimeEntry>,
 ) -> AppResult<Json<TimeEntry>> {
-    let prev: TimeEntry = sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1")
+    let prev_owner: i64 = sqlx::query_scalar("SELECT user_id FROM time_entries WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
+        .await?;
+    let mut tx = s.pool.begin().await?;
+    sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(prev_owner)
+        .execute(&mut *tx)
+        .await?;
+    let prev: TimeEntry = sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1 FOR UPDATE")
+        .bind(id)
+        .fetch_one(&mut *tx)
         .await?;
     let admin_correction = u.is_admin()
         && prev.user_id != u.id
@@ -273,7 +291,8 @@ pub async fn update(
     validate(&s.pool, prev.user_id, &b, Some(id)).await?;
     sqlx::query("UPDATE time_entries SET entry_date=$1, start_time=$2, end_time=$3, category_id=$4, comment=$5, updated_at=CURRENT_TIMESTAMP WHERE id=$6")
         .bind(b.entry_date).bind(&b.start_time).bind(&b.end_time).bind(b.category_id).bind(&b.comment).bind(id)
-        .execute(&s.pool).await?;
+        .execute(&mut *tx).await?;
+    tx.commit().await?;
     let next: TimeEntry = sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
@@ -381,35 +400,28 @@ pub async fn submit(
     let count = submitted.len();
     // Phase 4: notify the approver with the actual submitted count.
     if count > 0 {
-        let approver_id: Option<i64> =
-            sqlx::query_scalar("SELECT approver_id FROM users WHERE id=$1")
-                .bind(u.id)
-                .fetch_optional(&s.pool)
-                .await?
-                .flatten();
-        let notify_id = approver_id.unwrap_or(u.id);
+        let notify_ids = crate::auth::approval_recipient_ids(&s.pool, &u).await;
         let language = notification_language(&s.pool).await;
-        crate::notifications::create_translated(
-            &s,
-            language,
-            notify_id,
-            "timesheet_submitted",
-            TextKey::TimesheetSubmittedTitle,
-            TextKey::TimesheetSubmittedBody,
-            vec![
-                (
-                    "submitter_name",
-                    format!("{} {}", u.first_name, u.last_name),
-                ),
-                (
-                    "entry_count",
-                    i18n::entry_count(language, count as i64),
-                ),
-            ],
-            Some("time_entries"),
-            None,
-        )
-        .await;
+        for notify_id in notify_ids {
+            crate::notifications::create_translated(
+                &s,
+                language,
+                notify_id,
+                "timesheet_submitted",
+                TextKey::TimesheetSubmittedTitle,
+                TextKey::TimesheetSubmittedBody,
+                vec![
+                    (
+                        "submitter_name",
+                        format!("{} {}", u.first_name, u.last_name),
+                    ),
+                    ("entry_count", i18n::entry_count(language, count as i64)),
+                ],
+                Some("time_entries"),
+                None,
+            )
+            .await;
+        }
     }
     Ok(Json(serde_json::json!({"ok": true, "count": count})))
 }
@@ -597,13 +609,12 @@ pub async fn batch_approve(
             continue;
         }
         if !u.is_admin() {
-            let is_report: Option<bool> = sqlx::query_scalar(
-                "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2",
-            )
-            .bind(z.user_id)
-            .bind(u.id)
-            .fetch_optional(&s.pool)
-            .await?;
+            let is_report: Option<bool> =
+                sqlx::query_scalar("SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2")
+                    .bind(z.user_id)
+                    .bind(u.id)
+                    .fetch_optional(&s.pool)
+                    .await?;
             if is_report.is_none() {
                 continue;
             }
@@ -690,7 +701,7 @@ pub async fn batch_reject(
         let z: Option<TimeEntry> = sqlx::query_as(
             "SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, \
              status, submitted_at, reviewed_by, reviewed_at, rejection_reason, \
-             created_at, updated_at FROM time_entries WHERE id=$1 AND status='submitted'"
+             created_at, updated_at FROM time_entries WHERE id=$1 AND status='submitted'",
         )
         .bind(id)
         .fetch_optional(&s.pool)
@@ -700,13 +711,12 @@ pub async fn batch_reject(
             continue;
         }
         if !u.is_admin() {
-            let is_report: Option<bool> = sqlx::query_scalar(
-                "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2",
-            )
-            .bind(z.user_id)
-            .bind(u.id)
-            .fetch_optional(&s.pool)
-            .await?;
+            let is_report: Option<bool> =
+                sqlx::query_scalar("SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2")
+                    .bind(z.user_id)
+                    .bind(u.id)
+                    .fetch_optional(&s.pool)
+                    .await?;
             if is_report.is_none() {
                 continue;
             }

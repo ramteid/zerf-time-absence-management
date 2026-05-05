@@ -35,7 +35,9 @@ async fn get_json(url: &str) -> serde_json::Value {
 #[tokio::test]
 async fn available_countries_structure() {
     let body = get_json(&format!("{BASE}/AvailableCountries")).await;
-    let arr = body.as_array().expect("AvailableCountries must be a JSON array");
+    let arr = body
+        .as_array()
+        .expect("AvailableCountries must be a JSON array");
     assert!(!arr.is_empty(), "AvailableCountries must not be empty");
 
     for item in arr {
@@ -46,12 +48,19 @@ async fn available_countries_structure() {
             .as_str()
             .expect("each country must have a 'name' string field");
 
-        assert_eq!(code.len(), 2, "countryCode must be exactly 2 characters: {code}");
+        assert_eq!(
+            code.len(),
+            2,
+            "countryCode must be exactly 2 characters: {code}"
+        );
         assert!(
             code.chars().all(|c| c.is_ascii_uppercase()),
             "countryCode must be uppercase ASCII: {code}"
         );
-        assert!(!name.is_empty(), "name must not be empty for countryCode {code}");
+        assert!(
+            !name.is_empty(),
+            "name must not be empty for countryCode {code}"
+        );
     }
 }
 
@@ -86,7 +95,10 @@ async fn public_holidays_de_field_types() {
     let arr = body
         .as_array()
         .expect("PublicHolidays must be a JSON array");
-    assert!(!arr.is_empty(), "PublicHolidays for DE/{year} must not be empty");
+    assert!(
+        !arr.is_empty(),
+        "PublicHolidays for DE/{year} must not be empty"
+    );
 
     for item in arr {
         // date — must be a parseable YYYY-MM-DD string whose year matches the request
@@ -100,14 +112,21 @@ async fn public_holidays_de_field_types() {
         );
 
         // localName / name — must be non-empty strings
-        let local_name = item["localName"].as_str().expect("localName must be a string");
-        assert!(!local_name.is_empty(), "localName must not be empty ({date_str})");
+        let local_name = item["localName"]
+            .as_str()
+            .expect("localName must be a string");
+        assert!(
+            !local_name.is_empty(),
+            "localName must not be empty ({date_str})"
+        );
         let name = item["name"].as_str().expect("name must be a string");
         assert!(!name.is_empty(), "name must not be empty ({date_str})");
 
         // countryCode — must be the requested country
         assert_eq!(
-            item["countryCode"].as_str().expect("countryCode must be a string"),
+            item["countryCode"]
+                .as_str()
+                .expect("countryCode must be a string"),
             "DE",
             "countryCode must be 'DE' ({date_str})"
         );
@@ -122,7 +141,10 @@ async fn public_holidays_de_field_types() {
         let types = item["types"].as_array().expect("types must be an array");
         assert!(!types.is_empty(), "types must not be empty ({date_str})");
         for t in types {
-            assert!(t.as_str().is_some(), "each type entry must be a string ({date_str})");
+            assert!(
+                t.as_str().is_some(),
+                "each type entry must be a string ({date_str})"
+            );
         }
 
         // counties — null or array of ISO 3166-2 strings starting with "DE-"
@@ -158,9 +180,8 @@ async fn public_holidays_de_field_types() {
 async fn public_holidays_de_all_bundeslaender_codes_present() {
     // The 16 German Bundesländer as used by Nager.Date (ISO 3166-2:DE).
     const EXPECTED: &[&str] = &[
-        "DE-BB", "DE-BE", "DE-BW", "DE-BY", "DE-HB", "DE-HE",
-        "DE-HH", "DE-MV", "DE-NI", "DE-NW", "DE-RP", "DE-SH",
-        "DE-SL", "DE-SN", "DE-ST", "DE-TH",
+        "DE-BB", "DE-BE", "DE-BW", "DE-BY", "DE-HB", "DE-HE", "DE-HH", "DE-MV", "DE-NI", "DE-NW",
+        "DE-RP", "DE-SH", "DE-SL", "DE-SN", "DE-ST", "DE-TH",
     ];
 
     let year = chrono::Utc::now().year();
@@ -197,10 +218,8 @@ async fn public_holidays_de_fixed_holidays_present() {
     let body = get_json(&format!("{BASE}/PublicHolidays/{year}/DE")).await;
     let arr = body.as_array().expect("array");
 
-    let dates: std::collections::HashSet<&str> = arr
-        .iter()
-        .filter_map(|h| h["date"].as_str())
-        .collect();
+    let dates: std::collections::HashSet<&str> =
+        arr.iter().filter_map(|h| h["date"].as_str()).collect();
 
     // New Year's Day and Christmas Day are fixed public holidays in all states.
     for expected in [format!("{year}-01-01"), format!("{year}-12-25")] {

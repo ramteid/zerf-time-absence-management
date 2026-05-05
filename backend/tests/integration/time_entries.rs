@@ -60,7 +60,11 @@ async fn reject_requires_reason_before_ownership_check() {
             &json!({"reason": "   "}),
         )
         .await;
-    assert_eq!(st, StatusCode::BAD_REQUEST, "blank reason wins over ownership check");
+    assert_eq!(
+        st,
+        StatusCode::BAD_REQUEST,
+        "blank reason wins over ownership check"
+    );
 
     app.cleanup().await;
 }

@@ -16,6 +16,7 @@
 mod common;
 mod helpers;
 
+mod absences;
 mod admin;
 mod auth;
 mod change_requests;
