@@ -84,7 +84,7 @@
       <h1
         style="margin:0;font-size:20px;font-weight:600;letter-spacing:-0.02em"
       >
-        Zerf
+        ZERF {$t("Time tracking")}
       </h1>
     </div>
     <p style="font-size:13px;color:var(--text-tertiary);margin-bottom:24px">

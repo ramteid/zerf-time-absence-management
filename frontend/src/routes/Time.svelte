@@ -259,9 +259,9 @@
       {$t("contract")}
     </div>
   {/if}
-  <div class="top-bar-actions">
+  <div class="top-bar-actions time-top-bar-actions">
     {#if mo}
-      <div style="display:flex;align-items:center;gap:4px">
+      <div class="time-week-picker" style="display:flex;align-items:center;gap:4px">
         <button
           class="kz-btn kz-btn-icon-sm kz-btn-ghost"
           on:click={() => gotoWeek(-7)}
@@ -284,7 +284,7 @@
       </div>
     {/if}
     <button
-      class="kz-btn kz-btn-primary"
+      class="kz-btn kz-btn-primary time-submit-button"
       on:click={() => submitWeek(drafts.map((x) => x.id))}
       disabled={!drafts.length}
     >
@@ -292,20 +292,24 @@
     </button>
     {#if !drafts.length && weekStatus !== "draft"}
       {#if pendingReopen}
-        <span
-          class="kz-chip kz-chip-pending"
-          title={$t("Reopen pending approval.")}
-        >
-          {$t("Reopen pending approval.")}
-        </span>
+        <div class="time-reopen-action">
+          <span
+            class="kz-chip kz-chip-pending"
+            title={$t("Reopen pending approval.")}
+          >
+            {$t("Reopen pending approval.")}
+          </span>
+        </div>
       {:else if canRequestReopen}
-        <button
-          class="kz-btn kz-btn-sm"
-          on:click={requestReopen}
-          title={$t("Request edit")}
-        >
-          <Icon name="Edit" size={13} />{$t("Request edit")}
-        </button>
+        <div class="time-reopen-action">
+          <button
+            class="kz-btn kz-btn-sm"
+            on:click={requestReopen}
+            title={$t("Request edit")}
+          >
+            <Icon name="Edit" size={13} />{$t("Request edit")}
+          </button>
+        </div>
       {/if}
     {/if}
   </div>
