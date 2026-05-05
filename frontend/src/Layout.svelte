@@ -183,11 +183,7 @@
     const lead = [];
     const admin = [];
     for (const link of items) {
-      if (
-        link.key === "Dashboard" ||
-        link.key === "Reports" ||
-        link.key === "TeamSettings"
-      ) {
+      if (link.key === "TeamSettings") {
         lead.push(link);
       } else if (link.key === "Admin") {
         admin.push(link);

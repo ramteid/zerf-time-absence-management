@@ -223,6 +223,8 @@
   }
 
   async function load() {
+    const canApprove = !!$currentUser?.permissions?.can_approve;
+    if (!canApprove) return;
     try {
       const [e, a, c, r, u] = await Promise.all([
         api("/time-entries/all?status=submitted"),
@@ -557,28 +559,34 @@
     <h1>{$t("Dashboard")}</h1>
   </div>
   <div class="top-bar-subtitle">
-    {$t("Approve timesheets & manage requests")}
+    {#if $currentUser?.permissions?.can_approve}
+      {$t("Approve timesheets & manage requests")}
+    {:else}
+      {$t("Your overview")}
+    {/if}
   </div>
 </div>
 
 <div class="content-area">
   <div class="stat-cards">
-    <div class="kz-card stat-card">
-      <div class="stat-card-label">{$t("Pending Timesheets")}</div>
-      <div class="stat-card-value accent tab-num">{pendingWeeks.length}</div>
-    </div>
-    <div class="kz-card stat-card">
-      <div class="stat-card-label">{$t("Absence Requests")}</div>
-      <div class="stat-card-value tab-num">{pendingAbsences.length}</div>
-    </div>
-    <div class="kz-card stat-card">
-      <div class="stat-card-label">{$t("Change Requests")}</div>
-      <div class="stat-card-value tab-num">{changeRequests.length}</div>
-    </div>
-    <div class="kz-card stat-card">
-      <div class="stat-card-label">{$t("Team Members")}</div>
-      <div class="stat-card-value tab-num">{users.length}</div>
-    </div>
+    {#if $currentUser?.permissions?.can_approve}
+      <div class="kz-card stat-card">
+        <div class="stat-card-label">{$t("Pending Timesheets")}</div>
+        <div class="stat-card-value accent tab-num">{pendingWeeks.length}</div>
+      </div>
+      <div class="kz-card stat-card">
+        <div class="stat-card-label">{$t("Absence Requests")}</div>
+        <div class="stat-card-value tab-num">{pendingAbsences.length}</div>
+      </div>
+      <div class="kz-card stat-card">
+        <div class="stat-card-label">{$t("Change Requests")}</div>
+        <div class="stat-card-value tab-num">{changeRequests.length}</div>
+      </div>
+      <div class="kz-card stat-card">
+        <div class="stat-card-label">{$t("Team Members")}</div>
+        <div class="stat-card-value tab-num">{users.length}</div>
+      </div>
+    {/if}
     <div class="kz-card stat-card">
       <div class="stat-card-label">{$t("Overtime overview")}</div>
       {#if overtimeLoading}
@@ -637,6 +645,7 @@
     </div>
   </div>
 
+  {#if $currentUser?.permissions?.can_approve}
   <div
     class="dashboard-approval-grid"
     style="display:grid;grid-template-columns:1fr 1fr;gap:16px"
@@ -794,8 +803,9 @@
       {/if}
     </div>
   </div>
+  {/if}
 
-  {#if pendingReopens.length > 0}
+  {#if $currentUser?.permissions?.can_approve && pendingReopens.length > 0}
     <div
       class="kz-card"
       class:dashboard-focus={focusedSection === "reopen"}
@@ -907,7 +917,7 @@
     {/if}
   </div>
 
-  {#if changeRequests.length > 0}
+  {#if $currentUser?.permissions?.can_approve && changeRequests.length > 0}
     <div
       class="kz-card"
       class:dashboard-focus={focusedSection === "changes"}

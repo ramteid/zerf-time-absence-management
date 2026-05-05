@@ -118,6 +118,122 @@ async fn non_admin_users_must_have_approver() {
 }
 
 #[tokio::test]
+async fn duplicate_user_identifiers_are_rejected() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "unique@example.com",
+                "first_name": "Unique",
+                "last_name": "Person",
+                "role": "employee",
+                "weekly_hours": 39,
+                "annual_leave_days": 30,
+                "start_date": "2024-01-01",
+                "approver_id": 1,
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create baseline user");
+    let baseline_id = id(&body);
+
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "unique@example.com",
+                "first_name": "Different",
+                "last_name": "Person",
+                "role": "employee",
+                "weekly_hours": 39,
+                "annual_leave_days": 30,
+                "start_date": "2024-01-01",
+                "approver_id": 1,
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::CONFLICT, "duplicate email rejected");
+    assert!(body["error"]
+        .as_str()
+        .unwrap()
+        .contains("Email already exists."));
+
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "same-name@example.com",
+                "first_name": " Unique ",
+                "last_name": " Person ",
+                "role": "employee",
+                "weekly_hours": 39,
+                "annual_leave_days": 30,
+                "start_date": "2024-01-01",
+                "approver_id": 1,
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::CONFLICT, "duplicate full name rejected");
+    assert!(body["error"]
+        .as_str()
+        .unwrap()
+        .contains("First name and last name already exist."));
+
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "other@example.com",
+                "first_name": "Other",
+                "last_name": "Person",
+                "role": "employee",
+                "weekly_hours": 39,
+                "annual_leave_days": 30,
+                "start_date": "2024-01-01",
+                "approver_id": 1,
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create second user");
+    let second_id = id(&body);
+
+    let (st, body) = admin
+        .put(
+            &format!("/api/v1/users/{second_id}"),
+            &json!({"first_name": "Unique", "last_name": "Person"}),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::CONFLICT,
+        "duplicate full name update rejected"
+    );
+    assert!(body["error"]
+        .as_str()
+        .unwrap()
+        .contains("First name and last name already exist."));
+
+    let (st, body) = admin
+        .put(
+            &format!("/api/v1/users/{baseline_id}"),
+            &json!({"first_name": " Unique ", "last_name": " Person "}),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::OK,
+        "updating same user with trimmed name works"
+    );
+    assert_eq!(body["first_name"], "Unique");
+    assert_eq!(body["last_name"], "Person");
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
 async fn creation_password_modes_set_must_change_correctly() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;

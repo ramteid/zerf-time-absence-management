@@ -66,6 +66,18 @@ describe("translate", () => {
       "Deaktivierung nicht möglich: 2 aktive Benutzer haben diese Person noch als verantwortliche Person. Weisen Sie sie zuerst neu zu.",
     );
   });
+
+  it("localizes duplicate user conflicts", () => {
+    setLanguage("de");
+    expect(localizeErrorMessage("Conflict: Email already exists.")).toBe(
+      "Konflikt: E-Mail existiert bereits.",
+    );
+    expect(
+      localizeErrorMessage("Conflict: First name and last name already exist."),
+    ).toBe(
+      "Konflikt: Diese Kombination aus Vorname und Nachname existiert bereits.",
+    );
+  });
 });
 
 describe("resolveLanguage", () => {

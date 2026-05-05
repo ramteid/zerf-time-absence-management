@@ -203,6 +203,7 @@
       opts.position = positionInDialog;
     }
     fp = flatpickr(el, opts);
+    if (value) fp.setDate(value, false);
     fp.calendarContainer?.classList.add("kz-date-picker-calendar");
     if (container)
       fp.calendarContainer?.classList.add("kz-date-picker-overlay");

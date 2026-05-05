@@ -249,7 +249,7 @@
 
   const routeAccess = {
     "/dashboard": (user) => !!user?.permissions?.can_view_dashboard,
-    "/reports": (user) => !!user?.permissions?.can_view_team_reports,
+    "/reports": (user) => !!user?.permissions?.can_view_reports,
     "/team-settings": (user) => !!user?.permissions?.can_manage_team_settings,
     "/admin": (user) => !!user?.permissions?.can_manage_users,
     "/admin/users": (user) => !!user?.permissions?.can_manage_users,

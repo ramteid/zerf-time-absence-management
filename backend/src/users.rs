@@ -233,6 +233,90 @@ async fn validate_approver(
     Ok(())
 }
 
+fn normalize_user_name(first_name: &str, last_name: &str) -> AppResult<(String, String)> {
+    let first_name = first_name.trim().to_string();
+    let last_name = last_name.trim().to_string();
+    if first_name.is_empty()
+        || last_name.is_empty()
+        || first_name.len() > 200
+        || last_name.len() > 200
+    {
+        return Err(AppError::BadRequest("Invalid name.".into()));
+    }
+    Ok((first_name, last_name))
+}
+
+fn normalize_optional_user_name(name: Option<&String>) -> AppResult<Option<String>> {
+    match name {
+        Some(value) => {
+            let trimmed = value.trim().to_string();
+            if trimmed.is_empty() || trimmed.len() > 200 {
+                return Err(AppError::BadRequest("Invalid name.".into()));
+            }
+            Ok(Some(trimmed))
+        }
+        None => Ok(None),
+    }
+}
+
+async fn ensure_email_available(
+    pool: &crate::db::DatabasePool,
+    email: &str,
+    excluded_user_id: Option<i64>,
+) -> AppResult<()> {
+    let existing_id: Option<i64> = sqlx::query_scalar(
+        "SELECT id FROM users WHERE email=$1 AND ($2::BIGINT IS NULL OR id<>$2) LIMIT 1",
+    )
+    .bind(email)
+    .bind(excluded_user_id)
+    .fetch_optional(pool)
+    .await?;
+    if existing_id.is_some() {
+        return Err(AppError::Conflict("Email already exists.".into()));
+    }
+    Ok(())
+}
+
+async fn ensure_user_name_available(
+    pool: &crate::db::DatabasePool,
+    first_name: &str,
+    last_name: &str,
+    excluded_user_id: Option<i64>,
+) -> AppResult<()> {
+    let existing_id: Option<i64> = sqlx::query_scalar(
+        "SELECT id FROM users WHERE first_name=$1 AND last_name=$2 \
+         AND ($3::BIGINT IS NULL OR id<>$3) LIMIT 1",
+    )
+    .bind(first_name)
+    .bind(last_name)
+    .bind(excluded_user_id)
+    .fetch_optional(pool)
+    .await?;
+    if existing_id.is_some() {
+        return Err(AppError::Conflict(
+            "First name and last name already exist.".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn user_unique_conflict(error: &sqlx::Error) -> Option<AppError> {
+    let db_error = match error {
+        sqlx::Error::Database(db_error) => db_error,
+        _ => return None,
+    };
+    match db_error.constraint() {
+        Some("users_email_key") => Some(AppError::Conflict("Email already exists.".into())),
+        Some("idx_users_first_last_name_unique") => Some(AppError::Conflict(
+            "First name and last name already exist.".into(),
+        )),
+        _ if db_error.code().as_deref() == Some("23505") && db_error.table() == Some("users") => {
+            Some(AppError::Conflict("User already exists.".into()))
+        }
+        _ => None,
+    }
+}
+
 #[derive(Serialize)]
 pub struct CreateResponse {
     pub id: i64,
@@ -255,19 +339,15 @@ pub async fn create(
     if email_norm.is_empty() || email_norm.len() > 254 || !email_norm.contains('@') {
         return Err(AppError::BadRequest("Invalid email.".into()));
     }
-    if b.first_name.trim().is_empty()
-        || b.last_name.trim().is_empty()
-        || b.first_name.len() > 200
-        || b.last_name.len() > 200
-    {
-        return Err(AppError::BadRequest("Invalid name.".into()));
-    }
+    let (first_name, last_name) = normalize_user_name(&b.first_name, &b.last_name)?;
     if !(0.0..=168.0).contains(&b.weekly_hours) {
         return Err(AppError::BadRequest("Invalid weekly_hours.".into()));
     }
     if !(0..=366).contains(&b.annual_leave_days) {
         return Err(AppError::BadRequest("Invalid annual_leave_days.".into()));
     }
+    ensure_email_available(&s.pool, &email_norm, None).await?;
+    ensure_user_name_available(&s.pool, &first_name, &last_name, None).await?;
     let (password, temp) = match b.password {
         Some(p) if !p.is_empty() => {
             validate_password_strength(&p)?;
@@ -282,13 +362,13 @@ pub async fn create(
     validate_approver(&s.pool, &b.role, None, b.approver_id).await?;
     let overtime_balance = b.overtime_start_balance_min.unwrap_or(0);
     let id: i64 = sqlx::query_scalar("INSERT INTO users(email,password_hash,first_name,last_name,role,weekly_hours,annual_leave_days,start_date,must_change_password,approver_id,overtime_start_balance_min) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id")
-        .bind(&email_norm).bind(hash).bind(b.first_name.trim()).bind(b.last_name.trim()).bind(&b.role)
+        .bind(&email_norm).bind(hash).bind(&first_name).bind(&last_name).bind(&b.role)
         .bind(b.weekly_hours).bind(b.annual_leave_days).bind(b.start_date).bind(true).bind(b.approver_id)
         .bind(overtime_balance)
         .fetch_one(&s.pool).await
         .map_err(|e| {
             tracing::warn!(target:"zerf::users", "create user insert failed: {e}");
-            AppError::Conflict("Email already exists or invalid approver.".into())
+            user_unique_conflict(&e).unwrap_or_else(|| AppError::Conflict("Could not create user.".into()))
         })?;
     let user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1")
         .bind(id)
@@ -306,13 +386,24 @@ pub async fn create(
     .await;
     // Send registration email best-effort
     {
-        let smtp = crate::settings::load_smtp_config(&s.pool).await.map(std::sync::Arc::new);
+        let smtp = crate::settings::load_smtp_config(&s.pool)
+            .await
+            .map(std::sync::Arc::new);
         let email_to = email_norm.clone();
         let display_pw = temp.clone();
         let subject = "Welcome to Zerf".to_string();
+        let login_line = match s.cfg.public_url.as_deref() {
+            Some(url) => format!(
+                "\nURL:      https://{}\n",
+                url.trim_start_matches("https://")
+                    .trim_start_matches("http://")
+                    .trim_end_matches('/')
+            ),
+            None => String::new(),
+        };
         let body_text = format!(
-            "Hello {} {},\n\nYour account has been created.\n\nEmail: {}\nPassword: {}\n\nPlease log in and change your password immediately.",
-            b.first_name.trim(), b.last_name.trim(), email_to, display_pw
+            "Hello {} {},\n\nYour account has been created.\n\nEmail:    {}\nPassword: {}{}\nPlease log in and change your password immediately.",
+            first_name, last_name, email_to, display_pw, login_line
         );
         crate::email::send_async(smtp, email_to, subject, body_text);
     }
@@ -388,10 +479,22 @@ pub async fn update(
             return Err(AppError::BadRequest("Invalid email.".into()));
         }
     }
+    let first_name = normalize_optional_user_name(b.first_name.as_ref())?;
+    let last_name = normalize_optional_user_name(b.last_name.as_ref())?;
     let prev: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1")
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
+    if let Some(e) = &email_lc {
+        ensure_email_available(&s.pool, e, Some(id)).await?;
+    }
+    if first_name.is_some() || last_name.is_some() {
+        let next_first_name = first_name
+            .clone()
+            .unwrap_or_else(|| prev.first_name.clone());
+        let next_last_name = last_name.clone().unwrap_or_else(|| prev.last_name.clone());
+        ensure_user_name_available(&s.pool, &next_first_name, &next_last_name, Some(id)).await?;
+    }
     // Pre-validate the post-update invariant (non-admin → has approver).
     let next_role = b.role.clone().unwrap_or_else(|| prev.role.clone());
     let next_approver = match b.approver_id {
@@ -402,11 +505,14 @@ pub async fn update(
 
     let mut tx = s.pool.begin().await?;
     sqlx::query("UPDATE users SET email=COALESCE($1,email), first_name=COALESCE($2,first_name), last_name=COALESCE($3,last_name), role=COALESCE($4,role), weekly_hours=COALESCE($5,weekly_hours), annual_leave_days=COALESCE($6,annual_leave_days), start_date=COALESCE($7,start_date), active=COALESCE($8,active), allow_reopen_without_approval=COALESCE($9,allow_reopen_without_approval), overtime_start_balance_min=COALESCE($10,overtime_start_balance_min) WHERE id=$11")
-        .bind(email_lc).bind(b.first_name).bind(b.last_name).bind(b.role.clone())
+        .bind(email_lc).bind(first_name).bind(last_name).bind(b.role.clone())
         .bind(b.weekly_hours).bind(b.annual_leave_days).bind(b.start_date).bind(b.active)
         .bind(b.allow_reopen_without_approval).bind(b.overtime_start_balance_min).bind(id)
         .execute(&mut *tx).await
-        .map_err(|_| AppError::Conflict("Could not update user (e.g. email conflict).".into()))?;
+        .map_err(|e| {
+            tracing::warn!(target:"zerf::users", "update user failed: {e}");
+            user_unique_conflict(&e).unwrap_or_else(|| AppError::Conflict("Could not update user.".into()))
+        })?;
     // Approver_id requires special handling because we want to support
     // explicit clearing (Some(None)) which COALESCE cannot express.
     if let Some(v) = b.approver_id {

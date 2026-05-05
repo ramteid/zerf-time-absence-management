@@ -1,7 +1,7 @@
 <script>
   import { onMount } from "svelte";
   import { api } from "../api.js";
-  import { categories, currentUser, toast } from "../stores.js";
+  import { categories, toast } from "../stores.js";
   import { t } from "../i18n.js";
   import { isoDate } from "../format.js";
   import { buildChangeRequestPayload } from "../changeRequests.js";
@@ -83,7 +83,6 @@
       <DatePicker
         id="change-request-date"
         bind:value={entry_date}
-        min={$currentUser?.start_date}
         max={isoDate(new Date())}
         container={dlg}
       />

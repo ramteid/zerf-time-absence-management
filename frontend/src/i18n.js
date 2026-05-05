@@ -347,6 +347,8 @@ const TRANSLATIONS = {
     "Cancel this absence request?": "Diese Abwesenheitsanfrage stornieren?",
     "Approve timesheets & manage requests":
       "Stundenzettel genehmigen & Anträge verwalten",
+    "Your overview": "Deine Übersicht",
+    "Your hours overview": "Deine Stundenübersicht",
     "Pending Timesheets": "Ausstehende Stundenzettel",
     "Absence Requests": "Abwesenheitsanträge",
     "Team Members": "Teammitglieder",
@@ -393,6 +395,8 @@ const TRANSLATIONS = {
     "SMTP enabled": "SMTP aktiviert",
     "SMTP disabled": "SMTP deaktiviert",
     "Connection OK": "Verbindung OK",
+    "Not tested": "Nicht getestet",
+    "SMTP connection test failed": "SMTP-Verbindungstest fehlgeschlagen",
     "Initial setup required.": "Ersteinrichtung erforderlich.",
     "Please configure the country, region, default weekly hours and default annual leave days before using the application.":
       "Bitte Land, Region, Standard-Wochenstunden und Standard-Urlaubstage konfigurieren, bevor die Anwendung genutzt wird.",
@@ -524,6 +528,12 @@ const TRANSLATIONS = {
     "Approver must be an active Team lead or Admin.":
       "Verantwortliche Person muss eine aktive Teamleitung oder ein Admin sein.",
     "Approver not found.": "Verantwortliche Person nicht gefunden.",
+    "Email already exists.": "E-Mail existiert bereits.",
+    "First name and last name already exist.":
+      "Diese Kombination aus Vorname und Nachname existiert bereits.",
+    "User already exists.": "Benutzer existiert bereits.",
+    "Could not create user.": "Benutzer konnte nicht angelegt werden.",
+    "Could not update user.": "Benutzer konnte nicht aktualisiert werden.",
     "Email already exists or invalid approver.":
       "E-Mail existiert bereits oder verantwortliche Person ist ungültig.",
     "Could not update user (e.g. email conflict).":
@@ -881,6 +891,12 @@ export function localizeErrorMessage(message, lang = get(language)) {
     return translate(lang, "Conflict: {message}", {
       message: translatedDetail,
     });
+  }
+
+  const smtpPrefix = "SMTP_CONNECTION_FAILED:";
+  if (normalized.startsWith(smtpPrefix)) {
+    const detail = normalized.slice(smtpPrefix.length).trim();
+    return translate(lang, "SMTP connection test failed") + ": " + detail;
   }
 
   return normalized;
