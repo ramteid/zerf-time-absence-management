@@ -307,7 +307,7 @@ pub async fn create(
     .await;
     // Send registration email best-effort
     {
-        let smtp = s.cfg.smtp.clone().map(std::sync::Arc::new);
+        let smtp = crate::settings::load_smtp_config(&s.pool).await.map(std::sync::Arc::new);
         let email_to = email_norm.clone();
         let display_pw = temp.clone();
         let subject = "Welcome to Zerf".to_string();

@@ -80,7 +80,9 @@ pub async fn create(
             .fetch_optional(&state.pool)
             .await
     {
-        let smtp = state.cfg.smtp.clone().map(std::sync::Arc::new);
+        let smtp = crate::settings::load_smtp_config(&state.pool)
+            .await
+            .map(std::sync::Arc::new);
         crate::email::send_async(smtp, email, title.to_string(), body.to_string());
     }
 }

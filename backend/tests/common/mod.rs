@@ -60,7 +60,6 @@ impl TestApp {
             enforce_origin: false,
             enforce_csrf: false,
             trust_proxy: false,
-            smtp: None,
         };
 
         let pool = db::init(&cfg).await.expect("failed to init test database");
