@@ -160,8 +160,8 @@ updates after CI is green; major updates require a human review.
 
 1. `cp .env.example .env && chmod 600 .env`
 2. Replace `ZERF_SESSION_SECRET` and `ZERF_POSTGRES_PASSWORD` with `openssl rand -hex 32` outputs.
-3. Set `ZERF_DOMAIN` and `ZERF_ADMIN_EMAIL` in `.env`.
-4. `./start_public.sh` — note the one-time admin password from the logs.
+3. Set `ZERF_DOMAIN` in `.env`.
+4. `./start_public.sh` — open the application in your browser to create the initial admin account.
 5. Sign in, change the admin password (forced), create real users.
 6. Configure the `backup` service schedule via `BACKUP_INTERVAL_SECONDS` and copy snapshots off-host.
 7. Subscribe to release notes; let Dependabot keep dependencies fresh.

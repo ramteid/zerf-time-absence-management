@@ -163,6 +163,24 @@ const TRANSLATIONS = {
     "Your Name": "Ihr Name",
     "Please enter your first name and last name.":
       "Bitte geben Sie Ihren Vornamen und Nachnamen ein.",
+    "Create the initial administrator account to get started.":
+      "Erstellen Sie das erste Administratorkonto, um loszulegen.",
+    "Please enter a valid email address.":
+      "Bitte geben Sie eine gültige E-Mail-Adresse ein.",
+    "Password must be at least 8 characters.":
+      "Das Passwort muss mindestens 8 Zeichen lang sein.",
+    "Passwords do not match.": "Passwörter stimmen nicht überein.",
+    "Confirm password": "Passwort bestätigen",
+    "Creating account…": "Konto wird erstellt…",
+    "Create admin account": "Administratorkonto erstellen",
+    "Setup has already been completed.":
+      "Die Einrichtung wurde bereits abgeschlossen.",
+    "Invalid email address.": "Ungültige E-Mail-Adresse.",
+    "First name and last name are required.":
+      "Vorname und Nachname sind erforderlich.",
+    "Name too long.": "Name zu lang.",
+    "Password must be between 8 and 128 characters.":
+      "Das Passwort muss zwischen 8 und 128 Zeichen lang sein.",
     "Weekly hours": "Wochenstunden",
     "Annual leave days": "Urlaubstage pro Jahr",
     "Overtime start balance (hours)": "Überstunden-Startsaldo (Stunden)",

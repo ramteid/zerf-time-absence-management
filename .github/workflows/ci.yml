@@ -136,7 +136,6 @@ jobs:
             -p ${ZERF_TEST_PORT}:3000 \
             -e ZERF_DATABASE_URL=postgres://zerf_smoke:zerf_smoke@host.docker.internal:5432/zerf_smoke \
             -e ZERF_SESSION_SECRET=ci-test-secret-at-least-32-bytes-long \
-            -e ZERF_ADMIN_EMAIL=admin@test.local \
             "$IMG"
           # Wait for the container to become ready (up to 30 s)
           for i in $(seq 1 30); do

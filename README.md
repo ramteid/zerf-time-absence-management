@@ -108,8 +108,8 @@ sed -i "s|ZERF_POSTGRES_PASSWORD=.*|ZERF_POSTGRES_PASSWORD=$(openssl rand -hex 3
 
 Edit `.env` and set these values:
 
-- `ZERF_ADMIN_EMAIL` is required in every deployment mode.
 - `ZERF_DOMAIN` is required for public deployment.
+- On first boot, open the application in your browser to create the initial admin account.
 
 ### 2. Start the stack
 

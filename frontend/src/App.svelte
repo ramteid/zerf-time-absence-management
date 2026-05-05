@@ -26,6 +26,7 @@
   import { setLanguage, t } from "./i18n.js";
   import Layout from "./Layout.svelte";
   import Login from "./routes/Login.svelte";
+  import Setup from "./routes/Setup.svelte";
   import Time from "./routes/Time.svelte";
   import Absences from "./routes/Absences.svelte";
   import Calendar from "./routes/Calendar.svelte";
@@ -43,6 +44,7 @@
 
   let booting = true;
   let bootNetworkError = false;
+  let needsSetup = false;
 
   function debugLog(event, data = {}) {
     console.debug("[app-debug]", event, {
@@ -170,7 +172,13 @@
       _sessionExpiredHandling = false;
     });
     await loadSettings();
-    await loadMe();
+    try {
+      const status = await api("/auth/setup-status");
+      needsSetup = !!status?.needs_setup;
+    } catch {}
+    if (!needsSetup) {
+      await loadMe();
+    }
     booting = false;
 
     // Cross-tab: if another tab logs out or expires, mirror that here immediately.
@@ -356,6 +364,13 @@
       {$t("Retry")}
     </button>
   </div>
+{:else if needsSetup}
+  <Setup
+    onComplete={async () => {
+      needsSetup = false;
+      await loadMe();
+    }}
+  />
 {:else if !$currentUser}
   <Login />
 {:else if route}
