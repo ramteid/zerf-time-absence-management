@@ -26,6 +26,28 @@ pub fn send_async(smtp: Option<Arc<SmtpConfig>>, to: String, subject: String, bo
     });
 }
 
+/// Test the SMTP connection by performing a NOOP command. Returns `Ok(())`
+/// on success or an error describing the failure.
+pub async fn test_connection(
+    cfg: &SmtpConfig,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let mut builder = match cfg.encryption.as_str() {
+        "tls" => AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&cfg.host)
+            .port(cfg.port)
+            .tls(Tls::Wrapper(TlsParameters::new(cfg.host.clone())?)),
+        "starttls" => AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&cfg.host)
+            .port(cfg.port)
+            .tls(Tls::Required(TlsParameters::new(cfg.host.clone())?)),
+        _ => AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&cfg.host).port(cfg.port),
+    };
+    if let (Some(u), Some(p)) = (&cfg.username, &cfg.password) {
+        builder = builder.credentials(Credentials::new(u.clone(), p.clone()));
+    }
+    let mailer: AsyncSmtpTransport<Tokio1Executor> = builder.timeout(Some(std::time::Duration::from_secs(10))).build();
+    mailer.test_connection().await?;
+    Ok(())
+}
+
 async fn send_now(
     cfg: &SmtpConfig,
     to: &str,

@@ -15,10 +15,6 @@ pub struct Config {
     pub enforce_csrf: bool,
     pub trust_proxy: bool,
 
-    /// Optional SMTP settings for outbound notification emails.
-    /// All fields are optional; when `smtp.is_some()` returns false
-    /// the system falls back to in-app-only notifications.
-    pub smtp: Option<SmtpConfig>,
 }
 
 #[derive(Clone, Debug)]
@@ -42,12 +38,6 @@ fn env_bool(key: &str, default: bool) -> bool {
     }
 }
 
-fn env_opt(key: &str) -> Option<String> {
-    env::var(key)
-        .ok()
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-}
 
 impl Config {
     pub fn from_env() -> Self {
@@ -81,30 +71,6 @@ impl Config {
         let enforce_csrf = env_bool("ZERF_ENFORCE_CSRF", !dev_mode);
         let trust_proxy = env_bool("ZERF_TRUST_PROXY", true);
 
-        // SMTP is fully optional. We only build the struct when a host AND
-        // a from-address are present.  Missing credentials simply mean
-        // unauthenticated SMTP (test relays / local MTAs).
-        let smtp = match (env_opt("ZERF_SMTP_HOST"), env_opt("ZERF_SMTP_FROM")) {
-            (Some(host), Some(from)) => {
-                let port: u16 = env_opt("ZERF_SMTP_PORT")
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(587);
-                let encryption = env_opt("ZERF_SMTP_ENCRYPTION")
-                    .map(|s| s.to_lowercase())
-                    .filter(|s| matches!(s.as_str(), "starttls" | "tls" | "none"))
-                    .unwrap_or_else(|| "starttls".into());
-                Some(SmtpConfig {
-                    host,
-                    port,
-                    username: env_opt("ZERF_SMTP_USERNAME"),
-                    password: env_opt("ZERF_SMTP_PASSWORD"),
-                    from,
-                    encryption,
-                })
-            }
-            _ => None,
-        };
-
         Self {
             database_url,
             session_secret,
@@ -117,7 +83,6 @@ impl Config {
             enforce_origin,
             enforce_csrf,
             trust_proxy,
-            smtp,
         }
     }
 }

@@ -355,6 +355,17 @@ const TRANSLATIONS = {
     "Saving...": "Speichert...",
     "Signing in…": "Anmeldung läuft…",
     "Settings saved.": "Einstellungen gespeichert.",
+    "SMTP settings saved.": "SMTP-Einstellungen gespeichert.",
+    "Email (SMTP)": "E-Mail (SMTP)",
+    "Enable SMTP": "SMTP aktivieren",
+    "When enabled, notification emails are sent for approvals, rejections, and reopen requests.":
+      "Wenn aktiviert, werden Benachrichtigungs-E-Mails bei Genehmigungen, Ablehnungen und Wiedereröffnungsanträgen gesendet.",
+    "SMTP Host": "SMTP-Host",
+    "SMTP Port": "SMTP-Port",
+    "From address": "Absenderadresse",
+    Encryption: "Verschlüsselung",
+    stored: "gespeichert",
+    "Save SMTP Settings": "SMTP-Einstellungen speichern",
     "Initial setup required.": "Ersteinrichtung erforderlich.",
     "Please configure the country, region, default weekly hours and default annual leave days before using the application.":
       "Bitte Land, Region, Standard-Wochenstunden und Standard-Urlaubstage konfigurieren, bevor die Anwendung genutzt wird.",
