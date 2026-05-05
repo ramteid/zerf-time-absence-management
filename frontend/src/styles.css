@@ -1080,6 +1080,14 @@ dialog footer {
     justify-content: flex-start;
   }
 
+  .time-top-bar-actions .time-week-picker {
+    min-width: 0;
+  }
+
+  .time-top-bar-actions .time-week-label {
+    min-width: 96px;
+  }
+
   .time-top-bar-actions .time-submit-button {
     margin-left: auto;
   }

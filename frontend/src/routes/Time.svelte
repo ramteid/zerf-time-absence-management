@@ -269,8 +269,8 @@
           <Icon name="ChevLeft" size={16} />
         </button>
         <span
-          class="tab-num"
-          style="font-size:13.5px;font-weight:500;min-width:140px;text-align:center"
+          class="tab-num time-week-label"
+          style="font-size:13.5px;font-weight:500;text-align:center"
         >
           {fmtDateShort(mo)} – {fmtDateShort(su)}
         </span>
