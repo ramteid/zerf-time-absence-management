@@ -31,7 +31,7 @@
   const PULL_THRESHOLD = 80;
 
   function onTouchStart(e) {
-    if (window.scrollY === 0 && e.touches.length === 1) {
+    if (window.scrollY === 0 && e.touches.length === 1 && !e.target.closest(".tp-drum")) {
       pullStartY = e.touches[0].clientY;
       pulling = true;
     }
