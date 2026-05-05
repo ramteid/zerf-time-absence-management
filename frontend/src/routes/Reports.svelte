@@ -70,7 +70,21 @@
       params.set("user_id", $currentUser.id);
     catReport = await api(`/reports/categories?${params}`);
   }
-  function exportCsv() {
+  function csvSafe(s) {
+    if (s && /^[=+\-@\t\r]/.test(s)) return "'" + s;
+    return s;
+  }
+  function csvEncode(fields) {
+    return fields
+      .map((f) => {
+        const s = f == null ? "" : String(f);
+        return s.includes(",") || s.includes('"') || s.includes("\n")
+          ? '"' + s.replace(/"/g, '""') + '"'
+          : s;
+      })
+      .join(",");
+  }
+  async function exportCsv() {
     csvError = "";
     if (!csvFrom || !csvTo) {
       csvError = $t("Invalid date.");
@@ -80,12 +94,51 @@
       csvError = $t("From cannot be after To.");
       return;
     }
-    const params = new URLSearchParams({
-      user_id: String(csvUserId),
-      from: csvFrom,
-      to: csvTo,
-    });
-    window.open(`/api/v1/reports/csv?${params}`);
+    try {
+      const params = new URLSearchParams({
+        user_id: String(csvUserId),
+        from: csvFrom,
+        to: csvTo,
+      });
+      const report = await api(`/reports/range?${params}`);
+      const header = csvEncode([
+        $t("Date"), $t("Weekday"), $t("Start"), $t("End"),
+        $t("Category"), $t("Minutes"), $t("Status"), $t("Comment"),
+        $t("Absence"), $t("Holiday"),
+      ]);
+      const rows = [header];
+      for (const day of report.days) {
+        const weekday = $t(day.weekday);
+        const absence = day.absence ? absenceKindLabel(day.absence) : "";
+        const holiday = day.holiday || "";
+        if (!day.entries || day.entries.length === 0) {
+          rows.push(csvEncode([
+            day.date, weekday, "", "", "", "0", "", "",
+            csvSafe(absence), csvSafe(holiday),
+          ]));
+        } else {
+          for (const e of day.entries) {
+            rows.push(csvEncode([
+              day.date, weekday, e.start_time, e.end_time,
+              csvSafe(e.category), e.minutes, statusLabel(e.status),
+              csvSafe(e.comment || ""), csvSafe(absence), csvSafe(holiday),
+            ]));
+          }
+        }
+      }
+      rows.push(csvEncode([
+        "", $t("Total"), "", "", "", report.actual_min, "", "", "", "",
+      ]));
+      const blob = new Blob(["\uFEFF" + rows.join("\n")], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `report-${csvUserId}-${csvFrom}_to_${csvTo}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      csvError = $t(e?.message || "Export failed.");
+    }
   }
 </script>
 

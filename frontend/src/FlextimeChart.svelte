@@ -170,12 +170,12 @@
   }
 
   const ABSENCE_COLORS = {
-    vacation: "var(--accent)",
-    sick: "var(--danger)",
-    training: "var(--info)",
-    special_leave: "var(--warning)",
-    unpaid: "var(--text-tertiary)",
-    general_absence: "var(--text-secondary)",
+    vacation: "#f59e0b",
+    sick: "#ef4444",
+    training: "#3b82f6",
+    special_leave: "#a855f7",
+    unpaid: "#64748b",
+    general_absence: "#6b7280",
   };
 
   function absColor(kind) {

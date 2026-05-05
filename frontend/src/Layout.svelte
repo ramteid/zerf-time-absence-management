@@ -31,7 +31,11 @@
   const PULL_THRESHOLD = 80;
 
   function onTouchStart(e) {
-    if (window.scrollY === 0 && e.touches.length === 1 && !e.target.closest(".tp-drum")) {
+    if (
+      window.scrollY === 0 &&
+      e.touches.length === 1 &&
+      !e.target.closest(".tp-drum")
+    ) {
       pullStartY = e.touches[0].clientY;
       pulling = true;
     }
@@ -62,7 +66,8 @@
 
   // Bottom nav: show max 4 primary items + "More"
   $: mobileNavItems = (() => {
-    const all = nav || [];
+    const account = (nav || []).find((link) => link.key === "Account");
+    const all = (nav || []).filter((link) => link.key !== "Account");
     // Priority order for bottom bar
     const primary = ["Dashboard", "Time", "Absences", "Calendar"];
     const shown = primary
@@ -71,7 +76,7 @@
       .slice(0, 4);
     const shownKeys = new Set(shown.map((link) => link.key));
     const overflow = all.filter((link) => !shownKeys.has(link.key));
-    return { shown, overflow };
+    return { shown, overflow, account };
   })();
 
   async function logout() {
@@ -321,7 +326,8 @@
         href="/account"
         data-link="1"
         class="kz-btn-icon-sm"
-        class:active={pathname === "/account" || pathname.startsWith("/account/")}
+        class:active={pathname === "/account" ||
+          pathname.startsWith("/account/")}
         style="color:var(--nav-text-muted)"
         title={$t("Account")}
       >
@@ -356,7 +362,7 @@
         <span>{$t(link.key)}</span>
       </a>
     {/each}
-    {#if mobileNavItems.overflow.length > 0}
+    {#if mobileNavItems.overflow.length > 0 || mobileNavItems.account}
       <button
         class="mobile-nav-item"
         class:active={mobileMoreOpen}
@@ -375,21 +381,28 @@
     <div class="mobile-more-overlay" on:click={() => (mobileMoreOpen = false)}>
       <div class="mobile-more-sheet" on:click|stopPropagation>
         <div class="mobile-more-header">
-          <div
-            class="avatar"
-            style="width:32px;height:32px;font-size:11px;background:var(--accent);color:white"
+          <a
+            href={mobileNavItems.account?.href || "/account"}
+            data-link="1"
+            on:click={() => (mobileMoreOpen = false)}
+            style="display:flex;align-items:center;gap:12px;flex:1;min-width:0;color:inherit;text-decoration:none;border-radius:8px"
           >
-            {initials($currentUser)}
-          </div>
-          <div style="flex:1;min-width:0">
-            <div style="font-weight:600;font-size:14px">
-              {$currentUser.first_name}
-              {$currentUser.last_name}
+            <div
+              class="avatar"
+              style="width:32px;height:32px;font-size:11px;background:var(--accent);color:white"
+            >
+              {initials($currentUser)}
             </div>
-            <div style="font-size:12px;color:var(--text-secondary)">
-              {roleLabel($currentUser.role)}
+            <div style="flex:1;min-width:0">
+              <div style="font-weight:600;font-size:14px">
+                {$currentUser.first_name}
+                {$currentUser.last_name}
+              </div>
+              <div style="font-size:12px;color:var(--text-secondary)">
+                {roleLabel($currentUser.role)}
+              </div>
             </div>
-          </div>
+          </a>
           <button
             class="kz-btn-icon-sm"
             on:click={() => (mobileMoreOpen = false)}

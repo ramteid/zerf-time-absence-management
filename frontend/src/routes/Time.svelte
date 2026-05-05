@@ -36,6 +36,7 @@
   ];
 
   let entries = [];
+  let absences = [];
   let mo, su;
   let showEntry = null;
   let showChange = null;
@@ -65,10 +66,12 @@
     const to = isoDate(addDays(start, 6));
 
     try {
-      const [weekEntries, reopenRows, categoryRows] = await Promise.all([
+      const year = start.getFullYear();
+      const [weekEntries, reopenRows, categoryRows, absenceRows] = await Promise.all([
         api(`/time-entries?from=${from}&to=${to}`),
         api("/reopen-requests").catch(() => []),
         api("/categories").catch(() => $categories),
+        api(`/absences?year=${year}`).catch(() => []),
       ]);
       if (seq !== loadSeq) return;
       categories.set(categoryRows);
@@ -80,10 +83,12 @@
         return a.start_time.localeCompare(b.start_time);
       });
       myReopens = reopenRows;
+      absences = absenceRows.filter((a) => a.status !== "rejected");
     } catch {
       if (seq !== loadSeq) return;
       entries = [];
       myReopens = [];
+      absences = [];
     }
   }
 
@@ -171,6 +176,10 @@
     ($currentUser.weekly_hours || 0) - weekActual / 60,
   ).toFixed(1);
 
+  function hasAbsence(ds) {
+    return absences.some((a) => a.start_date <= ds && a.end_date >= ds);
+  }
+
   function buildDay(i, entryRows) {
     const d = addDays(mo, i);
     const ds = isoDate(d);
@@ -178,14 +187,15 @@
       d,
       ds,
       dayName: DAYS_FULL[i],
+      absent: hasAbsence(ds),
       items: entryRows
         .filter((e) => dateKey(e.entry_date) === ds)
         .sort((a, b) => a.start_time.localeCompare(b.start_time)),
     };
   }
 
-  $: weekdays = mo ? [0, 1, 2, 3, 4].map((i) => buildDay(i, entries)) : [];
-  $: weekendDays = mo ? [5, 6].map((i) => buildDay(i, entries)) : [];
+  $: weekdays = mo ? [0, 1, 2, 3, 4].map((i) => buildDay(i, entries, absences)) : [];
+  $: weekendDays = mo ? [5, 6].map((i) => buildDay(i, entries, absences)) : [];
 
   function durHours(start, end) {
     return (durMin(start, end) / 60).toFixed(1);
@@ -364,6 +374,7 @@
           class="kz-card day-card"
           class:day-card--locked={weekStatus === "submitted" ||
             weekStatus === "approved"}
+          class:day-card--absent={day.absent}
         >
           <div class="day-header">
             <div>
@@ -426,6 +437,7 @@
               <button
                 class="kz-btn kz-btn-ghost kz-btn-sm"
                 style="width:100%;justify-content:center;border-style:dashed;border-color:var(--border)"
+                disabled={day.absent}
                 on:click={() => (showEntry = { entry_date: day.ds })}
               >
                 <Icon name="Plus" size={13} />{$t("Add")}

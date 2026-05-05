@@ -142,6 +142,7 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                 )
                 .route("/holidays/{id}", delete(holidays::delete))
                 .route("/reports/month", get(reports::month))
+                .route("/reports/range", get(reports::range))
                 .route("/reports/csv", get(reports::range_csv))
                 .route("/reports/month/csv", get(reports::month_csv))
                 .route("/reports/team", get(reports::team))
