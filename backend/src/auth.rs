@@ -553,10 +553,11 @@ pub async fn auth_middleware(
     )
     .ok_or(AppError::Unauthorized)?;
 
+    let token_hash = hash_token(&token);
     let row: Option<(i64, DateTime<Utc>, DateTime<Utc>, String)> = sqlx::query_as(
         "SELECT user_id, last_active_at, created_at, csrf_token FROM sessions WHERE token = $1",
     )
-    .bind(hash_token(&token))
+    .bind(&token_hash)
     .fetch_optional(&s.pool)
     .await?;
     let (uid, last, created, csrf) = row.ok_or(AppError::Unauthorized)?;
@@ -565,7 +566,7 @@ pub async fn auth_middleware(
         || now - created > Duration::hours(ABSOLUTE_TIMEOUT_HOURS)
     {
         sqlx::query("DELETE FROM sessions WHERE token=$1")
-            .bind(hash_token(&token))
+            .bind(&token_hash)
             .execute(&s.pool)
             .await?;
         return Err(AppError::Unauthorized);
@@ -574,7 +575,7 @@ pub async fn auth_middleware(
     enforce_csrf(&parts, &s, &csrf).await?;
 
     sqlx::query("UPDATE sessions SET last_active_at=CURRENT_TIMESTAMP WHERE token=$1")
-        .bind(hash_token(&token))
+        .bind(&token_hash)
         .execute(&s.pool)
         .await?;
     let user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1 AND active=TRUE")
