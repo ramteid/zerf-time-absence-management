@@ -544,6 +544,7 @@ dialog {
   box-shadow: var(--shadow-lg);
   max-width: 480px;
   width: 90vw;
+  max-height: 90vh;
   background: var(--bg-surface);
   color: var(--text-primary);
   position: fixed;
@@ -551,6 +552,7 @@ dialog {
   left: 50%;
   transform: translate(-50%, -50%);
   margin: 0;
+  overflow: visible;
 }
 
 dialog::backdrop {
@@ -571,6 +573,8 @@ dialog .dialog-body {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  overflow-y: auto;
+  max-height: calc(90vh - 120px);
 }
 
 dialog footer {
@@ -604,10 +608,21 @@ dialog footer {
 
 .day-card {
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.day-add-btn {
+  margin-top: auto;
 }
 
 .day-card--locked {
   opacity: 0.6;
+  background: var(--bg-muted);
+}
+
+.day-card--absent {
+  opacity: 0.5;
   background: var(--bg-muted);
 }
 

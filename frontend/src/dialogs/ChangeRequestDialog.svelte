@@ -20,6 +20,10 @@
   let reason = "";
   let error = "";
 
+  $: if (start_time && end_time && start_time > end_time) {
+    end_time = start_time;
+  }
+
   onMount(() => {
     try {
       dlg.showModal();

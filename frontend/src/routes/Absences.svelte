@@ -262,7 +262,9 @@
           <div
             class="absence-entry"
             on:click={() => showDetail(a)}
-            on:keydown={(e) => { if (e.key === "Enter") showDetail(a); }}
+            on:keydown={(e) => {
+              if (e.key === "Enter") showDetail(a);
+            }}
             role="button"
             tabindex="0"
           >
@@ -287,7 +289,7 @@
               </div>
               <div class="absence-entry-field absence-entry-days">
                 <span class="absence-entry-label">{$t("Days")}</span>
-                <span class="absence-entry-value tab-num">{a.days || "-"}</span>
+                <span class="absence-entry-value tab-num">{a.days ?? "-"}</span>
               </div>
             </div>
             <div class="absence-entry-bottom">
@@ -333,28 +335,38 @@
           </div>
           <div>
             <div class="kz-label">{$t("Days")}</div>
-            <div class="tab-num">{detailAbsence.days || "-"}</div>
+            <div class="tab-num">{detailAbsence.days ?? "-"}</div>
           </div>
         </div>
         <div>
           <div class="kz-label">{$t("Status")}</div>
-          <span class="kz-chip kz-chip-{detailAbsence.status}">{statusLabel(detailAbsence.status)}</span>
+          <span class="kz-chip kz-chip-{detailAbsence.status}"
+            >{statusLabel(detailAbsence.status)}</span
+          >
         </div>
         {#if detailAbsence.comment}
           <div>
             <div class="kz-label">{$t("Comment")}</div>
-            <div style="white-space:pre-wrap;font-size:13px">{detailAbsence.comment}</div>
+            <div style="white-space:pre-wrap;font-size:13px">
+              {detailAbsence.comment}
+            </div>
           </div>
         {/if}
         {#if detailAbsence.rejection_reason}
           <div>
             <div class="kz-label">{$t("Rejection reason")}</div>
-            <div style="white-space:pre-wrap;font-size:13px;color:var(--danger-text)">{detailAbsence.rejection_reason}</div>
+            <div
+              style="white-space:pre-wrap;font-size:13px;color:var(--danger-text)"
+            >
+              {detailAbsence.rejection_reason}
+            </div>
           </div>
         {/if}
         <div>
           <div class="kz-label">{$t("Requested at")}</div>
-          <div class="tab-num" style="font-size:12px">{fmtDateTime(detailAbsence.created_at)}</div>
+          <div class="tab-num" style="font-size:12px">
+            {fmtDateTime(detailAbsence.created_at)}
+          </div>
         </div>
       </div>
     </div>
@@ -364,15 +376,23 @@
       {#if detailAbsence.cancellable}
         <button
           class="kz-btn kz-btn-danger"
-          on:click={() => { const id = detailAbsence.id; closeDetail(); cancel(id); }}
+          on:click={() => {
+            const id = detailAbsence.id;
+            closeDetail();
+            cancel(id);
+          }}
         >
-          {$t("Cancel")}
+          {$t("Cancel absence")}
         </button>
       {/if}
       {#if detailAbsence.editable}
         <button
           class="kz-btn kz-btn-primary"
-          on:click={() => { const a = detailAbsence; closeDetail(); showDialog = a; }}
+          on:click={() => {
+            const a = detailAbsence;
+            closeDetail();
+            showDialog = a;
+          }}
         >
           <Icon name="Edit" size={13} />{$t("Edit")}
         </button>
@@ -457,13 +477,13 @@
 
   .absence-year-select {
     min-width: 92px;
-    height: 85%;
   }
 
   @media (max-width: 640px) {
     .absence-year-select {
       min-width: 80px;
       max-width: 100px;
+      height: 85%;
     }
   }
 

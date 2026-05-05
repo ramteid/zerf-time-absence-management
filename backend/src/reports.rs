@@ -387,6 +387,26 @@ pub async fn month_csv(
     csv_response(r, uid, month)
 }
 
+#[derive(Deserialize)]
+pub struct RangeQuery {
+    pub user_id: Option<i64>,
+    pub from: NaiveDate,
+    pub to: NaiveDate,
+}
+
+pub async fn range(
+    State(s): State<AppState>,
+    u: User,
+    Query(q): Query<RangeQuery>,
+) -> AppResult<Json<MonthReport>> {
+    let uid = q.user_id.unwrap_or(u.id);
+    assert_can_access_user(&s.pool, &u, uid).await?;
+    validate_range(q.from, q.to)?;
+    let label = format!("{}_to_{}", q.from, q.to);
+    let r = build_range(&s.pool, uid, q.from, q.to, &label).await?;
+    Ok(Json(r))
+}
+
 pub async fn range_csv(
     State(s): State<AppState>,
     u: User,

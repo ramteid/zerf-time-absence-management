@@ -16,6 +16,10 @@
   let end_date = template.end_date || isoDate(new Date());
   let comment = template.comment || "";
   let error = "";
+
+  $: if (start_date && end_date && start_date > end_date) {
+    end_date = start_date;
+  }
   let closeHandled = false;
   let closeResult = { changed: false, savedAbsence: null };
 

@@ -95,12 +95,12 @@
     "#0d9488",
   ];
   const absColorMap = {
-    vacation: "#10b981",
-    sick: "#8b5cf6",
-    training: "#14b8a6",
-    special_leave: "#ec4899",
+    vacation: "#f59e0b",
+    sick: "#ef4444",
+    training: "#3b82f6",
+    special_leave: "#a855f7",
     unpaid: "#64748b",
-    general_absence: "#475569",
+    general_absence: "#6b7280",
     absent: "#9ca3af",
   };
 

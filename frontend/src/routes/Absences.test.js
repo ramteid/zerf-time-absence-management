@@ -145,4 +145,71 @@ describe("Absences", () => {
         .textContent,
     ).toContain("Requested");
   });
+
+  it("shows zero days for weekend-only training absences", async () => {
+    mockState.absences = [
+      {
+        id: 8,
+        user_id: 1,
+        kind: "training",
+        start_date: "2026-08-01",
+        end_date: "2026-08-02",
+        comment: "",
+        status: "approved",
+        reviewed_by: null,
+        reviewed_at: null,
+        rejection_reason: null,
+        created_at: "2026-07-01",
+      },
+    ];
+
+    component = mount(Absences, { target });
+    await settle();
+
+    const entry = target.querySelector(".absence-entry");
+    expect(
+      entry.querySelector(".absence-entry-days .absence-entry-value")
+        .textContent,
+    ).toBe("0");
+
+    entry.click();
+    await settle();
+
+    const detailValues = [
+      ...target.querySelectorAll("dialog .field-row .tab-num"),
+    ].map((element) => element.textContent.trim());
+    expect(detailValues[2]).toBe("0");
+    expect(target.querySelector("dialog .kz-btn-danger").textContent).toContain(
+      "Cancel absence",
+    );
+  });
+
+  it("uses a distinct German label for cancelling an absence", async () => {
+    setLanguage("de");
+    mockState.absences = [
+      {
+        id: 9,
+        user_id: 1,
+        kind: "vacation",
+        start_date: "2026-05-04",
+        end_date: "2026-05-05",
+        comment: "",
+        status: "approved",
+        reviewed_by: null,
+        reviewed_at: null,
+        rejection_reason: null,
+        created_at: "2026-04-01",
+      },
+    ];
+
+    component = mount(Absences, { target });
+    await settle();
+
+    target.querySelector(".absence-entry").click();
+    await settle();
+
+    expect(target.querySelector("dialog .kz-btn-danger").textContent).toContain(
+      "Stornieren",
+    );
+  });
 });

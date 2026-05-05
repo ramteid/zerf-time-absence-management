@@ -20,6 +20,10 @@
   let comment = template.comment || "";
   let error = "";
 
+  $: if (start_time && end_time && start_time > end_time) {
+    end_time = start_time;
+  }
+
   onMount(() => dlg.showModal());
 
   async function save() {
@@ -75,9 +79,17 @@
     dlg.close();
     onClose({ changed: false, entry: null, deletedId: null });
   }
+
+  function onDialogKeydown(e) {
+    const pickerOpen = dlg.querySelector(".tp-drum") || document.querySelector(".flatpickr-calendar.open");
+    if (e.key === "Enter" && !pickerOpen) {
+      e.preventDefault();
+      save();
+    }
+  }
 </script>
 
-<dialog bind:this={dlg}>
+<dialog bind:this={dlg} on:keydown={onDialogKeydown}>
   <header>
     <span style="flex:1">{$t(isNew ? "Add Entry" : "Edit Entry")}</span>
     <button class="kz-btn-icon-sm kz-btn-ghost" on:click={cancel}>
