@@ -1,8 +1,8 @@
 use anyhow::Result;
 use chrono::Datelike;
-use zerf::{build_app, categories, config, db, holidays, seed_admin, AppState};
 use std::net::SocketAddr;
 use std::sync::Arc;
+use zerf::{build_app, categories, config, db, holidays, seed_admin, AppState};
 
 #[tokio::main]
 async fn main() -> Result<()> {

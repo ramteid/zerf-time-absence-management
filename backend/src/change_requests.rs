@@ -1,14 +1,25 @@
 use crate::audit;
 use crate::auth::User;
 use crate::error::{AppError, AppResult};
+use crate::i18n::{self, TextKey};
 use crate::AppState;
 use axum::{
     extract::{Path, State},
     Json,
 };
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
+
+async fn notification_language(pool: &crate::db::DatabasePool) -> i18n::Language {
+    match i18n::load_ui_language(pool).await {
+        Ok(language) => language,
+        Err(e) => {
+            tracing::warn!(target:"zerf::change_requests", "load notification language failed: {e}");
+            i18n::Language::default()
+        }
+    }
+}
 
 #[derive(FromRow, Serialize)]
 pub struct ChangeRequest {
@@ -74,6 +85,41 @@ pub struct NewChangeRequest {
     pub reason: String,
 }
 
+fn parse_change_time(s: &str) -> AppResult<NaiveTime> {
+    NaiveTime::parse_from_str(s, "%H:%M")
+        .or_else(|_| NaiveTime::parse_from_str(s, "%H:%M:%S"))
+        .map_err(|_| AppError::BadRequest("Invalid time format (HH:MM).".into()))
+}
+
+fn has_actual_change(
+    current_date: NaiveDate,
+    current_start: NaiveTime,
+    current_end: NaiveTime,
+    current_category_id: i64,
+    current_comment: Option<&str>,
+    new_date: Option<NaiveDate>,
+    new_start: Option<NaiveTime>,
+    new_end: Option<NaiveTime>,
+    new_category_id: Option<i64>,
+    new_comment: Option<&str>,
+) -> bool {
+    let current_comment = current_comment.filter(|value| !value.is_empty());
+    let comment_changed = new_comment.is_some_and(|comment| {
+        let normalized = if comment.is_empty() {
+            None
+        } else {
+            Some(comment)
+        };
+        normalized != current_comment
+    });
+
+    new_date.is_some_and(|date| date != current_date)
+        || new_start.is_some_and(|start| start != current_start)
+        || new_end.is_some_and(|end| end != current_end)
+        || new_category_id.is_some_and(|category_id| category_id != current_category_id)
+        || comment_changed
+}
+
 pub async fn create(
     State(s): State<AppState>,
     u: User,
@@ -94,13 +140,16 @@ pub async fn create(
     // value that would later crash the reports / validation path. Times must
     // match HH:MM(:SS) and end > start when both are supplied. Future dates
     // are rejected — same rule as direct entry creation.
-    let parse_t = |s: &str| -> AppResult<chrono::NaiveTime> {
-        chrono::NaiveTime::parse_from_str(s, "%H:%M")
-            .or_else(|_| chrono::NaiveTime::parse_from_str(s, "%H:%M:%S"))
-            .map_err(|_| AppError::BadRequest("Invalid time format (HH:MM).".into()))
-    };
-    let new_start = b.new_start_time.as_deref().map(parse_t).transpose()?;
-    let new_end = b.new_end_time.as_deref().map(parse_t).transpose()?;
+    let new_start = b
+        .new_start_time
+        .as_deref()
+        .map(parse_change_time)
+        .transpose()?;
+    let new_end = b
+        .new_end_time
+        .as_deref()
+        .map(parse_change_time)
+        .transpose()?;
     if let (Some(s2), Some(e2)) = (new_start, new_end) {
         if e2 <= s2 {
             return Err(AppError::BadRequest(
@@ -118,8 +167,8 @@ pub async fn create(
             ));
         }
     }
-    let z: (i64, String, String, String) = sqlx::query_as(
-        "SELECT user_id, status, start_time, end_time FROM time_entries WHERE id=$1",
+    let z: (i64, String, NaiveDate, String, String, i64, Option<String>) = sqlx::query_as(
+        "SELECT user_id, status, entry_date, start_time, end_time, category_id, comment FROM time_entries WHERE id=$1",
     )
     .bind(b.time_entry_id)
     .fetch_one(&s.pool)
@@ -135,15 +184,29 @@ pub async fn create(
             "Rejected entries cannot have change requests. Use the reopen workflow to edit.".into(),
         ));
     }
+    let current_start = parse_change_time(&z.3)?;
+    let current_end = parse_change_time(&z.4)?;
+    if !has_actual_change(
+        z.2,
+        current_start,
+        current_end,
+        z.5,
+        z.6.as_deref(),
+        b.new_date,
+        new_start,
+        new_end,
+        b.new_category_id,
+        b.new_comment.as_deref(),
+    ) {
+        return Err(AppError::BadRequest(
+            "At least one actual change is required.".into(),
+        ));
+    }
     // When only one of start/end is proposed, validate the combination against
     // the existing entry's other time field to prevent storing impossible CRs.
     if new_start.is_some() || new_end.is_some() {
-        let eff_start = new_start
-            .or_else(|| parse_t(&z.2).ok())
-            .unwrap_or(chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap());
-        let eff_end = new_end
-            .or_else(|| parse_t(&z.3).ok())
-            .unwrap_or(chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap());
+        let eff_start = new_start.unwrap_or(current_start);
+        let eff_end = new_end.unwrap_or(current_end);
         if eff_end <= eff_start {
             return Err(AppError::BadRequest(
                 "End time must be after start time.".into(),
@@ -193,6 +256,30 @@ pub async fn create(
         Some(serde_json::to_value(&a).unwrap()),
     )
     .await;
+    let requester_name = format!("{} {}", u.first_name, u.last_name);
+    let requested_entry_date = a.new_date.unwrap_or(z.2);
+    let recipients = crate::auth::approval_recipient_ids(&s.pool, &u).await;
+    let language = notification_language(&s.pool).await;
+    for recipient_id in recipients {
+        crate::notifications::create_translated(
+            &s,
+            language,
+            recipient_id,
+            "change_request_created",
+            TextKey::ChangeRequestCreatedTitle,
+            TextKey::ChangeRequestCreatedBody,
+            vec![
+                ("requester_name", requester_name.clone()),
+                (
+                    "entry_date",
+                    i18n::format_date(language, requested_entry_date),
+                ),
+            ],
+            Some("change_requests"),
+            Some(id),
+        )
+        .await;
+    }
     Ok(Json(a))
 }
 
@@ -204,17 +291,50 @@ pub async fn approve(
     if !u.is_lead() {
         return Err(AppError::Forbidden);
     }
+    let a_preview: ChangeRequest =
+        sqlx::query_as("SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE id=$1 AND status='open'")
+            .bind(id)
+            .fetch_one(&s.pool)
+            .await?;
+    // A lead may not review their own request; admins may.
+    if a_preview.user_id == u.id && !u.is_admin() {
+        return Err(AppError::Forbidden);
+    }
+    if !u.is_admin() {
+        let is_report: Option<bool> =
+            sqlx::query_scalar("SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2")
+                .bind(a_preview.user_id)
+                .bind(u.id)
+                .fetch_optional(&s.pool)
+                .await?;
+        if is_report.is_none() {
+            return Err(AppError::Forbidden);
+        }
+    }
+
     let mut tx = s.pool.begin().await?;
+    // Fetch the existing entry and build effective post-change values so we can
+    // run the same overlap / 14-hour / category validation as direct edits do.
+    sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(a_preview.user_id)
+        .execute(&mut *tx)
+        .await?;
+    let entry: crate::time_entries::TimeEntry =
+        sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1 FOR UPDATE")
+            .bind(a_preview.time_entry_id)
+            .fetch_one(&mut *tx)
+            .await?;
     let a: ChangeRequest =
         sqlx::query_as("SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE id=$1 AND status='open' FOR UPDATE")
             .bind(id)
-            .fetch_one(&mut *tx)
-            .await?;
-    // A lead may not review their own request; admins may.
-    if a.user_id == u.id && !u.is_admin() {
-        return Err(AppError::Forbidden);
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(|| AppError::Conflict("Change request was already resolved by someone else.".into()))?;
+    if entry.user_id != a.user_id {
+        return Err(AppError::Conflict(
+            "Change request target no longer matches the entry owner.".into(),
+        ));
     }
-    // Non-admin leads may only act on requests from their direct reports.
     if !u.is_admin() {
         let is_report: Option<bool> = sqlx::query_scalar(
             "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2 FOR UPDATE",
@@ -227,13 +347,42 @@ pub async fn approve(
             return Err(AppError::Forbidden);
         }
     }
-    // Fetch the existing entry and build effective post-change values so we can
-    // run the same overlap / 14-hour / category validation as direct edits do.
-    let entry: crate::time_entries::TimeEntry =
-        sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1")
-            .bind(a.time_entry_id)
-            .fetch_one(&mut *tx)
-            .await?;
+    if entry.status == "draft" {
+        return Err(AppError::BadRequest("Edit drafts directly.".into()));
+    }
+    if entry.status == "rejected" {
+        return Err(AppError::BadRequest(
+            "Rejected entries cannot have change requests. Use the reopen workflow to edit.".into(),
+        ));
+    }
+    let current_start = parse_change_time(&entry.start_time)?;
+    let current_end = parse_change_time(&entry.end_time)?;
+    let new_start = a
+        .new_start_time
+        .as_deref()
+        .map(parse_change_time)
+        .transpose()?;
+    let new_end = a
+        .new_end_time
+        .as_deref()
+        .map(parse_change_time)
+        .transpose()?;
+    if !has_actual_change(
+        entry.entry_date,
+        current_start,
+        current_end,
+        entry.category_id,
+        entry.comment.as_deref(),
+        a.new_date,
+        new_start,
+        new_end,
+        a.new_category_id,
+        a.new_comment.as_deref(),
+    ) {
+        return Err(AppError::BadRequest(
+            "At least one actual change is required.".into(),
+        ));
+    }
     let effective = crate::time_entries::NewTimeEntry {
         entry_date: a.new_date.unwrap_or(entry.entry_date),
         start_time: a

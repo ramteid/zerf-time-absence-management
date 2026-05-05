@@ -14,6 +14,7 @@ use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::FromRow;
+use std::collections::BTreeSet;
 use subtle::ConstantTimeEq;
 
 // In production (Secure cookies), use the `__Host-` prefix so that:
@@ -75,6 +76,39 @@ impl User {
     pub fn is_lead(&self) -> bool {
         self.role == "team_lead" || self.role == "admin"
     }
+}
+
+pub async fn approval_recipient_ids(pool: &crate::db::DatabasePool, requester: &User) -> Vec<i64> {
+    let mut ids: BTreeSet<i64> = BTreeSet::new();
+
+    if let Some(approver_id) = requester.approver_id {
+        let is_active: bool = sqlx::query_scalar("SELECT active FROM users WHERE id=$1")
+            .bind(approver_id)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or(false);
+        if is_active {
+            ids.insert(approver_id);
+        }
+    }
+
+    if ids.is_empty() {
+        if requester.is_admin() {
+            ids.insert(requester.id);
+        } else if let Ok(admins) =
+            sqlx::query_scalar::<_, i64>("SELECT id FROM users WHERE active=TRUE AND role='admin'")
+                .fetch_all(pool)
+                .await
+        {
+            for admin_id in admins {
+                ids.insert(admin_id);
+            }
+        }
+    }
+
+    ids.into_iter().collect()
 }
 
 pub fn argon2_instance() -> Argon2<'static> {

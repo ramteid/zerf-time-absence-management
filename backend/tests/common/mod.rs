@@ -4,13 +4,13 @@
 //! testcontainers, runs migrations, seeds initial data, and starts the Axum
 //! server on a random port. Each test session gets a fully isolated database.
 
-use zerf::{build_app, categories, config::Config, db, holidays, seed_admin, AppState};
 use reqwest::{Client, StatusCode};
 use serde_json::Value;
 use std::sync::Arc;
 use testcontainers::runners::AsyncRunner;
 use testcontainers::ContainerAsync;
 use testcontainers_modules::postgres::Postgres;
+use zerf::{build_app, categories, config::Config, db, holidays, seed_admin, AppState};
 
 /// A running test application with its own database and HTTP client.
 pub struct TestApp {

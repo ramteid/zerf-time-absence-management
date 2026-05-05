@@ -14,10 +14,7 @@ async fn self_submission_is_visible_and_notifies_admin() {
     let monday = next_monday(-14).format("%Y-%m-%d").to_string();
     // Admin is seeded with start_date=today; move it back so past entries work.
     let (st, _) = admin
-        .put(
-            "/api/v1/users/1",
-            &json!({"start_date": "2024-01-01"}),
-        )
+        .put("/api/v1/users/1", &json!({"start_date": "2024-01-01"}))
         .await;
     assert_eq!(st, StatusCode::OK, "update admin start_date");
     let entry_id = create_and_submit_entry(&admin, &monday, cat_id).await;
@@ -92,6 +89,42 @@ async fn settings_validate_and_persist_user_defaults() {
     assert_eq!(body["ui_language"], "de");
     assert_eq!(body["default_weekly_hours"], 35.5);
     assert_eq!(body["default_annual_leave_days"], 28);
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn lead_without_approver_notifies_admin_on_self_submission() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+
+    let (_, body) = admin.get("/api/v1/categories").await;
+    let cat_id = body.as_array().unwrap()[0]["id"].as_i64().unwrap();
+    let monday = next_monday(-14).format("%Y-%m-%d").to_string();
+
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({"email":"lead-no-approver@example.com","first_name":"Nora","last_name":"Lead",
+                "role":"team_lead","weekly_hours":39,"annual_leave_days":30,
+                "start_date":"2024-01-01"}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create orphan lead");
+    let lead_pw = temp_pw(&body);
+    let lead = login_change_pw(&app, "lead-no-approver@example.com", &lead_pw).await;
+
+    let _entry_id = create_and_submit_entry(&lead, &monday, cat_id).await;
+
+    let (st, body) = admin.get("/api/v1/notifications").await;
+    assert_eq!(st, StatusCode::OK, "admin notifications");
+    assert!(
+        body.as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["kind"] == "timesheet_submitted"),
+        "admin received orphan-lead submission notification"
+    );
 
     app.cleanup().await;
 }

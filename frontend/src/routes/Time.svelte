@@ -349,7 +349,9 @@
       {#each weekdays as day (day.ds)}
         {@const total = day.items.reduce(
           (s, e) =>
-            s + durMin(e.start_time.slice(0, 5), e.end_time.slice(0, 5)),
+            e.status === "rejected"
+              ? s
+              : s + durMin(e.start_time.slice(0, 5), e.end_time.slice(0, 5)),
           0,
         )}
         {@const totalH = (total / 60).toFixed(1)}

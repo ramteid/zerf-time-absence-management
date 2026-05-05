@@ -87,3 +87,81 @@ async fn range_csv_and_category_totals_include_drafts() {
 
     app.cleanup().await;
 }
+
+#[tokio::test]
+async fn partial_sick_day_preserves_actual_minutes() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+
+    let (_lead_id, lead_pw, _emp_id, emp_pw, monday, cat_id) =
+        bootstrap_team(&app, &admin, false).await;
+    let lead = login_change_pw(&app, "lead-r@example.com", &lead_pw).await;
+    let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
+
+    let (st, body) = emp
+        .post(
+            "/api/v1/absences",
+            &json!({
+                "kind": "sick",
+                "start_date": monday,
+                "end_date": monday,
+                "comment": "cold"
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create sick leave");
+    assert_eq!(body["status"], "approved");
+
+    let (st, body) = emp
+        .post(
+            "/api/v1/time-entries",
+            &json!({
+                "entry_date": monday,
+                "start_time": "08:00",
+                "end_time": "12:00",
+                "category_id": cat_id,
+                "comment": "worked half day"
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create partial sick-day entry");
+    let entry_id = id(&body);
+
+    let (st, _) = emp
+        .post("/api/v1/time-entries/submit", &json!({"ids": [entry_id]}))
+        .await;
+    assert_eq!(st, StatusCode::OK, "submit partial sick-day entry");
+
+    let (st, _) = lead
+        .post(
+            &format!("/api/v1/time-entries/{}/approve", entry_id),
+            &json!({}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "approve partial sick-day entry");
+
+    let month = &monday[..7];
+    let (st, body) = emp
+        .get(&format!("/api/v1/reports/month?month={}", month))
+        .await;
+    assert_eq!(st, StatusCode::OK, "month report");
+    let day = body["days"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["date"] == monday)
+        .unwrap();
+    assert_eq!(day["absence"], "sick");
+    assert_eq!(day["actual_min"], 240);
+
+    let (st, body) = emp
+        .get(&format!(
+            "/api/v1/reports/flextime?from={}&to={}",
+            monday, monday
+        ))
+        .await;
+    assert_eq!(st, StatusCode::OK, "flextime report");
+    assert_eq!(body.as_array().unwrap()[0]["actual_min"], 240);
+
+    app.cleanup().await;
+}
