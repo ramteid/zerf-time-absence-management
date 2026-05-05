@@ -653,11 +653,7 @@ pub async fn update(
 }
 
 fn can_self_cancel(absence: &Absence) -> bool {
-    absence.status == "requested"
-        || (absence.kind == "sick"
-            && absence.status == "approved"
-            && absence.reviewed_by.is_none()
-            && absence.reviewed_at.is_none())
+    absence.status == "requested" || absence.status == "approved"
 }
 
 pub async fn cancel(
@@ -677,7 +673,7 @@ pub async fn cancel(
     }
     if !can_self_cancel(&a) {
         return Err(AppError::BadRequest(
-            "Only requested absences and auto-approved sick absences can be cancelled.".into(),
+            "Only requested or approved absences can be cancelled.".into(),
         ));
     }
     sqlx::query("UPDATE absences SET status='cancelled' WHERE id=$1")
