@@ -324,6 +324,11 @@
           >PM</button>
         </div>
       {/if}
+      <button
+        type="button"
+        class="tp-ok"
+        on:click|stopPropagation={closePicker}
+      >{$t("OK")}</button>
     </div>
   {/if}
 </div>
@@ -419,6 +424,25 @@
     color: var(--text-secondary);
     padding: 0 3px;
     align-self: center;
+  }
+
+  .tp-ok {
+    align-self: center;
+    margin-left: 8px;
+    padding: 4px 10px;
+    font-size: 13.5px;
+    font-weight: 600;
+    font-family: inherit;
+    color: var(--accent);
+    background: transparent;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+  }
+
+  .tp-ok:hover {
+    background: var(--accent);
+    color: #fff;
   }
 
   .tp-drum:focus {
