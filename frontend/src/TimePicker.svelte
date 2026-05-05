@@ -64,8 +64,11 @@
     }
   }
 
+  const MIN_STEP = 15;
+
   function stepMinute(delta) {
-    commit(h24, ((mins + delta) % 60 + 60) % 60);
+    const step = delta * MIN_STEP;
+    commit(h24, ((mins + step) % 60 + 60) % 60);
   }
 
   function toggleAmPm() {
@@ -178,11 +181,12 @@
           keyTimer = setTimeout(() => { keyBuf = ""; keyFocus = "m"; }, 1200);
         }
       } else if (keyFocus === "m") {
+        const snapped = Math.round(Math.min(59, num) / MIN_STEP) * MIN_STEP % 60;
         if (num > 5 || keyBuf.length >= 2) {
-          commit(h24, Math.min(59, num));
+          commit(h24, snapped);
           keyBuf = ""; keyFocus = use12h ? "ap" : "h";
         } else {
-          commit(h24, num);
+          commit(h24, snapped);
           keyTimer = setTimeout(() => { keyBuf = ""; keyFocus = use12h ? "ap" : "h"; }, 1200);
         }
       }
@@ -218,7 +222,7 @@
   function minItems(m) {
     return [-2, -1, 0, 1, 2].map((i) => ({
       offset: i,
-      v: ((m + i) % 60 + 60) % 60,
+      v: ((m + i * MIN_STEP) % 60 + 60) % 60,
     }));
   }
 
