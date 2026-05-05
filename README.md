@@ -35,6 +35,14 @@ Employees capture hours and absences, team leads review requests and submitted w
 
 The default reporting structure is many employees to one assigned team lead, and team leads can themselves report to another team lead for approval. Admins are primarily technical and organizational administrators. They can approve requests as a fallback, but they are not intended to be the regular approval path.
 
+## Time and absence management
+
+Employees log daily working hours by category and submit completed weeks for lead review. Flextime and overtime balances are tracked automatically based on configured weekly hours.
+
+Absences include vacation, sick leave, training, special leave, general absence, and unpaid leave. Requests follow a standard approval flow; sick leave starting today or earlier is auto-approved. Vacation budgets support annual entitlements and carryover.
+
+After submission, employees can request changes to reviewed entries or ask to reopen a week. Leads approve or reject these requests through the same dashboard used for time and absence reviews.
+
 ### Role organigram
 
 ```mermaid
