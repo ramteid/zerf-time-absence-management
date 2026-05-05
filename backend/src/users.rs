@@ -190,24 +190,23 @@ pub struct NewUser {
     pub start_date: NaiveDate,
     pub overtime_start_balance_min: Option<i64>,
     pub password: Option<String>,
-    /// Mandatory for `role == "employee"`. The approver must be an active
+    /// Mandatory for non-admin users. The approver must be an active
     /// `team_lead` or `admin` and cannot be the user themselves.
     pub approver_id: Option<i64>,
 }
 
 /// Validate that `approver_id` (if any) refers to an active lead/admin and
-/// is not the user themselves.  Also enforces the rule that active employees
-/// MUST have an approver.
+/// is not the user themselves. Also enforces the rule that non-admin users
+/// must have an approver.
 async fn validate_approver(
     pool: &crate::db::DatabasePool,
     role: &str,
     user_self_id: Option<i64>,
-    active: bool,
     approver_id: Option<i64>,
 ) -> AppResult<()> {
-    if role == "employee" && active && approver_id.is_none() {
+    if role != "admin" && approver_id.is_none() {
         return Err(AppError::BadRequest(
-            "An approver (Team lead or Admin) is required for employees.".into(),
+            "An approver (Team lead or Admin) is required for non-admin users.".into(),
         ));
     }
     if let Some(aid) = approver_id {
@@ -280,7 +279,7 @@ pub async fn create(
         }
     };
     let hash = hash_password(&password)?;
-    validate_approver(&s.pool, &b.role, None, true, b.approver_id).await?;
+    validate_approver(&s.pool, &b.role, None, b.approver_id).await?;
     let overtime_balance = b.overtime_start_balance_min.unwrap_or(0);
     let id: i64 = sqlx::query_scalar("INSERT INTO users(email,password_hash,first_name,last_name,role,weekly_hours,annual_leave_days,start_date,must_change_password,approver_id,overtime_start_balance_min) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id")
         .bind(&email_norm).bind(hash).bind(b.first_name.trim()).bind(b.last_name.trim()).bind(&b.role)
@@ -336,7 +335,7 @@ pub struct UpdateUser {
     pub active: Option<bool>,
     /// Distinguish "field omitted" (`None`) from "explicit null"
     /// (`Some(None)`) so the admin can clear an approver when they
-    /// promote an employee to lead.
+    /// promote a user to admin.
     #[serde(default, deserialize_with = "deserialize_double_option")]
     pub approver_id: Option<Option<i64>>,
     pub allow_reopen_without_approval: Option<bool>,
@@ -393,14 +392,13 @@ pub async fn update(
         .bind(id)
         .fetch_one(&s.pool)
         .await?;
-    // Pre-validate the post-update invariant (active employee → has approver).
+    // Pre-validate the post-update invariant (non-admin → has approver).
     let next_role = b.role.clone().unwrap_or_else(|| prev.role.clone());
-    let next_active = b.active.unwrap_or(prev.active);
     let next_approver = match b.approver_id {
         Some(v) => v,
         None => prev.approver_id,
     };
-    validate_approver(&s.pool, &next_role, Some(id), next_active, next_approver).await?;
+    validate_approver(&s.pool, &next_role, Some(id), next_approver).await?;
 
     let mut tx = s.pool.begin().await?;
     sqlx::query("UPDATE users SET email=COALESCE($1,email), first_name=COALESCE($2,first_name), last_name=COALESCE($3,last_name), role=COALESCE($4,role), weekly_hours=COALESCE($5,weekly_hours), annual_leave_days=COALESCE($6,annual_leave_days), start_date=COALESCE($7,start_date), active=COALESCE($8,active), allow_reopen_without_approval=COALESCE($9,allow_reopen_without_approval), overtime_start_balance_min=COALESCE($10,overtime_start_balance_min) WHERE id=$11")
@@ -465,7 +463,7 @@ pub async fn deactivate(
         .fetch_one(&s.pool)
         .await?;
     // Block deactivation if this person is the assigned approver for active users.
-    // Orphaned approver_id references would leave those employees in a broken state.
+    // Orphaned approver_id references would leave those users in a broken state.
     let reports_count: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE approver_id=$1 AND active=TRUE")
             .bind(id)

@@ -26,8 +26,16 @@
       error = $t("Please enter a valid email address.");
       return;
     }
-    if (password.length < 8) {
-      error = $t("Password must be at least 8 characters.");
+    if (password.length < 12) {
+      error = $t("Password must be at least 12 characters.");
+      return;
+    }
+    const hasLower = /[a-z]/.test(password);
+    const hasUpper = /[A-Z]/.test(password);
+    const hasDigit = /\d/.test(password);
+    const hasSymbol = /[^a-zA-Z0-9]/.test(password);
+    if ([hasLower, hasUpper, hasDigit, hasSymbol].filter(Boolean).length < 3) {
+      error = $t("Password must include at least 3 of: lowercase, uppercase, digit, symbol.");
       return;
     }
     if (password !== confirmPassword) {
@@ -120,7 +128,7 @@
           type="password"
           bind:value={password}
           required
-          minlength="8"
+          minlength="12"
           autocomplete="new-password"
         />
       </div>
@@ -134,7 +142,7 @@
           type="password"
           bind:value={confirmPassword}
           required
-          minlength="8"
+          minlength="12"
           autocomplete="new-password"
         />
       </div>

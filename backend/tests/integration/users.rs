@@ -5,7 +5,7 @@ use crate::common::TestApp;
 use crate::helpers::*;
 
 #[tokio::test]
-async fn employee_must_have_approver() {
+async fn non_admin_users_must_have_approver() {
     let app = TestApp::spawn().await;
     let admin = app.client();
     let (st, _) = admin.login("admin@example.com", &app.admin_password).await;
@@ -15,7 +15,7 @@ async fn employee_must_have_approver() {
         .await;
     assert_eq!(st, StatusCode::OK);
 
-    // Missing approver_id is rejected.
+    // Missing approver_id is rejected for employees.
     let (st, body) = admin
         .post(
             "/api/v1/users",
@@ -25,6 +25,26 @@ async fn employee_must_have_approver() {
         )
         .await;
     assert_eq!(st, StatusCode::BAD_REQUEST, "missing approver rejected");
+    assert!(body["error"]
+        .as_str()
+        .unwrap()
+        .to_lowercase()
+        .contains("approver"));
+
+    // Missing approver_id is rejected for team leads.
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({"email":"lead-missing@example.com","first_name":"Lead","last_name":"Missing",
+                "role":"team_lead","weekly_hours":39,"annual_leave_days":30,
+                "start_date":"2024-01-01"}),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::BAD_REQUEST,
+        "missing team lead approver rejected"
+    );
     assert!(body["error"]
         .as_str()
         .unwrap()
@@ -41,6 +61,47 @@ async fn employee_must_have_approver() {
         )
         .await;
     assert_eq!(st, StatusCode::OK, "with approver works");
+
+    // Team leads may report to another explicit team lead.
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({"email":"lead-approver@example.com","first_name":"Lead","last_name":"Approver",
+                "role":"team_lead","weekly_hours":39,"annual_leave_days":30,
+                "start_date":"2024-01-01","approver_id":1}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create team lead approver");
+    let lead_approver_id = id(&body);
+
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({"email":"lead-report@example.com","first_name":"Lead","last_name":"Report",
+                "role":"team_lead","weekly_hours":39,"annual_leave_days":30,
+                "start_date":"2024-01-01","approver_id":lead_approver_id}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create team lead with lead approver");
+    assert_eq!(body["user"]["approver_id"], lead_approver_id);
+    let lead_report_id = id(&body);
+
+    let (st, body) = admin
+        .put(
+            &format!("/api/v1/users/{lead_report_id}"),
+            &json!({"approver_id": null}),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::BAD_REQUEST,
+        "clearing team lead approver is rejected"
+    );
+    assert!(body["error"]
+        .as_str()
+        .unwrap()
+        .to_lowercase()
+        .contains("approver"));
 
     // Approver pointing at non-existent user.
     let (st, _) = admin
@@ -73,6 +134,7 @@ async fn creation_password_modes_set_must_change_correctly() {
                 "weekly_hours": 39,
                 "annual_leave_days": 30,
                 "start_date": "2024-01-01",
+                "approver_id": 1,
                 "password": manual_password,
             }),
         )

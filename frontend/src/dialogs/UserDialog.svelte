@@ -24,6 +24,7 @@
     template.approver_id == null ? "" : String(template.approver_id);
   let error = "";
   let approvers = [];
+  $: requiresApprover = role !== "admin";
 
   // Per-year vacation day overrides
   let leaveOverrides = [];
@@ -105,8 +106,8 @@
 
   async function save() {
     error = "";
-    if (role === "employee" && !approver_id) {
-      error = $t("An approver is required for employees.");
+    if (requiresApprover && !approver_id) {
+      error = $t("An approver is required for employees and team leads.");
       return;
     }
     if (isNew && password && password !== confirmPassword) {
@@ -130,7 +131,7 @@
           Number(overtime_start_balance_hours) * 60,
         ),
       };
-      if (role === "employee") {
+      if (requiresApprover) {
         body.approver_id = approver_id ? Number(approver_id) : null;
       } else if (!isNew && template.approver_id != null) {
         body.approver_id = null;
@@ -318,18 +319,24 @@
           bind:value={overtime_start_balance_hours}
         />
         <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
-          {$t("Initial overtime balance in hours when the user starts. Negative = deficit.")}
+          {$t(
+            "Initial overtime balance in hours when the user starts. Negative = deficit.",
+          )}
         </div>
       </div>
       {#if !isNew}
         <div>
-          <div style="font-size:13px;font-weight:600;margin-bottom:8px;margin-top:4px">
+          <div
+            style="font-size:13px;font-weight:600;margin-bottom:8px;margin-top:4px"
+          >
             {$t("Vacation days per year")}
           </div>
           {#if leaveOverrides.length > 0}
             <div style="margin-bottom:8px;font-size:12px">
               {#each leaveOverrides as o}
-                <div style="display:flex;gap:8px;align-items:center;padding:2px 0">
+                <div
+                  style="display:flex;gap:8px;align-items:center;padding:2px 0"
+                >
                   <span class="tab-num" style="min-width:50px">{o.year}:</span>
                   <span class="tab-num">{o.days} {$t("days")}</span>
                 </div>
@@ -339,9 +346,17 @@
           <div class="field-row" style="align-items:flex-end">
             <div>
               <label class="kz-label" for="override-year">{$t("Year")}</label>
-              <select id="override-year" class="kz-select" bind:value={overrideYear}>
-                <option value={new Date().getFullYear()}>{new Date().getFullYear()}</option>
-                <option value={new Date().getFullYear() + 1}>{new Date().getFullYear() + 1}</option>
+              <select
+                id="override-year"
+                class="kz-select"
+                bind:value={overrideYear}
+              >
+                <option value={new Date().getFullYear()}
+                  >{new Date().getFullYear()}</option
+                >
+                <option value={new Date().getFullYear() + 1}
+                  >{new Date().getFullYear() + 1}</option
+                >
               </select>
             </div>
             <div>
@@ -365,7 +380,9 @@
             </button>
           </div>
           <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
-            {$t("Overrides the default annual leave days for this user in the selected year.")}
+            {$t(
+              "Overrides the default annual leave days for this user in the selected year.",
+            )}
           </div>
         </div>
       {/if}
@@ -408,7 +425,7 @@
           </button>
         </div>
       {/if}
-      {#if role === "employee"}
+      {#if requiresApprover}
         <div>
           <label class="kz-label" for="user-approver"
             >{$t("Approver (Team lead / Admin)")}</label
@@ -428,7 +445,7 @@
             {/each}
           </select>
           <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
-            {$t("Required for employees.")}
+            {$t("Required for employees and team leads.")}
           </div>
         </div>
       {/if}

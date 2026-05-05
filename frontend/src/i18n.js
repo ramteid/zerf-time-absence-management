@@ -169,6 +169,8 @@ const TRANSLATIONS = {
       "Bitte geben Sie eine gültige E-Mail-Adresse ein.",
     "Password must be at least 8 characters.":
       "Das Passwort muss mindestens 8 Zeichen lang sein.",
+    "Password must be at least 12 characters.":
+      "Das Passwort muss mindestens 12 Zeichen lang sein.",
     "Passwords do not match.": "Passwörter stimmen nicht überein.",
     "Confirm password": "Passwort bestätigen",
     "Creating account…": "Konto wird erstellt…",
@@ -259,7 +261,6 @@ const TRANSLATIONS = {
     "Current password": "Aktuelles Passwort",
     "New password (min 12 chars)": "Neues Passwort (mind. 12 Zeichen)",
     "Confirm new password": "Neues Passwort bestätigen",
-    "Passwords do not match.": "Passwörter stimmen nicht überein.",
     "Password changed.": "Passwort geändert.",
     "Overtime balance {year}": "Überstundenkonto {year}",
     Balance: "Saldo",
@@ -285,7 +286,6 @@ const TRANSLATIONS = {
     "Approve & apply": "Genehmigen und anwenden",
     "Monthly report": "Monatsbericht",
     "Export CSV": "CSV exportieren",
-    Weekday: "Wochentag",
     Entries: "Einträge",
     Note: "Hinweis",
     "By category": "Nach Kategorie",
@@ -387,6 +387,12 @@ const TRANSLATIONS = {
     Encryption: "Verschlüsselung",
     stored: "gespeichert",
     "Save SMTP Settings": "SMTP-Einstellungen speichern",
+    "Test Connection": "Verbindung testen",
+    "Testing...": "Teste...",
+    "SMTP connection successful.": "SMTP-Verbindung erfolgreich.",
+    "SMTP enabled": "SMTP aktiviert",
+    "SMTP disabled": "SMTP deaktiviert",
+    "Connection OK": "Verbindung OK",
     "Initial setup required.": "Ersteinrichtung erforderlich.",
     "Please configure the country, region, default weekly hours and default annual leave days before using the application.":
       "Bitte Land, Region, Standard-Wochenstunden und Standard-Urlaubstage konfigurieren, bevor die Anwendung genutzt wird.",
@@ -443,9 +449,10 @@ const TRANSLATIONS = {
     Disabled: "Deaktiviert",
     // Reopen-week feature
     "Approver (Team lead / Admin)": "Verantwortliche Teamleitung / Admin",
-    "Required for employees.": "Pflichtfeld für Mitarbeitende.",
-    "An approver is required for employees.":
-      "Für Mitarbeitende ist eine verantwortliche Person erforderlich.",
+    "Required for employees and team leads.":
+      "Pflichtfeld für Mitarbeitende und Teamleitungen.",
+    "An approver is required for employees and team leads.":
+      "Für Mitarbeitende und Teamleitungen ist eine verantwortliche Person erforderlich.",
     "— None —": "— Keine —",
     "Request edit": "Bearbeitung anfordern",
     "Reopen this week?": "Diese Woche wieder bearbeiten?",
@@ -510,8 +517,8 @@ const TRANSLATIONS = {
     "Invalid name.": "Ungültiger Name.",
     "Invalid weekly_hours.": "Ungültige Wochenstunden.",
     "Invalid annual_leave_days.": "Ungültige Urlaubstage.",
-    "An approver (Team lead or Admin) is required for employees.":
-      "Für Mitarbeitende ist eine Teamleitung oder ein Admin als verantwortliche Person erforderlich.",
+    "An approver (Team lead or Admin) is required for non-admin users.":
+      "Für alle Nicht-Admin-Benutzer ist eine Teamleitung oder ein Admin als verantwortliche Person erforderlich.",
     "Approver cannot be the user themselves.":
       "Verantwortliche Person darf nicht dieselbe Person sein.",
     "Approver must be an active Team lead or Admin.":
@@ -714,7 +721,6 @@ const TRANSLATIONS = {
     "Time format": "Uhrzeitformat",
     "Default weekly hours": "Standard-Wochenstunden",
     "Default annual leave days": "Standard-Urlaubstage",
-    "Confirm password": "Passwort bestätigen",
     "Generate password": "Passwort generieren",
     "Password (min 12 chars)": "Passwort (mind. 12 Zeichen)",
     "Registration email will be sent.":

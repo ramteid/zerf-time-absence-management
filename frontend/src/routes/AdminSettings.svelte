@@ -5,8 +5,6 @@
 
   let s = {};
   let saving = false;
-  let savingSmtp = false;
-  let smtpPassword = "";
   let adminFirstName = "";
   let adminLastName = "";
   $: isFirstSetup = !!$currentUser?.must_configure_settings;
@@ -98,28 +96,7 @@
     }
   }
 
-  async function saveSmtp() {
-    savingSmtp = true;
-    try {
-      const body = {
-        smtp_enabled: !!s.smtp_enabled,
-        smtp_host: s.smtp_host || "",
-        smtp_port: parseInt(s.smtp_port) || 587,
-        smtp_username: s.smtp_username || "",
-        smtp_password: smtpPassword || undefined,
-        smtp_from: s.smtp_from || "",
-        smtp_encryption: s.smtp_encryption || "starttls",
-      };
-      const saved = await api("/settings/smtp", { method: "PUT", body });
-      Object.assign(s, saved);
-      smtpPassword = "";
-      toast($t("SMTP settings saved."), "ok");
-    } catch (e) {
-      toast($t(e?.message || "Error"), "error");
-    } finally {
-      savingSmtp = false;
-    }
-  }
+
 </script>
 
 <div class="top-bar">
@@ -128,7 +105,7 @@
   </div>
 </div>
 
-<div class="content-area" style="max-width:600px">
+<div class="content-area">
   {#if isFirstSetup}
     <div
       class="kz-card"
@@ -342,110 +319,5 @@
     </div>
   </div>
 
-  <div class="kz-card" style="padding:20px;margin-bottom:16px">
-    <div style="font-size:14px;font-weight:600;margin-bottom:14px">
-      {$t("Email (SMTP)")}
-    </div>
-    <div class="field-group">
-      <div class="field-row">
-        <div>
-          <label class="kz-label" style="display:flex;align-items:center;gap:8px">
-            <input
-              type="checkbox"
-              bind:checked={s.smtp_enabled}
-              style="width:auto"
-            />
-            {$t("Enable SMTP")}
-          </label>
-          <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
-            {$t("When enabled, notification emails are sent for approvals, rejections, and reopen requests.")}
-          </div>
-        </div>
-      </div>
 
-      <div class="field-row" style="margin-top:12px">
-        <div>
-          <label class="kz-label" for="smtp-host">{$t("SMTP Host")}</label>
-          <input
-            id="smtp-host"
-            class="kz-input"
-            bind:value={s.smtp_host}
-            placeholder="smtp.example.com"
-          />
-        </div>
-        <div>
-          <label class="kz-label" for="smtp-port">{$t("SMTP Port")}</label>
-          <input
-            id="smtp-port"
-            class="kz-input"
-            type="number"
-            bind:value={s.smtp_port}
-            placeholder="587"
-          />
-        </div>
-      </div>
-
-      <div class="field-row" style="margin-top:12px">
-        <div>
-          <label class="kz-label" for="smtp-username">{$t("Username")}</label>
-          <input
-            id="smtp-username"
-            class="kz-input"
-            bind:value={s.smtp_username}
-            autocomplete="off"
-          />
-        </div>
-        <div>
-          <label class="kz-label" for="smtp-password">
-            {$t("Password")}
-            {#if s.smtp_password_set}
-              <span style="font-size:11px;color:var(--text-tertiary);font-weight:normal">({$t("stored")})</span>
-            {/if}
-          </label>
-          <input
-            id="smtp-password"
-            class="kz-input"
-            type="password"
-            bind:value={smtpPassword}
-            placeholder={s.smtp_password_set ? "********" : ""}
-            autocomplete="new-password"
-          />
-        </div>
-      </div>
-
-      <div class="field-row" style="margin-top:12px">
-        <div>
-          <label class="kz-label" for="smtp-from">{$t("From address")}</label>
-          <input
-            id="smtp-from"
-            class="kz-input"
-            bind:value={s.smtp_from}
-            placeholder='Zerf <noreply@example.com>'
-          />
-        </div>
-        <div>
-          <label class="kz-label" for="smtp-encryption">{$t("Encryption")}</label>
-          <select
-            id="smtp-encryption"
-            class="kz-select"
-            bind:value={s.smtp_encryption}
-          >
-            <option value="starttls">STARTTLS</option>
-            <option value="tls">TLS</option>
-            <option value="none">{$t("None")}</option>
-          </select>
-        </div>
-      </div>
-
-      <div style="display:flex;justify-content:flex-end;padding-top:16px">
-        <button class="kz-btn kz-btn-primary" on:click={saveSmtp} disabled={savingSmtp}>
-          {#if savingSmtp}
-            {$t("Saving...")}
-          {:else}
-            {$t("Save SMTP Settings")}
-          {/if}
-        </button>
-      </div>
-    </div>
-  </div>
 </div>

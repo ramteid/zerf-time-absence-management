@@ -1,0 +1,198 @@
+<script>
+  import { api } from "../api.js";
+  import { toast } from "../stores.js";
+  import { t } from "../i18n.js";
+
+  let s = {};
+  let saving = false;
+  let smtpPassword = "";
+  let testing = false;
+  let testResult = null;
+
+  async function load() {
+    s = await api("/settings");
+  }
+  load();
+
+  async function save() {
+    saving = true;
+    try {
+      const body = {
+        smtp_enabled: !!s.smtp_enabled,
+        smtp_host: s.smtp_host || "",
+        smtp_port: parseInt(s.smtp_port) || 587,
+        smtp_username: s.smtp_username || "",
+        smtp_password: smtpPassword || undefined,
+        smtp_from: s.smtp_from || "",
+        smtp_encryption: s.smtp_encryption || "starttls",
+      };
+      const saved = await api("/settings/smtp", { method: "PUT", body });
+      Object.assign(s, saved);
+      smtpPassword = "";
+      testResult = body.smtp_enabled ? { ok: true } : null;
+      toast($t("SMTP settings saved."), "ok");
+    } catch (e) {
+      testResult = { ok: false, message: e?.message || "Error" };
+      toast($t(e?.message || "Error"), "error");
+    } finally {
+      saving = false;
+    }
+  }
+
+  async function testConnection() {
+    testing = true;
+    testResult = null;
+    try {
+      const body = {
+        smtp_enabled: true,
+        smtp_host: s.smtp_host || "",
+        smtp_port: parseInt(s.smtp_port) || 587,
+        smtp_username: s.smtp_username || "",
+        smtp_password: smtpPassword || undefined,
+        smtp_from: s.smtp_from || "",
+        smtp_encryption: s.smtp_encryption || "starttls",
+      };
+      await api("/settings/smtp/test", { method: "POST", body });
+      testResult = { ok: true };
+      toast($t("SMTP connection successful."), "ok");
+    } catch (e) {
+      testResult = { ok: false, message: e?.message || "Error" };
+      toast($t(e?.message || "Error"), "error");
+    } finally {
+      testing = false;
+    }
+  }
+</script>
+
+<div class="top-bar">
+  <div class="top-bar-title">
+    <h1>{$t("Email (SMTP)")}</h1>
+  </div>
+</div>
+
+<div class="content-area">
+  <div class="kz-card" style="padding:20px;margin-bottom:16px">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+      <span
+        class="smtp-status-dot"
+        style="width:10px;height:10px;border-radius:50%;flex-shrink:0;background:{s.smtp_enabled ? 'var(--success, #22c55e)' : 'var(--text-tertiary, #888)'}"
+      ></span>
+      <span style="font-size:13px;font-weight:500;color:var(--text-secondary)">
+        {s.smtp_enabled ? $t("SMTP enabled") : $t("SMTP disabled")}
+      </span>
+      {#if testResult}
+        <span style="font-size:12px;margin-left:8px;color:{testResult.ok ? 'var(--success, #22c55e)' : 'var(--error, #ef4444)'}">
+          {testResult.ok ? $t("Connection OK") : testResult.message}
+        </span>
+      {/if}
+    </div>
+    <div class="field-group">
+      <div class="field-row">
+        <div>
+          <label class="kz-label" style="display:flex;align-items:center;gap:8px">
+            <input
+              type="checkbox"
+              bind:checked={s.smtp_enabled}
+              style="width:auto"
+            />
+            {$t("Enable SMTP")}
+          </label>
+          <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
+            {$t("When enabled, notification emails are sent for approvals, rejections, and reopen requests.")}
+          </div>
+        </div>
+      </div>
+
+      <div class="field-row" style="margin-top:12px">
+        <div>
+          <label class="kz-label" for="smtp-host">{$t("SMTP Host")}</label>
+          <input
+            id="smtp-host"
+            class="kz-input"
+            bind:value={s.smtp_host}
+            placeholder="smtp.example.com"
+          />
+        </div>
+        <div>
+          <label class="kz-label" for="smtp-port">{$t("SMTP Port")}</label>
+          <input
+            id="smtp-port"
+            class="kz-input"
+            type="number"
+            bind:value={s.smtp_port}
+            placeholder="587"
+          />
+        </div>
+      </div>
+
+      <div class="field-row" style="margin-top:12px">
+        <div>
+          <label class="kz-label" for="smtp-username">{$t("Username")}</label>
+          <input
+            id="smtp-username"
+            class="kz-input"
+            bind:value={s.smtp_username}
+            autocomplete="off"
+          />
+        </div>
+        <div>
+          <label class="kz-label" for="smtp-password">
+            {$t("Password")}
+            {#if s.smtp_password_set}
+              <span style="font-size:11px;color:var(--text-tertiary);font-weight:normal">({$t("stored")})</span>
+            {/if}
+          </label>
+          <input
+            id="smtp-password"
+            class="kz-input"
+            type="password"
+            bind:value={smtpPassword}
+            placeholder={s.smtp_password_set ? "********" : ""}
+            autocomplete="new-password"
+          />
+        </div>
+      </div>
+
+      <div class="field-row" style="margin-top:12px">
+        <div>
+          <label class="kz-label" for="smtp-from">{$t("From address")}</label>
+          <input
+            id="smtp-from"
+            class="kz-input"
+            bind:value={s.smtp_from}
+            placeholder='Zerf <noreply@example.com>'
+          />
+        </div>
+        <div>
+          <label class="kz-label" for="smtp-encryption">{$t("Encryption")}</label>
+          <select
+            id="smtp-encryption"
+            class="kz-select"
+            bind:value={s.smtp_encryption}
+          >
+            <option value="starttls">STARTTLS</option>
+            <option value="tls">TLS</option>
+            <option value="none">{$t("None")}</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;gap:8px;padding-top:16px">
+        <button class="kz-btn" on:click={testConnection} disabled={testing || saving}>
+          {#if testing}
+            {$t("Testing...")}
+          {:else}
+            {$t("Test Connection")}
+          {/if}
+        </button>
+        <button class="kz-btn kz-btn-primary" on:click={save} disabled={saving || testing}>
+          {#if saving}
+            {$t("Saving...")}
+          {:else}
+            {$t("Save SMTP Settings")}
+          {/if}
+        </button>
+      </div>
+    </div>
+  </div>
+</div>

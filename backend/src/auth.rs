@@ -57,9 +57,8 @@ pub struct User {
     pub active: bool,
     pub must_change_password: bool,
     pub created_at: DateTime<Utc>,
-    /// Lead/admin who reviews this user's reopen requests.
-    /// Mandatory for active employees (DB CHECK constraint),
-    /// optional for leads/admins (they may self-service).
+    /// Lead/admin who reviews this user's requests.
+    /// Mandatory for non-admin users.
     pub approver_id: Option<i64>,
     /// When TRUE, this user's reopen requests are auto-approved without waiting
     /// for manual review.  The designated approver and all admins still receive
@@ -669,11 +668,7 @@ pub async fn setup(
         return Err(AppError::BadRequest("Name too long.".into()));
     }
     let password = &body.password;
-    if password.len() < 8 || password.len() > 128 {
-        return Err(AppError::BadRequest(
-            "Password must be between 8 and 128 characters.".into(),
-        ));
-    }
+    validate_password_strength(password)?;
 
     let hash = hash_password(password)?;
     let today = chrono::Local::now().date_naive();

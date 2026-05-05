@@ -171,7 +171,6 @@
     Time: "Clock",
     Absences: "Plane",
     Calendar: "Calendar",
-    Account: "User",
     Dashboard: "Home",
     Reports: "BarChart",
     Admin: "Settings",
@@ -309,29 +308,28 @@
     </div>
 
     <div class="sidebar-user">
-      <div
-        class="avatar"
-        style="width:30px;height:30px;font-size:11px;background:var(--nav-bg-active);color:var(--nav-text-active)"
-      >
-        {initials($currentUser)}
-      </div>
-      <div style="flex:1;min-width:0">
-        <div class="sidebar-user-name">
-          {$currentUser.first_name}
-          {$currentUser.last_name}
-        </div>
-        <div class="sidebar-user-role">{roleLabel($currentUser.role)}</div>
-      </div>
       <a
         href="/account"
         data-link="1"
-        class="kz-btn-icon-sm"
+        class="sidebar-user-account"
         class:active={pathname === "/account" ||
           pathname.startsWith("/account/")}
-        style="color:var(--nav-text-muted)"
         title={$t("Account")}
+        aria-label={$t("Account")}
       >
-        <Icon name="User" size={15} />
+        <div
+          class="avatar"
+          style="width:30px;height:30px;font-size:11px;background:var(--nav-bg-active);color:var(--nav-text-active)"
+        >
+          {initials($currentUser)}
+        </div>
+        <div style="flex:1;min-width:0">
+          <div class="sidebar-user-name">
+            {$currentUser.first_name}
+            {$currentUser.last_name}
+          </div>
+          <div class="sidebar-user-role">{roleLabel($currentUser.role)}</div>
+        </div>
       </a>
       <button
         class="kz-btn-icon-sm"

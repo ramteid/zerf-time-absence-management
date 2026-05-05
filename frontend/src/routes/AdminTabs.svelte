@@ -12,6 +12,7 @@
     { href: "/admin/categories", key: "Categories" },
     { href: "/admin/holidays", key: "Holidays" },
     { href: "/admin/settings", key: "Settings" },
+    { href: "/admin/email", key: "Email" },
     { href: "/admin/audit-log", key: "Audit Log" },
   ];
 </script>
