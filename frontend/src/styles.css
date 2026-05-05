@@ -1076,8 +1076,9 @@ dialog footer {
     width: 100%;
   }
 
-  .time-top-bar-actions {
+  .top-bar-actions.time-top-bar-actions {
     justify-content: flex-start;
+    gap: 6px;
   }
 
   .time-top-bar-actions .time-week-picker {
@@ -1085,11 +1086,14 @@ dialog footer {
   }
 
   .time-top-bar-actions .time-week-label {
-    min-width: 96px;
+    min-width: 84px;
   }
 
   .time-top-bar-actions .time-submit-button {
     margin-left: auto;
+    height: 32px;
+    padding: 0 10px;
+    font-size: 12.5px;
   }
 
   .time-top-bar-actions .time-reopen-action {
