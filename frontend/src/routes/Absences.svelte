@@ -1,9 +1,10 @@
 <script>
+  import { tick } from "svelte";
   import { api } from "../api.js";
   import { currentUser, toast } from "../stores.js";
   import { countWorkdays, holidayDateSet } from "../apiMappers.js";
   import { t, absenceKindLabel, statusLabel } from "../i18n.js";
-  import { fmtDate, parseDate } from "../format.js";
+  import { fmtDate, fmtDateTime, parseDate } from "../format.js";
   import Icon from "../Icons.svelte";
   import AbsenceDialog from "../dialogs/AbsenceDialog.svelte";
   import { confirmDialog } from "../confirm.js";
@@ -16,6 +17,10 @@
   let loadToken = 0;
   const baseYear = new Date().getFullYear();
   let selectedYear = baseYear;
+
+  // Detail popup state
+  let detailAbsence = null;
+  let detailDlg;
 
   $: yearOptions = [
     ...new Set([
@@ -88,13 +93,7 @@
   }
 
   function canCancel(absence) {
-    return (
-      absence.status === "requested" ||
-      (absence.kind === "sick" &&
-        absence.status === "approved" &&
-        absence.reviewed_by == null &&
-        absence.reviewed_at == null)
-    );
+    return absence.status === "requested" || absence.status === "approved";
   }
 
   $: absenceRows = absences.map((absence) => ({
@@ -103,6 +102,26 @@
     editable: canEdit(absence),
     cancellable: canCancel(absence),
   }));
+
+  function showDetail(absence) {
+    detailAbsence = absence;
+    tick().then(() => {
+      if (detailDlg && !detailDlg.open) {
+        try {
+          detailDlg.showModal();
+        } catch {
+          detailDlg.setAttribute("open", "open");
+        }
+      }
+    });
+  }
+
+  function closeDetail() {
+    if (detailDlg?.open) {
+      detailDlg.close();
+    }
+    detailAbsence = null;
+  }
 
   async function cancel(id) {
     const ok = await confirmDialog(
@@ -240,7 +259,13 @@
     {:else}
       <div class="absence-list">
         {#each absenceRows as a}
-          <div class="absence-entry">
+          <div
+            class="absence-entry"
+            on:click={() => showDetail(a)}
+            on:keydown={(e) => { if (e.key === "Enter") showDetail(a); }}
+            role="button"
+            tabindex="0"
+          >
             <div class="absence-entry-summary">
               <div class="absence-entry-field absence-entry-type">
                 <span class="absence-entry-label">{$t("Type")}</span>
@@ -265,35 +290,16 @@
                 <span class="absence-entry-value tab-num">{a.days || "-"}</span>
               </div>
             </div>
-            <div class="absence-entry-detail absence-entry-comment">
-              <span class="absence-entry-label">{$t("Comment")}</span>
-              <span class="absence-entry-value">{a.comment || "-"}</span>
-            </div>
-            <div class="absence-entry-detail absence-entry-status">
-              <span class="absence-entry-label">{$t("Status")}</span>
-              <span class="absence-entry-value">
+            <div class="absence-entry-bottom">
+              <div class="absence-entry-detail absence-entry-comment">
+                <span class="absence-entry-label">{$t("Comment")}</span>
+                <span class="absence-entry-value">{a.comment || "-"}</span>
+              </div>
+              <div class="absence-entry-detail absence-entry-status">
                 <span class="kz-chip kz-chip-{a.status}"
                   >{statusLabel(a.status)}</span
                 >
-              </span>
-            </div>
-            <div class="absence-entry-actions">
-              {#if a.cancellable}
-                <button
-                  class="kz-btn kz-btn-ghost kz-btn-sm kz-btn-danger"
-                  on:click={() => cancel(a.id)}
-                >
-                  {$t("Cancel")}
-                </button>
-              {/if}
-              {#if a.editable}
-                <button
-                  class="kz-btn kz-btn-ghost kz-btn-sm"
-                  on:click={() => (showDialog = a)}
-                >
-                  <Icon name="Edit" size={13} />
-                </button>
-              {/if}
+              </div>
             </div>
           </div>
         {/each}
@@ -306,6 +312,75 @@
   <AbsenceDialog template={showDialog} onClose={handleDialogClose} />
 {/if}
 
+{#if detailAbsence}
+  <dialog bind:this={detailDlg} on:close={closeDetail}>
+    <header>
+      <span style="flex:1">{absenceKindLabel(detailAbsence.kind)}</span>
+      <button class="kz-btn-icon-sm kz-btn-ghost" on:click={closeDetail}>
+        <Icon name="X" size={16} />
+      </button>
+    </header>
+    <div class="dialog-body">
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div class="field-row">
+          <div>
+            <div class="kz-label">{$t("From")}</div>
+            <div class="tab-num">{fmtDate(detailAbsence.start_date)}</div>
+          </div>
+          <div>
+            <div class="kz-label">{$t("To")}</div>
+            <div class="tab-num">{fmtDate(detailAbsence.end_date)}</div>
+          </div>
+          <div>
+            <div class="kz-label">{$t("Days")}</div>
+            <div class="tab-num">{detailAbsence.days || "-"}</div>
+          </div>
+        </div>
+        <div>
+          <div class="kz-label">{$t("Status")}</div>
+          <span class="kz-chip kz-chip-{detailAbsence.status}">{statusLabel(detailAbsence.status)}</span>
+        </div>
+        {#if detailAbsence.comment}
+          <div>
+            <div class="kz-label">{$t("Comment")}</div>
+            <div style="white-space:pre-wrap;font-size:13px">{detailAbsence.comment}</div>
+          </div>
+        {/if}
+        {#if detailAbsence.rejection_reason}
+          <div>
+            <div class="kz-label">{$t("Rejection reason")}</div>
+            <div style="white-space:pre-wrap;font-size:13px;color:var(--danger-text)">{detailAbsence.rejection_reason}</div>
+          </div>
+        {/if}
+        <div>
+          <div class="kz-label">{$t("Requested at")}</div>
+          <div class="tab-num" style="font-size:12px">{fmtDateTime(detailAbsence.created_at)}</div>
+        </div>
+      </div>
+    </div>
+    <footer>
+      <button class="kz-btn" on:click={closeDetail}>{$t("Close")}</button>
+      <span style="flex:1"></span>
+      {#if detailAbsence.cancellable}
+        <button
+          class="kz-btn kz-btn-danger"
+          on:click={() => { const id = detailAbsence.id; closeDetail(); cancel(id); }}
+        >
+          {$t("Cancel")}
+        </button>
+      {/if}
+      {#if detailAbsence.editable}
+        <button
+          class="kz-btn kz-btn-primary"
+          on:click={() => { const a = detailAbsence; closeDetail(); showDialog = a; }}
+        >
+          <Icon name="Edit" size={13} />{$t("Edit")}
+        </button>
+      {/if}
+    </footer>
+  </dialog>
+{/if}
+
 <style>
   .absence-list {
     display: flex;
@@ -315,10 +390,14 @@
   .absence-entry {
     padding: 12px 16px;
     border-bottom: 1px solid var(--border);
+    cursor: pointer;
     display: flex;
-    flex-wrap: wrap;
-    gap: 8px 16px;
-    align-items: center;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .absence-entry:hover {
+    background: var(--bg-hover);
   }
 
   .absence-entry:last-child {
@@ -330,6 +409,13 @@
     flex-wrap: wrap;
     gap: 8px 16px;
     align-items: center;
+    min-width: 0;
+  }
+
+  .absence-entry-bottom {
+    display: flex;
+    align-items: center;
+    gap: 8px 16px;
     min-width: 0;
   }
 
@@ -364,14 +450,14 @@
     overflow-wrap: anywhere;
   }
 
-  .absence-entry-actions {
+  .absence-entry-status {
     margin-left: auto;
-    display: flex;
-    gap: 4px;
+    flex-shrink: 0;
   }
 
   .absence-year-select {
     min-width: 92px;
+    height: 85%;
   }
 
   @media (max-width: 640px) {
@@ -382,13 +468,6 @@
   }
 
   @media (max-width: 640px) {
-    .absence-entry {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr);
-      align-items: stretch;
-      gap: 10px;
-    }
-
     .absence-entry-summary {
       width: 100%;
       display: grid;
@@ -427,15 +506,12 @@
       text-align: right;
     }
 
-    .absence-entry-detail {
-      width: 100%;
+    .absence-entry-bottom {
+      flex-wrap: wrap;
     }
 
-    .absence-entry-actions {
-      margin-left: 0;
-      padding-top: 4px;
-      justify-content: flex-end;
-      width: 100%;
+    .absence-entry-detail {
+      width: auto;
     }
   }
 </style>
