@@ -106,6 +106,7 @@
 
   function onTouchMove(e) {
     if (touchLastY === null) return;
+    e.preventDefault();
     const y = e.touches[0].clientY;
     touchAccY += touchLastY - y;
     touchLastY = y;
