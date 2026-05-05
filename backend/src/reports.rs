@@ -271,9 +271,9 @@ fn validate_range(from: NaiveDate, to: NaiveDate) -> AppResult<()> {
     if from > to {
         return Err(AppError::BadRequest("from must not be after to.".into()));
     }
-    if (to - from).num_days() > 366 {
+    if (to - from).num_days() > 365 {
         return Err(AppError::BadRequest(
-            "Date range must not exceed 366 days.".into(),
+            "Date range must not exceed 365 days.".into(),
         ));
     }
     Ok(())
@@ -495,7 +495,7 @@ pub async fn categories(
         "SELECT c.name, c.color, z.start_time, z.end_time \
          FROM time_entries z \
          JOIN categories c ON c.id=z.category_id \
-         WHERE z.status = 'approved' AND z.entry_date BETWEEN ",
+         WHERE z.status IN ('draft','submitted','approved') AND z.entry_date BETWEEN ",
     );
     builder.push_bind(q.from).push(" AND ").push_bind(q.to);
     if let Some(id) = uid {
