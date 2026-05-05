@@ -140,11 +140,10 @@ async fn perform_reopen(
 /// |----------------|-------------------------------------|---------------------------------------|
 /// | employee       | any                                 | designated approver + all admins      |
 /// | team_lead      | has designated approver             | that approver + all admins            |
-/// | team_lead      | no approver                         | all admins                            |
 /// | admin          | any                                 | all other admins                      |
 ///
 /// BTreeSet deduplicates (e.g. when the designated approver IS an admin).
-/// The requester is always excluded from the result.
+/// Non-admin requesters are excluded from the result.
 async fn approver_ids_to_notify(pool: &crate::db::DatabasePool, requester: &User) -> Vec<i64> {
     let mut ids: std::collections::BTreeSet<i64> = Default::default();
     if let Some(aid) = requester.approver_id {
@@ -235,7 +234,7 @@ pub async fn create(
     let auto_approve = u.allow_reopen_without_approval;
 
     // `recorded_approver` is stored as the primary approver on the request row.
-    // For self-service leads/admins (no designated approver) we record themselves.
+    // Admins do not require a designated approver, so their own id is recorded.
     let recorded_approver: i64 = u.approver_id.unwrap_or(u.id);
 
     let status = if auto_approve {

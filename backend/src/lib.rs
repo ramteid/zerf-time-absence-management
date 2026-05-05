@@ -80,6 +80,7 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                     get(settings::admin_settings).put(settings::update_admin_settings),
                 )
                 .route("/settings/smtp", put(settings::update_smtp_settings))
+                .route("/settings/smtp/test", post(settings::test_smtp_connection))
                 .route(
                     "/time-entries",
                     get(time_entries::list).post(time_entries::create),

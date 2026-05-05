@@ -2,7 +2,7 @@
 //!
 //! Best-effort delivery via SMTP when [`SmtpConfig`] is present. All errors
 //! are logged at WARN and never propagated to the calling business flow.
-//! The whole feature is no-op when the env vars are not set.
+//! The whole feature is no-op when SMTP is not configured in admin settings.
 
 use crate::config::SmtpConfig;
 use lettre::message::{header::ContentType, Mailbox, Message};

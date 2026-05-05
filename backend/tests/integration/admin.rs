@@ -94,7 +94,7 @@ async fn settings_validate_and_persist_user_defaults() {
 }
 
 #[tokio::test]
-async fn lead_without_approver_notifies_admin_on_self_submission() {
+async fn lead_with_admin_approver_notifies_admin_on_self_submission() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
 
@@ -105,14 +105,14 @@ async fn lead_without_approver_notifies_admin_on_self_submission() {
     let (st, body) = admin
         .post(
             "/api/v1/users",
-            &json!({"email":"lead-no-approver@example.com","first_name":"Nora","last_name":"Lead",
+            &json!({"email":"lead-with-admin-approver@example.com","first_name":"Nora","last_name":"Lead",
                 "role":"team_lead","weekly_hours":39,"annual_leave_days":30,
-                "start_date":"2024-01-01"}),
+                "start_date":"2024-01-01","approver_id":1}),
         )
         .await;
-    assert_eq!(st, StatusCode::OK, "create orphan lead");
+    assert_eq!(st, StatusCode::OK, "create lead");
     let lead_pw = temp_pw(&body);
-    let lead = login_change_pw(&app, "lead-no-approver@example.com", &lead_pw).await;
+    let lead = login_change_pw(&app, "lead-with-admin-approver@example.com", &lead_pw).await;
 
     let _entry_id = create_and_submit_entry(&lead, &monday, cat_id).await;
 
@@ -123,7 +123,7 @@ async fn lead_without_approver_notifies_admin_on_self_submission() {
             .unwrap()
             .iter()
             .any(|item| item["kind"] == "timesheet_submitted"),
-        "admin received orphan-lead submission notification"
+        "admin received lead submission notification"
     );
 
     app.cleanup().await;

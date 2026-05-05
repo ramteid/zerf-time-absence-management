@@ -38,6 +38,7 @@
   import AdminHolidays from "./routes/AdminHolidays.svelte";
   import AdminAuditLog from "./routes/AdminAuditLog.svelte";
   import AdminSettings from "./routes/AdminSettings.svelte";
+  import AdminEmail from "./routes/AdminEmail.svelte";
   import AdminTabs from "./routes/AdminTabs.svelte";
   import TeamSettings from "./routes/TeamSettings.svelte";
   import NotFound from "./routes/NotFound.svelte";
@@ -242,6 +243,7 @@
     "/admin/holidays": AdminHolidays,
     "/admin/audit-log": AdminAuditLog,
     "/admin/settings": AdminSettings,
+    "/admin/email": AdminEmail,
     "/team-settings": TeamSettings,
   };
 
@@ -255,6 +257,7 @@
     "/admin/holidays": (user) => !!user?.permissions?.can_manage_holidays,
     "/admin/audit-log": (user) => !!user?.permissions?.can_view_audit_log,
     "/admin/settings": (user) => !!user?.permissions?.can_manage_settings,
+    "/admin/email": (user) => !!user?.permissions?.can_manage_settings,
   };
 
   $: route = resolveRoute(pathname, $currentUser);

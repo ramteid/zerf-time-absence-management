@@ -33,7 +33,7 @@ Employees capture hours and absences, team leads review requests and submitted w
 
 ## Roles and approval model
 
-The default reporting structure is many employees to one assigned team lead, and team leads can themselves report to another team lead for approval. Admins are primarily technical and organizational administrators. They can approve requests as a fallback, but they are not intended to be the regular approval path.
+The default reporting structure is many employees to one assigned team lead, and every non-admin user has an explicit approver. Team leads can themselves report to another team lead or admin for approval. Admins are primarily technical and organizational administrators. They can approve requests as a fallback, but they are not intended to be the regular approval path.
 
 ## Time and absence management
 
@@ -119,7 +119,6 @@ Edit `.env` and set these values:
 | Local debug | `./start_local_debug.sh` | Run a debug-oriented local stack for backend and frontend debugging. |
 | Public | `./start_public.sh` | Run the public deployment stack with Caddy and HTTPS. |
 
-### 3. Sign in
+### 3. Initial setup
 
-Use the admin email from `.env` with the initial password `admin`.
-Change that password immediately after the first login.
+On first launch, open the application in your browser. You will be prompted to create the initial administrator account with your email, name, and password.

@@ -248,6 +248,7 @@ async fn employee_calendar_is_scoped_to_their_team() {
                 "weekly_hours":39,
                 "annual_leave_days":30,
                 "start_date":"2024-01-01",
+                "approver_id":1,
             }),
         )
         .await;

@@ -310,6 +310,57 @@ pub async fn update_smtp_settings(
     }))
 }
 
+/// Test SMTP connection without saving. Builds a temporary SmtpConfig from
+/// the request body and attempts to connect.
+pub async fn test_smtp_connection(
+    State(s): State<AppState>,
+    user: User,
+    Json(body): Json<UpdateSmtpSettings>,
+) -> AppResult<Json<serde_json::Value>> {
+    if !user.is_admin() {
+        return Err(AppError::Forbidden);
+    }
+
+    let host = body.smtp_host.trim().to_string();
+    let from = body.smtp_from.trim().to_string();
+    if host.is_empty() {
+        return Err(AppError::BadRequest("SMTP host is required.".into()));
+    }
+    if from.is_empty() {
+        return Err(AppError::BadRequest("SMTP from address is required.".into()));
+    }
+
+    let encryption = body
+        .smtp_encryption
+        .as_deref()
+        .unwrap_or("starttls")
+        .trim()
+        .to_lowercase();
+    let port = body.smtp_port.unwrap_or(587);
+    let username = body.smtp_username.as_deref().unwrap_or("").trim().to_string();
+
+    let password = if body.smtp_password.as_ref().is_some_and(|p| !p.is_empty()) {
+        body.smtp_password.clone()
+    } else {
+        let stored = load_setting(&s.pool, SMTP_PASSWORD_KEY, "").await?;
+        if stored.is_empty() { None } else { Some(stored) }
+    };
+
+    let test_cfg = SmtpConfig {
+        host,
+        port,
+        username: if username.is_empty() { None } else { Some(username) },
+        password,
+        from,
+        encryption,
+    };
+    crate::email::test_connection(&test_cfg).await.map_err(|e| {
+        AppError::BadRequest(format!("SMTP connection test failed: {e}"))
+    })?;
+
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
 pub async fn update_admin_settings(
     State(s): State<AppState>,
     user: User,

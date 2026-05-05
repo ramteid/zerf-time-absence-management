@@ -79,7 +79,7 @@ pub async fn bootstrap_team(
             "/api/v1/users",
             &json!({"email":"lead-r@example.com","first_name":"Lara","last_name":"Lead",
                 "role":"team_lead","weekly_hours":39,"annual_leave_days":30,
-                "start_date":"2024-01-01"}),
+                "start_date":"2024-01-01","approver_id":1}),
         )
         .await;
     assert_eq!(st, StatusCode::OK, "create lead");
