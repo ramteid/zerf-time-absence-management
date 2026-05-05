@@ -476,7 +476,9 @@
   }
 
   .absence-year-select {
+    width: auto;
     min-width: 92px;
+    max-width: 110px;
   }
 
   @media (max-width: 640px) {
