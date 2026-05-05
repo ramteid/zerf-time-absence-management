@@ -461,6 +461,9 @@
   }
 
   function closeAbsenceDetail() {
+    if (absenceDetailDlg?.open) {
+      absenceDetailDlg.close();
+    }
     absenceDetail = null;
   }
 
