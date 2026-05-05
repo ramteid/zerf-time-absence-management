@@ -407,7 +407,7 @@ pub async fn list_pending(
         sqlx::query_as(
             "SELECT id, user_id, week_start, approver_id, status, reviewed_at, \
              rejection_reason, created_at \
-             FROM reopen_requests WHERE status='pending' AND approver_id=$1 ORDER BY created_at",
+             FROM reopen_requests WHERE status='pending' AND approver_id=$1 AND user_id NOT IN (SELECT id FROM users WHERE role='admin') ORDER BY created_at",
         )
         .bind(u.id)
         .fetch_all(&s.pool)
@@ -442,6 +442,17 @@ pub async fn approve(
     }
     if !u.is_admin() && r.approver_id != u.id {
         return Err(AppError::Forbidden);
+    }
+    // Team leads must not act on reopen requests from admin users.
+    if !u.is_admin() {
+        let is_admin_user: Option<bool> =
+            sqlx::query_scalar("SELECT TRUE FROM users WHERE id = $1 AND role = 'admin'")
+                .bind(r.user_id)
+                .fetch_optional(&s.pool)
+                .await?;
+        if is_admin_user.is_some() {
+            return Err(AppError::Forbidden);
+        }
     }
     // Atomically claim the request before doing the (idempotent-ish) reopen.
     // The status guard prevents a TOCTOU race where two approvers click at
@@ -561,6 +572,17 @@ pub async fn reject(
     }
     if !u.is_admin() && r.approver_id != u.id {
         return Err(AppError::Forbidden);
+    }
+    // Team leads must not act on reopen requests from admin users.
+    if !u.is_admin() {
+        let is_admin_user: Option<bool> =
+            sqlx::query_scalar("SELECT TRUE FROM users WHERE id = $1 AND role = 'admin'")
+                .bind(r.user_id)
+                .fetch_optional(&s.pool)
+                .await?;
+        if is_admin_user.is_some() {
+            return Err(AppError::Forbidden);
+        }
     }
     let claimed = sqlx::query(
         "UPDATE reopen_requests SET status='rejected', reviewed_at=CURRENT_TIMESTAMP, \

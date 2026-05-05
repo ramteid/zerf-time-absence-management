@@ -140,7 +140,7 @@ pub async fn list_all(
         builder
             .push(" AND user_id IN (SELECT id FROM users WHERE approver_id = ")
             .push_bind(u.id)
-            .push(")");
+            .push(" AND role != 'admin')");
     }
     if let Some(v) = q.from {
         builder.push(" AND end_date >= ").push_bind(v);
@@ -189,15 +189,16 @@ async fn calendar_scope_user_ids(
     let mut user_ids = vec![requester.id];
 
     if requester.is_lead() {
-        let mut reports: Vec<i64> =
-            sqlx::query_scalar("SELECT id FROM users WHERE active=TRUE AND approver_id=$1")
-                .bind(requester.id)
-                .fetch_all(pool)
-                .await?;
+        let mut reports: Vec<i64> = sqlx::query_scalar(
+            "SELECT id FROM users WHERE active=TRUE AND approver_id=$1 AND role!='admin'",
+        )
+        .bind(requester.id)
+        .fetch_all(pool)
+        .await?;
         user_ids.append(&mut reports);
     } else if let Some(approver_id) = requester.approver_id {
         let mut team: Vec<i64> = sqlx::query_scalar(
-            "SELECT id FROM users WHERE active=TRUE AND (id=$1 OR approver_id=$1)",
+            "SELECT id FROM users WHERE active=TRUE AND (id=$1 OR (approver_id=$1 AND role!='admin'))",
         )
         .bind(approver_id)
         .fetch_all(pool)
@@ -368,10 +369,12 @@ where
 }
 
 async fn absence_owner_id(pool: &crate::db::DatabasePool, absence_id: i64) -> AppResult<i64> {
-    Ok(sqlx::query_scalar("SELECT user_id FROM absences WHERE id=$1")
-        .bind(absence_id)
-        .fetch_one(pool)
-        .await?)
+    Ok(
+        sqlx::query_scalar("SELECT user_id FROM absences WHERE id=$1")
+            .bind(absence_id)
+            .fetch_one(pool)
+            .await?,
+    )
 }
 
 pub async fn create(
@@ -398,8 +401,7 @@ pub async fn create(
     if overlap > 0 {
         return Err(AppError::Conflict("Overlap with existing absence.".into()));
     }
-    ensure_no_logged_time_conflict(&mut *tx, u.id, kind, b.start_date, b.end_date)
-        .await?;
+    ensure_no_logged_time_conflict(&mut *tx, u.id, kind, b.start_date, b.end_date).await?;
     // Validate vacation balance: user cannot request more vacation than available.
     if kind == "vacation" {
         let year = b.start_date.year();
@@ -418,7 +420,8 @@ pub async fn create(
         };
 
         // Carryover
-        let expiry_setting = crate::settings::load_setting(&s.pool, "carryover_expiry_date", "03-31").await?;
+        let expiry_setting =
+            crate::settings::load_setting(&s.pool, "carryover_expiry_date", "03-31").await?;
         let expiry_date = parse_expiry_date(&expiry_setting, year);
         let carryover_expired = expiry_date.map(|d| today > d).unwrap_or(false);
         let prev_year = year - 1;
@@ -433,7 +436,8 @@ pub async fn create(
         } else {
             prev_entitled
         };
-        let prev_taken = workdays_total(&s.pool, u.id, "vacation", prev_year_start, prev_year_end).await?;
+        let prev_taken =
+            workdays_total(&s.pool, u.id, "vacation", prev_year_start, prev_year_end).await?;
         let carryover_days = std::cmp::max(0, prev_effective - prev_taken.ceil() as i64);
         let total_entitlement = if carryover_expired {
             effective_entitlement as f64
@@ -556,8 +560,7 @@ pub async fn update(
     if overlap > 0 {
         return Err(AppError::Conflict("Overlap with existing absence.".into()));
     }
-    ensure_no_logged_time_conflict(&mut *tx, u.id, kind, b.start_date, b.end_date)
-        .await?;
+    ensure_no_logged_time_conflict(&mut *tx, u.id, kind, b.start_date, b.end_date).await?;
     // Validate vacation balance (excluding the current absence being edited).
     if kind == "vacation" {
         let year = b.start_date.year();
@@ -575,7 +578,8 @@ pub async fn update(
             entitled
         };
 
-        let expiry_setting = crate::settings::load_setting(&s.pool, "carryover_expiry_date", "03-31").await?;
+        let expiry_setting =
+            crate::settings::load_setting(&s.pool, "carryover_expiry_date", "03-31").await?;
         let expiry_date = parse_expiry_date(&expiry_setting, year);
         let carryover_expired = expiry_date.map(|d| today > d).unwrap_or(false);
         let prev_year = year - 1;
@@ -590,7 +594,8 @@ pub async fn update(
         } else {
             prev_entitled
         };
-        let prev_taken = workdays_total(&s.pool, u.id, "vacation", prev_year_start, prev_year_end).await?;
+        let prev_taken =
+            workdays_total(&s.pool, u.id, "vacation", prev_year_start, prev_year_end).await?;
         let carryover_days = std::cmp::max(0, prev_effective - prev_taken.ceil() as i64);
         let total_entitlement = if carryover_expired {
             effective_entitlement as f64
@@ -717,7 +722,7 @@ pub async fn approve(
     // Non-admin leads may only act on absences of their direct reports.
     if !u.is_admin() {
         let is_report: Option<bool> = sqlx::query_scalar(
-            "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2 FOR UPDATE",
+            "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2 AND role != 'admin' FOR UPDATE",
         )
         .bind(a.user_id)
         .bind(u.id)
@@ -821,7 +826,7 @@ pub async fn reject(
     // Non-admin leads may only act on absences of their direct reports.
     if !u.is_admin() {
         let is_report: Option<bool> = sqlx::query_scalar(
-            "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2 FOR UPDATE",
+            "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2 AND role != 'admin' FOR UPDATE",
         )
         .bind(a.user_id)
         .bind(u.id)
@@ -991,12 +996,13 @@ async fn assert_can_access_user(
     if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let is_report: Option<bool> =
-        sqlx::query_scalar("SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2")
-            .bind(target_uid)
-            .bind(requester.id)
-            .fetch_optional(pool)
-            .await?;
+    let is_report: Option<bool> = sqlx::query_scalar(
+        "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2 AND role != 'admin'",
+    )
+    .bind(target_uid)
+    .bind(requester.id)
+    .fetch_optional(pool)
+    .await?;
     if is_report.is_none() {
         return Err(AppError::Forbidden);
     }
@@ -1084,12 +1090,8 @@ pub async fn balance(
     };
 
     // -- Carryover from previous year --
-    let expiry_setting = crate::settings::load_setting(
-        &s.pool,
-        "carryover_expiry_date",
-        "03-31",
-    )
-    .await?;
+    let expiry_setting =
+        crate::settings::load_setting(&s.pool, "carryover_expiry_date", "03-31").await?;
     let expiry_date = parse_expiry_date(&expiry_setting, year);
     let carryover_expired = expiry_date.map(|d| today > d).unwrap_or(false);
 
@@ -1098,17 +1100,19 @@ pub async fn balance(
     let prev_entitled = effective_annual_days(&s.pool, &target, prev_year).await?;
     let prev_year_start = NaiveDate::from_ymd_opt(prev_year, 1, 1).unwrap();
     let prev_year_end = NaiveDate::from_ymd_opt(prev_year, 12, 31).unwrap();
-    let prev_effective = if target.start_date > prev_year_start && target.start_date <= prev_year_end {
-        let months_remaining = (13 - target.start_date.month()) as f64;
-        ((prev_entitled as f64) * months_remaining / 12.0).ceil() as i64
-    } else if target.start_date > prev_year_end {
-        // User didn't exist in previous year.
-        0
-    } else {
-        prev_entitled
-    };
+    let prev_effective =
+        if target.start_date > prev_year_start && target.start_date <= prev_year_end {
+            let months_remaining = (13 - target.start_date.month()) as f64;
+            ((prev_entitled as f64) * months_remaining / 12.0).ceil() as i64
+        } else if target.start_date > prev_year_end {
+            // User didn't exist in previous year.
+            0
+        } else {
+            prev_entitled
+        };
     // Count vacation days actually taken (approved) in the previous year.
-    let prev_taken = workdays_total(&s.pool, uid, "vacation", prev_year_start, prev_year_end).await?;
+    let prev_taken =
+        workdays_total(&s.pool, uid, "vacation", prev_year_start, prev_year_end).await?;
     let carryover_days = std::cmp::max(0, prev_effective - prev_taken.ceil() as i64);
 
     // Calculate how much of the carryover has been consumed this year.

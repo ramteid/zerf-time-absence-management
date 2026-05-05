@@ -32,12 +32,13 @@ async fn assert_can_access_user(
     if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let is_direct_report: Option<bool> =
-        sqlx::query_scalar("SELECT TRUE FROM users WHERE id=$1 AND approver_id=$2")
-            .bind(target_id)
-            .bind(requester.id)
-            .fetch_optional(pool)
-            .await?;
+    let is_direct_report: Option<bool> = sqlx::query_scalar(
+        "SELECT TRUE FROM users WHERE id=$1 AND approver_id=$2 AND role!='admin'",
+    )
+    .bind(target_id)
+    .bind(requester.id)
+    .fetch_optional(pool)
+    .await?;
     if is_direct_report.is_none() {
         return Err(AppError::Forbidden);
     }
@@ -74,7 +75,7 @@ pub async fn team_settings_list(
         // Team leads see themselves + their direct reports.
         sqlx::query_as::<_, (i64, String, String, String, String, bool)>(
             "SELECT id, email, first_name, last_name, role, allow_reopen_without_approval \
-             FROM users WHERE active=TRUE AND (id=$1 OR approver_id=$1) \
+             FROM users WHERE active=TRUE AND (id=$1 OR (approver_id=$1 AND role!='admin')) \
              ORDER BY last_name, first_name",
         )
         .bind(u.id)
@@ -111,7 +112,7 @@ pub async fn team_settings_update(
     // Team leads may only edit themselves or their direct reports.
     if !u.is_admin() && target_id != u.id {
         let is_direct_report: Option<bool> = sqlx::query_scalar(
-            "SELECT TRUE FROM users WHERE id=$1 AND approver_id=$2 AND active=TRUE",
+            "SELECT TRUE FROM users WHERE id=$1 AND approver_id=$2 AND active=TRUE AND role!='admin'",
         )
         .bind(target_id)
         .bind(u.id)
@@ -157,7 +158,7 @@ pub async fn list(State(s): State<AppState>, u: User) -> AppResult<Json<Vec<User
             .fetch_all(&s.pool)
             .await?
     } else {
-        sqlx::query_as::<_, User>("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1 OR approver_id=$1 ORDER BY last_name, first_name")
+        sqlx::query_as::<_, User>("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1 OR (approver_id=$1 AND role!='admin') ORDER BY last_name, first_name")
             .bind(u.id)
             .fetch_all(&s.pool)
             .await?

@@ -27,12 +27,13 @@ async fn assert_can_access_user(
     if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let is_report: Option<bool> =
-        sqlx::query_scalar("SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2")
-            .bind(target_uid)
-            .bind(requester.id)
-            .fetch_optional(pool)
-            .await?;
+    let is_report: Option<bool> = sqlx::query_scalar(
+        "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2 AND role != 'admin'",
+    )
+    .bind(target_uid)
+    .bind(requester.id)
+    .fetch_optional(pool)
+    .await?;
     if is_report.is_none() {
         return Err(AppError::Forbidden);
     }
@@ -455,7 +456,7 @@ pub async fn team(
             .fetch_all(&s.pool)
             .await?
     } else {
-        sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE active=TRUE AND approver_id=$1 ORDER BY last_name")
+        sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE active=TRUE AND approver_id=$1 AND role!='admin' ORDER BY last_name")
             .bind(u.id)
             .fetch_all(&s.pool)
             .await?
@@ -525,7 +526,7 @@ pub async fn categories(
         builder
             .push(" AND z.user_id IN (SELECT id FROM users WHERE approver_id = ")
             .push_bind(u.id)
-            .push(")");
+            .push(" AND role != 'admin')");
     }
     let rows: Vec<(String, String, String, String)> =
         builder.build_query_as().fetch_all(&s.pool).await?;

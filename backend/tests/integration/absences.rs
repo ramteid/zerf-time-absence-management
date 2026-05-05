@@ -195,8 +195,15 @@ async fn reviewed_absence_cannot_be_edited_or_cancelled_by_employee() {
             &json!({"kind":"vacation","start_date": day,"end_date": day,"comment":"edited"}),
         )
         .await;
-    assert_eq!(st, StatusCode::BAD_REQUEST, "reviewed absence is not editable");
-    assert!(body.to_string().contains("Cannot edit"), "edit failure body: {body}");
+    assert_eq!(
+        st,
+        StatusCode::BAD_REQUEST,
+        "reviewed absence is not editable"
+    );
+    assert!(
+        body.to_string().contains("Cannot edit"),
+        "edit failure body: {body}"
+    );
 
     let (st, body) = emp.delete(&format!("/api/v1/absences/{absence_id}")).await;
     assert_eq!(

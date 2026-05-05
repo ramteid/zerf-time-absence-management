@@ -437,7 +437,7 @@
               <button
                 class="kz-btn kz-btn-ghost kz-btn-sm"
                 style="width:100%;justify-content:center;border-style:dashed;border-color:var(--border)"
-                disabled={day.absent}
+                disabled={day.absent || ($currentUser?.start_date && day.ds < $currentUser.start_date)}
                 on:click={() => (showEntry = { entry_date: day.ds })}
               >
                 <Icon name="Plus" size={13} />{$t("Add")}
