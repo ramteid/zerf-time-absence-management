@@ -2,6 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mount, unmount } from "svelte";
 import Absences from "./Absences.svelte";
 import { currentUser } from "../stores.js";
+import { setLanguage } from "../i18n.js";
+
+const mockState = vi.hoisted(() => ({
+  absences: [],
+}));
 
 vi.mock("svelte", async () => {
   return await import("../../node_modules/svelte/src/index-client.js");
@@ -9,7 +14,7 @@ vi.mock("svelte", async () => {
 
 vi.mock("../api.js", () => ({
   api: vi.fn(async (path) => {
-    if (path.startsWith("/absences")) return [];
+    if (path.startsWith("/absences")) return mockState.absences;
     if (path.startsWith("/leave-balance")) {
       return {
         annual_entitlement: 30,
@@ -39,6 +44,8 @@ describe("Absences", () => {
     target = document.createElement("div");
     document.body.appendChild(target);
     currentUser.set({ id: 1 });
+    setLanguage("en");
+    mockState.absences = [];
     originalShowModal = HTMLDialogElement.prototype.showModal;
     HTMLDialogElement.prototype.showModal = function showModal() {
       this.setAttribute("open", "");
@@ -92,5 +99,50 @@ describe("Absences", () => {
     const dialog = target.querySelector("dialog");
     expect(dialog).not.toBeNull();
     expect(dialog.hasAttribute("open")).toBe(true);
+  });
+
+  it("renders absence history fields and comment", async () => {
+    const currentYear = new Date().getFullYear();
+    mockState.absences = [
+      {
+        id: 7,
+        user_id: 1,
+        kind: "vacation",
+        start_date: `${currentYear}-05-04`,
+        end_date: `${currentYear}-05-06`,
+        comment: "Family trip",
+        status: "requested",
+        reviewed_by: null,
+        reviewed_at: null,
+        rejection_reason: null,
+        created_at: `${currentYear}-04-01`,
+      },
+    ];
+
+    component = mount(Absences, { target });
+    await settle();
+
+    const entry = target.querySelector(".absence-entry");
+    expect(entry).not.toBeNull();
+    expect(entry.querySelector(".absence-entry-summary")).not.toBeNull();
+    expect(entry.querySelector(".absence-entry-type").textContent).toContain(
+      "Vacation",
+    );
+    expect(entry.querySelector(".absence-entry-days").textContent).toContain(
+      "Days",
+    );
+    expect(entry.querySelector(".absence-entry-from").textContent).toContain(
+      String(currentYear),
+    );
+    expect(entry.querySelector(".absence-entry-to").textContent).toContain(
+      String(currentYear),
+    );
+    expect(entry.querySelector(".absence-entry-comment").textContent).toContain(
+      "Family trip",
+    );
+    expect(
+      entry.querySelector(".absence-entry-status .kz-chip-requested")
+        .textContent,
+    ).toContain("Requested");
   });
 });

@@ -109,6 +109,12 @@
     ) {
       return `/dashboard?focus=reopen&${query}`;
     }
+    if (
+      notification.kind === "absence_requested" ||
+      notification.reference_type === "absences"
+    ) {
+      return `/dashboard?focus=absences&${query}`;
+    }
     return "";
   }
 
@@ -467,22 +473,26 @@
           on:click={markAllRead}
           disabled={$notificationsUnread === 0}
           title={$t("Mark all as read")}
+          aria-label={$t("Mark all as read")}
           style="font-size:11px"
         >
           <Icon name="Check" size={12} />
         </button>
         <button
-          class="kz-btn kz-btn-sm kz-btn-ghost"
+          class="kz-btn kz-btn-sm kz-btn-ghost kz-btn-danger"
           on:click={clearAll}
           disabled={$notifications.length === 0}
           title={$t("Clear all")}
+          aria-label={$t("Clear all")}
           style="font-size:11px"
         >
-          <Icon name="X" size={12} />
+          <Icon name="Trash" size={12} />
         </button>
         <button
           class="kz-btn kz-btn-sm kz-btn-ghost"
           on:click={() => (bellOpen = false)}
+          title={$t("Close")}
+          aria-label={$t("Close")}
           style="font-size:11px"
         >
           <Icon name="X" size={14} />

@@ -6,7 +6,7 @@ use axum::{
     extract::{Path, State},
     Json,
 };
-use chrono::NaiveDate;
+use chrono::{Datelike, NaiveDate};
 use serde::{Deserialize, Serialize};
 
 /// Per-user reopen policy. Returned by `GET /team-settings` for every active
@@ -533,6 +533,84 @@ pub async fn reset_password(
     )
     .await;
     Ok(Json(serde_json::json!({"temporary_password": temp})))
+}
+
+// -- Per-user per-year vacation day overrides ---
+
+#[derive(Deserialize)]
+pub struct LeaveOverrideBody {
+    pub year: i32,
+    pub days: i64,
+}
+
+#[derive(serde::Serialize, sqlx::FromRow)]
+pub struct LeaveOverride {
+    pub user_id: i64,
+    pub year: i32,
+    pub days: i64,
+}
+
+pub async fn get_leave_overrides(
+    State(s): State<AppState>,
+    u: User,
+    Path(id): Path<i64>,
+) -> AppResult<Json<Vec<LeaveOverride>>> {
+    if !u.is_admin() {
+        return Err(AppError::Forbidden);
+    }
+    let rows = sqlx::query_as::<_, LeaveOverride>(
+        "SELECT user_id, year, days FROM user_annual_leave_overrides WHERE user_id=$1 ORDER BY year",
+    )
+    .bind(id)
+    .fetch_all(&s.pool)
+    .await?;
+    Ok(Json(rows))
+}
+
+pub async fn set_leave_override(
+    State(s): State<AppState>,
+    u: User,
+    Path(id): Path<i64>,
+    Json(b): Json<LeaveOverrideBody>,
+) -> AppResult<Json<serde_json::Value>> {
+    if !u.is_admin() {
+        return Err(AppError::Forbidden);
+    }
+    let current_year = chrono::Local::now().year();
+    if b.year < current_year || b.year > current_year + 1 {
+        return Err(AppError::BadRequest(
+            "Leave overrides can only be set for the current or next year.".into(),
+        ));
+    }
+    if !(0..=366).contains(&b.days) {
+        return Err(AppError::BadRequest("Invalid days value.".into()));
+    }
+    // Verify user exists
+    let _exists: bool = sqlx::query_scalar("SELECT active FROM users WHERE id=$1")
+        .bind(id)
+        .fetch_optional(&s.pool)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    sqlx::query(
+        "INSERT INTO user_annual_leave_overrides(user_id, year, days) VALUES ($1, $2, $3) \
+         ON CONFLICT (user_id, year) DO UPDATE SET days = EXCLUDED.days",
+    )
+    .bind(id)
+    .bind(b.year)
+    .bind(b.days)
+    .execute(&s.pool)
+    .await?;
+    audit::log(
+        &s.pool,
+        u.id,
+        "updated",
+        "users",
+        id,
+        None,
+        Some(serde_json::json!({"leave_override": {"year": b.year, "days": b.days}})),
+    )
+    .await;
+    Ok(Json(serde_json::json!({"ok": true})))
 }
 
 /// Generate a 16-char temporary password with at least one of each class

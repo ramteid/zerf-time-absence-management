@@ -400,6 +400,67 @@ pub async fn create(
     }
     ensure_no_logged_time_conflict(&mut *tx, u.id, kind, b.start_date, b.end_date)
         .await?;
+    // Validate vacation balance: user cannot request more vacation than available.
+    if kind == "vacation" {
+        let year = b.start_date.year();
+        let year_from = NaiveDate::from_ymd_opt(year, 1, 1).unwrap();
+        let year_to = NaiveDate::from_ymd_opt(year, 12, 31).unwrap();
+        let today = chrono::Local::now().date_naive();
+
+        let entitled = effective_annual_days(&s.pool, &u, year).await?;
+        let year_start = NaiveDate::from_ymd_opt(year, 1, 1).unwrap();
+        let year_end = NaiveDate::from_ymd_opt(year, 12, 31).unwrap();
+        let effective_entitlement = if u.start_date > year_start && u.start_date <= year_end {
+            let months_remaining = (13 - u.start_date.month()) as f64;
+            ((entitled as f64) * months_remaining / 12.0).ceil() as i64
+        } else {
+            entitled
+        };
+
+        // Carryover
+        let expiry_setting = crate::settings::load_setting(&s.pool, "carryover_expiry_date", "03-31").await?;
+        let expiry_date = parse_expiry_date(&expiry_setting, year);
+        let carryover_expired = expiry_date.map(|d| today > d).unwrap_or(false);
+        let prev_year = year - 1;
+        let prev_entitled = effective_annual_days(&s.pool, &u, prev_year).await?;
+        let prev_year_start = NaiveDate::from_ymd_opt(prev_year, 1, 1).unwrap();
+        let prev_year_end = NaiveDate::from_ymd_opt(prev_year, 12, 31).unwrap();
+        let prev_effective = if u.start_date > prev_year_start && u.start_date <= prev_year_end {
+            let m = (13 - u.start_date.month()) as f64;
+            ((prev_entitled as f64) * m / 12.0).ceil() as i64
+        } else if u.start_date > prev_year_end {
+            0
+        } else {
+            prev_entitled
+        };
+        let prev_taken = workdays_total(&s.pool, u.id, "vacation", prev_year_start, prev_year_end).await?;
+        let carryover_days = std::cmp::max(0, prev_effective - prev_taken.ceil() as i64);
+        let total_entitlement = if carryover_expired {
+            effective_entitlement as f64
+        } else {
+            effective_entitlement as f64 + carryover_days as f64
+        };
+
+        // Sum existing vacation usage (requested + approved) in this year.
+        let existing: Vec<(NaiveDate, NaiveDate)> = sqlx::query_as(
+            "SELECT start_date, end_date FROM absences WHERE user_id=$1 AND kind='vacation' AND status IN ('requested','approved') AND end_date >= $2 AND start_date <= $3"
+        ).bind(u.id).bind(year_from).bind(year_to).fetch_all(&mut *tx).await?;
+        let mut used = 0.0;
+        for (sd, ed) in &existing {
+            let s2 = std::cmp::max(*sd, year_from);
+            let e2 = std::cmp::min(*ed, year_to);
+            used += workdays(&s.pool, s2, e2).await?;
+        }
+        // Add the new request's days.
+        let new_s = std::cmp::max(b.start_date, year_from);
+        let new_e = std::cmp::min(b.end_date, year_to);
+        let new_days = workdays(&s.pool, new_s, new_e).await?;
+        if used + new_days > total_entitlement {
+            return Err(AppError::BadRequest(
+                "Not enough remaining vacation days.".into(),
+            ));
+        }
+    }
     // Sick leave is auto-approved only when it has already started (or starts today).
     // Future-dated sick leave requires review like any other request.
     let today_date = chrono::Local::now().date_naive();
@@ -497,6 +558,65 @@ pub async fn update(
     }
     ensure_no_logged_time_conflict(&mut *tx, u.id, kind, b.start_date, b.end_date)
         .await?;
+    // Validate vacation balance (excluding the current absence being edited).
+    if kind == "vacation" {
+        let year = b.start_date.year();
+        let year_from = NaiveDate::from_ymd_opt(year, 1, 1).unwrap();
+        let year_to = NaiveDate::from_ymd_opt(year, 12, 31).unwrap();
+        let today = chrono::Local::now().date_naive();
+
+        let entitled = effective_annual_days(&s.pool, &u, year).await?;
+        let year_start = NaiveDate::from_ymd_opt(year, 1, 1).unwrap();
+        let year_end = NaiveDate::from_ymd_opt(year, 12, 31).unwrap();
+        let effective_entitlement = if u.start_date > year_start && u.start_date <= year_end {
+            let months_remaining = (13 - u.start_date.month()) as f64;
+            ((entitled as f64) * months_remaining / 12.0).ceil() as i64
+        } else {
+            entitled
+        };
+
+        let expiry_setting = crate::settings::load_setting(&s.pool, "carryover_expiry_date", "03-31").await?;
+        let expiry_date = parse_expiry_date(&expiry_setting, year);
+        let carryover_expired = expiry_date.map(|d| today > d).unwrap_or(false);
+        let prev_year = year - 1;
+        let prev_entitled = effective_annual_days(&s.pool, &u, prev_year).await?;
+        let prev_year_start = NaiveDate::from_ymd_opt(prev_year, 1, 1).unwrap();
+        let prev_year_end = NaiveDate::from_ymd_opt(prev_year, 12, 31).unwrap();
+        let prev_effective = if u.start_date > prev_year_start && u.start_date <= prev_year_end {
+            let m = (13 - u.start_date.month()) as f64;
+            ((prev_entitled as f64) * m / 12.0).ceil() as i64
+        } else if u.start_date > prev_year_end {
+            0
+        } else {
+            prev_entitled
+        };
+        let prev_taken = workdays_total(&s.pool, u.id, "vacation", prev_year_start, prev_year_end).await?;
+        let carryover_days = std::cmp::max(0, prev_effective - prev_taken.ceil() as i64);
+        let total_entitlement = if carryover_expired {
+            effective_entitlement as f64
+        } else {
+            effective_entitlement as f64 + carryover_days as f64
+        };
+
+        // Exclude the current absence being edited.
+        let existing: Vec<(NaiveDate, NaiveDate)> = sqlx::query_as(
+            "SELECT start_date, end_date FROM absences WHERE id != $1 AND user_id=$2 AND kind='vacation' AND status IN ('requested','approved') AND end_date >= $3 AND start_date <= $4"
+        ).bind(id).bind(u.id).bind(year_from).bind(year_to).fetch_all(&mut *tx).await?;
+        let mut used = 0.0;
+        for (sd, ed) in &existing {
+            let s2 = std::cmp::max(*sd, year_from);
+            let e2 = std::cmp::min(*ed, year_to);
+            used += workdays(&s.pool, s2, e2).await?;
+        }
+        let new_s = std::cmp::max(b.start_date, year_from);
+        let new_e = std::cmp::min(b.end_date, year_to);
+        let new_days = workdays(&s.pool, new_s, new_e).await?;
+        if used + new_days > total_entitlement {
+            return Err(AppError::BadRequest(
+                "Not enough remaining vacation days.".into(),
+            ));
+        }
+    }
     let today_date = chrono::Local::now().date_naive();
     let status = if kind == "sick" && b.start_date <= today_date {
         "approved"
@@ -847,6 +967,15 @@ pub struct LeaveBalance {
     pub requested: f64,
     #[serde(serialize_with = "serialize_day_count")]
     pub available: f64,
+    /// Carryover from previous year (0 if none or already expired).
+    pub carryover_days: i64,
+    /// How many carryover days are still remaining (not yet taken).
+    #[serde(serialize_with = "serialize_day_count")]
+    pub carryover_remaining: f64,
+    /// The date (ISO) when carryover expires, if applicable.
+    pub carryover_expiry: Option<String>,
+    /// Whether the carryover has already expired.
+    pub carryover_expired: bool,
 }
 
 #[derive(Deserialize)]
@@ -877,6 +1006,34 @@ async fn assert_can_access_user(
     Ok(())
 }
 
+/// Helper: resolve the effective annual leave entitlement for a user in a given year.
+/// Checks `user_annual_leave_overrides` first, falls back to `users.annual_leave_days`.
+async fn effective_annual_days(
+    pool: &crate::db::DatabasePool,
+    user: &crate::auth::User,
+    year: i32,
+) -> AppResult<i64> {
+    let override_days: Option<i64> = sqlx::query_scalar(
+        "SELECT days FROM user_annual_leave_overrides WHERE user_id=$1 AND year=$2",
+    )
+    .bind(user.id)
+    .bind(year)
+    .fetch_optional(pool)
+    .await?;
+    Ok(override_days.unwrap_or(user.annual_leave_days))
+}
+
+/// Parse the carryover expiry date setting (MM-DD) into a NaiveDate for the given year.
+fn parse_expiry_date(setting: &str, year: i32) -> Option<NaiveDate> {
+    let parts: Vec<&str> = setting.split('-').collect();
+    if parts.len() != 2 {
+        return None;
+    }
+    let month: u32 = parts[0].parse().ok()?;
+    let day: u32 = parts[1].parse().ok()?;
+    NaiveDate::from_ymd_opt(year, month, day)
+}
+
 pub async fn balance(
     State(s): State<AppState>,
     u: User,
@@ -902,8 +1059,6 @@ pub async fn balance(
         let s2 = std::cmp::max(a.start_date, from);
         let e2 = std::cmp::min(a.end_date, to);
         if a.status == "approved" {
-            // Split at today: the portion in the past counts as taken,
-            // the portion from today onward counts as upcoming.
             if e2 < today {
                 taken += workdays(&s.pool, s2, e2).await?;
             } else if s2 >= today {
@@ -917,25 +1072,99 @@ pub async fn balance(
             requested += workdays(&s.pool, s2, e2).await?;
         }
     }
-    let entitled = target.annual_leave_days;
-    // Pro-rate entitlement for mid-year starts: if the user's start_date is
-    // within the queried year, they are only entitled to the fraction of the
-    // year they were employed (rounded up to be generous).
+
+    // Resolve per-year entitlement (override or default).
+    let entitled = effective_annual_days(&s.pool, &target, year).await?;
+
+    // Pro-rate entitlement for mid-year starts.
     let year_start = NaiveDate::from_ymd_opt(year, 1, 1).unwrap();
     let year_end = NaiveDate::from_ymd_opt(year, 12, 31).unwrap();
     let effective_entitlement = if target.start_date > year_start && target.start_date <= year_end {
-        // Months remaining (inclusive of start month), standard German pro-rata
-        // calculation: full months from start_date.month through December.
         let months_remaining = (13 - target.start_date.month()) as f64;
         ((entitled as f64) * months_remaining / 12.0).ceil() as i64
     } else {
         entitled
     };
+
+    // -- Carryover from previous year --
+    let expiry_setting = crate::settings::load_setting(
+        &s.pool,
+        "carryover_expiry_date",
+        "03-31",
+    )
+    .await?;
+    let expiry_date = parse_expiry_date(&expiry_setting, year);
+    let carryover_expired = expiry_date.map(|d| today > d).unwrap_or(false);
+
+    // Previous year entitlement minus previous year's actually-taken vacation days.
+    let prev_year = year - 1;
+    let prev_entitled = effective_annual_days(&s.pool, &target, prev_year).await?;
+    let prev_year_start = NaiveDate::from_ymd_opt(prev_year, 1, 1).unwrap();
+    let prev_year_end = NaiveDate::from_ymd_opt(prev_year, 12, 31).unwrap();
+    let prev_effective = if target.start_date > prev_year_start && target.start_date <= prev_year_end {
+        let months_remaining = (13 - target.start_date.month()) as f64;
+        ((prev_entitled as f64) * months_remaining / 12.0).ceil() as i64
+    } else if target.start_date > prev_year_end {
+        // User didn't exist in previous year.
+        0
+    } else {
+        prev_entitled
+    };
+    // Count vacation days actually taken (approved) in the previous year.
+    let prev_taken = workdays_total(&s.pool, uid, "vacation", prev_year_start, prev_year_end).await?;
+    let carryover_days = std::cmp::max(0, prev_effective - prev_taken.ceil() as i64);
+
+    // Calculate how much of the carryover has been consumed this year.
+    // Carryover is consumed first: vacation taken this year eats into carryover
+    // before the current year's entitlement. But only if carryover hasn't expired.
+    // If expired, carryover_remaining = 0.
+    let carryover_remaining = if carryover_expired || carryover_days == 0 {
+        0.0
+    } else {
+        // Vacation taken this year (approved, already past) consumes carryover first.
+        // Must be taken (not just requested) before expiry to count.
+        let taken_before_expiry = if let Some(exp) = expiry_date {
+            // Count approved vacation days taken (end_date < today) within [jan1, expiry_date].
+            let cutoff = std::cmp::min(exp, today);
+            if cutoff >= from {
+                let mut sum = 0.0;
+                for a in &vacations {
+                    if a.status != "approved" {
+                        continue;
+                    }
+                    let s2 = std::cmp::max(a.start_date, from);
+                    let e2 = std::cmp::min(a.end_date, cutoff);
+                    if e2 >= s2 {
+                        sum += workdays(&s.pool, s2, e2).await?;
+                    }
+                }
+                sum
+            } else {
+                0.0
+            }
+        } else {
+            taken
+        };
+        (carryover_days as f64 - taken_before_expiry).max(0.0)
+    };
+
+    // Total available = current year entitlement + active carryover - all used/pending
+    let total_entitlement = if carryover_expired {
+        effective_entitlement as f64
+    } else {
+        effective_entitlement as f64 + carryover_days as f64
+    };
+    let available = total_entitlement - taken - upcoming - requested;
+
     Ok(Json(LeaveBalance {
         annual_entitlement: effective_entitlement,
         already_taken: taken,
         approved_upcoming: upcoming,
         requested,
-        available: effective_entitlement as f64 - taken - upcoming - requested,
+        available,
+        carryover_days,
+        carryover_remaining,
+        carryover_expiry: expiry_date.map(|d| d.to_string()),
+        carryover_expired,
     }))
 }
