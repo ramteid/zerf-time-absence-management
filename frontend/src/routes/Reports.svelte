@@ -7,6 +7,7 @@
   import Icon from "../Icons.svelte";
   import DatePicker from "../DatePicker.svelte";
   import FlextimeChart from "../FlextimeChart.svelte";
+  import { jsPDF } from "jspdf";
 
   const today = new Date();
   const monthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
@@ -36,6 +37,7 @@
   let catFrom = isoDate(new Date(today.getFullYear(), 0, 1));
   let catTo = isoDate(today);
   let catReport = null;
+  let teamCatReport = null;
   let catFilteredCategories = [];
   let catShowFilter = false;
 
@@ -63,6 +65,7 @@
   let detailShowDialog = false;
   let detailOvertimeBalance = 0;
   let detailFlextimeData = [];
+  let detailLeaveBalance = null;
 
   // Help tooltip state
   let activeHelp = null;
@@ -96,9 +99,14 @@
     if (catFrom > catTo) return;
     try {
       const params = new URLSearchParams({ from: catFrom, to: catTo });
-      if ($currentUser.role === "employee")
+      if ($currentUser.role === "employee") {
         params.set("user_id", $currentUser.id);
-      catReport = await api(`/reports/categories?${params}`);
+        catReport = await api(`/reports/categories?${params}`);
+        teamCatReport = null;
+      } else {
+        teamCatReport = await api(`/reports/team-categories?${params}`);
+        catReport = null;
+      }
       catFilteredCategories = [];
       catShowFilter = false;
     } catch (e) {
@@ -140,21 +148,55 @@
     ? catReport
     : (catReport || []).filter(c => catFilteredCategories.includes(c.category));
   $: filteredCatTotal = (filteredCatReport || []).reduce((s, x) => s + x.minutes, 0);
+
+  // Team category matrix derivations (lead view)
+  $: allTeamCatColumns = (() => {
+    if (!teamCatReport) return [];
+    const totals = new Map();
+    for (const row of teamCatReport) {
+      for (const c of row.categories) {
+        const e = totals.get(c.category) || { color: c.color, total: 0 };
+        e.total += c.minutes;
+        totals.set(c.category, e);
+      }
+    }
+    return [...totals.entries()]
+      .sort((a, b) => b[1].total - a[1].total)
+      .map(([category, { color }]) => ({ category, color }));
+  })();
+  $: visibleTeamCatColumns = catFilteredCategories.length === 0
+    ? allTeamCatColumns
+    : allTeamCatColumns.filter(c => catFilteredCategories.includes(c.category));
+  function teamCatMinutes(row, category) {
+    const c = row.categories.find(x => x.category === category);
+    return c ? c.minutes : 0;
+  }
+  function teamCatRowTotal(row) {
+    return row.categories.reduce((s, c) =>
+      catFilteredCategories.length === 0 || catFilteredCategories.includes(c.category)
+        ? s + c.minutes
+        : s
+    , 0);
+  }
   async function showDetail() {
     try {
-      const year = detailMonth.slice(0, 4);
+      const reportYear = detailMonth.slice(0, 4);
+      const currentYear = String(today.getFullYear());
       const monthNum = parseInt(detailMonth.slice(5, 7), 10);
-      const lastDay = new Date(parseInt(year, 10), monthNum, 0).getDate();
+      const lastDay = new Date(parseInt(reportYear, 10), monthNum, 0).getDate();
       const toDate = `${detailMonth}-${String(lastDay).padStart(2, "0")}`;
-      const [monthRaw, overtimeRows, flextimeRaw] = await Promise.all([
+      const [monthRaw, overtimeRows, flextimeRaw, leaveRaw] = await Promise.all([
         api(`/reports/month?user_id=${detailUserId}&month=${detailMonth}`),
-        api(`/reports/overtime?user_id=${detailUserId}&year=${year}`).catch(() => []),
+        // Always use current year so the balance shown is today's cumulative, not end-of-report-year.
+        api(`/reports/overtime?user_id=${detailUserId}&year=${currentYear}`).catch(() => []),
         api(`/reports/flextime?user_id=${detailUserId}&from=${detailMonth}-01&to=${toDate}`).catch(() => []),
+        api(`/leave-balance/${detailUserId}?year=${currentYear}`).catch(() => null),
       ]);
       detailReport = normalizeMonthReport(monthRaw);
       const lastRow = overtimeRows.length > 0 ? overtimeRows[overtimeRows.length - 1] : null;
       detailOvertimeBalance = lastRow?.cumulative_min || 0;
       detailFlextimeData = flextimeRaw;
+      detailLeaveBalance = leaveRaw;
       detailShowDialog = true;
     } catch (e) {
       toast($t(e?.message || "Error"), "error");
@@ -165,6 +207,7 @@
     detailReport = null;
     detailFlextimeData = [];
     detailOvertimeBalance = 0;
+    detailLeaveBalance = null;
   }
   function csvSafe(s) {
     if (s && /^[=+\-@\t\r]/.test(s)) return "'" + s;
@@ -232,6 +275,131 @@
       a.download = `report-${csvUserId}-${csvFrom}_to_${csvTo}.csv`;
       a.click();
       URL.revokeObjectURL(url);
+    } catch (e) {
+      csvError = $t(e?.message || "Export failed.");
+    }
+  }
+
+  async function exportPdf() {
+    csvError = "";
+    if (!csvFrom || !csvTo || csvFrom > csvTo) {
+      csvError = $t("Invalid date.");
+      return;
+    }
+    try {
+      const params = new URLSearchParams({ user_id: String(csvUserId), from: csvFrom, to: csvTo });
+      const report = await api(`/reports/range?${params}`);
+      const user = users.find(u => u.id === csvUserId);
+      const fullName = user ? `${user.first_name} ${user.last_name}` : String(csvUserId);
+
+      const doc = new jsPDF({ unit: "mm", format: "a4" });
+      const PH = 297, ML = 15, MT = 15;
+      const CW = 180; // 210 - 2*15
+      const rowH = 5.5, hdrH = 7;
+      let y = MT;
+
+      // Column definitions: [translated label, width mm, text-align]
+      // Total must be 180mm (210 - 2×15 margins).
+      // Holiday needs 33mm for long names like "Christi Himmelfahrt".
+      const cols = [
+        [$t("Date"),     22, "left"],
+        [$t("Weekday"),  20, "left"],
+        [$t("Start"),    12, "center"],
+        [$t("End"),      12, "center"],
+        [$t("Category"), 40, "left"],
+        [$t("Duration"), 16, "right"],
+        [$t("Absence"),  25, "left"],
+        [$t("Holiday"),  33, "left"],
+      ]; // 22+20+12+12+40+16+25+33 = 180
+
+      function colX(i) {
+        let x = ML;
+        for (let j = 0; j < i; j++) x += cols[j][1];
+        return x;
+      }
+
+      function textX(i) {
+        const [, w, align] = cols[i];
+        if (align === "right")  return colX(i) + w - 1;
+        if (align === "center") return colX(i) + w / 2;
+        return colX(i) + 1;
+      }
+
+      function drawHeader() {
+        doc.setFillColor(235, 235, 235);
+        doc.rect(ML, y, CW, hdrH, "F");
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8);
+        doc.setTextColor(50, 50, 50);
+        cols.forEach(([label,, align], i) =>
+          doc.text(label, textX(i), y + 4.8, { align })
+        );
+        y += hdrH;
+      }
+
+      function drawRow(cells, shade) {
+        if (y + rowH > PH - 15) { doc.addPage(); y = MT; drawHeader(); }
+        if (shade) {
+          doc.setFillColor(248, 248, 248);
+          doc.rect(ML, y, CW, rowH, "F");
+        }
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(7.5);
+        doc.setTextColor(30, 30, 30);
+        cells.forEach(([text, i]) => {
+          const [,, align] = cols[i];
+          doc.text(String(text ?? ""), textX(i), y + 3.8, { align });
+        });
+        doc.setDrawColor(220, 220, 220);
+        doc.line(ML, y + rowH, ML + CW, y + rowH);
+        y += rowH;
+      }
+
+      // Title block
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(13);
+      doc.setTextColor(20, 20, 20);
+      doc.text($t("Timesheet"), ML, y + 6);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(90, 90, 90);
+      doc.text(`${fullName}  ·  ${csvFrom} – ${csvTo}`, ML, y + 12);
+      y += 20;
+
+      drawHeader();
+
+      let rowIdx = 0;
+      for (const day of report.days) {
+        const absence = day.absence ? absenceKindLabel(day.absence) : "";
+        const holiday = day.holiday || "";
+        const weekday = $t(day.weekday);
+        if (!day.entries || day.entries.length === 0) {
+          drawRow([[day.date,0],[weekday,1],["",2],["",3],["",4],["0:00",5],[absence,6],[holiday,7]], rowIdx % 2 === 1);
+          rowIdx++;
+        } else {
+          for (const e of day.entries) {
+            drawRow([
+              [day.date,0],[weekday,1],
+              [e.start_time?.slice(0,5)??"",2],[e.end_time?.slice(0,5)??"",3],
+              [$t(e.category??""),4],[minToHM(e.minutes||0),5],
+              [absence,6],[holiday,7],
+            ], rowIdx % 2 === 1);
+            rowIdx++;
+          }
+        }
+      }
+
+      // Total row
+      if (y + rowH > PH - 15) { doc.addPage(); y = MT; drawHeader(); }
+      doc.setFillColor(235, 235, 235);
+      doc.rect(ML, y, CW, rowH, "F");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7.5);
+      doc.setTextColor(20, 20, 20);
+      doc.text($t("Total"), ML + 1, y + 3.8);
+      doc.text(minToHM(report.actual_min), textX(5), y + 3.8, { align: "right" });
+
+      doc.save(`stundennachweis-${fullName.replace(/\s+/g, "-")}-${csvFrom}_${csvTo}.pdf`);
     } catch (e) {
       csvError = $t(e?.message || "Export failed.");
     }
@@ -642,17 +810,34 @@
     </div>
     <div style="display:flex;gap:8px;margin-bottom:12px">
       <button class="kz-btn kz-btn-primary" on:click={showCat}>{$t("Run")}</button>
-      {#if catReport && catReport.length > 0}
-        <button
-          class="kz-btn"
-          on:click={() => catShowFilter = !catShowFilter}
-        >
+      {#if (catReport && catReport.length > 0) || (teamCatReport && teamCatReport.length > 0)}
+        <button class="kz-btn" on:click={() => catShowFilter = !catShowFilter}>
           {$t("Filter")} ({catFilteredCategories.length})
         </button>
       {/if}
     </div>
 
-    {#if catReport && catShowFilter && catReport.length > 0}
+    {#if catShowFilter && allTeamCatColumns.length > 0}
+      <!-- Lead: filter over all team categories -->
+      <div style="padding:12px;background:var(--bg-muted);border-radius:var(--radius-sm);margin-bottom:12px">
+        <div style="display:flex;flex-wrap:wrap;gap:8px">
+          {#each allTeamCatColumns as col}
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+              <input
+                type="checkbox"
+                checked={catFilteredCategories.includes(col.category)}
+                on:change={() => toggleCategoryFilter(col.category)}
+              />
+              <span class="cat-dot" style="background:{col.color || '#999'}"></span>
+              <span style="font-size:13px">{$t(col.category)}</span>
+            </label>
+          {/each}
+        </div>
+      </div>
+    {/if}
+
+    {#if catShowFilter && catReport && catReport.length > 0}
+      <!-- Employee: filter over own categories -->
       <div style="padding:12px;background:var(--bg-muted);border-radius:var(--radius-sm);margin-bottom:12px">
         <div style="display:flex;flex-wrap:wrap;gap:8px">
           {#each catReport as cat}
@@ -662,10 +847,7 @@
                 checked={catFilteredCategories.includes(cat.category)}
                 on:change={() => toggleCategoryFilter(cat.category)}
               />
-              <span
-                class="cat-dot"
-                style="background:{cat.color || '#999'}"
-              ></span>
+              <span class="cat-dot" style="background:{cat.color || '#999'}"></span>
               <span style="font-size:13px">{$t(cat.category)}</span>
             </label>
           {/each}
@@ -673,15 +855,60 @@
       </div>
     {/if}
 
+    {#if teamCatReport}
+      <!-- Lead: matrix table employee × category -->
+      {#if teamCatReport.length === 0}
+        <div style="padding:16px;color:var(--text-tertiary);font-size:13px">{$t("No data.")}</div>
+      {:else if visibleTeamCatColumns.length === 0}
+        <div style="padding:16px;color:var(--text-tertiary);font-size:13px">{$t("No data.")}</div>
+      {:else}
+        <div class="kz-card" style="overflow-x:auto;margin-top:12px">
+          <table class="kz-table">
+            <thead>
+              <tr>
+                <th>{$t("Employee")}</th>
+                {#each visibleTeamCatColumns as col}
+                  <th style="text-align:right">
+                    <span style="display:inline-flex;align-items:center;gap:4px;justify-content:flex-end">
+                      <span class="cat-dot" style="background:{col.color || '#999'}"></span>
+                      {$t(col.category)}
+                    </span>
+                  </th>
+                {/each}
+                <th style="text-align:right">{$t("Total")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each teamCatReport as row}
+                {@const rowTotal = teamCatRowTotal(row)}
+                <tr>
+                  <td style="font-weight:500">{row.name}</td>
+                  {#each visibleTeamCatColumns as col}
+                    <td class="tab-num" style="text-align:right;color:var(--text-tertiary)">
+                      {#if teamCatMinutes(row, col.category) > 0}
+                        {minToHM(teamCatMinutes(row, col.category))}
+                      {:else}
+                        –
+                      {/if}
+                    </td>
+                  {/each}
+                  <td class="tab-num" style="text-align:right;font-weight:600">
+                    {rowTotal > 0 ? minToHM(rowTotal) : "–"}
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      {/if}
+    {/if}
+
     {#if catReport}
+      <!-- Employee: own category aggregation -->
       {#if catReport.length === 0}
-        <div style="padding:16px;color:var(--text-tertiary);font-size:13px">
-          {$t("No data.")}
-        </div>
+        <div style="padding:16px;color:var(--text-tertiary);font-size:13px">{$t("No data.")}</div>
       {:else if filteredCatReport.length === 0 && catFilteredCategories.length > 0}
-        <div style="padding:16px;color:var(--text-tertiary);font-size:13px">
-          {$t("No data.")}
-        </div>
+        <div style="padding:16px;color:var(--text-tertiary);font-size:13px">{$t("No data.")}</div>
       {:else}
         <div class="kz-card" style="overflow-x:auto;margin-top:12px">
           <table class="kz-table">
@@ -696,23 +923,14 @@
               {#each filteredCatReport as c}
                 <tr>
                   <td style="font-weight:500">
-                    <span
-                      style="display:inline-flex;align-items:center;gap:6px"
-                    >
-                      <span
-                        class="cat-dot"
-                        style="background:{c.color || '#999'}"
-                      ></span>
+                    <span style="display:inline-flex;align-items:center;gap:6px">
+                      <span class="cat-dot" style="background:{c.color || '#999'}"></span>
                       {$t(c.category)}
                     </span>
                   </td>
-                  <td class="tab-num" style="text-align:right"
-                    >{minToHM(c.minutes)}</td
-                  >
+                  <td class="tab-num" style="text-align:right">{minToHM(c.minutes)}</td>
                   <td class="tab-num" style="text-align:right">
-                    {filteredCatTotal > 0
-                      ? ((c.minutes / filteredCatTotal) * 100).toFixed(1)
-                      : 0}%
+                    {filteredCatTotal > 0 ? ((c.minutes / filteredCatTotal) * 100).toFixed(1) : 0}%
                   </td>
                 </tr>
               {/each}
@@ -814,10 +1032,10 @@
     {/if}
   </div>
 
-  <!-- CSV Export tile (moved to bottom) -->
+  <!-- Export tile -->
   <div class="kz-card" style="padding:20px">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
-      <span style="font-size:14px;font-weight:600">{$t("Export CSV")}</span>
+      <span style="font-size:14px;font-weight:600">{$t("Export")}</span>
       <button
         class="kz-btn-icon-sm kz-btn-ghost"
         title={$t("help_csv_export")}
@@ -855,9 +1073,14 @@
       </div>
     </div>
     <div class="error-text">{csvError}</div>
-    <button class="kz-btn kz-btn-primary" on:click={exportCsv}>
-      <Icon name="Download" size={14} />{$t("Export CSV")}
-    </button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="kz-btn kz-btn-primary" on:click={exportCsv}>
+        <Icon name="Download" size={14} />{$t("Export CSV")}
+      </button>
+      <button class="kz-btn" on:click={exportPdf}>
+        <Icon name="FileText" size={14} />{$t("Export PDF")}
+      </button>
+    </div>
   </div>
 </div>
 
@@ -865,8 +1088,8 @@
   {@const detailUser = users.find(u => u.id === detailUserId)}
   <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
   <div class="dialog-backdrop" on:click={closeDetail}></div>
-  <dialog open style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:90%;max-width:900px;max-height:90vh;border:none;border-radius:var(--radius);box-shadow:var(--shadow-lg);padding:0;z-index:1001">
-    <header style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+  <dialog open on:close={closeDetail} style="max-width:900px;z-index:1001">
+    <header style="justify-content:space-between">
       <span style="font-size:16px;font-weight:600">
         {$t("Employee Details")} · {detailUser ? `${detailUser.first_name} ${detailUser.last_name}` : `#${detailUserId}`}
       </span>
@@ -879,44 +1102,71 @@
       </button>
     </header>
 
-    <div style="overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:16px">
-      <!-- Balances -->
-      <div class="stat-cards">
+    <div class="dialog-body" style="padding:20px;gap:16px">
+      <!-- Flextime balance -->
+      <div style="font-size:12px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">
+        {$t("Flextime")}
+      </div>
+      <div class="stat-cards" style="margin-bottom:16px">
         <div class="kz-card stat-card">
           <div class="stat-card-label">{$t("Overtime balance")}</div>
           <div
             class="stat-card-value tab-num"
-            style="color:{detailOvertimeBalance < 0
-              ? 'var(--danger-text)'
-              : 'var(--success-text)'}"
-          >
-            {minToHM(detailOvertimeBalance)}
-          </div>
+            style="color:{detailOvertimeBalance < 0 ? 'var(--danger-text)' : 'var(--success-text)'}"
+          >{minToHM(detailOvertimeBalance)}</div>
         </div>
         <div class="kz-card stat-card">
           <div class="stat-card-label">{$t("Target")}</div>
-          <div class="stat-card-value tab-num">
-            {minToHM(detailReport.target_min)}
-          </div>
+          <div class="stat-card-value tab-num">{minToHM(detailReport.target_min)}</div>
         </div>
         <div class="kz-card stat-card">
           <div class="stat-card-label">{$t("Actual")}</div>
-          <div class="stat-card-value tab-num">
-            {minToHM(detailReport.actual_min)}
-          </div>
+          <div class="stat-card-value tab-num">{minToHM(detailReport.actual_min)}</div>
         </div>
         <div class="kz-card stat-card">
           <div class="stat-card-label">{$t("Diff")}</div>
           <div
             class="stat-card-value tab-num"
-            style="color:{detailReport.diff_min < 0
-              ? 'var(--danger-text)'
-              : 'var(--success-text)'}"
-          >
-            {minToHM(detailReport.diff_min)}
-          </div>
+            style="color:{detailReport.diff_min < 0 ? 'var(--danger-text)' : 'var(--success-text)'}"
+          >{minToHM(detailReport.diff_min)}</div>
         </div>
       </div>
+
+      <!-- Vacation balance -->
+      {#if detailLeaveBalance}
+        <div style="font-size:12px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">
+          {$t("Vacation")}
+        </div>
+        <div class="stat-cards" style="margin-bottom:16px">
+          <div class="kz-card stat-card">
+            <div class="stat-card-label">{$t("Entitlement")}</div>
+            <div class="stat-card-value tab-num">{detailLeaveBalance.annual_entitlement}</div>
+          </div>
+          <div class="kz-card stat-card">
+            <div class="stat-card-label">{$t("Taken")}</div>
+            <div class="stat-card-value tab-num">{detailLeaveBalance.already_taken}</div>
+          </div>
+          {#if detailLeaveBalance.approved_upcoming > 0}
+            <div class="kz-card stat-card">
+              <div class="stat-card-label">{$t("Planned")}</div>
+              <div class="stat-card-value tab-num">{detailLeaveBalance.approved_upcoming}</div>
+            </div>
+          {/if}
+          {#if detailLeaveBalance.requested > 0}
+            <div class="kz-card stat-card">
+              <div class="stat-card-label">{$t("Requested")}</div>
+              <div class="stat-card-value tab-num">{detailLeaveBalance.requested}</div>
+            </div>
+          {/if}
+          <div class="kz-card stat-card">
+            <div class="stat-card-label">{$t("Remaining")}</div>
+            <div
+              class="stat-card-value tab-num"
+              style="color:{detailLeaveBalance.available < 0 ? 'var(--danger-text)' : 'var(--success-text)'}"
+            >{detailLeaveBalance.available}</div>
+          </div>
+        </div>
+      {/if}
 
       <!-- Flextime Chart -->
       {#if detailFlextimeData.length > 0}
@@ -926,15 +1176,20 @@
         </div>
       {/if}
 
-      <!-- Category breakdown -->
+      <!-- Category breakdown bar chart -->
       {#if detailReport.category_totals && Object.keys(detailReport.category_totals).length > 0}
+        {@const catEntries = Object.entries(detailReport.category_totals).sort((a, b) => b[1] - a[1])}
+        {@const catMax = catEntries[0][1]}
         <div class="kz-card" style="padding:16px">
-          <div style="font-weight:600;margin-bottom:8px">{$t("Category breakdown")}</div>
-          <div style="display:flex;flex-wrap:wrap;gap:12px">
-            {#each Object.entries(detailReport.category_totals) as [cat, mins]}
-              <div style="display:flex;align-items:center;gap:6px;font-size:13px">
-                <span style="font-weight:500">{$t(cat)}</span>
-                <span class="tab-num" style="color:var(--text-tertiary)">{minToHM(mins)}</span>
+          <div style="font-weight:600;margin-bottom:12px">{$t("Category breakdown")}</div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            {#each catEntries as [cat, mins]}
+              <div style="display:grid;grid-template-columns:130px 1fr 52px;align-items:center;gap:8px;font-size:12px">
+                <span style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title={$t(cat)}>{$t(cat)}</span>
+                <div style="background:var(--bg-muted);border-radius:3px;height:8px;overflow:hidden">
+                  <div style="height:100%;border-radius:3px;background:var(--accent);width:{Math.round((mins / catMax) * 100)}%;transition:width .3s"></div>
+                </div>
+                <span class="tab-num" style="color:var(--text-tertiary);text-align:right">{minToHM(mins)}</span>
               </div>
             {/each}
           </div>

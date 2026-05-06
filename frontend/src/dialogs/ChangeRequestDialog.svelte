@@ -12,6 +12,7 @@
   export let entry;
   export let onClose;
   let dlg;
+  let _closed = false;
   let entry_date = entry.entry_date || isoDate(new Date());
   let start_time = entry.start_time?.slice(0, 5) || "08:00";
   let end_time = entry.end_time?.slice(0, 5) || "12:00";
@@ -53,6 +54,7 @@
         body: result.payload,
       });
       toast($t("Change request submitted."), "ok");
+      _closed = true;
       dlg.close();
       onClose();
     } catch (e) {
@@ -61,12 +63,14 @@
   }
 
   function cancel() {
+    if (_closed) return;
+    _closed = true;
     dlg.close();
     onClose();
   }
 </script>
 
-<dialog bind:this={dlg}>
+<dialog bind:this={dlg} on:close={cancel}>
   <header>
     <span style="flex:1">{$t("Request change")}</span>
     <button class="kz-btn-icon-sm kz-btn-ghost" on:click={cancel}>

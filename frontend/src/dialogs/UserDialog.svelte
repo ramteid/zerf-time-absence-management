@@ -10,6 +10,7 @@
   export let template;
   export let onClose;
   let dlg;
+  let _closed = false;
   $: isNew = !template.id;
   let email = template.email || "";
   let first_name = template.first_name || "";
@@ -145,6 +146,7 @@
       } else {
         await api("/users/" + template.id, { method: "PUT", body });
         toast($t("User updated."), "ok");
+        _closed = true;
         dlg.close();
         onClose(true);
       }
@@ -184,18 +186,21 @@
   }
 
   function dismissTempPassword() {
+    _closed = true;
     showTempPassword = null;
     dlg.close();
     onClose(true);
   }
 
   function cancel() {
+    if (_closed) return;
+    _closed = true;
     dlg.close();
     onClose(false);
   }
 </script>
 
-<dialog bind:this={dlg} style="max-width:520px">
+<dialog bind:this={dlg} on:close={cancel} style="max-width:520px">
   {#if showTempPassword}
     <header>
       <span style="flex:1">{$t("User created.")}</span>

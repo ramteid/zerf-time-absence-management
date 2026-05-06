@@ -11,6 +11,15 @@
   /** @type {FlextimeDay[]} */
   export let data = [];
 
+  // Index of the last data point that is today or in the past.
+  // The line and area fill stop here; x-axis labels cover the full range.
+  $: todayStr = new Date().toISOString().slice(0, 10);
+  $: lastActualIdx = (() => {
+    let idx = data.length - 1;
+    while (idx >= 0 && data[idx].date > todayStr) idx--;
+    return idx;
+  })();
+
   // SVG layout constants
   const H = 230;
   const ML = 54,
@@ -52,11 +61,14 @@
   // the plot and the area fill bleeds through the x-axis into the label area.
   $: clampedZeroY = Math.min(MT + PH, Math.max(MT, zeroY));
 
-  // SVG path strings
+  // Points subset: only up to today (for line and area)
+  $: actualPts = lastActualIdx >= 0 ? pts.slice(0, lastActualIdx + 1) : [];
+
+  // SVG path strings (only drawn up to today)
   $: linePath =
-    pts.length < 2
+    actualPts.length < 2
       ? ""
-      : pts
+      : actualPts
           .map(
             (p, i) =>
               `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`,
@@ -64,12 +76,12 @@
           .join(" ");
 
   $: areaPath =
-    pts.length < 2
+    actualPts.length < 2
       ? ""
       : (() => {
-          const f = pts[0];
-          const l = pts[pts.length - 1];
-          const inner = pts
+          const f = actualPts[0];
+          const l = actualPts[actualPts.length - 1];
+          const inner = actualPts
             .map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`)
             .join(" L");
           const z = zeroY.toFixed(1);
@@ -115,7 +127,8 @@
       return;
     }
     const raw = data.length > 1 ? (plotX / PW) * (data.length - 1) : 0;
-    hoverIdx = Math.round(Math.max(0, Math.min(data.length - 1, raw)));
+    const idx = Math.round(Math.max(0, Math.min(data.length - 1, raw)));
+    hoverIdx = idx <= lastActualIdx ? idx : null;
   }
 
   function onMouseLeave() {
@@ -134,7 +147,8 @@
       return;
     }
     const raw = data.length > 1 ? (plotX / PW) * (data.length - 1) : 0;
-    hoverIdx = Math.round(Math.max(0, Math.min(data.length - 1, raw)));
+    const idx = Math.round(Math.max(0, Math.min(data.length - 1, raw)));
+    hoverIdx = idx <= lastActualIdx ? idx : null;
   }
 
   function onTouchEnd() {
@@ -239,9 +253,9 @@
         </clipPath>
       </defs>
 
-      <!-- ── Absence / holiday vertical bands ── -->
+      <!-- ── Absence / holiday vertical bands (only past/today) ── -->
       {#each data as d, i}
-        {#if d.absence || d.holiday}
+        {#if i <= lastActualIdx && (d.absence || d.holiday)}
           <rect
             x={pts[i].x - barW * 0.5}
             y={MT}

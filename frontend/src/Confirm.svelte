@@ -12,6 +12,7 @@
   export let onResolve;
   let dlg;
   let reason = "";
+  let _closed = false;
   onMount(() => {
     try {
       if (typeof dlg?.showModal === "function") {
@@ -29,17 +30,20 @@
       toast($t("Reason required"), "error");
       return;
     }
+    _closed = true;
     dlg.close();
     onResolve(needReason ? reason : true);
   }
 
   function cancel() {
+    if (_closed) return;
+    _closed = true;
     dlg.close();
     onResolve(null);
   }
 </script>
 
-<dialog bind:this={dlg}>
+<dialog bind:this={dlg} on:close={cancel}>
   <header>
     <span style="flex:1">{$t(title)}</span>
     <button class="kz-btn-icon-sm kz-btn-ghost" on:click={cancel}>

@@ -56,6 +56,15 @@ export function go(href, push = true) {
 
 if (typeof window !== "undefined") {
   window.addEventListener("popstate", () => {
+    // Mobile back-button support: close the topmost open dialog instead of
+    // navigating away. Use the last match (topmost in z-order) to handle
+    // nested dialogs correctly (e.g., Confirm on top of EntryDialog).
+    const openDialogs = document.querySelectorAll("dialog[open]");
+    if (openDialogs.length > 0) {
+      openDialogs[openDialogs.length - 1].close();
+      history.pushState({}, "", location.href);
+      return;
+    }
     path.set(location.pathname + location.search);
   });
 }
