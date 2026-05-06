@@ -191,6 +191,9 @@ async fn build_range(
             // Defensive: never panic on malformed time data — surface a 500 with
             // a generic message instead. The DB schema does not constrain the
             // text format, so a corrupted row must not take the process down.
+            if st == "rejected" {
+                continue;
+            }
             let bn = parse_report_time(b)?;
             let en = parse_report_time(e)?;
             let m = (en - bn).num_minutes();
