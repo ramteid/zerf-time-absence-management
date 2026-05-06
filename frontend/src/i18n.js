@@ -12,6 +12,8 @@ const TRANSLATIONS = {
   en: {
     hours_unit: "h",
     "{hours} / week": "{hours} / week",
+    help_overtime:
+      "Shows target and actual hours per month. Only approved time entries count towards the actual hours.",
     help_monthly_report:
       "Shows the monthly report for a team member with target/actual hours and daily details.",
     help_team_report:
@@ -419,7 +421,7 @@ const TRANSLATIONS = {
     "From address": "Absenderadresse",
     Encryption: "Verschlüsselung",
     stored: "gespeichert",
-    "Save SMTP Settings": "SMTP-Einstellungen speichern",
+    "Save": "Speichern",
     "Test Connection": "Verbindung testen",
     "Testing...": "Teste...",
     "SMTP connection successful.": "SMTP-Verbindung erfolgreich.",
@@ -730,6 +732,8 @@ const TRANSLATIONS = {
     "Public holiday": "Feiertag",
     Absent: "Abwesend",
     // Reports help tooltips
+    help_overtime:
+      "Zeigt Soll- und Ist-Stunden pro Monat. Nur genehmigte Zeiteinträge zählen zu den Ist-Stunden.",
     help_monthly_report:
       "Zeigt den Monatsbericht eines Mitarbeiters mit Soll-/Ist-Stunden und Details pro Tag.",
     help_team_report:

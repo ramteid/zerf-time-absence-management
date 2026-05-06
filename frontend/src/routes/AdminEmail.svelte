@@ -188,7 +188,7 @@
           {#if saving}
             {$t("Saving...")}
           {:else}
-            {$t("Save SMTP Settings")}
+            {$t("Save")}
           {/if}
         </button>
       </div>

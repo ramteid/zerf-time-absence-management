@@ -473,6 +473,14 @@
       <span class="card-header-title">
         {$t("Overtime balance {year}", { year: new Date().getFullYear() })}
       </span>
+      <button
+        class="kz-btn-icon-sm kz-btn-ghost"
+        title={$t("help_overtime")}
+        on:click={() => toggleHelp("overtime")}
+        style="color:var(--text-tertiary);font-size:14px;cursor:help"
+      >
+        <Icon name="Info" size={14} />
+      </button>
       <span
         class="kz-chip"
         class:kz-chip-approved={cumulative >= 0}
@@ -481,6 +489,13 @@
         {minToHM(cumulative)}
       </span>
     </div>
+    {#if activeHelp === "overtime"}
+      <div
+        style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)"
+      >
+        {$t("help_overtime")}
+      </div>
+    {/if}
 
     <!-- Desktop: table -->
     <div class="overtime-table-desktop">
@@ -648,7 +663,7 @@
             </thead>
             <tbody>
               {#each monthReport.entries as e}
-                <tr>
+                <tr class:entry-rejected={e.status === "rejected"}>
                   <td class="tab-num">{fmtDate(e.entry_date)}</td>
                   <td class="tab-num">{e.start_time?.slice(0, 5)}</td>
                   <td class="tab-num">{e.end_time?.slice(0, 5)}</td>
@@ -734,14 +749,14 @@
       </div>
 
       {#if teamReport}
-        <div class="kz-card" style="overflow-x:auto">
-          <table class="kz-table">
+        <div class="kz-table-wrap">
+          <table class="kz-table kz-table--fit" style="table-layout:fixed">
             <thead>
               <tr>
                 <th>{$t("Employee")}</th>
-                <th style="text-align:right">{$t("Target")}</th>
-                <th style="text-align:right">{$t("Actual")}</th>
-                <th style="text-align:right">{$t("Diff")}</th>
+                <th style="text-align:right;width:22%">{$t("Target")}</th>
+                <th style="text-align:right;width:22%">{$t("Actual")}</th>
+                <th style="text-align:right;width:22%">{$t("Diff")}</th>
               </tr>
             </thead>
             <tbody>
@@ -866,8 +881,8 @@
       {:else if visibleTeamCatColumns.length === 0}
         <div style="padding:16px;color:var(--text-tertiary);font-size:13px">{$t("No data.")}</div>
       {:else}
-        <div class="kz-card" style="overflow-x:auto;margin-top:12px">
-          <table class="kz-table">
+        <div class="kz-table-wrap" style="margin-top:12px">
+          <table class="kz-table kz-table--fit">
             <thead>
               <tr>
                 <th>{$t("Employee")}</th>
@@ -914,13 +929,13 @@
       {:else if filteredCatReport.length === 0 && catFilteredCategories.length > 0}
         <div style="padding:16px;color:var(--text-tertiary);font-size:13px">{$t("No data.")}</div>
       {:else}
-        <div class="kz-card" style="overflow-x:auto;margin-top:12px">
-          <table class="kz-table">
+        <div class="kz-table-wrap" style="margin-top:12px">
+          <table class="kz-table kz-table--fit" style="table-layout:fixed">
             <thead>
               <tr>
                 <th>{$t("Category")}</th>
-                <th style="text-align:right">{$t("Hours")}</th>
-                <th style="text-align:right">%</th>
+                <th style="text-align:right;width:22%">{$t("Hours")}</th>
+                <th style="text-align:right;width:16%">%</th>
               </tr>
             </thead>
             <tbody>
@@ -1018,7 +1033,7 @@
             <tbody>
               {#each absenceReport as a}
                 {@const absUser = isLeadView ? users.find(u => u.id === a.user_id) : null}
-                <tr>
+                <tr class:entry-rejected={a.status === "rejected"}>
                   {#if isLeadView}
                     <td style="font-weight:500">{absUser ? `${absUser.first_name} ${absUser.last_name}` : `#${a.user_id}`}</td>
                   {/if}
@@ -1217,7 +1232,7 @@
             </thead>
             <tbody>
               {#each detailReport.entries as e}
-                <tr>
+                <tr class:entry-rejected={e.status === "rejected"}>
                   <td class="tab-num">{fmtDate(e.entry_date)}</td>
                   <td class="tab-num">{e.start_time?.slice(0, 5)}</td>
                   <td class="tab-num">{e.end_time?.slice(0, 5)}</td>
