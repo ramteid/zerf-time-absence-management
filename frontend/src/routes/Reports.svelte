@@ -242,7 +242,7 @@
       const report = await api(`/reports/range?${params}`);
       const header = csvEncode([
         $t("Date"), $t("Weekday"), $t("Start"), $t("End"),
-        $t("Category"), $t("Minutes"), $t("Status"), $t("Comment"),
+        $t("Category"), $t("Duration"), $t("Status"), $t("Comment"),
         $t("Absence"), $t("Holiday"),
       ]);
       const rows = [header];
@@ -252,21 +252,23 @@
         const holiday = day.holiday || "";
         if (!day.entries || day.entries.length === 0) {
           rows.push(csvEncode([
-            day.date, weekday, "", "", "", "0", "", "",
+            day.date, weekday, "", "", "", "0:00", "", "",
             csvSafe(absence), csvSafe(holiday),
           ]));
         } else {
           for (const e of day.entries) {
             rows.push(csvEncode([
               day.date, weekday, e.start_time, e.end_time,
-              csvSafe($t(e.category)), e.minutes, statusLabel(e.status),
+              csvSafe($t(e.category)), minToHM(e.minutes || 0), statusLabel(e.status),
               csvSafe(e.comment || ""), csvSafe(absence), csvSafe(holiday),
             ]));
           }
         }
       }
+      const csvTotalMin = report.days.reduce((s, d) =>
+        s + (d.entries || []).reduce((es, e) => es + (e.minutes || 0), 0), 0);
       rows.push(csvEncode([
-        "", $t("Total"), "", "", "", report.actual_min, "", "", "", "",
+        "", $t("Total"), "", "", "", minToHM(csvTotalMin), "", "", "", "",
       ]));
       const blob = new Blob(["\uFEFF" + rows.join("\n")], { type: "text/csv;charset=utf-8" });
       const url = URL.createObjectURL(blob);
@@ -397,7 +399,9 @@
       doc.setFontSize(7.5);
       doc.setTextColor(20, 20, 20);
       doc.text($t("Total"), ML + 1, y + 3.8);
-      doc.text(minToHM(report.actual_min), textX(5), y + 3.8, { align: "right" });
+      const pdfTotalMin = report.days.reduce((s, d) =>
+        s + (d.entries || []).reduce((es, e) => es + (e.minutes || 0), 0), 0);
+      doc.text(minToHM(pdfTotalMin), textX(5), y + 3.8, { align: "right" });
 
       doc.save(`stundennachweis-${fullName.replace(/\s+/g, "-")}-${csvFrom}_${csvTo}.pdf`);
     } catch (e) {
