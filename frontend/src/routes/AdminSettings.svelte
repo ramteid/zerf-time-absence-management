@@ -260,6 +260,34 @@
         </div>
       </div>
 
+      <!-- Submission deadline -->
+      <div
+        style="font-size:14px;font-weight:600;margin-top:20px;margin-bottom:14px"
+      >
+        {$t("Time submission deadline")}
+      </div>
+      <div class="field-row">
+        <div>
+          <label class="kz-label" for="settings-submission-deadline"
+            >{$t("Submission deadline day of month")}</label
+          >
+          <input
+            id="settings-submission-deadline"
+            class="kz-input"
+            type="number"
+            min="1"
+            max="28"
+            bind:value={s.submission_deadline_day}
+            placeholder={$t("e.g. 5")}
+          />
+          <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
+            {$t(
+              "Users will be notified on this day of each month if they have unsubmitted time entries for previous months. Leave empty to disable. (1–28)"
+            )}
+          </div>
+        </div>
+      </div>
+
       <div
         style="font-size:14px;font-weight:600;margin-top:20px;margin-bottom:14px"
       >

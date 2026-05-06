@@ -74,6 +74,13 @@ async fn main() -> Result<()> {
         });
     }
 
+    // Submission reminder scheduler: wakes at 07:00 on the configured deadline day.
+    {
+        let p = pool.clone();
+        let s = state.clone();
+        tokio::spawn(zerf::submission_reminders::run_loop(p, s));
+    }
+
     let app = build_app(state);
 
     let addr: SocketAddr = cfg.bind.parse().expect("invalid ZERF_BIND");
