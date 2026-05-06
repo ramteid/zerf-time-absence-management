@@ -473,6 +473,24 @@ pub async fn update(
             ));
         }
     }
+    // Numeric bounds validation (same constraints as create).
+    if let Some(wh) = b.weekly_hours {
+        if !(0.0..=168.0).contains(&wh) {
+            return Err(AppError::BadRequest("Invalid weekly_hours.".into()));
+        }
+    }
+    if let Some(ald) = b.annual_leave_days {
+        if !(0..=366).contains(&ald) {
+            return Err(AppError::BadRequest("Invalid annual_leave_days.".into()));
+        }
+    }
+    if let Some(osb) = b.overtime_start_balance_min {
+        if !(-525_600..=525_600).contains(&osb) {
+            return Err(AppError::BadRequest(
+                "Invalid overtime_start_balance_min.".into(),
+            ));
+        }
+    }
     // Email format / length sanity (lowercase + minimal validation).
     let email_lc = b.email.as_ref().map(|e| e.trim().to_lowercase());
     if let Some(e) = &email_lc {
@@ -496,6 +514,9 @@ pub async fn update(
         let next_last_name = last_name.clone().unwrap_or_else(|| prev.last_name.clone());
         ensure_user_name_available(&s.pool, &next_first_name, &next_last_name, Some(id)).await?;
     }
+    let removing_admin_rights = prev.role == "admin"
+        && (b.role.as_deref().is_some_and(|r| r != "admin")
+            || matches!(b.active, Some(false)));
     // Pre-validate the post-update invariant (non-admin → has approver).
     let next_role = b.role.clone().unwrap_or_else(|| prev.role.clone());
     let next_approver = match b.approver_id {
@@ -505,6 +526,19 @@ pub async fn update(
     validate_approver(&s.pool, &next_role, Some(id), next_approver).await?;
 
     let mut tx = s.pool.begin().await?;
+    // Last-admin protection: checked inside the transaction to prevent TOCTOU.
+    if removing_admin_rights {
+        let active_admins: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM users WHERE active=TRUE AND role='admin'",
+        )
+        .fetch_one(&mut *tx)
+        .await?;
+        if active_admins <= 1 {
+            return Err(AppError::BadRequest(
+                "Cannot remove the last active admin.".into(),
+            ));
+        }
+    }
     sqlx::query("UPDATE users SET email=COALESCE($1,email), first_name=COALESCE($2,first_name), last_name=COALESCE($3,last_name), role=COALESCE($4,role), weekly_hours=COALESCE($5,weekly_hours), annual_leave_days=COALESCE($6,annual_leave_days), start_date=COALESCE($7,start_date), active=COALESCE($8,active), allow_reopen_without_approval=COALESCE($9,allow_reopen_without_approval), overtime_start_balance_min=COALESCE($10,overtime_start_balance_min) WHERE id=$11")
         .bind(email_lc).bind(first_name).bind(last_name).bind(b.role.clone())
         .bind(b.weekly_hours).bind(b.annual_leave_days).bind(b.start_date).bind(b.active)

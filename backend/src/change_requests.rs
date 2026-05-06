@@ -415,6 +415,20 @@ pub async fn approve(
         Some(serde_json::json!({"status": "approved", "reviewed_by": u.id})),
     )
     .await;
+    let language = notification_language(&s.pool).await;
+    let entry_date = a.new_date.unwrap_or(entry.entry_date);
+    crate::notifications::create_translated(
+        &s,
+        &language,
+        a.user_id,
+        "change_request_approved",
+        "change_request_approved_title",
+        "change_request_approved_body",
+        vec![("entry_date", i18n::format_date(&language, entry_date))],
+        Some("change_requests"),
+        Some(id),
+    )
+    .await;
     Ok(Json(serde_json::json!({"ok":true})))
 }
 
@@ -483,6 +497,28 @@ pub async fn reject(
         id,
         Some(serde_json::to_value(&prev).unwrap()),
         Some(serde_json::json!({"status": "rejected", "reason": b.reason})),
+    )
+    .await;
+    let language = notification_language(&s.pool).await;
+    let entry_date: NaiveDate =
+        sqlx::query_scalar("SELECT entry_date FROM time_entries WHERE id=$1")
+            .bind(prev.time_entry_id)
+            .fetch_one(&s.pool)
+            .await
+            .unwrap_or(prev.new_date.unwrap_or(chrono::Local::now().date_naive()));
+    crate::notifications::create_translated(
+        &s,
+        &language,
+        prev.user_id,
+        "change_request_rejected",
+        "change_request_rejected_title",
+        "change_request_rejected_body",
+        vec![
+            ("entry_date", i18n::format_date(&language, entry_date)),
+            ("reason", b.reason.clone()),
+        ],
+        Some("change_requests"),
+        Some(id),
     )
     .await;
     Ok(Json(serde_json::json!({"ok":true})))

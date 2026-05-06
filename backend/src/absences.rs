@@ -464,6 +464,52 @@ pub async fn create(
                 "Not enough remaining vacation days.".into(),
             ));
         }
+        // Validate end year separately when the absence spans two calendar years.
+        let end_year = b.end_date.year();
+        if end_year != year {
+            let ey_from = NaiveDate::from_ymd_opt(end_year, 1, 1).unwrap();
+            let ey_to = NaiveDate::from_ymd_opt(end_year, 12, 31).unwrap();
+
+            let ey_entitled = effective_annual_days(&s.pool, &u, end_year).await?;
+            let ey_effective = if u.start_date > ey_from && u.start_date <= ey_to {
+                let m = (13 - u.start_date.month()) as f64;
+                ((ey_entitled as f64) * m / 12.0).ceil() as i64
+            } else if u.start_date > ey_to {
+                0
+            } else {
+                ey_entitled
+            };
+
+            let ey_expiry_date = parse_expiry_date(&expiry_setting, end_year);
+            let ey_carryover_expired = ey_expiry_date.map(|d| today > d).unwrap_or(false);
+            // Carryover into end_year comes from start_year (which is year).
+            let cy_taken =
+                workdays_total(&s.pool, u.id, "vacation", year_from, year_to).await?;
+            let cy_carryover = std::cmp::max(0, effective_entitlement - cy_taken.ceil() as i64);
+            let ey_total = if ey_carryover_expired {
+                ey_effective as f64
+            } else {
+                ey_effective as f64 + cy_carryover as f64
+            };
+
+            let ey_existing: Vec<(NaiveDate, NaiveDate)> = sqlx::query_as(
+                "SELECT start_date, end_date FROM absences WHERE user_id=$1 AND kind='vacation' AND status IN ('requested','approved') AND end_date >= $2 AND start_date <= $3"
+            ).bind(u.id).bind(ey_from).bind(ey_to).fetch_all(&mut *tx).await?;
+            let mut ey_used = 0.0;
+            for (sd, ed) in &ey_existing {
+                let s2 = std::cmp::max(*sd, ey_from);
+                let e2 = std::cmp::min(*ed, ey_to);
+                ey_used += workdays(&s.pool, s2, e2).await?;
+            }
+            let ey_new_s = std::cmp::max(b.start_date, ey_from);
+            let ey_new_e = std::cmp::min(b.end_date, ey_to);
+            let ey_new_days = workdays(&s.pool, ey_new_s, ey_new_e).await?;
+            if ey_used + ey_new_days > ey_total {
+                return Err(AppError::BadRequest(
+                    "Not enough remaining vacation days.".into(),
+                ));
+            }
+        }
     }
     // Sick leave is auto-approved only when it has already started (or starts today).
     // Future-dated sick leave requires review like any other request.
@@ -620,6 +666,51 @@ pub async fn update(
             return Err(AppError::BadRequest(
                 "Not enough remaining vacation days.".into(),
             ));
+        }
+        // Validate end year separately when the absence spans two calendar years.
+        let end_year = b.end_date.year();
+        if end_year != year {
+            let ey_from = NaiveDate::from_ymd_opt(end_year, 1, 1).unwrap();
+            let ey_to = NaiveDate::from_ymd_opt(end_year, 12, 31).unwrap();
+
+            let ey_entitled = effective_annual_days(&s.pool, &u, end_year).await?;
+            let ey_effective = if u.start_date > ey_from && u.start_date <= ey_to {
+                let m = (13 - u.start_date.month()) as f64;
+                ((ey_entitled as f64) * m / 12.0).ceil() as i64
+            } else if u.start_date > ey_to {
+                0
+            } else {
+                ey_entitled
+            };
+
+            let ey_expiry_date = parse_expiry_date(&expiry_setting, end_year);
+            let ey_carryover_expired = ey_expiry_date.map(|d| today > d).unwrap_or(false);
+            let cy_taken =
+                workdays_total(&s.pool, u.id, "vacation", year_from, year_to).await?;
+            let cy_carryover = std::cmp::max(0, effective_entitlement - cy_taken.ceil() as i64);
+            let ey_total = if ey_carryover_expired {
+                ey_effective as f64
+            } else {
+                ey_effective as f64 + cy_carryover as f64
+            };
+
+            let ey_existing: Vec<(NaiveDate, NaiveDate)> = sqlx::query_as(
+                "SELECT start_date, end_date FROM absences WHERE id != $1 AND user_id=$2 AND kind='vacation' AND status IN ('requested','approved') AND end_date >= $3 AND start_date <= $4"
+            ).bind(id).bind(u.id).bind(ey_from).bind(ey_to).fetch_all(&mut *tx).await?;
+            let mut ey_used = 0.0;
+            for (sd, ed) in &ey_existing {
+                let s2 = std::cmp::max(*sd, ey_from);
+                let e2 = std::cmp::min(*ed, ey_to);
+                ey_used += workdays(&s.pool, s2, e2).await?;
+            }
+            let ey_new_s = std::cmp::max(b.start_date, ey_from);
+            let ey_new_e = std::cmp::min(b.end_date, ey_to);
+            let ey_new_days = workdays(&s.pool, ey_new_s, ey_new_e).await?;
+            if ey_used + ey_new_days > ey_total {
+                return Err(AppError::BadRequest(
+                    "Not enough remaining vacation days.".into(),
+                ));
+            }
         }
     }
     let today_date = chrono::Local::now().date_naive();
