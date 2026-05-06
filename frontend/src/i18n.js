@@ -27,6 +27,7 @@ const TRANSLATIONS = {
     "Who is absent": "Who is absent",
     "Previous week": "Previous week",
     "Next week": "Next week",
+    Today: "Today",
     "No absences this week.": "No absences this week.",
     "Employee Details": "Employee Details",
     "Total days": "Total days",
@@ -227,6 +228,7 @@ const TRANSLATIONS = {
     "Time tracking": "Zeiterfassung",
     "Previous week": "Vorherige Woche",
     "Next week": "Nächste Woche",
+    Today: "Heute",
     "Week {week}: {from} - {to}": "Woche {week}: {from} - {to}",
     "Week {week}": "Woche {week}",
 

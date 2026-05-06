@@ -55,7 +55,12 @@
     return isoDate(addDays(today, -n));
   }
 
-  let chartFrom = daysAgo(29);
+  function clampFromToUserStart(date) {
+    const userStart = $currentUser?.start_date;
+    return userStart && userStart > date ? userStart : date;
+  }
+
+  let chartFrom = clampFromToUserStart(daysAgo(29));
   let chartTo = isoDate(today);
   let chartData = [];
   let chartLoading = false;
@@ -163,7 +168,7 @@
   }
 
   function setRange(days) {
-    chartFrom = daysAgo(days - 1);
+    chartFrom = clampFromToUserStart(daysAgo(days - 1));
     chartTo = isoDate(today);
     loadChart();
   }
@@ -970,21 +975,21 @@
         >{$t("Who is absent")}</span
       >
       <button
-        class="kz-btn-icon-sm kz-btn-ghost"
+        class="kz-btn kz-btn-icon-sm kz-btn-ghost"
         on:click={absenceSliderPrevWeek}
         aria-label={$t("Previous week")}
       >
-        <Icon name="ChevronLeft" size={16} />
+        <Icon name="ChevLeft" size={16} />
       </button>
       <span style="font-size:12px;color:var(--text-tertiary);min-width:120px;text-align:center">
         {fmtDateShort(absenceSliderWeek)} - {fmtDateShort(isoDate(addDays(parseDate(absenceSliderWeek), 6)))}
       </span>
       <button
-        class="kz-btn-icon-sm kz-btn-ghost"
+        class="kz-btn kz-btn-icon-sm kz-btn-ghost"
         on:click={absenceSliderNextWeek}
         aria-label={$t("Next week")}
       >
-        <Icon name="ChevronRight" size={16} />
+        <Icon name="ChevRight" size={16} />
       </button>
       <button
         class="kz-btn kz-btn-sm"

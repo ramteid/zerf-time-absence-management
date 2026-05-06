@@ -41,8 +41,8 @@
   let catFilteredCategories = [];
   let catShowFilter = false;
 
-  let absenceFrom = isoDate(new Date(today.getFullYear(), 0, 1));
-  let absenceTo = isoDate(today);
+  let absenceFrom = isoDate(new Date(today.getFullYear(), today.getMonth(), 1));
+  let absenceTo = isoDate(new Date(today.getFullYear(), 11, 31));
   let absenceReport = null;
   $: absenceTotalDays = (absenceReport || []).reduce((s, x) => s + (x.days || 0), 0);
   $: absenceByKind = (absenceReport || []).reduce((map, x) => {
