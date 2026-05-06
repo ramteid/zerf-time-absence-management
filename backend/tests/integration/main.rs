@@ -25,6 +25,7 @@ mod notifications;
 mod reopen;
 mod reports;
 mod start_date;
+mod submission_reminders;
 mod team_settings;
 mod time_entries;
 mod users;

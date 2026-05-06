@@ -2,6 +2,7 @@ use crate::auth::User;
 use crate::config::SmtpConfig;
 use crate::error::{AppError, AppResult};
 use crate::holidays;
+use crate::i18n;
 use crate::AppState;
 use axum::extract::State;
 use axum::Json;
@@ -77,12 +78,9 @@ pub struct UpdateSmtpSettings {
     pub smtp_encryption: Option<String>,
 }
 
-fn normalize_language(value: &str) -> AppResult<&'static str> {
-    match value.trim() {
-        "en" => Ok("en"),
-        "de" => Ok("de"),
-        _ => Err(AppError::BadRequest("Invalid language.".into())),
-    }
+fn normalize_language(value: &str) -> AppResult<String> {
+    i18n::normalize_language_code(value)
+        .ok_or_else(|| AppError::BadRequest("Invalid language.".into()))
 }
 
 fn normalize_time_format(value: &str) -> AppResult<&'static str> {
@@ -105,7 +103,10 @@ pub async fn load_setting(
     Ok(value.unwrap_or_else(|| default.to_string()))
 }
 
-async fn save_setting(pool: &crate::db::DatabasePool, key: &str, value: &str) -> AppResult<String> {
+async fn save_setting_exec<'e, E>(exec: E, key: &str, value: &str) -> AppResult<String>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+{
     let saved: String = sqlx::query_scalar(
         "INSERT INTO app_settings(key, value) VALUES ($1, $2) \
          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP \
@@ -113,7 +114,7 @@ async fn save_setting(pool: &crate::db::DatabasePool, key: &str, value: &str) ->
     )
     .bind(key)
     .bind(value)
-    .fetch_one(pool)
+    .fetch_one(exec)
     .await?;
     Ok(saved)
 }
@@ -273,20 +274,7 @@ pub async fn update_smtp_settings(
             .map_err(|_| AppError::BadRequest("Invalid SMTP from address.".into()))?;
     }
 
-    save_setting(&s.pool, SMTP_HOST_KEY, &host).await?;
-    save_setting(&s.pool, SMTP_PORT_KEY, &port.to_string()).await?;
-    save_setting(&s.pool, SMTP_USERNAME_KEY, &username).await?;
-    save_setting(&s.pool, SMTP_FROM_KEY, &from).await?;
-    save_setting(&s.pool, SMTP_ENCRYPTION_KEY, &encryption).await?;
-
-    // Only overwrite password when explicitly provided (non-empty).
-    if let Some(ref pw) = body.smtp_password {
-        if !pw.is_empty() {
-            save_setting(&s.pool, SMTP_PASSWORD_KEY, pw).await?;
-        }
-    }
-
-    // Test connection before enabling.
+    // Test connection before saving anything when enabling.
     if body.smtp_enabled {
         let password = if body.smtp_password.as_ref().is_some_and(|p| !p.is_empty()) {
             body.smtp_password.clone()
@@ -316,12 +304,28 @@ pub async fn update_smtp_settings(
             .map_err(|e| AppError::BadRequest(format!("SMTP_CONNECTION_FAILED:{e}")))?;
     }
 
-    save_setting(
-        &s.pool,
+    // Save all SMTP settings atomically within a transaction.
+    let mut tx = s.pool.begin().await?;
+
+    save_setting_exec(&mut *tx, SMTP_HOST_KEY, &host).await?;
+    save_setting_exec(&mut *tx, SMTP_PORT_KEY, &port.to_string()).await?;
+    save_setting_exec(&mut *tx, SMTP_USERNAME_KEY, &username).await?;
+    save_setting_exec(&mut *tx, SMTP_FROM_KEY, &from).await?;
+    save_setting_exec(&mut *tx, SMTP_ENCRYPTION_KEY, &encryption).await?;
+
+    // Overwrite password when explicitly provided. An empty string clears it.
+    if let Some(ref pw) = body.smtp_password {
+        save_setting_exec(&mut *tx, SMTP_PASSWORD_KEY, pw).await?;
+    }
+
+    save_setting_exec(
+        &mut *tx,
         SMTP_ENABLED_KEY,
         if body.smtp_enabled { "true" } else { "false" },
     )
     .await?;
+
+    tx.commit().await?;
 
     // Return full admin settings.
     let base = load_all_settings(&s.pool).await?;
@@ -442,8 +446,8 @@ pub async fn update_admin_settings(
         }
     }
 
-    // Validate and save carryover expiry date (MM-DD format).
-    if let Some(ref ced) = body.carryover_expiry_date {
+    // Validate carryover expiry date (MM-DD format).
+    let validated_ced: Option<String> = if let Some(ref ced) = body.carryover_expiry_date {
         let ced = ced.trim();
         let parts: Vec<&str> = ced.split('-').collect();
         if parts.len() != 2 {
@@ -468,8 +472,10 @@ pub async fn update_admin_settings(
                 "Invalid carryover_expiry_date.".into(),
             ));
         }
-        save_setting(&s.pool, CARRYOVER_EXPIRY_DATE_KEY, ced).await?;
-    }
+        Some(ced.to_string())
+    } else {
+        None
+    };
 
     if let Some(day) = body.submission_deadline_day {
         if !(1..=28).contains(&day) {
@@ -477,28 +483,38 @@ pub async fn update_admin_settings(
                 "submission_deadline_day must be between 1 and 28.".into(),
             ));
         }
-        save_setting(&s.pool, SUBMISSION_DEADLINE_DAY_KEY, &day.to_string()).await?;
-    } else {
-        // Clear the setting if not provided
-        save_setting(&s.pool, SUBMISSION_DEADLINE_DAY_KEY, "").await?;
     }
-
-    save_setting(&s.pool, UI_LANGUAGE_KEY, language).await?;
-    save_setting(&s.pool, TIME_FORMAT_KEY, time_format).await?;
-    let saved_country = save_setting(&s.pool, COUNTRY_KEY, &country).await?;
-    let saved_region = save_setting(&s.pool, REGION_KEY, &region).await?;
 
     let dwh_str = body
         .default_weekly_hours
         .map(|v| v.to_string())
         .unwrap_or_default();
-    save_setting(&s.pool, DEFAULT_WEEKLY_HOURS_KEY, &dwh_str).await?;
-
     let dal_str = body
         .default_annual_leave_days
         .map(|v| v.to_string())
         .unwrap_or_default();
-    save_setting(&s.pool, DEFAULT_ANNUAL_LEAVE_DAYS_KEY, &dal_str).await?;
+
+    // Save all settings atomically within a transaction.
+    let mut tx = s.pool.begin().await?;
+
+    if let Some(ref ced) = validated_ced {
+        save_setting_exec(&mut *tx, CARRYOVER_EXPIRY_DATE_KEY, ced).await?;
+    }
+
+    if let Some(day) = body.submission_deadline_day {
+        save_setting_exec(&mut *tx, SUBMISSION_DEADLINE_DAY_KEY, &day.to_string()).await?;
+    } else {
+        save_setting_exec(&mut *tx, SUBMISSION_DEADLINE_DAY_KEY, "").await?;
+    }
+
+    save_setting_exec(&mut *tx, UI_LANGUAGE_KEY, &language).await?;
+    save_setting_exec(&mut *tx, TIME_FORMAT_KEY, time_format).await?;
+    let saved_country = save_setting_exec(&mut *tx, COUNTRY_KEY, &country).await?;
+    let saved_region = save_setting_exec(&mut *tx, REGION_KEY, &region).await?;
+    save_setting_exec(&mut *tx, DEFAULT_WEEKLY_HOURS_KEY, &dwh_str).await?;
+    save_setting_exec(&mut *tx, DEFAULT_ANNUAL_LEAVE_DAYS_KEY, &dal_str).await?;
+
+    tx.commit().await?;
 
     if !saved_country.is_empty()
         && (previous.country != saved_country || previous.region != saved_region)

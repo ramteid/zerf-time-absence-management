@@ -1,7 +1,7 @@
 use crate::audit;
 use crate::auth::User;
 use crate::error::{AppError, AppResult};
-use crate::i18n::{self, TextKey};
+use crate::i18n;
 use crate::AppState;
 use axum::{
     extract::{Path, State},
@@ -263,16 +263,16 @@ pub async fn create(
     for recipient_id in recipients {
         crate::notifications::create_translated(
             &s,
-            language,
+            &language,
             recipient_id,
             "change_request_created",
-            TextKey::ChangeRequestCreatedTitle,
-            TextKey::ChangeRequestCreatedBody,
+            "change_request_created_title",
+            "change_request_created_body",
             vec![
                 ("requester_name", requester_name.clone()),
                 (
                     "entry_date",
-                    i18n::format_date(language, requested_entry_date),
+                    i18n::format_date(&language, requested_entry_date),
                 ),
             ],
             Some("change_requests"),

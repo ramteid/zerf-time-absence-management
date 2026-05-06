@@ -1,5 +1,6 @@
 use crate::auth::User;
 use crate::error::{AppError, AppResult};
+use crate::i18n;
 use crate::AppState;
 use axum::{
     extract::{Path, Query, State},
@@ -241,7 +242,7 @@ pub struct Holiday {
 #[derive(Deserialize)]
 pub struct HolidayQuery {
     pub year: Option<i32>,
-    /// Pass "de" or "en" to control which name field is returned as `name`.
+    /// Optional UI language code used to choose the display name.
     pub lang: Option<String>,
 }
 
@@ -252,13 +253,9 @@ pub async fn list(
 ) -> AppResult<Json<Vec<serde_json::Value>>> {
     let year = q.year.unwrap_or_else(|| chrono::Local::now().year());
 
-    // Load UI language from settings if not passed as query param
-    let lang = match q.lang {
-        Some(l) => l,
-        None => sqlx::query_scalar("SELECT value FROM app_settings WHERE key = 'ui_language'")
-            .fetch_optional(&s.pool)
-            .await?
-            .unwrap_or_else(|| "en".to_string()),
+    let language = match q.lang {
+        Some(code) => i18n::Language::from_setting(&code),
+        None => i18n::load_ui_language(&s.pool).await?,
     };
 
     let rows = sqlx::query_as::<_, Holiday>(
@@ -268,16 +265,10 @@ pub async fn list(
     .fetch_all(&s.pool)
     .await?;
 
-    // Pick the display name based on language.
-    // For non-English languages, prefer local_name if available.
     let result: Vec<serde_json::Value> = rows
         .into_iter()
         .map(|h| {
-            let display_name = if lang != "en" {
-                h.local_name.clone().unwrap_or_else(|| h.name.clone())
-            } else {
-                h.name.clone()
-            };
+            let display_name = i18n::holiday_display_name(&language, h.name, h.local_name);
             serde_json::json!({
                 "id": h.id,
                 "holiday_date": h.holiday_date,
@@ -305,9 +296,13 @@ pub async fn create(
     if !u.is_admin() {
         return Err(AppError::Forbidden);
     }
+    let name = b.name.trim().to_string();
+    if name.is_empty() || name.len() > 200 {
+        return Err(AppError::BadRequest("Invalid holiday name.".into()));
+    }
     sqlx::query("INSERT INTO holidays(holiday_date, name, year, is_auto) VALUES ($1,$2,$3, FALSE)")
         .bind(b.holiday_date)
-        .bind(&b.name)
+        .bind(&name)
         .bind(b.holiday_date.year())
         .execute(&s.pool)
         .await

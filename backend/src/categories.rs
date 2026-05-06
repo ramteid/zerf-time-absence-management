@@ -79,12 +79,20 @@ pub async fn create(
     if !u.is_admin() {
         return Err(AppError::Forbidden);
     }
+    let name = b.name.trim().to_string();
+    if name.is_empty() || name.len() > 200 {
+        return Err(AppError::BadRequest("Invalid category name.".into()));
+    }
+    let color = b.color.trim().to_string();
+    if color.is_empty() || color.len() > 30 {
+        return Err(AppError::BadRequest("Invalid color.".into()));
+    }
     let id: i64 = sqlx::query_scalar(
         "INSERT INTO categories(name, description, color, sort_order) VALUES ($1,$2,$3,$4) RETURNING id",
     )
-    .bind(&b.name)
+    .bind(&name)
     .bind(&b.description)
-    .bind(&b.color)
+    .bind(&color)
     .bind(b.sort_order.unwrap_or(0))
     .fetch_one(&s.pool)
     .await
@@ -117,8 +125,22 @@ pub async fn update(
     if !u.is_admin() {
         return Err(AppError::Forbidden);
     }
+    if let Some(ref name) = b.name {
+        let name = name.trim();
+        if name.is_empty() || name.len() > 200 {
+            return Err(AppError::BadRequest("Invalid category name.".into()));
+        }
+    }
+    if let Some(ref color) = b.color {
+        let color = color.trim();
+        if color.is_empty() || color.len() > 30 {
+            return Err(AppError::BadRequest("Invalid color.".into()));
+        }
+    }
+    let name = b.name.map(|n| n.trim().to_string());
+    let color = b.color.map(|c| c.trim().to_string());
     sqlx::query("UPDATE categories SET name=COALESCE($1,name), description=COALESCE($2,description), color=COALESCE($3,color), sort_order=COALESCE($4,sort_order), active=COALESCE($5,active) WHERE id=$6")
-        .bind(b.name).bind(b.description).bind(b.color).bind(b.sort_order).bind(b.active).bind(id)
+        .bind(name).bind(b.description).bind(color).bind(b.sort_order).bind(b.active).bind(id)
         .execute(&s.pool).await?;
     Ok(Json(
         sqlx::query_as(
