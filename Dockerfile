@@ -69,13 +69,13 @@ RUN chmod 0555 /app/zerf && \
     chmod -R a=rX /app/static
 
 ENV ZERF_STATIC_DIR=/app/static \
-    ZERF_BIND=0.0.0.0:3000 \
+    ZERF_BIND=0.0.0.0:3333 \
     RUST_BACKTRACE=0
 
 USER zerf:zerf
-EXPOSE 3000
+EXPOSE 3333
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD ["/bin/sh", "-c", "wget -qO- --timeout=3 http://127.0.0.1:3000/healthz | grep -q ok"]
+  CMD ["/bin/sh", "-c", "wget -qO- --timeout=3 http://127.0.0.1:3333/healthz | grep -q ok"]
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["/app/zerf"]

@@ -53,8 +53,8 @@ services:
     environment:
       - ZERF_DATABASE_URL=${ZERF_DATABASE_URL:-postgres://${ZERF_POSTGRES_USER:-zerf}:${ZERF_POSTGRES_PASSWORD:?ZERF_POSTGRES_PASSWORD must be set in .env (openssl rand -hex 32)}@postgres:5432/${ZERF_POSTGRES_DB:-zerf}?sslmode=disable}
       - ZERF_SESSION_SECRET=${ZERF_SESSION_SECRET:?ZERF_SESSION_SECRET must be set in .env (>=32 chars random)}
-      - ZERF_BIND=0.0.0.0:3000
-      - ZERF_PUBLIC_URL=http://localhost:3000
+      - ZERF_BIND=0.0.0.0:3333
+      - ZERF_PUBLIC_URL=http://localhost:3333
       - ZERF_SECURE_COOKIES=false
       - ZERF_ENFORCE_CSRF=true
       # Local mode is intended for LAN access from arbitrary client IPs,
@@ -62,16 +62,16 @@ services:
       # re-enables it together with HTTPS and a fixed domain.
       - ZERF_ENFORCE_ORIGIN=false
     ports:
-      - "0.0.0.0:3000:3000"
+      - "0.0.0.0:3333:3333"
     expose:
-      - "3000"
+      - "3333"
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "5"
     healthcheck:
-      test: ["CMD", "/bin/sh", "-c", "wget -qO- --timeout=3 http://127.0.0.1:3000/healthz | grep -q ok"]
+      test: ["CMD", "/bin/sh", "-c", "wget -qO- --timeout=3 http://127.0.0.1:3333/healthz | grep -q ok"]
       interval: 30s
       timeout: 5s
       retries: 3
