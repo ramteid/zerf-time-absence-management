@@ -1,10 +1,33 @@
 <script>
+  import { onMount, onDestroy } from "svelte";
   import { api, csrfToken, resetUnauthorizedGate } from "../api.js";
   import { currentUser, categories, go } from "../stores.js";
   import { t } from "../i18n.js";
   import Icon from "../Icons.svelte";
 
-  let email = "";
+  // On mobile, the virtual keyboard shrinks the visual viewport but not the layout
+  // viewport. By removing the fixed height and overflow lock from the root elements,
+  // the browser can scroll naturally to keep the focused input above the keyboard.
+  onMount(() => {
+    document.documentElement.style.height = "auto";
+    document.documentElement.style.overflow = "auto";
+    document.body.style.height = "auto";
+    document.body.style.overflow = "auto";
+    document.getElementById("app").style.height = "auto";
+    document.getElementById("app").style.overflow = "visible";
+  });
+  onDestroy(() => {
+    document.documentElement.style.height = "";
+    document.documentElement.style.overflow = "";
+    document.body.style.height = "";
+    document.body.style.overflow = "";
+    document.getElementById("app").style.height = "";
+    document.getElementById("app").style.overflow = "";
+  });
+
+  export let initialEmail = "";
+
+  let email = initialEmail;
   let password = "";
   let error = "";
   let submitting = false;
@@ -95,17 +118,19 @@
         <label class="kz-label" for="email">{$t("Email")}</label>
         <input
           id="email"
+          name="username"
           class="kz-input"
           type="email"
           bind:value={email}
           required
-          autocomplete="email"
+          autocomplete="username"
         />
       </div>
       <div style="margin-bottom:14px">
         <label class="kz-label" for="password">{$t("Password")}</label>
         <input
           id="password"
+          name="password"
           class="kz-input"
           type="password"
           bind:value={password}
@@ -125,3 +150,4 @@
     </form>
   </div>
 </div>
+

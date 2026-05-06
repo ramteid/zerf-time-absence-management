@@ -46,6 +46,7 @@
   let booting = true;
   let bootNetworkError = false;
   let needsSetup = false;
+  let setupEmail = "";
 
   function debugLog(event, data = {}) {
     console.debug("[app-debug]", event, {
@@ -369,13 +370,13 @@
   </div>
 {:else if needsSetup}
   <Setup
-    onComplete={async () => {
+    onComplete={(email) => {
+      setupEmail = email;
       needsSetup = false;
-      await loadMe();
     }}
   />
 {:else if !$currentUser}
-  <Login />
+  <Login initialEmail={setupEmail} />
 {:else if route}
   <Layout>
     {#if isAdmin}
