@@ -54,6 +54,23 @@
           last_name: lastName.trim(),
         },
       });
+      // Hint the browser's password manager to store the new credential.
+      // Without this, browsers often skip the save prompt because the
+      // form submission was intercepted via fetch instead of a navigation.
+      try {
+        if (typeof window !== "undefined" && "PasswordCredential" in window) {
+          const cred = new window.PasswordCredential({
+            id: email.trim(),
+            password,
+            name: `${firstName.trim()} ${lastName.trim()}`.trim(),
+          });
+          if (navigator.credentials && navigator.credentials.store) {
+            await navigator.credentials.store(cred);
+          }
+        }
+      } catch (_) {
+        // Non-fatal: credential storage is a best-effort hint.
+      }
       onComplete();
     } catch (err) {
       error = $t(err?.message || "Error");
@@ -113,17 +130,19 @@
         <label class="kz-label" for="setup-email">{$t("Email")}</label>
         <input
           id="setup-email"
+          name="username"
           class="kz-input"
           type="email"
           bind:value={email}
           required
-          autocomplete="email"
+          autocomplete="username"
         />
       </div>
       <div style="margin-bottom:14px">
         <label class="kz-label" for="setup-password">{$t("Password")}</label>
         <input
           id="setup-password"
+          name="new-password"
           class="kz-input"
           type="password"
           bind:value={password}
@@ -138,6 +157,7 @@
         >
         <input
           id="setup-confirm"
+          name="new-password-confirm"
           class="kz-input"
           type="password"
           bind:value={confirmPassword}
