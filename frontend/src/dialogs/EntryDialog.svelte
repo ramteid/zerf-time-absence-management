@@ -12,6 +12,7 @@
   export let template;
   export let onClose;
   let dlg;
+  let _closed = false;
   $: isNew = !template.id;
   let entry_date = template.entry_date || isoDate(new Date());
   let start_time = template.start_time?.slice(0, 5) || "08:00";
@@ -51,6 +52,7 @@
       const saved = isNew
         ? await api("/time-entries", { method: "POST", body })
         : await api("/time-entries/" + template.id, { method: "PUT", body });
+      _closed = true;
       dlg.close();
       onClose({ changed: true, entry: saved, deletedId: null });
     } catch (e) {
@@ -68,6 +70,7 @@
       return;
     try {
       await api("/time-entries/" + template.id, { method: "DELETE" });
+      _closed = true;
       dlg.close();
       onClose({ changed: true, entry: null, deletedId: template.id });
     } catch (e) {
@@ -76,6 +79,8 @@
   }
 
   function cancel() {
+    if (_closed) return;
+    _closed = true;
     dlg.close();
     onClose({ changed: false, entry: null, deletedId: null });
   }
@@ -89,7 +94,7 @@
   }
 </script>
 
-<dialog bind:this={dlg} on:keydown={onDialogKeydown}>
+<dialog bind:this={dlg} on:keydown={onDialogKeydown} on:close={cancel}>
   <header>
     <span style="flex:1">{$t(isNew ? "Add Entry" : "Edit Entry")}</span>
     <button class="kz-btn-icon-sm kz-btn-ghost" on:click={cancel}>

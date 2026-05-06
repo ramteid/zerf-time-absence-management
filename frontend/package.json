@@ -25,6 +25,7 @@
     "vitest": "^4.1.5"
   },
   "dependencies": {
-    "flatpickr": "^4.6.13"
+    "flatpickr": "^4.6.13",
+    "jspdf": "^4.2.1"
   }
 }

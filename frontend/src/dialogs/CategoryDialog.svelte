@@ -7,6 +7,7 @@
   export let template;
   export let onClose;
   let dlg;
+  let _closed = false;
   $: isNew = !template.id;
   let canonicalName = template.name || "";
   let name = template.id ? $t(canonicalName) : canonicalName;
@@ -29,6 +30,7 @@
       };
       if (isNew) await api("/categories", { method: "POST", body });
       else await api("/categories/" + template.id, { method: "PUT", body });
+      _closed = true;
       dlg.close();
       onClose(true);
     } catch (e) {
@@ -37,12 +39,14 @@
   }
 
   function cancel() {
+    if (_closed) return;
+    _closed = true;
     dlg.close();
     onClose(false);
   }
 </script>
 
-<dialog bind:this={dlg}>
+<dialog bind:this={dlg} on:close={cancel}>
   <header>
     <span style="flex:1">{$t(isNew ? "Add Category" : "Edit Category")}</span>
     <button class="kz-btn-icon-sm kz-btn-ghost" on:click={cancel}>

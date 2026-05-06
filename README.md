@@ -106,10 +106,10 @@ sed -i "s|ZERF_SESSION_SECRET=.*|ZERF_SESSION_SECRET=$(openssl rand -hex 32)|" .
 sed -i "s|ZERF_POSTGRES_PASSWORD=.*|ZERF_POSTGRES_PASSWORD=$(openssl rand -hex 32)|" .env
 ```
 
-Edit `.env` and set these values:
+Edit `.env` and set the remaining required values:
 
-- `ZERF_DOMAIN` is required for public deployment.
-- On first boot, open the application in your browser to create the initial admin account.
+- `ZERF_POSTGRES_DB` and `ZERF_POSTGRES_USER`: choose any names for the database and user.
+- `ZERF_DOMAIN`: required only for public deployment (`start_public.sh`) — set this to your public hostname (e.g. `zerf.example.com`). Not needed for local deployment.
 
 ### 2. Start the stack
 

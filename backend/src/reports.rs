@@ -538,6 +538,88 @@ pub async fn categories(
     Ok(Json(sorted_totals))
 }
 
+#[derive(Serialize)]
+pub struct UserCategoryRow {
+    pub user_id: i64,
+    pub name: String,
+    pub categories: Vec<CategoryTotal>,
+}
+
+pub async fn team_categories(
+    State(app_state): State<AppState>,
+    requester: User,
+    Query(query): Query<CategoryQuery>,
+) -> AppResult<Json<Vec<UserCategoryRow>>> {
+    if !requester.is_lead() {
+        return Err(AppError::Forbidden);
+    }
+    validate_range(query.from, query.to)?;
+
+    let mut user_builder = QueryBuilder::<Postgres>::new(
+        "SELECT id, first_name, last_name FROM users WHERE active=TRUE",
+    );
+    if !requester.is_admin() {
+        user_builder
+            .push(" AND ((approver_id = ")
+            .push_bind(requester.id)
+            .push(" AND role != 'admin') OR id = ")
+            .push_bind(requester.id)
+            .push(")");
+    }
+    user_builder.push(" ORDER BY last_name, first_name");
+    let members: Vec<(i64, String, String)> =
+        user_builder.build_query_as().fetch_all(&app_state.pool).await?;
+
+    let mut entry_builder = QueryBuilder::<Postgres>::new(
+        "SELECT z.user_id, c.name, c.color, z.start_time, z.end_time \
+         FROM time_entries z \
+         JOIN categories c ON c.id=z.category_id \
+         WHERE z.status != 'rejected' AND z.entry_date BETWEEN ",
+    );
+    entry_builder.push_bind(query.from).push(" AND ").push_bind(query.to);
+    if !requester.is_admin() {
+        entry_builder
+            .push(" AND (z.user_id IN (SELECT id FROM users WHERE approver_id = ")
+            .push_bind(requester.id)
+            .push(" AND role != 'admin') OR z.user_id = ")
+            .push_bind(requester.id)
+            .push(")");
+    }
+    let rows: Vec<(i64, String, String, String, String)> =
+        entry_builder.build_query_as().fetch_all(&app_state.pool).await?;
+
+    let mut user_cat_map: HashMap<i64, HashMap<(String, String), i64>> = HashMap::new();
+    for (user_id, category, color, start_time, end_time) in rows {
+        let minutes =
+            (parse_report_time(&end_time)? - parse_report_time(&start_time)?).num_minutes();
+        *user_cat_map
+            .entry(user_id)
+            .or_default()
+            .entry((category, color))
+            .or_insert(0) += minutes;
+    }
+
+    let result = members
+        .into_iter()
+        .map(|(uid, first, last)| {
+            let mut cats: Vec<CategoryTotal> = user_cat_map
+                .remove(&uid)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|((category, color), minutes)| CategoryTotal { category, color, minutes })
+                .collect();
+            cats.sort_by(|a, b| b.minutes.cmp(&a.minutes).then_with(|| a.category.cmp(&b.category)));
+            UserCategoryRow {
+                user_id: uid,
+                name: format!("{first} {last}"),
+                categories: cats,
+            }
+        })
+        .collect();
+
+    Ok(Json(result))
+}
+
 #[derive(Deserialize)]
 pub struct OvertimeQuery {
     pub user_id: Option<i64>,
