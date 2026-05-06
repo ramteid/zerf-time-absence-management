@@ -470,17 +470,17 @@
   <!-- Overtime balance -->
   <div class="kz-card overtime-card" style="margin-bottom:16px">
     <div class="card-header">
-      <span class="card-header-title">
+      <span class="card-header-title" style="display:inline-flex;align-items:center;gap:8px">
         {$t("Overtime balance {year}", { year: new Date().getFullYear() })}
+        <button
+          class="kz-btn-icon-sm kz-btn-ghost"
+          title={$t("help_overtime")}
+          on:click={() => toggleHelp("overtime")}
+          style="color:var(--text-tertiary);font-size:14px;cursor:help"
+        >
+          <Icon name="Info" size={14} />
+        </button>
       </span>
-      <button
-        class="kz-btn-icon-sm kz-btn-ghost"
-        title={$t("help_overtime")}
-        on:click={() => toggleHelp("overtime")}
-        style="color:var(--text-tertiary);font-size:14px;cursor:help"
-      >
-        <Icon name="Info" size={14} />
-      </button>
       <span
         class="kz-chip"
         class:kz-chip-approved={cumulative >= 0}
