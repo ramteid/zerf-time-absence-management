@@ -261,6 +261,7 @@
         {#each absenceRows as a}
           <div
             class="absence-entry"
+            class:absence-entry--rejected={a.status === "rejected"}
             on:click={() => showDetail(a)}
             on:keydown={(e) => {
               if (e.key === "Enter") showDetail(a);
@@ -527,5 +528,10 @@
     .absence-entry-detail {
       width: auto;
     }
+  }
+
+  .absence-entry--rejected .absence-entry-value {
+    text-decoration: line-through;
+    color: var(--text-tertiary);
   }
 </style>

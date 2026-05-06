@@ -396,6 +396,7 @@
               {@const c = catOf(e.category_id, $categories)}
               <div
                 class="time-block"
+                class:time-block--rejected={e.status === "rejected"}
                 on:click={() => {
                   if (e.status === "draft") showEntry = e;
                   else if (e.status === "submitted" || e.status === "approved")
@@ -461,7 +462,7 @@
           <div class="day-entries">
             {#each day.items as e}
               {@const c = catOf(e.category_id, $categories)}
-              <div class="time-block">
+              <div class="time-block" class:time-block--rejected={e.status === "rejected"}>
                 <div class="time-block-cat">
                   <span class="cat-dot" style="background:{c.color}"></span>
                   <span class="time-block-cat-name">{$t(c.name)}</span>
@@ -499,3 +500,11 @@
     }}
   />
 {/if}
+
+<style>
+  .time-block--rejected .time-block-cat-name,
+  .time-block--rejected .time-block-times {
+    text-decoration: line-through;
+    color: var(--text-tertiary);
+  }
+</style>
