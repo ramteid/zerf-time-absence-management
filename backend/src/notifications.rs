@@ -5,7 +5,7 @@
 
 use crate::auth::User;
 use crate::error::{AppError, AppResult};
-use crate::i18n::{Language, TextKey};
+use crate::i18n::Language;
 use crate::AppState;
 use axum::{
     extract::{Path, State},
@@ -89,11 +89,11 @@ pub async fn create(
 
 pub async fn create_translated(
     state: &AppState,
-    language: Language,
+    language: &Language,
     user_id: i64,
     kind: &str,
-    title_key: TextKey,
-    body_key: TextKey,
+    title_key: &str,
+    body_key: &str,
     params: Vec<(&str, String)>,
     reference_type: Option<&str>,
     reference_id: Option<i64>,

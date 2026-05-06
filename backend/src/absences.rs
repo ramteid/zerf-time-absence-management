@@ -1,7 +1,7 @@
 use crate::audit;
 use crate::auth::User;
 use crate::error::{AppError, AppResult};
-use crate::i18n::{self, TextKey};
+use crate::i18n;
 use crate::AppState;
 use axum::{
     extract::{Path, Query, State},
@@ -498,15 +498,15 @@ pub async fn create(
         for recipient_id in recipients {
             crate::notifications::create_translated(
                 &s,
-                language,
+                &language,
                 recipient_id,
                 "absence_requested",
-                TextKey::AbsenceRequestedTitle,
-                TextKey::AbsenceRequestedBody,
+                "absence_requested_title",
+                "absence_requested_body",
                 vec![
                     ("requester_name", requester_name.clone()),
-                    ("start_date", i18n::format_date(language, a.start_date)),
-                    ("end_date", i18n::format_date(language, a.end_date)),
+                    ("start_date", i18n::format_date(&language, a.start_date)),
+                    ("end_date", i18n::format_date(&language, a.end_date)),
                 ],
                 Some("absences"),
                 Some(id),
@@ -778,14 +778,14 @@ pub async fn approve(
         let language = notification_language(&s.pool).await;
         crate::notifications::create_translated(
             &s,
-            language,
+            &language,
             a.user_id,
             "absence_approved",
-            TextKey::AbsenceApprovedTitle,
-            TextKey::AbsenceApprovedBody,
+            "absence_approved_title",
+            "absence_approved_body",
             vec![
-                ("start_date", i18n::format_date(language, a.start_date)),
-                ("end_date", i18n::format_date(language, a.end_date)),
+                ("start_date", i18n::format_date(&language, a.start_date)),
+                ("end_date", i18n::format_date(&language, a.end_date)),
             ],
             Some("absences"),
             Some(id),
@@ -870,14 +870,14 @@ pub async fn reject(
         let language = notification_language(&s.pool).await;
         crate::notifications::create_translated(
             &s,
-            language,
+            &language,
             a.user_id,
             "absence_rejected",
-            TextKey::AbsenceRejectedTitle,
-            TextKey::AbsenceRejectedBody,
+            "absence_rejected_title",
+            "absence_rejected_body",
             vec![
-                ("start_date", i18n::format_date(language, a.start_date)),
-                ("end_date", i18n::format_date(language, a.end_date)),
+                ("start_date", i18n::format_date(&language, a.start_date)),
+                ("end_date", i18n::format_date(&language, a.end_date)),
                 ("reason", b.reason.clone()),
             ],
             Some("absences"),
@@ -930,14 +930,14 @@ pub async fn revoke(
         let language = notification_language(&s.pool).await;
         crate::notifications::create_translated(
             &s,
-            language,
+            &language,
             a.user_id,
             "absence_revoked",
-            TextKey::AbsenceRevokedTitle,
-            TextKey::AbsenceRevokedBody,
+            "absence_revoked_title",
+            "absence_revoked_body",
             vec![
-                ("start_date", i18n::format_date(language, a.start_date)),
-                ("end_date", i18n::format_date(language, a.end_date)),
+                ("start_date", i18n::format_date(&language, a.start_date)),
+                ("end_date", i18n::format_date(&language, a.end_date)),
             ],
             Some("absences"),
             Some(id),

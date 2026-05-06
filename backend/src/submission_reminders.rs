@@ -3,7 +3,7 @@
 //! Users with weekly_hours = 0 are skipped (non-booking users).
 
 use crate::db::DatabasePool;
-use crate::i18n::{Language, TextKey};
+
 use crate::settings::load_setting;
 use chrono::{Datelike, Local, NaiveDate, TimeZone};
 use std::time::Duration;
@@ -21,22 +21,31 @@ pub fn duration_until_next_deadline(
     // Try this month's deadline day
     let candidate_day = day.min(last_day_of_month(today.year(), today.month()));
     let candidate = NaiveDate::from_ymd_opt(today.year(), today.month(), candidate_day).unwrap();
-    let target = candidate
-        .and_hms_opt(7, 0, 0)
-        .and_then(|dt| chrono::Local.from_local_datetime(&dt).single())
-        .expect("valid datetime");
 
-    if target > now {
-        return (target - now).to_std().unwrap_or(Duration::from_secs(60));
+    if let Some(target) = resolve_local_datetime(candidate, 7) {
+        if target > now {
+            return (target - now).to_std().unwrap_or(Duration::from_secs(60));
+        }
     }
 
-    // Already past – schedule next month
+    // Already past or ambiguous – schedule next month
     let next = advance_one_month(today, day);
-    let t2 = next
-        .and_hms_opt(7, 0, 0)
-        .and_then(|dt| chrono::Local.from_local_datetime(&dt).single())
-        .expect("valid datetime");
+    let t2 = resolve_local_datetime(next, 7).expect("next month datetime must resolve");
     (t2 - now).to_std().unwrap_or(Duration::from_secs(60))
+}
+
+/// Resolve a naive date + hour to a local datetime, handling DST gaps/ambiguities.
+fn resolve_local_datetime(date: NaiveDate, hour: u32) -> Option<chrono::DateTime<chrono::Local>> {
+    let naive = date.and_hms_opt(hour, 0, 0)?;
+    match chrono::Local.from_local_datetime(&naive) {
+        chrono::LocalResult::Single(dt) => Some(dt),
+        chrono::LocalResult::Ambiguous(earliest, _) => Some(earliest),
+        chrono::LocalResult::None => {
+            // Hour falls in a DST gap; try one hour later
+            let fallback = date.and_hms_opt(hour + 1, 0, 0)?;
+            chrono::Local.from_local_datetime(&fallback).earliest()
+        }
+    }
 }
 
 fn advance_one_month(d: NaiveDate, desired_day: u32) -> NaiveDate {
@@ -49,7 +58,7 @@ fn advance_one_month(d: NaiveDate, desired_day: u32) -> NaiveDate {
     NaiveDate::from_ymd_opt(year, month, actual_day).unwrap()
 }
 
-fn last_day_of_month(year: i32, month: u32) -> u32 {
+pub fn last_day_of_month(year: i32, month: u32) -> u32 {
     let next_month = if month == 12 {
         NaiveDate::from_ymd_opt(year + 1, 1, 1)
     } else {
@@ -58,27 +67,75 @@ fn last_day_of_month(year: i32, month: u32) -> u32 {
     next_month.unwrap().pred_opt().unwrap().day()
 }
 
-fn format_month(language: Language, year: i32, month: u32) -> String {
-    match language {
-        Language::De => {
-            let name = match month {
-                1 => "Januar", 2 => "Februar", 3 => "März", 4 => "April",
-                5 => "Mai", 6 => "Juni", 7 => "Juli", 8 => "August",
-                9 => "September", 10 => "Oktober", 11 => "November", 12 => "Dezember",
-                _ => "?",
-            };
-            format!("{name} {year}")
-        }
-        Language::En => {
-            let name = match month {
-                1 => "January", 2 => "February", 3 => "March", 4 => "April",
-                5 => "May", 6 => "June", 7 => "July", 8 => "August",
-                9 => "September", 10 => "October", 11 => "November", 12 => "December",
-                _ => "?",
-            };
-            format!("{name} {year}")
+/// Collect (year, month) pairs where the user has unsubmitted time entries,
+/// from their start_date through the last fully completed month.
+async fn find_unsubmitted_months(
+    pool: &DatabasePool,
+    user_id: i64,
+    user_start: NaiveDate,
+    last_year: i32,
+    last_month: u32,
+) -> Vec<(i32, u32)> {
+    // Single query: for each month with any entries, check if any are still draft.
+    // Months with zero entries are also "unsubmitted" and handled separately.
+    let rows: Vec<(i32, i32, i64, i64)> = sqlx::query_as(
+        "SELECT \
+             EXTRACT(YEAR FROM entry_date)::int AS y, \
+             EXTRACT(MONTH FROM entry_date)::int AS m, \
+             COUNT(*) AS total, \
+             COUNT(*) FILTER (WHERE status = 'draft') AS drafts \
+         FROM time_entries \
+         WHERE user_id = $1 \
+           AND entry_date >= $2 \
+           AND entry_date < $3 \
+         GROUP BY y, m",
+    )
+    .bind(user_id)
+    .bind(user_start)
+    .bind(
+        NaiveDate::from_ymd_opt(
+            if last_month == 12 {
+                last_year + 1
+            } else {
+                last_year
+            },
+            if last_month == 12 { 1 } else { last_month + 1 },
+            1,
+        )
+        .unwrap(),
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+
+    // Build a set of months that have all entries submitted (total > 0 && drafts == 0)
+    let mut submitted: std::collections::HashSet<(i32, u32)> = std::collections::HashSet::new();
+    for (y, m, total, drafts) in &rows {
+        if *total > 0 && *drafts == 0 {
+            submitted.insert((*y, *m as u32));
         }
     }
+
+    // Iterate all months from start to last completed month
+    let mut missing = Vec::new();
+    let mut y = user_start.year();
+    let mut m = user_start.month();
+    loop {
+        if y > last_year || (y == last_year && m > last_month) {
+            break;
+        }
+        if !submitted.contains(&(y, m)) {
+            missing.push((y, m));
+        }
+        if m == 12 {
+            m = 1;
+            y += 1;
+        } else {
+            m += 1;
+        }
+    }
+
+    missing
 }
 
 /// Run one check pass for all active users with weekly_hours > 0.
@@ -89,7 +146,7 @@ pub async fn run_check(state: &crate::AppState) {
         Ok(l) => l,
         Err(e) => {
             tracing::warn!(target:"zerf::submission_reminders", "load language failed: {e}");
-            Language::default()
+            crate::i18n::Language::default()
         }
     };
 
@@ -120,62 +177,51 @@ pub async fn run_check(state: &crate::AppState) {
         }
     };
 
+    // Load SMTP config once for all users
+    let smtp = crate::settings::load_smtp_config(pool)
+        .await
+        .map(std::sync::Arc::new);
+
     for (user_id, user_email, user_start) in rows {
-        let mut missing_months: Vec<String> = Vec::new();
+        let missing =
+            find_unsubmitted_months(pool, user_id, user_start, last_year, last_month).await;
 
-        let mut y = user_start.year();
-        let mut m = user_start.month();
-
-        loop {
-            if y > last_year || (y == last_year && m > last_month) {
-                break;
-            }
-
-            let month_start = NaiveDate::from_ymd_opt(y, m, 1).unwrap();
-            let month_end = NaiveDate::from_ymd_opt(y, m, last_day_of_month(y, m)).unwrap();
-
-            let total: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*) FROM time_entries WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3",
-            )
-            .bind(user_id)
-            .bind(month_start)
-            .bind(month_end)
-            .fetch_one(pool)
-            .await
-            .unwrap_or(0);
-
-            let draft: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*) FROM time_entries WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3 AND status = 'draft'",
-            )
-            .bind(user_id)
-            .bind(month_start)
-            .bind(month_end)
-            .fetch_one(pool)
-            .await
-            .unwrap_or(0);
-
-            // Not submitted: either all entries are draft, or there are no entries at all
-            if total == 0 || draft > 0 {
-                missing_months.push(format_month(language, y, m));
-            }
-
-            if m == 12 { m = 1; y += 1; } else { m += 1; }
-        }
-
-        if missing_months.is_empty() {
+        if missing.is_empty() {
             continue;
         }
 
+        // Check for duplicate: skip if a submission_reminder was already sent today
+        let already_sent: bool = sqlx::query_scalar(
+            "SELECT EXISTS(\
+                 SELECT 1 FROM notifications \
+                 WHERE user_id = $1 AND kind = 'submission_reminder' \
+                   AND created_at::date = CURRENT_DATE\
+             )",
+        )
+        .bind(user_id)
+        .fetch_one(pool)
+        .await
+        .unwrap_or(false);
+
+        if already_sent {
+            continue;
+        }
+
+        let missing_months: Vec<String> = missing
+            .iter()
+            .map(|(y, m)| crate::i18n::format_month(&language, *y, *m))
+            .collect();
+
         let months_str = missing_months.join(", ");
-        let title = crate::i18n::translate(language, TextKey::SubmissionReminderTitle, &[]);
+        let title = crate::i18n::translate(&language, "submission_reminder_title", &[]);
         let body = crate::i18n::translate(
-            language,
-            TextKey::SubmissionReminderBody,
+            &language,
+            "submission_reminder_body",
             &[("months", months_str.clone())],
         );
         let email_body = crate::i18n::translate(
-            language,
-            TextKey::SubmissionReminderEmailBody,
+            &language,
+            "submission_reminder_email_body",
             &[
                 ("months", missing_months.join("\n")),
                 ("app_url", app_url.clone()),
@@ -197,9 +243,9 @@ pub async fn run_check(state: &crate::AppState) {
         .await
         {
             Ok(_) => {
-                let _ = state.notifications.send(
-                    crate::notifications::NotificationSignal { user_id },
-                );
+                let _ = state
+                    .notifications
+                    .send(crate::notifications::NotificationSignal { user_id });
             }
             Err(e) => {
                 tracing::warn!(
@@ -210,10 +256,7 @@ pub async fn run_check(state: &crate::AppState) {
         }
 
         // Send email best-effort
-        let smtp = crate::settings::load_smtp_config(pool)
-            .await
-            .map(std::sync::Arc::new);
-        crate::email::send_async(smtp, user_email, title, email_body);
+        crate::email::send_async(smtp.clone(), user_email, title, email_body);
     }
 }
 
@@ -223,7 +266,7 @@ pub async fn run_loop(pool: DatabasePool, state: crate::AppState) {
         let day_str = load_setting(&pool, SUBMISSION_DEADLINE_DAY_KEY, "")
             .await
             .unwrap_or_default();
-        let day: Option<u8> = day_str.parse().ok().filter(|&d: &u8| d >= 1 && d <= 28);
+        let day: Option<u8> = day_str.parse().ok().filter(|&d: &u8| (1..=28).contains(&d));
 
         if let Some(d) = day {
             let now = Local::now();
@@ -239,7 +282,12 @@ pub async fn run_loop(pool: DatabasePool, state: crate::AppState) {
             let day_str2 = load_setting(&pool, SUBMISSION_DEADLINE_DAY_KEY, "")
                 .await
                 .unwrap_or_default();
-            if day_str2.parse::<u8>().ok().filter(|&d2| d2 >= 1 && d2 <= 28).is_some() {
+            if day_str2
+                .parse::<u8>()
+                .ok()
+                .filter(|&d2| (1..=28).contains(&d2))
+                .is_some()
+            {
                 tracing::info!(target:"zerf::submission_reminders", "Running submission reminder check");
                 run_check(&state).await;
             }
@@ -247,5 +295,97 @@ pub async fn run_loop(pool: DatabasePool, state: crate::AppState) {
             // No deadline configured – poll every hour
             tokio::time::sleep(Duration::from_secs(3600)).await;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deadline_in_future_same_month() {
+        // 2026-05-06 08:00 local, deadline day 15 -> should wait until 15th at 07:00
+        let now = chrono::Local.with_ymd_and_hms(2026, 5, 6, 8, 0, 0).unwrap();
+        let dur = duration_until_next_deadline(now, 15);
+        // Should be ~8 days 23 hours = 8*86400 + 23*3600 = 774000 seconds
+        let secs = dur.as_secs();
+        assert!(secs > 7 * 86400, "should be more than 7 days, got {secs}");
+        assert!(secs < 10 * 86400, "should be less than 10 days, got {secs}");
+    }
+
+    #[test]
+    fn deadline_today_but_not_yet() {
+        // 2026-05-15 06:00 local, deadline day 15 -> should wait ~1 hour
+        let now = chrono::Local
+            .with_ymd_and_hms(2026, 5, 15, 6, 0, 0)
+            .unwrap();
+        let dur = duration_until_next_deadline(now, 15);
+        let secs = dur.as_secs();
+        assert!(secs >= 3500, "should be about 1 hour, got {secs}");
+        assert!(secs <= 3700, "should be about 1 hour, got {secs}");
+    }
+
+    #[test]
+    fn deadline_already_passed_schedules_next_month() {
+        // 2026-05-15 08:00 local, deadline day 10 -> next: June 10 at 07:00
+        let now = chrono::Local
+            .with_ymd_and_hms(2026, 5, 15, 8, 0, 0)
+            .unwrap();
+        let dur = duration_until_next_deadline(now, 10);
+        let secs = dur.as_secs();
+        // ~25.96 days
+        assert!(secs > 24 * 86400, "should be >24 days, got {secs}");
+        assert!(secs < 27 * 86400, "should be <27 days, got {secs}");
+    }
+
+    #[test]
+    fn deadline_day_clamped_to_month_end() {
+        // Feb 2026: 28 days. Deadline day 28 on Feb 1 -> should target Feb 28
+        let now = chrono::Local.with_ymd_and_hms(2026, 2, 1, 6, 0, 0).unwrap();
+        let dur = duration_until_next_deadline(now, 28);
+        let secs = dur.as_secs();
+        // ~27 days + 1 hour
+        assert!(secs > 26 * 86400, "should be >26 days, got {secs}");
+        assert!(secs < 28 * 86400, "should be <28 days, got {secs}");
+    }
+
+    #[test]
+    fn deadline_december_wraps_to_january() {
+        // 2026-12-20 08:00, deadline day 5 -> next: Jan 5, 2027 at 07:00
+        let now = chrono::Local
+            .with_ymd_and_hms(2026, 12, 20, 8, 0, 0)
+            .unwrap();
+        let dur = duration_until_next_deadline(now, 5);
+        let secs = dur.as_secs();
+        // ~15.96 days
+        assert!(secs > 14 * 86400, "should be >14 days, got {secs}");
+        assert!(secs < 17 * 86400, "should be <17 days, got {secs}");
+    }
+
+    #[test]
+    fn last_day_of_month_february_leap_year() {
+        assert_eq!(last_day_of_month(2024, 2), 29);
+        assert_eq!(last_day_of_month(2025, 2), 28);
+    }
+
+    #[test]
+    fn last_day_of_month_various() {
+        assert_eq!(last_day_of_month(2026, 1), 31);
+        assert_eq!(last_day_of_month(2026, 4), 30);
+        assert_eq!(last_day_of_month(2026, 12), 31);
+    }
+
+    #[test]
+    fn advance_one_month_wraps_year() {
+        let d = NaiveDate::from_ymd_opt(2026, 12, 15).unwrap();
+        let next = advance_one_month(d, 15);
+        assert_eq!(next, NaiveDate::from_ymd_opt(2027, 1, 15).unwrap());
+    }
+
+    #[test]
+    fn advance_one_month_clamps_day() {
+        let d = NaiveDate::from_ymd_opt(2026, 1, 31).unwrap();
+        let next = advance_one_month(d, 31);
+        assert_eq!(next, NaiveDate::from_ymd_opt(2026, 2, 28).unwrap());
     }
 }

@@ -1,7 +1,7 @@
 use crate::audit;
 use crate::auth::User;
 use crate::error::{AppError, AppResult};
-use crate::i18n::{self, TextKey};
+use crate::i18n;
 use crate::AppState;
 use axum::{
     extract::{Path, Query, State},
@@ -405,17 +405,17 @@ pub async fn submit(
         for notify_id in notify_ids {
             crate::notifications::create_translated(
                 &s,
-                language,
+                &language,
                 notify_id,
                 "timesheet_submitted",
-                TextKey::TimesheetSubmittedTitle,
-                TextKey::TimesheetSubmittedBody,
+                "timesheet_submitted_title",
+                "timesheet_submitted_body",
                 vec![
                     (
                         "submitter_name",
                         format!("{} {}", u.first_name, u.last_name),
                     ),
-                    ("entry_count", i18n::entry_count(language, count as i64)),
+                    ("entry_count", i18n::entry_count(&language, count as i64)),
                 ],
                 Some("time_entries"),
                 None,
@@ -486,12 +486,12 @@ pub async fn approve(
     let language = notification_language(&s.pool).await;
     crate::notifications::create_translated(
         &s,
-        language,
+        &language,
         z.user_id,
         "timesheet_approved",
-        TextKey::TimesheetApprovedTitle,
-        TextKey::TimesheetApprovedBody,
-        vec![("entry_date", i18n::format_date(language, z.entry_date))],
+        "timesheet_approved_title",
+        "timesheet_approved_body",
+        vec![("entry_date", i18n::format_date(&language, z.entry_date))],
         Some("time_entries"),
         Some(id),
     )
@@ -569,13 +569,13 @@ pub async fn reject(
     let language = notification_language(&s.pool).await;
     crate::notifications::create_translated(
         &s,
-        language,
+        &language,
         z.user_id,
         "timesheet_rejected",
-        TextKey::TimesheetRejectedTitle,
-        TextKey::TimesheetRejectedBody,
+        "timesheet_rejected_title",
+        "timesheet_rejected_body",
         vec![
-            ("entry_date", i18n::format_date(language, z.entry_date)),
+            ("entry_date", i18n::format_date(&language, z.entry_date)),
             ("reason", b.reason.clone()),
         ],
         Some("time_entries"),
@@ -658,12 +658,12 @@ pub async fn batch_approve(
         let language = notification_language(&s.pool).await;
         crate::notifications::create_translated(
             &s,
-            language,
+            &language,
             z.user_id,
             "timesheet_approved",
-            TextKey::TimesheetApprovedTitle,
-            TextKey::TimesheetApprovedBody,
-            vec![("entry_date", i18n::format_date(language, z.entry_date))],
+            "timesheet_approved_title",
+            "timesheet_approved_body",
+            vec![("entry_date", i18n::format_date(&language, z.entry_date))],
             Some("time_entries"),
             Some(z.id),
         )
@@ -763,13 +763,13 @@ pub async fn batch_reject(
         let language = notification_language(&s.pool).await;
         crate::notifications::create_translated(
             &s,
-            language,
+            &language,
             z.user_id,
             "timesheet_rejected",
-            TextKey::TimesheetRejectedTitle,
-            TextKey::TimesheetRejectedBody,
+            "timesheet_rejected_title",
+            "timesheet_rejected_body",
             vec![
-                ("entry_date", i18n::format_date(language, z.entry_date)),
+                ("entry_date", i18n::format_date(&language, z.entry_date)),
                 ("reason", reason.clone()),
             ],
             Some("time_entries"),

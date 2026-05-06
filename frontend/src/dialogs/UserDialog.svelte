@@ -15,8 +15,8 @@
   let first_name = template.first_name || "";
   let last_name = template.last_name || "";
   let role = template.role || "employee";
-  let weekly_hours = template.weekly_hours || 39;
-  let annual_leave_days = template.annual_leave_days || 30;
+  let weekly_hours = template.weekly_hours ?? 39;
+  let annual_leave_days = template.annual_leave_days ?? 30;
   let start_date = template.start_date || isoDate(new Date());
   let overtime_start_balance_hours =
     (template.overtime_start_balance_min || 0) / 60;

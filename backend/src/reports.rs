@@ -1,5 +1,6 @@
 use crate::auth::User;
 use crate::error::{AppError, AppResult};
+use crate::i18n;
 use crate::AppState;
 use axum::{
     extract::{Query, State},
@@ -143,12 +144,7 @@ async fn build_range(
         "SELECT start_date, end_date, kind FROM absences WHERE user_id=$1 AND status='approved' AND end_date >= $2 AND start_date <= $3"
     ).bind(user_id).bind(from).bind(to).fetch_all(pool).await?;
 
-    // Load UI language to decide which holiday name to display
-    let ui_lang: String =
-        sqlx::query_scalar("SELECT value FROM app_settings WHERE key = 'ui_language'")
-            .fetch_optional(pool)
-            .await?
-            .unwrap_or_else(|| "en".to_string());
+    let language = i18n::load_ui_language(pool).await?;
 
     let h: Vec<(NaiveDate, String, Option<String>)> = sqlx::query_as(
         "SELECT holiday_date, name, local_name FROM holidays WHERE holiday_date BETWEEN $1 AND $2",
@@ -160,11 +156,7 @@ async fn build_range(
     let h: Vec<(NaiveDate, String)> = h
         .into_iter()
         .map(|(d, name, local_name)| {
-            let display = if ui_lang != "en" {
-                local_name.unwrap_or(name)
-            } else {
-                name
-            };
+            let display = i18n::holiday_display_name(&language, name, local_name);
             (d, display)
         })
         .collect();
@@ -694,11 +686,7 @@ pub async fn flextime(
     .fetch_all(&s.pool)
     .await?;
 
-    let ui_lang: String =
-        sqlx::query_scalar("SELECT value FROM app_settings WHERE key = 'ui_language'")
-            .fetch_optional(&s.pool)
-            .await?
-            .unwrap_or_else(|| "en".to_string());
+    let language = i18n::load_ui_language(&s.pool).await?;
 
     let h: Vec<(NaiveDate, String, Option<String>)> = sqlx::query_as(
         "SELECT holiday_date, name, local_name FROM holidays WHERE holiday_date BETWEEN $1 AND $2",
@@ -710,11 +698,7 @@ pub async fn flextime(
     let h_map: HashMap<NaiveDate, String> = h
         .into_iter()
         .map(|(d, name, local_name)| {
-            let display = if ui_lang != "en" {
-                local_name.unwrap_or(name)
-            } else {
-                name
-            };
+            let display = i18n::holiday_display_name(&language, name, local_name);
             (d, display)
         })
         .collect();

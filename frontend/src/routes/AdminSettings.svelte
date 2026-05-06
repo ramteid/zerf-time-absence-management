@@ -1,7 +1,7 @@
 <script>
   import { api } from "../api.js";
   import { currentUser, settings as appSettings, toast } from "../stores.js";
-  import { setLanguage, t } from "../i18n.js";
+  import { LANGUAGES, setLanguage, t } from "../i18n.js";
 
   let s = {};
   let saving = false;
@@ -14,9 +14,10 @@
 
   let countries = [];
   let countryRegions = [];
+  const languageOptions = Object.entries(LANGUAGES);
 
-  function sortCountriesByNameDescending(items) {
-    return [...items].sort((a, b) => b.name.localeCompare(a.name));
+  function sortCountriesByName(items) {
+    return [...items].sort((a, b) => a.name.localeCompare(b.name));
   }
 
   async function loadRegionsFor(country) {
@@ -36,7 +37,7 @@
     s = loadedSettings;
     appSettings.set(loadedSettings);
     if (s.ui_language) setLanguage(s.ui_language);
-    countries = sortCountriesByNameDescending(allCountries);
+    countries = sortCountriesByName(allCountries);
     if (s.country) {
       countryRegions = await loadRegionsFor(s.country);
     }
@@ -95,8 +96,6 @@
       saving = false;
     }
   }
-
-
 </script>
 
 <div class="top-bar">
@@ -174,15 +173,10 @@
             id="settings-language"
             class="kz-select"
             bind:value={s.ui_language}
-            on:change={() => {
-              if (s.ui_language === "de" && !s.time_format)
-                s.time_format = "24h";
-              if (s.ui_language === "en" && !s.time_format)
-                s.time_format = "12h";
-            }}
           >
-            <option value="en">English</option>
-            <option value="de">Deutsch</option>
+            {#each languageOptions as [code, language]}
+              <option value={code}>{language.label}</option>
+            {/each}
           </select>
         </div>
         <div>
@@ -282,7 +276,7 @@
           />
           <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
             {$t(
-              "Users will be notified on this day of each month if they have unsubmitted time entries for previous months. Leave empty to disable. (1–28)"
+              "Users will be notified on this day of each month if they have unsubmitted time entries for previous months. Leave empty to disable. (1–28)",
             )}
           </div>
         </div>
@@ -346,6 +340,4 @@
       </div>
     </div>
   </div>
-
-
 </div>

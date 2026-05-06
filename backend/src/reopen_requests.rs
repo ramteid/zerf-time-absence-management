@@ -16,7 +16,7 @@
 use crate::audit;
 use crate::auth::User;
 use crate::error::{AppError, AppResult};
-use crate::i18n::{self, TextKey};
+use crate::i18n;
 use crate::notifications;
 use crate::AppState;
 use axum::{
@@ -305,14 +305,14 @@ pub async fn create(
         // Notify the requester.
         notifications::create_translated(
             &s,
-            language,
+            &language,
             u.id,
             "reopen_auto_approved",
-            TextKey::ReopenAutoApprovedTitle,
-            TextKey::ReopenAutoApprovedBody,
+            "reopen_auto_approved_title",
+            "reopen_auto_approved_body",
             vec![
-                ("week_start", i18n::format_date(language, b.week_start)),
-                ("entry_count", i18n::entry_count(language, count)),
+                ("week_start", i18n::format_date(&language, b.week_start)),
+                ("entry_count", i18n::entry_count(&language, count)),
             ],
             Some("reopen_request"),
             Some(req_id),
@@ -323,15 +323,15 @@ pub async fn create(
         for aid in &notify_approvers {
             notifications::create_translated(
                 &s,
-                language,
+                &language,
                 *aid,
                 "reopen_auto_approved_notice",
-                TextKey::ReopenAutoApprovedNoticeTitle,
-                TextKey::ReopenAutoApprovedNoticeBody,
+                "reopen_auto_approved_notice_title",
+                "reopen_auto_approved_notice_body",
                 vec![
                     ("requester_name", requester_name.clone()),
-                    ("week_start", i18n::format_date(language, b.week_start)),
-                    ("entry_count", i18n::entry_count(language, count)),
+                    ("week_start", i18n::format_date(&language, b.week_start)),
+                    ("entry_count", i18n::entry_count(&language, count)),
                 ],
                 Some("reopen_request"),
                 Some(req_id),
@@ -351,14 +351,14 @@ pub async fn create(
         for aid in &notify_approvers {
             notifications::create_translated(
                 &s,
-                language,
+                &language,
                 *aid,
                 "reopen_request_created",
-                TextKey::ReopenRequestCreatedTitle,
-                TextKey::ReopenRequestCreatedBody,
+                "reopen_request_created_title",
+                "reopen_request_created_body",
                 vec![
                     ("requester_name", requester_name.clone()),
-                    ("week_start", i18n::format_date(language, b.week_start)),
+                    ("week_start", i18n::format_date(&language, b.week_start)),
                 ],
                 Some("reopen_request"),
                 Some(req_id),
@@ -496,12 +496,12 @@ pub async fn approve(
     let language = notification_language(&s.pool).await;
     notifications::create_translated(
         &s,
-        language,
+        &language,
         r.user_id,
         "reopen_approved",
-        TextKey::ReopenApprovedTitle,
-        TextKey::ReopenApprovedBody,
-        vec![("week_start", i18n::format_date(language, r.week_start))],
+        "reopen_approved_title",
+        "reopen_approved_body",
+        vec![("week_start", i18n::format_date(&language, r.week_start))],
         Some("reopen_request"),
         Some(id),
     )
@@ -530,14 +530,14 @@ pub async fn approve(
                     .unwrap_or_else(|| format!("User {}", r.user_id));
             notifications::create_translated(
                 &s,
-                language,
+                &language,
                 r.approver_id,
                 "reopen_approved_by_admin",
-                TextKey::ReopenApprovedByAdminTitle,
-                TextKey::ReopenApprovedByAdminBody,
+                "reopen_approved_by_admin_title",
+                "reopen_approved_by_admin_body",
                 vec![
                     ("requester_name", requester_name),
-                    ("week_start", i18n::format_date(language, r.week_start)),
+                    ("week_start", i18n::format_date(&language, r.week_start)),
                 ],
                 Some("reopen_request"),
                 Some(id),
@@ -611,13 +611,13 @@ pub async fn reject(
     let language = notification_language(&s.pool).await;
     notifications::create_translated(
         &s,
-        language,
+        &language,
         r.user_id,
         "reopen_rejected",
-        TextKey::ReopenRejectedTitle,
-        TextKey::ReopenRejectedBody,
+        "reopen_rejected_title",
+        "reopen_rejected_body",
         vec![
-            ("week_start", i18n::format_date(language, r.week_start)),
+            ("week_start", i18n::format_date(&language, r.week_start)),
             ("reason", reason.to_string()),
         ],
         Some("reopen_request"),
@@ -644,14 +644,14 @@ pub async fn reject(
                     .unwrap_or_else(|| format!("User {}", r.user_id));
             notifications::create_translated(
                 &s,
-                language,
+                &language,
                 r.approver_id,
                 "reopen_rejected_by_admin",
-                TextKey::ReopenRejectedByAdminTitle,
-                TextKey::ReopenRejectedByAdminBody,
+                "reopen_rejected_by_admin_title",
+                "reopen_rejected_by_admin_body",
                 vec![
                     ("requester_name", requester_name),
-                    ("week_start", i18n::format_date(language, r.week_start)),
+                    ("week_start", i18n::format_date(&language, r.week_start)),
                     ("reason", reason.to_string()),
                 ],
                 Some("reopen_request"),

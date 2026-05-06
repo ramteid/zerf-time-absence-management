@@ -16,6 +16,7 @@ use zerf::{build_app, categories, config::Config, db, holidays, seed_admin, AppS
 pub struct TestApp {
     pub base_url: String,
     pub admin_password: String,
+    pub state: AppState,
     /// Keep the container alive for the duration of the test.
     _container: ContainerAsync<Postgres>,
 }
@@ -94,7 +95,7 @@ impl TestApp {
             notifications: zerf::notifications::broadcaster(),
         };
 
-        let app = build_app(state);
+        let app = build_app(state.clone());
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
@@ -123,6 +124,7 @@ impl TestApp {
         Self {
             base_url: server_url,
             admin_password,
+            state,
             _container: container,
         }
     }

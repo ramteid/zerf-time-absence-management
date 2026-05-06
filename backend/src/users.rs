@@ -690,12 +690,15 @@ pub async fn set_leave_override(
     if !(0..=366).contains(&b.days) {
         return Err(AppError::BadRequest("Invalid days value.".into()));
     }
-    // Verify user exists
-    let _exists: bool = sqlx::query_scalar("SELECT active FROM users WHERE id=$1")
+    // Verify user exists and is active
+    let is_active: bool = sqlx::query_scalar("SELECT active FROM users WHERE id=$1")
         .bind(id)
         .fetch_optional(&s.pool)
         .await?
         .ok_or(AppError::NotFound)?;
+    if !is_active {
+        return Err(AppError::BadRequest("User is inactive.".into()));
+    }
     sqlx::query(
         "INSERT INTO user_annual_leave_overrides(user_id, year, days) VALUES ($1, $2, $3) \
          ON CONFLICT (user_id, year) DO UPDATE SET days = EXCLUDED.days",
