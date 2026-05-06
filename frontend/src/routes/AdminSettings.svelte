@@ -55,6 +55,10 @@
       toast($t("Please select a country."), "error");
       return;
     }
+    if (!s.region) {
+      toast($t("Please select a region."), "error");
+      return;
+    }
     if (s.default_weekly_hours == null || s.default_weekly_hours === "") {
       toast($t("Please enter default weekly hours."), "error");
       return;
@@ -309,12 +313,12 @@
           <label class="kz-label" for="settings-region">{$t("Region")}</label>
           {#if countryRegions.length > 0}
             <select
-              id="settings-region"
-              class="kz-select"
-              bind:value={s.region}
-            >
-              <option value="">{$t("- All -")}</option>
-              {#each countryRegions as r}
+                id="settings-region"
+                class="kz-select"
+                bind:value={s.region}
+              >
+                <option value="">{$t("- Please select -")}</option>
+                {#each countryRegions as r}
                 <option value={r}>{r}</option>
               {/each}
             </select>

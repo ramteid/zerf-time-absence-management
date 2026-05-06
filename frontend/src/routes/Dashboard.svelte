@@ -1,5 +1,6 @@
 <script>
   import { tick } from "svelte";
+  import { fly } from "svelte/transition";
   import { api } from "../api.js";
   import { categories, currentUser, path, toast } from "../stores.js";
   import { t, absenceKindLabel, formatHours } from "../i18n.js";
@@ -29,6 +30,12 @@
   let absenceDetail = null;
   let absenceDetailDlg;
 
+  // Absence slider state (initialized after `today` declaration below)
+  let absenceSliderWeek;
+  let absenceSliderTeamData = [];
+  let absenceSliderIsLeadView = false;
+  let absenceSliderDirection = 1;
+
   let selectedWeek = null;
   let weekDialog;
   let weekActionBusy = false;
@@ -42,6 +49,7 @@
 
   // -- Flextime chart --------------------------------------------------------
   const today = new Date();
+  absenceSliderWeek = isoDate(monday(today));
 
   function daysAgo(n) {
     return isoDate(addDays(today, -n));
@@ -247,6 +255,7 @@
   loadChart();
   loadOvertimeSummary();
   loadPastMonthSubmissionStatus();
+  loadAbsenceSliderTeamData(absenceSliderWeek);
 
   $: pendingWeeks = buildPendingWeeks(pendingEntries, users);
   $: currentOvertimeRow =
@@ -344,6 +353,40 @@
     setTimeout(() => {
       if (focusedSection === focus) focusedSection = "";
     }, 1400);
+  }
+
+  async function loadAbsenceSliderTeamData(weekStartDate) {
+    absenceSliderIsLeadView = $currentUser.permissions?.can_approve || false;
+    if (!absenceSliderIsLeadView) return;
+    try {
+      const weekEnd = isoDate(addDays(parseDate(weekStartDate), 6));
+      const params = new URLSearchParams({
+        from: weekStartDate,
+        to: weekEnd,
+        status: "approved",
+      });
+      absenceSliderTeamData = await api(`/absences/all?${params}`);
+    } catch (e) {
+      absenceSliderTeamData = [];
+    }
+  }
+
+  function absenceSliderPrevWeek() {
+    absenceSliderDirection = -1;
+    absenceSliderWeek = isoDate(addDays(parseDate(absenceSliderWeek), -7));
+    loadAbsenceSliderTeamData(absenceSliderWeek);
+  }
+
+  function absenceSliderNextWeek() {
+    absenceSliderDirection = 1;
+    absenceSliderWeek = isoDate(addDays(parseDate(absenceSliderWeek), 7));
+    loadAbsenceSliderTeamData(absenceSliderWeek);
+  }
+
+  function absenceSliderToToday() {
+    absenceSliderDirection = 0;
+    absenceSliderWeek = isoDate(monday(today));
+    loadAbsenceSliderTeamData(absenceSliderWeek);
   }
 
   $: dashboardQuery = (() => {
@@ -916,6 +959,73 @@
       <FlextimeChart data={chartData} />
     {/if}
   </div>
+
+  {#if $currentUser?.permissions?.can_approve}
+  <div class="kz-card" style="padding:16px 20px;margin:16px 0">
+    <div
+      style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px"
+    >
+      <Icon name="Users" size={15} sw={1.5} />
+      <span style="font-size:14px;font-weight:600;flex:1"
+        >{$t("Who is absent")}</span
+      >
+      <button
+        class="kz-btn-icon-sm kz-btn-ghost"
+        on:click={absenceSliderPrevWeek}
+        aria-label={$t("Previous week")}
+      >
+        <Icon name="ChevronLeft" size={16} />
+      </button>
+      <span style="font-size:12px;color:var(--text-tertiary);min-width:120px;text-align:center">
+        {fmtDateShort(absenceSliderWeek)} - {fmtDateShort(isoDate(addDays(parseDate(absenceSliderWeek), 6)))}
+      </span>
+      <button
+        class="kz-btn-icon-sm kz-btn-ghost"
+        on:click={absenceSliderNextWeek}
+        aria-label={$t("Next week")}
+      >
+        <Icon name="ChevronRight" size={16} />
+      </button>
+      <button
+        class="kz-btn kz-btn-sm"
+        on:click={absenceSliderToToday}
+      >
+        {$t("Today")}
+      </button>
+    </div>
+
+    {#key absenceSliderWeek}
+      <div
+        in:fly={{ x: absenceSliderDirection * 80, duration: 200 }}
+        style="overflow:hidden"
+      >
+        {#if absenceSliderTeamData.length === 0}
+          <div style="padding:12px;color:var(--text-tertiary);font-size:13px">
+            {$t("No absences this week.")}
+          </div>
+        {:else}
+          <div style="display:flex;flex-direction:column;gap:8px">
+            {#each absenceSliderTeamData as absence}
+              {@const user = users.find(u => u.id === absence.user_id)}
+              <div
+                style="padding:12px;border-left:3px solid var(--border);background:var(--bg-muted);border-radius:var(--radius-sm);display:flex;justify-content:space-between;align-items:center"
+              >
+                <div>
+                  <div style="font-weight:500;font-size:13px">
+                    {user ? `${user.first_name} ${user.last_name}` : `#${absence.user_id}`}
+                  </div>
+                  <div style="font-size:12px;color:var(--text-tertiary)">
+                    {absenceKindLabel(absence.kind)} · {fmtDateShort(absence.start_date)}{#if absence.start_date !== absence.end_date} - {fmtDateShort(absence.end_date)}{/if}
+                  </div>
+                </div>
+              </div>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    {/key}
+  </div>
+  {/if}
 
   {#if $currentUser?.permissions?.can_approve && changeRequests.length > 0}
     <div

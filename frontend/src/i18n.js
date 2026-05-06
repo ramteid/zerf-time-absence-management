@@ -18,8 +18,22 @@ const TRANSLATIONS = {
       "Compares target and actual hours for all active team members in the selected month.",
     help_category_breakdown:
       "Shows how tracked hours are distributed across the different categories.",
+    help_absence_report:
+      "View absence entries over a selected period with type distribution.",
+    help_employee_details:
+      "View detailed information about a team member including balance and statistics.",
     help_csv_export:
       "Exports the selected employee and date range as a CSV file.",
+    "Who is absent": "Who is absent",
+    "Previous week": "Previous week",
+    "Next week": "Next week",
+    "No absences this week.": "No absences this week.",
+    "Employee Details": "Employee Details",
+    "Total days": "Total days",
+    "Overtime balance": "Overtime balance",
+    Flextime: "Flextime",
+    Filter: "Filter",
+    Entries: "Entries",
     audit_table_users: "User",
     audit_table_absences: "Absence",
     audit_table_time_entries: "Time Entry",
@@ -403,12 +417,12 @@ const TRANSLATIONS = {
     "Please enter your name and configure the country, region, default weekly hours and default annual leave days before using the application.":
       "Bitte geben Sie Ihren Namen ein und konfigurieren Sie Land, Region, Standard-Wochenstunden und Standard-Urlaubstage, bevor die Anwendung genutzt wird.",
     "Please select a country.": "Bitte ein Land auswählen.",
+    "Please select a region.": "Bitte eine Region auswählen.",
     "Please enter default weekly hours.":
       "Bitte Standard-Wochenstunden eingeben.",
     "Please enter default annual leave days.":
       "Bitte Standard-Urlaubstage eingeben.",
     "- Please select -": "- Bitte auswählen -",
-    "- All -": "- Alle -",
     Country: "Land",
     Region: "Region",
     "e.g. US-CA": "z.B. US-CA",
@@ -626,6 +640,8 @@ const TRANSLATIONS = {
     "Overlap with existing absence.":
       "Überschneidung mit bestehender Abwesenheit.",
     // Time entry errors
+    "Entry date is before user start date.":
+      "Eintragsdatum liegt vor dem Startdatum des Benutzers.",
     "Overlap with an existing entry.":
       "Überschneidung mit einem bestehenden Eintrag.",
     "Entries in the future are not allowed.":
@@ -649,6 +665,8 @@ const TRANSLATIONS = {
     "Reason too long.": "Begründung zu lang.",
     "Reason required.": "Begründung erforderlich.",
     // Change request errors
+    "Date cannot be before user start date.":
+      "Datum darf nicht vor dem Startdatum des Benutzers liegen.",
     "Date cannot be in the future.": "Datum darf nicht in der Zukunft liegen.",
     "Edit drafts directly.": "Entwürfe können direkt bearbeitet werden.",
     "Invalid time format (HH:MM).": "Ungültiges Zeitformat (HH:MM).",
@@ -659,6 +677,8 @@ const TRANSLATIONS = {
     "Rejected entries cannot have change requests. Use the reopen workflow to edit.":
       "Abgelehnte Einträge können keine Änderungsanfragen haben. Nutzen Sie die Wiederfreigabe.",
     // Absence errors
+    "Absence start date is before user start date.":
+      "Abwesenheitsbeginn liegt vor dem Startdatum des Benutzers.",
     "Cannot edit.": "Bearbeitung nicht möglich.",
     "Absence was already reviewed by someone else.":
       "Abwesenheit wurde bereits von jemand anderem geprüft.",
@@ -699,8 +719,22 @@ const TRANSLATIONS = {
       "Vergleicht Soll- und Ist-Stunden aller aktiven Teammitglieder für den gewählten Monat.",
     help_category_breakdown:
       "Zeigt die Verteilung der erfassten Stunden auf die verschiedenen Kategorien.",
+    help_absence_report:
+      "Zeigt Abwesenheitseinträge über einen gewählten Zeitraum mit Typverteilung.",
+    help_employee_details:
+      "Zeigt detaillierte Informationen über einen Mitarbeiter einschließlich Saldo und Statistiken.",
     help_csv_export:
       "Exportiert den gewählten Mitarbeiter und Zeitraum als CSV-Datei.",
+    "Who is absent": "Wer ist abwesend",
+    "Previous week": "Vorherige Woche",
+    "Next week": "Nächste Woche",
+    "No absences this week.": "Keine Abwesenheiten diese Woche.",
+    "Employee Details": "Mitarbeiterdetails",
+    "Total days": "Tage gesamt",
+    "Overtime balance": "Gleitzeitstand",
+    Flextime: "Gleitzeit",
+    Filter: "Filter",
+    Entries: "Einträge",
     // Reports help (English defaults)
     // (English keys fall through)
     // Audit log
