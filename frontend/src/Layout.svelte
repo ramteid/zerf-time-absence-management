@@ -424,14 +424,6 @@
         <div
           style="border-top:1px solid var(--border);margin-top:8px;padding-top:8px"
         >
-          <button class="mobile-more-item" on:click={theme.toggle}>
-            <Icon name={$theme === "dark" ? "Sun" : "Moon"} size={18} />
-            <span
-              >{$theme === "dark"
-                ? $t("Switch to light mode")
-                : $t("Switch to dark mode")}</span
-            >
-          </button>
           <button
             class="mobile-more-item"
             style="color:var(--danger-text)"
