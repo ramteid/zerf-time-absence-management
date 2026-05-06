@@ -109,21 +109,17 @@ async fn find_unsubmitted_months(
     .unwrap_or_default();
 
     // Build a set of months that have all entries submitted (total > 0 && drafts == 0)
-    let mut submitted: std::collections::HashSet<(i32, u32)> = std::collections::HashSet::new();
-    for (y, m, total, drafts) in &rows {
-        if *total > 0 && *drafts == 0 {
-            submitted.insert((*y, *m as u32));
-        }
-    }
+    let submitted: std::collections::HashSet<(i32, u32)> = rows
+        .into_iter()
+        .filter(|(_, _, total, drafts)| *total > 0 && *drafts == 0)
+        .map(|(y, m, _, _)| (y, m as u32))
+        .collect();
 
     // Iterate all months from start to last completed month
     let mut missing = Vec::new();
     let mut y = user_start.year();
     let mut m = user_start.month();
-    loop {
-        if y > last_year || (y == last_year && m > last_month) {
-            break;
-        }
+    while y < last_year || (y == last_year && m <= last_month) {
         if !submitted.contains(&(y, m)) {
             missing.push((y, m));
         }
@@ -263,34 +259,19 @@ pub async fn run_check(state: &crate::AppState) {
 /// Background loop: sleep until the next deadline day at 07:00 then run check.
 pub async fn run_loop(pool: DatabasePool, state: crate::AppState) {
     loop {
-        let day_str = load_setting(&pool, SUBMISSION_DEADLINE_DAY_KEY, "")
-            .await
-            .unwrap_or_default();
+        let day_str = load_setting(&pool, SUBMISSION_DEADLINE_DAY_KEY, "").await.unwrap_or_default();
         let day: Option<u8> = day_str.parse().ok().filter(|&d: &u8| (1..=28).contains(&d));
 
         if let Some(d) = day {
-            let now = Local::now();
-            let wait = duration_until_next_deadline(now, d);
+            let wait = duration_until_next_deadline(Local::now(), d);
             tracing::info!(
                 target:"zerf::submission_reminders",
                 "Next submission reminder check scheduled in {:?}",
                 wait
             );
             tokio::time::sleep(wait).await;
-
-            // Re-read to confirm setting still active
-            let day_str2 = load_setting(&pool, SUBMISSION_DEADLINE_DAY_KEY, "")
-                .await
-                .unwrap_or_default();
-            if day_str2
-                .parse::<u8>()
-                .ok()
-                .filter(|&d2| (1..=28).contains(&d2))
-                .is_some()
-            {
-                tracing::info!(target:"zerf::submission_reminders", "Running submission reminder check");
-                run_check(&state).await;
-            }
+            tracing::info!(target:"zerf::submission_reminders", "Running submission reminder check");
+            run_check(&state).await;
         } else {
             // No deadline configured – poll every hour
             tokio::time::sleep(Duration::from_secs(3600)).await;

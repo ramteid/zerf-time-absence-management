@@ -51,13 +51,13 @@ async fn holidays_set(
     from: NaiveDate,
     to: NaiveDate,
 ) -> AppResult<HashSet<NaiveDate>> {
-    let r: Vec<(NaiveDate,)> =
+    let holiday_rows: Vec<(NaiveDate,)> =
         sqlx::query_as("SELECT holiday_date FROM holidays WHERE holiday_date BETWEEN $1 AND $2")
             .bind(from)
             .bind(to)
             .fetch_all(pool)
             .await?;
-    Ok(r.into_iter().map(|(d,)| d).collect())
+    Ok(holiday_rows.into_iter().map(|(date,)| date).collect())
 }
 
 pub async fn workdays(
@@ -68,15 +68,15 @@ pub async fn workdays(
     if to < from {
         return Ok(0.0);
     }
-    let h = holidays_set(pool, from, to).await?;
+    let holiday_dates = holidays_set(pool, from, to).await?;
     let mut count = 0.0;
-    let mut d = from;
-    while d <= to {
-        let wd = d.weekday().num_days_from_monday();
-        if wd < 5 && !h.contains(&d) {
+    let mut current_date = from;
+    while current_date <= to {
+        let day_of_week = current_date.weekday().num_days_from_monday();
+        if day_of_week < 5 && !holiday_dates.contains(&current_date) {
             count += 1.0;
         }
-        d += Duration::days(1);
+        current_date += Duration::days(1);
     }
     Ok(count)
 }
@@ -88,14 +88,14 @@ pub async fn workdays_total(
     from: NaiveDate,
     to: NaiveDate,
 ) -> AppResult<f64> {
-    let r: Vec<(NaiveDate, NaiveDate)> = sqlx::query_as(
+    let absence_ranges: Vec<(NaiveDate, NaiveDate)> = sqlx::query_as(
         "SELECT start_date, end_date FROM absences WHERE user_id=$1 AND kind=$2 AND status='approved' AND end_date >= $3 AND start_date <= $4"
     ).bind(user_id).bind(kind).bind(from).bind(to).fetch_all(pool).await?;
     let mut total = 0.0;
-    for (s, e) in r {
-        let s2 = std::cmp::max(s, from);
-        let e2 = std::cmp::min(e, to);
-        total += workdays(pool, s2, e2).await?;
+    for (absence_start, absence_end) in absence_ranges {
+        let clamped_start = std::cmp::max(absence_start, from);
+        let clamped_end = std::cmp::min(absence_end, to);
+        total += workdays(pool, clamped_start, clamped_end).await?;
     }
     Ok(total)
 }
@@ -106,17 +106,18 @@ pub struct YearQuery {
 }
 
 pub async fn list(
-    State(s): State<AppState>,
-    u: User,
-    Query(q): Query<YearQuery>,
+    State(app_state): State<AppState>,
+    requester: User,
+    Query(query): Query<YearQuery>,
 ) -> AppResult<Json<Vec<Absence>>> {
-    let year = q.year.unwrap_or_else(|| chrono::Local::now().year());
+    // Default to the current calendar year when no year is specified.
+    let year = query.year.unwrap_or_else(|| chrono::Local::now().year());
     let from = NaiveDate::from_ymd_opt(year, 1, 1).unwrap();
     let to = NaiveDate::from_ymd_opt(year, 12, 31).unwrap();
-    let r = sqlx::query_as::<_, Absence>(
+    let absences = sqlx::query_as::<_, Absence>(
         "SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE user_id=$1 AND end_date >= $2 AND start_date <= $3 ORDER BY start_date DESC"
-    ).bind(u.id).bind(from).bind(to).fetch_all(&s.pool).await?;
-    Ok(Json(r))
+    ).bind(requester.id).bind(from).bind(to).fetch_all(&app_state.pool).await?;
+    Ok(Json(absences))
 }
 
 #[derive(Deserialize)]
@@ -127,35 +128,35 @@ pub struct AllQuery {
 }
 
 pub async fn list_all(
-    State(s): State<AppState>,
-    u: User,
-    Query(q): Query<AllQuery>,
+    State(app_state): State<AppState>,
+    requester: User,
+    Query(query): Query<AllQuery>,
 ) -> AppResult<Json<Vec<Absence>>> {
-    if !u.is_lead() {
+    if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
     let mut builder = QueryBuilder::<Postgres>::new("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE TRUE");
     // Team leads only see absences from their direct reports; admins see all.
-    if !u.is_admin() {
+    if !requester.is_admin() {
         builder
             .push(" AND user_id IN (SELECT id FROM users WHERE approver_id = ")
-            .push_bind(u.id)
+            .push_bind(requester.id)
             .push(" AND role != 'admin')");
     }
-    if let Some(v) = q.from {
-        builder.push(" AND end_date >= ").push_bind(v);
+    if let Some(from_date) = query.from {
+        builder.push(" AND end_date >= ").push_bind(from_date);
     }
-    if let Some(v) = q.to {
-        builder.push(" AND start_date <= ").push_bind(v);
+    if let Some(to_date) = query.to {
+        builder.push(" AND start_date <= ").push_bind(to_date);
     }
-    if let Some(v) = q.status {
-        builder.push(" AND status = ").push_bind(v);
+    if let Some(status_filter) = query.status {
+        builder.push(" AND status = ").push_bind(status_filter);
     }
     builder.push(" ORDER BY start_date DESC");
     Ok(Json(
         builder
             .build_query_as::<Absence>()
-            .fetch_all(&s.pool)
+            .fetch_all(&app_state.pool)
             .await?,
     ))
 }
@@ -212,28 +213,24 @@ async fn calendar_scope_user_ids(
 }
 
 pub async fn calendar(
-    State(s): State<AppState>,
-    u: User,
-    Query(q): Query<MonthQuery>,
+    State(app_state): State<AppState>,
+    requester: User,
+    Query(query): Query<MonthQuery>,
 ) -> AppResult<Json<Vec<serde_json::Value>>> {
-    let parts: Vec<&str> = q.month.split('-').collect();
-    if parts.len() != 2 {
-        return Err(AppError::BadRequest("month=YYYY-MM required".into()));
-    }
-    let year: i32 = parts[0]
-        .parse()
-        .map_err(|_| AppError::BadRequest("Invalid year".into()))?;
-    let month: u32 = parts[1]
-        .parse()
-        .map_err(|_| AppError::BadRequest("Invalid month".into()))?;
-    let from = NaiveDate::from_ymd_opt(year, month, 1)
-        .ok_or_else(|| AppError::BadRequest("Invalid date".into()))?;
-    let to = if month == 12 {
+    // Parse the "YYYY-MM" month string into year and month components.
+    let (year_str, month_str) = query.month.split_once('-').ok_or_else(|| AppError::BadRequest("month=YYYY-MM required".into()))?;
+    let year: i32 = year_str.parse().map_err(|_| AppError::BadRequest("Invalid year".into()))?;
+    let month: u32 = month_str.parse().map_err(|_| AppError::BadRequest("Invalid month".into()))?;
+    let from = NaiveDate::from_ymd_opt(year, month, 1).ok_or_else(|| AppError::BadRequest("Invalid date".into()))?;
+    // Last day of the month: step to first of next month and subtract one day.
+    let next_month_first = if month == 12 {
         NaiveDate::from_ymd_opt(year + 1, 1, 1).unwrap()
     } else {
         NaiveDate::from_ymd_opt(year, month + 1, 1).unwrap()
-    } - Duration::days(1);
-    let scope_user_ids = calendar_scope_user_ids(&s.pool, &u).await?;
+    };
+    let to = next_month_first - Duration::days(1);
+    // Determine which user IDs this requester is allowed to see (scope restriction).
+    let scope_user_ids = calendar_scope_user_ids(&app_state.pool, &requester).await?;
     let mut builder = QueryBuilder::<Postgres>::new(
         "SELECT a.id, a.user_id, u.first_name, u.last_name, a.kind, a.start_date, a.end_date, a.comment, a.status FROM absences a JOIN users u ON u.id=a.user_id WHERE a.status IN ('requested','approved') AND a.end_date >= ",
     );
@@ -249,26 +246,26 @@ pub async fn calendar(
         separated.push_unseparated(")");
     }
     builder.push(" ORDER BY a.start_date");
-    let rows = builder
+    let calendar_entries = builder
         .build_query_as::<CalendarEntry>()
-        .fetch_all(&s.pool)
+        .fetch_all(&app_state.pool)
         .await?;
-    let lead = u.is_lead();
+    let requester_is_lead = requester.is_lead();
     // Privacy: only team leads / admins see the actual absence kind. For peers
     // we collapse to a coarse label so that sensitive categories (sick leave —
     // health data under GDPR Art. 9 — training, special leave, unpaid leave)
     // are not disclosed across the team. Vacation stays visible because it is
     // operationally needed to coordinate cover and is not health-related.
-    Ok(Json(rows.into_iter().map(|e| {
-        let own = e.user_id == u.id;
-        let kind_visible = lead || own || e.kind == "vacation";
-        let kind_out = if kind_visible { e.kind.clone() } else { "absent".to_string() };
+    Ok(Json(calendar_entries.into_iter().map(|entry| {
+        let is_own_entry = entry.user_id == requester.id;
+        let kind_is_visible = requester_is_lead || is_own_entry || entry.kind == "vacation";
+        let displayed_kind = if kind_is_visible { entry.kind.clone() } else { "absent".to_string() };
         serde_json::json!({
-            "id": e.id, "user_id": e.user_id, "name": format!("{} {}", e.first_name, e.last_name),
-            "kind": kind_out,
-            "start_date": e.start_date, "end_date": e.end_date,
-            "status": e.status,
-            "comment": if lead || own { e.comment.clone() } else { None }
+            "id": entry.id, "user_id": entry.user_id, "name": format!("{} {}", entry.first_name, entry.last_name),
+            "kind": displayed_kind,
+            "start_date": entry.start_date, "end_date": entry.end_date,
+            "status": entry.status,
+            "comment": if requester_is_lead || is_own_entry { entry.comment.clone() } else { None }
         })
     }).collect()))
 }
@@ -378,14 +375,14 @@ async fn absence_owner_id(pool: &crate::db::DatabasePool, absence_id: i64) -> Ap
 }
 
 pub async fn create(
-    State(s): State<AppState>,
-    u: User,
-    Json(b): Json<NewAbsence>,
+    State(app_state): State<AppState>,
+    requester: User,
+    Json(body): Json<NewAbsence>,
 ) -> AppResult<Json<Absence>> {
-    let kind = validate_absence(&b)?;
-    validate_sick_start_date(kind, b.start_date)?;
+    let kind = validate_absence(&body)?;
+    validate_sick_start_date(kind, body.start_date)?;
     // Reject absences that start before the user's start_date.
-    if b.start_date < u.start_date {
+    if body.start_date < requester.start_date {
         return Err(AppError::BadRequest(
             "Absence start date is before user start date.".into(),
         ));
@@ -393,328 +390,123 @@ pub async fn create(
     // Use an advisory lock on the user_id to serialize absence creation per
     // user, preventing the TOCTOU race where two concurrent requests both pass
     // the overlap check before either insert commits.
-    let mut tx = s.pool.begin().await?;
-    lock_absence_scope(&mut *tx, u.id).await?;
-    let overlap: i64 = sqlx::query_scalar(
+    let mut tx = app_state.pool.begin().await?;
+    lock_absence_scope(&mut *tx, requester.id).await?;
+    let overlap_count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM absences WHERE user_id=$1 AND status IN ('requested','approved') AND end_date >= $2 AND start_date <= $3"
-    ).bind(u.id).bind(b.start_date).bind(b.end_date).fetch_one(&mut *tx).await?;
-    if overlap > 0 {
+    ).bind(requester.id).bind(body.start_date).bind(body.end_date).fetch_one(&mut *tx).await?;
+    if overlap_count > 0 {
         return Err(AppError::Conflict("Overlap with existing absence.".into()));
     }
-    ensure_no_logged_time_conflict(&mut *tx, u.id, kind, b.start_date, b.end_date).await?;
+    ensure_no_logged_time_conflict(&mut *tx, requester.id, kind, body.start_date, body.end_date).await?;
     // Validate vacation balance: user cannot request more vacation than available.
     if kind == "vacation" {
-        let year = b.start_date.year();
-        let year_from = NaiveDate::from_ymd_opt(year, 1, 1).unwrap();
-        let year_to = NaiveDate::from_ymd_opt(year, 12, 31).unwrap();
-        let today = chrono::Local::now().date_naive();
-
-        let entitled = effective_annual_days(&s.pool, &u, year).await?;
-        let year_start = NaiveDate::from_ymd_opt(year, 1, 1).unwrap();
-        let year_end = NaiveDate::from_ymd_opt(year, 12, 31).unwrap();
-        let effective_entitlement = if u.start_date > year_start && u.start_date <= year_end {
-            let months_remaining = (13 - u.start_date.month()) as f64;
-            ((entitled as f64) * months_remaining / 12.0).ceil() as i64
-        } else {
-            entitled
-        };
-
-        // Carryover
-        let expiry_setting =
-            crate::settings::load_setting(&s.pool, "carryover_expiry_date", "03-31").await?;
-        let expiry_date = parse_expiry_date(&expiry_setting, year);
-        let carryover_expired = expiry_date.map(|d| today > d).unwrap_or(false);
-        let prev_year = year - 1;
-        let prev_entitled = effective_annual_days(&s.pool, &u, prev_year).await?;
-        let prev_year_start = NaiveDate::from_ymd_opt(prev_year, 1, 1).unwrap();
-        let prev_year_end = NaiveDate::from_ymd_opt(prev_year, 12, 31).unwrap();
-        let prev_effective = if u.start_date > prev_year_start && u.start_date <= prev_year_end {
-            let m = (13 - u.start_date.month()) as f64;
-            ((prev_entitled as f64) * m / 12.0).ceil() as i64
-        } else if u.start_date > prev_year_end {
-            0
-        } else {
-            prev_entitled
-        };
-        let prev_taken =
-            workdays_total(&s.pool, u.id, "vacation", prev_year_start, prev_year_end).await?;
-        let carryover_days = std::cmp::max(0, prev_effective - prev_taken.ceil() as i64);
-        let total_entitlement = if carryover_expired {
-            effective_entitlement as f64
-        } else {
-            effective_entitlement as f64 + carryover_days as f64
-        };
-
-        // Sum existing vacation usage (requested + approved) in this year.
-        let existing: Vec<(NaiveDate, NaiveDate)> = sqlx::query_as(
-            "SELECT start_date, end_date FROM absences WHERE user_id=$1 AND kind='vacation' AND status IN ('requested','approved') AND end_date >= $2 AND start_date <= $3"
-        ).bind(u.id).bind(year_from).bind(year_to).fetch_all(&mut *tx).await?;
-        let mut used = 0.0;
-        for (sd, ed) in &existing {
-            let s2 = std::cmp::max(*sd, year_from);
-            let e2 = std::cmp::min(*ed, year_to);
-            used += workdays(&s.pool, s2, e2).await?;
-        }
-        // Add the new request's days.
-        let new_s = std::cmp::max(b.start_date, year_from);
-        let new_e = std::cmp::min(b.end_date, year_to);
-        let new_days = workdays(&s.pool, new_s, new_e).await?;
-        if used + new_days > total_entitlement {
-            return Err(AppError::BadRequest(
-                "Not enough remaining vacation days.".into(),
-            ));
-        }
-        // Validate end year separately when the absence spans two calendar years.
-        let end_year = b.end_date.year();
-        if end_year != year {
-            let ey_from = NaiveDate::from_ymd_opt(end_year, 1, 1).unwrap();
-            let ey_to = NaiveDate::from_ymd_opt(end_year, 12, 31).unwrap();
-
-            let ey_entitled = effective_annual_days(&s.pool, &u, end_year).await?;
-            let ey_effective = if u.start_date > ey_from && u.start_date <= ey_to {
-                let m = (13 - u.start_date.month()) as f64;
-                ((ey_entitled as f64) * m / 12.0).ceil() as i64
-            } else if u.start_date > ey_to {
-                0
-            } else {
-                ey_entitled
-            };
-
-            let ey_expiry_date = parse_expiry_date(&expiry_setting, end_year);
-            let ey_carryover_expired = ey_expiry_date.map(|d| today > d).unwrap_or(false);
-            // Carryover into end_year comes from start_year (which is year).
-            let cy_taken =
-                workdays_total(&s.pool, u.id, "vacation", year_from, year_to).await?;
-            let cy_carryover = std::cmp::max(0, effective_entitlement - cy_taken.ceil() as i64);
-            let ey_total = if ey_carryover_expired {
-                ey_effective as f64
-            } else {
-                ey_effective as f64 + cy_carryover as f64
-            };
-
-            let ey_existing: Vec<(NaiveDate, NaiveDate)> = sqlx::query_as(
-                "SELECT start_date, end_date FROM absences WHERE user_id=$1 AND kind='vacation' AND status IN ('requested','approved') AND end_date >= $2 AND start_date <= $3"
-            ).bind(u.id).bind(ey_from).bind(ey_to).fetch_all(&mut *tx).await?;
-            let mut ey_used = 0.0;
-            for (sd, ed) in &ey_existing {
-                let s2 = std::cmp::max(*sd, ey_from);
-                let e2 = std::cmp::min(*ed, ey_to);
-                ey_used += workdays(&s.pool, s2, e2).await?;
-            }
-            let ey_new_s = std::cmp::max(b.start_date, ey_from);
-            let ey_new_e = std::cmp::min(b.end_date, ey_to);
-            let ey_new_days = workdays(&s.pool, ey_new_s, ey_new_e).await?;
-            if ey_used + ey_new_days > ey_total {
-                return Err(AppError::BadRequest(
-                    "Not enough remaining vacation days.".into(),
-                ));
-            }
-        }
+        validate_vacation_balance(&app_state.pool, &mut *tx, &requester, body.start_date, body.end_date, None).await?;
     }
     // Sick leave is auto-approved only when it has already started (or starts today).
     // Future-dated sick leave requires review like any other request.
     let today_date = chrono::Local::now().date_naive();
-    let status = if kind == "sick" && b.start_date <= today_date {
+    let initial_status = if kind == "sick" && body.start_date <= today_date {
         "approved"
     } else {
         "requested"
     };
-    let id: i64 = sqlx::query_scalar("INSERT INTO absences(user_id, kind, start_date, end_date, comment, status) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id")
-        .bind(u.id).bind(kind).bind(b.start_date).bind(b.end_date).bind(&b.comment).bind(status)
+    let new_absence_id: i64 = sqlx::query_scalar("INSERT INTO absences(user_id, kind, start_date, end_date, comment, status) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id")
+        .bind(requester.id).bind(kind).bind(body.start_date).bind(body.end_date).bind(&body.comment).bind(initial_status)
         .fetch_one(&mut *tx).await?;
     tx.commit().await?;
-    let a: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1")
-        .bind(id)
-        .fetch_one(&s.pool)
+    let created_absence: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1")
+        .bind(new_absence_id)
+        .fetch_one(&app_state.pool)
         .await?;
     audit::log(
-        &s.pool,
-        u.id,
+        &app_state.pool,
+        requester.id,
         "created",
         "absences",
-        id,
+        new_absence_id,
         None,
-        Some(serde_json::to_value(&a).unwrap()),
+        Some(serde_json::to_value(&created_absence).unwrap()),
     )
     .await;
-    if a.status == "requested" {
-        let requester_name = format!("{} {}", u.first_name, u.last_name);
-        let recipients = crate::auth::approval_recipient_ids(&s.pool, &u).await;
-        let language = notification_language(&s.pool).await;
-        for recipient_id in recipients {
+    if created_absence.status == "requested" {
+        // Notify approvers that a new absence request needs review.
+        let requester_full_name = format!("{} {}", requester.first_name, requester.last_name);
+        let approver_ids = crate::auth::approval_recipient_ids(&app_state.pool, &requester).await;
+        let language = notification_language(&app_state.pool).await;
+        for approver_id in approver_ids {
             crate::notifications::create_translated(
-                &s,
+                &app_state,
                 &language,
-                recipient_id,
+                approver_id,
                 "absence_requested",
                 "absence_requested_title",
                 "absence_requested_body",
                 vec![
-                    ("requester_name", requester_name.clone()),
-                    ("start_date", i18n::format_date(&language, a.start_date)),
-                    ("end_date", i18n::format_date(&language, a.end_date)),
+                    ("requester_name", requester_full_name.clone()),
+                    ("start_date", i18n::format_date(&language, created_absence.start_date)),
+                    ("end_date", i18n::format_date(&language, created_absence.end_date)),
                 ],
                 Some("absences"),
-                Some(id),
+                Some(new_absence_id),
             )
             .await;
         }
     }
-    Ok(Json(a))
+    Ok(Json(created_absence))
 }
 
 pub async fn update(
-    State(s): State<AppState>,
-    u: User,
-    Path(id): Path<i64>,
-    Json(b): Json<NewAbsence>,
+    State(app_state): State<AppState>,
+    requester: User,
+    Path(absence_id): Path<i64>,
+    Json(body): Json<NewAbsence>,
 ) -> AppResult<Json<Absence>> {
-    let kind = validate_absence(&b)?;
-    validate_sick_start_date(kind, b.start_date)?;
-    // Reject absences that start before the user's start_date.
-    if b.start_date < u.start_date {
+    let kind = validate_absence(&body)?;
+    validate_sick_start_date(kind, body.start_date)?;
+    // Reject absences that start before the user's employment start date.
+    if body.start_date < requester.start_date {
         return Err(AppError::BadRequest(
             "Absence start date is before user start date.".into(),
         ));
     }
-    let prev_owner = absence_owner_id(&s.pool, id).await?;
-    let mut tx = s.pool.begin().await?;
-    lock_absence_scope(&mut *tx, prev_owner).await?;
-    let prev: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1 FOR UPDATE")
-        .bind(id)
+    let current_owner_id = absence_owner_id(&app_state.pool, absence_id).await?;
+    let mut tx = app_state.pool.begin().await?;
+    lock_absence_scope(&mut *tx, current_owner_id).await?;
+    let absence_before_update: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1 FOR UPDATE")
+        .bind(absence_id)
         .fetch_one(&mut *tx)
         .await?;
-    if prev.user_id != u.id {
+    if absence_before_update.user_id != requester.id {
         return Err(AppError::Forbidden);
     }
-    if prev.status != "requested" {
+    if absence_before_update.status != "requested" {
         return Err(AppError::BadRequest("Cannot edit.".into()));
     }
     // Sick absences must remain sick: changing kind is never allowed.
-    if prev.kind == "sick" && b.kind != "sick" {
+    if absence_before_update.kind == "sick" && body.kind != "sick" {
         return Err(AppError::BadRequest(
             "Sick absences cannot change type.".into(),
         ));
     }
     // Re-check overlap with *other* absences of the same user (under advisory
     // lock to prevent TOCTOU race).
-    let overlap: i64 = sqlx::query_scalar(
+    let overlap_count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM absences WHERE id != $1 AND user_id=$2 AND status IN ('requested','approved') AND end_date >= $3 AND start_date <= $4",
     )
-    .bind(id).bind(u.id).bind(b.start_date).bind(b.end_date)
+    .bind(absence_id).bind(requester.id).bind(body.start_date).bind(body.end_date)
     .fetch_one(&mut *tx).await?;
-    if overlap > 0 {
+    if overlap_count > 0 {
         return Err(AppError::Conflict("Overlap with existing absence.".into()));
     }
-    ensure_no_logged_time_conflict(&mut *tx, u.id, kind, b.start_date, b.end_date).await?;
+    ensure_no_logged_time_conflict(&mut *tx, requester.id, kind, body.start_date, body.end_date).await?;
     // Validate vacation balance (excluding the current absence being edited).
     if kind == "vacation" {
-        let year = b.start_date.year();
-        let year_from = NaiveDate::from_ymd_opt(year, 1, 1).unwrap();
-        let year_to = NaiveDate::from_ymd_opt(year, 12, 31).unwrap();
-        let today = chrono::Local::now().date_naive();
-
-        let entitled = effective_annual_days(&s.pool, &u, year).await?;
-        let year_start = NaiveDate::from_ymd_opt(year, 1, 1).unwrap();
-        let year_end = NaiveDate::from_ymd_opt(year, 12, 31).unwrap();
-        let effective_entitlement = if u.start_date > year_start && u.start_date <= year_end {
-            let months_remaining = (13 - u.start_date.month()) as f64;
-            ((entitled as f64) * months_remaining / 12.0).ceil() as i64
-        } else {
-            entitled
-        };
-
-        let expiry_setting =
-            crate::settings::load_setting(&s.pool, "carryover_expiry_date", "03-31").await?;
-        let expiry_date = parse_expiry_date(&expiry_setting, year);
-        let carryover_expired = expiry_date.map(|d| today > d).unwrap_or(false);
-        let prev_year = year - 1;
-        let prev_entitled = effective_annual_days(&s.pool, &u, prev_year).await?;
-        let prev_year_start = NaiveDate::from_ymd_opt(prev_year, 1, 1).unwrap();
-        let prev_year_end = NaiveDate::from_ymd_opt(prev_year, 12, 31).unwrap();
-        let prev_effective = if u.start_date > prev_year_start && u.start_date <= prev_year_end {
-            let m = (13 - u.start_date.month()) as f64;
-            ((prev_entitled as f64) * m / 12.0).ceil() as i64
-        } else if u.start_date > prev_year_end {
-            0
-        } else {
-            prev_entitled
-        };
-        let prev_taken =
-            workdays_total(&s.pool, u.id, "vacation", prev_year_start, prev_year_end).await?;
-        let carryover_days = std::cmp::max(0, prev_effective - prev_taken.ceil() as i64);
-        let total_entitlement = if carryover_expired {
-            effective_entitlement as f64
-        } else {
-            effective_entitlement as f64 + carryover_days as f64
-        };
-
-        // Exclude the current absence being edited.
-        let existing: Vec<(NaiveDate, NaiveDate)> = sqlx::query_as(
-            "SELECT start_date, end_date FROM absences WHERE id != $1 AND user_id=$2 AND kind='vacation' AND status IN ('requested','approved') AND end_date >= $3 AND start_date <= $4"
-        ).bind(id).bind(u.id).bind(year_from).bind(year_to).fetch_all(&mut *tx).await?;
-        let mut used = 0.0;
-        for (sd, ed) in &existing {
-            let s2 = std::cmp::max(*sd, year_from);
-            let e2 = std::cmp::min(*ed, year_to);
-            used += workdays(&s.pool, s2, e2).await?;
-        }
-        let new_s = std::cmp::max(b.start_date, year_from);
-        let new_e = std::cmp::min(b.end_date, year_to);
-        let new_days = workdays(&s.pool, new_s, new_e).await?;
-        if used + new_days > total_entitlement {
-            return Err(AppError::BadRequest(
-                "Not enough remaining vacation days.".into(),
-            ));
-        }
-        // Validate end year separately when the absence spans two calendar years.
-        let end_year = b.end_date.year();
-        if end_year != year {
-            let ey_from = NaiveDate::from_ymd_opt(end_year, 1, 1).unwrap();
-            let ey_to = NaiveDate::from_ymd_opt(end_year, 12, 31).unwrap();
-
-            let ey_entitled = effective_annual_days(&s.pool, &u, end_year).await?;
-            let ey_effective = if u.start_date > ey_from && u.start_date <= ey_to {
-                let m = (13 - u.start_date.month()) as f64;
-                ((ey_entitled as f64) * m / 12.0).ceil() as i64
-            } else if u.start_date > ey_to {
-                0
-            } else {
-                ey_entitled
-            };
-
-            let ey_expiry_date = parse_expiry_date(&expiry_setting, end_year);
-            let ey_carryover_expired = ey_expiry_date.map(|d| today > d).unwrap_or(false);
-            let cy_taken =
-                workdays_total(&s.pool, u.id, "vacation", year_from, year_to).await?;
-            let cy_carryover = std::cmp::max(0, effective_entitlement - cy_taken.ceil() as i64);
-            let ey_total = if ey_carryover_expired {
-                ey_effective as f64
-            } else {
-                ey_effective as f64 + cy_carryover as f64
-            };
-
-            let ey_existing: Vec<(NaiveDate, NaiveDate)> = sqlx::query_as(
-                "SELECT start_date, end_date FROM absences WHERE id != $1 AND user_id=$2 AND kind='vacation' AND status IN ('requested','approved') AND end_date >= $3 AND start_date <= $4"
-            ).bind(id).bind(u.id).bind(ey_from).bind(ey_to).fetch_all(&mut *tx).await?;
-            let mut ey_used = 0.0;
-            for (sd, ed) in &ey_existing {
-                let s2 = std::cmp::max(*sd, ey_from);
-                let e2 = std::cmp::min(*ed, ey_to);
-                ey_used += workdays(&s.pool, s2, e2).await?;
-            }
-            let ey_new_s = std::cmp::max(b.start_date, ey_from);
-            let ey_new_e = std::cmp::min(b.end_date, ey_to);
-            let ey_new_days = workdays(&s.pool, ey_new_s, ey_new_e).await?;
-            if ey_used + ey_new_days > ey_total {
-                return Err(AppError::BadRequest(
-                    "Not enough remaining vacation days.".into(),
-                ));
-            }
-        }
+        validate_vacation_balance(&app_state.pool, &mut *tx, &requester, body.start_date, body.end_date, Some(absence_id)).await?;
     }
+    // Sick leave already started today is auto-approved; future-dated requires review.
     let today_date = chrono::Local::now().date_naive();
-    let status = if kind == "sick" && b.start_date <= today_date {
+    let updated_status = if kind == "sick" && body.start_date <= today_date {
         "approved"
     } else {
         "requested"
@@ -723,29 +515,29 @@ pub async fn update(
         "UPDATE absences SET kind=$1, start_date=$2, end_date=$3, comment=$4, status=$5, reviewed_by=NULL, reviewed_at=NULL, rejection_reason=NULL WHERE id=$6",
     )
     .bind(kind)
-    .bind(b.start_date)
-    .bind(b.end_date)
-    .bind(&b.comment)
-    .bind(status)
-    .bind(id)
+    .bind(body.start_date)
+    .bind(body.end_date)
+    .bind(&body.comment)
+    .bind(updated_status)
+    .bind(absence_id)
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
-    let next: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1")
-        .bind(id)
-        .fetch_one(&s.pool)
+    let absence_after_update: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1")
+        .bind(absence_id)
+        .fetch_one(&app_state.pool)
         .await?;
     audit::log(
-        &s.pool,
-        u.id,
+        &app_state.pool,
+        requester.id,
         "updated",
         "absences",
-        id,
-        Some(serde_json::to_value(&prev).unwrap()),
-        Some(serde_json::to_value(&next).unwrap()),
+        absence_id,
+        Some(serde_json::to_value(&absence_before_update).unwrap()),
+        Some(serde_json::to_value(&absence_after_update).unwrap()),
     )
     .await;
-    Ok(Json(next))
+    Ok(Json(absence_after_update))
 }
 
 fn can_self_cancel(absence: &Absence) -> bool {
@@ -754,37 +546,38 @@ fn can_self_cancel(absence: &Absence) -> bool {
 }
 
 pub async fn cancel(
-    State(s): State<AppState>,
-    u: User,
-    Path(id): Path<i64>,
+    State(app_state): State<AppState>,
+    requester: User,
+    Path(absence_id): Path<i64>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let owner_id = absence_owner_id(&s.pool, id).await?;
-    let mut tx = s.pool.begin().await?;
+    let owner_id = absence_owner_id(&app_state.pool, absence_id).await?;
+    let mut tx = app_state.pool.begin().await?;
     lock_absence_scope(&mut *tx, owner_id).await?;
-    let a: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1 FOR UPDATE")
-        .bind(id)
+    // Lock the absence row to prevent concurrent cancellations.
+    let absence: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1 FOR UPDATE")
+        .bind(absence_id)
         .fetch_one(&mut *tx)
         .await?;
-    if a.user_id != u.id {
+    if absence.user_id != requester.id {
         return Err(AppError::Forbidden);
     }
-    if !can_self_cancel(&a) {
+    if !can_self_cancel(&absence) {
         return Err(AppError::BadRequest(
             "Only requested or auto-approved sick absences can be self-cancelled.".into(),
         ));
     }
     sqlx::query("UPDATE absences SET status='cancelled' WHERE id=$1")
-        .bind(id)
+        .bind(absence_id)
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
     audit::log(
-        &s.pool,
-        u.id,
+        &app_state.pool,
+        requester.id,
         "cancelled",
         "absences",
-        id,
-        Some(serde_json::to_value(&a).unwrap()),
+        absence_id,
+        Some(serde_json::to_value(&absence).unwrap()),
         Some(serde_json::json!({"status": "cancelled"})),
     )
     .await;
@@ -792,94 +585,98 @@ pub async fn cancel(
 }
 
 pub async fn approve(
-    State(s): State<AppState>,
-    u: User,
-    Path(id): Path<i64>,
+    State(app_state): State<AppState>,
+    requester: User,
+    Path(absence_id): Path<i64>,
 ) -> AppResult<Json<serde_json::Value>> {
-    if !u.is_lead() {
+    if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let owner_id = absence_owner_id(&s.pool, id).await?;
-    let mut tx = s.pool.begin().await?;
+    let owner_id = absence_owner_id(&app_state.pool, absence_id).await?;
+    let mut tx = app_state.pool.begin().await?;
     lock_absence_scope(&mut *tx, owner_id).await?;
-    let a: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1 FOR UPDATE")
-        .bind(id)
+    // Lock the absence row to prevent concurrent approvals.
+    let absence: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1 FOR UPDATE")
+        .bind(absence_id)
         .fetch_one(&mut *tx)
         .await?;
     // A lead may not approve their own absence; admins may.
-    if a.user_id == u.id && !u.is_admin() {
+    if absence.user_id == requester.id && !requester.is_admin() {
         return Err(AppError::Forbidden);
     }
     // Non-admin leads may only act on absences of their direct reports.
-    if !u.is_admin() {
-        let is_report: Option<bool> = sqlx::query_scalar(
+    if !requester.is_admin() {
+        let is_direct_report: Option<bool> = sqlx::query_scalar(
             "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2 AND role != 'admin' FOR UPDATE",
         )
-        .bind(a.user_id)
-        .bind(u.id)
+        .bind(absence.user_id)
+        .bind(requester.id)
         .fetch_optional(&mut *tx)
         .await?;
-        if is_report.is_none() {
+        if is_direct_report.is_none() {
             return Err(AppError::Forbidden);
         }
     }
-    if a.status != "requested" {
+    if absence.status != "requested" {
         return Err(AppError::BadRequest(
             "Only requested absences can be approved.".into(),
         ));
     }
-    ensure_no_logged_time_conflict(&mut *tx, a.user_id, &a.kind, a.start_date, a.end_date).await?;
-    let updated = sqlx::query(
+    ensure_no_logged_time_conflict(&mut *tx, absence.user_id, &absence.kind, absence.start_date, absence.end_date).await?;
+    // Use optimistic locking: check that status is still 'requested' in the UPDATE.
+    let rows_updated = sqlx::query(
         "UPDATE absences SET status='approved', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP WHERE id=$2 AND status='requested'",
     )
-    .bind(u.id)
-    .bind(id)
+    .bind(requester.id)
+    .bind(absence_id)
     .execute(&mut *tx)
     .await?
     .rows_affected();
-    if updated == 0 {
+    if rows_updated == 0 {
         return Err(AppError::Conflict(
             "Absence was already reviewed by someone else.".into(),
         ));
     }
     tx.commit().await?;
-    let before = serde_json::to_value(&a).unwrap();
-    let after = serde_json::json!({"status": "approved", "reviewed_by": u.id});
+    let before_json = serde_json::to_value(&absence).unwrap();
+    let after_json = serde_json::json!({"status": "approved", "reviewed_by": requester.id});
     audit::log(
-        &s.pool,
-        u.id,
+        &app_state.pool,
+        requester.id,
         "approved",
         "absences",
-        id,
-        Some(before.clone()),
-        Some(after.clone()),
+        absence_id,
+        Some(before_json.clone()),
+        Some(after_json.clone()),
     )
     .await;
-    if a.user_id != u.id {
+    if absence.user_id != requester.id {
+        // Also record in the absence owner's audit trail.
         audit::log(
-            &s.pool,
-            a.user_id,
+            &app_state.pool,
+            absence.user_id,
             "approved",
             "absences",
-            id,
-            Some(before),
-            Some(after),
+            absence_id,
+            Some(before_json),
+            Some(after_json),
         )
         .await;
-        let language = notification_language(&s.pool).await;
+        // Notify the absence owner that their absence was approved.
+        let language = notification_language(&app_state.pool).await;
         crate::notifications::create_translated(
-            &s,
+            &app_state,
             &language,
-            a.user_id,
+            absence.user_id,
             "absence_approved",
             "absence_approved_title",
             "absence_approved_body",
             vec![
-                ("start_date", i18n::format_date(&language, a.start_date)),
-                ("end_date", i18n::format_date(&language, a.end_date)),
+                ("start_date", i18n::format_date(&language, absence.start_date)),
+                ("end_date", i18n::format_date(&language, absence.end_date)),
             ],
             Some("absences"),
-            Some(id),
+            Some(absence_id),
         )
         .await;
     }
@@ -892,87 +689,90 @@ pub struct RejectBody {
 }
 
 pub async fn reject(
-    State(s): State<AppState>,
-    u: User,
-    Path(id): Path<i64>,
-    Json(b): Json<RejectBody>,
+    State(app_state): State<AppState>,
+    requester: User,
+    Path(absence_id): Path<i64>,
+    Json(body): Json<RejectBody>,
 ) -> AppResult<Json<serde_json::Value>> {
-    if !u.is_lead() {
+    if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
-    if b.reason.trim().is_empty() {
+    if body.reason.trim().is_empty() {
         return Err(AppError::BadRequest("Reason required.".into()));
     }
-    let owner_id = absence_owner_id(&s.pool, id).await?;
-    let mut tx = s.pool.begin().await?;
+    let owner_id = absence_owner_id(&app_state.pool, absence_id).await?;
+    let mut tx = app_state.pool.begin().await?;
     lock_absence_scope(&mut *tx, owner_id).await?;
-    let a: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1 FOR UPDATE")
-        .bind(id)
+    // Lock the absence row to prevent concurrent rejections.
+    let absence: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1 FOR UPDATE")
+        .bind(absence_id)
         .fetch_one(&mut *tx)
         .await?;
     // A lead may not reject their own absence; admins may.
-    if a.user_id == u.id && !u.is_admin() {
+    if absence.user_id == requester.id && !requester.is_admin() {
         return Err(AppError::Forbidden);
     }
     // Non-admin leads may only act on absences of their direct reports.
-    if !u.is_admin() {
-        let is_report: Option<bool> = sqlx::query_scalar(
+    if !requester.is_admin() {
+        let is_direct_report: Option<bool> = sqlx::query_scalar(
             "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2 AND role != 'admin' FOR UPDATE",
         )
-        .bind(a.user_id)
-        .bind(u.id)
+        .bind(absence.user_id)
+        .bind(requester.id)
         .fetch_optional(&mut *tx)
         .await?;
-        if is_report.is_none() {
+        if is_direct_report.is_none() {
             return Err(AppError::Forbidden);
         }
     }
-    if a.status != "requested" {
+    if absence.status != "requested" {
         return Err(AppError::BadRequest(
             "Only requested absences can be rejected.".into(),
         ));
     }
-    let updated = sqlx::query(
+    // Use optimistic locking: check that status is still 'requested' in the UPDATE.
+    let rows_updated = sqlx::query(
         "UPDATE absences SET status='rejected', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP, rejection_reason=$2 WHERE id=$3 AND status='requested'",
     )
-    .bind(u.id)
-    .bind(&b.reason)
-    .bind(id)
+    .bind(requester.id)
+    .bind(&body.reason)
+    .bind(absence_id)
     .execute(&mut *tx)
     .await?
     .rows_affected();
-    if updated == 0 {
+    if rows_updated == 0 {
         return Err(AppError::Conflict(
             "Absence was already reviewed by someone else.".into(),
         ));
     }
     tx.commit().await?;
     audit::log(
-        &s.pool,
-        u.id,
+        &app_state.pool,
+        requester.id,
         "rejected",
         "absences",
-        id,
-        Some(serde_json::to_value(&a).unwrap()),
-        Some(serde_json::json!({"status": "rejected", "reason": b.reason})),
+        absence_id,
+        Some(serde_json::to_value(&absence).unwrap()),
+        Some(serde_json::json!({"status": "rejected", "reason": body.reason})),
     )
     .await;
-    if a.user_id != u.id {
-        let language = notification_language(&s.pool).await;
+    if absence.user_id != requester.id {
+        // Notify the absence owner that their absence was rejected.
+        let language = notification_language(&app_state.pool).await;
         crate::notifications::create_translated(
-            &s,
+            &app_state,
             &language,
-            a.user_id,
+            absence.user_id,
             "absence_rejected",
             "absence_rejected_title",
             "absence_rejected_body",
             vec![
-                ("start_date", i18n::format_date(&language, a.start_date)),
-                ("end_date", i18n::format_date(&language, a.end_date)),
-                ("reason", b.reason.clone()),
+                ("start_date", i18n::format_date(&language, absence.start_date)),
+                ("end_date", i18n::format_date(&language, absence.end_date)),
+                ("reason", body.reason.clone()),
             ],
             Some("absences"),
-            Some(id),
+            Some(absence_id),
         )
         .await;
     }
@@ -982,56 +782,58 @@ pub async fn reject(
 /// Admin-only: revoke an already-approved absence (e.g. mistaken approval).
 /// Transitions the absence to 'cancelled' with an audit trail.
 pub async fn revoke(
-    State(s): State<AppState>,
-    u: User,
-    Path(id): Path<i64>,
+    State(app_state): State<AppState>,
+    requester: User,
+    Path(absence_id): Path<i64>,
 ) -> AppResult<Json<serde_json::Value>> {
-    if !u.is_admin() {
+    if !requester.is_admin() {
         return Err(AppError::Forbidden);
     }
-    let owner_id = absence_owner_id(&s.pool, id).await?;
-    let mut tx = s.pool.begin().await?;
+    let owner_id = absence_owner_id(&app_state.pool, absence_id).await?;
+    let mut tx = app_state.pool.begin().await?;
     lock_absence_scope(&mut *tx, owner_id).await?;
-    let a: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1 FOR UPDATE")
-        .bind(id)
+    // Lock the absence row to prevent concurrent revocations.
+    let absence: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1 FOR UPDATE")
+        .bind(absence_id)
         .fetch_one(&mut *tx)
         .await?;
-    if a.status != "approved" {
+    if absence.status != "approved" {
         return Err(AppError::BadRequest(
             "Only approved absences can be revoked.".into(),
         ));
     }
     sqlx::query("UPDATE absences SET status='cancelled', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP WHERE id=$2")
-        .bind(u.id)
-        .bind(id)
+        .bind(requester.id)
+        .bind(absence_id)
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
     audit::log(
-        &s.pool,
-        u.id,
+        &app_state.pool,
+        requester.id,
         "revoked",
         "absences",
-        id,
-        Some(serde_json::to_value(&a).unwrap()),
-        Some(serde_json::json!({"status": "cancelled", "revoked_by": u.id})),
+        absence_id,
+        Some(serde_json::to_value(&absence).unwrap()),
+        Some(serde_json::json!({"status": "cancelled", "revoked_by": requester.id})),
     )
     .await;
-    if a.user_id != u.id {
-        let language = notification_language(&s.pool).await;
+    if absence.user_id != requester.id {
+        // Notify the absence owner that their absence was revoked by an admin.
+        let language = notification_language(&app_state.pool).await;
         crate::notifications::create_translated(
-            &s,
+            &app_state,
             &language,
-            a.user_id,
+            absence.user_id,
             "absence_revoked",
             "absence_revoked_title",
             "absence_revoked_body",
             vec![
-                ("start_date", i18n::format_date(&language, a.start_date)),
-                ("end_date", i18n::format_date(&language, a.end_date)),
+                ("start_date", i18n::format_date(&language, absence.start_date)),
+                ("end_date", i18n::format_date(&language, absence.end_date)),
             ],
             Some("absences"),
-            Some(id),
+            Some(absence_id),
         )
         .await;
     }
@@ -1119,92 +921,199 @@ async fn effective_annual_days(
 
 /// Parse the carryover expiry date setting (MM-DD) into a NaiveDate for the given year.
 fn parse_expiry_date(setting: &str, year: i32) -> Option<NaiveDate> {
-    let parts: Vec<&str> = setting.split('-').collect();
-    if parts.len() != 2 {
-        return None;
-    }
-    let month: u32 = parts[0].parse().ok()?;
-    let day: u32 = parts[1].parse().ok()?;
+    let (month_str, day_str) = setting.split_once('-')?;
+    let month: u32 = month_str.parse().ok()?;
+    let day: u32 = day_str.parse().ok()?;
     NaiveDate::from_ymd_opt(year, month, day)
 }
 
-pub async fn balance(
-    State(s): State<AppState>,
-    u: User,
-    Path(uid): Path<i64>,
-    Query(q): Query<BalanceQuery>,
-) -> AppResult<Json<LeaveBalance>> {
-    assert_can_access_user(&s.pool, &u, uid).await?;
-    let year = q.year.unwrap_or_else(|| chrono::Local::now().year());
-    let target: crate::auth::User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1")
-        .bind(uid)
-        .fetch_one(&s.pool)
-        .await?;
-    let from = NaiveDate::from_ymd_opt(year, 1, 1).unwrap();
-    let to = NaiveDate::from_ymd_opt(year, 12, 31).unwrap();
-    let today = chrono::Local::now().date_naive();
-    let vacations = sqlx::query_as::<_, Absence>(
-        "SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE user_id=$1 AND kind='vacation' AND status IN ('requested','approved') AND end_date >= $2 AND start_date <= $3"
-    ).bind(uid).bind(from).bind(to).fetch_all(&s.pool).await?;
-    let mut taken = 0.0;
-    let mut upcoming = 0.0;
-    let mut requested = 0.0;
-    for a in &vacations {
-        let s2 = std::cmp::max(a.start_date, from);
-        let e2 = std::cmp::min(a.end_date, to);
-        if a.status == "approved" {
-            if e2 < today {
-                taken += workdays(&s.pool, s2, e2).await?;
-            } else if s2 >= today {
-                upcoming += workdays(&s.pool, s2, e2).await?;
-            } else {
-                let yesterday = today - Duration::days(1);
-                taken += workdays(&s.pool, s2, yesterday).await?;
-                upcoming += workdays(&s.pool, today, e2).await?;
-            }
-        } else if a.status == "requested" {
-            requested += workdays(&s.pool, s2, e2).await?;
-        }
-    }
-
-    // Resolve per-year entitlement (override or default).
-    let entitled = effective_annual_days(&s.pool, &target, year).await?;
-
-    // Pro-rate entitlement for mid-year starts.
+/// Pro-rate annual leave entitlement for a user who started mid-year.
+/// Returns the full entitlement if the user was active the entire year,
+/// or zero if they hadn't started yet in `year`.
+fn pro_rate_entitlement(user_start_date: NaiveDate, year: i32, entitled: i64) -> i64 {
     let year_start = NaiveDate::from_ymd_opt(year, 1, 1).unwrap();
     let year_end = NaiveDate::from_ymd_opt(year, 12, 31).unwrap();
-    let effective_entitlement = if target.start_date > year_start && target.start_date <= year_end {
-        let months_remaining = (13 - target.start_date.month()) as f64;
+    if user_start_date > year_end {
+        0
+    } else if user_start_date > year_start {
+        let months_remaining = (13 - user_start_date.month()) as f64;
         ((entitled as f64) * months_remaining / 12.0).ceil() as i64
     } else {
         entitled
+    }
+}
+
+/// Validate that a vacation absence does not exceed the user's remaining entitlement
+/// for the affected year(s). `exclude_id` allows excluding the current absence when
+/// editing (pass `None` when creating).
+async fn validate_vacation_balance(
+    pool: &crate::db::DatabasePool,
+    tx: &mut sqlx::PgConnection,
+    user: &crate::auth::User,
+    start_date: NaiveDate,
+    end_date: NaiveDate,
+    exclude_id: Option<i64>,
+) -> AppResult<()> {
+    let year = start_date.year();
+    let year_from = NaiveDate::from_ymd_opt(year, 1, 1).unwrap();
+    let year_to = NaiveDate::from_ymd_opt(year, 12, 31).unwrap();
+    let today = chrono::Local::now().date_naive();
+
+    // Resolve effective entitlement for the start year (pro-rated if mid-year start).
+    let entitled = effective_annual_days(pool, user, year).await?;
+    let effective_entitlement = pro_rate_entitlement(user.start_date, year, entitled);
+
+    // Determine carryover from the previous year: entitlement minus days actually taken.
+    let expiry_setting = crate::settings::load_setting(pool, "carryover_expiry_date", "03-31").await?;
+    let expiry_date = parse_expiry_date(&expiry_setting, year);
+    let carryover_expired = expiry_date.map(|d| today > d).unwrap_or(false);
+    let prev_year = year - 1;
+    let prev_entitled = effective_annual_days(pool, user, prev_year).await?;
+    let prev_effective = pro_rate_entitlement(user.start_date, prev_year, prev_entitled);
+    let prev_year_start = NaiveDate::from_ymd_opt(prev_year, 1, 1).unwrap();
+    let prev_year_end = NaiveDate::from_ymd_opt(prev_year, 12, 31).unwrap();
+    let prev_taken = workdays_total(pool, user.id, "vacation", prev_year_start, prev_year_end).await?;
+    // Carryover is the unused portion of last year's entitlement (never negative).
+    let carryover_days = std::cmp::max(0, prev_effective - prev_taken.ceil() as i64);
+
+    // Total budget = this year's entitlement + unexpired carryover.
+    let total_entitlement = if carryover_expired {
+        effective_entitlement as f64
+    } else {
+        effective_entitlement as f64 + carryover_days as f64
     };
+
+    // Sum existing vacation usage (requested + approved) in this year, excluding `exclude_id`.
+    let existing_ranges: Vec<(NaiveDate, NaiveDate)> = if let Some(excl) = exclude_id {
+        sqlx::query_as(
+            "SELECT start_date, end_date FROM absences WHERE id != $1 AND user_id=$2 AND kind='vacation' AND status IN ('requested','approved') AND end_date >= $3 AND start_date <= $4"
+        ).bind(excl).bind(user.id).bind(year_from).bind(year_to).fetch_all(&mut *tx).await?
+    } else {
+        sqlx::query_as(
+            "SELECT start_date, end_date FROM absences WHERE user_id=$1 AND kind='vacation' AND status IN ('requested','approved') AND end_date >= $2 AND start_date <= $3"
+        ).bind(user.id).bind(year_from).bind(year_to).fetch_all(&mut *tx).await?
+    };
+    let mut used_days = 0.0;
+    for (s, e) in &existing_ranges {
+        // Clamp each existing absence to the current year boundary before counting workdays.
+        used_days += workdays(pool, std::cmp::max(*s, year_from), std::cmp::min(*e, year_to)).await?;
+    }
+    // Clamp the new absence to this year and check whether adding it would exceed the budget.
+    let new_start = std::cmp::max(start_date, year_from);
+    let new_end = std::cmp::min(end_date, year_to);
+    let new_days = workdays(pool, new_start, new_end).await?;
+    if used_days + new_days > total_entitlement {
+        return Err(AppError::BadRequest("Not enough remaining vacation days.".into()));
+    }
+
+    // When the absence spans New Year's Day, validate the end year's budget separately.
+    // The current year's unused entitlement becomes next year's carryover.
+    let end_year = end_date.year();
+    if end_year != year {
+        let end_year_from = NaiveDate::from_ymd_opt(end_year, 1, 1).unwrap();
+        let end_year_to = NaiveDate::from_ymd_opt(end_year, 12, 31).unwrap();
+
+        let end_year_entitled = effective_annual_days(pool, user, end_year).await?;
+        let end_year_effective = pro_rate_entitlement(user.start_date, end_year, end_year_entitled);
+
+        // Carryover into the end year = current year's entitlement minus current year's usage.
+        let end_year_expiry_date = parse_expiry_date(&expiry_setting, end_year);
+        let end_year_carryover_expired = end_year_expiry_date.map(|d| today > d).unwrap_or(false);
+        let current_year_taken = workdays_total(pool, user.id, "vacation", year_from, year_to).await?;
+        let current_year_carryover = std::cmp::max(0, effective_entitlement - current_year_taken.ceil() as i64);
+        let end_year_total = if end_year_carryover_expired {
+            end_year_effective as f64
+        } else {
+            end_year_effective as f64 + current_year_carryover as f64
+        };
+
+        let end_year_existing: Vec<(NaiveDate, NaiveDate)> = if let Some(excl) = exclude_id {
+            sqlx::query_as(
+                "SELECT start_date, end_date FROM absences WHERE id != $1 AND user_id=$2 AND kind='vacation' AND status IN ('requested','approved') AND end_date >= $3 AND start_date <= $4"
+            ).bind(excl).bind(user.id).bind(end_year_from).bind(end_year_to).fetch_all(&mut *tx).await?
+        } else {
+            sqlx::query_as(
+                "SELECT start_date, end_date FROM absences WHERE user_id=$1 AND kind='vacation' AND status IN ('requested','approved') AND end_date >= $2 AND start_date <= $3"
+            ).bind(user.id).bind(end_year_from).bind(end_year_to).fetch_all(&mut *tx).await?
+        };
+        let mut end_year_used = 0.0;
+        for (s, e) in &end_year_existing {
+            end_year_used += workdays(pool, std::cmp::max(*s, end_year_from), std::cmp::min(*e, end_year_to)).await?;
+        }
+        let end_new_start = std::cmp::max(start_date, end_year_from);
+        let end_new_end = std::cmp::min(end_date, end_year_to);
+        let end_new_days = workdays(pool, end_new_start, end_new_end).await?;
+        if end_year_used + end_new_days > end_year_total {
+            return Err(AppError::BadRequest("Not enough remaining vacation days.".into()));
+        }
+    }
+    Ok(())
+}
+
+pub async fn balance(
+    State(app_state): State<AppState>,
+    requester: User,
+    Path(target_user_id): Path<i64>,
+    Query(query): Query<BalanceQuery>,
+) -> AppResult<Json<LeaveBalance>> {
+    assert_can_access_user(&app_state.pool, &requester, target_user_id).await?;
+    // Default to the current year if none was provided.
+    let year = query.year.unwrap_or_else(|| chrono::Local::now().year());
+    let target_user: crate::auth::User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1")
+        .bind(target_user_id)
+        .fetch_one(&app_state.pool)
+        .await?;
+    let year_from = NaiveDate::from_ymd_opt(year, 1, 1).unwrap();
+    let year_to = NaiveDate::from_ymd_opt(year, 12, 31).unwrap();
+    let today = chrono::Local::now().date_naive();
+    // Load all vacation absences (requested + approved) in the given year.
+    let vacation_absences = sqlx::query_as::<_, Absence>(
+        "SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE user_id=$1 AND kind='vacation' AND status IN ('requested','approved') AND end_date >= $2 AND start_date <= $3"
+    ).bind(target_user_id).bind(year_from).bind(year_to).fetch_all(&app_state.pool).await?;
+    // Categorize each vacation absence into taken, upcoming, or requested buckets.
+    let mut taken_days = 0.0;
+    let mut upcoming_days = 0.0;
+    let mut requested_days = 0.0;
+    for absence in &vacation_absences {
+        let clamped_start = std::cmp::max(absence.start_date, year_from);
+        let clamped_end = std::cmp::min(absence.end_date, year_to);
+        if absence.status == "approved" {
+            if clamped_end < today {
+                // Absence is entirely in the past.
+                taken_days += workdays(&app_state.pool, clamped_start, clamped_end).await?;
+            } else if clamped_start >= today {
+                // Absence is entirely in the future.
+                upcoming_days += workdays(&app_state.pool, clamped_start, clamped_end).await?;
+            } else {
+                // Absence spans today: split into taken and upcoming.
+                let yesterday = today - Duration::days(1);
+                taken_days += workdays(&app_state.pool, clamped_start, yesterday).await?;
+                upcoming_days += workdays(&app_state.pool, today, clamped_end).await?;
+            }
+        } else if absence.status == "requested" {
+            requested_days += workdays(&app_state.pool, clamped_start, clamped_end).await?;
+        }
+    }
+
+    // Resolve per-year entitlement (override or default), pro-rated for mid-year starts.
+    let entitled = effective_annual_days(&app_state.pool, &target_user, year).await?;
+    let effective_entitlement = pro_rate_entitlement(target_user.start_date, year, entitled);
 
     // -- Carryover from previous year --
     let expiry_setting =
-        crate::settings::load_setting(&s.pool, "carryover_expiry_date", "03-31").await?;
+        crate::settings::load_setting(&app_state.pool, "carryover_expiry_date", "03-31").await?;
     let expiry_date = parse_expiry_date(&expiry_setting, year);
     let carryover_expired = expiry_date.map(|d| today > d).unwrap_or(false);
 
     // Previous year entitlement minus previous year's actually-taken vacation days.
     let prev_year = year - 1;
-    let prev_entitled = effective_annual_days(&s.pool, &target, prev_year).await?;
+    let prev_year_entitled = effective_annual_days(&app_state.pool, &target_user, prev_year).await?;
+    let prev_year_effective = pro_rate_entitlement(target_user.start_date, prev_year, prev_year_entitled);
     let prev_year_start = NaiveDate::from_ymd_opt(prev_year, 1, 1).unwrap();
     let prev_year_end = NaiveDate::from_ymd_opt(prev_year, 12, 31).unwrap();
-    let prev_effective =
-        if target.start_date > prev_year_start && target.start_date <= prev_year_end {
-            let months_remaining = (13 - target.start_date.month()) as f64;
-            ((prev_entitled as f64) * months_remaining / 12.0).ceil() as i64
-        } else if target.start_date > prev_year_end {
-            // User didn't exist in previous year.
-            0
-        } else {
-            prev_entitled
-        };
-    // Count vacation days actually taken (approved) in the previous year.
-    let prev_taken =
-        workdays_total(&s.pool, uid, "vacation", prev_year_start, prev_year_end).await?;
-    let carryover_days = std::cmp::max(0, prev_effective - prev_taken.ceil() as i64);
+    let prev_year_taken =
+        workdays_total(&app_state.pool, target_user_id, "vacation", prev_year_start, prev_year_end).await?;
+    let carryover_days = std::cmp::max(0, prev_year_effective - prev_year_taken.ceil() as i64);
 
     // Calculate how much of the carryover has been consumed this year.
     // Carryover is consumed first: vacation taken this year eats into carryover
@@ -1215,19 +1124,19 @@ pub async fn balance(
     } else {
         // Vacation taken this year (approved, already past) consumes carryover first.
         // Must be taken (not just requested) before expiry to count.
-        let taken_before_expiry = if let Some(exp) = expiry_date {
-            // Count approved vacation days taken (end_date < today) within [jan1, expiry_date].
-            let cutoff = std::cmp::min(exp, today);
-            if cutoff >= from {
+        let taken_before_expiry = if let Some(expiry) = expiry_date {
+            // Count approved vacation days taken within [jan1, expiry_date].
+            let cutoff = std::cmp::min(expiry, today);
+            if cutoff >= year_from {
                 let mut sum = 0.0;
-                for a in &vacations {
-                    if a.status != "approved" {
+                for absence in &vacation_absences {
+                    if absence.status != "approved" {
                         continue;
                     }
-                    let s2 = std::cmp::max(a.start_date, from);
-                    let e2 = std::cmp::min(a.end_date, cutoff);
-                    if e2 >= s2 {
-                        sum += workdays(&s.pool, s2, e2).await?;
+                    let clamped_start = std::cmp::max(absence.start_date, year_from);
+                    let clamped_end = std::cmp::min(absence.end_date, cutoff);
+                    if clamped_end >= clamped_start {
+                        sum += workdays(&app_state.pool, clamped_start, clamped_end).await?;
                     }
                 }
                 sum
@@ -1235,24 +1144,25 @@ pub async fn balance(
                 0.0
             }
         } else {
-            taken
+            // No expiry date configured: all taken days consume carryover.
+            taken_days
         };
         (carryover_days as f64 - taken_before_expiry).max(0.0)
     };
 
-    // Total available = current year entitlement + active carryover - all used/pending
+    // Total available = current year entitlement + active carryover - all used/pending.
     let total_entitlement = if carryover_expired {
         effective_entitlement as f64
     } else {
         effective_entitlement as f64 + carryover_days as f64
     };
-    let available = total_entitlement - taken - upcoming - requested;
+    let available = total_entitlement - taken_days - upcoming_days - requested_days;
 
     Ok(Json(LeaveBalance {
         annual_entitlement: effective_entitlement,
-        already_taken: taken,
-        approved_upcoming: upcoming,
-        requested,
+        already_taken: taken_days,
+        approved_upcoming: upcoming_days,
+        requested: requested_days,
         available,
         carryover_days,
         carryover_remaining,

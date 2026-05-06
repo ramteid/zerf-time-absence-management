@@ -47,25 +47,17 @@ pub struct MonthQuery {
     pub month: String,
 }
 
-fn month_bounds(m: &str) -> AppResult<(NaiveDate, NaiveDate)> {
-    let parts: Vec<&str> = m.split('-').collect();
-    if parts.len() != 2 {
-        return Err(AppError::BadRequest("month=YYYY-MM".into()));
-    }
-    let y: i32 = parts[0]
-        .parse()
-        .map_err(|_| AppError::BadRequest("year".into()))?;
-    let mo: u32 = parts[1]
-        .parse()
-        .map_err(|_| AppError::BadRequest("month".into()))?;
-    let from =
-        NaiveDate::from_ymd_opt(y, mo, 1).ok_or_else(|| AppError::BadRequest("date".into()))?;
-    let to = if mo == 12 {
-        NaiveDate::from_ymd_opt(y + 1, 1, 1).unwrap()
+fn month_bounds(month_str: &str) -> AppResult<(NaiveDate, NaiveDate)> {
+    let (year_str, month_str) = month_str.split_once('-').ok_or_else(|| AppError::BadRequest("month=YYYY-MM".into()))?;
+    let year: i32 = year_str.parse().map_err(|_| AppError::BadRequest("year".into()))?;
+    let month_num: u32 = month_str.parse().map_err(|_| AppError::BadRequest("month".into()))?;
+    let from = NaiveDate::from_ymd_opt(year, month_num, 1).ok_or_else(|| AppError::BadRequest("date".into()))?;
+    let next = if month_num == 12 {
+        NaiveDate::from_ymd_opt(year + 1, 1, 1).unwrap()
     } else {
-        NaiveDate::from_ymd_opt(y, mo + 1, 1).unwrap()
-    } - Duration::days(1);
-    Ok((from, to))
+        NaiveDate::from_ymd_opt(year, month_num + 1, 1).unwrap()
+    };
+    Ok((from, next - Duration::days(1)))
 }
 
 #[derive(Serialize)]
@@ -146,21 +138,16 @@ async fn build_range(
 
     let language = i18n::load_ui_language(pool).await?;
 
-    let h: Vec<(NaiveDate, String, Option<String>)> = sqlx::query_as(
+    let h_map: HashMap<NaiveDate, String> = sqlx::query_as::<_, (NaiveDate, String, Option<String>)>(
         "SELECT holiday_date, name, local_name FROM holidays WHERE holiday_date BETWEEN $1 AND $2",
     )
     .bind(from)
     .bind(to)
     .fetch_all(pool)
-    .await?;
-    let h: Vec<(NaiveDate, String)> = h
-        .into_iter()
-        .map(|(d, name, local_name)| {
-            let display = i18n::holiday_display_name(&language, name, local_name);
-            (d, display)
-        })
-        .collect();
-    let h_map: HashMap<NaiveDate, String> = h.into_iter().collect();
+    .await?
+    .into_iter()
+    .map(|(d, name, local_name)| (d, i18n::holiday_display_name(&language, name, local_name)))
+    .collect();
 
     let mut days: Vec<DayDetail> = vec![];
     let mut target_total = 0i64;
@@ -246,13 +233,14 @@ async fn build_month(
 }
 
 pub async fn month(
-    State(s): State<AppState>,
-    u: User,
-    Query(q): Query<MonthQuery>,
+    State(app_state): State<AppState>,
+    requester: User,
+    Query(query): Query<MonthQuery>,
 ) -> AppResult<Json<MonthReport>> {
-    let uid = q.user_id.unwrap_or(u.id);
-    assert_can_access_user(&s.pool, &u, uid).await?;
-    Ok(Json(build_month(&s.pool, uid, &q.month).await?))
+    // Default to the requester's own data if no user_id is specified.
+    let target_user_id = query.user_id.unwrap_or(requester.id);
+    assert_can_access_user(&app_state.pool, &requester, target_user_id).await?;
+    Ok(Json(build_month(&app_state.pool, target_user_id, &query.month).await?))
 }
 
 #[derive(Deserialize)]
@@ -369,18 +357,18 @@ fn csv_response(r: MonthReport, uid: i64, file_label: &str) -> AppResult<Respons
 }
 
 pub async fn month_csv(
-    State(s): State<AppState>,
-    u: User,
-    Query(q): Query<CsvQuery>,
+    State(app_state): State<AppState>,
+    requester: User,
+    Query(query): Query<CsvQuery>,
 ) -> AppResult<Response> {
-    let uid = q.user_id.unwrap_or(u.id);
-    assert_can_access_user(&s.pool, &u, uid).await?;
-    let month = q
+    let target_user_id = query.user_id.unwrap_or(requester.id);
+    assert_can_access_user(&app_state.pool, &requester, target_user_id).await?;
+    let month = query
         .month
         .as_ref()
         .ok_or_else(|| AppError::BadRequest("month=YYYY-MM".into()))?;
-    let r = build_month(&s.pool, uid, month).await?;
-    csv_response(r, uid, month)
+    let report = build_month(&app_state.pool, target_user_id, month).await?;
+    csv_response(report, target_user_id, month)
 }
 
 #[derive(Deserialize)]
@@ -391,34 +379,35 @@ pub struct RangeQuery {
 }
 
 pub async fn range(
-    State(s): State<AppState>,
-    u: User,
-    Query(q): Query<RangeQuery>,
+    State(app_state): State<AppState>,
+    requester: User,
+    Query(query): Query<RangeQuery>,
 ) -> AppResult<Json<MonthReport>> {
-    let uid = q.user_id.unwrap_or(u.id);
-    assert_can_access_user(&s.pool, &u, uid).await?;
-    validate_range(q.from, q.to)?;
-    let label = format!("{}_to_{}", q.from, q.to);
-    let r = build_range(&s.pool, uid, q.from, q.to, &label).await?;
-    Ok(Json(r))
+    let target_user_id = query.user_id.unwrap_or(requester.id);
+    assert_can_access_user(&app_state.pool, &requester, target_user_id).await?;
+    validate_range(query.from, query.to)?;
+    let label = format!("{}_to_{}", query.from, query.to);
+    let report = build_range(&app_state.pool, target_user_id, query.from, query.to, &label).await?;
+    Ok(Json(report))
 }
 
 pub async fn range_csv(
-    State(s): State<AppState>,
-    u: User,
-    Query(q): Query<CsvQuery>,
+    State(app_state): State<AppState>,
+    requester: User,
+    Query(query): Query<CsvQuery>,
 ) -> AppResult<Response> {
-    let uid = q.user_id.unwrap_or(u.id);
-    assert_can_access_user(&s.pool, &u, uid).await?;
-    let from = q
+    let target_user_id = query.user_id.unwrap_or(requester.id);
+    assert_can_access_user(&app_state.pool, &requester, target_user_id).await?;
+    let from = query
         .from
         .ok_or_else(|| AppError::BadRequest("from is required.".into()))?;
-    let to =
-        q.to.ok_or_else(|| AppError::BadRequest("to is required.".into()))?;
+    let to = query
+        .to
+        .ok_or_else(|| AppError::BadRequest("to is required.".into()))?;
     validate_range(from, to)?;
     let label = format!("{}_to_{}", from, to);
-    let r = build_range(&s.pool, uid, from, to, &label).await?;
-    csv_response(r, uid, &label)
+    let report = build_range(&app_state.pool, target_user_id, from, to, &label).await?;
+    csv_response(report, target_user_id, &label)
 }
 
 #[derive(Serialize)]
@@ -438,41 +427,41 @@ pub struct TeamQuery {
 }
 
 pub async fn team(
-    State(s): State<AppState>,
-    u: User,
-    Query(q): Query<TeamQuery>,
+    State(app_state): State<AppState>,
+    requester: User,
+    Query(query): Query<TeamQuery>,
 ) -> AppResult<Json<Vec<TeamRow>>> {
-    if !u.is_lead() {
+    if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
     // Admins see all active users; non-admin leads see only their direct reports.
-    let users: Vec<crate::auth::User> = if u.is_admin() {
+    let team_members: Vec<crate::auth::User> = if requester.is_admin() {
         sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE active=TRUE ORDER BY last_name")
-            .fetch_all(&s.pool)
+            .fetch_all(&app_state.pool)
             .await?
     } else {
         sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE active=TRUE AND approver_id=$1 AND role!='admin' ORDER BY last_name")
-            .bind(u.id)
-            .fetch_all(&s.pool)
+            .bind(requester.id)
+            .fetch_all(&app_state.pool)
             .await?
     };
-    let mut out = vec![];
-    let (from, to) = month_bounds(&q.month)?;
-    for usr in users {
-        let r = build_month(&s.pool, usr.id, &q.month).await?;
-        let vac = crate::absences::workdays_total(&s.pool, usr.id, "vacation", from, to).await?;
-        let sick = crate::absences::workdays_total(&s.pool, usr.id, "sick", from, to).await?;
-        out.push(TeamRow {
-            user_id: usr.id,
-            name: format!("{} {}", usr.first_name, usr.last_name),
-            target_min: r.target_min,
-            actual_min: r.actual_min,
-            diff_min: r.diff_min,
-            vacation_days: vac,
-            sick_days: sick,
+    let mut team_rows = vec![];
+    let (month_start, month_end) = month_bounds(&query.month)?;
+    for team_member in team_members {
+        let month_report = build_month(&app_state.pool, team_member.id, &query.month).await?;
+        let vacation_workdays = crate::absences::workdays_total(&app_state.pool, team_member.id, "vacation", month_start, month_end).await?;
+        let sick_workdays = crate::absences::workdays_total(&app_state.pool, team_member.id, "sick", month_start, month_end).await?;
+        team_rows.push(TeamRow {
+            user_id: team_member.id,
+            name: format!("{} {}", team_member.first_name, team_member.last_name),
+            target_min: month_report.target_min,
+            actual_min: month_report.actual_min,
+            diff_min: month_report.diff_min,
+            vacation_days: vacation_workdays,
+            sick_days: sick_workdays,
         });
     }
-    Ok(Json(out))
+    Ok(Json(team_rows))
 }
 
 #[derive(Deserialize)]
@@ -496,15 +485,17 @@ fn parse_report_time(raw: &str) -> AppResult<NaiveTime> {
 }
 
 pub async fn categories(
-    State(s): State<AppState>,
-    u: User,
-    Query(q): Query<CategoryQuery>,
+    State(app_state): State<AppState>,
+    requester: User,
+    Query(query): Query<CategoryQuery>,
 ) -> AppResult<Json<Vec<CategoryTotal>>> {
-    validate_range(q.from, q.to)?;
-    let uid = q.user_id;
-    if let Some(id) = uid {
-        assert_can_access_user(&s.pool, &u, id).await?;
-    } else if !u.is_lead() {
+    validate_range(query.from, query.to)?;
+    let target_user_id = query.user_id;
+    if let Some(user_id) = target_user_id {
+        // Requesting a specific user: verify access rights.
+        assert_can_access_user(&app_state.pool, &requester, user_id).await?;
+    } else if !requester.is_lead() {
+        // No specific user requested: only leads may see aggregated team data.
         return Err(AppError::Forbidden);
     }
     let mut builder = QueryBuilder::<Postgres>::new(
@@ -513,25 +504,25 @@ pub async fn categories(
          JOIN categories c ON c.id=z.category_id \
          WHERE z.status != 'rejected' AND z.entry_date BETWEEN ",
     );
-    builder.push_bind(q.from).push(" AND ").push_bind(q.to);
-    if let Some(id) = uid {
-        builder.push(" AND z.user_id = ").push_bind(id);
-    } else if !u.is_admin() {
+    builder.push_bind(query.from).push(" AND ").push_bind(query.to);
+    if let Some(user_id) = target_user_id {
+        builder.push(" AND z.user_id = ").push_bind(user_id);
+    } else if !requester.is_admin() {
         // Non-admin lead with no specific user: restrict to direct reports.
         builder
             .push(" AND z.user_id IN (SELECT id FROM users WHERE approver_id = ")
-            .push_bind(u.id)
+            .push_bind(requester.id)
             .push(" AND role != 'admin')");
     }
     let rows: Vec<(String, String, String, String)> =
-        builder.build_query_as().fetch_all(&s.pool).await?;
-    let mut totals: HashMap<(String, String), i64> = HashMap::new();
+        builder.build_query_as().fetch_all(&app_state.pool).await?;
+    let mut category_minutes_map: HashMap<(String, String), i64> = HashMap::new();
     for (category, color, start_time, end_time) in rows {
         let minutes =
             (parse_report_time(&end_time)? - parse_report_time(&start_time)?).num_minutes();
-        *totals.entry((category, color)).or_insert(0) += minutes;
+        *category_minutes_map.entry((category, color)).or_insert(0) += minutes;
     }
-    let mut out: Vec<CategoryTotal> = totals
+    let mut sorted_totals: Vec<CategoryTotal> = category_minutes_map
         .into_iter()
         .map(|((category, color), minutes)| CategoryTotal {
             category,
@@ -539,12 +530,12 @@ pub async fn categories(
             minutes,
         })
         .collect();
-    out.sort_by(|a, b| {
+    sorted_totals.sort_by(|a, b| {
         b.minutes
             .cmp(&a.minutes)
             .then_with(|| a.category.cmp(&b.category))
     });
-    Ok(Json(out))
+    Ok(Json(sorted_totals))
 }
 
 #[derive(Deserialize)]
@@ -563,13 +554,13 @@ pub struct MonthRow {
 }
 
 pub async fn overtime(
-    State(s): State<AppState>,
-    u: User,
-    Query(q): Query<OvertimeQuery>,
+    State(app_state): State<AppState>,
+    requester: User,
+    Query(query): Query<OvertimeQuery>,
 ) -> AppResult<Json<Vec<MonthRow>>> {
-    let uid = q.user_id.unwrap_or(u.id);
-    assert_can_access_user(&s.pool, &u, uid).await?;
-    let year = q.year.unwrap_or_else(|| chrono::Local::now().year());
+    let target_user_id = query.user_id.unwrap_or(requester.id);
+    assert_can_access_user(&app_state.pool, &requester, target_user_id).await?;
+    let year = query.year.unwrap_or_else(|| chrono::Local::now().year());
     let now = chrono::Local::now();
     let current_year = now.year();
     // Cap the loop so future months (with zero actuals but full targets) do not
@@ -583,46 +574,47 @@ pub async fn overtime(
         return Ok(Json(vec![]));
     };
     // Determine the user's start_date and overtime start balance.
-    let (user_start, overtime_start_balance_min): (NaiveDate, i64) =
+    let (user_start_date, overtime_start_balance_min): (NaiveDate, i64) =
         sqlx::query_as("SELECT start_date, overtime_start_balance_min FROM users WHERE id=$1")
-            .bind(uid)
-            .fetch_one(&s.pool)
+            .bind(target_user_id)
+            .fetch_one(&app_state.pool)
             .await?;
-    let start_month = if user_start.year() == year {
-        user_start.month()
-    } else if user_start.year() > year {
-        // User hasn't started yet in this year.
+    let first_month_in_year = if user_start_date.year() == year {
+        user_start_date.month()
+    } else if user_start_date.year() > year {
+        // User hasn't started yet in this year: nothing to show.
         return Ok(Json(vec![]));
     } else {
         1
     };
-    let mut out = vec![];
-    let mut cum = overtime_start_balance_min;
-    for prior_year in user_start.year()..year {
-        let prior_start_month = if prior_year == user_start.year() {
-            user_start.month()
+    let mut month_rows = vec![];
+    // Accumulate all prior-year months to seed the running overtime balance.
+    let mut cumulative_min = overtime_start_balance_min;
+    for prior_year in user_start_date.year()..year {
+        let prior_year_first_month = if prior_year == user_start_date.year() {
+            user_start_date.month()
         } else {
             1
         };
-        for prior_month in prior_start_month..=12 {
-            let mstr = format!("{:04}-{:02}", prior_year, prior_month);
-            let r = build_month(&s.pool, uid, &mstr).await?;
-            cum += r.diff_min;
+        for prior_month in prior_year_first_month..=12 {
+            let month_label = format!("{:04}-{:02}", prior_year, prior_month);
+            let month_report = build_month(&app_state.pool, target_user_id, &month_label).await?;
+            cumulative_min += month_report.diff_min;
         }
     }
-    for m in start_month..=max_month {
-        let mstr = format!("{:04}-{:02}", year, m);
-        let r = build_month(&s.pool, uid, &mstr).await?;
-        cum += r.diff_min;
-        out.push(MonthRow {
-            month: mstr,
-            target_min: r.target_min,
-            actual_min: r.actual_min,
-            diff_min: r.diff_min,
-            cumulative_min: cum,
+    for month_num in first_month_in_year..=max_month {
+        let month_label = format!("{:04}-{:02}", year, month_num);
+        let month_report = build_month(&app_state.pool, target_user_id, &month_label).await?;
+        cumulative_min += month_report.diff_min;
+        month_rows.push(MonthRow {
+            month: month_label,
+            target_min: month_report.target_min,
+            actual_min: month_report.actual_min,
+            diff_min: month_report.diff_min,
+            cumulative_min,
         });
     }
-    Ok(Json(out))
+    Ok(Json(month_rows))
 }
 
 #[derive(Deserialize)]
@@ -644,121 +636,115 @@ pub struct FlextimeDay {
 }
 
 pub async fn flextime(
-    State(s): State<AppState>,
-    u: User,
-    Query(q): Query<FlextimeQuery>,
+    State(app_state): State<AppState>,
+    requester: User,
+    Query(query): Query<FlextimeQuery>,
 ) -> AppResult<Json<Vec<FlextimeDay>>> {
-    let uid = q.user_id.unwrap_or(u.id);
-    assert_can_access_user(&s.pool, &u, uid).await?;
-    if q.from > q.to {
+    let target_user_id = query.user_id.unwrap_or(requester.id);
+    assert_can_access_user(&app_state.pool, &requester, target_user_id).await?;
+    if query.from > query.to {
         return Err(AppError::BadRequest("from must not be after to.".into()));
     }
-    if (q.to - q.from).num_days() > 366 {
+    if (query.to - query.from).num_days() > 366 {
         return Err(AppError::BadRequest(
             "Date range must not exceed 366 days.".into(),
         ));
     }
 
     let user: crate::auth::User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1")
-        .bind(uid)
-        .fetch_one(&s.pool)
+        .bind(target_user_id)
+        .fetch_one(&app_state.pool)
         .await?;
     let target_per_day_min = (user.weekly_hours / 5.0 * 60.0) as i64;
 
     // Start accumulating from the user's first day so the running balance at
-    // q.from already reflects all prior over/under-time.
-    let loop_start = user.start_date.min(q.from);
+    // query.from already reflects all prior over/under-time.
+    let loop_start = user.start_date.min(query.from);
 
-    let te: Vec<(NaiveDate, String, String, String)> = sqlx::query_as(
+    let time_entries_raw: Vec<(NaiveDate, String, String, String)> = sqlx::query_as(
         "SELECT entry_date, start_time, end_time, status \
          FROM time_entries WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3",
     )
-    .bind(uid)
+    .bind(target_user_id)
     .bind(loop_start)
-    .bind(q.to)
-    .fetch_all(&s.pool)
+    .bind(query.to)
+    .fetch_all(&app_state.pool)
     .await?;
 
-    let abs: Vec<(NaiveDate, NaiveDate, String)> = sqlx::query_as(
+    let approved_absences: Vec<(NaiveDate, NaiveDate, String)> = sqlx::query_as(
         "SELECT start_date, end_date, kind FROM absences \
          WHERE user_id=$1 AND status='approved' AND end_date >= $2 AND start_date <= $3",
     )
-    .bind(uid)
+    .bind(target_user_id)
     .bind(loop_start)
-    .bind(q.to)
-    .fetch_all(&s.pool)
+    .bind(query.to)
+    .fetch_all(&app_state.pool)
     .await?;
 
-    let language = i18n::load_ui_language(&s.pool).await?;
+    let language = i18n::load_ui_language(&app_state.pool).await?;
 
-    let h: Vec<(NaiveDate, String, Option<String>)> = sqlx::query_as(
+    let holiday_map: HashMap<NaiveDate, String> = sqlx::query_as::<_, (NaiveDate, String, Option<String>)>(
         "SELECT holiday_date, name, local_name FROM holidays WHERE holiday_date BETWEEN $1 AND $2",
     )
     .bind(loop_start)
-    .bind(q.to)
-    .fetch_all(&s.pool)
-    .await?;
-    let h_map: HashMap<NaiveDate, String> = h
-        .into_iter()
-        .map(|(d, name, local_name)| {
-            let display = i18n::holiday_display_name(&language, name, local_name);
-            (d, display)
-        })
-        .collect();
+    .bind(query.to)
+    .fetch_all(&app_state.pool)
+    .await?
+    .into_iter()
+    .map(|(date, name, local_name)| (date, i18n::holiday_display_name(&language, name, local_name)))
+    .collect();
 
     let today = chrono::Local::now().date_naive();
-    let mut out = vec![];
-    let mut cum = if loop_start < user.start_date {
+    let mut flextime_days = vec![];
+    // If loop_start is before the user's official start, begin with a zero balance
+    // and add the configured overtime start balance when the start date is reached.
+    let mut cumulative_min = if loop_start < user.start_date {
         0
     } else {
         user.overtime_start_balance_min
     };
-    let mut d = loop_start;
-    while d <= q.to {
-        if d == user.start_date && loop_start < user.start_date {
-            cum += user.overtime_start_balance_min;
+    let mut current_date = loop_start;
+    while current_date <= query.to {
+        // Inject the configured overtime start balance on the user's first day
+        // when we began iterating before that date.
+        if current_date == user.start_date && loop_start < user.start_date {
+            cumulative_min += user.overtime_start_balance_min;
         }
-        let wd = d.weekday().num_days_from_monday();
-        let weekday = wd < 5;
-        let holiday = h_map.get(&d).cloned();
-        let absence = abs
+        let day_of_week_num = current_date.weekday().num_days_from_monday();
+        let is_weekday = day_of_week_num < 5;
+        let holiday = holiday_map.get(&current_date).cloned();
+        let absence = approved_absences
             .iter()
-            .find(|(s, e, _)| d >= *s && d <= *e)
-            .map(|(_, _, k)| k.clone());
-        let before_start = d < user.start_date;
-        let after_today = d > today;
-        let target = if weekday && holiday.is_none() && !before_start && !after_today {
+            .find(|(abs_start, abs_end, _)| current_date >= *abs_start && current_date <= *abs_end)
+            .map(|(_, _, kind)| kind.clone());
+        let before_start = current_date < user.start_date;
+        let after_today = current_date > today;
+        let target = if is_weekday && holiday.is_none() && !before_start && !after_today {
             target_per_day_min
         } else {
             0
         };
         let mut actual = 0i64;
-        for (dd, b, e, st) in &te {
-            if *dd != d {
-                continue;
-            }
-            if st == "approved" {
-                let bn = parse_report_time(b)?;
-                let en = parse_report_time(e)?;
-                actual += (en - bn).num_minutes();
-            }
+        for (_, start_str, end_str, _) in time_entries_raw.iter().filter(|(d, _, _, st)| *d == current_date && st == "approved") {
+            actual += (parse_report_time(end_str)? - parse_report_time(start_str)?).num_minutes();
         }
-        let actual_eff = credited_actual_minutes(actual, target, absence.as_deref());
-        let diff = actual_eff - target;
-        cum += diff;
-        // Only emit days within the requested display range
-        if d >= q.from {
-            out.push(FlextimeDay {
-                date: d,
-                actual_min: actual_eff,
+        let credited_actual_min = credited_actual_minutes(actual, target, absence.as_deref());
+        let day_diff_min = credited_actual_min - target;
+        cumulative_min += day_diff_min;
+        // Only emit days within the requested display range (pre-range days are
+        // used only to compute the correct starting cumulative balance).
+        if current_date >= query.from {
+            flextime_days.push(FlextimeDay {
+                date: current_date,
+                actual_min: credited_actual_min,
                 target_min: target,
-                diff_min: diff,
-                cumulative_min: cum,
+                diff_min: day_diff_min,
+                cumulative_min,
                 absence,
                 holiday,
             });
         }
-        d += Duration::days(1);
+        current_date += Duration::days(1);
     }
-    Ok(Json(out))
+    Ok(Json(flextime_days))
 }

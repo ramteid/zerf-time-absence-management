@@ -10,6 +10,7 @@ use lettre::transport::smtp::authentication::Credentials;
 use lettre::transport::smtp::client::{Tls, TlsParameters};
 use lettre::{AsyncSmtpTransport, AsyncTransport, Tokio1Executor};
 use std::sync::Arc;
+use std::time::Duration;
 
 /// Send `subject` / `body_text` to `to`. Returns immediately and runs the
 /// actual SMTP transaction in a detached task. Safe to call from any async
@@ -31,6 +32,14 @@ pub fn send_async(smtp: Option<Arc<SmtpConfig>>, to: String, subject: String, bo
 pub async fn test_connection(
     cfg: &SmtpConfig,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    build_mailer(cfg, Some(Duration::from_secs(10)))?.test_connection().await?;
+    Ok(())
+}
+
+fn build_mailer(
+    cfg: &SmtpConfig,
+    timeout: Option<Duration>,
+) -> Result<AsyncSmtpTransport<Tokio1Executor>, Box<dyn std::error::Error + Send + Sync>> {
     let mut builder = match cfg.encryption.as_str() {
         "tls" => AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&cfg.host)
             .port(cfg.port)
@@ -43,11 +52,7 @@ pub async fn test_connection(
     if let (Some(u), Some(p)) = (&cfg.username, &cfg.password) {
         builder = builder.credentials(Credentials::new(u.clone(), p.clone()));
     }
-    let mailer: AsyncSmtpTransport<Tokio1Executor> = builder
-        .timeout(Some(std::time::Duration::from_secs(10)))
-        .build();
-    mailer.test_connection().await?;
-    Ok(())
+    Ok(builder.timeout(timeout).build())
 }
 
 async fn send_now(
@@ -64,20 +69,6 @@ async fn send_now(
         .subject(subject)
         .header(ContentType::TEXT_PLAIN)
         .body(body_text.to_string())?;
-
-    let mut builder = match cfg.encryption.as_str() {
-        "tls" => AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&cfg.host)
-            .port(cfg.port)
-            .tls(Tls::Wrapper(TlsParameters::new(cfg.host.clone())?)),
-        "starttls" => AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&cfg.host)
-            .port(cfg.port)
-            .tls(Tls::Required(TlsParameters::new(cfg.host.clone())?)),
-        _ => AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&cfg.host).port(cfg.port),
-    };
-    if let (Some(u), Some(p)) = (&cfg.username, &cfg.password) {
-        builder = builder.credentials(Credentials::new(u.clone(), p.clone()));
-    }
-    let mailer = builder.build();
-    mailer.send(email).await?;
+    build_mailer(cfg, None)?.send(email).await?;
     Ok(())
 }
