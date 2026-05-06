@@ -3,6 +3,7 @@
   import { api } from "../api.js";
   import { t } from "../i18n.js";
   import Icon from "../Icons.svelte";
+  import { storePasswordCredential } from "../passwordCredentials.js";
 
   // On mobile, the virtual keyboard shrinks the visual viewport but not the layout
   // viewport. By removing the fixed height and overflow lock from the root elements,
@@ -35,6 +36,7 @@
   let submitting = false;
 
   async function submit(e) {
+    const form = e.currentTarget;
     e.preventDefault();
     if (submitting) return;
     error = "";
@@ -56,7 +58,9 @@
     const hasDigit = /\d/.test(password);
     const hasSymbol = /[^a-zA-Z0-9]/.test(password);
     if ([hasLower, hasUpper, hasDigit, hasSymbol].filter(Boolean).length < 3) {
-      error = $t("Password must include at least 3 of: lowercase, uppercase, digit, symbol.");
+      error = $t(
+        "Password must include at least 3 of: lowercase, uppercase, digit, symbol.",
+      );
       return;
     }
     if (password !== confirmPassword) {
@@ -75,6 +79,7 @@
           last_name: lastName.trim(),
         },
       });
+      await storePasswordCredential(form);
       // Pass the email to the caller so the login form can pre-fill it.
       // The user will then sign in through the normal login form, which
       // browsers reliably use to detect and offer to save credentials.
@@ -102,7 +107,13 @@
     <p style="font-size:13px;color:var(--text-tertiary);margin-bottom:24px">
       {$t("Create the initial administrator account to get started.")}
     </p>
-    <form on:submit={submit}>
+    <form
+      name="setup"
+      method="post"
+      action="/api/v1/auth/setup"
+      autocomplete="on"
+      on:submit={submit}
+    >
       <div style="display:flex;gap:10px;margin-bottom:14px">
         <div style="flex:1">
           <label class="kz-label" for="setup-first-name"
@@ -119,8 +130,7 @@
           />
         </div>
         <div style="flex:1">
-          <label class="kz-label" for="setup-last-name"
-            >{$t("Last name")}</label
+          <label class="kz-label" for="setup-last-name">{$t("Last name")}</label
           >
           <input
             id="setup-last-name"
@@ -142,14 +152,14 @@
           type="email"
           bind:value={email}
           required
-          autocomplete="email"
+          autocomplete="username"
         />
       </div>
       <div style="margin-bottom:14px">
         <label class="kz-label" for="setup-password">{$t("Password")}</label>
         <input
           id="setup-password"
-          name="new-password"
+          name="password"
           class="kz-input"
           type="password"
           bind:value={password}
@@ -164,13 +174,13 @@
         >
         <input
           id="setup-confirm"
-          name="new-password-confirm"
+          name="password_confirm"
           class="kz-input"
           type="password"
           bind:value={confirmPassword}
           required
           minlength="12"
-          autocomplete="off"
+          autocomplete="new-password"
         />
       </div>
       <div class="error-text" style="margin-bottom:8px">{error}</div>
@@ -185,4 +195,3 @@
     </form>
   </div>
 </div>
-

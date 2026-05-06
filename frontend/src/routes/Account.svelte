@@ -45,6 +45,22 @@
           new_password: nw,
         },
       });
+      // Update the browser password manager with the new credential so it
+      // does not keep offering the old one as an autofill suggestion.
+      try {
+        if (window.PasswordCredential && $currentUser?.email) {
+          const cred = new window.PasswordCredential({
+            id: $currentUser.email,
+            password: nw,
+            name:
+              `${$currentUser.first_name || ""} ${$currentUser.last_name || ""}`.trim() ||
+              $currentUser.email,
+          });
+          await navigator.credentials.store(cred);
+        }
+      } catch (_) {
+        // Storing credentials is best-effort; ignore failures.
+      }
       currentUser.update((u) => ({ ...u, must_change_password: false }));
       toast($t("Password changed."), "ok");
       cur = "";

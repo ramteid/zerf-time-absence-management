@@ -1,6 +1,7 @@
 use crate::audit;
 use crate::auth::{hash_password, validate_password_strength, User};
 use crate::error::{AppError, AppResult};
+use crate::i18n;
 use crate::AppState;
 use axum::{
     extract::{Path, State},
@@ -366,19 +367,29 @@ pub async fn create(
     )
     .await;
     // Send registration email best-effort
-    let smtp = crate::settings::load_smtp_config(&app_state.pool).await.map(std::sync::Arc::new);
+    let smtp = crate::settings::load_smtp_config(&app_state.pool)
+        .await
+        .map(std::sync::Arc::new);
     let login_line = match app_state.cfg.public_url.as_deref() {
-        Some(url) => format!(
-            "\nURL:      https://{}\n",
-            url.trim_start_matches("https://").trim_start_matches("http://").trim_end_matches('/')
-        ),
+        Some(url) => format!("\nURL:      {}\n", url.trim_end_matches('/')),
         None => String::new(),
     };
-    let body_text = format!(
-        "Hello {} {},\n\nYour account has been created.\n\nEmail:    {}\nPassword: {}{}\nPlease log in and change your password immediately.",
-        first_name, last_name, normalized_email, temporary_password, login_line
+    let language = i18n::load_ui_language(&app_state.pool)
+        .await
+        .unwrap_or_default();
+    let subject = i18n::translate(&language, "account_created_subject", &[]);
+    let body_text = i18n::translate(
+        &language,
+        "account_created_body",
+        &[
+            ("first_name", first_name.clone()),
+            ("last_name", last_name.clone()),
+            ("email", normalized_email.clone()),
+            ("password", temporary_password.clone()),
+            ("login_line", login_line),
+        ],
     );
-    crate::email::send_async(smtp, normalized_email, "Welcome to Zerf".to_string(), body_text);
+    crate::email::send_async(smtp, normalized_email, subject, body_text);
     Ok(Json(CreateResponse {
         id: new_user_id,
         user: created_user,

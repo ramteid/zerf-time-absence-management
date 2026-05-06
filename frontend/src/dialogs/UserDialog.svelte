@@ -23,6 +23,7 @@
     (template.overtime_start_balance_min || 0) / 60;
   let approver_id =
     template.approver_id == null ? "" : String(template.approver_id);
+  let active = template.active ?? true;
   let error = "";
   let approvers = [];
   $: requiresApprover = role !== "admin";
@@ -139,6 +140,9 @@
       }
       if (isNew && password) {
         body.password = password;
+      }
+      if (!isNew) {
+        body.active = active;
       }
       if (isNew) {
         const r = await api("/users", { method: "POST", body });
@@ -389,6 +393,24 @@
               "Overrides the default annual leave days for this user in the selected year.",
             )}
           </div>
+        </div>
+      {/if}
+      {#if !isNew}
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--border)">
+          <div>
+            <div style="font-size:13px;font-weight:500">{$t("Account active")}</div>
+            <div style="font-size:11px;color:var(--text-tertiary);margin-top:2px">
+              {$t("Inactive users cannot log in.")}
+            </div>
+          </div>
+          <button
+            class="kz-btn kz-btn-sm"
+            class:kz-btn-danger={!active}
+            type="button"
+            on:click={() => (active = !active)}
+          >
+            {active ? $t("Active") : $t("Inactive")}
+          </button>
         </div>
       {/if}
       {#if isNew}

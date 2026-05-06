@@ -72,6 +72,10 @@ static LANGUAGES: &[LangDef] = &[
             ("submission_reminder_title", "Time entries not yet submitted"),
             ("submission_reminder_body", "You still have unsubmitted time entries for the following months: {months}"),
             ("submission_reminder_email_body", "Hello,\n\nyou still have unsubmitted time entries for the following months:\n\n{months}\n\nPlease log in and submit your time entries:\n{app_url}\n"),
+            ("password_reset_subject", "Reset your password"),
+            ("password_reset_body", "Hello,\n\nYou requested a password reset.\n\nPlease click the link below (valid for 1 hour):\n\n{reset_link}\n\nIf you did not request this, you can safely ignore this email."),
+            ("account_created_subject", "Welcome to Zerf"),
+            ("account_created_body", "Hello {first_name} {last_name},\n\nYour account has been created.\n\nEmail:    {email}\nPassword: {password}{login_line}\nPlease log in and change your password immediately."),
         ],
     },
     LangDef {
@@ -122,6 +126,10 @@ static LANGUAGES: &[LangDef] = &[
             ("submission_reminder_title", "Arbeitszeiten noch nicht eingereicht"),
             ("submission_reminder_body", "Sie haben noch nicht eingereichte Arbeitszeiten f\u{00fc}r folgende Monate: {months}"),
             ("submission_reminder_email_body", "Hallo,\n\nf\u{00fc}r folgende Monate wurden Ihre Arbeitszeiten noch nicht eingereicht:\n\n{months}\n\nBitte melden Sie sich an und reichen Sie Ihre Zeiten ein:\n{app_url}\n"),
+            ("password_reset_subject", "Passwort zur\u{00fc}cksetzen"),
+            ("password_reset_body", "Hallo,\n\nSie haben eine Anfrage zum Zur\u{00fc}cksetzen Ihres Passworts gestellt.\n\nBitte klicken Sie auf den folgenden Link (g\u{00fc}ltig f\u{00fc}r 1 Stunde):\n\n{reset_link}\n\nFalls Sie diese Anfrage nicht gestellt haben, k\u{00f6}nnen Sie diese E-Mail ignorieren."),
+            ("account_created_subject", "Willkommen bei Zerf"),
+            ("account_created_body", "Hallo {first_name} {last_name},\n\nIhr Konto wurde erstellt.\n\nE-Mail:   {email}\nPasswort: {password}{login_line}\nBitte melden Sie sich an und \u{00e4}ndern Sie Ihr Passwort umgehend."),
         ],
     },
 ];
@@ -175,7 +183,6 @@ impl Language {
     }
 }
 
-
 // -- Validation ---------------------------------------------------------------
 
 /// Validates and normalises a language code string. Accepts any well-formed
@@ -186,14 +193,14 @@ pub fn normalize_language_code(value: &str) -> Option<String> {
     if trimmed.len() < 2 {
         return None;
     }
-    if !trimmed.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+    if !trimmed
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-')
+    {
         return None;
     }
     let primary = trimmed.split('-').next().unwrap_or("");
-    if primary.len() < 2
-        || primary.len() > 3
-        || !primary.chars().all(|c| c.is_ascii_alphabetic())
-    {
+    if primary.len() < 2 || primary.len() > 3 || !primary.chars().all(|c| c.is_ascii_alphabetic()) {
         return None;
     }
     Some(trimmed.to_ascii_lowercase())
@@ -243,9 +250,7 @@ pub fn holiday_display_name(
     name: String,
     local_name: Option<String>,
 ) -> String {
-    local_name
-        .filter(|v| !v.trim().is_empty())
-        .unwrap_or(name)
+    local_name.filter(|v| !v.trim().is_empty()).unwrap_or(name)
 }
 
 // -- Translation lookup -------------------------------------------------------
@@ -310,6 +315,45 @@ mod tests {
             text,
             "Die Woche ab 27.04.2026 wurde wieder zur Bearbeitung freigegeben (1 Eintrag)."
         );
+    }
+
+    #[test]
+    fn password_reset_email_templates_are_translated() {
+        let language = Language::from_setting("de");
+        let subject = translate(&language, "password_reset_subject", &[]);
+        let body = translate(
+            &language,
+            "password_reset_body",
+            &[("reset_link", "https://zerf.example/reset".to_string())],
+        );
+
+        assert_eq!(subject, "Passwort zur\u{00fc}cksetzen");
+        assert!(body.contains("https://zerf.example/reset"));
+        assert!(body.contains("1 Stunde"));
+    }
+
+    #[test]
+    fn account_created_email_template_uses_parameters() {
+        let language = Language::from_setting("en");
+        let body = translate(
+            &language,
+            "account_created_body",
+            &[
+                ("first_name", "Ada".to_string()),
+                ("last_name", "Lovelace".to_string()),
+                ("email", "ada@example.com".to_string()),
+                ("password", "TempPass!234".to_string()),
+                (
+                    "login_line",
+                    "\nURL:      https://zerf.example\n".to_string(),
+                ),
+            ],
+        );
+
+        assert!(body.contains("Hello Ada Lovelace"));
+        assert!(body.contains("Email:    ada@example.com"));
+        assert!(body.contains("Password: TempPass!234"));
+        assert!(body.contains("URL:      https://zerf.example"));
     }
 
     #[test]
