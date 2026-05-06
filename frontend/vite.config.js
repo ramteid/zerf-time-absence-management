@@ -23,8 +23,8 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/api": "http://127.0.0.1:3000",
-      "/healthz": "http://127.0.0.1:3000",
+      "/api": "http://127.0.0.1:3333",
+      "/healthz": "http://127.0.0.1:3333",
     },
   },
   test: {

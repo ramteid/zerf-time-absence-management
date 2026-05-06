@@ -32,7 +32,7 @@
 	# Note: edge rate-limiting needs a Caddy build with the rate_limit module.
 	# The application itself enforces 5 failed attempts / 15 min per email.
 
-	reverse_proxy app:3000 {
+	reverse_proxy app:3333 {
 		header_up X-Real-IP {remote_host}
 	}
 }

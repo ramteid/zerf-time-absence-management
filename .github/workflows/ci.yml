@@ -133,7 +133,7 @@ jobs:
         run: |
           docker run -d --name smoke \
             --add-host=host.docker.internal:host-gateway \
-            -p ${ZERF_TEST_PORT}:3000 \
+            -p ${ZERF_TEST_PORT}:3333 \
             -e ZERF_DATABASE_URL=postgres://zerf_smoke:zerf_smoke@host.docker.internal:5432/zerf_smoke \
             -e ZERF_SESSION_SECRET=ci-test-secret-at-least-32-bytes-long \
             "$IMG"
