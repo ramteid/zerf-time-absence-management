@@ -101,9 +101,7 @@ pub async fn approval_recipient_ids(pool: &crate::db::DatabasePool, requester: &
                 .fetch_all(pool)
                 .await
         {
-            for admin_id in admins {
-                ids.insert(admin_id);
-            }
+            ids.extend(admins);
         }
     }
 
@@ -148,14 +146,15 @@ pub fn validate_password_strength(pw: &str) -> AppResult<()> {
             "Password is too long (max 256 chars).".into(),
         ));
     }
-    let has_lower = pw.chars().any(|c| c.is_ascii_lowercase());
-    let has_upper = pw.chars().any(|c| c.is_ascii_uppercase());
-    let has_digit = pw.chars().any(|c| c.is_ascii_digit());
-    let has_other = pw.chars().any(|c| !c.is_ascii_alphanumeric());
-    let classes = [has_lower, has_upper, has_digit, has_other]
-        .iter()
-        .filter(|x| **x)
-        .count();
+    let classes = [
+        pw.chars().any(|c| c.is_ascii_lowercase()),
+        pw.chars().any(|c| c.is_ascii_uppercase()),
+        pw.chars().any(|c| c.is_ascii_digit()),
+        pw.chars().any(|c| !c.is_ascii_alphanumeric()),
+    ]
+    .iter()
+    .filter(|&&present| present)
+    .count();
     if classes < 3 {
         return Err(AppError::BadRequest(
             "Password must include at least 3 of: lowercase, uppercase, digit, symbol.".into(),
@@ -190,12 +189,12 @@ pub struct LoginReq {
 }
 
 pub async fn login(
-    State(s): State<AppState>,
+    State(app_state): State<AppState>,
     headers: axum::http::HeaderMap,
     Json(req): Json<LoginReq>,
 ) -> AppResult<Response> {
     // Origin / Referer check — defence-in-depth against CSRF on the JSON login.
-    enforce_same_origin_headers(&headers, &s)?;
+    enforce_same_origin_headers(&headers, &app_state)?;
 
     let email = req.email.trim().to_lowercase();
     if email.is_empty() || email.len() > 254 || req.password.is_empty() || req.password.len() > 1024
@@ -209,14 +208,14 @@ pub async fn login(
     )
     .bind(&email)
     .bind(since)
-    .fetch_one(&s.pool)
+    .fetch_one(&app_state.pool)
     .await?;
     if failures >= MAX_FAILED_LOGINS {
         // Record the blocked attempt so the lockout window extends under
         // sustained attack (the window is sliding, based on recent failures).
         let _ = sqlx::query("INSERT INTO login_attempts(email, success) VALUES ($1, FALSE)")
             .bind(&email)
-            .execute(&s.pool)
+            .execute(&app_state.pool)
             .await;
         // Generic message — never reveal that the account exists/is locked.
         return Err(AppError::BadRequest("Invalid email or password.".into()));
@@ -225,12 +224,12 @@ pub async fn login(
     let user: Option<User> =
         sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE email = $1 AND active = TRUE")
             .bind(&email)
-            .fetch_optional(&s.pool)
+            .fetch_optional(&app_state.pool)
             .await?;
     // Always perform a hash verification to keep timing constant for unknown emails.
     let dummy = "$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHRzYWx0c2FsdA$8ueQukxsrOwHPzjhsRTRppvNN0o3Qx0vg7HHmH64Bmw";
-    let ok = match &user {
-        Some(u) => verify_password(&req.password, &u.password_hash),
+    let password_matches = match &user {
+        Some(found_user) => verify_password(&req.password, &found_user.password_hash),
         None => {
             let _ = verify_password(&req.password, dummy);
             false
@@ -238,55 +237,55 @@ pub async fn login(
     };
     sqlx::query("INSERT INTO login_attempts(email, success) VALUES ($1, $2)")
         .bind(&email)
-        .bind(ok)
-        .execute(&s.pool)
+        .bind(password_matches)
+        .execute(&app_state.pool)
         .await?;
     let user = user.ok_or_else(|| AppError::BadRequest("Invalid email or password.".into()))?;
-    if !ok {
+    if !password_matches {
         return Err(AppError::BadRequest("Invalid email or password.".into()));
     }
 
     // Session fixation defence: any pre-existing session token sent in the request
     // is ignored; we always issue a fresh, random, never-reused token.
-    let token = new_token();
-    let csrf = new_token();
+    let session_token = new_token();
+    let csrf_token = new_token();
     sqlx::query("INSERT INTO sessions(token, user_id, csrf_token) VALUES ($1, $2, $3)")
-        .bind(hash_token(&token))
+        .bind(hash_token(&session_token))
         .bind(user.id)
-        .bind(&csrf)
-        .execute(&s.pool)
+        .bind(&csrf_token)
+        .execute(&app_state.pool)
         .await?;
 
-    let cookie = build_session_cookie(&token, IDLE_TIMEOUT_HOURS * 3600, s.cfg.secure_cookies);
-    let body = Json(serde_json::json!({
+    let cookie = build_session_cookie(&session_token, IDLE_TIMEOUT_HOURS * 3600, app_state.cfg.secure_cookies);
+    let response_body = Json(serde_json::json!({
         "ok": true,
         "user": user,
         "must_change_password": user.must_change_password,
-        "csrf_token": csrf,
+        "csrf_token": csrf_token,
     }));
-    let mut resp = body.into_response();
-    resp.headers_mut()
+    let mut response = response_body.into_response();
+    response.headers_mut()
         .insert(header::SET_COOKIE, cookie.parse().unwrap());
-    Ok(resp)
+    Ok(response)
 }
 
-pub async fn logout(State(s): State<AppState>, req: Request) -> AppResult<Response> {
+pub async fn logout(State(app_state): State<AppState>, req: Request) -> AppResult<Response> {
     if let Some(token) = extract_token(&req) {
         // Per security policy: on logout, all sessions of the affected user are
         // deleted — not just the current one — so a user logging out from one
         // device invalidates all other open sessions too.
-        let uid: Option<i64> = sqlx::query_scalar("SELECT user_id FROM sessions WHERE token = $1")
+        let user_id: Option<i64> = sqlx::query_scalar("SELECT user_id FROM sessions WHERE token = $1")
             .bind(hash_token(&token))
-            .fetch_optional(&s.pool)
+            .fetch_optional(&app_state.pool)
             .await?;
-        if let Some(user_id) = uid {
+        if let Some(user_id) = user_id {
             sqlx::query("DELETE FROM sessions WHERE user_id = $1")
                 .bind(user_id)
-                .execute(&s.pool)
+                .execute(&app_state.pool)
                 .await?;
         }
     }
-    let cookie = build_session_cookie("", 0, s.cfg.secure_cookies);
+    let cookie = build_session_cookie("", 0, app_state.cfg.secure_cookies);
     let mut resp = Json(serde_json::json!({"ok": true})).into_response();
     resp.headers_mut()
         .insert(header::SET_COOKIE, cookie.parse().unwrap());
@@ -294,17 +293,17 @@ pub async fn logout(State(s): State<AppState>, req: Request) -> AppResult<Respon
 }
 
 pub async fn me(
-    State(s): State<AppState>,
+    State(app_state): State<AppState>,
     user: User,
     req: Request,
 ) -> AppResult<Json<serde_json::Value>> {
     // Expose the CSRF token to the SPA so it can include it on subsequent
     // state-changing requests as `X-CSRF-Token`.
-    let token = extract_token(&req).unwrap_or_default();
-    let csrf: Option<String> =
+    let raw_token = extract_token(&req).unwrap_or_default();
+    let csrf_token: Option<String> =
         sqlx::query_scalar("SELECT csrf_token FROM sessions WHERE token = $1")
-            .bind(hash_token(&token))
-            .fetch_optional(&s.pool)
+            .bind(hash_token(&raw_token))
+            .fetch_optional(&app_state.pool)
             .await?;
     let permissions = serde_json::json!({
         "is_admin": user.is_admin(),
@@ -341,16 +340,16 @@ pub async fn me(
     let must_configure_settings = if user.is_admin() {
         let country: Option<String> =
             sqlx::query_scalar("SELECT value FROM app_settings WHERE key = 'country'")
-                .fetch_optional(&s.pool)
+                .fetch_optional(&app_state.pool)
                 .await?;
         let dwh: Option<String> =
             sqlx::query_scalar("SELECT value FROM app_settings WHERE key = 'default_weekly_hours'")
-                .fetch_optional(&s.pool)
+                .fetch_optional(&app_state.pool)
                 .await?;
         let dal: Option<String> = sqlx::query_scalar(
             "SELECT value FROM app_settings WHERE key = 'default_annual_leave_days'",
         )
-        .fetch_optional(&s.pool)
+        .fetch_optional(&app_state.pool)
         .await?;
         let needs_name = user.first_name.is_empty() || user.last_name.is_empty();
         country.map_or(true, |v| v.is_empty())
@@ -371,7 +370,7 @@ pub async fn me(
         "approver_id": user.approver_id,
         "allow_reopen_without_approval": user.allow_reopen_without_approval,
         "dark_mode": user.dark_mode,
-        "csrf_token": csrf.unwrap_or_default(),
+        "csrf_token": csrf_token.unwrap_or_default(),
         "permissions": permissions,
         "nav": nav,
         "home": home,
@@ -390,46 +389,40 @@ pub struct PreferencesReq {
 }
 
 pub async fn update_preferences(
-    State(s): State<AppState>,
+    State(app_state): State<AppState>,
     user: User,
     Json(body): Json<PreferencesReq>,
 ) -> AppResult<Json<serde_json::Value>> {
     sqlx::query("UPDATE users SET dark_mode=$1 WHERE id=$2")
         .bind(body.dark_mode)
         .bind(user.id)
-        .execute(&s.pool)
+        .execute(&app_state.pool)
         .await?;
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
 pub async fn change_password(
-    State(s): State<AppState>,
+    State(app_state): State<AppState>,
     user: User,
     req: Request,
 ) -> AppResult<Response> {
-    let token = extract_token(&req).ok_or(AppError::Unauthorized)?;
-    let (parts, body_b) = req.into_parts();
-    let body_bytes = axum::body::to_bytes(body_b, 1024 * 1024)
+    let raw_token = extract_token(&req).ok_or(AppError::Unauthorized)?;
+    let (_, raw_body) = req.into_parts();
+    let body_bytes = axum::body::to_bytes(raw_body, 1024 * 1024)
         .await
         .map_err(|_| AppError::BadRequest("Invalid body".into()))?;
     let body: PasswordReq = serde_json::from_slice(&body_bytes)
         .map_err(|_| AppError::BadRequest("Invalid JSON".into()))?;
-    let _ = parts;
-    // When the user is forced to change a temporary password, skip
-    // the current-password check (they may not even know the generated
-    // string).  Otherwise, require and verify the current password.
-    if user.must_change_password {
-        // No current password needed for forced change.
-    } else {
-        let cur = body
+    // When the user is forced to change a temporary password, skip the current-password check
+    // (they may not even know the generated string). Otherwise, require and verify it.
+    if !user.must_change_password {
+        let current_password = body
             .current_password
             .as_deref()
-            .filter(|s| !s.is_empty())
+            .filter(|p| !p.is_empty())
             .ok_or_else(|| AppError::BadRequest("Current password required.".into()))?;
-        if !verify_password(cur, &user.password_hash) {
-            return Err(AppError::BadRequest(
-                "Current password is incorrect.".into(),
-            ));
+        if !verify_password(current_password, &user.password_hash) {
+            return Err(AppError::BadRequest("Current password is incorrect.".into()));
         }
     }
     validate_password_strength(&body.new_password)?;
@@ -438,11 +431,11 @@ pub async fn change_password(
             "New password must differ from the current one.".into(),
         ));
     }
-    let h = hash_password(&body.new_password)?;
-    let cur_token_hash = hash_token(&token);
-    let mut tx = s.pool.begin().await?;
+    let new_password_hash = hash_password(&body.new_password)?;
+    let current_token_hash = hash_token(&raw_token);
+    let mut tx = app_state.pool.begin().await?;
     sqlx::query("UPDATE users SET password_hash=$1, must_change_password=FALSE WHERE id=$2")
-        .bind(h)
+        .bind(new_password_hash)
         .bind(user.id)
         .execute(&mut *tx)
         .await?;
@@ -450,7 +443,7 @@ pub async fn change_password(
     // the caller's current session is preserved so they remain logged in.
     sqlx::query("DELETE FROM sessions WHERE user_id=$1 AND token<>$2")
         .bind(user.id)
-        .bind(&cur_token_hash)
+        .bind(&current_token_hash)
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
@@ -458,11 +451,11 @@ pub async fn change_password(
 }
 
 fn extract_token(req: &Request) -> Option<String> {
-    let h = req.headers().get(header::COOKIE)?.to_str().ok()?;
-    extract_token_from_cookie_str(h)
+    let cookie_header = req.headers().get(header::COOKIE)?.to_str().ok()?;
+    extract_token_from_cookie_str(cookie_header)
 }
 
-fn extract_token_from_cookie_str(h: &str) -> Option<String> {
+fn extract_token_from_cookie_str(cookie_str: &str) -> Option<String> {
     // Accept both the `__Host-` prefixed (production) and the plain (dev) names
     // so that an upgrade to secure cookies on a running deployment doesn't
     // break already-issued sessions.
@@ -470,35 +463,35 @@ fn extract_token_from_cookie_str(h: &str) -> Option<String> {
         concat!("__Host-zerf_session", "="),
         concat!("zerf_session", "="),
     ];
-    for part in h.split(';') {
-        let p = part.trim();
-        for pref in prefixes {
-            if let Some(rest) = p.strip_prefix(pref) {
-                return Some(rest.to_string());
+    for part in cookie_str.split(';') {
+        let cookie_part = part.trim();
+        for prefix in prefixes {
+            if let Some(token_value) = cookie_part.strip_prefix(prefix) {
+                return Some(token_value.to_string());
             }
         }
     }
     None
 }
 
-fn enforce_same_origin_headers(headers: &axum::http::HeaderMap, s: &AppState) -> AppResult<()> {
-    if !s.cfg.enforce_origin {
+fn enforce_same_origin_headers(headers: &axum::http::HeaderMap, app_state: &AppState) -> AppResult<()> {
+    if !app_state.cfg.enforce_origin {
         return Ok(());
     }
     let header_origin = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok());
     let header_referer = headers.get(header::REFERER).and_then(|v| v.to_str().ok());
-    let allowed = &s.cfg.allowed_origins;
-    let matches = |val: &str| {
-        allowed
+    let allowed_origins = &app_state.cfg.allowed_origins;
+    let origin_matches = |origin_value: &str| {
+        allowed_origins
             .iter()
-            .any(|a| val == a || val.starts_with(&format!("{a}/")))
+            .any(|allowed| origin_value == allowed || origin_value.starts_with(&format!("{allowed}/")))
     };
-    let ok = match (header_origin, header_referer) {
-        (Some(o), _) => matches(o),
-        (None, Some(r)) => matches(r),
+    let is_origin_allowed = match (header_origin, header_referer) {
+        (Some(origin), _) => origin_matches(origin),
+        (None, Some(referer)) => origin_matches(referer),
         (None, None) => false,
     };
-    if !ok {
+    if !is_origin_allowed {
         return Err(AppError::Forbidden);
     }
     Ok(())
@@ -510,14 +503,14 @@ fn enforce_same_origin_headers(headers: &axum::http::HeaderMap, s: &AppState) ->
 /// is defence-in-depth.
 async fn enforce_csrf(
     parts: &axum::http::request::Parts,
-    s: &AppState,
+    app_state: &AppState,
     csrf_token: &str,
 ) -> AppResult<()> {
     if matches!(parts.method, Method::GET | Method::HEAD | Method::OPTIONS) {
         return Ok(());
     }
-    enforce_same_origin_headers(&parts.headers, s)?;
-    if !s.cfg.enforce_csrf {
+    enforce_same_origin_headers(&parts.headers, app_state)?;
+    if !app_state.cfg.enforce_csrf {
         return Ok(());
     }
     let header_token = parts
@@ -538,48 +531,48 @@ async fn enforce_csrf(
 }
 
 pub async fn auth_middleware(
-    State(s): State<AppState>,
+    State(app_state): State<AppState>,
     req: Request,
     next: Next,
 ) -> Result<Response, AppError> {
     let (mut parts, body) = req.into_parts();
-    let token = extract_token_from_cookie_str(
+    let session_token = extract_token_from_cookie_str(
         parts
             .headers
             .get(header::COOKIE)
-            .and_then(|v| v.to_str().ok())
+            .and_then(|value| value.to_str().ok())
             .unwrap_or(""),
     )
     .ok_or(AppError::Unauthorized)?;
 
-    let token_hash = hash_token(&token);
-    let row: Option<(i64, DateTime<Utc>, DateTime<Utc>, String)> = sqlx::query_as(
+    let token_hash = hash_token(&session_token);
+    let session_row: Option<(i64, DateTime<Utc>, DateTime<Utc>, String)> = sqlx::query_as(
         "SELECT user_id, last_active_at, created_at, csrf_token FROM sessions WHERE token = $1",
     )
     .bind(&token_hash)
-    .fetch_optional(&s.pool)
+    .fetch_optional(&app_state.pool)
     .await?;
-    let (uid, last, created, csrf) = row.ok_or(AppError::Unauthorized)?;
+    let (user_id, last_active_at, session_created_at, csrf_token) = session_row.ok_or(AppError::Unauthorized)?;
     let now = Utc::now();
-    if now - last > Duration::hours(IDLE_TIMEOUT_HOURS)
-        || now - created > Duration::hours(ABSOLUTE_TIMEOUT_HOURS)
+    if now - last_active_at > Duration::hours(IDLE_TIMEOUT_HOURS)
+        || now - session_created_at > Duration::hours(ABSOLUTE_TIMEOUT_HOURS)
     {
         sqlx::query("DELETE FROM sessions WHERE token=$1")
             .bind(&token_hash)
-            .execute(&s.pool)
+            .execute(&app_state.pool)
             .await?;
         return Err(AppError::Unauthorized);
     }
 
-    enforce_csrf(&parts, &s, &csrf).await?;
+    enforce_csrf(&parts, &app_state, &csrf_token).await?;
 
     sqlx::query("UPDATE sessions SET last_active_at=CURRENT_TIMESTAMP WHERE token=$1")
         .bind(&token_hash)
-        .execute(&s.pool)
+        .execute(&app_state.pool)
         .await?;
     let user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1 AND active=TRUE")
-        .bind(uid)
-        .fetch_optional(&s.pool)
+        .bind(user_id)
+        .fetch_optional(&app_state.pool)
         .await?
         .ok_or(AppError::Unauthorized)?;
     parts.extensions.insert(user);
@@ -635,11 +628,11 @@ pub async fn cleanup_loop(pool: crate::db::DatabasePool) {
 // ---------------------------------------------------------------------------
 
 /// Returns whether the application needs initial setup (no users exist yet).
-pub async fn setup_status(State(s): State<AppState>) -> AppResult<Json<serde_json::Value>> {
-    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
-        .fetch_one(&s.pool)
+pub async fn setup_status(State(app_state): State<AppState>) -> AppResult<Json<serde_json::Value>> {
+    let user_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+        .fetch_one(&app_state.pool)
         .await?;
-    Ok(Json(serde_json::json!({ "needs_setup": count == 0 })))
+    Ok(Json(serde_json::json!({ "needs_setup": user_count == 0 })))
 }
 
 #[derive(Deserialize)]
@@ -652,7 +645,7 @@ pub struct SetupRequest {
 
 /// Create the initial admin user. Only works when no users exist yet.
 pub async fn setup(
-    State(s): State<AppState>,
+    State(app_state): State<AppState>,
     Json(body): Json<SetupRequest>,
 ) -> AppResult<Json<serde_json::Value>> {
     // Validate inputs before acquiring a transaction.
@@ -673,16 +666,16 @@ pub async fn setup(
     let password = &body.password;
     validate_password_strength(password)?;
 
-    let hash = hash_password(password)?;
+    let password_hash = hash_password(password)?;
     let today = chrono::Local::now().date_naive();
 
     // Use a serialized transaction to prevent race conditions where two
     // concurrent requests both see zero users and both insert an admin.
-    let mut tx = s.pool.begin().await?;
-    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+    let mut tx = app_state.pool.begin().await?;
+    let existing_user_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
         .fetch_one(&mut *tx)
         .await?;
-    if count > 0 {
+    if existing_user_count > 0 {
         return Err(AppError::BadRequest(
             "Setup has already been completed.".into(),
         ));
@@ -694,7 +687,7 @@ pub async fn setup(
          VALUES ($1, $2, $3, $4, 'admin', 39.0, 30, $5, FALSE, 0)",
     )
     .bind(&email)
-    .bind(&hash)
+    .bind(&password_hash)
     .bind(&first_name)
     .bind(&last_name)
     .bind(today)

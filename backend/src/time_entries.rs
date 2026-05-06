@@ -14,8 +14,8 @@ use sqlx::{FromRow, Postgres, QueryBuilder};
 async fn notification_language(pool: &crate::db::DatabasePool) -> i18n::Language {
     match i18n::load_ui_language(pool).await {
         Ok(language) => language,
-        Err(e) => {
-            tracing::warn!(target:"zerf::time_entries", "load notification language failed: {e}");
+        Err(error) => {
+            tracing::warn!(target:"zerf::time_entries", "load notification language failed: {error}");
             i18n::Language::default()
         }
     }
@@ -39,21 +39,21 @@ pub struct TimeEntry {
     pub updated_at: DateTime<Utc>,
 }
 
-fn parse_time(s: &str) -> AppResult<NaiveTime> {
-    NaiveTime::parse_from_str(s, "%H:%M")
-        .or_else(|_| NaiveTime::parse_from_str(s, "%H:%M:%S"))
-        .map_err(|_| AppError::BadRequest(format!("Invalid time: {s}")))
+fn parse_time(time_str: &str) -> AppResult<NaiveTime> {
+    NaiveTime::parse_from_str(time_str, "%H:%M")
+        .or_else(|_| NaiveTime::parse_from_str(time_str, "%H:%M:%S"))
+        .map_err(|_| AppError::BadRequest(format!("Invalid time: {time_str}")))
 }
 
 fn duration_min(start: &str, end: &str) -> AppResult<i64> {
-    let b = parse_time(start)?;
-    let e = parse_time(end)?;
-    if e <= b {
+    let start_time = parse_time(start)?;
+    let end_time = parse_time(end)?;
+    if end_time <= start_time {
         return Err(AppError::BadRequest(
             "End time must be after start time.".into(),
         ));
     }
-    Ok((e - b).num_minutes())
+    Ok((end_time - start_time).num_minutes())
 }
 
 #[derive(Deserialize)]
@@ -65,60 +65,60 @@ pub struct RangeQuery {
 }
 
 pub async fn list(
-    State(s): State<AppState>,
-    u: User,
-    Query(q): Query<RangeQuery>,
+    State(app_state): State<AppState>,
+    requester: User,
+    Query(query): Query<RangeQuery>,
 ) -> AppResult<Json<Vec<TimeEntry>>> {
     let mut builder = QueryBuilder::<Postgres>::new("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE user_id = ");
-    builder.push_bind(u.id);
-    if let Some(v) = q.from {
-        builder.push(" AND entry_date >= ").push_bind(v);
+    builder.push_bind(requester.id);
+    if let Some(from_date) = query.from {
+        builder.push(" AND entry_date >= ").push_bind(from_date);
     }
-    if let Some(v) = q.to {
-        builder.push(" AND entry_date <= ").push_bind(v);
+    if let Some(to_date) = query.to {
+        builder.push(" AND entry_date <= ").push_bind(to_date);
     }
     builder.push(" ORDER BY entry_date, start_time");
     Ok(Json(
         builder
             .build_query_as::<TimeEntry>()
-            .fetch_all(&s.pool)
+            .fetch_all(&app_state.pool)
             .await?,
     ))
 }
 
 pub async fn list_all(
-    State(s): State<AppState>,
-    u: User,
-    Query(q): Query<RangeQuery>,
+    State(app_state): State<AppState>,
+    requester: User,
+    Query(query): Query<RangeQuery>,
 ) -> AppResult<Json<Vec<TimeEntry>>> {
-    if !u.is_lead() {
+    if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
     let mut builder = QueryBuilder::<Postgres>::new("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE TRUE");
     // Team leads only see entries from their direct reports; admins see all.
-    if !u.is_admin() {
+    if !requester.is_admin() {
         builder
             .push(" AND user_id IN (SELECT id FROM users WHERE approver_id = ")
-            .push_bind(u.id)
+            .push_bind(requester.id)
             .push(" AND role != 'admin')");
     }
-    if let Some(v) = q.from {
-        builder.push(" AND entry_date >= ").push_bind(v);
+    if let Some(from_date) = query.from {
+        builder.push(" AND entry_date >= ").push_bind(from_date);
     }
-    if let Some(v) = q.to {
-        builder.push(" AND entry_date <= ").push_bind(v);
+    if let Some(to_date) = query.to {
+        builder.push(" AND entry_date <= ").push_bind(to_date);
     }
-    if let Some(v) = q.user_id {
-        builder.push(" AND user_id = ").push_bind(v);
+    if let Some(filter_user_id) = query.user_id {
+        builder.push(" AND user_id = ").push_bind(filter_user_id);
     }
-    if let Some(v) = q.status {
-        builder.push(" AND status = ").push_bind(v);
+    if let Some(filter_status) = query.status {
+        builder.push(" AND status = ").push_bind(filter_status);
     }
     builder.push(" ORDER BY entry_date DESC, start_time");
     Ok(Json(
         builder
             .build_query_as::<TimeEntry>()
-            .fetch_all(&s.pool)
+            .fetch_all(&app_state.pool)
             .await?,
     ))
 }
@@ -160,10 +160,11 @@ pub(crate) async fn validate(
             .bind(te.category_id)
             .fetch_optional(&mut *conn)
             .await?;
-    match cat_active {
-        None => return Err(AppError::BadRequest("Category not found.".into())),
-        Some(false) => return Err(AppError::BadRequest("Category is inactive.".into())),
-        Some(true) => {}
+    if cat_active.is_none() {
+        return Err(AppError::BadRequest("Category not found.".into()));
+    }
+    if cat_active == Some(false) {
+        return Err(AppError::BadRequest("Category is inactive.".into()));
     }
     if te.entry_date > chrono::Local::now().date_naive() {
         return Err(AppError::BadRequest(
@@ -174,7 +175,7 @@ pub(crate) async fn validate(
     let start_n = parse_time(&te.start_time)?;
     let end_n = parse_time(&te.end_time)?;
 
-    let existing: Vec<(i64, String, String, String)> = sqlx::query_as(
+    let existing_entries: Vec<(i64, String, String, String)> = sqlx::query_as(
         "SELECT id, start_time, end_time, status FROM time_entries WHERE user_id=$1 AND entry_date=$2",
     )
     .bind(user_id)
@@ -183,23 +184,17 @@ pub(crate) async fn validate(
     .await?;
 
     let mut day_total = new_min;
-    for (id, b, e, status) in &existing {
-        if Some(*id) == exclude_id {
+    for (existing_id, start_str, end_str, status) in &existing_entries {
+        // Skip the entry being edited and rejected entries (they are void).
+        if Some(*existing_id) == exclude_id || status == "rejected" {
             continue;
         }
-        // Rejected entries are effectively void: they do not occupy a time slot
-        // and must not count toward the daily 14-hour cap.
-        if status == "rejected" {
-            continue;
+        let existing_start = parse_time(start_str)?;
+        let existing_end = parse_time(end_str)?;
+        if start_n < existing_end && existing_start < end_n {
+            return Err(AppError::BadRequest("Overlap with an existing entry.".into()));
         }
-        let bb = parse_time(b)?;
-        let ee = parse_time(e)?;
-        if start_n < ee && bb < end_n {
-            return Err(AppError::BadRequest(
-                "Overlap with an existing entry.".into(),
-            ));
-        }
-        day_total += (ee - bb).num_minutes();
+        day_total += (existing_end - existing_start).num_minutes();
     }
     if day_total > 14 * 60 {
         return Err(AppError::BadRequest("Day total exceeds 14 hours.".into()));
@@ -225,117 +220,117 @@ pub(crate) async fn validate(
 }
 
 pub async fn create(
-    State(s): State<AppState>,
-    u: User,
-    Json(b): Json<NewTimeEntry>,
+    State(app_state): State<AppState>,
+    requester: User,
+    Json(body): Json<NewTimeEntry>,
 ) -> AppResult<Json<TimeEntry>> {
-    let mut tx = s.pool.begin().await?;
+    let mut tx = app_state.pool.begin().await?;
     sqlx::query("SELECT pg_advisory_xact_lock($1)")
-        .bind(u.id)
+        .bind(requester.id)
         .execute(&mut *tx)
         .await?;
-    validate(&mut *tx, u.id, &b, None).await?;
-    let id: i64 = sqlx::query_scalar("INSERT INTO time_entries(user_id, entry_date, start_time, end_time, category_id, comment) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id")
-        .bind(u.id).bind(b.entry_date).bind(&b.start_time).bind(&b.end_time).bind(b.category_id).bind(&b.comment)
+    validate(&mut *tx, requester.id, &body, None).await?;
+    let new_entry_id: i64 = sqlx::query_scalar("INSERT INTO time_entries(user_id, entry_date, start_time, end_time, category_id, comment) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id")
+        .bind(requester.id).bind(body.entry_date).bind(&body.start_time).bind(&body.end_time).bind(body.category_id).bind(&body.comment)
         .fetch_one(&mut *tx).await?;
     tx.commit().await?;
-    let z: TimeEntry = sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1")
-        .bind(id)
-        .fetch_one(&s.pool)
+    let created_entry: TimeEntry = sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1")
+        .bind(new_entry_id)
+        .fetch_one(&app_state.pool)
         .await?;
     audit::log(
-        &s.pool,
-        u.id,
+        &app_state.pool,
+        requester.id,
         "created",
         "time_entries",
-        id,
+        new_entry_id,
         None,
-        Some(serde_json::to_value(&z).unwrap()),
+        Some(serde_json::to_value(&created_entry).unwrap()),
     )
     .await;
-    Ok(Json(z))
+    Ok(Json(created_entry))
 }
 
 pub async fn update(
-    State(s): State<AppState>,
-    u: User,
-    Path(id): Path<i64>,
-    Json(b): Json<NewTimeEntry>,
+    State(app_state): State<AppState>,
+    requester: User,
+    Path(entry_id): Path<i64>,
+    Json(body): Json<NewTimeEntry>,
 ) -> AppResult<Json<TimeEntry>> {
-    let prev_owner: i64 = sqlx::query_scalar("SELECT user_id FROM time_entries WHERE id=$1")
-        .bind(id)
-        .fetch_one(&s.pool)
+    let entry_owner_id: i64 = sqlx::query_scalar("SELECT user_id FROM time_entries WHERE id=$1")
+        .bind(entry_id)
+        .fetch_one(&app_state.pool)
         .await?;
-    let mut tx = s.pool.begin().await?;
+    let mut tx = app_state.pool.begin().await?;
     sqlx::query("SELECT pg_advisory_xact_lock($1)")
-        .bind(prev_owner)
+        .bind(entry_owner_id)
         .execute(&mut *tx)
         .await?;
-    let prev: TimeEntry = sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1 FOR UPDATE")
-        .bind(id)
+    let previous_entry: TimeEntry = sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1 FOR UPDATE")
+        .bind(entry_id)
         .fetch_one(&mut *tx)
         .await?;
-    let admin_correction = u.is_admin()
-        && prev.user_id != u.id
-        && (prev.status == "approved" || prev.status == "submitted");
+    let admin_correction = requester.is_admin()
+        && previous_entry.user_id != requester.id
+        && (previous_entry.status == "approved" || previous_entry.status == "submitted");
     if !admin_correction {
-        if prev.user_id != u.id {
+        if previous_entry.user_id != requester.id {
             return Err(AppError::Forbidden);
         }
-        if prev.status != "draft" {
+        if previous_entry.status != "draft" {
             return Err(AppError::BadRequest(
                 "Only drafts can be edited directly. Please file a change request.".into(),
             ));
         }
     }
-    validate(&mut *tx, prev.user_id, &b, Some(id)).await?;
+    validate(&mut *tx, previous_entry.user_id, &body, Some(entry_id)).await?;
     sqlx::query("UPDATE time_entries SET entry_date=$1, start_time=$2, end_time=$3, category_id=$4, comment=$5, updated_at=CURRENT_TIMESTAMP WHERE id=$6")
-        .bind(b.entry_date).bind(&b.start_time).bind(&b.end_time).bind(b.category_id).bind(&b.comment).bind(id)
+        .bind(body.entry_date).bind(&body.start_time).bind(&body.end_time).bind(body.category_id).bind(&body.comment).bind(entry_id)
         .execute(&mut *tx).await?;
     tx.commit().await?;
-    let next: TimeEntry = sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1")
-        .bind(id)
-        .fetch_one(&s.pool)
+    let updated_entry: TimeEntry = sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1")
+        .bind(entry_id)
+        .fetch_one(&app_state.pool)
         .await?;
     audit::log(
-        &s.pool,
-        u.id,
+        &app_state.pool,
+        requester.id,
         "updated",
         "time_entries",
-        id,
-        Some(serde_json::to_value(&prev).unwrap()),
-        Some(serde_json::to_value(&next).unwrap()),
+        entry_id,
+        Some(serde_json::to_value(&previous_entry).unwrap()),
+        Some(serde_json::to_value(&updated_entry).unwrap()),
     )
     .await;
-    Ok(Json(next))
+    Ok(Json(updated_entry))
 }
 
 pub async fn delete(
-    State(s): State<AppState>,
-    u: User,
-    Path(id): Path<i64>,
+    State(app_state): State<AppState>,
+    requester: User,
+    Path(entry_id): Path<i64>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let z: TimeEntry = sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1")
-        .bind(id)
-        .fetch_one(&s.pool)
+    let time_entry: TimeEntry = sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1")
+        .bind(entry_id)
+        .fetch_one(&app_state.pool)
         .await?;
-    if z.user_id != u.id {
+    if time_entry.user_id != requester.id {
         return Err(AppError::Forbidden);
     }
-    if z.status != "draft" {
+    if time_entry.status != "draft" {
         return Err(AppError::BadRequest("Only drafts can be deleted.".into()));
     }
     sqlx::query("DELETE FROM time_entries WHERE id=$1")
-        .bind(id)
-        .execute(&s.pool)
+        .bind(entry_id)
+        .execute(&app_state.pool)
         .await?;
     audit::log(
-        &s.pool,
-        u.id,
+        &app_state.pool,
+        requester.id,
         "deleted",
         "time_entries",
-        id,
-        Some(serde_json::to_value(&z).unwrap()),
+        entry_id,
+        Some(serde_json::to_value(&time_entry).unwrap()),
         None,
     )
     .await;
@@ -348,74 +343,74 @@ pub struct IdsBody {
 }
 
 pub async fn submit(
-    State(s): State<AppState>,
-    u: User,
-    Json(b): Json<IdsBody>,
+    State(app_state): State<AppState>,
+    requester: User,
+    Json(body): Json<IdsBody>,
 ) -> AppResult<Json<serde_json::Value>> {
-    if b.ids.is_empty() {
+    if body.ids.is_empty() {
         return Ok(Json(serde_json::json!({"ok": true, "count": 0})));
     }
     // Phase 1: validate ownership for ALL entries before any writes, so a
     // mixed-ownership batch never partially submits.
-    for id in &b.ids {
-        let z: TimeEntry = sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1")
-            .bind(id)
-            .fetch_one(&s.pool)
+    for entry_id in &body.ids {
+        let entry: TimeEntry = sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1")
+            .bind(entry_id)
+            .fetch_one(&app_state.pool)
             .await?;
-        if z.user_id != u.id {
+        if entry.user_id != requester.id {
             return Err(AppError::Forbidden);
         }
     }
     // Phase 2: atomically submit all draft entries in a single transaction.
-    let mut tx = s.pool.begin().await?;
-    let mut submitted: Vec<i64> = vec![];
-    for id in &b.ids {
-        let rows = sqlx::query(
+    let mut tx = app_state.pool.begin().await?;
+    let mut submitted_ids: Vec<i64> = vec![];
+    for entry_id in &body.ids {
+        let affected_rows = sqlx::query(
             "UPDATE time_entries SET status='submitted', submitted_at=CURRENT_TIMESTAMP \
              WHERE id=$1 AND status='draft' AND user_id=$2",
         )
-        .bind(id)
-        .bind(u.id)
+        .bind(entry_id)
+        .bind(requester.id)
         .execute(&mut *tx)
         .await?
         .rows_affected();
-        if rows > 0 {
-            submitted.push(*id);
+        if affected_rows > 0 {
+            submitted_ids.push(*entry_id);
         }
     }
     tx.commit().await?;
     // Phase 3: audit logs (best-effort, after commit).
-    for id in &submitted {
+    for entry_id in &submitted_ids {
         audit::log(
-            &s.pool,
-            u.id,
+            &app_state.pool,
+            requester.id,
             "status_changed",
             "time_entries",
-            *id,
+            *entry_id,
             Some(serde_json::json!({"status": "draft"})),
             Some(serde_json::json!({"status": "submitted"})),
         )
         .await;
     }
-    let count = submitted.len();
+    let submitted_count = submitted_ids.len();
     // Phase 4: notify the approver with the actual submitted count.
-    if count > 0 {
-        let notify_ids = crate::auth::approval_recipient_ids(&s.pool, &u).await;
-        let language = notification_language(&s.pool).await;
-        for notify_id in notify_ids {
+    if submitted_count > 0 {
+        let approver_ids = crate::auth::approval_recipient_ids(&app_state.pool, &requester).await;
+        let language = notification_language(&app_state.pool).await;
+        for approver_id in approver_ids {
             crate::notifications::create_translated(
-                &s,
+                &app_state,
                 &language,
-                notify_id,
+                approver_id,
                 "timesheet_submitted",
                 "timesheet_submitted_title",
                 "timesheet_submitted_body",
                 vec![
                     (
                         "submitter_name",
-                        format!("{} {}", u.first_name, u.last_name),
+                        format!("{} {}", requester.first_name, requester.last_name),
                     ),
-                    ("entry_count", i18n::entry_count(&language, count as i64)),
+                    ("entry_count", i18n::entry_count(&language, submitted_count as i64)),
                 ],
                 Some("time_entries"),
                 None,
@@ -423,77 +418,77 @@ pub async fn submit(
             .await;
         }
     }
-    Ok(Json(serde_json::json!({"ok": true, "count": count})))
+    Ok(Json(serde_json::json!({"ok": true, "count": submitted_count})))
 }
 
 pub async fn approve(
-    State(s): State<AppState>,
-    u: User,
-    Path(id): Path<i64>,
+    State(app_state): State<AppState>,
+    requester: User,
+    Path(entry_id): Path<i64>,
 ) -> AppResult<Json<serde_json::Value>> {
-    if !u.is_lead() {
+    if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let mut tx = s.pool.begin().await?;
-    let z: TimeEntry = sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1 FOR UPDATE")
-        .bind(id)
+    let mut tx = app_state.pool.begin().await?;
+    let entry: TimeEntry = sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1 FOR UPDATE")
+        .bind(entry_id)
         .fetch_one(&mut *tx)
         .await?;
-    if z.user_id == u.id && !u.is_admin() {
+    if entry.user_id == requester.id && !requester.is_admin() {
         return Err(AppError::Forbidden);
     }
-    if !u.is_admin() {
-        let is_report: Option<bool> = sqlx::query_scalar(
+    if !requester.is_admin() {
+        let is_direct_report: Option<bool> = sqlx::query_scalar(
             "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2 AND role != 'admin' FOR UPDATE",
         )
-        .bind(z.user_id)
-        .bind(u.id)
+        .bind(entry.user_id)
+        .bind(requester.id)
         .fetch_optional(&mut *tx)
         .await?;
-        if is_report.is_none() {
+        if is_direct_report.is_none() {
             return Err(AppError::Forbidden);
         }
     }
-    if z.status != "submitted" {
+    if entry.status != "submitted" {
         return Err(AppError::BadRequest(
             "Only submitted entries can be approved.".into(),
         ));
     }
-    let updated = sqlx::query(
+    let rows_updated = sqlx::query(
         "UPDATE time_entries SET status='approved', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP WHERE id=$2 AND status='submitted'",
     )
-    .bind(u.id)
-    .bind(id)
+    .bind(requester.id)
+    .bind(entry_id)
     .execute(&mut *tx)
     .await?
     .rows_affected();
-    if updated == 0 {
+    if rows_updated == 0 {
         return Err(AppError::Conflict(
             "Entry was already reviewed by someone else.".into(),
         ));
     }
     tx.commit().await?;
     audit::log(
-        &s.pool,
-        u.id,
+        &app_state.pool,
+        requester.id,
         "approved",
         "time_entries",
-        id,
-        Some(serde_json::to_value(&z).unwrap()),
-        Some(serde_json::json!({"status": "approved", "reviewed_by": u.id})),
+        entry_id,
+        Some(serde_json::to_value(&entry).unwrap()),
+        Some(serde_json::json!({"status": "approved", "reviewed_by": requester.id})),
     )
     .await;
-    let language = notification_language(&s.pool).await;
+    let language = notification_language(&app_state.pool).await;
     crate::notifications::create_translated(
-        &s,
+        &app_state,
         &language,
-        z.user_id,
+        entry.user_id,
         "timesheet_approved",
         "timesheet_approved_title",
         "timesheet_approved_body",
-        vec![("entry_date", i18n::format_date(&language, z.entry_date))],
+        vec![("entry_date", i18n::format_date(&language, entry.entry_date))],
         Some("time_entries"),
-        Some(id),
+        Some(entry_id),
     )
     .await;
     Ok(Json(serde_json::json!({"ok":true})))
@@ -505,171 +500,171 @@ pub struct RejectBody {
 }
 
 pub async fn reject(
-    State(s): State<AppState>,
-    u: User,
-    Path(id): Path<i64>,
-    Json(b): Json<RejectBody>,
+    State(app_state): State<AppState>,
+    requester: User,
+    Path(entry_id): Path<i64>,
+    Json(body): Json<RejectBody>,
 ) -> AppResult<Json<serde_json::Value>> {
-    if !u.is_lead() {
+    if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
-    if b.reason.trim().is_empty() {
+    if body.reason.trim().is_empty() {
         return Err(AppError::BadRequest("Reason required.".into()));
     }
-    let mut tx = s.pool.begin().await?;
-    let z: TimeEntry = sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1 FOR UPDATE")
-        .bind(id)
+    let mut tx = app_state.pool.begin().await?;
+    let entry: TimeEntry = sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1 FOR UPDATE")
+        .bind(entry_id)
         .fetch_one(&mut *tx)
         .await?;
-    if z.user_id == u.id && !u.is_admin() {
+    if entry.user_id == requester.id && !requester.is_admin() {
         return Err(AppError::Forbidden);
     }
-    if !u.is_admin() {
-        let is_report: Option<bool> = sqlx::query_scalar(
+    if !requester.is_admin() {
+        let is_direct_report: Option<bool> = sqlx::query_scalar(
             "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2 AND role != 'admin' FOR UPDATE",
         )
-        .bind(z.user_id)
-        .bind(u.id)
+        .bind(entry.user_id)
+        .bind(requester.id)
         .fetch_optional(&mut *tx)
         .await?;
-        if is_report.is_none() {
+        if is_direct_report.is_none() {
             return Err(AppError::Forbidden);
         }
     }
-    if z.status != "submitted" {
+    if entry.status != "submitted" {
         return Err(AppError::BadRequest(
             "Only submitted entries can be rejected.".into(),
         ));
     }
-    let updated = sqlx::query(
+    let rows_updated = sqlx::query(
         "UPDATE time_entries SET status='rejected', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP, rejection_reason=$2 WHERE id=$3 AND status='submitted'",
     )
-    .bind(u.id)
-    .bind(&b.reason)
-    .bind(id)
+    .bind(requester.id)
+    .bind(&body.reason)
+    .bind(entry_id)
     .execute(&mut *tx)
     .await?
     .rows_affected();
-    if updated == 0 {
+    if rows_updated == 0 {
         return Err(AppError::Conflict(
             "Entry was already reviewed by someone else.".into(),
         ));
     }
     tx.commit().await?;
     audit::log(
-        &s.pool,
-        u.id,
+        &app_state.pool,
+        requester.id,
         "rejected",
         "time_entries",
-        id,
-        Some(serde_json::to_value(&z).unwrap()),
-        Some(serde_json::json!({"status": "rejected", "reason": b.reason})),
+        entry_id,
+        Some(serde_json::to_value(&entry).unwrap()),
+        Some(serde_json::json!({"status": "rejected", "reason": body.reason})),
     )
     .await;
-    let language = notification_language(&s.pool).await;
+    let language = notification_language(&app_state.pool).await;
     crate::notifications::create_translated(
-        &s,
+        &app_state,
         &language,
-        z.user_id,
+        entry.user_id,
         "timesheet_rejected",
         "timesheet_rejected_title",
         "timesheet_rejected_body",
         vec![
-            ("entry_date", i18n::format_date(&language, z.entry_date)),
-            ("reason", b.reason.clone()),
+            ("entry_date", i18n::format_date(&language, entry.entry_date)),
+            ("reason", body.reason.clone()),
         ],
         Some("time_entries"),
-        Some(id),
+        Some(entry_id),
     )
     .await;
     Ok(Json(serde_json::json!({"ok":true})))
 }
 
 pub async fn batch_approve(
-    State(s): State<AppState>,
-    u: User,
-    Json(b): Json<IdsBody>,
+    State(app_state): State<AppState>,
+    requester: User,
+    Json(body): Json<IdsBody>,
 ) -> AppResult<Json<serde_json::Value>> {
-    if !u.is_lead() {
+    if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
-    if b.ids.is_empty() {
+    if body.ids.is_empty() {
         return Ok(Json(serde_json::json!({"ok": true, "count": 0})));
     }
     // Fetch all submitted entries that this lead is allowed to approve.
-    let mut to_approve: Vec<TimeEntry> = vec![];
-    for id in &b.ids {
-        let z: Option<TimeEntry> =
+    let mut entries_to_approve: Vec<TimeEntry> = vec![];
+    for entry_id in &body.ids {
+        let entry: Option<TimeEntry> =
             sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1 AND status='submitted'")
-                .bind(id)
-                .fetch_optional(&s.pool)
+                .bind(entry_id)
+                .fetch_optional(&app_state.pool)
                 .await?;
-        let Some(z) = z else { continue };
-        if z.user_id == u.id && !u.is_admin() {
+        let Some(entry) = entry else { continue };
+        if entry.user_id == requester.id && !requester.is_admin() {
             continue;
         }
-        if !u.is_admin() {
-            let is_report: Option<bool> = sqlx::query_scalar(
+        if !requester.is_admin() {
+            let is_direct_report: Option<bool> = sqlx::query_scalar(
                 "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2 AND role != 'admin'",
             )
-            .bind(z.user_id)
-            .bind(u.id)
-            .fetch_optional(&s.pool)
+            .bind(entry.user_id)
+            .bind(requester.id)
+            .fetch_optional(&app_state.pool)
             .await?;
-            if is_report.is_none() {
+            if is_direct_report.is_none() {
                 continue;
             }
         }
-        to_approve.push(z);
+        entries_to_approve.push(entry);
     }
-    if to_approve.is_empty() {
+    if entries_to_approve.is_empty() {
         return Ok(Json(serde_json::json!({"ok": true, "count": 0})));
     }
     // Atomically approve all eligible entries.
-    let mut tx = s.pool.begin().await?;
-    let mut approved_entries: Vec<TimeEntry> = Vec::with_capacity(to_approve.len());
-    for z in &to_approve {
-        let updated = sqlx::query(
+    let mut tx = app_state.pool.begin().await?;
+    let mut approved_entries: Vec<TimeEntry> = Vec::with_capacity(entries_to_approve.len());
+    for entry in &entries_to_approve {
+        let affected_rows = sqlx::query(
             "UPDATE time_entries SET status='approved', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP WHERE id=$2 AND status='submitted'",
         )
-        .bind(u.id)
-        .bind(z.id)
+        .bind(requester.id)
+        .bind(entry.id)
         .execute(&mut *tx)
         .await?
         .rows_affected();
-        if updated > 0 {
-            approved_entries.push(z.clone());
+        if affected_rows > 0 {
+            approved_entries.push(entry.clone());
         }
     }
     tx.commit().await?;
-    let count = approved_entries.len();
+    let approved_count = approved_entries.len();
     // Audit + notify each affected employee (best-effort, after commit).
-    for z in &approved_entries {
+    for entry in &approved_entries {
         audit::log(
-            &s.pool,
-            u.id,
+            &app_state.pool,
+            requester.id,
             "approved",
             "time_entries",
-            z.id,
-            Some(serde_json::to_value(z).unwrap()),
-            Some(serde_json::json!({"status": "approved", "reviewed_by": u.id})),
+            entry.id,
+            Some(serde_json::to_value(entry).unwrap()),
+            Some(serde_json::json!({"status": "approved", "reviewed_by": requester.id})),
         )
         .await;
-        let language = notification_language(&s.pool).await;
+        let language = notification_language(&app_state.pool).await;
         crate::notifications::create_translated(
-            &s,
+            &app_state,
             &language,
-            z.user_id,
+            entry.user_id,
             "timesheet_approved",
             "timesheet_approved_title",
             "timesheet_approved_body",
-            vec![("entry_date", i18n::format_date(&language, z.entry_date))],
+            vec![("entry_date", i18n::format_date(&language, entry.entry_date))],
             Some("time_entries"),
-            Some(z.id),
+            Some(entry.id),
         )
         .await;
     }
-    Ok(Json(serde_json::json!({"ok":true, "count": count})))
+    Ok(Json(serde_json::json!({"ok":true, "count": approved_count})))
 }
 
 #[derive(Deserialize)]
@@ -679,103 +674,103 @@ pub struct BatchRejectBody {
 }
 
 pub async fn batch_reject(
-    State(s): State<AppState>,
-    u: User,
-    Json(b): Json<BatchRejectBody>,
+    State(app_state): State<AppState>,
+    requester: User,
+    Json(body): Json<BatchRejectBody>,
 ) -> AppResult<Json<serde_json::Value>> {
-    if !u.is_lead() {
+    if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let reason = b.reason.trim().to_string();
-    if reason.is_empty() {
+    let rejection_reason = body.reason.trim().to_string();
+    if rejection_reason.is_empty() {
         return Err(AppError::BadRequest("Reason required.".into()));
     }
-    if reason.len() > 2000 {
+    if rejection_reason.len() > 2000 {
         return Err(AppError::BadRequest("Reason too long.".into()));
     }
-    if b.ids.is_empty() {
+    if body.ids.is_empty() {
         return Ok(Json(serde_json::json!({"ok": true, "count": 0})));
     }
     // Fetch all submitted entries that this lead is allowed to reject.
-    let mut to_reject: Vec<TimeEntry> = vec![];
-    for id in &b.ids {
-        let z: Option<TimeEntry> = sqlx::query_as(
+    let mut entries_to_reject: Vec<TimeEntry> = vec![];
+    for entry_id in &body.ids {
+        let entry: Option<TimeEntry> = sqlx::query_as(
             "SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, \
              status, submitted_at, reviewed_by, reviewed_at, rejection_reason, \
              created_at, updated_at FROM time_entries WHERE id=$1 AND status='submitted'",
         )
-        .bind(id)
-        .fetch_optional(&s.pool)
+        .bind(entry_id)
+        .fetch_optional(&app_state.pool)
         .await?;
-        let Some(z) = z else { continue };
-        if z.user_id == u.id && !u.is_admin() {
+        let Some(entry) = entry else { continue };
+        if entry.user_id == requester.id && !requester.is_admin() {
             continue;
         }
-        if !u.is_admin() {
-            let is_report: Option<bool> = sqlx::query_scalar(
+        if !requester.is_admin() {
+            let is_direct_report: Option<bool> = sqlx::query_scalar(
                 "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2 AND role != 'admin'",
             )
-            .bind(z.user_id)
-            .bind(u.id)
-            .fetch_optional(&s.pool)
+            .bind(entry.user_id)
+            .bind(requester.id)
+            .fetch_optional(&app_state.pool)
             .await?;
-            if is_report.is_none() {
+            if is_direct_report.is_none() {
                 continue;
             }
         }
-        to_reject.push(z);
+        entries_to_reject.push(entry);
     }
-    if to_reject.is_empty() {
+    if entries_to_reject.is_empty() {
         return Ok(Json(serde_json::json!({"ok": true, "count": 0})));
     }
     // Atomically reject all eligible entries.
-    let mut tx = s.pool.begin().await?;
-    let mut rejected_entries: Vec<TimeEntry> = Vec::with_capacity(to_reject.len());
-    for z in &to_reject {
-        let updated = sqlx::query(
+    let mut tx = app_state.pool.begin().await?;
+    let mut rejected_entries: Vec<TimeEntry> = Vec::with_capacity(entries_to_reject.len());
+    for entry in &entries_to_reject {
+        let affected_rows = sqlx::query(
             "UPDATE time_entries SET status='rejected', reviewed_by=$1, \
              reviewed_at=CURRENT_TIMESTAMP, rejection_reason=$2 WHERE id=$3 AND status='submitted'",
         )
-        .bind(u.id)
-        .bind(&reason)
-        .bind(z.id)
+        .bind(requester.id)
+        .bind(&rejection_reason)
+        .bind(entry.id)
         .execute(&mut *tx)
         .await?
         .rows_affected();
-        if updated > 0 {
-            rejected_entries.push(z.clone());
+        if affected_rows > 0 {
+            rejected_entries.push(entry.clone());
         }
     }
     tx.commit().await?;
-    let count = rejected_entries.len();
+    let rejected_count = rejected_entries.len();
     // Audit + notify each affected employee (best-effort, after commit).
-    for z in &rejected_entries {
+    for entry in &rejected_entries {
         audit::log(
-            &s.pool,
-            u.id,
+            &app_state.pool,
+            requester.id,
             "rejected",
             "time_entries",
-            z.id,
-            Some(serde_json::to_value(z).unwrap()),
-            Some(serde_json::json!({"status": "rejected", "reason": reason})),
+            entry.id,
+            Some(serde_json::to_value(entry).unwrap()),
+            Some(serde_json::json!({"status": "rejected", "reason": rejection_reason})),
         )
         .await;
-        let language = notification_language(&s.pool).await;
+        let language = notification_language(&app_state.pool).await;
         crate::notifications::create_translated(
-            &s,
+            &app_state,
             &language,
-            z.user_id,
+            entry.user_id,
             "timesheet_rejected",
             "timesheet_rejected_title",
             "timesheet_rejected_body",
             vec![
-                ("entry_date", i18n::format_date(&language, z.entry_date)),
-                ("reason", reason.clone()),
+                ("entry_date", i18n::format_date(&language, entry.entry_date)),
+                ("reason", rejection_reason.clone()),
             ],
             Some("time_entries"),
-            Some(z.id),
+            Some(entry.id),
         )
         .await;
     }
-    Ok(Json(serde_json::json!({"ok": true, "count": count})))
+    Ok(Json(serde_json::json!({"ok": true, "count": rejected_count})))
 }

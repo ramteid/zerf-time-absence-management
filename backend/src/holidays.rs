@@ -49,7 +49,7 @@ async fn fetch_nager_holidays(country: &str, year: i32) -> Result<Vec<NagerHolid
 }
 
 /// Proxy: returns all countries supported by Nager.Date (compatible country codes).
-pub async fn available_countries(_u: User) -> AppResult<Json<Vec<NagerCountry>>> {
+pub async fn available_countries(_requester: User) -> AppResult<Json<Vec<NagerCountry>>> {
     let url = format!("{}/AvailableCountries", NAGER_BASE_URL);
     let resp = reqwest::get(&url)
         .await
@@ -71,20 +71,16 @@ pub async fn available_countries(_u: User) -> AppResult<Json<Vec<NagerCountry>>>
 /// derived from the county fields of the current year's public holidays.
 pub async fn available_regions(
     Path(country): Path<String>,
-    _u: User,
+    _requester: User,
 ) -> AppResult<Json<Vec<String>>> {
     let year = chrono::Local::now().year();
     let holidays = fetch_nager_holidays(&country, year).await?;
-
-    let mut codes: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    for h in &holidays {
-        if let Some(counties) = &h.counties {
-            for c in counties {
-                codes.insert(c.clone());
-            }
-        }
-    }
-    Ok(Json(codes.into_iter().collect()))
+    let region_codes: std::collections::BTreeSet<String> = holidays
+        .into_iter()
+        .filter_map(|h| h.counties)
+        .flatten()
+        .collect();
+    Ok(Json(region_codes.into_iter().collect()))
 }
 
 /// Fetch holidays from https://date.nager.at for a given year and country.
@@ -97,21 +93,16 @@ pub async fn fetch_holidays_from_api(
     let holidays = fetch_nager_holidays(country, year).await?;
 
     // Filter by region if set: keep nation-wide (counties=null) and matching region
-    let filtered: Vec<(NaiveDate, String, String)> = holidays
+    let filtered_holidays = holidays
         .into_iter()
         .filter(|h| {
-            if region.is_empty() {
-                return true;
-            }
-            match &h.counties {
-                None => true, // nation-wide
-                Some(c) => c.iter().any(|cc| cc == region),
-            }
+            region.is_empty()
+                || h.counties.as_ref().map_or(true, |c| c.iter().any(|code| code == region))
         })
         .map(|h| (h.date, h.name, h.local_name))
         .collect();
 
-    Ok(filtered)
+    Ok(filtered_holidays)
 }
 
 /// Delete all auto-imported holidays and re-import for the given years.
@@ -247,34 +238,34 @@ pub struct HolidayQuery {
 }
 
 pub async fn list(
-    State(s): State<AppState>,
-    _u: User,
-    Query(q): Query<HolidayQuery>,
+    State(app_state): State<AppState>,
+    _requester: User,
+    Query(query): Query<HolidayQuery>,
 ) -> AppResult<Json<Vec<serde_json::Value>>> {
-    let year = q.year.unwrap_or_else(|| chrono::Local::now().year());
+    let year = query.year.unwrap_or_else(|| chrono::Local::now().year());
 
-    let language = match q.lang {
+    let language = match query.lang {
         Some(code) => i18n::Language::from_setting(&code),
-        None => i18n::load_ui_language(&s.pool).await?,
+        None => i18n::load_ui_language(&app_state.pool).await?,
     };
 
-    let rows = sqlx::query_as::<_, Holiday>(
+    let holiday_rows = sqlx::query_as::<_, Holiday>(
         "SELECT id, holiday_date, name, local_name, year, is_auto FROM holidays WHERE year=$1 ORDER BY holiday_date",
     )
     .bind(year)
-    .fetch_all(&s.pool)
+    .fetch_all(&app_state.pool)
     .await?;
 
-    let result: Vec<serde_json::Value> = rows
+    let result: Vec<serde_json::Value> = holiday_rows
         .into_iter()
-        .map(|h| {
-            let display_name = i18n::holiday_display_name(&language, h.name, h.local_name);
+        .map(|holiday| {
+            let display_name = i18n::holiday_display_name(&language, holiday.name, holiday.local_name);
             serde_json::json!({
-                "id": h.id,
-                "holiday_date": h.holiday_date,
+                "id": holiday.id,
+                "holiday_date": holiday.holiday_date,
                 "name": display_name,
-                "year": h.year,
-                "is_auto": h.is_auto,
+                "year": holiday.year,
+                "is_auto": holiday.is_auto,
             })
         })
         .collect();
@@ -289,38 +280,38 @@ pub struct NewHoliday {
 }
 
 pub async fn create(
-    State(s): State<AppState>,
-    u: User,
-    Json(b): Json<NewHoliday>,
+    State(app_state): State<AppState>,
+    requester: User,
+    Json(body): Json<NewHoliday>,
 ) -> AppResult<Json<serde_json::Value>> {
-    if !u.is_admin() {
+    if !requester.is_admin() {
         return Err(AppError::Forbidden);
     }
-    let name = b.name.trim().to_string();
-    if name.is_empty() || name.len() > 200 {
+    let holiday_name = body.name.trim().to_string();
+    if holiday_name.is_empty() || holiday_name.len() > 200 {
         return Err(AppError::BadRequest("Invalid holiday name.".into()));
     }
     sqlx::query("INSERT INTO holidays(holiday_date, name, year, is_auto) VALUES ($1,$2,$3, FALSE)")
-        .bind(b.holiday_date)
-        .bind(&name)
-        .bind(b.holiday_date.year())
-        .execute(&s.pool)
+        .bind(body.holiday_date)
+        .bind(&holiday_name)
+        .bind(body.holiday_date.year())
+        .execute(&app_state.pool)
         .await
         .map_err(|_| AppError::Conflict("Holiday already exists".into()))?;
     Ok(Json(serde_json::json!({"ok":true})))
 }
 
 pub async fn delete(
-    State(s): State<AppState>,
-    u: User,
-    Path(id): Path<i64>,
+    State(app_state): State<AppState>,
+    requester: User,
+    Path(holiday_id): Path<i64>,
 ) -> AppResult<Json<serde_json::Value>> {
-    if !u.is_admin() {
+    if !requester.is_admin() {
         return Err(AppError::Forbidden);
     }
     sqlx::query("DELETE FROM holidays WHERE id=$1")
-        .bind(id)
-        .execute(&s.pool)
+        .bind(holiday_id)
+        .execute(&app_state.pool)
         .await?;
     Ok(Json(serde_json::json!({"ok":true})))
 }

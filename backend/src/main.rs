@@ -42,19 +42,19 @@ async fn main() -> Result<()> {
     // old notifications (>90 days).
     tokio::spawn(zerf::auth::cleanup_loop(pool.clone()));
     {
-        let p = pool.clone();
+        let pool = pool.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(86_400));
             loop {
                 interval.tick().await;
-                zerf::notifications::cleanup_old(&p).await;
+                zerf::notifications::cleanup_old(&pool).await;
             }
         });
     }
 
     // Weekly holiday scheduler: every Monday at 12:00, check if next year holidays exist.
     {
-        let p = pool.clone();
+        let pool = pool.clone();
         tokio::spawn(async move {
             loop {
                 let now = chrono::Local::now();
@@ -63,9 +63,9 @@ async fn main() -> Result<()> {
                 tokio::time::sleep(wait).await;
 
                 let next_year = chrono::Local::now().year() + 1;
-                if let Err(e) = holidays::ensure_holidays(&p, next_year).await {
+                if let Err(error) = holidays::ensure_holidays(&pool, next_year).await {
                     tracing::warn!(
-                        "Holiday scheduler: failed to ensure holidays for {next_year}: {e:?}"
+                        "Holiday scheduler: failed to ensure holidays for {next_year}: {error:?}"
                     );
                 } else {
                     tracing::info!("Holiday scheduler: ensured holidays for {next_year}");
@@ -75,11 +75,7 @@ async fn main() -> Result<()> {
     }
 
     // Submission reminder scheduler: wakes at 07:00 on the configured deadline day.
-    {
-        let p = pool.clone();
-        let s = state.clone();
-        tokio::spawn(zerf::submission_reminders::run_loop(p, s));
-    }
+    tokio::spawn(zerf::submission_reminders::run_loop(pool.clone(), state.clone()));
 
     let app = build_app(state);
 

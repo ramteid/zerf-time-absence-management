@@ -35,7 +35,7 @@ pub async fn ensure_initial(pool: &crate::db::DatabasePool) -> AppResult<()> {
     if count > 0 {
         return Ok(());
     }
-    let init = [
+    let initial_categories = [
         ("Core Duties", "#4CAF50", 1),
         ("Preparation Time", "#2196F3", 2),
         ("Leadership Tasks", "#FF9800", 3),
@@ -43,24 +43,24 @@ pub async fn ensure_initial(pool: &crate::db::DatabasePool) -> AppResult<()> {
         ("Training", "#795548", 5),
         ("Other", "#607D8B", 6),
     ];
-    for (n, c, s) in init {
+    for (name, color, sort_order) in initial_categories {
         sqlx::query("INSERT INTO categories(name, color, sort_order) VALUES ($1,$2,$3)")
-            .bind(n)
-            .bind(c)
-            .bind(s)
+            .bind(name)
+            .bind(color)
+            .bind(sort_order)
             .execute(pool)
             .await?;
     }
     Ok(())
 }
 
-pub async fn list(State(s): State<AppState>, _u: User) -> AppResult<Json<Vec<Category>>> {
-    let r = sqlx::query_as::<_, Category>(
+pub async fn list(State(app_state): State<AppState>, _requester: User) -> AppResult<Json<Vec<Category>>> {
+    let categories = sqlx::query_as::<_, Category>(
         "SELECT id, name, description, color, sort_order, active FROM categories WHERE active=TRUE ORDER BY sort_order, name",
     )
-    .fetch_all(&s.pool)
+    .fetch_all(&app_state.pool)
     .await?;
-    Ok(Json(r))
+    Ok(Json(categories))
 }
 
 #[derive(Deserialize)]
@@ -72,37 +72,37 @@ pub struct NewCategory {
 }
 
 pub async fn create(
-    State(s): State<AppState>,
-    u: User,
-    Json(b): Json<NewCategory>,
+    State(app_state): State<AppState>,
+    requester: User,
+    Json(body): Json<NewCategory>,
 ) -> AppResult<Json<Category>> {
-    if !u.is_admin() {
+    if !requester.is_admin() {
         return Err(AppError::Forbidden);
     }
-    let name = b.name.trim().to_string();
+    let name = body.name.trim().to_string();
     if name.is_empty() || name.len() > 200 {
         return Err(AppError::BadRequest("Invalid category name.".into()));
     }
-    let color = b.color.trim().to_string();
+    let color = body.color.trim().to_string();
     if color.is_empty() || color.len() > 30 {
         return Err(AppError::BadRequest("Invalid color.".into()));
     }
-    let id: i64 = sqlx::query_scalar(
+    let new_category_id: i64 = sqlx::query_scalar(
         "INSERT INTO categories(name, description, color, sort_order) VALUES ($1,$2,$3,$4) RETURNING id",
     )
     .bind(&name)
-    .bind(&b.description)
+    .bind(&body.description)
     .bind(&color)
-    .bind(b.sort_order.unwrap_or(0))
-    .fetch_one(&s.pool)
+    .bind(body.sort_order.unwrap_or(0))
+    .fetch_one(&app_state.pool)
     .await
     .map_err(|_| AppError::Conflict("Name already exists".into()))?;
     Ok(Json(
         sqlx::query_as(
             "SELECT id, name, description, color, sort_order, active FROM categories WHERE id=$1",
         )
-        .bind(id)
-        .fetch_one(&s.pool)
+        .bind(new_category_id)
+        .fetch_one(&app_state.pool)
         .await?,
     ))
 }
@@ -117,37 +117,37 @@ pub struct UpdateCategory {
 }
 
 pub async fn update(
-    State(s): State<AppState>,
-    u: User,
-    Path(id): Path<i64>,
-    Json(b): Json<UpdateCategory>,
+    State(app_state): State<AppState>,
+    requester: User,
+    Path(category_id): Path<i64>,
+    Json(body): Json<UpdateCategory>,
 ) -> AppResult<Json<Category>> {
-    if !u.is_admin() {
+    if !requester.is_admin() {
         return Err(AppError::Forbidden);
     }
-    if let Some(ref name) = b.name {
-        let name = name.trim();
-        if name.is_empty() || name.len() > 200 {
+    if let Some(ref new_name) = body.name {
+        let trimmed = new_name.trim();
+        if trimmed.is_empty() || trimmed.len() > 200 {
             return Err(AppError::BadRequest("Invalid category name.".into()));
         }
     }
-    if let Some(ref color) = b.color {
-        let color = color.trim();
-        if color.is_empty() || color.len() > 30 {
+    if let Some(ref new_color) = body.color {
+        let trimmed = new_color.trim();
+        if trimmed.is_empty() || trimmed.len() > 30 {
             return Err(AppError::BadRequest("Invalid color.".into()));
         }
     }
-    let name = b.name.map(|n| n.trim().to_string());
-    let color = b.color.map(|c| c.trim().to_string());
+    let normalized_name = body.name.map(|name| name.trim().to_string());
+    let normalized_color = body.color.map(|color| color.trim().to_string());
     sqlx::query("UPDATE categories SET name=COALESCE($1,name), description=COALESCE($2,description), color=COALESCE($3,color), sort_order=COALESCE($4,sort_order), active=COALESCE($5,active) WHERE id=$6")
-        .bind(name).bind(b.description).bind(color).bind(b.sort_order).bind(b.active).bind(id)
-        .execute(&s.pool).await?;
+        .bind(normalized_name).bind(body.description).bind(normalized_color).bind(body.sort_order).bind(body.active).bind(category_id)
+        .execute(&app_state.pool).await?;
     Ok(Json(
         sqlx::query_as(
             "SELECT id, name, description, color, sort_order, active FROM categories WHERE id=$1",
         )
-        .bind(id)
-        .fetch_one(&s.pool)
+        .bind(category_id)
+        .fetch_one(&app_state.pool)
         .await?,
     ))
 }

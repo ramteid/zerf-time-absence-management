@@ -120,73 +120,86 @@ where
 }
 
 async fn load_all_settings(pool: &crate::db::DatabasePool) -> AppResult<PublicSettings> {
-    let dwh = load_setting(pool, DEFAULT_WEEKLY_HOURS_KEY, "").await?;
-    let dal = load_setting(pool, DEFAULT_ANNUAL_LEAVE_DAYS_KEY, "").await?;
-    let sdd = load_setting(pool, SUBMISSION_DEADLINE_DAY_KEY, "").await?;
+    let default_weekly_hours_str = load_setting(pool, DEFAULT_WEEKLY_HOURS_KEY, "").await?;
+    let default_annual_leave_days_str = load_setting(pool, DEFAULT_ANNUAL_LEAVE_DAYS_KEY, "").await?;
+    let submission_deadline_day_str = load_setting(pool, SUBMISSION_DEADLINE_DAY_KEY, "").await?;
     Ok(PublicSettings {
         ui_language: load_setting(pool, UI_LANGUAGE_KEY, DEFAULT_UI_LANGUAGE).await?,
         time_format: load_setting(pool, TIME_FORMAT_KEY, DEFAULT_TIME_FORMAT).await?,
         country: load_setting(pool, COUNTRY_KEY, DEFAULT_COUNTRY).await?,
         region: load_setting(pool, REGION_KEY, DEFAULT_REGION).await?,
-        default_weekly_hours: dwh.parse().ok(),
-        default_annual_leave_days: dal.parse().ok(),
+        default_weekly_hours: default_weekly_hours_str.parse().ok(),
+        default_annual_leave_days: default_annual_leave_days_str.parse().ok(),
         carryover_expiry_date: load_setting(
             pool,
             CARRYOVER_EXPIRY_DATE_KEY,
             DEFAULT_CARRYOVER_EXPIRY_DATE,
         )
         .await?,
-        submission_deadline_day: sdd.parse().ok(),
+        submission_deadline_day: submission_deadline_day_str.parse().ok(),
     })
 }
 
-pub async fn public_settings(State(s): State<AppState>) -> AppResult<Json<PublicSettings>> {
-    Ok(Json(load_all_settings(&s.pool).await?))
+pub async fn public_settings(State(app_state): State<AppState>) -> AppResult<Json<PublicSettings>> {
+    Ok(Json(load_all_settings(&app_state.pool).await?))
 }
 
 pub async fn admin_settings(
-    State(s): State<AppState>,
+    State(app_state): State<AppState>,
     user: User,
 ) -> AppResult<Json<AdminSettingsResponse>> {
     if !user.is_admin() {
         return Err(AppError::Forbidden);
     }
-    let base = load_all_settings(&s.pool).await?;
-    let smtp = load_smtp_admin(&s.pool).await?;
-    Ok(Json(AdminSettingsResponse {
-        base,
-        smtp_enabled: smtp.0,
-        smtp_host: smtp.1,
-        smtp_port: smtp.2,
-        smtp_username: smtp.3,
-        smtp_from: smtp.4,
-        smtp_encryption: smtp.5,
-        smtp_password_set: smtp.6,
-    }))
+    Ok(Json(load_admin_settings_response(&app_state.pool).await?))
 }
 
-async fn load_smtp_admin(
-    pool: &crate::db::DatabasePool,
-) -> AppResult<(bool, String, u16, String, String, String, bool)> {
+async fn load_admin_settings_response(pool: &crate::db::DatabasePool) -> AppResult<AdminSettingsResponse> {
+    let base = load_all_settings(pool).await?;
     let enabled = load_setting(pool, SMTP_ENABLED_KEY, "false").await? == "true";
     let host = load_setting(pool, SMTP_HOST_KEY, "").await?;
-    let port: u16 = load_setting(pool, SMTP_PORT_KEY, "587")
-        .await?
-        .parse()
-        .unwrap_or(587);
+    let port: u16 = load_setting(pool, SMTP_PORT_KEY, "587").await?.parse().unwrap_or(587);
     let username = load_setting(pool, SMTP_USERNAME_KEY, "").await?;
     let from = load_setting(pool, SMTP_FROM_KEY, "").await?;
     let encryption = load_setting(pool, SMTP_ENCRYPTION_KEY, "starttls").await?;
     let password_set = !load_setting(pool, SMTP_PASSWORD_KEY, "").await?.is_empty();
-    Ok((
-        enabled,
+    Ok(AdminSettingsResponse {
+        base,
+        smtp_enabled: enabled,
+        smtp_host: host,
+        smtp_port: port,
+        smtp_username: username,
+        smtp_from: from,
+        smtp_encryption: encryption,
+        smtp_password_set: password_set,
+    })
+}
+
+/// Build an [`SmtpConfig`] from the fields of an [`UpdateSmtpSettings`] request,
+/// using the stored password when none is supplied in the body.
+async fn smtp_config_from_body(
+    pool: &crate::db::DatabasePool,
+    body: &UpdateSmtpSettings,
+) -> AppResult<SmtpConfig> {
+    let host = body.smtp_host.trim().to_string();
+    let from = body.smtp_from.trim().to_string();
+    let encryption = body.smtp_encryption.as_deref().unwrap_or("starttls").trim().to_lowercase();
+    let port = body.smtp_port.unwrap_or(587);
+    let username = body.smtp_username.as_deref().unwrap_or("").trim().to_string();
+    let password = if body.smtp_password.as_ref().is_some_and(|p| !p.is_empty()) {
+        body.smtp_password.clone()
+    } else {
+        let stored = load_setting(pool, SMTP_PASSWORD_KEY, "").await?;
+        if stored.is_empty() { None } else { Some(stored) }
+    };
+    Ok(SmtpConfig {
         host,
         port,
-        username,
+        username: if username.is_empty() { None } else { Some(username) },
+        password,
         from,
         encryption,
-        password_set,
-    ))
+    })
 }
 
 /// Load the active SMTP config from the database. Returns `None` when SMTP
@@ -230,7 +243,7 @@ pub async fn load_smtp_config(pool: &crate::db::DatabasePool) -> Option<SmtpConf
 }
 
 pub async fn update_smtp_settings(
-    State(s): State<AppState>,
+    State(app_state): State<AppState>,
     user: User,
     Json(body): Json<UpdateSmtpSettings>,
 ) -> AppResult<Json<AdminSettingsResponse>> {
@@ -238,114 +251,63 @@ pub async fn update_smtp_settings(
         return Err(AppError::Forbidden);
     }
 
-    let host = body.smtp_host.trim().to_string();
-    let from = body.smtp_from.trim().to_string();
-    let encryption = body
-        .smtp_encryption
-        .as_deref()
-        .unwrap_or("starttls")
-        .trim()
-        .to_lowercase();
-    if !matches!(encryption.as_str(), "starttls" | "tls" | "none") {
+    if !matches!(
+        body.smtp_encryption.as_deref().unwrap_or("starttls").trim(),
+        "starttls" | "tls" | "none"
+    ) {
         return Err(AppError::BadRequest(
             "smtp_encryption must be starttls, tls, or none.".into(),
         ));
     }
-    let port = body.smtp_port.unwrap_or(587);
-    let username = body
-        .smtp_username
-        .as_deref()
-        .unwrap_or("")
-        .trim()
-        .to_string();
 
     if body.smtp_enabled {
+        let host = body.smtp_host.trim();
+        let from = body.smtp_from.trim();
         if host.is_empty() {
             return Err(AppError::BadRequest("SMTP host is required.".into()));
         }
         if from.is_empty() {
-            return Err(AppError::BadRequest(
-                "SMTP from address is required.".into(),
-            ));
+            return Err(AppError::BadRequest("SMTP from address is required.".into()));
         }
         // Validate from address is parseable as a mailbox.
         use lettre::message::Mailbox;
         from.parse::<Mailbox>()
             .map_err(|_| AppError::BadRequest("Invalid SMTP from address.".into()))?;
-    }
 
-    // Test connection before saving anything when enabling.
-    if body.smtp_enabled {
-        let password = if body.smtp_password.as_ref().is_some_and(|p| !p.is_empty()) {
-            body.smtp_password.clone()
-        } else {
-            let stored = load_setting(&s.pool, SMTP_PASSWORD_KEY, "").await?;
-            if stored.is_empty() {
-                None
-            } else {
-                Some(stored)
-            }
-        };
-
-        let test_cfg = SmtpConfig {
-            host: host.clone(),
-            port,
-            username: if username.is_empty() {
-                None
-            } else {
-                Some(username.clone())
-            },
-            password,
-            from: from.clone(),
-            encryption: encryption.clone(),
-        };
-        crate::email::test_connection(&test_cfg)
+        // Test connection before saving anything when enabling.
+        let test_config = smtp_config_from_body(&app_state.pool, &body).await?;
+        crate::email::test_connection(&test_config)
             .await
             .map_err(|e| AppError::BadRequest(format!("SMTP_CONNECTION_FAILED:{e}")))?;
     }
 
-    // Save all SMTP settings atomically within a transaction.
-    let mut tx = s.pool.begin().await?;
+    let cfg = smtp_config_from_body(&app_state.pool, &body).await?;
 
-    save_setting_exec(&mut *tx, SMTP_HOST_KEY, &host).await?;
-    save_setting_exec(&mut *tx, SMTP_PORT_KEY, &port.to_string()).await?;
-    save_setting_exec(&mut *tx, SMTP_USERNAME_KEY, &username).await?;
-    save_setting_exec(&mut *tx, SMTP_FROM_KEY, &from).await?;
-    save_setting_exec(&mut *tx, SMTP_ENCRYPTION_KEY, &encryption).await?;
+    // Save all SMTP settings atomically within a transaction.
+    let mut tx = app_state.pool.begin().await?;
+
+    save_setting_exec(&mut *tx, SMTP_HOST_KEY, &cfg.host).await?;
+    save_setting_exec(&mut *tx, SMTP_PORT_KEY, &cfg.port.to_string()).await?;
+    save_setting_exec(&mut *tx, SMTP_USERNAME_KEY, cfg.username.as_deref().unwrap_or("")).await?;
+    save_setting_exec(&mut *tx, SMTP_FROM_KEY, &cfg.from).await?;
+    save_setting_exec(&mut *tx, SMTP_ENCRYPTION_KEY, &cfg.encryption).await?;
 
     // Overwrite password when explicitly provided. An empty string clears it.
-    if let Some(ref pw) = body.smtp_password {
-        save_setting_exec(&mut *tx, SMTP_PASSWORD_KEY, pw).await?;
+    if let Some(ref password) = body.smtp_password {
+        save_setting_exec(&mut *tx, SMTP_PASSWORD_KEY, password).await?;
     }
 
-    save_setting_exec(
-        &mut *tx,
-        SMTP_ENABLED_KEY,
-        if body.smtp_enabled { "true" } else { "false" },
-    )
-    .await?;
+    save_setting_exec(&mut *tx, SMTP_ENABLED_KEY, if body.smtp_enabled { "true" } else { "false" }).await?;
 
     tx.commit().await?;
 
-    // Return full admin settings.
-    let base = load_all_settings(&s.pool).await?;
-    let smtp = load_smtp_admin(&s.pool).await?;
-    Ok(Json(AdminSettingsResponse {
-        base,
-        smtp_enabled: smtp.0,
-        smtp_host: smtp.1,
-        smtp_port: smtp.2,
-        smtp_username: smtp.3,
-        smtp_from: smtp.4,
-        smtp_encryption: smtp.5,
-        smtp_password_set: smtp.6,
-    }))
+    Ok(Json(load_admin_settings_response(&app_state.pool).await?))
 }
 
 /// Test SMTP connection without saving. Builds a temporary SmtpConfig from
 /// the request body and attempts to connect.
 pub async fn test_smtp_connection(
-    State(s): State<AppState>,
+    State(app_state): State<AppState>,
     user: User,
     Json(body): Json<UpdateSmtpSettings>,
 ) -> AppResult<Json<serde_json::Value>> {
@@ -353,55 +315,17 @@ pub async fn test_smtp_connection(
         return Err(AppError::Forbidden);
     }
 
-    let host = body.smtp_host.trim().to_string();
-    let from = body.smtp_from.trim().to_string();
+    let host = body.smtp_host.trim();
+    let from = body.smtp_from.trim();
     if host.is_empty() {
         return Err(AppError::BadRequest("SMTP host is required.".into()));
     }
     if from.is_empty() {
-        return Err(AppError::BadRequest(
-            "SMTP from address is required.".into(),
-        ));
+        return Err(AppError::BadRequest("SMTP from address is required.".into()));
     }
 
-    let encryption = body
-        .smtp_encryption
-        .as_deref()
-        .unwrap_or("starttls")
-        .trim()
-        .to_lowercase();
-    let port = body.smtp_port.unwrap_or(587);
-    let username = body
-        .smtp_username
-        .as_deref()
-        .unwrap_or("")
-        .trim()
-        .to_string();
-
-    let password = if body.smtp_password.as_ref().is_some_and(|p| !p.is_empty()) {
-        body.smtp_password.clone()
-    } else {
-        let stored = load_setting(&s.pool, SMTP_PASSWORD_KEY, "").await?;
-        if stored.is_empty() {
-            None
-        } else {
-            Some(stored)
-        }
-    };
-
-    let test_cfg = SmtpConfig {
-        host,
-        port,
-        username: if username.is_empty() {
-            None
-        } else {
-            Some(username)
-        },
-        password,
-        from,
-        encryption,
-    };
-    crate::email::test_connection(&test_cfg)
+    let test_config = smtp_config_from_body(&app_state.pool, &body).await?;
+    crate::email::test_connection(&test_config)
         .await
         .map_err(|e| AppError::BadRequest(format!("SMTP_CONNECTION_FAILED:{e}")))?;
 
@@ -409,7 +333,7 @@ pub async fn test_smtp_connection(
 }
 
 pub async fn update_admin_settings(
-    State(s): State<AppState>,
+    State(app_state): State<AppState>,
     user: User,
     Json(body): Json<UpdateSettings>,
 ) -> AppResult<Json<AdminSettingsResponse>> {
@@ -419,7 +343,8 @@ pub async fn update_admin_settings(
 
     let language = normalize_language(&body.ui_language)?;
     let time_format = normalize_time_format(&body.time_format)?;
-    let previous = load_all_settings(&s.pool).await?;
+    // Load previous settings before the update so we can detect country/region changes.
+    let previous_settings = load_all_settings(&app_state.pool).await?;
     let country = body.country.trim().to_uppercase();
     let region = body.region.trim().to_string();
 
@@ -447,9 +372,9 @@ pub async fn update_admin_settings(
     }
 
     // Validate carryover expiry date (MM-DD format).
-    let validated_ced: Option<String> = if let Some(ref ced) = body.carryover_expiry_date {
-        let ced = ced.trim();
-        let parts: Vec<&str> = ced.split('-').collect();
+    let validated_carryover_date: Option<String> = if let Some(ref carryover_date) = body.carryover_expiry_date {
+        let carryover_date = carryover_date.trim();
+        let parts: Vec<&str> = carryover_date.split('-').collect();
         if parts.len() != 2 {
             return Err(AppError::BadRequest(
                 "carryover_expiry_date must be MM-DD.".into(),
@@ -472,7 +397,7 @@ pub async fn update_admin_settings(
                 "Invalid carryover_expiry_date.".into(),
             ));
         }
-        Some(ced.to_string())
+        Some(carryover_date.to_string())
     } else {
         None
     };
@@ -485,20 +410,20 @@ pub async fn update_admin_settings(
         }
     }
 
-    let dwh_str = body
+    let default_weekly_hours_str = body
         .default_weekly_hours
         .map(|v| v.to_string())
         .unwrap_or_default();
-    let dal_str = body
+    let default_annual_leave_days_str = body
         .default_annual_leave_days
         .map(|v| v.to_string())
         .unwrap_or_default();
 
     // Save all settings atomically within a transaction.
-    let mut tx = s.pool.begin().await?;
+    let mut tx = app_state.pool.begin().await?;
 
-    if let Some(ref ced) = validated_ced {
-        save_setting_exec(&mut *tx, CARRYOVER_EXPIRY_DATE_KEY, ced).await?;
+    if let Some(ref carryover_date) = validated_carryover_date {
+        save_setting_exec(&mut *tx, CARRYOVER_EXPIRY_DATE_KEY, carryover_date).await?;
     }
 
     if let Some(day) = body.submission_deadline_day {
@@ -511,29 +436,19 @@ pub async fn update_admin_settings(
     save_setting_exec(&mut *tx, TIME_FORMAT_KEY, time_format).await?;
     let saved_country = save_setting_exec(&mut *tx, COUNTRY_KEY, &country).await?;
     let saved_region = save_setting_exec(&mut *tx, REGION_KEY, &region).await?;
-    save_setting_exec(&mut *tx, DEFAULT_WEEKLY_HOURS_KEY, &dwh_str).await?;
-    save_setting_exec(&mut *tx, DEFAULT_ANNUAL_LEAVE_DAYS_KEY, &dal_str).await?;
+    save_setting_exec(&mut *tx, DEFAULT_WEEKLY_HOURS_KEY, &default_weekly_hours_str).await?;
+    save_setting_exec(&mut *tx, DEFAULT_ANNUAL_LEAVE_DAYS_KEY, &default_annual_leave_days_str).await?;
 
     tx.commit().await?;
 
+    // If the country or region changed, refresh the holidays table from the public holiday API.
     if !saved_country.is_empty()
-        && (previous.country != saved_country || previous.region != saved_region)
+        && (previous_settings.country != saved_country || previous_settings.region != saved_region)
     {
-        if let Err(e) = holidays::refresh_holidays(&s.pool, &saved_country, &saved_region).await {
+        if let Err(e) = holidays::refresh_holidays(&app_state.pool, &saved_country, &saved_region).await {
             tracing::warn!("Failed to refresh holidays: {:?}", e);
         }
     }
 
-    let base = load_all_settings(&s.pool).await?;
-    let smtp = load_smtp_admin(&s.pool).await?;
-    Ok(Json(AdminSettingsResponse {
-        base,
-        smtp_enabled: smtp.0,
-        smtp_host: smtp.1,
-        smtp_port: smtp.2,
-        smtp_username: smtp.3,
-        smtp_from: smtp.4,
-        smtp_encryption: smtp.5,
-        smtp_password_set: smtp.6,
-    }))
+    Ok(Json(load_admin_settings_response(&app_state.pool).await?))
 }

@@ -19,10 +19,10 @@ pub async fn log(
     before: Option<serde_json::Value>,
     after: Option<serde_json::Value>,
 ) {
-    let v = before.map(|x| x.to_string());
-    let n = after.map(|x| x.to_string());
+    let before_json = before.map(|value| value.to_string());
+    let after_json = after.map(|value| value.to_string());
     let _ = sqlx::query("INSERT INTO audit_log(user_id, action, table_name, record_id, before_data, after_data) VALUES ($1,$2,$3,$4,$5,$6)")
-        .bind(user_id).bind(action).bind(table_name).bind(record_id).bind(v).bind(n)
+        .bind(user_id).bind(action).bind(table_name).bind(record_id).bind(before_json).bind(after_json)
         .execute(pool).await;
 }
 
@@ -46,28 +46,28 @@ pub struct LogQuery {
 }
 
 pub async fn list(
-    State(s): State<AppState>,
-    u: User,
-    Query(q): Query<LogQuery>,
+    State(app_state): State<AppState>,
+    requester: User,
+    Query(query): Query<LogQuery>,
 ) -> AppResult<Json<Vec<LogEntry>>> {
-    if !u.is_admin() {
+    if !requester.is_admin() {
         return Err(AppError::Forbidden);
     }
     let mut builder = QueryBuilder::<Postgres>::new("SELECT id, user_id, action, table_name, record_id, before_data, after_data, occurred_at FROM audit_log WHERE TRUE");
-    if q.table_name.is_some() {
-        builder.push(" AND table_name = ").push_bind(q.table_name);
+    if query.table_name.is_some() {
+        builder.push(" AND table_name = ").push_bind(query.table_name);
     }
-    if q.record_id.is_some() {
-        builder.push(" AND record_id = ").push_bind(q.record_id);
+    if query.record_id.is_some() {
+        builder.push(" AND record_id = ").push_bind(query.record_id);
     }
-    if q.user_id.is_some() {
-        builder.push(" AND user_id = ").push_bind(q.user_id);
+    if query.user_id.is_some() {
+        builder.push(" AND user_id = ").push_bind(query.user_id);
     }
     builder.push(" ORDER BY occurred_at DESC LIMIT 500");
     Ok(Json(
         builder
             .build_query_as::<LogEntry>()
-            .fetch_all(&s.pool)
+            .fetch_all(&app_state.pool)
             .await?,
     ))
 }

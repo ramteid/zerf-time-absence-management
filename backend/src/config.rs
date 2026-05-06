@@ -28,8 +28,8 @@ pub struct SmtpConfig {
 
 fn env_bool(key: &str, default: bool) -> bool {
     match env::var(key) {
-        Ok(v) => matches!(
-            v.trim().to_lowercase().as_str(),
+        Ok(value) => matches!(
+            value.trim().to_lowercase().as_str(),
             "1" | "true" | "yes" | "on"
         ),
         Err(_) => default,
@@ -48,16 +48,16 @@ impl Config {
             panic!("ZERF_SESSION_SECRET is using a default/placeholder value — replace it with a real random secret");
         }
 
-        let public_url = env::var("ZERF_PUBLIC_URL").ok().filter(|s| !s.is_empty());
+        let public_url = env::var("ZERF_PUBLIC_URL").ok().filter(|url| !url.is_empty());
         let allowed_origins: Vec<String> = match env::var("ZERF_ALLOWED_ORIGINS").ok() {
-            Some(s) if !s.is_empty() => s
+            Some(origins_str) if !origins_str.is_empty() => origins_str
                 .split(',')
-                .map(|x| x.trim().trim_end_matches('/').to_string())
-                .filter(|x| !x.is_empty())
+                .map(|origin| origin.trim().trim_end_matches('/').to_string())
+                .filter(|origin| !origin.is_empty())
                 .collect(),
             _ => public_url
                 .iter()
-                .map(|u| u.trim_end_matches('/').to_string())
+                .map(|url| url.trim_end_matches('/').to_string())
                 .collect(),
         };
         let dev_mode = env_bool("ZERF_DEV", false);
