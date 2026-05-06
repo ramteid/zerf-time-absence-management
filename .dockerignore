@@ -1,19 +1,42 @@
+# Version control
 .git
 .github
-data
+
+# Build artifacts
 target
 backend/target
 node_modules
 frontend/node_modules
 frontend/dist
+
+# Data and databases
+data
 *.db
 *.db-journal
 *.db-wal
 *.db-shm
+
+# Environment files
 .env
 .env.*
 !.env.example
+
+# Docker and deployment
+docker
+Caddyfile
+caddy_data
+caddy_config
+Dockerfile
+.dockerignore
+
+# Documentation
 README.md
 SECURITY.md
-tests
+LICENSE
+
+# Tests and scripts
+backend/tests
 scripts
+
+# Shell scripts
+*.sh
