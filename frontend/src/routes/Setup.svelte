@@ -1,7 +1,28 @@
 <script>
+  import { onMount, onDestroy } from "svelte";
   import { api } from "../api.js";
   import { t } from "../i18n.js";
   import Icon from "../Icons.svelte";
+
+  // On mobile, the virtual keyboard shrinks the visual viewport but not the layout
+  // viewport. By removing the fixed height and overflow lock from the root elements,
+  // the browser can scroll naturally to keep the focused input above the keyboard.
+  onMount(() => {
+    document.documentElement.style.height = "auto";
+    document.documentElement.style.overflow = "auto";
+    document.body.style.height = "auto";
+    document.body.style.overflow = "auto";
+    document.getElementById("app").style.height = "auto";
+    document.getElementById("app").style.overflow = "visible";
+  });
+  onDestroy(() => {
+    document.documentElement.style.height = "";
+    document.documentElement.style.overflow = "";
+    document.body.style.height = "";
+    document.body.style.overflow = "";
+    document.getElementById("app").style.height = "";
+    document.getElementById("app").style.overflow = "";
+  });
 
   export let onComplete = () => {};
 
@@ -54,24 +75,10 @@
           last_name: lastName.trim(),
         },
       });
-      // Hint the browser's password manager to store the new credential.
-      // Without this, browsers often skip the save prompt because the
-      // form submission was intercepted via fetch instead of a navigation.
-      try {
-        if (typeof window !== "undefined" && "PasswordCredential" in window) {
-          const cred = new window.PasswordCredential({
-            id: email.trim(),
-            password,
-            name: `${firstName.trim()} ${lastName.trim()}`.trim(),
-          });
-          if (navigator.credentials && navigator.credentials.store) {
-            await navigator.credentials.store(cred);
-          }
-        }
-      } catch (_) {
-        // Non-fatal: credential storage is a best-effort hint.
-      }
-      onComplete();
+      // Pass the email to the caller so the login form can pre-fill it.
+      // The user will then sign in through the normal login form, which
+      // browsers reliably use to detect and offer to save credentials.
+      onComplete(email.trim());
     } catch (err) {
       error = $t(err?.message || "Error");
     } finally {
@@ -135,7 +142,7 @@
           type="email"
           bind:value={email}
           required
-          autocomplete="username"
+          autocomplete="email"
         />
       </div>
       <div style="margin-bottom:14px">
@@ -163,7 +170,7 @@
           bind:value={confirmPassword}
           required
           minlength="12"
-          autocomplete="new-password"
+          autocomplete="off"
         />
       </div>
       <div class="error-text" style="margin-bottom:8px">{error}</div>
@@ -178,3 +185,4 @@
     </form>
   </div>
 </div>
+

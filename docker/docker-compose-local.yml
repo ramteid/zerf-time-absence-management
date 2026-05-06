@@ -55,12 +55,14 @@ services:
       - ZERF_SESSION_SECRET=${ZERF_SESSION_SECRET:?ZERF_SESSION_SECRET must be set in .env (>=32 chars random)}
       - ZERF_BIND=0.0.0.0:3000
       - ZERF_PUBLIC_URL=http://localhost:3000
-      - ZERF_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
       - ZERF_SECURE_COOKIES=false
       - ZERF_ENFORCE_CSRF=true
-      - ZERF_ENFORCE_ORIGIN=true
+      # Local mode is intended for LAN access from arbitrary client IPs,
+      # so origin enforcement is disabled here. The public compose overlay
+      # re-enables it together with HTTPS and a fixed domain.
+      - ZERF_ENFORCE_ORIGIN=false
     ports:
-      - "127.0.0.1:3000:3000"
+      - "0.0.0.0:3000:3000"
     expose:
       - "3000"
     logging:

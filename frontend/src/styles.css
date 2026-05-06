@@ -904,12 +904,18 @@ dialog footer {
   }
 }
 
-/* ── Login ── */
+/* Login */
 .login-wrap {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 100%;
+  /* min-height 100svh (small viewport height) ensures the wrap fills the
+     visible area on desktop even when #app has height:auto set by the login
+     route. On mobile svh tracks the visual viewport so the card stays
+     centred when the keyboard is closed. */
+  min-height: 100svh;
+  padding: 24px 16px;
+  box-sizing: border-box;
   background: var(--bg-canvas);
 }
 
@@ -1192,6 +1198,12 @@ dialog footer {
     padding-right: 14px !important;
     overflow-x: visible;
     flex-wrap: wrap !important;
+  }
+
+  /* Login: top-align so the card can be scrolled into view when the keyboard is open */
+  .login-wrap {
+    align-items: flex-start;
+    min-height: auto;
   }
 
   /* Login card */
