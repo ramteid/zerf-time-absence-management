@@ -120,6 +120,9 @@
     ) {
       return `/dashboard?focus=absences&${query}`;
     }
+    if (notification.kind === "submission_reminder") {
+      return `/dashboard?${query}`;
+    }
     return "";
   }
 

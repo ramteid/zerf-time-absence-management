@@ -57,6 +57,9 @@ pub enum TextKey {
     TimesheetApprovedBody,
     TimesheetRejectedTitle,
     TimesheetRejectedBody,
+    SubmissionReminderTitle,
+    SubmissionReminderBody,
+    SubmissionReminderEmailBody,
 }
 
 pub async fn load_ui_language(pool: &DatabasePool) -> Result<Language, sqlx::Error> {
@@ -155,6 +158,13 @@ fn template(language: Language, key: TextKey) -> &'static str {
             TextKey::TimesheetRejectedBody => {
                 "Your timesheet entry for {entry_date} was rejected: {reason}"
             }
+            TextKey::SubmissionReminderTitle => "Time entries not yet submitted",
+            TextKey::SubmissionReminderBody => {
+                "You still have unsubmitted time entries for the following months: {months}"
+            }
+            TextKey::SubmissionReminderEmailBody => {
+                "Hello,\n\nyou still have unsubmitted time entries for the following months:\n\n{months}\n\nPlease log in and submit your time entries:\n{app_url}\n"
+            }
         },
         Language::De => match key {
             TextKey::ReopenAutoApprovedTitle => "Woche zur Bearbeitung freigegeben",
@@ -220,6 +230,13 @@ fn template(language: Language, key: TextKey) -> &'static str {
             TextKey::TimesheetRejectedTitle => "Zeiterfassung abgelehnt",
             TextKey::TimesheetRejectedBody => {
                 "Ihr Zeiterfassungseintrag für {entry_date} wurde abgelehnt: {reason}"
+            }
+            TextKey::SubmissionReminderTitle => "Arbeitszeiten noch nicht eingereicht",
+            TextKey::SubmissionReminderBody => {
+                "Sie haben noch nicht eingerichte Arbeitszeiten für folgende Monate: {months}"
+            }
+            TextKey::SubmissionReminderEmailBody => {
+                "Hallo,\n\nfür folgende Monate wurden Ihre Arbeitszeiten noch nicht eingereicht:\n\n{months}\n\nBitte melden Sie sich an und reichen Sie Ihre Zeiten ein:\n{app_url}\n"
             }
         },
     }

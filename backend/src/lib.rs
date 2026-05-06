@@ -13,6 +13,7 @@ pub mod notifications;
 pub mod reopen_requests;
 pub mod reports;
 pub mod settings;
+pub mod submission_reminders;
 pub mod time_entries;
 pub mod users;
 

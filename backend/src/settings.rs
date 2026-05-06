@@ -23,9 +23,10 @@ const SMTP_FROM_KEY: &str = "smtp_from";
 const SMTP_ENCRYPTION_KEY: &str = "smtp_encryption";
 const DEFAULT_UI_LANGUAGE: &str = "en";
 const DEFAULT_TIME_FORMAT: &str = "24h";
-const DEFAULT_COUNTRY: &str = "";
+const DEFAULT_COUNTRY: &str = "DE";
 const DEFAULT_REGION: &str = "";
 const DEFAULT_CARRYOVER_EXPIRY_DATE: &str = "03-31";
+const SUBMISSION_DEADLINE_DAY_KEY: &str = "submission_deadline_day";
 
 #[derive(Serialize)]
 pub struct PublicSettings {
@@ -36,6 +37,7 @@ pub struct PublicSettings {
     pub default_weekly_hours: Option<f64>,
     pub default_annual_leave_days: Option<i32>,
     pub carryover_expiry_date: String,
+    pub submission_deadline_day: Option<u8>,
 }
 
 #[derive(Serialize)]
@@ -61,6 +63,7 @@ pub struct UpdateSettings {
     pub default_weekly_hours: Option<f64>,
     pub default_annual_leave_days: Option<i32>,
     pub carryover_expiry_date: Option<String>,
+    pub submission_deadline_day: Option<u8>,
 }
 
 #[derive(Deserialize)]
@@ -118,6 +121,7 @@ async fn save_setting(pool: &crate::db::DatabasePool, key: &str, value: &str) ->
 async fn load_all_settings(pool: &crate::db::DatabasePool) -> AppResult<PublicSettings> {
     let dwh = load_setting(pool, DEFAULT_WEEKLY_HOURS_KEY, "").await?;
     let dal = load_setting(pool, DEFAULT_ANNUAL_LEAVE_DAYS_KEY, "").await?;
+    let sdd = load_setting(pool, SUBMISSION_DEADLINE_DAY_KEY, "").await?;
     Ok(PublicSettings {
         ui_language: load_setting(pool, UI_LANGUAGE_KEY, DEFAULT_UI_LANGUAGE).await?,
         time_format: load_setting(pool, TIME_FORMAT_KEY, DEFAULT_TIME_FORMAT).await?,
@@ -131,6 +135,7 @@ async fn load_all_settings(pool: &crate::db::DatabasePool) -> AppResult<PublicSe
             DEFAULT_CARRYOVER_EXPIRY_DATE,
         )
         .await?,
+        submission_deadline_day: sdd.parse().ok(),
     })
 }
 
@@ -464,6 +469,18 @@ pub async fn update_admin_settings(
             ));
         }
         save_setting(&s.pool, CARRYOVER_EXPIRY_DATE_KEY, ced).await?;
+    }
+
+    if let Some(day) = body.submission_deadline_day {
+        if !(1..=28).contains(&day) {
+            return Err(AppError::BadRequest(
+                "submission_deadline_day must be between 1 and 28.".into(),
+            ));
+        }
+        save_setting(&s.pool, SUBMISSION_DEADLINE_DAY_KEY, &day.to_string()).await?;
+    } else {
+        // Clear the setting if not provided
+        save_setting(&s.pool, SUBMISSION_DEADLINE_DAY_KEY, "").await?;
     }
 
     save_setting(&s.pool, UI_LANGUAGE_KEY, language).await?;
