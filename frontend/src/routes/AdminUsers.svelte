@@ -36,17 +36,19 @@
     }
   }
 
-  async function deactivate(id) {
-    if (
-      !(await confirmDialog($t("Deactivate?"), $t("Deactivate this user?"), {
-        danger: true,
-        confirm: $t("Deactivate"),
-      }))
-    )
-      return;
+  async function toggleActive(u) {
+    if (u.active) {
+      if (
+        !(await confirmDialog($t("Deactivate?"), $t("Deactivate this user?"), {
+          danger: true,
+          confirm: $t("Deactivate"),
+        }))
+      )
+        return;
+    }
     try {
-      await api(`/users/${id}/deactivate`, { method: "POST" });
-      toast($t("User deactivated."), "ok");
+      await api(`/users/${u.id}`, { method: "PUT", body: { active: !u.active } });
+      toast($t(u.active ? "User deactivated." : "User activated."), "ok");
       load();
     } catch (e) {
       toast($t(e?.message || "Error"), "error");
@@ -109,14 +111,14 @@
           >
             <Icon name="Shield" size={13} />
           </button>
-          {#if u.active}
-            <button
-              class="kz-btn kz-btn-ghost kz-btn-sm kz-btn-danger"
-              on:click={() => deactivate(u.id)}
-            >
-              <Icon name="X" size={13} />
-            </button>
-          {/if}
+          <button
+            class="kz-btn kz-btn-ghost kz-btn-sm"
+            class:kz-btn-danger={u.active}
+            title={u.active ? $t("Deactivate") : $t("Activate")}
+            on:click={() => toggleActive(u)}
+          >
+            <Icon name={u.active ? "X" : "Check"} size={13} />
+          </button>
         </div>
       </div>
     {/each}

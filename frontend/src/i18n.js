@@ -118,6 +118,36 @@ const TRANSLATIONS = {
     "Absence Request Details": "Absence Request Details",
     "Show details": "Show details",
     "Requested at": "Requested at",
+    "Forgot password?": "Forgot password?",
+    "Enter your email to receive a password reset link.":
+      "Enter your email to receive a password reset link.",
+    "Send reset link": "Send reset link",
+    "Sending...": "Sending...",
+    "If your email address is registered, you will receive a reset link shortly.":
+      "If your email address is registered, you will receive a reset link shortly.",
+    "Back to sign in": "Back to sign in",
+    "Choose a new password for your account.":
+      "Choose a new password for your account.",
+    "New password": "New password",
+    "Confirm password": "Confirm password",
+    "Passwords do not match.": "Passwords do not match.",
+    "Set new password": "Set new password",
+    "Password reset successfully. Please sign in.":
+      "Password reset successfully. Please sign in.",
+    smtp_not_configured:
+      "Email delivery is not configured. Please contact the administrator.",
+    public_url_not_configured:
+      "Password reset links are not configured. Please contact the administrator.",
+    reset_token_expired:
+      "This reset link has expired. Please request a new one.",
+    reset_token_invalid: "This reset link is invalid or has already been used.",
+    account_deactivated:
+      "Your account has been deactivated. Please contact your administrator.",
+    "Account active": "Account active",
+    "Inactive users cannot log in.": "Inactive users cannot log in.",
+    "User activated.": "User activated.",
+    Activate: "Activate",
+    Active: "Active",
   },
   de: {
     "Loading...": "Wird geladen...",
@@ -421,7 +451,6 @@ const TRANSLATIONS = {
     "From address": "Absenderadresse",
     Encryption: "Verschlüsselung",
     stored: "gespeichert",
-    "Save": "Speichern",
     "Test Connection": "Verbindung testen",
     "Testing...": "Teste...",
     "SMTP connection successful.": "SMTP-Verbindung erfolgreich.",
@@ -747,15 +776,12 @@ const TRANSLATIONS = {
     help_csv_export:
       "Exportiert den gewählten Mitarbeiter und Zeitraum als CSV-Datei.",
     "Who is absent": "Wer ist abwesend",
-    "Previous week": "Vorherige Woche",
-    "Next week": "Nächste Woche",
     "No absences this week.": "Keine Abwesenheiten diese Woche.",
     "Employee Details": "Mitarbeiterdetails",
     "Total days": "Tage gesamt",
     "Overtime balance": "Gleitzeitstand",
     Flextime: "Gleitzeit",
     Filter: "Filter",
-    Entries: "Einträge",
     // Reports help (English defaults)
     // (English keys fall through)
     // Audit log
@@ -818,6 +844,34 @@ const TRANSLATIONS = {
     "Absence Request Details": "Details des Abwesenheitsantrags",
     "Show details": "Details anzeigen",
     "Requested at": "Beantragt am",
+    "Forgot password?": "Passwort vergessen?",
+    "Enter your email to receive a password reset link.":
+      "Geben Sie Ihre E-Mail-Adresse ein, um einen Link zum Zurücksetzen zu erhalten.",
+    "Send reset link": "Reset-Link senden",
+    "Sending...": "Wird gesendet...",
+    "If your email address is registered, you will receive a reset link shortly.":
+      "Falls Ihre E-Mail-Adresse registriert ist, erhalten Sie in Kürze einen Reset-Link.",
+    "Back to sign in": "Zurück zur Anmeldung",
+    "Choose a new password for your account.":
+      "Wählen Sie ein neues Passwort für Ihr Konto.",
+    "New password": "Neues Passwort",
+    "Set new password": "Neues Passwort festlegen",
+    "Password reset successfully. Please sign in.":
+      "Passwort erfolgreich zurückgesetzt. Bitte melden Sie sich an.",
+    smtp_not_configured:
+      "E-Mail-Versand ist nicht konfiguriert. Bitte wenden Sie sich an den Administrator.",
+    public_url_not_configured:
+      "Links zum Zurücksetzen des Passworts sind nicht konfiguriert. Bitte wenden Sie sich an den Administrator.",
+    reset_token_expired:
+      "Dieser Reset-Link ist abgelaufen. Bitte fordern Sie einen neuen an.",
+    reset_token_invalid:
+      "Dieser Reset-Link ist ungültig oder wurde bereits verwendet.",
+    account_deactivated:
+      "Ihr Konto wurde deaktiviert. Bitte wenden Sie sich an Ihren Administrator.",
+    "Account active": "Konto aktiv",
+    "Inactive users cannot log in.": "Inaktive Nutzer können sich nicht anmelden.",
+    "User activated.": "Benutzer aktiviert.",
+    Activate: "Aktivieren",
   },
 };
 

@@ -19,7 +19,7 @@ private GitHub Security Advisory. Do **not** open a public issue.
 | Personal data in DB          | Data theft, lateral movement, tampering       | Internal-only PostgreSQL network, SCRAM auth, checksums, app least privilege |
 | State-changing endpoints     | CSRF                                          | SameSite=Strict cookie + Origin/Referer check + X-CSRF-Token header     |
 | HTTP traffic                 | MITM, downgrade, sniffing                     | Caddy + Let's Encrypt + HSTS preload + CSP + COOP/CORP                  |
-| Account takeover via reset   | Reuse of leaked temp pw                       | Forced password change on first login, sessions cleared on reset/change |
+| Account takeover via reset   | Token replay, reuse of leaked temp pw         | One-time 1 h reset tokens, forced password change on first login, sessions cleared on reset/change |
 | Logs                         | Sensitive data leakage                        | Passwords/secrets never logged; tracing on info; JSON-file 10MB rotation|
 
 Out of scope (v1): payroll integrations, SSO, multi-tenant isolation.
@@ -37,6 +37,9 @@ Out of scope (v1): payroll integrations, SSO, multi-tenant isolation.
   * may not equal the previous password.
 * **Generated temporary passwords** (16 chars, mixed-class) come from `OsRng`
   (the OS CSPRNG), never from the thread RNG.
+* **Self-service password reset** requires SMTP plus `ZERF_PUBLIC_URL`, stores
+  only SHA-256 token hashes, allows one live token per user, and consumes the
+  token atomically during password change.
 
 ## Sessions
 

@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::FromRow;
 use std::collections::BTreeSet;
+use std::sync::Arc;
 use subtle::ConstantTimeEq;
 
 // In production (Secure cookies), use the `__Host-` prefix so that:
@@ -41,6 +42,7 @@ const ABSOLUTE_TIMEOUT_HOURS: i64 = 24; // hard cap regardless of activity
 const MAX_FAILED_LOGINS: i64 = 5;
 const LOCKOUT_MIN: i64 = 15;
 const MIN_PW_LEN: usize = 12;
+const PASSWORD_RESET_TTL_HOURS: i64 = 1;
 
 #[derive(Debug, Clone, FromRow, Serialize)]
 pub struct User {
@@ -222,7 +224,7 @@ pub async fn login(
     }
 
     let user: Option<User> =
-        sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE email = $1 AND active = TRUE")
+        sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE email = $1")
             .bind(&email)
             .fetch_optional(&app_state.pool)
             .await?;
@@ -244,6 +246,9 @@ pub async fn login(
     if !password_matches {
         return Err(AppError::BadRequest("Invalid email or password.".into()));
     }
+    if !user.active {
+        return Err(AppError::BadRequest("account_deactivated".into()));
+    }
 
     // Session fixation defence: any pre-existing session token sent in the request
     // is ignored; we always issue a fresh, random, never-reused token.
@@ -256,7 +261,11 @@ pub async fn login(
         .execute(&app_state.pool)
         .await?;
 
-    let cookie = build_session_cookie(&session_token, IDLE_TIMEOUT_HOURS * 3600, app_state.cfg.secure_cookies);
+    let cookie = build_session_cookie(
+        &session_token,
+        IDLE_TIMEOUT_HOURS * 3600,
+        app_state.cfg.secure_cookies,
+    );
     let response_body = Json(serde_json::json!({
         "ok": true,
         "user": user,
@@ -264,7 +273,8 @@ pub async fn login(
         "csrf_token": csrf_token,
     }));
     let mut response = response_body.into_response();
-    response.headers_mut()
+    response
+        .headers_mut()
         .insert(header::SET_COOKIE, cookie.parse().unwrap());
     Ok(response)
 }
@@ -274,10 +284,11 @@ pub async fn logout(State(app_state): State<AppState>, req: Request) -> AppResul
         // Per security policy: on logout, all sessions of the affected user are
         // deleted — not just the current one — so a user logging out from one
         // device invalidates all other open sessions too.
-        let user_id: Option<i64> = sqlx::query_scalar("SELECT user_id FROM sessions WHERE token = $1")
-            .bind(hash_token(&token))
-            .fetch_optional(&app_state.pool)
-            .await?;
+        let user_id: Option<i64> =
+            sqlx::query_scalar("SELECT user_id FROM sessions WHERE token = $1")
+                .bind(hash_token(&token))
+                .fetch_optional(&app_state.pool)
+                .await?;
         if let Some(user_id) = user_id {
             sqlx::query("DELETE FROM sessions WHERE user_id = $1")
                 .bind(user_id)
@@ -422,7 +433,9 @@ pub async fn change_password(
             .filter(|p| !p.is_empty())
             .ok_or_else(|| AppError::BadRequest("Current password required.".into()))?;
         if !verify_password(current_password, &user.password_hash) {
-            return Err(AppError::BadRequest("Current password is incorrect.".into()));
+            return Err(AppError::BadRequest(
+                "Current password is incorrect.".into(),
+            ));
         }
     }
     validate_password_strength(&body.new_password)?;
@@ -474,7 +487,10 @@ fn extract_token_from_cookie_str(cookie_str: &str) -> Option<String> {
     None
 }
 
-fn enforce_same_origin_headers(headers: &axum::http::HeaderMap, app_state: &AppState) -> AppResult<()> {
+fn enforce_same_origin_headers(
+    headers: &axum::http::HeaderMap,
+    app_state: &AppState,
+) -> AppResult<()> {
     if !app_state.cfg.enforce_origin {
         return Ok(());
     }
@@ -482,9 +498,9 @@ fn enforce_same_origin_headers(headers: &axum::http::HeaderMap, app_state: &AppS
     let header_referer = headers.get(header::REFERER).and_then(|v| v.to_str().ok());
     let allowed_origins = &app_state.cfg.allowed_origins;
     let origin_matches = |origin_value: &str| {
-        allowed_origins
-            .iter()
-            .any(|allowed| origin_value == allowed || origin_value.starts_with(&format!("{allowed}/")))
+        allowed_origins.iter().any(|allowed| {
+            origin_value == allowed || origin_value.starts_with(&format!("{allowed}/"))
+        })
     };
     let is_origin_allowed = match (header_origin, header_referer) {
         (Some(origin), _) => origin_matches(origin),
@@ -552,7 +568,8 @@ pub async fn auth_middleware(
     .bind(&token_hash)
     .fetch_optional(&app_state.pool)
     .await?;
-    let (user_id, last_active_at, session_created_at, csrf_token) = session_row.ok_or(AppError::Unauthorized)?;
+    let (user_id, last_active_at, session_created_at, csrf_token) =
+        session_row.ok_or(AppError::Unauthorized)?;
     let now = Utc::now();
     if now - last_active_at > Duration::hours(IDLE_TIMEOUT_HOURS)
         || now - session_created_at > Duration::hours(ABSOLUTE_TIMEOUT_HOURS)
@@ -619,6 +636,13 @@ pub async fn cleanup_loop(pool: crate::db::DatabasePool) {
         .await
         {
             tracing::warn!(target: "zerf::cleanup", "login_attempts cleanup failed: {e}");
+        }
+        if let Err(e) =
+            sqlx::query("DELETE FROM password_reset_tokens WHERE expires_at < CURRENT_TIMESTAMP")
+                .execute(&pool)
+                .await
+        {
+            tracing::warn!(target: "zerf::cleanup", "password_reset_tokens cleanup failed: {e}");
         }
     }
 }
@@ -693,6 +717,161 @@ pub async fn setup(
     .bind(today)
     .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
+
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+// Forgot / reset password (unauthenticated)
+
+#[derive(Deserialize)]
+pub struct ForgotPasswordReq {
+    pub email: String,
+}
+
+pub async fn forgot_password(
+    State(app_state): State<AppState>,
+    Json(body): Json<ForgotPasswordReq>,
+) -> AppResult<Json<serde_json::Value>> {
+    let smtp = crate::settings::load_smtp_config(&app_state.pool).await;
+    if smtp.is_none() {
+        return Err(AppError::BadRequest("smtp_not_configured".into()));
+    }
+
+    let base_url = app_state
+        .cfg
+        .public_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|url| !url.is_empty())
+        .ok_or_else(|| AppError::BadRequest("public_url_not_configured".into()))?;
+
+    let email = body.email.trim().to_lowercase();
+    let user: Option<(i64, String)> =
+        sqlx::query_as("SELECT id, email FROM users WHERE lower(email)=$1 AND active=TRUE")
+            .bind(&email)
+            .fetch_optional(&app_state.pool)
+            .await?;
+
+    // Always return 200 to prevent email enumeration.
+    let Some((user_id, user_email)) = user else {
+        return Ok(Json(serde_json::json!({ "ok": true })));
+    };
+
+    let raw_token = new_token();
+    let token_hash = hash_token(&raw_token);
+    let expires_at = Utc::now() + Duration::hours(PASSWORD_RESET_TTL_HOURS);
+
+    sqlx::query(
+        "INSERT INTO password_reset_tokens(token_hash, user_id, expires_at) \
+         VALUES ($1, $2, $3) \
+         ON CONFLICT (user_id) DO UPDATE SET \
+             token_hash = EXCLUDED.token_hash, \
+             expires_at = EXCLUDED.expires_at, \
+             created_at = CURRENT_TIMESTAMP",
+    )
+    .bind(&token_hash)
+    .bind(user_id)
+    .bind(expires_at)
+    .execute(&app_state.pool)
+    .await?;
+
+    let reset_link = format!(
+        "{}/login?reset_token={}",
+        base_url.trim_end_matches('/'),
+        raw_token
+    );
+
+    let language = crate::i18n::load_ui_language(&app_state.pool)
+        .await
+        .unwrap_or_default();
+    let subject = crate::i18n::translate(&language, "password_reset_subject", &[]);
+    let body_text = crate::i18n::translate(
+        &language,
+        "password_reset_body",
+        &[("reset_link", reset_link)],
+    );
+
+    crate::email::send_async(smtp.map(Arc::new), user_email, subject, body_text);
+
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+pub struct ResetPasswordTokenReq {
+    pub token: String,
+    pub password: String,
+}
+
+pub async fn reset_password_with_token(
+    State(app_state): State<AppState>,
+    Json(body): Json<ResetPasswordTokenReq>,
+) -> AppResult<Json<serde_json::Value>> {
+    validate_password_strength(&body.password)?;
+
+    let token_hash = hash_token(body.token.trim());
+    let mut tx = app_state.pool.begin().await?;
+
+    let expired_user_id: Option<i64> = sqlx::query_scalar(
+        "DELETE FROM password_reset_tokens \
+         WHERE token_hash=$1 AND expires_at < CURRENT_TIMESTAMP \
+         RETURNING user_id",
+    )
+    .bind(&token_hash)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if expired_user_id.is_some() {
+        tx.commit().await?;
+        return Err(AppError::BadRequest("reset_token_expired".into()));
+    }
+
+    let user_id: Option<i64> = sqlx::query_scalar(
+        "DELETE FROM password_reset_tokens \
+         WHERE token_hash=$1 AND expires_at >= CURRENT_TIMESTAMP \
+         RETURNING user_id",
+    )
+    .bind(&token_hash)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let user_id = match user_id {
+        Some(id) => id,
+        None => return Err(AppError::BadRequest("reset_token_invalid".into())),
+    };
+
+    let current_password_hash: Option<String> = sqlx::query_scalar(
+        "SELECT password_hash FROM users WHERE id=$1 AND active=TRUE FOR UPDATE",
+    )
+    .bind(user_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some(current_password_hash) = current_password_hash else {
+        tx.commit().await?;
+        return Err(AppError::BadRequest("reset_token_invalid".into()));
+    };
+
+    if verify_password(&body.password, &current_password_hash) {
+        tx.rollback().await?;
+        return Err(AppError::BadRequest(
+            "New password must differ from the current one.".into(),
+        ));
+    }
+
+    let new_hash = hash_password(&body.password)?;
+    let update_result = sqlx::query(
+        "UPDATE users SET password_hash=$1, must_change_password=FALSE WHERE id=$2 AND active=TRUE",
+    )
+    .bind(&new_hash)
+    .bind(user_id)
+    .execute(&mut *tx)
+    .await?;
+    if update_result.rows_affected() != 1 {
+        tx.commit().await?;
+        return Err(AppError::BadRequest("reset_token_invalid".into()));
+    }
+    sqlx::query("DELETE FROM sessions WHERE user_id=$1")
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await?;
 
     Ok(Json(serde_json::json!({ "ok": true })))
