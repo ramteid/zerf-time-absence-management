@@ -1187,7 +1187,7 @@
               <div style="display:grid;grid-template-columns:130px 1fr 52px;align-items:center;gap:8px;font-size:12px">
                 <span style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title={$t(cat)}>{$t(cat)}</span>
                 <div style="background:var(--bg-muted);border-radius:3px;height:8px;overflow:hidden">
-                  <div style="height:100%;border-radius:3px;background:var(--accent);width:{Math.round((mins / catMax) * 100)}%;transition:width .3s"></div>
+                  <div style="height:100%;border-radius:3px;background:var(--accent);width:{catMax > 0 ? Math.round((mins / catMax) * 100) : 0}%;transition:width .3s"></div>
                 </div>
                 <span class="tab-num" style="color:var(--text-tertiary);text-align:right">{minToHM(mins)}</span>
               </div>
