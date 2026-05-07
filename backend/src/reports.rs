@@ -114,7 +114,7 @@ fn weekday_en(d: NaiveDate) -> &'static str {
 
 fn credited_actual_minutes(actual: i64, target: i64, absence: Option<&str>) -> i64 {
     match absence {
-        Some("sick") if actual > 0 => actual,
+        Some("sick") => actual.max(target),
         Some(_) => target,
         None => actual,
     }
@@ -532,7 +532,7 @@ pub async fn categories(
         "SELECT c.name, c.color, z.start_time, z.end_time \
          FROM time_entries z \
          JOIN categories c ON c.id=z.category_id \
-         WHERE z.status != 'rejected' AND z.entry_date BETWEEN ",
+         WHERE z.status = 'approved' AND z.entry_date BETWEEN ",
     );
     builder
         .push_bind(query.from)
@@ -593,11 +593,9 @@ pub async fn team_categories(
     );
     if !requester.is_admin() {
         user_builder
-            .push(" AND ((approver_id = ")
+            .push(" AND approver_id = ")
             .push_bind(requester.id)
-            .push(" AND role != 'admin') OR id = ")
-            .push_bind(requester.id)
-            .push(")");
+            .push(" AND role != 'admin'");
     }
     user_builder.push(" ORDER BY last_name, first_name");
     let members: Vec<(i64, String, String)> = user_builder
@@ -609,7 +607,7 @@ pub async fn team_categories(
         "SELECT z.user_id, c.name, c.color, z.start_time, z.end_time \
          FROM time_entries z \
          JOIN categories c ON c.id=z.category_id \
-         WHERE z.status != 'rejected' AND z.entry_date BETWEEN ",
+         WHERE z.status = 'approved' AND z.entry_date BETWEEN ",
     );
     entry_builder
         .push_bind(query.from)
@@ -617,11 +615,9 @@ pub async fn team_categories(
         .push_bind(query.to);
     if !requester.is_admin() {
         entry_builder
-            .push(" AND (z.user_id IN (SELECT id FROM users WHERE approver_id = ")
+            .push(" AND z.user_id IN (SELECT id FROM users WHERE approver_id = ")
             .push_bind(requester.id)
-            .push(" AND role != 'admin') OR z.user_id = ")
-            .push_bind(requester.id)
-            .push(")");
+            .push(" AND role != 'admin')");
     }
     let rows: Vec<(i64, String, String, String, String)> = entry_builder
         .build_query_as()
@@ -683,14 +679,11 @@ pub struct MonthRow {
     pub cumulative_min: i64,
 }
 
-pub async fn overtime(
-    State(app_state): State<AppState>,
-    requester: User,
-    Query(query): Query<OvertimeQuery>,
-) -> AppResult<Json<Vec<MonthRow>>> {
-    let target_user_id = query.user_id.unwrap_or(requester.id);
-    assert_can_access_user(&app_state.pool, &requester, target_user_id).await?;
-    let year = query.year.unwrap_or_else(|| chrono::Local::now().year());
+async fn build_overtime_rows_for_year(
+    pool: &crate::db::DatabasePool,
+    target_user_id: i64,
+    year: i32,
+) -> AppResult<Vec<MonthRow>> {
     let now = chrono::Local::now();
     let current_year = now.year();
     // Cap the loop so future months (with zero actuals but full targets) do not
@@ -701,22 +694,25 @@ pub async fn overtime(
         now.month()
     } else {
         // Future year - nothing has been worked yet.
-        return Ok(Json(vec![]));
+        return Ok(vec![]);
     };
+
     // Determine the user's start_date and overtime start balance.
     let (user_start_date, overtime_start_balance_min): (NaiveDate, i64) =
         sqlx::query_as("SELECT start_date, overtime_start_balance_min FROM users WHERE id=$1")
             .bind(target_user_id)
-            .fetch_one(&app_state.pool)
+            .fetch_one(pool)
             .await?;
+
     let first_month_in_year = if user_start_date.year() == year {
         user_start_date.month()
     } else if user_start_date.year() > year {
         // User hasn't started yet in this year: nothing to show.
-        return Ok(Json(vec![]));
+        return Ok(vec![]);
     } else {
         1
     };
+
     let mut month_rows = vec![];
     // Accumulate all prior-year months to seed the running overtime balance.
     let mut cumulative_min = overtime_start_balance_min;
@@ -728,13 +724,14 @@ pub async fn overtime(
         };
         for prior_month in prior_year_first_month..=12 {
             let month_label = format!("{:04}-{:02}", prior_year, prior_month);
-            let month_report = build_month(&app_state.pool, target_user_id, &month_label).await?;
+            let month_report = build_month(pool, target_user_id, &month_label).await?;
             cumulative_min += month_report.diff_min;
         }
     }
+
     for month_num in first_month_in_year..=max_month {
         let month_label = format!("{:04}-{:02}", year, month_num);
-        let month_report = build_month(&app_state.pool, target_user_id, &month_label).await?;
+        let month_report = build_month(pool, target_user_id, &month_label).await?;
         cumulative_min += month_report.diff_min;
         month_rows.push(MonthRow {
             month: month_label,
@@ -744,7 +741,59 @@ pub async fn overtime(
             cumulative_min,
         });
     }
-    Ok(Json(month_rows))
+
+    Ok(month_rows)
+}
+
+async fn cumulative_at_month_end(
+    pool: &crate::db::DatabasePool,
+    target_user_id: i64,
+    year: i32,
+    month: u32,
+    user_start_date: NaiveDate,
+    overtime_start_balance_min: i64,
+) -> AppResult<i64> {
+    if year < user_start_date.year()
+        || (year == user_start_date.year() && month < user_start_date.month())
+    {
+        return Ok(overtime_start_balance_min);
+    }
+
+    let now = chrono::Local::now();
+    let current_year = now.year();
+    let current_month = now.month();
+
+    let rows = build_overtime_rows_for_year(pool, target_user_id, year.min(current_year)).await?;
+    if rows.is_empty() {
+        return Ok(overtime_start_balance_min);
+    }
+
+    if year > current_year || (year == current_year && month > current_month) {
+        return Ok(rows
+            .last()
+            .map(|row| row.cumulative_min)
+            .unwrap_or(overtime_start_balance_min));
+    }
+
+    let key = format!("{:04}-{:02}", year, month);
+    if let Some(row) = rows.iter().find(|row| row.month == key) {
+        return Ok(row.cumulative_min);
+    }
+
+    Ok(overtime_start_balance_min)
+}
+
+pub async fn overtime(
+    State(app_state): State<AppState>,
+    requester: User,
+    Query(query): Query<OvertimeQuery>,
+) -> AppResult<Json<Vec<MonthRow>>> {
+    let target_user_id = query.user_id.unwrap_or(requester.id);
+    assert_can_access_user(&app_state.pool, &requester, target_user_id).await?;
+    let year = query.year.unwrap_or_else(|| chrono::Local::now().year());
+    Ok(Json(
+        build_overtime_rows_for_year(&app_state.pool, target_user_id, year).await?,
+    ))
 }
 
 #[derive(Deserialize)]
@@ -787,29 +836,95 @@ pub async fn flextime(
         .await?;
     let target_per_day_min = (user.weekly_hours / 5.0 * 60.0) as i64;
 
-    // Start accumulating from the user's first day so the running balance at
-    // query.from already reflects all prior over/under-time.
-    let loop_start = user.start_date.min(query.from);
+    // Seed cumulative at query.from-1 via month-level overtime plus a small
+    // partial-month report, so per-day flextime processing stays within the
+    // requested output range.
+    let mut cumulative_min = if query.from < user.start_date {
+        0
+    } else {
+        user.overtime_start_balance_min
+    };
+    if query.from > user.start_date {
+        let day_before_from = query.from - Duration::days(1);
+        let month_start = NaiveDate::from_ymd_opt(
+            day_before_from.year(),
+            day_before_from.month(),
+            1,
+        )
+        .ok_or_else(|| AppError::BadRequest("date".into()))?;
+
+        let cumulative_before_month = if month_start <= user.start_date {
+            user.overtime_start_balance_min
+        } else {
+            let previous_month_end = month_start - Duration::days(1);
+            cumulative_at_month_end(
+                &app_state.pool,
+                target_user_id,
+                previous_month_end.year(),
+                previous_month_end.month(),
+                user.start_date,
+                user.overtime_start_balance_min,
+            )
+            .await?
+        };
+
+        let seed_from = std::cmp::max(month_start, user.start_date);
+        if seed_from <= day_before_from {
+            let month_seed_report = build_range(
+                &app_state.pool,
+                target_user_id,
+                seed_from,
+                day_before_from,
+                "seed",
+            )
+            .await?;
+            cumulative_min = cumulative_before_month + month_seed_report.diff_min;
+        } else {
+            cumulative_min = cumulative_before_month;
+        }
+    }
 
     let time_entries_raw: Vec<(NaiveDate, String, String, String)> = sqlx::query_as(
         "SELECT entry_date, start_time, end_time, status \
          FROM time_entries WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3",
     )
     .bind(target_user_id)
-    .bind(loop_start)
+    .bind(query.from)
     .bind(query.to)
     .fetch_all(&app_state.pool)
     .await?;
+
+    let mut approved_minutes_by_day: HashMap<NaiveDate, i64> = HashMap::new();
+    for (entry_date, start_time, end_time, status) in time_entries_raw {
+        if status != "approved" {
+            continue;
+        }
+        let minutes =
+            (parse_report_time(&end_time)? - parse_report_time(&start_time)?).num_minutes();
+        *approved_minutes_by_day.entry(entry_date).or_insert(0) += minutes;
+    }
 
     let approved_absences: Vec<(NaiveDate, NaiveDate, String)> = sqlx::query_as(
         "SELECT start_date, end_date, kind FROM absences \
          WHERE user_id=$1 AND status='approved' AND end_date >= $2 AND start_date <= $3",
     )
     .bind(target_user_id)
-    .bind(loop_start)
+    .bind(query.from)
     .bind(query.to)
     .fetch_all(&app_state.pool)
     .await?;
+
+    let mut absence_by_day: HashMap<NaiveDate, String> = HashMap::new();
+    for (absence_start, absence_end, absence_kind) in approved_absences {
+        let mut day = std::cmp::max(absence_start, query.from);
+        let end = std::cmp::min(absence_end, query.to);
+        while day <= end {
+            absence_by_day
+                .entry(day)
+                .or_insert_with(|| absence_kind.clone());
+            day += Duration::days(1);
+        }
+    }
 
     let language = i18n::load_ui_language(&app_state.pool).await?;
 
@@ -819,7 +934,7 @@ pub async fn flextime(
     >(
         "SELECT holiday_date, name, local_name FROM holidays WHERE holiday_date BETWEEN $1 AND $2",
     )
-    .bind(loop_start)
+    .bind(query.from)
     .bind(query.to)
     .fetch_all(&app_state.pool)
     .await?
@@ -834,27 +949,17 @@ pub async fn flextime(
 
     let today = chrono::Local::now().date_naive();
     let mut flextime_days = vec![];
-    // If loop_start is before the user's official start, begin with a zero balance
-    // and add the configured overtime start balance when the start date is reached.
-    let mut cumulative_min = if loop_start < user.start_date {
-        0
-    } else {
-        user.overtime_start_balance_min
-    };
-    let mut current_date = loop_start;
+    let mut current_date = query.from;
     while current_date <= query.to {
         // Inject the configured overtime start balance on the user's first day
-        // when we began iterating before that date.
-        if current_date == user.start_date && loop_start < user.start_date {
+        // when the requested range begins before that date.
+        if current_date == user.start_date && query.from < user.start_date {
             cumulative_min += user.overtime_start_balance_min;
         }
         let day_of_week_num = current_date.weekday().num_days_from_monday();
         let is_weekday = day_of_week_num < 5;
         let holiday = holiday_map.get(&current_date).cloned();
-        let absence = approved_absences
-            .iter()
-            .find(|(abs_start, abs_end, _)| current_date >= *abs_start && current_date <= *abs_end)
-            .map(|(_, _, kind)| kind.clone());
+        let absence = absence_by_day.get(&current_date).cloned();
         let before_start = current_date < user.start_date;
         let after_today = current_date > today;
         let target = if is_weekday && holiday.is_none() && !before_start && !after_today {
@@ -862,29 +967,19 @@ pub async fn flextime(
         } else {
             0
         };
-        let mut actual = 0i64;
-        for (_, start_str, end_str, _) in time_entries_raw
-            .iter()
-            .filter(|(d, _, _, st)| *d == current_date && st == "approved")
-        {
-            actual += (parse_report_time(end_str)? - parse_report_time(start_str)?).num_minutes();
-        }
+        let actual = approved_minutes_by_day.get(&current_date).copied().unwrap_or(0);
         let credited_actual_min = credited_actual_minutes(actual, target, absence.as_deref());
         let day_diff_min = credited_actual_min - target;
         cumulative_min += day_diff_min;
-        // Only emit days within the requested display range (pre-range days are
-        // used only to compute the correct starting cumulative balance).
-        if current_date >= query.from {
-            flextime_days.push(FlextimeDay {
-                date: current_date,
-                actual_min: credited_actual_min,
-                target_min: target,
-                diff_min: day_diff_min,
-                cumulative_min,
-                absence,
-                holiday,
-            });
-        }
+        flextime_days.push(FlextimeDay {
+            date: current_date,
+            actual_min: credited_actual_min,
+            target_min: target,
+            diff_min: day_diff_min,
+            cumulative_min,
+            absence,
+            holiday,
+        });
         current_date += Duration::days(1);
     }
     Ok(Json(flextime_days))

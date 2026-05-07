@@ -91,6 +91,20 @@ fn normalize_time_format(value: &str) -> AppResult<&'static str> {
     }
 }
 
+fn setting_value_changed(previous: Option<&str>, next: &str) -> bool {
+    previous != Some(next)
+}
+
+fn holiday_location_changed(
+    previous_country: Option<&str>,
+    previous_region: Option<&str>,
+    next_country: &str,
+    next_region: &str,
+) -> bool {
+    setting_value_changed(previous_country, next_country)
+        || setting_value_changed(previous_region, next_region)
+}
+
 pub async fn load_setting(
     pool: &crate::db::DatabasePool,
     key: &str,
@@ -381,10 +395,20 @@ pub async fn update_admin_settings(
 
     let language = normalize_language(&body.ui_language)?;
     let time_format = normalize_time_format(&body.time_format)?;
-    // Load previous settings before the update so we can detect country/region changes.
-    let previous_settings = load_all_settings(&app_state.pool).await?;
     let country = body.country.trim().to_uppercase();
     let region = body.region.trim().to_string();
+    let previous_country: Option<String> = sqlx::query_scalar(
+        "SELECT value FROM app_settings WHERE key = $1",
+    )
+    .bind(COUNTRY_KEY)
+    .fetch_optional(&app_state.pool)
+    .await?;
+    let previous_region: Option<String> = sqlx::query_scalar(
+        "SELECT value FROM app_settings WHERE key = $1",
+    )
+    .bind(REGION_KEY)
+    .fetch_optional(&app_state.pool)
+    .await?;
 
     if !country.is_empty() && country.len() != 2 {
         return Err(AppError::BadRequest(
@@ -458,6 +482,17 @@ pub async fn update_admin_settings(
         .map(|v| v.to_string())
         .unwrap_or_default();
 
+    let prepared_holidays = if holiday_location_changed(
+        previous_country.as_deref(),
+        previous_region.as_deref(),
+        &country,
+        &region,
+    ) {
+        Some(holidays::prepare_holiday_refresh(&country, &region).await?)
+    } else {
+        None
+    };
+
     // Save all settings atomically within a transaction.
     let mut tx = app_state.pool.begin().await?;
 
@@ -473,8 +508,8 @@ pub async fn update_admin_settings(
 
     save_setting_exec(&mut *tx, UI_LANGUAGE_KEY, &language).await?;
     save_setting_exec(&mut *tx, TIME_FORMAT_KEY, time_format).await?;
-    let saved_country = save_setting_exec(&mut *tx, COUNTRY_KEY, &country).await?;
-    let saved_region = save_setting_exec(&mut *tx, REGION_KEY, &region).await?;
+    save_setting_exec(&mut *tx, COUNTRY_KEY, &country).await?;
+    save_setting_exec(&mut *tx, REGION_KEY, &region).await?;
     save_setting_exec(
         &mut *tx,
         DEFAULT_WEEKLY_HOURS_KEY,
@@ -488,18 +523,39 @@ pub async fn update_admin_settings(
     )
     .await?;
 
-    tx.commit().await?;
-
-    // If the country or region changed, refresh the holidays table from the public holiday API.
-    if !saved_country.is_empty()
-        && (previous_settings.country != saved_country || previous_settings.region != saved_region)
-    {
-        if let Err(e) =
-            holidays::refresh_holidays(&app_state.pool, &saved_country, &saved_region).await
-        {
-            tracing::warn!("Failed to refresh holidays: {:?}", e);
-        }
+    if let Some(ref holidays) = prepared_holidays {
+        crate::holidays::replace_auto_holidays_exec(&mut tx, holidays).await?;
     }
 
+    tx.commit().await?;
+
     Ok(Json(load_admin_settings_response(&app_state.pool).await?))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn holiday_location_changed_treats_missing_rows_as_changes() {
+        assert!(holiday_location_changed(None, None, "DE", ""));
+        assert!(holiday_location_changed(Some("DE"), None, "DE", ""));
+        assert!(holiday_location_changed(None, Some("DE-BW"), "DE", "DE-BW"));
+    }
+
+    #[test]
+    fn holiday_location_changed_ignores_unchanged_stored_values() {
+        assert!(!holiday_location_changed(
+            Some("DE"),
+            Some("DE-BW"),
+            "DE",
+            "DE-BW",
+        ));
+        assert!(holiday_location_changed(
+            Some("DE"),
+            Some("DE-BW"),
+            "AT",
+            "",
+        ));
+    }
 }

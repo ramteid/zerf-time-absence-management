@@ -29,12 +29,20 @@ const apiMock = vi.hoisted(() => vi.fn(async (path, opts = {}) => {
   if (path === "/settings" && (!opts.method || opts.method === "GET")) {
     return mockState.settings;
   }
+  if (path === "/settings" && opts.method === "PUT") {
+    mockState.settings = structuredClone(opts.body);
+    return mockState.settings;
+  }
   if (path === "/holidays/countries") {
     return mockState.countries;
   }
   if (path.startsWith("/holidays/regions/")) {
     const country = path.split("/").at(-1);
-    return mockState.regionsByCountry[country] || [];
+    const result = mockState.regionsByCountry[country];
+    if (result instanceof Error) {
+      throw result;
+    }
+    return result || [];
   }
   throw new Error(`Unhandled API path: ${path}`);
 }));
@@ -56,11 +64,13 @@ async function settle() {
 describe("AdminSettings", () => {
   let target;
   let component;
+  let originalSettings;
   let originalRegionsByCountry;
 
   beforeEach(() => {
     target = document.createElement("div");
     document.body.appendChild(target);
+    originalSettings = structuredClone(mockState.settings);
     originalRegionsByCountry = structuredClone(mockState.regionsByCountry);
     currentUser.set({
       id: 1,
@@ -78,6 +88,7 @@ describe("AdminSettings", () => {
       unmount(component);
       component = null;
     }
+    mockState.settings = originalSettings;
     mockState.regionsByCountry = originalRegionsByCountry;
     target.remove();
   });
@@ -112,5 +123,36 @@ describe("AdminSettings", () => {
     expect(regionField.tagName).toBe("SELECT");
     expect(regionField.disabled).toBe(true);
     expect(target.querySelector("input#settings-region")).toBeNull();
+  });
+
+  it("allows saving without selecting a region", async () => {
+    component = mount(AdminSettings, { target });
+    await settle();
+    await settle();
+
+    target.querySelector(".kz-btn-primary").click();
+    await settle();
+
+    const saveCall = apiMock.mock.calls.find(
+      ([path, opts]) => path === "/settings" && opts?.method === "PUT",
+    );
+    expect(saveCall).toBeTruthy();
+    expect(saveCall[1].body.region).toBe("");
+  });
+
+  it("allows saving even when region loading fails", async () => {
+    mockState.regionsByCountry = { ...mockState.regionsByCountry, DE: new Error("boom") };
+
+    component = mount(AdminSettings, { target });
+    await settle();
+    await settle();
+
+    target.querySelector(".kz-btn-primary").click();
+    await settle();
+
+    const saveCall = apiMock.mock.calls.find(
+      ([path, opts]) => path === "/settings" && opts?.method === "PUT",
+    );
+    expect(saveCall).toBeTruthy();
   });
 });

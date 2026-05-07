@@ -101,7 +101,7 @@
   }
 
   function monthFullySubmitted(report) {
-    if (!Array.isArray(report?.days)) return true;
+    if (!Array.isArray(report?.days)) return false;
     return report.days.every((day) => {
       if (!day || Number(day.target_min || 0) <= 0) return true;
       if (day.absence) return true;
@@ -130,14 +130,23 @@
     }
   }
 
-  async function loadPastMonthSubmissionStatus() {
-    const months = [];
-    // Only check months from the user's start_date onward.
+  function firstMonthForSubmission() {
     const userStart = $currentUser?.start_date;
-    const startYear = userStart ? parseInt(userStart.slice(0, 4), 10) : 0;
-    const startMonth = userStart ? parseInt(userStart.slice(5, 7), 10) : 1;
-    const firstMonth =
-      reportYear === startYear ? Math.max(startMonth, 1) : reportYear > startYear ? 1 : currentMonthIndex;
+    if (!userStart) return null;
+    const startYear = parseInt(userStart.slice(0, 4), 10);
+    const startMonth = parseInt(userStart.slice(5, 7), 10);
+    if (reportYear < startYear) return null;
+    return reportYear === startYear ? Math.max(startMonth, 1) : 1;
+  }
+
+  async function loadPastMonthSubmissionStatus() {
+    const firstMonth = firstMonthForSubmission();
+    if (firstMonth === null) {
+      monthSubmissionChecks = [];
+      monthSubmissionError = "";
+      return;
+    }
+    const months = [];
     for (let month = firstMonth; month < currentMonthIndex; month += 1) {
       months.push(monthKey(reportYear, month));
     }
@@ -264,16 +273,18 @@
 
   $: pendingWeeks = buildPendingWeeks(pendingEntries, users);
   $: currentOvertimeRow =
-    overtimeRows.find((row) => row.month === currentMonthKey) || null;
+    overtimeRows.find((row) => row.month === currentMonthKey) ??
+    (overtimeRows.length ? overtimeRows[overtimeRows.length - 1] : null);
   $: overtimeBalanceMin = currentOvertimeRow?.cumulative_min || 0;
   $: currentMonthDiffMin = currentOvertimeRow?.diff_min || 0;
   $: previousMonthsTotal = (() => {
+    // Access $currentUser here so Svelte tracks the dependency.
     const userStart = $currentUser?.start_date;
     if (!userStart) return 0;
     const startYear = parseInt(userStart.slice(0, 4), 10);
-    const startMonth = parseInt(userStart.slice(5, 7), 10);
     if (reportYear < startYear) return 0;
-    const firstMonth = reportYear === startYear ? startMonth : 1;
+    const startMonth = parseInt(userStart.slice(5, 7), 10);
+    const firstMonth = reportYear === startYear ? Math.max(startMonth, 1) : 1;
     return Math.max(0, currentMonthIndex - firstMonth);
   })();
   $: previousMonthsSubmitted = monthSubmissionChecks.filter(

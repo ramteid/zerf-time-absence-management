@@ -6,8 +6,20 @@
   let s = {};
   let saving = false;
   let smtpPassword = "";
+  let clearStoredPassword = false;
   let testing = false;
   let testResult = null;
+
+  $: if (smtpPassword && clearStoredPassword) {
+    clearStoredPassword = false;
+  }
+
+  function smtpPasswordPayload() {
+    if (clearStoredPassword) {
+      return "";
+    }
+    return smtpPassword || undefined;
+  }
 
   async function load() {
     s = await api("/settings");
@@ -22,13 +34,14 @@
         smtp_host: s.smtp_host || "",
         smtp_port: parseInt(s.smtp_port) || 587,
         smtp_username: s.smtp_username || "",
-        smtp_password: smtpPassword || undefined,
+        smtp_password: smtpPasswordPayload(),
         smtp_from: s.smtp_from || "",
         smtp_encryption: s.smtp_encryption || "starttls",
       };
       const saved = await api("/settings/smtp", { method: "PUT", body });
       Object.assign(s, saved);
       smtpPassword = "";
+      clearStoredPassword = false;
       testResult = body.smtp_enabled ? { ok: true } : null;
       toast($t("SMTP settings saved."), "ok");
     } catch (e) {
@@ -48,7 +61,7 @@
         smtp_host: s.smtp_host || "",
         smtp_port: parseInt(s.smtp_port) || 587,
         smtp_username: s.smtp_username || "",
-        smtp_password: smtpPassword || undefined,
+        smtp_password: smtpPasswordPayload(),
         smtp_from: s.smtp_from || "",
         smtp_encryption: s.smtp_encryption || "starttls",
       };
@@ -146,9 +159,25 @@
             class="kz-input"
             type="password"
             bind:value={smtpPassword}
-            placeholder={s.smtp_password_set ? "********" : ""}
+            placeholder={s.smtp_password_set && !clearStoredPassword ? "********" : ""}
             autocomplete="new-password"
           />
+          {#if s.smtp_password_set}
+            <label
+              class="kz-label"
+              for="smtp-clear-password"
+              style="display:flex;align-items:center;gap:8px;margin-top:8px;font-weight:400"
+            >
+              <input
+                id="smtp-clear-password"
+                type="checkbox"
+                bind:checked={clearStoredPassword}
+                disabled={!!smtpPassword}
+                style="width:auto"
+              />
+              {$t("Clear stored password")}
+            </label>
+          {/if}
         </div>
       </div>
 

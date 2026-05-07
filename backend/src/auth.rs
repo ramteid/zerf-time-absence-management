@@ -37,8 +37,7 @@ fn cookie_name(secure: bool) -> &'static str {
         SESSION_COOKIE_PLAIN
     }
 }
-const IDLE_TIMEOUT_HOURS: i64 = 8; // tightened from 24h spec to 8h idle
-const ABSOLUTE_TIMEOUT_HOURS: i64 = 24; // hard cap regardless of activity
+const ABSOLUTE_TIMEOUT_HOURS: i64 = 168; // 7 days absolute timeout
 const MAX_FAILED_LOGINS: i64 = 5;
 const LOCKOUT_MIN: i64 = 15;
 const MIN_PW_LEN: usize = 12;
@@ -263,7 +262,7 @@ pub async fn login(
 
     let cookie = build_session_cookie(
         &session_token,
-        IDLE_TIMEOUT_HOURS * 3600,
+        ABSOLUTE_TIMEOUT_HOURS * 3600,
         app_state.cfg.secure_cookies,
     );
     let response_body = Json(serde_json::json!({
@@ -469,13 +468,20 @@ fn extract_token(req: &Request) -> Option<String> {
 }
 
 fn extract_token_from_cookie_str(cookie_str: &str) -> Option<String> {
-    // Accept both the `__Host-` prefixed (production) and the plain (dev) names
-    // so that an upgrade to secure cookies on a running deployment doesn't
-    // break already-issued sessions.
-    let prefixes = [
-        concat!("__Host-zerf_session", "="),
-        concat!("zerf_session", "="),
-    ];
+    extract_token_from_cookie_str_secure(cookie_str, false)
+}
+
+fn extract_token_from_cookie_str_secure(cookie_str: &str, secure_only: bool) -> Option<String> {
+    // When secure_cookies is enabled, only accept the `__Host-` prefixed cookie
+    // to prevent sibling-subdomain fixation attacks via the plain name.
+    let prefixes: &[&str] = if secure_only {
+        &[concat!("__Host-zerf_session", "=")]
+    } else {
+        &[
+            concat!("__Host-zerf_session", "="),
+            concat!("zerf_session", "="),
+        ]
+    };
     for part in cookie_str.split(';') {
         let cookie_part = part.trim();
         for prefix in prefixes {
@@ -485,6 +491,41 @@ fn extract_token_from_cookie_str(cookie_str: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Extract scheme + lowercase host + port from a URL or origin string.
+/// Returns `None` for unparseable or opaque values.
+fn parse_origin_parts(value: &str) -> Option<(String, String, u16)> {
+    // The Origin header is just `scheme://host[:port]`, while Referer is a
+    // full URL.  We parse the first slash-delimited authority regardless.
+    let trimmed = value.trim();
+    // Find scheme
+    let (scheme, rest) = trimmed.split_once("://")?;
+    let scheme = scheme.to_ascii_lowercase();
+    // Strip path / query / fragment (take authority only)
+    let authority = rest.split('/').next().unwrap_or(rest);
+    let (host, port) = if let Some((h, p)) = authority.rsplit_once(':') {
+        // Only treat as port if it parses as a number; otherwise it may be
+        // part of an IPv6 address without brackets.
+        if let Ok(port_num) = p.parse::<u16>() {
+            (h.to_ascii_lowercase(), port_num)
+        } else {
+            (authority.to_ascii_lowercase(), default_port(&scheme))
+        }
+    } else {
+        (authority.to_ascii_lowercase(), default_port(&scheme))
+    };
+    // Strip trailing dot from DNS names
+    let host = host.trim_end_matches('.').to_string();
+    Some((scheme, host, port))
+}
+
+fn default_port(scheme: &str) -> u16 {
+    match scheme {
+        "https" => 443,
+        "http" => 80,
+        _ => 0,
+    }
 }
 
 fn enforce_same_origin_headers(
@@ -497,9 +538,14 @@ fn enforce_same_origin_headers(
     let header_origin = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok());
     let header_referer = headers.get(header::REFERER).and_then(|v| v.to_str().ok());
     let allowed_origins = &app_state.cfg.allowed_origins;
+
     let origin_matches = |origin_value: &str| {
+        let Some(req_parts) = parse_origin_parts(origin_value) else {
+            return false;
+        };
         allowed_origins.iter().any(|allowed| {
-            origin_value == allowed || origin_value.starts_with(&format!("{allowed}/"))
+            parse_origin_parts(allowed)
+                .is_some_and(|allowed_parts| allowed_parts == req_parts)
         })
     };
     let is_origin_allowed = match (header_origin, header_referer) {
@@ -552,28 +598,27 @@ pub async fn auth_middleware(
     next: Next,
 ) -> Result<Response, AppError> {
     let (mut parts, body) = req.into_parts();
-    let session_token = extract_token_from_cookie_str(
+    let session_token = extract_token_from_cookie_str_secure(
         parts
             .headers
             .get(header::COOKIE)
             .and_then(|value| value.to_str().ok())
             .unwrap_or(""),
+        app_state.cfg.secure_cookies,
     )
     .ok_or(AppError::Unauthorized)?;
 
     let token_hash = hash_token(&session_token);
-    let session_row: Option<(i64, DateTime<Utc>, DateTime<Utc>, String)> = sqlx::query_as(
-        "SELECT user_id, last_active_at, created_at, csrf_token FROM sessions WHERE token = $1",
+    let session_row: Option<(i64, DateTime<Utc>, String)> = sqlx::query_as(
+        "SELECT user_id, created_at, csrf_token FROM sessions WHERE token = $1",
     )
     .bind(&token_hash)
     .fetch_optional(&app_state.pool)
     .await?;
-    let (user_id, last_active_at, session_created_at, csrf_token) =
+    let (user_id, session_created_at, csrf_token) =
         session_row.ok_or(AppError::Unauthorized)?;
     let now = Utc::now();
-    if now - last_active_at > Duration::hours(IDLE_TIMEOUT_HOURS)
-        || now - session_created_at > Duration::hours(ABSOLUTE_TIMEOUT_HOURS)
-    {
+    if now - session_created_at > Duration::hours(ABSOLUTE_TIMEOUT_HOURS) {
         sqlx::query("DELETE FROM sessions WHERE token=$1")
             .bind(&token_hash)
             .execute(&app_state.pool)
@@ -700,6 +745,7 @@ pub async fn setup(
         .fetch_one(&mut *tx)
         .await?;
     if existing_user_count > 0 {
+        tracing::warn!(target: "zerf::auth", "POST /auth/setup called after initial setup is already complete — possible probing");
         return Err(AppError::BadRequest(
             "Setup has already been completed.".into(),
         ));
@@ -735,18 +781,47 @@ pub async fn forgot_password(
 ) -> AppResult<Json<serde_json::Value>> {
     let smtp = crate::settings::load_smtp_config(&app_state.pool).await;
     if smtp.is_none() {
-        return Err(AppError::BadRequest("smtp_not_configured".into()));
+        // Never reveal deployment configuration to unauthenticated clients.
+        tracing::warn!(target: "zerf::auth", "forgot_password called but SMTP is not configured");
+        return Ok(Json(serde_json::json!({ "ok": true })));
     }
 
-    let base_url = app_state
+    let base_url = match app_state
         .cfg
         .public_url
         .as_deref()
         .map(str::trim)
         .filter(|url| !url.is_empty())
-        .ok_or_else(|| AppError::BadRequest("public_url_not_configured".into()))?;
+    {
+        Some(url) => url.to_string(),
+        None => {
+            tracing::warn!(target: "zerf::auth", "forgot_password called but ZERF_PUBLIC_URL is not configured");
+            return Ok(Json(serde_json::json!({ "ok": true })));
+        }
+    };
 
     let email = body.email.trim().to_lowercase();
+
+    // Rate-limit: max 3 reset attempts per email per 15 minutes.
+    let since: DateTime<Utc> = Utc::now() - Duration::minutes(15);
+    let reset_attempts: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM login_attempts WHERE email = $1 AND success = FALSE AND attempted_at > $2",
+    )
+    .bind(&format!("reset:{}", email))
+    .bind(since)
+    .fetch_one(&app_state.pool)
+    .await
+    .unwrap_or(0);
+    if reset_attempts >= 3 {
+        // Silently return OK to prevent enumeration / timing leaks.
+        return Ok(Json(serde_json::json!({ "ok": true })));
+    }
+    // Record this reset attempt for rate-limiting purposes.
+    let _ = sqlx::query("INSERT INTO login_attempts(email, success) VALUES ($1, FALSE)")
+        .bind(&format!("reset:{}", email))
+        .execute(&app_state.pool)
+        .await;
+
     let user: Option<(i64, String)> =
         sqlx::query_as("SELECT id, email FROM users WHERE lower(email)=$1 AND active=TRUE")
             .bind(&email)

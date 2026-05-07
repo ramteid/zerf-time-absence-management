@@ -5,7 +5,7 @@ use crate::common::TestApp;
 use crate::helpers::*;
 
 #[tokio::test]
-async fn range_csv_and_category_totals_include_drafts() {
+async fn range_csv_and_category_totals_for_approved_entries() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
 
@@ -27,15 +27,36 @@ async fn range_csv_and_category_totals_include_drafts() {
         )
         .await;
     assert_eq!(st, StatusCode::OK, "create draft report entry");
-    let _entry_id = id(&body);
+    let entry_id = id(&body);
 
+    // Draft entries should NOT appear in category totals
     let (st, body) = lead
         .get(&format!(
             "/api/v1/reports/categories?user_id={}&from={}&to={}",
             emp_id, monday, monday
         ))
         .await;
-    assert_eq!(st, StatusCode::OK, "category report with draft");
+    assert_eq!(st, StatusCode::OK, "category report with only draft");
+    assert!(body.as_array().unwrap().is_empty());
+
+    // Submit and approve the entry
+    let (st, _) = emp
+        .post("/api/v1/time-entries/submit", &json!({"ids": [entry_id]}))
+        .await;
+    assert_eq!(st, StatusCode::OK, "submit entry");
+    let (st, _) = lead
+        .post(&format!("/api/v1/time-entries/{}/approve", entry_id), &json!({}))
+        .await;
+    assert_eq!(st, StatusCode::OK, "approve entry");
+
+    // Approved entries appear in category totals
+    let (st, body) = lead
+        .get(&format!(
+            "/api/v1/reports/categories?user_id={}&from={}&to={}",
+            emp_id, monday, monday
+        ))
+        .await;
+    assert_eq!(st, StatusCode::OK, "category report with approved");
     assert_eq!(body.as_array().unwrap()[0]["minutes"], 240);
 
     let (st, csv_body) = lead
@@ -89,7 +110,7 @@ async fn range_csv_and_category_totals_include_drafts() {
 }
 
 #[tokio::test]
-async fn partial_sick_day_preserves_actual_minutes() {
+async fn partial_sick_day_credits_at_least_target() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
 
@@ -140,6 +161,8 @@ async fn partial_sick_day_preserves_actual_minutes() {
         .await;
     assert_eq!(st, StatusCode::OK, "approve partial sick-day entry");
 
+    // With weekly_hours=39, target_per_day = 39/5*60 = 468 min.
+    // A sick day should credit max(actual=240, target=468) = 468.
     let month = &monday[..7];
     let (st, body) = emp
         .get(&format!("/api/v1/reports/month?month={}", month))
@@ -152,7 +175,7 @@ async fn partial_sick_day_preserves_actual_minutes() {
         .find(|item| item["date"] == monday)
         .unwrap();
     assert_eq!(day["absence"], "sick");
-    assert_eq!(day["actual_min"], 240);
+    assert_eq!(day["actual_min"], 468);
 
     let (st, body) = emp
         .get(&format!(
@@ -161,7 +184,7 @@ async fn partial_sick_day_preserves_actual_minutes() {
         ))
         .await;
     assert_eq!(st, StatusCode::OK, "flextime report");
-    assert_eq!(body.as_array().unwrap()[0]["actual_min"], 240);
+    assert_eq!(body.as_array().unwrap()[0]["actual_min"], 468);
 
     app.cleanup().await;
 }

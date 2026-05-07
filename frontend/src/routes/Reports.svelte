@@ -3,7 +3,7 @@
   import { currentUser, toast } from "../stores.js";
   import { t, absenceKindLabel, statusLabel } from "../i18n.js";
   import { isoDate, minToHM, fmtDate } from "../format.js";
-  import { normalizeMonthReport } from "../apiMappers.js";
+  import { normalizeMonthReport, countWorkdays, holidayDateSet } from "../apiMappers.js";
   import Icon from "../Icons.svelte";
   import DatePicker from "../DatePicker.svelte";
   import FlextimeChart from "../FlextimeChart.svelte";
@@ -18,7 +18,7 @@
   async function loadOvertime() {
     try {
       overtime = await api(
-        `/reports/overtime?year=${new Date().getFullYear()}`,
+        `/reports/overtime?year=${today.getFullYear()}`,
       );
     } catch (e) {
       toast($t(e?.message || "Overtime data unavailable."), "error");
@@ -113,24 +113,47 @@
       toast($t(e?.message || "Error"), "error");
     }
   }
+  let absenceHolidayDates = new Set();
+
+  function clampAbsenceRange(absence) {
+    if (!absence?.start_date || !absence?.end_date) return null;
+    const from = absence.start_date > absenceFrom ? absence.start_date : absenceFrom;
+    const to = absence.end_date < absenceTo ? absence.end_date : absenceTo;
+    if (to < from) return null;
+    return { from, to };
+  }
+
   function absenceDays(a) {
-    if (!a.start_date || !a.end_date) return 0;
-    const start = new Date(a.start_date);
-    const end = new Date(a.end_date);
-    return Math.max(1, Math.round((end - start) / 86400000) + 1);
+    const clamped = clampAbsenceRange(a);
+    if (!clamped) return 0;
+    return countWorkdays(clamped.from, clamped.to, absenceHolidayDates);
   }
   async function showAbsences() {
     if (absenceFrom > absenceTo) return;
     try {
       let raw;
       if ($currentUser.role === "employee") {
-        const fromYear = new Date(absenceFrom).getFullYear();
-        raw = await api(`/absences?year=${fromYear}`);
-        raw = raw.filter(a => a.end_date >= absenceFrom && a.start_date <= absenceTo);
+        const fromYear = parseInt(absenceFrom.slice(0, 4), 10);
+        const toYear = parseInt(absenceTo.slice(0, 4), 10);
+        const years = [...new Set(Array.from({ length: toYear - fromYear + 1 }, (_, i) => fromYear + i))];
+        const lists = await Promise.all(years.map(y => api(`/absences?year=${y}`)));
+        const seen = new Set();
+        raw = lists.flat().filter(a => {
+          if (seen.has(a.id)) return false;
+          seen.add(a.id);
+          return a.end_date >= absenceFrom && a.start_date <= absenceTo;
+        });
       } else {
         const params = new URLSearchParams({ from: absenceFrom, to: absenceTo });
         raw = await api(`/absences/all?${params}`);
       }
+      // Fetch holidays covering the absence period for workday counting
+      const allYears = [...new Set(raw.flatMap(a => [
+        parseInt(a.start_date.slice(0, 4), 10),
+        parseInt(a.end_date.slice(0, 4), 10),
+      ]))];
+      const holidayLists = await Promise.all(allYears.map(y => api(`/holidays?year=${y}`)));
+      absenceHolidayDates = holidayDateSet(holidayLists.flat());
       absenceReport = raw.map(a => ({ ...a, days: absenceDays(a) }));
     } catch (e) {
       toast($t(e?.message || "Error"), "error");
@@ -284,8 +307,12 @@
 
   async function exportPdf() {
     csvError = "";
-    if (!csvFrom || !csvTo || csvFrom > csvTo) {
+    if (!csvFrom || !csvTo) {
       csvError = $t("Invalid date.");
+      return;
+    }
+    if (csvFrom > csvTo) {
+      csvError = $t("From cannot be after To.");
       return;
     }
     try {
@@ -774,11 +801,11 @@
                   >
                   <td
                     class="tab-num"
-                    style="text-align:right;font-weight:500;color:{diff > 0
-                      ? 'var(--warning-text)'
-                      : diff < 0
-                        ? 'var(--danger-text)'
-                        : 'var(--success-text)'}"
+                    style="text-align:right;font-weight:500;color:{diff < 0
+                      ? 'var(--danger-text)'
+                      : diff > 0
+                        ? 'var(--success-text)'
+                        : 'var(--text-tertiary)'}"
                   >
                     {diff > 0 ? "+" : ""}{minToHM(diff)}
                   </td>
