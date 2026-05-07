@@ -928,7 +928,7 @@
       style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px"
     >
       <Icon name="TrendingUp" size={15} sw={1.5} />
-      <span style="font-size:14px;font-weight:600;flex:1"
+      <span style="font-size:14px;font-weight:400;flex:1"
         >{$t("Flextime balance")}</span
       >
       <div style="display:flex;gap:4px;flex-wrap:wrap">
@@ -983,7 +983,7 @@
       style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px"
     >
       <Icon name="Users" size={15} sw={1.5} />
-      <span style="font-size:14px;font-weight:600;flex:1"
+      <span style="font-size:14px;font-weight:400;flex:1"
         >{$t("Who is absent")}</span
       >
       <button

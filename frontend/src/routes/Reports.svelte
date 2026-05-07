@@ -473,7 +473,7 @@
   {#if $currentUser.permissions?.can_approve}
     <div class="kz-card" style="padding:20px;margin-bottom:16px">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
-        <span style="font-size:14px;font-weight:600">{$t("Employee Details")}</span>
+        <span style="font-size:14px;font-weight:400">{$t("Employee Details")}</span>
         <button
           class="kz-btn-icon-sm kz-btn-ghost"
           title={$t("help_employee_details")}
@@ -532,7 +532,6 @@
         {minToHM(cumulative)}
       </span>
     </div>
-    <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:8px">{$t("As of yesterday")}</div>
     {#if activeHelp === "overtime"}
       <div
         style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)"
@@ -585,7 +584,7 @@
       {#each overtime as m, i}
         {@const cum = m.cumulative_min}
         <div class="overtime-tile">
-          <div style="font-weight:600;font-size:13px;margin-bottom:4px">
+          <div style="font-weight:400;font-size:13px;margin-bottom:4px">
             {m.month}
           </div>
           <div class="overtime-tile-row">
@@ -628,7 +627,7 @@
   <!-- Monthly report -->
   <div class="kz-card" style="padding:20px;margin-bottom:16px">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
-      <span style="font-size:14px;font-weight:600">{$t("Monthly report")}</span>
+      <span style="font-size:14px;font-weight:400">{$t("Monthly report")}</span>
       <button
         class="kz-btn-icon-sm kz-btn-ghost"
         title={$t("help_monthly_report")}
@@ -759,7 +758,7 @@
   {#if $currentUser.permissions?.can_view_team_reports}
     <div class="kz-card" style="padding:20px;margin-bottom:16px">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
-        <span style="font-size:14px;font-weight:600">{$t("Team report")}</span>
+        <span style="font-size:14px;font-weight:400">{$t("Team report")}</span>
         <button
           class="kz-btn-icon-sm kz-btn-ghost"
           title={$t("help_team_report")}
@@ -813,7 +812,7 @@
                     style="text-align:right;color:var(--text-tertiary)"
                     >{minToHM(r.target_min)}</td
                   >
-                  <td class="tab-num" style="text-align:right;font-weight:600"
+                  <td class="tab-num" style="text-align:right;font-weight:400"
                     >{minToHM(r.actual_min)}</td
                   >
                   <td
@@ -838,7 +837,7 @@
   <!-- Category report -->
   <div class="kz-card" style="padding:20px;margin-bottom:16px">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
-      <span style="font-size:14px;font-weight:600"
+      <span style="font-size:14px;font-weight:400"
         >{$t("Category breakdown")}</span
       >
       <button
@@ -955,7 +954,7 @@
                       {/if}
                     </td>
                   {/each}
-                  <td class="tab-num" style="text-align:right;font-weight:600">
+                  <td class="tab-num" style="text-align:right;font-weight:400">
                     {rowTotal > 0 ? minToHM(rowTotal) : "–"}
                   </td>
                 </tr>
@@ -1007,7 +1006,7 @@
   <!-- Absence report -->
   <div class="kz-card" style="padding:20px;margin-bottom:16px">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
-      <span style="font-size:14px;font-weight:600">{$t("Absences")}</span>
+      <span style="font-size:14px;font-weight:400">{$t("Absences")}</span>
       <button
         class="kz-btn-icon-sm kz-btn-ghost"
         title={$t("help_absence_report")}
@@ -1098,7 +1097,7 @@
   <!-- Export tile -->
   <div class="kz-card" style="padding:20px">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
-      <span style="font-size:14px;font-weight:600">{$t("Export")}</span>
+      <span style="font-size:14px;font-weight:400">{$t("Export")}</span>
       <button
         class="kz-btn-icon-sm kz-btn-ghost"
         title={$t("help_csv_export")}
@@ -1153,7 +1152,7 @@
   <div class="dialog-backdrop" on:click={closeDetail}></div>
   <dialog open on:close={closeDetail} style="max-width:900px;z-index:1001">
     <header style="justify-content:space-between">
-      <span style="font-size:16px;font-weight:600">
+      <span style="font-size:16px;font-weight:400">
         {$t("Employee Details")} · {detailUser ? `${detailUser.first_name} ${detailUser.last_name}` : `#${detailUserId}`}
       </span>
       <button
@@ -1167,7 +1166,7 @@
 
     <div class="dialog-body" style="padding:20px;gap:16px">
       <!-- Flextime balance -->
-      <div style="font-size:12px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">
+      <div style="font-size:12px;font-weight:400;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">
         {$t("Flextime")}
       </div>
       <div class="stat-cards" style="margin-bottom:16px">
@@ -1197,7 +1196,7 @@
 
       <!-- Vacation balance -->
       {#if detailLeaveBalance}
-        <div style="font-size:12px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">
+        <div style="font-size:12px;font-weight:400;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">
           {$t("Vacation")}
         </div>
         <div class="stat-cards" style="margin-bottom:16px">
@@ -1234,7 +1233,7 @@
       <!-- Flextime Chart -->
       {#if detailFlextimeData.length > 0}
         <div class="kz-card" style="padding:16px">
-          <div style="font-weight:600;margin-bottom:8px">{$t("Flextime")}</div>
+          <div style="font-weight:400;margin-bottom:8px">{$t("Flextime")}</div>
           <FlextimeChart data={detailFlextimeData} />
         </div>
       {/if}
@@ -1244,7 +1243,7 @@
         {@const catEntries = Object.entries(detailReport.category_totals).sort((a, b) => b[1] - a[1])}
         {@const catMax = catEntries[0][1]}
         <div class="kz-card" style="padding:16px">
-          <div style="font-weight:600;margin-bottom:12px">{$t("Category breakdown")}</div>
+          <div style="font-weight:400;margin-bottom:12px">{$t("Category breakdown")}</div>
           <div style="display:flex;flex-direction:column;gap:8px">
             {#each catEntries as [cat, mins]}
               <div style="display:grid;grid-template-columns:130px 1fr 52px;align-items:center;gap:8px;font-size:12px">
@@ -1262,7 +1261,7 @@
       <!-- Entries -->
       {#if detailReport.entries?.length}
         <div class="kz-card" style="overflow-x:auto">
-          <div style="font-weight:600;margin-bottom:12px;padding:0 16px;padding-top:16px">{$t("Entries")}</div>
+          <div style="font-weight:400;margin-bottom:12px;padding:0 16px;padding-top:16px">{$t("Entries")}</div>
           <table class="kz-table">
             <thead>
               <tr>
@@ -1297,7 +1296,7 @@
       <!-- Absences -->
       {#if detailReport.absences?.length}
         <div class="kz-card" style="overflow-x:auto">
-          <div style="font-weight:600;margin-bottom:12px;padding:0 16px;padding-top:16px">{$t("Absences")}</div>
+          <div style="font-weight:400;margin-bottom:12px;padding:0 16px;padding-top:16px">{$t("Absences")}</div>
           <table class="kz-table">
             <thead>
               <tr>

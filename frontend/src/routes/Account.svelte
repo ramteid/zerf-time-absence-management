@@ -118,7 +118,7 @@
         {initials($currentUser)}
       </div>
       <div>
-        <div style="font-size:18px;font-weight:600">
+        <div style="font-size:18px;font-weight:400">
           {$currentUser.first_name}
           {$currentUser.last_name}
         </div>
@@ -193,7 +193,7 @@
 
   <!-- Password -->
   <div class="kz-card" style="padding:20px;margin-bottom:16px">
-    <div style="font-size:14px;font-weight:600;margin-bottom:14px">
+    <div style="font-size:14px;font-weight:400;margin-bottom:14px">
       {$t("Change password")}
     </div>
     <div class="field-group">
@@ -250,7 +250,7 @@
 
   <!-- Appearance -->
   <div class="kz-card" style="padding:20px;margin-bottom:16px">
-    <div style="font-size:14px;font-weight:600;margin-bottom:14px">
+    <div style="font-size:14px;font-weight:400;margin-bottom:14px">
       {$t("Appearance")}
     </div>
     <div style="display:flex;align-items:center;justify-content:space-between">

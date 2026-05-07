@@ -382,7 +382,7 @@ body {
 
 .sidebar-logo-text {
   color: var(--nav-text-active);
-  font-weight: 600;
+  font-weight: 400;
   font-size: 16px;
   letter-spacing: -0.02em;
 }
@@ -462,7 +462,7 @@ body {
 .top-bar-title h1 {
   margin: 0;
   font-size: 20px;
-  font-weight: 600;
+  font-weight: 400;
   letter-spacing: -0.02em;
   color: var(--text-primary);
 }
@@ -504,7 +504,7 @@ body {
 
 .stat-card-value {
   font-size: 22px;
-  font-weight: 600;
+  font-weight: 400;
   letter-spacing: -0.02em;
 }
 
@@ -524,7 +524,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-weight: 600;
+  font-weight: 400;
   flex-shrink: 0;
   letter-spacing: -0.02em;
   background: var(--accent-soft);
@@ -597,7 +597,7 @@ dialog header {
   padding: 16px 20px;
   border-bottom: 1px solid var(--border);
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 400;
   display: flex;
   align-items: center;
 }
@@ -630,7 +630,7 @@ dialog footer {
 
 .card-header-title {
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 400;
   flex: 1;
 }
 
@@ -671,7 +671,7 @@ dialog footer {
 
 .day-name {
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 400;
 }
 
 .day-date {
@@ -681,7 +681,7 @@ dialog footer {
 
 .day-total {
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 400;
 }
 
 .day-entries {

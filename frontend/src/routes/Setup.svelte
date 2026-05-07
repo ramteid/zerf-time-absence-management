@@ -99,7 +99,7 @@
         <Icon name="Clock" size={18} />
       </div>
       <h1
-        style="margin:0;font-size:20px;font-weight:600;letter-spacing:-0.02em"
+        style="margin:0;font-size:20px;font-weight:400;letter-spacing:-0.02em"
       >
         ZERF {$t("Time tracking")}
       </h1>

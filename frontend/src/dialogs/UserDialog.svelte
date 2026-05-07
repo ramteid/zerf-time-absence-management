@@ -207,7 +207,7 @@
       {:else}
         <div style="margin-top:10px;padding:10px 14px;background:var(--danger-bg, #fef2f2);border:2px solid var(--danger, #dc2626);border-radius:var(--radius-sm)">
           <strong style="color:var(--danger, #dc2626);font-size:14px">⚠ {$t("No email was sent! Email / SMTP is not configured.")}</strong>
-          <div style="color:var(--danger, #dc2626);font-size:13px;margin-top:4px;font-weight:600">
+          <div style="color:var(--danger, #dc2626);font-size:13px;margin-top:4px;font-weight:400">
             {$t("You must deliver this password to the user in person!")}
           </div>
         </div>
@@ -318,7 +318,7 @@
       </div>
       <div>
         <div
-          style="font-size:13px;font-weight:600;margin-bottom:8px;margin-top:4px"
+          style="font-size:13px;font-weight:400;margin-bottom:8px;margin-top:4px"
         >
           {$t("Vacation days per year")}
         </div>

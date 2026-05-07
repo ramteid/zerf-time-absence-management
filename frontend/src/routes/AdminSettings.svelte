@@ -165,7 +165,7 @@
   {/if}
   {#if needsName}
     <div class="kz-card" style="padding:20px;margin-bottom:16px">
-      <div style="font-size:14px;font-weight:600;margin-bottom:14px">
+      <div style="font-size:14px;font-weight:400;margin-bottom:14px">
         {$t("Your Name")}
       </div>
       <div class="field-group">
@@ -201,7 +201,32 @@
     </div>
   {/if}
   <div class="kz-card" style="padding:20px;margin-bottom:16px">
-    <div style="font-size:14px;font-weight:600;margin-bottom:14px">
+    <div style="font-size:14px;font-weight:400;margin-bottom:14px">
+      {$t("Organization")}
+    </div>
+    <div class="field-group">
+      <div class="field-row">
+        <div>
+          <label class="kz-label" for="settings-org-name"
+            >{$t("Organization name")}</label
+          >
+          <input
+            id="settings-org-name"
+            class="kz-input"
+            type="text"
+            maxlength="200"
+            bind:value={s.organization_name}
+            placeholder={$t("e.g. My Company")}
+          />
+          <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
+            {$t("Shown on the login screen and in the navigation.")}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="kz-card" style="padding:20px;margin-bottom:16px">
+    <div style="font-size:14px;font-weight:400;margin-bottom:14px">
       {$t("General")}
     </div>
     <div class="field-group">
@@ -237,7 +262,7 @@
 
       <!-- Default user settings -->
       <div
-        style="font-size:14px;font-weight:600;margin-top:20px;margin-bottom:14px"
+        style="font-size:14px;font-weight:400;margin-top:20px;margin-bottom:14px"
       >
         {$t("Default weekly hours")} / {$t("Default annual leave days")}
       </div>
@@ -273,7 +298,7 @@
 
       <!-- Carryover expiry date -->
       <div
-        style="font-size:14px;font-weight:600;margin-top:20px;margin-bottom:14px"
+        style="font-size:14px;font-weight:400;margin-top:20px;margin-bottom:14px"
       >
         {$t("Vacation carryover")}
       </div>
@@ -297,7 +322,7 @@
 
       <!-- Submission deadline -->
       <div
-        style="font-size:14px;font-weight:600;margin-top:20px;margin-bottom:14px"
+        style="font-size:14px;font-weight:400;margin-top:20px;margin-bottom:14px"
       >
         {$t("Time submission deadline")}
       </div>
@@ -324,7 +349,7 @@
       </div>
 
       <div
-        style="font-size:14px;font-weight:600;margin-top:20px;margin-bottom:14px"
+        style="font-size:14px;font-weight:400;margin-top:20px;margin-bottom:14px"
       >
         {$t("Holidays")}
       </div>

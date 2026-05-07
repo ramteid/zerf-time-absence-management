@@ -1,13 +1,20 @@
 import { writable, derived, get } from "svelte/store";
 
+// --- Configuration ---
+
 const STORAGE_KEY = "zerf.ui-language";
 export const DEFAULT_LANGUAGE = "en";
 
+// Supported languages with their display labels and locale codes used for date formatting.
 export const LANGUAGES = Object.freeze({
   en: { label: "English", locale: "en-US" },
   de: { label: "Deutsch", locale: "de-DE" },
 });
 
+// --- Translation tables ---
+
+// Keys in `en` are the canonical translation keys used throughout the app.
+// Keys absent from `de` fall back to the English value at runtime.
 const TRANSLATIONS = {
   en: {
     hours_unit: "h",
@@ -447,10 +454,12 @@ const TRANSLATIONS = {
     "Signing in…": "Anmeldung läuft…",
     "Settings saved.": "Einstellungen gespeichert.",
     "SMTP settings saved.": "SMTP-Einstellungen gespeichert.",
-    "Email (SMTP)": "E-Mail (SMTP)",
     "Enable SMTP": "SMTP aktivieren",
     "When enabled, notification emails are sent for approvals, rejections, and reopen requests.":
       "Wenn aktiviert, werden Benachrichtigungs-E-Mails bei Genehmigungen, Ablehnungen und Wiedereröffnungsanträgen gesendet.",
+    "Enable submission reminders": "Einreichungserinnerungen aktivieren",
+    "When enabled, users who have not submitted all time entries are reminded by email on the configured deadline day.":
+      "Wenn aktiviert, werden Benutzer, die noch nicht alle Zeiteinträge eingereicht haben, am konfigurierten Stichtag per E-Mail erinnert.",
     "SMTP Host": "SMTP-Host",
     "SMTP Port": "SMTP-Port",
     "From address": "Absenderadresse",
@@ -895,6 +904,8 @@ const TRANSLATIONS = {
   },
 };
 
+// --- Language store ---
+
 function hasLanguage(language) {
   return Object.prototype.hasOwnProperty.call(LANGUAGES, language);
 }
@@ -923,6 +934,9 @@ language.subscribe((lang) => {
   }
 });
 
+// --- Core translation helpers ---
+
+// Replaces {placeholder} tokens in a template string with values from params.
 function interpolate(template, params) {
   return template.replace(/\{(\w+)\}/g, (_, key) =>
     params[key] == null ? `{${key}}` : String(params[key]),
@@ -934,6 +948,9 @@ export function translate(lang, key, params = {}) {
   return interpolate(tpl, params);
 }
 
+// --- Absence kind labels ---
+
+// Maps absence kind identifiers to their canonical English translation keys.
 const ABSENCE_KIND_LABELS = Object.freeze({
   vacation: "Vacation",
   sick: "Sick",
@@ -947,6 +964,11 @@ function translatedAbsenceKind(lang, kind) {
   return translate(lang, ABSENCE_KIND_LABELS[kind] || kind);
 }
 
+// --- Error message localization ---
+
+// Regex patterns for backend error messages that carry dynamic values.
+// Each entry maps a pattern to a translation key and optionally transforms
+// the captured groups into interpolation params.
 const ERROR_PATTERNS = Object.freeze([
   {
     pattern: /^Password must be at least (?<min>\d+) characters\.$/,
@@ -1031,10 +1053,15 @@ export function localizeErrorMessage(message, lang = get(language)) {
   return normalized;
 }
 
+// --- Reactive translation store ---
+
+// `$t(key, params?)` is the primary translation function used in Svelte components.
 export const t = derived(
   language,
   ($lang) => (key, params) => translate($lang, key, params),
 );
+
+// --- Utility exports ---
 
 export function setLanguage(lang) {
   language.set(resolveLanguage(lang));

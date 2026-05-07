@@ -202,6 +202,15 @@ async fn spa_index(
     serve_spa_index(&state.cfg.static_dir).await
 }
 
+async fn serve_favicon(
+    State(state): State<AppState>,
+) -> Result<([(HeaderName, HeaderValue); 1], Vec<u8>), StatusCode> {
+    let body = tokio::fs::read(format!("{}/favicon.svg", state.cfg.static_dir))
+        .await
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+    Ok(([(header::CONTENT_TYPE, HeaderValue::from_static("image/svg+xml"))], body))
+}
+
 async fn spa_fallback(
     State(state): State<AppState>,
     method: Method,
@@ -257,6 +266,7 @@ pub fn build_app(state: AppState) -> Router {
         .nest("/api/v1", api)
         .route("/", get(spa_index))
         .route("/index.html", get(spa_index))
+        .route("/favicon.svg", get(serve_favicon))
         .fallback(spa_fallback)
         .with_state(state.clone())
         .layer(no_store_layer);

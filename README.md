@@ -21,6 +21,7 @@ Employees capture hours and absences, team leads review requests and submitted w
 - CSV export for report data and downstream processing.
 - Role-based administration for users, categories, holidays, settings, and audit history.
 - In-app notifications with optional SMTP-based email delivery.
+- Automated submission reminders: on a configured deadline day each month, users who have not yet submitted all past months' time entries receive an in-app notification and, if SMTP is enabled, an email reminder.
 - Self-hosted Docker deployment with automatic backup to a local Docker volume.
 
 ## How it differs from comparable software
