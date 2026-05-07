@@ -133,6 +133,26 @@ async fn password_reset_token_is_single_use_and_rejects_current_password() {
     let (st, body) = anon
         .post(
             "/api/v1/auth/reset-password",
+            &json!({"token": token, "password": "short"}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST, "weak password rejected");
+    assert_eq!(
+        body["error"], "Password must be at least 12 characters.",
+        "weak-password reset error"
+    );
+
+    let token_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM password_reset_tokens WHERE user_id=$1")
+            .bind(user_id)
+            .fetch_one(&app.state.pool)
+            .await
+            .expect("count reset tokens after weak password");
+    assert_eq!(token_count, 1, "token remains usable after weak password");
+
+    let (st, body) = anon
+        .post(
+            "/api/v1/auth/reset-password",
             &json!({"token": token, "password": current_password}),
         )
         .await;
@@ -254,10 +274,14 @@ async fn expired_password_reset_token_is_consumed() {
     let (st, body) = anon
         .post(
             "/api/v1/auth/reset-password",
-            &json!({"token": token, "password": "FreshPass!234"}),
+            &json!({"token": token, "password": "short"}),
         )
         .await;
-    assert_eq!(st, StatusCode::BAD_REQUEST, "expired token rejected");
+    assert_eq!(
+        st,
+        StatusCode::BAD_REQUEST,
+        "expired token rejected before password validation"
+    );
     assert_eq!(body["error"], "reset_token_expired", "expired reset error");
 
     let token_count: i64 =

@@ -869,7 +869,8 @@ const TRANSLATIONS = {
     account_deactivated:
       "Ihr Konto wurde deaktiviert. Bitte wenden Sie sich an Ihren Administrator.",
     "Account active": "Konto aktiv",
-    "Inactive users cannot log in.": "Inaktive Nutzer können sich nicht anmelden.",
+    "Inactive users cannot log in.":
+      "Inaktive Nutzer können sich nicht anmelden.",
     "User activated.": "Benutzer aktiviert.",
     Activate: "Aktivieren",
   },
