@@ -148,10 +148,8 @@ const TRANSLATIONS = {
     "Set new password": "Set new password",
     "Password reset successfully. Please sign in.":
       "Password reset successfully. Please sign in.",
-    smtp_not_configured:
-      "Email delivery is not configured. Please contact the administrator.",
-    public_url_not_configured:
-      "Password reset links are not configured. Please contact the administrator.",
+    password_reset_unavailable:
+      "Password reset is not available. Please contact the administrator.",
     reset_token_expired:
       "This reset link has expired. Please request a new one.",
     reset_token_invalid: "This reset link is invalid or has already been used.",
@@ -894,10 +892,8 @@ const TRANSLATIONS = {
     "Set new password": "Neues Passwort festlegen",
     "Password reset successfully. Please sign in.":
       "Passwort erfolgreich zurückgesetzt. Bitte melden Sie sich an.",
-    smtp_not_configured:
-      "E-Mail-Versand ist nicht konfiguriert. Bitte wenden Sie sich an den Administrator.",
-    public_url_not_configured:
-      "Links zum Zurücksetzen des Passworts sind nicht konfiguriert. Bitte wenden Sie sich an den Administrator.",
+    password_reset_unavailable:
+      "Passwort-Reset ist nicht verfügbar. Bitte wenden Sie sich an den Administrator.",
     reset_token_expired:
       "Dieser Reset-Link ist abgelaufen. Bitte fordern Sie einen neuen an.",
     reset_token_invalid:

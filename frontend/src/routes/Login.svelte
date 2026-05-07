@@ -1,7 +1,7 @@
 <script>
   import { onMount, onDestroy } from "svelte";
-  import { api, csrfToken, resetUnauthorizedGate } from "../api.js";
-  import { currentUser, categories, go, settings } from "../stores.js";
+  import { api, csrfToken } from "../api.js";
+  import { settings } from "../stores.js";
   import { t } from "../i18n.js";
   import Icon from "../Icons.svelte";
   import { storePasswordCredential } from "../passwordCredentials.js";
@@ -62,9 +62,6 @@
       });
       csrfToken.set(r.csrf_token || null);
       const me = await api("/auth/me");
-      csrfToken.set(me.csrf_token || null);
-      // Set the path before currentUser so App.svelte resolves the target route
-      // immediately instead of briefly rendering the loading state.
       const dashboardAvailable = (me?.nav || []).some(
         (item) => item?.key === "Dashboard" || item?.href === "/dashboard",
       );
@@ -76,12 +73,7 @@
             ? "/dashboard"
             : me.home || "/time";
       await storePasswordCredential(form);
-      go(dest);
-      currentUser.set(me);
-      resetUnauthorizedGate();
-      try {
-        categories.set(await api("/categories"));
-      } catch (_) {}
+      window.location.assign(dest);
     } catch (err) {
       if (err?.apiMessage === "account_deactivated") {
         loginError = $t("account_deactivated");
@@ -111,10 +103,8 @@
       });
       forgotSent = true;
     } catch (err) {
-      if (err?.apiMessage === "smtp_not_configured") {
-        forgotError = $t("smtp_not_configured");
-      } else if (err?.apiMessage === "public_url_not_configured") {
-        forgotError = $t("public_url_not_configured");
+      if (err?.apiMessage === "password_reset_unavailable") {
+        forgotError = $t("password_reset_unavailable");
       } else {
         forgotError = $t(err?.message || "Error");
       }

@@ -868,7 +868,7 @@ pub async fn forgot_password(
     let smtp = crate::settings::load_smtp_config(&app_state.pool).await;
     if smtp.is_none() {
         tracing::warn!(target: "zerf::auth", "forgot_password called but SMTP is not configured");
-        return Err(crate::error::AppError::BadRequest("smtp_not_configured".into()));
+        return Err(crate::error::AppError::BadRequest("password_reset_unavailable".into()));
     }
 
     let base_url = match app_state
@@ -881,7 +881,7 @@ pub async fn forgot_password(
         Some(url) => url.to_string(),
         None => {
             tracing::warn!(target: "zerf::auth", "forgot_password called but ZERF_PUBLIC_URL is not configured");
-            return Err(crate::error::AppError::BadRequest("public_url_not_configured".into()));
+            return Err(crate::error::AppError::BadRequest("password_reset_unavailable".into()));
         }
     };
 
