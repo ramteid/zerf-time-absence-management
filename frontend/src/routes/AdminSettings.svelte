@@ -92,18 +92,6 @@
       toast($t("Please select a country."), "error");
       return;
     }
-    if (regionLoading) {
-      toast($t("Loading..."), "error");
-      return;
-    }
-    if (regionsLoadFailed) {
-      toast($t("Could not load regions for the selected country."), "error");
-      return;
-    }
-    if (countryRegions.length > 0 && !s.region) {
-      toast($t("Please select a region."), "error");
-      return;
-    }
     if (s.default_weekly_hours == null || s.default_weekly_hours === "") {
       toast($t("Please enter default weekly hours."), "error");
       return;
@@ -165,8 +153,8 @@
       <p style="font-size:13px;color:var(--text-tertiary);margin-top:4px">
         {$t(
           needsName
-            ? "Please enter your name and configure the country, region, default weekly hours and default annual leave days before using the application."
-            : "Please configure the country, region, default weekly hours and default annual leave days before using the application.",
+            ? "Please enter your name and configure the country, default weekly hours and default annual leave days before using the application."
+            : "Please configure the country, default weekly hours and default annual leave days before using the application.",
         )}
       </p>
     </div>

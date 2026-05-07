@@ -460,14 +460,15 @@ const TRANSLATIONS = {
     "Not tested": "Nicht getestet",
     "SMTP connection test failed": "SMTP-Verbindungstest fehlgeschlagen",
     "Initial setup required.": "Ersteinrichtung erforderlich.",
-    "Please configure the country, region, default weekly hours and default annual leave days before using the application.":
-      "Bitte Land, Region, Standard-Wochenstunden und Standard-Urlaubstage konfigurieren, bevor die Anwendung genutzt wird.",
-    "Please enter your name and configure the country, region, default weekly hours and default annual leave days before using the application.":
-      "Bitte geben Sie Ihren Namen ein und konfigurieren Sie Land, Region, Standard-Wochenstunden und Standard-Urlaubstage, bevor die Anwendung genutzt wird.",
+    "Please configure the country, default weekly hours and default annual leave days before using the application.":
+      "Bitte Land, Standard-Wochenstunden und Standard-Urlaubstage konfigurieren, bevor die Anwendung genutzt wird.",
+    "Please enter your name and configure the country, default weekly hours and default annual leave days before using the application.":
+      "Bitte geben Sie Ihren Namen ein und konfigurieren Sie Land, Standard-Wochenstunden und Standard-Urlaubstage, bevor die Anwendung genutzt wird.",
     "Please select a country.": "Bitte ein Land auswählen.",
     "Please select a region.": "Bitte eine Region auswählen.",
     "Could not load regions for the selected country.":
       "Regionen für das ausgewählte Land konnten nicht geladen werden.",
+    "Clear stored password": "Gespeichertes Passwort löschen",
     "Please enter default weekly hours.":
       "Bitte Standard-Wochenstunden eingeben.",
     "Please enter default annual leave days.":
@@ -701,6 +702,8 @@ const TRANSLATIONS = {
     "Day total exceeds 14 hours.": "Tagestotal überschreitet 14 Stunden.",
     "End time must be after start time.":
       "Endzeit muss nach der Startzeit liegen.",
+    "End time cannot be in the future.":
+      "Endzeit darf nicht in der Zukunft liegen.",
     "Comment too long (max 2000).": "Kommentar zu lang (max. 2000).",
     "Comment too long.": "Kommentar zu lang.",
     "Category not found.": "Kategorie nicht gefunden.",

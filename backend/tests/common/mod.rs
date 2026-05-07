@@ -10,7 +10,26 @@ use std::sync::Arc;
 use testcontainers::runners::AsyncRunner;
 use testcontainers::ContainerAsync;
 use testcontainers_modules::postgres::Postgres;
-use zerf::{build_app, categories, config::Config, db, holidays, seed_admin, AppState};
+use zerf::{auth, build_app, categories, config::Config, db, holidays, users, AppState};
+
+/// Seed a test admin user with a CSPRNG-generated password.
+/// Only used in test code — never compiled into the production binary.
+async fn seed_admin(pool: &db::DatabasePool, admin_email: &str) -> anyhow::Result<Option<String>> {
+    let admin_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE role='admin'")
+        .fetch_one(pool)
+        .await?;
+    if admin_count == 0 {
+        let temp = users::generate_password();
+        let hash = auth::hash_password(&temp)?;
+        let today = chrono::Local::now().date_naive();
+        sqlx::query("INSERT INTO users(email,password_hash,first_name,last_name,role,weekly_hours,annual_leave_days,start_date,must_change_password,overtime_start_balance_min) VALUES ($1,$2,$3,$4,'admin',39.0,30,$5,TRUE,0)")
+            .bind(admin_email.to_lowercase()).bind(hash).bind("Test").bind("Admin").bind(today)
+            .execute(pool).await?;
+        Ok(Some(temp))
+    } else {
+        Ok(None)
+    }
+}
 
 /// A running test application with its own database and HTTP client.
 pub struct TestApp {

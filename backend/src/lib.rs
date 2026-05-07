@@ -41,27 +41,7 @@ pub struct AppState {
     pub notifications: notifications::NotificationBroadcaster,
 }
 
-/// Seed the admin user if no admin exists yet.  Returns the temporary
-/// password when a new admin was created (for log output / tests).
-pub async fn seed_admin(
-    pool: &db::DatabasePool,
-    admin_email: &str,
-) -> anyhow::Result<Option<String>> {
-    let admin_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE role='admin'")
-        .fetch_one(pool)
-        .await?;
-    if admin_count == 0 {
-        let temp = "admin".to_string();
-        let hash = auth::hash_password(&temp)?;
-        let today = chrono::Local::now().date_naive();
-        sqlx::query("INSERT INTO users(email,password_hash,first_name,last_name,role,weekly_hours,annual_leave_days,start_date,must_change_password,overtime_start_balance_min) VALUES ($1,$2,$3,$4,'admin',39.0,30,$5,TRUE,0)")
-            .bind(admin_email.to_lowercase()).bind(hash).bind("").bind("").bind(today)
-            .execute(pool).await?;
-        Ok(Some(temp))
-    } else {
-        Ok(None)
-    }
-}
+
 
 /// Build the API router (without static-file serving).
 pub fn build_api_router(state: AppState) -> Router<AppState> {
@@ -256,19 +236,36 @@ pub fn build_app(state: AppState) -> Router {
             "default-src 'self'; img-src 'self' data:; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
         )));
 
-    Router::new()
+    // no-store for API, SPA index, and fallback — but NOT for hashed /assets/*
+    let no_store_layer = SetResponseHeaderLayer::overriding(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("no-store"),
+    );
+
+    // Long-lived immutable caching for hashed static assets (/assets/*)
+    let assets_service = ServeDir::new(assets_dir);
+    let assets_router = Router::new()
+        .nest_service("/assets", assets_service)
+        .layer(SetResponseHeaderLayer::overriding(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("public, max-age=31536000, immutable"),
+        ));
+
+    // API + SPA routes get no-store
+    let app_routes = Router::new()
         .route("/healthz", get(|| async { "ok" }))
         .nest("/api/v1", api)
-        .nest_service("/assets", ServeDir::new(assets_dir))
         .route("/", get(spa_index))
         .route("/index.html", get(spa_index))
         .fallback(spa_fallback)
+        .with_state(state.clone())
+        .layer(no_store_layer);
+
+    Router::new()
+        .merge(assets_router)
+        .merge(app_routes)
         .with_state(state)
         .layer(security_headers)
-        .layer(SetResponseHeaderLayer::overriding(
-            header::CACHE_CONTROL,
-            HeaderValue::from_static("no-store"),
-        ))
         .layer(RequestBodyLimitLayer::new(1024 * 1024))
         .layer(TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,

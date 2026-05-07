@@ -37,6 +37,17 @@
       error = $t("Start cannot be after End.");
       return;
     }
+    if (isNew && entry_date === isoDate(new Date())) {
+      const now = new Date();
+      const currentTime =
+        String(now.getHours()).padStart(2, "0") +
+        ":" +
+        String(now.getMinutes()).padStart(2, "0");
+      if (end_time > currentTime) {
+        error = $t("End time cannot be in the future.");
+        return;
+      }
+    }
     if (category_id == null) {
       error = $t("Category required.");
       return;
