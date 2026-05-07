@@ -664,7 +664,7 @@ pub async fn approve(
     if absence.kind == "vacation" {
         let absence_owner: crate::auth::User = sqlx::query_as(
             "SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, \
-             annual_leave_days, start_date, active, must_change_password, created_at, \
+             start_date, active, must_change_password, created_at, \
              approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min \
              FROM users WHERE id=$1",
         )
@@ -958,20 +958,13 @@ async fn assert_can_access_user(
 }
 
 /// Helper: resolve the effective annual leave entitlement for a user in a given year.
-/// Checks `user_annual_leave_overrides` first, falls back to `users.annual_leave_days`.
+/// Uses the user_annual_leave table (lazy-creates row on first access).
 async fn effective_annual_days(
     pool: &crate::db::DatabasePool,
     user: &crate::auth::User,
     year: i32,
 ) -> AppResult<i64> {
-    let override_days: Option<i64> = sqlx::query_scalar(
-        "SELECT days FROM user_annual_leave_overrides WHERE user_id=$1 AND year=$2",
-    )
-    .bind(user.id)
-    .bind(year)
-    .fetch_optional(pool)
-    .await?;
-    Ok(override_days.unwrap_or(user.annual_leave_days))
+    crate::users::get_leave_days(pool, user.id, year).await
 }
 
 /// Parse the carryover expiry date setting (MM-DD) into a NaiveDate for the given year.
@@ -1118,7 +1111,7 @@ pub async fn balance(
     assert_can_access_user(&app_state.pool, &requester, target_user_id).await?;
     // Default to the current year if none was provided.
     let year = query.year.unwrap_or_else(|| chrono::Utc::now().year());
-    let target_user: crate::auth::User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1")
+    let target_user: crate::auth::User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1")
         .bind(target_user_id)
         .fetch_one(&app_state.pool)
         .await?;

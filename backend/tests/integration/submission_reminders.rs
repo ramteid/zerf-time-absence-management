@@ -88,7 +88,8 @@ async fn reminder_skips_user_with_all_submitted() {
                 "last_name": "User",
                 "role": "employee",
                 "weekly_hours": 20,
-                "annual_leave_days": 10,
+                "leave_days_current_year": 10,
+                "leave_days_next_year": 10,
                 "start_date": start_date,
                 "approver_id": 1
             }),
@@ -183,7 +184,8 @@ async fn reminder_skips_zero_hours_user() {
                 "last_name": "Hours",
                 "role": "employee",
                 "weekly_hours": 0,
-                "annual_leave_days": 0,
+                "leave_days_current_year": 0,
+                "leave_days_next_year": 0,
                 "start_date": "2024-01-01",
                 "approver_id": 1
             }),

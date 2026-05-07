@@ -20,7 +20,7 @@ async fn non_admin_users_must_have_approver() {
         .post(
             "/api/v1/users",
             &json!({"email":"a@example.com","first_name":"A","last_name":"A",
-                "role":"employee","weekly_hours":39,"annual_leave_days":30,
+                "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
                 "start_date":"2024-01-01"}),
         )
         .await;
@@ -36,7 +36,7 @@ async fn non_admin_users_must_have_approver() {
         .post(
             "/api/v1/users",
             &json!({"email":"lead-missing@example.com","first_name":"Lead","last_name":"Missing",
-                "role":"team_lead","weekly_hours":39,"annual_leave_days":30,
+                "role":"team_lead","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
                 "start_date":"2024-01-01"}),
         )
         .await;
@@ -56,7 +56,7 @@ async fn non_admin_users_must_have_approver() {
         .post(
             "/api/v1/users",
             &json!({"email":"b@example.com","first_name":"B","last_name":"B",
-                "role":"employee","weekly_hours":39,"annual_leave_days":30,
+                "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
                 "start_date":"2024-01-01","approver_id": 1}),
         )
         .await;
@@ -67,7 +67,7 @@ async fn non_admin_users_must_have_approver() {
         .post(
             "/api/v1/users",
             &json!({"email":"lead-approver@example.com","first_name":"Lead","last_name":"Approver",
-                "role":"team_lead","weekly_hours":39,"annual_leave_days":30,
+                "role":"team_lead","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
                 "start_date":"2024-01-01","approver_id":1}),
         )
         .await;
@@ -78,7 +78,7 @@ async fn non_admin_users_must_have_approver() {
         .post(
             "/api/v1/users",
             &json!({"email":"lead-report@example.com","first_name":"Lead","last_name":"Report",
-                "role":"team_lead","weekly_hours":39,"annual_leave_days":30,
+                "role":"team_lead","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
                 "start_date":"2024-01-01","approver_id":lead_approver_id}),
         )
         .await;
@@ -108,7 +108,7 @@ async fn non_admin_users_must_have_approver() {
         .post(
             "/api/v1/users",
             &json!({"email":"c@example.com","first_name":"C","last_name":"C",
-                "role":"employee","weekly_hours":39,"annual_leave_days":30,
+                "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
                 "start_date":"2024-01-01","approver_id": 99999}),
         )
         .await;
@@ -131,7 +131,7 @@ async fn duplicate_user_identifiers_are_rejected() {
                 "last_name": "Person",
                 "role": "employee",
                 "weekly_hours": 39,
-                "annual_leave_days": 30,
+                "leave_days_current_year": 30, "leave_days_next_year": 30,
                 "start_date": "2024-01-01",
                 "approver_id": 1,
             }),
@@ -149,7 +149,7 @@ async fn duplicate_user_identifiers_are_rejected() {
                 "last_name": "Person",
                 "role": "employee",
                 "weekly_hours": 39,
-                "annual_leave_days": 30,
+                "leave_days_current_year": 30, "leave_days_next_year": 30,
                 "start_date": "2024-01-01",
                 "approver_id": 1,
             }),
@@ -170,7 +170,7 @@ async fn duplicate_user_identifiers_are_rejected() {
                 "last_name": " Person ",
                 "role": "employee",
                 "weekly_hours": 39,
-                "annual_leave_days": 30,
+                "leave_days_current_year": 30, "leave_days_next_year": 30,
                 "start_date": "2024-01-01",
                 "approver_id": 1,
             }),
@@ -191,7 +191,7 @@ async fn duplicate_user_identifiers_are_rejected() {
                 "last_name": "Person",
                 "role": "employee",
                 "weekly_hours": 39,
-                "annual_leave_days": 30,
+                "leave_days_current_year": 30, "leave_days_next_year": 30,
                 "start_date": "2024-01-01",
                 "approver_id": 1,
             }),
@@ -248,7 +248,7 @@ async fn creation_password_modes_set_must_change_correctly() {
                 "last_name": "User",
                 "role": "team_lead",
                 "weekly_hours": 39,
-                "annual_leave_days": 30,
+                "leave_days_current_year": 30, "leave_days_next_year": 30,
                 "start_date": "2024-01-01",
                 "approver_id": 1,
                 "password": manual_password,
@@ -276,7 +276,7 @@ async fn creation_password_modes_set_must_change_correctly() {
                 "last_name": "User",
                 "role": "employee",
                 "weekly_hours": 39,
-                "annual_leave_days": 30,
+                "leave_days_current_year": 30, "leave_days_next_year": 30,
                 "start_date": "2024-01-01",
                 "approver_id": 1,
                 "password": generated_password,

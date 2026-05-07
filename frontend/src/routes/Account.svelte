@@ -9,21 +9,23 @@
     nw2 = "",
     error = "";
   let savingTheme = false;
-  let leaveOverrides = [];
+  let leaveDaysThisYear = 0;
+  let leaveDaysNextYear = 0;
   const thisYear = new Date().getFullYear();
   const nextYear = thisYear + 1;
 
   // Re-fetch whenever currentUser becomes available (store starts as null)
   $: if ($currentUser?.id) {
     api(`/users/${$currentUser.id}/leave-overrides`)
-      .then((r) => (leaveOverrides = r))
-      .catch(() => (leaveOverrides = []));
+      .then((rows) => {
+        const cur = rows.find((r) => r.year === thisYear);
+        const nxt = rows.find((r) => r.year === nextYear);
+        leaveDaysThisYear = cur?.days ?? 0;
+        leaveDaysNextYear = nxt?.days ?? 0;
+      })
+      .catch(() => {});
   }
 
-  function leaveDaysForYear(year) {
-    const override = leaveOverrides.find((o) => o.year === year);
-    return override != null ? override.days : $currentUser.annual_leave_days;
-  }
   function initials(u) {
     return ((u.first_name?.[0] || "") + (u.last_name?.[0] || "")).toUpperCase();
   }
@@ -157,7 +159,7 @@
         <input
           id="account-annual-leave-this"
           class="kz-input"
-          value={leaveDaysForYear(thisYear)}
+          value={leaveDaysThisYear}
           readonly
           style="color:var(--text-secondary)"
         />
@@ -169,7 +171,7 @@
         <input
           id="account-annual-leave-next"
           class="kz-input"
-          value={leaveDaysForYear(nextYear)}
+          value={leaveDaysNextYear}
           readonly
           style="color:var(--text-secondary)"
         />
