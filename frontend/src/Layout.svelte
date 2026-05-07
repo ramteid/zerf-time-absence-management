@@ -253,10 +253,10 @@
       <div class="sidebar-logo-icon">
         <Icon name="Clock" size={16} />
       </div>
-      <div style="display:flex;flex-direction:column;line-height:1.2;min-width:0">
+      <div style="display:flex;flex-direction:column;line-height:1.2;min-width:0;flex:1">
         <span class="sidebar-logo-text">Zerf</span>
         {#if $settings?.organization_name}
-          <span style="font-size:10px;color:var(--nav-text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{$settings.organization_name}</span>
+          <span style="font-size:10px;color:var(--nav-text-muted);word-break:break-word">{$settings.organization_name}</span>
         {/if}
       </div>
       <div class="kz-bell-wrapper" style="margin-left:auto;position:relative">
