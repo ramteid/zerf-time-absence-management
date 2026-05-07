@@ -39,6 +39,7 @@
   let password = "";
   let confirmPassword = "";
   let showTempPassword = null;
+  let smtpEnabled = false;
 
   function secureIndex(max) {
     const buf = new Uint32Array(1);
@@ -103,6 +104,7 @@
         if (settings.default_annual_leave_days != null) {
           annual_leave_days = Number(settings.default_annual_leave_days);
         }
+        smtpEnabled = !!settings.smtp_enabled;
       } catch {}
     }
   });
@@ -239,9 +241,18 @@
       >
         {$t("Temporary password:")} <strong>{showTempPassword}</strong>
       </div>
-      <div style="font-size:12px;color:var(--text-tertiary);margin-top:8px">
-        {$t("Registration email will be sent.")}
-      </div>
+      {#if smtpEnabled}
+        <div style="font-size:12px;color:var(--text-tertiary);margin-top:8px">
+          {$t("Registration email will be sent.")}
+        </div>
+      {:else}
+        <div style="margin-top:10px;padding:10px 14px;background:var(--danger-bg, #fef2f2);border:2px solid var(--danger, #dc2626);border-radius:var(--radius-sm)">
+          <strong style="color:var(--danger, #dc2626);font-size:14px">⚠ {$t("No email was sent! Email / SMTP is not configured.")}</strong>
+          <div style="color:var(--danger, #dc2626);font-size:13px;margin-top:4px;font-weight:600">
+            {$t("You must deliver this password to the user in person!")}
+          </div>
+        </div>
+      {/if}
     </div>
     <footer>
       <button class="kz-btn" on:click={copyPassword}>
