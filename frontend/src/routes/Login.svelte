@@ -1,7 +1,7 @@
 <script>
   import { onMount, onDestroy } from "svelte";
   import { api, csrfToken, resetUnauthorizedGate } from "../api.js";
-  import { currentUser, categories, go } from "../stores.js";
+  import { currentUser, categories, go, settings } from "../stores.js";
   import { t } from "../i18n.js";
   import Icon from "../Icons.svelte";
   import { storePasswordCredential } from "../passwordCredentials.js";
@@ -164,11 +164,18 @@
       <div class="login-logo-icon">
         <Icon name="Clock" size={18} />
       </div>
-      <h1
-        style="margin:0;font-size:20px;font-weight:600;letter-spacing:-0.02em"
-      >
-        ZERF {$t("Time tracking")}
-      </h1>
+      <div>
+        <h1
+          style="margin:0;font-size:20px;font-weight:400;letter-spacing:-0.02em"
+        >
+          ZERF {$t("Time tracking")}
+        </h1>
+        {#if $settings?.organization_name}
+          <div style="font-size:12px;color:var(--text-tertiary);margin-top:2px">
+            {$settings.organization_name}
+          </div>
+        {/if}
+      </div>
     </div>
 
     {#if view === "login"}

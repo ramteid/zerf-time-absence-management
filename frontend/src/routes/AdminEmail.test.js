@@ -24,9 +24,9 @@ const apiMock = vi.hoisted(() => vi.fn(async (path, opts = {}) => {
       ...mockState.settings,
       ...opts.body,
       smtp_password_set:
-        opts.body.smtp_password === undefined
-          ? mockState.settings.smtp_password_set
-          : opts.body.smtp_password !== "",
+        opts.body.smtp_password !== undefined
+          ? true
+          : mockState.settings.smtp_password_set,
     };
     return mockState.settings;
   }
@@ -52,11 +52,9 @@ async function settle() {
 
 describe("AdminEmail", () => {
   let component;
-  let originalSettings;
   let target;
 
   beforeEach(() => {
-    originalSettings = structuredClone(mockState.settings);
     target = document.createElement("div");
     document.body.appendChild(target);
     setLanguage("en");
@@ -68,26 +66,51 @@ describe("AdminEmail", () => {
       unmount(component);
       component = null;
     }
-    mockState.settings = originalSettings;
     target.remove();
   });
 
-  it("sends an empty password when clearing the stored SMTP password", async () => {
+  it("renders submission reminders checkbox as checked when setting is true", async () => {
+    mockState.settings = { ...mockState.settings, submission_reminders_enabled: true };
     component = mount(AdminEmail, { target });
     await settle();
+
+    const checkboxes = target.querySelectorAll('input[type="checkbox"]');
+    const remindersCheckbox = [...checkboxes].find(
+      (cb) => cb.closest("label")?.textContent?.includes("submission reminders"),
+    );
+    expect(remindersCheckbox).not.toBeNull();
+    expect(remindersCheckbox.checked).toBe(true);
+  });
+
+  it("renders submission reminders checkbox as unchecked when setting is false", async () => {
+    mockState.settings = { ...mockState.settings, submission_reminders_enabled: false };
+    component = mount(AdminEmail, { target });
     await settle();
 
-    const clearCheckbox = target.querySelector("#smtp-clear-password");
-    clearCheckbox.click();
+    const checkboxes = target.querySelectorAll('input[type="checkbox"]');
+    const remindersCheckbox = [...checkboxes].find(
+      (cb) => cb.closest("label")?.textContent?.includes("submission reminders"),
+    );
+    expect(remindersCheckbox).not.toBeNull();
+    expect(remindersCheckbox.checked).toBe(false);
+  });
+
+  it("includes submission_reminders_enabled in the save body", async () => {
+    mockState.settings = { ...mockState.settings, submission_reminders_enabled: true };
+    component = mount(AdminEmail, { target });
     await settle();
 
-    target.querySelector(".kz-btn-primary").click();
+    const saveBtn = [...target.querySelectorAll("button")].find(
+      (b) => b.textContent.trim() === "Save",
+    );
+    expect(saveBtn).not.toBeNull();
+    saveBtn.click();
     await settle();
 
     const saveCall = apiMock.mock.calls.find(
       ([path, opts]) => path === "/settings/smtp" && opts?.method === "PUT",
     );
     expect(saveCall).toBeTruthy();
-    expect(saveCall[1].body.smtp_password).toBe("");
+    expect(saveCall[1].body.submission_reminders_enabled).toBe(true);
   });
 });

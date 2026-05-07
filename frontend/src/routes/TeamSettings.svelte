@@ -49,7 +49,7 @@
   {:else}
     <!-- Reopen Requests section -->
     <div class="kz-card" style="padding:20px;margin-bottom:16px">
-      <div style="font-size:14px;font-weight:600;margin-bottom:6px">
+      <div style="font-size:14px;font-weight:400;margin-bottom:6px">
         {$t("Reopen Requests")}
       </div>
       <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:14px">

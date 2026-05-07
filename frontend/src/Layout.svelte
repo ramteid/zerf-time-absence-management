@@ -9,6 +9,7 @@
     notificationsUnread,
     toast,
     broadcastSession,
+    settings,
   } from "./stores.js";
   import {
     clearNotifications,
@@ -252,7 +253,12 @@
       <div class="sidebar-logo-icon">
         <Icon name="Clock" size={16} />
       </div>
-      <span class="sidebar-logo-text">Zerf</span>
+      <div style="display:flex;flex-direction:column;line-height:1.2;min-width:0">
+        <span class="sidebar-logo-text">Zerf</span>
+        {#if $settings?.organization_name}
+          <span style="font-size:10px;color:var(--nav-text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{$settings.organization_name}</span>
+        {/if}
+      </div>
       <div class="kz-bell-wrapper" style="margin-left:auto;position:relative">
         <button
           class="kz-btn-icon-sm"
@@ -263,7 +269,7 @@
           <Icon name="Bell" size={15} />
           {#if $notificationsUnread > 0}
             <span
-              style="position:absolute;top:-2px;right:-2px;background:var(--danger-text);color:white;border-radius:10px;font-size:9px;padding:1px 4px;line-height:1;min-width:14px;text-align:center;font-weight:600"
+              style="position:absolute;top:-2px;right:-2px;background:var(--danger-text);color:white;border-radius:10px;font-size:9px;padding:1px 4px;line-height:1;min-width:14px;text-align:center;font-weight:400"
             >
               {$notificationsUnread > 99 ? "99+" : $notificationsUnread}
             </span>
@@ -421,7 +427,7 @@
               {initials($currentUser)}
             </div>
             <div style="flex:1;min-width:0">
-              <div style="font-weight:600;font-size:14px">
+              <div style="font-weight:400;font-size:14px">
                 {$currentUser.first_name}
                 {$currentUser.last_name}
               </div>
@@ -478,7 +484,7 @@
       <Icon name="Bell" size={18} />
       {#if $notificationsUnread > 0}
         <span
-          style="position:absolute;top:-4px;right:-4px;background:var(--danger-text);color:white;border-radius:10px;font-size:9px;padding:1px 4px;line-height:1;min-width:14px;text-align:center;font-weight:600"
+          style="position:absolute;top:-4px;right:-4px;background:var(--danger-text);color:white;border-radius:10px;font-size:9px;padding:1px 4px;line-height:1;min-width:14px;text-align:center;font-weight:400"
         >
           {$notificationsUnread > 99 ? "99+" : $notificationsUnread}
         </span>

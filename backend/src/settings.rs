@@ -22,12 +22,14 @@ const SMTP_USERNAME_KEY: &str = "smtp_username";
 const SMTP_PASSWORD_KEY: &str = "smtp_password";
 const SMTP_FROM_KEY: &str = "smtp_from";
 const SMTP_ENCRYPTION_KEY: &str = "smtp_encryption";
+pub const SUBMISSION_REMINDERS_ENABLED_KEY: &str = "submission_reminders_enabled";
 const DEFAULT_UI_LANGUAGE: &str = "en";
 const DEFAULT_TIME_FORMAT: &str = "24h";
 const DEFAULT_COUNTRY: &str = "DE";
 const DEFAULT_REGION: &str = "";
 const DEFAULT_CARRYOVER_EXPIRY_DATE: &str = "03-31";
 const SUBMISSION_DEADLINE_DAY_KEY: &str = "submission_deadline_day";
+const ORGANIZATION_NAME_KEY: &str = "organization_name";
 
 #[derive(Serialize)]
 pub struct PublicSettings {
@@ -39,6 +41,7 @@ pub struct PublicSettings {
     pub default_annual_leave_days: Option<i32>,
     pub carryover_expiry_date: String,
     pub submission_deadline_day: Option<u8>,
+    pub organization_name: String,
 }
 
 #[derive(Serialize)]
@@ -53,6 +56,7 @@ pub struct AdminSettingsResponse {
     pub smtp_encryption: String,
     /// True when a password is stored (never returned in cleartext).
     pub smtp_password_set: bool,
+    pub submission_reminders_enabled: bool,
 }
 
 #[derive(Deserialize)]
@@ -65,6 +69,7 @@ pub struct UpdateSettings {
     pub default_annual_leave_days: Option<i32>,
     pub carryover_expiry_date: Option<String>,
     pub submission_deadline_day: Option<u8>,
+    pub organization_name: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -76,6 +81,7 @@ pub struct UpdateSmtpSettings {
     pub smtp_password: Option<String>,
     pub smtp_from: String,
     pub smtp_encryption: Option<String>,
+    pub submission_reminders_enabled: Option<bool>,
 }
 
 fn normalize_language(value: &str) -> AppResult<String> {
@@ -152,6 +158,7 @@ async fn load_all_settings(pool: &crate::db::DatabasePool) -> AppResult<PublicSe
         )
         .await?,
         submission_deadline_day: submission_deadline_day_str.parse().ok(),
+        organization_name: load_setting(pool, ORGANIZATION_NAME_KEY, "").await?,
     })
 }
 
@@ -183,6 +190,8 @@ async fn load_admin_settings_response(
     let from = load_setting(pool, SMTP_FROM_KEY, "").await?;
     let encryption = load_setting(pool, SMTP_ENCRYPTION_KEY, "starttls").await?;
     let password_set = !load_setting(pool, SMTP_PASSWORD_KEY, "").await?.is_empty();
+    let reminders_enabled =
+        load_setting(pool, SUBMISSION_REMINDERS_ENABLED_KEY, "true").await? != "false";
     Ok(AdminSettingsResponse {
         base,
         smtp_enabled: enabled,
@@ -192,6 +201,7 @@ async fn load_admin_settings_response(
         smtp_from: from,
         smtp_encryption: encryption,
         smtp_password_set: password_set,
+        submission_reminders_enabled: reminders_enabled,
     })
 }
 
@@ -337,15 +347,25 @@ pub async fn update_smtp_settings(
     save_setting_exec(&mut *tx, SMTP_FROM_KEY, &cfg.from).await?;
     save_setting_exec(&mut *tx, SMTP_ENCRYPTION_KEY, &cfg.encryption).await?;
 
-    // Overwrite password when explicitly provided. An empty string clears it.
+    // Overwrite password when explicitly provided.
     if let Some(ref password) = body.smtp_password {
-        save_setting_exec(&mut *tx, SMTP_PASSWORD_KEY, password).await?;
+        if !password.is_empty() {
+            save_setting_exec(&mut *tx, SMTP_PASSWORD_KEY, password).await?;
+        }
     }
 
     save_setting_exec(
         &mut *tx,
         SMTP_ENABLED_KEY,
         if body.smtp_enabled { "true" } else { "false" },
+    )
+    .await?;
+
+    let reminders_enabled = body.submission_reminders_enabled.unwrap_or(true);
+    save_setting_exec(
+        &mut *tx,
+        SUBMISSION_REMINDERS_ENABLED_KEY,
+        if reminders_enabled { "true" } else { "false" },
     )
     .await?;
 
@@ -473,6 +493,18 @@ pub async fn update_admin_settings(
         }
     }
 
+    let org_name = body
+        .organization_name
+        .as_deref()
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if org_name.chars().count() > 200 {
+        return Err(AppError::BadRequest(
+            "Organization name must be at most 200 characters.".into(),
+        ));
+    }
+
     let default_weekly_hours_str = body
         .default_weekly_hours
         .map(|v| v.to_string())
@@ -522,6 +554,8 @@ pub async fn update_admin_settings(
         &default_annual_leave_days_str,
     )
     .await?;
+
+    save_setting_exec(&mut *tx, ORGANIZATION_NAME_KEY, &org_name).await?;
 
     if let Some(ref holidays) = prepared_holidays {
         crate::holidays::replace_auto_holidays_exec(&mut tx, holidays).await?;

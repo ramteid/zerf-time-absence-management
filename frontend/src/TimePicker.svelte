@@ -417,7 +417,7 @@
 
   .tp-item-sel {
     color: var(--text-primary);
-    font-weight: 600;
+    font-weight: 400;
     font-size: 14.5px;
     background: var(--bg-muted);
   }
@@ -435,7 +435,7 @@
     margin-left: 8px;
     padding: 4px 10px;
     font-size: 13.5px;
-    font-weight: 600;
+    font-weight: 400;
     font-family: inherit;
     color: var(--accent);
     background: transparent;
