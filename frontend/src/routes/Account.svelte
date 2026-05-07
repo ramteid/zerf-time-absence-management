@@ -16,7 +16,7 @@
 
   // Re-fetch whenever currentUser becomes available (store starts as null)
   $: if ($currentUser?.id) {
-    api(`/users/${$currentUser.id}/leave-overrides`)
+    api(`/users/${$currentUser.id}/leave-days`)
       .then((rows) => {
         const cur = rows.find((r) => r.year === thisYear);
         const nxt = rows.find((r) => r.year === nextYear);

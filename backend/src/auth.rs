@@ -10,7 +10,7 @@ use axum::http::{header, Method};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Datelike, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::{Executor, FromRow, Postgres};
@@ -822,12 +822,6 @@ pub async fn setup(
             "Setup has already been completed.".into(),
         ));
     }
-    let default_leave_days: i64 = sqlx::query_scalar(
-        "SELECT COALESCE(value::BIGINT, 30) FROM app_settings WHERE key='default_annual_leave_days'",
-    )
-    .fetch_optional(&mut *tx)
-    .await?
-    .unwrap_or(30);
     sqlx::query(
         "INSERT INTO users(email, password_hash, first_name, last_name, role, \
          weekly_hours, start_date, must_change_password, \
@@ -846,17 +840,15 @@ pub async fn setup(
             .bind(&email)
             .fetch_one(&mut *tx)
             .await?;
-    let current_year = chrono::Utc::now().date_naive().year();
-    sqlx::query(
-        "INSERT INTO user_annual_leave(user_id, year, days) VALUES ($1,$2,$3),($1,$4,$3) \
-         ON CONFLICT DO NOTHING",
+    let current_year = Datelike::year(&chrono::Utc::now().date_naive());
+    let default_leave_days: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(value::BIGINT, 30) FROM app_settings WHERE key='default_annual_leave_days'",
     )
-    .bind(new_user_id)
-    .bind(current_year)
-    .bind(default_leave_days)
-    .bind(current_year + 1)
-    .execute(&mut *tx)
-    .await?;
+    .fetch_optional(&mut *tx)
+    .await?
+    .unwrap_or(30);
+    crate::users::set_leave_days(&mut *tx, new_user_id, current_year, default_leave_days).await?;
+    crate::users::set_leave_days(&mut *tx, new_user_id, current_year + 1, default_leave_days).await?;
     tx.commit().await?;
 
     Ok(Json(serde_json::json!({ "ok": true })))
