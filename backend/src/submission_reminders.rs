@@ -152,7 +152,7 @@ pub async fn run_check(state: &crate::AppState) {
         .clone()
         .unwrap_or_else(|| "http://localhost".to_string());
 
-    let today = Local::now().date_naive();
+    let today = chrono::Utc::now().date_naive();
     // Last fully completed month
     let (last_year, last_month) = if today.month() == 1 {
         (today.year() - 1, 12u32)
@@ -186,23 +186,6 @@ pub async fn run_check(state: &crate::AppState) {
             continue;
         }
 
-        // Check for duplicate: skip if a submission_reminder was already sent today
-        let already_sent: bool = sqlx::query_scalar(
-            "SELECT EXISTS(\
-                 SELECT 1 FROM notifications \
-                 WHERE user_id = $1 AND kind = 'submission_reminder' \
-                   AND created_at::date = CURRENT_DATE\
-             )",
-        )
-        .bind(user_id)
-        .fetch_one(pool)
-        .await
-        .unwrap_or(false);
-
-        if already_sent {
-            continue;
-        }
-
         let missing_months: Vec<String> = missing
             .iter()
             .map(|(y, m)| crate::i18n::format_month(&language, *y, *m))
@@ -224,10 +207,14 @@ pub async fn run_check(state: &crate::AppState) {
             ],
         );
 
-        // Insert in-app notification
+        // Insert in-app notification; ON CONFLICT DO NOTHING prevents duplicates if the
+        // background job overlaps with itself (relies on uq_notifications_reminder_daily index).
+        // Only send the in-app signal and email when the row was actually inserted
+        // (rows_affected == 0 means the conflict guard fired — reminder already sent today).
         match sqlx::query(
             "INSERT INTO notifications(user_id,kind,title,body,reference_type,reference_id) \
-             VALUES ($1,$2,$3,$4,$5,$6)",
+             VALUES ($1,$2,$3,$4,$5,$6) \
+             ON CONFLICT DO NOTHING",
         )
         .bind(user_id)
         .bind("submission_reminder")
@@ -238,10 +225,15 @@ pub async fn run_check(state: &crate::AppState) {
         .execute(pool)
         .await
         {
-            Ok(_) => {
+            Ok(result) if result.rows_affected() > 0 => {
                 let _ = state
                     .notifications
                     .send(crate::notifications::NotificationSignal { user_id });
+                // Send email best-effort
+                crate::email::send_async(smtp.clone(), user_email, title, email_body);
+            }
+            Ok(_) => {
+                // Conflict guard fired: reminder already sent today, skip email too.
             }
             Err(e) => {
                 tracing::warn!(
@@ -250,9 +242,6 @@ pub async fn run_check(state: &crate::AppState) {
                 );
             }
         }
-
-        // Send email best-effort
-        crate::email::send_async(smtp.clone(), user_email, title, email_body);
     }
 }
 

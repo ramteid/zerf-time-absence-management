@@ -1,5 +1,5 @@
 use crate::audit;
-use crate::auth::{hash_password, validate_password_strength, User};
+use crate::auth::{hash_password, lock_user_graph, validate_password_strength, User};
 use crate::error::{AppError, AppResult};
 use crate::i18n;
 use crate::AppState;
@@ -227,15 +227,29 @@ async fn validate_approver(
                 .await?;
         match approver_row {
             None => return Err(AppError::BadRequest("Approver not found.".into())),
-            Some((role, true)) if role == "team_lead" || role == "admin" => {}
+            Some((approver_role, true))
+                if approver_role == "admin"
+                    || (role != "admin" && approver_role == "team_lead") => {}
             Some(_) => {
                 return Err(AppError::BadRequest(
-                    "Approver must be an active Team lead or Admin.".into(),
+                    if role == "admin" {
+                        "Admins may only report to an active Admin.".into()
+                    } else {
+                        "Approver must be an active Team lead or Admin.".into()
+                    },
                 ))
             }
         }
     }
     Ok(())
+}
+
+fn can_approve_admin_subjects(role: &str, active: bool) -> bool {
+    active && role == "admin"
+}
+
+fn can_approve_non_admin_subjects(role: &str, active: bool) -> bool {
+    active && matches!(role, "team_lead" | "admin")
 }
 
 fn normalize_user_name(first_name: &str, last_name: &str) -> AppResult<(String, String)> {
@@ -359,17 +373,20 @@ pub async fn create(
         _ => generate_password(),
     };
     let password_hash = hash_password(&temporary_password)?;
-    validate_approver(&app_state.pool, &body.role, None, body.approver_id).await?;
     let overtime_balance = body.overtime_start_balance_min.unwrap_or(0);
+    let mut tx = app_state.pool.begin().await?;
+    lock_user_graph(&mut *tx).await?;
+    validate_approver(&app_state.pool, &body.role, None, body.approver_id).await?;
     let new_user_id: i64 = sqlx::query_scalar("INSERT INTO users(email,password_hash,first_name,last_name,role,weekly_hours,annual_leave_days,start_date,must_change_password,approver_id,overtime_start_balance_min) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id")
         .bind(&normalized_email).bind(password_hash).bind(&first_name).bind(&last_name).bind(&body.role)
         .bind(body.weekly_hours).bind(body.annual_leave_days).bind(body.start_date).bind(true).bind(body.approver_id)
         .bind(overtime_balance)
-        .fetch_one(&app_state.pool).await
+        .fetch_one(&mut *tx).await
         .map_err(|e| {
             tracing::warn!(target:"zerf::users", "create user insert failed: {e}");
             user_unique_conflict(&e).unwrap_or_else(|| AppError::Conflict("Could not create user.".into()))
         })?;
+    tx.commit().await?;
     let created_user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1")
         .bind(new_user_id)
         .fetch_one(&app_state.pool)
@@ -500,9 +517,11 @@ pub async fn update(
     }
     let first_name = normalize_optional_user_name(body.first_name.as_ref())?;
     let last_name = normalize_optional_user_name(body.last_name.as_ref())?;
-    let previous_user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1")
+    let mut tx = app_state.pool.begin().await?;
+    lock_user_graph(&mut *tx).await?;
+    let previous_user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1 FOR UPDATE")
         .bind(user_id)
-        .fetch_one(&app_state.pool)
+        .fetch_one(&mut *tx)
         .await?;
     if let Some(email) = &normalized_email {
         ensure_email_available(&app_state.pool, email, Some(user_id)).await?;
@@ -539,9 +558,37 @@ pub async fn update(
     };
     validate_approver(&app_state.pool, &new_role, Some(user_id), new_approver_id).await?;
 
-    let mut tx = app_state.pool.begin().await?;
-    // Last-admin protection: checked inside the transaction to prevent TOCTOU.
-    if removing_admin_rights {
+    let resulting_active = body.active.unwrap_or(previous_user.active);
+    if !can_approve_admin_subjects(&new_role, resulting_active) {
+        let admin_direct_reports_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM users WHERE approver_id=$1 AND active=TRUE AND role='admin'",
+        )
+        .bind(user_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if admin_direct_reports_count > 0 {
+            return Err(AppError::BadRequest(format!(
+                "Cannot change this user to a non-admin approver: {} active admin user(s) still have them as their approver. Reassign them first.",
+                admin_direct_reports_count
+            )));
+        }
+    }
+    if !can_approve_non_admin_subjects(&new_role, resulting_active) {
+        let non_admin_direct_reports_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM users WHERE approver_id=$1 AND active=TRUE AND role!='admin'",
+        )
+        .bind(user_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if non_admin_direct_reports_count > 0 {
+            return Err(AppError::BadRequest(format!(
+                "Cannot change this user to a non-approver: {} active non-admin user(s) still have them as their approver. Reassign them first.",
+                non_admin_direct_reports_count
+            )));
+        }
+    }
+    // Last-admin protection: checked while the user graph lock is held.
+    if removing_admin_rights && previous_user.active {
         let active_admins: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE active=TRUE AND role='admin'")
                 .fetch_one(&mut *tx)
@@ -616,16 +663,29 @@ pub async fn deactivate(
             "You cannot deactivate yourself.".into(),
         ));
     }
-    let previous_user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1")
+    let mut tx = app_state.pool.begin().await?;
+    lock_user_graph(&mut *tx).await?;
+    let previous_user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1 FOR UPDATE")
         .bind(user_id)
-        .fetch_one(&app_state.pool)
+        .fetch_one(&mut *tx)
         .await?;
+    if previous_user.active && previous_user.role == "admin" {
+        let active_admins: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE active=TRUE AND role='admin'")
+                .fetch_one(&mut *tx)
+                .await?;
+        if active_admins <= 1 {
+            return Err(AppError::BadRequest(
+                "Cannot remove the last active admin.".into(),
+            ));
+        }
+    }
     // Block deactivation if this person is the assigned approver for active users.
     // Orphaned approver_id references would leave those users in a broken state.
     let direct_reports_count: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE approver_id=$1 AND active=TRUE")
             .bind(user_id)
-            .fetch_one(&app_state.pool)
+            .fetch_one(&mut *tx)
             .await?;
     if direct_reports_count > 0 {
         return Err(AppError::BadRequest(format!(
@@ -633,7 +693,6 @@ pub async fn deactivate(
             direct_reports_count
         )));
     }
-    let mut tx = app_state.pool.begin().await?;
     sqlx::query("UPDATE users SET active=FALSE WHERE id=$1")
         .bind(user_id)
         .execute(&mut *tx)

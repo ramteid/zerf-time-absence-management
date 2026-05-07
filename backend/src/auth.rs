@@ -13,7 +13,7 @@ use axum::Json;
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use sqlx::FromRow;
+use sqlx::{Executor, FromRow, Postgres};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use subtle::ConstantTimeEq;
@@ -29,6 +29,7 @@ use subtle::ConstantTimeEq;
 // the plain name there.
 const SESSION_COOKIE_SECURE: &str = "__Host-zerf_session";
 const SESSION_COOKIE_PLAIN: &str = "zerf_session";
+const USER_GRAPH_LOCK_KEY: i64 = 0x7A_45_52_46_5F_53_54_55_i64;
 
 fn cookie_name(secure: bool) -> &'static str {
     if secure {
@@ -37,7 +38,8 @@ fn cookie_name(secure: bool) -> &'static str {
         SESSION_COOKIE_PLAIN
     }
 }
-const ABSOLUTE_TIMEOUT_HOURS: i64 = 168; // 7 days absolute timeout
+const ABSOLUTE_TIMEOUT_HOURS: i64 = 168; // 7 days absolute timeout (since session creation)
+const IDLE_TIMEOUT_HOURS: i64 = 8; // sliding idle timeout (since last_active_at)
 const MAX_FAILED_LOGINS: i64 = 5;
 const LOCKOUT_MIN: i64 = 15;
 const MIN_PW_LEN: usize = 12;
@@ -78,19 +80,76 @@ impl User {
     }
 }
 
+fn approver_can_review_subject(subject_role: &str, approver_role: &str) -> bool {
+    match subject_role {
+        "admin" => approver_role == "admin",
+        _ => approver_role == "team_lead" || approver_role == "admin",
+    }
+}
+
+async fn valid_approval_recipient_id(
+    pool: &crate::db::DatabasePool,
+    approver_id: i64,
+    subject_role: &str,
+) -> Option<i64> {
+    let approver_row: Option<(i64, String, bool)> = sqlx::query_as(
+        "SELECT id, role, active FROM users WHERE id=$1",
+    )
+    .bind(approver_id)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten();
+    match approver_row {
+        Some((id, approver_role, true))
+            if approver_can_review_subject(subject_role, &approver_role) =>
+        {
+            Some(id)
+        }
+        _ => None,
+    }
+}
+
+pub async fn primary_approval_recipient_id(
+    pool: &crate::db::DatabasePool,
+    requester: &User,
+) -> Option<i64> {
+    if let Some(approver_id) = requester.approver_id {
+        if let Some(valid_id) = valid_approval_recipient_id(pool, approver_id, &requester.role).await {
+            return Some(valid_id);
+        }
+    }
+    if requester.is_admin() {
+        return Some(requester.id);
+    }
+    sqlx::query_scalar::<_, i64>(
+        "SELECT id FROM users WHERE active=TRUE AND role='admin' ORDER BY id LIMIT 1",
+    )
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten()
+}
+
+pub async fn lock_user_graph<'e, E>(executor: E) -> AppResult<()>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    // Serialize mutations that change the approver/admin graph so approval
+    // routing and first-boot setup cannot observe stale membership.
+    sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(USER_GRAPH_LOCK_KEY)
+        .execute(executor)
+        .await?;
+    Ok(())
+}
+
 pub async fn approval_recipient_ids(pool: &crate::db::DatabasePool, requester: &User) -> Vec<i64> {
     let mut ids: BTreeSet<i64> = BTreeSet::new();
 
     if let Some(approver_id) = requester.approver_id {
-        let is_active: bool = sqlx::query_scalar("SELECT active FROM users WHERE id=$1")
-            .bind(approver_id)
-            .fetch_optional(pool)
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or(false);
-        if is_active {
-            ids.insert(approver_id);
+        if let Some(valid_id) = valid_approval_recipient_id(pool, approver_id, &requester.role).await {
+            ids.insert(valid_id);
         }
     }
 
@@ -609,16 +668,21 @@ pub async fn auth_middleware(
     .ok_or(AppError::Unauthorized)?;
 
     let token_hash = hash_token(&session_token);
-    let session_row: Option<(i64, DateTime<Utc>, String)> = sqlx::query_as(
-        "SELECT user_id, created_at, csrf_token FROM sessions WHERE token = $1",
+    let session_row: Option<(i64, DateTime<Utc>, DateTime<Utc>, String)> = sqlx::query_as(
+        "SELECT user_id, created_at, last_active_at, csrf_token FROM sessions WHERE token = $1",
     )
     .bind(&token_hash)
     .fetch_optional(&app_state.pool)
     .await?;
-    let (user_id, session_created_at, csrf_token) =
+    let (user_id, session_created_at, session_last_active_at, csrf_token) =
         session_row.ok_or(AppError::Unauthorized)?;
     let now = Utc::now();
-    if now - session_created_at > Duration::hours(ABSOLUTE_TIMEOUT_HOURS) {
+    // Enforce BOTH the absolute lifetime (since creation) and the sliding idle
+    // timeout (since last activity) directly in the middleware, so we never
+    // depend on the background cleanup task for authn correctness.
+    if now - session_created_at > Duration::hours(ABSOLUTE_TIMEOUT_HOURS)
+        || now - session_last_active_at > Duration::hours(IDLE_TIMEOUT_HOURS)
+    {
         sqlx::query("DELETE FROM sessions WHERE token=$1")
             .bind(&token_hash)
             .execute(&app_state.pool)
@@ -659,16 +723,18 @@ where
 }
 
 /// Periodic cleanup of expired sessions and old login attempts.
-/// Matches the actual timeout policy: idle > 8 h OR absolute age > 24 h.
+/// Matches the timeout policy enforced in `auth_middleware`:
+/// idle > IDLE_TIMEOUT_HOURS OR absolute age > ABSOLUTE_TIMEOUT_HOURS.
 pub async fn cleanup_loop(pool: crate::db::DatabasePool) {
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
+    let session_cleanup_sql = format!(
+        "DELETE FROM sessions \
+         WHERE last_active_at < CURRENT_TIMESTAMP - INTERVAL '{IDLE_TIMEOUT_HOURS} hours' \
+            OR created_at < CURRENT_TIMESTAMP - INTERVAL '{ABSOLUTE_TIMEOUT_HOURS} hours'"
+    );
     loop {
         interval.tick().await;
-        if let Err(e) = sqlx::query(
-            "DELETE FROM sessions \
-             WHERE last_active_at < CURRENT_TIMESTAMP - INTERVAL '8 hours' \
-                OR created_at < CURRENT_TIMESTAMP - INTERVAL '24 hours'",
-        )
+        if let Err(e) = sqlx::query(&session_cleanup_sql)
         .execute(&pool)
         .await
         {
@@ -736,11 +802,16 @@ pub async fn setup(
     validate_password_strength(password)?;
 
     let password_hash = hash_password(password)?;
-    let today = chrono::Local::now().date_naive();
+    let today = chrono::Utc::now().date_naive();
 
-    // Use a serialized transaction to prevent race conditions where two
-    // concurrent requests both see zero users and both insert an admin.
+    // Prevent race conditions where two concurrent requests both observe
+    // zero users and both insert an admin. `pool.begin()` runs at the
+    // default READ COMMITTED isolation, which does NOT serialize the
+    // SELECT/INSERT pair on its own. We take a transaction-scoped Postgres
+    // advisory lock so any concurrent setup call blocks until ours commits,
+    // and then sees the row we just inserted.
     let mut tx = app_state.pool.begin().await?;
+    lock_user_graph(&mut *tx).await?;
     let existing_user_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
         .fetch_one(&mut *tx)
         .await?;
@@ -795,10 +866,11 @@ pub async fn forgot_password(
     {
         Some(url) => url.to_string(),
         None => {
+            // Don't disclose deployment-config state to unauthenticated
+            // callers — log server-side and return the same generic OK we
+            // return for unknown emails / SMTP-not-configured.
             tracing::warn!(target: "zerf::auth", "forgot_password called but ZERF_PUBLIC_URL is not configured");
-            return Err(crate::error::AppError::BadRequest(
-                "public_url_not_configured".into(),
-            ));
+            return Ok(Json(serde_json::json!({ "ok": true })));
         }
     };
 

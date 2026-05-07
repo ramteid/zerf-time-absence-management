@@ -61,15 +61,15 @@ fn assert_monday(d: NaiveDate) -> AppResult<()> {
 /// Atomically reopen a week: reset every non-draft entry to draft and
 /// auto-reject open change_requests for those entries. Caller is the
 /// **acting** user (approver or self); `subject` is the user whose week
-/// is being reopened.  Counts how many entries were affected.
-async fn perform_reopen(
-    pool: &crate::db::DatabasePool,
+/// is being reopened. Returns the affected entry ids and their previous status
+/// so the caller can commit the whole state transition first and audit after.
+async fn perform_reopen_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     actor_id: i64,
     subject_id: i64,
     week_start: NaiveDate,
-) -> AppResult<i64> {
+) -> AppResult<Vec<(i64, String)>> {
     let week_end = week_start + chrono::Duration::days(6);
-    let mut tx = pool.begin().await?;
 
     let affected: Vec<(i64, String)> = sqlx::query_as(
         "SELECT id, status FROM time_entries \
@@ -78,13 +78,13 @@ async fn perform_reopen(
     .bind(subject_id)
     .bind(week_start)
     .bind(week_end)
-    .fetch_all(&mut *tx)
+    .fetch_all(&mut **tx)
     .await?;
 
     if affected.is_empty() {
-        // Nothing to reopen — caller should have validated, but be defensive.
-        tx.rollback().await?;
-        return Ok(0);
+        return Err(AppError::BadRequest(
+            "Nothing to reopen — this week has no submitted or approved entries.".into(),
+        ));
     }
 
     sqlx::query(
@@ -95,7 +95,7 @@ async fn perform_reopen(
     .bind(subject_id)
     .bind(week_start)
     .bind(week_end)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await?;
 
     // Auto-reject open change_requests for these entries.
@@ -110,13 +110,18 @@ async fn perform_reopen(
     )
     .bind(actor_id)
     .bind(&entry_ids)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await?;
 
-    tx.commit().await?;
+    Ok(affected)
+}
 
-    // Audit-log per entry (after commit; best-effort).
-    for (entry_id, prev_status) in &affected {
+async fn audit_reopened_entries(
+    pool: &crate::db::DatabasePool,
+    actor_id: i64,
+    affected: &[(i64, String)],
+) {
+    for (entry_id, prev_status) in affected {
         audit::log(
             pool,
             actor_id,
@@ -128,7 +133,6 @@ async fn perform_reopen(
         )
         .await;
     }
-    Ok(affected.len() as i64)
 }
 
 /// Collect all user-ids that should be notified as "approver" for a reopen
@@ -144,19 +148,8 @@ async fn perform_reopen(
 /// Non-admin requesters are excluded from the result.
 async fn approver_ids_to_notify(pool: &crate::db::DatabasePool, requester: &User) -> Vec<i64> {
     let mut ids: std::collections::BTreeSet<i64> = Default::default();
-    if let Some(approver_id) = requester.approver_id {
-        // Only include the designated approver if they are still active;
-        // a deactivated approver cannot log in to review the request.
-        let is_active: bool = sqlx::query_scalar("SELECT active FROM users WHERE id=$1")
-            .bind(approver_id)
-            .fetch_optional(pool)
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or(false);
-        if is_active {
-            ids.insert(approver_id);
-        }
+    if let Some(primary_approver_id) = crate::auth::primary_approval_recipient_id(pool, requester).await {
+        ids.insert(primary_approver_id);
     }
     if let Ok(admin_ids) =
         sqlx::query_scalar::<_, i64>("SELECT id FROM users WHERE active=TRUE AND role='admin'")
@@ -230,8 +223,11 @@ pub async fn create(
     let should_auto_approve = requester.allow_reopen_without_approval;
 
     // `recorded_approver` is stored as the primary approver on the request row.
-    // Admins do not require a designated approver, so their own id is recorded.
-    let recorded_approver_id: i64 = requester.approver_id.unwrap_or(requester.id);
+    // Fall back to an active admin when the configured approver is missing or
+    // no longer allowed to review requests.
+    let recorded_approver_id = crate::auth::primary_approval_recipient_id(&app_state.pool, &requester)
+        .await
+        .ok_or_else(|| AppError::Conflict("No valid approver is available for this reopen request.".into()))?;
 
     let initial_status = if should_auto_approve {
         "auto_approved"
@@ -243,42 +239,54 @@ pub async fn create(
     // insert, so we can reuse the result for both auto and pending paths).
     let approver_ids_for_notification = approver_ids_to_notify(&app_state.pool, &requester).await;
 
-    // Insert the request row FIRST so that if perform_reopen fails, the row
-    // can be cleaned up — but if only the INSERT succeeded, we won't have
-    // entries silently reopened without a record.
-    let insert_result: (i64, DateTime<Utc>) = sqlx::query_as(
-        "INSERT INTO reopen_requests(user_id, week_start, approver_id, status, reviewed_at) \
-         VALUES ($1,$2,$3,$4, CASE WHEN $4 IN ('auto_approved') THEN CURRENT_TIMESTAMP ELSE NULL END) \
-         RETURNING id, created_at",
-    )
-    .bind(requester.id)
-    .bind(body.week_start)
-    .bind(recorded_approver_id)
-    .bind(initial_status)
-    .fetch_one(&app_state.pool)
-    .await
-    .map_err(|e| {
-        tracing::warn!(target:"zerf::reopen", "create reopen failed: {e}");
-        AppError::Conflict("A pending request for this week already exists.".into())
-    })?;
-    let new_request_id = insert_result.0;
+    let (new_request_id, entries_reopened, reopened_entries): (i64, i64, Vec<(i64, String)>) =
+        if should_auto_approve {
+            let mut tx = app_state.pool.begin().await?;
+            let insert_result: (i64, DateTime<Utc>) = sqlx::query_as(
+                "INSERT INTO reopen_requests(user_id, week_start, approver_id, status, reviewed_at) \
+                 VALUES ($1,$2,$3,$4, CURRENT_TIMESTAMP) \
+                 RETURNING id, created_at",
+            )
+            .bind(requester.id)
+            .bind(body.week_start)
+            .bind(recorded_approver_id)
+            .bind(initial_status)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| {
+                tracing::warn!(target:"zerf::reopen", "create reopen failed: {e}");
+                AppError::Conflict("A pending request for this week already exists.".into())
+            })?;
+            let affected =
+                perform_reopen_in_tx(&mut tx, requester.id, requester.id, body.week_start).await?;
+            tx.commit().await?;
+            (
+                insert_result.0,
+                affected.len() as i64,
+                affected,
+            )
+        } else {
+            let insert_result: (i64, DateTime<Utc>) = sqlx::query_as(
+                "INSERT INTO reopen_requests(user_id, week_start, approver_id, status, reviewed_at) \
+                 VALUES ($1,$2,$3,$4, NULL) \
+                 RETURNING id, created_at",
+            )
+            .bind(requester.id)
+            .bind(body.week_start)
+            .bind(recorded_approver_id)
+            .bind(initial_status)
+            .fetch_one(&app_state.pool)
+            .await
+            .map_err(|e| {
+                tracing::warn!(target:"zerf::reopen", "create reopen failed: {e}");
+                AppError::Conflict("A pending request for this week already exists.".into())
+            })?;
+            (insert_result.0, 0, vec![])
+        };
 
-    // For the auto-approve flow, now perform the actual reopen. If it fails,
-    // delete the request row so the user can retry cleanly.
-    let entries_reopened = if should_auto_approve {
-        match perform_reopen(&app_state.pool, requester.id, requester.id, body.week_start).await {
-            Ok(count) => count,
-            Err(e) => {
-                let _ = sqlx::query("DELETE FROM reopen_requests WHERE id=$1")
-                    .bind(new_request_id)
-                    .execute(&app_state.pool)
-                    .await;
-                return Err(e);
-            }
-        }
-    } else {
-        0
-    };
+    if should_auto_approve {
+        audit_reopened_entries(&app_state.pool, requester.id, &reopened_entries).await;
+    }
 
     audit::log(
         &app_state.pool,
@@ -498,7 +506,16 @@ pub async fn approve(
     if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let reopen_request = load_pending(&app_state.pool, request_id).await?;
+    let mut tx = app_state.pool.begin().await?;
+    let reopen_request: ReopenRequest = sqlx::query_as(
+        "SELECT id, user_id, week_start, approver_id, status, reviewed_at, \
+         rejection_reason, created_at \
+         FROM reopen_requests WHERE id=$1 FOR UPDATE",
+    )
+    .bind(request_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(AppError::NotFound)?;
     if reopen_request.status != "pending" {
         return Err(AppError::BadRequest("Request is not pending.".into()));
     }
@@ -510,48 +527,29 @@ pub async fn approve(
         let is_admin_user: Option<bool> =
             sqlx::query_scalar("SELECT TRUE FROM users WHERE id = $1 AND role = 'admin'")
                 .bind(reopen_request.user_id)
-                .fetch_optional(&app_state.pool)
+                .fetch_optional(&mut *tx)
                 .await?;
         if is_admin_user.is_some() {
             return Err(AppError::Forbidden);
         }
     }
-    // Atomically claim the request before doing the (idempotent-ish) reopen.
-    // The status guard prevents a TOCTOU race where two approvers click at
-    // the same time and both run perform_reopen.
-    let rows_claimed = sqlx::query(
-        "UPDATE reopen_requests SET status='approved', reviewed_at=CURRENT_TIMESTAMP \
-         WHERE id=$1 AND status='pending'",
-    )
-    .bind(request_id)
-    .execute(&app_state.pool)
-    .await?
-    .rows_affected();
-    if rows_claimed == 0 {
-        return Err(AppError::Conflict(
-            "Request was already resolved by someone else.".into(),
-        ));
-    }
-    let entries_reopened = match perform_reopen(
-        &app_state.pool,
+    let reopened_entries = perform_reopen_in_tx(
+        &mut tx,
         requester.id,
         reopen_request.user_id,
         reopen_request.week_start,
     )
-    .await
-    {
-        Ok(count) => count,
-        Err(e) => {
-            // Revert the approval claim so the request can be retried.
-            let _ = sqlx::query(
-                "UPDATE reopen_requests SET status='pending', reviewed_at=NULL WHERE id=$1",
-            )
-            .bind(request_id)
-            .execute(&app_state.pool)
-            .await;
-            return Err(e);
-        }
-    };
+    .await?;
+    sqlx::query(
+        "UPDATE reopen_requests SET status='approved', reviewed_at=CURRENT_TIMESTAMP \
+         WHERE id=$1 AND status='pending'",
+    )
+    .bind(request_id)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    audit_reopened_entries(&app_state.pool, requester.id, &reopened_entries).await;
+    let entries_reopened = reopened_entries.len() as i64;
     audit::log(
         &app_state.pool,
         requester.id,

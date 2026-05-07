@@ -132,7 +132,7 @@ async fn build_range(
         .fetch_one(pool)
         .await?;
     let target_per_day_min = (user.weekly_hours / 5.0 * 60.0) as i64;
-    let today = chrono::Local::now().date_naive();
+    let today = chrono::Utc::now().date_naive();
 
     #[allow(clippy::type_complexity)]
     let te: Vec<(NaiveDate, String, String, String, String, i64, String, Option<String>)> = sqlx::query_as(
@@ -947,7 +947,7 @@ pub async fn flextime(
     })
     .collect();
 
-    let today = chrono::Local::now().date_naive();
+    let today = chrono::Utc::now().date_naive();
     let mut flextime_days = vec![];
     let mut current_date = query.from;
     while current_date <= query.to {
