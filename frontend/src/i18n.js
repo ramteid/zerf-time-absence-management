@@ -466,6 +466,8 @@ const TRANSLATIONS = {
       "Bitte geben Sie Ihren Namen ein und konfigurieren Sie Land, Region, Standard-Wochenstunden und Standard-Urlaubstage, bevor die Anwendung genutzt wird.",
     "Please select a country.": "Bitte ein Land auswählen.",
     "Please select a region.": "Bitte eine Region auswählen.",
+    "Could not load regions for the selected country.":
+      "Regionen für das ausgewählte Land konnten nicht geladen werden.",
     "Please enter default weekly hours.":
       "Bitte Standard-Wochenstunden eingeben.",
     "Please enter default annual leave days.":
@@ -473,6 +475,8 @@ const TRANSLATIONS = {
     "- Please select -": "- Bitte auswählen -",
     Country: "Land",
     Region: "Region",
+    "Could not load regions.": "Regionen konnten nicht geladen werden.",
+    "No regions available.": "Keine Regionen verfügbar.",
     "e.g. US-CA": "z.B. US-CA",
     "Audit Log": "Audit-Protokoll",
     "Holiday name": "Feiertagsname",
