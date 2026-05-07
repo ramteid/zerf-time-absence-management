@@ -587,7 +587,7 @@ const TRANSLATIONS = {
     "Invalid email.": "Ungültige E-Mail-Adresse.",
     "Invalid name.": "Ungültiger Name.",
     "Invalid weekly_hours.": "Ungültige Wochenstunden.",
-    "Invalid annual_leave_days.": "Ungültige Urlaubstage.",
+    "Invalid leave_days.": "Ungültige Urlaubstage.",
     "An approver (Team lead or Admin) is required for non-admin users.":
       "Für alle Nicht-Admin-Benutzer ist eine Teamleitung oder ein Admin als verantwortliche Person erforderlich.",
     "Approver cannot be the user themselves.":

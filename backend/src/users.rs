@@ -363,7 +363,7 @@ pub async fn create(
         return Err(AppError::BadRequest("Invalid weekly_hours.".into()));
     }
     if !(0..=366).contains(&body.leave_days_current_year) || !(0..=366).contains(&body.leave_days_next_year) {
-        return Err(AppError::BadRequest("Invalid annual_leave_days.".into()));
+        return Err(AppError::BadRequest("Invalid leave_days.".into()));
     }
     ensure_email_available(&app_state.pool, &normalized_email, None).await?;
     ensure_user_name_available(&app_state.pool, &first_name, &last_name, None).await?;
@@ -390,17 +390,8 @@ pub async fn create(
         })?;
     // Seed leave days for current + next year
     let current_year = chrono::Local::now().year();
-    sqlx::query(
-        "INSERT INTO user_annual_leave(user_id, year, days) VALUES ($1,$2,$3),($1,$4,$5) \
-         ON CONFLICT (user_id, year) DO UPDATE SET days = EXCLUDED.days",
-    )
-    .bind(new_user_id)
-    .bind(current_year)
-    .bind(body.leave_days_current_year)
-    .bind(current_year + 1)
-    .bind(body.leave_days_next_year)
-    .execute(&mut *tx)
-    .await?;
+    set_leave_days(&mut *tx, new_user_id, current_year, body.leave_days_current_year).await?;
+    set_leave_days(&mut *tx, new_user_id, current_year + 1, body.leave_days_next_year).await?;
     tx.commit().await?;
     let created_user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1")
         .bind(new_user_id)
@@ -516,12 +507,12 @@ pub async fn update(
     }
     if let Some(d) = body.leave_days_current_year {
         if !(0..=366).contains(&d) {
-            return Err(AppError::BadRequest("Invalid annual_leave_days.".into()));
+            return Err(AppError::BadRequest("Invalid leave_days.".into()));
         }
     }
     if let Some(d) = body.leave_days_next_year {
         if !(0..=366).contains(&d) {
-            return Err(AppError::BadRequest("Invalid annual_leave_days.".into()));
+            return Err(AppError::BadRequest("Invalid leave_days.".into()));
         }
     }
     if let Some(overtime_start_balance) = body.overtime_start_balance_min {
@@ -634,20 +625,10 @@ pub async fn update(
     // Update leave days if provided
     let current_year = chrono::Local::now().year();
     if let Some(d) = body.leave_days_current_year {
-        sqlx::query(
-            "INSERT INTO user_annual_leave(user_id, year, days) VALUES ($1,$2,$3) \
-             ON CONFLICT (user_id, year) DO UPDATE SET days = EXCLUDED.days",
-        )
-        .bind(user_id).bind(current_year).bind(d)
-        .execute(&mut *tx).await?;
+        set_leave_days(&mut *tx, user_id, current_year, d).await?;
     }
     if let Some(d) = body.leave_days_next_year {
-        sqlx::query(
-            "INSERT INTO user_annual_leave(user_id, year, days) VALUES ($1,$2,$3) \
-             ON CONFLICT (user_id, year) DO UPDATE SET days = EXCLUDED.days",
-        )
-        .bind(user_id).bind(current_year + 1).bind(d)
-        .execute(&mut *tx).await?;
+        set_leave_days(&mut *tx, user_id, current_year + 1, d).await?;
     }
     // Approver_id requires special handling because we want to support
     // explicit clearing (Some(None)) which COALESCE cannot express.
@@ -837,31 +818,27 @@ pub async fn get_leave_days(
 }
 
 /// Set the leave days for `user_id` in `year` (upsert).
-pub async fn set_leave_days(
-    pool: &crate::db::DatabasePool,
-    user_id: i64,
-    year: i32,
-    days: i64,
-) -> AppResult<()> {
+pub async fn set_leave_days<'e, E>(executor: E, user_id: i64, year: i32, days: i64) -> AppResult<()>
+where
+    E: sqlx::PgExecutor<'e>,
+{
     sqlx::query(
         "INSERT INTO user_annual_leave(user_id, year, days) VALUES ($1,$2,$3) \
          ON CONFLICT (user_id, year) DO UPDATE SET days = EXCLUDED.days",
     )
     .bind(user_id).bind(year).bind(days)
-    .execute(pool)
+    .execute(executor)
     .await?;
     Ok(())
 }
 
-// HTTP: GET /users/{id}/leave-overrides — returns current + next year rows
-pub async fn get_leave_overrides(
+// HTTP: GET /users/{id}/leave-days — returns current + next year rows
+pub async fn get_leave_days_handler(
     State(app_state): State<AppState>,
     requester: User,
     Path(user_id): Path<i64>,
 ) -> AppResult<Json<Vec<AnnualLeaveRow>>> {
-    if !requester.is_admin() && requester.id != user_id {
-        return Err(AppError::Forbidden);
-    }
+    assert_can_access_user(&app_state.pool, &requester, user_id).await?;
     let current_year = chrono::Local::now().year();
     let this = get_leave_days(&app_state.pool, user_id, current_year).await?;
     let next = get_leave_days(&app_state.pool, user_id, current_year + 1).await?;
@@ -877,8 +854,8 @@ pub struct SetLeaveBody {
     pub days: i64,
 }
 
-// HTTP: PUT /users/{id}/leave-overrides — admin sets a specific year
-pub async fn set_leave_override(
+// HTTP: PUT /users/{id}/leave-days — admin sets a specific year
+pub async fn set_leave_days_handler(
     State(app_state): State<AppState>,
     requester: User,
     Path(user_id): Path<i64>,

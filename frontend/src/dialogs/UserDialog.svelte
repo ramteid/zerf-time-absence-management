@@ -86,7 +86,7 @@
     // Load leave days for existing users
     if (!isNew) {
       try {
-        const rows = await api(`/users/${template.id}/leave-overrides`);
+        const rows = await api(`/users/${template.id}/leave-days`);
         const cur = rows.find((r) => r.year === _thisYear);
         const nxt = rows.find((r) => r.year === _nextYear);
         if (cur) leave_days_current_year = cur.days;
