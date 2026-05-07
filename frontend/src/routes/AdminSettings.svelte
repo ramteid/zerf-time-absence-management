@@ -92,6 +92,10 @@
       toast($t("Please select a country."), "error");
       return;
     }
+    if (regionLoading) {
+      toast($t("Please wait for regions to load."), "error");
+      return;
+    }
     if (s.default_weekly_hours == null || s.default_weekly_hours === "") {
       toast($t("Please enter default weekly hours."), "error");
       return;
@@ -368,7 +372,7 @@
       </div>
 
       <div style="display:flex;justify-content:flex-end;padding-top:16px">
-        <button class="kz-btn kz-btn-primary" on:click={save} disabled={saving}>
+        <button class="kz-btn kz-btn-primary" on:click={save} disabled={saving || regionLoading}>
           {#if saving}
             {$t("Saving...")}
           {:else}
