@@ -15,7 +15,7 @@ private GitHub Security Advisory. Do **not** open a public issue.
 | Asset                        | Risk                                          | Control                                                                |
 |------------------------------|-----------------------------------------------|-------------------------------------------------------------------------|
 | Login credentials            | Credential stuffing, brute force              | Argon2id hashing, 5/15 min lockout, generic error messages              |
-| Session cookies              | XSS theft, MITM, fixation, replay             | HttpOnly, Secure, SameSite=Strict, rotated on login, 8 h idle / 24 h max|
+| Session cookies              | XSS theft, MITM, fixation, replay             | HttpOnly, Secure, SameSite=Strict, rotated on login, 8 h idle / 7 d absolute, idle enforced in middleware |
 | Personal data in DB          | Data theft, lateral movement, tampering       | Internal-only PostgreSQL network, SCRAM auth, checksums, app least privilege |
 | State-changing endpoints     | CSRF                                          | SameSite=Strict cookie + Origin/Referer check + X-CSRF-Token header     |
 | HTTP traffic                 | MITM, downgrade, sniffing                     | Caddy + Let's Encrypt + HSTS preload + CSP + COOP/CORP                  |
@@ -30,7 +30,14 @@ Out of scope (v1): payroll integrations, SSO, multi-tenant isolation.
 * **Constant-time** verification path: failed lookups still run a verify against
   a dummy hash to keep timing uniform.
 * **Lockout**: 5 failed attempts per email in 15 min ⇒ generic "Invalid email or
-  password." (no account-existence oracle).
+  password." (no account-existence oracle). Requests that arrive while an
+  account is already locked are **not** counted toward extending the
+  window — that would let any unauthenticated attacker who knows a target
+  email keep the account locked indefinitely. Lockouts therefore expire
+  after 15 min of attacker silence and the legitimate user can retry.
+* **Edge rate limiting** in Caddy supplements the per-email lockout with
+  per-IP caps so a distributed attacker that varies usernames cannot
+  scan at high QPS — see "Transport & HTTP hardening" below.
 * **Password policy** (enforced server-side):
   * ≥ 12 characters, ≤ 256 characters
   * at least 3 of {lowercase, uppercase, digit, symbol}
@@ -47,9 +54,19 @@ Out of scope (v1): payroll integrations, SSO, multi-tenant isolation.
 * Cookie flags: `HttpOnly; Secure; SameSite=Strict; Path=/`.
 * **Session fixation**: a fresh token is issued on every successful login;
   any pre-existing token in the request is ignored.
-* **Idle timeout 8 h**, **absolute timeout 24 h** — whichever fires first.
+* **Idle timeout 8 h**, **absolute timeout 7 days** — whichever fires
+  first. Both are enforced directly in the auth middleware (the previous
+  version relied on the background cleanup task, which created a brief
+  window where idle sessions remained valid). The hourly cleanup loop
+  uses the same constants as the middleware so the two layers cannot
+  drift apart.
 * **Session invalidation**: on password change, password reset, deactivation
   and on logout, all sessions of the affected user are deleted server-side.
+* **First-boot setup race**: `POST /auth/setup` now takes a Postgres
+  transaction-scoped advisory lock around the count/insert, so two
+  concurrent setup requests cannot both create an admin on a fresh
+  database. The same lock (`lock_user_graph`) guards every write that
+  changes the approver/admin graph.
 * Background task purges expired sessions and old login attempts hourly.
 
 ## CSRF
@@ -85,7 +102,10 @@ before/after row. Admin-only endpoints additionally check `is_admin()`.
 * Date / time / numeric fields are parsed by `chrono` / `serde`; invalid input
   produces a `400 Bad Request`. Time-entry validation enforces overlap-free,
   ≤ 14 h/day, end > start, no future dates.
-* Email is lowercased and length-bounded (≤ 254).
+* Email is lowercased and length-bounded (≤ 254) on **every** auth
+  endpoint, including `forgot-password` (the latter previously had no
+  length cap, so an attacker could persist near-1 MiB strings into the
+  rate-limit table).
 
 ## Transport & HTTP hardening
 
@@ -104,6 +124,36 @@ Backend (tower-http `SetResponseHeaderLayer`) and Caddy both emit:
 
 Caddy also bumps to TLS 1.2+/H2/H3 and renews certificates via Let's Encrypt
 (`tls-alpn-01`), with HTTP→HTTPS redirect enabled by default.
+
+### Caddy edge controls (defence-in-depth)
+
+The reverse proxy is built with the
+[`caddy-ratelimit`](https://github.com/mholt/caddy-ratelimit) module
+(see `docker/Caddyfile.Dockerfile`) and applies:
+
+* **Per-IP rate limits** — `auth/login` 10/min, `auth/forgot-password`
+  5/15 min, `auth/reset-password` 10/15 min, `auth/setup` 5/h, generic
+  `/api/*` 600/min. Stops distributed credential stuffing, mass
+  password-reset bombing and bulk enumeration even when individual
+  emails would not trip the per-account lockout. `auth/setup-status`
+  is intentionally **not** capped tightly — the SPA polls it on every
+  Login-page load, so it rides the generic API ceiling.
+* **Server-level connection timeouts** — `read_header 5 s`,
+  `read_body 10 s`, `write 30 s`, `idle 2 min` — defends against
+  slow-loris and connection-flooding without disrupting the SSE
+  notification stream (which sends a keep-alive every 30 s).
+* **Method allow-list** — only `GET HEAD POST PUT DELETE OPTIONS`
+  reach the application; everything else (`TRACE`, `CONNECT`,
+  `PATCH`, exotic verbs) is rejected with 405 at the edge.
+* **Scanner suppression** — common probe paths (`.git/*`, `.env`,
+  `/wp-*`, `/xmlrpc.php`, `/phpmyadmin*`, `/server-status`,
+  `/actuator/*`) are answered with 404 without ever touching the app
+  or its logs.
+* **Reverse-proxy upstream timeouts** — bound dial / response-header /
+  read / write so a stuck application instance cannot tie up edge
+  workers.
+* **Body cap** — 1 MB at the edge, 1 MiB inside the app (edge is the
+  stricter of the two on purpose).
 
 ## Secrets & configuration
 

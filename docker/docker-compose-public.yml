@@ -8,7 +8,13 @@ services:
       - ZERF_ENFORCE_ORIGIN=true
 
   caddy:
-    image: caddy:2-alpine
+    # Build a Caddy image that includes the caddy-ratelimit module so the
+    # per-IP edge rate limits in the Caddyfile work. The base image still
+    # comes from the official caddy builder/runtime, so TLS, HTTP/3, etc.
+    # behave exactly like upstream.
+    build:
+      context: .
+      dockerfile: Caddyfile.Dockerfile
     container_name: zerf-caddy
     restart: unless-stopped
     cap_drop: [ALL]
