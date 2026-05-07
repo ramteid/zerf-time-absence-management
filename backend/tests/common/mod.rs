@@ -22,9 +22,18 @@ async fn seed_admin(pool: &db::DatabasePool, admin_email: &str) -> anyhow::Resul
         let temp = users::generate_password();
         let hash = auth::hash_password(&temp)?;
         let today = chrono::Local::now().date_naive();
-        sqlx::query("INSERT INTO users(email,password_hash,first_name,last_name,role,weekly_hours,annual_leave_days,start_date,must_change_password,overtime_start_balance_min) VALUES ($1,$2,$3,$4,'admin',39.0,30,$5,TRUE,0)")
+        sqlx::query("INSERT INTO users(email,password_hash,first_name,last_name,role,weekly_hours,start_date,must_change_password,overtime_start_balance_min) VALUES ($1,$2,$3,$4,'admin',39.0,$5,TRUE,0)")
             .bind(admin_email.to_lowercase()).bind(hash).bind("Test").bind("Admin").bind(today)
             .execute(pool).await?;
+
+        let admin_id: i64 = sqlx::query_scalar("SELECT id FROM users WHERE email=$1")
+            .bind(admin_email.to_lowercase())
+            .fetch_one(pool)
+            .await?;
+        let current_year = chrono::Local::now().year();
+        users::set_leave_days(pool, admin_id, current_year, 30).await?;
+        users::set_leave_days(pool, admin_id, current_year + 1, 30).await?;
+
         Ok(Some(temp))
     } else {
         Ok(None)

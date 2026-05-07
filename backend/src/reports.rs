@@ -170,7 +170,7 @@ async fn build_range(
             .find(|(s, e, _)| d >= *s && d <= *e)
             .map(|(_, _, k)| k.clone());
         let before_start = d < user.start_date;
-        let after_today = d > today;
+        let after_today = d >= today;
         let target = if weekday && holiday.is_none() && !before_start && !after_today {
             target_per_day_min
         } else {
@@ -205,7 +205,11 @@ async fn build_range(
                 comment: km.clone(),
             });
         }
-        let actual_eff = credited_actual_minutes(actual, target, absence.as_deref());
+        let actual_eff = if after_today {
+            0
+        } else {
+            credited_actual_minutes(actual, target, absence.as_deref())
+        };
         target_total += target;
         actual_total += actual_eff;
         days.push(DayDetail {
@@ -961,13 +965,17 @@ pub async fn flextime(
         let holiday = holiday_map.get(&current_date).cloned();
         let absence = absence_by_day.get(&current_date).cloned();
         let before_start = current_date < user.start_date;
-        let after_today = current_date > today;
+        let after_today = current_date >= today;
         let target = if is_weekday && holiday.is_none() && !before_start && !after_today {
             target_per_day_min
         } else {
             0
         };
-        let actual = approved_minutes_by_day.get(&current_date).copied().unwrap_or(0);
+        let actual = if after_today {
+            0
+        } else {
+            approved_minutes_by_day.get(&current_date).copied().unwrap_or(0)
+        };
         let credited_actual_min = credited_actual_minutes(actual, target, absence.as_deref());
         let day_diff_min = credited_actual_min - target;
         cumulative_min += day_diff_min;

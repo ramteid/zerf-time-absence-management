@@ -61,7 +61,7 @@
   }
 
   let chartFrom = clampFromToUserStart(daysAgo(29));
-  let chartTo = isoDate(today);
+  let chartTo = isoDate(addDays(today, -1));
   let chartData = [];
   let chartLoading = false;
   let overtimeRows = [];
@@ -178,7 +178,7 @@
 
   function setRange(days) {
     chartFrom = clampFromToUserStart(daysAgo(days - 1));
-    chartTo = isoDate(today);
+    chartTo = isoDate(addDays(today, -1));
     loadChart();
   }
 
@@ -664,6 +664,7 @@
             value: hoursFromMinutes(currentMonthDiffMin),
           })}
         </div>
+        <div class="stat-card-sub">{$t("As of yesterday")}</div>
       {/if}
       {#if overtimeError}
         <div class="error-text" style="font-size:11px;margin-top:4px">

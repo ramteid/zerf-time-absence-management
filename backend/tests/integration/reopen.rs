@@ -261,7 +261,7 @@ async fn lead_self_service() {
         .post(
             "/api/v1/users",
             &json!({"email":"solo@example.com","first_name":"Sol","last_name":"O",
-                "role":"team_lead","weekly_hours":39,"annual_leave_days":30,
+                "role":"team_lead","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
                 "start_date":"2024-01-01","approver_id":1}),
         )
         .await;

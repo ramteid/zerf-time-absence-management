@@ -11,7 +11,7 @@
   /** @type {FlextimeDay[]} */
   export let data = [];
 
-  // Index of the last data point that is today or in the past.
+  // Index of the last data point up to and including yesterday.
   // The line and area fill stop here; x-axis labels cover the full range.
   $: todayStr = new Date().toISOString().slice(0, 10);
   $: lastActualIdx = (() => {
@@ -451,5 +451,8 @@
         {/each}
       </div>
     {/if}
+    <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px;padding-left:{ML}px">
+      {$t("As of yesterday")}
+    </div>
   {/if}
 </div>
