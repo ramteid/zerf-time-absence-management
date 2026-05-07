@@ -827,6 +827,8 @@ const TRANSLATIONS = {
       "Es wurde keine E-Mail gesendet! E-Mail / SMTP ist nicht konfiguriert.",
     "You must deliver this password to the user in person!":
       "Sie müssen dieses Passwort persönlich an den Benutzer übergeben!",
+    "Default (all years without override)":
+      "Standard (alle Jahre ohne Ausnahme)",
     "User created.": "Benutzer erstellt.",
     "Temporary password:": "Temporäres Passwort:",
     Team: "Team",
