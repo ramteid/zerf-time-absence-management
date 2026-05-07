@@ -9,6 +9,21 @@
     nw2 = "",
     error = "";
   let savingTheme = false;
+  let leaveOverrides = [];
+  const thisYear = new Date().getFullYear();
+  const nextYear = thisYear + 1;
+
+  // Re-fetch whenever currentUser becomes available (store starts as null)
+  $: if ($currentUser?.id) {
+    api(`/users/${$currentUser.id}/leave-overrides`)
+      .then((r) => (leaveOverrides = r))
+      .catch(() => (leaveOverrides = []));
+  }
+
+  function leaveDaysForYear(year) {
+    const override = leaveOverrides.find((o) => o.year === year);
+    return override != null ? override.days : $currentUser.annual_leave_days;
+  }
   function initials(u) {
     return ((u.first_name?.[0] || "") + (u.last_name?.[0] || "")).toUpperCase();
   }
@@ -136,13 +151,25 @@
         />
       </div>
       <div>
-        <label class="kz-label" for="account-annual-leave"
-          >{$t("Annual leave days")}</label
+        <label class="kz-label" for="account-annual-leave-this"
+          >{$t("Annual leave days")} {thisYear}</label
         >
         <input
-          id="account-annual-leave"
+          id="account-annual-leave-this"
           class="kz-input"
-          value={$currentUser.annual_leave_days}
+          value={leaveDaysForYear(thisYear)}
+          readonly
+          style="color:var(--text-secondary)"
+        />
+      </div>
+      <div>
+        <label class="kz-label" for="account-annual-leave-next"
+          >{$t("Annual leave days")} {nextYear}</label
+        >
+        <input
+          id="account-annual-leave-next"
+          class="kz-input"
+          value={leaveDaysForYear(nextYear)}
           readonly
           style="color:var(--text-secondary)"
         />

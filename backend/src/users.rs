@@ -772,7 +772,8 @@ pub async fn get_leave_overrides(
     requester: User,
     Path(user_id): Path<i64>,
 ) -> AppResult<Json<Vec<LeaveOverride>>> {
-    if !requester.is_admin() {
+    // Admins can read any user's overrides; non-admins can only read their own.
+    if !requester.is_admin() && requester.id != user_id {
         return Err(AppError::Forbidden);
     }
     let override_rows = sqlx::query_as::<_, LeaveOverride>(
