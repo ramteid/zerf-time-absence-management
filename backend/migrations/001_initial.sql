@@ -6,7 +6,6 @@ CREATE TABLE IF NOT EXISTS users (
   last_name TEXT NOT NULL,
   role TEXT NOT NULL CHECK (role IN ('employee','team_lead','admin')),
   weekly_hours DOUBLE PRECISION NOT NULL CHECK (weekly_hours >= 0 AND weekly_hours <= 168),
-  annual_leave_days BIGINT NOT NULL CHECK (annual_leave_days >= 0 AND annual_leave_days <= 366),
   start_date DATE NOT NULL,
   active BOOLEAN NOT NULL DEFAULT TRUE,
   must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
@@ -24,24 +23,18 @@ CREATE INDEX IF NOT EXISTS idx_users_approver ON users(approver_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_first_last_name_unique
   ON users(first_name, last_name);
 
-CREATE TABLE IF NOT EXISTS user_annual_leave_overrides (
-  user_id BIGINT NOT NULL REFERENCES users(id),
-  year INTEGER NOT NULL CHECK (year >= 2000 AND year <= 2100),
-  days BIGINT NOT NULL CHECK (days >= 0 AND days <= 366),
-  PRIMARY KEY (user_id, year)
-);
-
 CREATE TABLE IF NOT EXISTS sessions (
   token TEXT PRIMARY KEY,
   user_id BIGINT NOT NULL REFERENCES users(id),
   created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   last_active_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  csrf_token TEXT NOT NULL DEFAULT ''
+  csrf_token TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_active ON sessions(last_active_at);
 
 CREATE TABLE IF NOT EXISTS login_attempts (
+  id BIGSERIAL PRIMARY KEY,
   email TEXT NOT NULL,
   attempted_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   success BOOLEAN NOT NULL
@@ -61,8 +54,8 @@ CREATE TABLE IF NOT EXISTS time_entries (
   id BIGSERIAL PRIMARY KEY,
   user_id BIGINT NOT NULL REFERENCES users(id),
   entry_date DATE NOT NULL,
-  start_time TEXT NOT NULL,
-  end_time TEXT NOT NULL,
+  start_time TEXT NOT NULL CONSTRAINT te_start_time_format CHECK (start_time ~ '^\d{2}:\d{2}(:\d{2})?$'),
+  end_time TEXT NOT NULL CONSTRAINT te_end_time_format   CHECK (end_time   ~ '^\d{2}:\d{2}(:\d{2})?$'),
   category_id BIGINT NOT NULL REFERENCES categories(id),
   comment TEXT,
   status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','submitted','approved','rejected')),
@@ -121,7 +114,9 @@ CREATE TABLE IF NOT EXISTS holidays (
   name TEXT NOT NULL,
   year INTEGER NOT NULL,
   is_auto BOOLEAN NOT NULL DEFAULT FALSE,
-  local_name TEXT
+  local_name TEXT,
+  CONSTRAINT holidays_year_matches_date
+    CHECK (year = EXTRACT(YEAR FROM holiday_date)::INTEGER)
 );
 
 CREATE TABLE IF NOT EXISTS reopen_requests (
@@ -183,3 +178,32 @@ CREATE TABLE IF NOT EXISTS audit_log (
   occurred_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_audit ON audit_log(table_name, record_id);
+
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    token_hash  TEXT        PRIMARY KEY,
+    user_id     BIGINT      NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    expires_at  TIMESTAMPTZ NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_expires_at
+    ON password_reset_tokens(expires_at);
+
+CREATE TABLE IF NOT EXISTS user_annual_leave (
+    user_id BIGINT  NOT NULL REFERENCES users(id),
+    year    INTEGER NOT NULL CHECK (year >= 2000 AND year <= 2100),
+    days    BIGINT  NOT NULL CHECK (days >= 0 AND days <= 366),
+    PRIMARY KEY (user_id, year)
+);
+
+-- PostgreSQL requires index expressions to be IMMUTABLE. Casting timestamptz to
+-- date is only STABLE (it depends on the session timezone), so we use a thin
+-- IMMUTABLE wrapper that pins the conversion to UTC.
+CREATE OR REPLACE FUNCTION notifications_created_date(ts TIMESTAMPTZ)
+RETURNS DATE
+LANGUAGE sql
+IMMUTABLE
+AS $$ SELECT (ts AT TIME ZONE 'UTC')::date $$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_notifications_reminder_daily
+    ON notifications (user_id, kind, notifications_created_date(created_at))
+    WHERE kind = 'submission_reminder';
