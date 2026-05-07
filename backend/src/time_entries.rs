@@ -166,7 +166,7 @@ pub(crate) async fn validate(
     if cat_active == Some(false) {
         return Err(AppError::BadRequest("Category is inactive.".into()));
     }
-    if te.entry_date > chrono::Local::now().date_naive() {
+    if te.entry_date > chrono::Utc::now().date_naive() {
         return Err(AppError::BadRequest(
             "Entries in the future are not allowed.".into(),
         ));
@@ -352,6 +352,9 @@ pub async fn submit(
     if body.ids.is_empty() {
         return Ok(Json(serde_json::json!({"ok": true, "count": 0})));
     }
+    if body.ids.len() > 500 {
+        return Err(AppError::BadRequest("Too many entries (max 500).".into()));
+    }
     // Phase 1: validate ownership for ALL entries before any writes, so a
     // mixed-ownership batch never partially submits.
     for entry_id in &body.ids {
@@ -441,7 +444,8 @@ pub async fn approve(
         .bind(entry_id)
         .fetch_one(&mut *tx)
         .await?;
-    if entry.user_id == requester.id && !requester.is_admin() {
+    // No user may approve their own entry.
+    if entry.user_id == requester.id {
         return Err(AppError::Forbidden);
     }
     if !requester.is_admin() {
@@ -518,12 +522,16 @@ pub async fn reject(
     if body.reason.trim().is_empty() {
         return Err(AppError::BadRequest("Reason required.".into()));
     }
+    if body.reason.len() > 2000 {
+        return Err(AppError::BadRequest("Reason too long (max 2000).".into()));
+    }
     let mut tx = app_state.pool.begin().await?;
     let entry: TimeEntry = sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1 FOR UPDATE")
         .bind(entry_id)
         .fetch_one(&mut *tx)
         .await?;
-    if entry.user_id == requester.id && !requester.is_admin() {
+    // No user may reject their own entry.
+    if entry.user_id == requester.id {
         return Err(AppError::Forbidden);
     }
     if !requester.is_admin() {
@@ -598,6 +606,9 @@ pub async fn batch_approve(
     if body.ids.is_empty() {
         return Ok(Json(serde_json::json!({"ok": true, "count": 0})));
     }
+    if body.ids.len() > 500 {
+        return Err(AppError::BadRequest("Too many entries (max 500).".into()));
+    }
     // Fetch all submitted entries that this lead is allowed to approve.
     let mut entries_to_approve: Vec<TimeEntry> = vec![];
     for entry_id in &body.ids {
@@ -607,7 +618,8 @@ pub async fn batch_approve(
                 .fetch_optional(&app_state.pool)
                 .await?;
         let Some(entry) = entry else { continue };
-        if entry.user_id == requester.id && !requester.is_admin() {
+        // No user may approve their own entry.
+        if entry.user_id == requester.id {
             continue;
         }
         if !requester.is_admin() {
@@ -700,6 +712,9 @@ pub async fn batch_reject(
     if body.ids.is_empty() {
         return Ok(Json(serde_json::json!({"ok": true, "count": 0})));
     }
+    if body.ids.len() > 500 {
+        return Err(AppError::BadRequest("Too many entries (max 500).".into()));
+    }
     // Fetch all submitted entries that this lead is allowed to reject.
     let mut entries_to_reject: Vec<TimeEntry> = vec![];
     for entry_id in &body.ids {
@@ -712,7 +727,8 @@ pub async fn batch_reject(
         .fetch_optional(&app_state.pool)
         .await?;
         let Some(entry) = entry else { continue };
-        if entry.user_id == requester.id && !requester.is_admin() {
+        // No user may reject their own entry.
+        if entry.user_id == requester.id {
             continue;
         }
         if !requester.is_admin() {

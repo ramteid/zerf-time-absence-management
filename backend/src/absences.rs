@@ -111,7 +111,7 @@ pub async fn list(
     Query(query): Query<YearQuery>,
 ) -> AppResult<Json<Vec<Absence>>> {
     // Default to the current calendar year when no year is specified.
-    let year = query.year.unwrap_or_else(|| chrono::Local::now().year());
+    let year = query.year.unwrap_or_else(|| chrono::Utc::now().year());
     let from = NaiveDate::from_ymd_opt(year, 1, 1).unwrap();
     let to = NaiveDate::from_ymd_opt(year, 12, 31).unwrap();
     let absences = sqlx::query_as::<_, Absence>(
@@ -307,7 +307,7 @@ fn validate_sick_start_date(kind: &str, start_date: NaiveDate) -> AppResult<()> 
         return Ok(());
     }
 
-    let earliest = chrono::Local::now().date_naive() - Duration::days(30);
+    let earliest = chrono::Utc::now().date_naive() - Duration::days(30);
     if start_date < earliest {
         return Err(AppError::BadRequest(
             "Sick leave cannot be backdated more than 30 days.".into(),
@@ -415,7 +415,7 @@ pub async fn create(
     }
     // Sick leave is auto-approved only when it has already started (or starts today).
     // Future-dated sick leave requires review like any other request.
-    let today_date = chrono::Local::now().date_naive();
+    let today_date = chrono::Utc::now().date_naive();
     let initial_status = if kind == "sick" && body.start_date <= today_date {
         "approved"
     } else {
@@ -515,7 +515,7 @@ pub async fn update(
         validate_vacation_balance(&app_state.pool, &mut *tx, &requester, body.start_date, body.end_date, Some(absence_id)).await?;
     }
     // Sick leave already started today is auto-approved; future-dated requires review.
-    let today_date = chrono::Local::now().date_naive();
+    let today_date = chrono::Utc::now().date_naive();
     let updated_status = if kind == "sick" && body.start_date <= today_date {
         "approved"
     } else {
@@ -1012,7 +1012,7 @@ async fn validate_vacation_balance(
     let year = start_date.year();
     let year_from = NaiveDate::from_ymd_opt(year, 1, 1).unwrap();
     let year_to = NaiveDate::from_ymd_opt(year, 12, 31).unwrap();
-    let today = chrono::Local::now().date_naive();
+    let today = chrono::Utc::now().date_naive();
 
     // Resolve effective entitlement for the start year (pro-rated if mid-year start).
     let entitled = effective_annual_days(pool, user, year).await?;
@@ -1117,14 +1117,14 @@ pub async fn balance(
 ) -> AppResult<Json<LeaveBalance>> {
     assert_can_access_user(&app_state.pool, &requester, target_user_id).await?;
     // Default to the current year if none was provided.
-    let year = query.year.unwrap_or_else(|| chrono::Local::now().year());
+    let year = query.year.unwrap_or_else(|| chrono::Utc::now().year());
     let target_user: crate::auth::User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1")
         .bind(target_user_id)
         .fetch_one(&app_state.pool)
         .await?;
     let year_from = NaiveDate::from_ymd_opt(year, 1, 1).unwrap();
     let year_to = NaiveDate::from_ymd_opt(year, 12, 31).unwrap();
-    let today = chrono::Local::now().date_naive();
+    let today = chrono::Utc::now().date_naive();
     // Load all vacation absences (requested + approved) in the given year.
     let vacation_absences = sqlx::query_as::<_, Absence>(
         "SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE user_id=$1 AND kind='vacation' AND status IN ('requested','approved') AND end_date >= $2 AND start_date <= $3"

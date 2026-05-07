@@ -161,7 +161,7 @@ pub async fn create(
         }
     }
     if let Some(new_date) = body.new_date {
-        if new_date > chrono::Local::now().date_naive() {
+        if new_date > chrono::Utc::now().date_naive() {
             return Err(AppError::BadRequest("Date cannot be in the future.".into()));
         }
         if new_date < requester.start_date {
@@ -217,18 +217,6 @@ pub async fn create(
             ));
         }
     }
-    // Guard against duplicate open change requests for the same entry.
-    let existing_open_cr_id: Option<i64> = sqlx::query_scalar(
-        "SELECT id FROM change_requests WHERE time_entry_id=$1 AND status='open'",
-    )
-    .bind(body.time_entry_id)
-    .fetch_optional(&app_state.pool)
-    .await?;
-    if let Some(existing_id) = existing_open_cr_id {
-        return Err(AppError::Conflict(format!(
-            "An open change request already exists for this entry (id {existing_id})."
-        )));
-    }
     // Validate new_category_id if provided — reject nonexistent/inactive categories
     // before storing so malformed data never reaches the approval path.
     if let Some(category_id) = body.new_category_id {
@@ -244,9 +232,33 @@ pub async fn create(
             return Err(AppError::BadRequest("Category is inactive.".into()));
         }
     }
+    // Use a transaction with an advisory lock on the time_entry_id to
+    // serialize CR creation per entry, preventing the TOCTOU race where two
+    // concurrent requests both pass the duplicate check before either inserts.
+    // The two-argument form pg_advisory_xact_lock(int, int) uses a separate
+    // namespace from the single-argument form used by absences/time_entries
+    // (which lock on user_id), avoiding spurious cross-subsystem contention.
+    let mut tx = app_state.pool.begin().await?;
+    sqlx::query("SELECT pg_advisory_xact_lock(2, $1::int)")
+        .bind(body.time_entry_id)
+        .execute(&mut *tx)
+        .await?;
+    // Guard against duplicate open change requests for the same entry.
+    let existing_open_cr_id: Option<i64> = sqlx::query_scalar(
+        "SELECT id FROM change_requests WHERE time_entry_id=$1 AND status='open'",
+    )
+    .bind(body.time_entry_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if let Some(existing_id) = existing_open_cr_id {
+        return Err(AppError::Conflict(format!(
+            "An open change request already exists for this entry (id {existing_id})."
+        )));
+    }
     let new_change_request_id: i64 = sqlx::query_scalar("INSERT INTO change_requests(time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id")
         .bind(body.time_entry_id).bind(requester.id).bind(body.new_date).bind(&body.new_start_time).bind(&body.new_end_time).bind(body.new_category_id).bind(&body.new_comment).bind(&body.reason)
-        .fetch_one(&app_state.pool).await?;
+        .fetch_one(&mut *tx).await?;
+    tx.commit().await?;
     let created_change_request: ChangeRequest = sqlx::query_as("SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE id=$1")
         .bind(new_change_request_id)
         .fetch_one(&app_state.pool)
@@ -305,8 +317,8 @@ pub async fn approve(
             .fetch_optional(&mut *tx)
             .await?
             .ok_or_else(|| AppError::Conflict("Change request was already resolved by someone else.".into()))?;
-    // A lead may not review their own request; admins may.
-    if change_request.user_id == requester.id && !requester.is_admin() {
+    // No user may review their own request.
+    if change_request.user_id == requester.id {
         return Err(AppError::Forbidden);
     }
     if !requester.is_admin() {
@@ -482,8 +494,8 @@ pub async fn reject(
         .bind(change_request_id)
         .fetch_one(&mut *tx)
         .await?;
-    // A lead may not reject their own request; admins may.
-    if change_request.user_id == requester.id && !requester.is_admin() {
+    // No user may reject their own request.
+    if change_request.user_id == requester.id {
         return Err(AppError::Forbidden);
     }
     // Non-admin leads may only act on requests from their direct reports.
@@ -535,7 +547,7 @@ pub async fn reject(
             .unwrap_or(
                 change_request
                     .new_date
-                    .unwrap_or(chrono::Local::now().date_naive()),
+                    .unwrap_or(chrono::Utc::now().date_naive()),
             );
     crate::notifications::create_translated(
         &app_state,
