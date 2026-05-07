@@ -17,7 +17,11 @@
   let last_name = template.last_name || "";
   let role = template.role || "employee";
   let weekly_hours = template.weekly_hours ?? 39;
-  let annual_leave_days = template.annual_leave_days ?? 30;
+  const _thisYear = new Date().getFullYear();
+  const _nextYear = _thisYear + 1;
+  // Leave days — two explicit fields (current year + next year)
+  let leave_days_current_year = 30;
+  let leave_days_next_year = 30;
   let start_date = template.start_date || isoDate(new Date());
   let overtime_start_balance_hours =
     (template.overtime_start_balance_min || 0) / 60;
@@ -27,13 +31,6 @@
   let error = "";
   let approvers = [];
   $: requiresApprover = role !== "admin";
-
-  // Per-year vacation day overrides
-  let leaveOverrides = [];
-  let pendingOverrides = []; // For new users: queued overrides saved after creation
-  let overrideYear = new Date().getFullYear();
-  let overrideDays = "";
-  let overrideSaving = false;
 
   // Password fields (only for new users)
   let password = "";
@@ -86,12 +83,16 @@
     } catch {
       approvers = [];
     }
-    // Load leave overrides for existing users
+    // Load leave days for existing users
     if (!isNew) {
       try {
-        leaveOverrides = await api(`/users/${template.id}/leave-overrides`);
+        const rows = await api(`/users/${template.id}/leave-overrides`);
+        const cur = rows.find((r) => r.year === _thisYear);
+        const nxt = rows.find((r) => r.year === _nextYear);
+        if (cur) leave_days_current_year = cur.days;
+        if (nxt) leave_days_next_year = nxt.days;
       } catch {
-        leaveOverrides = [];
+        // leave defaults
       }
     }
     // Prefill defaults for new users
@@ -102,7 +103,8 @@
           weekly_hours = Number(settings.default_weekly_hours);
         }
         if (settings.default_annual_leave_days != null) {
-          annual_leave_days = Number(settings.default_annual_leave_days);
+          leave_days_current_year = Number(settings.default_annual_leave_days);
+          leave_days_next_year = Number(settings.default_annual_leave_days);
         }
         smtpEnabled = !!settings.smtp_enabled;
       } catch {}
@@ -130,7 +132,8 @@
         last_name,
         role,
         weekly_hours: Number(weekly_hours),
-        annual_leave_days: Number(annual_leave_days),
+        leave_days_current_year: Number(leave_days_current_year),
+        leave_days_next_year: Number(leave_days_next_year),
         start_date,
         overtime_start_balance_min: Math.round(
           Number(overtime_start_balance_hours) * 60,
@@ -149,17 +152,6 @@
       }
       if (isNew) {
         const r = await api("/users", { method: "POST", body });
-        // Save all pending vacation day overrides for the new user
-        for (const po of pendingOverrides) {
-          try {
-            await api(`/users/${r.id}/leave-overrides`, {
-              method: "PUT",
-              body: { year: po.year, days: po.days },
-            });
-          } catch (e) {
-            console.error("Failed to save leave override:", e);
-          }
-        }
         showTempPassword = r.temporary_password;
       } else {
         await api("/users/" + template.id, { method: "PUT", body });
@@ -180,39 +172,6 @@
       copied = true;
       setTimeout(() => (copied = false), 2000);
     } catch {}
-  }
-
-  async function saveLeaveOverride() {
-    if (!overrideDays && overrideDays !== 0) {
-      error = $t("Please enter vacation days.");
-      return;
-    }
-    error = "";
-    if (!isNew) {
-      // For existing users, save immediately
-      overrideSaving = true;
-      try {
-        await api(`/users/${template.id}/leave-overrides`, {
-          method: "PUT",
-          body: { year: Number(overrideYear), days: Number(overrideDays) },
-        });
-        leaveOverrides = await api(`/users/${template.id}/leave-overrides`);
-        overrideDays = "";
-      } catch (e) {
-        error = $t(e?.message || "Error");
-      } finally {
-        overrideSaving = false;
-      }
-    } else {
-      // For new users, queue locally — will be saved after user creation
-      const year = Number(overrideYear);
-      const days = Number(overrideDays);
-      pendingOverrides = [
-        ...pendingOverrides.filter((o) => o.year !== year),
-        { year, days },
-      ];
-      overrideDays = "";
-    }
   }
 
   function dismissTempPassword() {
@@ -363,93 +322,31 @@
         >
           {$t("Vacation days per year")}
         </div>
-        <div style="margin-bottom:10px">
-          <label class="kz-label" for="user-annual-leave-days"
-            >{$t("Default (all years without override)")}</label
-          >
-          <input
-            id="user-annual-leave-days"
-            class="kz-input"
-            type="number"
-            min="0"
-            max="366"
-            bind:value={annual_leave_days}
-            style="max-width:120px"
-          />
-        </div>
-        {#if !isNew && leaveOverrides.length > 0}
-          <div style="margin-bottom:12px;font-size:12px">
-            {#each leaveOverrides as o}
-              <div
-                style="display:flex;gap:8px;align-items:center;padding:4px 0"
-              >
-                <span style="min-width:50px;font-weight:500">{o.year}:</span>
-                <span>{o.days} {$t("days")}</span>
-              </div>
-            {/each}
-          </div>
-        {/if}
-        {#if isNew && pendingOverrides.length > 0}
-          <div style="margin-bottom:12px;font-size:12px">
-            {#each pendingOverrides as o}
-              <div
-                style="display:flex;gap:8px;align-items:center;padding:4px 0"
-              >
-                <span style="min-width:50px;font-weight:500">{o.year}:</span>
-                <span>{o.days} {$t("days")}</span>
-              </div>
-            {/each}
-          </div>
-        {/if}
-        <div
-          style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end"
-        >
-          <div style="flex:0 1 auto;min-width:100px">
-            <label class="kz-label" for="override-year">{$t("Year")}</label>
-            <select
-              id="override-year"
-              class="kz-select"
-              bind:value={overrideYear}
-            >
-              <option value={new Date().getFullYear()}
-                >{new Date().getFullYear()}</option
-              >
-              <option value={new Date().getFullYear() + 1}
-                >{new Date().getFullYear() + 1}</option
-              >
-            </select>
-          </div>
-          <div style="flex:0 1 auto;min-width:90px">
-            <label class="kz-label" for="override-days">{$t("Days")}</label>
+        <div style="margin-bottom:10px;display:flex;gap:12px;flex-wrap:wrap">
+          <div>
+            <label class="kz-label" for="leave-cur">{$t("Annual leave days")} {_thisYear}</label>
             <input
-              id="override-days"
+              id="leave-cur"
               class="kz-input"
               type="number"
               min="0"
               max="366"
-              bind:value={overrideDays}
-              style="width:100%"
+              bind:value={leave_days_current_year}
+              style="max-width:120px"
             />
           </div>
-          <button
-            class="kz-btn kz-btn-sm"
-            on:click={saveLeaveOverride}
-            disabled={isNew ? false : overrideSaving}
-            style="flex:0 1 auto;white-space:nowrap"
-          >
-            {$t("Set")}
-          </button>
-        </div>
-        <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
-          {#if isNew}
-            {$t(
-              "Set vacation days for specific years. These will be saved after user creation.",
-            )}
-          {:else}
-            {$t(
-              "Overrides the default annual leave days for this user in the selected year.",
-            )}
-          {/if}
+          <div>
+            <label class="kz-label" for="leave-nxt">{$t("Annual leave days")} {_nextYear}</label>
+            <input
+              id="leave-nxt"
+              class="kz-input"
+              type="number"
+              min="0"
+              max="366"
+              bind:value={leave_days_next_year}
+              style="max-width:120px"
+            />
+          </div>
         </div>
       </div>
       {#if !isNew}

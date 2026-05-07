@@ -158,11 +158,11 @@ pub async fn list(
         return Err(AppError::Forbidden);
     }
     let user_list = if requester.is_admin() {
-        sqlx::query_as::<_, User>("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users ORDER BY last_name, first_name")
+        sqlx::query_as::<_, User>("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users ORDER BY last_name, first_name")
             .fetch_all(&app_state.pool)
             .await?
     } else {
-        sqlx::query_as::<_, User>("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1 OR (approver_id=$1 AND role!='admin') ORDER BY last_name, first_name")
+        sqlx::query_as::<_, User>("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1 OR (approver_id=$1 AND role!='admin') ORDER BY last_name, first_name")
             .bind(requester.id)
             .fetch_all(&app_state.pool)
             .await?
@@ -177,7 +177,7 @@ pub async fn get_one(
 ) -> AppResult<Json<User>> {
     assert_can_access_user(&app_state.pool, &requester, user_id).await?;
     Ok(Json(
-        sqlx::query_as::<_, User>("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1")
+        sqlx::query_as::<_, User>("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1")
             .bind(user_id)
             .fetch_one(&app_state.pool)
             .await?,
@@ -191,12 +191,14 @@ pub struct NewUser {
     pub last_name: String,
     pub role: String,
     pub weekly_hours: f64,
-    pub annual_leave_days: i64,
+    /// Leave days for the current year (required on creation).
+    pub leave_days_current_year: i64,
+    /// Leave days for next year (required on creation).
+    pub leave_days_next_year: i64,
     pub start_date: NaiveDate,
     pub overtime_start_balance_min: Option<i64>,
     pub password: Option<String>,
-    /// Mandatory for non-admin users. The approver must be an active
-    /// `team_lead` or `admin` and cannot be the user themselves.
+    /// Mandatory for non-admin users.
     pub approver_id: Option<i64>,
 }
 
@@ -360,7 +362,7 @@ pub async fn create(
     if !(0.0..=168.0).contains(&body.weekly_hours) {
         return Err(AppError::BadRequest("Invalid weekly_hours.".into()));
     }
-    if !(0..=366).contains(&body.annual_leave_days) {
+    if !(0..=366).contains(&body.leave_days_current_year) || !(0..=366).contains(&body.leave_days_next_year) {
         return Err(AppError::BadRequest("Invalid annual_leave_days.".into()));
     }
     ensure_email_available(&app_state.pool, &normalized_email, None).await?;
@@ -377,17 +379,30 @@ pub async fn create(
     let mut tx = app_state.pool.begin().await?;
     lock_user_graph(&mut *tx).await?;
     validate_approver(&app_state.pool, &body.role, None, body.approver_id).await?;
-    let new_user_id: i64 = sqlx::query_scalar("INSERT INTO users(email,password_hash,first_name,last_name,role,weekly_hours,annual_leave_days,start_date,must_change_password,approver_id,overtime_start_balance_min) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id")
+    let new_user_id: i64 = sqlx::query_scalar("INSERT INTO users(email,password_hash,first_name,last_name,role,weekly_hours,start_date,must_change_password,approver_id,overtime_start_balance_min) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id")
         .bind(&normalized_email).bind(password_hash).bind(&first_name).bind(&last_name).bind(&body.role)
-        .bind(body.weekly_hours).bind(body.annual_leave_days).bind(body.start_date).bind(true).bind(body.approver_id)
+        .bind(body.weekly_hours).bind(body.start_date).bind(true).bind(body.approver_id)
         .bind(overtime_balance)
         .fetch_one(&mut *tx).await
         .map_err(|e| {
             tracing::warn!(target:"zerf::users", "create user insert failed: {e}");
             user_unique_conflict(&e).unwrap_or_else(|| AppError::Conflict("Could not create user.".into()))
         })?;
+    // Seed leave days for current + next year
+    let current_year = chrono::Local::now().year();
+    sqlx::query(
+        "INSERT INTO user_annual_leave(user_id, year, days) VALUES ($1,$2,$3),($1,$4,$5) \
+         ON CONFLICT (user_id, year) DO UPDATE SET days = EXCLUDED.days",
+    )
+    .bind(new_user_id)
+    .bind(current_year)
+    .bind(body.leave_days_current_year)
+    .bind(current_year + 1)
+    .bind(body.leave_days_next_year)
+    .execute(&mut *tx)
+    .await?;
     tx.commit().await?;
-    let created_user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1")
+    let created_user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1")
         .bind(new_user_id)
         .fetch_one(&app_state.pool)
         .await?;
@@ -439,7 +454,10 @@ pub struct UpdateUser {
     pub last_name: Option<String>,
     pub role: Option<String>,
     pub weekly_hours: Option<f64>,
-    pub annual_leave_days: Option<i64>,
+    /// If provided, sets leave days for the current year.
+    pub leave_days_current_year: Option<i64>,
+    /// If provided, sets leave days for next year.
+    pub leave_days_next_year: Option<i64>,
     pub start_date: Option<NaiveDate>,
     pub active: Option<bool>,
     /// Distinguish "field omitted" (`None`) from "explicit null"
@@ -496,8 +514,13 @@ pub async fn update(
             return Err(AppError::BadRequest("Invalid weekly_hours.".into()));
         }
     }
-    if let Some(annual_leave_days) = body.annual_leave_days {
-        if !(0..=366).contains(&annual_leave_days) {
+    if let Some(d) = body.leave_days_current_year {
+        if !(0..=366).contains(&d) {
+            return Err(AppError::BadRequest("Invalid annual_leave_days.".into()));
+        }
+    }
+    if let Some(d) = body.leave_days_next_year {
+        if !(0..=366).contains(&d) {
             return Err(AppError::BadRequest("Invalid annual_leave_days.".into()));
         }
     }
@@ -519,7 +542,7 @@ pub async fn update(
     let last_name = normalize_optional_user_name(body.last_name.as_ref())?;
     let mut tx = app_state.pool.begin().await?;
     lock_user_graph(&mut *tx).await?;
-    let previous_user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1 FOR UPDATE")
+    let previous_user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1 FOR UPDATE")
         .bind(user_id)
         .fetch_one(&mut *tx)
         .await?;
@@ -599,15 +622,33 @@ pub async fn update(
             ));
         }
     }
-    sqlx::query("UPDATE users SET email=COALESCE($1,email), first_name=COALESCE($2,first_name), last_name=COALESCE($3,last_name), role=COALESCE($4,role), weekly_hours=COALESCE($5,weekly_hours), annual_leave_days=COALESCE($6,annual_leave_days), start_date=COALESCE($7,start_date), active=COALESCE($8,active), allow_reopen_without_approval=COALESCE($9,allow_reopen_without_approval), overtime_start_balance_min=COALESCE($10,overtime_start_balance_min) WHERE id=$11")
+    sqlx::query("UPDATE users SET email=COALESCE($1,email), first_name=COALESCE($2,first_name), last_name=COALESCE($3,last_name), role=COALESCE($4,role), weekly_hours=COALESCE($5,weekly_hours), start_date=COALESCE($6,start_date), active=COALESCE($7,active), allow_reopen_without_approval=COALESCE($8,allow_reopen_without_approval), overtime_start_balance_min=COALESCE($9,overtime_start_balance_min) WHERE id=$10")
         .bind(normalized_email).bind(first_name).bind(last_name).bind(body.role.clone())
-        .bind(body.weekly_hours).bind(body.annual_leave_days).bind(body.start_date).bind(body.active)
+        .bind(body.weekly_hours).bind(body.start_date).bind(body.active)
         .bind(body.allow_reopen_without_approval).bind(body.overtime_start_balance_min).bind(user_id)
         .execute(&mut *tx).await
         .map_err(|e| {
             tracing::warn!(target:"zerf::users", "update user failed: {e}");
             user_unique_conflict(&e).unwrap_or_else(|| AppError::Conflict("Could not update user.".into()))
         })?;
+    // Update leave days if provided
+    let current_year = chrono::Local::now().year();
+    if let Some(d) = body.leave_days_current_year {
+        sqlx::query(
+            "INSERT INTO user_annual_leave(user_id, year, days) VALUES ($1,$2,$3) \
+             ON CONFLICT (user_id, year) DO UPDATE SET days = EXCLUDED.days",
+        )
+        .bind(user_id).bind(current_year).bind(d)
+        .execute(&mut *tx).await?;
+    }
+    if let Some(d) = body.leave_days_next_year {
+        sqlx::query(
+            "INSERT INTO user_annual_leave(user_id, year, days) VALUES ($1,$2,$3) \
+             ON CONFLICT (user_id, year) DO UPDATE SET days = EXCLUDED.days",
+        )
+        .bind(user_id).bind(current_year + 1).bind(d)
+        .execute(&mut *tx).await?;
+    }
     // Approver_id requires special handling because we want to support
     // explicit clearing (Some(None)) which COALESCE cannot express.
     if let Some(approver_value) = body.approver_id {
@@ -633,7 +674,7 @@ pub async fn update(
             .await;
     }
     tx.commit().await?;
-    let updated_user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1")
+    let updated_user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1")
         .bind(user_id)
         .fetch_one(&app_state.pool)
         .await?;
@@ -665,7 +706,7 @@ pub async fn deactivate(
     }
     let mut tx = app_state.pool.begin().await?;
     lock_user_graph(&mut *tx).await?;
-    let previous_user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1 FOR UPDATE")
+    let previous_user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1 FOR UPDATE")
         .bind(user_id)
         .fetch_one(&mut *tx)
         .await?;
@@ -752,44 +793,96 @@ pub async fn reset_password(
     ))
 }
 
-// -- Per-user per-year vacation day overrides ---
+// ---------------------------------------------------------------------------
+// Annual leave facade — single source of truth backed by user_annual_leave.
+// ---------------------------------------------------------------------------
 
-#[derive(Deserialize)]
-pub struct LeaveOverrideBody {
-    pub year: i32,
-    pub days: i64,
-}
-
+/// Row returned by the leave endpoints.
 #[derive(serde::Serialize, sqlx::FromRow)]
-pub struct LeaveOverride {
+pub struct AnnualLeaveRow {
     pub user_id: i64,
     pub year: i32,
     pub days: i64,
 }
 
+/// Get the leave days for `user_id` in `year`.
+/// If no row exists yet, one is created lazily using the global default.
+pub async fn get_leave_days(
+    pool: &crate::db::DatabasePool,
+    user_id: i64,
+    year: i32,
+) -> AppResult<i64> {
+    let existing: Option<i64> =
+        sqlx::query_scalar("SELECT days FROM user_annual_leave WHERE user_id=$1 AND year=$2")
+            .bind(user_id)
+            .bind(year)
+            .fetch_optional(pool)
+            .await?;
+    if let Some(days) = existing {
+        return Ok(days);
+    }
+    let default_days: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(value::BIGINT, 30) FROM app_settings WHERE key='default_annual_leave_days'",
+    )
+    .fetch_optional(pool)
+    .await?
+    .unwrap_or(30);
+    sqlx::query(
+        "INSERT INTO user_annual_leave(user_id, year, days) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING",
+    )
+    .bind(user_id).bind(year).bind(default_days)
+    .execute(pool)
+    .await?;
+    Ok(default_days)
+}
+
+/// Set the leave days for `user_id` in `year` (upsert).
+pub async fn set_leave_days(
+    pool: &crate::db::DatabasePool,
+    user_id: i64,
+    year: i32,
+    days: i64,
+) -> AppResult<()> {
+    sqlx::query(
+        "INSERT INTO user_annual_leave(user_id, year, days) VALUES ($1,$2,$3) \
+         ON CONFLICT (user_id, year) DO UPDATE SET days = EXCLUDED.days",
+    )
+    .bind(user_id).bind(year).bind(days)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+// HTTP: GET /users/{id}/leave-overrides — returns current + next year rows
 pub async fn get_leave_overrides(
     State(app_state): State<AppState>,
     requester: User,
     Path(user_id): Path<i64>,
-) -> AppResult<Json<Vec<LeaveOverride>>> {
-    // Admins can read any user's overrides; non-admins can only read their own.
+) -> AppResult<Json<Vec<AnnualLeaveRow>>> {
     if !requester.is_admin() && requester.id != user_id {
         return Err(AppError::Forbidden);
     }
-    let override_rows = sqlx::query_as::<_, LeaveOverride>(
-        "SELECT user_id, year, days FROM user_annual_leave_overrides WHERE user_id=$1 ORDER BY year",
-    )
-    .bind(user_id)
-    .fetch_all(&app_state.pool)
-    .await?;
-    Ok(Json(override_rows))
+    let current_year = chrono::Local::now().year();
+    let this = get_leave_days(&app_state.pool, user_id, current_year).await?;
+    let next = get_leave_days(&app_state.pool, user_id, current_year + 1).await?;
+    Ok(Json(vec![
+        AnnualLeaveRow { user_id, year: current_year, days: this },
+        AnnualLeaveRow { user_id, year: current_year + 1, days: next },
+    ]))
 }
 
+#[derive(Deserialize)]
+pub struct SetLeaveBody {
+    pub year: i32,
+    pub days: i64,
+}
+
+// HTTP: PUT /users/{id}/leave-overrides — admin sets a specific year
 pub async fn set_leave_override(
     State(app_state): State<AppState>,
     requester: User,
     Path(user_id): Path<i64>,
-    Json(body): Json<LeaveOverrideBody>,
+    Json(body): Json<SetLeaveBody>,
 ) -> AppResult<Json<serde_json::Value>> {
     if !requester.is_admin() {
         return Err(AppError::Forbidden);
@@ -797,13 +890,12 @@ pub async fn set_leave_override(
     let current_year = chrono::Local::now().year();
     if body.year < current_year || body.year > current_year + 1 {
         return Err(AppError::BadRequest(
-            "Leave overrides can only be set for the current or next year.".into(),
+            "Leave days can only be set for the current or next year.".into(),
         ));
     }
     if !(0..=366).contains(&body.days) {
         return Err(AppError::BadRequest("Invalid days value.".into()));
     }
-    // Verify user exists and is active
     let is_active: bool = sqlx::query_scalar("SELECT active FROM users WHERE id=$1")
         .bind(user_id)
         .fetch_optional(&app_state.pool)
@@ -812,15 +904,7 @@ pub async fn set_leave_override(
     if !is_active {
         return Err(AppError::BadRequest("User is inactive.".into()));
     }
-    sqlx::query(
-        "INSERT INTO user_annual_leave_overrides(user_id, year, days) VALUES ($1, $2, $3) \
-         ON CONFLICT (user_id, year) DO UPDATE SET days = EXCLUDED.days",
-    )
-    .bind(user_id)
-    .bind(body.year)
-    .bind(body.days)
-    .execute(&app_state.pool)
-    .await?;
+    set_leave_days(&app_state.pool, user_id, body.year, body.days).await?;
     audit::log(
         &app_state.pool,
         requester.id,
@@ -828,7 +912,7 @@ pub async fn set_leave_override(
         "users",
         user_id,
         None,
-        Some(serde_json::json!({"leave_override": {"year": body.year, "days": body.days}})),
+        Some(serde_json::json!({"annual_leave": {"year": body.year, "days": body.days}})),
     )
     .await;
     Ok(Json(serde_json::json!({"ok": true})))

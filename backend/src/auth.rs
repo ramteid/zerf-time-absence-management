@@ -55,7 +55,6 @@ pub struct User {
     pub last_name: String,
     pub role: String,
     pub weekly_hours: f64,
-    pub annual_leave_days: i64,
     pub start_date: chrono::NaiveDate,
     pub active: bool,
     pub must_change_password: bool,
@@ -284,7 +283,7 @@ pub async fn login(
     }
 
     let user: Option<User> =
-        sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE email = $1")
+        sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE email = $1")
             .bind(&email)
             .fetch_optional(&app_state.pool)
             .await?;
@@ -434,7 +433,7 @@ pub async fn me(
         "id": user.id, "email": user.email,
         "first_name": user.first_name, "last_name": user.last_name,
         "role": user.role, "weekly_hours": user.weekly_hours,
-        "annual_leave_days": user.annual_leave_days, "start_date": user.start_date,
+        "start_date": user.start_date,
         "overtime_start_balance_min": user.overtime_start_balance_min,
         "active": user.active, "must_change_password": user.must_change_password,
         "must_configure_settings": must_configure_settings,
@@ -698,7 +697,7 @@ pub async fn auth_middleware(
         .bind(&token_hash)
         .execute(&app_state.pool)
         .await?;
-    let user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, annual_leave_days, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1 AND active=TRUE")
+    let user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1 AND active=TRUE")
         .bind(user_id)
         .fetch_optional(&app_state.pool)
         .await?
@@ -823,17 +822,39 @@ pub async fn setup(
             "Setup has already been completed.".into(),
         ));
     }
+    let default_leave_days: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(value::BIGINT, 30) FROM app_settings WHERE key='default_annual_leave_days'",
+    )
+    .fetch_optional(&mut *tx)
+    .await?
+    .unwrap_or(30);
     sqlx::query(
         "INSERT INTO users(email, password_hash, first_name, last_name, role, \
-         weekly_hours, annual_leave_days, start_date, must_change_password, \
+         weekly_hours, start_date, must_change_password, \
          overtime_start_balance_min) \
-         VALUES ($1, $2, $3, $4, 'admin', 39.0, 30, $5, FALSE, 0)",
+         VALUES ($1, $2, $3, $4, 'admin', 39.0, $5, FALSE, 0)",
     )
     .bind(&email)
     .bind(&password_hash)
     .bind(&first_name)
     .bind(&last_name)
     .bind(today)
+    .execute(&mut *tx)
+    .await?;
+    let new_user_id: i64 =
+        sqlx::query_scalar("SELECT id FROM users WHERE email=$1")
+            .bind(&email)
+            .fetch_one(&mut *tx)
+            .await?;
+    let current_year = chrono::Utc::now().date_naive().year();
+    sqlx::query(
+        "INSERT INTO user_annual_leave(user_id, year, days) VALUES ($1,$2,$3),($1,$4,$3) \
+         ON CONFLICT DO NOTHING",
+    )
+    .bind(new_user_id)
+    .bind(current_year)
+    .bind(default_leave_days)
+    .bind(current_year + 1)
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
