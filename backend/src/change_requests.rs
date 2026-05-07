@@ -39,7 +39,10 @@ pub struct ChangeRequest {
     pub created_at: DateTime<Utc>,
 }
 
-pub async fn list(State(app_state): State<AppState>, requester: User) -> AppResult<Json<Vec<ChangeRequest>>> {
+pub async fn list(
+    State(app_state): State<AppState>,
+    requester: User,
+) -> AppResult<Json<Vec<ChangeRequest>>> {
     Ok(Json(
         sqlx::query_as::<_, ChangeRequest>(
             "SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE user_id=$1 ORDER BY created_at DESC",
@@ -50,7 +53,10 @@ pub async fn list(State(app_state): State<AppState>, requester: User) -> AppResu
     ))
 }
 
-pub async fn list_all(State(app_state): State<AppState>, requester: User) -> AppResult<Json<Vec<ChangeRequest>>> {
+pub async fn list_all(
+    State(app_state): State<AppState>,
+    requester: User,
+) -> AppResult<Json<Vec<ChangeRequest>>> {
     if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
@@ -92,6 +98,7 @@ fn parse_change_time(time_str: &str) -> AppResult<NaiveTime> {
         .map_err(|_| AppError::BadRequest("Invalid time format (HH:MM).".into()))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn has_actual_change(
     current_date: NaiveDate,
     current_start: NaiveTime,
@@ -106,7 +113,7 @@ fn has_actual_change(
 ) -> bool {
     let current_comment = current_comment.filter(|v| !v.is_empty());
     let comment_changed = new_comment.is_some_and(|comment| {
-        comment.is_empty().then_some(None).unwrap_or(Some(comment)) != current_comment
+        (if comment.is_empty() { None } else { Some(comment) }) != current_comment
     });
 
     new_date.is_some_and(|date| date != current_date)
@@ -379,11 +386,21 @@ pub async fn approve(
             .new_end_time
             .clone()
             .unwrap_or_else(|| existing_entry.end_time.clone()),
-        category_id: change_request.new_category_id.unwrap_or(existing_entry.category_id),
-        comment: change_request.new_comment.clone().or(existing_entry.comment.clone()),
+        category_id: change_request
+            .new_category_id
+            .unwrap_or(existing_entry.category_id),
+        comment: change_request
+            .new_comment
+            .clone()
+            .or(existing_entry.comment.clone()),
     };
-    crate::time_entries::validate(&mut *tx, existing_entry.user_id, &effective_entry, Some(change_request.time_entry_id))
-        .await?;
+    crate::time_entries::validate(
+        &mut tx,
+        existing_entry.user_id,
+        &effective_entry,
+        Some(change_request.time_entry_id),
+    )
+    .await?;
     // Use optimistic locking: only proceed if status is still 'open'.
     let rows_claimed = sqlx::query(
         "UPDATE change_requests SET status='approved', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP WHERE id=$2 AND status='open'",
@@ -428,7 +445,10 @@ pub async fn approve(
         "change_request_approved",
         "change_request_approved_title",
         "change_request_approved_body",
-        vec![("entry_date", i18n::format_date(&language, affected_entry_date))],
+        vec![(
+            "entry_date",
+            i18n::format_date(&language, affected_entry_date),
+        )],
         Some("change_requests"),
         Some(change_request_id),
     )
@@ -512,7 +532,11 @@ pub async fn reject(
             .bind(change_request.time_entry_id)
             .fetch_one(&app_state.pool)
             .await
-            .unwrap_or(change_request.new_date.unwrap_or(chrono::Local::now().date_naive()));
+            .unwrap_or(
+                change_request
+                    .new_date
+                    .unwrap_or(chrono::Local::now().date_naive()),
+            );
     crate::notifications::create_translated(
         &app_state,
         &language,
@@ -521,7 +545,10 @@ pub async fn reject(
         "change_request_rejected_title",
         "change_request_rejected_body",
         vec![
-            ("entry_date", i18n::format_date(&language, affected_entry_date)),
+            (
+                "entry_date",
+                i18n::format_date(&language, affected_entry_date),
+            ),
             ("reason", body.reason.clone()),
         ],
         Some("change_requests"),

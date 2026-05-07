@@ -87,6 +87,7 @@ pub async fn create(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn create_translated(
     state: &AppState,
     language: &Language,
@@ -112,7 +113,10 @@ pub async fn create_translated(
     .await;
 }
 
-pub async fn list(State(app_state): State<AppState>, requester: User) -> AppResult<Json<Vec<Notification>>> {
+pub async fn list(
+    State(app_state): State<AppState>,
+    requester: User,
+) -> AppResult<Json<Vec<Notification>>> {
     Ok(Json(
         sqlx::query_as::<_, Notification>(
             "SELECT id, user_id, kind, title, body, reference_type, reference_id, is_read, created_at FROM notifications WHERE user_id=$1 \
@@ -146,7 +150,9 @@ pub async fn stream(
             Ok(signal) => signal.user_id == requester_id,
             Err(_) => true, // lagged — refresh to catch up
         };
-        should_refresh.then_some(Ok(Event::default().event("notification").data(r#"{"type":"refresh"}"#)))
+        should_refresh.then_some(Ok(Event::default()
+            .event("notification")
+            .data(r#"{"type":"refresh"}"#)))
     });
 
     Sse::new(stream).keep_alive(
@@ -161,12 +167,13 @@ pub async fn mark_read(
     requester: User,
     Path(notification_id): Path<i64>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let rows_updated = sqlx::query("UPDATE notifications SET is_read=TRUE WHERE id=$1 AND user_id=$2")
-        .bind(notification_id)
-        .bind(requester.id)
-        .execute(&app_state.pool)
-        .await?
-        .rows_affected();
+    let rows_updated =
+        sqlx::query("UPDATE notifications SET is_read=TRUE WHERE id=$1 AND user_id=$2")
+            .bind(notification_id)
+            .bind(requester.id)
+            .execute(&app_state.pool)
+            .await?
+            .rows_affected();
     if rows_updated == 0 {
         return Err(AppError::NotFound);
     }
@@ -183,16 +190,23 @@ pub async fn mark_all_read(
             .execute(&app_state.pool)
             .await?
             .rows_affected();
-    Ok(Json(serde_json::json!({ "ok": true, "count": rows_updated })))
+    Ok(Json(
+        serde_json::json!({ "ok": true, "count": rows_updated }),
+    ))
 }
 
-pub async fn delete_all(State(app_state): State<AppState>, requester: User) -> AppResult<Json<serde_json::Value>> {
+pub async fn delete_all(
+    State(app_state): State<AppState>,
+    requester: User,
+) -> AppResult<Json<serde_json::Value>> {
     let rows_deleted = sqlx::query("DELETE FROM notifications WHERE user_id=$1")
         .bind(requester.id)
         .execute(&app_state.pool)
         .await?
         .rows_affected();
-    Ok(Json(serde_json::json!({ "ok": true, "count": rows_deleted })))
+    Ok(Json(
+        serde_json::json!({ "ok": true, "count": rows_deleted }),
+    ))
 }
 
 /// Trim notifications older than 90 days; called from the background loop.

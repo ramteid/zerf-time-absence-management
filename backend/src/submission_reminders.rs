@@ -259,7 +259,9 @@ pub async fn run_check(state: &crate::AppState) {
 /// Background loop: sleep until the next deadline day at 07:00 then run check.
 pub async fn run_loop(pool: DatabasePool, state: crate::AppState) {
     loop {
-        let day_str = load_setting(&pool, SUBMISSION_DEADLINE_DAY_KEY, "").await.unwrap_or_default();
+        let day_str = load_setting(&pool, SUBMISSION_DEADLINE_DAY_KEY, "")
+            .await
+            .unwrap_or_default();
         let day: Option<u8> = day_str.parse().ok().filter(|&d: &u8| (1..=28).contains(&d));
 
         if let Some(d) = day {

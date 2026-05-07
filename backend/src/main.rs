@@ -75,7 +75,10 @@ async fn main() -> Result<()> {
     }
 
     // Submission reminder scheduler: wakes at 07:00 on the configured deadline day.
-    tokio::spawn(zerf::submission_reminders::run_loop(pool.clone(), state.clone()));
+    tokio::spawn(zerf::submission_reminders::run_loop(
+        pool.clone(),
+        state.clone(),
+    ));
 
     let app = build_app(state);
 

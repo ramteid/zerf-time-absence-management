@@ -121,7 +121,8 @@ where
 
 async fn load_all_settings(pool: &crate::db::DatabasePool) -> AppResult<PublicSettings> {
     let default_weekly_hours_str = load_setting(pool, DEFAULT_WEEKLY_HOURS_KEY, "").await?;
-    let default_annual_leave_days_str = load_setting(pool, DEFAULT_ANNUAL_LEAVE_DAYS_KEY, "").await?;
+    let default_annual_leave_days_str =
+        load_setting(pool, DEFAULT_ANNUAL_LEAVE_DAYS_KEY, "").await?;
     let submission_deadline_day_str = load_setting(pool, SUBMISSION_DEADLINE_DAY_KEY, "").await?;
     Ok(PublicSettings {
         ui_language: load_setting(pool, UI_LANGUAGE_KEY, DEFAULT_UI_LANGUAGE).await?,
@@ -154,11 +155,16 @@ pub async fn admin_settings(
     Ok(Json(load_admin_settings_response(&app_state.pool).await?))
 }
 
-async fn load_admin_settings_response(pool: &crate::db::DatabasePool) -> AppResult<AdminSettingsResponse> {
+async fn load_admin_settings_response(
+    pool: &crate::db::DatabasePool,
+) -> AppResult<AdminSettingsResponse> {
     let base = load_all_settings(pool).await?;
     let enabled = load_setting(pool, SMTP_ENABLED_KEY, "false").await? == "true";
     let host = load_setting(pool, SMTP_HOST_KEY, "").await?;
-    let port: u16 = load_setting(pool, SMTP_PORT_KEY, "587").await?.parse().unwrap_or(587);
+    let port: u16 = load_setting(pool, SMTP_PORT_KEY, "587")
+        .await?
+        .parse()
+        .unwrap_or(587);
     let username = load_setting(pool, SMTP_USERNAME_KEY, "").await?;
     let from = load_setting(pool, SMTP_FROM_KEY, "").await?;
     let encryption = load_setting(pool, SMTP_ENCRYPTION_KEY, "starttls").await?;
@@ -183,19 +189,37 @@ async fn smtp_config_from_body(
 ) -> AppResult<SmtpConfig> {
     let host = body.smtp_host.trim().to_string();
     let from = body.smtp_from.trim().to_string();
-    let encryption = body.smtp_encryption.as_deref().unwrap_or("starttls").trim().to_lowercase();
+    let encryption = body
+        .smtp_encryption
+        .as_deref()
+        .unwrap_or("starttls")
+        .trim()
+        .to_lowercase();
     let port = body.smtp_port.unwrap_or(587);
-    let username = body.smtp_username.as_deref().unwrap_or("").trim().to_string();
+    let username = body
+        .smtp_username
+        .as_deref()
+        .unwrap_or("")
+        .trim()
+        .to_string();
     let password = if body.smtp_password.as_ref().is_some_and(|p| !p.is_empty()) {
         body.smtp_password.clone()
     } else {
         let stored = load_setting(pool, SMTP_PASSWORD_KEY, "").await?;
-        if stored.is_empty() { None } else { Some(stored) }
+        if stored.is_empty() {
+            None
+        } else {
+            Some(stored)
+        }
     };
     Ok(SmtpConfig {
         host,
         port,
-        username: if username.is_empty() { None } else { Some(username) },
+        username: if username.is_empty() {
+            None
+        } else {
+            Some(username)
+        },
         password,
         from,
         encryption,
@@ -267,7 +291,9 @@ pub async fn update_smtp_settings(
             return Err(AppError::BadRequest("SMTP host is required.".into()));
         }
         if from.is_empty() {
-            return Err(AppError::BadRequest("SMTP from address is required.".into()));
+            return Err(AppError::BadRequest(
+                "SMTP from address is required.".into(),
+            ));
         }
         // Validate from address is parseable as a mailbox.
         use lettre::message::Mailbox;
@@ -288,7 +314,12 @@ pub async fn update_smtp_settings(
 
     save_setting_exec(&mut *tx, SMTP_HOST_KEY, &cfg.host).await?;
     save_setting_exec(&mut *tx, SMTP_PORT_KEY, &cfg.port.to_string()).await?;
-    save_setting_exec(&mut *tx, SMTP_USERNAME_KEY, cfg.username.as_deref().unwrap_or("")).await?;
+    save_setting_exec(
+        &mut *tx,
+        SMTP_USERNAME_KEY,
+        cfg.username.as_deref().unwrap_or(""),
+    )
+    .await?;
     save_setting_exec(&mut *tx, SMTP_FROM_KEY, &cfg.from).await?;
     save_setting_exec(&mut *tx, SMTP_ENCRYPTION_KEY, &cfg.encryption).await?;
 
@@ -297,7 +328,12 @@ pub async fn update_smtp_settings(
         save_setting_exec(&mut *tx, SMTP_PASSWORD_KEY, password).await?;
     }
 
-    save_setting_exec(&mut *tx, SMTP_ENABLED_KEY, if body.smtp_enabled { "true" } else { "false" }).await?;
+    save_setting_exec(
+        &mut *tx,
+        SMTP_ENABLED_KEY,
+        if body.smtp_enabled { "true" } else { "false" },
+    )
+    .await?;
 
     tx.commit().await?;
 
@@ -321,7 +357,9 @@ pub async fn test_smtp_connection(
         return Err(AppError::BadRequest("SMTP host is required.".into()));
     }
     if from.is_empty() {
-        return Err(AppError::BadRequest("SMTP from address is required.".into()));
+        return Err(AppError::BadRequest(
+            "SMTP from address is required.".into(),
+        ));
     }
 
     let test_config = smtp_config_from_body(&app_state.pool, &body).await?;
@@ -372,35 +410,36 @@ pub async fn update_admin_settings(
     }
 
     // Validate carryover expiry date (MM-DD format).
-    let validated_carryover_date: Option<String> = if let Some(ref carryover_date) = body.carryover_expiry_date {
-        let carryover_date = carryover_date.trim();
-        let parts: Vec<&str> = carryover_date.split('-').collect();
-        if parts.len() != 2 {
-            return Err(AppError::BadRequest(
-                "carryover_expiry_date must be MM-DD.".into(),
-            ));
-        }
-        let month: u32 = parts[0]
-            .parse()
-            .map_err(|_| AppError::BadRequest("Invalid month in carryover_expiry_date.".into()))?;
-        let day: u32 = parts[1]
-            .parse()
-            .map_err(|_| AppError::BadRequest("Invalid day in carryover_expiry_date.".into()))?;
-        if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
-            return Err(AppError::BadRequest(
-                "Invalid carryover_expiry_date.".into(),
-            ));
-        }
-        // Validate that the date actually exists (use a non-leap year to be strict).
-        if chrono::NaiveDate::from_ymd_opt(2025, month, day).is_none() {
-            return Err(AppError::BadRequest(
-                "Invalid carryover_expiry_date.".into(),
-            ));
-        }
-        Some(carryover_date.to_string())
-    } else {
-        None
-    };
+    let validated_carryover_date: Option<String> =
+        if let Some(ref carryover_date) = body.carryover_expiry_date {
+            let carryover_date = carryover_date.trim();
+            let parts: Vec<&str> = carryover_date.split('-').collect();
+            if parts.len() != 2 {
+                return Err(AppError::BadRequest(
+                    "carryover_expiry_date must be MM-DD.".into(),
+                ));
+            }
+            let month: u32 = parts[0].parse().map_err(|_| {
+                AppError::BadRequest("Invalid month in carryover_expiry_date.".into())
+            })?;
+            let day: u32 = parts[1].parse().map_err(|_| {
+                AppError::BadRequest("Invalid day in carryover_expiry_date.".into())
+            })?;
+            if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+                return Err(AppError::BadRequest(
+                    "Invalid carryover_expiry_date.".into(),
+                ));
+            }
+            // Validate that the date actually exists (use a non-leap year to be strict).
+            if chrono::NaiveDate::from_ymd_opt(2025, month, day).is_none() {
+                return Err(AppError::BadRequest(
+                    "Invalid carryover_expiry_date.".into(),
+                ));
+            }
+            Some(carryover_date.to_string())
+        } else {
+            None
+        };
 
     if let Some(day) = body.submission_deadline_day {
         if !(1..=28).contains(&day) {
@@ -436,8 +475,18 @@ pub async fn update_admin_settings(
     save_setting_exec(&mut *tx, TIME_FORMAT_KEY, time_format).await?;
     let saved_country = save_setting_exec(&mut *tx, COUNTRY_KEY, &country).await?;
     let saved_region = save_setting_exec(&mut *tx, REGION_KEY, &region).await?;
-    save_setting_exec(&mut *tx, DEFAULT_WEEKLY_HOURS_KEY, &default_weekly_hours_str).await?;
-    save_setting_exec(&mut *tx, DEFAULT_ANNUAL_LEAVE_DAYS_KEY, &default_annual_leave_days_str).await?;
+    save_setting_exec(
+        &mut *tx,
+        DEFAULT_WEEKLY_HOURS_KEY,
+        &default_weekly_hours_str,
+    )
+    .await?;
+    save_setting_exec(
+        &mut *tx,
+        DEFAULT_ANNUAL_LEAVE_DAYS_KEY,
+        &default_annual_leave_days_str,
+    )
+    .await?;
 
     tx.commit().await?;
 
@@ -445,7 +494,9 @@ pub async fn update_admin_settings(
     if !saved_country.is_empty()
         && (previous_settings.country != saved_country || previous_settings.region != saved_region)
     {
-        if let Err(e) = holidays::refresh_holidays(&app_state.pool, &saved_country, &saved_region).await {
+        if let Err(e) =
+            holidays::refresh_holidays(&app_state.pool, &saved_country, &saved_region).await
+        {
             tracing::warn!("Failed to refresh holidays: {:?}", e);
         }
     }

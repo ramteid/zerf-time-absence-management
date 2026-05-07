@@ -32,7 +32,9 @@ pub fn send_async(smtp: Option<Arc<SmtpConfig>>, to: String, subject: String, bo
 pub async fn test_connection(
     cfg: &SmtpConfig,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    build_mailer(cfg, Some(Duration::from_secs(10)))?.test_connection().await?;
+    build_mailer(cfg, Some(Duration::from_secs(10)))?
+        .test_connection()
+        .await?;
     Ok(())
 }
 
