@@ -30,6 +30,7 @@
 
   // Per-year vacation day overrides
   let leaveOverrides = [];
+  let pendingOverrides = []; // For new users: queued overrides saved after creation
   let overrideYear = new Date().getFullYear();
   let overrideDays = "";
   let overrideSaving = false;
@@ -146,6 +147,17 @@
       }
       if (isNew) {
         const r = await api("/users", { method: "POST", body });
+        // Save all pending vacation day overrides for the new user
+        for (const po of pendingOverrides) {
+          try {
+            await api(`/users/${r.id}/leave-overrides`, {
+              method: "PUT",
+              body: { year: po.year, days: po.days },
+            });
+          } catch (e) {
+            console.error("Failed to save leave override:", e);
+          }
+        }
         showTempPassword = r.temporary_password;
       } else {
         await api("/users/" + template.id, { method: "PUT", body });
@@ -173,19 +185,31 @@
       error = $t("Please enter vacation days.");
       return;
     }
-    overrideSaving = true;
     error = "";
-    try {
-      await api(`/users/${template.id}/leave-overrides`, {
-        method: "PUT",
-        body: { year: Number(overrideYear), days: Number(overrideDays) },
-      });
-      leaveOverrides = await api(`/users/${template.id}/leave-overrides`);
+    if (!isNew) {
+      // For existing users, save immediately
+      overrideSaving = true;
+      try {
+        await api(`/users/${template.id}/leave-overrides`, {
+          method: "PUT",
+          body: { year: Number(overrideYear), days: Number(overrideDays) },
+        });
+        leaveOverrides = await api(`/users/${template.id}/leave-overrides`);
+        overrideDays = "";
+      } catch (e) {
+        error = $t(e?.message || "Error");
+      } finally {
+        overrideSaving = false;
+      }
+    } else {
+      // For new users, queue locally — will be saved after user creation
+      const year = Number(overrideYear);
+      const days = Number(overrideDays);
+      pendingOverrides = [
+        ...pendingOverrides.filter((o) => o.year !== year),
+        { year, days },
+      ];
       overrideDays = "";
-    } catch (e) {
-      error = $t(e?.message || "Error");
-    } finally {
-      overrideSaving = false;
     }
   }
 
@@ -287,35 +311,24 @@
           />
         </div>
       </div>
-      <div class="field-row">
-        <div>
-          <label class="kz-label" for="user-weekly-hours"
-            >{$t("Weekly hours")}</label
-          >
-          <input
-            id="user-weekly-hours"
-            class="kz-input"
-            type="number"
-            step="0.5"
-            min="0"
-            max="168"
-            bind:value={weekly_hours}
-          />
+      {#if isNew}
+        <div class="field-row">
+          <div>
+            <label class="kz-label" for="user-weekly-hours"
+              >{$t("Weekly hours")}</label
+            >
+            <input
+              id="user-weekly-hours"
+              class="kz-input"
+              type="number"
+              step="0.5"
+              min="0"
+              max="168"
+              bind:value={weekly_hours}
+            />
+          </div>
         </div>
-        <div>
-          <label class="kz-label" for="user-annual-leave-days"
-            >{$t("Annual leave days")}</label
-          >
-          <input
-            id="user-annual-leave-days"
-            class="kz-input"
-            type="number"
-            min="0"
-            max="366"
-            bind:value={annual_leave_days}
-          />
-        </div>
-      </div>
+      {/if}
       <div>
         <label class="kz-label" for="user-overtime-balance"
           >{$t("Overtime start balance (hours)")}</label
@@ -333,68 +346,87 @@
           )}
         </div>
       </div>
-      {#if !isNew}
-        <div>
-          <div
-            style="font-size:13px;font-weight:600;margin-bottom:8px;margin-top:4px"
-          >
-            {$t("Vacation days per year")}
-          </div>
-          {#if leaveOverrides.length > 0}
-            <div style="margin-bottom:8px;font-size:12px">
-              {#each leaveOverrides as o}
-                <div
-                  style="display:flex;gap:8px;align-items:center;padding:2px 0"
-                >
-                  <span class="tab-num" style="min-width:50px">{o.year}:</span>
-                  <span class="tab-num">{o.days} {$t("days")}</span>
-                </div>
-              {/each}
-            </div>
-          {/if}
-          <div class="field-row" style="align-items:flex-end">
-            <div>
-              <label class="kz-label" for="override-year">{$t("Year")}</label>
-              <select
-                id="override-year"
-                class="kz-select"
-                bind:value={overrideYear}
+      <div>
+        <div
+          style="font-size:13px;font-weight:600;margin-bottom:8px;margin-top:4px"
+        >
+          {$t("Vacation days per year")}
+        </div>
+        {#if !isNew && leaveOverrides.length > 0}
+          <div style="margin-bottom:12px;font-size:12px">
+            {#each leaveOverrides as o}
+              <div
+                style="display:flex;gap:8px;align-items:center;padding:4px 0"
               >
-                <option value={new Date().getFullYear()}
-                  >{new Date().getFullYear()}</option
-                >
-                <option value={new Date().getFullYear() + 1}
-                  >{new Date().getFullYear() + 1}</option
-                >
-              </select>
-            </div>
-            <div>
-              <label class="kz-label" for="override-days">{$t("Days")}</label>
-              <input
-                id="override-days"
-                class="kz-input"
-                type="number"
-                min="0"
-                max="366"
-                bind:value={overrideDays}
-                style="width:80px"
-              />
-            </div>
-            <button
-              class="kz-btn kz-btn-sm"
-              on:click={saveLeaveOverride}
-              disabled={overrideSaving}
-            >
-              {$t("Set")}
-            </button>
+                <span style="min-width:50px;font-weight:500">{o.year}:</span>
+                <span>{o.days} {$t("days")}</span>
+              </div>
+            {/each}
           </div>
-          <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
+        {/if}
+        {#if isNew && pendingOverrides.length > 0}
+          <div style="margin-bottom:12px;font-size:12px">
+            {#each pendingOverrides as o}
+              <div
+                style="display:flex;gap:8px;align-items:center;padding:4px 0"
+              >
+                <span style="min-width:50px;font-weight:500">{o.year}:</span>
+                <span>{o.days} {$t("days")}</span>
+              </div>
+            {/each}
+          </div>
+        {/if}
+        <div
+          style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end"
+        >
+          <div style="flex:0 1 auto;min-width:100px">
+            <label class="kz-label" for="override-year">{$t("Year")}</label>
+            <select
+              id="override-year"
+              class="kz-select"
+              bind:value={overrideYear}
+            >
+              <option value={new Date().getFullYear()}
+                >{new Date().getFullYear()}</option
+              >
+              <option value={new Date().getFullYear() + 1}
+                >{new Date().getFullYear() + 1}</option
+              >
+            </select>
+          </div>
+          <div style="flex:0 1 auto;min-width:90px">
+            <label class="kz-label" for="override-days">{$t("Days")}</label>
+            <input
+              id="override-days"
+              class="kz-input"
+              type="number"
+              min="0"
+              max="366"
+              bind:value={overrideDays}
+              style="width:100%"
+            />
+          </div>
+          <button
+            class="kz-btn kz-btn-sm"
+            on:click={saveLeaveOverride}
+            disabled={isNew ? false : overrideSaving}
+            style="flex:0 1 auto;white-space:nowrap"
+          >
+            {$t("Set")}
+          </button>
+        </div>
+        <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
+          {#if isNew}
+            {$t(
+              "Set vacation days for specific years. These will be saved after user creation.",
+            )}
+          {:else}
             {$t(
               "Overrides the default annual leave days for this user in the selected year.",
             )}
-          </div>
+          {/if}
         </div>
-      {/if}
+      </div>
       {#if !isNew}
         <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--border)">
           <div>
