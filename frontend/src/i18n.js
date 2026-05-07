@@ -117,6 +117,10 @@ const TRANSLATIONS = {
     "Carryover expiry date (MM-DD)": "Carryover expiry date (MM-DD)",
     "Unused vacation from the previous year expires on this date.":
       "Unused vacation from the previous year expires on this date.",
+    "Shown on the login screen and in the navigation.":
+      "Shown on the login screen and in the navigation.",
+    "Users will be notified on this day of each month if they have unsubmitted time entries for previous months. Leave empty to disable. (1\u201328)":
+      "Users will be notified on this day of each month if they have unsubmitted time entries for previous months. Leave empty to disable. (1\u201328)",
     "Vacation days per year": "Vacation days per year",
     days: "days",
     Set: "Set",
@@ -449,6 +453,8 @@ const TRANSLATIONS = {
     "General Settings": "Allgemeine Einstellungen",
     General: "Allgemein",
     "Organization name": "Organisationsname",
+    "Shown on the login screen and in the navigation.":
+      "Wird auf dem Anmeldebildschirm und in der Navigation angezeigt.",
     "Save Changes": "Änderungen speichern",
     "Saving...": "Speichert...",
     "Signing in…": "Anmeldung läuft…",
@@ -861,6 +867,8 @@ const TRANSLATIONS = {
     "Carryover expiry date (MM-DD)": "Stichtag Urlaubsverfall (MM-TT)",
     "Unused vacation from the previous year expires on this date.":
       "Nicht genommener Urlaub aus dem Vorjahr verfällt an diesem Stichtag.",
+    "Users will be notified on this day of each month if they have unsubmitted time entries for previous months. Leave empty to disable. (1\u201328)":
+      "Benutzer werden an diesem Tag jedes Monats benachrichtigt, wenn sie noch nicht eingereichte Zeiteinträge aus Vormonaten haben. Leer lassen zum Deaktivieren. (1\u201328)",
     "Vacation days per year": "Urlaubstage pro Jahr",
     days: "Tage",
     Set: "Setzen",
