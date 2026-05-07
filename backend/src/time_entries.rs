@@ -444,8 +444,9 @@ pub async fn approve(
         .bind(entry_id)
         .fetch_one(&mut *tx)
         .await?;
-    // No user may approve their own entry.
-    if entry.user_id == requester.id {
+    // No user may approve their own entry — except admins, who may have
+    // no one above them to approve.
+    if entry.user_id == requester.id && !requester.is_admin() {
         return Err(AppError::Forbidden);
     }
     if !requester.is_admin() {
@@ -530,8 +531,8 @@ pub async fn reject(
         .bind(entry_id)
         .fetch_one(&mut *tx)
         .await?;
-    // No user may reject their own entry.
-    if entry.user_id == requester.id {
+    // No user may reject their own entry — except admins.
+    if entry.user_id == requester.id && !requester.is_admin() {
         return Err(AppError::Forbidden);
     }
     if !requester.is_admin() {

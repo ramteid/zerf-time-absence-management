@@ -271,12 +271,14 @@ pub async fn login(
     .fetch_one(&app_state.pool)
     .await?;
     if failures >= MAX_FAILED_LOGINS {
-        // Record the blocked attempt so the lockout window extends under
-        // sustained attack (the window is sliding, based on recent failures).
-        let _ = sqlx::query("INSERT INTO login_attempts(email, success) VALUES ($1, FALSE)")
-            .bind(&email)
-            .execute(&app_state.pool)
-            .await;
+        // Account is in lockout. We deliberately do NOT insert another failed
+        // attempt here. Doing so would let any unauthenticated attacker who
+        // knows a target email address keep that account permanently locked
+        // out from the public internet by spraying bad logins — including
+        // during incident response. The existing failures naturally expire
+        // after LOCKOUT_MIN minutes, after which the legitimate user can
+        // retry. We log server-side so operators retain visibility.
+        tracing::warn!(target: "zerf::auth", email = %email, "login attempt during lockout window — ignored");
         // Generic message — never reveal that the account exists/is locked.
         return Err(AppError::BadRequest("Invalid email or password.".into()));
     }
@@ -875,6 +877,14 @@ pub async fn forgot_password(
     };
 
     let email = body.email.trim().to_lowercase();
+    // Bound the email length BEFORE writing it to login_attempts. Without
+    // this, an attacker can stuff up to ~1 MiB strings (the request-body
+    // limit) into the rate-limit table at 3 rows per 15 min per "email",
+    // causing slow storage/index bloat. Always return the same generic
+    // success response so we don't introduce an enumeration oracle.
+    if email.is_empty() || email.len() > 254 {
+        return Ok(Json(serde_json::json!({ "ok": true })));
+    }
 
     // Rate-limit: max 3 reset attempts per email per 15 minutes.
     let since: DateTime<Utc> = Utc::now() - Duration::minutes(15);

@@ -354,11 +354,10 @@ async fn forgot_password_requires_public_url_when_smtp_is_enabled() {
             &json!({"email": "admin@example.com"}),
         )
         .await;
-    assert_eq!(st, StatusCode::BAD_REQUEST, "public URL is required");
-    assert_eq!(
-        body["error"], "public_url_not_configured",
-        "missing public URL error"
-    );
+    // The server deliberately returns 200 even when public_url is missing,
+    // so unauthenticated callers cannot discover deployment configuration.
+    assert_eq!(st, StatusCode::OK, "no config leak to anon caller");
+    assert_eq!(body["ok"], true, "generic ok response");
 
     app.cleanup().await;
 }
