@@ -363,6 +363,20 @@
         >
           {$t("Vacation days per year")}
         </div>
+        <div style="margin-bottom:10px">
+          <label class="kz-label" for="user-annual-leave-days"
+            >{$t("Default (all years without override)")}</label
+          >
+          <input
+            id="user-annual-leave-days"
+            class="kz-input"
+            type="number"
+            min="0"
+            max="366"
+            bind:value={annual_leave_days}
+            style="max-width:120px"
+          />
+        </div>
         {#if !isNew && leaveOverrides.length > 0}
           <div style="margin-bottom:12px;font-size:12px">
             {#each leaveOverrides as o}
