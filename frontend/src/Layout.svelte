@@ -196,11 +196,14 @@
 
   // Section grouping
   function navSections(items) {
+    const dashboard = [];
     const employee = [];
     const lead = [];
     const admin = [];
     for (const link of items) {
-      if (link.key === "TeamSettings") {
+      if (link.key === "Dashboard") {
+        dashboard.push(link);
+      } else if (link.key === "TeamSettings") {
         lead.push(link);
       } else if (link.key === "Admin") {
         admin.push(link);
@@ -208,7 +211,7 @@
         employee.push(link);
       }
     }
-    return { employee, lead, admin };
+    return { dashboard, employee, lead, admin };
   }
 
   $: sections = navSections(desktopNav);
@@ -270,8 +273,21 @@
     </div>
 
     <div class="sidebar-nav">
+      {#each sections.dashboard as link}
+        <a
+          href={link.href}
+          data-link="1"
+          class="kz-nav-item"
+          class:active={pathname === link.href ||
+            pathname.startsWith(link.href + "/")}
+        >
+          <Icon name={iconMap[link.key] || "FileText"} size={17} />
+          <span>{$t(link.key)}</span>
+        </a>
+      {/each}
+
       {#if sections.employee.length}
-        <div class="kz-nav-section">{$t("Employee")}</div>
+        <div class="kz-nav-section" style={sections.dashboard.length ? "margin-top: 8px" : ""}>{$t("Employee")}</div>
         {#each sections.employee as link}
           <a
             href={link.href}

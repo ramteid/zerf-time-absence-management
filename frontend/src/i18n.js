@@ -14,6 +14,7 @@ const TRANSLATIONS = {
     "{hours} / week": "{hours} / week",
     help_overtime:
       "Shows target and actual hours per month. Only approved time entries count towards the actual hours.",
+    "As of yesterday": "As of yesterday",
     help_monthly_report:
       "Shows the monthly report for a team member with target/actual hours and daily details.",
     help_team_report:
@@ -43,6 +44,8 @@ const TRANSLATIONS = {
     Remaining: "Remaining",
     Export: "Export",
     "Export PDF": "Export PDF",
+    "CSV download started.": "CSV download started.",
+    "PDF download started.": "PDF download started.",
     Timesheet: "Timesheet",
     Filter: "Filter",
     Entries: "Entries",
@@ -348,6 +351,8 @@ const TRANSLATIONS = {
     Export: "Export",
     "Export CSV": "CSV exportieren",
     "Export PDF": "PDF exportieren",
+    "CSV download started.": "CSV-Download gestartet.",
+    "PDF download started.": "PDF-Download gestartet.",
     Timesheet: "Stundennachweis",
     Entries: "Einträge",
     Note: "Hinweis",
@@ -770,6 +775,7 @@ const TRANSLATIONS = {
     // Reports help tooltips
     help_overtime:
       "Zeigt Soll- und Ist-Stunden pro Monat. Nur genehmigte Zeiteinträge zählen zu den Ist-Stunden.",
+    "As of yesterday": "Stand bis gestern",
     help_monthly_report:
       "Zeigt den Monatsbericht eines Mitarbeiters mit Soll-/Ist-Stunden und Details pro Tag.",
     help_team_report:

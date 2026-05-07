@@ -164,7 +164,7 @@ async fn overtime_start_balance_carries_into_later_years() {
                 "last_name": "Balance",
                 "role": "admin",
                 "weekly_hours": 0,
-                "annual_leave_days": 0,
+                "leave_days_current_year":0,"leave_days_next_year":0,
                 "start_date": start_date,
                 "overtime_start_balance_min": 120
             }),
@@ -209,7 +209,7 @@ async fn flextime_start_balance_begins_on_start_date() {
                 "last_name": "Carry",
                 "role": "admin",
                 "weekly_hours": 0,
-                "annual_leave_days": 0,
+                "leave_days_current_year":0,"leave_days_next_year":0,
                 "start_date": today(),
                 "overtime_start_balance_min": 120
             }),
@@ -258,7 +258,7 @@ async fn new_user_start_date_enforced() {
                 "last_name": "User",
                 "role": "admin",
                 "weekly_hours": 39,
-                "annual_leave_days": 30,
+                "leave_days_current_year":30,"leave_days_next_year":30,
                 "start_date": today(),
             }),
         )

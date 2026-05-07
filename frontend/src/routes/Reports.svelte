@@ -57,6 +57,7 @@
   let csvFrom = isoDate(new Date(today.getFullYear(), today.getMonth(), 1));
   let csvTo = isoDate(today);
   let csvError = "";
+  let exportInProgress = false;
 
   // Employee detail report state
   let detailUserId = $currentUser.id;
@@ -246,7 +247,18 @@
       })
       .join(",");
   }
+  function downloadBlob(blob, fileName) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
   async function exportCsv() {
+    if (exportInProgress) return;
     csvError = "";
     if (!csvFrom || !csvTo) {
       csvError = $t("Invalid date.");
@@ -256,6 +268,7 @@
       csvError = $t("From cannot be after To.");
       return;
     }
+    exportInProgress = true;
     try {
       const params = new URLSearchParams({
         user_id: String(csvUserId),
@@ -294,18 +307,17 @@
         "", $t("Total"), "", "", "", minToHM(csvTotalMin), "", "", "", "",
       ]));
       const blob = new Blob(["\uFEFF" + rows.join("\n")], { type: "text/csv;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `report-${csvUserId}-${csvFrom}_to_${csvTo}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
+      downloadBlob(blob, `report-${csvUserId}-${csvFrom}_to_${csvTo}.csv`);
+      toast($t("CSV download started."), "ok");
     } catch (e) {
       csvError = $t(e?.message || "Export failed.");
+    } finally {
+      exportInProgress = false;
     }
   }
 
   async function exportPdf() {
+    if (exportInProgress) return;
     csvError = "";
     if (!csvFrom || !csvTo) {
       csvError = $t("Invalid date.");
@@ -315,6 +327,7 @@
       csvError = $t("From cannot be after To.");
       return;
     }
+    exportInProgress = true;
     try {
       const params = new URLSearchParams({ user_id: String(csvUserId), from: csvFrom, to: csvTo });
       const report = await api(`/reports/range?${params}`);
@@ -431,8 +444,11 @@
       doc.text(minToHM(pdfTotalMin), textX(5), y + 3.8, { align: "right" });
 
       doc.save(`stundennachweis-${fullName.replace(/\s+/g, "-")}-${csvFrom}_${csvTo}.pdf`);
+      toast($t("PDF download started."), "ok");
     } catch (e) {
       csvError = $t(e?.message || "Export failed.");
+    } finally {
+      exportInProgress = false;
     }
   }
 </script>
@@ -516,6 +532,7 @@
         {minToHM(cumulative)}
       </span>
     </div>
+    <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:8px">{$t("As of yesterday")}</div>
     {#if activeHelp === "overtime"}
       <div
         style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)"
@@ -1120,10 +1137,10 @@
     </div>
     <div class="error-text">{csvError}</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="kz-btn kz-btn-primary" on:click={exportCsv}>
+      <button class="kz-btn kz-btn-primary" on:click={exportCsv} disabled={exportInProgress}>
         <Icon name="Download" size={14} />{$t("Export CSV")}
       </button>
-      <button class="kz-btn" on:click={exportPdf}>
+      <button class="kz-btn kz-btn-primary" on:click={exportPdf} disabled={exportInProgress}>
         <Icon name="FileText" size={14} />{$t("Export PDF")}
       </button>
     </div>
