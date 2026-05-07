@@ -41,8 +41,10 @@
   // "login" | "forgot" | "reset"
   let view = "login";
 
-  // Login
-  let email = initialEmail;
+  // Login — fall back to sessionStorage for the post-setup-reload case
+  const _storedEmail = sessionStorage.getItem("setup-email") || "";
+  if (_storedEmail) sessionStorage.removeItem("setup-email");
+  let email = initialEmail || _storedEmail;
   let password = "";
   let loginError = "";
   let submitting = false;

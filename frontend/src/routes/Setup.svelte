@@ -80,10 +80,11 @@
         },
       });
       await storePasswordCredential(form);
-      // Pass the email to the caller so the login form can pre-fill it.
-      // The user will then sign in through the normal login form, which
-      // browsers reliably use to detect and offer to save credentials.
-      onComplete(email.trim());
+      // A real page navigation lets Firefox and Safari detect the
+      // password form submission and offer to save the credentials.
+      // Store the email so the login form can pre-fill it after reload.
+      sessionStorage.setItem("setup-email", email.trim());
+      window.location.reload();
     } catch (err) {
       error = $t(err?.message || "Error");
     } finally {
