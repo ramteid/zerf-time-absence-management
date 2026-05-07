@@ -638,7 +638,7 @@ pub async fn cleanup_loop(pool: crate::db::DatabasePool) {
             tracing::warn!(target: "zerf::cleanup", "login_attempts cleanup failed: {e}");
         }
         if let Err(e) =
-            sqlx::query("DELETE FROM password_reset_tokens WHERE expires_at < CURRENT_TIMESTAMP")
+            sqlx::query("DELETE FROM password_reset_tokens WHERE expires_at <= CURRENT_TIMESTAMP")
                 .execute(&pool)
                 .await
         {
@@ -807,14 +807,12 @@ pub async fn reset_password_with_token(
     State(app_state): State<AppState>,
     Json(body): Json<ResetPasswordTokenReq>,
 ) -> AppResult<Json<serde_json::Value>> {
-    validate_password_strength(&body.password)?;
-
     let token_hash = hash_token(body.token.trim());
     let mut tx = app_state.pool.begin().await?;
 
     let expired_user_id: Option<i64> = sqlx::query_scalar(
         "DELETE FROM password_reset_tokens \
-         WHERE token_hash=$1 AND expires_at < CURRENT_TIMESTAMP \
+         WHERE token_hash=$1 AND expires_at <= CURRENT_TIMESTAMP \
          RETURNING user_id",
     )
     .bind(&token_hash)
@@ -827,7 +825,7 @@ pub async fn reset_password_with_token(
 
     let user_id: Option<i64> = sqlx::query_scalar(
         "DELETE FROM password_reset_tokens \
-         WHERE token_hash=$1 AND expires_at >= CURRENT_TIMESTAMP \
+         WHERE token_hash=$1 AND expires_at > CURRENT_TIMESTAMP \
          RETURNING user_id",
     )
     .bind(&token_hash)
@@ -848,6 +846,11 @@ pub async fn reset_password_with_token(
         tx.commit().await?;
         return Err(AppError::BadRequest("reset_token_invalid".into()));
     };
+
+    if let Err(err) = validate_password_strength(&body.password) {
+        tx.rollback().await?;
+        return Err(err);
+    }
 
     if verify_password(&body.password, &current_password_hash) {
         tx.rollback().await?;
