@@ -180,15 +180,24 @@
   $: drafts = entries.filter((e) => e.status === "draft");
   $: weekHours = (weekActual / 60).toFixed(1);
   $: contractHours = formatHours($currentUser.weekly_hours || 0);
-  $: targetHours = formatHours(($currentUser.weekly_hours || 0).toFixed(1));
-  $: overtime = Math.max(
-    0,
-    weekActual / 60 - ($currentUser.weekly_hours || 0),
-  ).toFixed(1);
-  $: remaining = Math.max(
-    0,
-    ($currentUser.weekly_hours || 0) - weekActual / 60,
-  ).toFixed(1);
+  // Pro-rate the weekly target for the start week: only count working days from
+  // the start date to Friday. Weeks entirely before the start date get 0.
+  $: effectiveWeeklyHours = (() => {
+    const startDate = $currentUser?.start_date;
+    const weekly = $currentUser?.weekly_hours || 0;
+    if (!mo || !startDate) return weekly;
+    const moStr = isoDate(mo);
+    const frStr = isoDate(addDays(mo, 4));
+    if (startDate > frStr) return 0;
+    if (startDate >= moStr) {
+      const startIdx = Math.round((parseDate(startDate) - mo) / 86400000);
+      return (Math.max(0, 5 - startIdx) / 5) * weekly;
+    }
+    return weekly;
+  })();
+  $: targetHours = formatHours(effectiveWeeklyHours.toFixed(1));
+  $: overtime = Math.max(0, weekActual / 60 - effectiveWeeklyHours).toFixed(1);
+  $: remaining = Math.max(0, effectiveWeeklyHours - weekActual / 60).toFixed(1);
 
   function hasAbsence(ds) {
     return absences.some((a) => a.start_date <= ds && a.end_date >= ds);
@@ -407,6 +416,8 @@
           class:day-card--locked={weekStatus === "submitted" ||
             weekStatus === "approved"}
           class:day-card--absent={day.absent}
+          class:day-card--before-start={$currentUser?.start_date &&
+            day.ds < $currentUser.start_date}
         >
           <div class="day-header">
             <div>
@@ -538,5 +549,9 @@
   .time-block--rejected .time-block-times {
     text-decoration: line-through;
     color: var(--text-tertiary);
+  }
+
+  .day-card--before-start {
+    opacity: 0.4;
   }
 </style>
