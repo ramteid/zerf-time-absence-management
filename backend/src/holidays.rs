@@ -97,7 +97,9 @@ pub async fn fetch_holidays_from_api(
         .into_iter()
         .filter(|h| {
             region.is_empty()
-                || h.counties.as_ref().map_or(true, |c| c.iter().any(|code| code == region))
+                || h.counties
+                    .as_ref()
+                    .is_none_or(|c| c.iter().any(|code| code == region))
         })
         .map(|h| (h.date, h.name, h.local_name))
         .collect();
@@ -259,7 +261,8 @@ pub async fn list(
     let result: Vec<serde_json::Value> = holiday_rows
         .into_iter()
         .map(|holiday| {
-            let display_name = i18n::holiday_display_name(&language, holiday.name, holiday.local_name);
+            let display_name =
+                i18n::holiday_display_name(&language, holiday.name, holiday.local_name);
             serde_json::json!({
                 "id": holiday.id,
                 "holiday_date": holiday.holiday_date,

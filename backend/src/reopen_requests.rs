@@ -309,7 +309,10 @@ pub async fn create(
             "reopen_auto_approved_body",
             vec![
                 ("week_start", i18n::format_date(&language, body.week_start)),
-                ("entry_count", i18n::entry_count(&language, entries_reopened)),
+                (
+                    "entry_count",
+                    i18n::entry_count(&language, entries_reopened),
+                ),
             ],
             Some("reopen_request"),
             Some(new_request_id),
@@ -327,7 +330,10 @@ pub async fn create(
                 vec![
                     ("requester_name", requester_full_name.clone()),
                     ("week_start", i18n::format_date(&language, body.week_start)),
-                    ("entry_count", i18n::entry_count(&language, entries_reopened)),
+                    (
+                        "entry_count",
+                        i18n::entry_count(&language, entries_reopened),
+                    ),
                 ],
                 Some("reopen_request"),
                 Some(new_request_id),
@@ -369,7 +375,10 @@ pub async fn create(
     }
 }
 
-pub async fn list_mine(State(app_state): State<AppState>, requester: User) -> AppResult<Json<Vec<ReopenRequest>>> {
+pub async fn list_mine(
+    State(app_state): State<AppState>,
+    requester: User,
+) -> AppResult<Json<Vec<ReopenRequest>>> {
     Ok(Json(
         sqlx::query_as::<_, ReopenRequest>(
             "SELECT id, user_id, week_start, approver_id, status, reviewed_at, \
@@ -425,6 +434,7 @@ async fn load_pending(pool: &crate::db::DatabasePool, id: i64) -> AppResult<Reop
 
 /// If an admin acted on a request that was in a team lead's queue, notify
 /// that lead so they know the item left their queue.
+#[allow(clippy::too_many_arguments)]
 async fn notify_lead_if_admin_acted(
     app_state: &AppState,
     language: &i18n::Language,
@@ -460,7 +470,10 @@ async fn notify_lead_if_admin_acted(
             .unwrap_or_else(|| format!("User {}", reopen_request.user_id));
     let mut params = vec![
         ("requester_name", employee_full_name),
-        ("week_start", i18n::format_date(language, reopen_request.week_start)),
+        (
+            "week_start",
+            i18n::format_date(language, reopen_request.week_start),
+        ),
     ];
     params.extend(extra_params);
     notifications::create_translated(
@@ -519,7 +532,14 @@ pub async fn approve(
             "Request was already resolved by someone else.".into(),
         ));
     }
-    let entries_reopened = match perform_reopen(&app_state.pool, requester.id, reopen_request.user_id, reopen_request.week_start).await {
+    let entries_reopened = match perform_reopen(
+        &app_state.pool,
+        requester.id,
+        reopen_request.user_id,
+        reopen_request.week_start,
+    )
+    .await
+    {
         Ok(count) => count,
         Err(e) => {
             // Revert the approval claim so the request can be retried.
@@ -551,7 +571,10 @@ pub async fn approve(
         "reopen_approved",
         "reopen_approved_title",
         "reopen_approved_body",
-        vec![("week_start", i18n::format_date(&language, reopen_request.week_start))],
+        vec![(
+            "week_start",
+            i18n::format_date(&language, reopen_request.week_start),
+        )],
         Some("reopen_request"),
         Some(request_id),
     )
@@ -645,7 +668,10 @@ pub async fn reject(
         "reopen_rejected_title",
         "reopen_rejected_body",
         vec![
-            ("week_start", i18n::format_date(&language, reopen_request.week_start)),
+            (
+                "week_start",
+                i18n::format_date(&language, reopen_request.week_start),
+            ),
             ("reason", rejection_reason.to_string()),
         ],
         Some("reopen_request"),

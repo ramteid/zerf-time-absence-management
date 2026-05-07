@@ -71,7 +71,10 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
         .route("/auth/setup-status", get(auth::setup_status))
         .route("/auth/setup", post(auth::setup))
         .route("/auth/forgot-password", post(auth::forgot_password))
-        .route("/auth/reset-password", post(auth::reset_password_with_token))
+        .route(
+            "/auth/reset-password",
+            post(auth::reset_password_with_token),
+        )
         .route("/settings/public", get(settings::public_settings))
         .merge(
             Router::new()

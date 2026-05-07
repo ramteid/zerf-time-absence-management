@@ -54,7 +54,10 @@ pub async fn ensure_initial(pool: &crate::db::DatabasePool) -> AppResult<()> {
     Ok(())
 }
 
-pub async fn list(State(app_state): State<AppState>, _requester: User) -> AppResult<Json<Vec<Category>>> {
+pub async fn list(
+    State(app_state): State<AppState>,
+    _requester: User,
+) -> AppResult<Json<Vec<Category>>> {
     let categories = sqlx::query_as::<_, Category>(
         "SELECT id, name, description, color, sort_order, active FROM categories WHERE active=TRUE ORDER BY sort_order, name",
     )

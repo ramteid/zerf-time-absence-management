@@ -56,14 +56,18 @@ pub async fn team_settings_list(
     type Row = (i64, String, String, String, String, bool);
     let rows_to_team_settings = |rows: Vec<Row>| -> Vec<TeamSettings> {
         rows.into_iter()
-            .map(|(id, email, first_name, last_name, role, allow_reopen_without_approval)| TeamSettings {
-                user_id: id,
-                email,
-                first_name,
-                last_name,
-                role,
-                allow_reopen_without_approval,
-            })
+            .map(
+                |(id, email, first_name, last_name, role, allow_reopen_without_approval)| {
+                    TeamSettings {
+                        user_id: id,
+                        email,
+                        first_name,
+                        last_name,
+                        role,
+                        allow_reopen_without_approval,
+                    }
+                },
+            )
             .collect()
     };
     let settings_list = if requester.is_admin() {
@@ -146,7 +150,10 @@ pub async fn team_settings_update(
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
-pub async fn list(State(app_state): State<AppState>, requester: User) -> AppResult<Json<Vec<User>>> {
+pub async fn list(
+    State(app_state): State<AppState>,
+    requester: User,
+) -> AppResult<Json<Vec<User>>> {
     if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
@@ -221,7 +228,11 @@ async fn validate_approver(
         match approver_row {
             None => return Err(AppError::BadRequest("Approver not found.".into())),
             Some((role, true)) if role == "team_lead" || role == "admin" => {}
-            Some(_) => return Err(AppError::BadRequest("Approver must be an active Team lead or Admin.".into())),
+            Some(_) => {
+                return Err(AppError::BadRequest(
+                    "Approver must be an active Team lead or Admin.".into(),
+                ))
+            }
         }
     }
     Ok(())
@@ -291,10 +302,14 @@ async fn ensure_user_name_available(
 }
 
 fn user_unique_conflict(error: &sqlx::Error) -> Option<AppError> {
-    let sqlx::Error::Database(db_error) = error else { return None };
+    let sqlx::Error::Database(db_error) = error else {
+        return None;
+    };
     match db_error.constraint() {
         Some("users_email_key") => Some(AppError::Conflict("Email already exists.".into())),
-        Some("idx_users_first_last_name_unique") => Some(AppError::Conflict("First name and last name already exist.".into())),
+        Some("idx_users_first_last_name_unique") => Some(AppError::Conflict(
+            "First name and last name already exist.".into(),
+        )),
         _ if db_error.code().as_deref() == Some("23505") && db_error.table() == Some("users") => {
             Some(AppError::Conflict("User already exists.".into()))
         }
@@ -321,7 +336,10 @@ pub async fn create(
         return Err(AppError::BadRequest("Invalid role".into()));
     }
     let normalized_email = body.email.trim().to_lowercase();
-    if normalized_email.is_empty() || normalized_email.len() > 254 || !normalized_email.contains('@') {
+    if normalized_email.is_empty()
+        || normalized_email.len() > 254
+        || !normalized_email.contains('@')
+    {
         return Err(AppError::BadRequest("Invalid email.".into()));
     }
     let (first_name, last_name) = normalize_user_name(&body.first_name, &body.last_name)?;
@@ -493,14 +511,28 @@ pub async fn update(
         let updated_first_name = first_name
             .clone()
             .unwrap_or_else(|| previous_user.first_name.clone());
-        let updated_last_name = last_name.clone().unwrap_or_else(|| previous_user.last_name.clone());
-        ensure_user_name_available(&app_state.pool, &updated_first_name, &updated_last_name, Some(user_id)).await?;
+        let updated_last_name = last_name
+            .clone()
+            .unwrap_or_else(|| previous_user.last_name.clone());
+        ensure_user_name_available(
+            &app_state.pool,
+            &updated_first_name,
+            &updated_last_name,
+            Some(user_id),
+        )
+        .await?;
     }
     let removing_admin_rights = previous_user.role == "admin"
-        && (body.role.as_deref().is_some_and(|role_value| role_value != "admin")
+        && (body
+            .role
+            .as_deref()
+            .is_some_and(|role_value| role_value != "admin")
             || matches!(body.active, Some(false)));
     // Pre-validate the post-update invariant (non-admin → has approver).
-    let new_role = body.role.clone().unwrap_or_else(|| previous_user.role.clone());
+    let new_role = body
+        .role
+        .clone()
+        .unwrap_or_else(|| previous_user.role.clone());
     let new_approver_id = match body.approver_id {
         Some(value) => value,
         None => previous_user.approver_id,
@@ -510,11 +542,10 @@ pub async fn update(
     let mut tx = app_state.pool.begin().await?;
     // Last-admin protection: checked inside the transaction to prevent TOCTOU.
     if removing_admin_rights {
-        let active_admins: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM users WHERE active=TRUE AND role='admin'",
-        )
-        .fetch_one(&mut *tx)
-        .await?;
+        let active_admins: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE active=TRUE AND role='admin'")
+                .fetch_one(&mut *tx)
+                .await?;
         if active_admins <= 1 {
             return Err(AppError::BadRequest(
                 "Cannot remove the last active admin.".into(),
@@ -542,7 +573,11 @@ pub async fn update(
     }
     // If role changed or user was deactivated, kill all sessions of that user
     // so cached role/state cannot be (ab)used.
-    let role_changed = body.role.as_deref().map(|role_value| role_value != previous_user.role).unwrap_or(false);
+    let role_changed = body
+        .role
+        .as_deref()
+        .map(|role_value| role_value != previous_user.role)
+        .unwrap_or(false);
     let just_deactivated = matches!(body.active, Some(false)) && previous_user.active;
     if role_changed || just_deactivated {
         let _ = sqlx::query("DELETE FROM sessions WHERE user_id=$1")
@@ -653,7 +688,9 @@ pub async fn reset_password(
         Some(serde_json::json!({"password_reset": true})),
     )
     .await;
-    Ok(Json(serde_json::json!({"temporary_password": temporary_password})))
+    Ok(Json(
+        serde_json::json!({"temporary_password": temporary_password}),
+    ))
 }
 
 // -- Per-user per-year vacation day overrides ---
@@ -760,7 +797,10 @@ pub fn generate_password() -> String {
             pool[(buf[0] as usize) % pool.len()]
         })
         .collect();
-    let all_chars: Vec<u8> = character_pools.iter().flat_map(|pool| pool.iter().copied()).collect();
+    let all_chars: Vec<u8> = character_pools
+        .iter()
+        .flat_map(|pool| pool.iter().copied())
+        .collect();
     while password_bytes.len() < 16 {
         let mut buf = [0u8; 1];
         rng.fill_bytes(&mut buf);

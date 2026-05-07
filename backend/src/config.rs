@@ -48,7 +48,9 @@ impl Config {
             panic!("ZERF_SESSION_SECRET is using a default/placeholder value — replace it with a real random secret");
         }
 
-        let public_url = env::var("ZERF_PUBLIC_URL").ok().filter(|url| !url.is_empty());
+        let public_url = env::var("ZERF_PUBLIC_URL")
+            .ok()
+            .filter(|url| !url.is_empty());
         let allowed_origins: Vec<String> = match env::var("ZERF_ALLOWED_ORIGINS").ok() {
             Some(origins_str) if !origins_str.is_empty() => origins_str
                 .split(',')

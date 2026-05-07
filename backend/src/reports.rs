@@ -48,10 +48,17 @@ pub struct MonthQuery {
 }
 
 fn month_bounds(month_str: &str) -> AppResult<(NaiveDate, NaiveDate)> {
-    let (year_str, month_str) = month_str.split_once('-').ok_or_else(|| AppError::BadRequest("month=YYYY-MM".into()))?;
-    let year: i32 = year_str.parse().map_err(|_| AppError::BadRequest("year".into()))?;
-    let month_num: u32 = month_str.parse().map_err(|_| AppError::BadRequest("month".into()))?;
-    let from = NaiveDate::from_ymd_opt(year, month_num, 1).ok_or_else(|| AppError::BadRequest("date".into()))?;
+    let (year_str, month_str) = month_str
+        .split_once('-')
+        .ok_or_else(|| AppError::BadRequest("month=YYYY-MM".into()))?;
+    let year: i32 = year_str
+        .parse()
+        .map_err(|_| AppError::BadRequest("year".into()))?;
+    let month_num: u32 = month_str
+        .parse()
+        .map_err(|_| AppError::BadRequest("month".into()))?;
+    let from = NaiveDate::from_ymd_opt(year, month_num, 1)
+        .ok_or_else(|| AppError::BadRequest("date".into()))?;
     let next = if month_num == 12 {
         NaiveDate::from_ymd_opt(year + 1, 1, 1).unwrap()
     } else {
@@ -240,7 +247,9 @@ pub async fn month(
     // Default to the requester's own data if no user_id is specified.
     let target_user_id = query.user_id.unwrap_or(requester.id);
     assert_can_access_user(&app_state.pool, &requester, target_user_id).await?;
-    Ok(Json(build_month(&app_state.pool, target_user_id, &query.month).await?))
+    Ok(Json(
+        build_month(&app_state.pool, target_user_id, &query.month).await?,
+    ))
 }
 
 #[derive(Deserialize)]
@@ -387,7 +396,14 @@ pub async fn range(
     assert_can_access_user(&app_state.pool, &requester, target_user_id).await?;
     validate_range(query.from, query.to)?;
     let label = format!("{}_to_{}", query.from, query.to);
-    let report = build_range(&app_state.pool, target_user_id, query.from, query.to, &label).await?;
+    let report = build_range(
+        &app_state.pool,
+        target_user_id,
+        query.from,
+        query.to,
+        &label,
+    )
+    .await?;
     Ok(Json(report))
 }
 
@@ -449,8 +465,22 @@ pub async fn team(
     let (month_start, month_end) = month_bounds(&query.month)?;
     for team_member in team_members {
         let month_report = build_month(&app_state.pool, team_member.id, &query.month).await?;
-        let vacation_workdays = crate::absences::workdays_total(&app_state.pool, team_member.id, "vacation", month_start, month_end).await?;
-        let sick_workdays = crate::absences::workdays_total(&app_state.pool, team_member.id, "sick", month_start, month_end).await?;
+        let vacation_workdays = crate::absences::workdays_total(
+            &app_state.pool,
+            team_member.id,
+            "vacation",
+            month_start,
+            month_end,
+        )
+        .await?;
+        let sick_workdays = crate::absences::workdays_total(
+            &app_state.pool,
+            team_member.id,
+            "sick",
+            month_start,
+            month_end,
+        )
+        .await?;
         team_rows.push(TeamRow {
             user_id: team_member.id,
             name: format!("{} {}", team_member.first_name, team_member.last_name),
@@ -499,12 +529,15 @@ pub async fn categories(
         return Err(AppError::Forbidden);
     }
     let mut builder = QueryBuilder::<Postgres>::new(
-         "SELECT c.name, c.color, z.start_time, z.end_time \
+        "SELECT c.name, c.color, z.start_time, z.end_time \
          FROM time_entries z \
          JOIN categories c ON c.id=z.category_id \
          WHERE z.status != 'rejected' AND z.entry_date BETWEEN ",
     );
-    builder.push_bind(query.from).push(" AND ").push_bind(query.to);
+    builder
+        .push_bind(query.from)
+        .push(" AND ")
+        .push_bind(query.to);
     if let Some(user_id) = target_user_id {
         builder.push(" AND z.user_id = ").push_bind(user_id);
     } else if !requester.is_admin() {
@@ -567,8 +600,10 @@ pub async fn team_categories(
             .push(")");
     }
     user_builder.push(" ORDER BY last_name, first_name");
-    let members: Vec<(i64, String, String)> =
-        user_builder.build_query_as().fetch_all(&app_state.pool).await?;
+    let members: Vec<(i64, String, String)> = user_builder
+        .build_query_as()
+        .fetch_all(&app_state.pool)
+        .await?;
 
     let mut entry_builder = QueryBuilder::<Postgres>::new(
         "SELECT z.user_id, c.name, c.color, z.start_time, z.end_time \
@@ -576,7 +611,10 @@ pub async fn team_categories(
          JOIN categories c ON c.id=z.category_id \
          WHERE z.status != 'rejected' AND z.entry_date BETWEEN ",
     );
-    entry_builder.push_bind(query.from).push(" AND ").push_bind(query.to);
+    entry_builder
+        .push_bind(query.from)
+        .push(" AND ")
+        .push_bind(query.to);
     if !requester.is_admin() {
         entry_builder
             .push(" AND (z.user_id IN (SELECT id FROM users WHERE approver_id = ")
@@ -585,8 +623,10 @@ pub async fn team_categories(
             .push_bind(requester.id)
             .push(")");
     }
-    let rows: Vec<(i64, String, String, String, String)> =
-        entry_builder.build_query_as().fetch_all(&app_state.pool).await?;
+    let rows: Vec<(i64, String, String, String, String)> = entry_builder
+        .build_query_as()
+        .fetch_all(&app_state.pool)
+        .await?;
 
     let mut user_cat_map: HashMap<i64, HashMap<(String, String), i64>> = HashMap::new();
     for (user_id, category, color, start_time, end_time) in rows {
@@ -606,9 +646,17 @@ pub async fn team_categories(
                 .remove(&uid)
                 .unwrap_or_default()
                 .into_iter()
-                .map(|((category, color), minutes)| CategoryTotal { category, color, minutes })
+                .map(|((category, color), minutes)| CategoryTotal {
+                    category,
+                    color,
+                    minutes,
+                })
                 .collect();
-            cats.sort_by(|a, b| b.minutes.cmp(&a.minutes).then_with(|| a.category.cmp(&b.category)));
+            cats.sort_by(|a, b| {
+                b.minutes
+                    .cmp(&a.minutes)
+                    .then_with(|| a.category.cmp(&b.category))
+            });
             UserCategoryRow {
                 user_id: uid,
                 name: format!("{first} {last}"),
@@ -765,7 +813,10 @@ pub async fn flextime(
 
     let language = i18n::load_ui_language(&app_state.pool).await?;
 
-    let holiday_map: HashMap<NaiveDate, String> = sqlx::query_as::<_, (NaiveDate, String, Option<String>)>(
+    let holiday_map: HashMap<NaiveDate, String> = sqlx::query_as::<
+        _,
+        (NaiveDate, String, Option<String>),
+    >(
         "SELECT holiday_date, name, local_name FROM holidays WHERE holiday_date BETWEEN $1 AND $2",
     )
     .bind(loop_start)
@@ -773,7 +824,12 @@ pub async fn flextime(
     .fetch_all(&app_state.pool)
     .await?
     .into_iter()
-    .map(|(date, name, local_name)| (date, i18n::holiday_display_name(&language, name, local_name)))
+    .map(|(date, name, local_name)| {
+        (
+            date,
+            i18n::holiday_display_name(&language, name, local_name),
+        )
+    })
     .collect();
 
     let today = chrono::Local::now().date_naive();
@@ -807,7 +863,10 @@ pub async fn flextime(
             0
         };
         let mut actual = 0i64;
-        for (_, start_str, end_str, _) in time_entries_raw.iter().filter(|(d, _, _, st)| *d == current_date && st == "approved") {
+        for (_, start_str, end_str, _) in time_entries_raw
+            .iter()
+            .filter(|(d, _, _, st)| *d == current_date && st == "approved")
+        {
             actual += (parse_report_time(end_str)? - parse_report_time(start_str)?).num_minutes();
         }
         let credited_actual_min = credited_actual_minutes(actual, target, absence.as_deref());

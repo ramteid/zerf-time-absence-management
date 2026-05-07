@@ -55,7 +55,9 @@ pub async fn list(
     }
     let mut builder = QueryBuilder::<Postgres>::new("SELECT id, user_id, action, table_name, record_id, before_data, after_data, occurred_at FROM audit_log WHERE TRUE");
     if query.table_name.is_some() {
-        builder.push(" AND table_name = ").push_bind(query.table_name);
+        builder
+            .push(" AND table_name = ")
+            .push_bind(query.table_name);
     }
     if query.record_id.is_some() {
         builder.push(" AND record_id = ").push_bind(query.record_id);

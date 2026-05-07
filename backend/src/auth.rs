@@ -363,9 +363,9 @@ pub async fn me(
         .fetch_optional(&app_state.pool)
         .await?;
         let needs_name = user.first_name.is_empty() || user.last_name.is_empty();
-        country.map_or(true, |v| v.is_empty())
-            || dwh.map_or(true, |v| v.is_empty())
-            || dal.map_or(true, |v| v.is_empty())
+        country.is_none_or(|v| v.is_empty())
+            || dwh.is_none_or(|v| v.is_empty())
+            || dal.is_none_or(|v| v.is_empty())
             || needs_name
     } else {
         false

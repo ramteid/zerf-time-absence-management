@@ -192,7 +192,9 @@ pub(crate) async fn validate(
         let existing_start = parse_time(start_str)?;
         let existing_end = parse_time(end_str)?;
         if start_n < existing_end && existing_start < end_n {
-            return Err(AppError::BadRequest("Overlap with an existing entry.".into()));
+            return Err(AppError::BadRequest(
+                "Overlap with an existing entry.".into(),
+            ));
         }
         day_total += (existing_end - existing_start).num_minutes();
     }
@@ -229,7 +231,7 @@ pub async fn create(
         .bind(requester.id)
         .execute(&mut *tx)
         .await?;
-    validate(&mut *tx, requester.id, &body, None).await?;
+    validate(&mut tx, requester.id, &body, None).await?;
     let new_entry_id: i64 = sqlx::query_scalar("INSERT INTO time_entries(user_id, entry_date, start_time, end_time, category_id, comment) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id")
         .bind(requester.id).bind(body.entry_date).bind(&body.start_time).bind(&body.end_time).bind(body.category_id).bind(&body.comment)
         .fetch_one(&mut *tx).await?;
@@ -283,7 +285,7 @@ pub async fn update(
             ));
         }
     }
-    validate(&mut *tx, previous_entry.user_id, &body, Some(entry_id)).await?;
+    validate(&mut tx, previous_entry.user_id, &body, Some(entry_id)).await?;
     sqlx::query("UPDATE time_entries SET entry_date=$1, start_time=$2, end_time=$3, category_id=$4, comment=$5, updated_at=CURRENT_TIMESTAMP WHERE id=$6")
         .bind(body.entry_date).bind(&body.start_time).bind(&body.end_time).bind(body.category_id).bind(&body.comment).bind(entry_id)
         .execute(&mut *tx).await?;
@@ -410,7 +412,10 @@ pub async fn submit(
                         "submitter_name",
                         format!("{} {}", requester.first_name, requester.last_name),
                     ),
-                    ("entry_count", i18n::entry_count(&language, submitted_count as i64)),
+                    (
+                        "entry_count",
+                        i18n::entry_count(&language, submitted_count as i64),
+                    ),
                 ],
                 Some("time_entries"),
                 None,
@@ -418,7 +423,9 @@ pub async fn submit(
             .await;
         }
     }
-    Ok(Json(serde_json::json!({"ok": true, "count": submitted_count})))
+    Ok(Json(
+        serde_json::json!({"ok": true, "count": submitted_count}),
+    ))
 }
 
 pub async fn approve(
@@ -664,7 +671,9 @@ pub async fn batch_approve(
         )
         .await;
     }
-    Ok(Json(serde_json::json!({"ok":true, "count": approved_count})))
+    Ok(Json(
+        serde_json::json!({"ok":true, "count": approved_count}),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -772,5 +781,7 @@ pub async fn batch_reject(
         )
         .await;
     }
-    Ok(Json(serde_json::json!({"ok": true, "count": rejected_count})))
+    Ok(Json(
+        serde_json::json!({"ok": true, "count": rejected_count}),
+    ))
 }
