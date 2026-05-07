@@ -796,7 +796,9 @@ pub async fn forgot_password(
         Some(url) => url.to_string(),
         None => {
             tracing::warn!(target: "zerf::auth", "forgot_password called but ZERF_PUBLIC_URL is not configured");
-            return Ok(Json(serde_json::json!({ "ok": true })));
+            return Err(crate::error::AppError::BadRequest(
+                "public_url_not_configured".into(),
+            ));
         }
     };
 
