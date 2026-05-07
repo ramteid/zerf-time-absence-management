@@ -51,10 +51,14 @@ validate_interval() {
 validate_retention() {
   case "$RETENTION" in
     *[!0-9]*|'')
-      echo "BACKUP_RETENTION_DAYS must be a non-negative integer." >&2
+      echo "BACKUP_RETENTION_DAYS must be a positive integer." >&2
       return 1
       ;;
   esac
+  if [ "$RETENTION" -eq 0 ]; then
+    echo "BACKUP_RETENTION_DAYS must be greater than zero." >&2
+    return 1
+  fi
 }
 
 resolve_direct_connection() {
@@ -88,7 +92,7 @@ run_direct_pg_dump() {
 apply_retention() {
   find "$OUT_DIR" -type f -name 'zerf-*.dump' \
     -mtime "+$RETENTION" \
-    -exec rm -f {} \;
+    -exec rm -f {} +
 }
 
 run_backup_once() {
@@ -107,7 +111,11 @@ run_backup_once() {
   fi
 
   chmod 600 "$temp_file"
-  mv "$temp_file" "$output_file"
+  if ! mv "$temp_file" "$output_file"; then
+    rm -f "$temp_file"
+    echo "Failed to finalize backup file." >&2
+    return 1
+  fi
 
   apply_retention
   echo "Backup written: $output_file"
@@ -122,5 +130,5 @@ fi
 
 while :; do
   sleep "$INTERVAL"
-  run_backup_once
+  run_backup_once || echo "Backup attempt failed; will retry in ${INTERVAL}s." >&2
 done

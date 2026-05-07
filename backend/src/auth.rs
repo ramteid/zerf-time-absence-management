@@ -867,9 +867,8 @@ pub async fn forgot_password(
 ) -> AppResult<Json<serde_json::Value>> {
     let smtp = crate::settings::load_smtp_config(&app_state.pool).await;
     if smtp.is_none() {
-        // Never reveal deployment configuration to unauthenticated clients.
         tracing::warn!(target: "zerf::auth", "forgot_password called but SMTP is not configured");
-        return Ok(Json(serde_json::json!({ "ok": true })));
+        return Err(crate::error::AppError::BadRequest("smtp_not_configured".into()));
     }
 
     let base_url = match app_state
@@ -881,11 +880,8 @@ pub async fn forgot_password(
     {
         Some(url) => url.to_string(),
         None => {
-            // Don't disclose deployment-config state to unauthenticated
-            // callers — log server-side and return the same generic OK we
-            // return for unknown emails / SMTP-not-configured.
             tracing::warn!(target: "zerf::auth", "forgot_password called but ZERF_PUBLIC_URL is not configured");
-            return Ok(Json(serde_json::json!({ "ok": true })));
+            return Err(crate::error::AppError::BadRequest("public_url_not_configured".into()));
         }
     };
 
