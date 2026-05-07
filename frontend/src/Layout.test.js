@@ -71,6 +71,7 @@ describe("Layout pull to refresh", () => {
 
   it("does not arm pull to refresh when the page content is already scrolled", async () => {
     component = mount(Layout, { target });
+    await settle();
     const { contentArea, handle } = appendContentArea(target);
     contentArea.scrollTop = 120;
 
@@ -83,6 +84,7 @@ describe("Layout pull to refresh", () => {
 
   it("arms pull to refresh when the page content starts at the top", async () => {
     component = mount(Layout, { target });
+    await settle();
     const { contentArea, handle } = appendContentArea(target);
     contentArea.scrollTop = 0;
 
