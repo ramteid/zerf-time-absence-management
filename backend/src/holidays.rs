@@ -48,7 +48,7 @@ async fn fetch_nager_holidays(country: &str, year: i32) -> Result<Vec<NagerHolid
         .map_err(|e| AppError::Internal(format!("Nager parse failed: {e}")))
 }
 
-/// Proxy: returns all countries supported by Nager.Date (compatible country codes).
+/// Proxy: returns all countries supported by Nager.Date.
 pub async fn available_countries(_requester: User) -> AppResult<Json<Vec<NagerCountry>>> {
     let url = format!("{}/AvailableCountries", NAGER_BASE_URL);
     let resp = reqwest::get(&url)

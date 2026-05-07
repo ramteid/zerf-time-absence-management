@@ -30,12 +30,26 @@
   let refreshing = false;
   const PULL_THRESHOLD = 80;
 
+  function getPullScrollContainer(target) {
+    if (target instanceof Element) {
+      const container = target.closest(".content-area");
+      if (container) return container;
+    }
+    return document.querySelector(".main-content .content-area");
+  }
+
   function onTouchStart(e) {
     if (
-      window.scrollY === 0 &&
       e.touches.length === 1 &&
+      e.target instanceof Element &&
       !e.target.closest(".tp-drum")
     ) {
+      const scrollContainer = getPullScrollContainer(e.target);
+      if (scrollContainer ? scrollContainer.scrollTop > 0 : window.scrollY > 0) {
+        pulling = false;
+        pullDistance = 0;
+        return;
+      }
       pullStartY = e.touches[0].clientY;
       pulling = true;
     }

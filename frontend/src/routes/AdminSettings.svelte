@@ -14,6 +14,10 @@
 
   let countries = [];
   let countryRegions = [];
+  let regionsCountry = null;
+  let regionLoadId = 0;
+  let regionLoading = false;
+  let regionsLoadFailed = false;
   const languageOptions = Object.entries(LANGUAGES);
 
   function sortCountriesByName(items) {
@@ -22,11 +26,47 @@
 
   async function loadRegionsFor(country) {
     if (!country) return [];
-    try {
-      return await api(`/holidays/regions/${country}`);
-    } catch {
-      return [];
+    return await api(`/holidays/regions/${country}`);
+  }
+
+  async function syncRegionsFor(country) {
+    const normalizedCountry = country || "";
+    const loadId = ++regionLoadId;
+    if (!normalizedCountry) {
+      countryRegions = [];
+      regionLoading = false;
+      regionsLoadFailed = false;
+      return;
     }
+    regionLoading = true;
+    regionsLoadFailed = false;
+    try {
+      const regions = await loadRegionsFor(normalizedCountry);
+      if (loadId !== regionLoadId || normalizedCountry !== (s.country || "")) {
+        return;
+      }
+      countryRegions = regions;
+      const currentRegion = s.region || "";
+      if (currentRegion && !regions.includes(currentRegion)) {
+        s = { ...s, region: "" };
+      }
+    } catch {
+      if (loadId !== regionLoadId || normalizedCountry !== (s.country || "")) {
+        return;
+      }
+      countryRegions = [];
+      regionsLoadFailed = true;
+    } finally {
+      if (loadId === regionLoadId && normalizedCountry === (s.country || "")) {
+        regionLoading = false;
+      }
+    }
+  }
+
+  $: selectedCountry = s.country || "";
+  $: if (selectedCountry !== regionsCountry) {
+    regionsCountry = selectedCountry;
+    void syncRegionsFor(selectedCountry);
   }
 
   async function load() {
@@ -38,9 +78,6 @@
     appSettings.set(loadedSettings);
     if (s.ui_language) setLanguage(s.ui_language);
     countries = sortCountriesByName(allCountries);
-    if (s.country) {
-      countryRegions = await loadRegionsFor(s.country);
-    }
   }
   load();
 
@@ -55,7 +92,15 @@
       toast($t("Please select a country."), "error");
       return;
     }
-    if (!s.region) {
+    if (regionLoading) {
+      toast($t("Loading..."), "error");
+      return;
+    }
+    if (regionsLoadFailed) {
+      toast($t("Could not load regions for the selected country."), "error");
+      return;
+    }
+    if (countryRegions.length > 0 && !s.region) {
       toast($t("Please select a region."), "error");
       return;
     }
@@ -298,9 +343,8 @@
             id="settings-country"
             class="kz-select"
             bind:value={s.country}
-            on:change={async () => {
-              s.region = "";
-              countryRegions = await loadRegionsFor(s.country);
+            on:change={() => {
+              s = { ...s, region: "" };
             }}
           >
             <option value="">{$t("- Please select -")}</option>
@@ -311,25 +355,27 @@
         </div>
         <div>
           <label class="kz-label" for="settings-region">{$t("Region")}</label>
-          {#if countryRegions.length > 0}
-            <select
-                id="settings-region"
-                class="kz-select"
-                bind:value={s.region}
-              >
+          <select
+              id="settings-region"
+              class="kz-select"
+              bind:value={s.region}
+              disabled={!s.country || regionLoading || regionsLoadFailed || countryRegions.length === 0}
+            >
+              {#if !s.country}
                 <option value="">{$t("- Please select -")}</option>
-                {#each countryRegions as r}
+              {:else if regionLoading}
+                <option value="">{$t("Loading...")}</option>
+              {:else if regionsLoadFailed}
+                <option value="">{$t("Could not load regions.")}</option>
+              {:else if countryRegions.length === 0}
+                <option value="">{$t("No regions available.")}</option>
+              {:else}
+                <option value="">{$t("- Please select -")}</option>
+              {/if}
+              {#each countryRegions as r}
                 <option value={r}>{r}</option>
               {/each}
             </select>
-          {:else}
-            <input
-              id="settings-region"
-              class="kz-input"
-              bind:value={s.region}
-              placeholder={$t("e.g. US-CA")}
-            />
-          {/if}
         </div>
       </div>
 
