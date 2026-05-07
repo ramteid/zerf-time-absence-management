@@ -4,7 +4,28 @@
 	# email ops@example.com
 	servers {
 		protocols h1 h2 h3
+
+		# Cap server-side connection lifetimes. Defence against slow-loris /
+		# header-flood / connection-exhaustion attacks against an exposed
+		# edge. Real users complete a request well under these.
+		timeouts {
+			read_body   10s
+			read_header 5s
+			write       30s
+			idle        2m
+		}
 	}
+
+	# Per-IP, per-route rate limiting requires a Caddy build that includes
+	# the third-party `caddy-ratelimit` module
+	# (https://github.com/mholt/caddy-ratelimit). The Dockerfile in this
+	# repository should build Caddy with `xcaddy build --with
+	# github.com/mholt/caddy-ratelimit`. The block below configures sensible
+	# defaults; if your Caddy build does not include the module, comment
+	# this `order` directive out together with the `rate_limit` blocks
+	# referenced below — the application still enforces a per-email
+	# lockout, this is purely defence-in-depth against distributed scans.
+	order rate_limit before basicauth
 }
 
 {$ZERF_DOMAIN:localhost} {
@@ -29,10 +50,93 @@
 		max_size 1MB
 	}
 
-	# Note: edge rate-limiting needs a Caddy build with the rate_limit module.
-	# The application itself enforces 5 failed attempts / 15 min per email.
+	# ---------------------------------------------------------------------
+	# Rate limiting (defence-in-depth)
+	# ---------------------------------------------------------------------
+	# The application enforces a per-email login lockout (5 fails / 15 min).
+	# A distributed attacker who varies the email can still scan at high
+	# QPS without ever tripping that lockout, so we add per-IP limits at
+	# the edge. Limits are intentionally generous for legitimate users.
+	#
+	# Requires caddy-ratelimit module — see the global `order` directive.
+
+	@auth_login path /api/v1/auth/login
+	rate_limit @auth_login {
+		zone auth_login {
+			key    {remote_host}
+			events 10
+			window 1m
+		}
+	}
+
+	@auth_forgot path /api/v1/auth/forgot-password
+	rate_limit @auth_forgot {
+		zone auth_forgot {
+			key    {remote_host}
+			events 5
+			window 15m
+		}
+	}
+
+	@auth_reset path /api/v1/auth/reset-password
+	rate_limit @auth_reset {
+		zone auth_reset {
+			key    {remote_host}
+			events 10
+			window 15m
+		}
+	}
+
+	# Setup endpoint is only legitimately hit ONCE in the lifetime of a
+	# deployment. Tighten hard so probing it is expensive. We deliberately
+	# do NOT include /auth/setup-status here: the SPA polls it on every
+	# Login-page load to decide whether to show the setup screen, so a
+	# tight per-IP cap would lock out legitimate users behind a corporate
+	# NAT. /setup-status is covered by the generic /api/* ceiling below.
+	@auth_setup path /api/v1/auth/setup
+	rate_limit @auth_setup {
+		zone auth_setup {
+			key    {remote_host}
+			events 5
+			window 1h
+		}
+	}
+
+	# Generic API ceiling — stops smash-and-grab scrapers and bulk
+	# enumeration, while leaving normal SPA usage (which makes a few dozen
+	# requests per page load) entirely unaffected.
+	@api path /api/*
+	rate_limit @api {
+		zone api_global {
+			key    {remote_host}
+			events 600
+			window 1m
+		}
+	}
+
+	# ---------------------------------------------------------------------
+	# Hardening: block well-known scanner paths early so they never reach
+	# the app and never appear in app logs.
+	# ---------------------------------------------------------------------
+	@scanners {
+		path /.git/* /.env /.env.* /wp-admin* /wp-login* /xmlrpc.php /phpmyadmin* /server-status /actuator/*
+	}
+	respond @scanners 404
+
+	# Only allow methods the application actually uses. Reject TRACE,
+	# CONNECT, PATCH (unused) and anything exotic at the edge.
+	@bad_method not method GET HEAD POST PUT DELETE OPTIONS
+	respond @bad_method 405
 
 	reverse_proxy app:3333 {
 		header_up X-Real-IP {remote_host}
+
+		# Don't sit on a stuck upstream forever.
+		transport http {
+			dial_timeout      5s
+			response_header_timeout 30s
+			read_timeout      60s
+			write_timeout     30s
+		}
 	}
 }
