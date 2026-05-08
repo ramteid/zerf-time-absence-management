@@ -79,7 +79,7 @@ describe("Layout pull to refresh", () => {
     dispatchTouch(handle, "touchmove", 220);
     await settle();
 
-    expect(target.querySelector(".pull-to-refresh")).toBeNull();
+    expect(target.querySelector(".pull-to-refresh.ptr-open")).toBeNull();
   });
 
   it("arms pull to refresh when the page content starts at the top", async () => {
@@ -92,6 +92,6 @@ describe("Layout pull to refresh", () => {
     dispatchTouch(handle, "touchmove", 220);
     await settle();
 
-    expect(target.querySelector(".pull-to-refresh")).not.toBeNull();
+    expect(target.querySelector(".pull-to-refresh.ptr-open")).not.toBeNull();
   });
 });
