@@ -19,11 +19,11 @@ const TRANSLATIONS = {
   en: {
     hours_unit: "h",
     "{hours} / week": "{hours} / week",
-    "As of yesterday": "As of yesterday",
+    "As of yesterday": "As of today",
     help_monthly_report:
       "Shows the monthly report for a team member with target/actual hours and daily details.",
     help_team_report:
-      "Compares target and actual hours for all active team members in the selected month. For the current month, data is only available up to yesterday.",
+      "Compares target and actual hours for all active team members in the selected month. For the current month, data is available including today.",
     help_category_breakdown:
       "Shows how tracked hours are distributed across the different categories.",
     help_absence_report:
@@ -35,9 +35,9 @@ const TRANSLATIONS = {
     help_csv_export:
       "Exports the selected employee and date range as a CSV file.",
     help_my_balance:
-      "Overview of your current flextime balance and submission status. The overtime balance is calculated up to yesterday.",
+      "Overview of your current flextime balance and submission status. The overtime balance is calculated including today.",
     help_flextime_chart:
-      "Your cumulative flextime balance over the selected period. Data is calculated up to yesterday.",
+      "Your cumulative flextime balance over the selected period. Data is calculated including today.",
     "Who is absent": "Who is absent",
     "Previous week": "Previous week",
     "Next week": "Next week",
@@ -173,7 +173,7 @@ const TRANSLATIONS = {
     "Vacation planned": "Vacation planned",
     "All weeks submitted": "All weeks submitted",
     "Note: current month - data up to yesterday":
-      "Note: current month - data up to yesterday",
+      "Note: current month - data including today",
   },
   de: {
     "Loading...": "Wird geladen...",
@@ -828,11 +828,11 @@ const TRANSLATIONS = {
     "Public holiday": "Feiertag",
     Absent: "Abwesend",
     // Reports help tooltips
-    "As of yesterday": "Stand bis gestern",
+    "As of yesterday": "Stand heute",
     help_monthly_report:
       "Zeigt den Monatsbericht eines Mitarbeiters mit Soll-/Ist-Stunden und Details pro Tag.",
     help_team_report:
-      "Vergleicht Soll- und Ist-Stunden aller aktiven Teammitglieder für den gewählten Monat. Für den laufenden Monat sind nur Daten bis gestern verfügbar.",
+      "Vergleicht Soll- und Ist-Stunden aller aktiven Teammitglieder für den gewählten Monat. Für den laufenden Monat sind Daten inklusive heute verfügbar.",
     help_category_breakdown:
       "Zeigt die Verteilung der erfassten Stunden auf die verschiedenen Kategorien.",
     help_absence_report:
@@ -844,9 +844,9 @@ const TRANSLATIONS = {
     help_csv_export:
       "Exportiert den gewählten Mitarbeiter und Zeitraum als CSV-Datei.",
     help_my_balance:
-      "Überblick über deinen aktuellen Gleitzeitstand und den Einreichungsstatus. Der Gleitzeitstand wird bis gestern berechnet.",
+      "Überblick über deinen aktuellen Gleitzeitstand und den Einreichungsstatus. Der Gleitzeitstand wird inklusive heute berechnet.",
     help_flextime_chart:
-      "Verlauf deines kumulierten Gleitzeitkontostands über den gewählten Zeitraum. Die Daten werden bis gestern berechnet.",
+      "Verlauf deines kumulierten Gleitzeitkontostands über den gewählten Zeitraum. Die Daten werden inklusive heute berechnet.",
     "Who is absent": "Wer ist abwesend",
     "No absences this week.": "Keine Abwesenheiten diese Woche.",
     "Employee Details": "Mitarbeiterdetails",
@@ -960,7 +960,7 @@ const TRANSLATIONS = {
     "Vacation planned": "Urlaub geplant",
     "All weeks submitted": "Alle Wochen eingereicht",
     "Note: current month - data up to yesterday":
-      "Hinweis: Laufender Monat - Daten bis gestern",
+      "Hinweis: Laufender Monat - Daten inklusive heute",
   },
 };
 

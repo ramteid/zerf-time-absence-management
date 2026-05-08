@@ -179,7 +179,7 @@ async fn build_range(
             })
             .map(|(_, _, absence_kind)| absence_kind.clone());
         let before_start = current_date < user.start_date;
-        let after_today = current_date >= today;
+        let after_today = current_date > today;
         let target =
             if weekday && holiday.is_none() && absence.is_none() && !before_start && !after_today {
                 target_per_day_min
@@ -244,7 +244,7 @@ async fn build_range(
         let actual_eff = if after_today { 0 } else { actual };
         target_total += target;
         actual_total += actual_eff;
-        submitted_total += submitted; // after_today entries already skipped in loop above
+        submitted_total += submitted; // future entries (after today) already skipped in loop above
         full_month_target_total += full_target;
         days.push(DayDetail {
             date: current_date,
@@ -493,19 +493,19 @@ pub async fn range_csv(
 pub struct TeamRow {
     pub user_id: i64,
     pub name: String,
-    /// Target minutes for the report month (excluding weekends, holidays, absences, and today+).
+    /// Target minutes for the report month (excluding weekends, holidays, absences, and future days).
     pub target_min: i64,
-    /// Actual minutes: approved time entries in the report month (up to yesterday).
+    /// Actual minutes: approved time entries in the report month (including today).
     pub actual_min: i64,
     /// Diff = actual - target for the report month.
     pub diff_min: i64,
-    /// Vacation working-days taken in the report month (up to yesterday).
+    /// Vacation working-days taken in the report month (including today).
     pub vacation_days: f64,
-    /// Vacation working-days planned but not yet started in the report month (from today).
+    /// Vacation working-days planned but not yet started in the report month (from tomorrow).
     pub vacation_planned_days: f64,
     /// Sick working-days in the report month.
     pub sick_days: f64,
-    /// Current cumulative flextime balance as of yesterday.
+    /// Current cumulative flextime balance as of today.
     pub flextime_balance_min: i64,
     /// True if all fully elapsed weeks (Sunday < today) overlapping the report month
     /// have been fully submitted.
@@ -641,12 +641,14 @@ pub async fn team(
         .collect();
 
     let today = reporting_today();
-    let yesterday = today - Duration::days(1);
     let (month_start, month_end) = month_bounds(&query.month)?;
 
-    // Vacation split: "taken" = up to yesterday, "planned" = from today onwards.
-    let vacation_taken_end = yesterday.min(month_end);
-    let vacation_planned_start = today.max(month_start);
+    // Vacation split for the selected month:
+    // - taken includes today
+    // - planned starts tomorrow
+    let vacation_taken_end = today.min(month_end);
+    let tomorrow = today + Duration::days(1);
+    let vacation_planned_start = tomorrow.max(month_start);
 
     let mut team_rows = vec![];
 
@@ -656,7 +658,7 @@ pub async fn team(
             build_month_without_submission_status(&app_state.pool, team_member.id, &query.month)
                 .await?;
 
-        // Vacation days taken are capped at yesterday.
+        // Vacation days taken are capped at today so current-day absences count.
         let absence_count_start = month_start.max(team_member.start_date);
 
         let vacation_taken = if absence_count_start <= vacation_taken_end {
@@ -672,7 +674,7 @@ pub async fn team(
             0.0
         };
 
-        // Planned vacation starts today or later inside the selected month.
+        // Planned vacation starts from tomorrow inside the selected month.
         let vacation_planned_start = vacation_planned_start.max(team_member.start_date);
         let vacation_planned = if vacation_planned_start <= month_end {
             crate::absences::workdays_total(
@@ -687,10 +689,9 @@ pub async fn team(
             0.0
         };
 
-        // Sick days are also capped at yesterday.
-        // Future absences are excluded, consistent with vacation_taken and the
-        // "data up to yesterday" principle for the current month.
-        let sick_end = yesterday.min(month_end);
+        // Sick days are capped at today so current-day sick leave counts.
+        // Future absences are excluded to keep month-to-date semantics.
+        let sick_end = today.min(month_end);
         let sick_workdays = if absence_count_start <= sick_end {
             crate::absences::workdays_total(
                 &app_state.pool,
@@ -705,7 +706,7 @@ pub async fn team(
         };
 
         // Current flextime balance is independent of the selected month.
-        // The latest row of the current year is the balance as of yesterday.
+        // The latest row of the current year is the balance as of today.
         let current_year = today.year();
         let overtime_rows =
             build_overtime_rows_for_year(&app_state.pool, team_member.id, current_year).await?;
@@ -767,7 +768,8 @@ pub async fn categories(
     Query(query): Query<CategoryQuery>,
 ) -> AppResult<Json<Vec<CategoryTotal>>> {
     validate_range(query.from, query.to)?;
-    let effective_to = query.to.min(reporting_today() - Duration::days(1));
+    // Clamp to today so category reports include current-day entries but no future dates.
+    let effective_to = query.to.min(reporting_today());
     if query.from > effective_to {
         return Ok(Json(Vec::new()));
     }
@@ -780,9 +782,8 @@ pub async fn categories(
         // No specific user requested: only leads may see aggregated team data.
         return Err(AppError::Forbidden);
     }
-    // The category breakdown shows booked time, not approved work time.
-    // Rejected entries are the only entries excluded; current-day rows are capped
-    // out by effective_to so report calculations never include today.
+    // The category breakdown shows booked time, not only approved work time.
+    // Rejected entries are excluded; effective_to ensures dates are bounded to today.
     let mut builder = QueryBuilder::<Postgres>::new(
         "SELECT c.name, c.color, z.start_time, z.end_time \
          FROM time_entries z \
@@ -844,7 +845,8 @@ pub async fn team_categories(
         return Err(AppError::Forbidden);
     }
     validate_range(query.from, query.to)?;
-    let effective_to = query.to.min(reporting_today() - Duration::days(1));
+    // Clamp to today so team category reports include current-day entries.
+    let effective_to = query.to.min(reporting_today());
     if query.from > effective_to {
         return Ok(Json(Vec::new()));
     }
@@ -867,7 +869,7 @@ pub async fn team_categories(
         .await?;
 
     // Same as the individual breakdown: include every booked, non-rejected entry
-    // before today, including drafts and submitted entries.
+    // up to today, including drafts and submitted entries.
     let mut entry_builder = QueryBuilder::<Postgres>::new(
         "SELECT z.user_id, c.name, c.color, z.start_time, z.end_time \
          FROM time_entries z \
@@ -1221,7 +1223,7 @@ pub async fn flextime(
         let holiday = holiday_map.get(&current_date).cloned();
         let absence = absence_by_day.get(&current_date).cloned();
         let before_start = current_date < user.start_date;
-        let after_today = current_date >= today;
+        let after_today = current_date > today;
         let target = if is_weekday
             && holiday.is_none()
             && absence.is_none()

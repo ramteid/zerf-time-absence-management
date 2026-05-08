@@ -1,6 +1,6 @@
 <script>
   import { t, absenceKindLabel, formatHours } from "./i18n.js";
-  import { fmtDateShort } from "./format.js";
+  import { fmtDateShort, isoDate } from "./format.js";
 
   /**
    * @typedef {{date: string, actual_min: number, target_min: number,
@@ -11,9 +11,9 @@
   /** @type {FlextimeDay[]} */
   export let data = [];
 
-  // Index of the last data point up to and including yesterday.
+  // Index of the last data point up to and including today (local date).
   // The line and area fill stop here; x-axis labels cover the full range.
-  $: todayStr = new Date().toISOString().slice(0, 10);
+  $: todayStr = isoDate(new Date());
   $: lastActualIdx = (() => {
     let lastVisibleIndex = data.length - 1;
     while (lastVisibleIndex >= 0 && data[lastVisibleIndex].date > todayStr) lastVisibleIndex--;

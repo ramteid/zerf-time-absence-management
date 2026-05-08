@@ -66,7 +66,7 @@
 
   // ── Flextime chart ────────────────────────────────────────────────────────────
   let chartFrom = clampFromToUserStart(daysAgo(29));
-  let chartTo = isoDate(addDays(today, -1));
+  let chartTo = isoDate(today);
   let chartData = [];
   let chartLoading = false;
 
@@ -187,7 +187,7 @@
 
   function setRange(days) {
     chartFrom = clampFromToUserStart(daysAgo(days - 1));
-    chartTo = isoDate(addDays(today, -1));
+    chartTo = isoDate(today);
     loadChart();
   }
 
@@ -710,7 +710,7 @@
     {/if}
     <div class="stat-cards">
 
-      <!-- Cumulative overtime balance (as of yesterday) -->
+      <!-- Cumulative overtime balance including today -->
       <div class="kz-card stat-card">
         <div class="stat-card-label">{$t("Overtime overview")}</div>
         {#if overtimeLoading}
