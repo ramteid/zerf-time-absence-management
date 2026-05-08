@@ -80,11 +80,9 @@
         },
       });
       await storePasswordCredential(form);
-      // A real page navigation lets Firefox and Safari detect the
-      // password form submission and offer to save the credentials.
-      // Store the email so the login form can pre-fill it after reload.
-      sessionStorage.setItem("setup-email", email.trim());
-      window.location.reload();
+      // Notify the parent (App.svelte) so it can transition to the login
+      // screen and pre-fill the email without a full page reload.
+      onComplete(email.trim());
     } catch (err) {
       error = $t(err?.message || "Error");
     } finally {
