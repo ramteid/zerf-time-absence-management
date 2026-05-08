@@ -19,8 +19,6 @@ const TRANSLATIONS = {
   en: {
     hours_unit: "h",
     "{hours} / week": "{hours} / week",
-    help_overtime:
-      "Shows target and actual hours per month. Only approved time entries count towards the actual hours.",
     "As of yesterday": "As of yesterday",
     help_monthly_report:
       "Shows the monthly report for a team member with target/actual hours and daily details.",
@@ -45,7 +43,6 @@ const TRANSLATIONS = {
     "No absences this week.": "No absences this week.",
     "Employee Details": "Employee Details",
     "Total days": "Total days",
-    "Overtime balance": "Overtime balance",
     Flextime: "Flextime",
     Vacation: "Vacation",
     Entitlement: "Entitlement",
@@ -291,9 +288,6 @@ const TRANSLATIONS = {
     "Week {week}: {from} - {to}": "Woche {week}: {from} - {to}",
     "Week {week}": "Woche {week}",
 
-    Target: "Soll",
-    Actual: "Ist",
-    Difference: "Differenz",
     "Add entry": "Eintrag hinzufügen",
     "Edit entry": "Eintrag bearbeiten",
     "Delete?": "Löschen?",
@@ -349,12 +343,9 @@ const TRANSLATIONS = {
     "New password (min 12 chars)": "Neues Passwort (mind. 12 Zeichen)",
     "Confirm new password": "Neues Passwort bestätigen",
     "Password changed.": "Passwort geändert.",
-    "Overtime balance {year}": "Überstundenkonto {year}",
     Balance: "Saldo",
     Month: "Monat",
     Year: "Jahr",
-    Diff: "Diff.",
-    Cumulative: "Kumuliert",
     "Submitted entries": "Eingereichte Einträge",
     "Open requests": "Offene Anträge",
     "Change requests": "Änderungsanträge",
@@ -701,6 +692,7 @@ const TRANSLATIONS = {
       "Für diesen Eintrag existiert bereits eine offene Änderungsanfrage (ID {id}).",
     "Leave balance unavailable.": "Urlaubsstand nicht verfügbar.",
     "Overtime data unavailable.": "Überstundendaten nicht verfügbar.",
+    "Overtime overview": "Überstundenübersicht",
     "This month: {value}": "Diesen Monat: {value}",
     "Submission status": "Einreichungsstatus",
     "All previous months submitted": "Alle vergangenen Monate eingereicht",
@@ -822,8 +814,6 @@ const TRANSLATIONS = {
     "Public holiday": "Feiertag",
     Absent: "Abwesend",
     // Reports help tooltips
-    help_overtime:
-      "Zeigt Soll- und Ist-Stunden pro Monat. Nur genehmigte Zeiteinträge zählen zu den Ist-Stunden.",
     "As of yesterday": "Stand bis gestern",
     help_monthly_report:
       "Zeigt den Monatsbericht eines Mitarbeiters mit Soll-/Ist-Stunden und Details pro Tag.",
@@ -845,7 +835,6 @@ const TRANSLATIONS = {
     "No absences this week.": "Keine Abwesenheiten diese Woche.",
     "Employee Details": "Mitarbeiterdetails",
     "Total days": "Tage gesamt",
-    "Overtime balance": "Gleitzeitstand",
     Flextime: "Gleitzeit",
     Filter: "Filter",
     // Reports help (English defaults)

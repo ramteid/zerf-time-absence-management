@@ -578,7 +578,9 @@ pub async fn update(
 }
 
 fn can_self_cancel(absence: &Absence) -> bool {
-    absence.status == "requested" || absence.status == "approved"
+    // Only requested absences and auto-approved sick absences can be self-cancelled.
+    absence.status == "requested"
+        || (absence.status == "approved" && absence.kind == "sick")
 }
 
 pub async fn cancel(
@@ -605,77 +607,25 @@ pub async fn cancel(
     }
     if !can_self_cancel(&absence) {
         return Err(AppError::BadRequest(
-            "Only requested or approved absences can be cancelled.".into(),
+            "Only requested absences and auto-approved sick absences can be self-cancelled.".into(),
         ));
     }
-    let direct_cancel =
-        absence.status == "requested" || requester.allow_reopen_without_approval;
-    if direct_cancel {
-        sqlx::query("UPDATE absences SET status='cancelled' WHERE id=$1")
-            .bind(absence_id)
-            .execute(&mut *transaction)
-            .await?;
-        transaction.commit().await?;
-        audit::log(
-            &app_state.pool,
-            requester.id,
-            "cancelled",
-            "absences",
-            absence_id,
-            Some(serde_json::to_value(&absence).unwrap()),
-            Some(serde_json::json!({"status": "cancelled"})),
-        )
-        .await;
-        Ok(Json(serde_json::json!({"ok": true})))
-    } else {
-        let rows = crate::repository::AbsenceDb::request_cancellation_tx(
-            &mut *transaction,
-            absence_id,
-        )
+    sqlx::query("UPDATE absences SET status='cancelled' WHERE id=$1")
+        .bind(absence_id)
+        .execute(&mut *transaction)
         .await?;
-        if rows == 0 {
-            return Err(AppError::Conflict(
-                "Absence status changed concurrently.".into(),
-            ));
-        }
-        transaction.commit().await?;
-        audit::log(
-            &app_state.pool,
-            requester.id,
-            "cancellation_requested",
-            "absences",
-            absence_id,
-            Some(serde_json::to_value(&absence).unwrap()),
-            Some(serde_json::json!({"status": "cancellation_pending"})),
-        )
-        .await;
-        let requester_full_name = format!("{} {}", requester.first_name, requester.last_name);
-        let approver_ids =
-            crate::auth::approval_recipient_ids(&app_state.pool, &requester).await;
-        let language = notification_language(&app_state.pool).await;
-        for approver_id in approver_ids {
-            crate::notifications::create_translated(
-                &app_state,
-                &language,
-                approver_id,
-                "absence_cancellation_requested",
-                "absence_cancellation_requested_title",
-                "absence_cancellation_requested_body",
-                vec![
-                    ("requester_name", requester_full_name.clone()),
-                    (
-                        "start_date",
-                        i18n::format_date(&language, absence.start_date),
-                    ),
-                    ("end_date", i18n::format_date(&language, absence.end_date)),
-                ],
-                Some("absences"),
-                Some(absence_id),
-            )
-            .await;
-        }
-        Ok(Json(serde_json::json!({"ok": true, "pending": true})))
-    }
+    transaction.commit().await?;
+    audit::log(
+        &app_state.pool,
+        requester.id,
+        "cancelled",
+        "absences",
+        absence_id,
+        Some(serde_json::to_value(&absence).unwrap()),
+        Some(serde_json::json!({"status": "cancelled"})),
+    )
+    .await;
+    Ok(Json(serde_json::json!({"ok": true})))
 }
 
 pub async fn approve(
