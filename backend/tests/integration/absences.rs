@@ -236,7 +236,7 @@ async fn employee_calendar_is_scoped_to_their_team() {
                 "weekly_hours":39,
                 "leave_days_current_year":30,"leave_days_next_year":30,
                 "start_date":"2024-01-01",
-                "approver_id": lead_id,
+                "approver_ids": [lead_id],
             }),
         )
         .await;
@@ -255,7 +255,7 @@ async fn employee_calendar_is_scoped_to_their_team() {
                 "weekly_hours":39,
                 "leave_days_current_year":30,"leave_days_next_year":30,
                 "start_date":"2024-01-01",
-                "approver_id":1,
+                "approver_ids":[1],
             }),
         )
         .await;
@@ -273,7 +273,7 @@ async fn employee_calendar_is_scoped_to_their_team() {
                 "weekly_hours":39,
                 "leave_days_current_year":30,"leave_days_next_year":30,
                 "start_date":"2024-01-01",
-                "approver_id": other_lead_id,
+                "approver_ids": [other_lead_id],
             }),
         )
         .await;

@@ -32,22 +32,26 @@ async fn main() -> Result<()> {
         tracing::info!("==========================================================");
     }
 
+    let broadcaster = zerf::notifications::broadcaster();
+    let db = zerf::repository::Db::new(pool.clone(), broadcaster.clone());
+
     let state = AppState {
         pool: pool.clone(),
+        db,
         cfg: Arc::new(config.clone()),
-        notifications: zerf::notifications::broadcaster(),
+        notifications: broadcaster,
     };
 
     // Background hygiene: clean expired sessions, old login attempts, and
     // old notifications (>90 days).
     tokio::spawn(zerf::auth::cleanup_loop(pool.clone()));
     {
-        let pool = pool.clone();
+        let db = state.db.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(86_400));
             loop {
                 interval.tick().await;
-                zerf::notifications::cleanup_old(&pool).await;
+                zerf::notifications::cleanup_old(&db).await;
             }
         });
     }

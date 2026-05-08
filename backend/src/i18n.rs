@@ -214,16 +214,10 @@ pub fn normalize_language_code(value: &str) -> Option<String> {
 
 // -- Database -----------------------------------------------------------------
 
-pub async fn load_ui_language(pool: &DatabasePool) -> Result<Language, sqlx::Error> {
-    let value: Option<String> = sqlx::query_scalar("SELECT value FROM app_settings WHERE key = $1")
-        .bind(UI_LANGUAGE_KEY)
-        .fetch_optional(pool)
-        .await?;
-
-    Ok(value
-        .as_deref()
-        .map(Language::from_setting)
-        .unwrap_or_default())
+pub async fn load_ui_language(pool: &DatabasePool) -> Result<Language, crate::error::AppError> {
+    let db = crate::repository::SettingsDb::new(pool.clone());
+    let code = db.load_ui_language_code().await;
+    Ok(Language::from_setting(&code))
 }
 
 // -- Formatting helpers -------------------------------------------------------

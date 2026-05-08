@@ -643,6 +643,12 @@
       toast($t(error?.message || "Error"), "error");
     }
   }
+
+  // ── Help tooltips ─────────────────────────────────────────────────────────────
+  let activeHelp = null;
+  function toggleHelp(id) {
+    activeHelp = activeHelp === id ? null : id;
+  }
 </script>
 
 <div class="top-bar">
@@ -664,7 +670,24 @@
        SECTION 1 – "Meine Bilanz": running balance & compliance (all users)
        ════════════════════════════════════════════════════════════════════════ -->
   <div class="dashboard-group">
-    <div class="dashboard-group-label">{$t("My Balance")}</div>
+    <div class="dashboard-group-label" style="display:flex;align-items:center;gap:6px">
+      {$t("My Balance")}
+      <button
+        class="kz-btn-icon-sm kz-btn-ghost"
+        title={$t("help_my_balance")}
+        on:click={() => toggleHelp("balance")}
+        style="color:var(--text-tertiary);font-size:14px;cursor:help"
+      >
+        <Icon name="Info" size={14} />
+      </button>
+    </div>
+    {#if activeHelp === "balance"}
+      <div
+        style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)"
+      >
+        {$t("help_my_balance")}
+      </div>
+    {/if}
     <div class="stat-cards">
 
       <!-- Cumulative overtime balance (as of yesterday) -->
@@ -684,7 +707,6 @@
           <div class="stat-card-sub">
             {$t("This month: {value}", { value: hoursFromMinutes(currentMonthDiffMin) })}
           </div>
-          <div class="stat-card-sub">{$t("As of yesterday")}</div>
         {/if}
         {#if overtimeError}
           <div class="error-text" style="font-size:11px;margin-top:4px">
@@ -1016,7 +1038,7 @@
       </div>
 
       {#key absenceSliderWeek}
-        <div in:fly={{ x: absenceSliderDirection * 80, duration: 200 }} style="overflow:hidden">
+        <div class="dropdown-slider" in:fly={{ x: absenceSliderDirection * 80, duration: 200 }}>
           {#if absenceSliderTeamData.length === 0}
             <div style="padding:12px;color:var(--text-tertiary);font-size:13px">
               {$t("No absences this week.")}
@@ -1025,9 +1047,7 @@
             <div style="display:flex;flex-direction:column;gap:8px">
               {#each absenceSliderTeamData as absence}
                 {@const absentUser = users.find((u) => u.id === absence.user_id)}
-                <div
-                  style="padding:12px;border-left:3px solid var(--border);background:var(--bg-muted);border-radius:var(--radius-sm);display:flex;justify-content:space-between;align-items:center"
-                >
+                <div class="dropdown-slider-item">
                   <div>
                     <div style="font-weight:500;font-size:13px">
                       {absentUser
@@ -1122,6 +1142,14 @@
     >
       <Icon name="TrendingUp" size={15} sw={1.5} />
       <span style="font-size:14px;font-weight:400;flex:1">{$t("Flextime balance")}</span>
+      <button
+        class="kz-btn-icon-sm kz-btn-ghost"
+        title={$t("help_flextime_chart")}
+        on:click={() => toggleHelp("flextime")}
+        style="color:var(--text-tertiary);font-size:14px;cursor:help"
+      >
+        <Icon name="Info" size={14} />
+      </button>
       <div style="display:flex;gap:4px;flex-wrap:wrap">
         <button class="kz-btn kz-btn-sm" on:click={() => setRange(30)}
           >{$t("Last 30 days")}</button
@@ -1153,6 +1181,13 @@
         </button>
       </div>
     </div>
+    {#if activeHelp === "flextime"}
+      <div
+        style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)"
+      >
+        {$t("help_flextime_chart")}
+      </div>
+    {/if}
     {#if chartLoading}
       <div
         style="text-align:center;padding:40px 0;font-size:13px;color:var(--text-tertiary)"

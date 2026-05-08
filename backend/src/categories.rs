@@ -1,69 +1,23 @@
 use crate::auth::User;
 use crate::error::{AppError, AppResult};
+use crate::repository::categories::Category;
 use crate::AppState;
 use axum::{
     extract::{Path, State},
     Json,
 };
-use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
-
-const LEGACY_CORE_DUTIES_NAME_HEX: &str = "446972656374204368696c6463617265";
-
-#[derive(FromRow, Serialize, Deserialize, Clone)]
-pub struct Category {
-    pub id: i64,
-    pub name: String,
-    pub description: Option<String>,
-    pub color: String,
-    pub sort_order: i64,
-    pub active: bool,
-}
+use serde::Deserialize;
 
 pub async fn ensure_initial(pool: &crate::db::DatabasePool) -> AppResult<()> {
-    sqlx::query(
-        "UPDATE categories SET name = $1 WHERE name = convert_from(decode($2, 'hex'), 'UTF8')",
-    )
-    .bind("Core Duties")
-    .bind(LEGACY_CORE_DUTIES_NAME_HEX)
-    .execute(pool)
-    .await?;
-
-    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM categories")
-        .fetch_one(pool)
-        .await?;
-    if count > 0 {
-        return Ok(());
-    }
-    let initial_categories = [
-        ("Core Duties", "#4CAF50", 1),
-        ("Preparation Time", "#2196F3", 2),
-        ("Leadership Tasks", "#FF9800", 3),
-        ("Team Meeting", "#9C27B0", 4),
-        ("Training", "#795548", 5),
-        ("Other", "#607D8B", 6),
-    ];
-    for (name, color, sort_order) in initial_categories {
-        sqlx::query("INSERT INTO categories(name, color, sort_order) VALUES ($1,$2,$3)")
-            .bind(name)
-            .bind(color)
-            .bind(sort_order)
-            .execute(pool)
-            .await?;
-    }
-    Ok(())
+    let db = crate::repository::CategoryDb::new(pool.clone());
+    db.ensure_initial().await
 }
 
 pub async fn list(
     State(app_state): State<AppState>,
     _requester: User,
 ) -> AppResult<Json<Vec<Category>>> {
-    let categories = sqlx::query_as::<_, Category>(
-        "SELECT id, name, description, color, sort_order, active FROM categories WHERE active=TRUE ORDER BY sort_order, name",
-    )
-    .fetch_all(&app_state.pool)
-    .await?;
-    Ok(Json(categories))
+    Ok(Json(app_state.db.categories.list_active().await?))
 }
 
 #[derive(Deserialize)]
@@ -90,24 +44,14 @@ pub async fn create(
     if color.is_empty() || color.len() > 30 {
         return Err(AppError::BadRequest("Invalid color.".into()));
     }
-    let new_category_id: i64 = sqlx::query_scalar(
-        "INSERT INTO categories(name, description, color, sort_order) VALUES ($1,$2,$3,$4) RETURNING id",
-    )
-    .bind(&name)
-    .bind(&body.description)
-    .bind(&color)
-    .bind(body.sort_order.unwrap_or(0))
-    .fetch_one(&app_state.pool)
-    .await
-    .map_err(|_| AppError::Conflict("Name already exists".into()))?;
-    Ok(Json(
-        sqlx::query_as(
-            "SELECT id, name, description, color, sort_order, active FROM categories WHERE id=$1",
-        )
-        .bind(new_category_id)
-        .fetch_one(&app_state.pool)
-        .await?,
-    ))
+    let new_id = app_state
+        .db
+        .categories
+        .create(&name, body.description.as_deref(), &color, body.sort_order.unwrap_or(0))
+        .await?;
+    let category = app_state.db.categories.find_by_id(new_id).await?
+        .ok_or_else(|| AppError::Internal("Created category not found".into()))?;
+    Ok(Json(category))
 }
 
 #[derive(Deserialize)]
@@ -140,17 +84,13 @@ pub async fn update(
             return Err(AppError::BadRequest("Invalid color.".into()));
         }
     }
-    let normalized_name = body.name.map(|name| name.trim().to_string());
-    let normalized_color = body.color.map(|color| color.trim().to_string());
-    sqlx::query("UPDATE categories SET name=COALESCE($1,name), description=COALESCE($2,description), color=COALESCE($3,color), sort_order=COALESCE($4,sort_order), active=COALESCE($5,active) WHERE id=$6")
-        .bind(normalized_name).bind(body.description).bind(normalized_color).bind(body.sort_order).bind(body.active).bind(category_id)
-        .execute(&app_state.pool).await?;
-    Ok(Json(
-        sqlx::query_as(
-            "SELECT id, name, description, color, sort_order, active FROM categories WHERE id=$1",
-        )
-        .bind(category_id)
-        .fetch_one(&app_state.pool)
-        .await?,
-    ))
+    let normalized_name = body.name.map(|n| n.trim().to_string());
+    let normalized_color = body.color.map(|c| c.trim().to_string());
+    app_state.db.categories.update(
+        category_id, normalized_name, body.description, normalized_color,
+        body.sort_order, body.active,
+    ).await?;
+    let category = app_state.db.categories.find_by_id(category_id).await?
+        .ok_or_else(|| AppError::Internal("Category not found".into()))?;
+    Ok(Json(category))
 }

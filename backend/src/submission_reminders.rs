@@ -172,12 +172,7 @@ pub async fn run_check(state: &crate::AppState) {
         (today.year(), today.month() - 1)
     };
 
-    let rows: Vec<(i64, String, NaiveDate)> = match sqlx::query_as::<_, (i64, String, NaiveDate)>(
-        "SELECT id, email, start_date FROM users WHERE active = TRUE AND weekly_hours > 0",
-    )
-    .fetch_all(pool)
-    .await
-    {
+    let rows: Vec<(i64, String, NaiveDate)> = match state.db.users.get_active_users_with_hours().await {
         Ok(r) => r,
         Err(e) => {
             tracing::warn!(target:"zerf::submission_reminders", "fetch users failed: {e}");
@@ -223,21 +218,17 @@ pub async fn run_check(state: &crate::AppState) {
         // background job overlaps with itself (relies on uq_notifications_reminder_daily index).
         // Only send the in-app signal and email when the row was actually inserted
         // (rows_affected == 0 means the conflict guard fired — reminder already sent today).
-        match sqlx::query(
-            "INSERT INTO notifications(user_id,kind,title,body,reference_type,reference_id) \
-             VALUES ($1,$2,$3,$4,$5,$6) \
-             ON CONFLICT DO NOTHING",
+        match state.db.notifications.insert_idempotent(
+            user_id,
+            "submission_reminder",
+            &title,
+            &body,
+            None,
+            None,
         )
-        .bind(user_id)
-        .bind("submission_reminder")
-        .bind(&title)
-        .bind(&body)
-        .bind(Option::<String>::None)
-        .bind(Option::<i64>::None)
-        .execute(pool)
         .await
         {
-            Ok(result) if result.rows_affected() > 0 => {
+            Ok(true) => {
                 let _ = state
                     .notifications
                     .send(crate::notifications::NotificationSignal { user_id });

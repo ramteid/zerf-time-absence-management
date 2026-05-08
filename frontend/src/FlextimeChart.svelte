@@ -451,8 +451,5 @@
         {/each}
       </div>
     {/if}
-    <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px;padding-left:{ML}px">
-      {$t("As of yesterday")}
-    </div>
   {/if}
 </div>

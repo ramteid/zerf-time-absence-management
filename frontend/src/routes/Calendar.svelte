@@ -284,7 +284,7 @@
   <div class="top-bar-subtitle">
     {fmtMonthYear(new Date(year, month - 1, 1))}
   </div>
-  <div class="top-bar-actions">
+  <div class="top-bar-actions calendar-top-actions">
     <div style="display:flex;align-items:center;gap:4px">
       <button
         class="kz-btn kz-btn-icon-sm kz-btn-ghost"

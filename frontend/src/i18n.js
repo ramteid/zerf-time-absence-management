@@ -25,15 +25,19 @@ const TRANSLATIONS = {
     help_monthly_report:
       "Shows the monthly report for a team member with target/actual hours and daily details.",
     help_team_report:
-      "Compares target and actual hours for all active team members in the selected month.",
+      "Compares target and actual hours for all active team members in the selected month. For the current month, data is only available up to yesterday.",
     help_category_breakdown:
       "Shows how tracked hours are distributed across the different categories.",
     help_absence_report:
-      "View absence entries over a selected period with type distribution.",
+      "View absence entries over a selected period with type distribution. Rejected and cancelled absences are excluded.",
     help_employee_details:
       "View detailed information about a team member including balance and statistics.",
     help_csv_export:
       "Exports the selected employee and date range as a CSV file.",
+    help_my_balance:
+      "Overview of your current flextime balance and submission status. The overtime balance is calculated up to yesterday.",
+    help_flextime_chart:
+      "Your cumulative flextime balance over the selected period. Data is calculated up to yesterday.",
     "Who is absent": "Who is absent",
     "Previous week": "Previous week",
     "Next week": "Next week",
@@ -551,12 +555,15 @@ const TRANSLATIONS = {
     Enabled: "Aktiviert",
     Disabled: "Deaktiviert",
     // Reopen-week feature
+    "Approvers (Team leads / Admins)": "Verantwortliche Teamleitungen / Admins",
     "Approver (Team lead / Admin)": "Verantwortliche Teamleitung / Admin",
+    "At least one approver is required for employees and team leads.":
+      "Für Mitarbeitende und Teamleitungen ist mindestens eine verantwortliche Person erforderlich.",
     "Required for employees and team leads.":
       "Pflichtfeld für Mitarbeitende und Teamleitungen.",
     "An approver is required for employees and team leads.":
       "Für Mitarbeitende und Teamleitungen ist eine verantwortliche Person erforderlich.",
-    "— None —": "— Keine —",
+    "No eligible approvers found.": "Keine geeigneten Verantwortlichen gefunden.",
     "Request edit": "Bearbeitung anfordern",
     "Reopen this week?": "Diese Woche wieder bearbeiten?",
     "Your team lead will be notified and must approve before the week becomes editable again.":
@@ -806,15 +813,19 @@ const TRANSLATIONS = {
     help_monthly_report:
       "Zeigt den Monatsbericht eines Mitarbeiters mit Soll-/Ist-Stunden und Details pro Tag.",
     help_team_report:
-      "Vergleicht Soll- und Ist-Stunden aller aktiven Teammitglieder für den gewählten Monat.",
+      "Vergleicht Soll- und Ist-Stunden aller aktiven Teammitglieder für den gewählten Monat. Für den laufenden Monat sind nur Daten bis gestern verfügbar.",
     help_category_breakdown:
       "Zeigt die Verteilung der erfassten Stunden auf die verschiedenen Kategorien.",
     help_absence_report:
-      "Zeigt Abwesenheitseinträge über einen gewählten Zeitraum mit Typverteilung.",
+      "Zeigt Abwesenheitseinträge über einen gewählten Zeitraum mit Typverteilung. Abgelehnte und stornierte Abwesenheiten werden nicht angezeigt.",
     help_employee_details:
       "Zeigt detaillierte Informationen über einen Mitarbeiter einschließlich Saldo und Statistiken.",
     help_csv_export:
       "Exportiert den gewählten Mitarbeiter und Zeitraum als CSV-Datei.",
+    help_my_balance:
+      "Überblick über deinen aktuellen Gleitzeitstand und den Einreichungsstatus. Der Gleitzeitstand wird bis gestern berechnet.",
+    help_flextime_chart:
+      "Verlauf deines kumulierten Gleitzeitkontostands über den gewählten Zeitraum. Die Daten werden bis gestern berechnet.",
     "Who is absent": "Wer ist abwesend",
     "No absences this week.": "Keine Abwesenheiten diese Woche.",
     "Employee Details": "Mitarbeiterdetails",

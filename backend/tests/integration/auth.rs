@@ -51,7 +51,7 @@ async fn me_payload_provides_role_shaped_view_data() {
             &json!({
                 "email":"emp-me@example.com","first_name":"E","last_name":"M",
                 "role":"employee","weekly_hours":39.0,"leave_days_current_year":30,"leave_days_next_year":30,
-                "start_date": today(), "approver_id": 1
+                "start_date": today(), "approver_ids": [1]
             }),
         )
         .await;
@@ -371,8 +371,8 @@ async fn create_password_reset_user(
     let password_hash = hash_password(password).expect("hash reset test password");
     let user_id: i64 = sqlx::query_scalar(
         "INSERT INTO users(email, password_hash, first_name, last_name, role, weekly_hours, \
-         start_date, active, must_change_password, approver_id, overtime_start_balance_min) \
-         VALUES ($1, $2, $3, $4, 'employee', 39.0, CURRENT_DATE, $5, FALSE, 1, 0) \
+         start_date, active, must_change_password, overtime_start_balance_min) \
+         VALUES ($1, $2, $3, $4, 'employee', 39.0, CURRENT_DATE, $5, FALSE, 0) \
          RETURNING id",
     )
     .bind(email)
@@ -383,6 +383,11 @@ async fn create_password_reset_user(
     .fetch_one(&app.state.pool)
     .await
     .expect("create reset test user");
+    sqlx::query("INSERT INTO user_approvers(user_id, approver_id) VALUES ($1, 1)")
+        .bind(user_id)
+        .execute(&app.state.pool)
+        .await
+        .expect("link reset test user to admin approver");
 
     sqlx::query(
         "INSERT INTO user_annual_leave(user_id, year, days) VALUES \

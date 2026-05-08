@@ -57,7 +57,7 @@ async fn non_admin_users_must_have_approver() {
             "/api/v1/users",
             &json!({"email":"b@example.com","first_name":"B","last_name":"B",
                 "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
-                "start_date":"2024-01-01","approver_id": 1}),
+                "start_date":"2024-01-01","approver_ids": [1]}),
         )
         .await;
     assert_eq!(st, StatusCode::OK, "with approver works");
@@ -68,7 +68,7 @@ async fn non_admin_users_must_have_approver() {
             "/api/v1/users",
             &json!({"email":"lead-approver@example.com","first_name":"Lead","last_name":"Approver",
                 "role":"team_lead","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
-                "start_date":"2024-01-01","approver_id":1}),
+                "start_date":"2024-01-01","approver_ids":[1]}),
         )
         .await;
     assert_eq!(st, StatusCode::OK, "create team lead approver");
@@ -79,17 +79,23 @@ async fn non_admin_users_must_have_approver() {
             "/api/v1/users",
             &json!({"email":"lead-report@example.com","first_name":"Lead","last_name":"Report",
                 "role":"team_lead","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
-                "start_date":"2024-01-01","approver_id":lead_approver_id}),
+                "start_date":"2024-01-01","approver_ids":[lead_approver_id]}),
         )
         .await;
     assert_eq!(st, StatusCode::OK, "create team lead with lead approver");
-    assert_eq!(body["user"]["approver_id"], lead_approver_id);
     let lead_report_id = id(&body);
+    // Verify approver was stored by fetching the user detail.
+    let (st, detail) = admin.get(&format!("/api/v1/users/{lead_report_id}")).await;
+    assert_eq!(st, StatusCode::OK, "get lead report detail");
+    assert!(
+        detail["approver_ids"].as_array().unwrap().iter().any(|v| v.as_i64() == Some(lead_approver_id)),
+        "lead_approver_id should be in approver_ids"
+    );
 
     let (st, body) = admin
         .put(
             &format!("/api/v1/users/{lead_report_id}"),
-            &json!({"approver_id": null}),
+            &json!({"approver_ids": []}),
         )
         .await;
     assert_eq!(
@@ -109,7 +115,7 @@ async fn non_admin_users_must_have_approver() {
             "/api/v1/users",
             &json!({"email":"c@example.com","first_name":"C","last_name":"C",
                 "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
-                "start_date":"2024-01-01","approver_id": 99999}),
+                "start_date":"2024-01-01","approver_ids": [99999]}),
         )
         .await;
     assert_eq!(st, StatusCode::BAD_REQUEST, "missing approver row rejected");
@@ -133,7 +139,7 @@ async fn duplicate_user_identifiers_are_rejected() {
                 "weekly_hours": 39,
                 "leave_days_current_year": 30, "leave_days_next_year": 30,
                 "start_date": "2024-01-01",
-                "approver_id": 1,
+                "approver_ids": [1],
             }),
         )
         .await;
@@ -151,7 +157,7 @@ async fn duplicate_user_identifiers_are_rejected() {
                 "weekly_hours": 39,
                 "leave_days_current_year": 30, "leave_days_next_year": 30,
                 "start_date": "2024-01-01",
-                "approver_id": 1,
+                "approver_ids": [1],
             }),
         )
         .await;
@@ -172,7 +178,7 @@ async fn duplicate_user_identifiers_are_rejected() {
                 "weekly_hours": 39,
                 "leave_days_current_year": 30, "leave_days_next_year": 30,
                 "start_date": "2024-01-01",
-                "approver_id": 1,
+                "approver_ids": [1],
             }),
         )
         .await;
@@ -193,7 +199,7 @@ async fn duplicate_user_identifiers_are_rejected() {
                 "weekly_hours": 39,
                 "leave_days_current_year": 30, "leave_days_next_year": 30,
                 "start_date": "2024-01-01",
-                "approver_id": 1,
+                "approver_ids": [1],
             }),
         )
         .await;
@@ -250,7 +256,7 @@ async fn creation_password_modes_set_must_change_correctly() {
                 "weekly_hours": 39,
                 "leave_days_current_year": 30, "leave_days_next_year": 30,
                 "start_date": "2024-01-01",
-                "approver_id": 1,
+                "approver_ids": [1],
                 "password": manual_password,
             }),
         )
@@ -278,7 +284,7 @@ async fn creation_password_modes_set_must_change_correctly() {
                 "weekly_hours": 39,
                 "leave_days_current_year": 30, "leave_days_next_year": 30,
                 "start_date": "2024-01-01",
-                "approver_id": 1,
+                "approver_ids": [1],
                 "password": generated_password,
             }),
         )

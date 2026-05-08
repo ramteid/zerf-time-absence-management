@@ -240,5 +240,5 @@ DATABASE_URL=postgres://postgres:postgres@127.0.0.1:55432/postgres cargo test
 - Prioritize readability for humans over brevity; code is read far more often than it is written.
 - Keep functions and modules small and focused on a single responsibility.
 - Reduce complexity: avoid unnecessary abstractions, indirection, and nesting.
-- Prefer simple, direct solutions over clever ones.
+- Prefer simple, direct solutions over clever ones. Keep it concise.
 - Apply appropriate architectural patterns (e.g., handler/service/repository separation) consistently across the codebase.
