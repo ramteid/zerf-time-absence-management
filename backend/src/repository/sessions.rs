@@ -274,6 +274,28 @@ impl SessionDb {
         .await
     }
 
+    /// Delete an expired reset token matching `token_hash` and return
+    /// `AppError::BadRequest("reset_token_expired")` if one was found.
+    /// Returns `Ok(())` when no expired token matched (the token may be valid
+    /// or non-existent — that is determined by the subsequent call to
+    /// `consume_reset_token_and_update_password_checked`).
+    pub async fn check_and_consume_expired_token(&self, token_hash: &str) -> AppResult<()> {
+        let expired: Option<i64> = sqlx::query_scalar(
+            "DELETE FROM password_reset_tokens \
+             WHERE token_hash=$1 AND expires_at <= CURRENT_TIMESTAMP \
+             RETURNING user_id",
+        )
+        .bind(token_hash)
+        .fetch_optional(&self.pool)
+        .await?;
+        if expired.is_some() {
+            return Err(crate::error::AppError::BadRequest(
+                "reset_token_expired".into(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Like `consume_reset_token_and_update_password` but also checks that the
     /// new password doesn't match the current hash. If `verify_not_reused` is
     /// provided, it is called with the current password_hash to check reuse.

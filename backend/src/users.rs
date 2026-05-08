@@ -193,6 +193,7 @@ pub struct NewUser {
     pub overtime_start_balance_min: Option<i64>,
     pub password: Option<String>,
     /// Mandatory for non-admin users: list of team leads/admins who can approve this user's submissions.
+    #[serde(default)]
     pub approver_ids: Vec<i64>,
 }
 

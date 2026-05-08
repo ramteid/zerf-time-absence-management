@@ -555,6 +555,7 @@ const TRANSLATIONS = {
     Enabled: "Aktiviert",
     Disabled: "Deaktiviert",
     // Reopen-week feature
+    Approvers: "Verantwortliche",
     "Approvers (Team leads / Admins)": "Verantwortliche Teamleitungen / Admins",
     "Approver (Team lead / Admin)": "Verantwortliche Teamleitung / Admin",
     "At least one approver is required for employees and team leads.":

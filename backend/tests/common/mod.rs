@@ -117,10 +117,13 @@ impl TestApp {
             .expect("failed to seed admin")
             .expect("admin should have been created");
 
+        let broadcaster = zerf::notifications::broadcaster();
+        let db = zerf::repository::Db::new(pool.clone(), broadcaster.clone());
         let state = AppState {
             pool: pool.clone(),
+            db,
             cfg: Arc::new(cfg),
-            notifications: zerf::notifications::broadcaster(),
+            notifications: broadcaster,
         };
 
         let app = build_app(state.clone());

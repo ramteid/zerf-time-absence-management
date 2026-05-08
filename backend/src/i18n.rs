@@ -9,7 +9,6 @@ use std::sync::LazyLock;
 
 use crate::db::DatabasePool;
 
-const UI_LANGUAGE_KEY: &str = "ui_language";
 const DEFAULT_LANGUAGE_CODE: &str = "en";
 
 // -- Language definition table ------------------------------------------------

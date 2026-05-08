@@ -34,7 +34,7 @@ Employees capture hours and absences, team leads review requests and submitted w
 
 ## Roles and approval model
 
-The default reporting structure is many employees to one assigned team lead, and every non-admin user has an explicit approver. Team leads can themselves report to another team lead or admin for approval. Admins are primarily technical and organizational administrators. They can approve requests as a fallback, but they are not intended to be the regular approval path.
+Every non-admin user has one or more assigned approvers. A user's approvers are the team leads or admins responsible for reviewing their time entries, absence requests, and reopen requests. Team leads can themselves report to one or more other team leads or admins. Admins are primarily technical and organizational administrators. They can approve requests as a fallback, but they are not intended to be the regular approval path.
 
 ## Time and absence management
 
@@ -58,14 +58,16 @@ flowchart TD
 		EN[Employee n]
 	end
 
-	LeadA -->|primary approver for| E1
-	LeadA -->|primary approver for| E2
-	LeadA -->|primary approver for| EN
-	LeadB -->|primary approver for| LeadA
+	LeadA -->|approver for| E1
+	LeadA -->|approver for| E2
+	LeadA -->|approver for| EN
+	LeadB -->|approver for| LeadA
 
 	Admin -->|manages platform and users| LeadB
 	Admin -. fallback approval only .-> LeadA
 ```
+
+A user can have multiple approvers. Any one of them can review and act on that user's requests.
 
 ### Example approval flow
 
@@ -74,17 +76,21 @@ Admins can still approve requests for any user when needed, even though the norm
 ```mermaid
 flowchart LR
 	Employee[Employee submits request]
-	Lead[Assigned team lead]
+	Lead1[Assigned team lead 1]
+	Lead2[Assigned team lead 2]
 	LeadApprover[Approver team lead]
 	Approved[Approved]
 	Rejected[Rejected]
 	LeadOwn[Team lead submits own request]
 
-	Employee -->|default review path| Lead
-	Lead -->|approve| Approved
-	Lead -->|reject| Rejected
+	Employee -->|any assigned approver can review| Lead1
+	Employee --> Lead2
+	Lead1 -->|approve| Approved
+	Lead1 -->|reject| Rejected
+	Lead2 -->|approve| Approved
+	Lead2 -->|reject| Rejected
 
-	LeadOwn -->|default review path| LeadApprover
+	LeadOwn -->|any assigned approver can review| LeadApprover
 	LeadApprover -->|approve| Approved
 	LeadApprover -->|reject| Rejected
 ```

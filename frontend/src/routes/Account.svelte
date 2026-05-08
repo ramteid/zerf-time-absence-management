@@ -188,6 +188,14 @@
           style="color:var(--text-secondary)"
         />
       </div>
+      {#if $currentUser.approvers && $currentUser.approvers.length > 0}
+        <div>
+          <label class="kz-label">{$t("Approvers")}</label>
+          <div style="font-size:13px;color:var(--text-secondary);padding:6px 0">
+            {$currentUser.approvers.map((a) => `${a.first_name} ${a.last_name}`).join(", ")}
+          </div>
+        </div>
+      {/if}
     </div>
   </div>
 
