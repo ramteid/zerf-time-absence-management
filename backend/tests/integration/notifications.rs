@@ -120,3 +120,48 @@ async fn change_request_creation_notifies_approver() {
 
     app.cleanup().await;
 }
+
+// When public_url is configured, the app URL must appear in email bodies but
+// must NOT be stored in the in-app notification body (which is shown inside the
+// app where a bare URL would be redundant and ugly).
+#[tokio::test]
+async fn notification_inapp_body_has_no_url_even_when_public_url_is_set() {
+    let app = TestApp::spawn_with_public_url("https://test.example.com").await;
+    let admin = admin_login(&app).await;
+
+    let (_lead_id, lead_pw, _emp_id, emp_pw, monday_iso, _cat_id) =
+        bootstrap_team(&app, &admin, false).await;
+    let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
+    let lead = login_change_pw(&app, "lead-r@example.com", &lead_pw).await;
+
+    let (st, _) = emp
+        .post(
+            "/api/v1/absences",
+            &serde_json::json!({
+                "kind": "vacation",
+                "start_date": monday_iso,
+                "end_date": monday_iso,
+            }),
+        )
+        .await;
+    assert_eq!(st, reqwest::StatusCode::OK);
+
+    let (st, notifications) = lead.get("/api/v1/notifications").await;
+    assert_eq!(st, reqwest::StatusCode::OK);
+
+    let notification = notifications
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["kind"] == "absence_requested")
+        .expect("lead must have received absence_requested notification");
+
+    let body = notification["body"].as_str().unwrap_or("");
+    assert!(
+        !body.contains("https://test.example.com"),
+        "in-app notification body must not contain the app URL, got: {body:?}"
+    );
+    assert!(!body.is_empty(), "in-app notification body must not be empty");
+
+    app.cleanup().await;
+}
