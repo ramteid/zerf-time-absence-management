@@ -4,6 +4,42 @@ use serde_json::json;
 use crate::common::TestApp;
 use crate::helpers::*;
 
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+/// Create a team lead (approver = admin/id 1) and return its id.
+async fn create_lead(admin: &crate::common::TestClient, email: &str, first: &str) -> i64 {
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": email, "first_name": first, "last_name": "Lead",
+                "role": "team_lead", "weekly_hours": 39,
+                "leave_days_current_year": 30, "leave_days_next_year": 30,
+                "start_date": "2024-01-01", "approver_ids": [1],
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create lead {email}");
+    id(&body)
+}
+
+/// Create an employee whose approver is `approver_id` and return its id.
+async fn create_emp(admin: &crate::common::TestClient, email: &str, first: &str, approver_id: i64) -> i64 {
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": email, "first_name": first, "last_name": "Emp",
+                "role": "employee", "weekly_hours": 39,
+                "leave_days_current_year": 30, "leave_days_next_year": 30,
+                "start_date": "2024-01-01", "approver_ids": [approver_id],
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create emp {email}");
+    id(&body)
+}
+
 #[tokio::test]
 async fn non_admin_users_must_have_approver() {
     let app = TestApp::spawn().await;
@@ -305,6 +341,85 @@ async fn creation_password_modes_set_must_change_correctly() {
     let (st, body) = generated.get("/api/v1/auth/me").await;
     assert_eq!(st, StatusCode::OK);
     assert_eq!(body["must_change_password"], true);
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn cannot_deactivate_user_who_is_approver_for_active_users() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+
+    let lead_id = create_lead(&admin, "lead-guard@example.com", "Guard").await;
+    let emp_id = create_emp(&admin, "emp-guard@example.com", "GuardEmp", lead_id).await;
+
+    // Deactivating the lead while emp still reports to them must be rejected.
+    let (st, body) = admin
+        .post(
+            &format!("/api/v1/users/{lead_id}/deactivate"),
+            &serde_json::json!({}),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::BAD_REQUEST,
+        "deactivate with active reports must fail"
+    );
+    let error_msg = body["error"].as_str().unwrap_or("").to_lowercase();
+    assert!(
+        error_msg.contains("approver") || error_msg.contains("reassign"),
+        "error must mention approver/reassign, got: {error_msg}"
+    );
+
+    // Reassign emp to admin (id=1), then deactivation must succeed.
+    let (st, _) = admin
+        .put(
+            &format!("/api/v1/users/{emp_id}"),
+            &serde_json::json!({"approver_ids": [1]}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "reassign emp to admin");
+
+    let (st, _) = admin
+        .post(
+            &format!("/api/v1/users/{lead_id}/deactivate"),
+            &serde_json::json!({}),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::OK,
+        "deactivate after reassign must succeed"
+    );
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn cannot_update_active_false_for_user_who_is_approver_for_active_users() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+
+    let lead_id = create_lead(&admin, "lead-put-guard@example.com", "PutGuard").await;
+    create_emp(&admin, "emp-put-guard@example.com", "PutGuardEmp", lead_id).await;
+
+    // PUT with active=false while lead has active direct reports must be rejected.
+    let (st, body) = admin
+        .put(
+            &format!("/api/v1/users/{lead_id}"),
+            &serde_json::json!({"active": false}),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::BAD_REQUEST,
+        "PUT active=false with active reports must fail"
+    );
+    let error_msg = body["error"].as_str().unwrap_or("").to_lowercase();
+    assert!(
+        error_msg.contains("approver") || error_msg.contains("reassign"),
+        "error must mention approver/reassign, got: {error_msg}"
+    );
 
     app.cleanup().await;
 }
