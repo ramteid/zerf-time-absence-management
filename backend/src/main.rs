@@ -85,10 +85,7 @@ async fn main() -> Result<()> {
     ));
 
     // Approval reminder scheduler: wakes every Monday at 07:00.
-    tokio::spawn(zerf::approval_reminders::run_loop(
-        pool.clone(),
-        state.clone(),
-    ));
+    tokio::spawn(zerf::approval_reminders::run_loop(state.clone()));
 
     let app = build_app(state);
 
