@@ -408,7 +408,7 @@ async fn full_integration_suite() {
         let ga_obj = find_by_id(&body, gabs).expect("GA not found in list");
         assert_eq!(ga_obj["status"], "approved", "status now approved");
 
-        // Once approved - no edit or cancel.
+        // Once approved - no edit allowed.
         let (st, _) = emp
             .put(
                 &format!("/api/v1/absences/{}", gabs),
@@ -421,12 +421,23 @@ async fn full_integration_suite() {
             "edit approved general_absence rejected"
         );
 
-        let (st, _) = emp.delete(&format!("/api/v1/absences/{}", gabs)).await;
+        // Cancelling an approved absence triggers a cancellation approval workflow.
+        let (st, body) = emp.delete(&format!("/api/v1/absences/{}", gabs)).await;
         assert_eq!(
             st,
-            StatusCode::BAD_REQUEST,
-            "cancel approved general_absence rejected"
+            StatusCode::OK,
+            "cancel approved general_absence triggers approval workflow"
         );
+        assert_eq!(body["pending"], true, "cancellation is pending approval");
+
+        // Re-approve so subsequent assertions (calendar, etc.) still see the absence.
+        let (st, _) = lead
+            .post(
+                &format!("/api/v1/absences/{}/reject-cancellation", gabs),
+                &json!({}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "reject cancellation to restore absence");
 
         // Calendar shows it.
         let (_, body) = lead

@@ -84,6 +84,12 @@ async fn main() -> Result<()> {
         state.clone(),
     ));
 
+    // Approval reminder scheduler: wakes every Monday at 07:00.
+    tokio::spawn(zerf::approval_reminders::run_loop(
+        pool.clone(),
+        state.clone(),
+    ));
+
     let app = build_app(state);
 
     let addr: SocketAddr = config.bind.parse().expect("invalid ZERF_BIND");
