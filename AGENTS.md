@@ -277,3 +277,4 @@ DATABASE_URL=postgres://postgres:postgres@127.0.0.1:55432/postgres cargo test
 - Reduce complexity: avoid unnecessary abstractions, indirection, and nesting.
 - Prefer simple, direct solutions over clever ones. Keep it concise.
 - Apply appropriate architectural patterns (e.g., handler/service/repository separation) consistently across the codebase.
+- Add comprehensive inline comments e. g. explaining decisions, intent and high-level logic.

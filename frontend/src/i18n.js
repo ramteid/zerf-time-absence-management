@@ -28,6 +28,8 @@ const TRANSLATIONS = {
       "Shows how tracked hours are distributed across the different categories.",
     help_absence_report:
       "View absence entries over a selected period with type distribution. Rejected and cancelled absences are excluded.",
+    help_logged:
+      "Submitted and approved hours including the current day for the current month.",
     help_employee_details:
       "View detailed information about a team member including balance and statistics.",
     help_csv_export:
@@ -833,6 +835,8 @@ const TRANSLATIONS = {
       "Zeigt die Verteilung der erfassten Stunden auf die verschiedenen Kategorien.",
     help_absence_report:
       "Zeigt Abwesenheitseinträge über einen gewählten Zeitraum mit Typverteilung. Abgelehnte und stornierte Abwesenheiten werden nicht angezeigt.",
+    help_logged:
+      "Eingereichte und genehmigte Stunden einschließlich des aktuellen Tages für den laufenden Monat.",
     help_employee_details:
       "Zeigt detaillierte Informationen über einen Mitarbeiter einschließlich Saldo und Statistiken.",
     help_csv_export:

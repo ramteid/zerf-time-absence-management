@@ -403,6 +403,68 @@ async fn delete_user_removes_data_and_preserves_approved_records() {
     app.cleanup().await;
 }
 
+// Regression test: reopen_requests.reviewed_by originally had constraint name
+// reopen_requests_approver_id_fkey (the column was renamed in migration 002).
+// Migration 005 dropped the wrong name, leaving the old RESTRICT constraint in place.
+// Deleting a user who reviewed a reopen request would silently fail before migration 006.
+#[tokio::test]
+async fn delete_user_who_reviewed_reopen_request_succeeds() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+
+    let (lead_id, lead_pw, _emp_id, emp_pw, monday_iso, cat_id) =
+        bootstrap_team(&app, &admin, false).await;
+    let lead = login_change_pw(&app, "lead-r@example.com", &lead_pw).await;
+    let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
+
+    // Employee submits and gets entries approved so they can request a reopen.
+    let eid = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
+    let (st, _) = lead
+        .post(&format!("/api/v1/time-entries/{eid}/approve"), &serde_json::json!({}))
+        .await;
+    assert_eq!(st, StatusCode::OK, "approve entry");
+
+    // Employee requests reopen; lead approves → reviewed_by = lead_id in reopen_requests.
+    let (st, rr_body) = emp
+        .post("/api/v1/reopen-requests", &serde_json::json!({"week_start": monday_iso}))
+        .await;
+    assert_eq!(st, StatusCode::OK, "create reopen request");
+    let rr_id = rr_body["id"].as_i64().unwrap();
+
+    let (st, _) = lead
+        .post(
+            &format!("/api/v1/reopen-requests/{rr_id}/approve"),
+            &serde_json::json!({}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "lead approves reopen request");
+
+    // Reassign emp to admin so lead has no active direct reports.
+    let (st, _) = admin
+        .put(
+            &format!("/api/v1/users/{_emp_id}"),
+            &serde_json::json!({"approver_ids": [1]}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "reassign emp");
+
+    // Deleting lead must succeed even though they reviewed a reopen request.
+    // This would fail with RESTRICT if migration 006 is missing.
+    let (st, _) = admin
+        .delete(&format!("/api/v1/users/{lead_id}"))
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::OK,
+        "delete user who reviewed reopen request must succeed"
+    );
+
+    // The reopen request itself must still exist with reviewed_by = NULL.
+    // (No direct API to check, but no FK error means the record was preserved.)
+
+    app.cleanup().await;
+}
+
 #[tokio::test]
 async fn cannot_delete_last_active_admin() {
     let app = TestApp::spawn().await;

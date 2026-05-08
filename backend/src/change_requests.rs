@@ -307,8 +307,8 @@ pub async fn approve(
             .fetch_optional(&mut *transaction)
             .await?
             .ok_or_else(|| AppError::Conflict("Change request was already resolved by someone else.".into()))?;
-    // No user may review their own request.
-    if change_request.user_id == requester.id {
+    // No user may review their own request; admins may.
+    if change_request.user_id == requester.id && !requester.is_admin() {
         return Err(AppError::Forbidden);
     }
     if !requester.is_admin() {
@@ -484,8 +484,8 @@ pub async fn reject(
         .bind(change_request_id)
         .fetch_one(&mut *transaction)
         .await?;
-    // No user may reject their own request.
-    if change_request.user_id == requester.id {
+    // No user may reject their own request; admins may.
+    if change_request.user_id == requester.id && !requester.is_admin() {
         return Err(AppError::Forbidden);
     }
     // Non-admin leads may only act on requests from their direct reports.
