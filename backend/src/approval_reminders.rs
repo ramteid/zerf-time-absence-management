@@ -94,6 +94,15 @@ async fn find_approvers_with_pending(pool: &DatabasePool) -> Vec<PendingApprover
 pub async fn run_check(state: &crate::AppState) {
     let pool = &state.pool;
 
+    let reminders_enabled =
+        crate::settings::load_setting(pool, crate::settings::SUBMISSION_REMINDERS_ENABLED_KEY, "true")
+            .await
+            .unwrap_or_else(|_| "true".to_string());
+    if reminders_enabled == "false" {
+        tracing::debug!(target:"zerf::approval_reminders", "Reminders are disabled, skipping check");
+        return;
+    }
+
     let language = match crate::i18n::load_ui_language(pool).await {
         Ok(l) => l,
         Err(e) => {

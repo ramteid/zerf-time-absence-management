@@ -76,7 +76,7 @@ describe("AdminEmail", () => {
 
     const checkboxes = target.querySelectorAll('input[type="checkbox"]');
     const remindersCheckbox = [...checkboxes].find(
-      (cb) => cb.closest("label")?.textContent?.includes("submission reminders"),
+      (cb) => cb.closest("label")?.textContent?.includes("reminders"),
     );
     expect(remindersCheckbox).not.toBeNull();
     expect(remindersCheckbox.checked).toBe(true);
@@ -89,7 +89,7 @@ describe("AdminEmail", () => {
 
     const checkboxes = target.querySelectorAll('input[type="checkbox"]');
     const remindersCheckbox = [...checkboxes].find(
-      (cb) => cb.closest("label")?.textContent?.includes("submission reminders"),
+      (cb) => cb.closest("label")?.textContent?.includes("reminders"),
     );
     expect(remindersCheckbox).not.toBeNull();
     expect(remindersCheckbox.checked).toBe(false);

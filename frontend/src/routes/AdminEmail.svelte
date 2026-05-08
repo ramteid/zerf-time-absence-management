@@ -119,7 +119,7 @@
               style="width:auto"
               disabled={!smtpSettings.smtp_enabled}
             />
-            {$t("Enable submission reminders")}
+            {$t("Enable reminders")}
           </label>
           <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
             {$t("When enabled, users who have not submitted all time entries are reminded by email on the configured deadline day.")}
