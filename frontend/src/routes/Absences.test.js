@@ -61,14 +61,13 @@ describe("Absences", () => {
     HTMLDialogElement.prototype.showModal = originalShowModal;
   });
 
-  it("opens the request dialog after the year select changes", async () => {
+  it("opens the request dialog after the year slider changes", async () => {
     component = mount(Absences, { target });
     await settle();
 
-    const select = target.querySelector(".absence-year-select");
-    const currentYear = String(new Date().getFullYear());
-    select.value = currentYear;
-    select.dispatchEvent(new Event("change", { bubbles: true }));
+    // Navigate to previous year via the prev button
+    const prevBtn = target.querySelector('[aria-label="Previous year"]');
+    prevBtn.click();
     await settle();
 
     target.querySelector(".kz-btn-primary").click();
@@ -79,7 +78,7 @@ describe("Absences", () => {
     expect(dialog.hasAttribute("open")).toBe(true);
   });
 
-  it("falls back when modal opening is rejected after the year select changes", async () => {
+  it("falls back when modal opening is rejected after the year slider changes", async () => {
     HTMLDialogElement.prototype.showModal = function showModal() {
       throw new DOMException("Modal opening rejected.", "InvalidStateError");
     };
@@ -87,10 +86,9 @@ describe("Absences", () => {
     component = mount(Absences, { target });
     await settle();
 
-    const select = target.querySelector(".absence-year-select");
-    const currentYear = String(new Date().getFullYear());
-    select.value = currentYear;
-    select.dispatchEvent(new Event("change", { bubbles: true }));
+    // Navigate to previous year via the prev button
+    const prevBtn = target.querySelector('[aria-label="Previous year"]');
+    prevBtn.click();
     await settle();
 
     target.querySelector(".kz-btn-primary").click();

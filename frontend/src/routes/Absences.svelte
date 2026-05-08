@@ -22,18 +22,8 @@
   let detailAbsence = null;
   let detailDlg;
 
-  $: yearOptions = [
-    ...new Set([
-      baseYear - 1,
-      baseYear,
-      baseYear + 1,
-      selectedYear,
-      ...absences.flatMap((absence) => [
-        parseDate(absence.start_date).getFullYear(),
-        parseDate(absence.end_date).getFullYear(),
-      ]),
-    ]),
-  ].sort((a, b) => b - a);
+  $: canGoPrevYear = selectedYear > baseYear - 1;
+  $: canGoNextYear = selectedYear < baseYear + 1;
 
   async function load() {
     const token = ++loadToken;
@@ -151,16 +141,25 @@
     {$t("Vacation, sick leave & training days")}
   </div>
   <div class="top-bar-actions absence-top-actions">
-    <select
-      class="kz-select absence-year-select"
-      aria-label={$t("Year")}
-      value={selectedYear}
-      on:change={(event) => (selectedYear = Number(event.currentTarget.value))}
-    >
-      {#each yearOptions as yearOption}
-        <option value={yearOption}>{yearOption}</option>
-      {/each}
-    </select>
+    <div class="kz-nav-slider">
+      <button
+        class="kz-btn kz-btn-ghost"
+        on:click={() => (selectedYear -= 1)}
+        disabled={!canGoPrevYear}
+        aria-label={$t("Previous year")}
+      >
+        <Icon name="ChevLeft" size={16} />
+      </button>
+      <span class="nav-label tab-num" style="min-width:60px">{selectedYear}</span>
+      <button
+        class="kz-btn kz-btn-ghost"
+        on:click={() => (selectedYear += 1)}
+        disabled={!canGoNextYear}
+        aria-label={$t("Next year")}
+      >
+        <Icon name="ChevRight" size={16} />
+      </button>
+    </div>
     <button class="kz-btn kz-btn-primary" on:click={() => (showDialog = {})}>
       <Icon name="Plus" size={14} />{$t("Request Absence")}
     </button>
@@ -474,12 +473,6 @@
   .absence-entry-status {
     margin-left: auto;
     flex-shrink: 0;
-  }
-
-  .absence-year-select {
-    width: auto;
-    min-width: 92px;
-    max-width: 110px;
   }
 
   @media (max-width: 640px) {

@@ -50,9 +50,9 @@
     <h1>{$t("Holidays")}</h1>
   </div>
   <div class="top-bar-actions">
-    <div style="display:flex;align-items:center;gap:4px">
+    <div class="kz-nav-slider">
       <button
-        class="kz-btn kz-btn-icon-sm kz-btn-ghost"
+        class="kz-btn kz-btn-ghost"
         on:click={() => {
           year--;
           load();
@@ -60,13 +60,9 @@
       >
         <Icon name="ChevLeft" size={16} />
       </button>
-      <span
-        class="tab-num"
-        style="font-size:13.5px;font-weight:500;min-width:60px;text-align:center"
-        >{year}</span
-      >
+      <span class="nav-label tab-num" style="min-width:60px">{year}</span>
       <button
-        class="kz-btn kz-btn-icon-sm kz-btn-ghost"
+        class="kz-btn kz-btn-ghost"
         on:click={() => {
           year++;
           load();

@@ -259,6 +259,38 @@
       </div>
     {/if}
   </div>
+  <!-- Mobile title bar: logo + notification icon (mobile only) -->
+  <div class="mobile-title-bar">
+    <div class="mobile-title-bar-brand">
+      <div class="mobile-title-bar-icon">
+        <Icon name="Clock" size={16} />
+      </div>
+      <div class="mobile-title-bar-names">
+        <span class="mobile-title-bar-appname">Zerf</span>
+        {#if $settings?.organization_name}
+          <span class="mobile-title-bar-org">{$settings.organization_name}</span>
+        {/if}
+      </div>
+    </div>
+    <div class="kz-mobile-bell-wrapper mobile-title-bar-bell">
+      <button
+        class="kz-btn-icon-sm"
+        style="color:var(--nav-text-muted);position:relative"
+        on:click|stopPropagation={toggleBell}
+        title={$t("Notifications")}
+      >
+        <Icon name="Bell" size={21} />
+        {#if $notificationsUnread > 0}
+          <span
+            style="position:absolute;top:-4px;right:-4px;background:var(--danger-text);color:white;border-radius:10px;font-size:9px;padding:1px 4px;line-height:1;min-width:14px;text-align:center;font-weight:400"
+          >
+            {$notificationsUnread > 99 ? "99+" : $notificationsUnread}
+          </span>
+        {/if}
+      </button>
+    </div>
+  </div>
+
   <div class="sidebar">
     <div class="sidebar-logo">
       <div class="sidebar-logo-icon">
@@ -483,25 +515,6 @@
       </div>
     </div>
   {/if}
-
-  <!-- Mobile bell button: fixed top-right, visible only on mobile -->
-  <div class="kz-mobile-bell-wrapper">
-    <button
-      class="kz-btn-icon-sm"
-      style="color:var(--text-secondary);position:relative;background:var(--bg-surface);border:1px solid var(--border);border-radius:8px;padding:6px;box-shadow:var(--shadow-md)"
-      on:click|stopPropagation={toggleBell}
-      title={$t("Notifications")}
-    >
-      <Icon name="Bell" size={18} />
-      {#if $notificationsUnread > 0}
-        <span
-          style="position:absolute;top:-4px;right:-4px;background:var(--danger-text);color:white;border-radius:10px;font-size:9px;padding:1px 4px;line-height:1;min-width:14px;text-align:center;font-weight:400"
-        >
-          {$notificationsUnread > 99 ? "99+" : $notificationsUnread}
-        </span>
-      {/if}
-    </button>
-  </div>
 
   <!-- Notification panel -->
   {#if bellOpen}
