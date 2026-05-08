@@ -49,12 +49,12 @@
   }
 
   function shuffle(chars) {
-    const out = [...chars];
-    for (let i = out.length - 1; i > 0; i--) {
-      const j = secureIndex(i + 1);
-      [out[i], out[j]] = [out[j], out[i]];
+    const shuffledCharacters = [...chars];
+    for (let currentIndex = shuffledCharacters.length - 1; currentIndex > 0; currentIndex--) {
+      const randomIndex = secureIndex(currentIndex + 1);
+      [shuffledCharacters[currentIndex], shuffledCharacters[randomIndex]] = [shuffledCharacters[randomIndex], shuffledCharacters[currentIndex]];
     }
-    return out.join("");
+    return shuffledCharacters.join("");
   }
 
   function generatePassword() {
@@ -63,22 +63,22 @@
     const digits = "23456789";
     const symbols = "!@#$%";
     const all = lower + upper + digits + symbols;
-    let pw = pick(lower) + pick(upper) + pick(digits) + pick(symbols);
-    while (pw.length < 16) pw += pick(all);
-    pw = shuffle(pw);
-    password = pw;
-    confirmPassword = pw;
+    let generatedPassword = pick(lower) + pick(upper) + pick(digits) + pick(symbols);
+    while (generatedPassword.length < 16) generatedPassword += pick(all);
+    generatedPassword = shuffle(generatedPassword);
+    password = generatedPassword;
+    confirmPassword = generatedPassword;
   }
 
   onMount(async () => {
     dlg.showModal();
     try {
-      const all = await api("/users");
-      approvers = all.filter(
-        (u) =>
-          u.active &&
-          (u.role === "team_lead" || u.role === "admin") &&
-          u.id !== template.id,
+      const allUsers = await api("/users");
+      approvers = allUsers.filter(
+        (candidateUser) =>
+          candidateUser.active &&
+          (candidateUser.role === "team_lead" || candidateUser.role === "admin") &&
+          candidateUser.id !== template.id,
       );
     } catch {
       approvers = [];
@@ -87,10 +87,10 @@
     if (!isNew) {
       try {
         const rows = await api(`/users/${template.id}/leave-days`);
-        const cur = rows.find((r) => r.year === _thisYear);
-        const nxt = rows.find((r) => r.year === _nextYear);
-        if (cur) leave_days_current_year = cur.days;
-        if (nxt) leave_days_next_year = nxt.days;
+        const currentYearLeave = rows.find((leaveRow) => leaveRow.year === _thisYear);
+        const nextYearLeave = rows.find((leaveRow) => leaveRow.year === _nextYear);
+        if (currentYearLeave) leave_days_current_year = currentYearLeave.days;
+        if (nextYearLeave) leave_days_next_year = nextYearLeave.days;
       } catch {
         // leave defaults
       }
@@ -151,8 +151,8 @@
         body.active = active;
       }
       if (isNew) {
-        const r = await api("/users", { method: "POST", body });
-        showTempPassword = r.temporary_password;
+        const createdUser = await api("/users", { method: "POST", body });
+        showTempPassword = createdUser.temporary_password;
       } else {
         await api("/users/" + template.id, { method: "PUT", body });
         toast($t("User updated."), "ok");

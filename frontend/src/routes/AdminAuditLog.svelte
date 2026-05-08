@@ -32,7 +32,7 @@
       entry.action === "deleted" ? entry.before_data : entry.after_data;
     if (!raw) return "–";
     try {
-      const obj = typeof raw === "string" ? JSON.parse(raw) : raw;
+      const parsedData = typeof raw === "string" ? JSON.parse(raw) : raw;
       // Pick a few meaningful fields for summary
       const keys = [
         "name",
@@ -49,8 +49,8 @@
         "value",
       ];
       const parts = [];
-      for (const k of keys) {
-        if (obj[k] != null) parts.push(`${k}: ${obj[k]}`);
+      for (const fieldKey of keys) {
+        if (parsedData[fieldKey] != null) parts.push(`${fieldKey}: ${parsedData[fieldKey]}`);
       }
       return parts.length > 0 ? parts.join(", ") : translate("Data");
     } catch {
@@ -85,17 +85,17 @@
           </tr>
         </thead>
         <tbody>
-          {#each rows as e}
+          {#each rows as auditEntry}
             <tr>
               <td class="tab-num" style="white-space:nowrap"
-                >{fmtDateTime(e.occurred_at)}</td
+                >{fmtDateTime(auditEntry.occurred_at)}</td
               >
-              <td>{e.user_label}</td>
-              <td>{auditActionLabel(e.action)}</td>
-              <td>{auditTableLabel(e.table_name)}</td>
+              <td>{auditEntry.user_label}</td>
+              <td>{auditActionLabel(auditEntry.action)}</td>
+              <td>{auditTableLabel(auditEntry.table_name)}</td>
               <td
                 style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--text-tertiary)"
-                title={e.data_summary}>{e.data_summary}</td
+                title={auditEntry.data_summary}>{auditEntry.data_summary}</td
               >
             </tr>
           {/each}

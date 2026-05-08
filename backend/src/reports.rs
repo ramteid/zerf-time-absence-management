@@ -13,6 +13,10 @@ use serde::{Deserialize, Serialize};
 use sqlx::{Postgres, QueryBuilder};
 use std::collections::HashMap;
 
+fn reporting_today() -> NaiveDate {
+    chrono::Local::now().date_naive()
+}
+
 /// Verify that `requester` is allowed to read data for `target_uid`.
 /// Admins may access any user. Non-admin leads may only access their direct
 /// reports (users whose `approver_id` matches the lead's id). Every user may
@@ -98,6 +102,8 @@ pub struct MonthReport {
     pub actual_min: i64,
     pub diff_min: i64,
     pub category_totals: HashMap<String, i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub weeks_all_submitted: Option<bool>,
 }
 
 fn weekday_en(d: NaiveDate) -> &'static str {
@@ -112,14 +118,6 @@ fn weekday_en(d: NaiveDate) -> &'static str {
     ][d.weekday().num_days_from_monday() as usize]
 }
 
-fn credited_actual_minutes(actual: i64, target: i64, absence: Option<&str>) -> i64 {
-    match absence {
-        Some("sick") => actual.max(target),
-        Some(_) => target,
-        None => actual,
-    }
-}
-
 async fn build_range(
     pool: &crate::db::DatabasePool,
     user_id: i64,
@@ -132,20 +130,32 @@ async fn build_range(
         .fetch_one(pool)
         .await?;
     let target_per_day_min = (user.weekly_hours / 5.0 * 60.0) as i64;
-    let today = chrono::Utc::now().date_naive();
+    let today = reporting_today();
 
     #[allow(clippy::type_complexity)]
-    let te: Vec<(NaiveDate, String, String, String, String, i64, String, Option<String>)> = sqlx::query_as(
+    let time_entry_rows: Vec<(
+        NaiveDate,
+        String,
+        String,
+        String,
+        String,
+        i64,
+        String,
+        Option<String>,
+    )> = sqlx::query_as(
         "SELECT z.entry_date, z.start_time, z.end_time, c.name, c.color, z.category_id, z.status, z.comment FROM time_entries z JOIN categories c ON c.id=z.category_id WHERE z.user_id=$1 AND z.entry_date BETWEEN $2 AND $3 ORDER BY z.entry_date, z.start_time"
     ).bind(user_id).bind(from).bind(to).fetch_all(pool).await?;
 
-    let abs: Vec<(NaiveDate, NaiveDate, String)> = sqlx::query_as(
+    let approved_absence_rows: Vec<(NaiveDate, NaiveDate, String)> = sqlx::query_as(
         "SELECT start_date, end_date, kind FROM absences WHERE user_id=$1 AND status='approved' AND end_date >= $2 AND start_date <= $3"
     ).bind(user_id).bind(from).bind(to).fetch_all(pool).await?;
 
     let language = i18n::load_ui_language(pool).await?;
 
-    let h_map: HashMap<NaiveDate, String> = sqlx::query_as::<_, (NaiveDate, String, Option<String>)>(
+    let holiday_map: HashMap<NaiveDate, String> = sqlx::query_as::<
+        _,
+        (NaiveDate, String, Option<String>),
+    >(
         "SELECT holiday_date, name, local_name FROM holidays WHERE holiday_date BETWEEN $1 AND $2",
     )
     .bind(from)
@@ -153,78 +163,93 @@ async fn build_range(
     .fetch_all(pool)
     .await?
     .into_iter()
-    .map(|(d, name, local_name)| (d, i18n::holiday_display_name(&language, name, local_name)))
+    .map(|(holiday_date, name, local_name)| {
+        (
+            holiday_date,
+            i18n::holiday_display_name(&language, name, local_name),
+        )
+    })
     .collect();
 
     let mut days: Vec<DayDetail> = vec![];
     let mut target_total = 0i64;
     let mut actual_total = 0i64;
-    let mut cat: HashMap<String, i64> = HashMap::new();
-    let mut d = from;
-    while d <= to {
-        let wd = d.weekday().num_days_from_monday();
-        let weekday = wd < 5;
-        let holiday = h_map.get(&d).cloned();
-        let absence = abs
+    let mut category_minutes_by_name: HashMap<String, i64> = HashMap::new();
+    let mut current_date = from;
+    while current_date <= to {
+        let weekday_number = current_date.weekday().num_days_from_monday();
+        let weekday = weekday_number < 5;
+        let holiday = holiday_map.get(&current_date).cloned();
+        let absence = approved_absence_rows
             .iter()
-            .find(|(s, e, _)| d >= *s && d <= *e)
-            .map(|(_, _, k)| k.clone());
-        let before_start = d < user.start_date;
-        let after_today = d >= today;
-        let target = if weekday && holiday.is_none() && !before_start && !after_today {
-            target_per_day_min
-        } else {
-            0
-        };
+            .find(|(absence_start, absence_end, _)| {
+                current_date >= *absence_start && current_date <= *absence_end
+            })
+            .map(|(_, _, absence_kind)| absence_kind.clone());
+        let before_start = current_date < user.start_date;
+        let after_today = current_date >= today;
+        let target =
+            if weekday && holiday.is_none() && absence.is_none() && !before_start && !after_today {
+                target_per_day_min
+            } else {
+                0
+            };
         let mut entries: Vec<EntryDetail> = vec![];
         let mut actual = 0i64;
-        for (dd, b, e, cn, cf, _kid, st, km) in &te {
-            if *dd != d {
+        for (
+            entry_date,
+            start_time,
+            end_time,
+            category_name,
+            category_color,
+            _category_id,
+            status,
+            comment,
+        ) in &time_entry_rows
+        {
+            if *entry_date != current_date {
                 continue;
             }
-            // Defensive: never panic on malformed time data — surface a 500 with
+            if before_start || after_today || status == "rejected" {
+                continue;
+            }
+            // Defensive: never panic on malformed time data - surface a 500 with
             // a generic message instead. The DB schema does not constrain the
             // text format, so a corrupted row must not take the process down.
-            if st == "rejected" {
-                continue;
+            let parsed_start_time = parse_report_time(start_time)?;
+            let parsed_end_time = parse_report_time(end_time)?;
+            let entry_minutes = (parsed_end_time - parsed_start_time).num_minutes();
+            // Only approved entries count towards actual hours and the monthly diff.
+            if status == "approved" {
+                actual += entry_minutes;
             }
-            let bn = parse_report_time(b)?;
-            let en = parse_report_time(e)?;
-            let m = (en - bn).num_minutes();
-            // Nur genehmigte Einträge zählen für Ist-Stunden und Differenz.
-            if st == "approved" {
-                actual += m;
-            }
-            // Kategorietotals: alle nicht abgelehnten Einträge – rejected wurde
-            // bereits oben via `continue` übersprungen, daher ist st hier nie rejected.
-            *cat.entry(cn.clone()).or_insert(0) += m;
+            // Category totals show every booked entry that is not rejected.
+            *category_minutes_by_name
+                .entry(category_name.clone())
+                .or_insert(0) += entry_minutes;
             entries.push(EntryDetail {
-                start_time: b.clone(),
-                end_time: e.clone(),
-                category: cn.clone(),
-                color: cf.clone(),
-                minutes: m,
-                status: st.clone(),
-                comment: km.clone(),
+                start_time: start_time.clone(),
+                end_time: end_time.clone(),
+                category: category_name.clone(),
+                color: category_color.clone(),
+                minutes: entry_minutes,
+                status: status.clone(),
+                comment: comment.clone(),
             });
         }
-        let actual_eff = if after_today {
-            0
-        } else {
-            credited_actual_minutes(actual, target, absence.as_deref())
-        };
+        let actual_eff = if after_today { 0 } else { actual };
         target_total += target;
         actual_total += actual_eff;
         days.push(DayDetail {
-            date: d,
-            weekday: weekday_en(d).to_string(),
+            date: current_date,
+            weekday: weekday_en(current_date).to_string(),
             entries,
             actual_min: actual_eff,
             target_min: target,
             absence,
             holiday,
         });
-        d += Duration::days(1);
+        current_date += Duration::days(1);
     }
     Ok(MonthReport {
         user_id,
@@ -233,11 +258,28 @@ async fn build_range(
         target_min: target_total,
         actual_min: actual_total,
         diff_min: actual_total - target_total,
-        category_totals: cat,
+        category_totals: category_minutes_by_name,
+        weeks_all_submitted: None,
     })
 }
 
 async fn build_month(
+    pool: &crate::db::DatabasePool,
+    user_id: i64,
+    month: &str,
+) -> AppResult<MonthReport> {
+    let (from, to) = month_bounds(month)?;
+    let user_start_date: NaiveDate = sqlx::query_scalar("SELECT start_date FROM users WHERE id=$1")
+        .bind(user_id)
+        .fetch_one(pool)
+        .await?;
+    let mut report = build_range(pool, user_id, from, to, month).await?;
+    report.weeks_all_submitted =
+        Some(all_weeks_submitted_for_month(pool, user_id, from, to, user_start_date).await?);
+    Ok(report)
+}
+
+async fn build_month_without_submission_status(
     pool: &crate::db::DatabasePool,
     user_id: i64,
     month: &str,
@@ -293,64 +335,68 @@ fn csv_response(r: MonthReport, uid: i64, file_label: &str) -> AppResult<Respons
         tracing::error!(target: "zerf::reports", "CSV export failed: {error}");
         AppError::Internal("CSV export failed.".into())
     }
-    let mut wtr = csv::Writer::from_writer(vec![]);
-    wtr.write_record([
-        "Date", "Weekday", "Start", "End", "Category", "Minutes", "Status", "Comment", "Absence",
-        "Holiday",
-    ])
-    .map_err(csv_err)?;
-    for t in &r.days {
-        if t.entries.is_empty() {
-            wtr.write_record([
-                t.date.to_string(),
-                t.weekday.clone(),
-                "".into(),
-                "".into(),
-                "".into(),
-                "0".into(),
-                "".into(),
-                "".into(),
-                safe(&t.absence.clone().unwrap_or_default()),
-                safe(&t.holiday.clone().unwrap_or_default()),
-            ])
-            .map_err(csv_err)?;
-        } else {
-            for e in &t.entries {
-                wtr.write_record([
-                    t.date.to_string(),
-                    t.weekday.clone(),
-                    e.start_time.clone(),
-                    e.end_time.clone(),
-                    safe(&e.category),
-                    e.minutes.to_string(),
-                    e.status.clone(),
-                    safe(&e.comment.clone().unwrap_or_default()),
-                    safe(&t.absence.clone().unwrap_or_default()),
-                    safe(&t.holiday.clone().unwrap_or_default()),
+    let mut csv_writer = csv::Writer::from_writer(vec![]);
+    csv_writer
+        .write_record([
+            "Date", "Weekday", "Start", "End", "Category", "Minutes", "Status", "Comment",
+            "Absence", "Holiday",
+        ])
+        .map_err(csv_err)?;
+    for day in &r.days {
+        if day.entries.is_empty() {
+            csv_writer
+                .write_record([
+                    day.date.to_string(),
+                    day.weekday.clone(),
+                    "".into(),
+                    "".into(),
+                    "".into(),
+                    "0".into(),
+                    "".into(),
+                    "".into(),
+                    safe(&day.absence.clone().unwrap_or_default()),
+                    safe(&day.holiday.clone().unwrap_or_default()),
                 ])
                 .map_err(csv_err)?;
+        } else {
+            for entry in &day.entries {
+                csv_writer
+                    .write_record([
+                        day.date.to_string(),
+                        day.weekday.clone(),
+                        entry.start_time.clone(),
+                        entry.end_time.clone(),
+                        safe(&entry.category),
+                        entry.minutes.to_string(),
+                        entry.status.clone(),
+                        safe(&entry.comment.clone().unwrap_or_default()),
+                        safe(&day.absence.clone().unwrap_or_default()),
+                        safe(&day.holiday.clone().unwrap_or_default()),
+                    ])
+                    .map_err(csv_err)?;
             }
         }
     }
-    wtr.write_record([
-        "",
-        "Total",
-        "",
-        "",
-        "",
-        &r.actual_min.to_string(),
-        "",
-        "",
-        "",
-        "",
-    ])
-    .map_err(csv_err)?;
-    let data = wtr.into_inner().map_err(|error| {
+    csv_writer
+        .write_record([
+            "",
+            "Total",
+            "",
+            "",
+            "",
+            &r.actual_min.to_string(),
+            "",
+            "",
+            "",
+            "",
+        ])
+        .map_err(csv_err)?;
+    let data = csv_writer.into_inner().map_err(|error| {
         tracing::error!(target: "zerf::reports", "CSV export finalize failed: {error}");
         AppError::Internal("CSV export failed.".into())
     })?;
-    let mut resp = Response::new(axum::body::Body::from(data));
-    resp.headers_mut().insert(
+    let mut response = Response::new(axum::body::Body::from(data));
+    response.headers_mut().insert(
         header::CONTENT_TYPE,
         "text/csv; charset=utf-8".parse().unwrap(),
     );
@@ -359,17 +405,17 @@ fn csv_response(r: MonthReport, uid: i64, file_label: &str) -> AppResult<Respons
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
         .take(30)
         .collect();
-    let cd = format!(
+    let content_disposition = format!(
         "attachment; filename=\"report-user-{}-{}.csv\"",
         uid, safe_label
     );
-    resp.headers_mut().insert(
+    response.headers_mut().insert(
         header::CONTENT_DISPOSITION,
-        axum::http::HeaderValue::from_str(&cd).unwrap_or_else(|_| {
+        axum::http::HeaderValue::from_str(&content_disposition).unwrap_or_else(|_| {
             axum::http::HeaderValue::from_static("attachment; filename=\"report.csv\"")
         }),
     );
-    Ok(resp)
+    Ok(response)
 }
 
 pub async fn month_csv(
@@ -433,28 +479,27 @@ pub async fn range_csv(
     csv_response(report, target_user_id, &label)
 }
 
-/// Eine Zeile im Teambericht – ein Datensatz pro aktivem Teammitglied.
+/// One row in the team report - one record per active team member.
 #[derive(Serialize)]
 pub struct TeamRow {
     pub user_id: i64,
     pub name: String,
-    /// Soll-Minuten des Berichtsmonats (ohne Wochenenden, Feiertage, Abwesenheiten, ab heute).
+    /// Target minutes for the report month (excluding weekends, holidays, absences, and today+).
     pub target_min: i64,
-    /// Ist-Minuten: genehmigte Zeiteinträge im Berichtsmonat (bis gestern).
+    /// Actual minutes: approved time entries in the report month (up to yesterday).
     pub actual_min: i64,
-    /// Diff = actual - target für den Berichtsmonat.
+    /// Diff = actual - target for the report month.
     pub diff_min: i64,
-    /// Genommene Urlaubsarbeitstage im Berichtsmonat (bis gestern).
+    /// Vacation working-days taken in the report month (up to yesterday).
     pub vacation_days: f64,
-    /// Geplante (noch nicht begonnene) Urlaubsarbeitstage im Berichtsmonat (ab heute).
+    /// Vacation working-days planned but not yet started in the report month (from today).
     pub vacation_planned_days: f64,
-    /// Kranke Arbeitstage im Berichtsmonat.
+    /// Sick working-days in the report month.
     pub sick_days: f64,
-    /// Kumulierter Gleitzeitkontostand am Ende des Berichtsmonats (oder bis gestern
-    /// bei laufendem Monat).
+    /// Current cumulative flextime balance as of yesterday.
     pub flextime_balance_min: i64,
-    /// True, wenn alle vollständig vergangenen Wochen (Sonntag < heute), die den
-    /// Berichtsmonat überschneiden, vollständig eingereicht wurden.
+    /// True if all fully elapsed weeks (Sunday < today) overlapping the report month
+    /// have been fully submitted.
     pub weeks_all_submitted: bool,
 }
 
@@ -463,17 +508,17 @@ pub struct TeamQuery {
     pub month: String,
 }
 
-/// Prüft, ob alle vollständig vergangenen Arbeitswochen, die den angegebenen Monat
-/// überschneiden, für den Benutzer eingereicht wurden.
+/// Checks whether all fully elapsed working weeks overlapping the given month
+/// have been submitted for the user.
 ///
-/// Eine Woche gilt als "vollständig vergangen", wenn ihr Sonntag vor `heute` liegt.
-/// Eine Grenzwoche, die zwei Monate überspannt (z.B. Mo 28.04. – So 03.05.), zählt
-/// für BEIDE Monate – und es werden alle fünf Arbeitstage der Woche geprüft, nicht
-/// nur die Tage des Zielmonats.
+/// A week is "fully elapsed" when its Sunday falls before today.
+/// A boundary week spanning two months (e.g. Mon 28 Apr - Sun 3 May) counts
+/// for both months: all five weekdays of the week are checked, not just the
+/// days that fall within the target month.
 ///
-/// Ein Arbeitstag gilt als eingereicht, wenn
-///   - eine genehmigte Abwesenheit den Tag abdeckt, ODER
-///   - mindestens ein Zeiteintrag im Status "submitted" oder "approved" vorhanden ist.
+/// A working day is considered submitted when either:
+///   - an approved absence covers the day, OR
+///   - at least one time entry with status "submitted" or "approved" exists.
 async fn all_weeks_submitted_for_month(
     pool: &crate::db::DatabasePool,
     user_id: i64,
@@ -481,32 +526,32 @@ async fn all_weeks_submitted_for_month(
     month_end: NaiveDate,
     user_start_date: NaiveDate,
 ) -> AppResult<bool> {
-    let today = chrono::Utc::now().date_naive();
+    let today = reporting_today();
 
-    // ── Wochengrenzen berechnen ──────────────────────────────────────────────
-    // Montag der Woche, in der der erste Monatstag liegt.
+    // Compute the Monday of the first and last week touched by the month.
+    // Monday of the week in which the first day of the month falls.
     let first_week_monday = {
         let offset = month_start.weekday().num_days_from_monday() as i64;
         month_start - Duration::days(offset)
     };
-    // Montag der Woche, in der der letzte Monatstag liegt.
+    // Monday of the week in which the last day of the month falls.
     let last_week_monday = {
         let offset = month_end.weekday().num_days_from_monday() as i64;
         month_end - Duration::days(offset)
     };
 
-    // Alle vollständig vergangenen Wochen sammeln (Sonntag < heute).
+    // Collect all fully elapsed weeks (Sunday < today).
     let mut complete_week_mondays: Vec<NaiveDate> = Vec::new();
-    let mut w = first_week_monday;
-    while w <= last_week_monday {
-        let week_sunday = w + Duration::days(6);
+    let mut current_week_monday = first_week_monday;
+    while current_week_monday <= last_week_monday {
+        let week_sunday = current_week_monday + Duration::days(6);
         if week_sunday < today {
-            complete_week_mondays.push(w);
+            complete_week_mondays.push(current_week_monday);
         }
-        w += Duration::days(7);
+        current_week_monday += Duration::days(7);
     }
 
-    // Keine vollständigen Vergangenheitswochen → nichts zu prüfen.
+    // No fully elapsed past weeks - nothing to check.
     if complete_week_mondays.is_empty() {
         return Ok(true);
     }
@@ -514,7 +559,7 @@ async fn all_weeks_submitted_for_month(
     let check_from = complete_week_mondays[0];
     let check_to = *complete_week_mondays.last().unwrap() + Duration::days(6);
 
-    // ── Feiertage im Prüfzeitraum laden ─────────────────────────────────────
+    // Load public holidays in the check range once, then use a set for cheap lookups.
     let holiday_set: std::collections::HashSet<NaiveDate> = {
         let rows: Vec<(NaiveDate,)> = sqlx::query_as(
             "SELECT holiday_date FROM holidays WHERE holiday_date BETWEEN $1 AND $2",
@@ -523,10 +568,12 @@ async fn all_weeks_submitted_for_month(
         .bind(check_to)
         .fetch_all(pool)
         .await?;
-        rows.into_iter().map(|(d,)| d).collect()
+        rows.into_iter()
+            .map(|(holiday_date,)| holiday_date)
+            .collect()
     };
 
-    // ── Genehmigte Abwesenheitstage als Set aufbauen ─────────────────────────
+    // Build a set of approved absence days, clamped to the week check range.
     let absence_rows: Vec<(NaiveDate, NaiveDate)> = sqlx::query_as(
         "SELECT start_date, end_date FROM absences \
          WHERE user_id=$1 AND status='approved' AND end_date >= $2 AND start_date <= $3",
@@ -537,18 +584,17 @@ async fn all_weeks_submitted_for_month(
     .fetch_all(pool)
     .await?;
 
-    let mut absent_days: std::collections::HashSet<NaiveDate> =
-        std::collections::HashSet::new();
+    let mut absent_days: std::collections::HashSet<NaiveDate> = std::collections::HashSet::new();
     for (abs_start, abs_end) in &absence_rows {
-        let mut d = check_from.max(*abs_start);
+        let mut current_absence_date = check_from.max(*abs_start);
         let end = check_to.min(*abs_end);
-        while d <= end {
-            absent_days.insert(d);
-            d += Duration::days(1);
+        while current_absence_date <= end {
+            absent_days.insert(current_absence_date);
+            current_absence_date += Duration::days(1);
         }
     }
 
-    // ── Eingereichte/genehmigte Zeiteinträge laden ──────────────────────────
+    // Load submitted/approved time entry dates. Draft days are not submitted.
     let submitted_dates: std::collections::HashSet<NaiveDate> = {
         let rows: Vec<(NaiveDate,)> = sqlx::query_as(
             "SELECT DISTINCT entry_date FROM time_entries \
@@ -563,27 +609,26 @@ async fn all_weeks_submitted_for_month(
         rows.into_iter().map(|(d,)| d).collect()
     };
 
-    // ── Jede vollständige Woche prüfen ───────────────────────────────────────
+    // Check each fully elapsed week.
     for &week_monday in &complete_week_mondays {
-        // Montag bis Freitag (0..5)
+        // Monday through Friday (offsets 0..5)
         for day_offset in 0..5i64 {
             let day = week_monday + Duration::days(day_offset);
 
-            // Tage vor dem Vertragsstart des Benutzers überspringen.
+            // Skip days before the user's contract start.
             if day < user_start_date {
                 continue;
             }
-            // Feiertage überspringen.
+            // Skip public holidays.
             if holiday_set.contains(&day) {
                 continue;
             }
-            // Zukünftige Tage überspringen (sollte bei vollständigen Wochen nicht
-            // vorkommen, aber defensiv).
+            // Skip future days (should not occur for fully elapsed weeks, but be defensive).
             if day >= today {
                 continue;
             }
 
-            // Arbeitstag muss durch Abwesenheit ODER eingereichten Eintrag gedeckt sein.
+            // Every working day must be covered by an absence OR a submitted entry.
             if !absent_days.contains(&day) && !submitted_dates.contains(&day) {
                 return Ok(false);
             }
@@ -602,7 +647,7 @@ pub async fn team(
         return Err(AppError::Forbidden);
     }
 
-    // Admins sehen alle aktiven Benutzer; Teamleitungen nur ihre direkten Berichte.
+    // Admins see all active users; team leads see only their direct reports.
     let team_members: Vec<crate::auth::User> = if requester.is_admin() {
         sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE active=TRUE ORDER BY last_name")
             .fetch_all(&app_state.pool)
@@ -614,28 +659,31 @@ pub async fn team(
             .await?
     };
 
-    let today = chrono::Utc::now().date_naive();
+    let today = reporting_today();
     let yesterday = today - Duration::days(1);
     let (month_start, month_end) = month_bounds(&query.month)?;
 
-    // Für den Urlaub-Split: "genommen" = bis gestern, "geplant" = ab heute.
+    // Vacation split: "taken" = up to yesterday, "planned" = from today onwards.
     let vacation_taken_end = yesterday.min(month_end);
     let vacation_planned_start = today.max(month_start);
 
     let mut team_rows = vec![];
 
     for team_member in team_members {
-        // ── Monatsbericht für Soll/Ist/Diff ─────────────────────────────────
+        // Reuse the month report so target, actual, and diff stay consistent.
         let month_report =
-            build_month(&app_state.pool, team_member.id, &query.month).await?;
+            build_month_without_submission_status(&app_state.pool, team_member.id, &query.month)
+                .await?;
 
-        // ── Urlaubstage: genommen (bis gestern) ──────────────────────────────
-        let vacation_taken = if month_start <= vacation_taken_end {
+        // Vacation days taken are capped at yesterday.
+        let absence_count_start = month_start.max(team_member.start_date);
+
+        let vacation_taken = if absence_count_start <= vacation_taken_end {
             crate::absences::workdays_total(
                 &app_state.pool,
                 team_member.id,
                 "vacation",
-                month_start,
+                absence_count_start,
                 vacation_taken_end,
             )
             .await?
@@ -643,7 +691,8 @@ pub async fn team(
             0.0
         };
 
-        // ── Urlaubstage: geplant (ab heute bis Monatsende) ───────────────────
+        // Planned vacation starts today or later inside the selected month.
+        let vacation_planned_start = vacation_planned_start.max(team_member.start_date);
         let vacation_planned = if vacation_planned_start <= month_end {
             crate::absences::workdays_total(
                 &app_state.pool,
@@ -657,16 +706,16 @@ pub async fn team(
             0.0
         };
 
-        // ── Krankheitstage bis gestern ───────────────────────────────────────
-        // Zukünftige Abwesenheiten ausblenden – konsistent mit vacation_taken
-        // und dem "Daten bis gestern"-Grundsatz für den laufenden Monat.
+        // Sick days are also capped at yesterday.
+        // Future absences are excluded, consistent with vacation_taken and the
+        // "data up to yesterday" principle for the current month.
         let sick_end = yesterday.min(month_end);
-        let sick_workdays = if month_start <= sick_end {
+        let sick_workdays = if absence_count_start <= sick_end {
             crate::absences::workdays_total(
                 &app_state.pool,
                 team_member.id,
                 "sick",
-                month_start,
+                absence_count_start,
                 sick_end,
             )
             .await?
@@ -674,28 +723,17 @@ pub async fn team(
             0.0
         };
 
-        // ── Gleitzeitkontostand am Ende des Berichtsmonats ───────────────────
-        // Wir rufen build_overtime_rows_for_year für das Jahr des Berichtsmonats auf
-        // und suchen die Zeile dieses Monats. Bei laufendem Monat enthält die letzte
-        // Zeile den Stand bis gestern (da build_range today ausschließt).
-        let report_year = month_start.year();
+        // Current flextime balance is independent of the selected month.
+        // The latest row of the current year is the balance as of yesterday.
+        let current_year = today.year();
         let overtime_rows =
-            build_overtime_rows_for_year(&app_state.pool, team_member.id, report_year)
-                .await?;
-        let month_key = format!("{:04}-{:02}", report_year, month_start.month());
+            build_overtime_rows_for_year(&app_state.pool, team_member.id, current_year).await?;
         let flextime_balance_min = overtime_rows
-            .iter()
-            .find(|r| r.month == month_key)
+            .last()
             .map(|r| r.cumulative_min)
-            // Fallback: letzte verfügbare Zeile (für Zukunftsmonate nicht vorhanden).
-            .unwrap_or_else(|| {
-                overtime_rows
-                    .last()
-                    .map(|r| r.cumulative_min)
-                    .unwrap_or(team_member.overtime_start_balance_min)
-            });
+            .unwrap_or(team_member.overtime_start_balance_min);
 
-        // ── Alle vergangenen Wochen eingereicht? ─────────────────────────────
+        // Submission status uses full past weeks, including boundary weeks.
         let weeks_all_submitted = all_weeks_submitted_for_month(
             &app_state.pool,
             team_member.id,
@@ -748,6 +786,11 @@ pub async fn categories(
     Query(query): Query<CategoryQuery>,
 ) -> AppResult<Json<Vec<CategoryTotal>>> {
     validate_range(query.from, query.to)?;
+    let effective_to = query.to.min(reporting_today() - Duration::days(1));
+    if query.from > effective_to {
+        return Ok(Json(Vec::new()));
+    }
+
     let target_user_id = query.user_id;
     if let Some(user_id) = target_user_id {
         // Requesting a specific user: verify access rights.
@@ -756,19 +799,21 @@ pub async fn categories(
         // No specific user requested: only leads may see aggregated team data.
         return Err(AppError::Forbidden);
     }
-    // Entwürfe und abgelehnte Einträge werden ausgeschlossen; eingereichte (aber noch
-    // nicht genehmigte) Buchungen erscheinen in der Kategorieauswertung, da Admins
-    // und Teamleitungen deren eigene Einträge oft noch ausstehen haben.
+    // The category breakdown shows booked time, not approved work time.
+    // Rejected entries are the only entries excluded; current-day rows are capped
+    // out by effective_to so report calculations never include today.
     let mut builder = QueryBuilder::<Postgres>::new(
         "SELECT c.name, c.color, z.start_time, z.end_time \
          FROM time_entries z \
+         JOIN users u ON u.id=z.user_id \
          JOIN categories c ON c.id=z.category_id \
-         WHERE z.status IN ('submitted', 'approved') AND z.entry_date BETWEEN ",
+         WHERE z.status != 'rejected' AND z.entry_date >= u.start_date \
+         AND z.entry_date BETWEEN ",
     );
     builder
         .push_bind(query.from)
         .push(" AND ")
-        .push_bind(query.to);
+        .push_bind(effective_to);
     if let Some(user_id) = target_user_id {
         builder.push(" AND z.user_id = ").push_bind(user_id);
     } else if !requester.is_admin() {
@@ -818,15 +863,21 @@ pub async fn team_categories(
         return Err(AppError::Forbidden);
     }
     validate_range(query.from, query.to)?;
+    let effective_to = query.to.min(reporting_today() - Duration::days(1));
+    if query.from > effective_to {
+        return Ok(Json(Vec::new()));
+    }
 
     let mut user_builder = QueryBuilder::<Postgres>::new(
         "SELECT id, first_name, last_name FROM users WHERE active=TRUE",
     );
     if !requester.is_admin() {
         user_builder
-            .push(" AND approver_id = ")
+            .push(" AND (id = ")
             .push_bind(requester.id)
-            .push(" AND role != 'admin'");
+            .push(" OR (approver_id = ")
+            .push_bind(requester.id)
+            .push(" AND role != 'admin'))");
     }
     user_builder.push(" ORDER BY last_name, first_name");
     let members: Vec<(i64, String, String)> = user_builder
@@ -834,23 +885,27 @@ pub async fn team_categories(
         .fetch_all(&app_state.pool)
         .await?;
 
-    // Wie bei der Einzelauswertung: rejected ausschließen, aber submitted+approved
-    // und draft einbeziehen, damit das Teambild vollständig ist.
+    // Same as the individual breakdown: include every booked, non-rejected entry
+    // before today, including drafts and submitted entries.
     let mut entry_builder = QueryBuilder::<Postgres>::new(
         "SELECT z.user_id, c.name, c.color, z.start_time, z.end_time \
          FROM time_entries z \
+         JOIN users u ON u.id=z.user_id \
          JOIN categories c ON c.id=z.category_id \
-         WHERE z.status != 'rejected' AND z.entry_date BETWEEN ",
+         WHERE z.status != 'rejected' AND z.entry_date >= u.start_date \
+         AND z.entry_date BETWEEN ",
     );
     entry_builder
         .push_bind(query.from)
         .push(" AND ")
-        .push_bind(query.to);
+        .push_bind(effective_to);
     if !requester.is_admin() {
         entry_builder
-            .push(" AND z.user_id IN (SELECT id FROM users WHERE approver_id = ")
+            .push(" AND z.user_id IN (SELECT id FROM users WHERE id = ")
             .push_bind(requester.id)
-            .push(" AND role != 'admin')");
+            .push(" OR (approver_id = ")
+            .push_bind(requester.id)
+            .push(" AND role != 'admin'))");
     }
     let rows: Vec<(i64, String, String, String, String)> = entry_builder
         .build_query_as()
@@ -957,14 +1012,16 @@ async fn build_overtime_rows_for_year(
         };
         for prior_month in prior_year_first_month..=12 {
             let month_label = format!("{:04}-{:02}", prior_year, prior_month);
-            let month_report = build_month(pool, target_user_id, &month_label).await?;
+            let month_report =
+                build_month_without_submission_status(pool, target_user_id, &month_label).await?;
             cumulative_min += month_report.diff_min;
         }
     }
 
     for month_num in first_month_in_year..=max_month {
         let month_label = format!("{:04}-{:02}", year, month_num);
-        let month_report = build_month(pool, target_user_id, &month_label).await?;
+        let month_report =
+            build_month_without_submission_status(pool, target_user_id, &month_label).await?;
         cumulative_min += month_report.diff_min;
         month_rows.push(MonthRow {
             month: month_label,
@@ -1079,12 +1136,9 @@ pub async fn flextime(
     };
     if query.from > user.start_date {
         let day_before_from = query.from - Duration::days(1);
-        let month_start = NaiveDate::from_ymd_opt(
-            day_before_from.year(),
-            day_before_from.month(),
-            1,
-        )
-        .ok_or_else(|| AppError::BadRequest("date".into()))?;
+        let month_start =
+            NaiveDate::from_ymd_opt(day_before_from.year(), day_before_from.month(), 1)
+                .ok_or_else(|| AppError::BadRequest("date".into()))?;
 
         let cumulative_before_month = if month_start <= user.start_date {
             user.overtime_start_balance_min
@@ -1180,7 +1234,7 @@ pub async fn flextime(
     })
     .collect();
 
-    let today = chrono::Utc::now().date_naive();
+    let today = reporting_today();
     let mut flextime_days = vec![];
     let mut current_date = query.from;
     while current_date <= query.to {
@@ -1195,22 +1249,29 @@ pub async fn flextime(
         let absence = absence_by_day.get(&current_date).cloned();
         let before_start = current_date < user.start_date;
         let after_today = current_date >= today;
-        let target = if is_weekday && holiday.is_none() && !before_start && !after_today {
+        let target = if is_weekday
+            && holiday.is_none()
+            && absence.is_none()
+            && !before_start
+            && !after_today
+        {
             target_per_day_min
         } else {
             0
         };
-        let actual = if after_today {
+        let actual = if before_start || after_today {
             0
         } else {
-            approved_minutes_by_day.get(&current_date).copied().unwrap_or(0)
+            approved_minutes_by_day
+                .get(&current_date)
+                .copied()
+                .unwrap_or(0)
         };
-        let credited_actual_min = credited_actual_minutes(actual, target, absence.as_deref());
-        let day_diff_min = credited_actual_min - target;
+        let day_diff_min = actual - target;
         cumulative_min += day_diff_min;
         flextime_days.push(FlextimeDay {
             date: current_date,
-            actual_min: credited_actual_min,
+            actual_min: actual,
             target_min: target,
             diff_min: day_diff_min,
             cumulative_min,

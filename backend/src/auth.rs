@@ -356,10 +356,10 @@ pub async fn logout(State(app_state): State<AppState>, req: Request) -> AppResul
         }
     }
     let cookie = build_session_cookie("", 0, app_state.cfg.secure_cookies);
-    let mut resp = Json(serde_json::json!({"ok": true})).into_response();
-    resp.headers_mut()
+    let mut response = Json(serde_json::json!({"ok": true})).into_response();
+    response.headers_mut()
         .insert(header::SET_COOKIE, cookie.parse().unwrap());
-    Ok(resp)
+    Ok(response)
 }
 
 pub async fn me(
@@ -389,7 +389,7 @@ pub async fn me(
         "can_view_dashboard": true,
         "can_view_reports": true,
     });
-    let mut nav = vec![
+    let mut navigation_items = vec![
         serde_json::json!({"href":"/time","key":"Time","icon":"⏱"}),
         serde_json::json!({"href":"/absences","key":"Absences","icon":"📅"}),
         serde_json::json!({"href":"/calendar","key":"Calendar","icon":"🗓"}),
@@ -398,10 +398,10 @@ pub async fn me(
         serde_json::json!({"href":"/account","key":"Account","icon":"👤"}),
     ];
     if user.is_lead() {
-        nav.push(serde_json::json!({"href":"/team-settings","key":"TeamSettings","icon":"🛡"}));
+        navigation_items.push(serde_json::json!({"href":"/team-settings","key":"TeamSettings","icon":"🛡"}));
     }
     if user.is_admin() {
-        nav.push(serde_json::json!({"href":"/admin/users","key":"Admin","icon":"⚙"}));
+        navigation_items.push(serde_json::json!({"href":"/admin/users","key":"Admin","icon":"⚙"}));
     }
     let home = "/dashboard";
     // For admins: flag whether initial setup (country, working-time defaults,
@@ -412,19 +412,19 @@ pub async fn me(
             sqlx::query_scalar("SELECT value FROM app_settings WHERE key = 'country'")
                 .fetch_optional(&app_state.pool)
                 .await?;
-        let dwh: Option<String> =
+        let default_weekly_hours: Option<String> =
             sqlx::query_scalar("SELECT value FROM app_settings WHERE key = 'default_weekly_hours'")
                 .fetch_optional(&app_state.pool)
                 .await?;
-        let dal: Option<String> = sqlx::query_scalar(
+        let default_annual_leave_days: Option<String> = sqlx::query_scalar(
             "SELECT value FROM app_settings WHERE key = 'default_annual_leave_days'",
         )
         .fetch_optional(&app_state.pool)
         .await?;
         let needs_name = user.first_name.is_empty() || user.last_name.is_empty();
-        country.is_none_or(|v| v.is_empty())
-            || dwh.is_none_or(|v| v.is_empty())
-            || dal.is_none_or(|v| v.is_empty())
+        country.is_none_or(|value| value.is_empty())
+            || default_weekly_hours.is_none_or(|value| value.is_empty())
+            || default_annual_leave_days.is_none_or(|value| value.is_empty())
             || needs_name
     } else {
         false
@@ -442,7 +442,7 @@ pub async fn me(
         "dark_mode": user.dark_mode,
         "csrf_token": csrf_token.unwrap_or_default(),
         "permissions": permissions,
-        "nav": nav,
+        "nav": navigation_items,
         "home": home,
     })))
 }
@@ -505,20 +505,20 @@ pub async fn change_password(
     }
     let new_password_hash = hash_password(&body.new_password)?;
     let current_token_hash = hash_token(&raw_token);
-    let mut tx = app_state.pool.begin().await?;
+    let mut transaction = app_state.pool.begin().await?;
     sqlx::query("UPDATE users SET password_hash=$1, must_change_password=FALSE WHERE id=$2")
         .bind(new_password_hash)
         .bind(user.id)
-        .execute(&mut *tx)
+        .execute(&mut *transaction)
         .await?;
     // On password change, all OTHER sessions for this user are revoked, but
     // the caller's current session is preserved so they remain logged in.
     sqlx::query("DELETE FROM sessions WHERE user_id=$1 AND token<>$2")
         .bind(user.id)
         .bind(&current_token_hash)
-        .execute(&mut *tx)
+        .execute(&mut *transaction)
         .await?;
-    tx.commit().await?;
+    transaction.commit().await?;
     Ok(Json(serde_json::json!({"ok": true})).into_response())
 }
 
@@ -811,10 +811,10 @@ pub async fn setup(
     // SELECT/INSERT pair on its own. We take a transaction-scoped Postgres
     // advisory lock so any concurrent setup call blocks until ours commits,
     // and then sees the row we just inserted.
-    let mut tx = app_state.pool.begin().await?;
-    lock_user_graph(&mut *tx).await?;
+    let mut transaction = app_state.pool.begin().await?;
+    lock_user_graph(&mut *transaction).await?;
     let existing_user_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut *transaction)
         .await?;
     if existing_user_count > 0 {
         tracing::warn!(target: "zerf::auth", "POST /auth/setup called after initial setup is already complete — possible probing");
@@ -833,23 +833,35 @@ pub async fn setup(
     .bind(&first_name)
     .bind(&last_name)
     .bind(today)
-    .execute(&mut *tx)
+    .execute(&mut *transaction)
     .await?;
     let new_user_id: i64 =
         sqlx::query_scalar("SELECT id FROM users WHERE email=$1")
             .bind(&email)
-            .fetch_one(&mut *tx)
+            .fetch_one(&mut *transaction)
             .await?;
     let current_year = Datelike::year(&chrono::Utc::now().date_naive());
     let default_leave_days: i64 = sqlx::query_scalar(
         "SELECT COALESCE(value::BIGINT, 30) FROM app_settings WHERE key='default_annual_leave_days'",
     )
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut *transaction)
     .await?
     .unwrap_or(30);
-    crate::users::set_leave_days(&mut *tx, new_user_id, current_year, default_leave_days).await?;
-    crate::users::set_leave_days(&mut *tx, new_user_id, current_year + 1, default_leave_days).await?;
-    tx.commit().await?;
+    crate::users::set_leave_days(
+        &mut *transaction,
+        new_user_id,
+        current_year,
+        default_leave_days,
+    )
+    .await?;
+    crate::users::set_leave_days(
+        &mut *transaction,
+        new_user_id,
+        current_year + 1,
+        default_leave_days,
+    )
+    .await?;
+    transaction.commit().await?;
 
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -976,7 +988,7 @@ pub async fn reset_password_with_token(
     Json(body): Json<ResetPasswordTokenReq>,
 ) -> AppResult<Json<serde_json::Value>> {
     let token_hash = hash_token(body.token.trim());
-    let mut tx = app_state.pool.begin().await?;
+    let mut transaction = app_state.pool.begin().await?;
 
     let expired_user_id: Option<i64> = sqlx::query_scalar(
         "DELETE FROM password_reset_tokens \
@@ -984,10 +996,10 @@ pub async fn reset_password_with_token(
          RETURNING user_id",
     )
     .bind(&token_hash)
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut *transaction)
     .await?;
     if expired_user_id.is_some() {
-        tx.commit().await?;
+        transaction.commit().await?;
         return Err(AppError::BadRequest("reset_token_expired".into()));
     }
 
@@ -997,7 +1009,7 @@ pub async fn reset_password_with_token(
          RETURNING user_id",
     )
     .bind(&token_hash)
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut *transaction)
     .await?;
     let user_id = match user_id {
         Some(id) => id,
@@ -1008,20 +1020,20 @@ pub async fn reset_password_with_token(
         "SELECT password_hash FROM users WHERE id=$1 AND active=TRUE FOR UPDATE",
     )
     .bind(user_id)
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut *transaction)
     .await?;
     let Some(current_password_hash) = current_password_hash else {
-        tx.commit().await?;
+        transaction.commit().await?;
         return Err(AppError::BadRequest("reset_token_invalid".into()));
     };
 
     if let Err(err) = validate_password_strength(&body.password) {
-        tx.rollback().await?;
+        transaction.rollback().await?;
         return Err(err);
     }
 
     if verify_password(&body.password, &current_password_hash) {
-        tx.rollback().await?;
+        transaction.rollback().await?;
         return Err(AppError::BadRequest(
             "New password must differ from the current one.".into(),
         ));
@@ -1033,17 +1045,17 @@ pub async fn reset_password_with_token(
     )
     .bind(&new_hash)
     .bind(user_id)
-    .execute(&mut *tx)
+    .execute(&mut *transaction)
     .await?;
     if update_result.rows_affected() != 1 {
-        tx.commit().await?;
+        transaction.commit().await?;
         return Err(AppError::BadRequest("reset_token_invalid".into()));
     }
     sqlx::query("DELETE FROM sessions WHERE user_id=$1")
         .bind(user_id)
-        .execute(&mut *tx)
+        .execute(&mut *transaction)
         .await?;
-    tx.commit().await?;
+    transaction.commit().await?;
 
     Ok(Json(serde_json::json!({ "ok": true })))
 }

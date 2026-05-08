@@ -15,28 +15,28 @@
   // The line and area fill stop here; x-axis labels cover the full range.
   $: todayStr = new Date().toISOString().slice(0, 10);
   $: lastActualIdx = (() => {
-    let idx = data.length - 1;
-    while (idx >= 0 && data[idx].date > todayStr) idx--;
-    return idx;
+    let lastVisibleIndex = data.length - 1;
+    while (lastVisibleIndex >= 0 && data[lastVisibleIndex].date > todayStr) lastVisibleIndex--;
+    return lastVisibleIndex;
   })();
 
   // SVG layout constants
-  const H = 230;
-  const ML = 54,
-    MR = 16,
-    MT = 16,
-    MB = 46;
+  const chartHeight = 230;
+  const marginLeft = 54,
+    marginRight = 16,
+    marginTop = 16,
+    marginBottom = 46;
 
   let containerW = 640;
-  $: PW = Math.max(1, containerW - ML - MR);
-  $: PH = Math.max(1, H - MT - MB);
+  $: plotWidth = Math.max(1, containerW - marginLeft - marginRight);
+  $: plotHeight = Math.max(1, chartHeight - marginTop - marginBottom);
 
   // Unique id to avoid clip-path collisions when multiple instances exist
-  const uid = Math.random().toString(36).slice(2, 8);
+  const chartInstanceId = Math.random().toString(36).slice(2, 8);
 
   // Value extents (always include 0)
-  $: dataMin = data.reduce((m, d) => Math.min(m, d.cumulative_min), 0);
-  $: dataMax = data.reduce((m, d) => Math.max(m, d.cumulative_min), 0);
+  $: dataMin = data.reduce((minimumMinutes, day) => Math.min(minimumMinutes, day.cumulative_min), 0);
+  $: dataMax = data.reduce((maximumMinutes, day) => Math.max(maximumMinutes, day.cumulative_min), 0);
   $: rawRange = Math.max(dataMax - dataMin, 60); // at least 1h
 
   // Display range with 10% padding
@@ -45,21 +45,21 @@
   $: dispRange = dispMax - dispMin;
 
   // Coordinate transforms
-  $: xOf = (i) =>
-    ML + (data.length > 1 ? (i / (data.length - 1)) * PW : PW / 2);
-  $: yOf = (v) => MT + PH - ((v - dispMin) / dispRange) * PH;
+  $: xOf = (pointIndex) =>
+    marginLeft + (data.length > 1 ? (pointIndex / (data.length - 1)) * plotWidth : plotWidth / 2);
+  $: yOf = (minuteValue) => marginTop + plotHeight - ((minuteValue - dispMin) / dispRange) * plotHeight;
   $: zeroY = yOf(0);
 
   // Pre-compute point coordinates
-  $: pts = data.map((d, i) => ({
-    x: xOf(i),
-    y: yOf(d.cumulative_min),
+  $: pts = data.map((day, pointIndex) => ({
+    x: xOf(pointIndex),
+    y: yOf(day.cumulative_min),
   }));
 
   // zeroY clamped to the plot area for clip-path rects.
   // Without clamping, when all values are same-sign the zero line falls outside
   // the plot and the area fill bleeds through the x-axis into the label area.
-  $: clampedZeroY = Math.min(MT + PH, Math.max(MT, zeroY));
+  $: clampedZeroY = Math.min(marginTop + plotHeight, Math.max(marginTop, zeroY));
 
   // Points subset: only up to today (for line and area)
   $: actualPts = lastActualIdx >= 0 ? pts.slice(0, lastActualIdx + 1) : [];
@@ -70,8 +70,8 @@
       ? ""
       : actualPts
           .map(
-            (p, i) =>
-              `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`,
+            (point, pointIndex) =>
+              `${pointIndex === 0 ? "M" : "L"}${point.x.toFixed(1)},${point.y.toFixed(1)}`,
           )
           .join(" ");
 
@@ -79,26 +79,26 @@
     actualPts.length < 2
       ? ""
       : (() => {
-          const f = actualPts[0];
-          const l = actualPts[actualPts.length - 1];
-          const inner = actualPts
-            .map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`)
+          const firstPoint = actualPts[0];
+          const lastPoint = actualPts[actualPts.length - 1];
+          const innerPath = actualPts
+            .map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`)
             .join(" L");
-          const z = zeroY.toFixed(1);
-          return `M${f.x.toFixed(1)},${z} L${inner} L${l.x.toFixed(1)},${z} Z`;
+          const zeroLineY = zeroY.toFixed(1);
+          return `M${firstPoint.x.toFixed(1)},${zeroLineY} L${innerPath} L${lastPoint.x.toFixed(1)},${zeroLineY} Z`;
         })();
 
   // Y-axis ticks
   $: yTicks = (() => {
     const rangeH = rawRange / 60;
     const step = rangeH / 5;
-    const nice = [0.25, 0.5, 1, 2, 4, 8, 12, 24].find((s) => s >= step) || 24;
-    const niceM = nice * 60;
-    // Start at first multiple of niceM >= dataMin
-    const start = Math.ceil(dataMin / niceM) * niceM;
+    const niceStepHours = [0.25, 0.5, 1, 2, 4, 8, 12, 24].find((stepHours) => stepHours >= step) || 24;
+    const niceStepMinutes = niceStepHours * 60;
+    // Start at first multiple of niceStepMinutes >= dataMin
+    const start = Math.ceil(dataMin / niceStepMinutes) * niceStepMinutes;
     const ticks = [];
-    for (let v = start; v <= dataMax + niceM * 0.01; v += niceM) {
-      ticks.push(v);
+    for (let tickMinutes = start; tickMinutes <= dataMax + niceStepMinutes * 0.01; tickMinutes += niceStepMinutes) {
+      ticks.push(tickMinutes);
     }
     if (!ticks.includes(0)) ticks.push(0);
     return ticks.sort((a, b) => a - b);
@@ -106,13 +106,13 @@
 
   // X-axis tick indices (~8 labels)
   $: xTickStep = Math.max(1, Math.ceil(data.length / 8));
-  $: xTicks = data.reduce((acc, _d, i) => {
-    if (i % xTickStep === 0) acc.push(i);
-    return acc;
+  $: xTicks = data.reduce((tickIndexes, _day, pointIndex) => {
+    if (pointIndex % xTickStep === 0) tickIndexes.push(pointIndex);
+    return tickIndexes;
   }, /** @type {number[]} */ ([]));
 
   // Bar pixel width (for absence/holiday bands)
-  $: barW = data.length > 1 ? PW / (data.length - 1) : PW;
+  $: barWidth = data.length > 1 ? plotWidth / (data.length - 1) : plotWidth;
 
   // ── Hover state ──────────────────────────────────────────────────────────
   let hoverIdx = /** @type {number|null} */ (null);
@@ -121,14 +121,14 @@
     if (!data.length) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const svgX = e.clientX - rect.left;
-    const plotX = svgX - ML;
-    if (plotX < 0 || plotX > PW) {
+    const plotX = svgX - marginLeft;
+    if (plotX < 0 || plotX > plotWidth) {
       hoverIdx = null;
       return;
     }
-    const raw = data.length > 1 ? (plotX / PW) * (data.length - 1) : 0;
-    const idx = Math.round(Math.max(0, Math.min(data.length - 1, raw)));
-    hoverIdx = idx <= lastActualIdx ? idx : null;
+    const rawIndex = data.length > 1 ? (plotX / plotWidth) * (data.length - 1) : 0;
+    const hoverIndex = Math.round(Math.max(0, Math.min(data.length - 1, rawIndex)));
+    hoverIdx = hoverIndex <= lastActualIdx ? hoverIndex : null;
   }
 
   function onMouseLeave() {
@@ -141,14 +141,14 @@
     const touch = e.touches[0];
     const rect = e.currentTarget.getBoundingClientRect();
     const svgX = touch.clientX - rect.left;
-    const plotX = svgX - ML;
-    if (plotX < 0 || plotX > PW) {
+    const plotX = svgX - marginLeft;
+    if (plotX < 0 || plotX > plotWidth) {
       hoverIdx = null;
       return;
     }
-    const raw = data.length > 1 ? (plotX / PW) * (data.length - 1) : 0;
-    const idx = Math.round(Math.max(0, Math.min(data.length - 1, raw)));
-    hoverIdx = idx <= lastActualIdx ? idx : null;
+    const rawIndex = data.length > 1 ? (plotX / plotWidth) * (data.length - 1) : 0;
+    const hoverIndex = Math.round(Math.max(0, Math.min(data.length - 1, rawIndex)));
+    hoverIdx = hoverIndex <= lastActualIdx ? hoverIndex : null;
   }
 
   function onTouchEnd() {
@@ -159,27 +159,27 @@
   $: hoverPt = hoverIdx !== null ? pts[hoverIdx] : null;
 
   // ── Tooltip ──────────────────────────────────────────────────────────────
-  const TW = 172;
-  const TH = 70;
+  const tooltipWidth = 172;
+  const tooltipHeight = 70;
 
   $: tooltipX =
-    hoverPt && hoverPt.x + TW + MR + 10 > containerW
-      ? hoverPt.x - TW - 8
+    hoverPt && hoverPt.x + tooltipWidth + marginRight + 10 > containerW
+      ? hoverPt.x - tooltipWidth - 8
       : hoverPt
         ? hoverPt.x + 10
         : 0;
   $: tooltipY = hoverPt
-    ? Math.max(MT, Math.min(H - MB - TH, hoverPt.y - TH / 2))
+    ? Math.max(marginTop, Math.min(chartHeight - marginBottom - tooltipHeight, hoverPt.y - tooltipHeight / 2))
     : 0;
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   function fmtBal(min) {
-    const neg = min < 0;
-    const abs = Math.abs(min);
-    const h = Math.floor(abs / 60);
-    const m = abs % 60;
+    const isNegative = min < 0;
+    const absoluteMinutes = Math.abs(min);
+    const hours = Math.floor(absoluteMinutes / 60);
+    const minutes = absoluteMinutes % 60;
     return formatHours(
-      (neg ? "-" : "+") + h + ":" + String(m).padStart(2, "0"),
+      (isNegative ? "-" : "+") + hours + ":" + String(minutes).padStart(2, "0"),
     );
   }
 
@@ -200,12 +200,12 @@
   $: legendItems = (() => {
     const seen = new Set();
     const items = [];
-    for (const d of data) {
-      if (d.absence && !seen.has(d.absence)) {
-        seen.add(d.absence);
-        items.push({ key: d.absence, color: absColor(d.absence) });
+    for (const day of data) {
+      if (day.absence && !seen.has(day.absence)) {
+        seen.add(day.absence);
+        items.push({ key: day.absence, color: absColor(day.absence) });
       }
-      if (d.holiday && !seen.has("__holiday__")) {
+      if (day.holiday && !seen.has("__holiday__")) {
         seen.add("__holiday__");
         items.push({ key: "__holiday__", color: "var(--warning)" });
       }
@@ -230,7 +230,7 @@
       role="img"
       aria-label={$t("Flextime balance")}
       width={containerW}
-      height={H}
+      height={chartHeight}
       style="display:block;overflow:visible"
       on:mousemove={onMouseMove}
       on:mouseleave={onMouseLeave}
@@ -239,29 +239,29 @@
     >
       <defs>
         <!-- clip above zero-line → positive area (green) -->
-        <clipPath id="clip-above-{uid}">
-          <rect x={ML} y={MT} width={PW} height={clampedZeroY - MT} />
+        <clipPath id="clip-above-{chartInstanceId}">
+          <rect x={marginLeft} y={marginTop} width={plotWidth} height={clampedZeroY - marginTop} />
         </clipPath>
         <!-- clip below zero-line → negative area (red) -->
-        <clipPath id="clip-below-{uid}">
+        <clipPath id="clip-below-{chartInstanceId}">
           <rect
-            x={ML}
+            x={marginLeft}
             y={clampedZeroY}
-            width={PW}
-            height={MT + PH - clampedZeroY}
+            width={plotWidth}
+            height={marginTop + plotHeight - clampedZeroY}
           />
         </clipPath>
       </defs>
 
       <!-- ── Absence / holiday vertical bands (only past/today) ── -->
-      {#each data as d, i}
-        {#if i <= lastActualIdx && (d.absence || d.holiday)}
+      {#each data as day, pointIndex}
+        {#if pointIndex <= lastActualIdx && (day.absence || day.holiday)}
           <rect
-            x={pts[i].x - barW * 0.5}
-            y={MT}
-            width={barW}
-            height={PH}
-            fill={d.absence ? absColor(d.absence) : "var(--warning)"}
+            x={pts[pointIndex].x - barWidth * 0.5}
+            y={marginTop}
+            width={barWidth}
+            height={plotHeight}
+            fill={day.absence ? absColor(day.absence) : "var(--warning)"}
             opacity="0.18"
           />
         {/if}
@@ -269,19 +269,19 @@
 
       <!-- ── Y-axis grid lines & labels ── -->
       {#each yTicks as tick}
-        {@const ty = yOf(tick)}
+        {@const tickY = yOf(tick)}
         <line
-          x1={ML}
-          y1={ty}
-          x2={containerW - MR}
-          y2={ty}
+          x1={marginLeft}
+          y1={tickY}
+          x2={containerW - marginRight}
+          y2={tickY}
           stroke={tick === 0 ? "var(--border-strong)" : "var(--border)"}
           stroke-width={tick === 0 ? 1.2 : 0.6}
           stroke-dasharray={tick === 0 ? undefined : "3 3"}
         />
         <text
-          x={ML - 5}
-          y={ty}
+          x={marginLeft - 5}
+          y={tickY}
           text-anchor="end"
           dominant-baseline="middle"
           font-size="10"
@@ -300,13 +300,13 @@
           d={areaPath}
           fill="var(--accent)"
           opacity="0.2"
-          clip-path="url(#clip-above-{uid})"
+          clip-path="url(#clip-above-{chartInstanceId})"
         />
         <path
           d={areaPath}
           fill="var(--danger)"
           opacity="0.2"
-          clip-path="url(#clip-below-{uid})"
+          clip-path="url(#clip-below-{chartInstanceId})"
         />
       {/if}
 
@@ -324,18 +324,18 @@
 
       <!-- ── Axes ── -->
       <line
-        x1={ML}
-        y1={H - MB}
-        x2={containerW - MR}
-        y2={H - MB}
+        x1={marginLeft}
+        y1={chartHeight - marginBottom}
+        x2={containerW - marginRight}
+        y2={chartHeight - marginBottom}
         stroke="var(--border-strong)"
         stroke-width="1"
       />
       <line
-        x1={ML}
-        y1={MT}
-        x2={ML}
-        y2={H - MB}
+        x1={marginLeft}
+        y1={marginTop}
+        x2={marginLeft}
+        y2={chartHeight - marginBottom}
         stroke="var(--border)"
         stroke-width="1"
       />

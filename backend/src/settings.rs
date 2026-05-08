@@ -331,31 +331,41 @@ pub async fn update_smtp_settings(
             .map_err(|e| AppError::BadRequest(format!("SMTP_CONNECTION_FAILED:{e}")))?;
     }
 
-    let cfg = smtp_config_from_body(&app_state.pool, &body).await?;
+    let smtp_config = smtp_config_from_body(&app_state.pool, &body).await?;
 
     // Save all SMTP settings atomically within a transaction.
-    let mut tx = app_state.pool.begin().await?;
+    let mut transaction = app_state.pool.begin().await?;
 
-    save_setting_exec(&mut *tx, SMTP_HOST_KEY, &cfg.host).await?;
-    save_setting_exec(&mut *tx, SMTP_PORT_KEY, &cfg.port.to_string()).await?;
+    save_setting_exec(&mut *transaction, SMTP_HOST_KEY, &smtp_config.host).await?;
     save_setting_exec(
-        &mut *tx,
-        SMTP_USERNAME_KEY,
-        cfg.username.as_deref().unwrap_or(""),
+        &mut *transaction,
+        SMTP_PORT_KEY,
+        &smtp_config.port.to_string(),
     )
     .await?;
-    save_setting_exec(&mut *tx, SMTP_FROM_KEY, &cfg.from).await?;
-    save_setting_exec(&mut *tx, SMTP_ENCRYPTION_KEY, &cfg.encryption).await?;
+    save_setting_exec(
+        &mut *transaction,
+        SMTP_USERNAME_KEY,
+        smtp_config.username.as_deref().unwrap_or(""),
+    )
+    .await?;
+    save_setting_exec(&mut *transaction, SMTP_FROM_KEY, &smtp_config.from).await?;
+    save_setting_exec(
+        &mut *transaction,
+        SMTP_ENCRYPTION_KEY,
+        &smtp_config.encryption,
+    )
+    .await?;
 
     // Overwrite password when explicitly provided.
     if let Some(ref password) = body.smtp_password {
         if !password.is_empty() {
-            save_setting_exec(&mut *tx, SMTP_PASSWORD_KEY, password).await?;
+            save_setting_exec(&mut *transaction, SMTP_PASSWORD_KEY, password).await?;
         }
     }
 
     save_setting_exec(
-        &mut *tx,
+        &mut *transaction,
         SMTP_ENABLED_KEY,
         if body.smtp_enabled { "true" } else { "false" },
     )
@@ -363,13 +373,13 @@ pub async fn update_smtp_settings(
 
     let reminders_enabled = body.submission_reminders_enabled.unwrap_or(true);
     save_setting_exec(
-        &mut *tx,
+        &mut *transaction,
         SUBMISSION_REMINDERS_ENABLED_KEY,
         if reminders_enabled { "true" } else { "false" },
     )
     .await?;
 
-    tx.commit().await?;
+    transaction.commit().await?;
 
     Ok(Json(load_admin_settings_response(&app_state.pool).await?))
 }
@@ -526,42 +536,52 @@ pub async fn update_admin_settings(
     };
 
     // Save all settings atomically within a transaction.
-    let mut tx = app_state.pool.begin().await?;
+    let mut transaction = app_state.pool.begin().await?;
 
     if let Some(ref carryover_date) = validated_carryover_date {
-        save_setting_exec(&mut *tx, CARRYOVER_EXPIRY_DATE_KEY, carryover_date).await?;
+        save_setting_exec(
+            &mut *transaction,
+            CARRYOVER_EXPIRY_DATE_KEY,
+            carryover_date,
+        )
+        .await?;
     }
 
     if let Some(day) = body.submission_deadline_day {
-        save_setting_exec(&mut *tx, SUBMISSION_DEADLINE_DAY_KEY, &day.to_string()).await?;
+        save_setting_exec(
+            &mut *transaction,
+            SUBMISSION_DEADLINE_DAY_KEY,
+            &day.to_string(),
+        )
+        .await?;
     } else {
-        save_setting_exec(&mut *tx, SUBMISSION_DEADLINE_DAY_KEY, "").await?;
+        save_setting_exec(&mut *transaction, SUBMISSION_DEADLINE_DAY_KEY, "").await?;
     }
 
-    save_setting_exec(&mut *tx, UI_LANGUAGE_KEY, &language).await?;
-    save_setting_exec(&mut *tx, TIME_FORMAT_KEY, time_format).await?;
-    save_setting_exec(&mut *tx, COUNTRY_KEY, &country).await?;
-    save_setting_exec(&mut *tx, REGION_KEY, &region).await?;
+    save_setting_exec(&mut *transaction, UI_LANGUAGE_KEY, &language).await?;
+    save_setting_exec(&mut *transaction, TIME_FORMAT_KEY, time_format).await?;
+    save_setting_exec(&mut *transaction, COUNTRY_KEY, &country).await?;
+    save_setting_exec(&mut *transaction, REGION_KEY, &region).await?;
     save_setting_exec(
-        &mut *tx,
+        &mut *transaction,
         DEFAULT_WEEKLY_HOURS_KEY,
         &default_weekly_hours_str,
     )
     .await?;
     save_setting_exec(
-        &mut *tx,
+        &mut *transaction,
         DEFAULT_ANNUAL_LEAVE_DAYS_KEY,
         &default_annual_leave_days_str,
     )
     .await?;
 
-    save_setting_exec(&mut *tx, ORGANIZATION_NAME_KEY, &org_name).await?;
+    save_setting_exec(&mut *transaction, ORGANIZATION_NAME_KEY, &org_name).await?;
 
     if let Some(ref holidays) = prepared_holidays {
-        crate::holidays::replace_auto_holidays_exec(&mut tx, holidays).await?;
+        crate::holidays::replace_auto_holidays_exec(&mut transaction, holidays).await?;
     }
 
-    tx.commit().await?;
+    transaction.commit().await?;
 
     Ok(Json(load_admin_settings_response(&app_state.pool).await?))
 }

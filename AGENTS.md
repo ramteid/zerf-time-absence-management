@@ -233,3 +233,12 @@ DATABASE_URL=postgres://postgres:postgres@127.0.0.1:55432/postgres cargo test
 ```
 
 `backend/tests/nager_contract.rs` validates the external Nager.Date holiday API contract.
+
+## Coding Conventions
+
+- Use explicit, descriptive variable and function names that reveal intent without requiring a comment.
+- Prioritize readability for humans over brevity; code is read far more often than it is written.
+- Keep functions and modules small and focused on a single responsibility.
+- Reduce complexity: avoid unnecessary abstractions, indirection, and nesting.
+- Prefer simple, direct solutions over clever ones.
+- Apply appropriate architectural patterns (e.g., handler/service/repository separation) consistently across the codebase.

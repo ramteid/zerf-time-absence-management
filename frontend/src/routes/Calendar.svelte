@@ -24,25 +24,25 @@
   let loadSeq = 0;
 
   $: {
-    const q = $path.includes("?") ? $path.split("?")[1] : "";
-    const p = new URLSearchParams(q);
+    const queryString = $path.includes("?") ? $path.split("?")[1] : "";
+    const searchParams = new URLSearchParams(queryString);
     const today = new Date();
-    year = Number(p.get("year")) || today.getFullYear();
-    month = Number(p.get("month")) || today.getMonth() + 1;
+    year = Number(searchParams.get("year")) || today.getFullYear();
+    month = Number(searchParams.get("month")) || today.getMonth() + 1;
   }
 
   async function load() {
     const seq = ++loadSeq;
     const loadYear = year;
     const loadMonth = month;
-    const ms = `${loadYear}-${String(loadMonth).padStart(2, "0")}`;
-    const first = new Date(loadYear, loadMonth - 1, 1);
-    const last = new Date(loadYear, loadMonth, 0);
+    const monthString = `${loadYear}-${String(loadMonth).padStart(2, "0")}`;
+    const firstDayOfMonth = new Date(loadYear, loadMonth - 1, 1);
+    const lastDayOfMonth = new Date(loadYear, loadMonth, 0);
     const [nextEntries, nextHolidays, nextTimeEntries, nextCategories] =
       await Promise.all([
-        api(`/absences/calendar?month=${ms}`),
+        api(`/absences/calendar?month=${monthString}`),
         api(`/holidays?year=${loadYear}`),
-        api(`/time-entries?from=${isoDate(first)}&to=${isoDate(last)}`).catch(
+        api(`/time-entries?from=${isoDate(firstDayOfMonth)}&to=${isoDate(lastDayOfMonth)}`).catch(
           () => [],
         ),
         api("/categories").catch(() => $categories),
@@ -55,23 +55,23 @@
   }
   $: year && month && load().catch(() => {});
 
-  $: hMap = new Map(holidays.map((f) => [f.holiday_date, f.name]));
+  $: holidayByDate = new Map(holidays.map((holiday) => [holiday.holiday_date, holiday.name]));
 
   // The calendar API is already team-scoped. Time entries remain personal,
   // so we still filter those defensively.
   $: myTimeEntries = timeEntries.filter((e) => e.user_id === $currentUser?.id);
 
   $: teMap = (() => {
-    const map = new Map();
-    for (const te of myTimeEntries) {
-      const d =
-        typeof te.entry_date === "string"
-          ? te.entry_date.slice(0, 10)
-          : isoDate(te.entry_date);
-      if (!map.has(d)) map.set(d, []);
-      map.get(d).push(te);
+    const timeEntriesByDate = new Map();
+    for (const timeEntry of myTimeEntries) {
+      const entryDateKey =
+        typeof timeEntry.entry_date === "string"
+          ? timeEntry.entry_date.slice(0, 10)
+          : isoDate(timeEntry.entry_date);
+      if (!timeEntriesByDate.has(entryDateKey)) timeEntriesByDate.set(entryDateKey, []);
+      timeEntriesByDate.get(entryDateKey).push(timeEntry);
     }
-    return map;
+    return timeEntriesByDate;
   })();
 
   $: categoryById = new Map(
@@ -114,8 +114,8 @@
   }
 
   function fallbackColor(offset = 0, used = new Set()) {
-    for (let i = 0; i < FALLBACK_COLORS.length; i++) {
-      const color = FALLBACK_COLORS[(offset + i) % FALLBACK_COLORS.length];
+    for (let colorIndex = 0; colorIndex < FALLBACK_COLORS.length; colorIndex++) {
+      const color = FALLBACK_COLORS[(offset + colorIndex) % FALLBACK_COLORS.length];
       if (!used.has(color.toLowerCase())) return color;
     }
     const hue = (offset * 47) % 360;
@@ -141,40 +141,40 @@
     return [absence.name, absence.comment].filter(Boolean).join(" - ");
   }
 
-  function rawCellEvents(c, entryMap, categoryMap, translate) {
-    const evts = [];
-    if (c.hol) {
-      evts.push({
+  function rawCellEvents(cell, entryMap, categoryMap, translate) {
+    const events = [];
+    if (cell.hol) {
+      events.push({
         key: "holiday",
         color: HOLIDAY_COLOR,
         label: translate("Holiday"),
-        detail: c.hol,
+        detail: cell.hol,
       });
     }
-    for (const a of c.absences) {
-      const label = absenceKindLabel(a.kind);
-      evts.push({
-        key: `absence:${a.kind}`,
-        color: absColor(a.kind),
+    for (const absence of cell.absences) {
+      const label = absenceKindLabel(absence.kind);
+      events.push({
+        key: `absence:${absence.kind}`,
+        color: absColor(absence.kind),
         label,
         title: label,
-        detail: absenceDetail(a),
+        detail: absenceDetail(absence),
       });
     }
-    for (const e of entryMap.get(c.ds) || []) {
-      const start = e.start_time?.slice(0, 5) || "";
-      const end = e.end_time?.slice(0, 5) || "";
-      const dur = start && end ? minToHM(durMin(start, end)) : "";
-      const range = start && end ? `${start} - ${end}` : "";
-      const detail = dur ? `${range} (${dur})` : range;
-      evts.push({
-        key: `work:${e.category_id ?? "unknown"}`,
-        color: workBaseColor(e, evts.length, categoryMap),
-        label: translate(workLabel(e, categoryMap)),
+    for (const entry of entryMap.get(cell.ds) || []) {
+      const startTime = entry.start_time?.slice(0, 5) || "";
+      const endTime = entry.end_time?.slice(0, 5) || "";
+      const durationLabel = startTime && endTime ? minToHM(durMin(startTime, endTime)) : "";
+      const timeRange = startTime && endTime ? `${startTime} - ${endTime}` : "";
+      const detail = durationLabel ? `${timeRange} (${durationLabel})` : timeRange;
+      events.push({
+        key: `work:${entry.category_id ?? "unknown"}`,
+        color: workBaseColor(entry, events.length, categoryMap),
+        label: translate(workLabel(entry, categoryMap)),
         detail,
       });
     }
-    return evts;
+    return events;
   }
 
   function buildColorMap(baseCells, entryMap, categoryMap, translate) {
@@ -182,27 +182,27 @@
     // with holiday or absence colors, even in months where none of those appear.
     const used = new Set([
       HOLIDAY_COLOR.toLowerCase(),
-      ...Object.values(absColorMap).map((c) => c.toLowerCase()),
+      ...Object.values(absColorMap).map((color) => color.toLowerCase()),
     ]);
     const assigned = new Map();
-    for (const c of baseCells) {
-      if (c.other) continue;
-      for (const ev of rawCellEvents(c, entryMap, categoryMap, translate)) {
-        if (assigned.has(ev.key)) continue;
+    for (const cell of baseCells) {
+      if (cell.other) continue;
+      for (const event of rawCellEvents(cell, entryMap, categoryMap, translate)) {
+        if (assigned.has(event.key)) continue;
         let color =
-          normalizeColor(ev.color) || fallbackColor(assigned.size, used);
+          normalizeColor(event.color) || fallbackColor(assigned.size, used);
         if (used.has(color)) color = fallbackColor(assigned.size, used);
-        assigned.set(ev.key, color);
+        assigned.set(event.key, color);
         used.add(color);
       }
     }
     return assigned;
   }
 
-  function cellEvents(c, entryMap, categoryMap, colorMap, translate) {
-    return rawCellEvents(c, entryMap, categoryMap, translate).map((ev) => ({
-      ...ev,
-      color: colorMap.get(ev.key) || ev.color,
+  function cellEvents(cell, entryMap, categoryMap, colorMap, translate) {
+    return rawCellEvents(cell, entryMap, categoryMap, translate).map((event) => ({
+      ...event,
+      color: colorMap.get(event.key) || event.color,
     }));
   }
 
@@ -224,24 +224,24 @@
   $: cells = (() => {
     const first = new Date(year, month - 1, 1);
     const start = monday(first);
-    const out = [];
-    for (let i = 0; i < 42; i++) {
-      const d = addDays(start, i);
-      const ds = isoDate(d);
-      const other = d.getMonth() !== month - 1;
-      const wd = (d.getDay() + 6) % 7;
-      out.push({
-        d,
-        ds,
+    const nextCells = [];
+    for (let dayOffset = 0; dayOffset < 42; dayOffset++) {
+      const date = addDays(start, dayOffset);
+      const dateString = isoDate(date);
+      const other = date.getMonth() !== month - 1;
+      const weekdayIndex = (date.getDay() + 6) % 7;
+      nextCells.push({
+        d: date,
+        ds: dateString,
         other,
-        weekend: wd >= 5,
-        today: ds === todayStr,
-        hol: hMap.get(ds),
-        absences: entries.filter((e) => ds >= e.start_date && ds <= e.end_date),
+        weekend: weekdayIndex >= 5,
+        today: dateString === todayStr,
+        hol: holidayByDate.get(dateString),
+        absences: entries.filter((entry) => dateString >= entry.start_date && dateString <= entry.end_date),
       });
-      if (i >= 34 && other && (i + 1) % 7 === 0) break;
+      if (dayOffset >= 34 && other && (dayOffset + 1) % 7 === 0) break;
     }
-    return out;
+    return nextCells;
   })();
 
   $: colorByKey = buildColorMap(cells, teMap, categoryById, $t);
@@ -252,21 +252,21 @@
 
   $: legendItems = (() => {
     const seen = new Map();
-    for (const c of eventCells) {
-      if (c.other) continue;
-      for (const ev of c.events) {
-        if (!seen.has(ev.key)) {
-          seen.set(ev.key, { color: ev.color, label: ev.label });
+    for (const cell of eventCells) {
+      if (cell.other) continue;
+      for (const event of cell.events) {
+        if (!seen.has(event.key)) {
+          seen.set(event.key, { color: event.color, label: event.label });
         }
       }
     }
     return [...seen.values()];
   })();
 
-  async function clickDay(c) {
-    const evts = c.events;
-    if (evts.length === 0) return;
-    popupCell = { ...c, events: evts };
+  async function clickDay(cell) {
+    const cellEventsList = cell.events;
+    if (cellEventsList.length === 0) return;
+    popupCell = { ...cell, events: cellEventsList };
     await tick();
     dlg?.showModal();
   }

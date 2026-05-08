@@ -3,8 +3,8 @@
   import { t } from "../i18n.js";
 
   $: pathname = (() => {
-    const i = $path.indexOf("?");
-    return i >= 0 ? $path.slice(0, i) : $path;
+    const queryIndex = $path.indexOf("?");
+    return queryIndex >= 0 ? $path.slice(0, queryIndex) : $path;
   })();
 
   const tabs = [

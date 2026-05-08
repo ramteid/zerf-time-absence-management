@@ -226,16 +226,16 @@ pub async fn create(
     requester: User,
     Json(body): Json<NewTimeEntry>,
 ) -> AppResult<Json<TimeEntry>> {
-    let mut tx = app_state.pool.begin().await?;
+    let mut transaction = app_state.pool.begin().await?;
     sqlx::query("SELECT pg_advisory_xact_lock($1)")
         .bind(requester.id)
-        .execute(&mut *tx)
+        .execute(&mut *transaction)
         .await?;
-    validate(&mut tx, requester.id, &body, None).await?;
+    validate(&mut transaction, requester.id, &body, None).await?;
     let new_entry_id: i64 = sqlx::query_scalar("INSERT INTO time_entries(user_id, entry_date, start_time, end_time, category_id, comment) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id")
         .bind(requester.id).bind(body.entry_date).bind(&body.start_time).bind(&body.end_time).bind(body.category_id).bind(&body.comment)
-        .fetch_one(&mut *tx).await?;
-    tx.commit().await?;
+        .fetch_one(&mut *transaction).await?;
+    transaction.commit().await?;
     let created_entry: TimeEntry = sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1")
         .bind(new_entry_id)
         .fetch_one(&app_state.pool)
@@ -263,14 +263,14 @@ pub async fn update(
         .bind(entry_id)
         .fetch_one(&app_state.pool)
         .await?;
-    let mut tx = app_state.pool.begin().await?;
+    let mut transaction = app_state.pool.begin().await?;
     sqlx::query("SELECT pg_advisory_xact_lock($1)")
         .bind(entry_owner_id)
-        .execute(&mut *tx)
+        .execute(&mut *transaction)
         .await?;
     let previous_entry: TimeEntry = sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1 FOR UPDATE")
         .bind(entry_id)
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut *transaction)
         .await?;
     let admin_correction = requester.is_admin()
         && previous_entry.user_id != requester.id
@@ -285,11 +285,17 @@ pub async fn update(
             ));
         }
     }
-    validate(&mut tx, previous_entry.user_id, &body, Some(entry_id)).await?;
+    validate(
+        &mut transaction,
+        previous_entry.user_id,
+        &body,
+        Some(entry_id),
+    )
+    .await?;
     sqlx::query("UPDATE time_entries SET entry_date=$1, start_time=$2, end_time=$3, category_id=$4, comment=$5, updated_at=CURRENT_TIMESTAMP WHERE id=$6")
         .bind(body.entry_date).bind(&body.start_time).bind(&body.end_time).bind(body.category_id).bind(&body.comment).bind(entry_id)
-        .execute(&mut *tx).await?;
-    tx.commit().await?;
+        .execute(&mut *transaction).await?;
+    transaction.commit().await?;
     let updated_entry: TimeEntry = sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1")
         .bind(entry_id)
         .fetch_one(&app_state.pool)
@@ -367,7 +373,7 @@ pub async fn submit(
         }
     }
     // Phase 2: atomically submit all draft entries in a single transaction.
-    let mut tx = app_state.pool.begin().await?;
+    let mut transaction = app_state.pool.begin().await?;
     let mut submitted_ids: Vec<i64> = vec![];
     for entry_id in &body.ids {
         let affected_rows = sqlx::query(
@@ -376,14 +382,14 @@ pub async fn submit(
         )
         .bind(entry_id)
         .bind(requester.id)
-        .execute(&mut *tx)
+        .execute(&mut *transaction)
         .await?
         .rows_affected();
         if affected_rows > 0 {
             submitted_ids.push(*entry_id);
         }
     }
-    tx.commit().await?;
+    transaction.commit().await?;
     // Phase 3: audit logs (best-effort, after commit).
     for entry_id in &submitted_ids {
         audit::log(
@@ -439,10 +445,10 @@ pub async fn approve(
     if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let mut tx = app_state.pool.begin().await?;
+    let mut transaction = app_state.pool.begin().await?;
     let entry: TimeEntry = sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1 FOR UPDATE")
         .bind(entry_id)
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut *transaction)
         .await?;
     // No user may approve their own entry — except admins, who may have
     // no one above them to approve.
@@ -455,7 +461,7 @@ pub async fn approve(
         )
         .bind(entry.user_id)
         .bind(requester.id)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut *transaction)
         .await?;
         if is_direct_report.is_none() {
             return Err(AppError::Forbidden);
@@ -471,7 +477,7 @@ pub async fn approve(
     )
     .bind(requester.id)
     .bind(entry_id)
-    .execute(&mut *tx)
+    .execute(&mut *transaction)
     .await?
     .rows_affected();
     if rows_updated == 0 {
@@ -479,7 +485,7 @@ pub async fn approve(
             "Entry was already reviewed by someone else.".into(),
         ));
     }
-    tx.commit().await?;
+    transaction.commit().await?;
     audit::log(
         &app_state.pool,
         requester.id,
@@ -526,10 +532,10 @@ pub async fn reject(
     if body.reason.len() > 2000 {
         return Err(AppError::BadRequest("Reason too long (max 2000).".into()));
     }
-    let mut tx = app_state.pool.begin().await?;
+    let mut transaction = app_state.pool.begin().await?;
     let entry: TimeEntry = sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1 FOR UPDATE")
         .bind(entry_id)
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut *transaction)
         .await?;
     // No user may reject their own entry — except admins.
     if entry.user_id == requester.id && !requester.is_admin() {
@@ -541,7 +547,7 @@ pub async fn reject(
         )
         .bind(entry.user_id)
         .bind(requester.id)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut *transaction)
         .await?;
         if is_direct_report.is_none() {
             return Err(AppError::Forbidden);
@@ -558,7 +564,7 @@ pub async fn reject(
     .bind(requester.id)
     .bind(&body.reason)
     .bind(entry_id)
-    .execute(&mut *tx)
+    .execute(&mut *transaction)
     .await?
     .rows_affected();
     if rows_updated == 0 {
@@ -566,7 +572,7 @@ pub async fn reject(
             "Entry was already reviewed by someone else.".into(),
         ));
     }
-    tx.commit().await?;
+    transaction.commit().await?;
     audit::log(
         &app_state.pool,
         requester.id,
@@ -641,7 +647,7 @@ pub async fn batch_approve(
         return Ok(Json(serde_json::json!({"ok": true, "count": 0})));
     }
     // Atomically approve all eligible entries.
-    let mut tx = app_state.pool.begin().await?;
+    let mut transaction = app_state.pool.begin().await?;
     let mut approved_entries: Vec<TimeEntry> = Vec::with_capacity(entries_to_approve.len());
     for entry in &entries_to_approve {
         let affected_rows = sqlx::query(
@@ -649,14 +655,14 @@ pub async fn batch_approve(
         )
         .bind(requester.id)
         .bind(entry.id)
-        .execute(&mut *tx)
+        .execute(&mut *transaction)
         .await?
         .rows_affected();
         if affected_rows > 0 {
             approved_entries.push(entry.clone());
         }
     }
-    tx.commit().await?;
+    transaction.commit().await?;
     let approved_count = approved_entries.len();
     // Audit + notify each affected employee (best-effort, after commit).
     for entry in &approved_entries {
@@ -750,7 +756,7 @@ pub async fn batch_reject(
         return Ok(Json(serde_json::json!({"ok": true, "count": 0})));
     }
     // Atomically reject all eligible entries.
-    let mut tx = app_state.pool.begin().await?;
+    let mut transaction = app_state.pool.begin().await?;
     let mut rejected_entries: Vec<TimeEntry> = Vec::with_capacity(entries_to_reject.len());
     for entry in &entries_to_reject {
         let affected_rows = sqlx::query(
@@ -760,14 +766,14 @@ pub async fn batch_reject(
         .bind(requester.id)
         .bind(&rejection_reason)
         .bind(entry.id)
-        .execute(&mut *tx)
+        .execute(&mut *transaction)
         .await?
         .rows_affected();
         if affected_rows > 0 {
             rejected_entries.push(entry.clone());
         }
     }
-    tx.commit().await?;
+    transaction.commit().await?;
     let rejected_count = rejected_entries.len();
     // Audit + notify each affected employee (best-effort, after commit).
     for entry in &rejected_entries {

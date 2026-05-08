@@ -527,12 +527,12 @@
   async function batchApprove() {
     const ids = pendingEntries.map((entry) => entry.id);
     if (!ids.length) return;
-    const ok = await confirmDialog(
+    const confirmed = await confirmDialog(
       $t("Approve all?"),
       $t("Approve all {n} submitted entries across all users?", { n: ids.length }),
       { confirm: $t("Approve all") },
     );
-    if (!ok) return;
+    if (!confirmed) return;
     try {
       await api("/time-entries/batch-approve", { method: "POST", body: { ids } });
       toast($t("All approved."), "ok");
@@ -1215,9 +1215,9 @@
       <button
         class="kz-btn kz-btn-danger"
         on:click={() => {
-          const id = absenceDetail.id;
+          const absenceId = absenceDetail.id;
           closeAbsenceDetail();
-          rejectAbsence(id);
+          rejectAbsence(absenceId);
         }}
       >
         <Icon name="X" size={14} />{$t("Reject")}
@@ -1225,9 +1225,9 @@
       <button
         class="kz-btn kz-btn-primary"
         on:click={() => {
-          const id = absenceDetail.id;
+          const absenceId = absenceDetail.id;
           closeAbsenceDetail();
-          approveAbsence(id);
+          approveAbsence(absenceId);
         }}
       >
         <Icon name="Check" size={14} />{$t("Approve")}

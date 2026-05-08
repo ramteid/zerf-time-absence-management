@@ -3,7 +3,7 @@
   import { currentUser, settings as appSettings, toast } from "../stores.js";
   import { LANGUAGES, setLanguage, t } from "../i18n.js";
 
-  let s = {};
+  let settingsForm = {};
   let saving = false;
   let adminFirstName = "";
   let adminLastName = "";
@@ -42,28 +42,28 @@
     regionsLoadFailed = false;
     try {
       const regions = await loadRegionsFor(normalizedCountry);
-      if (loadId !== regionLoadId || normalizedCountry !== (s.country || "")) {
+      if (loadId !== regionLoadId || normalizedCountry !== (settingsForm.country || "")) {
         return;
       }
       countryRegions = regions;
-      const currentRegion = s.region || "";
+      const currentRegion = settingsForm.region || "";
       if (currentRegion && !regions.includes(currentRegion)) {
-        s = { ...s, region: "" };
+        settingsForm = { ...settingsForm, region: "" };
       }
     } catch {
-      if (loadId !== regionLoadId || normalizedCountry !== (s.country || "")) {
+      if (loadId !== regionLoadId || normalizedCountry !== (settingsForm.country || "")) {
         return;
       }
       countryRegions = [];
       regionsLoadFailed = true;
     } finally {
-      if (loadId === regionLoadId && normalizedCountry === (s.country || "")) {
+      if (loadId === regionLoadId && normalizedCountry === (settingsForm.country || "")) {
         regionLoading = false;
       }
     }
   }
 
-  $: selectedCountry = s.country || "";
+  $: selectedCountry = settingsForm.country || "";
   $: if (selectedCountry !== regionsCountry) {
     regionsCountry = selectedCountry;
     void syncRegionsFor(selectedCountry);
@@ -74,9 +74,9 @@
       api("/settings"),
       api("/holidays/countries"),
     ]);
-    s = loadedSettings;
+    settingsForm = loadedSettings;
     appSettings.set(loadedSettings);
-    if (s.ui_language) setLanguage(s.ui_language);
+    if (settingsForm.ui_language) setLanguage(settingsForm.ui_language);
     countries = sortCountriesByName(allCountries);
   }
   load();
@@ -88,7 +88,7 @@
         return;
       }
     }
-    if (!s.country) {
+    if (!settingsForm.country) {
       toast($t("Please select a country."), "error");
       return;
     }
@@ -96,21 +96,21 @@
       toast($t("Please wait for regions to load."), "error");
       return;
     }
-    if (s.default_weekly_hours == null || s.default_weekly_hours === "") {
+    if (settingsForm.default_weekly_hours == null || settingsForm.default_weekly_hours === "") {
       toast($t("Please enter default weekly hours."), "error");
       return;
     }
     if (
-      s.default_annual_leave_days == null ||
-      s.default_annual_leave_days === ""
+      settingsForm.default_annual_leave_days == null ||
+      settingsForm.default_annual_leave_days === ""
     ) {
       toast($t("Please enter default annual leave days."), "error");
       return;
     }
     saving = true;
     try {
-      const saved = await api("/settings", { method: "PUT", body: s });
-      s = saved;
+      const saved = await api("/settings", { method: "PUT", body: settingsForm });
+      settingsForm = saved;
       appSettings.set(saved);
       if (saved.ui_language) setLanguage(saved.ui_language);
       if (needsName) {
@@ -121,14 +121,14 @@
             last_name: adminLastName.trim(),
           },
         });
-        currentUser.update((u) => ({
-          ...u,
+        currentUser.update((userState) => ({
+          ...userState,
           first_name: adminFirstName.trim(),
           last_name: adminLastName.trim(),
         }));
       }
       if (isFirstSetup) {
-        currentUser.update((u) => ({ ...u, must_configure_settings: false }));
+        currentUser.update((userState) => ({ ...userState, must_configure_settings: false }));
       }
       toast($t("Settings saved."), "ok");
     } catch (e) {
@@ -215,7 +215,7 @@
             class="kz-input"
             type="text"
             maxlength="200"
-            bind:value={s.organization_name}
+            bind:value={settingsForm.organization_name}
             placeholder={$t("e.g. My Company")}
           />
           <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
@@ -238,7 +238,7 @@
           <select
             id="settings-language"
             class="kz-select"
-            bind:value={s.ui_language}
+            bind:value={settingsForm.ui_language}
           >
             {#each languageOptions as [code, language]}
               <option value={code}>{language.label}</option>
@@ -252,7 +252,7 @@
           <select
             id="settings-time-format"
             class="kz-select"
-            bind:value={s.time_format}
+            bind:value={settingsForm.time_format}
           >
             <option value="24h">24h (14:30)</option>
             <option value="12h">12h (2:30 PM)</option>
@@ -278,7 +278,7 @@
             step="0.5"
             min="0"
             max="168"
-            bind:value={s.default_weekly_hours}
+            bind:value={settingsForm.default_weekly_hours}
           />
         </div>
         <div>
@@ -291,7 +291,7 @@
             type="number"
             min="0"
             max="366"
-            bind:value={s.default_annual_leave_days}
+            bind:value={settingsForm.default_annual_leave_days}
           />
         </div>
       </div>
@@ -310,7 +310,7 @@
           <input
             id="settings-carryover-expiry"
             class="kz-input"
-            bind:value={s.carryover_expiry_date}
+            bind:value={settingsForm.carryover_expiry_date}
             placeholder="03-31"
             maxlength="5"
           />
@@ -337,7 +337,7 @@
             type="number"
             min="1"
             max="28"
-            bind:value={s.submission_deadline_day}
+            bind:value={settingsForm.submission_deadline_day}
             placeholder={$t("e.g. 5")}
           />
           <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
@@ -359,14 +359,14 @@
           <select
             id="settings-country"
             class="kz-select"
-            bind:value={s.country}
+            bind:value={settingsForm.country}
             on:change={() => {
-              s = { ...s, region: "" };
+              settingsForm = { ...settingsForm, region: "" };
             }}
           >
             <option value="">{$t("- Please select -")}</option>
-            {#each countries as c}
-              <option value={c.countryCode}>{c.name}</option>
+            {#each countries as countryOption}
+              <option value={countryOption.countryCode}>{countryOption.name}</option>
             {/each}
           </select>
         </div>
@@ -375,10 +375,10 @@
           <select
               id="settings-region"
               class="kz-select"
-              bind:value={s.region}
-              disabled={!s.country || regionLoading || regionsLoadFailed || countryRegions.length === 0}
+              bind:value={settingsForm.region}
+              disabled={!settingsForm.country || regionLoading || regionsLoadFailed || countryRegions.length === 0}
             >
-              {#if !s.country}
+              {#if !settingsForm.country}
                 <option value="">{$t("- Please select -")}</option>
               {:else if regionLoading}
                 <option value="">{$t("Loading...")}</option>
@@ -389,8 +389,8 @@
               {:else}
                 <option value="">{$t("- Please select -")}</option>
               {/if}
-              {#each countryRegions as r}
-                <option value={r}>{r}</option>
+              {#each countryRegions as regionOption}
+                <option value={regionOption}>{regionOption}</option>
               {/each}
             </select>
         </div>

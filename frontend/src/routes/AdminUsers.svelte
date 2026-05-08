@@ -14,7 +14,7 @@
   }
   load();
 
-  async function resetPw(id) {
+  async function resetPw(userId) {
     if (
       !(await confirmDialog(
         $t("Reset password?"),
@@ -24,10 +24,10 @@
     )
       return;
     try {
-      const r = await api(`/users/${id}/reset-password`, { method: "POST" });
+      const resetResponse = await api(`/users/${userId}/reset-password`, { method: "POST" });
       toast(
         $t("Temporary password: {password}", {
-          password: r.temporary_password,
+          password: resetResponse.temporary_password,
         }),
         "info",
       );

@@ -62,32 +62,32 @@
 
   async function loadSettings() {
     try {
-      const s = await api("/settings/public");
-      if (!s.time_format) s.time_format = "24h";
-      settings.set(s);
-      if (s.ui_language) setLanguage(s.ui_language);
+      const publicSettings = await api("/settings/public");
+      if (!publicSettings.time_format) publicSettings.time_format = "24h";
+      settings.set(publicSettings);
+      if (publicSettings.ui_language) setLanguage(publicSettings.ui_language);
     } catch {}
   }
 
   async function loadMe() {
     debugLog("loadMe:start");
     try {
-      const me = await api("/auth/me");
+      const currentUserResponse = await api("/auth/me");
       debugLog("loadMe:success", {
-        meId: me?.id ?? null,
-        meHome: me?.home ?? null,
-        mustChangePassword: !!me?.must_change_password,
+        meId: currentUserResponse?.id ?? null,
+        meHome: currentUserResponse?.home ?? null,
+        mustChangePassword: !!currentUserResponse?.must_change_password,
       });
-      currentUser.set(me);
-      csrfToken.set(me.csrf_token || null);
-      theme.set(me.dark_mode ? "dark" : "light");
+      currentUser.set(currentUserResponse);
+      csrfToken.set(currentUserResponse.csrf_token || null);
+      theme.set(currentUserResponse.dark_mode ? "dark" : "light");
       bootNetworkError = false;
       if (!$categories.length) {
         try {
           categories.set(await api("/categories"));
           debugLog("loadMe:categories-loaded");
-        } catch (e) {
-          debugLog("loadMe:categories-failed", { message: e?.message ?? null });
+        } catch (error) {
+          debugLog("loadMe:categories-failed", { message: error?.message ?? null });
           toast(
             $t("Failed to load categories. Some features may be unavailable."),
             "error",
@@ -149,17 +149,17 @@
   async function onFocus() {
     if (!$currentUser) return;
     try {
-      const me = await api("/auth/me");
+      const validatedUser = await api("/auth/me");
       // Refresh CSRF token in case it rotated while the tab was hidden.
-      csrfToken.set(me.csrf_token || null);
+      csrfToken.set(validatedUser.csrf_token || null);
       // Sync dark mode preference in case it changed on another device.
-      theme.set(me.dark_mode ? "dark" : "light");
-    } catch (err) {
+      theme.set(validatedUser.dark_mode ? "dark" : "light");
+    } catch (error) {
       // api("/auth/me") is excluded from the global 401 interceptor to prevent
       // redirect loops during normal boot. So we must handle session expiry
       // explicitly here: if the re-validation call gets a 401/403, treat it
       // as an expired session and trigger the full expiry flow.
-      if (!err.isNetworkError) {
+      if (!error.isNetworkError) {
         handleSessionExpired();
       }
       // Network errors during tab-focus check are intentionally ignored.
@@ -341,11 +341,11 @@
   }
 
   // Intercept data-link clicks
-  function onClick(e) {
-    const a = e.target.closest("a[data-link]");
-    if (a) {
-      e.preventDefault();
-      go(a.getAttribute("href"));
+  function onClick(event) {
+    const linkElement = event.target.closest("a[data-link]");
+    if (linkElement) {
+      event.preventDefault();
+      go(linkElement.getAttribute("href"));
     }
   }
 </script>

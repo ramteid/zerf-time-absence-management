@@ -7,7 +7,7 @@ const API = "/api/v1";
 
 export const csrfToken = writable(null);
 let _csrf = null;
-csrfToken.subscribe((v) => (_csrf = v));
+csrfToken.subscribe((csrfValue) => (_csrf = csrfValue));
 
 // Session-expiry handler
 // App.svelte registers handleSessionExpired here.  We use a Promise-based
@@ -59,9 +59,9 @@ export async function api(path, opts = {}) {
     headers["X-CSRF-Token"] = _csrf;
   }
 
-  let r;
+  let response;
   try {
-    r = await fetch(API + path, {
+    response = await fetch(API + path, {
       headers,
       cache: ["GET", "HEAD", "OPTIONS"].includes(method)
         ? "no-store"
@@ -74,26 +74,26 @@ export async function api(path, opts = {}) {
     // Distinguish a real network failure (offline, DNS, etc.) from an auth
     // failure. Re-throw as a typed error so callers can handle it differently
     // from business-logic errors. Does NOT trigger the session-expiry handler.
-    const e = apiError("Network error. Please check your connection.");
-    e.isNetworkError = true;
-    throw e;
+    const networkError = apiError("Network error. Please check your connection.");
+    networkError.isNetworkError = true;
+    throw networkError;
   }
 
-  if (r.status === 204) return null;
+  if (response.status === 204) return null;
 
   // Session is gone or CSRF token is stale — force the user back to login.
   // Skip this for the auth endpoints themselves to avoid redirect loops.
-  if (r.status === 401 && !path.startsWith("/auth/")) {
+  if (response.status === 401 && !path.startsWith("/auth/")) {
     handleUnauthorized();
     throw apiError("Session expired. Please sign in again.");
   }
 
-  const ct = r.headers.get("content-type") || "";
-  if (!ct.includes("json")) {
-    if (!r.ok) throw apiError((await r.text()) || "Error");
-    return r;
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("json")) {
+    if (!response.ok) throw apiError((await response.text()) || "Error");
+    return response;
   }
-  const d = await r.json();
-  if (!r.ok) throw apiError(d.error || "Error");
-  return d;
+  const payload = await response.json();
+  if (!response.ok) throw apiError(payload.error || "Error");
+  return payload;
 }

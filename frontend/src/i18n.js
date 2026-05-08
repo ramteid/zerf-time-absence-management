@@ -160,7 +160,7 @@ const TRANSLATIONS = {
     "User activated.": "User activated.",
     Activate: "Activate",
     Active: "Active",
-    // Reports – new section labels and team report columns
+    // Reports - new section labels and team report columns
     "Employee report": "Employee report",
     "Export timesheet": "Export timesheet",
     "Current flextime balance": "Current flextime balance",
@@ -169,7 +169,8 @@ const TRANSLATIONS = {
     "Vacation taken": "Vacation taken",
     "Vacation planned": "Vacation planned",
     "All weeks submitted": "All weeks submitted",
-    "Note: current month – data up to yesterday": "Note: current month – data up to yesterday",
+    "Note: current month - data up to yesterday":
+      "Note: current month - data up to yesterday",
   },
   de: {
     "Loading...": "Wird geladen...",
@@ -918,7 +919,7 @@ const TRANSLATIONS = {
       "Inaktive Nutzer können sich nicht anmelden.",
     "User activated.": "Benutzer aktiviert.",
     Activate: "Aktivieren",
-    // Reports – neue Bezeichnungen und Teambericht-Spalten
+    // Reports - labels and team report columns
     "Employee report": "Mitarbeiterbericht",
     "Export timesheet": "Export Stundennachweis",
     "Current flextime balance": "Aktueller Gleitzeitkontostand",
@@ -927,7 +928,8 @@ const TRANSLATIONS = {
     "Vacation taken": "Urlaub genommen",
     "Vacation planned": "Urlaub geplant",
     "All weeks submitted": "Alle Wochen eingereicht",
-    "Note: current month – data up to yesterday": "Hinweis: Laufender Monat – Daten bis gestern",
+    "Note: current month - data up to yesterday":
+      "Hinweis: Laufender Monat - Daten bis gestern",
   },
 };
 
