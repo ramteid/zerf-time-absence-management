@@ -409,6 +409,7 @@ const TRANSLATIONS = {
     Rejected: "Abgelehnt",
     Partial: "Teilweise",
     Cancelled: "Storniert",
+    "Cancellation pending": "Stornierung beantragt",
     Open: "Offen",
     Monday: "Montag",
     Tuesday: "Dienstag",
@@ -440,6 +441,17 @@ const TRANSLATIONS = {
     "No absences yet.": "Noch keine Abwesenheiten.",
     "Absence cancelled.": "Abwesenheit storniert.",
     "Cancel this absence request?": "Diese Abwesenheitsanfrage stornieren?",
+    "Request cancellation?": "Stornierung beantragen?",
+    "Request cancellation of this approved absence? Your team lead must approve the cancellation.":
+      "Stornierung dieser genehmigten Abwesenheit beantragen? Die Stornierung muss vom Teamleiter genehmigt werden.",
+    "Yes, request cancellation": "Ja, Stornierung beantragen",
+    "Cancellation requested. Your team lead will review it.":
+      "Stornierung beantragt. Dein Teamleiter wird sie prüfen.",
+    "Request cancellation": "Stornierung beantragen",
+    "Reject cancellation?": "Stornierung ablehnen?",
+    "Reject this cancellation request? The absence will remain approved.":
+      "Diese Stornierungsanfrage ablehnen? Die Abwesenheit bleibt genehmigt.",
+    Cancellation: "Stornierung",
     "Approve timesheets & manage requests":
       "Stundenzettel genehmigen & Anträge verwalten",
     "Your overview": "Deine Übersicht",
@@ -577,6 +589,7 @@ const TRANSLATIONS = {
     "Reopen approved.": "Wiederfreigabe genehmigt.",
     "Reopen rejected.": "Wiederfreigabe abgelehnt.",
     "Week reopen requests": "Wochen-Wiederfreigaben",
+    Reopen: "Wiederfreigabe",
     "wants to edit week of {date}":
       "möchte die Woche ab {date} wieder bearbeiten",
     TeamSettings: "Team-Einstellungen",
@@ -781,9 +794,11 @@ const TRANSLATIONS = {
     "Only requested absences can be rejected.":
       "Nur beantragte Abwesenheiten können abgelehnt werden.",
     "Only requested absences and auto-approved sick absences can be cancelled.":
-      "Nur beantragte Abwesenheiten und automatisch genehmigte Krankmeldungen können storniert werden.",
+      "Nur beantragte oder genehmigte Abwesenheiten können storniert werden.",
     "Only requested absences can be cancelled.":
-      "Nur beantragte Abwesenheiten können storniert werden.",
+      "Nur beantragte oder genehmigte Abwesenheiten können storniert werden.",
+    "Only requested or approved absences can be cancelled.":
+      "Nur beantragte oder genehmigte Abwesenheiten können storniert werden.",
     "Only approved absences can be revoked.":
       "Nur genehmigte Abwesenheiten können widerrufen werden.",
     "Approved absences cannot change type.":
@@ -1130,6 +1145,7 @@ export function statusLabel(status) {
     partial: "Partial",
     requested: "Requested",
     cancelled: "Cancelled",
+    cancellation_pending: "Cancellation pending",
     open: "Open",
   };
   return translate(get(language), labels[status] || status);

@@ -289,7 +289,7 @@
       >
         <Icon name="ChevLeft" size={16} />
       </button>
-      <span class="nav-label tab-num" style="min-width:130px">
+      <span class="nav-label tab-num" style="min-width:70px">
         {fmtMonthYear(new Date(year, month - 1, 1))}
       </span>
       <button

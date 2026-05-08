@@ -262,6 +262,10 @@ body {
   background: var(--bg-muted);
   color: var(--text-tertiary);
 }
+.kz-chip-cancellation_pending {
+  background: var(--warning-soft);
+  color: var(--warning-text);
+}
 .kz-chip-open {
   background: var(--info-soft);
   color: var(--info-text);
@@ -487,7 +491,7 @@ body {
   gap: 4px;
 }
 .kz-nav-slider .kz-btn {
-  width: 34px;
+  /* width: 34px; */
   height: 34px;
   padding: 0;
   justify-content: center;
