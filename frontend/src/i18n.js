@@ -404,6 +404,9 @@ const TRANSLATIONS = {
     Sunday: "Sonntag",
     // Redesign keys
     "Time Entry": "Zeiterfassung",
+    "This Week": "Diese Woche",
+    "My Balance": "Meine Bilanz",
+    "My Team": "Mein Team",
     contract: "Vertrag",
     Logged: "Erfasst",
     "of {target} target": "von {target} Soll",
