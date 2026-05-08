@@ -4,10 +4,10 @@
 :root {
   color-scheme: light;
 
-  --bg-canvas: #f6f5f2;
-  --bg-surface: #ffffff;
-  --bg-muted: #f1efeb;
-  --bg-subtle: #faf9f6;
+  --bg-canvas: #f3f2ee;
+  --bg-surface: #faf9f7;
+  --bg-muted: #edecea;
+  --bg-subtle: #f7f6f3;
   --bg-elevated: rgba(0, 0, 0, 0.04);
 
   --border: #e8e5df;
