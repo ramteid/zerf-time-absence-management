@@ -195,7 +195,7 @@ async fn partial_sick_day_counts_worked_time_and_removes_target() {
 }
 
 #[tokio::test]
-async fn reports_exclude_current_day_from_hours_and_categories() {
+async fn reports_include_current_day_in_hours_and_categories() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
 
@@ -213,7 +213,7 @@ async fn reports_exclude_current_day_from_hours_and_categories() {
                 "start_time": "08:00",
                 "end_time": "12:00",
                 "category_id": cat_id,
-                "comment": "today should not report"
+                "comment": "today should report"
             }),
         )
         .await;
@@ -238,15 +238,17 @@ async fn reports_exclude_current_day_from_hours_and_categories() {
         .get(&format!("/api/v1/reports/month?month={month}"))
         .await;
     assert_eq!(st, StatusCode::OK, "month report");
-    assert_eq!(body["actual_min"], 0);
-    assert!(body["category_totals"].as_object().unwrap().is_empty());
+    // Month report is now month-to-date and therefore includes today's approved entries.
+    assert_eq!(body["actual_min"], 240);
+    assert!(!body["category_totals"].as_object().unwrap().is_empty());
     let today_row = body["days"]
         .as_array()
         .unwrap()
         .iter()
         .find(|item| item["date"] == today)
         .unwrap();
-    assert!(today_row["entries"].as_array().unwrap().is_empty());
+    assert_eq!(today_row["actual_min"], 240);
+    assert_eq!(today_row["entries"].as_array().unwrap().len(), 1);
 
     let (st, body) = emp
         .get(&format!(
@@ -255,7 +257,9 @@ async fn reports_exclude_current_day_from_hours_and_categories() {
         ))
         .await;
     assert_eq!(st, StatusCode::OK, "category report for today");
-    assert!(body.as_array().unwrap().is_empty());
+    let rows = body.as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["minutes"], 240);
 
     app.cleanup().await;
 }
