@@ -58,6 +58,41 @@ scripts/      Backup utility
 | `i18n.rs` | Backend translations |
 | `error.rs` | Error types |
 
+### Architecture: Repository Pattern
+
+The backend uses a **repository façade** (`repository::Db`) as the single entry point for all database access. Service modules (handlers) should never import `sqlx` directly for new code.
+
+**Key types:**
+
+| Type | Location | Role |
+|------|----------|------|
+| `AppState` | `lib.rs` | Holds `pool`, `db` (repo façade), `cfg`, `notifications` |
+| `repository::Db` | `repository/mod.rs` | Façade owning all sub-repositories |
+| `*Db` (e.g. `UserDb`, `TimeEntryDb`) | `repository/*.rs` | Domain-specific query collections |
+
+**Sub-repositories** (fields on `repository::Db`):
+
+`sessions`, `users`, `time_entries`, `absences`, `change_requests`, `reopen_requests`, `categories`, `holidays`, `notifications`, `audit`, `settings`, `reports`
+
+**Access patterns in handlers:**
+
+```rust
+// Simple reads via the façade (preferred)
+let entries = app_state.db.time_entries.list_for_user(user_id, from, to).await?;
+
+// Transaction-bound writes (still use pool directly)
+let mut tx = app_state.pool.begin().await?;
+SubDb::method_tx(&mut *tx, ...).await?;
+tx.commit().await?;
+
+// Standalone context (background tasks, cross-module helpers)
+let user = UserDb::new(pool.clone()).find_by_id(id).await?;
+```
+
+**Type conversion:** Repository structs (`repository::User`, `repository::TimeEntry`, etc.) are converted to handler-level types via `repo_*_to_service()` helper functions (e.g. `crate::users::repo_user_to_auth_user()`).
+
+**Migration status:** Read paths are fully migrated through the repository. Complex transactional write handlers (absences create/approve/reject, reopen approve/reject, change_requests approve/reject) still use `sqlx` directly via `app_state.pool` for multi-statement transactions with `FOR UPDATE` locks and cross-table validation.
+
 ### Background tasks (spawned in main.rs)
 
 - Auth cleanup: purge expired sessions and login attempts (hourly)

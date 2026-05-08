@@ -29,7 +29,6 @@ use subtle::ConstantTimeEq;
 // the plain name there.
 const SESSION_COOKIE_SECURE: &str = "__Host-zerf_session";
 const SESSION_COOKIE_PLAIN: &str = "zerf_session";
-const USER_GRAPH_LOCK_KEY: i64 = 0x7A_45_52_46_5F_53_54_55_i64;
 
 fn cookie_name(secure: bool) -> &'static str {
     if secure {
@@ -337,6 +336,17 @@ pub async fn me(
         false
     };
     let approver_ids = app_state.db.users.get_approver_ids(user.id).await.unwrap_or_default();
+    let approvers: Vec<serde_json::Value> = app_state
+        .db
+        .users
+        .get_approver_details(user.id)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(id, first_name, last_name)| {
+            serde_json::json!({"id": id, "first_name": first_name, "last_name": last_name})
+        })
+        .collect();
     Ok(Json(serde_json::json!({
         "id": user.id, "email": user.email,
         "first_name": user.first_name, "last_name": user.last_name,
@@ -346,6 +356,7 @@ pub async fn me(
         "active": user.active, "must_change_password": user.must_change_password,
         "must_configure_settings": must_configure_settings,
         "approver_ids": approver_ids,
+        "approvers": approvers,
         "allow_reopen_without_approval": user.allow_reopen_without_approval,
         "dark_mode": user.dark_mode,
         "csrf_token": csrf_token.unwrap_or_default(),
@@ -826,9 +837,18 @@ pub async fn reset_password_with_token(
     State(app_state): State<AppState>,
     Json(body): Json<ResetPasswordTokenReq>,
 ) -> AppResult<Json<serde_json::Value>> {
+    let token_hash = hash_token(body.token.trim());
+
+    // Check for an expired token before password validation so callers receive
+    // a meaningful error even when the supplied password is too short.
+    app_state
+        .db
+        .sessions
+        .check_and_consume_expired_token(&token_hash)
+        .await?;
+
     validate_password_strength(&body.password)?;
     let new_hash = hash_password(&body.password)?;
-    let token_hash = hash_token(body.token.trim());
 
     let password = body.password;
     let reuse_check = move |current_hash: &str| -> bool {

@@ -550,6 +550,23 @@ impl UserDb {
         .await?)
     }
 
+    /// Fetch approver details (id, first_name, last_name) for a user.
+    pub async fn get_approver_details(
+        &self,
+        user_id: i64,
+    ) -> AppResult<Vec<(i64, String, String)>> {
+        Ok(sqlx::query_as::<_, (i64, String, String)>(
+            "SELECT u.id, u.first_name, u.last_name FROM user_approvers ua \
+             JOIN users u ON u.id = ua.approver_id \
+             WHERE ua.user_id = $1 AND u.active = TRUE \
+             AND (u.role = 'team_lead' OR u.role = 'admin') \
+             ORDER BY u.last_name, u.first_name",
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
     pub async fn deactivate_tx(tx: &mut sqlx::PgConnection, id: i64) -> AppResult<()> {
         sqlx::query("UPDATE users SET active=FALSE WHERE id=$1")
             .bind(id)
