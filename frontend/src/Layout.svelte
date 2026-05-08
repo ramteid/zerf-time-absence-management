@@ -30,6 +30,15 @@
   let pullDistance = 0;
   let refreshing = false;
   const PULL_THRESHOLD = 80;
+  let pullEl;
+
+  $: if (pullEl) {
+    if (pullDistance > 0) {
+      try { pullEl.showPopover?.(); } catch {}
+    } else {
+      try { pullEl.hidePopover?.(); } catch {}
+    }
+  }
 
   function getPullScrollContainer(target) {
     if (target instanceof Element) {
@@ -232,9 +241,15 @@
 />
 
 <div class="app-layout">
-  <!-- Pull-to-refresh indicator -->
-  {#if pullDistance > 0}
-    <div class="pull-to-refresh" style="height:{pullDistance}px">
+  <!-- Pull-to-refresh indicator: uses Popover API to appear above native dialogs (top layer) -->
+  <div
+    class="pull-to-refresh"
+    class:ptr-open={pullDistance > 0}
+    style="height:{pullDistance}px"
+    popover="manual"
+    bind:this={pullEl}
+  >
+    {#if pullDistance > 0}
       <div class="pull-spinner" class:active={pullDistance >= PULL_THRESHOLD}>
         {#if refreshing}
           <Icon name="Clock" size={20} />
@@ -246,8 +261,8 @@
           </span>
         {/if}
       </div>
-    </div>
-  {/if}
+    {/if}
+  </div>
   <div class="sidebar">
     <div class="sidebar-logo">
       <div class="sidebar-logo-icon">
