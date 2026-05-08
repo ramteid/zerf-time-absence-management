@@ -113,7 +113,11 @@ fn has_actual_change(
 ) -> bool {
     let current_comment = current_comment.filter(|v| !v.is_empty());
     let comment_changed = new_comment.is_some_and(|comment| {
-        (if comment.is_empty() { None } else { Some(comment) }) != current_comment
+        (if comment.is_empty() {
+            None
+        } else {
+            Some(comment)
+        }) != current_comment
     });
 
     new_date.is_some_and(|date| date != current_date)
@@ -238,17 +242,17 @@ pub async fn create(
     // The two-argument form pg_advisory_xact_lock(int, int) uses a separate
     // namespace from the single-argument form used by absences/time_entries
     // (which lock on user_id), avoiding spurious cross-subsystem contention.
-    let mut tx = app_state.pool.begin().await?;
+    let mut transaction = app_state.pool.begin().await?;
     sqlx::query("SELECT pg_advisory_xact_lock(2, $1::int)")
         .bind(body.time_entry_id)
-        .execute(&mut *tx)
+        .execute(&mut *transaction)
         .await?;
     // Guard against duplicate open change requests for the same entry.
     let existing_open_cr_id: Option<i64> = sqlx::query_scalar(
         "SELECT id FROM change_requests WHERE time_entry_id=$1 AND status='open'",
     )
     .bind(body.time_entry_id)
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut *transaction)
     .await?;
     if let Some(existing_id) = existing_open_cr_id {
         return Err(AppError::Conflict(format!(
@@ -257,8 +261,8 @@ pub async fn create(
     }
     let new_change_request_id: i64 = sqlx::query_scalar("INSERT INTO change_requests(time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id")
         .bind(body.time_entry_id).bind(requester.id).bind(body.new_date).bind(&body.new_start_time).bind(&body.new_end_time).bind(body.new_category_id).bind(&body.new_comment).bind(&body.reason)
-        .fetch_one(&mut *tx).await?;
-    tx.commit().await?;
+        .fetch_one(&mut *transaction).await?;
+    transaction.commit().await?;
     let created_change_request: ChangeRequest = sqlx::query_as("SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE id=$1")
         .bind(new_change_request_id)
         .fetch_one(&app_state.pool)
@@ -309,12 +313,12 @@ pub async fn approve(
     if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let mut tx = app_state.pool.begin().await?;
+    let mut transaction = app_state.pool.begin().await?;
     // Fetch and lock the change request — fail fast if already resolved.
     let change_request: ChangeRequest =
         sqlx::query_as("SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE id=$1 AND status='open' FOR UPDATE")
             .bind(change_request_id)
-            .fetch_optional(&mut *tx)
+            .fetch_optional(&mut *transaction)
             .await?
             .ok_or_else(|| AppError::Conflict("Change request was already resolved by someone else.".into()))?;
     // No user may review their own request.
@@ -328,7 +332,7 @@ pub async fn approve(
         )
         .bind(change_request.user_id)
         .bind(requester.id)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut *transaction)
         .await?;
         if is_direct_report.is_none() {
             return Err(AppError::Forbidden);
@@ -337,14 +341,14 @@ pub async fn approve(
     // Acquire a per-user advisory lock to serialize updates to this user's entries.
     sqlx::query("SELECT pg_advisory_xact_lock($1)")
         .bind(change_request.user_id)
-        .execute(&mut *tx)
+        .execute(&mut *transaction)
         .await?;
     // Fetch the existing entry and build effective post-change values so we can
     // run the same overlap / 14-hour / category validation as direct edits do.
     let existing_entry: crate::time_entries::TimeEntry =
         sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1 FOR UPDATE")
             .bind(change_request.time_entry_id)
-            .fetch_one(&mut *tx)
+            .fetch_one(&mut *transaction)
             .await?;
     if existing_entry.user_id != change_request.user_id {
         return Err(AppError::Conflict(
@@ -407,7 +411,7 @@ pub async fn approve(
             .or(existing_entry.comment.clone()),
     };
     crate::time_entries::validate(
-        &mut tx,
+        &mut transaction,
         existing_entry.user_id,
         &effective_entry,
         Some(change_request.time_entry_id),
@@ -419,7 +423,7 @@ pub async fn approve(
     )
     .bind(requester.id)
     .bind(change_request_id)
-    .execute(&mut *tx)
+    .execute(&mut *transaction)
     .await?
     .rows_affected();
     if rows_claimed == 0 {
@@ -429,14 +433,14 @@ pub async fn approve(
     }
     let rows_entry_updated = sqlx::query("UPDATE time_entries SET entry_date=COALESCE($1,entry_date), start_time=COALESCE($2,start_time), end_time=COALESCE($3,end_time), category_id=COALESCE($4,category_id), comment=CASE WHEN $5 IS NOT NULL THEN NULLIF($5,'') ELSE comment END, updated_at=CURRENT_TIMESTAMP WHERE id=$6 AND status=$7")
         .bind(change_request.new_date).bind(&change_request.new_start_time).bind(&change_request.new_end_time).bind(change_request.new_category_id).bind(&change_request.new_comment).bind(change_request.time_entry_id).bind(&existing_entry.status)
-        .execute(&mut *tx).await?
+        .execute(&mut *transaction).await?
         .rows_affected();
     if rows_entry_updated == 0 {
         return Err(AppError::Conflict(
             "Change request could no longer be applied because the entry changed.".into(),
         ));
     }
-    tx.commit().await?;
+    transaction.commit().await?;
     audit::log(
         &app_state.pool,
         requester.id,
@@ -488,11 +492,11 @@ pub async fn reject(
     if body.reason.len() > 2000 {
         return Err(AppError::BadRequest("Reason too long.".into()));
     }
-    let mut tx = app_state.pool.begin().await?;
+    let mut transaction = app_state.pool.begin().await?;
     // Lock the change request row to prevent concurrent rejections.
     let change_request: ChangeRequest = sqlx::query_as("SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE id=$1 AND status='open'")
         .bind(change_request_id)
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut *transaction)
         .await?;
     // No user may reject their own request.
     if change_request.user_id == requester.id {
@@ -505,7 +509,7 @@ pub async fn reject(
         )
         .bind(change_request.user_id)
         .bind(requester.id)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut *transaction)
         .await?;
         if is_direct_report.is_none() {
             return Err(AppError::Forbidden);
@@ -518,7 +522,7 @@ pub async fn reject(
     .bind(requester.id)
     .bind(&body.reason)
     .bind(change_request_id)
-    .execute(&mut *tx)
+    .execute(&mut *transaction)
     .await?
     .rows_affected();
     if rows_updated == 0 {
@@ -526,7 +530,7 @@ pub async fn reject(
             "Change request was already resolved by someone else.".into(),
         ));
     }
-    tx.commit().await?;
+    transaction.commit().await?;
     audit::log(
         &app_state.pool,
         requester.id,

@@ -72,10 +72,10 @@ if (typeof window !== "undefined") {
 export const toasts = writable([]);
 let _id = 0;
 export function toast(message, type = "info") {
-  const id = ++_id;
-  toasts.update((arr) => [...arr, { id, message, type }]);
+  const toastId = ++_id;
+  toasts.update((arr) => [...arr, { id: toastId, message, type }]);
   setTimeout(
-    () => toasts.update((arr) => arr.filter((t) => t.id !== id)),
+    () => toasts.update((arr) => arr.filter((t) => t.id !== toastId)),
     3500,
   );
 }

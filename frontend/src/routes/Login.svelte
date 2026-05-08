@@ -56,22 +56,22 @@
     loginError = "";
     submitting = true;
     try {
-      const r = await api("/auth/login", {
+      const loginResponse = await api("/auth/login", {
         method: "POST",
         body: { email, password },
       });
-      csrfToken.set(r.csrf_token || null);
-      const me = await api("/auth/me");
-      const dashboardAvailable = (me?.nav || []).some(
+      csrfToken.set(loginResponse.csrf_token || null);
+      const currentUserResponse = await api("/auth/me");
+      const dashboardAvailable = (currentUserResponse?.nav || []).some(
         (item) => item?.key === "Dashboard" || item?.href === "/dashboard",
       );
-      const dest = me.must_change_password
+      const dest = currentUserResponse.must_change_password
         ? "/account"
-        : me.must_configure_settings
+        : currentUserResponse.must_configure_settings
           ? "/admin/settings"
           : dashboardAvailable
             ? "/dashboard"
-            : me.home || "/time";
+            : currentUserResponse.home || "/time";
       await storePasswordCredential(form);
       window.location.assign(dest);
     } catch (err) {

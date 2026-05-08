@@ -230,9 +230,9 @@ pub async fn refresh_holidays(
     region: &str,
 ) -> AppResult<()> {
     let prepared = prepare_holiday_refresh(country, region).await?;
-    let mut tx = pool.begin().await?;
-    replace_auto_holidays_exec(&mut tx, &prepared).await?;
-    tx.commit().await?;
+    let mut transaction = pool.begin().await?;
+    replace_auto_holidays_exec(&mut transaction, &prepared).await?;
+    transaction.commit().await?;
 
     Ok(())
 }

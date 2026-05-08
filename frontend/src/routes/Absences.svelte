@@ -123,8 +123,8 @@
     detailAbsence = null;
   }
 
-  async function cancel(id) {
-    const ok = await confirmDialog(
+  async function cancel(absenceId) {
+    const confirmed = await confirmDialog(
       $t("Cancel?"),
       $t("Cancel this absence request?"),
       {
@@ -132,9 +132,9 @@
         confirm: $t("Yes, cancel absence"),
       },
     );
-    if (!ok) return;
+    if (!confirmed) return;
     try {
-      await api("/absences/" + id, { method: "DELETE" });
+      await api("/absences/" + absenceId, { method: "DELETE" });
       toast($t("Absence cancelled."), "ok");
       load();
     } catch (e) {
@@ -378,9 +378,9 @@
         <button
           class="kz-btn kz-btn-danger"
           on:click={() => {
-            const id = detailAbsence.id;
+            const absenceId = detailAbsence.id;
             closeDetail();
-            cancel(id);
+            cancel(absenceId);
           }}
         >
           {$t("Cancel absence")}
@@ -390,9 +390,9 @@
         <button
           class="kz-btn kz-btn-primary"
           on:click={() => {
-            const a = detailAbsence;
+            const selectedAbsence = detailAbsence;
             closeDetail();
-            showDialog = a;
+            showDialog = selectedAbsence;
           }}
         >
           <Icon name="Edit" size={13} />{$t("Edit")}

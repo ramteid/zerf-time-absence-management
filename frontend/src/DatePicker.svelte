@@ -18,8 +18,8 @@
   let cls = "kz-input";
   export { cls as class };
 
-  let el;
-  let fp;
+  let inputElement;
+  let datePickerInstance;
   let lastLang;
   let lastMode = mode;
   let lastContainer = container;
@@ -73,12 +73,12 @@
   }
 
   function openPicker() {
-    if (!fp) return;
-    if (fp.isOpen) {
-      fp.close();
+    if (!datePickerInstance) return;
+    if (datePickerInstance.isOpen) {
+      datePickerInstance.close();
       return;
     }
-    fp.open();
+    datePickerInstance.open();
   }
 
   function handleInputClick() {
@@ -86,7 +86,7 @@
   }
 
   function removeAltInputListeners() {
-    const input = fp?.altInput;
+    const input = datePickerInstance?.altInput;
     if (!input) return;
     input.removeEventListener("click", handleInputClick);
   }
@@ -161,9 +161,9 @@
   }
 
   function build(lang) {
-    if (fp) {
+    if (datePickerInstance) {
       removeAltInputListeners();
-      fp.destroy();
+      datePickerInstance.destroy();
     }
     const isMonth = mode === "month";
     lastLang = lang;
@@ -202,30 +202,30 @@
       opts.appendTo = container;
       opts.position = positionInDialog;
     }
-    fp = flatpickr(el, opts);
-    if (value) fp.setDate(value, false);
-    fp.calendarContainer?.classList.add("kz-date-picker-calendar");
+    datePickerInstance = flatpickr(inputElement, opts);
+    if (value) datePickerInstance.setDate(value, false);
+    datePickerInstance.calendarContainer?.classList.add("kz-date-picker-calendar");
     if (container)
-      fp.calendarContainer?.classList.add("kz-date-picker-overlay");
-    if (id && fp.altInput) fp.altInput.id = id;
-    if (fp.altInput) {
-      if (style) fp.altInput.setAttribute("style", style);
+      datePickerInstance.calendarContainer?.classList.add("kz-date-picker-overlay");
+    if (id && datePickerInstance.altInput) datePickerInstance.altInput.id = id;
+    if (datePickerInstance.altInput) {
+      if (style) datePickerInstance.altInput.setAttribute("style", style);
       // Keep native mobile keyboard closed while still allowing date selection.
-      fp.altInput.readOnly = true;
-      fp.altInput.setAttribute("inputmode", "none");
-      fp.altInput.addEventListener("click", handleInputClick);
+      datePickerInstance.altInput.readOnly = true;
+      datePickerInstance.altInput.setAttribute("inputmode", "none");
+      datePickerInstance.altInput.addEventListener("click", handleInputClick);
     }
   }
 
   onMount(() => build($language));
   onDestroy(() => {
     removeAltInputListeners();
-    if (fp) fp.destroy();
+    if (datePickerInstance) datePickerInstance.destroy();
   });
 
   // Rebuild on language/mode change
   $: if (
-    fp &&
+    datePickerInstance &&
     ($language !== lastLang || mode !== lastMode || container !== lastContainer)
   ) {
     lastLang = $language;
@@ -234,13 +234,13 @@
     build($language);
   }
   // Reactive value/min/max sync
-  $: if (fp && fp.input.value !== value) fp.setDate(value || null, false);
-  $: if (fp) fp.set("minDate", min || null);
-  $: if (fp) fp.set("maxDate", max || null);
+  $: if (datePickerInstance && datePickerInstance.input.value !== value) datePickerInstance.setDate(value || null, false);
+  $: if (datePickerInstance) datePickerInstance.set("minDate", min || null);
+  $: if (datePickerInstance) datePickerInstance.set("maxDate", max || null);
 </script>
 
 <span class="date-picker-wrap">
-  <input bind:this={el} type="text" />
+  <input bind:this={inputElement} type="text" />
   <button
     type="button"
     class="date-picker-button"

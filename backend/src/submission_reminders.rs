@@ -29,9 +29,12 @@ pub fn duration_until_next_deadline(
     }
 
     // Already past or ambiguous – schedule next month
-    let next = advance_one_month(today, day);
-    let t2 = resolve_local_datetime(next, 7).expect("next month datetime must resolve");
-    (t2 - now).to_std().unwrap_or(Duration::from_secs(60))
+    let next_deadline_date = advance_one_month(today, day);
+    let next_deadline =
+        resolve_local_datetime(next_deadline_date, 7).expect("next month datetime must resolve");
+    (next_deadline - now)
+        .to_std()
+        .unwrap_or(Duration::from_secs(60))
 }
 
 /// Resolve a naive date + hour to a local datetime, handling DST gaps/ambiguities.
@@ -48,11 +51,11 @@ fn resolve_local_datetime(date: NaiveDate, hour: u32) -> Option<chrono::DateTime
     }
 }
 
-fn advance_one_month(d: NaiveDate, desired_day: u32) -> NaiveDate {
-    let (year, month) = if d.month() == 12 {
-        (d.year() + 1, 1)
+fn advance_one_month(date: NaiveDate, desired_day: u32) -> NaiveDate {
+    let (year, month) = if date.month() == 12 {
+        (date.year() + 1, 1)
     } else {
-        (d.year(), d.month() + 1)
+        (date.year(), date.month() + 1)
     };
     let actual_day = desired_day.min(last_day_of_month(year, month));
     NaiveDate::from_ymd_opt(year, month, actual_day).unwrap()
@@ -112,22 +115,22 @@ async fn find_unsubmitted_months(
     let submitted: std::collections::HashSet<(i32, u32)> = rows
         .into_iter()
         .filter(|(_, _, total, drafts)| *total > 0 && *drafts == 0)
-        .map(|(y, m, _, _)| (y, m as u32))
+        .map(|(year, month, _, _)| (year, month as u32))
         .collect();
 
     // Iterate all months from start to last completed month
     let mut missing = Vec::new();
-    let mut y = user_start.year();
-    let mut m = user_start.month();
-    while y < last_year || (y == last_year && m <= last_month) {
-        if !submitted.contains(&(y, m)) {
-            missing.push((y, m));
+    let mut year = user_start.year();
+    let mut month = user_start.month();
+    while year < last_year || (year == last_year && month <= last_month) {
+        if !submitted.contains(&(year, month)) {
+            missing.push((year, month));
         }
-        if m == 12 {
-            m = 1;
-            y += 1;
+        if month == 12 {
+            month = 1;
+            year += 1;
         } else {
-            m += 1;
+            month += 1;
         }
     }
 

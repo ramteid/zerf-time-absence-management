@@ -69,7 +69,7 @@
     const requestId = ++loadRequestCounter;
     const weekStart = setWeek(dateLike);
     const from = isoDate(weekStart);
-    const to = isoDate(addDays(weekStart, 6));
+    const weekEndIsoDate = isoDate(addDays(weekStart, 6));
     // A week can span two calendar years, so we may need holidays for both years.
     const yearsInWeek = Array.from(
       new Set([weekStart.getFullYear(), addDays(weekStart, 6).getFullYear()]),
@@ -84,11 +84,11 @@
         absenceRows,
         holidayRowsByYear,
       ] = await Promise.all([
-        api(`/time-entries?from=${from}&to=${to}`),
+        api(`/time-entries?from=${from}&to=${weekEndIsoDate}`),
         api("/reopen-requests").catch(() => []),
         api("/categories").catch(() => $categories),
         api(`/absences?year=${year}`).catch(() => []),
-        Promise.all(yearsInWeek.map((y) => api(`/holidays?year=${y}`).catch(() => []))),
+        Promise.all(yearsInWeek.map((yearValue) => api(`/holidays?year=${yearValue}`).catch(() => []))),
       ]);
       // Discard results from a superseded load – a newer request is already in flight.
       if (requestId !== loadRequestCounter) return;
@@ -124,12 +124,12 @@
 
   async function submitWeek(ids) {
     if (!ids?.length) return;
-    const ok = await confirmDialog(
+    const confirmed = await confirmDialog(
       "Submit this week?",
       "All draft entries of this week will be submitted for approval.",
       { confirm: "Submit Week" },
     );
-    if (!ok) return;
+    if (!confirmed) return;
     try {
       await api("/time-entries/submit", { method: "POST", body: { ids } });
       toast($t("Week submitted."), "ok");
@@ -141,14 +141,14 @@
 
   async function requestReopen() {
     if (!weekFrom) return;
-    const ok = await confirmDialog(
+    const confirmed = await confirmDialog(
       $t("Reopen this week?"),
       $t(
         "Your team lead will be notified and must approve before the week becomes editable again.",
       ),
       { confirm: $t("Request edit") },
     );
-    if (!ok) return;
+    if (!confirmed) return;
     try {
       const response = await api("/reopen-requests", {
         method: "POST",

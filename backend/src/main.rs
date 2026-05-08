@@ -13,8 +13,8 @@ async fn main() -> Result<()> {
         )
         .init();
 
-    let cfg = config::Config::from_env();
-    let pool = db::init(&cfg).await?;
+    let config = config::Config::from_env();
+    let pool = db::init(&config).await?;
     categories::ensure_initial(&pool).await?;
     let year = chrono::Local::now().year();
     holidays::ensure_holidays(&pool, year).await?;
@@ -34,7 +34,7 @@ async fn main() -> Result<()> {
 
     let state = AppState {
         pool: pool.clone(),
-        cfg: Arc::new(cfg.clone()),
+        cfg: Arc::new(config.clone()),
         notifications: zerf::notifications::broadcaster(),
     };
 
@@ -82,13 +82,13 @@ async fn main() -> Result<()> {
 
     let app = build_app(state);
 
-    let addr: SocketAddr = cfg.bind.parse().expect("invalid ZERF_BIND");
+    let addr: SocketAddr = config.bind.parse().expect("invalid ZERF_BIND");
     tracing::info!(
         "Zerf listening on http://{} (secure_cookies={}, csrf={}, origin={})",
         addr,
-        cfg.secure_cookies,
-        cfg.enforce_csrf,
-        cfg.enforce_origin
+        config.secure_cookies,
+        config.enforce_csrf,
+        config.enforce_origin
     );
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;

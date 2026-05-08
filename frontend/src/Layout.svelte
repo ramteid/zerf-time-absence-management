@@ -58,10 +58,10 @@
   }
   function onTouchMove(e) {
     if (!pulling) return;
-    const dy = e.touches[0].clientY - pullStartY;
-    if (dy > 0) {
+    const dragDistanceY = e.touches[0].clientY - pullStartY;
+    if (dragDistanceY > 0) {
       const wasHidden = pullDistance === 0;
-      pullDistance = Math.min(dy * 0.5, 120);
+      pullDistance = Math.min(dragDistanceY * 0.5, 120);
       if (wasHidden) try { pullEl?.showPopover?.(); } catch {}
     } else {
       pulling = false;
@@ -75,7 +75,7 @@
       refreshing = true;
       pullDistance = PULL_THRESHOLD;
       // reload current page
-      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 300));
       location.reload();
       return;
     }
@@ -183,8 +183,8 @@
   }
 
   $: pathname = (() => {
-    const i = $path.indexOf("?");
-    return i >= 0 ? $path.slice(0, i) : $path;
+    const queryIndex = $path.indexOf("?");
+    return queryIndex >= 0 ? $path.slice(0, queryIndex) : $path;
   })();
   $: nav = $currentUser?.nav || [];
   $: desktopNav = nav.filter((link) => link.key !== "Account");

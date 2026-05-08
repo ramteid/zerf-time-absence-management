@@ -50,24 +50,24 @@ export function fmtDateTime(d) {
 }
 export function weekdayLabels() {
   const base = new Date(Date.UTC(2024, 0, 1));
-  return Array.from({ length: 7 }, (_, i) =>
-    new Date(base.getTime() + i * 86400000).toLocaleDateString(getLocale(), {
+  return Array.from({ length: 7 }, (_, dayIndex) =>
+    new Date(base.getTime() + dayIndex * 86400000).toLocaleDateString(getLocale(), {
       weekday: "short",
       timeZone: "UTC",
     }),
   );
 }
 export function isoDate(d) {
-  const x = parseDate(d);
-  if (Number.isNaN(x.getTime())) {
+  const parsedDate = parseDate(d);
+  if (Number.isNaN(parsedDate.getTime())) {
     return "";
   }
   return (
-    x.getFullYear() +
+    parsedDate.getFullYear() +
     "-" +
-    String(x.getMonth() + 1).padStart(2, "0") +
+    String(parsedDate.getMonth() + 1).padStart(2, "0") +
     "-" +
-    String(x.getDate()).padStart(2, "0")
+    String(parsedDate.getDate()).padStart(2, "0")
   );
 }
 export function dateKey(value) {
@@ -78,10 +78,10 @@ export function dateKey(value) {
       return isoPrefix[0];
     }
 
-    const de = raw.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
-    if (de) {
-      return `${de[3]}-${String(Number(de[2])).padStart(2, "0")}-${String(
-        Number(de[1]),
+    const germanDateMatch = raw.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+    if (germanDateMatch) {
+      return `${germanDateMatch[3]}-${String(Number(germanDateMatch[2])).padStart(2, "0")}-${String(
+        Number(germanDateMatch[1]),
       ).padStart(2, "0")}`;
     }
 
@@ -117,21 +117,21 @@ export function dateKey(value) {
   return isoDate(value);
 }
 export function monday(d) {
-  const x = parseDate(d);
-  const wd = (x.getDay() + 6) % 7;
-  x.setDate(x.getDate() - wd);
-  x.setHours(0, 0, 0, 0);
-  return x;
+  const parsedDate = parseDate(d);
+  const weekdayIndex = (parsedDate.getDay() + 6) % 7;
+  parsedDate.setDate(parsedDate.getDate() - weekdayIndex);
+  parsedDate.setHours(0, 0, 0, 0);
+  return parsedDate;
 }
 export function addDays(d, n) {
-  const x = parseDate(d);
-  x.setDate(x.getDate() + n);
-  return x;
+  const parsedDate = parseDate(d);
+  parsedDate.setDate(parsedDate.getDate() + n);
+  return parsedDate;
 }
 export function minToHM(min) {
   const sign = min < 0 ? "-" : "";
-  const a = Math.abs(min);
-  return sign + Math.floor(a / 60) + ":" + String(a % 60).padStart(2, "0");
+  const absoluteMinutes = Math.abs(min);
+  return sign + Math.floor(absoluteMinutes / 60) + ":" + String(absoluteMinutes % 60).padStart(2, "0");
 }
 export function durMin(start, end) {
   const [bh, bm] = start.split(":").map(Number);
@@ -139,12 +139,12 @@ export function durMin(start, end) {
   return eh * 60 + em - (bh * 60 + bm);
 }
 export function isoWeek(d) {
-  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-  const dn = (t.getUTCDay() + 6) % 7;
-  t.setUTCDate(t.getUTCDate() - dn + 3);
-  const j1 = new Date(Date.UTC(t.getUTCFullYear(), 0, 4));
+  const utcDate = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dayNumber = (utcDate.getUTCDay() + 6) % 7;
+  utcDate.setUTCDate(utcDate.getUTCDate() - dayNumber + 3);
+  const firstThursday = new Date(Date.UTC(utcDate.getUTCFullYear(), 0, 4));
   return (
-    1 + Math.round(((t - j1) / 86400000 - 3 + ((j1.getUTCDay() + 6) % 7)) / 7)
+    1 + Math.round(((utcDate - firstThursday) / 86400000 - 3 + ((firstThursday.getUTCDay() + 6) % 7)) / 7)
   );
 }
 

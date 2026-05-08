@@ -3,15 +3,15 @@
   import { toast } from "../stores.js";
   import { t } from "../i18n.js";
 
-  let s = {};
+  let smtpSettings = {};
   let saving = false;
   let smtpPassword = "";
   let testing = false;
   let testResult = null;
 
   async function load() {
-    s = await api("/settings");
-    if (s.smtp_enabled) {
+    smtpSettings = await api("/settings");
+    if (smtpSettings.smtp_enabled) {
       testConnection(true);
     }
   }
@@ -21,17 +21,17 @@
     saving = true;
     try {
       const body = {
-        smtp_enabled: !!s.smtp_enabled,
-        smtp_host: s.smtp_host || "",
-        smtp_port: parseInt(s.smtp_port) || 587,
-        smtp_username: s.smtp_username || "",
+        smtp_enabled: !!smtpSettings.smtp_enabled,
+        smtp_host: smtpSettings.smtp_host || "",
+        smtp_port: parseInt(smtpSettings.smtp_port) || 587,
+        smtp_username: smtpSettings.smtp_username || "",
         smtp_password: smtpPassword || undefined,
-        smtp_from: s.smtp_from || "",
-        smtp_encryption: s.smtp_encryption || "starttls",
-        submission_reminders_enabled: s.submission_reminders_enabled !== false,
+        smtp_from: smtpSettings.smtp_from || "",
+        smtp_encryption: smtpSettings.smtp_encryption || "starttls",
+        submission_reminders_enabled: smtpSettings.submission_reminders_enabled !== false,
       };
       const saved = await api("/settings/smtp", { method: "PUT", body });
-      Object.assign(s, saved);
+      Object.assign(smtpSettings, saved);
       smtpPassword = "";
       toast($t("SMTP settings saved."), "ok");
       if (body.smtp_enabled) {
@@ -53,12 +53,12 @@
     try {
       const body = {
         smtp_enabled: true,
-        smtp_host: s.smtp_host || "",
-        smtp_port: parseInt(s.smtp_port) || 587,
-        smtp_username: s.smtp_username || "",
+        smtp_host: smtpSettings.smtp_host || "",
+        smtp_port: parseInt(smtpSettings.smtp_port) || 587,
+        smtp_username: smtpSettings.smtp_username || "",
         smtp_password: smtpPassword || undefined,
-        smtp_from: s.smtp_from || "",
-        smtp_encryption: s.smtp_encryption || "starttls",
+        smtp_from: smtpSettings.smtp_from || "",
+        smtp_encryption: smtpSettings.smtp_encryption || "starttls",
       };
       await api("/settings/smtp/test", { method: "POST", body });
       testResult = { ok: true };
@@ -99,7 +99,7 @@
           <label class="kz-label" style="display:flex;align-items:center;gap:8px">
             <input
               type="checkbox"
-              bind:checked={s.smtp_enabled}
+              bind:checked={smtpSettings.smtp_enabled}
               style="width:auto"
             />
             {$t("Enable SMTP")}
@@ -115,9 +115,9 @@
           <label class="kz-label" style="display:flex;align-items:center;gap:8px">
             <input
               type="checkbox"
-              bind:checked={s.submission_reminders_enabled}
+              bind:checked={smtpSettings.submission_reminders_enabled}
               style="width:auto"
-              disabled={!s.smtp_enabled}
+              disabled={!smtpSettings.smtp_enabled}
             />
             {$t("Enable submission reminders")}
           </label>
@@ -133,7 +133,7 @@
           <input
             id="smtp-host"
             class="kz-input"
-            bind:value={s.smtp_host}
+            bind:value={smtpSettings.smtp_host}
             placeholder="smtp.example.com"
           />
         </div>
@@ -143,7 +143,7 @@
             id="smtp-port"
             class="kz-input"
             type="number"
-            bind:value={s.smtp_port}
+            bind:value={smtpSettings.smtp_port}
             placeholder="587"
           />
         </div>
@@ -155,14 +155,14 @@
           <input
             id="smtp-username"
             class="kz-input"
-            bind:value={s.smtp_username}
+            bind:value={smtpSettings.smtp_username}
             autocomplete="off"
           />
         </div>
         <div>
           <label class="kz-label" for="smtp-password">
             {$t("Password")}
-            {#if s.smtp_password_set}
+            {#if smtpSettings.smtp_password_set}
               <span style="font-size:11px;color:var(--text-tertiary);font-weight:normal">({$t("stored")})</span>
             {/if}
           </label>
@@ -171,7 +171,7 @@
             class="kz-input"
             type="password"
             bind:value={smtpPassword}
-            placeholder={s.smtp_password_set ? "********" : ""}
+            placeholder={smtpSettings.smtp_password_set ? "********" : ""}
             autocomplete="new-password"
           />
         </div>
@@ -183,7 +183,7 @@
           <input
             id="smtp-from"
             class="kz-input"
-            bind:value={s.smtp_from}
+            bind:value={smtpSettings.smtp_from}
             placeholder='Zerf <noreply@example.com>'
           />
         </div>
@@ -192,7 +192,7 @@
           <select
             id="smtp-encryption"
             class="kz-select"
-            bind:value={s.smtp_encryption}
+            bind:value={smtpSettings.smtp_encryption}
           >
             <option value="starttls">STARTTLS</option>
             <option value="tls">TLS</option>

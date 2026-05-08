@@ -145,11 +145,13 @@ struct LangIndex {
 }
 
 static INDEX: LazyLock<LangIndex> = LazyLock::new(|| {
-    let mut by_code = HashMap::new();
-    for (i, lang) in LANGUAGES.iter().enumerate() {
-        by_code.insert(lang.code, i);
+    let mut language_index_by_code = HashMap::new();
+    for (language_index, language_definition) in LANGUAGES.iter().enumerate() {
+        language_index_by_code.insert(language_definition.code, language_index);
     }
-    LangIndex { by_code }
+    LangIndex {
+        by_code: language_index_by_code,
+    }
 });
 
 fn lang_def(language: &Language) -> &'static LangDef {
@@ -174,7 +176,7 @@ impl Language {
         INDEX
             .by_code
             .get(normalized.as_str())
-            .map(|&i| Self(i))
+            .map(|&language_index| Self(language_index))
             .unwrap_or_default()
     }
 
@@ -260,12 +262,12 @@ pub fn holiday_display_name(
 // -- Translation lookup -------------------------------------------------------
 
 pub fn translate(language: &Language, key: &str, params: &[(&str, String)]) -> String {
-    let def = lang_def(language);
-    let template = def
+    let language_definition = lang_def(language);
+    let template = language_definition
         .translations
         .iter()
-        .find(|(k, _)| *k == key)
-        .map(|(_, v)| *v)
+        .find(|(translation_key, _)| *translation_key == key)
+        .map(|(_, translation_value)| *translation_value)
         .unwrap_or(key);
     render(template, params)
 }
