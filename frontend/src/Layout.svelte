@@ -505,7 +505,7 @@
         >
           <button
             class="mobile-more-item"
-            style="color:var(--danger-text)"
+            style="color:var(--danger-text);width:fit-content"
             on:click={logout}
           >
             <Icon name="LogOut" size={18} />

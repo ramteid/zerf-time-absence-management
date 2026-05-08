@@ -1024,6 +1024,28 @@ async fn cumulative_at_month_end(
     Ok(overtime_start_balance_min)
 }
 
+/// Query parameters for the overtime endpoint (used by the Dashboard).
+#[derive(Deserialize)]
+pub struct OvertimeQuery {
+    pub user_id: Option<i64>,
+    pub year: Option<i32>,
+}
+
+/// Returns per-month overtime rows for the requested year, used by the
+/// Dashboard to display the current flextime balance and monthly diff.
+pub async fn overtime(
+    State(app_state): State<AppState>,
+    requester: User,
+    Query(query): Query<OvertimeQuery>,
+) -> AppResult<Json<Vec<MonthRow>>> {
+    let target_user_id = query.user_id.unwrap_or(requester.id);
+    assert_can_access_user(&app_state, &requester, target_user_id).await?;
+    let year = query.year.unwrap_or_else(|| chrono::Local::now().year());
+    Ok(Json(
+        build_overtime_rows_for_year(&app_state.pool, target_user_id, year).await?,
+    ))
+}
+
 #[derive(Deserialize)]
 pub struct FlextimeQuery {
     pub user_id: Option<i64>,
