@@ -482,7 +482,7 @@ const TRANSLATIONS = {
     "Enable SMTP": "SMTP aktivieren",
     "When enabled, notification emails are sent for approvals, rejections, and reopen requests.":
       "Wenn aktiviert, werden Benachrichtigungs-E-Mails bei Genehmigungen, Ablehnungen und Wiedereröffnungsanträgen gesendet.",
-    "Enable submission reminders": "Einreichungserinnerungen aktivieren",
+    "Enable reminders": "Erinnerungen aktivieren",
     "When enabled, users who have not submitted all time entries are reminded by email on the configured deadline day.":
       "Wenn aktiviert, werden Benutzer, die noch nicht alle Zeiteinträge eingereicht haben, am konfigurierten Stichtag per E-Mail erinnert.",
     "SMTP Host": "SMTP-Host",
