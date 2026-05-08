@@ -143,10 +143,15 @@ pub async fn run_check(state: &crate::AppState) {
             "approval_reminder_body",
             &[("count", count_str.clone())],
         );
-        let email_body = crate::i18n::translate(
-            &language,
-            "approval_reminder_email_body",
-            &[("count", count_str), ("app_url", app_url.clone())],
+        let timestamp = chrono::Local::now().format("%d.%m.%Y %H:%M").to_string();
+        let email_body = format!(
+            "{}\n\n{}",
+            crate::i18n::translate(
+                &language,
+                "approval_reminder_email_body",
+                &[("count", count_str), ("app_url", app_url.clone())],
+            ),
+            timestamp,
         );
 
         match state

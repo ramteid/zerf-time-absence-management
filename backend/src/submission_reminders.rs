@@ -205,13 +205,18 @@ pub async fn run_check(state: &crate::AppState) {
             "submission_reminder_body",
             &[("months", months_str.clone())],
         );
-        let email_body = crate::i18n::translate(
-            &language,
-            "submission_reminder_email_body",
-            &[
-                ("months", missing_months.join("\n")),
-                ("app_url", app_url.clone()),
-            ],
+        let timestamp = chrono::Local::now().format("%d.%m.%Y %H:%M").to_string();
+        let email_body = format!(
+            "{}\n\n{}",
+            crate::i18n::translate(
+                &language,
+                "submission_reminder_email_body",
+                &[
+                    ("months", missing_months.join("\n")),
+                    ("app_url", app_url.clone()),
+                ],
+            ),
+            timestamp,
         );
 
         // Insert in-app notification; ON CONFLICT DO NOTHING prevents duplicates if the

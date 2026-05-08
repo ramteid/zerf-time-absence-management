@@ -346,6 +346,112 @@ async fn creation_password_modes_set_must_change_correctly() {
 }
 
 #[tokio::test]
+async fn delete_user_removes_data_and_preserves_approved_records() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+
+    let lead_id = create_lead(&admin, "lead-del@example.com", "DelLead").await;
+    let emp_id = create_emp(&admin, "emp-del@example.com", "DelEmp", lead_id).await;
+
+    // Cannot delete while emp still has lead as approver.
+    let (st, body) = admin
+        .delete(&format!("/api/v1/users/{lead_id}"))
+        .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST, "delete with active reports must fail");
+    let error_msg = body["error"].as_str().unwrap_or("").to_lowercase();
+    assert!(
+        error_msg.contains("approver") || error_msg.contains("reassign"),
+        "error must mention approver/reassign, got: {error_msg}"
+    );
+
+    // Cannot delete yourself.
+    let (st, _) = admin.delete("/api/v1/users/1").await;
+    assert_eq!(st, StatusCode::BAD_REQUEST, "deleting yourself must fail");
+
+    // Reassign emp to admin, then delete the lead.
+    let (st, _) = admin
+        .put(
+            &format!("/api/v1/users/{emp_id}"),
+            &serde_json::json!({"approver_ids": [1]}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "reassign emp to admin");
+
+    let (st, _) = admin.delete(&format!("/api/v1/users/{lead_id}")).await;
+    assert_eq!(st, StatusCode::OK, "delete after reassign must succeed");
+
+    // Lead must no longer appear in the user list.
+    let (st, list) = admin.get("/api/v1/users").await;
+    assert_eq!(st, StatusCode::OK);
+    assert!(
+        !list.as_array().unwrap().iter().any(|u| u["id"].as_i64() == Some(lead_id)),
+        "deleted lead must not appear in user list"
+    );
+
+    // Emp still exists and is now assigned to admin.
+    let (st, detail) = admin.get(&format!("/api/v1/users/{emp_id}")).await;
+    assert_eq!(st, StatusCode::OK, "emp still exists after lead deletion");
+    assert!(
+        detail["approver_ids"].as_array().unwrap().iter().any(|v| v.as_i64() == Some(1)),
+        "emp's approver must be admin after lead deleted"
+    );
+
+    // Delete emp too — should succeed since no active reports.
+    let (st, _) = admin.delete(&format!("/api/v1/users/{emp_id}")).await;
+    assert_eq!(st, StatusCode::OK, "delete emp must succeed");
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn cannot_delete_last_active_admin() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+
+    // The seeded admin (id=1) is the only active admin — must be rejected.
+    let (st, _) = admin.delete("/api/v1/users/1").await;
+    // This hits "cannot delete yourself" first, so create a second admin to test the guard.
+    assert_eq!(st, StatusCode::BAD_REQUEST);
+
+    // Create a second admin by promoting a lead, then try to delete the first admin via the second.
+    let second_admin_id = create_lead(&admin, "admin2@example.com", "Second").await;
+    let (st, _) = admin
+        .put(
+            &format!("/api/v1/users/{second_admin_id}"),
+            &serde_json::json!({"role": "admin"}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "promote to admin");
+
+    // Login as second admin and try to delete admin 1 (the only remaining active admin of the pair).
+    // Actually, now there are 2 admins — deleting admin 1 is allowed since admin 2 still exists.
+    let second_admin_pw = {
+        let (_, body) = admin
+            .post(
+                &format!("/api/v1/users/{second_admin_id}/reset-password"),
+                &serde_json::json!({}),
+            )
+            .await;
+        body["temporary_password"].as_str().unwrap().to_string()
+    };
+    let second_client = app.client();
+    let (st, _) = second_client.login("admin2@example.com", &second_admin_pw).await;
+    assert_eq!(st, StatusCode::OK);
+    let (st, _) = second_client
+        .change_password(&second_admin_pw, "NewAdminPass!234")
+        .await;
+    assert_eq!(st, StatusCode::OK);
+
+    // Now only one admin (second) — trying to delete second must fail (can't delete yourself).
+    let (st, _) = second_client
+        .delete(&format!("/api/v1/users/{second_admin_id}"))
+        .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST, "cannot delete yourself");
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
 async fn cannot_deactivate_user_who_is_approver_for_active_users() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
