@@ -430,20 +430,164 @@ pub async fn range_csv(
     csv_response(report, target_user_id, &label)
 }
 
+/// Eine Zeile im Teambericht – ein Datensatz pro aktivem Teammitglied.
 #[derive(Serialize)]
 pub struct TeamRow {
     pub user_id: i64,
     pub name: String,
+    /// Soll-Minuten des Berichtsmonats (ohne Wochenenden, Feiertage, Abwesenheiten, ab heute).
     pub target_min: i64,
+    /// Ist-Minuten: genehmigte Zeiteinträge im Berichtsmonat (bis gestern).
     pub actual_min: i64,
+    /// Diff = actual - target für den Berichtsmonat.
     pub diff_min: i64,
+    /// Genommene Urlaubsarbeitstage im Berichtsmonat (bis gestern).
     pub vacation_days: f64,
+    /// Geplante (noch nicht begonnene) Urlaubsarbeitstage im Berichtsmonat (ab heute).
+    pub vacation_planned_days: f64,
+    /// Kranke Arbeitstage im Berichtsmonat.
     pub sick_days: f64,
+    /// Kumulierter Gleitzeitkontostand am Ende des Berichtsmonats (oder bis gestern
+    /// bei laufendem Monat).
+    pub flextime_balance_min: i64,
+    /// True, wenn alle vollständig vergangenen Wochen (Sonntag < heute), die den
+    /// Berichtsmonat überschneiden, vollständig eingereicht wurden.
+    pub weeks_all_submitted: bool,
 }
 
 #[derive(Deserialize)]
 pub struct TeamQuery {
     pub month: String,
+}
+
+/// Prüft, ob alle vollständig vergangenen Arbeitswochen, die den angegebenen Monat
+/// überschneiden, für den Benutzer eingereicht wurden.
+///
+/// Eine Woche gilt als "vollständig vergangen", wenn ihr Sonntag vor `heute` liegt.
+/// Eine Grenzwoche, die zwei Monate überspannt (z.B. Mo 28.04. – So 03.05.), zählt
+/// für BEIDE Monate – und es werden alle fünf Arbeitstage der Woche geprüft, nicht
+/// nur die Tage des Zielmonats.
+///
+/// Ein Arbeitstag gilt als eingereicht, wenn
+///   - eine genehmigte Abwesenheit den Tag abdeckt, ODER
+///   - mindestens ein Zeiteintrag im Status "submitted" oder "approved" vorhanden ist.
+async fn all_weeks_submitted_for_month(
+    pool: &crate::db::DatabasePool,
+    user_id: i64,
+    month_start: NaiveDate,
+    month_end: NaiveDate,
+    user_start_date: NaiveDate,
+) -> AppResult<bool> {
+    let today = chrono::Utc::now().date_naive();
+
+    // ── Wochengrenzen berechnen ──────────────────────────────────────────────
+    // Montag der Woche, in der der erste Monatstag liegt.
+    let first_week_monday = {
+        let offset = month_start.weekday().num_days_from_monday() as i64;
+        month_start - Duration::days(offset)
+    };
+    // Montag der Woche, in der der letzte Monatstag liegt.
+    let last_week_monday = {
+        let offset = month_end.weekday().num_days_from_monday() as i64;
+        month_end - Duration::days(offset)
+    };
+
+    // Alle vollständig vergangenen Wochen sammeln (Sonntag < heute).
+    let mut complete_week_mondays: Vec<NaiveDate> = Vec::new();
+    let mut w = first_week_monday;
+    while w <= last_week_monday {
+        let week_sunday = w + Duration::days(6);
+        if week_sunday < today {
+            complete_week_mondays.push(w);
+        }
+        w += Duration::days(7);
+    }
+
+    // Keine vollständigen Vergangenheitswochen → nichts zu prüfen.
+    if complete_week_mondays.is_empty() {
+        return Ok(true);
+    }
+
+    let check_from = complete_week_mondays[0];
+    let check_to = *complete_week_mondays.last().unwrap() + Duration::days(6);
+
+    // ── Feiertage im Prüfzeitraum laden ─────────────────────────────────────
+    let holiday_set: std::collections::HashSet<NaiveDate> = {
+        let rows: Vec<(NaiveDate,)> = sqlx::query_as(
+            "SELECT holiday_date FROM holidays WHERE holiday_date BETWEEN $1 AND $2",
+        )
+        .bind(check_from)
+        .bind(check_to)
+        .fetch_all(pool)
+        .await?;
+        rows.into_iter().map(|(d,)| d).collect()
+    };
+
+    // ── Genehmigte Abwesenheitstage als Set aufbauen ─────────────────────────
+    let absence_rows: Vec<(NaiveDate, NaiveDate)> = sqlx::query_as(
+        "SELECT start_date, end_date FROM absences \
+         WHERE user_id=$1 AND status='approved' AND end_date >= $2 AND start_date <= $3",
+    )
+    .bind(user_id)
+    .bind(check_from)
+    .bind(check_to)
+    .fetch_all(pool)
+    .await?;
+
+    let mut absent_days: std::collections::HashSet<NaiveDate> =
+        std::collections::HashSet::new();
+    for (abs_start, abs_end) in &absence_rows {
+        let mut d = check_from.max(*abs_start);
+        let end = check_to.min(*abs_end);
+        while d <= end {
+            absent_days.insert(d);
+            d += Duration::days(1);
+        }
+    }
+
+    // ── Eingereichte/genehmigte Zeiteinträge laden ──────────────────────────
+    let submitted_dates: std::collections::HashSet<NaiveDate> = {
+        let rows: Vec<(NaiveDate,)> = sqlx::query_as(
+            "SELECT DISTINCT entry_date FROM time_entries \
+             WHERE user_id=$1 AND status IN ('submitted','approved') \
+             AND entry_date BETWEEN $2 AND $3",
+        )
+        .bind(user_id)
+        .bind(check_from)
+        .bind(check_to)
+        .fetch_all(pool)
+        .await?;
+        rows.into_iter().map(|(d,)| d).collect()
+    };
+
+    // ── Jede vollständige Woche prüfen ───────────────────────────────────────
+    for &week_monday in &complete_week_mondays {
+        // Montag bis Freitag (0..5)
+        for day_offset in 0..5i64 {
+            let day = week_monday + Duration::days(day_offset);
+
+            // Tage vor dem Vertragsstart des Benutzers überspringen.
+            if day < user_start_date {
+                continue;
+            }
+            // Feiertage überspringen.
+            if holiday_set.contains(&day) {
+                continue;
+            }
+            // Zukünftige Tage überspringen (sollte bei vollständigen Wochen nicht
+            // vorkommen, aber defensiv).
+            if day >= today {
+                continue;
+            }
+
+            // Arbeitstag muss durch Abwesenheit ODER eingereichten Eintrag gedeckt sein.
+            if !absent_days.contains(&day) && !submitted_dates.contains(&day) {
+                return Ok(false);
+            }
+        }
+    }
+
+    Ok(true)
 }
 
 pub async fn team(
@@ -454,7 +598,8 @@ pub async fn team(
     if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
-    // Admins see all active users; non-admin leads see only their direct reports.
+
+    // Admins sehen alle aktiven Benutzer; Teamleitungen nur ihre direkten Berichte.
     let team_members: Vec<crate::auth::User> = if requester.is_admin() {
         sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE active=TRUE ORDER BY last_name")
             .fetch_all(&app_state.pool)
@@ -465,18 +610,51 @@ pub async fn team(
             .fetch_all(&app_state.pool)
             .await?
     };
-    let mut team_rows = vec![];
+
+    let today = chrono::Utc::now().date_naive();
+    let yesterday = today - Duration::days(1);
     let (month_start, month_end) = month_bounds(&query.month)?;
+
+    // Für den Urlaub-Split: "genommen" = bis gestern, "geplant" = ab heute.
+    let vacation_taken_end = yesterday.min(month_end);
+    let vacation_planned_start = today.max(month_start);
+
+    let mut team_rows = vec![];
+
     for team_member in team_members {
-        let month_report = build_month(&app_state.pool, team_member.id, &query.month).await?;
-        let vacation_workdays = crate::absences::workdays_total(
-            &app_state.pool,
-            team_member.id,
-            "vacation",
-            month_start,
-            month_end,
-        )
-        .await?;
+        // ── Monatsbericht für Soll/Ist/Diff ─────────────────────────────────
+        let month_report =
+            build_month(&app_state.pool, team_member.id, &query.month).await?;
+
+        // ── Urlaubstage: genommen (bis gestern) ──────────────────────────────
+        let vacation_taken = if month_start <= vacation_taken_end {
+            crate::absences::workdays_total(
+                &app_state.pool,
+                team_member.id,
+                "vacation",
+                month_start,
+                vacation_taken_end,
+            )
+            .await?
+        } else {
+            0.0
+        };
+
+        // ── Urlaubstage: geplant (ab heute bis Monatsende) ───────────────────
+        let vacation_planned = if vacation_planned_start <= month_end {
+            crate::absences::workdays_total(
+                &app_state.pool,
+                team_member.id,
+                "vacation",
+                vacation_planned_start,
+                month_end,
+            )
+            .await?
+        } else {
+            0.0
+        };
+
+        // ── Krankheitstage im vollen Monat ───────────────────────────────────
         let sick_workdays = crate::absences::workdays_total(
             &app_state.pool,
             team_member.id,
@@ -485,16 +663,52 @@ pub async fn team(
             month_end,
         )
         .await?;
+
+        // ── Gleitzeitkontostand am Ende des Berichtsmonats ───────────────────
+        // Wir rufen build_overtime_rows_for_year für das Jahr des Berichtsmonats auf
+        // und suchen die Zeile dieses Monats. Bei laufendem Monat enthält die letzte
+        // Zeile den Stand bis gestern (da build_range today ausschließt).
+        let report_year = month_start.year();
+        let overtime_rows =
+            build_overtime_rows_for_year(&app_state.pool, team_member.id, report_year)
+                .await?;
+        let month_key = format!("{:04}-{:02}", report_year, month_start.month());
+        let flextime_balance_min = overtime_rows
+            .iter()
+            .find(|r| r.month == month_key)
+            .map(|r| r.cumulative_min)
+            // Fallback: letzte verfügbare Zeile (für Zukunftsmonate nicht vorhanden).
+            .unwrap_or_else(|| {
+                overtime_rows
+                    .last()
+                    .map(|r| r.cumulative_min)
+                    .unwrap_or(team_member.overtime_start_balance_min)
+            });
+
+        // ── Alle vergangenen Wochen eingereicht? ─────────────────────────────
+        let weeks_all_submitted = all_weeks_submitted_for_month(
+            &app_state.pool,
+            team_member.id,
+            month_start,
+            month_end,
+            team_member.start_date,
+        )
+        .await?;
+
         team_rows.push(TeamRow {
             user_id: team_member.id,
             name: format!("{} {}", team_member.first_name, team_member.last_name),
             target_min: month_report.target_min,
             actual_min: month_report.actual_min,
             diff_min: month_report.diff_min,
-            vacation_days: vacation_workdays,
+            vacation_days: vacation_taken,
+            vacation_planned_days: vacation_planned,
             sick_days: sick_workdays,
+            flextime_balance_min,
+            weeks_all_submitted,
         });
     }
+
     Ok(Json(team_rows))
 }
 
@@ -532,11 +746,15 @@ pub async fn categories(
         // No specific user requested: only leads may see aggregated team data.
         return Err(AppError::Forbidden);
     }
+    // Wir schließen nur "rejected"-Einträge aus, damit auch eingereichte (aber noch
+    // nicht genehmigte) Buchungen in der Kategorieauswertung erscheinen.
+    // Das ist besonders für Admins und Teamleitungen wichtig, deren eigene Einträge
+    // u.U. noch nicht genehmigt wurden.
     let mut builder = QueryBuilder::<Postgres>::new(
         "SELECT c.name, c.color, z.start_time, z.end_time \
          FROM time_entries z \
          JOIN categories c ON c.id=z.category_id \
-         WHERE z.status = 'approved' AND z.entry_date BETWEEN ",
+         WHERE z.status != 'rejected' AND z.entry_date BETWEEN ",
     );
     builder
         .push_bind(query.from)
@@ -607,11 +825,13 @@ pub async fn team_categories(
         .fetch_all(&app_state.pool)
         .await?;
 
+    // Wie bei der Einzelauswertung: rejected ausschließen, aber submitted+approved
+    // und draft einbeziehen, damit das Teambild vollständig ist.
     let mut entry_builder = QueryBuilder::<Postgres>::new(
         "SELECT z.user_id, c.name, c.color, z.start_time, z.end_time \
          FROM time_entries z \
          JOIN categories c ON c.id=z.category_id \
-         WHERE z.status = 'approved' AND z.entry_date BETWEEN ",
+         WHERE z.status != 'rejected' AND z.entry_date BETWEEN ",
     );
     entry_builder
         .push_bind(query.from)

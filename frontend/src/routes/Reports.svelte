@@ -1,94 +1,179 @@
 <script>
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Reports – Zentrale Seite für alle monatlichen und teambezogenen Statistiken.
+  //
+  // Anzeigereihenfolge der Kacheln:
+  //   1. Überstundenkonto  – Jahresübersicht des angemeldeten Benutzers
+  //   2. Mitarbeiterbericht – Monatsdetails (Mitarbeiterdetails + Monatsbericht)
+  //   3. Teambericht       – Teamübersicht (nur Teamleitungen / Admins)
+  //   4. Kategorieauswertung
+  //   5. Abwesenheiten
+  //   6. Export Stundennachweis
+  //
+  // Allgemeine Regeln:
+  //   - Der aktuelle Tag wird in keiner Stundenberechnung berücksichtigt.
+  //   - Die Zeiterfassung ist wochenbasiert, Auswertungen monatsbasiert.
+  //     Grenzwochen (Mo-So überspannen Monatswechsel) zählen tagesweise
+  //     zu den jeweiligen Monaten; für die Einreichungsprüfung zählen sie
+  //     zu BEIDEN Monaten.
+  // ═══════════════════════════════════════════════════════════════════════════
+
   import { api } from "../api.js";
   import { currentUser, toast } from "../stores.js";
-  import { t, absenceKindLabel, statusLabel } from "../i18n.js";
-  import { isoDate, minToHM, fmtDate } from "../format.js";
+  import { t, absenceKindLabel, statusLabel, formatHours } from "../i18n.js";
+  import { isoDate, minToHM, fmtDate, fmtMonthLabel } from "../format.js";
   import { normalizeMonthReport, countWorkdays, holidayDateSet } from "../apiMappers.js";
   import Icon from "../Icons.svelte";
   import DatePicker from "../DatePicker.svelte";
-  import FlextimeChart from "../FlextimeChart.svelte";
   import { jsPDF } from "jspdf";
 
+  // ── Festes Datums-Referenzobjekt für diese Sitzung ──────────────────────
+  // Einmalig bei Komponenteninitialisierung gesetzt, um Drift während der
+  // Sitzung zu vermeiden.
   const today = new Date();
-  const monthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+  const currentYear = today.getFullYear();
+  const currentMonthStr = `${currentYear}-${String(today.getMonth() + 1).padStart(2, "0")}`;
 
+  // ── Benutzerliste ────────────────────────────────────────────────────────
+  // Teamleitungen und Admins laden alle Benutzer für das Mitarbeiter-Dropdown.
+  // Reine Mitarbeiter (role === "employee") sehen kein Dropdown – nur die
+  // eigenen Daten.
+  let users = [];
+  async function initUsers() {
+    try {
+      users = $currentUser.role === "employee"
+        ? [$currentUser]
+        : await api("/users");
+    } catch (e) {
+      toast($t(e?.message || "Error"), "error");
+    }
+  }
+  initUsers();
+
+  // ── Hilfe-Tooltips ───────────────────────────────────────────────────────
+  let activeHelp = null;
+  function toggleHelp(id) {
+    activeHelp = activeHelp === id ? null : id;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ABSCHNITT 1 – Überstundenkonto (laufendes Jahr des angemeldeten Benutzers)
+  //
+  // Wird einmalig beim Seitenaufruf geladen und zeigt für jeden Monat:
+  //   • Soll: Summe aller Soll-Minuten (Arbeitstage ohne Feiertage/Abwesenheiten,
+  //           bis gestern)
+  //   • IST: Summe aller genehmigten Zeiteinträge bis gestern
+  //   • Diff: IST - Soll (negativ = rot, positiv = grün)
+  //   • Kumuliert: laufendes Gleitzeitguthaben inklusive Überstunden-Startsaldo
+  //
+  // Monatsbezeichnung: Das Backend liefert "YYYY-MM" – auf dem Frontend wird
+  // daraus via fmtMonthLabel() ein lesbarer Monatsname ("Mai 2026" o.ä.).
+  // ═══════════════════════════════════════════════════════════════════════════
   let overtime = [];
-  $: cumulative = overtime.length > 0 ? overtime[overtime.length - 1].cumulative_min : 0;
+  // Der letzte Eintrag enthält den aktuellsten kumulierten Saldo (Stand: gestern).
+  $: cumulativeBalance = overtime.length > 0
+    ? overtime[overtime.length - 1].cumulative_min
+    : 0;
 
   async function loadOvertime() {
     try {
-      overtime = await api(
-        `/reports/overtime?year=${today.getFullYear()}`,
-      );
+      overtime = await api(`/reports/overtime?year=${currentYear}`);
     } catch (e) {
       toast($t(e?.message || "Overtime data unavailable."), "error");
     }
   }
   loadOvertime();
 
-  let users = [];
-  let userId = $currentUser.id;
-  let month = monthStr;
-  let monthReport = null;
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ABSCHNITT 2 – Mitarbeiterbericht (Monatsbericht + Mitarbeiterdetails)
+  //
+  // Kombiniert die bisherigen getrennten Kacheln "Mitarbeiterdetails" und
+  // "Monatsbericht" in einer gemeinsamen Kachel.
+  //
+  // Für Teamleitungen/Admins: Mitarbeiter-Dropdown sichtbar.
+  // Für Mitarbeiter: kein Dropdown – automatisch eigene Daten.
+  //
+  // Nach "Anzeigen" werden geladen:
+  //   • Monatsbericht (Soll/IST/Diff + Einträge + Abwesenheiten)
+  //   • Überstunden des Jahres (für kumulierten Kontostand)
+  //   • Urlaubsstand des Jahres
+  // ═══════════════════════════════════════════════════════════════════════════
+  let reportUserId = $currentUser.id;
+  let reportMonth = currentMonthStr;
+  // reportData enthält nach dem Laden alle nötigen Informationen.
+  let reportData = null;
 
-  let teamMonth = monthStr;
-  let teamReport = null;
-
-  let catFrom = isoDate(new Date(today.getFullYear(), 0, 1));
-  let catTo = isoDate(today);
-  let catReport = null;
-  let teamCatReport = null;
-  let catFilteredCategories = [];
-  let catShowFilter = false;
-
-  let absenceFrom = isoDate(new Date(today.getFullYear(), today.getMonth(), 1));
-  let absenceTo = isoDate(new Date(today.getFullYear(), 11, 31));
-  let absenceReport = null;
-  $: absenceTotalDays = (absenceReport || []).reduce((s, x) => s + (x.days || 0), 0);
-  $: absenceByKind = (absenceReport || []).reduce((map, x) => {
-    const k = x.kind || "unknown";
-    map[k] = (map[k] || 0) + (x.days || 0);
-    return map;
-  }, {});
-  $: isLeadView = $currentUser.role !== "employee";
-
-  // CSV export state
-  let csvUserId = $currentUser.id;
-  let csvFrom = isoDate(new Date(today.getFullYear(), today.getMonth(), 1));
-  let csvTo = isoDate(today);
-  let csvError = "";
-  let exportInProgress = false;
-
-  // Employee detail report state
-  let detailUserId = $currentUser.id;
-  let detailMonth = monthStr;
-  let detailReport = null;
-  let detailShowDialog = false;
-  let detailOvertimeBalance = 0;
-  let detailFlextimeData = [];
-  let detailLeaveBalance = null;
-
-  // Help tooltip state
-  let activeHelp = null;
-  function toggleHelp(id) {
-    activeHelp = activeHelp === id ? null : id;
-  }
-
-  async function init() {
-    users =
-      $currentUser.role === "employee" ? [$currentUser] : await api("/users");
-  }
-  init();
-
-  async function showMonth() {
+  async function loadReport() {
     try {
-      monthReport = normalizeMonthReport(
-        await api(`/reports/month?user_id=${userId}&month=${month}`),
-      );
+      const reportYear = reportMonth.slice(0, 4);
+      const [monthRaw, overtimeRows, leaveRaw] = await Promise.all([
+        api(`/reports/month?user_id=${reportUserId}&month=${reportMonth}`),
+        // Immer das aktuelle Jahr verwenden, damit der kumulierte Kontostand
+        // den heutigen Stand widerspiegelt, nicht den Jahresendstand.
+        api(`/reports/overtime?user_id=${reportUserId}&year=${currentYear}`).catch(() => []),
+        api(`/leave-balance/${reportUserId}?year=${reportYear}`).catch(() => null),
+      ]);
+
+      const monthReport = normalizeMonthReport(monthRaw);
+
+      // Monatsstatus aus den Einträgen ableiten.
+      const nonDraft = (monthReport.entries || []).filter(e => e.status !== "draft");
+      const monthStatus = (() => {
+        if (nonDraft.length === 0) return "draft";
+        if (nonDraft.every(e => e.status === "approved")) return "approved";
+        if (nonDraft.some(e => e.status === "submitted")) return "submitted";
+        if (nonDraft.every(e => e.status === "rejected")) return "rejected";
+        return "partial";
+      })();
+
+      // Letzter Überstunden-Eintrag = aktueller Kontostand (bis gestern).
+      const lastOvertimeRow = overtimeRows.length > 0
+        ? overtimeRows[overtimeRows.length - 1]
+        : null;
+
+      reportData = {
+        monthReport,
+        monthStatus,
+        cumulativeOvertimeMin: lastOvertimeRow?.cumulative_min ?? 0,
+        leaveBalance: leaveRaw,
+      };
     } catch (e) {
       toast($t(e?.message || "Error"), "error");
     }
   }
+
+  // Abwesenheitszusammenfassung für Kacheln: { vacation: 2, sick: 1, ... }
+  $: reportAbsenceSummary = (() => {
+    if (!reportData) return {};
+    const map = {};
+    for (const a of reportData.monthReport.absences || []) {
+      map[a.kind] = (map[a.kind] || 0) + (a.days || 0);
+    }
+    return map;
+  })();
+
+  // Farbe für den Monatsstatus-Badge.
+  $: reportStatusColor = (() => {
+    switch (reportData?.monthStatus) {
+      case "approved":  return "var(--success-text)";
+      case "submitted": return "var(--success-text)";
+      case "rejected":  return "var(--danger-text)";
+      case "partial":   return "var(--warning-text)";
+      default:          return "var(--danger-text)";
+    }
+  })();
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ABSCHNITT 3 – Teambericht (Teamübersicht pro Mitarbeiter)
+  //
+  // Nur für Teamleitungen und Admins sichtbar.
+  // Spalten: Gleitzeitkonto, Monatsdiff, Krankheitstage, Urlaub genommen/geplant,
+  //          Alle Wochen eingereicht.
+  // Bei laufendem Monat: alle Werte relativ zu Arbeitstagen vom 1. bis gestern.
+  // ═══════════════════════════════════════════════════════════════════════════
+  let teamMonth = currentMonthStr;
+  let teamReport = null;
+
   async function showTeam() {
     try {
       teamReport = await api(`/reports/team?month=${teamMonth}`);
@@ -96,15 +181,34 @@
       toast($t(e?.message || "Error"), "error");
     }
   }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ABSCHNITT 4 – Kategorieauswertung
+  //
+  // Mitarbeiter: eigene Buchungen als Rangliste.
+  // Teamleitungen/Admins: Matrix Mitarbeiter × Kategorie.
+  //
+  // Hinweis: Das Backend schließt nur "rejected"-Einträge aus, sodass auch
+  // eingereichte (noch nicht genehmigte) Buchungen erscheinen.
+  // ═══════════════════════════════════════════════════════════════════════════
+  let catFrom = isoDate(new Date(currentYear, 0, 1));
+  let catTo = isoDate(today);
+  let catReport = null;
+  let teamCatReport = null;
+  let catFilteredCategories = [];
+  let catShowFilter = false;
+
   async function showCat() {
     if (catFrom > catTo) return;
     try {
       const params = new URLSearchParams({ from: catFrom, to: catTo });
       if ($currentUser.role === "employee") {
+        // Mitarbeiter sehen nur ihre eigene Auswertung.
         params.set("user_id", $currentUser.id);
         catReport = await api(`/reports/categories?${params}`);
         teamCatReport = null;
       } else {
+        // Teamleitungen / Admins sehen die Teammatrix.
         teamCatReport = await api(`/reports/team-categories?${params}`);
         catReport = null;
       }
@@ -114,8 +218,67 @@
       toast($t(e?.message || "Error"), "error");
     }
   }
+
+  function toggleCategoryFilter(categoryName) {
+    catFilteredCategories = catFilteredCategories.includes(categoryName)
+      ? catFilteredCategories.filter(c => c !== categoryName)
+      : [...catFilteredCategories, categoryName];
+  }
+
+  // Gefilterte Mitarbeiterliste (wendet aktiven Kategoriefilter an).
+  $: filteredCatReport = catFilteredCategories.length === 0
+    ? catReport
+    : (catReport || []).filter(c => catFilteredCategories.includes(c.category));
+  $: filteredCatTotal = (filteredCatReport || []).reduce((s, x) => s + x.minutes, 0);
+
+  // Spalten für die Teammatrix (absteigend nach Gesamtminuten sortiert).
+  $: allTeamCatColumns = (() => {
+    if (!teamCatReport) return [];
+    const totals = new Map();
+    for (const row of teamCatReport) {
+      for (const c of row.categories) {
+        const entry = totals.get(c.category) || { color: c.color, total: 0 };
+        entry.total += c.minutes;
+        totals.set(c.category, entry);
+      }
+    }
+    return [...totals.entries()]
+      .sort((a, b) => b[1].total - a[1].total)
+      .map(([category, { color }]) => ({ category, color }));
+  })();
+  $: visibleTeamCatColumns = catFilteredCategories.length === 0
+    ? allTeamCatColumns
+    : allTeamCatColumns.filter(c => catFilteredCategories.includes(c.category));
+
+  function teamCatMinutes(row, category) {
+    const c = row.categories.find(x => x.category === category);
+    return c ? c.minutes : 0;
+  }
+  function teamCatRowTotal(row) {
+    return row.categories.reduce((s, c) =>
+      catFilteredCategories.length === 0 || catFilteredCategories.includes(c.category)
+        ? s + c.minutes : s, 0);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ABSCHNITT 5 – Abwesenheiten
+  //
+  // Zeigt Abwesenheitseinträge im gewählten Zeitraum mit Typenverteilung.
+  // Mitarbeiter laden nur eigene Abwesenheiten; Leitungen/Admins alle.
+  // ═══════════════════════════════════════════════════════════════════════════
+  let absenceFrom = isoDate(new Date(currentYear, today.getMonth(), 1));
+  let absenceTo = isoDate(new Date(currentYear, 11, 31));
+  let absenceReport = null;
+  $: absenceTotalDays = (absenceReport || []).reduce((s, x) => s + (x.days || 0), 0);
+  $: absenceByKind = (absenceReport || []).reduce((map, x) => {
+    const k = x.kind || "unknown";
+    map[k] = (map[k] || 0) + (x.days || 0);
+    return map;
+  }, {});
+  $: isLeadView = $currentUser.role !== "employee";
   let absenceHolidayDates = new Set();
 
+  // Kürzt den Abwesenheitszeitraum auf das gewählte Von-Bis-Fenster.
   function clampAbsenceRange(absence) {
     if (!absence?.start_date || !absence?.end_date) return null;
     const from = absence.start_date > absenceFrom ? absence.start_date : absenceFrom;
@@ -129,14 +292,17 @@
     if (!clamped) return 0;
     return countWorkdays(clamped.from, clamped.to, absenceHolidayDates);
   }
+
   async function showAbsences() {
     if (absenceFrom > absenceTo) return;
     try {
       let raw;
       if ($currentUser.role === "employee") {
+        // Eigene Abwesenheiten: das API ist jahresbasiert, daher bei
+        // jahresübergreifenden Bereichen mehrere Abrufe + Deduplizierung.
         const fromYear = parseInt(absenceFrom.slice(0, 4), 10);
         const toYear = parseInt(absenceTo.slice(0, 4), 10);
-        const years = [...new Set(Array.from({ length: toYear - fromYear + 1 }, (_, i) => fromYear + i))];
+        const years = Array.from({ length: toYear - fromYear + 1 }, (_, i) => fromYear + i);
         const lists = await Promise.all(years.map(y => api(`/absences?year=${y}`)));
         const seen = new Set();
         raw = lists.flat().filter(a => {
@@ -148,7 +314,7 @@
         const params = new URLSearchParams({ from: absenceFrom, to: absenceTo });
         raw = await api(`/absences/all?${params}`);
       }
-      // Fetch holidays covering the absence period for workday counting
+      // Feiertage für alle beteiligten Jahre laden (für korrekte Arbeitstage).
       const allYears = [...new Set(raw.flatMap(a => [
         parseInt(a.start_date.slice(0, 4), 10),
         parseInt(a.end_date.slice(0, 4), 10),
@@ -160,93 +326,38 @@
       toast($t(e?.message || "Error"), "error");
     }
   }
-  function toggleCategoryFilter(categoryName) {
-    const idx = catFilteredCategories.indexOf(categoryName);
-    if (idx >= 0) {
-      catFilteredCategories = catFilteredCategories.filter(c => c !== categoryName);
-    } else {
-      catFilteredCategories = [...catFilteredCategories, categoryName];
-    }
-  }
-  $: filteredCatReport = catFilteredCategories.length === 0
-    ? catReport
-    : (catReport || []).filter(c => catFilteredCategories.includes(c.category));
-  $: filteredCatTotal = (filteredCatReport || []).reduce((s, x) => s + x.minutes, 0);
 
-  // Team category matrix derivations (lead view)
-  $: allTeamCatColumns = (() => {
-    if (!teamCatReport) return [];
-    const totals = new Map();
-    for (const row of teamCatReport) {
-      for (const c of row.categories) {
-        const e = totals.get(c.category) || { color: c.color, total: 0 };
-        e.total += c.minutes;
-        totals.set(c.category, e);
-      }
-    }
-    return [...totals.entries()]
-      .sort((a, b) => b[1].total - a[1].total)
-      .map(([category, { color }]) => ({ category, color }));
-  })();
-  $: visibleTeamCatColumns = catFilteredCategories.length === 0
-    ? allTeamCatColumns
-    : allTeamCatColumns.filter(c => catFilteredCategories.includes(c.category));
-  function teamCatMinutes(row, category) {
-    const c = row.categories.find(x => x.category === category);
-    return c ? c.minutes : 0;
-  }
-  function teamCatRowTotal(row) {
-    return row.categories.reduce((s, c) =>
-      catFilteredCategories.length === 0 || catFilteredCategories.includes(c.category)
-        ? s + c.minutes
-        : s
-    , 0);
-  }
-  async function showDetail() {
-    try {
-      const reportYear = detailMonth.slice(0, 4);
-      const currentYear = String(today.getFullYear());
-      const monthNum = parseInt(detailMonth.slice(5, 7), 10);
-      const lastDay = new Date(parseInt(reportYear, 10), monthNum, 0).getDate();
-      const toDate = `${detailMonth}-${String(lastDay).padStart(2, "0")}`;
-      const [monthRaw, overtimeRows, flextimeRaw, leaveRaw] = await Promise.all([
-        api(`/reports/month?user_id=${detailUserId}&month=${detailMonth}`),
-        // Always use current year so the balance shown is today's cumulative, not end-of-report-year.
-        api(`/reports/overtime?user_id=${detailUserId}&year=${currentYear}`).catch(() => []),
-        api(`/reports/flextime?user_id=${detailUserId}&from=${detailMonth}-01&to=${toDate}`).catch(() => []),
-        api(`/leave-balance/${detailUserId}?year=${currentYear}`).catch(() => null),
-      ]);
-      detailReport = normalizeMonthReport(monthRaw);
-      const lastRow = overtimeRows.length > 0 ? overtimeRows[overtimeRows.length - 1] : null;
-      detailOvertimeBalance = lastRow?.cumulative_min || 0;
-      detailFlextimeData = flextimeRaw;
-      detailLeaveBalance = leaveRaw;
-      detailShowDialog = true;
-    } catch (e) {
-      toast($t(e?.message || "Error"), "error");
-    }
-  }
-  function closeDetail() {
-    detailShowDialog = false;
-    detailReport = null;
-    detailFlextimeData = [];
-    detailOvertimeBalance = 0;
-    detailLeaveBalance = null;
-  }
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ABSCHNITT 6 – Export Stundennachweis (CSV / PDF)
+  //
+  // Teamleitungen/Admins können beliebigen Mitarbeiter wählen.
+  // Mitarbeiter exportieren immer die eigenen Daten.
+  // Desktop-Layout: Nach dem Mitarbeiter-Dropdown beginnt eine neue Zeile.
+  // ═══════════════════════════════════════════════════════════════════════════
+  let csvUserId = $currentUser.id;
+  let csvFrom = isoDate(new Date(currentYear, today.getMonth(), 1));
+  let csvTo = isoDate(today);
+  let csvError = "";
+  let exportInProgress = false;
+
+  // CSV-Formel-Injektionsschutz: Zellen, die mit =, +, -, @ usw. beginnen,
+  // werden mit einem einfachen Anführungszeichen vorangestellt.
   function csvSafe(s) {
     if (s && /^[=+\-@\t\r]/.test(s)) return "'" + s;
     return s;
   }
+
+  // Kodiert ein Array von Feldern als eine CSV-Zeile (RFC 4180).
   function csvEncode(fields) {
-    return fields
-      .map((f) => {
-        const s = f == null ? "" : String(f);
-        return s.includes(",") || s.includes('"') || s.includes("\n")
-          ? '"' + s.replace(/"/g, '""') + '"'
-          : s;
-      })
-      .join(",");
+    return fields.map(f => {
+      const s = f == null ? "" : String(f);
+      return s.includes(",") || s.includes('"') || s.includes("\n")
+        ? '"' + s.replace(/"/g, '""') + '"'
+        : s;
+    }).join(",");
   }
+
+  // Erstellt einen temporären <a>-Link und löst den Browser-Download aus.
   function downloadBlob(blob, fileName) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -257,17 +368,12 @@
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 0);
   }
+
   async function exportCsv() {
     if (exportInProgress) return;
     csvError = "";
-    if (!csvFrom || !csvTo) {
-      csvError = $t("Invalid date.");
-      return;
-    }
-    if (csvFrom > csvTo) {
-      csvError = $t("From cannot be after To.");
-      return;
-    }
+    if (!csvFrom || !csvTo) { csvError = $t("Invalid date."); return; }
+    if (csvFrom > csvTo) { csvError = $t("From cannot be after To."); return; }
     exportInProgress = true;
     try {
       const params = new URLSearchParams({
@@ -301,13 +407,12 @@
           }
         }
       }
-      const csvTotalMin = report.days.reduce((s, d) =>
-        s + (d.entries || []).reduce((es, e) => es + (e.minutes || 0), 0), 0);
-      rows.push(csvEncode([
-        "", $t("Total"), "", "", "", minToHM(csvTotalMin), "", "", "", "",
-      ]));
-      const blob = new Blob(["\uFEFF" + rows.join("\n")], { type: "text/csv;charset=utf-8" });
-      downloadBlob(blob, `report-${csvUserId}-${csvFrom}_to_${csvTo}.csv`);
+      const totalMin = report.days.reduce(
+        (s, d) => s + (d.entries || []).reduce((es, e) => es + (e.minutes || 0), 0), 0
+      );
+      rows.push(csvEncode(["", $t("Total"), "", "", "", minToHM(totalMin), "", "", "", ""]));
+      const blob = new Blob(["﻿" + rows.join("\n")], { type: "text/csv;charset=utf-8" });
+      downloadBlob(blob, `stundennachweis-${csvUserId}-${csvFrom}_${csvTo}.csv`);
       toast($t("CSV download started."), "ok");
     } catch (e) {
       csvError = $t(e?.message || "Export failed.");
@@ -319,14 +424,8 @@
   async function exportPdf() {
     if (exportInProgress) return;
     csvError = "";
-    if (!csvFrom || !csvTo) {
-      csvError = $t("Invalid date.");
-      return;
-    }
-    if (csvFrom > csvTo) {
-      csvError = $t("From cannot be after To.");
-      return;
-    }
+    if (!csvFrom || !csvTo) { csvError = $t("Invalid date."); return; }
+    if (csvFrom > csvTo) { csvError = $t("From cannot be after To."); return; }
     exportInProgress = true;
     try {
       const params = new URLSearchParams({ user_id: String(csvUserId), from: csvFrom, to: csvTo });
@@ -335,14 +434,12 @@
       const fullName = user ? `${user.first_name} ${user.last_name}` : String(csvUserId);
 
       const doc = new jsPDF({ unit: "mm", format: "a4" });
-      const PH = 297, ML = 15, MT = 15;
-      const CW = 180; // 210 - 2*15
+      const PH = 297, ML = 15, MT = 15, CW = 180;
       const rowH = 5.5, hdrH = 7;
       let y = MT;
 
-      // Column definitions: [translated label, width mm, text-align]
-      // Total must be 180mm (210 - 2×15 margins).
-      // Holiday needs 33mm for long names like "Christi Himmelfahrt".
+      // Spaltendefinitionen (Summe = 180 mm).
+      // "Holiday" braucht 33 mm für lange Namen wie "Christi Himmelfahrt".
       const cols = [
         [$t("Date"),     22, "left"],
         [$t("Weekday"),  20, "left"],
@@ -359,14 +456,12 @@
         for (let j = 0; j < i; j++) x += cols[j][1];
         return x;
       }
-
       function textX(i) {
         const [, w, align] = cols[i];
         if (align === "right")  return colX(i) + w - 1;
         if (align === "center") return colX(i) + w / 2;
         return colX(i) + 1;
       }
-
       function drawHeader() {
         doc.setFillColor(235, 235, 235);
         doc.rect(ML, y, CW, hdrH, "F");
@@ -378,7 +473,6 @@
         );
         y += hdrH;
       }
-
       function drawRow(cells, shade) {
         if (y + rowH > PH - 15) { doc.addPage(); y = MT; drawHeader(); }
         if (shade) {
@@ -397,7 +491,7 @@
         y += rowH;
       }
 
-      // Title block
+      // Titelblock
       doc.setFont("helvetica", "bold");
       doc.setFontSize(13);
       doc.setTextColor(20, 20, 20);
@@ -407,7 +501,6 @@
       doc.setTextColor(90, 90, 90);
       doc.text(`${fullName}  ·  ${csvFrom} – ${csvTo}`, ML, y + 12);
       y += 20;
-
       drawHeader();
 
       let rowIdx = 0;
@@ -416,7 +509,10 @@
         const holiday = day.holiday || "";
         const weekday = $t(day.weekday);
         if (!day.entries || day.entries.length === 0) {
-          drawRow([[day.date,0],[weekday,1],["",2],["",3],["",4],["0:00",5],[absence,6],[holiday,7]], rowIdx % 2 === 1);
+          drawRow(
+            [[day.date,0],[weekday,1],["",2],["",3],["",4],["0:00",5],[absence,6],[holiday,7]],
+            rowIdx % 2 === 1
+          );
           rowIdx++;
         } else {
           for (const e of day.entries) {
@@ -431,7 +527,7 @@
         }
       }
 
-      // Total row
+      // Gesamtzeile
       if (y + rowH > PH - 15) { doc.addPage(); y = MT; drawHeader(); }
       doc.setFillColor(235, 235, 235);
       doc.rect(ML, y, CW, rowH, "F");
@@ -439,8 +535,9 @@
       doc.setFontSize(7.5);
       doc.setTextColor(20, 20, 20);
       doc.text($t("Total"), ML + 1, y + 3.8);
-      const pdfTotalMin = report.days.reduce((s, d) =>
-        s + (d.entries || []).reduce((es, e) => es + (e.minutes || 0), 0), 0);
+      const pdfTotalMin = report.days.reduce(
+        (s, d) => s + (d.entries || []).reduce((es, e) => es + (e.minutes || 0), 0), 0
+      );
       doc.text(minToHM(pdfTotalMin), textX(5), y + 3.8, { align: "right" });
 
       doc.save(`stundennachweis-${fullName.replace(/\s+/g, "-")}-${csvFrom}_${csvTo}.pdf`);
@@ -453,8 +550,9 @@
   }
 </script>
 
-<svelte:window on:keydown={e => { if (e.key === "Escape" && detailShowDialog) closeDetail(); }} />
-
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     SEITENKOPF
+     ═══════════════════════════════════════════════════════════════════════════ -->
 <div class="top-bar">
   <div class="top-bar-title">
     <h1>{$t("Reports")}</h1>
@@ -469,52 +567,15 @@
 </div>
 
 <div class="content-area">
-  <!-- Employee detail report -->
-  {#if $currentUser.permissions?.can_approve}
-    <div class="kz-card" style="padding:20px;margin-bottom:16px">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
-        <span style="font-size:14px;font-weight:400">{$t("Employee Details")}</span>
-        <button
-          class="kz-btn-icon-sm kz-btn-ghost"
-          title={$t("help_employee_details")}
-          on:click={() => toggleHelp("detail")}
-          style="color:var(--text-tertiary);font-size:14px;cursor:help"
-        >
-          <Icon name="Info" size={14} />
-        </button>
-      </div>
-      {#if activeHelp === "detail"}
-        <div
-          style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)"
-        >
-          {$t("View detailed information about a team member including balance and statistics.")}
-        </div>
-      {/if}
-      <div class="field-row" style="margin-bottom:12px">
-        <div>
-          <label class="kz-label" for="reports-detail-user-id">{$t("Employee")}</label>
-          <select id="reports-detail-user-id" class="kz-select" bind:value={detailUserId}>
-            {#each users as u}
-              <option value={u.id}>{u.first_name} {u.last_name}</option>
-            {/each}
-          </select>
-        </div>
-        <div>
-          <label class="kz-label" for="reports-detail-month">{$t("Month")}</label>
-          <DatePicker id="reports-detail-month" mode="month" bind:value={detailMonth} />
-        </div>
-      </div>
-      <button class="kz-btn kz-btn-primary" on:click={showDetail}
-        >{$t("Show")}</button
-      >
-    </div>
-  {/if}
 
-  <!-- Overtime balance -->
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       KACHEL 1 – Überstundenkonto (laufendes Jahr, immer ganz oben)
+       Zeigt den angemeldeten Benutzer. Tabelle: ein Eintrag pro Monat.
+       ═══════════════════════════════════════════════════════════════════════ -->
   <div class="kz-card overtime-card" style="margin-bottom:16px">
     <div class="card-header">
       <span class="card-header-title" style="display:inline-flex;align-items:center;gap:8px">
-        {$t("Overtime balance {year}", { year: new Date().getFullYear() })}
+        {$t("Overtime balance {year}", { year: currentYear })}
         <button
           class="kz-btn-icon-sm kz-btn-ghost"
           title={$t("help_overtime")}
@@ -524,23 +585,23 @@
           <Icon name="Info" size={14} />
         </button>
       </span>
+      <!-- Aktueller Gesamtkontostand als farbiger Badge -->
       <span
         class="kz-chip"
-        class:kz-chip-approved={cumulative >= 0}
-        class:kz-chip-rejected={cumulative < 0}
+        class:kz-chip-approved={cumulativeBalance >= 0}
+        class:kz-chip-rejected={cumulativeBalance < 0}
       >
-        {minToHM(cumulative)}
+        {minToHM(cumulativeBalance)}
       </span>
     </div>
+
     {#if activeHelp === "overtime"}
-      <div
-        style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)"
-      >
+      <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)">
         {$t("help_overtime")}
       </div>
     {/if}
 
-    <!-- Desktop: table -->
+    <!-- Desktop-Tabelle: eine Zeile pro Monat -->
     <div class="overtime-table-desktop">
       <table class="kz-table">
         <thead>
@@ -551,27 +612,26 @@
           </tr>
         </thead>
         <tbody>
-          {#each overtime as m, i}
+          {#each overtime as m}
             {@const cum = m.cumulative_min}
             <tr>
-              <td class="tab-num">{m.month}</td>
+              <!-- Monatsname statt "YYYY-MM" -->
+              <td class="tab-num">{fmtMonthLabel(m.month)}</td>
               <td class="tab-num">{minToHM(m.target_min)}</td>
               <td class="tab-num">{minToHM(m.actual_min)}</td>
+              <!-- Diff: rot bei Minusstunden, grün bei Überstunden -->
               <td
                 class="tab-num"
-                style="color:{m.diff_min < 0
-                  ? 'var(--danger-text)'
-                  : 'var(--success-text)'}"
+                style="color:{m.diff_min < 0 ? 'var(--danger-text)' : m.diff_min > 0 ? 'var(--success-text)' : 'var(--text-tertiary)'}"
               >
-                {minToHM(m.diff_min)}
+                {m.diff_min > 0 ? "+" : ""}{minToHM(m.diff_min)}
               </td>
+              <!-- Kumuliert: rot bei Defizit, grün bei Guthaben -->
               <td
                 class="tab-num"
-                style="color:{cum < 0
-                  ? 'var(--danger-text)'
-                  : 'var(--success-text)'}"
+                style="color:{cum < 0 ? 'var(--danger-text)' : cum > 0 ? 'var(--success-text)' : 'var(--text-tertiary)'}"
               >
-                {minToHM(cum)}
+                {cum > 0 ? "+" : ""}{minToHM(cum)}
               </td>
             </tr>
           {/each}
@@ -579,44 +639,32 @@
       </table>
     </div>
 
-    <!-- Mobile: stacked tiles -->
+    <!-- Mobile-Kacheln: eine Kachel pro Monat -->
     <div class="overtime-tiles-mobile">
-      {#each overtime as m, i}
+      {#each overtime as m}
         {@const cum = m.cumulative_min}
         <div class="overtime-tile">
           <div style="font-weight:400;font-size:13px;margin-bottom:4px">
-            {m.month}
+            {fmtMonthLabel(m.month)}
           </div>
           <div class="overtime-tile-row">
-            <span>{$t("Target")}</span><span class="tab-num"
-              >{minToHM(m.target_min)}</span
-            >
+            <span>{$t("Target")}</span>
+            <span class="tab-num">{minToHM(m.target_min)}</span>
           </div>
           <div class="overtime-tile-row">
-            <span>{$t("Actual")}</span><span class="tab-num"
-              >{minToHM(m.actual_min)}</span
-            >
+            <span>{$t("Actual")}</span>
+            <span class="tab-num">{minToHM(m.actual_min)}</span>
           </div>
           <div class="overtime-tile-row">
             <span>{$t("Diff")}</span>
-            <span
-              class="tab-num"
-              style="color:{m.diff_min < 0
-                ? 'var(--danger-text)'
-                : 'var(--success-text)'}"
-            >
-              {minToHM(m.diff_min)}
+            <span class="tab-num" style="color:{m.diff_min < 0 ? 'var(--danger-text)' : m.diff_min > 0 ? 'var(--success-text)' : 'var(--text-tertiary)'}">
+              {m.diff_min > 0 ? "+" : ""}{minToHM(m.diff_min)}
             </span>
           </div>
           <div class="overtime-tile-row">
             <span>{$t("Cumulative")}</span>
-            <span
-              class="tab-num"
-              style="color:{cum < 0
-                ? 'var(--danger-text)'
-                : 'var(--success-text)'}"
-            >
-              {minToHM(cum)}
+            <span class="tab-num" style="color:{cum < 0 ? 'var(--danger-text)' : cum > 0 ? 'var(--success-text)' : 'var(--text-tertiary)'}">
+              {cum > 0 ? "+" : ""}{minToHM(cum)}
             </span>
           </div>
         </div>
@@ -624,31 +672,40 @@
     </div>
   </div>
 
-  <!-- Monthly report -->
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       KACHEL 2 – Mitarbeiterbericht
+       Kombiniert die bisherigen Kacheln "Mitarbeiterdetails" (Dialog) und
+       "Monatsbericht" (Inline) in einer gemeinsamen Inline-Kachel.
+
+       Mitarbeiter-Rolle: kein Dropdown, automatisch eigene Daten.
+       Teamleitung / Admin: Dropdown zur Auswahl des Mitarbeiters.
+       ═══════════════════════════════════════════════════════════════════════ -->
   <div class="kz-card" style="padding:20px;margin-bottom:16px">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
-      <span style="font-size:14px;font-weight:400">{$t("Monthly report")}</span>
+      <span style="font-size:14px;font-weight:400">{$t("Employee report")}</span>
       <button
         class="kz-btn-icon-sm kz-btn-ghost"
-        title={$t("help_monthly_report")}
-        on:click={() => toggleHelp("monthly")}
+        title={$t("help_employee_details")}
+        on:click={() => toggleHelp("report")}
         style="color:var(--text-tertiary);font-size:14px;cursor:help"
       >
         <Icon name="Info" size={14} />
       </button>
     </div>
-    {#if activeHelp === "monthly"}
-      <div
-        style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)"
-      >
-        {$t("help_monthly_report")}
+
+    {#if activeHelp === "report"}
+      <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)">
+        {$t("View detailed information about a team member including balance and statistics.")}
       </div>
     {/if}
+
+    <!-- Steuerungszeile: Mitarbeiter-Dropdown (nur für Leitungen/Admins) + Monatsauswahl -->
     <div class="field-row" style="margin-bottom:12px">
       {#if $currentUser.role !== "employee"}
+        <!-- Teamleitungen und Admins können jeden Mitarbeiter wählen. -->
         <div>
-          <label class="kz-label" for="reports-user-id">{$t("Employee")}</label>
-          <select id="reports-user-id" class="kz-select" bind:value={userId}>
+          <label class="kz-label" for="report-user-id">{$t("Employee")}</label>
+          <select id="report-user-id" class="kz-select" bind:value={reportUserId}>
             {#each users as u}
               <option value={u.id}>{u.first_name} {u.last_name}</option>
             {/each}
@@ -656,43 +713,149 @@
         </div>
       {/if}
       <div>
-        <label class="kz-label" for="reports-month">{$t("Month")}</label>
-        <DatePicker id="reports-month" mode="month" bind:value={month} />
+        <label class="kz-label" for="report-month">{$t("Month")}</label>
+        <DatePicker id="report-month" mode="month" bind:value={reportMonth} />
       </div>
     </div>
-    <button class="kz-btn kz-btn-primary" on:click={showMonth}
-      >{$t("Show")}</button
-    >
 
-    {#if monthReport}
-      <div class="stat-cards" style="margin-top:16px">
+    <button class="kz-btn kz-btn-primary" on:click={loadReport}>{$t("Show")}</button>
+
+    {#if reportData}
+      <!-- ── Zusammenfassungs-Kacheln (Dashboard-Kacheln des Mitarbeiters) ── -->
+      <div style="font-size:12px;font-weight:400;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.05em;margin-top:20px;margin-bottom:6px">
+        {$t("My Balance")}
+      </div>
+      <div class="stat-cards" style="margin-bottom:16px">
+
+        <!-- Erfasste vs. Soll-Stunden im Monat -->
         <div class="kz-card stat-card">
-          <div class="stat-card-label">{$t("Target")}</div>
-          <div class="stat-card-value tab-num">
-            {minToHM(monthReport.target_min)}
-          </div>
-        </div>
-        <div class="kz-card stat-card">
-          <div class="stat-card-label">{$t("Actual")}</div>
-          <div class="stat-card-value tab-num">
-            {minToHM(monthReport.actual_min)}
-          </div>
-        </div>
-        <div class="kz-card stat-card">
-          <div class="stat-card-label">{$t("Diff")}</div>
+          <div class="stat-card-label">{$t("Logged")}</div>
           <div
             class="stat-card-value tab-num"
-            style="color:{monthReport.diff_min < 0
-              ? 'var(--danger-text)'
-              : 'var(--success-text)'}"
+            style="color:{reportData.monthReport.actual_min >= reportData.monthReport.target_min ? 'var(--accent)' : 'var(--warning-text)'}"
           >
-            {minToHM(monthReport.diff_min)}
+            {formatHours(((reportData.monthReport.actual_min || 0) / 60).toFixed(1))}
+          </div>
+          <div class="stat-card-sub">
+            {$t("of {target} target", { target: formatHours(((reportData.monthReport.target_min || 0) / 60).toFixed(1)) })}
+          </div>
+        </div>
+
+        <!-- Überstunden / Minusstunden dieses Monats -->
+        <div class="kz-card stat-card">
+          <div class="stat-card-label">{$t("Monthly diff")}</div>
+          <div
+            class="stat-card-value tab-num"
+            style="color:{reportData.monthReport.diff_min < 0 ? 'var(--danger-text)' : reportData.monthReport.diff_min > 0 ? 'var(--success-text)' : 'var(--text-tertiary)'}"
+          >
+            {reportData.monthReport.diff_min > 0 ? "+" : ""}
+            {minToHM(reportData.monthReport.diff_min)}
+          </div>
+        </div>
+
+        <!-- Kumulierter Gleitzeitkontostand (laufendes Jahr, bis gestern) -->
+        <div class="kz-card stat-card">
+          <div class="stat-card-label">{$t("Overtime overview")}</div>
+          <div
+            class="stat-card-value tab-num"
+            style="color:{reportData.cumulativeOvertimeMin < 0 ? 'var(--danger-text)' : 'var(--success-text)'}"
+          >
+            {formatHours(((reportData.cumulativeOvertimeMin || 0) / 60).toFixed(1))}
+          </div>
+        </div>
+
+        <!-- Monatsstatus (Entwurf / Eingereicht / Genehmigt / ...) -->
+        <div class="kz-card stat-card">
+          <div class="stat-card-label">{$t("Status")}</div>
+          <div
+            class="stat-card-value tab-num"
+            style="font-size:18px;color:{reportStatusColor}"
+          >
+            {statusLabel(reportData.monthStatus)}
           </div>
         </div>
       </div>
 
-      {#if monthReport.entries?.length}
-        <div class="kz-card" style="overflow-x:auto;margin-top:12px">
+      <!-- ── Urlaubsstand (falls verfügbar) ─────────────────────────────── -->
+      {#if reportData.leaveBalance}
+        <div style="font-size:12px;font-weight:400;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">
+          {$t("Vacation")}
+        </div>
+        <div class="stat-cards" style="margin-bottom:16px">
+          <div class="kz-card stat-card">
+            <div class="stat-card-label">{$t("Entitlement")}</div>
+            <div class="stat-card-value tab-num">{reportData.leaveBalance.annual_entitlement}</div>
+          </div>
+          <div class="kz-card stat-card">
+            <div class="stat-card-label">{$t("Taken")}</div>
+            <div class="stat-card-value tab-num">{reportData.leaveBalance.already_taken}</div>
+          </div>
+          {#if reportData.leaveBalance.approved_upcoming > 0}
+            <div class="kz-card stat-card">
+              <div class="stat-card-label">{$t("Planned")}</div>
+              <div class="stat-card-value tab-num">{reportData.leaveBalance.approved_upcoming}</div>
+            </div>
+          {/if}
+          {#if reportData.leaveBalance.requested > 0}
+            <div class="kz-card stat-card">
+              <div class="stat-card-label">{$t("Requested")}</div>
+              <div class="stat-card-value tab-num">{reportData.leaveBalance.requested}</div>
+            </div>
+          {/if}
+          <div class="kz-card stat-card">
+            <div class="stat-card-label">{$t("Remaining")}</div>
+            <div
+              class="stat-card-value tab-num"
+              style="color:{reportData.leaveBalance.available < 0 ? 'var(--danger-text)' : 'var(--success-text)'}"
+            >
+              {reportData.leaveBalance.available}
+            </div>
+          </div>
+        </div>
+      {/if}
+
+      <!-- ── Abwesenheits-Kacheln für den gewählten Monat ─────────────────── -->
+      {#if Object.keys(reportAbsenceSummary).length > 0}
+        <div style="font-size:12px;font-weight:400;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">
+          {$t("Absences")}
+        </div>
+        <div class="stat-cards" style="margin-bottom:16px">
+          {#each Object.entries(reportAbsenceSummary) as [kind, days]}
+            <div class="kz-card stat-card">
+              <div class="stat-card-label">{absenceKindLabel(kind)}</div>
+              <div class="stat-card-value tab-num">{days}</div>
+              <div class="stat-card-sub">{$t("days")}</div>
+            </div>
+          {/each}
+        </div>
+      {/if}
+
+      <!-- ── Kategoriebuchhaltung als Balkendiagramm ──────────────────────── -->
+      {#if reportData.monthReport.category_totals && Object.keys(reportData.monthReport.category_totals).length > 0}
+        {@const catEntries = Object.entries(reportData.monthReport.category_totals).sort((a, b) => b[1] - a[1])}
+        {@const catMax = catEntries[0][1]}
+        <div class="kz-card" style="padding:16px;margin-bottom:12px">
+          <div style="font-weight:400;margin-bottom:12px">{$t("Category breakdown")}</div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            {#each catEntries as [cat, mins]}
+              <div style="display:grid;grid-template-columns:130px 1fr 52px;align-items:center;gap:8px;font-size:12px">
+                <span style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title={$t(cat)}>
+                  {$t(cat)}
+                </span>
+                <div style="background:var(--bg-muted);border-radius:3px;height:8px;overflow:hidden">
+                  <div style="height:100%;border-radius:3px;background:var(--accent);width:{catMax > 0 ? Math.round((mins / catMax) * 100) : 0}%;transition:width .3s"></div>
+                </div>
+                <span class="tab-num" style="color:var(--text-tertiary);text-align:right">{minToHM(mins)}</span>
+              </div>
+            {/each}
+          </div>
+        </div>
+      {/if}
+
+      <!-- ── Zeiteinträge-Tabelle ────────────────────────────────────────── -->
+      {#if reportData.monthReport.entries?.length}
+        <div class="kz-card" style="overflow-x:auto;margin-bottom:12px">
+          <div style="font-weight:400;padding:16px 16px 12px">{$t("Entries")}</div>
           <table class="kz-table">
             <thead>
               <tr>
@@ -705,18 +868,16 @@
               </tr>
             </thead>
             <tbody>
-              {#each monthReport.entries as e}
+              {#each reportData.monthReport.entries as e}
                 <tr class:entry-rejected={e.status === "rejected"}>
                   <td class="tab-num">{fmtDate(e.entry_date)}</td>
                   <td class="tab-num">{e.start_time?.slice(0, 5)}</td>
                   <td class="tab-num">{e.end_time?.slice(0, 5)}</td>
                   <td class="tab-num">{minToHM(e.minutes || 0)}</td>
                   <td>{e.category_name ? $t(e.category_name) : "–"}</td>
-                  <td
-                    ><span class="kz-chip kz-chip-{e.status}"
-                      >{statusLabel(e.status)}</span
-                    ></td
-                  >
+                  <td>
+                    <span class="kz-chip kz-chip-{e.status}">{statusLabel(e.status)}</span>
+                  </td>
                 </tr>
               {/each}
             </tbody>
@@ -724,11 +885,10 @@
         </div>
       {/if}
 
-      {#if monthReport.absences?.length}
-        <div class="kz-card" style="overflow-x:auto;margin-top:12px">
-          <div class="card-header">
-            <span class="card-header-title">{$t("Absences")}</span>
-          </div>
+      <!-- ── Abwesenheiten-Tabelle ───────────────────────────────────────── -->
+      {#if reportData.monthReport.absences?.length}
+        <div class="kz-card" style="overflow-x:auto">
+          <div style="font-weight:400;padding:16px 16px 12px">{$t("Absences")}</div>
           <table class="kz-table">
             <thead>
               <tr>
@@ -739,7 +899,7 @@
               </tr>
             </thead>
             <tbody>
-              {#each monthReport.absences as a}
+              {#each reportData.monthReport.absences as a}
                 <tr>
                   <td>{absenceKindLabel(a.kind)}</td>
                   <td class="tab-num">{fmtDate(a.start_date)}</td>
@@ -754,7 +914,11 @@
     {/if}
   </div>
 
-  <!-- Team report -->
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       KACHEL 3 – Teambericht (nur Teamleitungen / Admins)
+       Spalten: Gleitzeitkonto | Monatsdiff | Krank | Urlaub gen. | Urlaub gep. | Wochen
+       Bei laufendem Monat: Hinweistext, dass Daten nur bis gestern reichen.
+       ═══════════════════════════════════════════════════════════════════════ -->
   {#if $currentUser.permissions?.can_view_team_reports}
     <div class="kz-card" style="padding:20px;margin-bottom:16px">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
@@ -769,61 +933,79 @@
         </button>
       </div>
       {#if activeHelp === "team"}
-        <div
-          style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)"
-        >
+        <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)">
           {$t("help_team_report")}
         </div>
       {/if}
-      <div
-        style="display:flex;gap:12px;align-items:flex-end;margin-bottom:12px;flex-wrap:wrap"
-      >
+
+      <div style="display:flex;gap:12px;align-items:flex-end;margin-bottom:12px;flex-wrap:wrap">
         <div style="flex:1">
-          <label class="kz-label" for="reports-team-month">{$t("Month")}</label>
-          <DatePicker
-            id="reports-team-month"
-            mode="month"
-            bind:value={teamMonth}
-          />
+          <label class="kz-label" for="team-month">{$t("Month")}</label>
+          <DatePicker id="team-month" mode="month" bind:value={teamMonth} />
         </div>
-        <button class="kz-btn kz-btn-primary" on:click={showTeam}
-          >{$t("Show")}</button
-        >
+        <button class="kz-btn kz-btn-primary" on:click={showTeam}>{$t("Show")}</button>
       </div>
 
       {#if teamReport}
+        <!-- Hinweis bei laufendem Monat: Daten nur bis gestern -->
+        {#if teamMonth === currentMonthStr}
+          <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:10px;padding:6px 10px;background:var(--bg-muted);border-radius:var(--radius-sm)">
+            {$t("Note: current month – data up to yesterday")}
+          </div>
+        {/if}
+
+        <!-- Scrollbare Tabelle mit allen neuen Spalten -->
         <div class="kz-table-wrap">
-          <table class="kz-table kz-table--fit" style="table-layout:fixed">
+          <table class="kz-table kz-table--fit">
             <thead>
               <tr>
-                <th>{$t("Employee")}</th>
-                <th style="text-align:right;width:22%">{$t("Target")}</th>
-                <th style="text-align:right;width:22%">{$t("Actual")}</th>
-                <th style="text-align:right;width:22%">{$t("Diff")}</th>
+                <!-- Name -->
+                <th style="min-width:120px">{$t("Employee")}</th>
+                <!-- Aktueller Gleitzeitkontostand -->
+                <th style="text-align:right;white-space:nowrap">{$t("Current flextime balance")}</th>
+                <!-- Monatsdifferenz (Überstunden / Minusstunden) -->
+                <th style="text-align:right;white-space:nowrap">{$t("Monthly diff")}</th>
+                <!-- Krankheitstage -->
+                <th style="text-align:right;white-space:nowrap">{$t("Sick days")}</th>
+                <!-- Genommene Urlaubstage -->
+                <th style="text-align:right;white-space:nowrap">{$t("Vacation taken")}</th>
+                <!-- Geplante Urlaubstage -->
+                <th style="text-align:right;white-space:nowrap">{$t("Vacation planned")}</th>
+                <!-- Alle vergangenen Wochen eingereicht? -->
+                <th style="text-align:center;white-space:nowrap">{$t("All weeks submitted")}</th>
               </tr>
             </thead>
             <tbody>
               {#each teamReport as r}
-                {@const diff = r.actual_min - r.target_min}
                 <tr>
                   <td style="font-weight:500">{r.name}</td>
-                  <td
-                    class="tab-num"
-                    style="text-align:right;color:var(--text-tertiary)"
-                    >{minToHM(r.target_min)}</td
-                  >
-                  <td class="tab-num" style="text-align:right;font-weight:400"
-                    >{minToHM(r.actual_min)}</td
-                  >
-                  <td
-                    class="tab-num"
-                    style="text-align:right;font-weight:500;color:{diff < 0
-                      ? 'var(--danger-text)'
-                      : diff > 0
-                        ? 'var(--success-text)'
-                        : 'var(--text-tertiary)'}"
-                  >
-                    {diff > 0 ? "+" : ""}{minToHM(diff)}
+                  <!-- Gleitzeitkonto: rot = Defizit, grün = Guthaben -->
+                  <td class="tab-num" style="text-align:right;font-weight:500;color:{r.flextime_balance_min < 0 ? 'var(--danger-text)' : r.flextime_balance_min > 0 ? 'var(--success-text)' : 'var(--text-tertiary)'}">
+                    {r.flextime_balance_min > 0 ? "+" : ""}{minToHM(r.flextime_balance_min)}
+                  </td>
+                  <!-- Monatsdiff -->
+                  <td class="tab-num" style="text-align:right;color:{r.diff_min < 0 ? 'var(--danger-text)' : r.diff_min > 0 ? 'var(--success-text)' : 'var(--text-tertiary)'}">
+                    {r.diff_min > 0 ? "+" : ""}{minToHM(r.diff_min)}
+                  </td>
+                  <!-- Krankheitstage (Dezimalzahl, da Halbtage möglich) -->
+                  <td class="tab-num" style="text-align:right;color:var(--text-tertiary)">
+                    {r.sick_days > 0 ? r.sick_days.toFixed(r.sick_days % 1 === 0 ? 0 : 1) : "–"}
+                  </td>
+                  <!-- Urlaub genommen -->
+                  <td class="tab-num" style="text-align:right;color:var(--text-tertiary)">
+                    {r.vacation_days > 0 ? r.vacation_days.toFixed(r.vacation_days % 1 === 0 ? 0 : 1) : "–"}
+                  </td>
+                  <!-- Urlaub geplant -->
+                  <td class="tab-num" style="text-align:right;color:var(--text-tertiary)">
+                    {r.vacation_planned_days > 0 ? r.vacation_planned_days.toFixed(r.vacation_planned_days % 1 === 0 ? 0 : 1) : "–"}
+                  </td>
+                  <!-- Alle Wochen eingereicht: grünes Häkchen oder rotes X -->
+                  <td style="text-align:center">
+                    {#if r.weeks_all_submitted}
+                      <span style="color:var(--success-text)">✓</span>
+                    {:else}
+                      <span style="color:var(--danger-text)">✗</span>
+                    {/if}
                   </td>
                 </tr>
               {/each}
@@ -834,12 +1016,15 @@
     </div>
   {/if}
 
-  <!-- Category report -->
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       KACHEL 4 – Kategorieauswertung
+       Mitarbeiter: eigene Buchungen (nicht abgelehnte Einträge).
+       Teamleitungen/Admins: Matrix Mitarbeiter × Kategorie.
+       Filter-Button erscheint nach dem ersten Laden mit Ergebnissen.
+       ═══════════════════════════════════════════════════════════════════════ -->
   <div class="kz-card" style="padding:20px;margin-bottom:16px">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
-      <span style="font-size:14px;font-weight:400"
-        >{$t("Category breakdown")}</span
-      >
+      <span style="font-size:14px;font-weight:400">{$t("Category breakdown")}</span>
       <button
         class="kz-btn-icon-sm kz-btn-ghost"
         title={$t("help_category_breakdown")}
@@ -850,37 +1035,37 @@
       </button>
     </div>
     {#if activeHelp === "cat"}
-      <div
-        style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)"
-      >
+      <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)">
         {$t("help_category_breakdown")}
       </div>
     {/if}
+
     <div class="field-row" style="margin-bottom:12px">
       <div>
-        <label class="kz-label" for="reports-category-from">{$t("From")}</label>
-        <DatePicker
-          id="reports-category-from"
-          bind:value={catFrom}
-          max={catTo}
-        />
+        <label class="kz-label" for="cat-from">{$t("From")}</label>
+        <DatePicker id="cat-from" bind:value={catFrom} max={catTo} />
       </div>
       <div>
-        <label class="kz-label" for="reports-category-to">{$t("To")}</label>
-        <DatePicker id="reports-category-to" bind:value={catTo} min={catFrom} />
+        <label class="kz-label" for="cat-to">{$t("To")}</label>
+        <DatePicker id="cat-to" bind:value={catTo} min={catFrom} />
       </div>
     </div>
-    <div style="display:flex;gap:8px;margin-bottom:12px">
+
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
       <button class="kz-btn kz-btn-primary" on:click={showCat}>{$t("Run")}</button>
-      {#if (catReport && catReport.length > 0) || (teamCatReport && teamCatReport.length > 0)}
+      <!-- Filter-Button: nur sichtbar wenn Ergebnisse vorhanden -->
+      {#if (catReport && catReport.length > 0) || (allTeamCatColumns.length > 0)}
         <button class="kz-btn" on:click={() => catShowFilter = !catShowFilter}>
-          {$t("Filter")} ({catFilteredCategories.length})
+          {$t("Filter")}
+          {#if catFilteredCategories.length > 0}
+            ({catFilteredCategories.length})
+          {/if}
         </button>
       {/if}
     </div>
 
+    <!-- Teamleitung/Admin-Filterbereich (Kategorien der Teammatrix) -->
     {#if catShowFilter && allTeamCatColumns.length > 0}
-      <!-- Lead: filter over all team categories -->
       <div style="padding:12px;background:var(--bg-muted);border-radius:var(--radius-sm);margin-bottom:12px">
         <div style="display:flex;flex-wrap:wrap;gap:8px">
           {#each allTeamCatColumns as col}
@@ -898,8 +1083,8 @@
       </div>
     {/if}
 
+    <!-- Mitarbeiter-Filterbereich (eigene Kategorien) -->
     {#if catShowFilter && catReport && catReport.length > 0}
-      <!-- Employee: filter over own categories -->
       <div style="padding:12px;background:var(--bg-muted);border-radius:var(--radius-sm);margin-bottom:12px">
         <div style="display:flex;flex-wrap:wrap;gap:8px">
           {#each catReport as cat}
@@ -917,11 +1102,9 @@
       </div>
     {/if}
 
+    <!-- Teammatrix (Teamleitung / Admin) -->
     {#if teamCatReport}
-      <!-- Lead: matrix table employee × category -->
-      {#if teamCatReport.length === 0}
-        <div style="padding:16px;color:var(--text-tertiary);font-size:13px">{$t("No data.")}</div>
-      {:else if visibleTeamCatColumns.length === 0}
+      {#if teamCatReport.length === 0 || visibleTeamCatColumns.length === 0}
         <div style="padding:16px;color:var(--text-tertiary);font-size:13px">{$t("No data.")}</div>
       {:else}
         <div class="kz-table-wrap" style="margin-top:12px">
@@ -965,13 +1148,13 @@
       {/if}
     {/if}
 
+    <!-- Mitarbeiterliste (eigene Kategorien) -->
     {#if catReport}
-      <!-- Employee: own category aggregation -->
       {#if catReport.length === 0}
         <div style="padding:16px;color:var(--text-tertiary);font-size:13px">{$t("No data.")}</div>
-      {:else if filteredCatReport.length === 0 && catFilteredCategories.length > 0}
+      {:else if filteredCatReport && filteredCatReport.length === 0 && catFilteredCategories.length > 0}
         <div style="padding:16px;color:var(--text-tertiary);font-size:13px">{$t("No data.")}</div>
-      {:else}
+      {:else if filteredCatReport}
         <div class="kz-table-wrap" style="margin-top:12px">
           <table class="kz-table kz-table--fit" style="table-layout:fixed">
             <thead>
@@ -1003,7 +1186,10 @@
     {/if}
   </div>
 
-  <!-- Absence report -->
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       KACHEL 5 – Abwesenheiten
+       Zeigt Abwesenheitseinträge mit Typverteilung für einen wählbaren Zeitraum.
+       ═══════════════════════════════════════════════════════════════════════ -->
   <div class="kz-card" style="padding:20px;margin-bottom:16px">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
       <span style="font-size:14px;font-weight:400">{$t("Absences")}</span>
@@ -1017,41 +1203,31 @@
       </button>
     </div>
     {#if activeHelp === "absence"}
-      <div
-        style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)"
-      >
+      <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)">
         {$t("View absence entries over a selected period with type distribution.")}
       </div>
     {/if}
+
     <div class="field-row" style="margin-bottom:12px">
       <div>
-        <label class="kz-label" for="reports-absence-from">{$t("From")}</label>
-        <DatePicker
-          id="reports-absence-from"
-          bind:value={absenceFrom}
-          max={absenceTo}
-        />
+        <label class="kz-label" for="absence-from">{$t("From")}</label>
+        <DatePicker id="absence-from" bind:value={absenceFrom} max={absenceTo} />
       </div>
       <div>
-        <label class="kz-label" for="reports-absence-to">{$t("To")}</label>
-        <DatePicker id="reports-absence-to" bind:value={absenceTo} min={absenceFrom} />
+        <label class="kz-label" for="absence-to">{$t("To")}</label>
+        <DatePicker id="absence-to" bind:value={absenceTo} min={absenceFrom} />
       </div>
     </div>
-    <button class="kz-btn kz-btn-primary" on:click={showAbsences}>{$t("Run")}</button
-    >
+    <button class="kz-btn kz-btn-primary" on:click={showAbsences}>{$t("Run")}</button>
 
     {#if absenceReport}
       {#if absenceReport.length === 0}
-        <div style="padding:16px;color:var(--text-tertiary);font-size:13px">
-          {$t("No data.")}
-        </div>
+        <div style="padding:16px;color:var(--text-tertiary);font-size:13px">{$t("No data.")}</div>
       {:else}
         <div class="stat-cards" style="margin-top:16px">
           <div class="kz-card stat-card">
             <div class="stat-card-label">{$t("Total days")}</div>
-            <div class="stat-card-value tab-num">
-              {absenceTotalDays}
-            </div>
+            <div class="stat-card-value tab-num">{absenceTotalDays}</div>
           </div>
           {#each Object.entries(absenceByKind) as [kind, days]}
             <div class="kz-card stat-card">
@@ -1078,7 +1254,9 @@
                 {@const absUser = isLeadView ? users.find(u => u.id === a.user_id) : null}
                 <tr class:entry-rejected={a.status === "rejected"}>
                   {#if isLeadView}
-                    <td style="font-weight:500">{absUser ? `${absUser.first_name} ${absUser.last_name}` : `#${a.user_id}`}</td>
+                    <td style="font-weight:500">
+                      {absUser ? `${absUser.first_name} ${absUser.last_name}` : `#${a.user_id}`}
+                    </td>
                   {/if}
                   <td>{absenceKindLabel(a.kind)}</td>
                   <td class="tab-num" style="text-align:right">{fmtDate(a.start_date)}</td>
@@ -1094,10 +1272,13 @@
     {/if}
   </div>
 
-  <!-- Export tile -->
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       KACHEL 6 – Export Stundennachweis (CSV / PDF)
+       Desktop: Mitarbeiter-Dropdown in eigener Zeile, dann Von/Bis darunter.
+       ═══════════════════════════════════════════════════════════════════════ -->
   <div class="kz-card" style="padding:20px">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
-      <span style="font-size:14px;font-weight:400">{$t("Export")}</span>
+      <span style="font-size:14px;font-weight:400">{$t("Export timesheet")}</span>
       <button
         class="kz-btn-icon-sm kz-btn-ghost"
         title={$t("help_csv_export")}
@@ -1108,23 +1289,26 @@
       </button>
     </div>
     {#if activeHelp === "csv"}
-      <div
-        style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)"
-      >
+      <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)">
         {$t("help_csv_export")}
       </div>
     {/if}
+
+    <!-- Desktop-Layout: Mitarbeiter steht in einer eigenen Zeile,
+         dann Von/Bis-Zeile darunter. Mobile: alles untereinander. -->
+    {#if $currentUser.role !== "employee"}
+      <!-- Erste Zeile: nur Mitarbeiter-Auswahl -->
+      <div style="margin-bottom:12px">
+        <label class="kz-label" for="csv-user-id">{$t("Employee")}</label>
+        <select id="csv-user-id" class="kz-select" bind:value={csvUserId}>
+          {#each users as u}
+            <option value={u.id}>{u.first_name} {u.last_name}</option>
+          {/each}
+        </select>
+      </div>
+    {/if}
+    <!-- Zweite Zeile: Von / Bis -->
     <div class="field-row" style="margin-bottom:12px">
-      {#if $currentUser.role !== "employee"}
-        <div>
-          <label class="kz-label" for="csv-user-id">{$t("Employee")}</label>
-          <select id="csv-user-id" class="kz-select" bind:value={csvUserId}>
-            {#each users as u}
-              <option value={u.id}>{u.first_name} {u.last_name}</option>
-            {/each}
-          </select>
-        </div>
-      {/if}
       <div>
         <label class="kz-label" for="csv-from">{$t("From")}</label>
         <DatePicker id="csv-from" bind:value={csvFrom} max={csvTo} />
@@ -1134,6 +1318,7 @@
         <DatePicker id="csv-to" bind:value={csvTo} min={csvFrom} />
       </div>
     </div>
+
     <div class="error-text">{csvError}</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="kz-btn kz-btn-primary" on:click={exportCsv} disabled={exportInProgress}>
@@ -1144,190 +1329,11 @@
       </button>
     </div>
   </div>
+
 </div>
 
-{#if detailShowDialog && detailReport}
-  {@const detailUser = users.find(u => u.id === detailUserId)}
-  <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
-  <div class="dialog-backdrop" on:click={closeDetail}></div>
-  <dialog open on:close={closeDetail} style="max-width:900px;z-index:1001">
-    <header style="justify-content:space-between">
-      <span style="font-size:16px;font-weight:400">
-        {$t("Employee Details")} · {detailUser ? `${detailUser.first_name} ${detailUser.last_name}` : `#${detailUserId}`}
-      </span>
-      <button
-        class="kz-btn-icon-sm kz-btn-ghost"
-        on:click={closeDetail}
-        aria-label={$t("Close")}
-      >
-        <Icon name="X" size={16} />
-      </button>
-    </header>
-
-    <div class="dialog-body" style="padding:20px;gap:16px">
-      <!-- Flextime balance -->
-      <div style="font-size:12px;font-weight:400;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">
-        {$t("Flextime")}
-      </div>
-      <div class="stat-cards" style="margin-bottom:16px">
-        <div class="kz-card stat-card">
-          <div class="stat-card-label">{$t("Overtime balance")}</div>
-          <div
-            class="stat-card-value tab-num"
-            style="color:{detailOvertimeBalance < 0 ? 'var(--danger-text)' : 'var(--success-text)'}"
-          >{minToHM(detailOvertimeBalance)}</div>
-        </div>
-        <div class="kz-card stat-card">
-          <div class="stat-card-label">{$t("Target")}</div>
-          <div class="stat-card-value tab-num">{minToHM(detailReport.target_min)}</div>
-        </div>
-        <div class="kz-card stat-card">
-          <div class="stat-card-label">{$t("Actual")}</div>
-          <div class="stat-card-value tab-num">{minToHM(detailReport.actual_min)}</div>
-        </div>
-        <div class="kz-card stat-card">
-          <div class="stat-card-label">{$t("Diff")}</div>
-          <div
-            class="stat-card-value tab-num"
-            style="color:{detailReport.diff_min < 0 ? 'var(--danger-text)' : 'var(--success-text)'}"
-          >{minToHM(detailReport.diff_min)}</div>
-        </div>
-      </div>
-
-      <!-- Vacation balance -->
-      {#if detailLeaveBalance}
-        <div style="font-size:12px;font-weight:400;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">
-          {$t("Vacation")}
-        </div>
-        <div class="stat-cards" style="margin-bottom:16px">
-          <div class="kz-card stat-card">
-            <div class="stat-card-label">{$t("Entitlement")}</div>
-            <div class="stat-card-value tab-num">{detailLeaveBalance.annual_entitlement}</div>
-          </div>
-          <div class="kz-card stat-card">
-            <div class="stat-card-label">{$t("Taken")}</div>
-            <div class="stat-card-value tab-num">{detailLeaveBalance.already_taken}</div>
-          </div>
-          {#if detailLeaveBalance.approved_upcoming > 0}
-            <div class="kz-card stat-card">
-              <div class="stat-card-label">{$t("Planned")}</div>
-              <div class="stat-card-value tab-num">{detailLeaveBalance.approved_upcoming}</div>
-            </div>
-          {/if}
-          {#if detailLeaveBalance.requested > 0}
-            <div class="kz-card stat-card">
-              <div class="stat-card-label">{$t("Requested")}</div>
-              <div class="stat-card-value tab-num">{detailLeaveBalance.requested}</div>
-            </div>
-          {/if}
-          <div class="kz-card stat-card">
-            <div class="stat-card-label">{$t("Remaining")}</div>
-            <div
-              class="stat-card-value tab-num"
-              style="color:{detailLeaveBalance.available < 0 ? 'var(--danger-text)' : 'var(--success-text)'}"
-            >{detailLeaveBalance.available}</div>
-          </div>
-        </div>
-      {/if}
-
-      <!-- Flextime Chart -->
-      {#if detailFlextimeData.length > 0}
-        <div class="kz-card" style="padding:16px">
-          <div style="font-weight:400;margin-bottom:8px">{$t("Flextime")}</div>
-          <FlextimeChart data={detailFlextimeData} />
-        </div>
-      {/if}
-
-      <!-- Category breakdown bar chart -->
-      {#if detailReport.category_totals && Object.keys(detailReport.category_totals).length > 0}
-        {@const catEntries = Object.entries(detailReport.category_totals).sort((a, b) => b[1] - a[1])}
-        {@const catMax = catEntries[0][1]}
-        <div class="kz-card" style="padding:16px">
-          <div style="font-weight:400;margin-bottom:12px">{$t("Category breakdown")}</div>
-          <div style="display:flex;flex-direction:column;gap:8px">
-            {#each catEntries as [cat, mins]}
-              <div style="display:grid;grid-template-columns:130px 1fr 52px;align-items:center;gap:8px;font-size:12px">
-                <span style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title={$t(cat)}>{$t(cat)}</span>
-                <div style="background:var(--bg-muted);border-radius:3px;height:8px;overflow:hidden">
-                  <div style="height:100%;border-radius:3px;background:var(--accent);width:{catMax > 0 ? Math.round((mins / catMax) * 100) : 0}%;transition:width .3s"></div>
-                </div>
-                <span class="tab-num" style="color:var(--text-tertiary);text-align:right">{minToHM(mins)}</span>
-              </div>
-            {/each}
-          </div>
-        </div>
-      {/if}
-
-      <!-- Entries -->
-      {#if detailReport.entries?.length}
-        <div class="kz-card" style="overflow-x:auto">
-          <div style="font-weight:400;margin-bottom:12px;padding:0 16px;padding-top:16px">{$t("Entries")}</div>
-          <table class="kz-table">
-            <thead>
-              <tr>
-                <th>{$t("Date")}</th>
-                <th>{$t("Start")}</th>
-                <th>{$t("End")}</th>
-                <th>{$t("Duration")}</th>
-                <th>{$t("Category")}</th>
-                <th>{$t("Status")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each detailReport.entries as e}
-                <tr class:entry-rejected={e.status === "rejected"}>
-                  <td class="tab-num">{fmtDate(e.entry_date)}</td>
-                  <td class="tab-num">{e.start_time?.slice(0, 5)}</td>
-                  <td class="tab-num">{e.end_time?.slice(0, 5)}</td>
-                  <td class="tab-num">{minToHM(e.minutes || 0)}</td>
-                  <td>{e.category_name ? $t(e.category_name) : "–"}</td>
-                  <td
-                    ><span class="kz-chip kz-chip-{e.status}"
-                      >{statusLabel(e.status)}</span
-                    ></td
-                  >
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
-      {/if}
-
-      <!-- Absences -->
-      {#if detailReport.absences?.length}
-        <div class="kz-card" style="overflow-x:auto">
-          <div style="font-weight:400;margin-bottom:12px;padding:0 16px;padding-top:16px">{$t("Absences")}</div>
-          <table class="kz-table">
-            <thead>
-              <tr>
-                <th>{$t("Type")}</th>
-                <th>{$t("From")}</th>
-                <th>{$t("To")}</th>
-                <th>{$t("Days")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each detailReport.absences as a}
-                <tr>
-                  <td>{absenceKindLabel(a.kind)}</td>
-                  <td class="tab-num">{fmtDate(a.start_date)}</td>
-                  <td class="tab-num">{fmtDate(a.end_date)}</td>
-                  <td class="tab-num">{a.days}</td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
-      {/if}
-    </div>
-
-    <footer style="padding:16px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end">
-      <button class="kz-btn" on:click={closeDetail}>{$t("Close")}</button>
-    </footer>
-  </dialog>
-{/if}
-
 <style>
+  /* ── Überstundenkonto: Tabelle auf Desktop, Kacheln auf Mobile ────────── */
   .overtime-table-desktop {
     overflow-x: auto;
   }
@@ -1348,20 +1354,16 @@
     padding: 2px 0;
   }
 
-  .dialog-backdrop {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.4);
-    z-index: 1000;
-  }
-
+  /* Farbpunkt für Kategorie-Legende */
   .cat-dot {
     width: 10px;
     height: 10px;
     border-radius: 50%;
     display: inline-block;
+    flex-shrink: 0;
   }
 
+  /* Mobile: Tabelle durch gestapelte Kacheln ersetzen */
   @media (max-width: 640px) {
     .overtime-table-desktop {
       display: none;

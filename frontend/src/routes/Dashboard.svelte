@@ -81,9 +81,6 @@
   let monthSubmissionLoading = false;
   let monthSubmissionError = "";
 
-  // ── Current-week personal stats (mirrored from the Time Entry page) ───────────
-  let currentWeekEntries = [];
-
   const reportYear = today.getFullYear();
   const currentMonthIndex = today.getMonth() + 1; // 1-based
   const currentMonthKey = `${reportYear}-${String(currentMonthIndex).padStart(2, "0")}`;
@@ -195,19 +192,6 @@
     loadChart();
   }
 
-  // Loads time entries for the current calendar week so we can show "This Week"
-  // summary stats on the dashboard without navigating to the Time Entry page.
-  async function loadCurrentWeekStats() {
-    const weekStart = monday(today);
-    const from = isoDate(weekStart);
-    const to = isoDate(addDays(weekStart, 6));
-    try {
-      currentWeekEntries = await api(`/time-entries?from=${from}&to=${to}`);
-    } catch {
-      currentWeekEntries = [];
-    }
-  }
-
   // Loads all data that is only visible to team leads and admins (can_approve).
   async function load() {
     const canApprove = !!$currentUser?.permissions?.can_approve;
@@ -240,7 +224,6 @@
   loadChart();
   loadOvertimeSummary();
   loadPastMonthSubmissionStatus();
-  loadCurrentWeekStats();
   loadAbsenceSliderTeamData(absenceSliderWeek);
 
   // ── Reactive derivations: overtime balance ────────────────────────────────────
@@ -271,45 +254,6 @@
     (monthSubmissionChecks.length === previousMonthsTotal &&
       previousMonthsSubmitted === previousMonthsTotal);
   $: previousMonthsIncomplete = Math.max(0, previousMonthsTotal - previousMonthsSubmitted);
-
-  // ── Reactive derivations: current-week personal stats ────────────────────────
-
-  // Sum up logged minutes for the current week, excluding rejected entries.
-  $: currentWeekLoggedMinutes = currentWeekEntries
-    .filter((entry) => entry.status !== "rejected")
-    .reduce((totalMinutes, entry) => {
-      if (!entry.start_time || !entry.end_time) return totalMinutes;
-      return totalMinutes + durMin(entry.start_time.slice(0, 5), entry.end_time.slice(0, 5));
-    }, 0);
-
-  // Pro-rate the weekly target for the user's onboarding week: count only the
-  // working days from their contract start date through Friday.
-  $: effectiveWeeklyHoursTarget = (() => {
-    const userStartDate = $currentUser?.start_date;
-    const weeklyHours = $currentUser?.weekly_hours || 0;
-    const weekStart = monday(today);
-    if (!userStartDate) return weeklyHours;
-    const weekStartStr = isoDate(weekStart);
-    const fridayStr = isoDate(addDays(weekStart, 4));
-    // Weeks entirely before the user's start date have a target of zero.
-    if (userStartDate > fridayStr) return 0;
-    if (userStartDate >= weekStartStr) {
-      const daysFromMonday = Math.round(
-        (parseDate(userStartDate) - weekStart) / 86400000,
-      );
-      return (Math.max(0, 5 - daysFromMonday) / 5) * weeklyHours;
-    }
-    return weeklyHours;
-  })();
-
-  $: currentWeekLoggedHours = formatHours((currentWeekLoggedMinutes / 60).toFixed(1));
-  $: currentWeekTargetHours = formatHours(effectiveWeeklyHoursTarget.toFixed(1));
-  $: currentWeekOvertimeHours = formatHours(
-    Math.max(0, currentWeekLoggedMinutes / 60 - effectiveWeeklyHoursTarget).toFixed(1),
-  );
-  $: currentWeekRemainingHours = formatHours(
-    Math.max(0, effectiveWeeklyHoursTarget - currentWeekLoggedMinutes / 60).toFixed(1),
-  );
 
   // ── Pending-week builder (groups submitted entries by user + week) ─────────────
 
@@ -717,42 +661,7 @@
 <div class="content-area">
 
   <!-- ════════════════════════════════════════════════════════════════════════
-       SECTION 1 – "Diese Woche": current-week time stats (all users)
-       These cards are the same metrics that used to live on the Time Entry
-       page, giving users a quick glance without leaving the dashboard.
-       ════════════════════════════════════════════════════════════════════════ -->
-  <div class="dashboard-group">
-    <div class="dashboard-group-label">{$t("This Week")}</div>
-    <div class="stat-cards">
-
-      <!-- Logged hours vs. contracted target -->
-      <div class="kz-card stat-card">
-        <div class="stat-card-label">{$t("Logged")}</div>
-        <div class="stat-card-value accent tab-num">{currentWeekLoggedHours}</div>
-        <div class="stat-card-sub">
-          {$t("of {target} target", { target: currentWeekTargetHours })}
-        </div>
-      </div>
-
-      <!-- Hours worked beyond the weekly target -->
-      <div class="kz-card stat-card">
-        <div class="stat-card-label">{$t("Overtime")}</div>
-        <div class="stat-card-value tab-num">{currentWeekOvertimeHours}</div>
-        <div class="stat-card-sub">{$t("this week")}</div>
-      </div>
-
-      <!-- Hours still needed to reach the weekly target -->
-      <div class="kz-card stat-card">
-        <div class="stat-card-label">{$t("Remaining")}</div>
-        <div class="stat-card-value tab-num">{currentWeekRemainingHours}</div>
-        <div class="stat-card-sub">{$t("to target")}</div>
-      </div>
-
-    </div>
-  </div>
-
-  <!-- ════════════════════════════════════════════════════════════════════════
-       SECTION 2 – "Meine Bilanz": running balance & compliance (all users)
+       SECTION 1 – "Meine Bilanz": running balance & compliance (all users)
        ════════════════════════════════════════════════════════════════════════ -->
   <div class="dashboard-group">
     <div class="dashboard-group-label">{$t("My Balance")}</div>
@@ -828,17 +737,26 @@
 
         <div class="kz-card stat-card">
           <div class="stat-card-label">{$t("Pending Timesheets")}</div>
-          <div class="stat-card-value accent tab-num">{pendingWeeks.length}</div>
+          <div
+            class="stat-card-value tab-num"
+            style="color:{pendingWeeks.length > 0 ? 'var(--danger-text)' : 'var(--success-text)'}"
+          >{pendingWeeks.length}</div>
         </div>
 
         <div class="kz-card stat-card">
           <div class="stat-card-label">{$t("Absence Requests")}</div>
-          <div class="stat-card-value tab-num">{pendingAbsences.length}</div>
+          <div
+            class="stat-card-value tab-num"
+            style="color:{pendingAbsences.length > 0 ? 'var(--danger-text)' : 'var(--success-text)'}"
+          >{pendingAbsences.length}</div>
         </div>
 
         <div class="kz-card stat-card">
           <div class="stat-card-label">{$t("Change Requests")}</div>
-          <div class="stat-card-value tab-num">{changeRequests.length}</div>
+          <div
+            class="stat-card-value tab-num"
+            style="color:{changeRequests.length > 0 ? 'var(--danger-text)' : 'var(--success-text)'}"
+          >{changeRequests.length}</div>
         </div>
 
         <div class="kz-card stat-card">
@@ -1066,31 +984,35 @@
     <!-- "Who is absent" team calendar widget -->
     <div class="kz-card" style="padding:16px 20px;margin-top:16px">
       <div
-        style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px"
+        style="display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap;margin-bottom:14px"
       >
         <Icon name="Users" size={15} sw={1.5} />
         <span style="font-size:14px;font-weight:400;flex:1">{$t("Who is absent")}</span>
-        <button
-          class="kz-btn kz-btn-icon-sm kz-btn-ghost"
-          on:click={absenceSliderPrevWeek}
-          aria-label={$t("Previous week")}
-        >
-          <Icon name="ChevLeft" size={16} />
-        </button>
-        <span style="font-size:12px;color:var(--text-tertiary);min-width:120px;text-align:center">
-          {fmtDateShort(absenceSliderWeek)} -
-          {fmtDateShort(isoDate(addDays(parseDate(absenceSliderWeek), 6)))}
-        </span>
-        <button
-          class="kz-btn kz-btn-icon-sm kz-btn-ghost"
-          on:click={absenceSliderNextWeek}
-          aria-label={$t("Next week")}
-        >
-          <Icon name="ChevRight" size={16} />
-        </button>
-        <button class="kz-btn kz-btn-sm" on:click={absenceSliderToToday}>
-          {$t("Today")}
-        </button>
+        <div class="absence-date-controls">
+          <div class="absence-week-picker">
+            <button
+              class="kz-btn kz-btn-icon-sm kz-btn-ghost"
+              on:click={absenceSliderPrevWeek}
+              aria-label={$t("Previous week")}
+            >
+              <Icon name="ChevLeft" size={16} />
+            </button>
+            <span class="absence-week-range">
+              {fmtDateShort(absenceSliderWeek)} -
+              {fmtDateShort(isoDate(addDays(parseDate(absenceSliderWeek), 6)))}
+            </span>
+            <button
+              class="kz-btn kz-btn-icon-sm kz-btn-ghost"
+              on:click={absenceSliderNextWeek}
+              aria-label={$t("Next week")}
+            >
+              <Icon name="ChevRight" size={16} />
+            </button>
+          </div>
+          <button class="kz-btn kz-btn-sm" on:click={absenceSliderToToday}>
+            {$t("Today")}
+          </button>
+        </div>
       </div>
 
       {#key absenceSliderWeek}
@@ -1395,6 +1317,26 @@
   /* Highlight ring for scroll-to-section navigation. */
   .dashboard-focus {
     box-shadow: 0 0 0 2px var(--accent);
+  }
+
+  .absence-date-controls {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .absence-week-picker {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .absence-week-range {
+    color: var(--text-tertiary);
+    font-size: 12px;
+    min-width: 120px;
+    text-align: center;
   }
 
   .week-entry-list {

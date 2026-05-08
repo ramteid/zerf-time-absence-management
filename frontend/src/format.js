@@ -38,6 +38,13 @@ export function fmtMonthYear(d) {
     year: "numeric",
   });
 }
+
+// Converts a "YYYY-MM" string (as returned by the overtime API) to a
+// localized "Month Year" label, e.g. "Mai 2026" or "May 2026".
+// Appending "-01" makes it a valid ISO date for parseDate().
+export function fmtMonthLabel(yearMonth) {
+  return fmtMonthYear(yearMonth + "-01");
+}
 export function fmtDateTime(d) {
   return parseDate(d).toLocaleString(getLocale());
 }

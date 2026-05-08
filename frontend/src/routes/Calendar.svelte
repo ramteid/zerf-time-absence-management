@@ -79,6 +79,7 @@
   );
 
   // Distinct, accessible palette. Red is reserved for error states only.
+  // Amber (#f59e0b) is reserved for holidays; yellow-adjacent tones are avoided in fallbacks.
   const HOLIDAY_COLOR = "#f59e0b";
   const FALLBACK_COLORS = [
     "#2563eb",
@@ -90,7 +91,7 @@
     "#0f766e",
     "#7c3aed",
     "#0891b2",
-    "#ca8a04",
+    "#d946ef",
     "#4f46e5",
     "#0d9488",
   ];
@@ -177,7 +178,12 @@
   }
 
   function buildColorMap(baseCells, entryMap, categoryMap, translate) {
-    const used = new Set();
+    // Pre-seed reserved colors so work categories can never accidentally clash
+    // with holiday or absence colors, even in months where none of those appear.
+    const used = new Set([
+      HOLIDAY_COLOR.toLowerCase(),
+      ...Object.values(absColorMap).map((c) => c.toLowerCase()),
+    ]);
     const assigned = new Map();
     for (const c of baseCells) {
       if (c.other) continue;
