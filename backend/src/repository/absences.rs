@@ -100,7 +100,7 @@ impl AbsenceDb {
     ) -> AppResult<f64> {
         let ranges: Vec<(NaiveDate, NaiveDate)> = sqlx::query_as(
             "SELECT start_date, end_date FROM absences \
-             WHERE user_id=$1 AND kind=$2 AND status='approved' \
+             WHERE user_id=$1 AND kind=$2 AND status IN ('approved','cancellation_pending') \
              AND end_date >= $3 AND start_date <= $4",
         )
         .bind(user_id)
@@ -175,7 +175,11 @@ impl AbsenceDb {
             builder.push(" AND start_date <= ").push_bind(t);
         }
         if let Some(s) = status_filter {
-            builder.push(" AND status = ").push_bind(s.to_owned());
+            if s == "pending_review" {
+                builder.push(" AND status IN ('requested','cancellation_pending')");
+            } else {
+                builder.push(" AND status = ").push_bind(s.to_owned());
+            }
         }
         builder.push(" ORDER BY start_date DESC");
         Ok(builder
@@ -242,8 +246,8 @@ impl AbsenceDb {
             "SELECT a.id, a.user_id, u.first_name, u.last_name, a.kind, \
              a.start_date, a.end_date, a.comment, a.status \
              FROM absences a JOIN users u ON u.id=a.user_id \
-             WHERE a.status IN ('requested','approved') \
-             AND a.end_date >= ",
+             WHERE a.status IN ('requested','approved','cancellation_pending') \
+             AND a.end_date >=",
         );
         builder.push_bind(from);
         builder.push(" AND a.start_date <= ").push_bind(to);
@@ -271,7 +275,7 @@ impl AbsenceDb {
     ) -> AppResult<Vec<Absence>> {
         Ok(sqlx::query_as::<_, Absence>(&format!(
             "{ABS_SELECT} WHERE user_id=$1 AND kind='vacation' \
-             AND status IN ('requested','approved') \
+             AND status IN ('requested','approved','cancellation_pending') \
              AND end_date >= $2 AND start_date <= $3"
         ))
         .bind(user_id)
@@ -289,7 +293,7 @@ impl AbsenceDb {
     ) -> AppResult<Vec<(NaiveDate, NaiveDate, String)>> {
         Ok(sqlx::query_as::<_, (NaiveDate, NaiveDate, String)>(
             "SELECT start_date, end_date, kind FROM absences \
-             WHERE user_id=$1 AND status='approved' \
+             WHERE user_id=$1 AND status IN ('approved','cancellation_pending') \
              AND end_date >= $2 AND start_date <= $3",
         )
         .bind(user_id)
@@ -315,7 +319,7 @@ impl AbsenceDb {
 
         let overlap: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM absences WHERE user_id=$1 \
-             AND status IN ('requested','approved') \
+             AND status IN ('requested','approved','cancellation_pending') \
              AND end_date >= $2 AND start_date <= $3",
         )
         .bind(user_id)
@@ -370,7 +374,7 @@ impl AbsenceDb {
 
         let overlap: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM absences WHERE id != $1 AND user_id=$2 \
-             AND status IN ('requested','approved') \
+             AND status IN ('requested','approved','cancellation_pending') \
              AND end_date >= $3 AND start_date <= $4",
         )
         .bind(absence_id)
@@ -473,6 +477,52 @@ impl AbsenceDb {
         Ok(())
     }
 
+    pub async fn request_cancellation_tx(
+        tx: &mut sqlx::PgConnection,
+        absence_id: i64,
+    ) -> AppResult<u64> {
+        Ok(sqlx::query(
+            "UPDATE absences SET status='cancellation_pending', reviewed_by=NULL, \
+             reviewed_at=NULL WHERE id=$1 AND status='approved'",
+        )
+        .bind(absence_id)
+        .execute(tx)
+        .await?
+        .rows_affected())
+    }
+
+    pub async fn approve_cancellation_tx(
+        tx: &mut sqlx::PgConnection,
+        absence_id: i64,
+        reviewer_id: i64,
+    ) -> AppResult<u64> {
+        Ok(sqlx::query(
+            "UPDATE absences SET status='cancelled', reviewed_by=$1, \
+             reviewed_at=CURRENT_TIMESTAMP WHERE id=$2 AND status='cancellation_pending'",
+        )
+        .bind(reviewer_id)
+        .bind(absence_id)
+        .execute(tx)
+        .await?
+        .rows_affected())
+    }
+
+    pub async fn reject_cancellation_tx(
+        tx: &mut sqlx::PgConnection,
+        absence_id: i64,
+        reviewer_id: i64,
+    ) -> AppResult<u64> {
+        Ok(sqlx::query(
+            "UPDATE absences SET status='approved', reviewed_by=$1, \
+             reviewed_at=CURRENT_TIMESTAMP WHERE id=$2 AND status='cancellation_pending'",
+        )
+        .bind(reviewer_id)
+        .bind(absence_id)
+        .execute(tx)
+        .await?
+        .rows_affected())
+    }
+
     pub async fn find_for_update(
         tx: &mut sqlx::PgConnection,
         absence_id: i64,
@@ -518,7 +568,7 @@ impl AbsenceDb {
             Ok(sqlx::query_as::<_, (NaiveDate, NaiveDate)>(
                 "SELECT start_date, end_date FROM absences \
                  WHERE id != $1 AND user_id=$2 AND kind='vacation' \
-                 AND status IN ('requested','approved') \
+                 AND status IN ('requested','approved','cancellation_pending') \
                  AND end_date >= $3 AND start_date <= $4",
             )
             .bind(excl)
@@ -531,7 +581,7 @@ impl AbsenceDb {
             Ok(sqlx::query_as::<_, (NaiveDate, NaiveDate)>(
                 "SELECT start_date, end_date FROM absences \
                  WHERE user_id=$1 AND kind='vacation' \
-                 AND status IN ('requested','approved') \
+                 AND status IN ('requested','approved','cancellation_pending') \
                  AND end_date >= $2 AND start_date <= $3",
             )
             .bind(user_id)

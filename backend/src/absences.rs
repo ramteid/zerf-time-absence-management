@@ -363,7 +363,7 @@ pub async fn create(
     let mut transaction = app_state.pool.begin().await?;
     lock_absence_scope(&mut *transaction, requester.id).await?;
     let overlap_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM absences WHERE user_id=$1 AND status IN ('requested','approved') AND end_date >= $2 AND start_date <= $3"
+        "SELECT COUNT(*) FROM absences WHERE user_id=$1 AND status IN ('requested','approved','cancellation_pending') AND end_date >= $2 AND start_date <= $3"
     ).bind(requester.id).bind(body.start_date).bind(body.end_date).fetch_one(&mut *transaction).await?;
     if overlap_count > 0 {
         return Err(AppError::Conflict("Overlap with existing absence.".into()));
@@ -483,7 +483,7 @@ pub async fn update(
     // Re-check overlap with *other* absences of the same user (under advisory
     // lock to prevent TOCTOU race).
     let overlap_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM absences WHERE id != $1 AND user_id=$2 AND status IN ('requested','approved') AND end_date >= $3 AND start_date <= $4",
+        "SELECT COUNT(*) FROM absences WHERE id != $1 AND user_id=$2 AND status IN ('requested','approved','cancellation_pending') AND end_date >= $3 AND start_date <= $4",
     )
     .bind(absence_id).bind(requester.id).bind(body.start_date).bind(body.end_date)
     .fetch_one(&mut *transaction).await?;
@@ -578,8 +578,7 @@ pub async fn update(
 }
 
 fn can_self_cancel(absence: &Absence) -> bool {
-    absence.status == "requested"
-        || (absence.kind == "sick" && absence.status == "approved" && absence.reviewed_by.is_none())
+    absence.status == "requested" || absence.status == "approved"
 }
 
 pub async fn cancel(
@@ -587,34 +586,96 @@ pub async fn cancel(
     requester: User,
     Path(absence_id): Path<i64>,
 ) -> AppResult<Json<serde_json::Value>> {
-    // Pre-check ownership and status (the repo's cancel will do its own locking).
-    let absence_check = repo_absence_to_service(
-        app_state.db.absences.find_by_id(absence_id).await?,
-    );
-    if absence_check.user_id != requester.id {
+    let owner_id = absence_owner_id(&app_state.pool, absence_id).await?;
+    if owner_id != requester.id {
         return Err(AppError::Forbidden);
     }
-    if !can_self_cancel(&absence_check) {
+    let mut transaction = app_state.pool.begin().await?;
+    lock_absence_scope(&mut *transaction, owner_id).await?;
+    let absence: Absence = sqlx::query_as(
+        "SELECT id, user_id, kind, start_date, end_date, comment, status, \
+         reviewed_by, reviewed_at, rejection_reason, created_at \
+         FROM absences WHERE id=$1 FOR UPDATE",
+    )
+    .bind(absence_id)
+    .fetch_one(&mut *transaction)
+    .await?;
+    if absence.user_id != requester.id {
+        return Err(AppError::Forbidden);
+    }
+    if !can_self_cancel(&absence) {
         return Err(AppError::BadRequest(
-            "Only requested or auto-approved sick absences can be self-cancelled.".into(),
+            "Only requested or approved absences can be cancelled.".into(),
         ));
     }
-    let absence = app_state
-        .db
-        .absences
-        .cancel(absence_id, requester.id)
+    let direct_cancel =
+        absence.status == "requested" || requester.allow_reopen_without_approval;
+    if direct_cancel {
+        sqlx::query("UPDATE absences SET status='cancelled' WHERE id=$1")
+            .bind(absence_id)
+            .execute(&mut *transaction)
+            .await?;
+        transaction.commit().await?;
+        audit::log(
+            &app_state.pool,
+            requester.id,
+            "cancelled",
+            "absences",
+            absence_id,
+            Some(serde_json::to_value(&absence).unwrap()),
+            Some(serde_json::json!({"status": "cancelled"})),
+        )
+        .await;
+        Ok(Json(serde_json::json!({"ok": true})))
+    } else {
+        let rows = crate::repository::AbsenceDb::request_cancellation_tx(
+            &mut *transaction,
+            absence_id,
+        )
         .await?;
-    audit::log(
-        &app_state.pool,
-        requester.id,
-        "cancelled",
-        "absences",
-        absence_id,
-        Some(serde_json::to_value(&absence).unwrap()),
-        Some(serde_json::json!({"status": "cancelled"})),
-    )
-    .await;
-    Ok(Json(serde_json::json!({"ok":true})))
+        if rows == 0 {
+            return Err(AppError::Conflict(
+                "Absence status changed concurrently.".into(),
+            ));
+        }
+        transaction.commit().await?;
+        audit::log(
+            &app_state.pool,
+            requester.id,
+            "cancellation_requested",
+            "absences",
+            absence_id,
+            Some(serde_json::to_value(&absence).unwrap()),
+            Some(serde_json::json!({"status": "cancellation_pending"})),
+        )
+        .await;
+        let requester_full_name = format!("{} {}", requester.first_name, requester.last_name);
+        let approver_ids =
+            crate::auth::approval_recipient_ids(&app_state.pool, &requester).await;
+        let language = notification_language(&app_state.pool).await;
+        for approver_id in approver_ids {
+            crate::notifications::create_translated(
+                &app_state,
+                &language,
+                approver_id,
+                "absence_cancellation_requested",
+                "absence_cancellation_requested_title",
+                "absence_cancellation_requested_body",
+                vec![
+                    ("requester_name", requester_full_name.clone()),
+                    (
+                        "start_date",
+                        i18n::format_date(&language, absence.start_date),
+                    ),
+                    ("end_date", i18n::format_date(&language, absence.end_date)),
+                ],
+                Some("absences"),
+                Some(absence_id),
+            )
+            .await;
+        }
+        Ok(Json(serde_json::json!({"ok": true, "pending": true})))
+    }
 }
 
 pub async fn approve(
@@ -850,6 +911,134 @@ pub async fn reject(
     Ok(Json(serde_json::json!({"ok":true})))
 }
 
+pub async fn approve_cancellation(
+    State(app_state): State<AppState>,
+    requester: User,
+    Path(absence_id): Path<i64>,
+) -> AppResult<Json<serde_json::Value>> {
+    if !requester.is_lead() {
+        return Err(AppError::Forbidden);
+    }
+    let owner_id = absence_owner_id(&app_state.pool, absence_id).await?;
+    let mut transaction = app_state.pool.begin().await?;
+    lock_absence_scope(&mut *transaction, owner_id).await?;
+    let absence = crate::repository::AbsenceDb::find_for_update(&mut *transaction, absence_id).await?;
+    if absence.user_id == requester.id && !requester.is_admin() {
+        return Err(AppError::Forbidden);
+    }
+    if !requester.is_admin() && !crate::repository::AbsenceDb::is_direct_report_for_update(&mut *transaction, absence.user_id, requester.id).await? {
+        return Err(AppError::Forbidden);
+    }
+    if absence.status != "cancellation_pending" {
+        return Err(AppError::BadRequest(
+            "Only cancellation-pending absences can have their cancellation approved.".into(),
+        ));
+    }
+    let rows = crate::repository::AbsenceDb::approve_cancellation_tx(
+        &mut *transaction,
+        absence_id,
+        requester.id,
+    )
+    .await?;
+    if rows == 0 {
+        return Err(AppError::Conflict(
+            "Absence status changed concurrently.".into(),
+        ));
+    }
+    transaction.commit().await?;
+    audit::log(
+        &app_state.pool,
+        requester.id,
+        "cancelled",
+        "absences",
+        absence_id,
+        Some(serde_json::to_value(&absence).unwrap()),
+        Some(serde_json::json!({"status": "cancelled", "reviewed_by": requester.id})),
+    )
+    .await;
+    let language = notification_language(&app_state.pool).await;
+    crate::notifications::create_translated(
+        &app_state,
+        &language,
+        absence.user_id,
+        "absence_cancellation_approved",
+        "absence_cancellation_approved_title",
+        "absence_cancellation_approved_body",
+        vec![
+            ("start_date", i18n::format_date(&language, absence.start_date)),
+            ("end_date", i18n::format_date(&language, absence.end_date)),
+        ],
+        Some("absences"),
+        Some(absence_id),
+    )
+    .await;
+    Ok(Json(serde_json::json!({"ok": true})))
+}
+
+pub async fn reject_cancellation(
+    State(app_state): State<AppState>,
+    requester: User,
+    Path(absence_id): Path<i64>,
+) -> AppResult<Json<serde_json::Value>> {
+    if !requester.is_lead() {
+        return Err(AppError::Forbidden);
+    }
+    let owner_id = absence_owner_id(&app_state.pool, absence_id).await?;
+    let mut transaction = app_state.pool.begin().await?;
+    lock_absence_scope(&mut *transaction, owner_id).await?;
+    let absence = crate::repository::AbsenceDb::find_for_update(&mut *transaction, absence_id).await?;
+    if absence.user_id == requester.id && !requester.is_admin() {
+        return Err(AppError::Forbidden);
+    }
+    if !requester.is_admin() && !crate::repository::AbsenceDb::is_direct_report_for_update(&mut *transaction, absence.user_id, requester.id).await? {
+        return Err(AppError::Forbidden);
+    }
+    if absence.status != "cancellation_pending" {
+        return Err(AppError::BadRequest(
+            "Only cancellation-pending absences can have their cancellation rejected.".into(),
+        ));
+    }
+    let rows = crate::repository::AbsenceDb::reject_cancellation_tx(
+        &mut *transaction,
+        absence_id,
+        requester.id,
+    )
+    .await?;
+    if rows == 0 {
+        return Err(AppError::Conflict(
+            "Absence status changed concurrently.".into(),
+        ));
+    }
+    transaction.commit().await?;
+    audit::log(
+        &app_state.pool,
+        requester.id,
+        "cancellation_rejected",
+        "absences",
+        absence_id,
+        Some(serde_json::to_value(&absence).unwrap()),
+        Some(serde_json::json!({"status": "approved", "reviewed_by": requester.id})),
+    )
+    .await;
+    let language = notification_language(&app_state.pool).await;
+    crate::notifications::create_translated(
+        &app_state,
+        &language,
+        absence.user_id,
+        "absence_cancellation_rejected",
+        "absence_cancellation_rejected_title",
+        "absence_cancellation_rejected_body",
+        vec![
+            ("start_date", i18n::format_date(&language, absence.start_date)),
+            ("end_date", i18n::format_date(&language, absence.end_date)),
+        ],
+        Some("absences"),
+        Some(absence_id),
+    )
+    .await;
+    Ok(Json(serde_json::json!({"ok": true})))
+}
+
 /// Admin-only: revoke an already-approved absence (e.g. mistaken approval).
 /// Transitions the absence to 'cancelled' with an audit trail.
 pub async fn revoke(
@@ -1049,11 +1238,11 @@ async fn validate_vacation_balance(
     // Sum existing vacation usage (requested + approved) in this year, excluding `exclude_id`.
     let existing_ranges: Vec<(NaiveDate, NaiveDate)> = if let Some(excl) = exclude_id {
         sqlx::query_as(
-            "SELECT start_date, end_date FROM absences WHERE id != $1 AND user_id=$2 AND kind='vacation' AND status IN ('requested','approved') AND end_date >= $3 AND start_date <= $4"
+            "SELECT start_date, end_date FROM absences WHERE id != $1 AND user_id=$2 AND kind='vacation' AND status IN ('requested','approved','cancellation_pending') AND end_date >= $3 AND start_date <= $4"
         ).bind(excl).bind(user.id).bind(year_from).bind(year_to).fetch_all(&mut *tx).await?
     } else {
         sqlx::query_as(
-            "SELECT start_date, end_date FROM absences WHERE user_id=$1 AND kind='vacation' AND status IN ('requested','approved') AND end_date >= $2 AND start_date <= $3"
+            "SELECT start_date, end_date FROM absences WHERE user_id=$1 AND kind='vacation' AND status IN ('requested','approved','cancellation_pending') AND end_date >= $2 AND start_date <= $3"
         ).bind(user.id).bind(year_from).bind(year_to).fetch_all(&mut *tx).await?
     };
     let mut used_days = 0.0;
@@ -1106,11 +1295,11 @@ async fn validate_vacation_balance(
 
         let end_year_existing: Vec<(NaiveDate, NaiveDate)> = if let Some(excl) = exclude_id {
             sqlx::query_as(
-                "SELECT start_date, end_date FROM absences WHERE id != $1 AND user_id=$2 AND kind='vacation' AND status IN ('requested','approved') AND end_date >= $3 AND start_date <= $4"
+                "SELECT start_date, end_date FROM absences WHERE id != $1 AND user_id=$2 AND kind='vacation' AND status IN ('requested','approved','cancellation_pending') AND end_date >= $3 AND start_date <= $4"
             ).bind(excl).bind(user.id).bind(end_year_from).bind(end_year_to).fetch_all(&mut *tx).await?
         } else {
             sqlx::query_as(
-                "SELECT start_date, end_date FROM absences WHERE user_id=$1 AND kind='vacation' AND status IN ('requested','approved') AND end_date >= $2 AND start_date <= $3"
+                "SELECT start_date, end_date FROM absences WHERE user_id=$1 AND kind='vacation' AND status IN ('requested','approved','cancellation_pending') AND end_date >= $2 AND start_date <= $3"
             ).bind(user.id).bind(end_year_from).bind(end_year_to).fetch_all(&mut *tx).await?
         };
         let mut end_year_used = 0.0;

@@ -99,6 +99,8 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                 .route("/absences/{id}/approve", post(absences::approve))
                 .route("/absences/{id}/reject", post(absences::reject))
                 .route("/absences/{id}/revoke", post(absences::revoke))
+                .route("/absences/{id}/approve-cancellation", post(absences::approve_cancellation))
+                .route("/absences/{id}/reject-cancellation", post(absences::reject_cancellation))
                 .route("/leave-balance/{uid}", get(absences::balance))
                 .route(
                     "/change-requests",

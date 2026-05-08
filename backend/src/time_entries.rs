@@ -203,7 +203,8 @@ pub(crate) async fn validate(
     // training, special_leave, general_absence). Sick days are excluded from
     // this check because partial sick days with work are common.
     let absence_on_day: Option<String> = sqlx::query_scalar(
-        "SELECT kind FROM absences WHERE user_id=$1 AND status='approved' \
+        "SELECT kind FROM absences WHERE user_id=$1 \
+         AND status IN ('approved','cancellation_pending') \
          AND start_date <= $2 AND end_date >= $2 AND kind <> 'sick' LIMIT 1",
     )
     .bind(user_id)

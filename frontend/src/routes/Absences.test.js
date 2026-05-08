@@ -178,7 +178,7 @@ describe("Absences", () => {
     ].map((element) => element.textContent.trim());
     expect(detailValues[2]).toBe("0");
     expect(target.querySelector("dialog .kz-btn-danger").textContent).toContain(
-      "Cancel absence",
+      "Request cancellation",
     );
   });
 
@@ -207,7 +207,7 @@ describe("Absences", () => {
     await settle();
 
     expect(target.querySelector("dialog .kz-btn-danger").textContent).toContain(
-      "Stornieren",
+      "Stornierung beantragen",
     );
   });
 });

@@ -86,6 +86,12 @@
     return absence.status === "requested" || absence.status === "approved";
   }
 
+  function cancelLabel(absence) {
+    return absence.status === "approved"
+      ? $t("Request cancellation")
+      : $t("Cancel absence");
+  }
+
   $: absenceRows = absences.map((absence) => ({
     ...absence,
     days: countWorkdays(absence.start_date, absence.end_date, holidayDates),
@@ -113,19 +119,26 @@
     detailAbsence = null;
   }
 
-  async function cancel(absenceId) {
+  async function cancel(absence) {
+    const isApproved = absence.status === "approved";
     const confirmed = await confirmDialog(
-      $t("Cancel?"),
-      $t("Cancel this absence request?"),
+      isApproved ? $t("Request cancellation?") : $t("Cancel?"),
+      isApproved
+        ? $t("Request cancellation of this approved absence? Your team lead must approve the cancellation.")
+        : $t("Cancel this absence request?"),
       {
         danger: true,
-        confirm: $t("Yes, cancel absence"),
+        confirm: isApproved ? $t("Yes, request cancellation") : $t("Yes, cancel absence"),
       },
     );
     if (!confirmed) return;
     try {
-      await api("/absences/" + absenceId, { method: "DELETE" });
-      toast($t("Absence cancelled."), "ok");
+      const result = await api("/absences/" + absence.id, { method: "DELETE" });
+      if (result?.pending) {
+        toast($t("Cancellation requested. Your team lead will review it."), "ok");
+      } else {
+        toast($t("Absence cancelled."), "ok");
+      }
       load();
     } catch (e) {
       toast($t(e?.message || "Error"), "error");
@@ -150,7 +163,7 @@
       >
         <Icon name="ChevLeft" size={16} />
       </button>
-      <span class="nav-label tab-num" style="min-width:60px">{selectedYear}</span>
+      <span class="nav-label tab-num" style="min-width:50px">{selectedYear}</span>
       <button
         class="kz-btn kz-btn-ghost"
         on:click={() => (selectedYear += 1)}
@@ -377,12 +390,12 @@
         <button
           class="kz-btn kz-btn-danger"
           on:click={() => {
-            const absenceId = detailAbsence.id;
+            const absence = detailAbsence;
             closeDetail();
-            cancel(absenceId);
+            cancel(absence);
           }}
         >
-          {$t("Cancel absence")}
+          {cancelLabel(detailAbsence)}
         </button>
       {/if}
       {#if detailAbsence.editable}

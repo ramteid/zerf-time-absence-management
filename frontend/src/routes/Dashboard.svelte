@@ -45,7 +45,6 @@
   // Section element refs used to scroll-to-section when navigating from a badge.
   let timesheetsSectionEl;
   let absencesSectionEl;
-  let reopenSectionEl;
   let changesSectionEl;
   let focusedSection = "";
   let lastFocusSignature = "";
@@ -205,7 +204,7 @@
         teamMembers,
       ] = await Promise.all([
         api("/time-entries/all?status=submitted"),
-        api("/absences/all?status=requested"),
+        api("/absences/all?status=pending_review"),
         api("/change-requests/all?status=open"),
         api("/reopen-requests/pending"),
         api("/users"),
@@ -385,7 +384,7 @@
   function sectionByFocus(focus) {
     if (focus === "timesheets") return timesheetsSectionEl;
     if (focus === "absences") return absencesSectionEl;
-    if (focus === "reopen") return reopenSectionEl;
+    if (focus === "reopen") return timesheetsSectionEl;
     if (focus === "changes") return changesSectionEl;
     return null;
   }
@@ -562,9 +561,13 @@
     absenceDetail = null;
   }
 
-  async function approveAbsence(id) {
+  async function approveAbsence(absence) {
+    const isCancellation = absence.status === "cancellation_pending";
+    const endpoint = isCancellation
+      ? `/absences/${absence.id}/approve-cancellation`
+      : `/absences/${absence.id}/approve`;
     try {
-      await api(`/absences/${id}/approve`, { method: "POST" });
+      await api(endpoint, { method: "POST" });
       toast($t("Approved."), "ok");
       load();
     } catch (error) {
@@ -572,19 +575,36 @@
     }
   }
 
-  async function rejectAbsence(id) {
-    const reason = await confirmDialog(
-      $t("Reject?"),
-      $t("Reject this request?"),
-      { danger: true, confirm: $t("Reject"), reason: true },
-    );
-    if (!reason) return;
-    try {
-      await api(`/absences/${id}/reject`, { method: "POST", body: { reason } });
-      toast($t("Rejected."), "ok");
-      load();
-    } catch (error) {
-      toast($t(error?.message || "Error"), "error");
+  async function rejectAbsence(absence) {
+    const isCancellation = absence.status === "cancellation_pending";
+    if (isCancellation) {
+      const confirmed = await confirmDialog(
+        $t("Reject cancellation?"),
+        $t("Reject this cancellation request? The absence will remain approved."),
+        { danger: true, confirm: $t("Reject") },
+      );
+      if (!confirmed) return;
+      try {
+        await api(`/absences/${absence.id}/reject-cancellation`, { method: "POST" });
+        toast($t("Rejected."), "ok");
+        load();
+      } catch (error) {
+        toast($t(error?.message || "Error"), "error");
+      }
+    } else {
+      const reason = await confirmDialog(
+        $t("Reject?"),
+        $t("Reject this request?"),
+        { danger: true, confirm: $t("Reject"), reason: true },
+      );
+      if (!reason) return;
+      try {
+        await api(`/absences/${absence.id}/reject`, { method: "POST", body: { reason } });
+        toast($t("Rejected."), "ok");
+        load();
+      } catch (error) {
+        toast($t(error?.message || "Error"), "error");
+      }
     }
   }
 
@@ -808,11 +828,13 @@
         <div class="card-header">
           <Icon name="FileText" size={15} sw={1.5} />
           <span class="card-header-title">{$t("Timesheet Approvals")}</span>
-          {#if pendingWeeks.length}
+          {#if pendingWeeks.length + pendingReopens.length > 0}
             <span class="kz-chip kz-chip-submitted" style="font-size:10.5px">
-              {pendingWeeks.length}
+              {pendingWeeks.length + pendingReopens.length}
               {$t("pending")}
             </span>
+          {/if}
+          {#if pendingWeeks.length}
             <button class="kz-btn kz-btn-sm" on:click={batchApprove}>
               <Icon name="Check" size={13} />{$t("Approve All")}
             </button>
@@ -868,7 +890,43 @@
             </div>
           </div>
         {/each}
-        {#if pendingWeeks.length === 0}
+        {#each pendingReopens as reopen}
+          <div
+            style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px"
+          >
+            <div class="avatar" style="width:30px;height:30px;font-size:11px">
+              {userInitials(reopen.user_id, users)}
+            </div>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:13px;font-weight:500;display:flex;align-items:center;gap:6px">
+                {userName(reopen.user_id, users)}
+                <span class="kz-chip kz-chip-pending" style="font-size:10px">{$t("Reopen")}</span>
+              </div>
+              <div class="tab-num" style="font-size:11.5px;color:var(--text-tertiary)">
+                {$t("wants to edit week of {date}", { date: fmtDateShort(reopen.week_start) })}
+              </div>
+            </div>
+            <div style="display:flex;gap:4px">
+              <button
+                class="kz-btn-icon-sm"
+                style="color:var(--success-text);background:var(--success-soft)"
+                title={$t("Approve")}
+                on:click={() => approveReopen(reopen.id)}
+              >
+                <Icon name="Check" size={14} />
+              </button>
+              <button
+                class="kz-btn-icon-sm"
+                style="color:var(--danger-text);background:var(--danger-soft)"
+                title={$t("Reject")}
+                on:click={() => rejectReopen(reopen.id)}
+              >
+                <Icon name="X" size={14} />
+              </button>
+            </div>
+          </div>
+        {/each}
+        {#if pendingWeeks.length === 0 && pendingReopens.length === 0}
           <div
             style="padding:32px;text-align:center;color:var(--text-tertiary);font-size:13px"
           >
@@ -912,8 +970,11 @@
               tabindex="0"
               title={$t("Show details")}
             >
-              <div style="font-size:13px;font-weight:500">
+              <div style="font-size:13px;font-weight:500;display:flex;align-items:center;gap:6px">
                 {userName(absence.user_id, users)}
+                {#if absence.status === "cancellation_pending"}
+                  <span class="kz-chip kz-chip-cancellation_pending" style="font-size:10px">{$t("Cancellation")}</span>
+                {/if}
               </div>
               <div class="tab-num" style="font-size:11.5px;color:var(--text-tertiary)">
                 {absenceKindLabel(absence.kind)} · {fmtDateShort(absence.start_date)} -
@@ -924,14 +985,14 @@
               <button
                 class="kz-btn-icon-sm"
                 style="color:var(--success-text);background:var(--success-soft)"
-                on:click={() => approveAbsence(absence.id)}
+                on:click={() => approveAbsence(absence)}
               >
                 <Icon name="Check" size={14} />
               </button>
               <button
                 class="kz-btn-icon-sm"
                 style="color:var(--danger-text);background:var(--danger-soft)"
-                on:click={() => rejectAbsence(absence.id)}
+                on:click={() => rejectAbsence(absence)}
               >
                 <Icon name="X" size={14} />
               </button>
@@ -949,59 +1010,6 @@
       </div>
     </div>
 
-    <!-- Week reopen requests (only rendered when there are pending ones) -->
-    {#if pendingReopens.length > 0}
-      <div
-        class="kz-card"
-        class:dashboard-focus={focusedSection === "reopen"}
-        style="overflow-x:auto;margin-top:16px"
-        bind:this={reopenSectionEl}
-      >
-        <div class="card-header">
-          <Icon name="Edit" size={15} sw={1.5} />
-          <span class="card-header-title">{$t("Week reopen requests")}</span>
-          <span class="kz-chip kz-chip-pending" style="font-size:10.5px">
-            {pendingReopens.length}
-            {$t("open")}
-          </span>
-        </div>
-        {#each pendingReopens as reopen}
-          <div
-            style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px"
-          >
-            <div class="avatar" style="width:30px;height:30px;font-size:11px">
-              {userInitials(reopen.user_id, users)}
-            </div>
-            <div style="flex:1;min-width:0">
-              <div style="font-size:13px;font-weight:500">
-                {userName(reopen.user_id, users)}
-              </div>
-              <div class="tab-num" style="font-size:11.5px;color:var(--text-tertiary)">
-                {$t("wants to edit week of {date}", { date: fmtDateShort(reopen.week_start) })}
-              </div>
-            </div>
-            <div style="display:flex;gap:4px">
-              <button
-                class="kz-btn-icon-sm"
-                style="color:var(--success-text);background:var(--success-soft)"
-                title={$t("Approve")}
-                on:click={() => approveReopen(reopen.id)}
-              >
-                <Icon name="Check" size={14} />
-              </button>
-              <button
-                class="kz-btn-icon-sm"
-                style="color:var(--danger-text);background:var(--danger-soft)"
-                title={$t("Reject")}
-                on:click={() => rejectReopen(reopen.id)}
-              >
-                <Icon name="X" size={14} />
-              </button>
-            </div>
-          </div>
-        {/each}
-      </div>
-    {/if}
 
     <!-- "Who is absent" team calendar widget -->
     <div class="kz-card" style="margin-top:16px">
@@ -1247,9 +1255,9 @@
       <button
         class="kz-btn kz-btn-danger"
         on:click={() => {
-          const absenceId = absenceDetail.id;
+          const absence = absenceDetail;
           closeAbsenceDetail();
-          rejectAbsence(absenceId);
+          rejectAbsence(absence);
         }}
       >
         <Icon name="X" size={14} />{$t("Reject")}
@@ -1257,9 +1265,9 @@
       <button
         class="kz-btn kz-btn-primary"
         on:click={() => {
-          const absenceId = absenceDetail.id;
+          const absence = absenceDetail;
           closeAbsenceDetail();
-          approveAbsence(absenceId);
+          approveAbsence(absence);
         }}
       >
         <Icon name="Check" size={14} />{$t("Approve")}
