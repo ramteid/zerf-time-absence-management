@@ -158,7 +158,7 @@ pub async fn run_check(state: &crate::AppState) {
 }
 
 /// Background loop: sleep until the next Monday at 07:00 local time, then run check.
-pub async fn run_loop(_pool: DatabasePool, state: crate::AppState) {
+pub async fn run_loop(state: crate::AppState) {
     loop {
         let wait = duration_until_next_monday_7am(Local::now());
         tracing::info!(
