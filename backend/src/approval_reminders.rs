@@ -55,15 +55,23 @@ async fn find_approvers_with_pending(pool: &DatabasePool) -> Vec<PendingApprover
              ) all_pending
              GROUP BY user_id
          ),
+         -- Mirror get_approver_ids: only count an assignment as active when the
+         -- approver is active AND has an approver-eligible role.
          assigned_user_ids AS (
-             SELECT DISTINCT user_id FROM user_approvers
+             SELECT DISTINCT ua.user_id
+             FROM user_approvers ua
+             JOIN users approver ON approver.id = ua.approver_id
+             WHERE approver.active = TRUE
+               AND approver.role IN ('team_lead', 'admin')
          ),
          -- path A: users who have explicit approver assignments
          via_assignment AS (
              SELECT ua.approver_id, SUM(up.pending_count)::bigint AS pending_count
              FROM user_approvers ua
              JOIN user_pending up ON up.user_id = ua.user_id
-             JOIN users approver  ON approver.id = ua.approver_id AND approver.active = TRUE
+             JOIN users approver  ON approver.id = ua.approver_id
+                                 AND approver.active = TRUE
+                                 AND approver.role IN ('team_lead', 'admin')
              GROUP BY ua.approver_id
          ),
          -- path B: users with NO explicit assignment → all active admins are responsible
