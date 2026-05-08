@@ -12,6 +12,7 @@ pub mod i18n;
 pub mod notifications;
 pub mod reopen_requests;
 pub mod reports;
+pub mod repository;
 pub mod settings;
 pub mod submission_reminders;
 pub mod time_entries;
@@ -37,6 +38,7 @@ use tower_http::trace::TraceLayer;
 #[derive(Clone)]
 pub struct AppState {
     pub pool: db::DatabasePool,
+    pub db: repository::Db,
     pub cfg: Arc<config::Config>,
     pub notifications: notifications::NotificationBroadcaster,
 }

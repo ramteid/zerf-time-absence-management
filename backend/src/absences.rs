@@ -9,7 +9,7 @@ use axum::{
 };
 use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc};
 use serde::{Deserialize, Serialize, Serializer};
-use sqlx::{Executor, FromRow, Postgres, QueryBuilder};
+use sqlx::{Executor, FromRow, Postgres};
 use std::collections::HashSet;
 
 async fn notification_language(pool: &crate::db::DatabasePool) -> i18n::Language {
@@ -19,6 +19,22 @@ async fn notification_language(pool: &crate::db::DatabasePool) -> i18n::Language
             tracing::warn!(target:"zerf::absences", "load notification language failed: {e}");
             i18n::Language::default()
         }
+    }
+}
+
+fn repo_absence_to_service(a: crate::repository::Absence) -> Absence {
+    Absence {
+        id: a.id,
+        user_id: a.user_id,
+        kind: a.kind,
+        start_date: a.start_date,
+        end_date: a.end_date,
+        comment: a.comment,
+        status: a.status,
+        reviewed_by: a.reviewed_by,
+        reviewed_at: a.reviewed_at,
+        rejection_reason: a.rejection_reason,
+        created_at: a.created_at,
     }
 }
 
@@ -51,13 +67,8 @@ async fn holidays_set(
     from: NaiveDate,
     to: NaiveDate,
 ) -> AppResult<HashSet<NaiveDate>> {
-    let holiday_rows: Vec<(NaiveDate,)> =
-        sqlx::query_as("SELECT holiday_date FROM holidays WHERE holiday_date BETWEEN $1 AND $2")
-            .bind(from)
-            .bind(to)
-            .fetch_all(pool)
-            .await?;
-    Ok(holiday_rows.into_iter().map(|(date,)| date).collect())
+    use crate::repository::AbsenceDb;
+    AbsenceDb::new(pool.clone()).holidays_set(from, to).await
 }
 
 pub async fn workdays(
@@ -88,16 +99,8 @@ pub async fn workdays_total(
     from: NaiveDate,
     to: NaiveDate,
 ) -> AppResult<f64> {
-    let absence_ranges: Vec<(NaiveDate, NaiveDate)> = sqlx::query_as(
-        "SELECT start_date, end_date FROM absences WHERE user_id=$1 AND kind=$2 AND status='approved' AND end_date >= $3 AND start_date <= $4"
-    ).bind(user_id).bind(kind).bind(from).bind(to).fetch_all(pool).await?;
-    let mut total = 0.0;
-    for (absence_start, absence_end) in absence_ranges {
-        let clamped_start = std::cmp::max(absence_start, from);
-        let clamped_end = std::cmp::min(absence_end, to);
-        total += workdays(pool, clamped_start, clamped_end).await?;
-    }
-    Ok(total)
+    use crate::repository::AbsenceDb;
+    AbsenceDb::new(pool.clone()).workdays_total(user_id, kind, from, to).await
 }
 
 #[derive(Deserialize)]
@@ -110,14 +113,15 @@ pub async fn list(
     requester: User,
     Query(query): Query<YearQuery>,
 ) -> AppResult<Json<Vec<Absence>>> {
-    // Default to the current calendar year when no year is specified.
     let year = query.year.unwrap_or_else(|| chrono::Utc::now().year());
     let from = NaiveDate::from_ymd_opt(year, 1, 1).unwrap();
     let to = NaiveDate::from_ymd_opt(year, 12, 31).unwrap();
-    let absences = sqlx::query_as::<_, Absence>(
-        "SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE user_id=$1 AND end_date >= $2 AND start_date <= $3 ORDER BY start_date DESC"
-    ).bind(requester.id).bind(from).bind(to).fetch_all(&app_state.pool).await?;
-    Ok(Json(absences))
+    let absences = app_state
+        .db
+        .absences
+        .list_for_user(requester.id, from, to)
+        .await?;
+    Ok(Json(absences.into_iter().map(repo_absence_to_service).collect()))
 }
 
 #[derive(Deserialize)]
@@ -135,30 +139,18 @@ pub async fn list_all(
     if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let mut builder = QueryBuilder::<Postgres>::new("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE TRUE");
-    // Team leads only see absences from their direct reports; admins see all.
-    if !requester.is_admin() {
-        builder
-            .push(" AND user_id IN (SELECT id FROM users WHERE approver_id = ")
-            .push_bind(requester.id)
-            .push(" AND role != 'admin')");
-    }
-    if let Some(from_date) = query.from {
-        builder.push(" AND end_date >= ").push_bind(from_date);
-    }
-    if let Some(to_date) = query.to {
-        builder.push(" AND start_date <= ").push_bind(to_date);
-    }
-    if let Some(status_filter) = query.status {
-        builder.push(" AND status = ").push_bind(status_filter);
-    }
-    builder.push(" ORDER BY start_date DESC");
-    Ok(Json(
-        builder
-            .build_query_as::<Absence>()
-            .fetch_all(&app_state.pool)
-            .await?,
-    ))
+    let absences = app_state
+        .db
+        .absences
+        .list_all(
+            requester.is_admin(),
+            requester.id,
+            query.from,
+            query.to,
+            query.status.as_deref(),
+        )
+        .await?;
+    Ok(Json(absences.into_iter().map(repo_absence_to_service).collect()))
 }
 
 #[derive(Deserialize)]
@@ -180,36 +172,14 @@ pub struct CalendarEntry {
 }
 
 async fn calendar_scope_user_ids(
-    pool: &crate::db::DatabasePool,
+    app_state: &AppState,
     requester: &User,
 ) -> AppResult<Option<Vec<i64>>> {
-    if requester.is_admin() {
-        return Ok(None);
-    }
-
-    let mut user_ids = vec![requester.id];
-
-    if requester.is_lead() {
-        let mut reports: Vec<i64> = sqlx::query_scalar(
-            "SELECT id FROM users WHERE active=TRUE AND approver_id=$1 AND role!='admin'",
-        )
-        .bind(requester.id)
-        .fetch_all(pool)
-        .await?;
-        user_ids.append(&mut reports);
-    } else if let Some(approver_id) = requester.approver_id {
-        let mut team: Vec<i64> = sqlx::query_scalar(
-            "SELECT id FROM users WHERE active=TRUE AND (id=$1 OR (approver_id=$1 AND role!='admin'))",
-        )
-        .bind(approver_id)
-        .fetch_all(pool)
-        .await?;
-        user_ids.append(&mut team);
-    }
-
-    user_ids.sort_unstable();
-    user_ids.dedup();
-    Ok(Some(user_ids))
+    app_state
+        .db
+        .absences
+        .calendar_scope_user_ids(requester.id, requester.is_admin(), requester.is_lead())
+        .await
 }
 
 pub async fn calendar(
@@ -238,25 +208,11 @@ pub async fn calendar(
     };
     let to = next_month_first - Duration::days(1);
     // Determine which user IDs this requester is allowed to see (scope restriction).
-    let scope_user_ids = calendar_scope_user_ids(&app_state.pool, &requester).await?;
-    let mut builder = QueryBuilder::<Postgres>::new(
-        "SELECT a.id, a.user_id, u.first_name, u.last_name, a.kind, a.start_date, a.end_date, a.comment, a.status FROM absences a JOIN users u ON u.id=a.user_id WHERE a.status IN ('requested','approved') AND a.end_date >= ",
-    );
-    builder.push_bind(from);
-    builder.push(" AND a.start_date <= ");
-    builder.push_bind(to);
-    if let Some(user_ids) = scope_user_ids {
-        builder.push(" AND a.user_id IN (");
-        let mut separated = builder.separated(", ");
-        for user_id in user_ids {
-            separated.push_bind(user_id);
-        }
-        separated.push_unseparated(")");
-    }
-    builder.push(" ORDER BY a.start_date");
-    let calendar_entries = builder
-        .build_query_as::<CalendarEntry>()
-        .fetch_all(&app_state.pool)
+    let scope_user_ids = calendar_scope_user_ids(&app_state, &requester).await?;
+    let calendar_entries = app_state
+        .db
+        .absences
+        .calendar_entries(from, to, scope_user_ids.as_deref())
         .await?;
     let requester_is_lead = requester.is_lead();
     // Privacy: only team leads / admins see the actual absence kind. For peers
@@ -384,12 +340,8 @@ where
 }
 
 async fn absence_owner_id(pool: &crate::db::DatabasePool, absence_id: i64) -> AppResult<i64> {
-    Ok(
-        sqlx::query_scalar("SELECT user_id FROM absences WHERE id=$1")
-            .bind(absence_id)
-            .fetch_one(pool)
-            .await?,
-    )
+    use crate::repository::AbsenceDb;
+    AbsenceDb::new(pool.clone()).get_user_id(absence_id).await
 }
 
 pub async fn create(
@@ -635,27 +587,23 @@ pub async fn cancel(
     requester: User,
     Path(absence_id): Path<i64>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let owner_id = absence_owner_id(&app_state.pool, absence_id).await?;
-    let mut transaction = app_state.pool.begin().await?;
-    lock_absence_scope(&mut *transaction, owner_id).await?;
-    // Lock the absence row to prevent concurrent cancellations.
-    let absence: Absence = sqlx::query_as("SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE id=$1 FOR UPDATE")
-        .bind(absence_id)
-        .fetch_one(&mut *transaction)
-        .await?;
-    if absence.user_id != requester.id {
+    // Pre-check ownership and status (the repo's cancel will do its own locking).
+    let absence_check = repo_absence_to_service(
+        app_state.db.absences.find_by_id(absence_id).await?,
+    );
+    if absence_check.user_id != requester.id {
         return Err(AppError::Forbidden);
     }
-    if !can_self_cancel(&absence) {
+    if !can_self_cancel(&absence_check) {
         return Err(AppError::BadRequest(
             "Only requested or auto-approved sick absences can be self-cancelled.".into(),
         ));
     }
-    sqlx::query("UPDATE absences SET status='cancelled' WHERE id=$1")
-        .bind(absence_id)
-        .execute(&mut *transaction)
+    let absence = app_state
+        .db
+        .absences
+        .cancel(absence_id, requester.id)
         .await?;
-    transaction.commit().await?;
     audit::log(
         &app_state.pool,
         requester.id,
@@ -692,7 +640,7 @@ pub async fn approve(
     // Non-admin leads may only act on absences of their direct reports.
     if !requester.is_admin() {
         let is_direct_report: Option<bool> = sqlx::query_scalar(
-            "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2 AND role != 'admin' FOR UPDATE",
+            "SELECT TRUE FROM users WHERE id = $1 AND role != 'admin' AND EXISTS (SELECT 1 FROM user_approvers WHERE user_id = $1 AND approver_id = $2) FOR UPDATE",
         )
         .bind(absence.user_id)
         .bind(requester.id)
@@ -722,7 +670,7 @@ pub async fn approve(
         let absence_owner: crate::auth::User = sqlx::query_as(
             "SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, \
              start_date, active, must_change_password, created_at, \
-             approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min \
+             allow_reopen_without_approval, dark_mode, overtime_start_balance_min \
              FROM users WHERE id=$1",
         )
         .bind(absence.user_id)
@@ -837,7 +785,7 @@ pub async fn reject(
     // Non-admin leads may only act on absences of their direct reports.
     if !requester.is_admin() {
         let is_direct_report: Option<bool> = sqlx::query_scalar(
-            "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2 AND role != 'admin' FOR UPDATE",
+            "SELECT TRUE FROM users WHERE id = $1 AND role != 'admin' AND EXISTS (SELECT 1 FROM user_approvers WHERE user_id = $1 AND approver_id = $2) FOR UPDATE",
         )
         .bind(absence.user_id)
         .bind(requester.id)
@@ -1005,7 +953,7 @@ pub struct BalanceQuery {
 }
 
 async fn assert_can_access_user(
-    pool: &crate::db::DatabasePool,
+    app_state: &AppState,
     requester: &User,
     target_uid: i64,
 ) -> AppResult<()> {
@@ -1015,14 +963,8 @@ async fn assert_can_access_user(
     if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let is_report: Option<bool> = sqlx::query_scalar(
-        "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2 AND role != 'admin'",
-    )
-    .bind(target_uid)
-    .bind(requester.id)
-    .fetch_optional(pool)
-    .await?;
-    if is_report.is_none() {
+    let is_report = app_state.db.users.is_direct_report(target_uid, requester.id).await?;
+    if !is_report {
         return Err(AppError::Forbidden);
     }
     Ok(())
@@ -1198,20 +1140,24 @@ pub async fn balance(
     Path(target_user_id): Path<i64>,
     Query(query): Query<BalanceQuery>,
 ) -> AppResult<Json<LeaveBalance>> {
-    assert_can_access_user(&app_state.pool, &requester, target_user_id).await?;
+    assert_can_access_user(&app_state, &requester, target_user_id).await?;
     // Default to the current year if none was provided.
     let year = query.year.unwrap_or_else(|| chrono::Utc::now().year());
-    let target_user: crate::auth::User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1")
-        .bind(target_user_id)
-        .fetch_one(&app_state.pool)
-        .await?;
+    let repo_user = app_state.db.users.find_by_id(target_user_id).await?
+        .ok_or(AppError::NotFound)?;
+    let target_user = crate::users::repo_user_to_auth_user(repo_user);
     let year_from = NaiveDate::from_ymd_opt(year, 1, 1).unwrap();
     let year_to = NaiveDate::from_ymd_opt(year, 12, 31).unwrap();
     let today = chrono::Utc::now().date_naive();
     // Load all vacation absences (requested + approved) in the given year.
-    let vacation_absences = sqlx::query_as::<_, Absence>(
-        "SELECT id, user_id, kind, start_date, end_date, comment, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM absences WHERE user_id=$1 AND kind='vacation' AND status IN ('requested','approved') AND end_date >= $2 AND start_date <= $3"
-    ).bind(target_user_id).bind(year_from).bind(year_to).fetch_all(&app_state.pool).await?;
+    let vacation_absences: Vec<Absence> = app_state
+        .db
+        .absences
+        .vacation_absences_in_year(target_user_id, year_from, year_to)
+        .await?
+        .into_iter()
+        .map(repo_absence_to_service)
+        .collect();
     // Categorize each vacation absence into taken, upcoming, or requested buckets.
     let mut taken_days = 0.0;
     let mut upcoming_days = 0.0;

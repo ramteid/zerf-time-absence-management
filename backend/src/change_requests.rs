@@ -39,18 +39,31 @@ pub struct ChangeRequest {
     pub created_at: DateTime<Utc>,
 }
 
+fn repo_cr_to_service(cr: crate::repository::ChangeRequest) -> ChangeRequest {
+    ChangeRequest {
+        id: cr.id,
+        time_entry_id: cr.time_entry_id,
+        user_id: cr.user_id,
+        new_date: cr.new_date,
+        new_start_time: cr.new_start_time,
+        new_end_time: cr.new_end_time,
+        new_category_id: cr.new_category_id,
+        new_comment: cr.new_comment,
+        reason: cr.reason,
+        status: cr.status,
+        reviewed_by: cr.reviewed_by,
+        reviewed_at: cr.reviewed_at,
+        rejection_reason: cr.rejection_reason,
+        created_at: cr.created_at,
+    }
+}
+
 pub async fn list(
     State(app_state): State<AppState>,
     requester: User,
 ) -> AppResult<Json<Vec<ChangeRequest>>> {
-    Ok(Json(
-        sqlx::query_as::<_, ChangeRequest>(
-            "SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE user_id=$1 ORDER BY created_at DESC",
-        )
-        .bind(requester.id)
-        .fetch_all(&app_state.pool)
-        .await?,
-    ))
+    let crs = app_state.db.change_requests.list_for_user(requester.id).await?;
+    Ok(Json(crs.into_iter().map(repo_cr_to_service).collect()))
 }
 
 pub async fn list_all(
@@ -60,25 +73,12 @@ pub async fn list_all(
     if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
-    if requester.is_admin() {
-        // Admins see all open change requests.
-        return Ok(Json(
-            sqlx::query_as::<_, ChangeRequest>(
-                "SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE status='open' ORDER BY created_at",
-            )
-            .fetch_all(&app_state.pool)
-            .await?,
-        ));
-    }
-    // Non-admin leads see only open change requests from their direct reports.
-    Ok(Json(
-        sqlx::query_as::<_, ChangeRequest>(
-            "SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE status='open' AND user_id IN (SELECT id FROM users WHERE approver_id = $1 AND role != 'admin') ORDER BY created_at",
-        )
-        .bind(requester.id)
-        .fetch_all(&app_state.pool)
-        .await?,
-    ))
+    let crs = if requester.is_admin() {
+        app_state.db.change_requests.list_open_all().await?
+    } else {
+        app_state.db.change_requests.list_open_for_lead(requester.id).await?
+    };
+    Ok(Json(crs.into_iter().map(repo_cr_to_service).collect()))
 }
 
 #[derive(Deserialize)]
@@ -175,12 +175,12 @@ pub async fn create(
         }
     }
     // Load the target time entry to check ownership and current state.
-    let (entry_owner_id, entry_status, entry_date, entry_start_time, entry_end_time, entry_category_id, entry_comment): (i64, String, NaiveDate, String, String, i64, Option<String>) = sqlx::query_as(
-        "SELECT user_id, status, entry_date, start_time, end_time, category_id, comment FROM time_entries WHERE id=$1",
-    )
-    .bind(body.time_entry_id)
-    .fetch_one(&app_state.pool)
-    .await?;
+    let (entry_owner_id, entry_status, entry_date, entry_start_time, entry_end_time, entry_category_id, entry_comment) = app_state
+        .db
+        .change_requests
+        .get_entry_info(body.time_entry_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
     if entry_owner_id != requester.id {
         return Err(AppError::Forbidden);
     }
@@ -224,11 +224,11 @@ pub async fn create(
     // Validate new_category_id if provided — reject nonexistent/inactive categories
     // before storing so malformed data never reaches the approval path.
     if let Some(category_id) = body.new_category_id {
-        let category_active: Option<bool> =
-            sqlx::query_scalar("SELECT active FROM categories WHERE id = $1")
-                .bind(category_id)
-                .fetch_optional(&app_state.pool)
-                .await?;
+        let category_active = app_state
+            .db
+            .change_requests
+            .check_category_active(category_id)
+            .await?;
         if category_active.is_none() {
             return Err(AppError::BadRequest("Category not found.".into()));
         }
@@ -236,37 +236,23 @@ pub async fn create(
             return Err(AppError::BadRequest("Category is inactive.".into()));
         }
     }
-    // Use a transaction with an advisory lock on the time_entry_id to
-    // serialize CR creation per entry, preventing the TOCTOU race where two
-    // concurrent requests both pass the duplicate check before either inserts.
-    // The two-argument form pg_advisory_xact_lock(int, int) uses a separate
-    // namespace from the single-argument form used by absences/time_entries
-    // (which lock on user_id), avoiding spurious cross-subsystem contention.
-    let mut transaction = app_state.pool.begin().await?;
-    sqlx::query("SELECT pg_advisory_xact_lock(2, $1::int)")
-        .bind(body.time_entry_id)
-        .execute(&mut *transaction)
-        .await?;
-    // Guard against duplicate open change requests for the same entry.
-    let existing_open_cr_id: Option<i64> = sqlx::query_scalar(
-        "SELECT id FROM change_requests WHERE time_entry_id=$1 AND status='open'",
-    )
-    .bind(body.time_entry_id)
-    .fetch_optional(&mut *transaction)
-    .await?;
-    if let Some(existing_id) = existing_open_cr_id {
-        return Err(AppError::Conflict(format!(
-            "An open change request already exists for this entry (id {existing_id})."
-        )));
-    }
-    let new_change_request_id: i64 = sqlx::query_scalar("INSERT INTO change_requests(time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id")
-        .bind(body.time_entry_id).bind(requester.id).bind(body.new_date).bind(&body.new_start_time).bind(&body.new_end_time).bind(body.new_category_id).bind(&body.new_comment).bind(&body.reason)
-        .fetch_one(&mut *transaction).await?;
-    transaction.commit().await?;
-    let created_change_request: ChangeRequest = sqlx::query_as("SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE id=$1")
-        .bind(new_change_request_id)
-        .fetch_one(&app_state.pool)
-        .await?;
+    let created_change_request = repo_cr_to_service(
+        app_state
+            .db
+            .change_requests
+            .create(
+                body.time_entry_id,
+                requester.id,
+                body.new_date,
+                body.new_start_time.as_deref(),
+                body.new_end_time.as_deref(),
+                body.new_category_id,
+                body.new_comment.as_deref(),
+                &body.reason,
+            )
+            .await?,
+    );
+    let new_change_request_id = created_change_request.id;
     audit::log(
         &app_state.pool,
         requester.id,
@@ -328,7 +314,7 @@ pub async fn approve(
     if !requester.is_admin() {
         // Non-admin leads may only act on requests from their direct reports.
         let is_direct_report: Option<bool> = sqlx::query_scalar(
-            "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2 AND role != 'admin' FOR UPDATE",
+            "SELECT TRUE FROM users WHERE id = $1 AND role != 'admin' AND EXISTS (SELECT 1 FROM user_approvers WHERE user_id = $1 AND approver_id = $2) FOR UPDATE",
         )
         .bind(change_request.user_id)
         .bind(requester.id)
@@ -505,7 +491,7 @@ pub async fn reject(
     // Non-admin leads may only act on requests from their direct reports.
     if !requester.is_admin() {
         let is_direct_report: Option<bool> = sqlx::query_scalar(
-            "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2 AND role != 'admin' FOR UPDATE",
+            "SELECT TRUE FROM users WHERE id = $1 AND role != 'admin' AND EXISTS (SELECT 1 FROM user_approvers WHERE user_id = $1 AND approver_id = $2) FOR UPDATE",
         )
         .bind(change_request.user_id)
         .bind(requester.id)
@@ -543,16 +529,16 @@ pub async fn reject(
     .await;
     // Notify the requester that their change request was rejected.
     let language = notification_language(&app_state.pool).await;
-    let affected_entry_date: NaiveDate =
-        sqlx::query_scalar("SELECT entry_date FROM time_entries WHERE id=$1")
-            .bind(change_request.time_entry_id)
-            .fetch_one(&app_state.pool)
-            .await
-            .unwrap_or(
-                change_request
-                    .new_date
-                    .unwrap_or(chrono::Utc::now().date_naive()),
-            );
+    let affected_entry_date: NaiveDate = app_state
+        .db
+        .change_requests
+        .get_entry_date(change_request.time_entry_id)
+        .await?
+        .unwrap_or_else(|| {
+            change_request
+                .new_date
+                .unwrap_or(chrono::Utc::now().date_naive())
+        });
     crate::notifications::create_translated(
         &app_state,
         &language,

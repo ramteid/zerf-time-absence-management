@@ -25,8 +25,7 @@
   let start_date = template.start_date || isoDate(new Date());
   let overtime_start_balance_hours =
     (template.overtime_start_balance_min || 0) / 60;
-  let approver_id =
-    template.approver_id == null ? "" : String(template.approver_id);
+  let approver_ids = Array.isArray(template.approver_ids) ? template.approver_ids.map(Number) : [];
   let active = template.active ?? true;
   let error = "";
   let approvers = [];
@@ -113,8 +112,8 @@
 
   async function save() {
     error = "";
-    if (requiresApprover && !approver_id) {
-      error = $t("An approver is required for employees and team leads.");
+    if (requiresApprover && approver_ids.length === 0) {
+      error = $t("At least one approver is required for employees and team leads.");
       return;
     }
     if (isNew && password && password !== confirmPassword) {
@@ -140,9 +139,9 @@
         ),
       };
       if (requiresApprover) {
-        body.approver_id = approver_id ? Number(approver_id) : null;
-      } else if (!isNew && template.approver_id != null) {
-        body.approver_id = null;
+        body.approver_ids = approver_ids;
+      } else {
+        body.approver_ids = [];
       }
       if (isNew && password) {
         body.password = password;
@@ -408,25 +407,28 @@
       {/if}
       {#if requiresApprover}
         <div>
-          <label class="kz-label" for="user-approver"
-            >{$t("Approver (Team lead / Admin)")}</label
-          >
-          <select
-            id="user-approver"
-            class="kz-select"
-            bind:value={approver_id}
-            required
-          >
-            <option value="">{$t("— None —")}</option>
-            {#each approvers as a}
-              <option value={String(a.id)}>
-                {a.first_name}
-                {a.last_name} ({a.email})
-              </option>
-            {/each}
-          </select>
+          <label class="kz-label">{$t("Approvers (Team leads / Admins)")}</label>
+          {#if approvers.length === 0}
+            <div style="font-size:13px;color:var(--text-tertiary);padding:6px 0">
+              {$t("No eligible approvers found.")}
+            </div>
+          {:else}
+            <div style="display:flex;flex-direction:column;gap:6px;max-height:180px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px">
+              {#each approvers as a}
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
+                  <input
+                    type="checkbox"
+                    value={a.id}
+                    bind:group={approver_ids}
+                  />
+                  {a.first_name}
+                  {a.last_name} ({a.email})
+                </label>
+              {/each}
+            </div>
+          {/if}
           <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
-            {$t("Required for employees and team leads.")}
+            {$t("At least one approver is required for employees and team leads.")}
           </div>
         </div>
       {/if}

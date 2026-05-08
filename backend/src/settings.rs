@@ -3,6 +3,7 @@ use crate::config::SmtpConfig;
 use crate::error::{AppError, AppResult};
 use crate::holidays;
 use crate::i18n;
+use crate::repository::SettingsDb;
 use crate::AppState;
 use axum::extract::State;
 use axum::Json;
@@ -116,27 +117,16 @@ pub async fn load_setting(
     key: &str,
     default: &str,
 ) -> AppResult<String> {
-    let value: Option<String> = sqlx::query_scalar("SELECT value FROM app_settings WHERE key = $1")
-        .bind(key)
-        .fetch_optional(pool)
-        .await?;
-    Ok(value.unwrap_or_else(|| default.to_string()))
+    let db = SettingsDb::new(pool.clone());
+    db.load_setting(key, default).await
 }
 
-async fn save_setting_exec<'e, E>(exec: E, key: &str, value: &str) -> AppResult<String>
-where
-    E: sqlx::Executor<'e, Database = sqlx::Postgres>,
-{
-    let saved: String = sqlx::query_scalar(
-        "INSERT INTO app_settings(key, value) VALUES ($1, $2) \
-         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP \
-         RETURNING value",
-    )
-    .bind(key)
-    .bind(value)
-    .fetch_one(exec)
-    .await?;
-    Ok(saved)
+async fn save_setting_exec(
+    tx: &mut sqlx::PgConnection,
+    key: &str,
+    value: &str,
+) -> AppResult<String> {
+    SettingsDb::save_setting_tx(tx, key, value).await
 }
 
 async fn load_all_settings(pool: &crate::db::DatabasePool) -> AppResult<PublicSettings> {
@@ -253,41 +243,8 @@ async fn smtp_config_from_body(
 /// Load the active SMTP config from the database. Returns `None` when SMTP
 /// is disabled or not fully configured.
 pub async fn load_smtp_config(pool: &crate::db::DatabasePool) -> Option<SmtpConfig> {
-    let enabled = load_setting(pool, SMTP_ENABLED_KEY, "false").await.ok()?;
-    if enabled != "true" {
-        return None;
-    }
-    let host = load_setting(pool, SMTP_HOST_KEY, "").await.ok()?;
-    let from = load_setting(pool, SMTP_FROM_KEY, "").await.ok()?;
-    if host.is_empty() || from.is_empty() {
-        return None;
-    }
-    let port: u16 = load_setting(pool, SMTP_PORT_KEY, "587")
-        .await
-        .ok()?
-        .parse()
-        .unwrap_or(587);
-    let username = load_setting(pool, SMTP_USERNAME_KEY, "").await.ok()?;
-    let password = load_setting(pool, SMTP_PASSWORD_KEY, "").await.ok()?;
-    let encryption = load_setting(pool, SMTP_ENCRYPTION_KEY, "starttls")
-        .await
-        .ok()?;
-    Some(SmtpConfig {
-        host,
-        port,
-        username: if username.is_empty() {
-            None
-        } else {
-            Some(username)
-        },
-        password: if password.is_empty() {
-            None
-        } else {
-            Some(password)
-        },
-        from,
-        encryption,
-    })
+    let db = SettingsDb::new(pool.clone());
+    db.load_smtp_config().await
 }
 
 pub async fn update_smtp_settings(
@@ -427,18 +384,8 @@ pub async fn update_admin_settings(
     let time_format = normalize_time_format(&body.time_format)?;
     let country = body.country.trim().to_uppercase();
     let region = body.region.trim().to_string();
-    let previous_country: Option<String> = sqlx::query_scalar(
-        "SELECT value FROM app_settings WHERE key = $1",
-    )
-    .bind(COUNTRY_KEY)
-    .fetch_optional(&app_state.pool)
-    .await?;
-    let previous_region: Option<String> = sqlx::query_scalar(
-        "SELECT value FROM app_settings WHERE key = $1",
-    )
-    .bind(REGION_KEY)
-    .fetch_optional(&app_state.pool)
-    .await?;
+    let previous_country = app_state.db.settings.get_raw(COUNTRY_KEY).await?;
+    let previous_region = app_state.db.settings.get_raw(REGION_KEY).await?;
 
     if !country.is_empty() && country.len() != 2 {
         return Err(AppError::BadRequest(

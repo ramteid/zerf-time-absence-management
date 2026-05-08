@@ -74,7 +74,7 @@ async fn full_integration_suite() {
         let (st, body) = admin
             .post(
                 "/api/v1/users",
-                &json!({"email":"lead@example.com","first_name":"Lea","last_name":"Lead","role":"team_lead","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,"start_date":"2024-01-01","approver_id":1}),
+                &json!({"email":"lead@example.com","first_name":"Lea","last_name":"Lead","role":"team_lead","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,"start_date":"2024-01-01","approver_ids":[1]}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "create team_lead");
@@ -84,7 +84,7 @@ async fn full_integration_suite() {
         let (st, body) = admin
             .post(
                 "/api/v1/users",
-                &json!({"email":"erin@example.com","first_name":"Erin","last_name":"Worker","role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,"start_date":"2024-01-01","approver_id": lead_id}),
+                &json!({"email":"erin@example.com","first_name":"Erin","last_name":"Worker","role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,"start_date":"2024-01-01","approver_ids": [lead_id]}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "create employee");
@@ -750,7 +750,7 @@ async fn full_integration_suite() {
         let (st, body) = admin
             .post(
                 "/api/v1/users",
-                &json!({"email":"tina@example.com","first_name":"Tina","last_name":"Timekeeper","role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,"start_date":"2024-01-01","approver_id": lead_id}),
+                &json!({"email":"tina@example.com","first_name":"Tina","last_name":"Timekeeper","role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,"start_date":"2024-01-01","approver_ids": [lead_id]}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "create Tina");

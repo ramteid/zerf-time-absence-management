@@ -12,36 +12,14 @@ use axum::{
     response::sse::{Event, KeepAlive, Sse},
     Json,
 };
-use chrono::{DateTime, Utc};
-use serde::Serialize;
-use sqlx::FromRow;
 use std::{convert::Infallible, time::Duration};
-use tokio::sync::broadcast;
 use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 
-#[derive(Clone, Debug)]
-pub struct NotificationSignal {
-    pub user_id: i64,
-}
-
-pub type NotificationBroadcaster = broadcast::Sender<NotificationSignal>;
+// Re-export the canonical types from the repository layer.
+pub use crate::repository::notifications::{NotificationBroadcaster, NotificationSignal};
 
 pub fn broadcaster() -> NotificationBroadcaster {
-    let (tx, _) = broadcast::channel(256);
-    tx
-}
-
-#[derive(FromRow, Serialize)]
-pub struct Notification {
-    pub id: i64,
-    pub user_id: i64,
-    pub kind: String,
-    pub title: String,
-    pub body: Option<String>,
-    pub reference_type: Option<String>,
-    pub reference_id: Option<i64>,
-    pub is_read: bool,
-    pub created_at: DateTime<Utc>,
+    crate::repository::notifications::new_broadcaster()
 }
 
 /// Insert a notification row. `email` is sent best-effort via SMTP if
@@ -56,33 +34,15 @@ pub async fn create(
     reference_type: Option<&str>,
     reference_id: Option<i64>,
 ) {
-    if let Err(e) = sqlx::query(
-        "INSERT INTO notifications(user_id,kind,title,body,reference_type,reference_id) \
-         VALUES ($1,$2,$3,$4,$5,$6)",
-    )
-    .bind(user_id)
-    .bind(kind)
-    .bind(title)
-    .bind(body)
-    .bind(reference_type)
-    .bind(reference_id)
-    .execute(&state.pool)
-    .await
-    {
+    if let Err(e) = state.db.notifications.insert(
+        user_id, kind, title, body, reference_type, reference_id,
+    ).await {
         tracing::warn!(target:"zerf::notifications", "insert failed: {e}");
         return;
     }
-    let _ = state.notifications.send(NotificationSignal { user_id });
     // Resolve recipient email and dispatch SMTP best-effort.
-    if let Ok(Some(email)) =
-        sqlx::query_scalar::<_, String>("SELECT email FROM users WHERE id=$1 AND active=TRUE")
-            .bind(user_id)
-            .fetch_optional(&state.pool)
-            .await
-    {
-        let smtp = crate::settings::load_smtp_config(&state.pool)
-            .await
-            .map(std::sync::Arc::new);
+    if let Some(email) = state.db.notifications.get_user_email(user_id).await {
+        let smtp = state.db.settings.load_smtp_config().await.map(std::sync::Arc::new);
         crate::email::send_async(smtp, email, title.to_string(), body.to_string());
     }
 }
@@ -116,28 +76,16 @@ pub async fn create_translated(
 pub async fn list(
     State(app_state): State<AppState>,
     requester: User,
-) -> AppResult<Json<Vec<Notification>>> {
-    Ok(Json(
-        sqlx::query_as::<_, Notification>(
-            "SELECT id, user_id, kind, title, body, reference_type, reference_id, is_read, created_at FROM notifications WHERE user_id=$1 \
-             ORDER BY created_at DESC LIMIT 100",
-        )
-        .bind(requester.id)
-        .fetch_all(&app_state.pool)
-        .await?,
-    ))
+) -> AppResult<Json<Vec<crate::repository::notifications::Notification>>> {
+    Ok(Json(app_state.db.notifications.list_for_user(requester.id).await?))
 }
 
 pub async fn unread_count(
     State(app_state): State<AppState>,
     requester: User,
 ) -> AppResult<Json<serde_json::Value>> {
-    let unread_count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM notifications WHERE user_id=$1 AND is_read=FALSE")
-            .bind(requester.id)
-            .fetch_one(&app_state.pool)
-            .await?;
-    Ok(Json(serde_json::json!({ "count": unread_count })))
+    let count = app_state.db.notifications.count_unread(requester.id).await?;
+    Ok(Json(serde_json::json!({ "count": count })))
 }
 
 pub async fn stream(
@@ -145,7 +93,7 @@ pub async fn stream(
     requester: User,
 ) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
     let requester_id = requester.id;
-    let stream = BroadcastStream::new(app_state.notifications.subscribe()).filter_map(move |msg| {
+    let stream = BroadcastStream::new(app_state.db.notifications.subscribe()).filter_map(move |msg| {
         let should_refresh = match msg {
             Ok(signal) => signal.user_id == requester_id,
             Err(_) => true, // lagged — refresh to catch up
@@ -167,13 +115,7 @@ pub async fn mark_read(
     requester: User,
     Path(notification_id): Path<i64>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let rows_updated =
-        sqlx::query("UPDATE notifications SET is_read=TRUE WHERE id=$1 AND user_id=$2")
-            .bind(notification_id)
-            .bind(requester.id)
-            .execute(&app_state.pool)
-            .await?
-            .rows_affected();
+    let rows_updated = app_state.db.notifications.mark_read(notification_id, requester.id).await?;
     if rows_updated == 0 {
         return Err(AppError::NotFound);
     }
@@ -184,12 +126,7 @@ pub async fn mark_all_read(
     State(app_state): State<AppState>,
     requester: User,
 ) -> AppResult<Json<serde_json::Value>> {
-    let rows_updated =
-        sqlx::query("UPDATE notifications SET is_read=TRUE WHERE user_id=$1 AND is_read=FALSE")
-            .bind(requester.id)
-            .execute(&app_state.pool)
-            .await?
-            .rows_affected();
+    let rows_updated = app_state.db.notifications.mark_all_read(requester.id).await?;
     Ok(Json(
         serde_json::json!({ "ok": true, "count": rows_updated }),
     ))
@@ -199,21 +136,13 @@ pub async fn delete_all(
     State(app_state): State<AppState>,
     requester: User,
 ) -> AppResult<Json<serde_json::Value>> {
-    let rows_deleted = sqlx::query("DELETE FROM notifications WHERE user_id=$1")
-        .bind(requester.id)
-        .execute(&app_state.pool)
-        .await?
-        .rows_affected();
+    let rows_deleted = app_state.db.notifications.delete_all(requester.id).await?;
     Ok(Json(
         serde_json::json!({ "ok": true, "count": rows_deleted }),
     ))
 }
 
 /// Trim notifications older than 90 days; called from the background loop.
-pub async fn cleanup_old(pool: &crate::db::DatabasePool) {
-    let _ = sqlx::query(
-        "DELETE FROM notifications WHERE created_at < CURRENT_TIMESTAMP - INTERVAL '90 days'",
-    )
-    .execute(pool)
-    .await;
+pub async fn cleanup_old(db: &crate::repository::Db) {
+    db.notifications.cleanup_old().await;
 }

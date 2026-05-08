@@ -22,7 +22,7 @@ fn reporting_today() -> NaiveDate {
 /// reports (users whose `approver_id` matches the lead's id). Every user may
 /// always access their own data.
 async fn assert_can_access_user(
-    pool: &crate::db::DatabasePool,
+    app_state: &AppState,
     requester: &User,
     target_uid: i64,
 ) -> AppResult<()> {
@@ -32,14 +32,8 @@ async fn assert_can_access_user(
     if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let is_report: Option<bool> = sqlx::query_scalar(
-        "SELECT TRUE FROM users WHERE id = $1 AND approver_id = $2 AND role != 'admin'",
-    )
-    .bind(target_uid)
-    .bind(requester.id)
-    .fetch_optional(pool)
-    .await?;
-    if is_report.is_none() {
+    let is_report = app_state.db.users.is_direct_report(target_uid, requester.id).await?;
+    if !is_report {
         return Err(AppError::Forbidden);
     }
     Ok(())
@@ -125,12 +119,15 @@ async fn build_range(
     to: NaiveDate,
     label: &str,
 ) -> AppResult<MonthReport> {
-    let user: crate::auth::User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1")
-        .bind(user_id)
-        .fetch_one(pool)
-        .await?;
+    let repo_user = crate::repository::UserDb::new(pool.clone())
+        .find_by_id(user_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let user = crate::users::repo_user_to_auth_user(repo_user);
     let target_per_day_min = (user.weekly_hours / 5.0 * 60.0) as i64;
     let today = reporting_today();
+
+    let reports_db = crate::repository::ReportDb::new(pool.clone());
 
     #[allow(clippy::type_complexity)]
     let time_entry_rows: Vec<(
@@ -142,34 +139,23 @@ async fn build_range(
         i64,
         String,
         Option<String>,
-    )> = sqlx::query_as(
-        "SELECT z.entry_date, z.start_time, z.end_time, c.name, c.color, z.category_id, z.status, z.comment FROM time_entries z JOIN categories c ON c.id=z.category_id WHERE z.user_id=$1 AND z.entry_date BETWEEN $2 AND $3 ORDER BY z.entry_date, z.start_time"
-    ).bind(user_id).bind(from).bind(to).fetch_all(pool).await?;
+    )> = reports_db.time_entry_rows(user_id, from, to).await?;
 
-    let approved_absence_rows: Vec<(NaiveDate, NaiveDate, String)> = sqlx::query_as(
-        "SELECT start_date, end_date, kind FROM absences WHERE user_id=$1 AND status='approved' AND end_date >= $2 AND start_date <= $3"
-    ).bind(user_id).bind(from).bind(to).fetch_all(pool).await?;
+    let approved_absence_rows: Vec<(NaiveDate, NaiveDate, String)> =
+        reports_db.approved_absence_rows(user_id, from, to).await?;
 
     let language = i18n::load_ui_language(pool).await?;
 
-    let holiday_map: HashMap<NaiveDate, String> = sqlx::query_as::<
-        _,
-        (NaiveDate, String, Option<String>),
-    >(
-        "SELECT holiday_date, name, local_name FROM holidays WHERE holiday_date BETWEEN $1 AND $2",
-    )
-    .bind(from)
-    .bind(to)
-    .fetch_all(pool)
-    .await?
-    .into_iter()
-    .map(|(holiday_date, name, local_name)| {
-        (
-            holiday_date,
-            i18n::holiday_display_name(&language, name, local_name),
-        )
-    })
-    .collect();
+    let holiday_raw = reports_db.holiday_rows(from, to).await?;
+    let holiday_map: HashMap<NaiveDate, String> = holiday_raw
+        .into_iter()
+        .map(|(holiday_date, name, local_name)| {
+            (
+                holiday_date,
+                i18n::holiday_display_name(&language, name, local_name),
+            )
+        })
+        .collect();
 
     let mut days: Vec<DayDetail> = vec![];
     let mut target_total = 0i64;
@@ -269,10 +255,11 @@ async fn build_month(
     month: &str,
 ) -> AppResult<MonthReport> {
     let (from, to) = month_bounds(month)?;
-    let user_start_date: NaiveDate = sqlx::query_scalar("SELECT start_date FROM users WHERE id=$1")
-        .bind(user_id)
-        .fetch_one(pool)
-        .await?;
+    let repo_user = crate::repository::UserDb::new(pool.clone())
+        .find_by_id(user_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let user_start_date = repo_user.start_date;
     let mut report = build_range(pool, user_id, from, to, month).await?;
     report.weeks_all_submitted =
         Some(all_weeks_submitted_for_month(pool, user_id, from, to, user_start_date).await?);
@@ -295,7 +282,7 @@ pub async fn month(
 ) -> AppResult<Json<MonthReport>> {
     // Default to the requester's own data if no user_id is specified.
     let target_user_id = query.user_id.unwrap_or(requester.id);
-    assert_can_access_user(&app_state.pool, &requester, target_user_id).await?;
+    assert_can_access_user(&app_state, &requester, target_user_id).await?;
     Ok(Json(
         build_month(&app_state.pool, target_user_id, &query.month).await?,
     ))
@@ -424,7 +411,7 @@ pub async fn month_csv(
     Query(query): Query<CsvQuery>,
 ) -> AppResult<Response> {
     let target_user_id = query.user_id.unwrap_or(requester.id);
-    assert_can_access_user(&app_state.pool, &requester, target_user_id).await?;
+    assert_can_access_user(&app_state, &requester, target_user_id).await?;
     let month = query
         .month
         .as_ref()
@@ -446,7 +433,7 @@ pub async fn range(
     Query(query): Query<RangeQuery>,
 ) -> AppResult<Json<MonthReport>> {
     let target_user_id = query.user_id.unwrap_or(requester.id);
-    assert_can_access_user(&app_state.pool, &requester, target_user_id).await?;
+    assert_can_access_user(&app_state, &requester, target_user_id).await?;
     validate_range(query.from, query.to)?;
     let label = format!("{}_to_{}", query.from, query.to);
     let report = build_range(
@@ -466,7 +453,7 @@ pub async fn range_csv(
     Query(query): Query<CsvQuery>,
 ) -> AppResult<Response> {
     let target_user_id = query.user_id.unwrap_or(requester.id);
-    assert_can_access_user(&app_state.pool, &requester, target_user_id).await?;
+    assert_can_access_user(&app_state, &requester, target_user_id).await?;
     let from = query
         .from
         .ok_or_else(|| AppError::BadRequest("from is required.".into()))?;
@@ -560,29 +547,13 @@ async fn all_weeks_submitted_for_month(
     let check_to = *complete_week_mondays.last().unwrap() + Duration::days(6);
 
     // Load public holidays in the check range once, then use a set for cheap lookups.
-    let holiday_set: std::collections::HashSet<NaiveDate> = {
-        let rows: Vec<(NaiveDate,)> = sqlx::query_as(
-            "SELECT holiday_date FROM holidays WHERE holiday_date BETWEEN $1 AND $2",
-        )
-        .bind(check_from)
-        .bind(check_to)
-        .fetch_all(pool)
-        .await?;
-        rows.into_iter()
-            .map(|(holiday_date,)| holiday_date)
-            .collect()
-    };
+    let reports_db = crate::repository::ReportDb::new(pool.clone());
+    let holiday_set = reports_db.holiday_set(check_from, check_to).await?;
 
     // Build a set of approved absence days, clamped to the week check range.
-    let absence_rows: Vec<(NaiveDate, NaiveDate)> = sqlx::query_as(
-        "SELECT start_date, end_date FROM absences \
-         WHERE user_id=$1 AND status='approved' AND end_date >= $2 AND start_date <= $3",
-    )
-    .bind(user_id)
-    .bind(check_from)
-    .bind(check_to)
-    .fetch_all(pool)
-    .await?;
+    let absence_rows = reports_db
+        .absence_ranges_in_period(user_id, check_from, check_to)
+        .await?;
 
     let mut absent_days: std::collections::HashSet<NaiveDate> = std::collections::HashSet::new();
     for (abs_start, abs_end) in &absence_rows {
@@ -595,19 +566,9 @@ async fn all_weeks_submitted_for_month(
     }
 
     // Load submitted/approved time entry dates. Draft days are not submitted.
-    let submitted_dates: std::collections::HashSet<NaiveDate> = {
-        let rows: Vec<(NaiveDate,)> = sqlx::query_as(
-            "SELECT DISTINCT entry_date FROM time_entries \
-             WHERE user_id=$1 AND status IN ('submitted','approved') \
-             AND entry_date BETWEEN $2 AND $3",
-        )
-        .bind(user_id)
-        .bind(check_from)
-        .bind(check_to)
-        .fetch_all(pool)
+    let submitted_dates = reports_db
+        .submitted_dates_in_range(user_id, check_from, check_to)
         .await?;
-        rows.into_iter().map(|(d,)| d).collect()
-    };
 
     // Check each fully elapsed week.
     for &week_monday in &complete_week_mondays {
@@ -647,17 +608,15 @@ pub async fn team(
         return Err(AppError::Forbidden);
     }
 
-    // Admins see all active users; team leads see only their direct reports.
-    let team_members: Vec<crate::auth::User> = if requester.is_admin() {
-        sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE active=TRUE ORDER BY last_name")
-            .fetch_all(&app_state.pool)
-            .await?
-    } else {
-        sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE active=TRUE AND approver_id=$1 AND role!='admin' ORDER BY last_name")
-            .bind(requester.id)
-            .fetch_all(&app_state.pool)
-            .await?
-    };
+    // Admins see all active users; team leads see themselves and their direct reports.
+    let team_members: Vec<crate::auth::User> = app_state
+        .db
+        .reports
+        .active_team_members(requester.id, requester.is_admin())
+        .await?
+        .into_iter()
+        .map(crate::users::repo_user_to_auth_user)
+        .collect();
 
     let today = reporting_today();
     let yesterday = today - Duration::days(1);
@@ -794,7 +753,7 @@ pub async fn categories(
     let target_user_id = query.user_id;
     if let Some(user_id) = target_user_id {
         // Requesting a specific user: verify access rights.
-        assert_can_access_user(&app_state.pool, &requester, user_id).await?;
+        assert_can_access_user(&app_state, &requester, user_id).await?;
     } else if !requester.is_lead() {
         // No specific user requested: only leads may see aggregated team data.
         return Err(AppError::Forbidden);
@@ -819,9 +778,9 @@ pub async fn categories(
     } else if !requester.is_admin() {
         // Non-admin lead with no specific user: restrict to direct reports.
         builder
-            .push(" AND z.user_id IN (SELECT id FROM users WHERE approver_id = ")
+            .push(" AND z.user_id IN (SELECT ua.user_id FROM user_approvers ua JOIN users u ON u.id=ua.user_id WHERE ua.approver_id = ")
             .push_bind(requester.id)
-            .push(" AND role != 'admin')");
+            .push(" AND u.role != 'admin')");
     }
     let rows: Vec<(String, String, String, String)> =
         builder.build_query_as().fetch_all(&app_state.pool).await?;
@@ -875,9 +834,9 @@ pub async fn team_categories(
         user_builder
             .push(" AND (id = ")
             .push_bind(requester.id)
-            .push(" OR (approver_id = ")
+            .push(" OR (role != 'admin' AND id IN (SELECT user_id FROM user_approvers WHERE approver_id = ")
             .push_bind(requester.id)
-            .push(" AND role != 'admin'))");
+            .push(")))");
     }
     user_builder.push(" ORDER BY last_name, first_name");
     let members: Vec<(i64, String, String)> = user_builder
@@ -903,9 +862,9 @@ pub async fn team_categories(
         entry_builder
             .push(" AND z.user_id IN (SELECT id FROM users WHERE id = ")
             .push_bind(requester.id)
-            .push(" OR (approver_id = ")
+            .push(" OR (role != 'admin' AND id IN (SELECT user_id FROM user_approvers WHERE approver_id = ")
             .push_bind(requester.id)
-            .push(" AND role != 'admin'))");
+            .push(")))");
     }
     let rows: Vec<(i64, String, String, String, String)> = entry_builder
         .build_query_as()
@@ -986,11 +945,9 @@ async fn build_overtime_rows_for_year(
     };
 
     // Determine the user's start_date and overtime start balance.
+    let reports_db = crate::repository::ReportDb::new(pool.clone());
     let (user_start_date, overtime_start_balance_min): (NaiveDate, i64) =
-        sqlx::query_as("SELECT start_date, overtime_start_balance_min FROM users WHERE id=$1")
-            .bind(target_user_id)
-            .fetch_one(pool)
-            .await?;
+        reports_db.user_start_and_overtime(target_user_id).await?;
 
     let first_month_in_year = if user_start_date.year() == year {
         user_start_date.month()
@@ -1079,7 +1036,7 @@ pub async fn overtime(
     Query(query): Query<OvertimeQuery>,
 ) -> AppResult<Json<Vec<MonthRow>>> {
     let target_user_id = query.user_id.unwrap_or(requester.id);
-    assert_can_access_user(&app_state.pool, &requester, target_user_id).await?;
+    assert_can_access_user(&app_state, &requester, target_user_id).await?;
     let year = query.year.unwrap_or_else(|| chrono::Local::now().year());
     Ok(Json(
         build_overtime_rows_for_year(&app_state.pool, target_user_id, year).await?,
@@ -1110,7 +1067,7 @@ pub async fn flextime(
     Query(query): Query<FlextimeQuery>,
 ) -> AppResult<Json<Vec<FlextimeDay>>> {
     let target_user_id = query.user_id.unwrap_or(requester.id);
-    assert_can_access_user(&app_state.pool, &requester, target_user_id).await?;
+    assert_can_access_user(&app_state, &requester, target_user_id).await?;
     if query.from > query.to {
         return Err(AppError::BadRequest("from must not be after to.".into()));
     }
@@ -1120,10 +1077,14 @@ pub async fn flextime(
         ));
     }
 
-    let user: crate::auth::User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1")
-        .bind(target_user_id)
-        .fetch_one(&app_state.pool)
-        .await?;
+    let user: crate::auth::User = crate::users::repo_user_to_auth_user(
+        app_state
+            .db
+            .users
+            .find_by_id(target_user_id)
+            .await?
+            .ok_or(AppError::NotFound)?,
+    );
     let target_per_day_min = (user.weekly_hours / 5.0 * 60.0) as i64;
 
     // Seed cumulative at query.from-1 via month-level overtime plus a small
@@ -1171,15 +1132,11 @@ pub async fn flextime(
         }
     }
 
-    let time_entries_raw: Vec<(NaiveDate, String, String, String)> = sqlx::query_as(
-        "SELECT entry_date, start_time, end_time, status \
-         FROM time_entries WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3",
-    )
-    .bind(target_user_id)
-    .bind(query.from)
-    .bind(query.to)
-    .fetch_all(&app_state.pool)
-    .await?;
+    let time_entries_raw = app_state
+        .db
+        .reports
+        .flextime_entries(target_user_id, query.from, query.to)
+        .await?;
 
     let mut approved_minutes_by_day: HashMap<NaiveDate, i64> = HashMap::new();
     for (entry_date, start_time, end_time, status) in time_entries_raw {
@@ -1191,15 +1148,11 @@ pub async fn flextime(
         *approved_minutes_by_day.entry(entry_date).or_insert(0) += minutes;
     }
 
-    let approved_absences: Vec<(NaiveDate, NaiveDate, String)> = sqlx::query_as(
-        "SELECT start_date, end_date, kind FROM absences \
-         WHERE user_id=$1 AND status='approved' AND end_date >= $2 AND start_date <= $3",
-    )
-    .bind(target_user_id)
-    .bind(query.from)
-    .bind(query.to)
-    .fetch_all(&app_state.pool)
-    .await?;
+    let approved_absences = app_state
+        .db
+        .reports
+        .approved_absence_rows(target_user_id, query.from, query.to)
+        .await?;
 
     let mut absence_by_day: HashMap<NaiveDate, String> = HashMap::new();
     for (absence_start, absence_end, absence_kind) in approved_absences {
@@ -1215,24 +1168,19 @@ pub async fn flextime(
 
     let language = i18n::load_ui_language(&app_state.pool).await?;
 
-    let holiday_map: HashMap<NaiveDate, String> = sqlx::query_as::<
-        _,
-        (NaiveDate, String, Option<String>),
-    >(
-        "SELECT holiday_date, name, local_name FROM holidays WHERE holiday_date BETWEEN $1 AND $2",
-    )
-    .bind(query.from)
-    .bind(query.to)
-    .fetch_all(&app_state.pool)
-    .await?
-    .into_iter()
-    .map(|(date, name, local_name)| {
-        (
-            date,
-            i18n::holiday_display_name(&language, name, local_name),
-        )
-    })
-    .collect();
+    let holiday_map: HashMap<NaiveDate, String> = app_state
+        .db
+        .reports
+        .holiday_rows(query.from, query.to)
+        .await?
+        .into_iter()
+        .map(|(date, name, local_name)| {
+            (
+                date,
+                i18n::holiday_display_name(&language, name, local_name),
+            )
+        })
+        .collect();
 
     let today = reporting_today();
     let mut flextime_days = vec![];

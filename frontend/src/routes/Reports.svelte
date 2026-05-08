@@ -350,6 +350,10 @@
         });
         raw = await api(`/absences/all?${params}`);
       }
+      // Exclude absences that are no longer valid.
+      raw = raw.filter(
+        (a) => a.status !== "rejected" && a.status !== "cancelled",
+      );
       // Load holidays for all involved years (needed for correct working-day counts).
       const allYears = [
         ...new Set(
@@ -1210,15 +1214,6 @@
       </div>
 
       {#if teamReport}
-        <!-- Notice for the current month: data only up to yesterday -->
-        {#if teamMonth === currentMonthStr}
-          <div
-            style="font-size:12px;color:var(--text-tertiary);margin-bottom:10px;padding:6px 10px;background:var(--bg-muted);border-radius:var(--radius-sm)"
-          >
-            {$t("Note: current month - data up to yesterday")}
-          </div>
-        {/if}
-
         <!-- Scrollable table with all columns -->
         <div class="kz-table-wrap">
           <table class="kz-table kz-table--fit">

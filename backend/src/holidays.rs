@@ -8,7 +8,6 @@ use axum::{
 };
 use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, TimeZone, Timelike};
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
 
 /// A single holiday from the Nager.Date API.
 #[derive(Clone, Deserialize, Debug)]
@@ -202,25 +201,16 @@ pub async fn replace_auto_holidays_exec(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     holidays: &[PreparedHoliday],
 ) -> AppResult<()> {
-    sqlx::query("DELETE FROM holidays WHERE is_auto = TRUE")
-        .execute(&mut **tx)
-        .await?;
-
-    for holiday in holidays {
-        sqlx::query(
-            "INSERT INTO holidays(holiday_date, name, local_name, year, is_auto) \
-             VALUES ($1, $2, $3, $4, TRUE) \
-             ON CONFLICT (holiday_date) DO NOTHING",
-        )
-        .bind(holiday.holiday_date)
-        .bind(&holiday.name)
-        .bind(&holiday.local_name)
-        .bind(holiday.year)
-        .execute(&mut **tx)
-        .await?;
-    }
-
-    Ok(())
+    let prepared: Vec<crate::repository::PreparedHoliday> = holidays
+        .iter()
+        .map(|h| crate::repository::PreparedHoliday {
+            holiday_date: h.holiday_date,
+            name: h.name.clone(),
+            local_name: h.local_name.clone(),
+            year: h.year,
+        })
+        .collect();
+    crate::repository::HolidayDb::replace_auto_tx(tx, &prepared).await
 }
 
 /// Delete all auto-imported holidays and re-import for the given years.
@@ -230,35 +220,31 @@ pub async fn refresh_holidays(
     region: &str,
 ) -> AppResult<()> {
     let prepared = prepare_holiday_refresh(country, region).await?;
-    let mut transaction = pool.begin().await?;
-    replace_auto_holidays_exec(&mut transaction, &prepared).await?;
-    transaction.commit().await?;
-
-    Ok(())
+    let repo_prepared: Vec<crate::repository::PreparedHoliday> = prepared
+        .iter()
+        .map(|h| crate::repository::PreparedHoliday {
+            holiday_date: h.holiday_date,
+            name: h.name.clone(),
+            local_name: h.local_name.clone(),
+            year: h.year,
+        })
+        .collect();
+    let db = crate::repository::HolidayDb::new(pool.clone());
+    db.replace_auto_holidays(&repo_prepared).await
 }
 
 /// Ensure holidays exist for a given year (called on startup).
 pub async fn ensure_holidays(pool: &crate::db::DatabasePool, year: i32) -> AppResult<()> {
-    // Check if any auto holidays exist for this year
-    let count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM holidays WHERE year = $1 AND is_auto = TRUE")
-            .bind(year)
-            .fetch_one(pool)
-            .await?;
+    let db = crate::repository::HolidayDb::new(pool.clone());
+    let count = db.count_auto_for_year(year).await?;
     if count > 0 {
         return Ok(());
     }
 
     // Load country/region from settings
-    let country: String =
-        sqlx::query_scalar("SELECT value FROM app_settings WHERE key = 'country'")
-            .fetch_optional(pool)
-            .await?
-            .unwrap_or_default();
-    let region: String = sqlx::query_scalar("SELECT value FROM app_settings WHERE key = 'region'")
-        .fetch_optional(pool)
-        .await?
-        .unwrap_or_default();
+    let settings_db = crate::repository::SettingsDb::new(pool.clone());
+    let country = settings_db.get_raw("country").await?.unwrap_or_default();
+    let region = settings_db.get_raw("region").await?.unwrap_or_default();
 
     // Country not yet configured — skip silently until admin sets it up.
     if country.is_empty() {
@@ -267,19 +253,16 @@ pub async fn ensure_holidays(pool: &crate::db::DatabasePool, year: i32) -> AppRe
 
     match fetch_holidays_from_api(&country, &region, year).await {
         Ok(list) => {
-            for (date, name, local_name) in list {
-                sqlx::query(
-                    "INSERT INTO holidays(holiday_date, name, local_name, year, is_auto) \
-                     VALUES ($1, $2, $3, $4, TRUE) \
-                     ON CONFLICT (holiday_date) DO NOTHING",
-                )
-                .bind(date)
-                .bind(&name)
-                .bind(&local_name)
-                .bind(year)
-                .execute(pool)
-                .await?;
-            }
+            let prepared: Vec<crate::repository::PreparedHoliday> = list
+                .into_iter()
+                .map(|(date, name, local_name)| crate::repository::PreparedHoliday {
+                    holiday_date: date,
+                    name,
+                    local_name,
+                    year,
+                })
+                .collect();
+            db.insert_auto_holidays(&prepared).await?;
         }
         Err(e) => {
             tracing::warn!("Failed to fetch holidays for {}/{}: {:?}", country, year, e);
@@ -312,15 +295,13 @@ pub fn duration_until_next_monday_noon(now: DateTime<Local>) -> AppResult<std::t
         .map_err(|_| AppError::Internal("Holiday scheduler target is in the past.".into()))
 }
 
-#[derive(FromRow, Serialize)]
+#[derive(Serialize)]
 pub struct Holiday {
     pub id: i64,
     pub holiday_date: NaiveDate,
     pub name: String,
-    #[sqlx(default)]
     pub local_name: Option<String>,
     pub year: i32,
-    #[sqlx(default)]
     pub is_auto: bool,
 }
 
@@ -343,12 +324,7 @@ pub async fn list(
         None => i18n::load_ui_language(&app_state.pool).await?,
     };
 
-    let holiday_rows = sqlx::query_as::<_, Holiday>(
-        "SELECT id, holiday_date, name, local_name, year, is_auto FROM holidays WHERE year=$1 ORDER BY holiday_date",
-    )
-    .bind(year)
-    .fetch_all(&app_state.pool)
-    .await?;
+    let holiday_rows = app_state.db.holidays.list_for_year(year).await?;
 
     let result: Vec<serde_json::Value> = holiday_rows
         .into_iter()
@@ -386,13 +362,11 @@ pub async fn create(
     if holiday_name.is_empty() || holiday_name.len() > 200 {
         return Err(AppError::BadRequest("Invalid holiday name.".into()));
     }
-    sqlx::query("INSERT INTO holidays(holiday_date, name, year, is_auto) VALUES ($1,$2,$3, FALSE)")
-        .bind(body.holiday_date)
-        .bind(&holiday_name)
-        .bind(body.holiday_date.year())
-        .execute(&app_state.pool)
-        .await
-        .map_err(|_| AppError::Conflict("Holiday already exists".into()))?;
+    app_state
+        .db
+        .holidays
+        .create_manual(body.holiday_date, &holiday_name)
+        .await?;
     Ok(Json(serde_json::json!({"ok":true})))
 }
 
@@ -404,10 +378,7 @@ pub async fn delete(
     if !requester.is_admin() {
         return Err(AppError::Forbidden);
     }
-    sqlx::query("DELETE FROM holidays WHERE id=$1")
-        .bind(holiday_id)
-        .execute(&app_state.pool)
-        .await?;
+    app_state.db.holidays.delete(holiday_id).await?;
     Ok(Json(serde_json::json!({"ok":true})))
 }
 

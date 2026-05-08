@@ -1323,6 +1323,10 @@ dialog footer {
     justify-content: space-between;
   }
 
+  .top-bar-actions.calendar-top-actions {
+    justify-content: flex-start;
+  }
+
   /* Pull-to-refresh */
   .pull-to-refresh.ptr-open {
     display: flex;
@@ -1415,4 +1419,34 @@ dialog footer {
 .mobile-more-item.active {
   color: var(--accent);
   font-weight: 500;
+}
+
+/* ── Dropdown Slider ── */
+.dropdown-slider {
+  position: relative;
+  overflow: hidden;
+}
+
+/* Gradient overlay: transparent at bottom to opaque white at top */
+.dropdown-slider::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 40px;
+  background: linear-gradient(to top, var(--bg-surface), transparent);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Ensure list items don't have left border for cleaner look */
+.dropdown-slider-item {
+  padding: 12px;
+  background: var(--bg-muted);
+  border-radius: var(--radius-sm);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border: none;
 }

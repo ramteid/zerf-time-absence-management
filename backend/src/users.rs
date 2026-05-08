@@ -2,6 +2,7 @@ use crate::audit;
 use crate::auth::{hash_password, lock_user_graph, validate_password_strength, User};
 use crate::error::{AppError, AppResult};
 use crate::i18n;
+use crate::repository::UserDb;
 use crate::AppState;
 use axum::{
     extract::{Path, State},
@@ -9,6 +10,25 @@ use axum::{
 };
 use chrono::{Datelike, NaiveDate};
 use serde::{Deserialize, Serialize};
+
+pub(crate) fn repo_user_to_auth_user(u: crate::repository::User) -> User {
+    User {
+        id: u.id,
+        email: u.email,
+        password_hash: u.password_hash,
+        first_name: u.first_name,
+        last_name: u.last_name,
+        role: u.role,
+        weekly_hours: u.weekly_hours,
+        start_date: u.start_date,
+        active: u.active,
+        must_change_password: u.must_change_password,
+        created_at: u.created_at,
+        allow_reopen_without_approval: u.allow_reopen_without_approval,
+        dark_mode: u.dark_mode,
+        overtime_start_balance_min: u.overtime_start_balance_min,
+    }
+}
 
 /// Per-user reopen policy. Returned by `GET /team-settings` for every active
 /// user; visible and editable by any lead/admin.
@@ -23,7 +43,7 @@ pub struct TeamSettings {
 }
 
 async fn assert_can_access_user(
-    pool: &crate::db::DatabasePool,
+    app_state: &AppState,
     requester: &User,
     target_id: i64,
 ) -> AppResult<()> {
@@ -33,14 +53,8 @@ async fn assert_can_access_user(
     if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let is_direct_report: Option<bool> = sqlx::query_scalar(
-        "SELECT TRUE FROM users WHERE id=$1 AND approver_id=$2 AND role!='admin'",
-    )
-    .bind(target_id)
-    .bind(requester.id)
-    .fetch_optional(pool)
-    .await?;
-    if is_direct_report.is_none() {
+    let is_report = app_state.db.users.is_direct_report(target_id, requester.id).await?;
+    if !is_report {
         return Err(AppError::Forbidden);
     }
     Ok(())
@@ -53,47 +67,22 @@ pub async fn team_settings_list(
     if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
-    type Row = (i64, String, String, String, String, bool);
-    let rows_to_team_settings = |rows: Vec<Row>| -> Vec<TeamSettings> {
-        rows.into_iter()
-            .map(
-                |(id, email, first_name, last_name, role, allow_reopen_without_approval)| {
-                    TeamSettings {
-                        user_id: id,
-                        email,
-                        first_name,
-                        last_name,
-                        role,
-                        allow_reopen_without_approval,
-                    }
-                },
-            )
-            .collect()
-    };
-    let settings_list = if requester.is_admin() {
-        // Admins see all active users.
-        rows_to_team_settings(
-            sqlx::query_as::<_, Row>(
-                "SELECT id, email, first_name, last_name, role, allow_reopen_without_approval \
-                 FROM users WHERE active=TRUE \
-                 ORDER BY last_name, first_name",
-            )
-            .fetch_all(&app_state.pool)
-            .await?,
-        )
+    let users = if requester.is_admin() {
+        app_state.db.users.find_all_active_ordered().await?
     } else {
-        // Team leads see themselves + their direct reports.
-        rows_to_team_settings(
-            sqlx::query_as::<_, Row>(
-                "SELECT id, email, first_name, last_name, role, allow_reopen_without_approval \
-                 FROM users WHERE active=TRUE AND (id=$1 OR (approver_id=$1 AND role!='admin')) \
-                 ORDER BY last_name, first_name",
-            )
-            .bind(requester.id)
-            .fetch_all(&app_state.pool)
-            .await?,
-        )
+        app_state.db.users.find_active_team_for_lead(requester.id).await?
     };
+    let settings_list: Vec<TeamSettings> = users
+        .into_iter()
+        .map(|u| TeamSettings {
+            user_id: u.id,
+            email: u.email,
+            first_name: u.first_name,
+            last_name: u.last_name,
+            role: u.role,
+            allow_reopen_without_approval: u.allow_reopen_without_approval,
+        })
+        .collect();
     Ok(Json(settings_list))
 }
 
@@ -113,29 +102,20 @@ pub async fn team_settings_update(
     }
     // Team leads may only edit themselves or their direct reports.
     if !requester.is_admin() && target_id != requester.id {
-        let is_direct_report: Option<bool> = sqlx::query_scalar(
-            "SELECT TRUE FROM users WHERE id=$1 AND approver_id=$2 AND active=TRUE AND role!='admin'",
-        )
-        .bind(target_id)
-        .bind(requester.id)
-        .fetch_optional(&app_state.pool)
-        .await?;
-        if is_direct_report.is_none() {
+        let is_report = app_state.db.users.is_direct_report(target_id, requester.id).await?;
+        if !is_report {
             return Err(AppError::Forbidden);
         }
     }
     // Target must be an active user.
-    let is_active: Option<bool> = sqlx::query_scalar("SELECT active FROM users WHERE id=$1")
-        .bind(target_id)
-        .fetch_optional(&app_state.pool)
-        .await?;
+    let is_active = app_state.db.users.get_active_flag(target_id).await?;
     if !is_active.unwrap_or(false) {
         return Err(AppError::BadRequest("User not found or inactive.".into()));
     }
-    sqlx::query("UPDATE users SET allow_reopen_without_approval=$1 WHERE id=$2")
-        .bind(body.allow_reopen_without_approval)
-        .bind(target_id)
-        .execute(&app_state.pool)
+    app_state
+        .db
+        .users
+        .update_reopen_policy(target_id, body.allow_reopen_without_approval)
         .await?;
     audit::log(
         &app_state.pool,
@@ -157,16 +137,12 @@ pub async fn list(
     if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let user_list = if requester.is_admin() {
-        sqlx::query_as::<_, User>("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users ORDER BY last_name, first_name")
-            .fetch_all(&app_state.pool)
-            .await?
+    let repo_users = if requester.is_admin() {
+        app_state.db.users.find_all_ordered().await?
     } else {
-        sqlx::query_as::<_, User>("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1 OR (approver_id=$1 AND role!='admin') ORDER BY last_name, first_name")
-            .bind(requester.id)
-            .fetch_all(&app_state.pool)
-            .await?
+        app_state.db.users.find_for_approver(requester.id).await?
     };
+    let user_list: Vec<User> = repo_users.into_iter().map(repo_user_to_auth_user).collect();
     Ok(Json(user_list))
 }
 
@@ -174,14 +150,32 @@ pub async fn get_one(
     State(app_state): State<AppState>,
     requester: User,
     Path(user_id): Path<i64>,
-) -> AppResult<Json<User>> {
-    assert_can_access_user(&app_state.pool, &requester, user_id).await?;
-    Ok(Json(
-        sqlx::query_as::<_, User>("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1")
-            .bind(user_id)
-            .fetch_one(&app_state.pool)
-            .await?,
-    ))
+) -> AppResult<Json<serde_json::Value>> {
+    assert_can_access_user(&app_state, &requester, user_id).await?;
+    let user = app_state
+        .db
+        .users
+        .find_by_id(user_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let approver_ids = app_state.db.users.get_approver_ids(user.id).await.unwrap_or_default();
+    let user_json = serde_json::json!({
+        "id": user.id,
+        "email": user.email,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "role": user.role,
+        "weekly_hours": user.weekly_hours,
+        "start_date": user.start_date,
+        "active": user.active,
+        "must_change_password": user.must_change_password,
+        "created_at": user.created_at,
+        "allow_reopen_without_approval": user.allow_reopen_without_approval,
+        "dark_mode": user.dark_mode,
+        "overtime_start_balance_min": user.overtime_start_balance_min,
+        "approver_ids": approver_ids,
+    });
+    Ok(Json(user_json))
 }
 
 #[derive(Deserialize)]
@@ -198,35 +192,30 @@ pub struct NewUser {
     pub start_date: NaiveDate,
     pub overtime_start_balance_min: Option<i64>,
     pub password: Option<String>,
-    /// Mandatory for non-admin users.
-    pub approver_id: Option<i64>,
+    /// Mandatory for non-admin users: list of team leads/admins who can approve this user's submissions.
+    pub approver_ids: Vec<i64>,
 }
 
-/// Validate that `approver_id` (if any) refers to an active lead/admin and
-/// is not the user themselves. Also enforces the rule that non-admin users
-/// must have an approver.
-async fn validate_approver(
-    pool: &crate::db::DatabasePool,
+/// Validate that each approver_id refers to an active lead/admin and is not the user themselves.
+/// Also enforces the rule that non-admin users must have at least one approver.
+async fn validate_approver_ids(
+    app_state: &AppState,
     role: &str,
     user_self_id: Option<i64>,
-    approver_id: Option<i64>,
+    approver_ids: &[i64],
 ) -> AppResult<()> {
-    if role != "admin" && approver_id.is_none() {
+    if role != "admin" && approver_ids.is_empty() {
         return Err(AppError::BadRequest(
             "An approver (Team lead or Admin) is required for non-admin users.".into(),
         ));
     }
-    if let Some(aid) = approver_id {
-        if Some(aid) == user_self_id {
+    for aid in approver_ids {
+        if Some(*aid) == user_self_id {
             return Err(AppError::BadRequest(
                 "Approver cannot be the user themselves.".into(),
             ));
         }
-        let approver_row: Option<(String, bool)> =
-            sqlx::query_as("SELECT role, active FROM users WHERE id=$1")
-                .bind(aid)
-                .fetch_optional(pool)
-                .await?;
+        let approver_row = app_state.db.users.get_approver_info(*aid).await?;
         match approver_row {
             None => return Err(AppError::BadRequest("Approver not found.".into())),
             Some((approver_role, true))
@@ -275,44 +264,28 @@ fn normalize_optional_user_name(name: Option<&String>) -> AppResult<Option<Strin
 }
 
 async fn ensure_email_available(
-    pool: &crate::db::DatabasePool,
+    app_state: &AppState,
     email: &str,
     excluded_user_id: Option<i64>,
 ) -> AppResult<()> {
-    let existing_id: Option<i64> = sqlx::query_scalar(
-        "SELECT id FROM users WHERE email=$1 AND ($2::BIGINT IS NULL OR id<>$2) LIMIT 1",
-    )
-    .bind(email)
-    .bind(excluded_user_id)
-    .fetch_optional(pool)
-    .await?;
-    if existing_id.is_some() {
-        return Err(AppError::Conflict("Email already exists.".into()));
-    }
-    Ok(())
+    app_state
+        .db
+        .users
+        .check_email_available(email, excluded_user_id)
+        .await
 }
 
 async fn ensure_user_name_available(
-    pool: &crate::db::DatabasePool,
+    app_state: &AppState,
     first_name: &str,
     last_name: &str,
     excluded_user_id: Option<i64>,
 ) -> AppResult<()> {
-    let existing_id: Option<i64> = sqlx::query_scalar(
-        "SELECT id FROM users WHERE first_name=$1 AND last_name=$2 \
-         AND ($3::BIGINT IS NULL OR id<>$3) LIMIT 1",
-    )
-    .bind(first_name)
-    .bind(last_name)
-    .bind(excluded_user_id)
-    .fetch_optional(pool)
-    .await?;
-    if existing_id.is_some() {
-        return Err(AppError::Conflict(
-            "First name and last name already exist.".into(),
-        ));
-    }
-    Ok(())
+    app_state
+        .db
+        .users
+        .check_name_available(first_name, last_name, excluded_user_id)
+        .await
 }
 
 fn user_unique_conflict(error: &sqlx::Error) -> Option<AppError> {
@@ -365,8 +338,8 @@ pub async fn create(
     {
         return Err(AppError::BadRequest("Invalid leave_days.".into()));
     }
-    ensure_email_available(&app_state.pool, &normalized_email, None).await?;
-    ensure_user_name_available(&app_state.pool, &first_name, &last_name, None).await?;
+    ensure_email_available(&app_state, &normalized_email, None).await?;
+    ensure_user_name_available(&app_state, &first_name, &last_name, None).await?;
     let temporary_password = match body.password {
         Some(provided) if !provided.is_empty() => {
             validate_password_strength(&provided)?;
@@ -378,26 +351,34 @@ pub async fn create(
     let overtime_balance = body.overtime_start_balance_min.unwrap_or(0);
     let mut transaction = app_state.pool.begin().await?;
     lock_user_graph(&mut *transaction).await?;
-    validate_approver(&app_state.pool, &body.role, None, body.approver_id).await?;
-    let new_user_id: i64 = sqlx::query_scalar("INSERT INTO users(email,password_hash,first_name,last_name,role,weekly_hours,start_date,must_change_password,approver_id,overtime_start_balance_min) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id")
+    validate_approver_ids(&app_state, &body.role, None, &body.approver_ids).await?;
+    let new_user_id: i64 = sqlx::query_scalar("INSERT INTO users(email,password_hash,first_name,last_name,role,weekly_hours,start_date,must_change_password,overtime_start_balance_min) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id")
         .bind(&normalized_email).bind(password_hash).bind(&first_name).bind(&last_name).bind(&body.role)
-        .bind(body.weekly_hours).bind(body.start_date).bind(true).bind(body.approver_id)
+        .bind(body.weekly_hours).bind(body.start_date).bind(true)
         .bind(overtime_balance)
         .fetch_one(&mut *transaction).await
         .map_err(|e| {
             tracing::warn!(target:"zerf::users", "create user insert failed: {e}");
             user_unique_conflict(&e).unwrap_or_else(|| AppError::Conflict("Could not create user.".into()))
         })?;
+    // Insert approver relationships into user_approvers junction table
+    for approver_id in &body.approver_ids {
+        sqlx::query("INSERT INTO user_approvers(user_id, approver_id) VALUES ($1, $2)")
+            .bind(new_user_id)
+            .bind(approver_id)
+            .execute(&mut *transaction)
+            .await?;
+    };
     // Seed leave days for current + next year
     let current_year = chrono::Local::now().year();
-    set_leave_days(
+    UserDb::set_leave_days_tx(
         &mut *transaction,
         new_user_id,
         current_year,
         body.leave_days_current_year,
     )
     .await?;
-    set_leave_days(
+    UserDb::set_leave_days_tx(
         &mut *transaction,
         new_user_id,
         current_year + 1,
@@ -405,10 +386,8 @@ pub async fn create(
     )
     .await?;
     transaction.commit().await?;
-    let created_user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1")
-        .bind(new_user_id)
-        .fetch_one(&app_state.pool)
-        .await?;
+    let created_user = app_state.db.users.find_by_id(new_user_id).await?.ok_or(AppError::NotFound)?;
+    let created_auth_user = repo_user_to_auth_user(created_user);
     audit::log(
         &app_state.pool,
         requester.id,
@@ -416,7 +395,7 @@ pub async fn create(
         "users",
         new_user_id,
         None,
-        Some(serde_json::to_value(&created_user).unwrap()),
+        Some(serde_json::to_value(&created_auth_user).unwrap()),
     )
     .await;
     // Send registration email best-effort
@@ -445,7 +424,7 @@ pub async fn create(
     crate::email::send_async(smtp, normalized_email, subject, body_text);
     Ok(Json(CreateResponse {
         id: new_user_id,
-        user: created_user,
+        user: created_auth_user,
         temporary_password,
     }))
 }
@@ -463,21 +442,22 @@ pub struct UpdateUser {
     pub leave_days_next_year: Option<i64>,
     pub start_date: Option<NaiveDate>,
     pub active: Option<bool>,
-    /// Distinguish "field omitted" (`None`) from "explicit null"
-    /// (`Some(None)`) so the admin can clear an approver when they
-    /// promote a user to admin.
-    #[serde(default, deserialize_with = "deserialize_double_option")]
-    pub approver_id: Option<Option<i64>>,
+    /// List of approvers (team leads/admins) for this user.
+    /// If provided (even as empty list), replaces all existing approvers.
+    #[serde(default, deserialize_with = "deserialize_optional_vec")]
+    pub approver_ids: Option<Vec<i64>>,
     pub allow_reopen_without_approval: Option<bool>,
     pub overtime_start_balance_min: Option<i64>,
 }
 
-fn deserialize_double_option<'de, D, T>(de: D) -> Result<Option<Option<T>>, D::Error>
+fn deserialize_optional_vec<'de, D>(de: D) -> Result<Option<Vec<i64>>, D::Error>
 where
-    D: serde::Deserializer<'de>,
-    T: serde::Deserialize<'de>,
+    D: serde::de::Deserializer<'de>,
 {
-    Option::<T>::deserialize(de).map(Some)
+    match Option::<Vec<i64>>::deserialize(de)? {
+        None => Ok(None),
+        Some(v) => Ok(Some(v)),
+    }
 }
 
 pub async fn update(
@@ -545,12 +525,12 @@ pub async fn update(
     let last_name = normalize_optional_user_name(body.last_name.as_ref())?;
     let mut transaction = app_state.pool.begin().await?;
     lock_user_graph(&mut *transaction).await?;
-    let previous_user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1 FOR UPDATE")
+    let previous_user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, start_date, active, must_change_password, created_at, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1 FOR UPDATE")
         .bind(user_id)
         .fetch_one(&mut *transaction)
         .await?;
     if let Some(email) = &normalized_email {
-        ensure_email_available(&app_state.pool, email, Some(user_id)).await?;
+        ensure_email_available(&app_state, email, Some(user_id)).await?;
     }
     if first_name.is_some() || last_name.is_some() {
         let updated_first_name = first_name
@@ -560,7 +540,7 @@ pub async fn update(
             .clone()
             .unwrap_or_else(|| previous_user.last_name.clone());
         ensure_user_name_available(
-            &app_state.pool,
+            &app_state,
             &updated_first_name,
             &updated_last_name,
             Some(user_id),
@@ -578,20 +558,18 @@ pub async fn update(
         .role
         .clone()
         .unwrap_or_else(|| previous_user.role.clone());
-    let new_approver_id = match body.approver_id {
-        Some(value) => value,
-        None => previous_user.approver_id,
-    };
-    validate_approver(&app_state.pool, &new_role, Some(user_id), new_approver_id).await?;
+    // Validate new approver_ids if provided
+    if let Some(approver_ids) = &body.approver_ids {
+        validate_approver_ids(&app_state, &new_role, Some(user_id), approver_ids).await?;
+    }
 
     let resulting_active = body.active.unwrap_or(previous_user.active);
     if !can_approve_admin_subjects(&new_role, resulting_active) {
-        let admin_direct_reports_count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM users WHERE approver_id=$1 AND active=TRUE AND role='admin'",
-        )
-        .bind(user_id)
-        .fetch_one(&mut *transaction)
-        .await?;
+        let admin_direct_reports_count = app_state
+            .db
+            .users
+            .count_admin_direct_reports(user_id)
+            .await?;
         if admin_direct_reports_count > 0 {
             return Err(AppError::BadRequest(format!(
                 "Cannot change this user to a non-admin approver: {} active admin user(s) still have them as their approver. Reassign them first.",
@@ -600,12 +578,11 @@ pub async fn update(
         }
     }
     if !can_approve_non_admin_subjects(&new_role, resulting_active) {
-        let non_admin_direct_reports_count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM users WHERE approver_id=$1 AND active=TRUE AND role!='admin'",
-        )
-        .bind(user_id)
-        .fetch_one(&mut *transaction)
-        .await?;
+        let non_admin_direct_reports_count = app_state
+            .db
+            .users
+            .count_non_admin_direct_reports(user_id)
+            .await?;
         if non_admin_direct_reports_count > 0 {
             return Err(AppError::BadRequest(format!(
                 "Cannot change this user to a non-approver: {} active non-admin user(s) still have them as their approver. Reassign them first.",
@@ -615,10 +592,7 @@ pub async fn update(
     }
     // Last-admin protection: checked while the user graph lock is held.
     if removing_admin_rights && previous_user.active {
-        let active_admins: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE active=TRUE AND role='admin'")
-                .fetch_one(&mut *transaction)
-                .await?;
+        let active_admins = UserDb::count_active_admins_tx(&mut *transaction).await?;
         if active_admins <= 1 {
             return Err(AppError::BadRequest(
                 "Cannot remove the last active admin.".into(),
@@ -637,20 +611,26 @@ pub async fn update(
     // Update leave days if provided
     let current_year = chrono::Local::now().year();
     if let Some(d) = body.leave_days_current_year {
-        set_leave_days(&mut *transaction, user_id, current_year, d).await?;
+        UserDb::set_leave_days_tx(&mut *transaction, user_id, current_year, d).await?;
     }
     if let Some(d) = body.leave_days_next_year {
-        set_leave_days(&mut *transaction, user_id, current_year + 1, d).await?;
+        UserDb::set_leave_days_tx(&mut *transaction, user_id, current_year + 1, d).await?;
     }
-    // Approver_id requires special handling because we want to support
-    // explicit clearing (Some(None)) which COALESCE cannot express.
-    if let Some(approver_value) = body.approver_id {
-        sqlx::query("UPDATE users SET approver_id=$1 WHERE id=$2")
-            .bind(approver_value)
+    // Handle approver_ids update if provided
+    if let Some(new_approver_ids) = &body.approver_ids {
+        // Delete all existing approver relationships
+        sqlx::query("DELETE FROM user_approvers WHERE user_id=$1")
             .bind(user_id)
             .execute(&mut *transaction)
-            .await
-            .map_err(|_| AppError::Conflict("Could not update approver.".into()))?;
+            .await?;
+        // Insert new approver relationships
+        for approver_id in new_approver_ids {
+            sqlx::query("INSERT INTO user_approvers(user_id, approver_id) VALUES ($1, $2)")
+                .bind(user_id)
+                .bind(approver_id)
+                .execute(&mut *transaction)
+                .await?;
+        }
     }
     // If role changed or user was deactivated, kill all sessions of that user
     // so cached role/state cannot be (ab)used.
@@ -661,16 +641,16 @@ pub async fn update(
         .unwrap_or(false);
     let just_deactivated = matches!(body.active, Some(false)) && previous_user.active;
     if role_changed || just_deactivated {
-        let _ = sqlx::query("DELETE FROM sessions WHERE user_id=$1")
-            .bind(user_id)
-            .execute(&mut *transaction)
-            .await;
+        let _ = crate::repository::SessionDb::delete_for_user_tx(&mut *transaction, user_id).await;
     }
     transaction.commit().await?;
-    let updated_user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1")
-        .bind(user_id)
-        .fetch_one(&app_state.pool)
-        .await?;
+    let updated_user = app_state
+        .db
+        .users
+        .find_by_id(user_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let updated_auth_user = repo_user_to_auth_user(updated_user);
     audit::log(
         &app_state.pool,
         requester.id,
@@ -678,10 +658,10 @@ pub async fn update(
         "users",
         user_id,
         Some(serde_json::to_value(&previous_user).unwrap()),
-        Some(serde_json::to_value(&updated_user).unwrap()),
+        Some(serde_json::to_value(&updated_auth_user).unwrap()),
     )
     .await;
-    Ok(Json(updated_user))
+    Ok(Json(updated_auth_user))
 }
 
 pub async fn deactivate(
@@ -699,42 +679,32 @@ pub async fn deactivate(
     }
     let mut transaction = app_state.pool.begin().await?;
     lock_user_graph(&mut *transaction).await?;
-    let previous_user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, start_date, active, must_change_password, created_at, approver_id, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1 FOR UPDATE")
+    let previous_user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, start_date, active, must_change_password, created_at, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1 FOR UPDATE")
         .bind(user_id)
         .fetch_one(&mut *transaction)
         .await?;
     if previous_user.active && previous_user.role == "admin" {
-        let active_admins: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE active=TRUE AND role='admin'")
-                .fetch_one(&mut *transaction)
-                .await?;
+        let active_admins = UserDb::count_active_admins_tx(&mut *transaction).await?;
         if active_admins <= 1 {
             return Err(AppError::BadRequest(
                 "Cannot remove the last active admin.".into(),
             ));
         }
     }
-    // Block deactivation if this person is the assigned approver for active users.
-    // Orphaned approver_id references would leave those users in a broken state.
-    let direct_reports_count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE approver_id=$1 AND active=TRUE")
-            .bind(user_id)
-            .fetch_one(&mut *transaction)
-            .await?;
+    // Block deactivation if this person is an assigned approver for active users.
+    let direct_reports_count = app_state
+        .db
+        .users
+        .count_active_direct_reports(user_id)
+        .await?;
     if direct_reports_count > 0 {
         return Err(AppError::BadRequest(format!(
             "Cannot deactivate: {} active user(s) still have this person as their approver. Reassign them first.",
             direct_reports_count
         )));
     }
-    sqlx::query("UPDATE users SET active=FALSE WHERE id=$1")
-        .bind(user_id)
-        .execute(&mut *transaction)
-        .await?;
-    sqlx::query("DELETE FROM sessions WHERE user_id=$1")
-        .bind(user_id)
-        .execute(&mut *transaction)
-        .await?;
+    UserDb::deactivate_tx(&mut *transaction, user_id).await?;
+    crate::repository::SessionDb::delete_for_user_tx(&mut *transaction, user_id).await?;
     transaction.commit().await?;
     audit::log(
         &app_state.pool,
@@ -760,16 +730,9 @@ pub async fn reset_password(
     let temporary_password = generate_password();
     let new_password_hash = hash_password(&temporary_password)?;
     let mut transaction = app_state.pool.begin().await?;
-    sqlx::query("UPDATE users SET password_hash=$1, must_change_password=TRUE WHERE id=$2")
-        .bind(new_password_hash)
-        .bind(target_id)
-        .execute(&mut *transaction)
-        .await?;
+    UserDb::update_password(&mut *transaction, target_id, &new_password_hash, true).await?;
     // Force re-authentication: kill any existing sessions for this user.
-    sqlx::query("DELETE FROM sessions WHERE user_id=$1")
-        .bind(target_id)
-        .execute(&mut *transaction)
-        .await?;
+    crate::repository::SessionDb::delete_for_user_tx(&mut *transaction, target_id).await?;
     transaction.commit().await?;
     audit::log(
         &app_state.pool,
@@ -805,28 +768,8 @@ pub async fn get_leave_days(
     user_id: i64,
     year: i32,
 ) -> AppResult<i64> {
-    let existing: Option<i64> =
-        sqlx::query_scalar("SELECT days FROM user_annual_leave WHERE user_id=$1 AND year=$2")
-            .bind(user_id)
-            .bind(year)
-            .fetch_optional(pool)
-            .await?;
-    if let Some(days) = existing {
-        return Ok(days);
-    }
-    let default_days: i64 = sqlx::query_scalar(
-        "SELECT COALESCE(value::BIGINT, 30) FROM app_settings WHERE key='default_annual_leave_days'",
-    )
-    .fetch_optional(pool)
-    .await?
-    .unwrap_or(30);
-    sqlx::query(
-        "INSERT INTO user_annual_leave(user_id, year, days) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING",
-    )
-    .bind(user_id).bind(year).bind(default_days)
-    .execute(pool)
-    .await?;
-    Ok(default_days)
+    let db = UserDb::new(pool.clone());
+    db.get_leave_days(user_id, year).await
 }
 
 /// Set the leave days for `user_id` in `year` (upsert).
@@ -852,7 +795,7 @@ pub async fn get_leave_days_handler(
     requester: User,
     Path(user_id): Path<i64>,
 ) -> AppResult<Json<Vec<AnnualLeaveRow>>> {
-    assert_can_access_user(&app_state.pool, &requester, user_id).await?;
+    assert_can_access_user(&app_state, &requester, user_id).await?;
     let current_year = chrono::Local::now().year();
     let this = get_leave_days(&app_state.pool, user_id, current_year).await?;
     let next = get_leave_days(&app_state.pool, user_id, current_year + 1).await?;
@@ -895,15 +838,12 @@ pub async fn set_leave_days_handler(
     if !(0..=366).contains(&body.days) {
         return Err(AppError::BadRequest("Invalid days value.".into()));
     }
-    let is_active: bool = sqlx::query_scalar("SELECT active FROM users WHERE id=$1")
-        .bind(user_id)
-        .fetch_optional(&app_state.pool)
-        .await?
+    let is_active = app_state.db.users.get_active_flag(user_id).await?
         .ok_or(AppError::NotFound)?;
     if !is_active {
         return Err(AppError::BadRequest("User is inactive.".into()));
     }
-    set_leave_days(&app_state.pool, user_id, body.year, body.days).await?;
+    app_state.db.users.set_leave_days(user_id, body.year, body.days).await?;
     audit::log(
         &app_state.pool,
         requester.id,
