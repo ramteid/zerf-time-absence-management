@@ -552,7 +552,7 @@ impl TimeEntryDb {
             let Some(entry) = self.find_by_id_submitted(id).await? else {
                 continue;
             };
-            if entry.user_id == reviewer_id {
+            if entry.user_id == reviewer_id && !reviewer_is_admin {
                 continue;
             }
             if !reviewer_is_admin {

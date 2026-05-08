@@ -529,7 +529,7 @@
     if (!ids.length) return;
     const confirmed = await confirmDialog(
       $t("Approve all?"),
-      $t("Approve all {n} submitted entries across all users?", { n: ids.length }),
+      $t("Approve all {n} submissions across all users?", { n: pendingWeeks.length }),
       { confirm: $t("Approve all") },
     );
     if (!confirmed) return;
@@ -1004,12 +1004,10 @@
     {/if}
 
     <!-- "Who is absent" team calendar widget -->
-    <div class="kz-card" style="padding:16px 20px;margin-top:16px">
-      <div
-        style="display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap;margin-bottom:14px"
-      >
+    <div class="kz-card" style="margin-top:16px">
+      <div class="card-header">
         <Icon name="Users" size={15} sw={1.5} />
-        <span style="font-size:14px;font-weight:400;flex:1">{$t("Who is absent")}</span>
+        <span class="card-header-title">{$t("Who is absent")}</span>
         <div class="absence-date-controls">
           <div class="absence-week-picker">
             <button
@@ -1045,7 +1043,6 @@
               {$t("No absences this week.")}
             </div>
           {:else}
-            <div style="display:flex;flex-direction:column;gap:8px">
               {#each absenceSliderTeamData as absence}
                 {@const absentUser = users.find((u) => u.id === absence.user_id)}
                 <div class="dropdown-slider-item">
@@ -1061,7 +1058,6 @@
                   </div>
                 </div>
               {/each}
-            </div>
           {/if}
         </div>
       {/key}
@@ -1365,15 +1361,15 @@
   .absence-week-picker {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 2px;
   }
 
   .absence-week-range {
     color: var(--text-tertiary);
     font-size: 12px;
-    min-width: 120px;
-    text-align: center;
-    padding: 2px 4px;
+    min-width: 108px;
+    justify-content: center;
+    padding: 2px 6px;
     height: auto;
   }
 
