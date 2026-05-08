@@ -911,12 +911,6 @@ pub async fn team_categories(
     Ok(Json(result))
 }
 
-#[derive(Deserialize)]
-pub struct OvertimeQuery {
-    pub user_id: Option<i64>,
-    pub year: Option<i32>,
-}
-
 #[derive(Serialize)]
 pub struct MonthRow {
     pub month: String,
@@ -1028,19 +1022,6 @@ async fn cumulative_at_month_end(
     }
 
     Ok(overtime_start_balance_min)
-}
-
-pub async fn overtime(
-    State(app_state): State<AppState>,
-    requester: User,
-    Query(query): Query<OvertimeQuery>,
-) -> AppResult<Json<Vec<MonthRow>>> {
-    let target_user_id = query.user_id.unwrap_or(requester.id);
-    assert_can_access_user(&app_state, &requester, target_user_id).await?;
-    let year = query.year.unwrap_or_else(|| chrono::Local::now().year());
-    Ok(Json(
-        build_overtime_rows_for_year(&app_state.pool, target_user_id, year).await?,
-    ))
 }
 
 #[derive(Deserialize)]

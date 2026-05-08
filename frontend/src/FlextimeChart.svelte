@@ -344,7 +344,7 @@
       {#each xTicks as i}
         <text
           x={pts[i].x}
-          y={H - MB + 14}
+          y={chartHeight - marginBottom + 14}
           text-anchor="middle"
           font-size="10"
           fill="var(--text-tertiary)"
@@ -358,18 +358,18 @@
         <!-- Vertical crosshair line -->
         <line
           x1={hoverPt.x}
-          y1={MT}
+          y1={marginTop}
           x2={hoverPt.x}
-          y2={H - MB}
+          y2={chartHeight - marginBottom}
           stroke="var(--text-tertiary)"
           stroke-width="1"
           stroke-dasharray="4 3"
         />
         <!-- Horizontal crosshair line -->
         <line
-          x1={ML}
+          x1={marginLeft}
           y1={hoverPt.y}
-          x2={containerW - MR}
+          x2={containerW - marginRight}
           y2={hoverPt.y}
           stroke="var(--text-tertiary)"
           stroke-width="1"
@@ -389,8 +389,8 @@
         <rect
           x={tooltipX}
           y={tooltipY}
-          width={TW}
-          height={TH}
+          width={tooltipWidth}
+          height={tooltipHeight}
           rx="4"
           fill="var(--bg-surface)"
           stroke="var(--border-strong)"
@@ -435,7 +435,7 @@
     <!-- ── Legend ── -->
     {#if legendItems.length}
       <div
-        style="display:flex;gap:14px;flex-wrap:wrap;margin-top:4px;padding-left:{ML}px"
+        style="display:flex;gap:14px;flex-wrap:wrap;margin-top:4px;padding-left:{marginLeft}px"
       >
         {#each legendItems as item}
           <div

@@ -1,6 +1,6 @@
 <script>
   // Reports page for monthly and team-related statistics.
-  // The card order is: overtime balance, employee report, team report,
+  // The card order is: employee report, team report,
   // category breakdown, absences, and timesheet export.
   // Current-day hours are excluded everywhere. Boundary weeks count by day for
   // month totals, but they count for both months when checking week submission.
@@ -50,36 +50,13 @@
     activeHelp = activeHelp === id ? null : id;
   }
 
-  // Section 1: overtime balance for the logged-in user in the current year.
-  // Loaded once on page entry and shows per month:
-  // - Target: working minutes excluding holidays, absences, and today.
-  // - Actual: approved worked minutes excluding today.
-  // - Diff: actual minus target.
-  // - Cumulative: running flextime balance including the start balance.
-  // Month label: the backend returns "YYYY-MM"; fmtMonthLabel()
-  // converts it to a readable month name ("May 2026" etc.).
-  let overtime = [];
-  // The last entry holds the most recent cumulative balance (as of yesterday).
-  $: cumulativeBalance =
-    overtime.length > 0 ? overtime[overtime.length - 1].cumulative_min : 0;
-
-  async function loadOvertime() {
-    try {
-      overtime = await api(`/reports/overtime?year=${currentYear}`);
-    } catch (e) {
-      toast($t(e?.message || "Overtime data unavailable."), "error");
-    }
-  }
-  loadOvertime();
-
-  // Section 2: employee report.
+  // Section 1: employee report.
   // Merges the previously separate "Employee details" and "Monthly report" cards
   // into one combined card.
   // For leads/admins: employee dropdown is visible.
   // For employees: no dropdown; own data is selected automatically.
   // After "Show" the following are loaded:
   // - Monthly report with target, actual, diff, entries, and absences.
-  // - Year overtime rows for the cumulative balance.
   // - Leave balance for the selected year.
   let reportUserId = $currentUser.id;
   let reportMonth = currentMonthStr;
@@ -89,13 +66,8 @@
   async function loadReport() {
     try {
       const reportYear = reportMonth.slice(0, 4);
-      const [monthRaw, overtimeRows, leaveRaw] = await Promise.all([
+      const [monthRaw, leaveRaw] = await Promise.all([
         api(`/reports/month?user_id=${reportUserId}&month=${reportMonth}`),
-        // Use reportYear so the balance shown is at the end of the selected month,
-        // not at the end of the current year.
-        api(
-          `/reports/overtime?user_id=${reportUserId}&year=${reportYear}`,
-        ).catch(() => []),
         api(`/leave-balance/${reportUserId}?year=${reportYear}`).catch(
           () => null,
         ),
@@ -115,17 +87,9 @@
         return "partial";
       })();
 
-      // Find the cumulative balance at the end of the selected month.
-      // Fall back to the last available row (e.g. for a future month).
-      const reportMonthRow = overtimeRows.find((r) => r.month === reportMonth);
-      const fallbackRow =
-        overtimeRows.length > 0 ? overtimeRows[overtimeRows.length - 1] : null;
-
       reportData = {
         monthReport,
         monthStatus,
-        cumulativeOvertimeMin:
-          (reportMonthRow ?? fallbackRow)?.cumulative_min ?? 0,
         leaveBalance: leaveRaw,
       };
     } catch (e) {
@@ -742,127 +706,7 @@
 </div>
 
 <div class="content-area">
-  <!-- Card 1: overtime balance for the logged-in user. -->
-  <div class="kz-card overtime-card" style="margin-bottom:16px">
-    <div class="card-header">
-      <span
-        class="card-header-title"
-        style="display:inline-flex;align-items:center;gap:8px"
-      >
-        {$t("Overtime balance {year}", { year: currentYear })}
-        <button
-          class="kz-btn-icon-sm kz-btn-ghost"
-          title={$t("help_overtime")}
-          on:click={() => toggleHelp("overtime")}
-          style="color:var(--text-tertiary);font-size:14px;cursor:help"
-        >
-          <Icon name="Info" size={14} />
-        </button>
-      </span>
-      <!-- Current total balance as a colour-coded badge -->
-      <span
-        class="kz-chip"
-        class:kz-chip-approved={cumulativeBalance >= 0}
-        class:kz-chip-rejected={cumulativeBalance < 0}
-      >
-        {minToHM(cumulativeBalance)}
-      </span>
-    </div>
-
-    {#if activeHelp === "overtime"}
-      <div
-        style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)"
-      >
-        {$t("help_overtime")}
-      </div>
-    {/if}
-
-    <!-- Desktop table: one row per month -->
-    <div class="overtime-table-desktop">
-      <table class="kz-table">
-        <thead>
-          <tr>
-            {#each ["Month", "Target", "Actual", "Diff", "Cumulative"] as c}
-              <th>{$t(c)}</th>
-            {/each}
-          </tr>
-        </thead>
-        <tbody>
-          {#each overtime as m}
-            {@const cum = m.cumulative_min}
-            <tr>
-              <!-- Month name instead of "YYYY-MM" -->
-              <td class="tab-num">{fmtMonthLabel(m.month)}</td>
-              <td class="tab-num">{minToHM(m.target_min)}</td>
-              <td class="tab-num">{minToHM(m.actual_min)}</td>
-              <!-- Diff: red for negative, green for zero or positive -->
-              <td
-                class="tab-num"
-                style="color:{m.diff_min < 0
-                  ? 'var(--danger-text)'
-                  : 'var(--success-text)'}"
-              >
-                {m.diff_min >= 0 ? "+" : ""}{minToHM(m.diff_min)}
-              </td>
-              <!-- Cumulative: red for deficit, green for zero or surplus -->
-              <td
-                class="tab-num"
-                style="color:{cum < 0
-                  ? 'var(--danger-text)'
-                  : 'var(--success-text)'}"
-              >
-                {cum >= 0 ? "+" : ""}{minToHM(cum)}
-              </td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
-    </div>
-
-    <!-- Mobile tiles: one tile per month -->
-    <div class="overtime-tiles-mobile">
-      {#each overtime as m}
-        {@const cum = m.cumulative_min}
-        <div class="overtime-tile">
-          <div style="font-weight:400;font-size:13px;margin-bottom:4px">
-            {fmtMonthLabel(m.month)}
-          </div>
-          <div class="overtime-tile-row">
-            <span>{$t("Target")}</span>
-            <span class="tab-num">{minToHM(m.target_min)}</span>
-          </div>
-          <div class="overtime-tile-row">
-            <span>{$t("Actual")}</span>
-            <span class="tab-num">{minToHM(m.actual_min)}</span>
-          </div>
-          <div class="overtime-tile-row">
-            <span>{$t("Diff")}</span>
-            <span
-              class="tab-num"
-              style="color:{m.diff_min < 0
-                ? 'var(--danger-text)'
-                : 'var(--success-text)'}"
-            >
-              {m.diff_min >= 0 ? "+" : ""}{minToHM(m.diff_min)}
-            </span>
-          </div>
-          <div class="overtime-tile-row">
-            <span>{$t("Cumulative")}</span>
-            <span
-              class="tab-num"
-              style="color:{cum < 0
-                ? 'var(--danger-text)'
-                : 'var(--success-text)'}"
-            >
-              {cum >= 0 ? "+" : ""}{minToHM(cum)}
-            </span>
-          </div>
-        </div>
-      {/each}
-    </div>
-  </div>
-
-  <!-- Card 2: employee report for the selected employee and month. -->
+  <!-- Card 1: employee report for the selected employee and month. -->
   <div class="kz-card" style="padding:20px;margin-bottom:16px">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
       <span style="font-size:14px;font-weight:400">{$t("Employee report")}</span
@@ -956,21 +800,6 @@
           >
             {reportData.monthReport.diff_min >= 0 ? "+" : ""}
             {minToHM(reportData.monthReport.diff_min)}
-          </div>
-        </div>
-
-        <!-- Cumulative flextime balance at the end of the selected month. -->
-        <div class="kz-card stat-card">
-          <div class="stat-card-label">{$t("Overtime overview")}</div>
-          <div
-            class="stat-card-value tab-num"
-            style="color:{reportData.cumulativeOvertimeMin < 0
-              ? 'var(--danger-text)'
-              : 'var(--success-text)'}"
-          >
-            {formatHours(
-              ((reportData.cumulativeOvertimeMin || 0) / 60).toFixed(1),
-            )}
           </div>
         </div>
 
@@ -1713,27 +1542,6 @@
 </div>
 
 <style>
-  /* Overtime balance: table on desktop, tiles on mobile. */
-  .overtime-table-desktop {
-    overflow-x: auto;
-  }
-  .overtime-tiles-mobile {
-    display: none;
-  }
-  .overtime-tile {
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--border);
-  }
-  .overtime-tile:last-child {
-    border-bottom: none;
-  }
-  .overtime-tile-row {
-    display: flex;
-    justify-content: space-between;
-    font-size: 12px;
-    padding: 2px 0;
-  }
-
   /* Colour dot for the category legend */
   .cat-dot {
     width: 10px;
@@ -1743,13 +1551,4 @@
     flex-shrink: 0;
   }
 
-  /* Mobile: replace table with stacked tiles */
-  @media (max-width: 640px) {
-    .overtime-table-desktop {
-      display: none;
-    }
-    .overtime-tiles-mobile {
-      display: block;
-    }
-  }
 </style>
