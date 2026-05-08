@@ -407,7 +407,7 @@
       {/if}
       {#if requiresApprover}
         <div>
-          <label class="kz-label">{$t("Approvers (Team leads / Admins)")}</label>
+          <div class="kz-label">{$t("Approvers (Team leads / Admins)")}</div>
           {#if approvers.length === 0}
             <div style="font-size:13px;color:var(--text-tertiary);padding:6px 0">
               {$t("No eligible approvers found.")}
