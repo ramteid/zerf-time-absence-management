@@ -68,8 +68,12 @@
     try {
       const reportYear = reportMonth.slice(0, 4);
       const reportYearNum = parseInt(reportYear);
+      const chartYearFrom = `${reportYear}-01-01`;
       const chartYearTo =
         reportYearNum < currentYear ? `${reportYear}-12-31` : yesterdayIso;
+      // Only fetch the chart when the year has at least one elapsed day.
+      const canFetchChart =
+        reportYearNum <= currentYear && chartYearTo >= chartYearFrom;
 
       const [monthRaw, leaveRaw, overtimeRows, flextimeRaw] =
         await Promise.all([
@@ -80,9 +84,9 @@
           api(
             `/reports/overtime?user_id=${reportUserId}&year=${reportYear}`,
           ).catch(() => null),
-          reportYearNum <= currentYear
+          canFetchChart
             ? api(
-                `/reports/flextime?user_id=${reportUserId}&from=${reportYear}-01-01&to=${chartYearTo}`,
+                `/reports/flextime?user_id=${reportUserId}&from=${chartYearFrom}&to=${chartYearTo}`,
               ).catch(() => [])
             : Promise.resolve([]),
         ]);
@@ -788,7 +792,9 @@
       <div class="stat-cards" style="margin-bottom:16px">
         <!-- Submitted hours vs. full-month target -->
         <div class="kz-card stat-card">
-          <div class="stat-card-label">{$t("Logged")}</div>
+          <div class="stat-card-label">{$t("Logged")}
+            <span title={$t("help_logged")} style="color:var(--text-tertiary);cursor:help;vertical-align:middle;margin-left:4px"><Icon name="Info" size={12} /></span>
+          </div>
           <div
             class="stat-card-value tab-num"
             style="color:{reportData.monthReport.submitted_min >=

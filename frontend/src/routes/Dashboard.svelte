@@ -786,19 +786,19 @@
         </div>
 
         <div class="kz-card stat-card">
-          <div class="stat-card-label">{$t("Absence Requests")}</div>
-          <div
-            class="stat-card-value tab-num"
-            style="color:{pendingAbsences.length > 0 ? 'var(--danger-text)' : 'var(--success-text)'}"
-          >{pendingAbsences.length}</div>
-        </div>
-
-        <div class="kz-card stat-card">
           <div class="stat-card-label">{$t("Change Requests")}</div>
           <div
             class="stat-card-value tab-num"
             style="color:{changeRequests.length > 0 ? 'var(--danger-text)' : 'var(--success-text)'}"
           >{changeRequests.length}</div>
+        </div>
+
+        <div class="kz-card stat-card">
+          <div class="stat-card-label">{$t("Absence Requests")}</div>
+          <div
+            class="stat-card-value tab-num"
+            style="color:{pendingAbsences.length > 0 ? 'var(--danger-text)' : 'var(--success-text)'}"
+          >{pendingAbsences.length}</div>
         </div>
 
         <div class="kz-card stat-card">

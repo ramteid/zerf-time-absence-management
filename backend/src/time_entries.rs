@@ -509,19 +509,28 @@ pub async fn batch_approve(
             Some(serde_json::json!({"status": "approved", "reviewed_by": requester.id})),
         )
         .await;
+    }
+    if approved_count > 0 {
         let language = notification_language(&app_state.pool).await;
-        crate::notifications::create_translated(
-            &app_state,
-            &language,
-            entry.user_id,
-            "timesheet_approved",
-            "timesheet_approved_title",
-            "timesheet_approved_body",
-            vec![("entry_date", i18n::format_date(&language, entry.entry_date))],
-            Some("time_entries"),
-            Some(entry.id),
-        )
-        .await;
+        let mut count_by_user: std::collections::HashMap<i64, usize> =
+            std::collections::HashMap::new();
+        for entry in &approved_entries {
+            *count_by_user.entry(entry.user_id).or_insert(0) += 1;
+        }
+        for (user_id, count) in count_by_user {
+            crate::notifications::create_translated(
+                &app_state,
+                &language,
+                user_id,
+                "timesheet_approved",
+                "timesheet_approved_title",
+                "timesheet_batch_approved_body",
+                vec![("entry_count", i18n::entry_count(&language, count as i64))],
+                Some("time_entries"),
+                None,
+            )
+            .await;
+        }
     }
     Ok(Json(
         serde_json::json!({"ok":true, "count": approved_count}),
