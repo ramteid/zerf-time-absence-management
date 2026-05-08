@@ -715,6 +715,8 @@ const TRANSLATIONS = {
     "Auto-approve reopens": "Wiederfreigabe ohne Bestätigung",
     // Flextime chart
     "Flextime balance": "Gleitzeitkontostand",
+    "Flextime opening balance": "Gleitzeitkontostand Anfang",
+    "Flextime closing balance": "Gleitzeitkontostand Ende",
     "Daily diff": "Tagesdifferenz",
     "Last 30 days": "Letzte 30 Tage",
     "Last 90 days": "Letzte 90 Tage",

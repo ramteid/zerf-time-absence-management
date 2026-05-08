@@ -820,6 +820,10 @@ dialog footer {
 }
 
 .cal-day {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
   min-height: 80px;
   padding: 4px 6px;
   border-radius: var(--radius-sm);

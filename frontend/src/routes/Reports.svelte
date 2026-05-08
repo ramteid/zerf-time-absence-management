@@ -2,7 +2,7 @@
   // Reports page for monthly and team-related statistics.
   // The card order is: employee report, team report,
   // category breakdown, absences, and timesheet export.
-  // Current-day hours are excluded everywhere. Boundary weeks count by day for
+  // Current-day hours are included in the monthly report. Boundary weeks count by day for
   // month totals, but they count for both months when checking week submission.
 
   import { api } from "../api.js";
@@ -25,9 +25,9 @@
   import FlextimeChart from "../FlextimeChart.svelte";
   import { jsPDF } from "jspdf";
 
-  // Fixed date reference for this session. Report hour calculations always end
-  // yesterday, and the backend enforces the same rule for direct API calls.
+  // Fixed date reference for this session.
   const today = new Date();
+  const todayIso = isoDate(today);
   const yesterday = addDays(today, -1);
   const yesterdayIso = isoDate(yesterday);
   const currentYear = today.getFullYear();
@@ -370,7 +370,7 @@
   // Desktop layout: a new row starts after the employee dropdown.
   let csvUserId = $currentUser.id;
   let csvFrom = isoDate(new Date(currentYear, today.getMonth(), 1));
-  let csvTo = yesterdayIso;
+  let csvTo = todayIso;
   let csvError = "";
   let exportInProgress = false;
 
@@ -430,7 +430,20 @@
         from: csvFrom,
         to: csvTo,
       });
-      const report = await api(`/reports/range?${params}`);
+      const [report, flextimeData] = await Promise.all([
+        api(`/reports/range?${params}`),
+        api(`/reports/flextime?${params}`).catch(() => []),
+      ]);
+      // Derive opening balance (cumulative at day before from) and closing
+      // balance (cumulative at the last day in the range).
+      const openingBalance =
+        flextimeData.length > 0
+          ? flextimeData[0].cumulative_min - flextimeData[0].diff_min
+          : null;
+      const closingBalance =
+        flextimeData.length > 0
+          ? flextimeData[flextimeData.length - 1].cumulative_min
+          : null;
       const header = csvEncode([
         $t("Date"),
         $t("Weekday"),
@@ -505,6 +518,39 @@
           "",
         ]),
       );
+      // Flextime balance rows (opening and closing).
+      if (openingBalance !== null) {
+        rows.push(
+          csvEncode([
+            "",
+            $t("Flextime opening balance"),
+            "",
+            "",
+            "",
+            (openingBalance >= 0 ? "+" : "") + minToHM(openingBalance),
+            "",
+            "",
+            "",
+            "",
+          ]),
+        );
+      }
+      if (closingBalance !== null) {
+        rows.push(
+          csvEncode([
+            "",
+            $t("Flextime closing balance"),
+            "",
+            "",
+            "",
+            (closingBalance >= 0 ? "+" : "") + minToHM(closingBalance),
+            "",
+            "",
+            "",
+            "",
+          ]),
+        );
+      }
       const blob = new Blob(["\uFEFF" + rows.join("\n")], {
         type: "text/csv;charset=utf-8",
       });
@@ -538,7 +584,18 @@
         from: csvFrom,
         to: csvTo,
       });
-      const report = await api(`/reports/range?${params}`);
+      const [report, flextimeData] = await Promise.all([
+        api(`/reports/range?${params}`),
+        api(`/reports/flextime?${params}`).catch(() => []),
+      ]);
+      const openingBalance =
+        flextimeData.length > 0
+          ? flextimeData[0].cumulative_min - flextimeData[0].diff_min
+          : null;
+      const closingBalance =
+        flextimeData.length > 0
+          ? flextimeData[flextimeData.length - 1].cumulative_min
+          : null;
       const selectedUser = users.find((userRow) => userRow.id === csvUserId);
       const fullName = selectedUser
         ? `${selectedUser.first_name} ${selectedUser.last_name}`
@@ -702,6 +759,33 @@
       doc.text(minToHM(pdfTotalMin), textX(5), currentY + 3.8, {
         align: "right",
       });
+      currentY += rowHeight;
+
+      // Flextime balance rows.
+      function drawSummaryRow(label, value) {
+        if (currentY + rowHeight > pageHeight - 15) {
+          doc.addPage();
+          currentY = marginTop;
+        }
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(7.5);
+        doc.setTextColor(90, 90, 90);
+        doc.text(label, marginLeft + 1, currentY + 3.8);
+        doc.text(value, textX(5), currentY + 3.8, { align: "right" });
+        currentY += rowHeight;
+      }
+      if (openingBalance !== null) {
+        drawSummaryRow(
+          $t("Flextime opening balance"),
+          (openingBalance >= 0 ? "+" : "") + minToHM(openingBalance),
+        );
+      }
+      if (closingBalance !== null) {
+        drawSummaryRow(
+          $t("Flextime closing balance"),
+          (closingBalance >= 0 ? "+" : "") + minToHM(closingBalance),
+        );
+      }
 
       doc.save(
         `stundennachweis-${fullName.replace(/\s+/g, "-")}-${csvFrom}_${csvTo}.pdf`,
@@ -1559,7 +1643,7 @@
           id="csv-to"
           bind:value={csvTo}
           min={csvFrom}
-          max={yesterdayIso}
+          max={todayIso}
         />
       </div>
     </div>
