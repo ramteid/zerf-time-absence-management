@@ -191,10 +191,13 @@ async fn build_range(
             let bn = parse_report_time(b)?;
             let en = parse_report_time(e)?;
             let m = (en - bn).num_minutes();
+            // Nur genehmigte Einträge zählen für Ist-Stunden und Differenz.
             if st == "approved" {
                 actual += m;
-                *cat.entry(cn.clone()).or_insert(0) += m;
             }
+            // Kategorietotals: alle nicht abgelehnten Einträge – rejected wurde
+            // bereits oben via `continue` übersprungen, daher ist st hier nie rejected.
+            *cat.entry(cn.clone()).or_insert(0) += m;
             entries.push(EntryDetail {
                 start_time: b.clone(),
                 end_time: e.clone(),
@@ -654,15 +657,22 @@ pub async fn team(
             0.0
         };
 
-        // ── Krankheitstage im vollen Monat ───────────────────────────────────
-        let sick_workdays = crate::absences::workdays_total(
-            &app_state.pool,
-            team_member.id,
-            "sick",
-            month_start,
-            month_end,
-        )
-        .await?;
+        // ── Krankheitstage bis gestern ───────────────────────────────────────
+        // Zukünftige Abwesenheiten ausblenden – konsistent mit vacation_taken
+        // und dem "Daten bis gestern"-Grundsatz für den laufenden Monat.
+        let sick_end = yesterday.min(month_end);
+        let sick_workdays = if month_start <= sick_end {
+            crate::absences::workdays_total(
+                &app_state.pool,
+                team_member.id,
+                "sick",
+                month_start,
+                sick_end,
+            )
+            .await?
+        } else {
+            0.0
+        };
 
         // ── Gleitzeitkontostand am Ende des Berichtsmonats ───────────────────
         // Wir rufen build_overtime_rows_for_year für das Jahr des Berichtsmonats auf
@@ -746,15 +756,14 @@ pub async fn categories(
         // No specific user requested: only leads may see aggregated team data.
         return Err(AppError::Forbidden);
     }
-    // Wir schließen nur "rejected"-Einträge aus, damit auch eingereichte (aber noch
-    // nicht genehmigte) Buchungen in der Kategorieauswertung erscheinen.
-    // Das ist besonders für Admins und Teamleitungen wichtig, deren eigene Einträge
-    // u.U. noch nicht genehmigt wurden.
+    // Entwürfe und abgelehnte Einträge werden ausgeschlossen; eingereichte (aber noch
+    // nicht genehmigte) Buchungen erscheinen in der Kategorieauswertung, da Admins
+    // und Teamleitungen deren eigene Einträge oft noch ausstehen haben.
     let mut builder = QueryBuilder::<Postgres>::new(
         "SELECT c.name, c.color, z.start_time, z.end_time \
          FROM time_entries z \
          JOIN categories c ON c.id=z.category_id \
-         WHERE z.status != 'rejected' AND z.entry_date BETWEEN ",
+         WHERE z.status IN ('submitted', 'approved') AND z.entry_date BETWEEN ",
     );
     builder
         .push_bind(query.from)
