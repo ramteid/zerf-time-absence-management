@@ -22,6 +22,7 @@
   } from "../apiMappers.js";
   import Icon from "../Icons.svelte";
   import DatePicker from "../DatePicker.svelte";
+  import FlextimeChart from "../FlextimeChart.svelte";
   import { jsPDF } from "jspdf";
 
   // Fixed date reference for this session. Report hour calculations always end
@@ -66,12 +67,25 @@
   async function loadReport() {
     try {
       const reportYear = reportMonth.slice(0, 4);
-      const [monthRaw, leaveRaw] = await Promise.all([
-        api(`/reports/month?user_id=${reportUserId}&month=${reportMonth}`),
-        api(`/leave-balance/${reportUserId}?year=${reportYear}`).catch(
-          () => null,
-        ),
-      ]);
+      const reportYearNum = parseInt(reportYear);
+      const chartYearTo =
+        reportYearNum < currentYear ? `${reportYear}-12-31` : yesterdayIso;
+
+      const [monthRaw, leaveRaw, overtimeRows, flextimeRaw] =
+        await Promise.all([
+          api(`/reports/month?user_id=${reportUserId}&month=${reportMonth}`),
+          api(`/leave-balance/${reportUserId}?year=${reportYear}`).catch(
+            () => null,
+          ),
+          api(
+            `/reports/overtime?user_id=${reportUserId}&year=${reportYear}`,
+          ).catch(() => null),
+          reportYearNum <= currentYear
+            ? api(
+                `/reports/flextime?user_id=${reportUserId}&from=${reportYear}-01-01&to=${chartYearTo}`,
+              ).catch(() => [])
+            : Promise.resolve([]),
+        ]);
 
       const monthReport = normalizeMonthReport(monthRaw);
 
@@ -87,10 +101,16 @@
         return "partial";
       })();
 
+      const flextimeBalanceRow = (overtimeRows || []).find(
+        (row) => row.month === reportMonth,
+      );
+
       reportData = {
         monthReport,
         monthStatus,
         leaveBalance: leaveRaw,
+        flextimeBalance: flextimeBalanceRow?.cumulative_min ?? null,
+        flextimeChartData: flextimeRaw || [],
       };
     } catch (e) {
       toast($t(e?.message || "Error"), "error");
@@ -766,40 +786,47 @@
         {$t("My Balance")}
       </div>
       <div class="stat-cards" style="margin-bottom:16px">
-        <!-- Logged vs. target hours for the month -->
+        <!-- Submitted hours vs. full-month target -->
         <div class="kz-card stat-card">
           <div class="stat-card-label">{$t("Logged")}</div>
           <div
             class="stat-card-value tab-num"
-            style="color:{reportData.monthReport.actual_min >=
-            reportData.monthReport.target_min
+            style="color:{reportData.monthReport.submitted_min >=
+            reportData.monthReport.full_month_target_min
               ? 'var(--accent)'
               : 'var(--warning-text)'}"
           >
             {formatHours(
-              ((reportData.monthReport.actual_min || 0) / 60).toFixed(1),
+              ((reportData.monthReport.submitted_min || 0) / 60).toFixed(1),
             )}
           </div>
           <div class="stat-card-sub">
             {$t("of {target} target", {
               target: formatHours(
-                ((reportData.monthReport.target_min || 0) / 60).toFixed(1),
+                (
+                  (reportData.monthReport.full_month_target_min || 0) / 60
+                ).toFixed(1),
               ),
             })}
           </div>
         </div>
 
-        <!-- Overtime / minus hours for this month -->
+        <!-- Flextime balance at end of selected month -->
         <div class="kz-card stat-card">
-          <div class="stat-card-label">{$t("Monthly diff")}</div>
+          <div class="stat-card-label">{$t("Flextime balance")}</div>
           <div
             class="stat-card-value tab-num"
-            style="color:{reportData.monthReport.diff_min < 0
+            style="color:{(reportData.flextimeBalance ?? 0) < 0
               ? 'var(--danger-text)'
               : 'var(--success-text)'}"
           >
-            {reportData.monthReport.diff_min >= 0 ? "+" : ""}
-            {minToHM(reportData.monthReport.diff_min)}
+            {#if reportData.flextimeBalance !== null}
+              {reportData.flextimeBalance >= 0 ? "+" : ""}{minToHM(
+                reportData.flextimeBalance,
+              )}
+            {:else}
+              –
+            {/if}
           </div>
         </div>
 
@@ -1003,6 +1030,16 @@
               {/each}
             </tbody>
           </table>
+        </div>
+      {/if}
+
+      <!-- Gleitzeitkonto-Verlauf für das gewählte Jahr -->
+      {#if reportData.flextimeChartData?.length}
+        <div class="kz-card" style="padding:16px;margin-top:12px">
+          <div style="font-weight:400;margin-bottom:12px">
+            {$t("Flextime balance")}
+          </div>
+          <FlextimeChart data={reportData.flextimeChartData} />
         </div>
       {/if}
     {/if}

@@ -720,6 +720,61 @@ pub async fn deactivate(
     Ok(Json(serde_json::json!({"ok":true})))
 }
 
+pub async fn delete_user(
+    State(app_state): State<AppState>,
+    requester: User,
+    Path(user_id): Path<i64>,
+) -> AppResult<Json<serde_json::Value>> {
+    if !requester.is_admin() {
+        return Err(AppError::Forbidden);
+    }
+    if user_id == requester.id {
+        return Err(AppError::BadRequest("You cannot delete yourself.".into()));
+    }
+    let mut transaction = app_state.pool.begin().await?;
+    lock_user_graph(&mut *transaction).await?;
+    let target_user: User = sqlx::query_as(
+        "SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, \
+         start_date, active, must_change_password, created_at, allow_reopen_without_approval, \
+         dark_mode, overtime_start_balance_min FROM users WHERE id=$1 FOR UPDATE",
+    )
+    .bind(user_id)
+    .fetch_optional(&mut *transaction)
+    .await?
+    .ok_or(AppError::NotFound)?;
+    if target_user.active && target_user.role == "admin" {
+        let active_admins = UserDb::count_active_admins_tx(&mut *transaction).await?;
+        if active_admins <= 1 {
+            return Err(AppError::BadRequest(
+                "Cannot delete the last active admin.".into(),
+            ));
+        }
+    }
+    let direct_reports_count = app_state.db.users.count_active_direct_reports(user_id).await?;
+    if direct_reports_count > 0 {
+        return Err(AppError::BadRequest(format!(
+            "Cannot delete: {} active user(s) still have this person as their approver. Reassign them first.",
+            direct_reports_count
+        )));
+    }
+    sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(user_id)
+        .execute(&mut *transaction)
+        .await?;
+    transaction.commit().await?;
+    audit::log(
+        &app_state.pool,
+        requester.id,
+        "deleted",
+        "users",
+        user_id,
+        Some(serde_json::to_value(&target_user).unwrap()),
+        None,
+    )
+    .await;
+    Ok(Json(serde_json::json!({"ok": true})))
+}
+
 pub async fn reset_password(
     State(app_state): State<AppState>,
     requester: User,

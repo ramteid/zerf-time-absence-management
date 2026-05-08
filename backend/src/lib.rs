@@ -117,7 +117,7 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                     post(change_requests::reject),
                 )
                 .route("/users", get(users::list).post(users::create))
-                .route("/users/{id}", get(users::get_one).put(users::update))
+                .route("/users/{id}", get(users::get_one).put(users::update).delete(users::delete_user))
                 .route("/users/{id}/deactivate", post(users::deactivate))
                 .route("/users/{id}/reset-password", post(users::reset_password))
                 .route(

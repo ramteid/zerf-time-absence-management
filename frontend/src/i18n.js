@@ -465,6 +465,11 @@ const TRANSLATIONS = {
     Inactive: "Inaktiv",
     "Deactivate this user?": "Diesen Benutzer deaktivieren?",
     "User deactivated.": "Benutzer deaktiviert.",
+    "Delete user?": "Benutzer löschen?",
+    "Delete user permanently? All data of this user will be deleted. This cannot be undone.":
+      "Benutzer dauerhaft löschen? Alle Daten dieses Benutzers werden gelöscht. Dies kann nicht rückgängig gemacht werden.",
+    "Delete permanently": "Dauerhaft löschen",
+    "User deleted.": "Benutzer gelöscht.",
     "User updated.": "Benutzer aktualisiert.",
     "Time Categories": "Zeitkategorien",
     "Add Category": "Kategorie hinzufügen",
@@ -657,6 +662,11 @@ const TRANSLATIONS = {
       "Sie können sich nicht selbst deaktivieren.",
     "Cannot deactivate: {count} active user(s) still have this person as their approver. Reassign them first.":
       "Deaktivierung nicht möglich: {count} aktive Benutzer haben diese Person noch als verantwortliche Person. Weisen Sie sie zuerst neu zu.",
+    "You cannot delete yourself.": "Sie können sich nicht selbst löschen.",
+    "Cannot delete: {count} active user(s) still have this person as their approver. Reassign them first.":
+      "Löschen nicht möglich: {count} aktive Benutzer haben diese Person noch als verantwortliche Person. Weisen Sie sie zuerst neu zu.",
+    "Cannot delete the last active admin.":
+      "Der letzte aktive Administrator kann nicht gelöscht werden.",
     "User not found or inactive.": "Benutzer nicht gefunden oder inaktiv.",
     "Cannot log time on a day with an approved absence ({kind}). Please cancel or adjust the absence first.":
       "An einem Tag mit genehmigter Abwesenheit ({kind}) kann keine Zeit erfasst werden. Bitte stornieren oder ändern Sie zuerst die Abwesenheit.",
@@ -1022,6 +1032,11 @@ const ERROR_PATTERNS = Object.freeze([
     pattern:
       /^Cannot deactivate: (?<count>\d+) active user\(s\) still have this person as their approver\. Reassign them first\.$/,
     key: "Cannot deactivate: {count} active user(s) still have this person as their approver. Reassign them first.",
+  },
+  {
+    pattern:
+      /^Cannot delete: (?<count>\d+) active user\(s\) still have this person as their approver\. Reassign them first\.$/,
+    key: "Cannot delete: {count} active user(s) still have this person as their approver. Reassign them first.",
   },
   {
     pattern:

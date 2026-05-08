@@ -55,6 +55,24 @@
     }
   }
 
+  async function deleteUser(u) {
+    if (
+      !(await confirmDialog(
+        $t("Delete user?"),
+        $t("Delete user permanently? All data of this user will be deleted. This cannot be undone."),
+        { danger: true, confirm: $t("Delete permanently") },
+      ))
+    )
+      return;
+    try {
+      await api(`/users/${u.id}`, { method: "DELETE" });
+      toast($t("User deleted."), "ok");
+      load();
+    } catch (e) {
+      toast($t(e?.message || "Error"), "error");
+    }
+  }
+
   function initials(u) {
     return ((u.first_name?.[0] || "") + (u.last_name?.[0] || "")).toUpperCase();
   }
@@ -118,6 +136,13 @@
             on:click={() => toggleActive(u)}
           >
             <Icon name={u.active ? "X" : "Check"} size={13} />
+          </button>
+          <button
+            class="kz-btn kz-btn-ghost kz-btn-sm kz-btn-danger"
+            title={$t("Delete permanently")}
+            on:click={() => deleteUser(u)}
+          >
+            <Icon name="Trash2" size={13} />
           </button>
         </div>
       </div>

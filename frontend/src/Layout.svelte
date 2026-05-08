@@ -18,7 +18,7 @@
     refreshNotifications,
   } from "./notificationService.js";
   import { t, roleLabel } from "./i18n.js";
-  import { fmtDate } from "./format.js";
+  import { fmtDate, fmtDateTime } from "./format.js";
   import Icon from "./Icons.svelte";
 
   // Mobile menu
@@ -594,7 +594,7 @@
               class="tab-num"
               style="font-size:10.5px;color:var(--text-tertiary);margin-top:4px"
             >
-              {fmtDate(n.created_at)}
+              {fmtDateTime(n.created_at)}
             </div>
           </div>
         {/each}

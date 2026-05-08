@@ -95,6 +95,10 @@ pub struct MonthReport {
     pub target_min: i64,
     pub actual_min: i64,
     pub diff_min: i64,
+    /// Submitted + approved entries (excludes draft/rejected).
+    pub submitted_min: i64,
+    /// Full-month target without the "capped at today" restriction.
+    pub full_month_target_min: i64,
     pub category_totals: HashMap<String, i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub weeks_all_submitted: Option<bool>,
@@ -160,6 +164,8 @@ async fn build_range(
     let mut days: Vec<DayDetail> = vec![];
     let mut target_total = 0i64;
     let mut actual_total = 0i64;
+    let mut submitted_total = 0i64;
+    let mut full_month_target_total = 0i64;
     let mut category_minutes_by_name: HashMap<String, i64> = HashMap::new();
     let mut current_date = from;
     while current_date <= to {
@@ -180,8 +186,16 @@ async fn build_range(
             } else {
                 0
             };
+        // full_month_target counts all workdays in the month (no today cutoff).
+        let full_target =
+            if weekday && holiday.is_none() && absence.is_none() && !before_start {
+                target_per_day_min
+            } else {
+                0
+            };
         let mut entries: Vec<EntryDetail> = vec![];
         let mut actual = 0i64;
+        let mut submitted = 0i64;
         for (
             entry_date,
             start_time,
@@ -209,6 +223,10 @@ async fn build_range(
             if status == "approved" {
                 actual += entry_minutes;
             }
+            // submitted_min counts submitted + approved (everything the employee filed).
+            if status == "approved" || status == "submitted" {
+                submitted += entry_minutes;
+            }
             // Category totals show every booked entry that is not rejected.
             *category_minutes_by_name
                 .entry(category_name.clone())
@@ -226,6 +244,8 @@ async fn build_range(
         let actual_eff = if after_today { 0 } else { actual };
         target_total += target;
         actual_total += actual_eff;
+        submitted_total += submitted; // after_today entries already skipped in loop above
+        full_month_target_total += full_target;
         days.push(DayDetail {
             date: current_date,
             weekday: weekday_en(current_date).to_string(),
@@ -244,6 +264,8 @@ async fn build_range(
         target_min: target_total,
         actual_min: actual_total,
         diff_min: actual_total - target_total,
+        submitted_min: submitted_total,
+        full_month_target_min: full_month_target_total,
         category_totals: category_minutes_by_name,
         weeks_all_submitted: None,
     })

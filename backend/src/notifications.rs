@@ -46,9 +46,10 @@ pub async fn create(
     // Resolve recipient email and dispatch SMTP best-effort.
     if let Some(email) = state.db.notifications.get_user_email(user_id).await {
         let smtp = state.db.settings.load_smtp_config().await.map(std::sync::Arc::new);
+        let timestamp = chrono::Local::now().format("%d.%m.%Y %H:%M").to_string();
         let email_body = match &state.cfg.public_url {
-            Some(url) => format!("{body}\n\n{url}"),
-            None => body.to_string(),
+            Some(url) => format!("{body}\n\n{url}\n\n{timestamp}"),
+            None => format!("{body}\n\n{timestamp}"),
         };
         crate::email::send_async(smtp, email, title.to_string(), email_body);
     }
