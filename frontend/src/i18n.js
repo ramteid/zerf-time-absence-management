@@ -450,8 +450,8 @@ const TRANSLATIONS = {
     "Timesheet Approvals": "Stundenzettel-Genehmigungen",
     "Approve All": "Alle genehmigen",
     "Approve all?": "Alle genehmigen?",
-    "Approve all {n} submitted entries across all users?":
-      "Alle {n} eingereichten Einträge aller Benutzer genehmigen?",
+    "Approve all {n} submissions across all users?":
+      "Alle {n} Einreichungen aller Benutzer genehmigen?",
     "All caught up!": "Alles erledigt!",
     "No pending requests": "Keine ausstehenden Anträge",
     "Team hours overview": "Teamstunden-Übersicht",

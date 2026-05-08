@@ -1518,11 +1518,14 @@ dialog footer {
 }
 
 .dropdown-slider-item {
-  padding: 12px;
-  background: var(--bg-muted);
-  border-radius: var(--radius-sm);
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border: none;
+  background: transparent;
+}
+
+.dropdown-slider-item:last-child {
+  border-bottom: none;
 }
