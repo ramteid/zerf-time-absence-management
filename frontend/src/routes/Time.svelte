@@ -99,7 +99,9 @@
         return a.start_time.localeCompare(b.start_time);
       });
       myReopens = reopenRows;
-      absences = absenceRows.filter((absence) => absence.status !== "rejected");
+      absences = absenceRows.filter(
+        (absence) => absence.status !== "rejected" && absence.status !== "cancelled",
+      );
       holidays = holidayRowsByYear.flat();
     } catch {
       if (requestId !== loadRequestCounter) return;

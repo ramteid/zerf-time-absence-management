@@ -1,0 +1,152 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { mount, unmount } from "svelte";
+import Time from "./Time.svelte";
+import { currentUser, path, settings } from "../stores.js";
+import { setLanguage } from "../i18n.js";
+
+const mockState = vi.hoisted(() => ({
+  entries: [],
+  absences: [],
+  holidays: [],
+  reopens: [],
+  categories: [],
+}));
+
+vi.mock("svelte", async () => {
+  return await import("../../node_modules/svelte/src/index-client.js");
+});
+
+vi.mock("../api.js", () => ({
+  api: vi.fn(async (urlPath) => {
+    if (urlPath.startsWith("/time-entries")) return mockState.entries;
+    if (urlPath.startsWith("/reopen-requests")) return mockState.reopens;
+    if (urlPath.startsWith("/categories")) return mockState.categories;
+    if (urlPath.startsWith("/absences")) return mockState.absences;
+    if (urlPath.startsWith("/holidays")) return mockState.holidays;
+    throw new Error(`Unhandled API path: ${urlPath}`);
+  }),
+}));
+
+async function settle() {
+  await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await Promise.resolve();
+}
+
+// Returns a Monday date string for a past week (to avoid future-day disabling).
+function pastMonday() {
+  const now = new Date();
+  const day = now.getDay();
+  const diff = day === 0 ? 6 : day - 1;
+  const mon = new Date(now);
+  mon.setDate(mon.getDate() - diff - 7); // last week's Monday
+  return mon.toISOString().slice(0, 10);
+}
+
+describe("Time", () => {
+  let target;
+  let component;
+
+  beforeEach(() => {
+    target = document.createElement("div");
+    document.body.appendChild(target);
+    currentUser.set({
+      id: 1,
+      role: "employee",
+      weekly_hours: 40,
+      start_date: "2020-01-01",
+    });
+    settings.set({ time_format: "24h" });
+    setLanguage("en");
+    mockState.entries = [];
+    mockState.absences = [];
+    mockState.holidays = [];
+    mockState.reopens = [];
+    mockState.categories = [];
+  });
+
+  afterEach(() => {
+    if (component) {
+      unmount(component);
+      component = null;
+    }
+    target.remove();
+  });
+
+  it("cancelled absences do not block time entry creation", async () => {
+    const monday = pastMonday();
+    path.set(`/time?week=${monday}`);
+
+    mockState.absences = [
+      {
+        id: 10,
+        user_id: 1,
+        kind: "vacation",
+        start_date: monday,
+        end_date: monday,
+        status: "cancelled",
+        comment: null,
+      },
+    ];
+
+    component = mount(Time, { target });
+    await settle();
+
+    // The add-entry buttons should not be disabled for the Monday that only
+    // has a cancelled absence.
+    const addButtons = target.querySelectorAll("button[style*='dashed']");
+    const mondayButton = addButtons[0];
+    expect(mondayButton).toBeDefined();
+    expect(mondayButton.disabled).toBe(false);
+  });
+
+  it("approved absences block time entry creation", async () => {
+    const monday = pastMonday();
+    path.set(`/time?week=${monday}`);
+
+    mockState.absences = [
+      {
+        id: 11,
+        user_id: 1,
+        kind: "vacation",
+        start_date: monday,
+        end_date: monday,
+        status: "approved",
+        comment: null,
+      },
+    ];
+
+    component = mount(Time, { target });
+    await settle();
+
+    const addButtons = target.querySelectorAll("button[style*='dashed']");
+    const mondayButton = addButtons[0];
+    expect(mondayButton).toBeDefined();
+    expect(mondayButton.disabled).toBe(true);
+  });
+
+  it("rejected absences do not block time entry creation", async () => {
+    const monday = pastMonday();
+    path.set(`/time?week=${monday}`);
+
+    mockState.absences = [
+      {
+        id: 12,
+        user_id: 1,
+        kind: "vacation",
+        start_date: monday,
+        end_date: monday,
+        status: "rejected",
+        comment: null,
+      },
+    ];
+
+    component = mount(Time, { target });
+    await settle();
+
+    const addButtons = target.querySelectorAll("button[style*='dashed']");
+    const mondayButton = addButtons[0];
+    expect(mondayButton).toBeDefined();
+    expect(mondayButton.disabled).toBe(false);
+  });
+});
