@@ -32,14 +32,6 @@
   const PULL_THRESHOLD = 80;
   let pullEl;
 
-  $: if (pullEl) {
-    if (pullDistance > 0) {
-      try { pullEl.showPopover?.(); } catch {}
-    } else {
-      try { pullEl.hidePopover?.(); } catch {}
-    }
-  }
-
   function getPullScrollContainer(target) {
     if (target instanceof Element) {
       const container = target.closest(".content-area");
@@ -68,10 +60,13 @@
     if (!pulling) return;
     const dy = e.touches[0].clientY - pullStartY;
     if (dy > 0) {
+      const wasHidden = pullDistance === 0;
       pullDistance = Math.min(dy * 0.5, 120);
+      if (wasHidden) try { pullEl?.showPopover?.(); } catch {}
     } else {
       pulling = false;
       pullDistance = 0;
+      try { pullEl?.hidePopover?.(); } catch {}
     }
   }
   async function onTouchEnd() {
@@ -86,6 +81,7 @@
     }
     pulling = false;
     pullDistance = 0;
+    try { pullEl?.hidePopover?.(); } catch {}
   }
 
   // Bottom nav: show max 4 primary items + "More"
