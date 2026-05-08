@@ -108,9 +108,9 @@
       const reportYear = reportMonth.slice(0, 4);
       const [monthRaw, overtimeRows, leaveRaw] = await Promise.all([
         api(`/reports/month?user_id=${reportUserId}&month=${reportMonth}`),
-        // Immer das aktuelle Jahr verwenden, damit der kumulierte Kontostand
-        // den heutigen Stand widerspiegelt, nicht den Jahresendstand.
-        api(`/reports/overtime?user_id=${reportUserId}&year=${currentYear}`).catch(() => []),
+        // reportYear verwenden, damit der Kontostand am Ende des gewählten Monats
+        // angezeigt wird, nicht der Stand am Ende des laufenden Jahres.
+        api(`/reports/overtime?user_id=${reportUserId}&year=${reportYear}`).catch(() => []),
         api(`/leave-balance/${reportUserId}?year=${reportYear}`).catch(() => null),
       ]);
 
@@ -126,15 +126,15 @@
         return "partial";
       })();
 
-      // Letzter Überstunden-Eintrag = aktueller Kontostand (bis gestern).
-      const lastOvertimeRow = overtimeRows.length > 0
-        ? overtimeRows[overtimeRows.length - 1]
-        : null;
+      // Kumulierten Kontostand am Ende des gewählten Monats suchen.
+      // Fallback auf letzten verfügbaren Eintrag (z.B. bei Zukunftsmonat).
+      const reportMonthRow = overtimeRows.find(r => r.month === reportMonth);
+      const fallbackRow = overtimeRows.length > 0 ? overtimeRows[overtimeRows.length - 1] : null;
 
       reportData = {
         monthReport,
         monthStatus,
-        cumulativeOvertimeMin: lastOvertimeRow?.cumulative_min ?? 0,
+        cumulativeOvertimeMin: (reportMonthRow ?? fallbackRow)?.cumulative_min ?? 0,
         leaveBalance: leaveRaw,
       };
     } catch (e) {
@@ -619,19 +619,19 @@
               <td class="tab-num">{fmtMonthLabel(m.month)}</td>
               <td class="tab-num">{minToHM(m.target_min)}</td>
               <td class="tab-num">{minToHM(m.actual_min)}</td>
-              <!-- Diff: rot bei Minusstunden, grün bei Überstunden -->
+              <!-- Diff: rot bei Minusstunden, grün bei Ausgeglichen oder Überstunden -->
               <td
                 class="tab-num"
-                style="color:{m.diff_min < 0 ? 'var(--danger-text)' : m.diff_min > 0 ? 'var(--success-text)' : 'var(--text-tertiary)'}"
+                style="color:{m.diff_min < 0 ? 'var(--danger-text)' : 'var(--success-text)'}"
               >
-                {m.diff_min > 0 ? "+" : ""}{minToHM(m.diff_min)}
+                {m.diff_min >= 0 ? "+" : ""}{minToHM(m.diff_min)}
               </td>
-              <!-- Kumuliert: rot bei Defizit, grün bei Guthaben -->
+              <!-- Kumuliert: rot bei Defizit, grün bei Ausgeglichen oder Guthaben -->
               <td
                 class="tab-num"
-                style="color:{cum < 0 ? 'var(--danger-text)' : cum > 0 ? 'var(--success-text)' : 'var(--text-tertiary)'}"
+                style="color:{cum < 0 ? 'var(--danger-text)' : 'var(--success-text)'}"
               >
-                {cum > 0 ? "+" : ""}{minToHM(cum)}
+                {cum >= 0 ? "+" : ""}{minToHM(cum)}
               </td>
             </tr>
           {/each}
@@ -657,14 +657,14 @@
           </div>
           <div class="overtime-tile-row">
             <span>{$t("Diff")}</span>
-            <span class="tab-num" style="color:{m.diff_min < 0 ? 'var(--danger-text)' : m.diff_min > 0 ? 'var(--success-text)' : 'var(--text-tertiary)'}">
-              {m.diff_min > 0 ? "+" : ""}{minToHM(m.diff_min)}
+            <span class="tab-num" style="color:{m.diff_min < 0 ? 'var(--danger-text)' : 'var(--success-text)'}">
+              {m.diff_min >= 0 ? "+" : ""}{minToHM(m.diff_min)}
             </span>
           </div>
           <div class="overtime-tile-row">
             <span>{$t("Cumulative")}</span>
-            <span class="tab-num" style="color:{cum < 0 ? 'var(--danger-text)' : cum > 0 ? 'var(--success-text)' : 'var(--text-tertiary)'}">
-              {cum > 0 ? "+" : ""}{minToHM(cum)}
+            <span class="tab-num" style="color:{cum < 0 ? 'var(--danger-text)' : 'var(--success-text)'}">
+              {cum >= 0 ? "+" : ""}{minToHM(cum)}
             </span>
           </div>
         </div>
@@ -746,9 +746,9 @@
           <div class="stat-card-label">{$t("Monthly diff")}</div>
           <div
             class="stat-card-value tab-num"
-            style="color:{reportData.monthReport.diff_min < 0 ? 'var(--danger-text)' : reportData.monthReport.diff_min > 0 ? 'var(--success-text)' : 'var(--text-tertiary)'}"
+            style="color:{reportData.monthReport.diff_min < 0 ? 'var(--danger-text)' : 'var(--success-text)'}"
           >
-            {reportData.monthReport.diff_min > 0 ? "+" : ""}
+            {reportData.monthReport.diff_min >= 0 ? "+" : ""}
             {minToHM(reportData.monthReport.diff_min)}
           </div>
         </div>
@@ -979,13 +979,13 @@
               {#each teamReport as r}
                 <tr>
                   <td style="font-weight:500">{r.name}</td>
-                  <!-- Gleitzeitkonto: rot = Defizit, grün = Guthaben -->
-                  <td class="tab-num" style="text-align:right;font-weight:500;color:{r.flextime_balance_min < 0 ? 'var(--danger-text)' : r.flextime_balance_min > 0 ? 'var(--success-text)' : 'var(--text-tertiary)'}">
-                    {r.flextime_balance_min > 0 ? "+" : ""}{minToHM(r.flextime_balance_min)}
+                  <!-- Gleitzeitkonto: rot = Defizit, grün = ausgeglichen oder Guthaben -->
+                  <td class="tab-num" style="text-align:right;font-weight:500;color:{r.flextime_balance_min < 0 ? 'var(--danger-text)' : 'var(--success-text)'}">
+                    {r.flextime_balance_min >= 0 ? "+" : ""}{minToHM(r.flextime_balance_min)}
                   </td>
                   <!-- Monatsdiff -->
-                  <td class="tab-num" style="text-align:right;color:{r.diff_min < 0 ? 'var(--danger-text)' : r.diff_min > 0 ? 'var(--success-text)' : 'var(--text-tertiary)'}">
-                    {r.diff_min > 0 ? "+" : ""}{minToHM(r.diff_min)}
+                  <td class="tab-num" style="text-align:right;color:{r.diff_min < 0 ? 'var(--danger-text)' : 'var(--success-text)'}">
+                    {r.diff_min >= 0 ? "+" : ""}{minToHM(r.diff_min)}
                   </td>
                   <!-- Krankheitstage (Dezimalzahl, da Halbtage möglich) -->
                   <td class="tab-num" style="text-align:right;color:var(--text-tertiary)">
