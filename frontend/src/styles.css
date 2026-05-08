@@ -661,7 +661,7 @@ dialog footer {
 /* ── Week grid (Time Entry) ── */
 .week-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-template-columns: repeat(5, 1fr);
   gap: 12px;
 }
 
@@ -1174,12 +1174,6 @@ dialog footer {
     height: 32px;
     padding: 0 10px;
     font-size: 12.5px;
-  }
-
-  .time-top-bar-actions .time-reopen-action {
-    display: flex;
-    flex-basis: 100%;
-    justify-content: flex-end;
   }
 
   /* Tables: allow horizontal scroll */

@@ -262,6 +262,9 @@
   };
 
   $: route = resolveRoute(pathname, $currentUser);
+  $: document.title = $settings?.organization_name
+    ? `Zerf - ${$settings.organization_name}`
+    : "Zerf";
   $: isAdmin =
     pathname.startsWith("/admin") &&
     !!$currentUser?.permissions?.can_manage_users;

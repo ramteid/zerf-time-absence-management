@@ -363,76 +363,56 @@
       </div>
     {/if}
 
-    <!-- Submit button and week status chip grouped vertically so the status reads
-         as a direct label for the action rather than an unrelated toolbar element. -->
-    <div class="time-submit-group">
-      <button
-        class="kz-btn kz-btn-primary time-submit-button"
-        on:click={() => submitWeek(drafts.map((draft) => draft.id))}
-        disabled={!drafts.length}
-      >
-        <Icon name="Send" size={14} />{$t("Submit Week")}
-      </button>
-      {#if entries.length > 0}
-        <div class="time-week-status">
-          <span class="kz-chip kz-chip-{weekStatus}">{statusLabel(weekStatus)}</span>
-        </div>
-      {/if}
-    </div>
+    <button
+      class="kz-btn kz-btn-primary time-submit-button"
+      on:click={() => submitWeek(drafts.map((draft) => draft.id))}
+      disabled={!drafts.length}
+    >
+      <Icon name="Send" size={14} />{$t("Submit Week")}
+    </button>
 
-    {#if !drafts.length && weekStatus !== "draft"}
-      {#if pendingReopen}
-        <div class="time-reopen-action">
-          <span
-            class="kz-chip kz-chip-pending"
-            title={$t("Reopen pending approval.")}
-          >
-            {$t("Reopen pending approval.")}
-          </span>
-        </div>
-      {:else if canRequestReopen}
-        <div class="time-reopen-action">
-          <button
-            class="kz-btn kz-btn-sm"
-            on:click={requestReopen}
-            title={$t("Request edit")}
-          >
-            <Icon name="Edit" size={13} />{$t("Request edit")}
-          </button>
-        </div>
-      {/if}
+    {#if canRequestReopen}
+      <button
+        class="kz-btn kz-btn-sm"
+        on:click={requestReopen}
+        title={$t("Request edit")}
+      >
+        <Icon name="Edit" size={13} />{$t("Request edit")}
+      </button>
     {/if}
   </div>
 </div>
 
 <div class="content-area">
   {#if weekFrom}
-    <!-- Summary strip: logged hours and current week status -->
-    <div class="stat-cards" style="margin-bottom:16px">
-      <div class="kz-card stat-card">
-        <div class="stat-card-label">{$t("Logged")}</div>
-        <div
-          class="stat-card-value tab-num"
-          style="color: {weekActualMinutes >= effectiveWeeklyHours * 60
-            ? 'var(--accent)'
-            : 'var(--warning-text)'}"
-        >
-          {weekLoggedHours}
+    {#if entries.length > 0}
+      <!-- Summary strip: rendered only once there is something to summarise. -->
+      <div class="stat-cards" style="margin-bottom:16px">
+        <div class="kz-card stat-card">
+          <div class="stat-card-label">{$t("Logged")}</div>
+          <div
+            class="stat-card-value tab-num"
+            style="color: {weekActualMinutes >= effectiveWeeklyHours * 60
+              ? 'var(--accent)'
+              : 'var(--warning-text)'}"
+          >
+            {weekLoggedHours}
+          </div>
+          <div class="stat-card-sub">
+            {$t("of {target} target", { target: weekTargetHours })}
+          </div>
         </div>
-        <div class="stat-card-sub">
-          {$t("of {target} target", { target: weekTargetHours })}
+        <div class="kz-card stat-card">
+          <div class="stat-card-label">{$t("Status")}</div>
+          <div
+            class="stat-card-value tab-num"
+            style="font-size:18px;color:{weekStatusColor(weekStatus)}"
+          >
+            {statusLabel(weekStatus)}
+          </div>
         </div>
       </div>
-      <div class="kz-card stat-card">
-        <div class="stat-card-label">{$t("Status")}</div>
-        <div
-          class="stat-card-value tab-num"
-          style="font-size:18px;color:{weekStatusColor(weekStatus)}"
-        >
-          {statusLabel(weekStatus)}
-        </div>
-      </div>
-    </div>
+    {/if}
 
     <!-- Week grid: one card per weekday (Mon–Fri) -->
     <div class="week-grid">
@@ -590,12 +570,4 @@
     opacity: 0.4;
   }
 
-  /* Stack the submit button above the week-status chip so the status label
-     reads as a direct annotation of the action, not a sibling toolbar element. */
-  .time-submit-group {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 4px;
-  }
 </style>
