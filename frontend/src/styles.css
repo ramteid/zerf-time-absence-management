@@ -1306,7 +1306,7 @@ dialog footer {
   }
 
   /* Pull-to-refresh */
-  .pull-to-refresh {
+  .pull-to-refresh.ptr-open {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1318,6 +1318,10 @@ dialog footer {
     right: 0;
     width: 100%;
     z-index: 400;
+  }
+  /* Popover API: hide when not in top layer (higher specificity wins over .ptr-open) */
+  .pull-to-refresh:not(:popover-open) {
+    display: none;
   }
 
   .pull-spinner {
