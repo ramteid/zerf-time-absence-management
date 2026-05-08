@@ -281,25 +281,19 @@
   <div class="top-bar-title">
     <h1>{$t("Calendar")}</h1>
   </div>
-  <div class="top-bar-subtitle">
-    {fmtMonthYear(new Date(year, month - 1, 1))}
-  </div>
   <div class="top-bar-actions calendar-top-actions">
-    <div style="display:flex;align-items:center;gap:4px">
+    <div class="kz-nav-slider">
       <button
-        class="kz-btn kz-btn-icon-sm kz-btn-ghost"
+        class="kz-btn kz-btn-ghost"
         on:click={() => go("/calendar" + prev)}
       >
         <Icon name="ChevLeft" size={16} />
       </button>
-      <span
-        class="tab-num"
-        style="font-size:13.5px;font-weight:500;min-width:140px;text-align:center"
-      >
+      <span class="nav-label tab-num" style="min-width:130px">
         {fmtMonthYear(new Date(year, month - 1, 1))}
       </span>
       <button
-        class="kz-btn kz-btn-icon-sm kz-btn-ghost"
+        class="kz-btn kz-btn-ghost"
         on:click={() => go("/calendar" + next)}
       >
         <Icon name="ChevRight" size={16} />

@@ -1019,10 +1019,14 @@
             >
               <Icon name="ChevLeft" size={16} />
             </button>
-            <span class="absence-week-range">
+            <button
+              class="kz-btn kz-btn-ghost absence-week-range"
+              on:click={absenceSliderToToday}
+              title={$t("Today")}
+            >
               {fmtDateShort(absenceSliderWeek)} -
               {fmtDateShort(isoDate(addDays(parseDate(absenceSliderWeek), 6)))}
-            </span>
+            </button>
             <button
               class="kz-btn kz-btn-icon-sm kz-btn-ghost"
               on:click={absenceSliderNextWeek}
@@ -1031,9 +1035,6 @@
               <Icon name="ChevRight" size={16} />
             </button>
           </div>
-          <button class="kz-btn kz-btn-sm" on:click={absenceSliderToToday}>
-            {$t("Today")}
-          </button>
         </div>
       </div>
 
@@ -1372,8 +1373,13 @@
     font-size: 12px;
     min-width: 120px;
     text-align: center;
+    padding: 2px 4px;
+    height: auto;
   }
 
+  .absence-week-range:hover {
+    color: var(--text-primary);
+  }
   .week-entry-list {
     display: flex;
     flex-direction: column;

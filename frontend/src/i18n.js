@@ -688,7 +688,6 @@ const TRANSLATIONS = {
       "Für diesen Eintrag existiert bereits eine offene Änderungsanfrage (ID {id}).",
     "Leave balance unavailable.": "Urlaubsstand nicht verfügbar.",
     "Overtime data unavailable.": "Überstundendaten nicht verfügbar.",
-    "Overtime overview": "Überstundenübersicht",
     "This month: {value}": "Diesen Monat: {value}",
     "Submission status": "Einreichungsstatus",
     "All previous months submitted": "Alle vergangenen Monate eingereicht",

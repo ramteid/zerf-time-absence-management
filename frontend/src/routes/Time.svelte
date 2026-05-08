@@ -340,21 +340,18 @@
   {/if}
   <div class="top-bar-actions time-top-bar-actions">
     {#if weekFrom}
-      <div class="time-week-picker" style="display:flex;align-items:center;gap:4px">
+      <div class="kz-nav-slider time-week-picker">
         <button
-          class="kz-btn kz-btn-icon-sm kz-btn-ghost"
+          class="kz-btn kz-btn-ghost"
           on:click={() => gotoWeek(-7)}
         >
           <Icon name="ChevLeft" size={16} />
         </button>
-        <span
-          class="tab-num time-week-label"
-          style="font-size:13.5px;font-weight:500;text-align:center"
-        >
+        <span class="nav-label tab-num time-week-label">
           {fmtDateShort(weekFrom)} – {fmtDateShort(weekTo)}
         </span>
         <button
-          class="kz-btn kz-btn-icon-sm kz-btn-ghost"
+          class="kz-btn kz-btn-ghost"
           on:click={() => gotoWeek(7)}
           disabled={isAtOrPastCurrentWeek}
         >

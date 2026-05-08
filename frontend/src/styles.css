@@ -480,6 +480,25 @@ body {
   gap: 8px;
 }
 
+/* ── Nav Slider (shared week / month / year navigation) ── */
+.kz-nav-slider {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.kz-nav-slider .kz-btn {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  justify-content: center;
+}
+.kz-nav-slider .nav-label {
+  font-size: 13.5px;
+  font-weight: 500;
+  text-align: center;
+  white-space: nowrap;
+}
+
 /* ── StatCard ── */
 .stat-cards {
   display: flex;
@@ -1019,10 +1038,11 @@ dialog footer {
 /* ── Mobile bell button (top-right corner) ── */
 .kz-mobile-bell-wrapper {
   display: none;
-  position: fixed;
-  top: 12px;
-  right: 12px;
-  z-index: 250;
+}
+
+/* ── Mobile title bar (mobile only) ── */
+.mobile-title-bar {
+  display: none;
 }
 
 @media (min-width: 769px) and (max-width: 1024px) {
@@ -1033,7 +1053,7 @@ dialog footer {
 
 @media (max-width: 768px) {
   .kz-notif-panel {
-    top: 56px;
+    top: 50px;
     bottom: auto;
     right: 12px;
     left: 12px;
@@ -1043,7 +1063,8 @@ dialog footer {
   }
 
   .kz-mobile-bell-wrapper {
-    display: block;
+    display: flex;
+    align-items: center;
   }
 }
 
@@ -1115,8 +1136,72 @@ dialog footer {
     display: none;
   }
 
+  /* Mobile title bar */
+  .mobile-title-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 50px;
+    padding: 0 12px 0 14px;
+    background: var(--nav-bg);
+    border-bottom: 1px solid var(--nav-border);
+    z-index: 200;
+  }
+
+  .mobile-title-bar-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .mobile-title-bar-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 7px;
+    background: var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    flex-shrink: 0;
+  }
+
+  .mobile-title-bar-names {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.2;
+    min-width: 0;
+  }
+
+  .mobile-title-bar-appname {
+    color: var(--nav-text-active);
+    font-weight: 400;
+    font-size: 15px;
+    letter-spacing: -0.02em;
+  }
+
+  .mobile-title-bar-org {
+    font-size: 10px;
+    color: var(--nav-text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .mobile-title-bar-bell {
+    flex-shrink: 0;
+    margin-left: 8px;
+  }
+
   .main-content {
-    /* Account for bottom nav height + safe-area */
+    /* Account for fixed title bar + bottom nav height + safe-area */
+    padding-top: 50px;
     padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px));
   }
 
@@ -1320,7 +1405,11 @@ dialog footer {
   }
 
   .top-bar-actions.absence-top-actions {
-    justify-content: space-between;
+    justify-content: flex-start;
+  }
+
+  .absence-top-actions .kz-btn-primary {
+    margin-left: auto;
   }
 
   .top-bar-actions.calendar-top-actions {
@@ -1333,13 +1422,14 @@ dialog footer {
     align-items: center;
     justify-content: center;
     overflow: hidden;
-    background: var(--bg-surface);
+    background: linear-gradient(to bottom, var(--bg-surface) 60%, transparent);
     position: fixed;
     top: 0;
     left: 0;
     right: 0;
     width: 100%;
     z-index: 400;
+    border: none;
   }
   /* Popover API: hide when not in top layer (higher specificity wins over .ptr-open) */
   .pull-to-refresh:not(:popover-open) {
@@ -1427,20 +1517,6 @@ dialog footer {
   overflow: hidden;
 }
 
-/* Gradient overlay: transparent at bottom to opaque white at top */
-.dropdown-slider::after {
-  content: "";
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 40px;
-  background: linear-gradient(to top, var(--bg-surface), transparent);
-  pointer-events: none;
-  z-index: 1;
-}
-
-/* Ensure list items don't have left border for cleaner look */
 .dropdown-slider-item {
   padding: 12px;
   background: var(--bg-muted);
