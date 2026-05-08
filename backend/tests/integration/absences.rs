@@ -159,12 +159,16 @@ async fn sick_updates_cannot_backdate_and_auto_approved_sick_can_be_cancelled() 
         "edit failure body: {body}"
     );
 
-    let (st, _) = emp.delete(&format!("/api/v1/absences/{auto_sick}")).await;
-    assert_eq!(st, StatusCode::OK, "auto-approved sick can be cancelled");
+    let (st, body) = emp.delete(&format!("/api/v1/absences/{auto_sick}")).await;
+    assert_eq!(st, StatusCode::OK, "approved sick cancellation accepted");
+    assert_eq!(
+        body["pending"], true,
+        "approved sick cancellation requires approver review"
+    );
 }
 
 #[tokio::test]
-async fn reviewed_absence_cannot_be_edited_or_cancelled_by_employee() {
+async fn approved_absence_cannot_be_edited_but_cancellation_requires_approval() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
     let (_, lead_pw, _, emp_pw, _, _) = bootstrap_team(&app, &admin, false).await;
@@ -198,22 +202,23 @@ async fn reviewed_absence_cannot_be_edited_or_cancelled_by_employee() {
     assert_eq!(
         st,
         StatusCode::BAD_REQUEST,
-        "reviewed absence is not editable"
+        "approved absence is not editable"
     );
     assert!(
         body.to_string().contains("Cannot edit"),
         "edit failure body: {body}"
     );
 
+    // Cancelling an approved absence triggers a cancellation approval workflow.
     let (st, body) = emp.delete(&format!("/api/v1/absences/{absence_id}")).await;
     assert_eq!(
         st,
-        StatusCode::BAD_REQUEST,
-        "reviewed absence cannot be self-cancelled"
+        StatusCode::OK,
+        "cancellation request accepted"
     );
-    assert!(
-        body.to_string().contains("auto-approved sick absences"),
-        "cancel failure body: {body}"
+    assert_eq!(
+        body["pending"], true,
+        "cancellation requires approver review"
     );
 
     app.cleanup().await;

@@ -14,6 +14,7 @@ pub mod reopen_requests;
 pub mod reports;
 pub mod repository;
 pub mod settings;
+pub mod approval_reminders;
 pub mod submission_reminders;
 pub mod time_entries;
 pub mod users;
