@@ -13,7 +13,6 @@
     minToHM,
     fmtDate,
     fmtMonthLabel,
-    addDays,
   } from "../format.js";
   import {
     normalizeMonthReport,
@@ -28,8 +27,6 @@
   // Fixed date reference for this session.
   const today = new Date();
   const todayIso = isoDate(today);
-  const yesterday = addDays(today, -1);
-  const yesterdayIso = isoDate(yesterday);
   const currentYear = today.getFullYear();
   const currentMonthStr = `${currentYear}-${String(today.getMonth() + 1).padStart(2, "0")}`;
 
@@ -70,8 +67,8 @@
       const reportYearNum = parseInt(reportYear);
       const chartYearFrom = `${reportYear}-01-01`;
       const chartYearTo =
-        reportYearNum < currentYear ? `${reportYear}-12-31` : yesterdayIso;
-      // Only fetch the chart when the year has at least one elapsed day.
+        reportYearNum < currentYear ? `${reportYear}-12-31` : todayIso;
+      // Only fetch the chart when the year has at least one day in range.
       const canFetchChart =
         reportYearNum <= currentYear && chartYearTo >= chartYearFrom;
 
@@ -152,7 +149,7 @@
   // Visible for leads and admins only.
   // Columns: flextime balance, monthly diff, sick days, vacation taken/planned,
   //          all weeks submitted.
-  // For the current month: all values relative to working days from the 1st to yesterday.
+  // For the current month: all values relative to working days from the 1st to today.
   let teamMonth = currentMonthStr;
   let teamReport = null;
 
@@ -170,7 +167,8 @@
   // Note: the backend only excludes "rejected" entries, so submitted
   // (not yet approved) bookings also appear.
   let catFrom = isoDate(new Date(currentYear, 0, 1));
-  let catTo = yesterdayIso;
+  // Category reports now include today's entries by default.
+  let catTo = todayIso;
   let catReport = null;
   let teamCatReport = null;
   let catFilteredCategories = [];
@@ -1310,7 +1308,7 @@
           id="cat-to"
           bind:value={catTo}
           min={catFrom}
-          max={yesterdayIso}
+          max={todayIso}
         />
       </div>
     </div>

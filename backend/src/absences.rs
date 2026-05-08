@@ -1387,10 +1387,13 @@ pub async fn balance(
                 // Absence is entirely in the future.
                 upcoming_days += workdays(&app_state.pool, clamped_start, clamped_end).await?;
             } else {
-                // Absence spans today: split into taken and upcoming.
-                let yesterday = today - Duration::days(1);
-                taken_days += workdays(&app_state.pool, clamped_start, yesterday).await?;
-                upcoming_days += workdays(&app_state.pool, today, clamped_end).await?;
+                // Absence spans today: count today as already taken and only keep
+                // days strictly after today in the upcoming bucket.
+                taken_days += workdays(&app_state.pool, clamped_start, today).await?;
+                let tomorrow = today + Duration::days(1);
+                if tomorrow <= clamped_end {
+                    upcoming_days += workdays(&app_state.pool, tomorrow, clamped_end).await?;
+                }
             }
         } else if absence.status == "requested" {
             requested_days += workdays(&app_state.pool, clamped_start, clamped_end).await?;
