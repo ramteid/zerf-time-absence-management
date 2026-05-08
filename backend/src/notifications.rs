@@ -25,6 +25,9 @@ pub fn broadcaster() -> NotificationBroadcaster {
 /// Insert a notification row. `email` is sent best-effort via SMTP if
 /// configured. Both operations are non-fatal: failures are logged but not
 /// propagated.
+///
+/// The in-app notification stores `body` verbatim. The outgoing email appends
+/// the public app URL so recipients can navigate directly to the application.
 pub async fn create(
     state: &AppState,
     user_id: i64,
@@ -43,7 +46,11 @@ pub async fn create(
     // Resolve recipient email and dispatch SMTP best-effort.
     if let Some(email) = state.db.notifications.get_user_email(user_id).await {
         let smtp = state.db.settings.load_smtp_config().await.map(std::sync::Arc::new);
-        crate::email::send_async(smtp, email, title.to_string(), body.to_string());
+        let email_body = match &state.cfg.public_url {
+            Some(url) => format!("{body}\n\n{url}"),
+            None => body.to_string(),
+        };
+        crate::email::send_async(smtp, email, title.to_string(), email_body);
     }
 }
 

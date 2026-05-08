@@ -62,6 +62,17 @@ impl TestApp {
     /// Starts a Postgres container via testcontainers, creates the schema,
     /// seeds initial data, and starts the Axum server on a random port.
     pub async fn spawn() -> Self {
+        Self::spawn_inner(None).await
+    }
+
+    /// Like [`spawn`] but with a `public_url` set in the config.
+    /// Used to test that the app URL is appended to email bodies but not to
+    /// in-app notification bodies.
+    pub async fn spawn_with_public_url(public_url: &str) -> Self {
+        Self::spawn_inner(Some(public_url.to_string())).await
+    }
+
+    async fn spawn_inner(public_url: Option<String>) -> Self {
         let container = Postgres::default()
             .start()
             .await
@@ -82,7 +93,7 @@ impl TestApp {
             session_secret: "integration-test-secret-do-not-use-in-prod-32-characters".into(),
             bind: "127.0.0.1:0".into(),
             static_dir: "static".into(),
-            public_url: None,
+            public_url,
             allowed_origins: vec![],
             secure_cookies: false,
             enforce_origin: false,
