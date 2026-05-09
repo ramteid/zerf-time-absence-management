@@ -429,6 +429,7 @@ pub async fn create(
                 "absence_requested_body",
                 vec![
                     ("requester_name", requester_full_name.clone()),
+                    ("kind", i18n::absence_kind_label(&language, &created_absence.kind)),
                     (
                         "start_date",
                         i18n::format_date(&language, created_absence.start_date),
@@ -559,6 +560,7 @@ pub async fn update(
                 "absence_updated_body",
                 vec![
                     ("requester_name", requester_full_name.clone()),
+                    ("kind", i18n::absence_kind_label(&language, &absence_after_update.kind)),
                     (
                         "start_date",
                         i18n::format_date(&language, absence_after_update.start_date),
@@ -633,6 +635,7 @@ pub async fn cancel(
                     "absence_cancelled_body",
                     vec![
                         ("requester_name", requester_full_name.clone()),
+                        ("kind", i18n::absence_kind_label(&language, &absence.kind)),
                         (
                             "start_date",
                             i18n::format_date(&language, absence.start_date),
@@ -684,6 +687,7 @@ pub async fn cancel(
                     "absence_cancellation_requested_body",
                     vec![
                         ("requester_name", requester_full_name.clone()),
+                        ("kind", i18n::absence_kind_label(&language, &absence.kind)),
                         (
                             "start_date",
                             i18n::format_date(&language, absence.start_date),
@@ -822,6 +826,7 @@ pub async fn approve(
         "absence_approved_title",
         "absence_approved_body",
         vec![
+            ("kind", i18n::absence_kind_label(&language, &absence.kind)),
             (
                 "start_date",
                 i18n::format_date(&language, absence.start_date),
@@ -922,6 +927,7 @@ pub async fn reject(
         "absence_rejected_title",
         "absence_rejected_body",
         vec![
+            ("kind", i18n::absence_kind_label(&language, &absence.kind)),
             (
                 "start_date",
                 i18n::format_date(&language, absence.start_date),
@@ -990,6 +996,7 @@ pub async fn approve_cancellation(
         "absence_cancellation_approved_title",
         "absence_cancellation_approved_body",
         vec![
+            ("kind", i18n::absence_kind_label(&language, &absence.kind)),
             ("start_date", i18n::format_date(&language, absence.start_date)),
             ("end_date", i18n::format_date(&language, absence.end_date)),
         ],
@@ -1054,6 +1061,7 @@ pub async fn reject_cancellation(
         "absence_cancellation_rejected_title",
         "absence_cancellation_rejected_body",
         vec![
+            ("kind", i18n::absence_kind_label(&language, &absence.kind)),
             ("start_date", i18n::format_date(&language, absence.start_date)),
             ("end_date", i18n::format_date(&language, absence.end_date)),
         ],
@@ -1114,6 +1122,7 @@ pub async fn revoke(
             "absence_revoked_title",
             "absence_revoked_body",
             vec![
+                ("kind", i18n::absence_kind_label(&language, &absence.kind)),
                 (
                     "start_date",
                     i18n::format_date(&language, absence.start_date),

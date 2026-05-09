@@ -831,9 +831,7 @@
       <div
         style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)"
       >
-        {$t(
-          "View detailed information about a team member including balance and statistics.",
-        )}
+        {$t("help_employee_details")}
       </div>
     {/if}
 
@@ -1503,9 +1501,7 @@
       <div
         style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)"
       >
-        {$t(
-          "View absence entries over a selected period with type distribution.",
-        )}
+        {$t("help_absence_report")}
       </div>
     {/if}
 
