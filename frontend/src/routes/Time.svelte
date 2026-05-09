@@ -362,23 +362,26 @@
       </div>
     {/if}
 
-    <button
-      class="kz-btn kz-btn-primary time-submit-button"
-      on:click={() => submitWeek(drafts.map((draft) => draft.id))}
-      disabled={!drafts.length}
-    >
-      <Icon name="Send" size={14} />{$t("Submit Week")}
-    </button>
-
-    {#if canRequestReopen}
+    <!-- Submit and reopen buttons stacked vertically. -->
+    <div style="display:flex;flex-direction:column;gap:6px;align-items:stretch">
       <button
-        class="kz-btn kz-btn-sm"
-        on:click={requestReopen}
-        title={$t("Request edit")}
+        class="kz-btn kz-btn-primary time-submit-button"
+        on:click={() => submitWeek(drafts.map((draft) => draft.id))}
+        disabled={!drafts.length}
       >
-        <Icon name="Edit" size={13} />{$t("Request edit")}
+        <Icon name="Send" size={14} />{$t("Submit Week")}
       </button>
-    {/if}
+
+      {#if canRequestReopen}
+        <button
+          class="kz-btn kz-btn-sm"
+          on:click={requestReopen}
+          title={$t("Request edit")}
+        >
+          <Icon name="Edit" size={13} />{$t("Request edit")}
+        </button>
+      {/if}
+    </div>
   </div>
 </div>
 

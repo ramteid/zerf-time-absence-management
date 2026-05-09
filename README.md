@@ -44,6 +44,16 @@ Absences include vacation, sick leave, training, special leave, general absence,
 
 After submission, employees can request changes to reviewed entries or ask to reopen a week. Leads approve or reject these requests through the same dashboard used for time and absence reviews.
 
+### Hour calculation when sick leave overlaps with existing time entries
+
+When an approved absence (including sick leave) covers a day on which time entries have already been recorded, the following rules apply:
+
+- The **daily target hours are set to zero** for every day covered by an approved absence. The employee owes no hours for those days regardless of absence type.
+- Any **time entries that already exist on an absence day are still counted as actual worked hours**. They remain in the record and contribute positively to the employee's flextime balance.
+- As a result, an employee who logs hours on the same day as an approved sick leave entry will end up with a positive flextime delta for that day (actual > 0, target = 0).
+
+This behavior is intentional and aligns with standard practice: an absence waives the daily obligation, but any hours the employee did log are not discarded. A typical use case is a partial sick day where the employee worked in the morning and went home ill in the afternoon — both the half-day of work and the approved sick leave coexist without conflict.
+
 ### Role organigram
 
 ```mermaid
