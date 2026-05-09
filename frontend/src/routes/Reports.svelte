@@ -48,24 +48,6 @@
     activeHelp = activeHelp === id ? null : id;
   }
 
-  // A month is considered fully approved only when every required workday in
-  // the loaded report period has at least one approved entry and no draft/
-  // submitted entries left.
-  function monthAllApproved(monthReport) {
-    if (!monthReport?.days?.length) return false;
-    const requiredDays = monthReport.days.filter((day) => day?.target_min > 0);
-    if (!requiredDays.length) return false;
-    return requiredDays.every((day) => {
-      const entries = Array.isArray(day.entries) ? day.entries : [];
-      if (!entries.length) return false;
-      const hasPending = entries.some(
-        (entry) => entry?.status === "draft" || entry?.status === "submitted",
-      );
-      const hasApproved = entries.some((entry) => entry?.status === "approved");
-      return !hasPending && hasApproved;
-    });
-  }
-
   // Section 1: employee report.
   // Merges the previously separate "Employee details" and "Monthly report" cards
   // into one combined card.
@@ -108,25 +90,12 @@
 
       const monthReport = normalizeMonthReport(monthRaw);
 
-      // Derive the month status from the entries.
-      const nonDraft = (monthReport.entries || []).filter(
-        (e) => e.status !== "draft",
-      );
-      const monthStatus = (() => {
-        if (monthAllApproved(monthReport)) return "approved";
-        if (nonDraft.length === 0) return "draft";
-        if (nonDraft.some((e) => e.status === "submitted")) return "submitted";
-        if (nonDraft.every((e) => e.status === "rejected")) return "rejected";
-        return "partial";
-      })();
-
       const flextimeBalanceRow = (overtimeRows || []).find(
         (row) => row.month === reportMonth,
       );
 
       reportData = {
         monthReport,
-        monthStatus,
         leaveBalance: leaveRaw,
         flextimeBalance: flextimeBalanceRow?.cumulative_min ?? null,
         flextimeChartData: flextimeRaw || [],
@@ -145,17 +114,6 @@
         (map[absenceEntry.kind] || 0) + (absenceEntry.days || 0);
     }
     return map;
-  })();
-
-  // Colour for the month-status badge in the Approvals tile.
-  // "approved" = all entries approved (green); anything else = not fully approved (amber).
-  $: reportStatusColor = (() => {
-    switch (reportData?.monthStatus) {
-      case "approved":
-        return "var(--success-text)";
-      default:
-        return "var(--warning-text)";
-    }
   })();
 
   // Section 3: team report per employee.
@@ -885,12 +843,13 @@
       <div class="stat-cards" style="margin-bottom:16px">
         <!-- Submitted hours vs. full-month target -->
         <div class="kz-card stat-card">
-          <div class="stat-card-label">{$t("Logged")}
+          <div class="stat-card-label stat-card-label-help">
+            <span>{$t("Logged")}</span>
             <button
               class="kz-btn-icon-sm kz-btn-ghost"
               title={$t("help_logged")}
               on:click={() => toggleHelp("logged")}
-              style="color:var(--text-tertiary);font-size:12px;cursor:help;vertical-align:middle;margin-left:4px"
+              style="color:var(--text-tertiary);font-size:12px;cursor:help"
             >
               <Icon name="Info" size={12} />
             </button>
@@ -936,38 +895,28 @@
           </div>
         </div>
 
-        <!-- Submission status for all fully elapsed weeks touching the month -->
+        <!-- Submission status with the same wording as on the dashboard -->
         <div class="kz-card stat-card">
-          <div class="stat-card-label">{$t("Submission status")}</div>
-          <div
-            class="stat-card-value tab-num"
-            style="font-size:18px;color:{reportData.monthReport
-              .weeks_all_submitted
-              ? 'var(--success-text)'
-              : 'var(--danger-text)'}"
-          >
-            {reportData.monthReport.weeks_all_submitted ? $t("Yes") : $t("No")}
-          </div>
-          <div class="stat-card-sub">{$t("All weeks submitted")}</div>
-        </div>
-
-        <!-- Month approval tile: "All approved" vs "Incomplete" -->
-        <div class="kz-card stat-card">
-          <div class="stat-card-label">{$t("Approvals")}
+          <div class="stat-card-label stat-card-label-help">
+            <span>{$t("Submission status")}</span>
             <button
               class="kz-btn-icon-sm kz-btn-ghost"
-              title={$t("help_month_status")}
+              title={$t("help_submission_status")}
               on:click={() => toggleHelp("approvals")}
-              style="color:var(--text-tertiary);font-size:12px;cursor:help;vertical-align:middle;margin-left:4px"
+              style="color:var(--text-tertiary);font-size:12px;cursor:help"
             >
               <Icon name="Info" size={12} />
             </button>
           </div>
           <div
             class="stat-card-value tab-num"
-            style="font-size:18px;color:{reportStatusColor}"
+            style="color:{reportData.monthReport.weeks_all_submitted
+              ? 'var(--success-text)'
+              : 'var(--warning-text)'}"
           >
-            {reportData.monthStatus === "approved" ? $t("All approved") : $t("Incomplete")}
+            {reportData.monthReport.weeks_all_submitted
+              ? $t("All submitted")
+              : $t("Weeks missing")}
           </div>
         </div>
       </div>
@@ -983,7 +932,7 @@
         <div
           style="font-size:12px;color:var(--text-tertiary);margin-top:-6px;margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)"
         >
-          {$t("help_month_status")}
+          {$t("help_submission_status")}
         </div>
       {/if}
 

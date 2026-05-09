@@ -28,16 +28,16 @@ static LANGUAGES: &[LangDef] = &[
         name: "English",
         date_format: "%m/%d/%Y",
         translations: &[
-            ("entry_singular", "1 entry"),
-            ("entry_plural", "{count} entries"),
+            ("week_singular", "1 week"),
+            ("week_plural", "{count} weeks"),
             ("month_1", "January"), ("month_2", "February"), ("month_3", "March"),
             ("month_4", "April"), ("month_5", "May"), ("month_6", "June"),
             ("month_7", "July"), ("month_8", "August"), ("month_9", "September"),
             ("month_10", "October"), ("month_11", "November"), ("month_12", "December"),
             ("reopen_auto_approved_title", "Week reopened for editing"),
-            ("reopen_auto_approved_body", "The week starting {week_start} was reopened for editing ({entry_count})."),
+            ("reopen_auto_approved_body", "The week starting {week_start} was reopened for editing."),
             ("reopen_auto_approved_notice_title", "Week reopen auto-approved"),
-            ("reopen_auto_approved_notice_body", "{requester_name}'s week reopen for the week starting {week_start} was auto-approved ({entry_count})."),
+            ("reopen_auto_approved_notice_body", "{requester_name}'s week reopen for the week starting {week_start} was auto-approved."),
             ("reopen_request_created_title", "New week reopen request"),
             ("reopen_request_created_body", "{requester_name} wants to edit the week starting {week_start}."),
             ("reopen_approved_title", "Week reopen approved"),
@@ -73,21 +73,21 @@ static LANGUAGES: &[LangDef] = &[
             ("absence_cancellation_rejected_title", "Absence cancellation rejected"),
             ("absence_cancellation_rejected_body", "Your cancellation request for the {kind} absence ({start_date} to {end_date}) was rejected."),
             ("change_request_created_title", "New change request"),
-            ("change_request_created_body", "{requester_name} requested a change for the time entry on {entry_date}."),
+            ("change_request_created_body", "{requester_name} requested a change for the week containing {entry_date}."),
             ("change_request_approved_title", "Change request approved"),
-            ("change_request_approved_body", "Your change request for the time entry on {entry_date} has been approved."),
+            ("change_request_approved_body", "Your change request for the week containing {entry_date} has been approved."),
             ("change_request_rejected_title", "Change request rejected"),
-            ("change_request_rejected_body", "Your change request for the time entry on {entry_date} was rejected: {reason}"),
+            ("change_request_rejected_body", "Your change request for the week containing {entry_date} was rejected: {reason}"),
             ("timesheet_submitted_title", "{submitter_name} submitted a timesheet"),
-            ("timesheet_submitted_body", "{entry_count} submitted for approval"),
+            ("timesheet_submitted_body", "{week_count} submitted for approval."),
             ("timesheet_approved_title", "Timesheet approved"),
-            ("timesheet_approved_body", "Your timesheet entry for {entry_date} has been approved."),
-            ("timesheet_batch_approved_body", "{entry_count} approved"),
+            ("timesheet_approved_body", "Your week containing {entry_date} has been approved."),
+            ("timesheet_batch_approved_body", "{week_count} approved."),
             ("timesheet_rejected_title", "Timesheet rejected"),
-            ("timesheet_rejected_body", "Your timesheet entry for {entry_date} was rejected: {reason}"),
-            ("submission_reminder_title", "Time entries not yet submitted"),
-            ("submission_reminder_body", "You still have unsubmitted time entries for the following months: {months}"),
-            ("submission_reminder_email_body", "Hello,\n\nyou still have unsubmitted time entries for the following months:\n\n{months}\n\nPlease log in and submit your time entries:\n{app_url}\n"),
+            ("timesheet_rejected_body", "Your week containing {entry_date} was rejected: {reason}"),
+            ("submission_reminder_title", "Weeks not yet submitted"),
+            ("submission_reminder_body", "You still have weeks not submitted for the following months: {months}"),
+            ("submission_reminder_email_body", "Hello,\n\nyou still have weeks not submitted for the following months:\n\n{months}\n\nPlease log in and submit your weeks:\n{app_url}\n"),
             ("approval_reminder_title", "Pending approvals"),
             ("approval_reminder_body", "You have {count} pending request(s) awaiting your approval."),
             ("approval_reminder_email_body", "Hello,\n\nyou have {count} pending request(s) awaiting your approval.\n\nPlease log in to review them:\n{app_url}\n"),
@@ -102,16 +102,16 @@ static LANGUAGES: &[LangDef] = &[
         name: "Deutsch",
         date_format: "%d.%m.%Y",
         translations: &[
-            ("entry_singular", "1 Eintrag"),
-            ("entry_plural", "{count} Eintr\u{00e4}ge"),
+            ("week_singular", "1 Woche"),
+            ("week_plural", "{count} Wochen"),
             ("month_1", "Januar"), ("month_2", "Februar"), ("month_3", "M\u{00e4}rz"),
             ("month_4", "April"), ("month_5", "Mai"), ("month_6", "Juni"),
             ("month_7", "Juli"), ("month_8", "August"), ("month_9", "September"),
             ("month_10", "Oktober"), ("month_11", "November"), ("month_12", "Dezember"),
             ("reopen_auto_approved_title", "Woche zur Bearbeitung freigegeben"),
-            ("reopen_auto_approved_body", "Die Woche ab {week_start} wurde wieder zur Bearbeitung freigegeben ({entry_count})."),
+            ("reopen_auto_approved_body", "Die Woche ab {week_start} wurde wieder zur Bearbeitung freigegeben."),
             ("reopen_auto_approved_notice_title", "Wochenfreigabe automatisch genehmigt"),
-            ("reopen_auto_approved_notice_body", "Die Wiederfreigabe von {requester_name} f\u{00fc}r die Woche ab {week_start} wurde automatisch genehmigt ({entry_count})."),
+            ("reopen_auto_approved_notice_body", "Die Wiederfreigabe von {requester_name} f\u{00fc}r die Woche ab {week_start} wurde automatisch genehmigt."),
             ("reopen_request_created_title", "Neue Anfrage zur Wochenfreigabe"),
             ("reopen_request_created_body", "{requester_name} m\u{00f6}chte die Woche ab {week_start} wieder bearbeiten."),
             ("reopen_approved_title", "Wochenfreigabe genehmigt"),
@@ -147,21 +147,21 @@ static LANGUAGES: &[LangDef] = &[
             ("absence_cancellation_rejected_title", "Stornierung abgelehnt"),
             ("absence_cancellation_rejected_body", "Die Stornierung Ihrer {kind} ({start_date} bis {end_date}) wurde abgelehnt."),
             ("change_request_created_title", "Neue \u{00c4}nderungsanfrage"),
-            ("change_request_created_body", "{requester_name} hat eine \u{00c4}nderung f\u{00fc}r den Zeiteintrag am {entry_date} beantragt."),
+            ("change_request_created_body", "{requester_name} hat eine \u{00c4}nderung f\u{00fc}r die Woche mit {entry_date} beantragt."),
             ("change_request_approved_title", "\u{00c4}nderungsanfrage genehmigt"),
-            ("change_request_approved_body", "Ihre \u{00c4}nderungsanfrage f\u{00fc}r den Zeiteintrag am {entry_date} wurde genehmigt."),
+            ("change_request_approved_body", "Ihre \u{00c4}nderungsanfrage f\u{00fc}r die Woche mit {entry_date} wurde genehmigt."),
             ("change_request_rejected_title", "\u{00c4}nderungsanfrage abgelehnt"),
-            ("change_request_rejected_body", "Ihre \u{00c4}nderungsanfrage f\u{00fc}r den Zeiteintrag am {entry_date} wurde abgelehnt: {reason}"),
+            ("change_request_rejected_body", "Ihre \u{00c4}nderungsanfrage f\u{00fc}r die Woche mit {entry_date} wurde abgelehnt: {reason}"),
             ("timesheet_submitted_title", "{submitter_name} hat eine Zeiterfassung eingereicht"),
-            ("timesheet_submitted_body", "{entry_count} zur Genehmigung eingereicht"),
+            ("timesheet_submitted_body", "{week_count} zur Genehmigung eingereicht."),
             ("timesheet_approved_title", "Zeiterfassung genehmigt"),
-            ("timesheet_approved_body", "Ihr Zeiterfassungseintrag f\u{00fc}r {entry_date} wurde genehmigt."),
-            ("timesheet_batch_approved_body", "{entry_count} genehmigt"),
+            ("timesheet_approved_body", "Ihre Woche mit {entry_date} wurde genehmigt."),
+            ("timesheet_batch_approved_body", "{week_count} genehmigt."),
             ("timesheet_rejected_title", "Zeiterfassung abgelehnt"),
-            ("timesheet_rejected_body", "Ihr Zeiterfassungseintrag f\u{00fc}r {entry_date} wurde abgelehnt: {reason}"),
+            ("timesheet_rejected_body", "Ihre Woche mit {entry_date} wurde abgelehnt: {reason}"),
             ("submission_reminder_title", "Arbeitszeiten noch nicht eingereicht"),
-            ("submission_reminder_body", "Sie haben noch nicht eingereichte Arbeitszeiten f\u{00fc}r folgende Monate: {months}"),
-            ("submission_reminder_email_body", "Hallo,\n\nf\u{00fc}r folgende Monate wurden Ihre Arbeitszeiten noch nicht eingereicht:\n\n{months}\n\nBitte melden Sie sich an und reichen Sie Ihre Zeiten ein:\n{app_url}\n"),
+            ("submission_reminder_body", "Sie haben noch nicht eingereichte Wochen f\u{00fc}r folgende Monate: {months}"),
+            ("submission_reminder_email_body", "Hallo,\n\nf\u{00fc}r folgende Monate wurden Ihre Wochen noch nicht eingereicht:\n\n{months}\n\nBitte melden Sie sich an und reichen Sie Ihre Wochen ein:\n{app_url}\n"),
             ("approval_reminder_title", "Offene Genehmigungen"),
             ("approval_reminder_body", "Es gibt {count} Anfrage(n), die Ihre Genehmigung erfordern."),
             ("approval_reminder_email_body", "Hallo,\n\nes gibt {count} Anfrage(n), die Ihre Genehmigung erfordern.\n\nBitte melden Sie sich an, um diese zu bearbeiten:\n{app_url}\n"),
@@ -271,11 +271,11 @@ pub fn format_month(language: &Language, year: i32, month: u32) -> String {
     }
 }
 
-pub fn entry_count(language: &Language, count: i64) -> String {
+pub fn week_count(language: &Language, count: i64) -> String {
     if count == 1 {
-        translate(language, "entry_singular", &[])
+        translate(language, "week_singular", &[])
     } else {
-        translate(language, "entry_plural", &[("count", count.to_string())])
+        translate(language, "week_plural", &[("count", count.to_string())])
     }
 }
 
@@ -347,15 +347,12 @@ mod tests {
         let text = translate(
             &language,
             "reopen_auto_approved_body",
-            &[
-                ("week_start", format_date(&language, date)),
-                ("entry_count", entry_count(&language, 1)),
-            ],
+            &[("week_start", format_date(&language, date))],
         );
 
         assert_eq!(
             text,
-            "Die Woche ab 27.04.2026 wurde wieder zur Bearbeitung freigegeben (1 Eintrag)."
+            "Die Woche ab 27.04.2026 wurde wieder zur Bearbeitung freigegeben."
         );
     }
 
@@ -417,7 +414,7 @@ mod tests {
         let language = Language::from_setting("pt-BR");
         let date = chrono::NaiveDate::from_ymd_opt(2026, 4, 27).unwrap();
         assert_eq!(format_date(&language, date), "04/27/2026");
-        assert_eq!(entry_count(&language, 2), "2 entries");
+        assert_eq!(week_count(&language, 2), "2 weeks");
     }
 
     #[test]

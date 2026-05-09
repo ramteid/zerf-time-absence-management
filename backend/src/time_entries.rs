@@ -7,9 +7,10 @@ use axum::{
     extract::{Path, Query, State},
     Json,
 };
-use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
+use chrono::{DateTime, Datelike, NaiveDate, NaiveTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
+use std::collections::HashSet;
 
 async fn notification_language(pool: &crate::db::DatabasePool) -> i18n::Language {
     match i18n::load_ui_language(pool).await {
@@ -73,6 +74,10 @@ fn duration_min(start: &str, end: &str) -> AppResult<i64> {
         ));
     }
     Ok((end_time - start_time).num_minutes())
+}
+
+fn week_start(date: NaiveDate) -> NaiveDate {
+    date - chrono::Duration::days(date.weekday().num_days_from_monday() as i64)
 }
 
 #[derive(Deserialize)]
@@ -352,8 +357,15 @@ pub async fn submit(
         .await;
     }
     let submitted_count = submitted_ids.len();
+    let mut submitted_weeks = HashSet::new();
+    for entry_id in &submitted_ids {
+        if let Some(entry_date) = app_state.db.time_entries.get_date_for_entry(*entry_id).await? {
+            submitted_weeks.insert(week_start(entry_date));
+        }
+    }
+    let submitted_week_count = submitted_weeks.len();
     // Phase 4: notify the approver with the actual submitted count.
-    if submitted_count > 0 {
+    if submitted_week_count > 0 {
         let approver_ids = crate::auth::approval_recipient_ids(&app_state.pool, &requester).await;
         let language = notification_language(&app_state.pool).await;
         for approver_id in approver_ids {
@@ -370,8 +382,8 @@ pub async fn submit(
                         format!("{} {}", requester.first_name, requester.last_name),
                     ),
                     (
-                        "entry_count",
-                        i18n::entry_count(&language, submitted_count as i64),
+                        "week_count",
+                        i18n::week_count(&language, submitted_week_count as i64),
                     ),
                 ],
                 Some("time_entries"),
@@ -512,12 +524,15 @@ pub async fn batch_approve(
     }
     if approved_count > 0 {
         let language = notification_language(&app_state.pool).await;
-        let mut count_by_user: std::collections::HashMap<i64, usize> =
+        let mut weeks_by_user: std::collections::HashMap<i64, HashSet<NaiveDate>> =
             std::collections::HashMap::new();
         for entry in &approved_entries {
-            *count_by_user.entry(entry.user_id).or_insert(0) += 1;
+            weeks_by_user
+                .entry(entry.user_id)
+                .or_default()
+                .insert(week_start(entry.entry_date));
         }
-        for (user_id, count) in count_by_user {
+        for (user_id, weeks) in weeks_by_user {
             crate::notifications::create_translated(
                 &app_state,
                 &language,
@@ -525,7 +540,7 @@ pub async fn batch_approve(
                 "timesheet_approved",
                 "timesheet_approved_title",
                 "timesheet_batch_approved_body",
-                vec![("entry_count", i18n::entry_count(&language, count as i64))],
+                vec![("week_count", i18n::week_count(&language, weeks.len() as i64))],
                 Some("time_entries"),
                 None,
             )

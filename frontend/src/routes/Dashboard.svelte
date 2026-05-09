@@ -751,7 +751,7 @@
         {:else}
           <div
             class="stat-card-value tab-num"
-            style="font-size:15px;color:{allWeeksSubmitted
+            style="color:{allWeeksSubmitted
               ? 'var(--success-text)'
               : 'var(--warning-text)'}"
           >
@@ -866,7 +866,7 @@
                 {weekHours(week)}
               </div>
               <div style="font-size:11px;color:var(--text-tertiary)">
-                {week.entries.length} {$t("Entries")}
+                {week.entries.length} {$t("Days")}
               </div>
             </div>
             <div style="display:flex;gap:4px">
@@ -1294,7 +1294,7 @@
 
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <span class="kz-chip kz-chip-submitted">
-          {selectedWeek.entries.length} {$t("Entries")}
+          {selectedWeek.entries.length} {$t("Days")}
         </span>
         <span class="kz-chip kz-chip-approved">{weekHours(selectedWeek)}</span>
       </div>
