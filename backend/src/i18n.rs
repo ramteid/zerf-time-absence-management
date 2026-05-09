@@ -129,7 +129,7 @@ static LANGUAGES: &[LangDef] = &[
             ("absence_kind_unpaid", "Unbezahlter Urlaub"),
             ("absence_kind_general_absence", "Allgemeine Abwesenheit"),
             ("absence_requested_title", "Neue Abwesenheitsanfrage"),
-            ("absence_requested_body", "{requester_name} hat eine {kind} von {start_date} bis {end_date} beantragt."),
+            ("absence_requested_body", "{requester_name} hat eine Abwesenheit vom Typ {kind} von {start_date} bis {end_date} beantragt."),
             ("absence_updated_title", "Abwesenheitsanfrage aktualisiert"),
             ("absence_updated_body", "{requester_name} hat die {kind}-Anfrage ({start_date} bis {end_date}) aktualisiert."),
             ("absence_approved_title", "Abwesenheit genehmigt"),
