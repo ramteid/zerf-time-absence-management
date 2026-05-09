@@ -38,6 +38,13 @@ const TRANSLATIONS = {
       "Overview of your current flextime balance and submission status. The overtime balance is calculated including today.",
     help_flextime_chart:
       "Your cumulative flextime balance over the selected period. Data is calculated including today.",
+    help_month_status:
+      "Whether all time entries in the selected month have been approved by the manager.",
+    Approvals: "Approvals",
+    "All approved": "All approved",
+    Incomplete: "Incomplete",
+    "All submitted": "All submitted",
+    "Weeks missing": "Weeks missing",
     "Who is absent": "Who is absent",
     "Previous week": "Previous week",
     "Next week": "Next week",
@@ -88,6 +95,8 @@ const TRANSLATIONS = {
     "Invalid date.": "Invalid date.",
     "end_date must be >= start_date.": "From cannot be after To.",
     "Absence range exceeds one year.": "Absence range exceeds one year.",
+    "Absence must include at least one workday.":
+      "Absence must include at least one workday.",
     "Conflict: Overlap with existing absence":
       "Conflict: Overlap with existing absence.",
     "Overlap with existing absence": "Overlap with existing absence.",
@@ -707,9 +716,6 @@ const TRANSLATIONS = {
     "Overtime overview": "Überstundenübersicht",
     "This month: {value}": "Diesen Monat: {value}",
     "Submission status": "Einreichungsstatus",
-    "All previous months submitted": "Alle vergangenen Monate eingereicht",
-    "{count} month(s) incomplete": "{count} Monat(e) unvollständig",
-    "No previous months yet": "Noch keine vergangenen Monate",
     "Could not check submission status.":
       "Einreichungsstatus konnte nicht geprüft werden.",
     "Auto-approve reopens": "Wiederfreigabe ohne Bestätigung",
@@ -738,6 +744,8 @@ const TRANSLATIONS = {
     "end_date must be >= start_date.": "Von kann nicht nach Bis liegen.",
     "Absence range exceeds one year.":
       "Der Abwesenheitszeitraum darf ein Jahr nicht überschreiten.",
+    "Absence must include at least one workday.":
+      "Die Abwesenheit muss mindestens einen Arbeitstag enthalten.",
     "Non-sick absences cannot overlap days with logged time. Please remove or reject the time entries first.":
       "Nicht-Krank-Abwesenheiten dürfen sich nicht mit Tagen mit gebuchter Zeit überschneiden. Bitte entfernen oder verwerfen Sie die Zeiteinträge zuerst.",
     you: "Sie",
@@ -847,6 +855,13 @@ const TRANSLATIONS = {
       "Überblick über deinen aktuellen Gleitzeitstand und den Einreichungsstatus. Der Gleitzeitstand wird inklusive heute berechnet.",
     help_flextime_chart:
       "Verlauf deines kumulierten Gleitzeitkontostands über den gewählten Zeitraum. Die Daten werden inklusive heute berechnet.",
+    help_month_status:
+      "Zeigt an, ob alle Zeiteinträge im gewählten Monat von der Führungskraft genehmigt wurden.",
+    Approvals: "Genehmigungen",
+    "All approved": "Alle genehmigt",
+    Incomplete: "Unvollständig",
+    "All submitted": "Alles eingereicht",
+    "Weeks missing": "Wochen fehlen",
     "Who is absent": "Wer ist abwesend",
     "No absences this week.": "Keine Abwesenheiten diese Woche.",
     "Employee Details": "Mitarbeiterdetails",

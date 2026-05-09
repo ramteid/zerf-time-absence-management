@@ -129,19 +129,14 @@
     return map;
   })();
 
-  // Colour for the month-status badge.
+  // Colour for the month-status badge in the Approvals tile.
+  // "approved" = all entries approved (green); anything else = not fully approved (amber).
   $: reportStatusColor = (() => {
     switch (reportData?.monthStatus) {
       case "approved":
         return "var(--success-text)";
-      case "submitted":
-        return "var(--success-text)";
-      case "rejected":
-        return "var(--danger-text)";
-      case "partial":
-        return "var(--warning-text)";
       default:
-        return "var(--danger-text)";
+        return "var(--warning-text)";
     }
   })();
 
@@ -931,14 +926,16 @@
           <div class="stat-card-sub">{$t("All weeks submitted")}</div>
         </div>
 
-        <!-- Month status (draft / submitted / approved / ...) -->
+        <!-- Month approval tile: "All approved" vs "Incomplete" -->
         <div class="kz-card stat-card">
-          <div class="stat-card-label">{$t("Status")}</div>
+          <div class="stat-card-label">{$t("Approvals")}
+            <span title={$t("help_month_status")} style="color:var(--text-tertiary);cursor:help;vertical-align:middle;margin-left:4px"><Icon name="Info" size={12} /></span>
+          </div>
           <div
             class="stat-card-value tab-num"
             style="font-size:18px;color:{reportStatusColor}"
           >
-            {statusLabel(reportData.monthStatus)}
+            {reportData.monthStatus === "approved" ? $t("All approved") : $t("Incomplete")}
           </div>
         </div>
       </div>

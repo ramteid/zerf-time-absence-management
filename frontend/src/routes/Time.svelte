@@ -8,7 +8,7 @@
     toast,
     settings,
   } from "../stores.js";
-  import { t, statusLabel, formatHours } from "../i18n.js";
+  import { t, statusLabel, formatHours, absenceKindLabel } from "../i18n.js";
   import { confirmDialog } from "../confirm.js";
   import {
     monday,
@@ -35,6 +35,15 @@
     "Saturday",
     "Sunday",
   ];
+
+  const ABSENCE_COLORS = Object.freeze({
+    vacation: "#3b82f6",
+    sick: "#ef4444",
+    training: "#0d9488",
+    special_leave: "#d97706",
+    unpaid: "#6b7280",
+    general_absence: "#475569",
+  });
 
   let entries = [];
   let absences = [];
@@ -213,18 +222,26 @@
   function buildWeekDay(dayIndex, entryRows, absenceRows, holidayRows) {
     const dayDate = addDays(weekFrom, dayIndex);
     const dayDateStr = isoDate(dayDate);
+    const matchingAbsence = absenceRows.find(
+      (absence) => absence.start_date <= dayDateStr && absence.end_date >= dayDateStr,
+    );
+    const matchingHoliday = holidayRows.find((holiday) => holiday.holiday_date === dayDateStr);
     return {
       d: dayDate,
       ds: dayDateStr,
       dayName: WEEKDAY_NAMES[dayIndex],
-      absent: absenceRows.some(
-        (absence) => absence.start_date <= dayDateStr && absence.end_date >= dayDateStr,
-      ),
-      holiday: holidayRows.some((holiday) => holiday.holiday_date === dayDateStr),
+      absent: !!matchingAbsence,
+      holiday: !!matchingHoliday,
+      absenceKind: matchingAbsence?.kind || null,
+      holidayName: matchingHoliday?.name || null,
       items: entryRows
         .filter((entry) => dateKey(entry.entry_date) === dayDateStr)
         .sort((a, b) => a.start_time.localeCompare(b.start_time)),
     };
+  }
+
+  function absenceColor(kind) {
+    return ABSENCE_COLORS[kind] || "var(--text-tertiary)";
   }
 
   $: weekdays = weekFrom
@@ -363,7 +380,7 @@
     {/if}
 
     <!-- Submit and reopen buttons stacked vertically. -->
-    <div style="display:flex;flex-direction:column;gap:6px;align-items:stretch">
+    <div class="time-submit-stack">
       <button
         class="kz-btn kz-btn-primary time-submit-button"
         on:click={() => submitWeek(drafts.map((draft) => draft.id))}
@@ -452,6 +469,20 @@
           </div>
 
           <div class="day-entries">
+            {#if day.absenceKind || day.holiday}
+              {@const statusColor = day.absenceKind
+                ? absenceColor(day.absenceKind)
+                : "var(--warning-text)"}
+              <div class="day-status-indicator" style={`--status-color:${statusColor}`}>
+                <span class="day-status-dot" aria-hidden="true"></span>
+                <span class="day-status-text"
+                  >{day.absenceKind
+                    ? absenceKindLabel(day.absenceKind)
+                    : day.holidayName || $t("Public holiday")}</span
+                >
+              </div>
+            {/if}
+
             {#each day.items as entry}
               {@const category = categoryById(entry.category_id, $categories)}
               <div
@@ -570,6 +601,38 @@
 
   .day-card--before-start {
     opacity: 0.4;
+  }
+
+  .day-status-indicator {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    align-self: center;
+    gap: 8px;
+    margin: auto;
+    max-width: 100%;
+    padding: 6px 10px;
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, var(--status-color) 28%, transparent);
+    background: color-mix(in srgb, var(--status-color) 12%, transparent);
+    color: var(--status-color);
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
+  }
+
+  .day-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: var(--status-color);
+  }
+
+  .day-status-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
 </style>

@@ -238,6 +238,10 @@
       on:touchend={onTouchEnd}
     >
       <defs>
+        <!-- clip to the full plot area (used for absence/holiday bands) -->
+        <clipPath id="clip-plot-{chartInstanceId}">
+          <rect x={marginLeft} y={marginTop} width={plotWidth} height={plotHeight} />
+        </clipPath>
         <!-- clip above zero-line → positive area (green) -->
         <clipPath id="clip-above-{chartInstanceId}">
           <rect x={marginLeft} y={marginTop} width={plotWidth} height={clampedZeroY - marginTop} />
@@ -254,18 +258,22 @@
       </defs>
 
       <!-- ── Absence / holiday vertical bands (only past/today) ── -->
-      {#each data as day, pointIndex}
-        {#if pointIndex <= lastActualIdx && (day.absence || day.holiday)}
-          <rect
-            x={pts[pointIndex].x - barWidth * 0.5}
-            y={marginTop}
-            width={barWidth}
-            height={plotHeight}
-            fill={day.absence ? absColor(day.absence) : "var(--warning)"}
-            opacity="0.18"
-          />
-        {/if}
-      {/each}
+      <!-- clip-path ensures bars centred on the first/last data point
+           do not bleed outside the plot area boundaries. -->
+      <g clip-path="url(#clip-plot-{chartInstanceId})">
+        {#each data as day, pointIndex}
+          {#if pointIndex <= lastActualIdx && (day.absence || day.holiday)}
+            <rect
+              x={pts[pointIndex].x - barWidth * 0.5}
+              y={marginTop}
+              width={barWidth}
+              height={plotHeight}
+              fill={day.absence ? absColor(day.absence) : "var(--warning)"}
+              opacity="0.18"
+            />
+          {/if}
+        {/each}
+      </g>
 
       <!-- ── Y-axis grid lines & labels ── -->
       {#each yTicks as tick}
