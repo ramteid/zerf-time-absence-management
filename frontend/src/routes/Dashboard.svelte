@@ -79,10 +79,12 @@
   let monthSubmissionChecks = [];
   let monthSubmissionLoading = false;
   let monthSubmissionError = "";
+  let currentMonthSubmitted = true;
 
   const reportYear = today.getFullYear();
   const currentMonthIndex = today.getMonth() + 1; // 1-based
   const currentMonthKey = `${reportYear}-${String(currentMonthIndex).padStart(2, "0")}`;
+  const todayIso = isoDate(today);
 
   // ── Loaders ───────────────────────────────────────────────────────────────────
 
@@ -113,6 +115,22 @@
     return report?.weeks_all_submitted === true;
   }
 
+  // Current month is treated as submitted only when every required workday up
+  // to today has no draft entries and at least one submitted/approved entry.
+  function currentMonthFullySubmitted(report) {
+    if (!report?.days?.length) return true;
+    return report.days
+      .filter((day) => day?.target_min > 0 && day?.date <= todayIso)
+      .every((day) => {
+        const entries = Array.isArray(day.entries) ? day.entries : [];
+        const hasDraft = entries.some((entry) => entry?.status === "draft");
+        const hasSubmittedOrApproved = entries.some(
+          (entry) => entry?.status === "submitted" || entry?.status === "approved",
+        );
+        return !hasDraft && hasSubmittedOrApproved;
+      });
+  }
+
   async function loadOvertimeSummary() {
     overtimeLoading = true;
     overtimeError = "";
@@ -135,8 +153,12 @@
     if (!userStart) return [];
     const startYear = parseInt(userStart.slice(0, 4), 10);
     const startMonth = parseInt(userStart.slice(5, 7), 10);
-    const endYear = today.getFullYear();
-    const endMonth = today.getMonth() + 1; // 1-based
+    let endYear = today.getFullYear();
+    let endMonth = today.getMonth(); // 1-based previous month
+    if (endMonth === 0) {
+      endMonth = 12;
+      endYear -= 1;
+    }
     if (startYear > endYear || (startYear === endYear && startMonth > endMonth)) return [];
     const months = [];
     for (let y = startYear; y <= endYear; y++) {
@@ -151,24 +173,29 @@
 
   async function loadPastMonthSubmissionStatus() {
     const monthsToCheck = allMonthsToCheck();
+    const currentMonth = monthKey(today.getFullYear(), today.getMonth() + 1);
     if (!monthsToCheck.length) {
       monthSubmissionChecks = [];
-      monthSubmissionError = "";
-      return;
     }
 
     monthSubmissionLoading = true;
     monthSubmissionError = "";
     try {
-      const reports = await Promise.all(
-        monthsToCheck.map((month) => api(`/reports/month?month=${month}`)),
-      );
+      const requests = [
+        ...monthsToCheck.map((month) => api(`/reports/month?month=${month}`)),
+        api(`/reports/month?month=${currentMonth}`),
+      ];
+      const reports = await Promise.all(requests);
+      const currentMonthReport = reports[reports.length - 1];
+      const historicalReports = reports.slice(0, monthsToCheck.length);
       monthSubmissionChecks = monthsToCheck.map((month, index) => ({
         month,
-        submitted: monthFullySubmitted(reports[index]),
+        submitted: monthFullySubmitted(historicalReports[index]),
       }));
+      currentMonthSubmitted = currentMonthFullySubmitted(currentMonthReport);
     } catch (error) {
       monthSubmissionChecks = [];
+      currentMonthSubmitted = true;
       monthSubmissionError = error?.message || "Could not check submission status.";
     } finally {
       monthSubmissionLoading = false;
@@ -229,9 +256,11 @@
 
   // True when every month from the user's start to now has weeks_all_submitted.
   // Empty checks (no start date, or start date in the future) count as "all done".
+  // The current month is checked separately to include the current week.
   $: allWeeksSubmitted =
-    monthSubmissionChecks.length === 0 ||
-    monthSubmissionChecks.every((check) => check.submitted);
+    (monthSubmissionChecks.length === 0 ||
+      monthSubmissionChecks.every((check) => check.submitted)) &&
+    currentMonthSubmitted;
 
   // ── Pending-week builder (groups submitted entries by user + week) ─────────────
 

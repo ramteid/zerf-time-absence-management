@@ -48,6 +48,24 @@
     activeHelp = activeHelp === id ? null : id;
   }
 
+  // A month is considered fully approved only when every required workday in
+  // the loaded report period has at least one approved entry and no draft/
+  // submitted entries left.
+  function monthAllApproved(monthReport) {
+    if (!monthReport?.days?.length) return false;
+    const requiredDays = monthReport.days.filter((day) => day?.target_min > 0);
+    if (!requiredDays.length) return false;
+    return requiredDays.every((day) => {
+      const entries = Array.isArray(day.entries) ? day.entries : [];
+      if (!entries.length) return false;
+      const hasPending = entries.some(
+        (entry) => entry?.status === "draft" || entry?.status === "submitted",
+      );
+      const hasApproved = entries.some((entry) => entry?.status === "approved");
+      return !hasPending && hasApproved;
+    });
+  }
+
   // Section 1: employee report.
   // Merges the previously separate "Employee details" and "Monthly report" cards
   // into one combined card.
@@ -95,8 +113,8 @@
         (e) => e.status !== "draft",
       );
       const monthStatus = (() => {
+        if (monthAllApproved(monthReport)) return "approved";
         if (nonDraft.length === 0) return "draft";
-        if (nonDraft.every((e) => e.status === "approved")) return "approved";
         if (nonDraft.some((e) => e.status === "submitted")) return "submitted";
         if (nonDraft.every((e) => e.status === "rejected")) return "rejected";
         return "partial";
@@ -868,7 +886,14 @@
         <!-- Submitted hours vs. full-month target -->
         <div class="kz-card stat-card">
           <div class="stat-card-label">{$t("Logged")}
-            <span title={$t("help_logged")} style="color:var(--text-tertiary);cursor:help;vertical-align:middle;margin-left:4px"><Icon name="Info" size={12} /></span>
+            <button
+              class="kz-btn-icon-sm kz-btn-ghost"
+              title={$t("help_logged")}
+              on:click={() => toggleHelp("logged")}
+              style="color:var(--text-tertiary);font-size:12px;cursor:help;vertical-align:middle;margin-left:4px"
+            >
+              <Icon name="Info" size={12} />
+            </button>
           </div>
           <div
             class="stat-card-value tab-num"
@@ -929,7 +954,14 @@
         <!-- Month approval tile: "All approved" vs "Incomplete" -->
         <div class="kz-card stat-card">
           <div class="stat-card-label">{$t("Approvals")}
-            <span title={$t("help_month_status")} style="color:var(--text-tertiary);cursor:help;vertical-align:middle;margin-left:4px"><Icon name="Info" size={12} /></span>
+            <button
+              class="kz-btn-icon-sm kz-btn-ghost"
+              title={$t("help_month_status")}
+              on:click={() => toggleHelp("approvals")}
+              style="color:var(--text-tertiary);font-size:12px;cursor:help;vertical-align:middle;margin-left:4px"
+            >
+              <Icon name="Info" size={12} />
+            </button>
           </div>
           <div
             class="stat-card-value tab-num"
@@ -939,6 +971,21 @@
           </div>
         </div>
       </div>
+
+      {#if activeHelp === "logged"}
+        <div
+          style="font-size:12px;color:var(--text-tertiary);margin-top:-6px;margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)"
+        >
+          {$t("help_logged")}
+        </div>
+      {/if}
+      {#if activeHelp === "approvals"}
+        <div
+          style="font-size:12px;color:var(--text-tertiary);margin-top:-6px;margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)"
+        >
+          {$t("help_month_status")}
+        </div>
+      {/if}
 
       <!-- Leave balance, if available. -->
       {#if reportData.leaveBalance}
