@@ -828,7 +828,7 @@
           <Icon name="FileText" size={15} sw={1.5} />
           <span class="card-header-title">{$t("Timesheet Approvals")}</span>
           {#if pendingWeeks.length + pendingReopens.length > 0}
-            <span class="kz-chip kz-chip-submitted" style="font-size:10.5px">
+            <span class="kz-chip kz-chip-pending" style="font-size:10.5px">
               {pendingWeeks.length + pendingReopens.length}
               {$t("pending")}
             </span>
@@ -1010,6 +1010,74 @@
     </div>
 
 
+    <!-- Change-request approvals -->
+    <div
+      class="kz-card"
+      class:dashboard-focus={focusedSection === "changes"}
+      style="overflow-x:auto;margin-top:16px"
+      bind:this={changesSectionEl}
+    >
+      <div class="card-header">
+        <Icon name="Edit" size={15} sw={1.5} />
+        <span class="card-header-title">{$t("Change Requests")}</span>
+        {#if changeRequests.length}
+          <span class="kz-chip kz-chip-pending" style="font-size:10.5px">
+            {changeRequests.length}
+            {$t("pending")}
+          </span>
+        {/if}
+      </div>
+      {#each changeRequests as cr}
+        <div
+          style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px"
+        >
+          <div class="avatar" style="width:30px;height:30px;font-size:11px">
+            {userInitials(cr.user_id, users)}
+          </div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:13px;font-weight:500">
+              {userName(cr.user_id, users)}
+            </div>
+            <div class="tab-num" style="font-size:11.5px;color:var(--text-tertiary)">
+              {fmtDateShort(cr.created_at)}
+            </div>
+            {#if cr.reason}
+              <div style="font-size:11.5px;color:var(--text-secondary);margin-top:2px">{cr.reason}</div>
+            {/if}
+            {#each changeRequestChanges(cr) as change}
+              <div style="font-size:11px;color:var(--text-tertiary)">{change}</div>
+            {/each}
+          </div>
+          <div style="display:flex;gap:4px">
+            <button
+              class="kz-btn-icon-sm"
+              style="color:var(--success-text);background:var(--success-soft)"
+              title={$t("Approve")}
+              on:click={() => approveCR(cr.id)}
+            >
+              <Icon name="Check" size={14} />
+            </button>
+            <button
+              class="kz-btn-icon-sm"
+              style="color:var(--danger-text);background:var(--danger-soft)"
+              title={$t("Reject")}
+              on:click={() => rejectCR(cr.id)}
+            >
+              <Icon name="X" size={14} />
+            </button>
+          </div>
+        </div>
+      {/each}
+      {#if changeRequests.length === 0}
+        <div
+          style="padding:32px;text-align:center;color:var(--text-tertiary);font-size:13px"
+        >
+          <Icon name="Edit" size={24} sw={1.2} />
+          <div style="margin-top:8px">{$t("No pending requests")}</div>
+        </div>
+      {/if}
+    </div>
+
     <!-- "Who is absent" team calendar widget -->
     <div class="kz-card" style="margin-top:16px">
       <div class="card-header">
@@ -1070,70 +1138,6 @@
       {/key}
     </div>
 
-    <!-- Change requests table (only rendered when there are open ones) -->
-    {#if changeRequests.length > 0}
-      <div
-        class="kz-card"
-        class:dashboard-focus={focusedSection === "changes"}
-        style="overflow-x:auto;margin-top:16px"
-        bind:this={changesSectionEl}
-      >
-        <div class="card-header">
-          <Icon name="Edit" size={15} sw={1.5} />
-          <span class="card-header-title">{$t("Change Requests")}</span>
-          <span class="kz-chip kz-chip-pending" style="font-size:10.5px">
-            {changeRequests.length}
-            {$t("open")}
-          </span>
-        </div>
-        <table class="kz-table">
-          <thead>
-            <tr>
-              <th>{$t("Employee")}</th>
-              <th>{$t("Created")}</th>
-              <th>{$t("Request")}</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each changeRequests as cr}
-              <tr>
-                <td style="font-weight:500">{userName(cr.user_id, users)}</td>
-                <td class="tab-num">{fmtDate(cr.created_at)}</td>
-                <td
-                  style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
-                >
-                  <div style="display:flex;flex-direction:column;gap:4px;white-space:normal">
-                    <div>{cr.reason || "-"}</div>
-                    {#each changeRequestChanges(cr) as change}
-                      <div style="font-size:11.5px;color:var(--text-tertiary)">{change}</div>
-                    {/each}
-                  </div>
-                </td>
-                <td style="text-align:right">
-                  <div style="display:flex;gap:4px;justify-content:flex-end">
-                    <button
-                      class="kz-btn-icon-sm"
-                      style="color:var(--success-text);background:var(--success-soft)"
-                      on:click={() => approveCR(cr.id)}
-                    >
-                      <Icon name="Check" size={14} />
-                    </button>
-                    <button
-                      class="kz-btn-icon-sm"
-                      style="color:var(--danger-text);background:var(--danger-soft)"
-                      on:click={() => rejectCR(cr.id)}
-                    >
-                      <Icon name="X" size={14} />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
-    {/if}
   {/if}
 
   <!-- ════════════════════════════════════════════════════════════════════════
