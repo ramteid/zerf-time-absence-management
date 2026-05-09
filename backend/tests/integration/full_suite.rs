@@ -319,11 +319,13 @@ async fn full_integration_suite() {
         abs_id = id(&body);
         assert_eq!(body["status"], "requested", "vacation requested");
 
-        // Sick auto-approved.
+        // Sick auto-approved. Ensure the range always includes at least one
+        // workday so this stays valid when run on weekends.
+        let sick_end = next_monday(0).to_string();
         let (st, body) = emp
             .post(
                 "/api/v1/absences",
-                &json!({"kind":"sick","start_date": &today_s,"end_date": &today_s}),
+                &json!({"kind":"sick","start_date": &today_s,"end_date": &sick_end}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "report sick");

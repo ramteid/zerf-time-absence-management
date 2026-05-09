@@ -2,7 +2,7 @@ use reqwest::StatusCode;
 use serde_json::json;
 
 use crate::common::TestApp;
-use crate::helpers::{admin_login, date_offset, today};
+use crate::helpers::{admin_login, date_offset, next_monday, today};
 
 /// Admin's start_date is set to today during seed. Verify that creating a time
 /// entry before that date is rejected.
@@ -93,6 +93,7 @@ async fn absence_before_start_date_rejected() {
 async fn absence_on_start_date_accepted() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
+    let sick_end = next_monday(0).to_string();
 
     let (st, _) = admin
         .post(
@@ -100,7 +101,7 @@ async fn absence_on_start_date_accepted() {
             &json!({
                 "kind": "sick",
                 "start_date": today(),
-                "end_date": today(),
+                "end_date": sick_end,
             }),
         )
         .await;
