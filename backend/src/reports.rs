@@ -400,10 +400,15 @@ fn csv_response(r: MonthReport, uid: i64, file_label: &str) -> AppResult<Respons
             "",
         ])
         .map_err(csv_err)?;
-    let data = csv_writer.into_inner().map_err(|error| {
+    let csv_bytes = csv_writer.into_inner().map_err(|error| {
         tracing::error!(target: "zerf::reports", "CSV export finalize failed: {error}");
         AppError::Internal("CSV export failed.".into())
     })?;
+    // Prepend the UTF-8 BOM so that Excel auto-detects the encoding and correctly
+    // splits fields into columns regardless of the system locale.
+    let mut data = Vec::with_capacity(3 + csv_bytes.len());
+    data.extend_from_slice(b"\xEF\xBB\xBF");
+    data.extend_from_slice(&csv_bytes);
     let mut response = Response::new(axum::body::Body::from(data));
     response.headers_mut().insert(
         header::CONTENT_TYPE,

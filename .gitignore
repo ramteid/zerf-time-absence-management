@@ -11,3 +11,5 @@ node_modules/
 *.db-shm
 *.log
 .DS_Store
+__pycache__/
+*.xlsx

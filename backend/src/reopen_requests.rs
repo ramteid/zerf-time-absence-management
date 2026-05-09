@@ -310,13 +310,7 @@ pub async fn create(
             "reopen_auto_approved",
             "reopen_auto_approved_title",
             "reopen_auto_approved_body",
-            vec![
-                ("week_start", i18n::format_date(&language, body.week_start)),
-                (
-                    "entry_count",
-                    i18n::entry_count(&language, entries_reopened),
-                ),
-            ],
+            vec![("week_start", i18n::format_date(&language, body.week_start))],
             Some("reopen_request"),
             Some(new_request_id),
         )
@@ -333,10 +327,6 @@ pub async fn create(
                 vec![
                     ("requester_name", requester_full_name.clone()),
                     ("week_start", i18n::format_date(&language, body.week_start)),
-                    (
-                        "entry_count",
-                        i18n::entry_count(&language, entries_reopened),
-                    ),
                 ],
                 Some("reopen_request"),
                 Some(new_request_id),

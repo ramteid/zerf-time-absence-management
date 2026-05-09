@@ -52,7 +52,7 @@ async fn auto_approve_when_policy_set() {
     let monday = next_monday(-14);
     let monday_de = monday.format("%d.%m.%Y").to_string();
     let expected_body =
-        format!("Die Woche ab {monday_de} wurde wieder zur Bearbeitung freigegeben (1 Eintrag).");
+        format!("Die Woche ab {monday_de} wurde wieder zur Bearbeitung freigegeben.");
     assert_eq!(
         notification["title"].as_str(),
         Some("Woche zur Bearbeitung freigegeben")

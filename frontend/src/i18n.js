@@ -38,8 +38,8 @@ const TRANSLATIONS = {
       "Overview of your current flextime balance and submission status. The overtime balance is calculated including today.",
     help_flextime_chart:
       "Your cumulative flextime balance over the selected period. Data is calculated including today.",
-    help_month_status:
-      "Whether all time entries in the selected month have been approved by the manager.",
+    help_submission_status:
+      "Whether all required weeks in the selected month have been submitted.",
     Approvals: "Approvals",
     "All approved": "All approved",
     Incomplete: "Incomplete",
@@ -66,6 +66,7 @@ const TRANSLATIONS = {
     Timesheet: "Timesheet",
     Filter: "Filter",
     Entries: "Entries",
+    Days: "Days",
     audit_table_users: "User",
     audit_table_absences: "Absence",
     audit_table_time_entries: "Time Entry",
@@ -132,7 +133,9 @@ const TRANSLATIONS = {
     "Shown on the login screen and in the navigation.":
       "Shown on the login screen and in the navigation.",
     "Users will be notified on this day of each month if they have unsubmitted time entries for previous months. Leave empty to disable. (1\u201328)":
-      "Users will be notified on this day of each month if they have unsubmitted time entries for previous months. Leave empty to disable. (1\u201328)",
+      "Users will be notified on this day of each month if they have unsubmitted weeks from previous months. Leave empty to disable. (1\u201328)",
+    "All draft entries of this week will be submitted for approval.":
+      "All draft days of this week will be submitted for approval.",
     "Vacation days per year": "Vacation days per year",
     days: "days",
     Set: "Set",
@@ -307,7 +310,7 @@ const TRANSLATIONS = {
     "Submit week ({count})": "Woche einreichen ({count})",
     "Submit this week?": "Diese Woche einreichen?",
     "All draft entries of this week will be submitted for approval.":
-      "Alle Entwurfs-Einträge dieser Woche werden zur Genehmigung eingereicht.",
+      "Alle Entwürfe dieser Woche werden zur Genehmigung eingereicht.",
     "Week submitted.": "Woche eingereicht.",
     "Original: {date} {start}-{end}": "Original: {date} {start}-{end}",
     "Why is the change needed?": "Warum ist die Änderung nötig?",
@@ -357,12 +360,12 @@ const TRANSLATIONS = {
     Balance: "Saldo",
     Month: "Monat",
     Year: "Jahr",
-    "Submitted entries": "Eingereichte Einträge",
+    "Submitted entries": "Eingereichte Wochen",
     "Open requests": "Offene Anträge",
     "Change requests": "Änderungsanträge",
     "Change Requests": "Änderungsanträge",
-    "Submitted time entries": "Eingereichte Zeiteinträge",
-    "No open entries.": "Keine offenen Einträge.",
+    "Submitted time entries": "Eingereichte Wochenzeiten",
+    "No open entries.": "Keine offenen Wochen.",
     Approved: "Genehmigt",
     "Approved.": "Genehmigt.",
     "Approve all": "Alle genehmigen",
@@ -465,7 +468,7 @@ const TRANSLATIONS = {
     "Approve All": "Alle genehmigen",
     "Approve all?": "Alle genehmigen?",
     "Approve all {n} submissions across all users?":
-      "Alle {n} Einreichungen aller Benutzer genehmigen?",
+      "Alle {n} Wochen aller Benutzer genehmigen?",
     "All caught up!": "Alles erledigt!",
     "No pending requests": "Keine ausstehenden Anträge",
     "Team hours overview": "Teamstunden-Übersicht",
@@ -500,7 +503,7 @@ const TRANSLATIONS = {
       "Wenn aktiviert, werden Benachrichtigungs-E-Mails bei Genehmigungen, Ablehnungen und Wiedereröffnungsanträgen gesendet.",
     "Enable reminders": "Erinnerungen aktivieren",
     "When enabled, users who have not submitted all time entries are reminded by email on the configured deadline day.":
-      "Wenn aktiviert, werden Benutzer, die noch nicht alle Zeiteinträge eingereicht haben, am konfigurierten Stichtag per E-Mail erinnert.",
+      "Wenn aktiviert, werden Benutzer, die noch nicht alle Wochen eingereicht haben, am konfigurierten Stichtag per E-Mail erinnert.",
     "SMTP Host": "SMTP-Host",
     "SMTP Port": "SMTP-Port",
     "From address": "Absenderadresse",
@@ -554,7 +557,7 @@ const TRANSLATIONS = {
     open: "offen",
     "All approved.": "Alle genehmigt.",
     "Reject?": "Ablehnen?",
-    "Reject this entry?": "Diesen Eintrag ablehnen?",
+    "Reject this entry?": "Diese Woche ablehnen?",
     "Reject this request?": "Diese Anfrage ablehnen?",
     "Reject this change request?": "Diese Änderungsanfrage ablehnen?",
     Request: "Anfrage",
@@ -778,11 +781,11 @@ const TRANSLATIONS = {
     "Only drafts can be edited directly. Please file a change request.":
       "Nur Entwürfe können direkt bearbeitet werden. Bitte stellen Sie eine Änderungsanfrage.",
     "Only submitted entries can be approved.":
-      "Nur eingereichte Einträge können genehmigt werden.",
+      "Nur eingereichte Wochen können genehmigt werden.",
     "Only submitted entries can be rejected.":
-      "Nur eingereichte Einträge können abgelehnt werden.",
+      "Nur eingereichte Wochen können abgelehnt werden.",
     "Entry was already reviewed by someone else.":
-      "Eintrag wurde bereits von jemand anderem geprüft.",
+      "Woche wurde bereits von jemand anderem geprüft.",
     "Reason too long.": "Begründung zu lang.",
     "Reason required.": "Begründung erforderlich.",
     // Change request errors
@@ -855,8 +858,8 @@ const TRANSLATIONS = {
       "Überblick über deinen aktuellen Gleitzeitstand und den Einreichungsstatus. Der Gleitzeitstand wird inklusive heute berechnet.",
     help_flextime_chart:
       "Verlauf deines kumulierten Gleitzeitkontostands über den gewählten Zeitraum. Die Daten werden inklusive heute berechnet.",
-    help_month_status:
-      "Zeigt an, ob alle Zeiteinträge im gewählten Monat von der Führungskraft genehmigt wurden.",
+    help_submission_status:
+      "Zeigt an, ob alle erforderlichen Wochen im gewählten Monat eingereicht wurden.",
     Approvals: "Genehmigungen",
     "All approved": "Alle genehmigt",
     Incomplete: "Unvollständig",
@@ -926,7 +929,7 @@ const TRANSLATIONS = {
     "Unused vacation from the previous year expires on this date.":
       "Nicht genommener Urlaub aus dem Vorjahr verfällt an diesem Stichtag.",
     "Users will be notified on this day of each month if they have unsubmitted time entries for previous months. Leave empty to disable. (1\u201328)":
-      "Benutzer werden an diesem Tag jedes Monats benachrichtigt, wenn sie noch nicht eingereichte Zeiteinträge aus Vormonaten haben. Leer lassen zum Deaktivieren. (1\u201328)",
+      "Benutzer werden an diesem Tag jedes Monats benachrichtigt, wenn sie noch nicht eingereichte Wochen aus Vormonaten haben. Leer lassen zum Deaktivieren. (1\u201328)",
     "Vacation days per year": "Urlaubstage pro Jahr",
     days: "Tage",
     Set: "Setzen",

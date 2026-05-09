@@ -532,6 +532,22 @@ body {
   margin-bottom: 4px;
 }
 
+.stat-card-label-help {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.stat-card-label-help > span {
+  min-width: 0;
+}
+
+.stat-card-label-help .kz-btn-icon-sm {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
 .stat-card-value {
   font-size: 22px;
   font-weight: 400;
