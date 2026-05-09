@@ -745,7 +745,7 @@
 
       <!-- Whether all weeks since the user's start date (up to last week) are submitted -->
       <div class="kz-card stat-card">
-        <div class="stat-card-label">{$t("Submission status")}</div>
+        <div class="stat-card-label">{$t("Submissions")}</div>
         {#if monthSubmissionLoading}
           <div class="stat-card-value tab-num">...</div>
         {:else}

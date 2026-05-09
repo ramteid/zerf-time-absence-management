@@ -718,9 +718,9 @@ const TRANSLATIONS = {
     "Overtime data unavailable.": "Überstundendaten nicht verfügbar.",
     "Overtime overview": "Überstundenübersicht",
     "This month: {value}": "Diesen Monat: {value}",
-    "Submission status": "Einreichungsstatus",
+    "Submissions": "Einreichungen",
     "Could not check submission status.":
-      "Einreichungsstatus konnte nicht geprüft werden.",
+      "Einreichungen konnte nicht geprüft werden.",
     "Auto-approve reopens": "Wiederfreigabe ohne Bestätigung",
     // Flextime chart
     "Flextime balance": "Gleitzeitkontostand",
@@ -855,7 +855,7 @@ const TRANSLATIONS = {
     help_csv_export:
       "Exportiert den gewählten Mitarbeiter und Zeitraum als CSV-Datei.",
     help_my_balance:
-      "Überblick über deinen aktuellen Gleitzeitstand und den Einreichungsstatus. Der Gleitzeitstand wird inklusive heute berechnet.",
+      "Überblick über deinen aktuellen Gleitzeitstand und den Einreichungen. Der Gleitzeitstand wird inklusive heute berechnet.",
     help_flextime_chart:
       "Verlauf deines kumulierten Gleitzeitkontostands über den gewählten Zeitraum. Die Daten werden inklusive heute berechnet.",
     help_submission_status:
