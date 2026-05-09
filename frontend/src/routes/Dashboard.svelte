@@ -107,21 +107,10 @@
     return formatHours(((minutes || 0) / 60).toFixed(1));
   }
 
+  // A month report is considered fully submitted for week-tracking purposes
+  // when the backend's weeks_all_submitted flag is true.
   function monthFullySubmitted(report) {
-    if (!Array.isArray(report?.days)) return false;
-    return report.days.every((day) => {
-      if (!day || Number(day.target_min || 0) <= 0) return true;
-      if (day.absence) return true;
-      const dayEntries = Array.isArray(day.entries) ? day.entries : [];
-      if (!dayEntries.length) return false;
-      // A day counts as submitted only when it has at least one submitted/approved
-      // entry and no entries are still in draft status.
-      const hasSubmittedOrApproved = dayEntries.some(
-        (entry) => entry.status === "submitted" || entry.status === "approved",
-      );
-      const hasDraft = dayEntries.some((entry) => entry.status === "draft");
-      return hasSubmittedOrApproved && !hasDraft;
-    });
+    return report?.weeks_all_submitted === true;
   }
 
   async function loadOvertimeSummary() {
@@ -137,30 +126,31 @@
     }
   }
 
-  // Returns the first month (1-based) that should appear in submission checks,
-  // accounting for when the user's contract began.
-  function firstMonthForSubmission() {
+  // Builds all YYYY-MM month keys from the user's start month (inclusive) to
+  // the current month (inclusive), spanning multiple years. The backend's
+  // weeks_all_submitted flag correctly limits checking to fully elapsed weeks
+  // (Sunday < today), so including the current month is safe.
+  function allMonthsToCheck() {
     const userStart = $currentUser?.start_date;
-    if (!userStart) return null;
+    if (!userStart) return [];
     const startYear = parseInt(userStart.slice(0, 4), 10);
     const startMonth = parseInt(userStart.slice(5, 7), 10);
-    if (reportYear < startYear) return null;
-    return reportYear === startYear ? Math.max(startMonth, 1) : 1;
+    const endYear = today.getFullYear();
+    const endMonth = today.getMonth() + 1; // 1-based
+    if (startYear > endYear || (startYear === endYear && startMonth > endMonth)) return [];
+    const months = [];
+    for (let y = startYear; y <= endYear; y++) {
+      const fromMonth = y === startYear ? startMonth : 1;
+      const toMonth = y === endYear ? endMonth : 12;
+      for (let m = fromMonth; m <= toMonth; m++) {
+        months.push(monthKey(y, m));
+      }
+    }
+    return months;
   }
 
   async function loadPastMonthSubmissionStatus() {
-    const firstMonth = firstMonthForSubmission();
-    if (firstMonth === null) {
-      monthSubmissionChecks = [];
-      monthSubmissionError = "";
-      return;
-    }
-    // Build the list of months between contract start and the current month (exclusive).
-    const monthsToCheck = [];
-    for (let month = firstMonth; month < currentMonthIndex; month += 1) {
-      monthsToCheck.push(monthKey(reportYear, month));
-    }
-
+    const monthsToCheck = allMonthsToCheck();
     if (!monthsToCheck.length) {
       monthSubmissionChecks = [];
       monthSubmissionError = "";
@@ -237,22 +227,11 @@
 
   // ── Reactive derivations: submission compliance ───────────────────────────────
 
-  $: previousMonthsTotal = (() => {
-    // Access $currentUser here so Svelte tracks the dependency.
-    const userStart = $currentUser?.start_date;
-    if (!userStart) return 0;
-    const startYear = parseInt(userStart.slice(0, 4), 10);
-    if (reportYear < startYear) return 0;
-    const startMonth = parseInt(userStart.slice(5, 7), 10);
-    const firstMonth = reportYear === startYear ? Math.max(startMonth, 1) : 1;
-    return Math.max(0, currentMonthIndex - firstMonth);
-  })();
-  $: previousMonthsSubmitted = monthSubmissionChecks.filter((month) => month.submitted).length;
-  $: allPreviousMonthsSubmitted =
-    previousMonthsTotal === 0 ||
-    (monthSubmissionChecks.length === previousMonthsTotal &&
-      previousMonthsSubmitted === previousMonthsTotal);
-  $: previousMonthsIncomplete = Math.max(0, previousMonthsTotal - previousMonthsSubmitted);
+  // True when every month from the user's start to now has weeks_all_submitted.
+  // Empty checks (no start date, or start date in the future) count as "all done".
+  $: allWeeksSubmitted =
+    monthSubmissionChecks.length === 0 ||
+    monthSubmissionChecks.every((check) => check.submitted);
 
   // ── Pending-week builder (groups submitted entries by user + week) ─────────────
 
@@ -735,28 +714,19 @@
         {/if}
       </div>
 
-      <!-- How many past months have been fully submitted -->
+      <!-- Whether all weeks since the user's start date (up to last week) are submitted -->
       <div class="kz-card stat-card">
         <div class="stat-card-label">{$t("Submission status")}</div>
         {#if monthSubmissionLoading}
           <div class="stat-card-value tab-num">...</div>
-        {:else if previousMonthsTotal === 0}
-          <div class="stat-card-value tab-num">{$t("No previous months yet")}</div>
         {:else}
           <div
             class="stat-card-value tab-num"
-            style="color:{allPreviousMonthsSubmitted
+            style="font-size:15px;color:{allWeeksSubmitted
               ? 'var(--success-text)'
               : 'var(--warning-text)'}"
           >
-            {previousMonthsSubmitted}/{previousMonthsTotal}
-          </div>
-          <div class="stat-card-sub">
-            {#if allPreviousMonthsSubmitted}
-              {$t("All previous months submitted")}
-            {:else}
-              {$t("{count} month(s) incomplete", { count: previousMonthsIncomplete })}
-            {/if}
+            {allWeeksSubmitted ? $t("All submitted") : $t("Weeks missing")}
           </div>
         {/if}
         {#if monthSubmissionError}

@@ -78,6 +78,13 @@ describe("translate", () => {
       "Konflikt: Diese Kombination aus Vorname und Nachname existiert bereits.",
     );
   });
+
+  it("localizes workday-required absence validation error", () => {
+    setLanguage("de");
+    expect(localizeErrorMessage("Absence must include at least one workday.")).toBe(
+      "Die Abwesenheit muss mindestens einen Arbeitstag enthalten.",
+    );
+  });
 });
 
 describe("resolveLanguage", () => {

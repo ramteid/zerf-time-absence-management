@@ -484,6 +484,13 @@ body {
   gap: 8px;
 }
 
+.time-submit-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: stretch;
+}
+
 /* ── Nav Slider (shared week / month / year navigation) ── */
 .kz-nav-slider {
   display: flex;
@@ -1267,6 +1274,11 @@ dialog footer {
     height: 32px;
     padding: 0 10px;
     font-size: 12.5px;
+  }
+
+  .time-top-bar-actions .time-submit-stack {
+    margin-left: auto;
+    align-items: flex-end;
   }
 
   /* Tables: allow horizontal scroll */

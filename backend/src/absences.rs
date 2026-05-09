@@ -281,6 +281,20 @@ fn validate_sick_start_date(kind: &str, start_date: NaiveDate) -> AppResult<()> 
     Ok(())
 }
 
+async fn validate_absence_has_workday(
+    pool: &crate::db::DatabasePool,
+    start_date: NaiveDate,
+    end_date: NaiveDate,
+) -> AppResult<()> {
+    let effective_workdays = workdays(pool, start_date, end_date).await?;
+    if effective_workdays <= 0.0 {
+        return Err(AppError::BadRequest(
+            "Absence must include at least one workday.".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn absence_blocks_logged_time(kind: &str) -> bool {
     kind != "sick"
 }
@@ -351,6 +365,7 @@ pub async fn create(
 ) -> AppResult<Json<Absence>> {
     let kind = validate_absence(&body)?;
     validate_sick_start_date(kind, body.start_date)?;
+    validate_absence_has_workday(&app_state.pool, body.start_date, body.end_date).await?;
     // Reject absences that start before the user's start_date.
     if body.start_date < requester.start_date {
         return Err(AppError::BadRequest(
@@ -456,6 +471,7 @@ pub async fn update(
 ) -> AppResult<Json<Absence>> {
     let kind = validate_absence(&body)?;
     validate_sick_start_date(kind, body.start_date)?;
+    validate_absence_has_workday(&app_state.pool, body.start_date, body.end_date).await?;
     // Reject absences that start before the user's employment start date.
     if body.start_date < requester.start_date {
         return Err(AppError::BadRequest(

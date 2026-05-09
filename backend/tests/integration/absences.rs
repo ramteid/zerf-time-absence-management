@@ -45,6 +45,80 @@ async fn non_sick_absence_rejects_logged_time() {
 }
 
 #[tokio::test]
+async fn absence_requires_at_least_one_effective_workday() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (_, _, _, emp_pw, _, _) = bootstrap_team(&app, &admin, false).await;
+    let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
+
+    let next_week_monday = next_monday(7);
+    let saturday = (next_week_monday + chrono::Duration::days(5))
+        .format("%Y-%m-%d")
+        .to_string();
+    let sunday = (next_week_monday + chrono::Duration::days(6))
+        .format("%Y-%m-%d")
+        .to_string();
+
+    for kind in ["vacation", "sick", "training", "special_leave", "unpaid", "general_absence"] {
+        let (st, body) = emp
+            .post(
+                "/api/v1/absences",
+                &json!({"kind": kind, "start_date": saturday, "end_date": sunday}),
+            )
+            .await;
+        assert_eq!(
+            st,
+            StatusCode::BAD_REQUEST,
+            "weekend-only {kind} absence should be rejected"
+        );
+        assert!(
+            body.to_string()
+                .contains("Absence must include at least one workday"),
+            "error should mention missing workday for {kind}: {body}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn absence_update_requires_at_least_one_effective_workday() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (_, _, _, emp_pw, _, _) = bootstrap_team(&app, &admin, false).await;
+    let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
+
+    let next_week_monday = next_monday(7);
+    let monday = next_week_monday.format("%Y-%m-%d").to_string();
+    let saturday = (next_week_monday + chrono::Duration::days(5))
+        .format("%Y-%m-%d")
+        .to_string();
+    let sunday = (next_week_monday + chrono::Duration::days(6))
+        .format("%Y-%m-%d")
+        .to_string();
+
+    let (st, body) = emp
+        .post(
+            "/api/v1/absences",
+            &json!({"kind":"vacation","start_date": monday,"end_date": monday}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create weekday absence");
+    let absence_id = id(&body);
+
+    let (st, body) = emp
+        .put(
+            &format!("/api/v1/absences/{absence_id}"),
+            &json!({"kind":"vacation","start_date": saturday,"end_date": sunday}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST, "update to weekend-only rejected");
+    assert!(
+        body.to_string()
+            .contains("Absence must include at least one workday"),
+        "error should mention missing workday: {body}"
+    );
+}
+
+#[tokio::test]
 async fn approval_rejects_logged_time_conflicts() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
@@ -103,11 +177,14 @@ async fn sick_updates_cannot_backdate_and_auto_approved_sick_can_be_cancelled() 
     let (_, _, _, emp_pw, _, _) = bootstrap_team(&app, &admin, false).await;
     let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
 
-    let future_day = next_monday(14).format("%Y-%m-%d").to_string();
+    let future_start = next_monday(14).format("%Y-%m-%d").to_string();
+    let future_end = (next_monday(14) + chrono::Duration::days(2))
+        .format("%Y-%m-%d")
+        .to_string();
     let (st, body) = emp
         .post(
             "/api/v1/absences",
-            &json!({"kind":"sick","start_date": future_day,"end_date": future_day}),
+            &json!({"kind":"sick","start_date": future_start,"end_date": future_end}),
         )
         .await;
     assert_eq!(st, StatusCode::OK, "create future sick absence");
@@ -133,14 +210,14 @@ async fn sick_updates_cannot_backdate_and_auto_approved_sick_can_be_cancelled() 
         "error mentions backdate limit: {body}"
     );
 
-    let today = chrono::Local::now()
-        .date_naive()
+    let current_start = next_monday(-7).format("%Y-%m-%d").to_string();
+    let current_end = (next_monday(-7) + chrono::Duration::days(2))
         .format("%Y-%m-%d")
         .to_string();
     let (st, body) = emp
         .post(
             "/api/v1/absences",
-            &json!({"kind":"sick","start_date": today,"end_date": today}),
+            &json!({"kind":"sick","start_date": current_start,"end_date": current_end}),
         )
         .await;
     assert_eq!(st, StatusCode::OK, "create current sick absence");
@@ -150,7 +227,7 @@ async fn sick_updates_cannot_backdate_and_auto_approved_sick_can_be_cancelled() 
     let (st, body) = emp
         .put(
             &format!("/api/v1/absences/{auto_sick}"),
-            &json!({"kind":"sick","start_date": today,"end_date": today,"comment":"updated"}),
+            &json!({"kind":"sick","start_date": current_start,"end_date": current_end,"comment":"updated"}),
         )
         .await;
     assert_eq!(st, StatusCode::BAD_REQUEST, "approved sick edit rejected");
@@ -175,11 +252,14 @@ async fn approved_absence_cannot_be_edited_but_cancellation_requires_approval() 
     let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
     let lead = login_change_pw(&app, "lead-r@example.com", &lead_pw).await;
 
-    let day = next_monday(14).format("%Y-%m-%d").to_string();
+    let day_start = next_monday(14).format("%Y-%m-%d").to_string();
+    let day_end = (next_monday(14) + chrono::Duration::days(2))
+        .format("%Y-%m-%d")
+        .to_string();
     let (st, body) = emp
         .post(
             "/api/v1/absences",
-            &json!({"kind":"vacation","start_date": day,"end_date": day}),
+            &json!({"kind":"vacation","start_date": day_start,"end_date": day_end}),
         )
         .await;
     assert_eq!(st, StatusCode::OK, "create requested absence");
@@ -196,7 +276,7 @@ async fn approved_absence_cannot_be_edited_but_cancellation_requires_approval() 
     let (st, body) = emp
         .put(
             &format!("/api/v1/absences/{absence_id}"),
-            &json!({"kind":"vacation","start_date": day,"end_date": day,"comment":"edited"}),
+            &json!({"kind":"vacation","start_date": day_start,"end_date": day_end,"comment":"edited"}),
         )
         .await;
     assert_eq!(
