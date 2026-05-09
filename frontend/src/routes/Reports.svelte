@@ -898,7 +898,7 @@
         <!-- Submission status with the same wording as on the dashboard -->
         <div class="kz-card stat-card">
           <div class="stat-card-label stat-card-label-help">
-            <span>{$t("Submission status")}</span>
+            <span>{$t("Submissions")}</span>
             <button
               class="kz-btn-icon-sm kz-btn-ghost"
               title={$t("help_submission_status")}
