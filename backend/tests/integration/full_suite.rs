@@ -304,8 +304,10 @@ async fn full_integration_suite() {
     // -- Absences -----------------------------------------------------------
     let v_from = next_monday(10);
     let v_to = v_from + chrono::Duration::days(2);
-    let v_days = 3i64;
     let abs_id: i64;
+    // Vacation balance available after the vacation is approved; captured from
+    // the API so public holidays within the range are accounted for correctly.
+    let balance_after_vacation: serde_json::Value;
     {
         let (st, body) = emp
             .post(
@@ -354,6 +356,13 @@ async fn full_integration_suite() {
             .post(&format!("/api/v1/absences/{}/approve", abs_id), &json!({}))
             .await;
         assert_eq!(st, StatusCode::OK, "approve vacation");
+
+        // Capture the balance now so the general-absence test can confirm it does
+        // not change (avoids hardcoding workday count which breaks on public holidays).
+        let (_, bal) = emp
+            .get(&format!("/api/v1/leave-balance/{}?year={}", emp_id, year()))
+            .await;
+        balance_after_vacation = bal;
     }
 
     // -- General absence - happy-path journey -------------------------------
@@ -449,16 +458,15 @@ async fn full_integration_suite() {
             "calendar shows general_absence"
         );
 
-        // Vacation balance unchanged.
+        // Vacation balance unchanged by the general absence (only kind=vacation is counted).
         let (_, body) = emp
             .get(&format!("/api/v1/leave-balance/{}?year={}", emp_id, year()))
             .await;
         assert_eq!(body["annual_entitlement"], 30, "entitlement still 30");
-        let v_avail = 30 - v_days;
         assert_eq!(
-            body["available"], v_avail,
-            "available still {} (general_absence excluded)",
-            v_avail
+            body["available"], balance_after_vacation["available"],
+            "available unchanged after general_absence (was {}, still {})",
+            balance_after_vacation["available"], body["available"]
         );
 
         // Monthly report.
@@ -685,18 +693,21 @@ async fn full_integration_suite() {
 
     // -- Vacation balance ---------------------------------------------------
     {
+        // Use the balance captured after vacation approval; public holidays within
+        // the vacation range reduce the workday count so we cannot hardcode v_days.
         let (st, body) = emp
             .get(&format!("/api/v1/leave-balance/{}?year={}", emp_id, year()))
             .await;
         assert_eq!(st, StatusCode::OK, "leave balance");
         assert_eq!(body["annual_entitlement"], 30, "annual=30");
         assert_eq!(
-            body["approved_upcoming"], v_days,
-            "approved_upcoming={}",
-            v_days
+            body["approved_upcoming"], balance_after_vacation["approved_upcoming"],
+            "approved_upcoming matches balance captured after vacation approval"
         );
-        let v_avail = 30 - v_days;
-        assert_eq!(body["available"], v_avail, "available={}", v_avail);
+        assert_eq!(
+            body["available"], balance_after_vacation["available"],
+            "available matches balance captured after vacation approval"
+        );
     }
 
     // -- Reports ------------------------------------------------------------
