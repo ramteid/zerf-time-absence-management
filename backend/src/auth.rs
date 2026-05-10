@@ -122,6 +122,22 @@ pub fn verify_password(password: &str, hash: &str) -> bool {
     }
 }
 
+/// Async wrapper: offloads Argon2 hashing to a blocking thread so the Tokio
+/// runtime is not starved during CPU-intensive work (especially important when
+/// many integration tests run in parallel, each making concurrent requests).
+pub async fn hash_password_async(password: String) -> AppResult<String> {
+    tokio::task::spawn_blocking(move || hash_password(&password))
+        .await
+        .map_err(|_| AppError::Internal("password hash task panicked".into()))?
+}
+
+/// Async wrapper: offloads Argon2 verification to a blocking thread.
+pub async fn verify_password_async(password: String, hash: String) -> bool {
+    tokio::task::spawn_blocking(move || verify_password(&password, &hash))
+        .await
+        .unwrap_or(false)
+}
+
 /// Reject obviously weak passwords (length, character classes).
 /// Spec asks for "stark gehasht" + admin-controlled passwords; we still
 /// enforce a sensible minimum policy to protect users when they self-service.
@@ -226,9 +242,12 @@ pub async fn login(
     // Always perform a hash verification to keep timing constant for unknown emails.
     let dummy = "$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHRzYWx0c2FsdA$8ueQukxsrOwHPzjhsRTRppvNN0o3Qx0vg7HHmH64Bmw";
     let password_matches = match &user {
-        Some(found_user) => verify_password(&req.password, &found_user.password_hash),
+        Some(found_user) => {
+            verify_password_async(req.password.clone(), found_user.password_hash.clone()).await
+        }
         None => {
-            let _ = verify_password(&req.password, dummy);
+            // Always run a dummy verification to keep timing constant for unknown emails.
+            verify_password_async(req.password.clone(), dummy.to_string()).await;
             false
         }
     };
@@ -406,19 +425,19 @@ pub async fn change_password(
             .as_deref()
             .filter(|p| !p.is_empty())
             .ok_or_else(|| AppError::BadRequest("Current password required.".into()))?;
-        if !verify_password(current_password, &user.password_hash) {
+        if !verify_password_async(current_password.to_string(), user.password_hash.clone()).await {
             return Err(AppError::BadRequest(
                 "Current password is incorrect.".into(),
             ));
         }
     }
     validate_password_strength(&body.new_password)?;
-    if verify_password(&body.new_password, &user.password_hash) {
+    if verify_password_async(body.new_password.clone(), user.password_hash.clone()).await {
         return Err(AppError::BadRequest(
             "New password must differ from the current one.".into(),
         ));
     }
-    let new_password_hash = hash_password(&body.new_password)?;
+    let new_password_hash = hash_password_async(body.new_password.clone()).await?;
     let current_token_hash = hash_token(&raw_token);
     let mut transaction = app_state.pool.begin().await?;
     UserDb::update_password(&mut *transaction, user.id, &new_password_hash, false).await?;
@@ -694,7 +713,7 @@ pub async fn setup(
     let password = &body.password;
     validate_password_strength(password)?;
 
-    let password_hash = hash_password(password)?;
+    let password_hash = hash_password_async(body.password.clone()).await?;
     let today = chrono::Utc::now().date_naive();
 
     // Prevent race conditions where two concurrent requests both observe
@@ -848,7 +867,7 @@ pub async fn reset_password_with_token(
         .await?;
 
     validate_password_strength(&body.password)?;
-    let new_hash = hash_password(&body.password)?;
+    let new_hash = hash_password_async(body.password.clone()).await?;
 
     let password = body.password;
     let reuse_check = move |current_hash: &str| -> bool {

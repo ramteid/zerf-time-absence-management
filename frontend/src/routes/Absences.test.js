@@ -35,6 +35,18 @@ async function settle() {
   await Promise.resolve();
 }
 
+async function waitForElement(target, selector, timeout = 10000) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    const element = target.querySelector(selector);
+    if (element) {
+      return element;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`Element not found within ${timeout}ms: ${selector}`);
+}
+
 describe("Absences", () => {
   let target;
   let component;
@@ -66,17 +78,22 @@ describe("Absences", () => {
     await settle();
 
     // Navigate to previous year via the prev button
-    const prevBtn = target.querySelector('[aria-label="Previous year"]');
+    const prevBtn = await waitForElement(
+      target,
+      '[aria-label="Previous year"]',
+      10000,
+    );
     prevBtn.click();
     await settle();
 
-    target.querySelector(".kz-btn-primary").click();
+    const requestButton = await waitForElement(target, ".kz-btn-primary", 10000);
+    requestButton.click();
     await settle();
 
-    const dialog = target.querySelector("dialog");
+    const dialog = await waitForElement(target, "dialog", 10000);
     expect(dialog).not.toBeNull();
     expect(dialog.hasAttribute("open")).toBe(true);
-  });
+  }, 20000);
 
   it("falls back when modal opening is rejected after the year slider changes", async () => {
     HTMLDialogElement.prototype.showModal = function showModal() {
@@ -87,17 +104,22 @@ describe("Absences", () => {
     await settle();
 
     // Navigate to previous year via the prev button
-    const prevBtn = target.querySelector('[aria-label="Previous year"]');
+    const prevBtn = await waitForElement(
+      target,
+      '[aria-label="Previous year"]',
+      10000,
+    );
     prevBtn.click();
     await settle();
 
-    target.querySelector(".kz-btn-primary").click();
+    const requestButton = await waitForElement(target, ".kz-btn-primary", 10000);
+    requestButton.click();
     await settle();
 
-    const dialog = target.querySelector("dialog");
+    const dialog = await waitForElement(target, "dialog", 10000);
     expect(dialog).not.toBeNull();
     expect(dialog.hasAttribute("open")).toBe(true);
-  });
+  }, 20000);
 
   it("renders absence history fields and comment", async () => {
     const currentYear = new Date().getFullYear();
