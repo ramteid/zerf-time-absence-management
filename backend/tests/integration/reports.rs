@@ -113,7 +113,7 @@ async fn reports_full_workflow() {
         assert_eq!(st, StatusCode::BAD_REQUEST, "CSV inverted range rejected");
 
         let too_far = (chrono::NaiveDate::parse_from_str(&monday, "%Y-%m-%d").unwrap()
-            + chrono::Duration::days(366))
+            + chrono::Duration::days(367))
         .format("%Y-%m-%d")
         .to_string();
         let (st, _) = lead

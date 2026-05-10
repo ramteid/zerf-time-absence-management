@@ -308,9 +308,9 @@ fn validate_range(from: NaiveDate, to: NaiveDate) -> AppResult<()> {
     if from > to {
         return Err(AppError::BadRequest("from must not be after to.".into()));
     }
-    if (to - from).num_days() > 365 {
+    if (to - from).num_days() > 366 {
         return Err(AppError::BadRequest(
-            "Date range must not exceed 365 days.".into(),
+            "Date range must not exceed 366 days.".into(),
         ));
     }
     Ok(())

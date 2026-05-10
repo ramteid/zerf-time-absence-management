@@ -431,8 +431,9 @@ pub async fn update_admin_settings(
                     "Invalid carryover_expiry_date.".into(),
                 ));
             }
-            // Validate that the date actually exists (use a non-leap year to be strict).
-            if chrono::NaiveDate::from_ymd_opt(2025, month, day).is_none() {
+            // Validate that the MM-DD combination exists on a calendar.
+            // Use a leap year baseline so 02-29 can be configured.
+            if chrono::NaiveDate::from_ymd_opt(2024, month, day).is_none() {
                 return Err(AppError::BadRequest(
                     "Invalid carryover_expiry_date.".into(),
                 ));

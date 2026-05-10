@@ -396,6 +396,7 @@ pub async fn create(
             body.start_date,
             body.end_date,
             None,
+            false,
         )
         .await?;
     }
@@ -484,6 +485,7 @@ pub async fn update(
             body.start_date,
             body.end_date,
             Some(absence_id),
+            false,
         )
         .await?;
     }
@@ -651,6 +653,7 @@ pub async fn approve(
             absence.start_date,
             absence.end_date,
             Some(absence_id),
+            true,
         )
         .await?;
     }
@@ -992,8 +995,19 @@ async fn effective_annual_days(
 fn parse_expiry_date(setting: &str, year: i32) -> Option<NaiveDate> {
     let (month_str, day_str) = setting.split_once('-')?;
     let month: u32 = month_str.parse().ok()?;
-    let day: u32 = day_str.parse().ok()?;
-    NaiveDate::from_ymd_opt(year, month, day)
+    let configured_day: u32 = day_str.parse().ok()?;
+    if !(1..=12).contains(&month) {
+        return None;
+    }
+
+    let next_month_start = if month == 12 {
+        NaiveDate::from_ymd_opt(year + 1, 1, 1)?
+    } else {
+        NaiveDate::from_ymd_opt(year, month + 1, 1)?
+    };
+    let max_day = (next_month_start - Duration::days(1)).day();
+    let effective_day = configured_day.min(max_day);
+    NaiveDate::from_ymd_opt(year, month, effective_day)
 }
 
 /// Pro-rate annual leave entitlement for a user who started mid-year.
@@ -1140,6 +1154,7 @@ async fn validate_vacation_balance(
     start_date: NaiveDate,
     end_date: NaiveDate,
     exclude_id: Option<i64>,
+    count_new_for_carryover_source: bool,
 ) -> AppResult<()> {
     use crate::repository::AbsenceDb;
 
@@ -1149,11 +1164,10 @@ async fn validate_vacation_balance(
     let today = chrono::Local::now().date_naive();
     let expiry_setting =
         crate::settings::load_setting(pool, "carryover_expiry_date", "03-31").await?;
-    let (effective_entitlement, carryover_days, carryover_expired) =
+    let (effective_entitlement, carryover_days, _carryover_expired) =
         vacation_year_context(pool, user, year, today, &expiry_setting).await?;
     let expiry_date = parse_expiry_date(&expiry_setting, year);
-    let total_entitlement =
-        total_entitlement_with_carryover(effective_entitlement, carryover_days, carryover_expired);
+    let total_entitlement = effective_entitlement as f64 + carryover_days as f64;
 
     // Sum existing vacation usage (requested + approved) in this year, excluding `exclude_id`.
     let existing_ranges =
@@ -1168,7 +1182,7 @@ async fn validate_vacation_balance(
     } else {
         0.0
     };
-    if used_days + new_days > total_entitlement {
+    if expiry_date.is_none() && used_days + new_days > total_entitlement {
         return Err(AppError::BadRequest(
             "Not enough remaining vacation days.".into(),
         ));
@@ -1241,14 +1255,24 @@ async fn validate_vacation_balance(
         let end_year_effective =
             pro_rate_entitlement(user.start_date, end_year, end_year_entitled);
 
-        // Carryover into the end year = current year's entitlement minus ALL current-year
-        // vacation usage (requested + approved + the new absence's current-year portion).
-        // We use `used_days + new_days` which already accounts for all of these,
-        // rather than `workdays_total` which only counts approved absences and would
-        // miss pending requests and the not-yet-inserted new absence.
+        // Carryover source is status-based: only approved / cancellation_pending
+        // vacation reduces next year's carryover. Requested days reserve current-year
+        // availability but do not reduce the carryover source.
         let end_year_expiry_date = parse_expiry_date(&expiry_setting, end_year);
         let end_year_carryover_expired = end_year_expiry_date.map(|d| today > d).unwrap_or(false);
-        let current_year_total_usage = used_days + new_days;
+        let current_year_approved_usage = workdays_total(pool, user.id, "vacation", year_from, year_to).await?;
+        let current_year_new_approved = if count_new_for_carryover_source {
+            if let Some((current_year_new_start, current_year_new_end)) =
+                clamp_range_to_window(start_date, end_date, year_from, year_to)
+            {
+                workdays(pool, current_year_new_start, current_year_new_end).await?
+            } else {
+                0.0
+            }
+        } else {
+            0.0
+        };
+        let current_year_total_usage = current_year_approved_usage + current_year_new_approved;
         let current_year_carryover = std::cmp::max(
             0,
             effective_entitlement - current_year_total_usage.round() as i64,
@@ -1281,6 +1305,80 @@ async fn validate_vacation_balance(
             return Err(AppError::BadRequest(
                 "Not enough remaining vacation days.".into(),
             ));
+        }
+
+        // Apply the same post-expiry rule to the end year: days strictly after
+        // expiry must be covered by end-year entitlement only.
+        if let Some(end_year_expiry) = end_year_expiry_date {
+            let end_pre_window_end = std::cmp::min(end_year_expiry, end_year_to);
+            let end_post_window_start = end_year_expiry + Duration::days(1);
+
+            let end_pre_existing_days = if end_year_from <= end_pre_window_end {
+                workdays_for_ranges_in_window(
+                    pool,
+                    &end_year_existing,
+                    end_year_from,
+                    end_pre_window_end,
+                )
+                .await?
+            } else {
+                0.0
+            };
+            let end_pre_new_days = if end_year_from <= end_pre_window_end {
+                if let Some((end_pre_new_start, end_pre_new_end)) = clamp_range_to_window(
+                    start_date,
+                    end_date,
+                    end_year_from,
+                    end_pre_window_end,
+                ) {
+                    workdays(pool, end_pre_new_start, end_pre_new_end).await?
+                } else {
+                    0.0
+                }
+            } else {
+                0.0
+            };
+
+            let end_post_existing_days = if end_post_window_start <= end_year_to {
+                workdays_for_ranges_in_window(
+                    pool,
+                    &end_year_existing,
+                    end_post_window_start,
+                    end_year_to,
+                )
+                .await?
+            } else {
+                0.0
+            };
+            let end_post_new_days = if end_post_window_start <= end_year_to {
+                if let Some((end_post_new_start, end_post_new_end)) = clamp_range_to_window(
+                    start_date,
+                    end_date,
+                    end_post_window_start,
+                    end_year_to,
+                ) {
+                    workdays(pool, end_post_new_start, end_post_new_end).await?
+                } else {
+                    0.0
+                }
+            } else {
+                0.0
+            };
+
+            let end_pre_total = end_pre_existing_days + end_pre_new_days;
+            let end_post_total = end_post_existing_days + end_post_new_days;
+            let end_carryover_budget = current_year_carryover as f64;
+            let end_base_budget = end_year_effective as f64;
+            let end_base_consumed_before_or_on_expiry =
+                (end_pre_total - end_carryover_budget).max(0.0);
+            let end_base_remaining_after_expiry =
+                (end_base_budget - end_base_consumed_before_or_on_expiry).max(0.0);
+
+            if end_post_total > end_base_remaining_after_expiry {
+                return Err(AppError::BadRequest(
+                    "Not enough remaining vacation days.".into(),
+                ));
+            }
         }
     }
     Ok(())
@@ -1362,7 +1460,9 @@ pub async fn balance(
     )
     .await?;
 
-    // Total available = current year entitlement + active carryover - all used/pending.
+    // Total available is an annual frame value (entitlement + active carryover),
+    // then reduced by taken/upcoming/requested days. It is intentionally not a
+    // date-window-specific "bookable after expiry" value.
     let total_entitlement =
         total_entitlement_with_carryover(effective_entitlement, carryover_days, carryover_expired);
     let available = total_entitlement - taken_days - upcoming_days - requested_days;
