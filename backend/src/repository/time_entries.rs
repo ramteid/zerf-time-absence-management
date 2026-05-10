@@ -121,7 +121,7 @@ pub(crate) async fn validate_entry(
         return Err(AppError::BadRequest("Day total exceeds 14 hours.".into()));
     }
     let absence_on_day: Option<String> = sqlx::query_scalar(
-        "SELECT kind FROM absences WHERE user_id=$1 AND status='approved' \
+        "SELECT kind FROM absences WHERE user_id=$1 AND status IN ('approved','cancellation_pending') \
          AND start_date <= $2 AND end_date >= $2 AND kind <> 'sick' LIMIT 1",
     )
     .bind(user_id)
@@ -604,7 +604,7 @@ impl TimeEntryDb {
             let Some(entry) = self.find_by_id_submitted(id).await? else {
                 continue;
             };
-            if entry.user_id == reviewer_id {
+            if entry.user_id == reviewer_id && !reviewer_is_admin {
                 continue;
             }
             if !reviewer_is_admin {
