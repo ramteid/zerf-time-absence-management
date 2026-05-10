@@ -68,6 +68,24 @@ async fn set_leave_days_current_and_next(
     );
 }
 
+async fn set_leave_days_for_year(
+    app: &TestApp,
+    user_id: i64,
+    year: i32,
+    days: i64,
+) {
+    sqlx::query(
+        "INSERT INTO user_annual_leave(user_id, year, days) VALUES ($1,$2,$3) \
+         ON CONFLICT (user_id, year) DO UPDATE SET days = EXCLUDED.days",
+    )
+    .bind(user_id)
+    .bind(year)
+    .bind(days)
+    .execute(&app.state.pool)
+    .await
+    .expect("set annual leave row");
+}
+
 async fn pick_workdays(
     client: &crate::common::TestClient,
     year: i32,
@@ -106,6 +124,73 @@ async fn pick_workdays(
         out.len()
     );
     out
+}
+
+async fn holiday_set_for_year(
+    client: &crate::common::TestClient,
+    year: i32,
+) -> std::collections::HashSet<NaiveDate> {
+    let (st, holidays_json) = client.get(&format!("/api/v1/holidays?year={year}")).await;
+    assert_eq!(st, StatusCode::OK, "load holidays for year {year}");
+
+    holidays_json
+        .as_array()
+        .expect("holidays should be an array")
+        .iter()
+        .map(|item| {
+            NaiveDate::parse_from_str(
+                item["holiday_date"]
+                    .as_str()
+                    .expect("holiday_date should be string"),
+                "%Y-%m-%d",
+            )
+            .expect("holiday_date should be ISO date")
+        })
+        .collect()
+}
+
+fn is_workday(date: NaiveDate, holiday_set: &std::collections::HashSet<NaiveDate>) -> bool {
+    !matches!(date.weekday(), Weekday::Sat | Weekday::Sun) && !holiday_set.contains(&date)
+}
+
+async fn last_workday_in_year(
+    client: &crate::common::TestClient,
+    year: i32,
+) -> NaiveDate {
+    let holiday_set = holiday_set_for_year(client, year).await;
+    let mut cursor = NaiveDate::from_ymd_opt(year, 12, 31).expect("valid year-end date");
+    while cursor.year() == year {
+        if is_workday(cursor, &holiday_set) {
+            return cursor;
+        }
+        cursor -= Duration::days(1);
+    }
+    panic!("could not find a workday in year {year}");
+}
+
+async fn nth_workday_from(
+    client: &crate::common::TestClient,
+    start_inclusive: NaiveDate,
+    n: usize,
+) -> NaiveDate {
+    assert!(n > 0, "n must be >= 1");
+    let mut current_year = start_inclusive.year();
+    let mut holiday_set = holiday_set_for_year(client, current_year).await;
+    let mut cursor = start_inclusive;
+    let mut seen = 0usize;
+    loop {
+        if cursor.year() != current_year {
+            current_year = cursor.year();
+            holiday_set = holiday_set_for_year(client, current_year).await;
+        }
+        if is_workday(cursor, &holiday_set) {
+            seen += 1;
+            if seen == n {
+                return cursor;
+            }
+        }
+        cursor += Duration::days(1);
+    }
 }
 
 async fn create_vacation(
@@ -294,6 +379,171 @@ async fn carryover_policy_edge_cases() {
     assert!(
         body.to_string().contains("Not enough remaining vacation days"),
         "error should mention remaining vacation days: {body}"
+    );
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn cross_year_request_enforces_end_year_post_expiry_budget() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (_lead_id, _lead_pw, emp_id, emp_pw, _, _) = bootstrap_team(&app, &admin, false).await;
+    let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
+
+    let current_year = chrono::Local::now().year();
+    let next_year = current_year + 1;
+
+    update_carryover_expiry(&admin, "03-31").await;
+    // Build a large carryover into next year while keeping next-year entitlement tiny.
+    set_leave_days_current_and_next(&admin, emp_id, 90, 2).await;
+
+    let start = last_workday_in_year(&emp, current_year).await;
+    let end = nth_workday_from(
+        &emp,
+        NaiveDate::from_ymd_opt(next_year, 4, 1).expect("valid date"),
+        3,
+    )
+    .await;
+
+    let (st, body) = emp
+        .post(
+            "/api/v1/absences",
+            &json!({
+                "kind": "vacation",
+                "start_date": start.format("%Y-%m-%d").to_string(),
+                "end_date": end.format("%Y-%m-%d").to_string()
+            }),
+        )
+        .await;
+
+    assert_eq!(
+        st,
+        StatusCode::BAD_REQUEST,
+        "cross-year request should be rejected when post-expiry part exceeds end-year base entitlement"
+    );
+    assert!(
+        body.to_string().contains("Not enough remaining vacation days"),
+        "error should mention remaining vacation days: {body}"
+    );
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn pre_expiry_days_can_be_requested_after_expiry() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (_lead_id, _lead_pw, emp_id, emp_pw, _, _) = bootstrap_team(&app, &admin, false).await;
+    let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
+
+    let current_year = chrono::Local::now().year();
+    let prev_year = current_year - 1;
+
+    // Ensure carryover exists for current year and expiry is already in the past.
+    update_carryover_expiry(&admin, "01-31").await;
+    set_leave_days_for_year(&app, emp_id, prev_year, 2).await;
+    set_leave_days_current_and_next(&admin, emp_id, 1, 1).await;
+
+    let january_workdays = pick_workdays(&emp, current_year, 1, 2).await;
+    for day in january_workdays {
+        let iso = day.format("%Y-%m-%d").to_string();
+        let (st, body) = emp
+            .post(
+                "/api/v1/absences",
+                &json!({"kind":"vacation","start_date": iso, "end_date": iso}),
+            )
+            .await;
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "pre-expiry day should remain bookable after expiry date: {body}"
+        );
+    }
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn requested_days_do_not_reduce_cross_year_carryover_source() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (_lead_id, _lead_pw, emp_id, emp_pw, _, _) = bootstrap_team(&app, &admin, false).await;
+    let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
+
+    let current_year = chrono::Local::now().year();
+    let next_year = current_year + 1;
+
+    update_carryover_expiry(&admin, "03-31").await;
+    // With next-year base entitlement set to 0, January days in next year must be
+    // funded by carryover from current year.
+    set_leave_days_current_and_next(&admin, emp_id, 2, 0).await;
+
+    // Consume one current-year day as requested only; this must reserve availability
+    // but must not reduce the carryover source for next year.
+    let current_year_requested_day = pick_workdays(&emp, current_year, 6, 1).await[0];
+    let day_iso = current_year_requested_day.format("%Y-%m-%d").to_string();
+    let (st, body) = emp
+        .post(
+            "/api/v1/absences",
+            &json!({"kind":"vacation","start_date": day_iso, "end_date": day_iso}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create requested current-year day: {body}");
+
+    // Request an absence crossing into January next year. This should stay valid even
+    // with a requested day in current year, because requested status must not reduce
+    // the carryover source used for next-year validation.
+    let cross_start = last_workday_in_year(&emp, current_year).await;
+    let cross_end = nth_workday_from(
+        &emp,
+        NaiveDate::from_ymd_opt(next_year, 1, 1).expect("valid date"),
+        1,
+    )
+    .await;
+    let (st, body) = emp
+        .post(
+            "/api/v1/absences",
+            &json!({
+                "kind":"vacation",
+                "start_date": cross_start.format("%Y-%m-%d").to_string(),
+                "end_date": cross_end.format("%Y-%m-%d").to_string()
+            }),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::OK,
+        "cross-year request should stay allowed when only requested days exist in current year: {body}"
+    );
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn carryover_expiry_allows_leap_day_and_normalizes_non_leap_years() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (_lead_id, _lead_pw, emp_id, emp_pw, _, _) = bootstrap_team(&app, &admin, false).await;
+    let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
+
+    let current_year = chrono::Local::now().year();
+    update_carryover_expiry(&admin, "02-29").await;
+
+    let (st, balance) = emp
+        .get(&format!("/api/v1/leave-balance/{emp_id}?year={current_year}"))
+        .await;
+    assert_eq!(st, StatusCode::OK, "load leave balance with 02-29 expiry");
+
+    let expected_expiry = if NaiveDate::from_ymd_opt(current_year, 2, 29).is_some() {
+        format!("{current_year:04}-02-29")
+    } else {
+        format!("{current_year:04}-02-28")
+    };
+    assert_eq!(
+        balance["carryover_expiry"],
+        expected_expiry,
+        "carryover expiry should be year-aware"
     );
 
     app.cleanup().await;
