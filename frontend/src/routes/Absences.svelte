@@ -274,6 +274,7 @@
           <div
             class="absence-entry"
             class:absence-entry--rejected={a.status === "rejected"}
+            class:absence-entry--cancelled={a.status === "cancelled"}
             on:click={() => showDetail(a)}
             on:keydown={(e) => {
               if (e.key === "Enter") showDetail(a);
@@ -435,6 +436,11 @@
 
   .absence-entry:last-child {
     border-bottom: none;
+  }
+
+  .absence-entry--cancelled .absence-entry-value {
+    text-decoration: line-through;
+    color: var(--text-tertiary);
   }
 
   .absence-entry-summary {
