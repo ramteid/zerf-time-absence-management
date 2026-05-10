@@ -141,7 +141,7 @@ static LANGUAGES: &[LangDef] = &[
             ("absence_cancelled_title", "Abwesenheitsantrag zur\u{00fc}ckgezogen"),
             ("absence_cancelled_body", "{requester_name} hat den Antrag auf {kind} ({start_date} bis {end_date}) zur\u{00fc}ckgezogen."),
             ("absence_cancellation_requested_title", "Stornierungsanfrage f\u{00fc}r Abwesenheit"),
-            ("absence_cancellation_requested_body", "{requester_name} m\u{00f6}chte die {kind} ({start_date} bis {end_date}) stornieren."),
+            ("absence_cancellation_requested_body", "{requester_name} m\u{00f6}chte den {kind} ({start_date} bis {end_date}) stornieren."),
             ("absence_cancellation_approved_title", "Stornierung genehmigt"),
             ("absence_cancellation_approved_body", "Die Stornierung Ihrer {kind} ({start_date} bis {end_date}) wurde genehmigt."),
             ("absence_cancellation_rejected_title", "Stornierung abgelehnt"),
