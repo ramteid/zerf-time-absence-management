@@ -108,14 +108,21 @@ pub struct YearQuery {
     pub year: Option<i32>,
 }
 
+fn year_bounds(year: i32) -> AppResult<(NaiveDate, NaiveDate)> {
+    let from = NaiveDate::from_ymd_opt(year, 1, 1)
+        .ok_or_else(|| AppError::BadRequest("Invalid year.".into()))?;
+    let to = NaiveDate::from_ymd_opt(year, 12, 31)
+        .ok_or_else(|| AppError::BadRequest("Invalid year.".into()))?;
+    Ok((from, to))
+}
+
 pub async fn list(
     State(app_state): State<AppState>,
     requester: User,
     Query(query): Query<YearQuery>,
 ) -> AppResult<Json<Vec<Absence>>> {
     let year = query.year.unwrap_or_else(|| chrono::Utc::now().year());
-    let from = NaiveDate::from_ymd_opt(year, 1, 1).unwrap();
-    let to = NaiveDate::from_ymd_opt(year, 12, 31).unwrap();
+    let (from, to) = year_bounds(year)?;
     let absences = app_state
         .db
         .absences
@@ -202,9 +209,14 @@ pub async fn calendar(
         .ok_or_else(|| AppError::BadRequest("Invalid date".into()))?;
     // Last day of the month: step to first of next month and subtract one day.
     let next_month_first = if month == 12 {
-        NaiveDate::from_ymd_opt(year + 1, 1, 1).unwrap()
+        let next_year = year
+            .checked_add(1)
+            .ok_or_else(|| AppError::BadRequest("Invalid date".into()))?;
+        NaiveDate::from_ymd_opt(next_year, 1, 1)
+            .ok_or_else(|| AppError::BadRequest("Invalid date".into()))?
     } else {
-        NaiveDate::from_ymd_opt(year, month + 1, 1).unwrap()
+        NaiveDate::from_ymd_opt(year, month + 1, 1)
+            .ok_or_else(|| AppError::BadRequest("Invalid date".into()))?
     };
     let to = next_month_first - Duration::days(1);
     // Determine which user IDs this requester is allowed to see (scope restriction).
@@ -1385,8 +1397,7 @@ pub async fn balance(
     let repo_user = app_state.db.users.find_by_id(target_user_id).await?
         .ok_or(AppError::NotFound)?;
     let target_user = crate::users::repo_user_to_auth_user(repo_user);
-    let year_from = NaiveDate::from_ymd_opt(year, 1, 1).unwrap();
-    let year_to = NaiveDate::from_ymd_opt(year, 12, 31).unwrap();
+    let (year_from, year_to) = year_bounds(year)?;
     let today = chrono::Utc::now().date_naive();
     // Load all vacation absences (requested + approved) in the given year.
     let vacation_absences: Vec<Absence> = app_state

@@ -416,3 +416,35 @@ async fn employee_calendar_is_scoped_to_their_team() {
         "outsider should not be visible in team calendar"
     );
 }
+
+#[tokio::test]
+async fn absences_list_rejects_invalid_year_query() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (_, _, _, emp_pw, _, _) = bootstrap_team(&app, &admin, false).await;
+    let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
+
+    let (st, body) = emp.get("/api/v1/absences?year=2147483647").await;
+    assert_eq!(st, StatusCode::BAD_REQUEST, "invalid year must be rejected");
+    assert!(
+        body.to_string().contains("Invalid year"),
+        "error should mention invalid year: {body}"
+    );
+}
+
+#[tokio::test]
+async fn leave_balance_rejects_invalid_year_query() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (_, _, emp_id, emp_pw, _, _) = bootstrap_team(&app, &admin, false).await;
+    let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
+
+    let (st, body) = emp
+        .get(&format!("/api/v1/leave-balance/{emp_id}?year=2147483647"))
+        .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST, "invalid year must be rejected");
+    assert!(
+        body.to_string().contains("Invalid year"),
+        "error should mention invalid year: {body}"
+    );
+}
