@@ -186,6 +186,17 @@ const TRANSLATIONS = {
     "All weeks submitted": "All weeks submitted",
     "Note: current month - data up to yesterday":
       "Note: current month - data including today",
+    // Dashboard request detail labels
+    Approval: "Approval",
+    Change: "Change",
+    "Reopen Request Details": "Reopen Request Details",
+    "Change Request Details": "Change Request Details",
+    "Absence Type": "Absence Type",
+    "Request Type": "Request Type",
+    Changes: "Changes",
+    "Diff unavailable for this request.": "Diff unavailable for this request.",
+    Empty: "Empty",
+    Week: "Week",
   },
   de: {
     "Loading...": "Wird geladen...",
@@ -976,9 +987,20 @@ const TRANSLATIONS = {
     "Sick days": "Krankheitstage",
     "Vacation taken": "Urlaub genommen",
     "Vacation planned": "Urlaub geplant",
-    "All weeks submitted": "Alle Wochen eingereicht",
     "Note: current month - data up to yesterday":
       "Hinweis: Laufender Monat - Daten inklusive heute",
+    // Dashboard request detail labels
+    Approval: "Genehmigung",
+    Change: "Änderung",
+    "Reopen Request Details": "Details der Wiederfreigabe-Anfrage",
+    "Change Request Details": "Details der Änderungsanfrage",
+    "Absence Type": "Abwesenheitstyp",
+    "Request Type": "Anfragetyp",
+    Changes: "Änderungen",
+    "Diff unavailable for this request.":
+      "Änderungen nicht verfügbar für diese Anfrage.",
+    Empty: "Leer",
+    Week: "Woche",
   },
 };
 
