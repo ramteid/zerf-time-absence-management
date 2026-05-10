@@ -125,7 +125,7 @@ async fn pending_then_reject() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
 
-    let (_lead_id, lead_pw, _emp_id, emp_pw, monday_iso, cat_id) =
+    let (lead_id, lead_pw, _emp_id, emp_pw, monday_iso, cat_id) =
         bootstrap_team(&app, &admin, false).await;
     let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
     let lead = login_change_pw(&app, "lead-r@example.com", &lead_pw).await;
@@ -156,6 +156,12 @@ async fn pending_then_reject() {
         )
         .await;
     assert_eq!(st, StatusCode::OK);
+
+    let (st, body) = emp.get("/api/v1/reopen-requests").await;
+    assert_eq!(st, StatusCode::OK);
+    let request = find_by_id(&body, req_id).expect("reopen request present");
+    assert_eq!(request["status"], "rejected");
+    assert_eq!(request["reviewed_by"], lead_id);
 
     let (_, body) = emp.get("/api/v1/time-entries").await;
     assert_eq!(body[0]["status"], "submitted", "entry stays submitted");

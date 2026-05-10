@@ -627,10 +627,11 @@ pub async fn reject(
     }
     // Use optimistic locking: only proceed if status is still 'pending'.
     let rows_claimed = sqlx::query(
-        "UPDATE reopen_requests SET status='rejected', reviewed_at=CURRENT_TIMESTAMP, \
-         rejection_reason=$2 WHERE id=$1 AND status='pending'",
+        "UPDATE reopen_requests SET status='rejected', reviewed_by=$2, reviewed_at=CURRENT_TIMESTAMP, \
+         rejection_reason=$3 WHERE id=$1 AND status='pending'",
     )
     .bind(request_id)
+    .bind(requester.id)
     .bind(rejection_reason)
     .execute(&app_state.pool)
     .await?
