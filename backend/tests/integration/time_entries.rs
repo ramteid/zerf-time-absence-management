@@ -29,7 +29,6 @@ async fn time_entries_full_workflow() {
     }
 
     // -- Reject requires reason before ownership check --
-        app.cleanup().await;
     {
         let (_lead_id, lead_pw, _emp_id, _emp_pw, monday_iso, cat_id) =
             bootstrap_team_with_suffix(&app, &admin, false, "1").await;
@@ -69,11 +68,6 @@ async fn time_entries_full_workflow() {
     }
 
     // -- Blocks time entry when absence cancellation pending --
-            app.cleanup().await;
-        let (_lead_id, lead_pw, _emp_id, emp_pw, monday_iso, cat_id) =
-            bootstrap_team_with_suffix(&app, &admin, false, "2").await;
-        let lead = login_change_pw(&app, "lead-2@example.com", &lead_pw).await;
-        let emp = login_change_pw(&app, "emp-2@example.com", &emp_pw).await;
     {
         let (_lead_id, lead_pw, _emp_id, emp_pw, monday_iso, cat_id) =
             bootstrap_team_with_suffix(&app, &admin, false, "2").await;
@@ -123,7 +117,6 @@ async fn time_entries_full_workflow() {
     }
 
     // -- Admin can batch reject own submitted entry --
-        app.cleanup().await;
     {
         let monday_iso = today();
         let (_, categories_body) = admin.get("/api/v1/categories").await;

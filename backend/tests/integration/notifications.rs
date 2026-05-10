@@ -52,7 +52,6 @@ async fn notifications_full_workflow() {
     }
 
     // -- Absence request notifies approver --
-        app.cleanup().await;
     {
         let (_lead_id, lead_pw, _emp_id, emp_pw, monday_iso, _cat_id) =
             bootstrap_team_with_suffix(&app, &admin, false, "2").await;
@@ -85,7 +84,6 @@ async fn notifications_full_workflow() {
     }
 
     // -- Change request creation notifies approver --
-        app.cleanup().await;
     {
         let (_lead_id, lead_pw, _emp_id, emp_pw, monday_iso, cat_id) =
             bootstrap_team_with_suffix(&app, &admin, true, "3").await;
@@ -160,11 +158,9 @@ async fn notifications_full_workflow() {
         assert!(!body.is_empty(), "in-app notification body must not be empty");
 
         app2.cleanup().await;
-        app2.cleanup().await;
     }
 
     // -- Timesheet batch approval notification counts weeks not entries --
-        app.cleanup().await;
     {
         let (_lead_id, lead_pw, _emp_id, emp_pw, monday_iso, cat_id) =
             bootstrap_team_with_suffix(&app, &admin, false, "4").await;

@@ -116,7 +116,6 @@ async fn reports_full_workflow() {
     }
 
     // -- Partial sick day counts worked time and removes target --
-        app.cleanup().await;
     {
         let (_lead_id, lead_pw, _emp_id, emp_pw, monday, cat_id) =
             bootstrap_team_with_suffix(&app, &admin, false, "2").await;
@@ -194,7 +193,6 @@ async fn reports_full_workflow() {
     }
 
     // -- Reports include current day in hours and categories --
-        app.cleanup().await;
     {
         let (_lead_id, lead_pw, emp_id, emp_pw, _monday, cat_id) =
             bootstrap_team_with_suffix(&app, &admin, false, "3").await;
@@ -260,7 +258,6 @@ async fn reports_full_workflow() {
     }
 
     // -- Reports ignore legacy time before user start date --
-        app.cleanup().await;
     {
         let (lead_id, lead_pw, emp_id, emp_pw, _monday, cat_id) =
             bootstrap_team_with_suffix(&app, &admin, false, "4").await;
