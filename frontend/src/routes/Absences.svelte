@@ -44,12 +44,13 @@
     }
 
     const years = [
-      ...new Set(
-        absences.flatMap((absence) => [
+      ...new Set([
+        year,
+        ...absences.flatMap((absence) => [
           parseDate(absence.start_date).getFullYear(),
           parseDate(absence.end_date).getFullYear(),
         ]),
-      ),
+      ]),
     ];
     const holidayLists = await Promise.all(
       years.map((year) => api(`/holidays?year=${year}`)),

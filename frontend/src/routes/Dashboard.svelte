@@ -117,12 +117,15 @@
     return report?.weeks_all_submitted === true;
   }
 
-  // Current month is treated as submitted only when every required workday up
+  // Current week is treated as submitted only when every required workday up
   // to today has no draft entries and at least one submitted/approved entry.
-  function currentMonthFullySubmitted(report) {
+  function currentWeekFullySubmitted(report) {
     if (!report?.days?.length) return true;
+    const weekStart = isoDate(monday(today));
     return report.days
-      .filter((day) => day?.target_min > 0 && day?.date <= todayIso)
+      .filter(
+        (day) => day?.target_min > 0 && day?.date >= weekStart && day?.date <= todayIso,
+      )
       .every((day) => {
         const entries = Array.isArray(day.entries) ? day.entries : [];
         const hasDraft = entries.some((entry) => entry?.status === "draft");
@@ -149,18 +152,14 @@
   // Builds all YYYY-MM month keys from the user's start month (inclusive) to
   // the current month (inclusive), spanning multiple years. The backend's
   // weeks_all_submitted flag correctly limits checking to fully elapsed weeks
-  // (Sunday < today), so including the current month is safe.
+  // (Sunday < today), including boundary weeks across month edges.
   function allMonthsToCheck() {
     const userStart = $currentUser?.start_date;
     if (!userStart) return [];
     const startYear = parseInt(userStart.slice(0, 4), 10);
     const startMonth = parseInt(userStart.slice(5, 7), 10);
-    let endYear = today.getFullYear();
-    let endMonth = today.getMonth(); // 1-based previous month
-    if (endMonth === 0) {
-      endMonth = 12;
-      endYear -= 1;
-    }
+    const endYear = today.getFullYear();
+    const endMonth = today.getMonth() + 1;
     if (startYear > endYear || (startYear === endYear && startMonth > endMonth)) return [];
     const months = [];
     for (let y = startYear; y <= endYear; y++) {
@@ -175,26 +174,23 @@
 
   async function loadPastMonthSubmissionStatus() {
     const monthsToCheck = allMonthsToCheck();
-    const currentMonth = monthKey(today.getFullYear(), today.getMonth() + 1);
     if (!monthsToCheck.length) {
       monthSubmissionChecks = [];
+      currentMonthSubmitted = true;
+      return;
     }
 
     monthSubmissionLoading = true;
     monthSubmissionError = "";
     try {
-      const requests = [
-        ...monthsToCheck.map((month) => api(`/reports/month?month=${month}`)),
-        api(`/reports/month?month=${currentMonth}`),
-      ];
+      const requests = monthsToCheck.map((month) => api(`/reports/month?month=${month}`));
       const reports = await Promise.all(requests);
       const currentMonthReport = reports[reports.length - 1];
-      const historicalReports = reports.slice(0, monthsToCheck.length);
       monthSubmissionChecks = monthsToCheck.map((month, index) => ({
         month,
-        submitted: monthFullySubmitted(historicalReports[index]),
+        submitted: monthFullySubmitted(reports[index]),
       }));
-      currentMonthSubmitted = currentMonthFullySubmitted(currentMonthReport);
+      currentMonthSubmitted = currentWeekFullySubmitted(currentMonthReport);
     } catch (error) {
       monthSubmissionChecks = [];
       currentMonthSubmitted = true;

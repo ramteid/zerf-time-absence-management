@@ -64,6 +64,12 @@ pub fn year() -> i32 {
     chrono::Utc::now().date_naive().year()
 }
 
+/// Compute per-day target minutes from weekly hours using the same rounding
+/// rule as backend reporting: `(weekly_hours / 5 * 60).round()`.
+pub fn per_day_target_minutes(weekly_hours: i64) -> i64 {
+    (weekly_hours as f64 / 5.0 * 60.0).round() as i64
+}
+
 /// Bootstrap admin (id 1, AdminPass!234), one lead, one employee.
 /// Returns (lead_id, lead_pw, emp_id, emp_pw, monday_iso, cat_id).
 pub async fn bootstrap_team(

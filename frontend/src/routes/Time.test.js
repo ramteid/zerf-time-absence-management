@@ -149,4 +149,40 @@ describe("Time", () => {
     expect(mondayButton).toBeDefined();
     expect(mondayButton.disabled).toBe(false);
   });
+
+  it("requested absences do not reduce weekly target", async () => {
+    const monday = pastMonday();
+    path.set(`/time?week=${monday}`);
+
+    // Keep one approved entry so the summary strip is rendered.
+    mockState.entries = [
+      {
+        id: 100,
+        user_id: 1,
+        entry_date: monday,
+        start_time: "08:00",
+        end_time: "12:00",
+        category_id: 1,
+        status: "approved",
+      },
+    ];
+
+    // Important regression case: requested absences must not remove target time.
+    mockState.absences = [
+      {
+        id: 13,
+        user_id: 1,
+        kind: "vacation",
+        start_date: monday,
+        end_date: monday,
+        status: "requested",
+        comment: null,
+      },
+    ];
+
+    component = mount(Time, { target });
+    await settle();
+
+    expect(target.textContent).toContain("of 40.0h target");
+  });
 });

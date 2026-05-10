@@ -413,5 +413,99 @@ async fn absences_full_workflow() {
         );
     }
 
+    // -- cancellation_pending vacation remains reserved and moves to pending bucket --
+    {
+        let target_day = next_monday(42).format("%Y-%m-%d").to_string();
+        let year = &target_day[..4];
+
+        let (st, balance_before) = emp
+            .get(&format!("/api/v1/leave-balance/{emp_id}?year={year}"))
+            .await;
+        assert_eq!(st, StatusCode::OK, "load baseline leave balance");
+
+        let (st, body) = emp
+            .post(
+                "/api/v1/absences",
+                &json!({"kind":"vacation","start_date": target_day,"end_date": target_day}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "create vacation for cancellation test");
+        let absence_id = id(&body);
+
+        let (st, _) = lead
+            .post(
+                &format!("/api/v1/absences/{absence_id}/approve"),
+                &json!({}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "approve vacation before cancellation request");
+
+        let (st, balance_after_approval) = emp
+            .get(&format!("/api/v1/leave-balance/{emp_id}?year={year}"))
+            .await;
+        assert_eq!(st, StatusCode::OK, "load leave balance after approval");
+
+        let approved_before = balance_before["approved_upcoming"].as_f64().unwrap_or(0.0);
+        let requested_before = balance_before["requested"].as_f64().unwrap_or(0.0);
+        let approved_after = balance_after_approval["approved_upcoming"]
+            .as_f64()
+            .unwrap_or(0.0);
+        let requested_after = balance_after_approval["requested"].as_f64().unwrap_or(0.0);
+        let booked_days = approved_after - approved_before;
+        assert!(
+            booked_days > 0.0,
+            "approved upcoming should increase after approval (before={approved_before}, after={approved_after})"
+        );
+        assert_eq!(
+            requested_after, requested_before,
+            "requested bucket should not change after approval"
+        );
+
+        let (st, body) = emp.delete(&format!("/api/v1/absences/{absence_id}")).await;
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "request cancellation for approved vacation"
+        );
+        assert_eq!(
+            body["pending"], true,
+            "approved vacation cancellation should enter pending workflow"
+        );
+
+        let (st, balance_after_cancellation_request) = emp
+            .get(&format!("/api/v1/leave-balance/{emp_id}?year={year}"))
+            .await;
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "load leave balance after cancellation request"
+        );
+
+        let approved_pending = balance_after_cancellation_request["approved_upcoming"]
+            .as_f64()
+            .unwrap_or(0.0);
+        let requested_pending = balance_after_cancellation_request["requested"]
+            .as_f64()
+            .unwrap_or(0.0);
+        let available_after_approval = balance_after_approval["available"].as_f64().unwrap_or(0.0);
+        let available_pending = balance_after_cancellation_request["available"]
+            .as_f64()
+            .unwrap_or(0.0);
+
+        assert_eq!(
+            approved_pending, approved_before,
+            "approved upcoming should drop back when cancellation is pending"
+        );
+        assert_eq!(
+            requested_pending,
+            requested_before + booked_days,
+            "pending cancellation days should move into requested bucket"
+        );
+        assert_eq!(
+            available_pending, available_after_approval,
+            "available balance should remain reserved while cancellation is pending"
+        );
+    }
+
     app.cleanup().await;
 }

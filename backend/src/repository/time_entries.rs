@@ -1,5 +1,6 @@
 use crate::db::DatabasePool;
 use crate::error::{AppError, AppResult};
+use crate::time_calc;
 use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::{Postgres, QueryBuilder};
@@ -33,9 +34,7 @@ pub struct NewEntryData {
 }
 
 fn parse_time(s: &str) -> AppResult<NaiveTime> {
-    NaiveTime::parse_from_str(s, "%H:%M")
-        .or_else(|_| NaiveTime::parse_from_str(s, "%H:%M:%S"))
-        .map_err(|_| AppError::BadRequest(format!("Invalid time: {s}")))
+    time_calc::parse_input_time(s)
 }
 
 fn duration_min(start: &str, end: &str) -> AppResult<i64> {
@@ -87,7 +86,7 @@ pub(crate) async fn validate_entry(
     if cat_active == Some(false) {
         return Err(AppError::BadRequest("Category is inactive.".into()));
     }
-    if te.entry_date > chrono::Utc::now().date_naive() {
+    if te.entry_date > time_calc::today_local() {
         return Err(AppError::BadRequest(
             "Entries in the future are not allowed.".into(),
         ));
@@ -386,19 +385,33 @@ impl TimeEntryDb {
     }
 
     pub async fn delete(&self, entry_id: i64) -> AppResult<TimeEntry> {
+        let owner_id: i64 = sqlx::query_scalar("SELECT user_id FROM time_entries WHERE id=$1")
+            .bind(entry_id)
+            .fetch_one(&self.pool)
+            .await?;
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("SELECT pg_advisory_xact_lock($1)")
+            .bind(owner_id)
+            .execute(&mut *tx)
+            .await?;
         let entry: TimeEntry = sqlx::query_as::<_, TimeEntry>(&format!(
-            "{TE_SELECT} WHERE id=$1"
+            "{TE_SELECT} WHERE id=$1 FOR UPDATE"
         ))
         .bind(entry_id)
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tx)
         .await?;
         if entry.status != "draft" {
             return Err(AppError::BadRequest("Only drafts can be deleted.".into()));
         }
-        sqlx::query("DELETE FROM time_entries WHERE id=$1")
+        let rows = sqlx::query("DELETE FROM time_entries WHERE id=$1 AND status='draft'")
             .bind(entry_id)
-            .execute(&self.pool)
-            .await?;
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
+        if rows == 0 {
+            return Err(AppError::Conflict("Entry was modified concurrently.".into()));
+        }
+        tx.commit().await?;
         Ok(entry)
     }
 

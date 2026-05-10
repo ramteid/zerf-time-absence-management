@@ -1,6 +1,7 @@
 use crate::auth::User;
 use crate::error::{AppError, AppResult};
 use crate::i18n;
+use crate::time_calc;
 use crate::AppState;
 use axum::{
     extract::{Query, State},
@@ -14,7 +15,7 @@ use sqlx::{Postgres, QueryBuilder};
 use std::collections::HashMap;
 
 fn reporting_today() -> NaiveDate {
-    chrono::Local::now().date_naive()
+    time_calc::today_local()
 }
 
 /// Verify that `requester` is allowed to read data for `target_uid`.
@@ -128,7 +129,7 @@ async fn build_range(
         .await?
         .ok_or(AppError::NotFound)?;
     let user = crate::users::repo_user_to_auth_user(repo_user);
-    let target_per_day_min = (user.weekly_hours / 5.0 * 60.0) as i64;
+    let target_per_day_min = (user.weekly_hours / 5.0 * 60.0).round() as i64;
     let today = reporting_today();
 
     let reports_db = crate::repository::ReportDb::new(pool.clone());
@@ -144,6 +145,8 @@ async fn build_range(
         String,
         Option<String>,
     )> = reports_db.time_entry_rows(user_id, from, to).await?;
+    // Pre-group by date so per-day lookups are O(1) instead of scanning all rows.
+    let entries_by_date = group_entries_by_date(time_entry_rows);
 
     let approved_absence_rows: Vec<(NaiveDate, NaiveDate, String)> =
         reports_db.approved_absence_rows(user_id, from, to).await?;
@@ -169,88 +172,71 @@ async fn build_range(
     let mut category_minutes_by_name: HashMap<String, i64> = HashMap::new();
     let mut current_date = from;
     while current_date <= to {
-        let weekday_number = current_date.weekday().num_days_from_monday();
-        let weekday = weekday_number < 5;
         let holiday = holiday_map.get(&current_date).cloned();
         let absence = approved_absence_rows
             .iter()
-            .find(|(absence_start, absence_end, _)| {
-                current_date >= *absence_start && current_date <= *absence_end
-            })
-            .map(|(_, _, absence_kind)| absence_kind.clone());
+            .find(|(abs_start, abs_end, _)| current_date >= *abs_start && current_date <= *abs_end)
+            .map(|(_, _, kind)| kind.clone());
         let before_start = current_date < user.start_date;
         let after_today = current_date > today;
-        let target =
-            if weekday && holiday.is_none() && absence.is_none() && !before_start && !after_today {
-                target_per_day_min
-            } else {
-                0
-            };
-        // full_month_target counts all workdays in the month (no today cutoff).
-        let full_target =
-            if weekday && holiday.is_none() && absence.is_none() && !before_start {
-                target_per_day_min
-            } else {
-                0
-            };
+
+        // A day has a work target when it is a weekday within the user's contract,
+        // not covered by a holiday or absence, and not in the future.
+        let is_workday = current_date.weekday().num_days_from_monday() < 5
+            && holiday.is_none()
+            && absence.is_none()
+            && !before_start;
+        let target = if is_workday && !after_today { target_per_day_min } else { 0 };
+        // full_month_target counts all contract workdays without the "capped at today" cutoff.
+        let full_target = if is_workday { target_per_day_min } else { 0 };
+
         let mut entries: Vec<EntryDetail> = vec![];
         let mut actual = 0i64;
         let mut submitted = 0i64;
-        for (
-            entry_date,
-            start_time,
-            end_time,
-            category_name,
-            category_color,
-            _category_id,
-            status,
-            comment,
-        ) in &time_entry_rows
-        {
-            if *entry_date != current_date {
-                continue;
+        // Skip entry processing entirely for inactive/future days.
+        if !before_start && !after_today {
+            for (start_time, end_time, category_name, category_color, _cat_id, status, comment)
+                in entries_by_date.get(&current_date).into_iter().flatten()
+            {
+                if status == "rejected" {
+                    continue;
+                }
+                // Defensive: surface a 500 on malformed time strings rather than panicking.
+                // The DB schema does not constrain the text format.
+                let entry_minutes =
+                    (parse_report_time(end_time)? - parse_report_time(start_time)?).num_minutes();
+                // Only approved entries count towards actual hours and the monthly diff.
+                if status == "approved" {
+                    actual += entry_minutes;
+                }
+                // submitted_min includes submitted + approved (everything the employee filed).
+                if status == "approved" || status == "submitted" {
+                    submitted += entry_minutes;
+                }
+                // Category totals include every non-rejected entry.
+                *category_minutes_by_name.entry(category_name.clone()).or_insert(0) +=
+                    entry_minutes;
+                entries.push(EntryDetail {
+                    start_time: start_time.clone(),
+                    end_time: end_time.clone(),
+                    category: category_name.clone(),
+                    color: category_color.clone(),
+                    minutes: entry_minutes,
+                    status: status.clone(),
+                    comment: comment.clone(),
+                });
             }
-            if before_start || after_today || status == "rejected" {
-                continue;
-            }
-            // Defensive: never panic on malformed time data - surface a 500 with
-            // a generic message instead. The DB schema does not constrain the
-            // text format, so a corrupted row must not take the process down.
-            let parsed_start_time = parse_report_time(start_time)?;
-            let parsed_end_time = parse_report_time(end_time)?;
-            let entry_minutes = (parsed_end_time - parsed_start_time).num_minutes();
-            // Only approved entries count towards actual hours and the monthly diff.
-            if status == "approved" {
-                actual += entry_minutes;
-            }
-            // submitted_min counts submitted + approved (everything the employee filed).
-            if status == "approved" || status == "submitted" {
-                submitted += entry_minutes;
-            }
-            // Category totals show every booked entry that is not rejected.
-            *category_minutes_by_name
-                .entry(category_name.clone())
-                .or_insert(0) += entry_minutes;
-            entries.push(EntryDetail {
-                start_time: start_time.clone(),
-                end_time: end_time.clone(),
-                category: category_name.clone(),
-                color: category_color.clone(),
-                minutes: entry_minutes,
-                status: status.clone(),
-                comment: comment.clone(),
-            });
         }
-        let actual_eff = if after_today { 0 } else { actual };
+
         target_total += target;
-        actual_total += actual_eff;
-        submitted_total += submitted; // future entries (after today) already skipped in loop above
+        actual_total += actual;
+        submitted_total += submitted;
         full_month_target_total += full_target;
         days.push(DayDetail {
             date: current_date,
             weekday: weekday_en(current_date).to_string(),
             entries,
-            actual_min: actual_eff,
+            actual_min: actual,
             target_min: target,
             absence,
             holiday,
@@ -351,6 +337,7 @@ fn csv_response(r: MonthReport, uid: i64, file_label: &str) -> AppResult<Respons
             "Absence", "Holiday",
         ])
         .map_err(csv_err)?;
+    let mut csv_total_min = 0i64;
     for day in &r.days {
         if day.entries.is_empty() {
             csv_writer
@@ -369,6 +356,7 @@ fn csv_response(r: MonthReport, uid: i64, file_label: &str) -> AppResult<Respons
                 .map_err(csv_err)?;
         } else {
             for entry in &day.entries {
+                csv_total_min += entry.minutes;
                 csv_writer
                     .write_record([
                         day.date.to_string(),
@@ -393,7 +381,7 @@ fn csv_response(r: MonthReport, uid: i64, file_label: &str) -> AppResult<Respons
             "",
             "",
             "",
-            &r.actual_min.to_string(),
+            &csv_total_min.to_string(),
             "",
             "",
             "",
@@ -581,20 +569,15 @@ async fn all_weeks_submitted_for_month(
     let absence_rows = reports_db
         .absence_ranges_in_period(user_id, check_from, check_to)
         .await?;
-
-    let mut absent_days: std::collections::HashSet<NaiveDate> = std::collections::HashSet::new();
-    for (abs_start, abs_end) in &absence_rows {
-        let mut current_absence_date = check_from.max(*abs_start);
-        let end = check_to.min(*abs_end);
-        while current_absence_date <= end {
-            absent_days.insert(current_absence_date);
-            current_absence_date += Duration::days(1);
-        }
-    }
+    let absent_days = expand_absence_date_set(&absence_rows, check_from, check_to);
 
     // Load submitted/approved time entry dates. Draft days are not submitted.
     let submitted_dates = reports_db
         .submitted_dates_in_range(user_id, check_from, check_to)
+        .await?;
+    // A day with a draft alongside a submitted entry is not fully submitted.
+    let draft_dates = reports_db
+        .draft_dates_in_range(user_id, check_from, check_to)
         .await?;
 
     // Check each fully elapsed week.
@@ -616,8 +599,11 @@ async fn all_weeks_submitted_for_month(
                 continue;
             }
 
-            // Every working day must be covered by an absence OR a submitted entry.
-            if !absent_days.contains(&day) && !submitted_dates.contains(&day) {
+            // Every working day must be covered by an absence OR a submitted entry with no
+            // outstanding drafts.
+            let submitted_and_clean =
+                submitted_dates.contains(&day) && !draft_dates.contains(&day);
+            if !absent_days.contains(&day) && !submitted_and_clean {
                 return Ok(false);
             }
         }
@@ -762,9 +748,51 @@ pub struct CategoryTotal {
 }
 
 fn parse_report_time(raw: &str) -> AppResult<NaiveTime> {
-    NaiveTime::parse_from_str(raw, "%H:%M")
-        .or_else(|_| NaiveTime::parse_from_str(raw, "%H:%M:%S"))
-        .map_err(|_| AppError::Internal("Invalid time value stored in database.".into()))
+    time_calc::parse_stored_time(raw)
+}
+
+// Type alias for the 7-field tuple stored per time entry after stripping the date.
+type RawEntryTuple = (String, String, String, String, i64, String, Option<String>);
+
+/// Pre-groups raw time entry rows (as fetched from the DB) by date.
+/// Allows O(1) per-day lookup instead of scanning the full list for each day.
+fn group_entries_by_date(
+    rows: Vec<(NaiveDate, String, String, String, String, i64, String, Option<String>)>,
+) -> HashMap<NaiveDate, Vec<RawEntryTuple>> {
+    let mut map: HashMap<NaiveDate, Vec<RawEntryTuple>> = HashMap::new();
+    for (date, start, end, category, color, cat_id, status, comment) in rows {
+        map.entry(date)
+            .or_default()
+            .push((start, end, category, color, cat_id, status, comment));
+    }
+    map
+}
+
+/// Expands a list of (start, end) date ranges into a flat set of individual dates,
+/// clamped to the given [from, to] window.
+fn expand_absence_date_set(
+    ranges: &[(NaiveDate, NaiveDate)],
+    from: NaiveDate,
+    to: NaiveDate,
+) -> std::collections::HashSet<NaiveDate> {
+    let mut set = std::collections::HashSet::new();
+    for &(range_start, range_end) in ranges {
+        let mut day = range_start.max(from);
+        while day <= range_end.min(to) {
+            set.insert(day);
+            day += Duration::days(1);
+        }
+    }
+    set
+}
+
+/// Sorts category totals descending by minutes, then ascending by name.
+fn sort_categories_desc(cats: &mut Vec<CategoryTotal>) {
+    cats.sort_by(|a, b| {
+        b.minutes
+            .cmp(&a.minutes)
+            .then_with(|| a.category.cmp(&b.category))
+    });
 }
 
 pub async fn categories(
@@ -820,17 +848,9 @@ pub async fn categories(
     }
     let mut sorted_totals: Vec<CategoryTotal> = category_minutes_map
         .into_iter()
-        .map(|((category, color), minutes)| CategoryTotal {
-            category,
-            color,
-            minutes,
-        })
+        .map(|((category, color), minutes)| CategoryTotal { category, color, minutes })
         .collect();
-    sorted_totals.sort_by(|a, b| {
-        b.minutes
-            .cmp(&a.minutes)
-            .then_with(|| a.category.cmp(&b.category))
-    });
+    sort_categories_desc(&mut sorted_totals);
     Ok(Json(sorted_totals))
 }
 
@@ -918,17 +938,9 @@ pub async fn team_categories(
                 .remove(&uid)
                 .unwrap_or_default()
                 .into_iter()
-                .map(|((category, color), minutes)| CategoryTotal {
-                    category,
-                    color,
-                    minutes,
-                })
+                .map(|((category, color), minutes)| CategoryTotal { category, color, minutes })
                 .collect();
-            cats.sort_by(|a, b| {
-                b.minutes
-                    .cmp(&a.minutes)
-                    .then_with(|| a.category.cmp(&b.category))
-            });
+            sort_categories_desc(&mut cats);
             UserCategoryRow {
                 user_id: uid,
                 name: format!("{first} {last}"),
@@ -1117,7 +1129,7 @@ pub async fn flextime(
             .await?
             .ok_or(AppError::NotFound)?,
     );
-    let target_per_day_min = (user.weekly_hours / 5.0 * 60.0) as i64;
+    let target_per_day_min = (user.weekly_hours / 5.0 * 60.0).round() as i64;
 
     // Seed cumulative at query.from-1 via month-level overtime plus a small
     // partial-month report, so per-day flextime processing stays within the
@@ -1186,14 +1198,12 @@ pub async fn flextime(
         .approved_absence_rows(target_user_id, query.from, query.to)
         .await?;
 
+    // Expand absence ranges into a per-day map so each day can look up its kind in O(1).
     let mut absence_by_day: HashMap<NaiveDate, String> = HashMap::new();
     for (absence_start, absence_end, absence_kind) in approved_absences {
-        let mut day = std::cmp::max(absence_start, query.from);
-        let end = std::cmp::min(absence_end, query.to);
-        while day <= end {
-            absence_by_day
-                .entry(day)
-                .or_insert_with(|| absence_kind.clone());
+        let mut day = absence_start.max(query.from);
+        while day <= absence_end.min(query.to) {
+            absence_by_day.entry(day).or_insert_with(|| absence_kind.clone());
             day += Duration::days(1);
         }
     }
@@ -1223,29 +1233,20 @@ pub async fn flextime(
         if current_date == user.start_date && query.from < user.start_date {
             cumulative_min += user.overtime_start_balance_min;
         }
-        let day_of_week_num = current_date.weekday().num_days_from_monday();
-        let is_weekday = day_of_week_num < 5;
         let holiday = holiday_map.get(&current_date).cloned();
         let absence = absence_by_day.get(&current_date).cloned();
         let before_start = current_date < user.start_date;
         let after_today = current_date > today;
-        let target = if is_weekday
+        let is_workday = current_date.weekday().num_days_from_monday() < 5
             && holiday.is_none()
             && absence.is_none()
             && !before_start
-            && !after_today
-        {
-            target_per_day_min
-        } else {
-            0
-        };
+            && !after_today;
+        let target = if is_workday { target_per_day_min } else { 0 };
         let actual = if before_start || after_today {
             0
         } else {
-            approved_minutes_by_day
-                .get(&current_date)
-                .copied()
-                .unwrap_or(0)
+            approved_minutes_by_day.get(&current_date).copied().unwrap_or(0)
         };
         let day_diff_min = actual - target;
         cumulative_min += day_diff_min;

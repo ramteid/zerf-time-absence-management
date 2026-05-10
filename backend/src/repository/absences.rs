@@ -482,8 +482,8 @@ impl AbsenceDb {
         absence_id: i64,
     ) -> AppResult<u64> {
         Ok(sqlx::query(
-            "UPDATE absences SET status='cancellation_pending', reviewed_by=NULL, \
-             reviewed_at=NULL WHERE id=$1 AND status='approved'",
+            "UPDATE absences SET status='cancellation_pending' \
+             WHERE id=$1 AND status='approved'",
         )
         .bind(absence_id)
         .execute(tx)
@@ -512,11 +512,11 @@ impl AbsenceDb {
         absence_id: i64,
         reviewer_id: i64,
     ) -> AppResult<u64> {
+        let _ = reviewer_id; // recorded in audit log; original reviewer_by preserved on the row
         Ok(sqlx::query(
-            "UPDATE absences SET status='approved', reviewed_by=$1, \
-             reviewed_at=CURRENT_TIMESTAMP WHERE id=$2 AND status='cancellation_pending'",
+            "UPDATE absences SET status='approved' \
+             WHERE id=$1 AND status='cancellation_pending'",
         )
-        .bind(reviewer_id)
         .bind(absence_id)
         .execute(tx)
         .await?
@@ -556,7 +556,8 @@ impl AbsenceDb {
 
     // ── Vacation balance helpers ───────────────────────────────────────────
 
-    /// Load vacation ranges (requested+approved) for a year, optionally excluding one absence.
+    /// Load vacation ranges that reserve vacation budget for a year
+    /// (requested, approved, cancellation_pending), optionally excluding one absence.
     pub async fn vacation_ranges_in_year_tx(
         tx: &mut sqlx::PgConnection,
         user_id: i64,
@@ -638,6 +639,105 @@ impl AbsenceDb {
 
     pub async fn begin(&self) -> AppResult<sqlx::Transaction<'_, sqlx::Postgres>> {
         Ok(self.pool.begin().await?)
+    }
+
+    /// Return the error if any active absence for this user overlaps `[start, end]`.
+    /// Pass `exclude_id` when editing an existing absence so it is not counted against itself.
+    pub async fn assert_no_overlap_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        user_id: i64,
+        start_date: NaiveDate,
+        end_date: NaiveDate,
+        exclude_id: Option<i64>,
+    ) -> AppResult<()> {
+        let count: i64 = if let Some(excl) = exclude_id {
+            sqlx::query_scalar(
+                "SELECT COUNT(*) FROM absences WHERE id != $1 AND user_id=$2 \
+                 AND status IN ('requested','approved','cancellation_pending') \
+                 AND end_date >= $3 AND start_date <= $4",
+            )
+            .bind(excl).bind(user_id).bind(start_date).bind(end_date)
+            .fetch_one(&mut **tx).await?
+        } else {
+            sqlx::query_scalar(
+                "SELECT COUNT(*) FROM absences WHERE user_id=$1 \
+                 AND status IN ('requested','approved','cancellation_pending') \
+                 AND end_date >= $2 AND start_date <= $3",
+            )
+            .bind(user_id).bind(start_date).bind(end_date)
+            .fetch_one(&mut **tx).await?
+        };
+        if count > 0 {
+            return Err(AppError::Conflict("Overlap with existing absence.".into()));
+        }
+        Ok(())
+    }
+
+    /// Insert a new absence row and return the generated ID.
+    pub async fn insert_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        user_id: i64,
+        kind: &str,
+        start_date: NaiveDate,
+        end_date: NaiveDate,
+        comment: Option<&str>,
+        initial_status: &str,
+    ) -> AppResult<i64> {
+        Ok(sqlx::query_scalar(
+            "INSERT INTO absences(user_id, kind, start_date, end_date, comment, status) \
+             VALUES ($1,$2,$3,$4,$5,$6) RETURNING id",
+        )
+        .bind(user_id).bind(kind).bind(start_date).bind(end_date).bind(comment).bind(initial_status)
+        .fetch_one(&mut **tx).await?)
+    }
+
+    /// Update mutable fields of a pending absence (resets review metadata).
+    pub async fn update_fields_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        absence_id: i64,
+        kind: &str,
+        start_date: NaiveDate,
+        end_date: NaiveDate,
+        comment: Option<&str>,
+        new_status: &str,
+    ) -> AppResult<()> {
+        sqlx::query(
+            "UPDATE absences SET kind=$1, start_date=$2, end_date=$3, comment=$4, \
+             status=$5, reviewed_by=NULL, reviewed_at=NULL, rejection_reason=NULL \
+             WHERE id=$6",
+        )
+        .bind(kind).bind(start_date).bind(end_date).bind(comment).bind(new_status).bind(absence_id)
+        .execute(&mut **tx).await?;
+        Ok(())
+    }
+
+    /// Cancel a still-requested absence (user-initiated withdrawal, no review needed).
+    pub async fn cancel_requested_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        absence_id: i64,
+    ) -> AppResult<()> {
+        sqlx::query("UPDATE absences SET status='cancelled' WHERE id=$1")
+            .bind(absence_id)
+            .execute(&mut **tx)
+            .await?;
+        Ok(())
+    }
+
+    /// Return the `before_data` JSON from the most recent 'updated' audit log entry
+    /// for this absence. Returns `None` when no such entry exists (e.g. first request).
+    pub async fn latest_update_before_data(
+        pool: &DatabasePool,
+        absence_id: i64,
+    ) -> AppResult<Option<String>> {
+        Ok(sqlx::query_scalar(
+            "SELECT before_data FROM audit_log \
+             WHERE table_name='absences' AND record_id=$1 AND action='updated' \
+             ORDER BY occurred_at DESC LIMIT 1",
+        )
+        .bind(absence_id)
+        .fetch_optional(pool)
+        .await?
+        .flatten())
     }
 
     /// Carryover expiry setting (used in vacation balance calculation).
