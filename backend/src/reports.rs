@@ -832,11 +832,13 @@ pub async fn categories(
     if let Some(user_id) = target_user_id {
         builder.push(" AND z.user_id = ").push_bind(user_id);
     } else if !requester.is_admin() {
-        // Non-admin lead with no specific user: restrict to direct reports.
+        // Non-admin lead with no specific user: include self and direct reports.
         builder
-            .push(" AND z.user_id IN (SELECT ua.user_id FROM user_approvers ua JOIN users u ON u.id=ua.user_id WHERE ua.approver_id = ")
+            .push(" AND z.user_id IN (SELECT id FROM users WHERE id = ")
             .push_bind(requester.id)
-            .push(" AND u.role != 'admin')");
+            .push(" OR (role != 'admin' AND id IN (SELECT user_id FROM user_approvers WHERE approver_id = ")
+            .push_bind(requester.id)
+            .push(")))");
     }
     let rows: Vec<(String, String, String, String)> =
         builder.build_query_as().fetch_all(&app_state.pool).await?;

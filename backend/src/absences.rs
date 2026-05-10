@@ -1151,6 +1151,7 @@ async fn validate_vacation_balance(
         crate::settings::load_setting(pool, "carryover_expiry_date", "03-31").await?;
     let (effective_entitlement, carryover_days, carryover_expired) =
         vacation_year_context(pool, user, year, today, &expiry_setting).await?;
+    let expiry_date = parse_expiry_date(&expiry_setting, year);
     let total_entitlement =
         total_entitlement_with_carryover(effective_entitlement, carryover_days, carryover_expired);
 
@@ -1171,6 +1172,62 @@ async fn validate_vacation_balance(
         return Err(AppError::BadRequest(
             "Not enough remaining vacation days.".into(),
         ));
+    }
+
+    // Enforce carryover expiry by absence date, not request/approval date.
+    // Days strictly after the configured expiry must be covered by current-year
+    // entitlement only; carryover can cover only days on/before expiry.
+    if let Some(expiry) = expiry_date {
+        let pre_window_end = std::cmp::min(expiry, year_to);
+        let post_window_start = expiry + Duration::days(1);
+
+        let pre_existing_days = if year_from <= pre_window_end {
+            workdays_for_ranges_in_window(pool, &existing_ranges, year_from, pre_window_end).await?
+        } else {
+            0.0
+        };
+        let pre_new_days = if year_from <= pre_window_end {
+            if let Some((pre_new_start, pre_new_end)) =
+                clamp_range_to_window(start_date, end_date, year_from, pre_window_end)
+            {
+                workdays(pool, pre_new_start, pre_new_end).await?
+            } else {
+                0.0
+            }
+        } else {
+            0.0
+        };
+
+        let post_existing_days = if post_window_start <= year_to {
+            workdays_for_ranges_in_window(pool, &existing_ranges, post_window_start, year_to)
+                .await?
+        } else {
+            0.0
+        };
+        let post_new_days = if post_window_start <= year_to {
+            if let Some((post_new_start, post_new_end)) =
+                clamp_range_to_window(start_date, end_date, post_window_start, year_to)
+            {
+                workdays(pool, post_new_start, post_new_end).await?
+            } else {
+                0.0
+            }
+        } else {
+            0.0
+        };
+
+        let pre_total = pre_existing_days + pre_new_days;
+        let post_total = post_existing_days + post_new_days;
+        let carryover_budget = carryover_days as f64;
+        let base_budget = effective_entitlement as f64;
+        let base_consumed_before_or_on_expiry = (pre_total - carryover_budget).max(0.0);
+        let base_remaining_after_expiry = (base_budget - base_consumed_before_or_on_expiry).max(0.0);
+
+        if post_total > base_remaining_after_expiry {
+            return Err(AppError::BadRequest(
+                "Not enough remaining vacation days.".into(),
+            ));
+        }
     }
 
     // When the absence spans New Year's Day, validate the end year's budget separately.

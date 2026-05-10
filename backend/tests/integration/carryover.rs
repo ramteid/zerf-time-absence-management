@@ -254,5 +254,47 @@ async fn carryover_policy_edge_cases() {
         "available must stay unchanged while cancellation is pending"
     );
 
+    // Edge case 5: post-expiry vacation days must be covered by current-year
+    // entitlement only; carryover can be used only up to the expiry date.
+    // Here: next-year entitlement=2, carryover=4 from current year => November
+    // bookings in next year may reserve at most 2 days.
+    set_leave_days_current_and_next(&admin, emp_id, 6, 2).await;
+
+    let (st, bal_next_year_small_entitlement) = emp
+        .get(&format!("/api/v1/leave-balance/{emp_id}?year={next_year}"))
+        .await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(
+        json_i64(&bal_next_year_small_entitlement, "annual_entitlement"),
+        2,
+        "next-year entitlement should be overridden to 2"
+    );
+    assert_eq!(
+        json_i64(&bal_next_year_small_entitlement, "carryover_days"),
+        4,
+        "carryover remains 4 from current-year entitlement 6 minus 2 approved"
+    );
+
+    let nov_workdays = pick_workdays(&emp, next_year, 11, 3).await;
+    for day in &nov_workdays[0..2] {
+        let _ = create_vacation(&emp, *day).await;
+    }
+    let day3 = nov_workdays[2].format("%Y-%m-%d").to_string();
+    let (st, body) = emp
+        .post(
+            "/api/v1/absences",
+            &json!({"kind":"vacation","start_date": day3, "end_date": day3}),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::BAD_REQUEST,
+        "third post-expiry day should be rejected; only annual entitlement is usable after expiry"
+    );
+    assert!(
+        body.to_string().contains("Not enough remaining vacation days"),
+        "error should mention remaining vacation days: {body}"
+    );
+
     app.cleanup().await;
 }
