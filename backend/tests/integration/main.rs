@@ -19,6 +19,7 @@ mod helpers;
 mod absences;
 mod admin;
 mod auth;
+mod carryover;
 mod change_requests;
 mod full_suite;
 mod notifications;

@@ -2,6 +2,7 @@ use crate::audit;
 use crate::auth::User;
 use crate::error::{AppError, AppResult};
 use crate::i18n;
+use crate::time_calc;
 use crate::AppState;
 use axum::{
     extract::{Path, State},
@@ -93,9 +94,8 @@ pub struct NewChangeRequest {
 }
 
 fn parse_change_time(time_str: &str) -> AppResult<NaiveTime> {
-    NaiveTime::parse_from_str(time_str, "%H:%M")
-        .or_else(|_| NaiveTime::parse_from_str(time_str, "%H:%M:%S"))
-        .map_err(|_| AppError::BadRequest("Invalid time format (HH:MM).".into()))
+    time_calc::parse_hhmm_or_hhmmss(time_str)
+        .ok_or_else(|| AppError::BadRequest("Invalid time format (HH:MM).".into()))
 }
 
 fn monday_of(date: NaiveDate) -> NaiveDate {
@@ -289,7 +289,7 @@ pub async fn create(
         }
     }
     if let Some(new_date) = body.new_date {
-        if new_date > chrono::Utc::now().date_naive() {
+        if new_date > time_calc::today_local() {
             return Err(AppError::BadRequest("Date cannot be in the future.".into()));
         }
         if new_date < requester.start_date {
@@ -545,6 +545,9 @@ pub async fn approve(
             .clone()
             .or(existing_entry.comment.clone()),
     };
+    // Validate the resulting state on the effective (possibly changed) entry date.
+    // The source day can only lose minutes when moving/changing an entry, so it
+    // cannot newly violate overlap/day-total constraints.
     crate::time_entries::validate(
         &mut transaction,
         existing_entry.user_id,
@@ -720,7 +723,7 @@ pub async fn reject(
             "submitted".to_string(),
             change_request
                 .new_date
-                .unwrap_or(chrono::Utc::now().date_naive()),
+                .unwrap_or(time_calc::today_local()),
             change_request
                 .new_start_time
                 .clone()

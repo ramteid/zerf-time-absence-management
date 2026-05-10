@@ -2,7 +2,7 @@ use crate::db::DatabasePool;
 use crate::error::AppResult;
 use crate::repository::users::User;
 use chrono::NaiveDate;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 #[derive(Clone)]
 pub struct ReportDb {
@@ -57,7 +57,10 @@ impl ReportDb {
         .await?)
     }
 
-    /// Approved absences in range: (start_date, end_date, kind).
+    /// Active absences in range: (start_date, end_date, kind).
+    ///
+    /// `cancellation_pending` still blocks time logging until an approver
+    /// decides, so reporting/flextime must treat it like approved.
     pub async fn approved_absence_rows(
         &self,
         user_id: i64,
@@ -66,7 +69,7 @@ impl ReportDb {
     ) -> AppResult<Vec<(NaiveDate, NaiveDate, String)>> {
         Ok(sqlx::query_as(
             "SELECT start_date, end_date, kind FROM absences \
-             WHERE user_id=$1 AND status='approved' \
+             WHERE user_id=$1 AND status IN ('approved','cancellation_pending') \
              AND end_date >= $2 AND start_date <= $3",
         )
         .bind(user_id)
@@ -103,14 +106,6 @@ impl ReportDb {
         Ok(rows.into_iter().map(|(d,)| d).collect())
     }
 
-    pub async fn holiday_map(&self, from: NaiveDate, to: NaiveDate) -> AppResult<HashMap<NaiveDate, String>> {
-        let rows: Vec<(NaiveDate, String, Option<String>)> = self.holiday_rows(from, to).await?;
-        Ok(rows
-            .into_iter()
-            .map(|(d, name, local)| (d, local.unwrap_or(name)))
-            .collect())
-    }
-
     /// Submitted/approved dates (for all_weeks_submitted check).
     pub async fn submitted_dates_in_range(
         &self,
@@ -131,6 +126,26 @@ impl ReportDb {
         Ok(rows.into_iter().map(|(d,)| d).collect())
     }
 
+    /// Dates that have at least one draft entry (for all_weeks_submitted check).
+    pub async fn draft_dates_in_range(
+        &self,
+        user_id: i64,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> AppResult<HashSet<NaiveDate>> {
+        let rows: Vec<(NaiveDate,)> = sqlx::query_as(
+            "SELECT DISTINCT entry_date FROM time_entries \
+             WHERE user_id=$1 AND status='draft' \
+             AND entry_date BETWEEN $2 AND $3",
+        )
+        .bind(user_id)
+        .bind(from)
+        .bind(to)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(|(d,)| d).collect())
+    }
+
     /// Absence ranges in a period (for all_weeks_submitted check).
     pub async fn absence_ranges_in_period(
         &self,
@@ -140,7 +155,7 @@ impl ReportDb {
     ) -> AppResult<Vec<(NaiveDate, NaiveDate)>> {
         Ok(sqlx::query_as(
             "SELECT start_date, end_date FROM absences \
-             WHERE user_id=$1 AND status='approved' \
+             WHERE user_id=$1 AND status IN ('approved','cancellation_pending') \
              AND end_date >= $2 AND start_date <= $3",
         )
         .bind(user_id)
@@ -262,22 +277,4 @@ impl ReportDb {
         }
     }
 
-    /// Approved absence ranges for a user (for overtime calculation).
-    pub async fn approved_absences_in_range(
-        &self,
-        user_id: i64,
-        from: NaiveDate,
-        to: NaiveDate,
-    ) -> AppResult<Vec<(NaiveDate, NaiveDate, String)>> {
-        Ok(sqlx::query_as(
-            "SELECT start_date, end_date, kind FROM absences \
-             WHERE user_id=$1 AND status='approved' \
-             AND end_date >= $2 AND start_date <= $3",
-        )
-        .bind(user_id)
-        .bind(from)
-        .bind(to)
-        .fetch_all(&self.pool)
-        .await?)
-    }
 }

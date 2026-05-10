@@ -231,7 +231,15 @@ async fn notifications_full_workflow() {
             .expect("timesheet_approved notification must exist");
 
         assert_eq!(approval_notification["title"], "Timesheet approved");
-        assert_eq!(approval_notification["body"], "1 week approved.");
+        let body = approval_notification["body"]
+            .as_str()
+            .expect("timesheet approval notification body must be string");
+        assert!(
+            body.contains("Your timesheets were approved in batch.")
+                && body.contains("Scope: 1 week")
+                && body.contains("Please review your dashboard for details."),
+            "unexpected batch approval body: {body}"
+        );
     }
 
     app.cleanup().await;

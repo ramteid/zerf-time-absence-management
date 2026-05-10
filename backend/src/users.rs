@@ -693,11 +693,14 @@ pub async fn deactivate(
         }
     }
     // Block deactivation if this person is an assigned approver for active users.
-    let direct_reports_count = app_state
-        .db
-        .users
-        .count_active_direct_reports(user_id)
-        .await?;
+    // Run inside the transaction (under the user-graph lock) to avoid TOCTOU.
+    let direct_reports_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM user_approvers \
+         WHERE approver_id=$1 AND user_id IN (SELECT id FROM users WHERE active=TRUE)",
+    )
+    .bind(user_id)
+    .fetch_one(&mut *transaction)
+    .await?;
     if direct_reports_count > 0 {
         return Err(AppError::BadRequest(format!(
             "Cannot deactivate: {} active user(s) still have this person as their approver. Reassign them first.",
@@ -750,7 +753,14 @@ pub async fn delete_user(
             ));
         }
     }
-    let direct_reports_count = app_state.db.users.count_active_direct_reports(user_id).await?;
+    // Run inside the transaction (under the user-graph lock) to avoid TOCTOU.
+    let direct_reports_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM user_approvers \
+         WHERE approver_id=$1 AND user_id IN (SELECT id FROM users WHERE active=TRUE)",
+    )
+    .bind(user_id)
+    .fetch_one(&mut *transaction)
+    .await?;
     if direct_reports_count > 0 {
         return Err(AppError::BadRequest(format!(
             "Cannot delete: {} active user(s) still have this person as their approver. Reassign them first.",
@@ -886,9 +896,9 @@ pub async fn set_leave_days_handler(
         return Err(AppError::Forbidden);
     }
     let current_year = chrono::Local::now().year();
-    if body.year < current_year || body.year > current_year + 1 {
+    if body.year > current_year + 1 {
         return Err(AppError::BadRequest(
-            "Leave days can only be set for the current or next year.".into(),
+            "Leave days cannot be set more than one year ahead.".into(),
         ));
     }
     if !(0..=366).contains(&body.days) {

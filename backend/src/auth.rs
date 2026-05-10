@@ -73,6 +73,9 @@ impl User {
     pub fn is_lead(&self) -> bool {
         self.role == "team_lead" || self.role == "admin"
     }
+    pub fn full_name(&self) -> String {
+        format!("{} {}", self.first_name, self.last_name)
+    }
 }
 
 /// Fetch all assigned approvers for a user from the user_approvers table.

@@ -257,6 +257,95 @@ async fn reports_full_workflow() {
         assert_eq!(rows[0]["minutes"], 240);
     }
 
+    // -- cancellation_pending absences remove day target like approved absences --
+    {
+        let (_lead_id, _lead_pw, emp_id, emp_pw, monday, _cat_id) =
+            bootstrap_team_with_suffix(&app, &admin, false, "3b").await;
+        let emp = login_change_pw(&app, "emp-3b@example.com", &emp_pw).await;
+
+        // Insert a cancellation_pending vacation absence directly to pin report semantics.
+        // Time-entry validation treats this status as blocking, so reports/flextime must
+        // also remove target minutes for the covered day.
+        sqlx::query(
+            "INSERT INTO absences(user_id, kind, start_date, end_date, status, created_at) \
+             VALUES ($1,'vacation',$2,$2,'cancellation_pending',CURRENT_TIMESTAMP)",
+        )
+        .bind(emp_id)
+        .bind(chrono::NaiveDate::parse_from_str(&monday, "%Y-%m-%d").unwrap())
+        .execute(&app.state.pool)
+        .await
+        .unwrap();
+
+        let month = &monday[..7];
+        let (st, body) = emp
+            .get(&format!("/api/v1/reports/month?month={month}"))
+            .await;
+        assert_eq!(st, StatusCode::OK, "month report for cancellation_pending");
+        let day = body["days"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["date"] == monday)
+            .unwrap();
+        assert_eq!(day["absence"], "vacation");
+        assert_eq!(day["target_min"], 0);
+
+        let (st, body) = emp
+            .get(&format!(
+                "/api/v1/reports/flextime?from={}&to={}",
+                monday, monday
+            ))
+            .await;
+        assert_eq!(st, StatusCode::OK, "flextime for cancellation_pending");
+        assert_eq!(body.as_array().unwrap()[0]["absence"], "vacation");
+        assert_eq!(body.as_array().unwrap()[0]["target_min"], 0);
+    }
+
+    // -- requested absences do not remove day target before approval --
+    {
+        let expected_day_target = per_day_target_minutes(39);
+        let (_lead_id, _lead_pw, emp_id, emp_pw, monday, _cat_id) =
+            bootstrap_team_with_suffix(&app, &admin, false, "3c").await;
+        let emp = login_change_pw(&app, "emp-3c@example.com", &emp_pw).await;
+
+        // Insert a requested vacation absence directly to pin report semantics.
+        // Requested absences are not yet approved and therefore must NOT remove
+        // target minutes in month/flextime views.
+        sqlx::query(
+            "INSERT INTO absences(user_id, kind, start_date, end_date, status, created_at) \
+             VALUES ($1,'vacation',$2,$2,'requested',CURRENT_TIMESTAMP)",
+        )
+        .bind(emp_id)
+        .bind(chrono::NaiveDate::parse_from_str(&monday, "%Y-%m-%d").unwrap())
+        .execute(&app.state.pool)
+        .await
+        .unwrap();
+
+        let month = &monday[..7];
+        let (st, body) = emp
+            .get(&format!("/api/v1/reports/month?month={month}"))
+            .await;
+        assert_eq!(st, StatusCode::OK, "month report for requested absence");
+        let day = body["days"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["date"] == monday)
+            .unwrap();
+        assert!(day["absence"].is_null());
+        assert_eq!(day["target_min"], expected_day_target);
+
+        let (st, body) = emp
+            .get(&format!(
+                "/api/v1/reports/flextime?from={}&to={}",
+                monday, monday
+            ))
+            .await;
+        assert_eq!(st, StatusCode::OK, "flextime for requested absence");
+        assert!(body.as_array().unwrap()[0]["absence"].is_null());
+        assert_eq!(body.as_array().unwrap()[0]["target_min"], expected_day_target);
+    }
+
     // -- Reports ignore legacy time before user start date --
     {
         let (lead_id, lead_pw, emp_id, emp_pw, _monday, cat_id) =

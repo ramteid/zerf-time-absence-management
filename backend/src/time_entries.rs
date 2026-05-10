@@ -7,7 +7,7 @@ use axum::{
     extract::{Path, Query, State},
     Json,
 };
-use chrono::{DateTime, Datelike, NaiveDate, NaiveTime, Utc};
+use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use std::collections::HashSet;
@@ -57,23 +57,6 @@ pub struct TimeEntry {
     pub rejection_reason: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
-}
-
-fn parse_time(time_str: &str) -> AppResult<NaiveTime> {
-    NaiveTime::parse_from_str(time_str, "%H:%M")
-        .or_else(|_| NaiveTime::parse_from_str(time_str, "%H:%M:%S"))
-        .map_err(|_| AppError::BadRequest(format!("Invalid time: {time_str}")))
-}
-
-fn duration_min(start: &str, end: &str) -> AppResult<i64> {
-    let start_time = parse_time(start)?;
-    let end_time = parse_time(end)?;
-    if end_time <= start_time {
-        return Err(AppError::BadRequest(
-            "End time must be after start time.".into(),
-        ));
-    }
-    Ok((end_time - start_time).num_minutes())
 }
 
 fn week_start(date: NaiveDate) -> NaiveDate {
@@ -141,88 +124,14 @@ pub(crate) async fn validate(
     te: &NewTimeEntry,
     exclude_id: Option<i64>,
 ) -> AppResult<()> {
-    if let Some(c) = &te.comment {
-        if c.len() > 2000 {
-            return Err(AppError::BadRequest("Comment too long (max 2000).".into()));
-        }
-    }
-    // Reject entries before the user's start_date.
-    let user_start: chrono::NaiveDate =
-        sqlx::query_scalar("SELECT start_date FROM users WHERE id = $1")
-            .bind(user_id)
-            .fetch_one(&mut *conn)
-            .await?;
-    if te.entry_date < user_start {
-        return Err(AppError::BadRequest(
-            "Entry date is before user start date.".into(),
-        ));
-    }
-    // Validate that the category exists and is active.
-    let cat_active: Option<bool> =
-        sqlx::query_scalar("SELECT active FROM categories WHERE id = $1")
-            .bind(te.category_id)
-            .fetch_optional(&mut *conn)
-            .await?;
-    if cat_active.is_none() {
-        return Err(AppError::BadRequest("Category not found.".into()));
-    }
-    if cat_active == Some(false) {
-        return Err(AppError::BadRequest("Category is inactive.".into()));
-    }
-    if te.entry_date > chrono::Utc::now().date_naive() {
-        return Err(AppError::BadRequest(
-            "Entries in the future are not allowed.".into(),
-        ));
-    }
-    let new_min = duration_min(&te.start_time, &te.end_time)?;
-    let start_n = parse_time(&te.start_time)?;
-    let end_n = parse_time(&te.end_time)?;
-
-    let existing_entries: Vec<(i64, String, String, String)> = sqlx::query_as(
-        "SELECT id, start_time, end_time, status FROM time_entries WHERE user_id=$1 AND entry_date=$2",
-    )
-    .bind(user_id)
-    .bind(te.entry_date)
-    .fetch_all(&mut *conn)
-    .await?;
-
-    let mut day_total = new_min;
-    for (existing_id, start_str, end_str, status) in &existing_entries {
-        // Skip the entry being edited and rejected entries (they are void).
-        if Some(*existing_id) == exclude_id || status == "rejected" {
-            continue;
-        }
-        let existing_start = parse_time(start_str)?;
-        let existing_end = parse_time(end_str)?;
-        if start_n < existing_end && existing_start < end_n {
-            return Err(AppError::BadRequest(
-                "Overlap with an existing entry.".into(),
-            ));
-        }
-        day_total += (existing_end - existing_start).num_minutes();
-    }
-    if day_total > 14 * 60 {
-        return Err(AppError::BadRequest("Day total exceeds 14 hours.".into()));
-    }
-    // Prevent time entries on days with approved absences (vacation, unpaid,
-    // training, special_leave, general_absence). Sick days are excluded from
-    // this check because partial sick days with work are common.
-    let absence_on_day: Option<String> = sqlx::query_scalar(
-        "SELECT kind FROM absences WHERE user_id=$1 \
-         AND status IN ('approved','cancellation_pending') \
-         AND start_date <= $2 AND end_date >= $2 AND kind <> 'sick' LIMIT 1",
-    )
-    .bind(user_id)
-    .bind(te.entry_date)
-    .fetch_optional(&mut *conn)
-    .await?;
-    if let Some(kind) = absence_on_day {
-        return Err(AppError::BadRequest(format!(
-            "Cannot log time on a day with an approved absence ({kind}). \
-             Please cancel or adjust the absence first."
-        )));
-    }
-    Ok(())
+    let entry = crate::repository::NewEntryData {
+        entry_date: te.entry_date,
+        start_time: te.start_time.clone(),
+        end_time: te.end_time.clone(),
+        category_id: te.category_id,
+        comment: te.comment.clone(),
+    };
+    crate::repository::time_entries::validate_entry(conn, user_id, &entry, exclude_id).await
 }
 
 pub async fn create(

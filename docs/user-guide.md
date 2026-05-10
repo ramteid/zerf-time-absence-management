@@ -124,15 +124,125 @@ States:
 - `All submitted` (green): all required days in elapsed weeks are covered by submitted or approved entries.
 - `Weeks missing` (amber): at least one elapsed week has missing submissions.
 
-## Vacation balance logic
+## Vacation balance and carryover logic
+
+This section explains exactly how vacation balances are calculated, including carryover from the previous year.
+
+### Balance fields in the UI
 
 | Field | Meaning |
 | --- | --- |
-| Entitlement | Annual leave configured for the selected year (incl. carryover). |
-| Taken | Approved leave days already in the past. |
-| Planned | Approved future leave days. |
-| Requested | Pending leave requests. |
-| Remaining | Entitlement minus taken minus planned minus requested. |
+| Annual entitlement | Configured annual leave for the selected year (after start-date pro-rating). |
+| Carryover days | Unused vacation from previous year that can be transferred into selected year. |
+| Carryover remaining | Portion of transferred carryover that is still unused. |
+| Carryover expiry | Date when carryover becomes unusable (MM-DD from settings, applied to selected year). |
+| Already taken | Approved vacation days in the selected year that are already in the past (or up to today). |
+| Approved upcoming | Approved vacation days in the selected year that are still in the future. |
+| Requested | Vacation requests waiting for approval. Includes cancellation pending days. |
+| Available | Total budget minus already taken, approved upcoming, and requested. |
+
+### Core formulas
+
+For selected year Y:
+
+1. Annual entitlement Y:
+- Uses the leave-day value configured for user and year Y.
+- If user started during Y, entitlement is pro-rated.
+
+2. Carryover days into Y:
+- Start with previous year entitlement after pro-rating.
+- Subtract previous year approved vacation usage.
+- Never below zero.
+
+In short:
+- Carryover days Y = max(0, previous-year entitlement - previous-year approved usage)
+
+3. Total usable budget in Y:
+- If carryover has expired: only annual entitlement.
+- If carryover has not expired: annual entitlement + carryover days.
+
+4. Available days in Y:
+- Available = total usable budget - already taken - approved upcoming - requested
+
+### Which statuses affect carryover and available days
+
+Vacation status impact:
+
+- Approved:
+	- Counts as usage for budget checks.
+	- Split into already taken or approved upcoming depending on date.
+- Requested:
+	- Reserves budget and is counted in requested.
+	- Not counted as already taken.
+- Cancellation pending:
+	- Still reserves budget and is counted in requested.
+	- Reason: cancellation is not final until approver decision.
+- Rejected or cancelled:
+	- No budget impact.
+
+Important distinction:
+
+- Carryover source (how many days are transferred from previous year) uses approved previous-year usage.
+- Current-year availability uses approved plus requested plus cancellation pending reservation.
+
+### Carryover expiry behavior
+
+The carryover expiry setting is configured as MM-DD in admin settings.
+
+- Example setting 03-31 means carryover for year Y expires on Y-03-31.
+- After expiry, transferred carryover is not part of total usable budget.
+
+Carryover remaining is consumed by approved taken days:
+
+- With expiry date:
+	- Only approved days taken up to min(expiry date, today) reduce carryover remaining.
+- Without valid expiry date:
+	- All already taken approved days reduce carryover remaining.
+
+Approved upcoming days do not consume carryover remaining yet, because they are not taken yet.
+
+### Cross-year vacation requests
+
+If one vacation request spans two years, Zerf validates both years separately:
+
+- Part inside start year is checked against start-year budget.
+- Part inside end year is checked against end-year budget.
+- Carryover into end year is derived from remaining start-year entitlement.
+
+This prevents a request from being valid in one year but over budget in the other year.
+
+### Worked examples
+
+Example A: standard carryover
+
+- 2026 entitlement: 30
+- 2026 approved vacation used: 22
+- Carryover into 2027: 8
+- 2027 entitlement: 30
+- 2027 total budget before expiry: 38
+
+Example B: pending requests reserve budget
+
+- Total budget: 38
+- Already taken: 5
+- Approved upcoming: 4
+- Requested (pending): 3
+- Available: 38 - 5 - 4 - 3 = 26
+
+Example C: cancellation pending
+
+- One approved upcoming day is moved to cancellation pending.
+- Approved upcoming decreases by 1.
+- Requested increases by 1.
+- Available stays unchanged until cancellation is approved or rejected.
+
+### Why this can feel strict
+
+Users sometimes see that available days do not increase immediately after requesting cancellation. This is intentional.
+
+- A cancellation request is not final.
+- The day stays reserved until approver decision.
+- This avoids overbooking the same budget window during pending review.
 
 ## Notifications
 

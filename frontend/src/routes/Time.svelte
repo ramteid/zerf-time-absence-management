@@ -85,18 +85,21 @@
     );
 
     try {
-      const year = weekStart.getFullYear();
       const [
         weekEntries,
         reopenRows,
         categoryRows,
-        absenceRows,
+        absenceRowsByYear,
         holidayRowsByYear,
       ] = await Promise.all([
         api(`/time-entries?from=${from}&to=${weekEndIsoDate}`),
         api("/reopen-requests").catch(() => []),
         api("/categories").catch(() => $categories),
-        api(`/absences?year=${year}`).catch(() => []),
+        Promise.all(
+          yearsInWeek.map((yearValue) =>
+            api(`/absences?year=${yearValue}`).catch(() => []),
+          ),
+        ),
         Promise.all(yearsInWeek.map((yearValue) => api(`/holidays?year=${yearValue}`).catch(() => []))),
       ]);
       // Discard results from a superseded load – a newer request is already in flight.
@@ -108,9 +111,19 @@
         return a.start_time.localeCompare(b.start_time);
       });
       myReopens = reopenRows;
-      absences = absenceRows.filter(
-        (absence) => absence.status !== "rejected" && absence.status !== "cancelled",
-      );
+      const seenAbsenceIds = new Set();
+      absences = absenceRowsByYear
+        .flat()
+        .filter((absence) => {
+          if (seenAbsenceIds.has(absence.id)) return false;
+          seenAbsenceIds.add(absence.id);
+          return (
+            absence.end_date >= from &&
+            absence.start_date <= weekEndIsoDate &&
+            absence.status !== "rejected" &&
+            absence.status !== "cancelled"
+          );
+        });
       holidays = holidayRowsByYear.flat();
     } catch {
       if (requestId !== loadRequestCounter) return;
@@ -187,7 +200,7 @@
   $: contractHours = formatHours($currentUser.weekly_hours || 0);
 
   // Total logged minutes this week, excluding rejected entries.
-  $: weekActualMinutes = entries
+  $: weekLoggedMinutes = entries
     .filter((entry) => entry.status !== "rejected")
     .reduce(
       (totalMinutes, entry) =>
@@ -197,25 +210,36 @@
       0,
     );
 
-  // Pro-rate the weekly target for the user's onboarding week: only count working
-  // days from the contract start date through Friday. Weeks entirely before the
-  // start date get a target of zero so no artificial deficit appears.
-  $: effectiveWeeklyHours = (() => {
-    const startDate = $currentUser?.start_date;
-    const weekly = $currentUser?.weekly_hours || 0;
-    if (!weekFrom || !startDate) return weekly;
-    const weekStartStr = isoDate(weekFrom);
-    const fridayStr = isoDate(addDays(weekFrom, 4));
-    if (startDate > fridayStr) return 0;
-    if (startDate >= weekStartStr) {
-      const daysFromMonday = Math.round((parseDate(startDate) - weekFrom) / 86400000);
-      return (Math.max(0, 5 - daysFromMonday) / 5) * weekly;
-    }
-    return weekly;
+  // Backend monthly "actual" uses approved entries only; keep weekly summary aligned.
+  $: weekApprovedMinutes = entries
+    .filter((entry) => entry.status === "approved")
+    .reduce(
+      (totalMinutes, entry) =>
+        entry.start_time && entry.end_time
+          ? totalMinutes + durMin(entry.start_time.slice(0, 5), entry.end_time.slice(0, 5))
+          : totalMinutes,
+      0,
+    );
+
+  // Weekly target is the sum of target-eligible weekdays in this week:
+  // excludes holidays, absences, future days, and days before contract start.
+  $: weekTargetMinutes = (() => {
+    const weeklyHours = Number($currentUser?.weekly_hours || 0);
+    const perDayMinutes = Math.round((weeklyHours / 5) * 60);
+    if (perDayMinutes <= 0) return 0;
+    return weekdays.reduce((totalMinutes, day) => {
+      const isBeforeStart = $currentUser?.start_date && day.ds < $currentUser.start_date;
+      const isFuture = day.ds > today;
+      if (day.absentForTarget || day.holiday || isBeforeStart || isFuture) {
+        return totalMinutes;
+      }
+      return totalMinutes + perDayMinutes;
+    }, 0);
   })();
 
-  $: weekLoggedHours = formatHours((weekActualMinutes / 60).toFixed(1));
-  $: weekTargetHours = formatHours(effectiveWeeklyHours.toFixed(1));
+  $: weekLoggedHours = formatHours((weekLoggedMinutes / 60).toFixed(1));
+  $: weekApprovedHours = formatHours((weekApprovedMinutes / 60).toFixed(1));
+  $: weekTargetHours = formatHours((weekTargetMinutes / 60).toFixed(1));
 
   // Build a descriptor for one day of the week. All data is passed explicitly so
   // that Svelte's reactive system can track the dependencies correctly.
@@ -231,6 +255,11 @@
       ds: dayDateStr,
       dayName: WEEKDAY_NAMES[dayIndex],
       absent: !!matchingAbsence,
+      // Keep day-level target rules aligned with backend reports:
+      // only approved/cancellation_pending absences remove daily target.
+      absentForTarget: matchingAbsence
+        ? ["approved", "cancellation_pending"].includes(matchingAbsence.status)
+        : false,
       holiday: !!matchingHoliday,
       absenceKind: matchingAbsence?.kind || null,
       holidayName: matchingHoliday?.name || null,
@@ -309,7 +338,7 @@
     if (entries.length === 0) return "draft";
     const nonDraftEntries = entries.filter((entry) => entry.status !== "draft");
     if (nonDraftEntries.length === 0) return "draft";
-    if (nonDraftEntries.every((entry) => entry.status === "approved")) return "approved";
+    if (nonDraftEntries.length === entries.length && nonDraftEntries.every((entry) => entry.status === "approved")) return "approved";
     if (nonDraftEntries.some((entry) => entry.status === "submitted")) return "submitted";
     if (nonDraftEntries.every((entry) => entry.status === "rejected")) return "rejected";
     // Mix of approved + rejected with nothing pending: surface as "partial" so
@@ -339,7 +368,7 @@
   // but disabled on days where adding time entries makes no sense.
   function isDayAddDisabled(day) {
     return (
-      day.absent ||
+      day.absentForTarget ||
       day.holiday ||
       day.ds > today ||
       ($currentUser?.start_date && day.ds < $currentUser.start_date)
@@ -408,17 +437,17 @@
       <!-- Summary strip: rendered only once there is something to summarise. -->
       <div class="stat-cards" style="margin-bottom:16px">
         <div class="kz-card stat-card">
-          <div class="stat-card-label">{$t("Logged")}</div>
+          <div class="stat-card-label">{$t("Approved")}</div>
           <div
             class="stat-card-value tab-num"
-            style="color: {weekActualMinutes >= effectiveWeeklyHours * 60
+            style="color: {weekApprovedMinutes >= weekTargetMinutes
               ? 'var(--accent)'
               : 'var(--warning-text)'}"
           >
-            {weekLoggedHours}
+            {weekApprovedHours}
           </div>
           <div class="stat-card-sub">
-            {$t("of {target} target", { target: weekTargetHours })}
+            {$t("of {target} target", { target: weekTargetHours })} - {$t("Logged")}: {weekLoggedHours}
           </div>
         </div>
         <div class="kz-card stat-card">
