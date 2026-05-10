@@ -411,7 +411,7 @@
   // ── Absence slider (team view, leads/admins only) ─────────────────────────────
 
   async function loadAbsenceSliderTeamData(weekStartDate) {
-    absenceSliderIsLeadView = $currentUser.permissions?.can_approve || false;
+    absenceSliderIsLeadView = $currentUser?.permissions?.can_approve || false;
     if (!absenceSliderIsLeadView) return;
     try {
       const weekEnd = isoDate(addDays(parseDate(weekStartDate), 6));

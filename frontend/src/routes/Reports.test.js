@@ -31,6 +31,17 @@ async function settle() {
   await Promise.resolve();
 }
 
+// Poll until a matching element appears in `target`, or throw after `timeout` ms.
+async function waitForElement(target, selector, timeout = 10000) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    const el = target.querySelector(selector);
+    if (el) return el;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`Element not found within ${timeout}ms: ${selector}`);
+}
+
 describe("Reports", () => {
   let target;
   let component;
@@ -96,6 +107,8 @@ describe("Reports", () => {
     target.remove();
   });
 
+  // loadReport() makes 4 parallel async API calls; Svelte needs additional
+  // microtask cycles to propagate the reactive update — use waitFor to poll.
   it("shows help text when clicking Logged and Submission status info buttons", async () => {
     component = mount(Reports, { target });
     await settle();
@@ -103,27 +116,32 @@ describe("Reports", () => {
     const showButton = target.querySelector("button.kz-btn.kz-btn-primary");
     expect(showButton).not.toBeNull();
     showButton.click();
-    await settle();
 
     const loggedHelp =
       "Submitted and approved hours including the current day for the current month.";
     const approvalsHelp =
       "Whether all required weeks in the selected month have been submitted.";
 
-    const loggedInfoButton = target.querySelector(`button[title='${loggedHelp}']`);
-    expect(loggedInfoButton).not.toBeNull();
+    // Poll until the stat cards appear — loadReport() is async and Svelte needs
+    // several microtask cycles to re-render after Promise.all resolves.
+    const loggedInfoButton = await waitForElement(
+      target,
+      `button[title='${loggedHelp}']`,
+      10000,
+    );
     loggedInfoButton.click();
     await settle();
 
     expect(target.textContent).toContain(loggedHelp);
 
-    const approvalsInfoButton = target.querySelector(
+    const approvalsInfoButton = await waitForElement(
+      target,
       `button[title='${approvalsHelp}']`,
+      5000,
     );
-    expect(approvalsInfoButton).not.toBeNull();
     approvalsInfoButton.click();
     await settle();
 
     expect(target.textContent).toContain(approvalsHelp);
-  });
+  }, 20000);
 });
