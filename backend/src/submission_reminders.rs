@@ -20,7 +20,10 @@ pub fn duration_until_next_deadline(
 
     // Try this month's deadline day
     let candidate_day = day.min(last_day_of_month(today.year(), today.month()));
-    let candidate = NaiveDate::from_ymd_opt(today.year(), today.month(), candidate_day).unwrap();
+    let Some(candidate) = NaiveDate::from_ymd_opt(today.year(), today.month(), candidate_day)
+    else {
+        return Duration::from_secs(60);
+    };
 
     if let Some(target) = resolve_local_datetime(candidate, 7) {
         if target > now {
@@ -30,10 +33,9 @@ pub fn duration_until_next_deadline(
 
     // Already past or ambiguous – schedule next month
     let next_deadline_date = advance_one_month(today, day);
-    let next_deadline =
-        resolve_local_datetime(next_deadline_date, 7).expect("next month datetime must resolve");
-    (next_deadline - now)
-        .to_std()
+    let next_deadline = (7..=23).find_map(|hour| resolve_local_datetime(next_deadline_date, hour));
+    next_deadline
+        .and_then(|deadline| (deadline - now).to_std().ok())
         .unwrap_or(Duration::from_secs(60))
 }
 
@@ -58,7 +60,7 @@ fn advance_one_month(date: NaiveDate, desired_day: u32) -> NaiveDate {
         (date.year(), date.month() + 1)
     };
     let actual_day = desired_day.min(last_day_of_month(year, month));
-    NaiveDate::from_ymd_opt(year, month, actual_day).unwrap()
+    NaiveDate::from_ymd_opt(year, month, actual_day).unwrap_or(date)
 }
 
 pub fn last_day_of_month(year: i32, month: u32) -> u32 {
@@ -67,7 +69,10 @@ pub fn last_day_of_month(year: i32, month: u32) -> u32 {
     } else {
         NaiveDate::from_ymd_opt(year, month + 1, 1)
     };
-    next_month.unwrap().pred_opt().unwrap().day()
+    next_month
+        .and_then(|date| date.pred_opt())
+        .map(|date| date.day())
+        .unwrap_or(28)
 }
 
 /// Collect (year, month) pairs where the user has unsubmitted time entries,
