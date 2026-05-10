@@ -38,7 +38,6 @@ async fn change_requests_full_workflow() {
     }
 
     // -- Noop change request rejected --
-        app.cleanup().await;
     {
         let (_lead_id, _lead_pw, _emp_id, emp_pw, monday, cat) =
             bootstrap_team_with_suffix(&app, &admin, false, "2").await;
@@ -83,9 +82,6 @@ async fn change_requests_full_workflow() {
     }
 
     // -- Approval overlap rejected --
-        app.cleanup().await;
-        app.cleanup().await;
-        app.cleanup().await;
     {
         let (_lead_id, lead_pw, _emp_id, emp_pw, monday, cat) =
             bootstrap_team_with_suffix(&app, &admin, false, "3").await;

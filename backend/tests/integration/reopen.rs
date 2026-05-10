@@ -67,7 +67,6 @@ async fn reopen_full_workflow() {
     }
 
     // -- Pending then approve --
-        app.cleanup().await;
     {
         let (_lead_id, lead_pw, _emp_id, emp_pw, monday_iso, cat_id) =
             bootstrap_team_with_suffix(&app, &admin, false, "2").await;
@@ -120,7 +119,6 @@ async fn reopen_full_workflow() {
     }
 
     // -- Pending then reject --
-        app.cleanup().await;
     {
         let (lead_id, lead_pw, _emp_id, emp_pw, monday_iso, cat_id) =
             bootstrap_team_with_suffix(&app, &admin, false, "3").await;
@@ -173,7 +171,6 @@ async fn reopen_full_workflow() {
     }
 
     // -- Empty week rejected --
-        app.cleanup().await;
     {
         let (_lead_id, _lead_pw, _emp_id, emp_pw, monday_iso, _cat_id) =
             bootstrap_team_with_suffix(&app, &admin, true, "4").await;
@@ -194,7 +191,6 @@ async fn reopen_full_workflow() {
     }
 
     // -- Not monday rejected --
-        app.cleanup().await;
     {
         let (_lead_id, _lead_pw, _emp_id, emp_pw, _monday_iso, _cat_id) =
             bootstrap_team_with_suffix(&app, &admin, true, "5").await;
@@ -210,7 +206,6 @@ async fn reopen_full_workflow() {
     }
 
     // -- Cancels open change requests --
-        app.cleanup().await;
     {
         let (_lead_id, _lead_pw, _emp_id, emp_pw, monday_iso, cat_id) =
             bootstrap_team_with_suffix(&app, &admin, true, "6").await;
@@ -245,7 +240,6 @@ async fn reopen_full_workflow() {
     }
 
     // -- Lead self-service --
-        app.cleanup().await;
     {
         let (st, body) = admin
             .post(

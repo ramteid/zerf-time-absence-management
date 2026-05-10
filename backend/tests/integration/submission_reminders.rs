@@ -55,7 +55,6 @@ async fn submission_reminders_full_workflow() {
     }
 
     // -- Reminder skips user with all submitted --
-        app.cleanup().await;
     {
         let today = chrono::Local::now().date_naive();
         let last_month_start = if today.month() == 1 {
@@ -112,7 +111,6 @@ async fn submission_reminders_full_workflow() {
     }
 
     // -- Reminder deduplicates on same day --
-        app.cleanup().await;
     {
         let (_lead_id, _lead_pw, _emp_id, emp_pw, _monday_iso, _cat_id) =
             bootstrap_team_with_suffix(&app, &admin, false, "2").await;
@@ -136,7 +134,6 @@ async fn submission_reminders_full_workflow() {
     }
 
     // -- Reminder skips zero hours user --
-        app.cleanup().await;
     {
         let (st, body) = admin
             .post(
@@ -176,7 +173,6 @@ async fn submission_reminders_full_workflow() {
     }
 
     // -- Submission deadline day setting validation --
-        app.cleanup().await;
     {
         let (st, settings) = admin.get("/api/v1/settings").await;
         assert_eq!(st, StatusCode::OK);
