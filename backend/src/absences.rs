@@ -35,6 +35,11 @@ fn repo_absence_to_service(a: crate::repository::Absence) -> Absence {
         reviewed_at: a.reviewed_at,
         rejection_reason: a.rejection_reason,
         created_at: a.created_at,
+        review_type: None,
+        previous_kind: None,
+        previous_start_date: None,
+        previous_end_date: None,
+        previous_comment: None,
     }
 }
 
@@ -60,6 +65,70 @@ pub struct Absence {
     pub reviewed_at: Option<DateTime<Utc>>,
     pub rejection_reason: Option<String>,
     pub created_at: DateTime<Utc>,
+    #[sqlx(default)]
+    pub review_type: Option<String>,
+    #[sqlx(default)]
+    pub previous_kind: Option<String>,
+    #[sqlx(default)]
+    pub previous_start_date: Option<NaiveDate>,
+    #[sqlx(default)]
+    pub previous_end_date: Option<NaiveDate>,
+    #[sqlx(default)]
+    pub previous_comment: Option<String>,
+}
+
+#[derive(FromRow)]
+struct AbsenceAuditBeforeRow {
+    before_data: Option<String>,
+}
+
+fn json_opt_string(value: &serde_json::Value, key: &str) -> Option<String> {
+    value.get(key)?.as_str().map(ToOwned::to_owned)
+}
+
+fn json_opt_date(value: &serde_json::Value, key: &str) -> Option<NaiveDate> {
+    let date_str = value.get(key)?.as_str()?;
+    NaiveDate::parse_from_str(date_str, "%Y-%m-%d").ok()
+}
+
+async fn enrich_pending_review_metadata(
+    pool: &crate::db::DatabasePool,
+    absence: &mut Absence,
+) -> AppResult<()> {
+    if absence.status == "cancellation_pending" {
+        absence.review_type = Some("cancellation".to_string());
+        return Ok(());
+    }
+
+    absence.review_type = Some("approval".to_string());
+
+    let audit_row = sqlx::query_as::<_, AbsenceAuditBeforeRow>(
+        "SELECT before_data FROM audit_log \
+         WHERE table_name='absences' AND record_id=$1 AND action='updated' \
+         ORDER BY occurred_at DESC LIMIT 1",
+    )
+    .bind(absence.id)
+    .fetch_optional(pool)
+    .await?;
+
+    let Some(audit_row) = audit_row else {
+        return Ok(());
+    };
+
+    let Some(before_data) = audit_row.before_data else {
+        return Ok(());
+    };
+
+    let Ok(before_json) = serde_json::from_str::<serde_json::Value>(&before_data) else {
+        return Ok(());
+    };
+
+    absence.review_type = Some("change".to_string());
+    absence.previous_kind = json_opt_string(&before_json, "kind");
+    absence.previous_start_date = json_opt_date(&before_json, "start_date");
+    absence.previous_end_date = json_opt_date(&before_json, "end_date");
+    absence.previous_comment = json_opt_string(&before_json, "comment");
+    Ok(())
 }
 
 async fn holidays_set(
@@ -157,7 +226,14 @@ pub async fn list_all(
             query.status.as_deref(),
         )
         .await?;
-    Ok(Json(absences.into_iter().map(repo_absence_to_service).collect()))
+
+    let mut mapped: Vec<Absence> = absences.into_iter().map(repo_absence_to_service).collect();
+    if query.status.as_deref() == Some("pending_review") {
+        for absence in &mut mapped {
+            enrich_pending_review_metadata(&app_state.pool, absence).await?;
+        }
+    }
+    Ok(Json(mapped))
 }
 
 #[derive(Deserialize)]
