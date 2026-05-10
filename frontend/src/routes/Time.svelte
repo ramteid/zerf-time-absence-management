@@ -136,9 +136,9 @@
   async function submitWeek(ids) {
     if (!ids?.length) return;
     const confirmed = await confirmDialog(
-      "Submit this week?",
-      "All draft entries of this week will be submitted for approval.",
-      { confirm: "Submit Week" },
+      $t("Submit this week?"),
+      $t("All draft entries of this week will be submitted for approval."),
+      { confirm: $t("Submit Week") },
     );
     if (!confirmed) return;
     try {
