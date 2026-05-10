@@ -61,16 +61,27 @@
   // reportData holds all needed information after loading.
   let reportData = null;
 
+  function monthStart(monthKey) {
+    return `${monthKey}-01`;
+  }
+
+  function monthEnd(monthKey) {
+    const [yearPart, monthPart] = monthKey.split("-");
+    const year = Number(yearPart);
+    const month = Number(monthPart);
+    const lastDay = new Date(year, month, 0).getDate();
+    return `${monthKey}-${String(lastDay).padStart(2, "0")}`;
+  }
+
   async function loadReport() {
     try {
       const reportYear = reportMonth.slice(0, 4);
       const reportYearNum = parseInt(reportYear);
-      const chartYearFrom = `${reportYear}-01-01`;
-      const chartYearTo =
-        reportYearNum < currentYear ? `${reportYear}-12-31` : todayIso;
-      // Only fetch the chart when the year has at least one day in range.
-      const canFetchChart =
-        reportYearNum <= currentYear && chartYearTo >= chartYearFrom;
+      const isCurrentMonth = reportMonth === currentMonthStr;
+      const chartMonthFrom = monthStart(reportMonth);
+      const chartMonthTo = isCurrentMonth ? todayIso : monthEnd(reportMonth);
+      // Only fetch when the selected month includes at least one day up to today.
+      const canFetchChart = reportYearNum < currentYear || chartMonthFrom <= todayIso;
 
       const [monthRaw, leaveRaw, overtimeRows, flextimeRaw] =
         await Promise.all([
@@ -83,7 +94,7 @@
           ).catch(() => null),
           canFetchChart
             ? api(
-                `/reports/flextime?user_id=${reportUserId}&from=${chartYearFrom}&to=${chartYearTo}`,
+                `/reports/flextime?user_id=${reportUserId}&from=${chartMonthFrom}&to=${chartMonthTo}`,
               ).catch(() => [])
             : Promise.resolve([]),
         ]);

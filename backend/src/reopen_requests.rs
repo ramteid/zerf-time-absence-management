@@ -10,8 +10,8 @@
 //! Approval / auto-approval reopens the week atomically:
 //!   * all non-draft entries for `[week_start, week_start+6 days]` are reset
 //!     to `'draft'` (audit-logged per entry);
-//!   * any open `change_requests` for those entries are auto-rejected with
-//!     a system reason (also audit-logged).
+//!   * any open `change_requests` for those entries are auto-approved and
+//!     applied before the status reset.
 
 use crate::audit;
 use crate::auth::User;
@@ -59,8 +59,134 @@ fn assert_monday(d: NaiveDate) -> AppResult<()> {
     Ok(())
 }
 
-/// Atomically reopen a week: reset every non-draft entry to draft and
-/// auto-reject open change_requests for those entries. Caller is the
+#[derive(FromRow)]
+struct ChangeOverviewRow {
+    entry_date: NaiveDate,
+    start_time: String,
+    end_time: String,
+    old_category_name: String,
+    comment: Option<String>,
+    new_date: Option<NaiveDate>,
+    new_start_time: Option<String>,
+    new_end_time: Option<String>,
+    new_category_name: Option<String>,
+    new_comment: Option<String>,
+}
+
+fn hhmm(value: &str) -> String {
+    value.chars().take(5).collect()
+}
+
+fn change_request_overview_text(
+    language: &i18n::Language,
+    rows: &[ChangeOverviewRow],
+    applied: bool,
+) -> String {
+    if rows.is_empty() {
+        return if language.code() == "de" {
+            "Keine offenen Änderungsanträge in dieser Woche.".to_string()
+        } else {
+            "No open change requests in this week.".to_string()
+        };
+    }
+
+    let header = if language.code() == "de" {
+        if applied {
+            "Automatisch übernommene Änderungsanträge:"
+        } else {
+            "Offene Änderungsanträge für diese Woche:"
+        }
+    } else if applied {
+        "Automatically applied change requests:"
+    } else {
+        "Open change requests for this week:"
+    };
+
+    let mut lines = vec![header.to_string()];
+    for row in rows {
+        let before_category = i18n::work_category_label(language, &row.old_category_name);
+        let after_category = i18n::work_category_label(
+            language,
+            row.new_category_name
+                .as_deref()
+                .unwrap_or(&row.old_category_name),
+        );
+        let before_comment = row.comment.as_deref().unwrap_or("").trim();
+        let after_comment = row.new_comment.as_deref().unwrap_or(before_comment).trim();
+        let before_comment = if before_comment.is_empty() {
+            if language.code() == "de" {
+                "(leer)"
+            } else {
+                "(empty)"
+            }
+        } else {
+            before_comment
+        };
+        let after_comment = if after_comment.is_empty() {
+            if language.code() == "de" {
+                "(leer)"
+            } else {
+                "(empty)"
+            }
+        } else {
+            after_comment
+        };
+        let base_line = format!(
+            "- {} {}-{} ({}) -> {} {}-{} ({})",
+            i18n::format_date(language, row.entry_date),
+            hhmm(&row.start_time),
+            hhmm(&row.end_time),
+            before_category,
+            i18n::format_date(language, row.new_date.unwrap_or(row.entry_date)),
+            hhmm(row.new_start_time.as_deref().unwrap_or(&row.start_time)),
+            hhmm(row.new_end_time.as_deref().unwrap_or(&row.end_time)),
+            after_category,
+        );
+        lines.push(base_line);
+        if before_comment != after_comment {
+            let comment_label = if language.code() == "de" {
+                "  Kommentar"
+            } else {
+                "  Comment"
+            };
+            lines.push(format!("{comment_label}: {before_comment} -> {after_comment}"));
+        }
+    }
+    lines.join("\n")
+}
+
+async fn load_change_request_overview(
+    pool: &crate::db::DatabasePool,
+    language: &i18n::Language,
+    user_id: i64,
+    week_start: NaiveDate,
+    applied: bool,
+) -> String {
+    let week_end = week_start + chrono::Duration::days(6);
+    let rows = sqlx::query_as::<_, ChangeOverviewRow>(
+        "SELECT te.entry_date, te.start_time, te.end_time, \
+                c_old.name AS old_category_name, te.comment, \
+                cr.new_date, cr.new_start_time, cr.new_end_time, \
+                c_new.name AS new_category_name, cr.new_comment \
+         FROM change_requests cr \
+         JOIN time_entries te ON te.id = cr.time_entry_id \
+         LEFT JOIN categories c_old ON c_old.id = te.category_id \
+         LEFT JOIN categories c_new ON c_new.id = cr.new_category_id \
+         WHERE cr.status='open' AND te.user_id=$1 AND te.entry_date BETWEEN $2 AND $3 \
+         ORDER BY te.entry_date, te.start_time, cr.id",
+    )
+    .bind(user_id)
+    .bind(week_start)
+    .bind(week_end)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+
+    change_request_overview_text(language, &rows, applied)
+}
+
+/// Atomically reopen a week: apply open change_requests for the week's
+/// non-draft entries, then reset those entries to draft. Caller is the
 /// **acting** user (approver or self); `subject` is the user whose week
 /// is being reopened. Returns the affected entry ids and their previous status
 /// so the caller can commit the whole state transition first and audit after.
@@ -88,28 +214,45 @@ async fn perform_reopen_in_tx(
         ));
     }
 
+    // Auto-apply open change requests for these entries.
+    let entry_ids: Vec<i64> = affected.iter().map(|(id, _)| *id).collect();
     sqlx::query(
-        "UPDATE time_entries SET status='draft', submitted_at=NULL, reviewed_by=NULL, \
-         reviewed_at=NULL, rejection_reason=NULL, updated_at=CURRENT_TIMESTAMP \
-         WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3 AND status<>'draft'",
+        "UPDATE time_entries te \
+         SET entry_date=COALESCE(cr.new_date, te.entry_date), \
+             start_time=COALESCE(cr.new_start_time, te.start_time), \
+             end_time=COALESCE(cr.new_end_time, te.end_time), \
+             category_id=COALESCE(cr.new_category_id, te.category_id), \
+             comment=CASE WHEN cr.new_comment IS NOT NULL THEN NULLIF(cr.new_comment,'') ELSE te.comment END, \
+             updated_at=CURRENT_TIMESTAMP \
+         FROM change_requests cr \
+         WHERE cr.status='open' AND te.id = cr.time_entry_id AND te.id = ANY($1)",
     )
-    .bind(subject_id)
-    .bind(week_start)
-    .bind(week_end)
+    .bind(&entry_ids)
     .execute(&mut **tx)
     .await?;
 
-    // Auto-reject open change_requests for these entries.
-    let entry_ids: Vec<i64> = affected.iter().map(|(id, _)| *id).collect();
     sqlx::query(
         "UPDATE change_requests \
-         SET status='rejected', \
+         SET status='approved', \
              reviewed_by=$1, \
              reviewed_at=CURRENT_TIMESTAMP, \
-             rejection_reason='Auto-cancelled: week was reopened for editing' \
+             rejection_reason=NULL \
          WHERE status='open' AND time_entry_id = ANY($2)",
     )
     .bind(actor_id)
+    .bind(&entry_ids)
+    .execute(&mut **tx)
+    .await?;
+
+    // Reset all affected entries to draft.  We filter by their original IDs
+    // (not by date range) because the CR-apply step above may have moved some
+    // entries to a date outside the original week; a date-range filter would
+    // silently miss those and leave them in submitted/approved status.
+    sqlx::query(
+        "UPDATE time_entries SET status='draft', submitted_at=NULL, reviewed_by=NULL, \
+         reviewed_at=NULL, rejection_reason=NULL, updated_at=CURRENT_TIMESTAMP \
+         WHERE id = ANY($1)",
+    )
     .bind(&entry_ids)
     .execute(&mut **tx)
     .await?;
@@ -234,6 +377,14 @@ pub async fn create(
     // Collect all users that should be notified as approvers (before the DB
     // insert, so we can reuse the result for both auto and pending paths).
     let approver_ids_for_notification = approver_ids_to_notify(&app_state.pool, &requester).await;
+    let language = notification_language(&app_state.pool).await;
+    let week_label = i18n::format_week_label(&language, body.week_start);
+    let pending_change_overview =
+        load_change_request_overview(&app_state.pool, &language, requester.id, body.week_start, false)
+            .await;
+    let applied_change_overview =
+        load_change_request_overview(&app_state.pool, &language, requester.id, body.week_start, true)
+            .await;
 
         let (new_request_id, entries_reopened, reopened_entries): (i64, i64, Vec<(i64, String)>) =
         if should_auto_approve {
@@ -298,7 +449,6 @@ pub async fn create(
     )
     .await;
 
-    let language = notification_language(&app_state.pool).await;
     let requester_full_name = format!("{} {}", requester.first_name, requester.last_name);
 
     if should_auto_approve {
@@ -310,7 +460,10 @@ pub async fn create(
             "reopen_auto_approved",
             "reopen_auto_approved_title",
             "reopen_auto_approved_body",
-            vec![("week_start", i18n::format_date(&language, body.week_start))],
+            vec![
+                ("week_label", week_label.clone()),
+                ("change_request_overview", applied_change_overview.clone()),
+            ],
             Some("reopen_request"),
             Some(new_request_id),
         )
@@ -326,7 +479,8 @@ pub async fn create(
                 "reopen_auto_approved_notice_body",
                 vec![
                     ("requester_name", requester_full_name.clone()),
-                    ("week_start", i18n::format_date(&language, body.week_start)),
+                    ("week_label", week_label.clone()),
+                    ("change_request_overview", applied_change_overview.clone()),
                 ],
                 Some("reopen_request"),
                 Some(new_request_id),
@@ -352,7 +506,8 @@ pub async fn create(
                 "reopen_request_created_body",
                 vec![
                     ("requester_name", requester_full_name.clone()),
-                    ("week_start", i18n::format_date(&language, body.week_start)),
+                    ("week_label", week_label.clone()),
+                    ("change_request_overview", pending_change_overview.clone()),
                 ],
                 Some("reopen_request"),
                 Some(new_request_id),
@@ -417,11 +572,12 @@ async fn notify_leads_if_admin_acted(
     language: &i18n::Language,
     requester: &User,
     request_user_id: i64,
-    week_start: NaiveDate,
     request_id: i64,
     action_key: &str,
     action_title_key: &str,
     action_body_key: &str,
+    week_label: String,
+    change_request_overview: String,
     extra_params: Vec<(&'static str, String)>,
 ) {
     if !requester.is_admin() {
@@ -454,7 +610,8 @@ async fn notify_leads_if_admin_acted(
             .unwrap_or_else(|| format!("User {request_user_id}"));
     let mut params = vec![
         ("requester_name", employee_full_name),
-        ("week_start", i18n::format_date(language, week_start)),
+        ("week_label", week_label),
+        ("change_request_overview", change_request_overview),
     ];
     params.extend(extra_params);
     for lead_id in lead_ids {
@@ -517,6 +674,16 @@ pub async fn approve(
             return Err(AppError::Forbidden);
         }
     }
+    let language = notification_language(&app_state.pool).await;
+    let week_label = i18n::format_week_label(&language, reopen_request.week_start);
+    let applied_change_overview = load_change_request_overview(
+        &app_state.pool,
+        &language,
+        reopen_request.user_id,
+        reopen_request.week_start,
+        true,
+    )
+    .await;
     let reopened_entries = perform_reopen_in_tx(
         &mut transaction,
         requester.id,
@@ -545,7 +712,6 @@ pub async fn approve(
         Some(serde_json::json!({"status": "approved"})),
     )
     .await;
-    let language = notification_language(&app_state.pool).await;
     // Notify the employee whose week was reopened.
     notifications::create_translated(
         &app_state,
@@ -554,10 +720,10 @@ pub async fn approve(
         "reopen_approved",
         "reopen_approved_title",
         "reopen_approved_body",
-        vec![(
-            "week_start",
-            i18n::format_date(&language, reopen_request.week_start),
-        )],
+        vec![
+            ("week_label", week_label.clone()),
+            ("change_request_overview", applied_change_overview.clone()),
+        ],
         Some("reopen_request"),
         Some(request_id),
     )
@@ -569,11 +735,12 @@ pub async fn approve(
         &language,
         &requester,
         reopen_request.user_id,
-        reopen_request.week_start,
         request_id,
         "reopen_approved_by_admin",
         "reopen_approved_by_admin_title",
         "reopen_approved_by_admin_body",
+        week_label,
+        applied_change_overview,
         vec![],
     )
     .await;
@@ -652,6 +819,15 @@ pub async fn reject(
     )
     .await;
     let language = notification_language(&app_state.pool).await;
+    let week_label = i18n::format_week_label(&language, reopen_request.week_start);
+    let pending_change_overview = load_change_request_overview(
+        &app_state.pool,
+        &language,
+        reopen_request.user_id,
+        reopen_request.week_start,
+        false,
+    )
+    .await;
     // Notify the employee whose reopen request was rejected.
     notifications::create_translated(
         &app_state,
@@ -661,10 +837,8 @@ pub async fn reject(
         "reopen_rejected_title",
         "reopen_rejected_body",
         vec![
-            (
-                "week_start",
-                i18n::format_date(&language, reopen_request.week_start),
-            ),
+            ("week_label", week_label.clone()),
+            ("change_request_overview", pending_change_overview.clone()),
             ("reason", rejection_reason.to_string()),
         ],
         Some("reopen_request"),
@@ -678,11 +852,12 @@ pub async fn reject(
         &language,
         &requester,
         reopen_request.user_id,
-        reopen_request.week_start,
         request_id,
         "reopen_rejected_by_admin",
         "reopen_rejected_by_admin_title",
         "reopen_rejected_by_admin_body",
+        week_label,
+        pending_change_overview,
         vec![("reason", rejection_reason.to_string())],
     )
     .await;

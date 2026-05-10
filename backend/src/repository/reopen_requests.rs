@@ -246,8 +246,8 @@ impl ReopenRequestDb {
 
     // ── Internal: perform the actual reopen within a transaction ──────────
 
-    /// Reset all non-draft entries in `week_start..week_start+6` to draft and
-    /// auto-reject their open change requests.
+    /// Apply open change requests for all non-draft entries in
+    /// `week_start..week_start+6`, then reset those entries to draft.
     /// Returns the list of (entry_id, previous_status) that were changed.
     pub async fn perform_reopen(
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -271,25 +271,41 @@ impl ReopenRequestDb {
                 "Nothing to reopen — this week has no submitted or approved entries.".into(),
             ));
         }
+        let entry_ids: Vec<i64> = affected.iter().map(|(id, _)| *id).collect();
+        sqlx::query(
+            "UPDATE time_entries te \
+             SET entry_date=COALESCE(cr.new_date, te.entry_date), \
+                 start_time=COALESCE(cr.new_start_time, te.start_time), \
+                 end_time=COALESCE(cr.new_end_time, te.end_time), \
+                 category_id=COALESCE(cr.new_category_id, te.category_id), \
+                 comment=CASE WHEN cr.new_comment IS NOT NULL THEN NULLIF(cr.new_comment,'') ELSE te.comment END, \
+                 updated_at=CURRENT_TIMESTAMP \
+             FROM change_requests cr \
+             WHERE cr.status='open' AND te.id = cr.time_entry_id AND te.id = ANY($1)",
+        )
+        .bind(&entry_ids)
+        .execute(&mut **tx)
+        .await?;
+        sqlx::query(
+            "UPDATE change_requests \
+             SET status='approved', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP, \
+                 rejection_reason=NULL \
+             WHERE status='open' AND time_entry_id = ANY($2)",
+        )
+        .bind(actor_id)
+        .bind(&entry_ids)
+        .execute(&mut **tx)
+        .await?;
+        // Reset all affected entries to draft.  We filter by their original IDs
+        // (not by date range) because the CR-apply step above may have moved some
+        // entries to a date outside the original week; a date-range filter would
+        // silently miss those and leave them in submitted/approved status.
         sqlx::query(
             "UPDATE time_entries \
              SET status='draft', submitted_at=NULL, reviewed_by=NULL, \
                  reviewed_at=NULL, rejection_reason=NULL, updated_at=CURRENT_TIMESTAMP \
-             WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3 AND status<>'draft'",
+             WHERE id = ANY($1)",
         )
-        .bind(subject_id)
-        .bind(week_start)
-        .bind(week_end)
-        .execute(&mut **tx)
-        .await?;
-        let entry_ids: Vec<i64> = affected.iter().map(|(id, _)| *id).collect();
-        sqlx::query(
-            "UPDATE change_requests \
-             SET status='rejected', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP, \
-                 rejection_reason='Auto-cancelled: week was reopened for editing' \
-             WHERE status='open' AND time_entry_id = ANY($2)",
-        )
-        .bind(actor_id)
         .bind(&entry_ids)
         .execute(&mut **tx)
         .await?;

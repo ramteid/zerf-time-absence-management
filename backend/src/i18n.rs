@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use crate::db::DatabasePool;
+use chrono::Datelike;
 
 const DEFAULT_LANGUAGE_CODE: &str = "en";
 
@@ -35,19 +36,19 @@ static LANGUAGES: &[LangDef] = &[
             ("month_7", "July"), ("month_8", "August"), ("month_9", "September"),
             ("month_10", "October"), ("month_11", "November"), ("month_12", "December"),
             ("reopen_auto_approved_title", "Week reopened for editing"),
-            ("reopen_auto_approved_body", "The week starting {week_start} was reopened for editing."),
+            ("reopen_auto_approved_body", "Your week was reopened for editing.\nWeek: {week_label}\n\n{change_request_overview}"),
             ("reopen_auto_approved_notice_title", "Week reopen auto-approved"),
-            ("reopen_auto_approved_notice_body", "{requester_name}'s week reopen for the week starting {week_start} was auto-approved."),
+            ("reopen_auto_approved_notice_body", "{requester_name}'s week reopen was auto-approved.\nWeek: {week_label}\n\n{change_request_overview}"),
             ("reopen_request_created_title", "New week reopen request"),
-            ("reopen_request_created_body", "{requester_name} wants to edit the week starting {week_start}."),
+            ("reopen_request_created_body", "{requester_name} requested to reopen a week.\nWeek: {week_label}\n\n{change_request_overview}"),
             ("reopen_approved_title", "Week reopen approved"),
-            ("reopen_approved_body", "Your week starting {week_start} was reopened for editing."),
+            ("reopen_approved_body", "Your week reopen request was approved.\nWeek: {week_label}\n\n{change_request_overview}"),
             ("reopen_approved_by_admin_title", "Week reopen approved by admin"),
-            ("reopen_approved_by_admin_body", "The week reopen request from {requester_name} for the week starting {week_start} was approved by an admin."),
+            ("reopen_approved_by_admin_body", "The week reopen request from {requester_name} was approved by an admin.\nWeek: {week_label}\n\n{change_request_overview}"),
             ("reopen_rejected_title", "Week reopen rejected"),
-            ("reopen_rejected_body", "Your request to edit the week starting {week_start} was rejected: {reason}"),
+            ("reopen_rejected_body", "Your week reopen request was rejected.\nWeek: {week_label}\nReason: {reason}"),
             ("reopen_rejected_by_admin_title", "Week reopen rejected by admin"),
-            ("reopen_rejected_by_admin_body", "The week reopen request from {requester_name} for the week starting {week_start} was rejected by an admin: {reason}"),
+            ("reopen_rejected_by_admin_body", "The week reopen request from {requester_name} was rejected by an admin.\nWeek: {week_label}\nReason: {reason}"),
             ("absence_kind_vacation", "Vacation"),
             ("absence_kind_sick", "Sick"),
             ("absence_kind_training", "Training"),
@@ -73,11 +74,11 @@ static LANGUAGES: &[LangDef] = &[
             ("absence_cancellation_rejected_title", "Absence cancellation rejected"),
             ("absence_cancellation_rejected_body", "Your cancellation request for the {kind} absence ({start_date} to {end_date}) was rejected."),
             ("change_request_created_title", "New change request"),
-            ("change_request_created_body", "{requester_name} requested a change for the week containing {entry_date}."),
+            ("change_request_created_body", "{requester_name} requested a time-entry change.\nWeek: {week_label}\nEntry: {entry_label}\nReason: {reason}\n\nDiff:\n{change_diff}"),
             ("change_request_approved_title", "Change request approved"),
-            ("change_request_approved_body", "Your change request for the week containing {entry_date} has been approved."),
+            ("change_request_approved_body", "Your time-entry change request was approved.\nWeek: {week_label}\nEntry: {entry_label}\n\nApplied diff:\n{change_diff}"),
             ("change_request_rejected_title", "Change request rejected"),
-            ("change_request_rejected_body", "Your change request for the week containing {entry_date} was rejected: {reason}"),
+            ("change_request_rejected_body", "Your time-entry change request was rejected.\nWeek: {week_label}\nEntry: {entry_label}\nReason: {reason}\n\nRequested diff:\n{change_diff}"),
             ("timesheet_submitted_title", "{submitter_name} submitted a timesheet"),
             ("timesheet_submitted_body", "{week_count} submitted for approval."),
             ("timesheet_approved_title", "Timesheet approved"),
@@ -109,19 +110,19 @@ static LANGUAGES: &[LangDef] = &[
             ("month_7", "Juli"), ("month_8", "August"), ("month_9", "September"),
             ("month_10", "Oktober"), ("month_11", "November"), ("month_12", "Dezember"),
             ("reopen_auto_approved_title", "Woche zur Bearbeitung freigegeben"),
-            ("reopen_auto_approved_body", "Die Woche ab {week_start} wurde wieder zur Bearbeitung freigegeben."),
+            ("reopen_auto_approved_body", "Ihre Woche wurde wieder zur Bearbeitung freigegeben.\nWoche: {week_label}\n\n{change_request_overview}"),
             ("reopen_auto_approved_notice_title", "Wochenfreigabe automatisch genehmigt"),
-            ("reopen_auto_approved_notice_body", "Die Wiederfreigabe von {requester_name} f\u{00fc}r die Woche ab {week_start} wurde automatisch genehmigt."),
+            ("reopen_auto_approved_notice_body", "Die Wiederfreigabe von {requester_name} wurde automatisch genehmigt.\nWoche: {week_label}\n\n{change_request_overview}"),
             ("reopen_request_created_title", "Neue Anfrage zur Wochenfreigabe"),
-            ("reopen_request_created_body", "{requester_name} m\u{00f6}chte die Woche ab {week_start} wieder bearbeiten."),
+            ("reopen_request_created_body", "{requester_name} m\u{00f6}chte eine Woche wieder bearbeiten.\nWoche: {week_label}\n\n{change_request_overview}"),
             ("reopen_approved_title", "Wochenfreigabe genehmigt"),
-            ("reopen_approved_body", "Ihre Woche ab {week_start} wurde zur Bearbeitung freigegeben."),
+            ("reopen_approved_body", "Ihre Anfrage zur Wochenfreigabe wurde genehmigt.\nWoche: {week_label}\n\n{change_request_overview}"),
             ("reopen_approved_by_admin_title", "Wochenfreigabe durch Admin genehmigt"),
-            ("reopen_approved_by_admin_body", "Die Wiederfreigabe-Anfrage von {requester_name} f\u{00fc}r die Woche ab {week_start} wurde von einem Admin genehmigt."),
+            ("reopen_approved_by_admin_body", "Die Wiederfreigabe-Anfrage von {requester_name} wurde von einem Admin genehmigt.\nWoche: {week_label}\n\n{change_request_overview}"),
             ("reopen_rejected_title", "Wochenfreigabe abgelehnt"),
-            ("reopen_rejected_body", "Ihre Anfrage zur Bearbeitung der Woche ab {week_start} wurde abgelehnt: {reason}"),
+            ("reopen_rejected_body", "Ihre Anfrage zur Wochenfreigabe wurde abgelehnt.\nWoche: {week_label}\nGrund: {reason}"),
             ("reopen_rejected_by_admin_title", "Wochenfreigabe durch Admin abgelehnt"),
-            ("reopen_rejected_by_admin_body", "Die Wiederfreigabe-Anfrage von {requester_name} f\u{00fc}r die Woche ab {week_start} wurde von einem Admin abgelehnt: {reason}"),
+            ("reopen_rejected_by_admin_body", "Die Wiederfreigabe-Anfrage von {requester_name} wurde von einem Admin abgelehnt.\nWoche: {week_label}\nGrund: {reason}"),
             ("absence_kind_vacation", "Urlaub"),
             ("absence_kind_sick", "Krankmeldung"),
             ("absence_kind_training", "Fortbildung"),
@@ -147,11 +148,11 @@ static LANGUAGES: &[LangDef] = &[
             ("absence_cancellation_rejected_title", "Stornierung abgelehnt"),
             ("absence_cancellation_rejected_body", "Die Stornierung Ihrer {kind} ({start_date} bis {end_date}) wurde abgelehnt."),
             ("change_request_created_title", "Neue \u{00c4}nderungsanfrage"),
-            ("change_request_created_body", "{requester_name} hat eine \u{00c4}nderung f\u{00fc}r die Woche mit {entry_date} beantragt."),
+            ("change_request_created_body", "{requester_name} hat eine \u{00c4}nderung einer Zeitbuchung beantragt.\nWoche: {week_label}\nEintrag: {entry_label}\nBegr\u{00fc}ndung: {reason}\n\nDiff:\n{change_diff}"),
             ("change_request_approved_title", "\u{00c4}nderungsanfrage genehmigt"),
-            ("change_request_approved_body", "Ihre \u{00c4}nderungsanfrage f\u{00fc}r die Woche mit {entry_date} wurde genehmigt."),
+            ("change_request_approved_body", "Ihre \u{00c4}nderungsanfrage wurde genehmigt.\nWoche: {week_label}\nEintrag: {entry_label}\n\n\u{00dc}bernommener Diff:\n{change_diff}"),
             ("change_request_rejected_title", "\u{00c4}nderungsanfrage abgelehnt"),
-            ("change_request_rejected_body", "Ihre \u{00c4}nderungsanfrage f\u{00fc}r die Woche mit {entry_date} wurde abgelehnt: {reason}"),
+            ("change_request_rejected_body", "Ihre \u{00c4}nderungsanfrage wurde abgelehnt.\nWoche: {week_label}\nEintrag: {entry_label}\nGrund: {reason}\n\nBeantragter Diff:\n{change_diff}"),
             ("timesheet_submitted_title", "{submitter_name} hat eine Zeiterfassung eingereicht"),
             ("timesheet_submitted_body", "{week_count} zur Genehmigung eingereicht."),
             ("timesheet_approved_title", "Zeiterfassung genehmigt"),
@@ -279,6 +280,39 @@ pub fn week_count(language: &Language, count: i64) -> String {
     }
 }
 
+pub fn format_week_label(language: &Language, week_start: chrono::NaiveDate) -> String {
+    let week_end = week_start + chrono::Duration::days(6);
+    let week = week_start.iso_week().week();
+    if language.code() == "de" {
+        format!(
+            "KW {week} ({} bis {})",
+            format_date(language, week_start),
+            format_date(language, week_end)
+        )
+    } else {
+        format!(
+            "CW {week} ({} to {})",
+            format_date(language, week_start),
+            format_date(language, week_end)
+        )
+    }
+}
+
+pub fn work_category_label(language: &Language, category_name: &str) -> String {
+    if language.code() != "de" {
+        return category_name.to_string();
+    }
+    match category_name {
+        "Core Duties" => "Kernaufgaben".to_string(),
+        "Preparation Time" => "Vorbereitungszeit".to_string(),
+        "Leadership Tasks" => "Leitungsaufgaben".to_string(),
+        "Team Meeting" => "Teambesprechung".to_string(),
+        "Training" => "Fortbildung".to_string(),
+        "Other" => "Sonstiges".to_string(),
+        other => other.to_string(),
+    }
+}
+
 /// Returns the localised label for an absence kind identifier (e.g. `"sick"`).
 /// Falls back to the raw kind string when no translation is available.
 pub fn absence_kind_label(language: &Language, kind: &str) -> String {
@@ -344,16 +378,21 @@ mod tests {
     fn translates_with_parameters() {
         let language = Language::from_setting("de");
         let date = chrono::NaiveDate::from_ymd_opt(2026, 4, 27).unwrap();
+        let week_label = format_week_label(&language, date);
         let text = translate(
             &language,
             "reopen_auto_approved_body",
-            &[("week_start", format_date(&language, date))],
+            &[
+                ("week_label", week_label.clone()),
+                (
+                    "change_request_overview",
+                    "Keine offenen Änderungsanträge in dieser Woche.".to_string(),
+                ),
+            ],
         );
 
-        assert_eq!(
-            text,
-            "Die Woche ab 27.04.2026 wurde wieder zur Bearbeitung freigegeben."
-        );
+        assert!(text.contains(&week_label));
+        assert!(text.contains("Keine offenen Änderungsanträge"));
     }
 
     #[test]

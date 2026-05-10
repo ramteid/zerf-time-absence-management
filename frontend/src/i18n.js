@@ -987,6 +987,7 @@ const TRANSLATIONS = {
     "Sick days": "Krankheitstage",
     "Vacation taken": "Urlaub genommen",
     "Vacation planned": "Urlaub geplant",
+    "All weeks submitted": "Alle Wochen eingereicht",
     "Note: current month - data up to yesterday":
       "Hinweis: Laufender Monat - Daten inklusive heute",
     // Dashboard request detail labels
