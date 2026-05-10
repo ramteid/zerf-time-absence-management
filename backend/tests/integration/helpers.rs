@@ -127,11 +127,15 @@ pub async fn bootstrap_team_with_suffix(
 
     let lead_email = format!("lead-{}@example.com", suffix);
     let emp_email = format!("emp-{}@example.com", suffix);
+    let lead_first_name = format!("Lara{}", suffix);
+    let lead_last_name = format!("Lead{}", suffix);
+    let emp_first_name = format!("Emil{}", suffix);
+    let emp_last_name = format!("Emp{}", suffix);
 
     let (st, body) = admin
         .post(
             "/api/v1/users",
-            &json!({"email": &lead_email, "first_name":"Lara","last_name":"Lead",
+            &json!({"email": &lead_email, "first_name": &lead_first_name,"last_name": &lead_last_name,
                 "role":"team_lead","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
                 "start_date":"2024-01-01","approver_ids":[1]}),
         )
@@ -143,7 +147,7 @@ pub async fn bootstrap_team_with_suffix(
     let (st, body) = admin
         .post(
             "/api/v1/users",
-            &json!({"email": &emp_email, "first_name":"Emil","last_name":"Emp",
+            &json!({"email": &emp_email, "first_name": &emp_first_name,"last_name": &emp_last_name,
                 "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
                 "start_date":"2024-01-01","approver_ids":[lead_id]}),
         )

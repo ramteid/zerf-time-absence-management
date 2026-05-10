@@ -115,11 +115,15 @@ async fn absences_full_workflow() {
 
     // -- Approval rejects logged time conflicts --
     {
-        let work_day = next_monday(-7).format("%Y-%m-%d").to_string();
+        // Use a different workday than the previous block to avoid state bleed
+        // from the earlier "logged time" test case.
+        let conflict_day = (next_monday(-7) + chrono::Duration::days(1))
+            .format("%Y-%m-%d")
+            .to_string();
         let (st, body) = emp
             .post(
                 "/api/v1/absences",
-                &json!({"kind":"vacation","start_date": work_day,"end_date": work_day}),
+                &json!({"kind":"vacation","start_date": conflict_day,"end_date": conflict_day}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "create requested absence");
@@ -129,7 +133,7 @@ async fn absences_full_workflow() {
             .post(
                 "/api/v1/time-entries",
                 &json!({
-                    "entry_date": work_day,
+                    "entry_date": conflict_day,
                     "start_time": "08:00",
                     "end_time": "12:00",
                     "category_id": cat_id,
@@ -194,8 +198,8 @@ async fn absences_full_workflow() {
             "error mentions backdate limit: {body}"
         );
 
-        let current_start = next_monday(-7).format("%Y-%m-%d").to_string();
-        let current_end = (next_monday(-7) + chrono::Duration::days(2))
+        let current_start = next_monday(-21).format("%Y-%m-%d").to_string();
+        let current_end = (next_monday(-21) + chrono::Duration::days(2))
             .format("%Y-%m-%d")
             .to_string();
         let (st, body) = emp
@@ -230,8 +234,8 @@ async fn absences_full_workflow() {
 
     // -- Approved absence cannot be edited but cancellation requires approval --
     {
-        let day_start = next_monday(14).format("%Y-%m-%d").to_string();
-        let day_end = (next_monday(14) + chrono::Duration::days(2))
+        let day_start = next_monday(28).format("%Y-%m-%d").to_string();
+        let day_end = (next_monday(28) + chrono::Duration::days(2))
             .format("%Y-%m-%d")
             .to_string();
         let (st, body) = emp
