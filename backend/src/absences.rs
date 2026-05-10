@@ -1158,6 +1158,12 @@ async fn validate_vacation_balance(
 ) -> AppResult<()> {
     use crate::repository::AbsenceDb;
 
+    // Carryover policy matrix (date-driven, not request-driven):
+    // 1) vacation_day <= expiry_date: may consume carryover + annual entitlement
+    // 2) vacation_day >  expiry_date: may consume annual entitlement only
+    // 3) cross-year requests are validated per year with the same split logic
+    // 4) carryover source for next year comes from current-year approved/pending-approved usage
+
     let year = start_date.year();
     let year_from = NaiveDate::from_ymd_opt(year, 1, 1).unwrap();
     let year_to = NaiveDate::from_ymd_opt(year, 12, 31).unwrap();
@@ -1182,7 +1188,7 @@ async fn validate_vacation_balance(
     } else {
         0.0
     };
-    if expiry_date.is_none() && used_days + new_days > total_entitlement {
+    if used_days + new_days > total_entitlement {
         return Err(AppError::BadRequest(
             "Not enough remaining vacation days.".into(),
         ));
@@ -1259,7 +1265,6 @@ async fn validate_vacation_balance(
         // vacation reduces next year's carryover. Requested days reserve current-year
         // availability but do not reduce the carryover source.
         let end_year_expiry_date = parse_expiry_date(&expiry_setting, end_year);
-        let end_year_carryover_expired = end_year_expiry_date.map(|d| today > d).unwrap_or(false);
         let current_year_approved_usage = workdays_total(pool, user.id, "vacation", year_from, year_to).await?;
         let current_year_new_approved = if count_new_for_carryover_source {
             if let Some((current_year_new_start, current_year_new_end)) =
@@ -1277,11 +1282,9 @@ async fn validate_vacation_balance(
             0,
             effective_entitlement - current_year_total_usage.round() as i64,
         );
-        let end_year_total = total_entitlement_with_carryover(
-            end_year_effective,
-            current_year_carryover,
-            end_year_carryover_expired,
-        );
+        // Do not collapse carryover based on today's date here. We validate by
+        // vacation day date (pre/post expiry split below), not by request day.
+        let end_year_total = end_year_effective as f64 + current_year_carryover as f64;
 
         let end_year_existing = AbsenceDb::vacation_ranges_in_year_tx(
             &mut *tx,
