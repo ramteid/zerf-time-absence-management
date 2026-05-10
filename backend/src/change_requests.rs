@@ -7,7 +7,7 @@ use axum::{
     extract::{Path, State},
     Json,
 };
-use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
+use chrono::{DateTime, Datelike, NaiveDate, NaiveTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
@@ -96,6 +96,130 @@ fn parse_change_time(time_str: &str) -> AppResult<NaiveTime> {
     NaiveTime::parse_from_str(time_str, "%H:%M")
         .or_else(|_| NaiveTime::parse_from_str(time_str, "%H:%M:%S"))
         .map_err(|_| AppError::BadRequest("Invalid time format (HH:MM).".into()))
+}
+
+fn monday_of(date: NaiveDate) -> NaiveDate {
+    date - chrono::Duration::days(date.weekday().num_days_from_monday() as i64)
+}
+
+fn hhmm(time_str: &str) -> String {
+    time_str.chars().take(5).collect()
+}
+
+fn empty_text(language: &i18n::Language) -> &'static str {
+    if language.code() == "de" {
+        "(leer)"
+    } else {
+        "(empty)"
+    }
+}
+
+async fn category_label(
+    pool: &crate::db::DatabasePool,
+    language: &i18n::Language,
+    category_id: i64,
+) -> String {
+    let raw_name: Option<String> = sqlx::query_scalar("SELECT name FROM categories WHERE id=$1")
+        .bind(category_id)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten();
+    match raw_name {
+        Some(name) => i18n::work_category_label(language, &name),
+        None => format!("#{category_id}"),
+    }
+}
+
+fn entry_label(
+    language: &i18n::Language,
+    entry_date: NaiveDate,
+    start_time: &str,
+    end_time: &str,
+    category: &str,
+) -> String {
+    format!(
+        "{} · {}-{} · {}",
+        i18n::format_date(language, entry_date),
+        hhmm(start_time),
+        hhmm(end_time),
+        category
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn change_diff(
+    language: &i18n::Language,
+    current_date: NaiveDate,
+    current_start: &str,
+    current_end: &str,
+    current_category: &str,
+    current_comment: Option<&str>,
+    new_date: Option<NaiveDate>,
+    new_start: Option<&str>,
+    new_end: Option<&str>,
+    new_category: Option<&str>,
+    new_comment: Option<&str>,
+) -> String {
+    let mut lines = Vec::new();
+    let date_label = if language.code() == "de" { "Datum" } else { "Date" };
+    let time_label = if language.code() == "de" { "Zeit" } else { "Time" };
+    let type_label = if language.code() == "de" { "Typ" } else { "Type" };
+    let comment_label = if language.code() == "de" {
+        "Kommentar"
+    } else {
+        "Comment"
+    };
+
+    if let Some(next_date) = new_date {
+        if next_date != current_date {
+            lines.push(format!(
+                "- {date_label}: {} -> {}",
+                i18n::format_date(language, current_date),
+                i18n::format_date(language, next_date)
+            ));
+        }
+    }
+
+    let next_start = new_start.map(hhmm).unwrap_or_else(|| hhmm(current_start));
+    let next_end = new_end.map(hhmm).unwrap_or_else(|| hhmm(current_end));
+    let current_start_hhmm = hhmm(current_start);
+    let current_end_hhmm = hhmm(current_end);
+    if next_start != current_start_hhmm || next_end != current_end_hhmm {
+        lines.push(format!(
+            "- {time_label}: {}-{} -> {}-{}",
+            current_start_hhmm, current_end_hhmm, next_start, next_end
+        ));
+    }
+
+    let next_category = new_category.unwrap_or(current_category);
+    if next_category != current_category {
+        lines.push(format!(
+            "- {type_label}: {current_category} -> {next_category}"
+        ));
+    }
+
+    if let Some(comment) = new_comment {
+        let before = current_comment.filter(|value| !value.is_empty());
+        let after = if comment.is_empty() { None } else { Some(comment) };
+        if before != after {
+            lines.push(format!(
+                "- {comment_label}: {} -> {}",
+                before.unwrap_or(empty_text(language)),
+                after.unwrap_or(empty_text(language))
+            ));
+        }
+    }
+
+    if lines.is_empty() {
+        if language.code() == "de" {
+            "- Keine effektive Änderung".to_string()
+        } else {
+            "- No effective change".to_string()
+        }
+    } else {
+        lines.join("\n")
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -265,9 +389,34 @@ pub async fn create(
     .await;
     // Notify approvers that a change request needs review.
     let requester_full_name = format!("{} {}", requester.first_name, requester.last_name);
-    let requested_entry_date = created_change_request.new_date.unwrap_or(entry_date);
     let approver_ids = crate::auth::approval_recipient_ids(&app_state.pool, &requester).await;
     let language = notification_language(&app_state.pool).await;
+    let week_label = i18n::format_week_label(&language, monday_of(entry_date));
+    let current_category = category_label(&app_state.pool, &language, entry_category_id).await;
+    let proposed_category = match body.new_category_id {
+        Some(category_id) => Some(category_label(&app_state.pool, &language, category_id).await),
+        None => None,
+    };
+    let entry_label_text = entry_label(
+        &language,
+        entry_date,
+        &entry_start_time,
+        &entry_end_time,
+        &current_category,
+    );
+    let diff_text = change_diff(
+        &language,
+        entry_date,
+        &entry_start_time,
+        &entry_end_time,
+        &current_category,
+        entry_comment.as_deref(),
+        body.new_date,
+        body.new_start_time.as_deref(),
+        body.new_end_time.as_deref(),
+        proposed_category.as_deref(),
+        body.new_comment.as_deref(),
+    );
     for approver_id in approver_ids {
         crate::notifications::create_translated(
             &app_state,
@@ -278,10 +427,10 @@ pub async fn create(
             "change_request_created_body",
             vec![
                 ("requester_name", requester_full_name.clone()),
-                (
-                    "entry_date",
-                    i18n::format_date(&language, requested_entry_date),
-                ),
+                ("week_label", week_label.clone()),
+                ("entry_label", entry_label_text.clone()),
+                ("reason", body.reason.trim().to_string()),
+                ("change_diff", diff_text.clone()),
             ],
             Some("change_requests"),
             Some(new_change_request_id),
@@ -439,7 +588,38 @@ pub async fn approve(
     .await;
     // Notify the requester that their change request was approved.
     let language = notification_language(&app_state.pool).await;
-    let affected_entry_date = change_request.new_date.unwrap_or(existing_entry.entry_date);
+    let week_label = i18n::format_week_label(&language, monday_of(existing_entry.entry_date));
+    let current_category = category_label(&app_state.pool, &language, existing_entry.category_id).await;
+    let effective_category = match change_request.new_category_id {
+        Some(category_id) => category_label(&app_state.pool, &language, category_id).await,
+        None => current_category.clone(),
+    };
+    let entry_label_text = entry_label(
+        &language,
+        change_request.new_date.unwrap_or(existing_entry.entry_date),
+        change_request
+            .new_start_time
+            .as_deref()
+            .unwrap_or(&existing_entry.start_time),
+        change_request
+            .new_end_time
+            .as_deref()
+            .unwrap_or(&existing_entry.end_time),
+        &effective_category,
+    );
+    let diff_text = change_diff(
+        &language,
+        existing_entry.entry_date,
+        &existing_entry.start_time,
+        &existing_entry.end_time,
+        &current_category,
+        existing_entry.comment.as_deref(),
+        change_request.new_date,
+        change_request.new_start_time.as_deref(),
+        change_request.new_end_time.as_deref(),
+        Some(&effective_category),
+        change_request.new_comment.as_deref(),
+    );
     crate::notifications::create_translated(
         &app_state,
         &language,
@@ -447,10 +627,11 @@ pub async fn approve(
         "change_request_approved",
         "change_request_approved_title",
         "change_request_approved_body",
-        vec![(
-            "entry_date",
-            i18n::format_date(&language, affected_entry_date),
-        )],
+        vec![
+            ("week_label", week_label),
+            ("entry_label", entry_label_text),
+            ("change_diff", diff_text),
+        ],
         Some("change_requests"),
         Some(change_request_id),
     )
@@ -529,16 +710,59 @@ pub async fn reject(
     .await;
     // Notify the requester that their change request was rejected.
     let language = notification_language(&app_state.pool).await;
-    let affected_entry_date: NaiveDate = app_state
+    let (entry_owner_id, _entry_status, entry_date, entry_start_time, entry_end_time, entry_category_id, entry_comment) = app_state
         .db
         .change_requests
-        .get_entry_date(change_request.time_entry_id)
+        .get_entry_info(change_request.time_entry_id)
         .await?
-        .unwrap_or_else(|| {
+        .unwrap_or((
+            change_request.user_id,
+            "submitted".to_string(),
             change_request
                 .new_date
-                .unwrap_or(chrono::Utc::now().date_naive())
-        });
+                .unwrap_or(chrono::Utc::now().date_naive()),
+            change_request
+                .new_start_time
+                .clone()
+                .unwrap_or_else(|| "00:00".to_string()),
+            change_request
+                .new_end_time
+                .clone()
+                .unwrap_or_else(|| "00:00".to_string()),
+            change_request.new_category_id.unwrap_or_default(),
+            None,
+        ));
+    let _ = entry_owner_id;
+    let week_label = i18n::format_week_label(&language, monday_of(entry_date));
+    let current_category = if entry_category_id > 0 {
+        category_label(&app_state.pool, &language, entry_category_id).await
+    } else {
+        "-".to_string()
+    };
+    let requested_category = match change_request.new_category_id {
+        Some(category_id) => category_label(&app_state.pool, &language, category_id).await,
+        None => current_category.clone(),
+    };
+    let entry_label_text = entry_label(
+        &language,
+        entry_date,
+        &entry_start_time,
+        &entry_end_time,
+        &current_category,
+    );
+    let diff_text = change_diff(
+        &language,
+        entry_date,
+        &entry_start_time,
+        &entry_end_time,
+        &current_category,
+        entry_comment.as_deref(),
+        change_request.new_date,
+        change_request.new_start_time.as_deref(),
+        change_request.new_end_time.as_deref(),
+        Some(&requested_category),
+        change_request.new_comment.as_deref(),
+    );
     crate::notifications::create_translated(
         &app_state,
         &language,
@@ -547,11 +771,10 @@ pub async fn reject(
         "change_request_rejected_title",
         "change_request_rejected_body",
         vec![
-            (
-                "entry_date",
-                i18n::format_date(&language, affected_entry_date),
-            ),
+            ("week_label", week_label),
+            ("entry_label", entry_label_text),
             ("reason", body.reason.clone()),
+            ("change_diff", diff_text),
         ],
         Some("change_requests"),
         Some(change_request_id),

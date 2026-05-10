@@ -251,6 +251,15 @@
 
   $: pendingWeeks = buildPendingWeeks(pendingEntries, users);
   $: timeEntryById = new Map(allTimeEntries.map((entry) => [entry.id, entry]));
+  $: pendingReopenWeekKeys = new Set(
+    pendingReopens.map((reopen) => `${reopen.user_id}:${dateKey(reopen.week_start)}`),
+  );
+  $: visibleChangeRequests = changeRequests.filter(
+    (changeRequest) =>
+      !pendingReopenWeekKeys.has(
+        `${changeRequest.user_id}:${dateKey(changeRequestWeekStart(changeRequest))}`,
+      ),
+  );
 
   $: currentOvertimeRow =
     overtimeRows.find((row) => row.month === currentMonthKey) ??
@@ -361,9 +370,21 @@
     return formatHours((week.total_min / 60).toFixed(1));
   }
 
+  function weekEntryTypeSummary(week) {
+    const types = Array.from(
+      new Set((week?.entries || []).map((entry) => categoryName(entry.category_id))),
+    );
+    return types.join(", ");
+  }
+
   function categoryName(categoryId) {
     const category = $categories.find((item) => item.id === categoryId);
     return category ? $t(category.name) : `#${categoryId}`;
+  }
+
+  function changeRequestWeekStart(changeRequest) {
+    const entry = timeEntryById.get(changeRequest.time_entry_id);
+    return entry ? weekStartOf(entry.entry_date) : "";
   }
 
   function changeRequestChanges(changeRequest) {
@@ -909,8 +930,8 @@
           <div class="stat-card-label">{$t("Change Requests")}</div>
           <div
             class="stat-card-value tab-num"
-            style="color:{changeRequests.length > 0 ? 'var(--danger-text)' : 'var(--success-text)'}"
-          >{changeRequests.length}</div>
+            style="color:{visibleChangeRequests.length > 0 ? 'var(--danger-text)' : 'var(--success-text)'}"
+          >{visibleChangeRequests.length}</div>
         </div>
 
         <div class="kz-card stat-card">
@@ -948,9 +969,9 @@
         <div class="card-header">
           <Icon name="FileText" size={15} sw={1.5} />
           <span class="card-header-title">{$t("Timesheet Approvals")}</span>
-          {#if pendingWeeks.length + pendingReopens.length + changeRequests.length > 0}
+          {#if pendingWeeks.length + pendingReopens.length + visibleChangeRequests.length > 0}
             <span class="kz-chip kz-chip-pending" style="font-size:10.5px">
-              {pendingWeeks.length + pendingReopens.length + changeRequests.length}
+              {pendingWeeks.length + pendingReopens.length + visibleChangeRequests.length}
               {$t("pending")}
             </span>
           {/if}
@@ -989,6 +1010,9 @@
               </div>
               <div style="font-size:11px;color:var(--text-tertiary)">
                 {week.entries.length} {$t("Days")}
+              </div>
+              <div style="font-size:11px;color:var(--text-tertiary)">
+                {$t("Type")}: {weekEntryTypeSummary(week)}
               </div>
             </div>
             <div style="display:flex;gap:4px">
@@ -1057,7 +1081,7 @@
             </div>
           </div>
         {/each}
-        {#each changeRequests as cr}
+        {#each visibleChangeRequests as cr}
           <div
             class="dashboard-click-row"
             on:click={() => openRequestDetail("change", cr)}
@@ -1108,7 +1132,7 @@
             </div>
           </div>
         {/each}
-        {#if pendingWeeks.length === 0 && pendingReopens.length === 0 && changeRequests.length === 0}
+        {#if pendingWeeks.length === 0 && pendingReopens.length === 0 && visibleChangeRequests.length === 0}
           <div
             style="padding:32px;text-align:center;color:var(--text-tertiary);font-size:13px"
           >
@@ -1572,6 +1596,9 @@
             <div class="tab-num" style="font-size:12px;color:var(--text-secondary)">
               {entry.start_time.slice(0, 5)} - {entry.end_time.slice(0, 5)} ·
               {formatHours((entryMinutes(entry) / 60).toFixed(1))}
+            </div>
+            <div style="font-size:11.5px;color:var(--text-tertiary)">
+              {$t("Type")}: {categoryName(entry.category_id)}
             </div>
             {#if entry.comment}
               <div style="font-size:11.5px;color:var(--text-tertiary)">{entry.comment}</div>

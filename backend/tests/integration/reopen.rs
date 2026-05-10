@@ -54,15 +54,17 @@ async fn reopen_full_workflow() {
             .iter()
             .find(|n| n["kind"] == "reopen_auto_approved")
             .expect("notification created");
-        let monday = next_monday(-14);
-        let monday_de = monday.format("%d.%m.%Y").to_string();
-        let expected_body =
-            format!("Die Woche ab {monday_de} wurde wieder zur Bearbeitung freigegeben.");
         assert_eq!(
             notification["title"].as_str(),
             Some("Woche zur Bearbeitung freigegeben")
         );
-        assert_eq!(notification["body"].as_str(), Some(expected_body.as_str()));
+        let body = notification["body"].as_str().unwrap_or("");
+        assert!(body.contains("Woche: KW"), "body should include week label: {body}");
+        assert!(
+            body.contains("Keine offenen Änderungsanträge")
+                || body.contains("Automatisch übernommene Änderungsanträge"),
+            "body should include change-request overview: {body}"
+        );
         assert!(!notification["title"].as_str().unwrap().contains(" / "));
     }
 
@@ -205,7 +207,7 @@ async fn reopen_full_workflow() {
         assert_eq!(st, StatusCode::BAD_REQUEST, "tuesday rejected");
     }
 
-    // -- Cancels open change requests --
+    // -- Applies open change requests --
     {
         let (_lead_id, _lead_pw, _emp_id, emp_pw, monday_iso, cat_id) =
             bootstrap_team_with_suffix(&app, &admin, true, "6").await;
@@ -231,12 +233,12 @@ async fn reopen_full_workflow() {
 
         let (_, body) = emp.get("/api/v1/change-requests").await;
         let cr = find_by_id(&body, cr_id).expect("cr present");
-        assert_eq!(cr["status"], "rejected");
-        assert!(cr["rejection_reason"]
-            .as_str()
-            .unwrap()
-            .to_lowercase()
-            .contains("auto"));
+        assert_eq!(cr["status"], "approved");
+
+        let (_, body) = emp.get("/api/v1/time-entries").await;
+        let entry = find_by_id(&body, eid).expect("entry present");
+        assert_eq!(entry["status"], "draft");
+        assert_eq!(entry["comment"], "edited");
     }
 
     // -- Lead self-service --
