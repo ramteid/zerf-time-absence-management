@@ -34,6 +34,20 @@ async fn reports_full_workflow() {
         assert_eq!(st, StatusCode::OK, "create draft report entry");
         let entry_id = id(&body);
 
+        let (st, _) = lead
+            .post(
+                "/api/v1/time-entries",
+                &json!({
+                    "entry_date": monday,
+                    "start_time": "13:00",
+                    "end_time": "17:00",
+                    "category_id": cat_id,
+                    "comment": "lead own time"
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "create lead draft entry");
+
         // Draft entries are booked time and should appear in category totals.
         let (st, body) = lead
             .get(&format!(
@@ -43,6 +57,19 @@ async fn reports_full_workflow() {
             .await;
         assert_eq!(st, StatusCode::OK, "category report with only draft");
         assert_eq!(body.as_array().unwrap()[0]["minutes"], 240);
+
+        let (st, body) = lead
+            .get(&format!(
+                "/api/v1/reports/categories?from={}&to={}",
+                monday, monday
+            ))
+            .await;
+        assert_eq!(st, StatusCode::OK, "lead aggregate category report");
+        assert_eq!(
+            body.as_array().unwrap()[0]["minutes"],
+            480,
+            "aggregate must include lead + direct report booked time"
+        );
 
         // Submit and approve the entry
         let (st, _) = emp
