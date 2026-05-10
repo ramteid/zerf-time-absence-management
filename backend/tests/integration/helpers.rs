@@ -114,6 +114,59 @@ pub async fn bootstrap_team(
     (lead_id, lead_pw, emp_id, emp_pw, monday_iso, cat_id)
 }
 
+/// Bootstrap admin, one lead, one employee with unique email suffix.
+/// Returns (lead_id, lead_pw, emp_id, emp_pw, monday_iso, cat_id).
+pub async fn bootstrap_team_with_suffix(
+    _app: &TestApp,
+    admin: &TestClient,
+    emp_policy_auto: bool,
+    suffix: &str,
+) -> (i64, String, i64, String, String, i64) {
+    let (_, body) = admin.get("/api/v1/categories").await;
+    let cat_id = body.as_array().unwrap()[0]["id"].as_i64().unwrap();
+
+    let lead_email = format!("lead-{}@example.com", suffix);
+    let emp_email = format!("emp-{}@example.com", suffix);
+
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({"email": &lead_email, "first_name":"Lara","last_name":"Lead",
+                "role":"team_lead","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
+                "start_date":"2024-01-01","approver_ids":[1]}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create lead");
+    let lead_id = id(&body);
+    let lead_pw = temp_pw(&body);
+
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({"email": &emp_email, "first_name":"Emil","last_name":"Emp",
+                "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
+                "start_date":"2024-01-01","approver_ids":[lead_id]}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create emp");
+    let emp_id = id(&body);
+    let emp_pw = temp_pw(&body);
+
+    if emp_policy_auto {
+        let (st, _) = admin
+            .put(
+                &format!("/api/v1/team-settings/{}", emp_id),
+                &json!({"allow_reopen_without_approval": true}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "set emp policy auto");
+    }
+
+    let last_mon = next_monday(-14);
+    let monday_iso = last_mon.format("%Y-%m-%d").to_string();
+
+    (lead_id, lead_pw, emp_id, emp_pw, monday_iso, cat_id)
+}
 pub async fn login_change_pw(app: &TestApp, email: &str, temp: &str) -> TestClient {
     let c = app.client();
     let (st, _) = c.login(email, temp).await;

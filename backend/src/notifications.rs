@@ -48,7 +48,7 @@ pub async fn create(
         let smtp = state.db.settings.load_smtp_config().await.map(std::sync::Arc::new);
         let timestamp = chrono::Local::now().format("%d.%m.%Y %H:%M").to_string();
         let email_body = match &state.cfg.public_url {
-            Some(url) => format!("{timestamp}\n\nfi{body}\n\n{url}"),
+            Some(url) => format!("{timestamp}\n\n{body}\n\n{url}"),
             None => format!("{body}\n\n{timestamp}"),
         };
         crate::email::send_async(smtp, email, title.to_string(), email_body);

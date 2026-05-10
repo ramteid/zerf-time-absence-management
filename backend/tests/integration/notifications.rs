@@ -1,3 +1,6 @@
+//! End-to-end notification workflow tests running in a single container for efficiency.
+//! All test cases run sequentially within the same app instance.
+
 use reqwest::StatusCode;
 use serde_json::json;
 use chrono::{Duration, NaiveDate};
@@ -6,242 +9,234 @@ use crate::common::TestApp;
 use crate::helpers::*;
 
 #[tokio::test]
-async fn notifications_crud() {
+async fn notifications_full_workflow() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
 
-    let (_lead_id, _lead_pw, _emp_id, emp_pw, monday_iso, cat_id) =
-        bootstrap_team(&app, &admin, true).await;
-    let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
-    let _ = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
-    emp.post(
-        "/api/v1/reopen-requests",
-        &json!({"week_start": monday_iso}),
-    )
-    .await;
-
-    let (st, body) = emp.get("/api/v1/notifications/unread-count").await;
-    assert_eq!(st, StatusCode::OK);
-    assert!(body["count"].as_i64().unwrap() >= 1);
-
-    let (st, list) = emp.get("/api/v1/notifications").await;
-    assert_eq!(st, StatusCode::OK);
-    let nid = list[0]["id"].as_i64().unwrap();
-
-    let (st, _) = emp
-        .post(&format!("/api/v1/notifications/{}/read", nid), &json!({}))
-        .await;
-    assert_eq!(st, StatusCode::OK);
-
-    let (st, _) = emp.post("/api/v1/notifications/read-all", &json!({})).await;
-    assert_eq!(st, StatusCode::OK);
-
-    let (st, body) = emp.get("/api/v1/notifications/unread-count").await;
-    assert_eq!(st, StatusCode::OK);
-    assert_eq!(body["count"], 0);
-
-    let (st, _) = emp.delete("/api/v1/notifications").await;
-    assert_eq!(st, StatusCode::OK);
-    let (_, list) = emp.get("/api/v1/notifications").await;
-    assert_eq!(list.as_array().unwrap().len(), 0);
-
-    app.cleanup().await;
-}
-
-#[tokio::test]
-async fn absence_request_notifies_approver() {
-    let app = TestApp::spawn().await;
-    let admin = admin_login(&app).await;
-
-    let (_lead_id, lead_pw, _emp_id, emp_pw, monday_iso, _cat_id) =
-        bootstrap_team(&app, &admin, false).await;
-    let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
-    let lead = login_change_pw(&app, "lead-r@example.com", &lead_pw).await;
-
-    let (st, body) = emp
-        .post(
-            "/api/v1/absences",
-            &json!({
-                "kind": "vacation",
-                "start_date": monday_iso,
-                "end_date": monday_iso,
-                "comment": "need a day off"
-            }),
+    // -- Notifications CRUD --
+    {
+        let (_lead_id, _lead_pw, _emp_id, emp_pw, monday_iso, cat_id) =
+            bootstrap_team_with_suffix(&app, &admin, true, "1").await;
+        let emp = login_change_pw(&app, "emp-1@example.com", &emp_pw).await;
+        let _ = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
+        emp.post(
+            "/api/v1/reopen-requests",
+            &json!({"week_start": monday_iso}),
         )
         .await;
-    assert_eq!(st, StatusCode::OK, "create absence request");
-    assert_eq!(body["status"], "requested");
 
-    let (st, body) = lead.get("/api/v1/notifications").await;
-    assert_eq!(st, StatusCode::OK, "lead notifications");
-    assert!(
-        body.as_array()
-            .unwrap()
-            .iter()
-            .any(|item| item["kind"] == "absence_requested"),
-        "lead received absence request notification"
-    );
+        let (st, body) = emp.get("/api/v1/notifications/unread-count").await;
+        assert_eq!(st, StatusCode::OK);
+        assert!(body["count"].as_i64().unwrap() >= 1);
 
-    app.cleanup().await;
-}
+        let (st, list) = emp.get("/api/v1/notifications").await;
+        assert_eq!(st, StatusCode::OK);
+        let nid = list[0]["id"].as_i64().unwrap();
 
-#[tokio::test]
-async fn change_request_creation_notifies_approver() {
-    let app = TestApp::spawn().await;
-    let admin = admin_login(&app).await;
+        let (st, _) = emp
+            .post(&format!("/api/v1/notifications/{}/read", nid), &json!({}))
+            .await;
+        assert_eq!(st, StatusCode::OK);
 
-    let (_lead_id, lead_pw, _emp_id, emp_pw, monday_iso, cat_id) =
-        bootstrap_team(&app, &admin, false).await;
-    let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
-    let lead = login_change_pw(&app, "lead-r@example.com", &lead_pw).await;
+        let (st, _) = emp.post("/api/v1/notifications/read-all", &json!({})).await;
+        assert_eq!(st, StatusCode::OK);
 
-    let eid = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
-    let (st, body) = emp
-        .post(
-            "/api/v1/change-requests",
-            &json!({
-                "time_entry_id": eid,
-                "new_start_time": "09:00",
-                "reason": "came in later"
-            }),
-        )
-        .await;
-    assert_eq!(st, StatusCode::OK, "create change request");
-    assert_eq!(body["status"], "open");
+        let (st, body) = emp.get("/api/v1/notifications/unread-count").await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(body["count"], 0);
 
-    let (st, body) = lead.get("/api/v1/notifications").await;
-    assert_eq!(st, StatusCode::OK, "lead notifications");
-    assert!(
-        body.as_array()
-            .unwrap()
-            .iter()
-            .any(|item| item["kind"] == "change_request_created"),
-        "lead received change request notification"
-    );
+        let (st, _) = emp.delete("/api/v1/notifications").await;
+        assert_eq!(st, StatusCode::OK);
+        let (_, list) = emp.get("/api/v1/notifications").await;
+        assert_eq!(list.as_array().unwrap().len(), 0);
+    }
 
-    app.cleanup().await;
-}
+    // -- Absence request notifies approver --
+        app.cleanup().await;
+    {
+        let (_lead_id, lead_pw, _emp_id, emp_pw, monday_iso, _cat_id) =
+            bootstrap_team_with_suffix(&app, &admin, false, "2").await;
+        let emp = login_change_pw(&app, "emp-2@example.com", &emp_pw).await;
+        let lead = login_change_pw(&app, "lead-2@example.com", &lead_pw).await;
 
-// When public_url is configured, the app URL must appear in email bodies but
-// must NOT be stored in the in-app notification body (which is shown inside the
-// app where a bare URL would be redundant and ugly).
-#[tokio::test]
-async fn notification_inapp_body_has_no_url_even_when_public_url_is_set() {
-    let app = TestApp::spawn_with_public_url("https://test.example.com").await;
-    let admin = admin_login(&app).await;
-
-    let (_lead_id, lead_pw, _emp_id, emp_pw, monday_iso, _cat_id) =
-        bootstrap_team(&app, &admin, false).await;
-    let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
-    let lead = login_change_pw(&app, "lead-r@example.com", &lead_pw).await;
-
-    let (st, _) = emp
-        .post(
-            "/api/v1/absences",
-            &serde_json::json!({
-                "kind": "vacation",
-                "start_date": monday_iso,
-                "end_date": monday_iso,
-            }),
-        )
-        .await;
-    assert_eq!(st, reqwest::StatusCode::OK);
-
-    let (st, notifications) = lead.get("/api/v1/notifications").await;
-    assert_eq!(st, reqwest::StatusCode::OK);
-
-    let notification = notifications
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|item| item["kind"] == "absence_requested")
-        .expect("lead must have received absence_requested notification");
-
-    let body = notification["body"].as_str().unwrap_or("");
-    assert!(
-        !body.contains("https://test.example.com"),
-        "in-app notification body must not contain the app URL, got: {body:?}"
-    );
-    assert!(!body.is_empty(), "in-app notification body must not be empty");
-
-    app.cleanup().await;
-}
-
-#[tokio::test]
-async fn timesheet_batch_approval_notification_counts_weeks_not_entries() {
-    let app = TestApp::spawn().await;
-    let admin = admin_login(&app).await;
-
-    let (_lead_id, lead_pw, _emp_id, emp_pw, monday_iso, cat_id) =
-        bootstrap_team(&app, &admin, false).await;
-    let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
-    let lead = login_change_pw(&app, "lead-r@example.com", &lead_pw).await;
-
-    let monday = NaiveDate::parse_from_str(&monday_iso, "%Y-%m-%d").expect("valid monday date");
-    let tuesday_iso = (monday + Duration::days(1)).format("%Y-%m-%d").to_string();
-
-    let slots = [
-        (&monday_iso, "08:00", "09:00"),
-        (&monday_iso, "09:30", "10:30"),
-        (&monday_iso, "11:00", "12:00"),
-        (&tuesday_iso, "08:00", "09:00"),
-        (&tuesday_iso, "09:30", "10:30"),
-        (&tuesday_iso, "11:00", "12:00"),
-    ];
-
-    let mut ids = Vec::new();
-    for (entry_date, start_time, end_time) in slots {
         let (st, body) = emp
             .post(
-                "/api/v1/time-entries",
+                "/api/v1/absences",
                 &json!({
-                    "entry_date": entry_date,
-                    "start_time": start_time,
-                    "end_time": end_time,
-                    "category_id": cat_id,
-                    "comment": "week test"
+                    "kind": "vacation",
+                    "start_date": monday_iso,
+                    "end_date": monday_iso,
+                    "comment": "need a day off"
                 }),
             )
             .await;
-        assert_eq!(st, StatusCode::OK, "create time entry for weekly notification test");
-        ids.push(id(&body));
+        assert_eq!(st, StatusCode::OK, "create absence request");
+        assert_eq!(body["status"], "requested");
+
+        let (st, body) = lead.get("/api/v1/notifications").await;
+        assert_eq!(st, StatusCode::OK, "lead notifications");
+        assert!(
+            body.as_array()
+                .unwrap()
+                .iter()
+                .any(|item| item["kind"] == "absence_requested"),
+            "lead received absence request notification"
+        );
     }
 
-    let (st, _) = emp
-        .post("/api/v1/time-entries/submit", &json!({"ids": ids}))
-        .await;
-    assert_eq!(st, StatusCode::OK, "submit weekly timesheet");
+    // -- Change request creation notifies approver --
+        app.cleanup().await;
+    {
+        let (_lead_id, lead_pw, _emp_id, emp_pw, monday_iso, cat_id) =
+            bootstrap_team_with_suffix(&app, &admin, true, "3").await;
+        let emp = login_change_pw(&app, "emp-3@example.com", &emp_pw).await;
+        let lead = login_change_pw(&app, "lead-3@example.com", &lead_pw).await;
 
-    let (st, body) = lead.get("/api/v1/time-entries/all?status=submitted").await;
-    assert_eq!(st, StatusCode::OK, "lead fetches submitted entries");
-    let approve_ids: Vec<i64> = body
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|row| row["id"].as_i64().expect("submitted entry id"))
-        .collect();
-    assert_eq!(approve_ids.len(), 6, "six submitted entries expected");
+        let eid = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
+        let (st, body) = emp
+            .post(
+                "/api/v1/change-requests",
+                &json!({
+                    "time_entry_id": eid,
+                    "new_start_time": "09:00",
+                    "reason": "came in later"
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "create change request");
+        assert_eq!(body["status"], "open");
 
-    let (st, _) = lead
-        .post(
-            "/api/v1/time-entries/batch-approve",
-            &json!({"ids": approve_ids}),
-        )
-        .await;
-    assert_eq!(st, StatusCode::OK, "batch approve submitted entries");
+        let (st, body) = lead.get("/api/v1/notifications").await;
+        assert_eq!(st, StatusCode::OK, "lead notifications");
+        assert!(
+            body.as_array()
+                .unwrap()
+                .iter()
+                .any(|item| item["kind"] == "change_request_created"),
+            "lead received change request notification"
+        );
+    }
 
-    let (st, notifications) = emp.get("/api/v1/notifications").await;
-    assert_eq!(st, StatusCode::OK, "employee notifications");
+    // -- Notification in-app body has no URL even when public URL is set --
+    // When public_url is configured, the app URL must appear in email bodies but
+    // must NOT be stored in the in-app notification body (which is shown inside the
+    // app where a bare URL would be redundant and ugly).
+    {
+        let app2 = TestApp::spawn_with_public_url("https://test.example.com").await;
+        let admin2 = admin_login(&app2).await;
 
-    let approval_notification = notifications
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|item| item["kind"] == "timesheet_approved")
-        .expect("timesheet_approved notification must exist");
+        let (_lead_id, lead_pw, _emp_id, emp_pw, monday_iso, _cat_id) =
+            bootstrap_team_with_suffix(&app2, &admin2, false, "3").await;
+        let emp = login_change_pw(&app2, "emp-3@example.com", &emp_pw).await;
+        let lead = login_change_pw(&app2, "lead-3@example.com", &lead_pw).await;
 
-    assert_eq!(approval_notification["title"], "Timesheet approved");
-    assert_eq!(approval_notification["body"], "1 week approved.");
+        let (st, _) = emp
+            .post(
+                "/api/v1/absences",
+                &serde_json::json!({
+                    "kind": "vacation",
+                    "start_date": monday_iso,
+                    "end_date": monday_iso,
+                }),
+            )
+            .await;
+        assert_eq!(st, reqwest::StatusCode::OK);
+
+        let (st, notifications) = lead.get("/api/v1/notifications").await;
+        assert_eq!(st, reqwest::StatusCode::OK);
+
+        let notification = notifications
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["kind"] == "absence_requested")
+            .expect("lead must have received absence_requested notification");
+
+        let body = notification["body"].as_str().unwrap_or("");
+        assert!(
+            !body.contains("https://test.example.com"),
+            "in-app notification body must not contain the app URL, got: {body:?}"
+        );
+        assert!(!body.is_empty(), "in-app notification body must not be empty");
+
+        app2.cleanup().await;
+        app2.cleanup().await;
+    }
+
+    // -- Timesheet batch approval notification counts weeks not entries --
+        app.cleanup().await;
+    {
+        let (_lead_id, lead_pw, _emp_id, emp_pw, monday_iso, cat_id) =
+            bootstrap_team_with_suffix(&app, &admin, false, "4").await;
+        let emp = login_change_pw(&app, "emp-4@example.com", &emp_pw).await;
+        let lead = login_change_pw(&app, "lead-4@example.com", &lead_pw).await;
+
+        let monday = NaiveDate::parse_from_str(&monday_iso, "%Y-%m-%d").expect("valid monday date");
+        let tuesday_iso = (monday + Duration::days(1)).format("%Y-%m-%d").to_string();
+
+        let slots = [
+            (&monday_iso, "08:00", "09:00"),
+            (&monday_iso, "09:30", "10:30"),
+            (&monday_iso, "11:00", "12:00"),
+            (&tuesday_iso, "08:00", "09:00"),
+            (&tuesday_iso, "09:30", "10:30"),
+            (&tuesday_iso, "11:00", "12:00"),
+        ];
+
+        let mut ids = Vec::new();
+        for (entry_date, start_time, end_time) in slots {
+            let (st, body) = emp
+                .post(
+                    "/api/v1/time-entries",
+                    &json!({
+                        "entry_date": entry_date,
+                        "start_time": start_time,
+                        "end_time": end_time,
+                        "category_id": cat_id,
+                        "comment": "week test"
+                    }),
+                )
+                .await;
+            assert_eq!(st, StatusCode::OK, "create time entry for weekly notification test");
+            ids.push(id(&body));
+        }
+
+        let (st, _) = emp
+            .post("/api/v1/time-entries/submit", &json!({"ids": ids}))
+            .await;
+        assert_eq!(st, StatusCode::OK, "submit weekly timesheet");
+
+        let (st, body) = lead.get("/api/v1/time-entries/all?status=submitted").await;
+        assert_eq!(st, StatusCode::OK, "lead fetches submitted entries");
+        let approve_ids: Vec<i64> = body
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["id"].as_i64().expect("submitted entry id"))
+            .collect();
+        assert_eq!(approve_ids.len(), 6, "six submitted entries expected");
+
+        let (st, _) = lead
+            .post(
+                "/api/v1/time-entries/batch-approve",
+                &json!({"ids": approve_ids}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "batch approve submitted entries");
+
+        let (st, notifications) = emp.get("/api/v1/notifications").await;
+        assert_eq!(st, StatusCode::OK, "employee notifications");
+
+        let approval_notification = notifications
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["kind"] == "timesheet_approved")
+            .expect("timesheet_approved notification must exist");
+
+        assert_eq!(approval_notification["title"], "Timesheet approved");
+        assert_eq!(approval_notification["body"], "1 week approved.");
+    }
 
     app.cleanup().await;
 }
