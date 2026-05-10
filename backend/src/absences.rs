@@ -365,13 +365,13 @@ pub async fn create(
 ) -> AppResult<Json<Absence>> {
     let kind = validate_absence(&body)?;
     validate_sick_start_date(kind, body.start_date)?;
-    validate_absence_has_workday(&app_state.pool, body.start_date, body.end_date).await?;
     // Reject absences that start before the user's start_date.
     if body.start_date < requester.start_date {
         return Err(AppError::BadRequest(
             "Absence start date is before user start date.".into(),
         ));
     }
+    validate_absence_has_workday(&app_state.pool, body.start_date, body.end_date).await?;
     // Use an advisory lock on the user_id to serialize absence creation per
     // user, preventing the TOCTOU race where two concurrent requests both pass
     // the overlap check before either insert commits.
@@ -471,13 +471,13 @@ pub async fn update(
 ) -> AppResult<Json<Absence>> {
     let kind = validate_absence(&body)?;
     validate_sick_start_date(kind, body.start_date)?;
-    validate_absence_has_workday(&app_state.pool, body.start_date, body.end_date).await?;
     // Reject absences that start before the user's employment start date.
     if body.start_date < requester.start_date {
         return Err(AppError::BadRequest(
             "Absence start date is before user start date.".into(),
         ));
     }
+    validate_absence_has_workday(&app_state.pool, body.start_date, body.end_date).await?;
     let current_owner_id = absence_owner_id(&app_state.pool, absence_id).await?;
     let mut transaction = app_state.pool.begin().await?;
     lock_absence_scope(&mut *transaction, current_owner_id).await?;
