@@ -128,7 +128,9 @@ async fn admin_can_batch_reject_own_submitted_entry() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
 
-    let monday_iso = next_monday(-14).format("%Y-%m-%d").to_string();
+    // The test admin is seeded with start_date = today, so we must use today's
+    // date (or a future one is disallowed, past ones are before start_date).
+    let monday_iso = today();
     let (_, categories_body) = admin.get("/api/v1/categories").await;
     let category_id = categories_body.as_array().unwrap()[0]["id"].as_i64().unwrap();
 

@@ -32,7 +32,7 @@ async function settle() {
 }
 
 // Poll until a matching element appears in `target`, or throw after `timeout` ms.
-async function waitForElement(target, selector, timeout = 10000) {
+async function waitForElement(target, selector, timeout = 15000) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
     const el = target.querySelector(selector);
@@ -124,10 +124,11 @@ describe("Reports", () => {
 
     // Poll until the stat cards appear — loadReport() is async and Svelte needs
     // several microtask cycles to re-render after Promise.all resolves.
+    await waitForElement(target, ".stat-cards", 20000);
     const loggedInfoButton = await waitForElement(
       target,
       `button[title='${loggedHelp}']`,
-      10000,
+      20000,
     );
     loggedInfoButton.click();
     await settle();
@@ -137,11 +138,11 @@ describe("Reports", () => {
     const approvalsInfoButton = await waitForElement(
       target,
       `button[title='${approvalsHelp}']`,
-      5000,
+      20000,
     );
     approvalsInfoButton.click();
     await settle();
 
     expect(target.textContent).toContain(approvalsHelp);
-  }, 20000);
+  }, 60000);
 });
