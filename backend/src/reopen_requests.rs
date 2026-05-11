@@ -170,9 +170,10 @@ async fn load_change_request_overview(
                 c_new.name AS new_category_name, cr.new_comment \
          FROM change_requests cr \
          JOIN time_entries te ON te.id = cr.time_entry_id \
-         LEFT JOIN categories c_old ON c_old.id = te.category_id \
+         JOIN categories c_old ON c_old.id = te.category_id \
          LEFT JOIN categories c_new ON c_new.id = cr.new_category_id \
          WHERE cr.status='open' AND te.user_id=$1 AND te.entry_date BETWEEN $2 AND $3 \
+         AND c_old.counts_as_work = TRUE \
          ORDER BY te.entry_date, te.start_time, cr.id",
     )
     .bind(user_id)
@@ -200,7 +201,9 @@ async fn perform_reopen_in_tx(
 
     let affected: Vec<(i64, String)> = sqlx::query_as(
         "SELECT id, status FROM time_entries \
-         WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3 AND status<>'draft' FOR UPDATE",
+         WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3 AND status<>'draft' \
+         AND category_id IN (SELECT id FROM categories WHERE counts_as_work = TRUE) \
+         FOR UPDATE",
     )
     .bind(subject_id)
     .bind(week_start)
@@ -231,15 +234,18 @@ async fn perform_reopen_in_tx(
     .execute(&mut **tx)
     .await?;
 
+    // When auto-applying CRs during reopen, set reviewed_by=NULL to indicate auto-application
+    // rather than explicit human approval. This preserves permission model semantics:
+    // CRs should only have a non-NULL reviewed_by when explicitly approved by a lead/admin.
     sqlx::query(
         "UPDATE change_requests \
          SET status='approved', \
-             reviewed_by=$1, \
+             reviewed_by=CASE WHEN $1::bigint IS NOT NULL THEN $1 ELSE NULL END, \
              reviewed_at=CURRENT_TIMESTAMP, \
              rejection_reason=NULL \
          WHERE status='open' AND time_entry_id = ANY($2)",
     )
-    .bind(actor_id)
+    .bind(match actor_id == subject_id { true => None as Option<i64>, false => Some(actor_id) })
     .bind(&entry_ids)
     .execute(&mut **tx)
     .await?;
@@ -276,6 +282,38 @@ async fn audit_reopened_entries(
             Some(serde_json::json!({"status":"draft"})),
         )
         .await;
+    }
+}
+
+/// Audit log all change requests that were auto-applied during reopen.
+/// Records which CRs were applied and by which actor/subject combination.
+async fn audit_applied_change_requests(
+    pool: &crate::db::DatabasePool,
+    actor_id: i64,
+    subject_id: i64,
+    applied_entry_ids: &[i64],
+) {
+    // Load the CRs that were applied (those with status='open' for the given entries)
+    if let Ok(cr_ids) = sqlx::query_scalar::<_, i64>(
+        "SELECT id FROM change_requests WHERE status='approved' AND time_entry_id = ANY($1) \
+         AND reviewed_by IS NULL",
+    )
+    .bind(applied_entry_ids)
+    .fetch_all(pool)
+    .await
+    {
+        for cr_id in cr_ids {
+            audit::log(
+                pool,
+                actor_id,
+                "auto_applied",
+                "change_requests",
+                cr_id,
+                Some(serde_json::json!({"status": "open"})),
+                Some(serde_json::json!({"status": "approved", "reviewed_by": null, "auto_applied_by_user_id": subject_id})),
+            )
+            .await;
+        }
     }
 }
 
@@ -433,6 +471,8 @@ pub async fn create(
 
     if should_auto_approve {
         audit_reopened_entries(&app_state.pool, requester.id, &reopened_entries).await;
+        let entry_ids: Vec<i64> = reopened_entries.iter().map(|(id, _)| *id).collect();
+        audit_applied_change_requests(&app_state.pool, requester.id, requester.id, &entry_ids).await;
     }
 
     audit::log(
@@ -676,6 +716,9 @@ pub async fn approve(
     }
     let language = notification_language(&app_state.pool).await;
     let week_label = i18n::format_week_label(&language, reopen_request.week_start);
+    // Load CR overview BEFORE transaction commit to show which CRs will be applied.
+    // The query reads committed state; the header text (applied=true) reflects the
+    // semantic intent that these CRs WILL BE applied during reopen_in_tx().
     let applied_change_overview = load_change_request_overview(
         &app_state.pool,
         &language,
@@ -847,6 +890,8 @@ pub async fn reject(
     .await;
     // Symmetric with approve: if an admin rejected a request, notify all assigned
     // team leads for this user so they know the item left their queue.
+    // NOTE: reopen_rejected_by_admin_body template does not include {change_request_overview},
+    // so we pass an empty string to avoid wasted computation.
     notify_leads_if_admin_acted(
         &app_state,
         &language,
@@ -857,7 +902,7 @@ pub async fn reject(
         "reopen_rejected_by_admin_title",
         "reopen_rejected_by_admin_body",
         week_label,
-        pending_change_overview,
+        String::new(),
         vec![("reason", rejection_reason.to_string())],
     )
     .await;

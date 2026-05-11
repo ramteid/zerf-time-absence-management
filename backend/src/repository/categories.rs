@@ -12,6 +12,7 @@ pub struct Category {
     pub description: Option<String>,
     pub color: String,
     pub sort_order: i64,
+    pub counts_as_work: bool,
     pub active: bool,
 }
 
@@ -45,20 +46,22 @@ impl CategoryDb {
         }
 
         let initial = [
-            ("Core Duties", "#4CAF50", 1i64),
-            ("Preparation Time", "#2196F3", 2),
-            ("Leadership Tasks", "#FF9800", 3),
-            ("Team Meeting", "#9C27B0", 4),
-            ("Training", "#795548", 5),
-            ("Other", "#607D8B", 6),
+            ("Core Duties", "#4CAF50", 1i64, true),
+            ("Preparation Time", "#2196F3", 2, true),
+            ("Leadership Tasks", "#FF9800", 3, true),
+            ("Team Meeting", "#9C27B0", 4, true),
+            ("Training", "#795548", 5, true),
+            ("Other", "#607D8B", 6, true),
+            ("Flextime Reduction", "#6D4C41", 7, false),
         ];
-        for (name, color, sort_order) in initial {
+        for (name, color, sort_order, counts_as_work) in initial {
             sqlx::query(
-                "INSERT INTO categories(name, color, sort_order) VALUES ($1,$2,$3)",
+                "INSERT INTO categories(name, color, sort_order, counts_as_work) VALUES ($1,$2,$3,$4)",
             )
             .bind(name)
             .bind(color)
             .bind(sort_order)
+            .bind(counts_as_work)
             .execute(&self.pool)
             .await?;
         }
@@ -67,7 +70,7 @@ impl CategoryDb {
 
     pub async fn list_active(&self) -> AppResult<Vec<Category>> {
         Ok(sqlx::query_as::<_, Category>(
-            "SELECT id, name, description, color, sort_order, active \
+            "SELECT id, name, description, color, sort_order, counts_as_work, active \
              FROM categories WHERE active=TRUE ORDER BY sort_order, name",
         )
         .fetch_all(&self.pool)
@@ -76,7 +79,7 @@ impl CategoryDb {
 
     pub async fn find_by_id(&self, id: i64) -> AppResult<Option<Category>> {
         Ok(sqlx::query_as::<_, Category>(
-            "SELECT id, name, description, color, sort_order, active \
+            "SELECT id, name, description, color, sort_order, counts_as_work, active \
              FROM categories WHERE id=$1",
         )
         .bind(id)
@@ -98,15 +101,17 @@ impl CategoryDb {
         description: Option<&str>,
         color: &str,
         sort_order: i64,
+        counts_as_work: bool,
     ) -> AppResult<i64> {
         sqlx::query_scalar(
-            "INSERT INTO categories(name, description, color, sort_order) \
-             VALUES ($1,$2,$3,$4) RETURNING id",
+            "INSERT INTO categories(name, description, color, sort_order, counts_as_work) \
+             VALUES ($1,$2,$3,$4,$5) RETURNING id",
         )
         .bind(name)
         .bind(description)
         .bind(color)
         .bind(sort_order)
+        .bind(counts_as_work)
         .fetch_one(&self.pool)
         .await
         .map_err(|_| AppError::Conflict("Name already exists".into()))
@@ -119,19 +124,21 @@ impl CategoryDb {
         description: Option<String>,
         color: Option<String>,
         sort_order: Option<i64>,
+        counts_as_work: Option<bool>,
         active: Option<bool>,
     ) -> AppResult<()> {
         sqlx::query(
             "UPDATE categories \
              SET name=COALESCE($1,name), description=COALESCE($2,description), \
                  color=COALESCE($3,color), sort_order=COALESCE($4,sort_order), \
-                 active=COALESCE($5,active) \
-             WHERE id=$6",
+                 counts_as_work=COALESCE($5,counts_as_work), active=COALESCE($6,active) \
+             WHERE id=$7",
         )
         .bind(name)
         .bind(description)
         .bind(color)
         .bind(sort_order)
+        .bind(counts_as_work)
         .bind(active)
         .bind(id)
         .execute(&self.pool)

@@ -36,6 +36,14 @@ pub fn find_by_id(body: &Value, val: i64) -> Option<&Value> {
         .and_then(|arr| arr.iter().find(|o| o["id"].as_i64() == Some(val)))
 }
 
+pub fn category_id_by_name(body: &Value, name: &str) -> Option<i64> {
+    body.as_array().and_then(|arr| {
+        arr.iter()
+            .find(|category| category["name"].as_str() == Some(name))
+            .and_then(|category| category["id"].as_i64())
+    })
+}
+
 /// Next Monday ≥ offset days from now.
 pub fn next_monday(offset_days: i64) -> chrono::NaiveDate {
     let start = chrono::Utc::now().date_naive() + chrono::Duration::days(offset_days);

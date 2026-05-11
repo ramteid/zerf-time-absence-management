@@ -55,6 +55,7 @@ static LANGUAGES: &[LangDef] = &[
             ("absence_kind_special_leave", "Special leave"),
             ("absence_kind_unpaid", "Unpaid"),
             ("absence_kind_general_absence", "General absence"),
+            ("absence_kind_flextime_reduction", "Flextime Reduction"),
             ("absence_requested_title", "New absence request"),
             ("absence_requested_body", "{requester_name} requested a {kind} absence.\n\nPeriod: {start_date} to {end_date}\n\nPlease review the request and decide whether to approve or reject it."),
             ("absence_updated_title", "Absence request updated"),
@@ -129,6 +130,7 @@ static LANGUAGES: &[LangDef] = &[
             ("absence_kind_special_leave", "Sonderurlaub"),
             ("absence_kind_unpaid", "Unbezahlter Urlaub"),
             ("absence_kind_general_absence", "Allgemeine Abwesenheit"),
+            ("absence_kind_flextime_reduction", "Gleitzeitabbau"),
             ("absence_requested_title", "Neue Abwesenheitsanfrage"),
             ("absence_requested_body", "{requester_name} hat eine Abwesenheit vom Typ {kind} beantragt.\n\nZeitraum: {start_date} bis {end_date}\n\nBitte pr\u{00fc}fen Sie die Anfrage und entscheiden Sie \u{00fc}ber Genehmigung oder Ablehnung."),
             ("absence_updated_title", "Abwesenheitsanfrage aktualisiert"),
@@ -325,6 +327,7 @@ pub fn work_category_label(language: &Language, category_name: &str) -> String {
         "Team Meeting" => "Teambesprechung".to_string(),
         "Training" => "Fortbildung".to_string(),
         "Other" => "Sonstiges".to_string(),
+        "Flextime Reduction" => "Gleitzeitabbau".to_string(),
         other => other.to_string(),
     }
 }

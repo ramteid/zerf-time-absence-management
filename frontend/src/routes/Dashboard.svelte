@@ -128,11 +128,18 @@
       )
       .every((day) => {
         const entries = Array.isArray(day.entries) ? day.entries : [];
-        const hasDraft = entries.some((entry) => entry?.status === "draft");
-        const hasSubmittedOrApproved = entries.some(
-          (entry) => entry?.status === "submitted" || entry?.status === "approved",
+        const hasDraft = entries.some(
+          (entry) => entry?.status === "draft" && entryCountsAsWork(entry),
         );
-        return !hasDraft && hasSubmittedOrApproved;
+        const hasTargetRemovingAbsence =
+          day?.absence && day.absence !== "flextime_reduction";
+        const hasCreditedSubmittedOrApproved = entries.some((entry) => {
+          if (entry?.status !== "submitted" && entry?.status !== "approved") {
+            return false;
+          }
+          return entryCountsAsWork(entry);
+        });
+        return !hasDraft && (hasTargetRemovingAbsence || hasCreditedSubmittedOrApproved);
       });
   }
 
@@ -275,8 +282,27 @@
 
   // ── Pending-week builder (groups submitted entries by user + week) ─────────────
 
+  function entryCountsAsWork(entry) {
+    if (entry?.counts_as_work === false) return false;
+    if (entry?.counts_as_work === true) return true;
+
+    if (entry?.category_id != null) {
+      const categoryById = $categories.find((item) => item.id === entry.category_id);
+      if (categoryById) return categoryById.counts_as_work !== false;
+    }
+
+    if (entry?.category) {
+      const categoryByName = $categories.find((item) => item.name === entry.category);
+      if (categoryByName) return categoryByName.counts_as_work !== false;
+    }
+
+    return true;
+  }
+
   function entryMinutes(entry) {
-    if (!entry?.start_time || !entry?.end_time) return 0;
+    if (!entry?.start_time || !entry?.end_time || !entryCountsAsWork(entry)) {
+      return 0;
+    }
     const start = entry.start_time.slice(0, 5);
     const end = entry.end_time.slice(0, 5);
     return Math.max(0, durMin(start, end));

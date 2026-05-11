@@ -12,6 +12,7 @@ pub const ALLOWED_KINDS: &[&str] = &[
     "special_leave",
     "unpaid",
     "general_absence",
+    "flextime_reduction",
 ];
 
 #[derive(sqlx::FromRow, Serialize, Clone)]
@@ -683,10 +684,12 @@ impl AbsenceDb {
             return Ok(()); // sick leave doesn't block logged time
         }
         let conflict: Option<NaiveDate> = sqlx::query_scalar(
-            "SELECT entry_date FROM time_entries \
-             WHERE user_id=$1 AND status <> 'rejected' \
-             AND entry_date BETWEEN $2 AND $3 \
-             ORDER BY entry_date LIMIT 1",
+            "SELECT entry_date FROM time_entries te \
+             JOIN categories c ON c.id = te.category_id \
+             WHERE te.user_id=$1 AND te.status <> 'rejected' \
+             AND c.counts_as_work = TRUE \
+             AND te.entry_date BETWEEN $2 AND $3 \
+             ORDER BY te.entry_date LIMIT 1",
         )
         .bind(user_id)
         .bind(start_date)

@@ -14,6 +14,12 @@ use serde::{Deserialize, Serialize};
 use sqlx::{Postgres, QueryBuilder};
 use std::collections::HashMap;
 
+const FLEXTIME_REDUCTION_KIND: &str = "flextime_reduction";
+
+fn absence_removes_target(kind: &str) -> bool {
+    kind != FLEXTIME_REDUCTION_KIND
+}
+
 fn reporting_today() -> NaiveDate {
     time_calc::today_local()
 }
@@ -84,8 +90,13 @@ pub struct EntryDetail {
     pub category: String,
     pub color: String,
     pub minutes: i64,
+    pub counts_as_work: bool,
     pub status: String,
     pub comment: Option<String>,
+}
+
+fn entry_counts_as_work(counts_as_work: bool, status: &str) -> bool {
+    counts_as_work && status != "rejected"
 }
 
 #[derive(Serialize)]
@@ -168,6 +179,7 @@ async fn build_range(
         String,
         String,
         i64,
+        bool,
         String,
         Option<String>,
     )> = reports_db.time_entry_rows(user_id, from, to).await?;
@@ -208,9 +220,13 @@ async fn build_range(
 
         // A day has a work target when it is a weekday within the user's contract,
         // not covered by a holiday or absence, and not in the future.
+        let absence_blocks_target = absence
+            .as_deref()
+            .map(absence_removes_target)
+            .unwrap_or(false);
         let is_workday = is_contract_workday(current_date, user.workdays_per_week)
             && holiday.is_none()
-            && absence.is_none()
+            && !absence_blocks_target
             && !before_start;
         let target = if is_workday && !after_today { target_per_day_min } else { 0 };
         // full_month_target counts all contract workdays without the "capped at today" cutoff.
@@ -221,7 +237,16 @@ async fn build_range(
         let mut submitted = 0i64;
         // Skip entry processing entirely for inactive/future days.
         if !before_start && !after_today {
-            for (start_time, end_time, category_name, category_color, _cat_id, status, comment)
+            for (
+                start_time,
+                end_time,
+                category_name,
+                category_color,
+                _cat_id,
+                counts_as_work,
+                status,
+                comment,
+            )
                 in entries_by_date.get(&current_date).into_iter().flatten()
             {
                 if status == "rejected" {
@@ -232,22 +257,25 @@ async fn build_range(
                 let entry_minutes =
                     (parse_report_time(end_time)? - parse_report_time(start_time)?).num_minutes();
                 // Only approved entries count towards actual hours and the monthly diff.
-                if status == "approved" {
+                if *counts_as_work && status == "approved" {
                     actual += entry_minutes;
                 }
                 // submitted_min includes submitted + approved (everything the employee filed).
-                if status == "approved" || status == "submitted" {
+                if *counts_as_work && (status == "approved" || status == "submitted") {
                     submitted += entry_minutes;
                 }
                 // Category totals include every non-rejected entry.
-                *category_minutes_by_name.entry(category_name.clone()).or_insert(0) +=
-                    entry_minutes;
+                if entry_counts_as_work(*counts_as_work, status) {
+                    *category_minutes_by_name.entry(category_name.clone()).or_insert(0) +=
+                        entry_minutes;
+                }
                 entries.push(EntryDetail {
                     start_time: start_time.clone(),
                     end_time: end_time.clone(),
                     category: category_name.clone(),
                     color: category_color.clone(),
                     minutes: entry_minutes,
+                    counts_as_work: *counts_as_work,
                     status: status.clone(),
                     comment: comment.clone(),
                 });
@@ -393,7 +421,9 @@ fn csv_response(r: MonthReport, uid: i64, file_label: &str) -> AppResult<Respons
                 .map_err(csv_err)?;
         } else {
             for entry in &day.entries {
-                csv_total_min += entry.minutes;
+                if entry.counts_as_work {
+                    csv_total_min += entry.minutes;
+                }
                 csv_writer
                     .write_record([
                         day.date.to_string(),
@@ -556,7 +586,7 @@ pub struct TeamQuery {
 /// days that fall within the target month.
 ///
 /// A working day is considered submitted when either:
-///   - an approved absence covers the day, OR
+///   - an approved absence that removes the daily target covers the day, OR
 ///   - at least one time entry with status "submitted" or "approved" exists.
 async fn all_weeks_submitted_for_month(
     pool: &crate::db::DatabasePool,
@@ -643,7 +673,7 @@ async fn all_weeks_submitted_for_month(
                 continue;
             }
 
-            // Every working day must be covered by an absence OR a submitted entry with no
+            // Every working day must be covered by a target-removing absence OR a submitted entry with no
             // outstanding drafts.
             let submitted_and_clean =
                 submitted_dates.contains(&day) && !draft_dates.contains(&day);
@@ -796,19 +826,29 @@ fn parse_report_time(raw: &str) -> AppResult<NaiveTime> {
     time_calc::parse_stored_time(raw)
 }
 
-// Type alias for the 7-field tuple stored per time entry after stripping the date.
-type RawEntryTuple = (String, String, String, String, i64, String, Option<String>);
+// Type alias for the 8-field tuple stored per time entry after stripping the date.
+type RawEntryTuple = (String, String, String, String, i64, bool, String, Option<String>);
 
 /// Pre-groups raw time entry rows (as fetched from the DB) by date.
 /// Allows O(1) per-day lookup instead of scanning the full list for each day.
 fn group_entries_by_date(
-    rows: Vec<(NaiveDate, String, String, String, String, i64, String, Option<String>)>,
+    rows: Vec<(
+        NaiveDate,
+        String,
+        String,
+        String,
+        String,
+        i64,
+        bool,
+        String,
+        Option<String>,
+    )>,
 ) -> HashMap<NaiveDate, Vec<RawEntryTuple>> {
     let mut map: HashMap<NaiveDate, Vec<RawEntryTuple>> = HashMap::new();
-    for (date, start, end, category, color, cat_id, status, comment) in rows {
+    for (date, start, end, category, color, cat_id, counts_as_work, status, comment) in rows {
         map.entry(date)
             .or_default()
-            .push((start, end, category, color, cat_id, status, comment));
+            .push((start, end, category, color, cat_id, counts_as_work, status, comment));
     }
     map
 }
@@ -816,14 +856,17 @@ fn group_entries_by_date(
 /// Expands a list of (start, end) date ranges into a flat set of individual dates,
 /// clamped to the given [from, to] window.
 fn expand_absence_date_set(
-    ranges: &[(NaiveDate, NaiveDate)],
+    ranges: &[(NaiveDate, NaiveDate, String)],
     from: NaiveDate,
     to: NaiveDate,
 ) -> std::collections::HashSet<NaiveDate> {
     let mut set = std::collections::HashSet::new();
-    for &(range_start, range_end) in ranges {
-        let mut day = range_start.max(from);
-        while day <= range_end.min(to) {
+    for (range_start, range_end, kind) in ranges {
+        if !absence_removes_target(kind) {
+            continue;
+        }
+        let mut day = (*range_start).max(from);
+        while day <= (*range_end).min(to) {
             set.insert(day);
             day += Duration::days(1);
         }
@@ -867,7 +910,7 @@ pub async fn categories(
          FROM time_entries z \
          JOIN users u ON u.id=z.user_id \
          JOIN categories c ON c.id=z.category_id \
-         WHERE z.status != 'rejected' AND z.entry_date >= u.start_date \
+            WHERE z.status != 'rejected' AND c.counts_as_work = TRUE AND z.entry_date >= u.start_date \
          AND z.entry_date BETWEEN ",
     );
     builder
@@ -947,7 +990,7 @@ pub async fn team_categories(
          FROM time_entries z \
          JOIN users u ON u.id=z.user_id \
          JOIN categories c ON c.id=z.category_id \
-         WHERE z.status != 'rejected' AND z.entry_date >= u.start_date \
+            WHERE z.status != 'rejected' AND c.counts_as_work = TRUE AND z.entry_date >= u.start_date \
          AND z.entry_date BETWEEN ",
     );
     entry_builder
@@ -1230,8 +1273,8 @@ pub async fn flextime(
         .await?;
 
     let mut approved_minutes_by_day: HashMap<NaiveDate, i64> = HashMap::new();
-    for (entry_date, start_time, end_time, status) in time_entries_raw {
-        if status != "approved" {
+    for (entry_date, start_time, end_time, status, counts_as_work) in time_entries_raw {
+        if status != "approved" || !counts_as_work {
             continue;
         }
         let minutes =
@@ -1284,9 +1327,13 @@ pub async fn flextime(
         let absence = absence_by_day.get(&current_date).cloned();
         let before_start = current_date < user.start_date;
         let after_today = current_date > today;
+        let absence_blocks_target = absence
+            .as_deref()
+            .map(absence_removes_target)
+            .unwrap_or(false);
         let is_workday = is_contract_workday(current_date, user.workdays_per_week)
             && holiday.is_none()
-            && absence.is_none()
+            && !absence_blocks_target
             && !before_start
             && !after_today;
         let target = if is_workday { target_per_day_min } else { 0 };

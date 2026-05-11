@@ -79,8 +79,10 @@ impl ReopenRequestDb {
         week_end: NaiveDate,
     ) -> AppResult<i64> {
         Ok(sqlx::query_scalar(
-            "SELECT COUNT(*) FROM time_entries \
-             WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3 AND status<>'draft'",
+            "SELECT COUNT(*) FROM time_entries te
+             JOIN categories c ON c.id = te.category_id
+             WHERE te.user_id=$1 AND te.entry_date BETWEEN $2 AND $3 
+             AND te.status<>'draft' AND c.counts_as_work = TRUE",
         )
         .bind(user_id)
         .bind(week_start)
@@ -259,6 +261,7 @@ impl ReopenRequestDb {
         let affected: Vec<(i64, String)> = sqlx::query_as(
             "SELECT id, status FROM time_entries \
              WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3 AND status<>'draft' \
+             AND category_id IN (SELECT id FROM categories WHERE counts_as_work = TRUE) \
              FOR UPDATE",
         )
         .bind(subject_id)
@@ -286,13 +289,17 @@ impl ReopenRequestDb {
         .bind(&entry_ids)
         .execute(&mut **tx)
         .await?;
+        // When auto-applying CRs during reopen, set reviewed_by=NULL to indicate auto-application
+        // rather than explicit human approval. This preserves permission model semantics.
         sqlx::query(
             "UPDATE change_requests \
-             SET status='approved', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP, \
+             SET status='approved', \
+                 reviewed_by=CASE WHEN $1::bigint IS NOT NULL THEN $1 ELSE NULL END, \
+                 reviewed_at=CURRENT_TIMESTAMP, \
                  rejection_reason=NULL \
              WHERE status='open' AND time_entry_id = ANY($2)",
         )
-        .bind(actor_id)
+        .bind(match actor_id == subject_id { true => None as Option<i64>, false => Some(actor_id) })
         .bind(&entry_ids)
         .execute(&mut **tx)
         .await?;

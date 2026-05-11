@@ -501,7 +501,8 @@
         (summaryMinutes, reportDay) =>
           summaryMinutes +
           (reportDay.entries || []).reduce(
-            (entryMinutes, entry) => entryMinutes + (entry.minutes || 0),
+            (entryMinutes, entry) =>
+              entryMinutes + (entry.counts_as_work === false ? 0 : entry.minutes || 0),
             0,
           ),
         0,
@@ -753,7 +754,8 @@
         (summaryMinutes, reportDay) =>
           summaryMinutes +
           (reportDay.entries || []).reduce(
-            (entryMinutes, entry) => entryMinutes + (entry.minutes || 0),
+            (entryMinutes, entry) =>
+              entryMinutes + (entry.counts_as_work === false ? 0 : entry.minutes || 0),
             0,
           ),
         0,

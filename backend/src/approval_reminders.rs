@@ -46,7 +46,9 @@ async fn find_approvers_with_pending(pool: &DatabasePool) -> Vec<PendingApprover
         "WITH user_pending AS (
              SELECT user_id, COUNT(*)::bigint AS pending_count
              FROM (
-                 SELECT user_id FROM time_entries       WHERE status = 'submitted'
+                 SELECT te.user_id FROM time_entries te
+                 JOIN categories c ON c.id = te.category_id
+                 WHERE te.status = 'submitted' AND c.counts_as_work = TRUE
                  UNION ALL
                  SELECT user_id FROM change_requests    WHERE status = 'open'
                  UNION ALL

@@ -43,7 +43,46 @@
     special_leave: "#d97706",
     unpaid: "#6b7280",
     general_absence: "#475569",
+    flextime_reduction: "#6D4C41",
   });
+
+  const TARGET_REMOVING_ABSENCE_STATUSES = ["approved", "cancellation_pending"];
+
+  function categoryCountsAsWork(categoryId, categoryRows) {
+    const category = categoryRows.find((item) => item.id === categoryId);
+    return category?.counts_as_work !== false;
+  }
+
+  function entryCountsAsWork(entry, categoryRows) {
+    if (entry?.counts_as_work === false) return false;
+    if (entry?.counts_as_work === true) return true;
+    return categoryCountsAsWork(entry?.category_id, categoryRows);
+  }
+
+  function creditedEntryMinutes(entry, categoryRows) {
+    if (
+      !entry?.start_time ||
+      !entry?.end_time ||
+      entry.status === "rejected" ||
+      !entryCountsAsWork(entry, categoryRows)
+    ) {
+      return 0;
+    }
+    return durMin(entry.start_time.slice(0, 5), entry.end_time.slice(0, 5));
+  }
+
+  function absenceRemovesTarget(absence) {
+    return absence
+      ? TARGET_REMOVING_ABSENCE_STATUSES.includes(absence.status) &&
+          absence.kind !== "flextime_reduction"
+      : false;
+  }
+
+  function absenceBlocksEntry(absence) {
+    return absence
+      ? TARGET_REMOVING_ABSENCE_STATUSES.includes(absence.status) && absence.kind !== "sick"
+      : false;
+  }
 
   let entries = [];
   let absences = [];
@@ -201,12 +240,8 @@
 
   // Total logged minutes this week, excluding rejected entries.
   $: weekLoggedMinutes = entries
-    .filter((entry) => entry.status !== "rejected")
     .reduce(
-      (totalMinutes, entry) =>
-        entry.start_time && entry.end_time
-          ? totalMinutes + durMin(entry.start_time.slice(0, 5), entry.end_time.slice(0, 5))
-          : totalMinutes,
+      (totalMinutes, entry) => totalMinutes + creditedEntryMinutes(entry, $categories),
       0,
     );
 
@@ -214,10 +249,7 @@
   $: weekApprovedMinutes = entries
     .filter((entry) => entry.status === "approved")
     .reduce(
-      (totalMinutes, entry) =>
-        entry.start_time && entry.end_time
-          ? totalMinutes + durMin(entry.start_time.slice(0, 5), entry.end_time.slice(0, 5))
-          : totalMinutes,
+      (totalMinutes, entry) => totalMinutes + creditedEntryMinutes(entry, $categories),
       0,
     );
 
@@ -259,11 +291,10 @@
       ds: dayDateStr,
       dayName: WEEKDAY_NAMES[dayIndex],
       absent: !!matchingAbsence,
+      absentForEntry: absenceBlocksEntry(matchingAbsence),
       // Keep day-level target rules aligned with backend reports:
       // only approved/cancellation_pending absences remove daily target.
-      absentForTarget: matchingAbsence
-        ? ["approved", "cancellation_pending"].includes(matchingAbsence.status)
-        : false,
+      absentForTarget: absenceRemovesTarget(matchingAbsence),
       holiday: !!matchingHoliday,
       absenceKind: matchingAbsence?.kind || null,
       holidayName: matchingHoliday?.name || null,
@@ -378,6 +409,7 @@
   function isDayAddDisabled(day) {
     return (
       day.absentForTarget ||
+      day.absentForEntry ||
       day.holiday ||
       day.ds > today ||
       ($currentUser?.start_date && day.ds < $currentUser.start_date)
@@ -476,10 +508,7 @@
       {#each weekdays as day (day.ds)}
         {@const dailyTargetHours = ($currentUser.weekly_hours || 0) / ($currentUser.workdays_per_week || 5)}
         {@const dailyTotalMinutes = day.items.reduce(
-          (totalMinutes, entry) =>
-            entry.status === "rejected"
-              ? totalMinutes
-              : totalMinutes + durMin(entry.start_time.slice(0, 5), entry.end_time.slice(0, 5)),
+          (totalMinutes, entry) => totalMinutes + creditedEntryMinutes(entry, $categories),
           0,
         )}
         {@const dailyTotalHours = (dailyTotalMinutes / 60).toFixed(1)}
