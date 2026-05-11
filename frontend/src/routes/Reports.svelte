@@ -61,6 +61,14 @@
   // reportData holds all needed information after loading.
   let reportData = null;
 
+  function userWorkdaysPerWeek(userId, fallback = 5) {
+    const matchedUser = users.find((user) => user.id === userId);
+    const value = Number(matchedUser?.workdays_per_week);
+    return Number.isFinite(value) && value >= 1 && value <= 7
+      ? value
+      : fallback;
+  }
+
   function monthStart(monthKey) {
     return `${monthKey}-01`;
   }
@@ -99,7 +107,10 @@
             : Promise.resolve([]),
         ]);
 
-      const monthReport = normalizeMonthReport(monthRaw);
+      const monthReport = normalizeMonthReport(
+        monthRaw,
+        userWorkdaysPerWeek(reportUserId, Number($currentUser?.workdays_per_week || 5)),
+      );
 
       const flextimeBalanceRow = (overtimeRows || []).find(
         (row) => row.month === reportMonth,
@@ -283,7 +294,18 @@
   function absenceDays(absence) {
     const clamped = clampAbsenceRange(absence);
     if (!clamped) return 0;
-    return countWorkdays(clamped.from, clamped.to, absenceHolidayDates, $currentUser?.workdays_per_week || 5);
+    const workdaysPerWeek = userWorkdaysPerWeek(
+      absence?.user_id,
+      Number($currentUser?.workdays_per_week || 5),
+    );
+    // Count absence days using user's workdays_per_week (respects flexible work schedules).
+    // Example: 4-day worker's absence only counts Mon-Thu, not Fri-Sun.
+    return countWorkdays(
+      clamped.from,
+      clamped.to,
+      absenceHolidayDates,
+      workdaysPerWeek,
+    );
   }
 
   async function showAbsences() {

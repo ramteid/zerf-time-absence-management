@@ -117,11 +117,29 @@ fn weekday_en(d: NaiveDate) -> &'static str {
     ][d.weekday().num_days_from_monday() as usize]
 }
 
+/// Determine if a date is a contract workday based on user's workdays_per_week.
+/// Contract workdays are the first N days of the ISO week.
+/// ISO weekday: 0=Monday, 1=Tuesday, ..., 6=Sunday
+/// Examples:
+///   - workdays_per_week=5: Mon-Fri are contract days
+///   - workdays_per_week=4: Mon-Thu are contract days
+///   - workdays_per_week=6: Mon-Sat are contract days
 fn is_contract_workday(date: NaiveDate, workdays_per_week: i16) -> bool {
+    // ISO weekday 0=Monday, 6=Sunday. Contract workdays are first N days of week.
+    // Examples: workdays_per_week=5 → Mon-Fri OK, Sun-Sat not OK
+    //          workdays_per_week=4 → Mon-Thu OK, Fri-Sun not OK
     date.weekday().num_days_from_monday() < workdays_per_week as u32
 }
 
+/// Calculate the daily target work minutes based on user's weekly hours and workdays_per_week.
+/// Formula: (weekly_hours / workdays_per_week) * 60 minutes
+/// Examples:
+///   - 40 hours/week, 5 days: 8 hours/day = 480 minutes/day
+///   - 40 hours/week, 4 days: 10 hours/day = 600 minutes/day
+///   - 32 hours/week, 4 days: 8 hours/day = 480 minutes/day
 fn target_minutes_per_day(weekly_hours: f64, workdays_per_week: i16) -> i64 {
+    // Calculate daily target = (weekly_hours / workdays_per_week) * 60 minutes
+    // Examples: 40h/5days=8h/day=480min, 40h/4days=10h/day=600min
     (weekly_hours / f64::from(workdays_per_week) * 60.0).round() as i64
 }
 
@@ -601,7 +619,14 @@ async fn all_weeks_submitted_for_month(
         .await?;
 
     // Check each fully elapsed week.
+    // For each complete week, check that all contract workdays are submitted.
+    // A contract workday must be covered by either:
+    //   1. An approved/cancellation_pending absence, OR
+    //   2. A submitted/approved time entry (with no draft conflicts)
     for &week_monday in &complete_week_mondays {
+        // Iterate only the first workdays_per_week days of the week (skip non-contract days)
+        // Check only contract workdays in this week (first workdays_per_week days).
+        // Non-contract days (e.g., weekend for 5-day worker) are implicitly submitted.
         for day_offset in 0..i64::from(workdays_per_week) {
             let day = week_monday + Duration::days(day_offset);
 

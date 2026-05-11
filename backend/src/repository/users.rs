@@ -1,3 +1,4 @@
+    // workdays_per_week is included in INSERT to support flexible work schedules per user
 use crate::db::DatabasePool;
 use crate::error::{AppError, AppResult};
 use chrono::{DateTime, NaiveDate, Utc};
