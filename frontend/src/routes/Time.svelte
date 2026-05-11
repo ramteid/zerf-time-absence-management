@@ -225,7 +225,8 @@
   // excludes holidays, absences, future days, and days before contract start.
   $: weekTargetMinutes = (() => {
     const weeklyHours = Number($currentUser?.weekly_hours || 0);
-    const perDayMinutes = Math.round((weeklyHours / 5) * 60);
+    const workdaysPerWeek = Number($currentUser?.workdays_per_week || 5);
+    const perDayMinutes = Math.round((weeklyHours / workdaysPerWeek) * 60);
     if (perDayMinutes <= 0) return 0;
     return weekdays.reduce((totalMinutes, day) => {
       const isBeforeStart = $currentUser?.start_date && day.ds < $currentUser.start_date;
@@ -274,10 +275,12 @@
   }
 
   $: weekdays = weekFrom
-    ? [0, 1, 2, 3, 4].map((dayIndex) => buildWeekDay(dayIndex, entries, absences, holidays))
+    ? Array.from({ length: $currentUser?.workdays_per_week || 5 }, (_, i) => i)
+        .map((dayIndex) => buildWeekDay(dayIndex, entries, absences, holidays))
     : [];
   $: weekendDays = weekFrom
-    ? [5, 6].map((dayIndex) => buildWeekDay(dayIndex, entries, absences, holidays))
+    ? Array.from({ length: 7 - ($currentUser?.workdays_per_week || 5) }, (_, i) => ($currentUser?.workdays_per_week || 5) + i)
+        .map((dayIndex) => buildWeekDay(dayIndex, entries, absences, holidays))
     : [];
 
   function entryDurationHours(startTime, endTime) {
@@ -465,7 +468,7 @@
     <!-- Week grid: one card per weekday (Mon–Fri) -->
     <div class="week-grid">
       {#each weekdays as day (day.ds)}
-        {@const dailyTargetHours = ($currentUser.weekly_hours || 0) / 5}
+        {@const dailyTargetHours = ($currentUser.weekly_hours || 0) / ($currentUser.workdays_per_week || 5)}
         {@const dailyTotalMinutes = day.items.reduce(
           (totalMinutes, entry) =>
             entry.status === "rejected"

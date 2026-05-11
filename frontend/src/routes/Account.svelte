@@ -153,6 +153,18 @@
         />
       </div>
       <div>
+        <label class="kz-label" for="account-workdays-per-week"
+          >{$t("Workdays per week")}</label
+        >
+        <input
+          id="account-workdays-per-week"
+          class="kz-input"
+          value={$currentUser.workdays_per_week}
+          readonly
+          style="color:var(--text-secondary)"
+        />
+      </div>
+      <div>
         <label class="kz-label" for="account-annual-leave-this"
           >{$t("Annual leave days")} {thisYear}</label
         >

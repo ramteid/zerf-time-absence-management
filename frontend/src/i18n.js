@@ -137,6 +137,9 @@ const TRANSLATIONS = {
     "All draft entries of this week will be submitted for approval.":
       "All draft days of this week will be submitted for approval.",
     "Vacation days per year": "Vacation days per year",
+    "Workdays per week": "Workdays per week",
+    "Workdays per week must be between 1 and 7.":
+      "Workdays per week must be between 1 and 7.",
     days: "days",
     Set: "Set",
     "Overrides the default annual leave days for this user in the selected year.":
@@ -197,6 +200,10 @@ const TRANSLATIONS = {
     "Diff unavailable for this request.": "Diff unavailable for this request.",
     Empty: "Empty",
     Week: "Week",
+    Timezone: "Timezone",
+    "Use an IANA timezone, e.g. Europe/Berlin.":
+      "Use an IANA timezone, e.g. Europe/Berlin.",
+    "Please enter a timezone.": "Please enter a timezone.",
   },
   de: {
     "Loading...": "Wird geladen...",
@@ -289,6 +296,9 @@ const TRANSLATIONS = {
     "Password must be between 8 and 128 characters.":
       "Das Passwort muss zwischen 8 und 128 Zeichen lang sein.",
     "Weekly hours": "Wochenstunden",
+    "Workdays per week": "Arbeitstage pro Woche",
+    "Workdays per week must be between 1 and 7.":
+      "Arbeitstage pro Woche muss zwischen 1 und 7 liegen.",
     "Annual leave days": "Urlaubstage pro Jahr",
     "Overtime start balance (hours)": "Überstunden-Startsaldo (Stunden)",
     "Initial overtime balance in hours when the user starts. Negative = deficit.":
@@ -297,6 +307,10 @@ const TRANSLATIONS = {
     Settings: "Einstellungen",
     "Language settings": "Spracheinstellungen",
     "Interface language": "Oberflächensprache",
+    Timezone: "Zeitzone",
+    "Use an IANA timezone, e.g. Europe/Berlin.":
+      "Verwenden Sie eine IANA-Zeitzone, z. B. Europe/Berlin.",
+    "Please enter a timezone.": "Bitte geben Sie eine Zeitzone ein.",
     "Missing translations fall back to English.":
       "Fehlende Übersetzungen fallen auf Englisch zurück.",
     "Language saved.": "Sprache gespeichert.",

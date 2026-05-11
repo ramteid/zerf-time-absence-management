@@ -234,7 +234,7 @@
         d: date,
         ds: dateString,
         other,
-        weekend: weekdayIndex >= 5,
+        weekend: weekdayIndex >= ($currentUser?.workdays_per_week || 5),
         today: dateString === todayStr,
         hol: holidayByDate.get(dateString),
         absences: entries.filter((entry) => dateString >= entry.start_date && dateString <= entry.end_date),

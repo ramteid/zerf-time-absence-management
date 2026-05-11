@@ -1,5 +1,4 @@
 use anyhow::Result;
-use chrono::Datelike;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use zerf::{build_app, categories, config, db, holidays, AppState};
@@ -16,7 +15,7 @@ async fn main() -> Result<()> {
     let config = config::Config::from_env();
     let pool = db::init(&config).await?;
     categories::ensure_initial(&pool).await?;
-    let year = chrono::Local::now().year();
+    let year = zerf::settings::app_current_year(&pool).await;
     holidays::ensure_holidays(&pool, year).await?;
     holidays::ensure_holidays(&pool, year + 1).await?;
 
@@ -66,7 +65,7 @@ async fn main() -> Result<()> {
                     .unwrap_or(std::time::Duration::from_secs(3600));
                 tokio::time::sleep(wait).await;
 
-                let next_year = chrono::Local::now().year() + 1;
+                let next_year = zerf::settings::app_current_year(&pool).await + 1;
                 if let Err(error) = holidays::ensure_holidays(&pool, next_year).await {
                     tracing::warn!(
                         "Holiday scheduler: failed to ensure holidays for {next_year}: {error:?}"

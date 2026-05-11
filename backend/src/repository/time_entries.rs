@@ -5,6 +5,19 @@ use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::{Postgres, QueryBuilder};
 
+async fn app_today(conn: &mut sqlx::PgConnection) -> AppResult<NaiveDate> {
+    let timezone: Option<String> = sqlx::query_scalar(
+        "SELECT value FROM app_settings WHERE key = 'timezone'",
+    )
+    .fetch_optional(&mut *conn)
+    .await?;
+    let tz_name = timezone.unwrap_or_else(|| crate::settings::DEFAULT_TIMEZONE.to_string());
+    let tz = tz_name
+        .parse::<chrono_tz::Tz>()
+        .unwrap_or(chrono_tz::Europe::Berlin);
+    Ok(Utc::now().with_timezone(&tz).date_naive())
+}
+
 #[derive(sqlx::FromRow, Serialize, Clone)]
 pub struct TimeEntry {
     pub id: i64,
@@ -86,7 +99,7 @@ pub(crate) async fn validate_entry(
     if cat_active == Some(false) {
         return Err(AppError::BadRequest("Category is inactive.".into()));
     }
-    if te.entry_date > time_calc::today_local() {
+    if te.entry_date > app_today(conn).await? {
         return Err(AppError::BadRequest(
             "Entries in the future are not allowed.".into(),
         ));

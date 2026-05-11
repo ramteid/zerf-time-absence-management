@@ -289,7 +289,8 @@ pub async fn create(
         }
     }
     if let Some(new_date) = body.new_date {
-        if new_date > time_calc::today_local() {
+        let today = crate::settings::app_today(&app_state.pool).await;
+        if new_date > today {
             return Err(AppError::BadRequest("Date cannot be in the future.".into()));
         }
         if new_date < requester.start_date {
@@ -663,11 +664,12 @@ pub async fn reject(
         return Err(AppError::BadRequest("Reason too long.".into()));
     }
     let mut transaction = app_state.pool.begin().await?;
-    // Lock the change request row to prevent concurrent rejections.
-    let change_request: ChangeRequest = sqlx::query_as("SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE id=$1 AND status='open'")
+    // Lock the open change request row and fail fast if it was already resolved.
+    let change_request: ChangeRequest = sqlx::query_as("SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE id=$1 AND status='open' FOR UPDATE")
         .bind(change_request_id)
-        .fetch_one(&mut *transaction)
-        .await?;
+        .fetch_optional(&mut *transaction)
+        .await?
+        .ok_or_else(|| AppError::Conflict("Change request was already resolved by someone else.".into()))?;
     // No user may reject their own request; admins may.
     if change_request.user_id == requester.id && !requester.is_admin() {
         return Err(AppError::Forbidden);
@@ -723,7 +725,7 @@ pub async fn reject(
             "submitted".to_string(),
             change_request
                 .new_date
-                .unwrap_or(time_calc::today_local()),
+                .unwrap_or(crate::settings::app_today(&app_state.pool).await),
             change_request
                 .new_start_time
                 .clone()

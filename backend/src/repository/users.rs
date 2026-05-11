@@ -18,6 +18,7 @@ pub struct User {
     pub last_name: String,
     pub role: String,
     pub weekly_hours: f64,
+    pub workdays_per_week: i16,
     pub start_date: NaiveDate,
     pub active: bool,
     pub must_change_password: bool,
@@ -37,7 +38,7 @@ impl User {
 }
 
 const USER_SELECT: &str =
-    "SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, \
+    "SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, workdays_per_week, \
      start_date, active, must_change_password, created_at, \
      allow_reopen_without_approval, dark_mode, overtime_start_balance_min \
      FROM users";
@@ -403,8 +404,8 @@ impl UserDb {
     ) -> AppResult<i64> {
         sqlx::query(
             "INSERT INTO users(email, password_hash, first_name, last_name, role, \
-             weekly_hours, start_date, must_change_password, overtime_start_balance_min) \
-             VALUES ($1, $2, $3, $4, 'admin', 39.0, $5, FALSE, 0)",
+               weekly_hours, workdays_per_week, start_date, must_change_password, overtime_start_balance_min) \
+               VALUES ($1, $2, $3, $4, 'admin', 39.0, 5, $5, FALSE, 0)",
         )
         .bind(email)
         .bind(password_hash)
@@ -436,14 +437,15 @@ impl UserDb {
         last_name: &str,
         role: &str,
         weekly_hours: f64,
+        workdays_per_week: i16,
         start_date: NaiveDate,
         must_change_password: bool,
         overtime_start_balance_min: i64,
     ) -> Result<i64, sqlx::Error> {
         sqlx::query_scalar(
             "INSERT INTO users(email, password_hash, first_name, last_name, role, \
-             weekly_hours, start_date, must_change_password, overtime_start_balance_min) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id",
+             weekly_hours, workdays_per_week, start_date, must_change_password, overtime_start_balance_min) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id",
         )
         .bind(email)
         .bind(password_hash)
@@ -451,6 +453,7 @@ impl UserDb {
         .bind(last_name)
         .bind(role)
         .bind(weekly_hours)
+        .bind(workdays_per_week)
         .bind(start_date)
         .bind(must_change_password)
         .bind(overtime_start_balance_min)
@@ -466,6 +469,7 @@ impl UserDb {
         last_name: Option<String>,
         role: Option<String>,
         weekly_hours: Option<f64>,
+        workdays_per_week: Option<i16>,
         start_date: Option<NaiveDate>,
         active: Option<bool>,
         allow_reopen_without_approval: Option<bool>,
@@ -478,17 +482,19 @@ impl UserDb {
                  last_name=COALESCE($3,last_name), \
                  role=COALESCE($4,role), \
                  weekly_hours=COALESCE($5,weekly_hours), \
-                 start_date=COALESCE($6,start_date), \
-                 active=COALESCE($7,active), \
-                 allow_reopen_without_approval=COALESCE($8,allow_reopen_without_approval), \
-                 overtime_start_balance_min=COALESCE($9,overtime_start_balance_min) \
-             WHERE id=$10",
+                 workdays_per_week=COALESCE($6,workdays_per_week), \
+                 start_date=COALESCE($7,start_date), \
+                 active=COALESCE($8,active), \
+                 allow_reopen_without_approval=COALESCE($9,allow_reopen_without_approval), \
+                 overtime_start_balance_min=COALESCE($10,overtime_start_balance_min) \
+             WHERE id=$11",
         )
         .bind(email)
         .bind(first_name)
         .bind(last_name)
         .bind(role)
         .bind(weekly_hours)
+        .bind(workdays_per_week)
         .bind(start_date)
         .bind(active)
         .bind(allow_reopen_without_approval)

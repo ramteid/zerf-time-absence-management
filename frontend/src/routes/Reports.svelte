@@ -283,7 +283,7 @@
   function absenceDays(absence) {
     const clamped = clampAbsenceRange(absence);
     if (!clamped) return 0;
-    return countWorkdays(clamped.from, clamped.to, absenceHolidayDates);
+    return countWorkdays(clamped.from, clamped.to, absenceHolidayDates, $currentUser?.workdays_per_week || 5);
   }
 
   async function showAbsences() {

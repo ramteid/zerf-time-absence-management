@@ -5,14 +5,14 @@
 use crate::db::DatabasePool;
 
 use crate::settings::load_setting;
-use chrono::{Datelike, Local, NaiveDate, TimeZone};
+use chrono::{Datelike, NaiveDate, TimeZone, Utc};
 use std::time::Duration;
 
 const SUBMISSION_DEADLINE_DAY_KEY: &str = "submission_deadline_day";
 
 /// Returns the duration to wait until the next occurrence of `day_of_month` at 07:00 local time.
 pub fn duration_until_next_deadline(
-    now: chrono::DateTime<chrono::Local>,
+    now: chrono::DateTime<chrono_tz::Tz>,
     day_of_month: u8,
 ) -> Duration {
     let day = day_of_month as u32;
@@ -25,7 +25,7 @@ pub fn duration_until_next_deadline(
         return Duration::from_secs(60);
     };
 
-    if let Some(target) = resolve_local_datetime(candidate, 7) {
+    if let Some(target) = resolve_local_datetime(candidate, 7, now.timezone()) {
         if target > now {
             return (target - now).to_std().unwrap_or(Duration::from_secs(60));
         }
@@ -33,22 +33,27 @@ pub fn duration_until_next_deadline(
 
     // Already past or ambiguous – schedule next month
     let next_deadline_date = advance_one_month(today, day);
-    let next_deadline = (7..=23).find_map(|hour| resolve_local_datetime(next_deadline_date, hour));
+    let next_deadline =
+        (7..=23).find_map(|hour| resolve_local_datetime(next_deadline_date, hour, now.timezone()));
     next_deadline
         .and_then(|deadline| (deadline - now).to_std().ok())
         .unwrap_or(Duration::from_secs(60))
 }
 
 /// Resolve a naive date + hour to a local datetime, handling DST gaps/ambiguities.
-fn resolve_local_datetime(date: NaiveDate, hour: u32) -> Option<chrono::DateTime<chrono::Local>> {
+fn resolve_local_datetime(
+    date: NaiveDate,
+    hour: u32,
+    timezone: chrono_tz::Tz,
+) -> Option<chrono::DateTime<chrono_tz::Tz>> {
     let naive = date.and_hms_opt(hour, 0, 0)?;
-    match chrono::Local.from_local_datetime(&naive) {
+    match timezone.from_local_datetime(&naive) {
         chrono::LocalResult::Single(dt) => Some(dt),
         chrono::LocalResult::Ambiguous(earliest, _) => Some(earliest),
         chrono::LocalResult::None => {
             // Hour falls in a DST gap; try one hour later
             let fallback = date.and_hms_opt(hour + 1, 0, 0)?;
-            chrono::Local.from_local_datetime(&fallback).earliest()
+            timezone.from_local_datetime(&fallback).earliest()
         }
     }
 }
@@ -168,8 +173,18 @@ pub async fn run_check(state: &crate::AppState) {
         .public_url
         .clone()
         .unwrap_or_else(|| "http://localhost".to_string());
+    let timezone = crate::settings::load_setting(
+        pool,
+        crate::settings::TIMEZONE_KEY,
+        crate::settings::DEFAULT_TIMEZONE,
+    )
+    .await
+    .unwrap_or_else(|_| crate::settings::DEFAULT_TIMEZONE.to_string());
+    let tz = timezone
+        .parse::<chrono_tz::Tz>()
+        .unwrap_or(chrono_tz::Europe::Berlin);
 
-    let today = chrono::Utc::now().date_naive();
+    let today = Utc::now().with_timezone(&tz).date_naive();
     // Last fully completed month
     let (last_year, last_month) = if today.month() == 1 {
         (today.year() - 1, 12u32)
@@ -210,7 +225,7 @@ pub async fn run_check(state: &crate::AppState) {
             "submission_reminder_body",
             &[("months", months_str.clone())],
         );
-        let timestamp = chrono::Local::now().format("%d.%m.%Y %H:%M").to_string();
+        let timestamp = crate::i18n::format_datetime_in_timezone(&language, chrono::Utc::now(), &timezone);
         let email_body = format!(
             "{}\n\n{}",
             crate::i18n::translate(
@@ -267,7 +282,17 @@ pub async fn run_loop(pool: DatabasePool, state: crate::AppState) {
         let day: Option<u8> = day_str.parse().ok().filter(|&d: &u8| (1..=28).contains(&d));
 
         if let Some(d) = day {
-            let wait = duration_until_next_deadline(Local::now(), d);
+            let timezone = load_setting(
+                &pool,
+                crate::settings::TIMEZONE_KEY,
+                crate::settings::DEFAULT_TIMEZONE,
+            )
+            .await
+            .unwrap_or_else(|_| crate::settings::DEFAULT_TIMEZONE.to_string());
+            let tz = timezone
+                .parse::<chrono_tz::Tz>()
+                .unwrap_or(chrono_tz::Europe::Berlin);
+            let wait = duration_until_next_deadline(Utc::now().with_timezone(&tz), d);
             tracing::info!(
                 target:"zerf::submission_reminders",
                 "Next submission reminder check scheduled in {:?}",
@@ -286,11 +311,12 @@ pub async fn run_loop(pool: DatabasePool, state: crate::AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono_tz::Europe::Berlin;
 
     #[test]
     fn deadline_in_future_same_month() {
         // 2026-05-06 08:00 local, deadline day 15 -> should wait until 15th at 07:00
-        let now = chrono::Local.with_ymd_and_hms(2026, 5, 6, 8, 0, 0).unwrap();
+        let now = Berlin.with_ymd_and_hms(2026, 5, 6, 8, 0, 0).unwrap();
         let dur = duration_until_next_deadline(now, 15);
         // Should be ~8 days 23 hours = 8*86400 + 23*3600 = 774000 seconds
         let secs = dur.as_secs();
@@ -301,7 +327,7 @@ mod tests {
     #[test]
     fn deadline_today_but_not_yet() {
         // 2026-05-15 06:00 local, deadline day 15 -> should wait ~1 hour
-        let now = chrono::Local
+        let now = Berlin
             .with_ymd_and_hms(2026, 5, 15, 6, 0, 0)
             .unwrap();
         let dur = duration_until_next_deadline(now, 15);
@@ -313,7 +339,7 @@ mod tests {
     #[test]
     fn deadline_already_passed_schedules_next_month() {
         // 2026-05-15 08:00 local, deadline day 10 -> next: June 10 at 07:00
-        let now = chrono::Local
+        let now = Berlin
             .with_ymd_and_hms(2026, 5, 15, 8, 0, 0)
             .unwrap();
         let dur = duration_until_next_deadline(now, 10);
@@ -326,7 +352,7 @@ mod tests {
     #[test]
     fn deadline_day_clamped_to_month_end() {
         // Feb 2026: 28 days. Deadline day 28 on Feb 1 -> should target Feb 28
-        let now = chrono::Local.with_ymd_and_hms(2026, 2, 1, 6, 0, 0).unwrap();
+        let now = Berlin.with_ymd_and_hms(2026, 2, 1, 6, 0, 0).unwrap();
         let dur = duration_until_next_deadline(now, 28);
         let secs = dur.as_secs();
         // ~27 days + 1 hour
@@ -337,7 +363,7 @@ mod tests {
     #[test]
     fn deadline_december_wraps_to_january() {
         // 2026-12-20 08:00, deadline day 5 -> next: Jan 5, 2027 at 07:00
-        let now = chrono::Local
+        let now = Berlin
             .with_ymd_and_hms(2026, 12, 20, 8, 0, 0)
             .unwrap();
         let dur = duration_until_next_deadline(now, 5);

@@ -95,7 +95,7 @@
 
   $: absenceRows = absences.map((absence) => ({
     ...absence,
-    days: countWorkdays(absence.start_date, absence.end_date, holidayDates),
+    days: countWorkdays(absence.start_date, absence.end_date, holidayDates, $currentUser?.workdays_per_week || 5),
     editable: canEdit(absence),
     cancellable: canCancel(absence),
   }));

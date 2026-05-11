@@ -11,7 +11,7 @@ use axum::http::{header, Method};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use chrono::{DateTime, Datelike, Duration, Utc};
+use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::FromRow;
@@ -54,6 +54,7 @@ pub struct User {
     pub last_name: String,
     pub role: String,
     pub weekly_hours: f64,
+    pub workdays_per_week: i16,
     pub start_date: chrono::NaiveDate,
     pub active: bool,
     pub must_change_password: bool,
@@ -234,6 +235,7 @@ pub async fn login(
         last_name: u.last_name,
         role: u.role,
         weekly_hours: u.weekly_hours,
+        workdays_per_week: u.workdays_per_week,
         start_date: u.start_date,
         active: u.active,
         must_change_password: u.must_change_password,
@@ -373,6 +375,7 @@ pub async fn me(
         "id": user.id, "email": user.email,
         "first_name": user.first_name, "last_name": user.last_name,
         "role": user.role, "weekly_hours": user.weekly_hours,
+        "workdays_per_week": user.workdays_per_week,
         "start_date": user.start_date,
         "overtime_start_balance_min": user.overtime_start_balance_min,
         "active": user.active, "must_change_password": user.must_change_password,
@@ -630,6 +633,7 @@ pub async fn auth_middleware(
         last_name: repo_user.last_name,
         role: repo_user.role,
         weekly_hours: repo_user.weekly_hours,
+        workdays_per_week: repo_user.workdays_per_week,
         start_date: repo_user.start_date,
         active: repo_user.active,
         must_change_password: repo_user.must_change_password,
@@ -717,7 +721,7 @@ pub async fn setup(
     validate_password_strength(password)?;
 
     let password_hash = hash_password_async(body.password.clone()).await?;
-    let today = chrono::Utc::now().date_naive();
+    let today = crate::settings::app_today(&app_state.pool).await;
 
     // Prevent race conditions where two concurrent requests both observe
     // zero users and both insert an admin. `pool.begin()` runs at the
@@ -743,7 +747,7 @@ pub async fn setup(
         today,
     )
     .await?;
-    let current_year = Datelike::year(&chrono::Utc::now().date_naive());
+    let current_year = crate::settings::app_current_year(&app_state.pool).await;
     let default_leave_days = UserDb::get_default_leave_days_tx(&mut *transaction).await?;
     UserDb::set_leave_days_tx(&mut *transaction, new_user_id, current_year, default_leave_days)
         .await?;

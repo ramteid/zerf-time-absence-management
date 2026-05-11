@@ -73,22 +73,64 @@ impl AbsenceDb {
         Ok(rows.into_iter().map(|(d,)| d).collect())
     }
 
-    /// Count working days between `from` and `to` (inclusive),
-    /// excluding weekends and public holidays.
+    fn workdays_in_window(
+        from: NaiveDate,
+        to: NaiveDate,
+        holidays: &HashSet<NaiveDate>,
+        workdays_per_week: i16,
+    ) -> f64 {
+        if to < from {
+            return 0.0;
+        }
+        let mut count = 0.0;
+        let mut d = from;
+        while d <= to {
+            if d.weekday().num_days_from_monday() < workdays_per_week as u32
+                && !holidays.contains(&d)
+            {
+                count += 1.0;
+            }
+            d += Duration::days(1);
+        }
+        count
+    }
+
+    pub async fn user_workdays_per_week(&self, user_id: i64) -> AppResult<i16> {
+        Ok(sqlx::query_scalar("SELECT workdays_per_week FROM users WHERE id=$1")
+            .bind(user_id)
+            .fetch_one(&self.pool)
+            .await?)
+    }
+
+    /// Count default contract workdays (Mon-Fri) between `from` and `to` (inclusive),
+    /// excluding public holidays.
     pub async fn workdays(&self, from: NaiveDate, to: NaiveDate) -> AppResult<f64> {
         if to < from {
             return Ok(0.0);
         }
         let holidays = self.holidays_set(from, to).await?;
-        let mut count = 0.0;
-        let mut d = from;
-        while d <= to {
-            if d.weekday().num_days_from_monday() < 5 && !holidays.contains(&d) {
-                count += 1.0;
-            }
-            d += Duration::days(1);
+        Ok(Self::workdays_in_window(from, to, &holidays, 5))
+    }
+
+    /// Count user-specific contract workdays between `from` and `to` (inclusive),
+    /// excluding public holidays.
+    pub async fn workdays_for_user(
+        &self,
+        user_id: i64,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> AppResult<f64> {
+        if to < from {
+            return Ok(0.0);
         }
-        Ok(count)
+        let holidays = self.holidays_set(from, to).await?;
+        let workdays_per_week = self.user_workdays_per_week(user_id).await?;
+        Ok(Self::workdays_in_window(
+            from,
+            to,
+            &holidays,
+            workdays_per_week,
+        ))
     }
 
     pub async fn workdays_total(
@@ -109,11 +151,13 @@ impl AbsenceDb {
         .bind(to)
         .fetch_all(&self.pool)
         .await?;
+        let workdays_per_week = self.user_workdays_per_week(user_id).await?;
+        let holidays = self.holidays_set(from, to).await?;
         let mut total = 0.0;
         for (s, e) in ranges {
             let cs = std::cmp::max(s, from);
             let ce = std::cmp::min(e, to);
-            total += self.workdays(cs, ce).await?;
+            total += Self::workdays_in_window(cs, ce, &holidays, workdays_per_week);
         }
         Ok(total)
     }
