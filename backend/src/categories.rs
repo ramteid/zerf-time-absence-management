@@ -26,6 +26,7 @@ pub struct NewCategory {
     pub description: Option<String>,
     pub color: String,
     pub sort_order: Option<i64>,
+    pub counts_as_work: Option<bool>,
 }
 
 pub async fn create(
@@ -47,7 +48,13 @@ pub async fn create(
     let new_id = app_state
         .db
         .categories
-        .create(&name, body.description.as_deref(), &color, body.sort_order.unwrap_or(0))
+        .create(
+            &name,
+            body.description.as_deref(),
+            &color,
+            body.sort_order.unwrap_or(0),
+            body.counts_as_work.unwrap_or(true),
+        )
         .await?;
     let category = app_state.db.categories.find_by_id(new_id).await?
         .ok_or_else(|| AppError::Internal("Created category not found".into()))?;
@@ -60,6 +67,7 @@ pub struct UpdateCategory {
     pub description: Option<String>,
     pub color: Option<String>,
     pub sort_order: Option<i64>,
+    pub counts_as_work: Option<bool>,
     pub active: Option<bool>,
 }
 
@@ -88,7 +96,7 @@ pub async fn update(
     let normalized_color = body.color.map(|c| c.trim().to_string());
     app_state.db.categories.update(
         category_id, normalized_name, body.description, normalized_color,
-        body.sort_order, body.active,
+        body.sort_order, body.counts_as_work, body.active,
     ).await?;
     let category = app_state.db.categories.find_by_id(category_id).await?
         .ok_or_else(|| AppError::Internal("Category not found".into()))?;

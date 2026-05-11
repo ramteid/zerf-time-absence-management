@@ -38,6 +38,7 @@ const TRANSLATIONS = {
       "Overview of your current flextime balance and submission status. The overtime balance is calculated including today.",
     help_flextime_chart:
       "Your cumulative flextime balance over the selected period. Data is calculated including today.",
+    "Counts as work": "Counts as work",
     help_submission_status:
       "Whether all required weeks in the selected month have been submitted.",
     Approvals: "Approvals",
@@ -53,6 +54,7 @@ const TRANSLATIONS = {
     "Employee Details": "Employee Details",
     "Total days": "Total days",
     Flextime: "Flextime",
+    "Flextime Reduction": "Flextime Reduction",
     Vacation: "Vacation",
     Entitlement: "Entitlement",
     Taken: "Taken",
@@ -513,6 +515,7 @@ const TRANSLATIONS = {
     "Time Categories": "Zeitkategorien",
     "Add Category": "Kategorie hinzufügen",
     "Edit Category": "Kategorie bearbeiten",
+    "Counts as work": "Zählt als Arbeitszeit",
     "General Settings": "Allgemeine Einstellungen",
     General: "Allgemein",
     "Organization name": "Organisationsname",
@@ -895,6 +898,7 @@ const TRANSLATIONS = {
     "Employee Details": "Mitarbeiterdetails",
     "Total days": "Tage gesamt",
     Flextime: "Gleitzeit",
+    "Flextime Reduction": "Gleitzeitabbau",
     Filter: "Filter",
     // Reports help (English defaults)
     // (English keys fall through)
@@ -1073,6 +1077,7 @@ const ABSENCE_KIND_LABELS = Object.freeze({
   special_leave: "Special leave",
   unpaid: "Unpaid",
   general_absence: "General absence",
+  flextime_reduction: "Flextime Reduction",
 });
 
 function translatedAbsenceKind(lang, kind) {

@@ -33,19 +33,31 @@ impl ReportDb {
         .is_some())
     }
 
-    /// Time entries joined with category name/color for a user in a date range.
-    /// Returns: (entry_date, start_time, end_time, cat_name, cat_color, category_id, status, comment)
+    /// Time entries joined with category metadata for a user in a date range.
+    /// Returns: (entry_date, start_time, end_time, cat_name, cat_color, category_id, counts_as_work, status, comment)
     #[allow(clippy::type_complexity)]
     pub async fn time_entry_rows(
         &self,
         user_id: i64,
         from: NaiveDate,
         to: NaiveDate,
-    ) -> AppResult<Vec<(NaiveDate, String, String, String, String, i64, String, Option<String>)>>
+    ) -> AppResult<
+        Vec<(
+            NaiveDate,
+            String,
+            String,
+            String,
+            String,
+            i64,
+            bool,
+            String,
+            Option<String>,
+        )>,
+    >
     {
         Ok(sqlx::query_as(
             "SELECT z.entry_date, z.start_time, z.end_time, c.name, c.color, \
-             z.category_id, z.status, z.comment \
+             z.category_id, c.counts_as_work, z.status, z.comment \
              FROM time_entries z JOIN categories c ON c.id=z.category_id \
              WHERE z.user_id=$1 AND z.entry_date BETWEEN $2 AND $3 \
              ORDER BY z.entry_date, z.start_time",
@@ -114,8 +126,10 @@ impl ReportDb {
         to: NaiveDate,
     ) -> AppResult<HashSet<NaiveDate>> {
         let rows: Vec<(NaiveDate,)> = sqlx::query_as(
-            "SELECT DISTINCT entry_date FROM time_entries \
-             WHERE user_id=$1 AND status IN ('submitted','approved') \
+            "SELECT DISTINCT z.entry_date FROM time_entries z \
+             JOIN categories c ON c.id = z.category_id \
+             WHERE z.user_id=$1 AND z.status IN ('submitted','approved') \
+             AND c.counts_as_work = TRUE \
              AND entry_date BETWEEN $2 AND $3",
         )
         .bind(user_id)
@@ -134,8 +148,10 @@ impl ReportDb {
         to: NaiveDate,
     ) -> AppResult<HashSet<NaiveDate>> {
         let rows: Vec<(NaiveDate,)> = sqlx::query_as(
-            "SELECT DISTINCT entry_date FROM time_entries \
-             WHERE user_id=$1 AND status='draft' \
+            "SELECT DISTINCT z.entry_date FROM time_entries z \
+             JOIN categories c ON c.id = z.category_id \
+             WHERE z.user_id=$1 AND z.status='draft' \
+             AND c.counts_as_work = TRUE \
              AND entry_date BETWEEN $2 AND $3",
         )
         .bind(user_id)
@@ -152,9 +168,9 @@ impl ReportDb {
         user_id: i64,
         from: NaiveDate,
         to: NaiveDate,
-    ) -> AppResult<Vec<(NaiveDate, NaiveDate)>> {
+    ) -> AppResult<Vec<(NaiveDate, NaiveDate, String)>> {
         Ok(sqlx::query_as(
-            "SELECT start_date, end_date FROM absences \
+            "SELECT start_date, end_date, kind FROM absences \
              WHERE user_id=$1 AND status IN ('approved','cancellation_pending') \
              AND end_date >= $2 AND start_date <= $3",
         )
@@ -207,17 +223,18 @@ impl ReportDb {
         .await?)
     }
 
-    /// Time entry rows for flextime (raw: date, start, end, status).
+    /// Time entry rows for flextime (raw: date, start, end, status, counts_as_work).
     pub async fn flextime_entries(
         &self,
         user_id: i64,
         from: NaiveDate,
         to: NaiveDate,
-    ) -> AppResult<Vec<(NaiveDate, String, String, String)>> {
+    ) -> AppResult<Vec<(NaiveDate, String, String, String, bool)>> {
         Ok(sqlx::query_as(
-            "SELECT entry_date, start_time, end_time, status \
-             FROM time_entries \
-             WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3 \
+            "SELECT z.entry_date, z.start_time, z.end_time, z.status, c.counts_as_work \
+             FROM time_entries z \
+             JOIN categories c ON c.id = z.category_id \
+             WHERE z.user_id=$1 AND z.entry_date BETWEEN $2 AND $3 \
              ORDER BY entry_date, start_time",
         )
         .bind(user_id)
@@ -228,18 +245,30 @@ impl ReportDb {
     }
 
     /// Category entries for a user (for per-category report).
-    /// Returns (date, start, end, cat_name, cat_color, minutes, status, comment).
+    /// Returns (date, start, end, cat_name, cat_color, minutes, counts_as_work, status, comment).
     #[allow(clippy::type_complexity)]
     pub async fn category_entries_for_user(
         &self,
         user_id: i64,
         from: NaiveDate,
         to: NaiveDate,
-    ) -> AppResult<Vec<(NaiveDate, String, String, String, String, i64, String, Option<String>)>>
+    ) -> AppResult<
+        Vec<(
+            NaiveDate,
+            String,
+            String,
+            String,
+            String,
+            i64,
+            bool,
+            String,
+            Option<String>,
+        )>,
+    >
     {
         Ok(sqlx::query_as(
             "SELECT z.entry_date, z.start_time, z.end_time, c.name, c.color, \
-             z.category_id, z.status, z.comment \
+             z.category_id, c.counts_as_work, z.status, z.comment \
              FROM time_entries z JOIN categories c ON c.id=z.category_id \
              WHERE z.user_id=$1 AND z.entry_date BETWEEN $2 AND $3 \
              ORDER BY z.entry_date, z.start_time",

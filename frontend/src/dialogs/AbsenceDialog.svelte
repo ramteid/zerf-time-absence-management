@@ -130,6 +130,7 @@
         <option value="special_leave">{$t("Special leave")}</option>
         <option value="unpaid">{$t("Unpaid")}</option>
         <option value="general_absence">{$t("General absence")}</option>
+        <option value="flextime_reduction">{$t("Flextime Reduction")}</option>
       </select>
     </div>
     <div class="field-row">

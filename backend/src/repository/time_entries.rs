@@ -108,9 +108,10 @@ pub(crate) async fn validate_entry(
     let start_n = parse_time(&te.start_time)?;
     let end_n = parse_time(&te.end_time)?;
 
-    let existing: Vec<(i64, String, String, String)> = sqlx::query_as(
-        "SELECT id, start_time, end_time, status \
-         FROM time_entries WHERE user_id=$1 AND entry_date=$2",
+    let existing: Vec<(i64, String, String, String, bool)> = sqlx::query_as(
+        "SELECT te.id, te.start_time, te.end_time, te.status, c.counts_as_work \
+         FROM time_entries te JOIN categories c ON c.id = te.category_id \
+         WHERE te.user_id=$1 AND te.entry_date=$2",
     )
     .bind(user_id)
     .bind(te.entry_date)
@@ -118,16 +119,19 @@ pub(crate) async fn validate_entry(
     .await?;
 
     let mut day_total = new_min;
-    for (eid, start_str, end_str, status) in &existing {
+    for (eid, start_str, end_str, status, counts_as_work) in &existing {
         if Some(*eid) == exclude_id || status == "rejected" {
             continue;
         }
         let es = parse_time(start_str)?;
         let ee = parse_time(end_str)?;
-        if start_n < ee && es < end_n {
+        // Only check overlap with crediting entries; non-crediting entries don't block new entries
+        if *counts_as_work && start_n < ee && es < end_n {
             return Err(AppError::BadRequest("Overlap with an existing entry.".into()));
         }
-        day_total += (ee - es).num_minutes();
+        if *counts_as_work {
+            day_total += (ee - es).num_minutes();
+        }
     }
     if day_total > 14 * 60 {
         return Err(AppError::BadRequest("Day total exceeds 14 hours.".into()));
@@ -735,8 +739,10 @@ impl TimeEntryDb {
         to: NaiveDate,
     ) -> AppResult<Vec<NaiveDate>> {
         let rows: Vec<(NaiveDate,)> = sqlx::query_as(
-            "SELECT DISTINCT entry_date FROM time_entries \
-             WHERE user_id=$1 AND status IN ('submitted','approved') \
+            "SELECT DISTINCT z.entry_date FROM time_entries z \
+             JOIN categories c ON c.id = z.category_id \
+             WHERE z.user_id=$1 AND z.status IN ('submitted','approved') \
+             AND c.counts_as_work = TRUE \
              AND entry_date BETWEEN $2 AND $3",
         )
         .bind(user_id)
@@ -806,7 +812,7 @@ impl TimeEntryDb {
         Ok(())
     }
 
-    /// For submission_reminders: entries by user in range grouped by month.
+    /// For submission-style checks: credited entries by user in range grouped by month.
     pub async fn get_monthly_submission_stats(
         &self,
         user_id: i64,
@@ -819,8 +825,10 @@ impl TimeEntryDb {
                  EXTRACT(MONTH FROM entry_date)::int AS m, \
                  COUNT(*) AS total, \
                  COUNT(*) FILTER (WHERE status = 'draft') AS drafts \
-             FROM time_entries \
-             WHERE user_id = $1 AND entry_date >= $2 AND entry_date < $3 \
+             FROM time_entries te \
+             JOIN categories c ON c.id = te.category_id \
+             WHERE te.user_id = $1 AND te.entry_date >= $2 AND te.entry_date < $3 \
+               AND c.counts_as_work = TRUE \
              GROUP BY y, m",
         )
         .bind(user_id)

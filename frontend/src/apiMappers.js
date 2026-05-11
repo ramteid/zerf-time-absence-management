@@ -112,6 +112,7 @@ export function normalizeMonthReport(report, workdaysPerWeek = 5) {
         end_time: entry.end_time,
         minutes: entry.minutes,
         category_name: entry.category,
+        counts_as_work: entry.counts_as_work,
         status: entry.status,
         comment: entry.comment,
       });

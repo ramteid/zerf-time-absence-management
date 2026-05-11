@@ -54,6 +54,7 @@ describe("Time", () => {
       id: 1,
       role: "employee",
       weekly_hours: 40,
+      workdays_per_week: 5,
       start_date: "2020-01-01",
     });
     settings.set({ time_format: "24h" });
@@ -109,6 +110,31 @@ describe("Time", () => {
         id: 11,
         user_id: 1,
         kind: "vacation",
+        start_date: monday,
+        end_date: monday,
+        status: "approved",
+        comment: null,
+      },
+    ];
+
+    component = mount(Time, { target });
+    await settle();
+
+    const addButtons = target.querySelectorAll("button[style*='dashed']");
+    const mondayButton = addButtons[0];
+    expect(mondayButton).toBeDefined();
+    expect(mondayButton.disabled).toBe(true);
+  });
+
+  it("approved flextime reduction absences still block time entry creation", async () => {
+    const monday = pastMonday();
+    path.set(`/time?week=${monday}`);
+
+    mockState.absences = [
+      {
+        id: 15,
+        user_id: 1,
+        kind: "flextime_reduction",
         start_date: monday,
         end_date: monday,
         status: "approved",
@@ -184,5 +210,100 @@ describe("Time", () => {
     await settle();
 
     expect(target.textContent).toContain("of 40.0h target");
+  });
+
+  it("flextime reduction absences keep the weekly target", async () => {
+    const monday = pastMonday();
+    path.set(`/time?week=${monday}`);
+
+    mockState.entries = [
+      {
+        id: 101,
+        user_id: 1,
+        entry_date: monday,
+        start_time: "08:00",
+        end_time: "12:00",
+        category_id: 1,
+        status: "approved",
+      },
+    ];
+    mockState.absences = [
+      {
+        id: 14,
+        user_id: 1,
+        kind: "flextime_reduction",
+        start_date: monday,
+        end_date: monday,
+        status: "approved",
+        comment: null,
+      },
+    ];
+    mockState.categories = [{ id: 1, name: "Core Duties", counts_as_work: true }];
+
+    component = mount(Time, { target });
+    await settle();
+
+    expect(target.textContent).toContain("of 40.0h target");
+  });
+
+  it("flextime reduction entries do not add credited weekly hours", async () => {
+    const monday = pastMonday();
+    path.set(`/time?week=${monday}`);
+
+    mockState.categories = [
+      { id: 1, name: "Core Duties", counts_as_work: true },
+      { id: 2, name: "Flextime Reduction", counts_as_work: false },
+    ];
+    mockState.entries = [
+      {
+        id: 102,
+        user_id: 1,
+        entry_date: monday,
+        start_time: "08:00",
+        end_time: "12:00",
+        category_id: 1,
+        status: "approved",
+      },
+      {
+        id: 103,
+        user_id: 1,
+        entry_date: monday,
+        start_time: "13:00",
+        end_time: "17:00",
+        category_id: 2,
+        status: "approved",
+      },
+    ];
+
+    component = mount(Time, { target });
+    await settle();
+
+    expect(target.textContent).toContain("of 40.0h target");
+    expect(target.textContent).toContain("Logged: 4.0h");
+  });
+
+  it("uses entry counts_as_work when category lookup is unavailable", async () => {
+    const monday = pastMonday();
+    path.set(`/time?week=${monday}`);
+
+    mockState.categories = [{ id: 1, name: "Core Duties", counts_as_work: true }];
+    mockState.entries = [
+      {
+        id: 104,
+        user_id: 1,
+        entry_date: monday,
+        start_time: "08:00",
+        end_time: "12:00",
+        category_id: 999,
+        counts_as_work: false,
+        status: "approved",
+      },
+    ];
+
+    component = mount(Time, { target });
+    await settle();
+
+    expect(target.textContent).toContain("of 40.0h target");
+    expect(target.textContent).toContain("Logged: 0.0h");
   });
 });

@@ -30,6 +30,7 @@ fn repo_entry_to_service(e: crate::repository::TimeEntry) -> TimeEntry {
         start_time: e.start_time,
         end_time: e.end_time,
         category_id: e.category_id,
+        counts_as_work: None,
         comment: e.comment,
         status: e.status,
         submitted_at: e.submitted_at,
@@ -49,6 +50,7 @@ pub struct TimeEntry {
     pub start_time: String,
     pub end_time: String,
     pub category_id: i64,
+    pub counts_as_work: Option<bool>,
     pub comment: Option<String>,
     pub status: String,
     pub submitted_at: Option<DateTime<Utc>>,
@@ -71,6 +73,25 @@ pub struct RangeQuery {
     pub status: Option<String>,
 }
 
+async fn attach_counts_as_work(
+    app_state: &AppState,
+    entries: &mut [TimeEntry],
+) -> AppResult<()> {
+    let category_ids: HashSet<i64> = entries.iter().map(|entry| entry.category_id).collect();
+    let mut by_category: std::collections::HashMap<i64, bool> = std::collections::HashMap::new();
+
+    for category_id in category_ids {
+        let category = app_state.db.categories.find_by_id(category_id).await?;
+        by_category.insert(category_id, category.map(|item| item.counts_as_work).unwrap_or(true));
+    }
+
+    for entry in entries {
+        entry.counts_as_work = Some(*by_category.get(&entry.category_id).unwrap_or(&true));
+    }
+
+    Ok(())
+}
+
 pub async fn list(
     State(app_state): State<AppState>,
     requester: User,
@@ -81,7 +102,8 @@ pub async fn list(
         .time_entries
         .list_for_user(requester.id, query.from, query.to)
         .await?;
-    let mapped: Vec<TimeEntry> = entries.into_iter().map(repo_entry_to_service).collect();
+    let mut mapped: Vec<TimeEntry> = entries.into_iter().map(repo_entry_to_service).collect();
+    attach_counts_as_work(&app_state, &mut mapped).await?;
     Ok(Json(mapped))
 }
 
@@ -105,7 +127,8 @@ pub async fn list_all(
             query.status,
         )
         .await?;
-    let mapped: Vec<TimeEntry> = entries.into_iter().map(repo_entry_to_service).collect();
+    let mut mapped: Vec<TimeEntry> = entries.into_iter().map(repo_entry_to_service).collect();
+    attach_counts_as_work(&app_state, &mut mapped).await?;
     Ok(Json(mapped))
 }
 

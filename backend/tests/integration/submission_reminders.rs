@@ -172,6 +172,66 @@ async fn submission_reminders_full_workflow() {
         assert_eq!(reminders.len(), 0, "zero-hours user skipped");
     }
 
+    // -- Reminder still warns when the only submitted entry does not count as work --
+    {
+        let today = chrono::Local::now().date_naive();
+        let last_month_start = if today.month() == 1 {
+            chrono::NaiveDate::from_ymd_opt(today.year() - 1, 12, 1).unwrap()
+        } else {
+            chrono::NaiveDate::from_ymd_opt(today.year(), today.month() - 1, 1).unwrap()
+        };
+        let start_date = last_month_start.format("%Y-%m-%d").to_string();
+
+        let (_, categories_body) = admin.get("/api/v1/categories").await;
+        let flextime_category_id = category_id_by_name(&categories_body, "Flextime Reduction")
+            .expect("seeded flextime reduction category");
+
+        let (st, body) = admin
+            .post(
+                "/api/v1/users",
+                &json!({
+                    "email": "flextime-reminder@example.com",
+                    "first_name": "Flextime",
+                    "last_name": "Reminder",
+                    "role": "employee",
+                    "weekly_hours": 20,
+                    "leave_days_current_year": 10,
+                    "leave_days_next_year": 10,
+                    "start_date": start_date,
+                    "approver_ids": [1]
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK);
+        let emp_pw = temp_pw(&body);
+
+        let emp = login_change_pw(&app, "flextime-reminder@example.com", &emp_pw).await;
+
+        let entry_date = last_month_start.format("%Y-%m-%d").to_string();
+        let eid = create_draft_entry(&emp, &entry_date, flextime_category_id).await;
+
+        let (st, _) = emp
+            .post("/api/v1/time-entries/submit", &json!({"ids": [eid]}))
+            .await;
+        assert_eq!(st, StatusCode::OK);
+
+        let (st, _) = emp.delete("/api/v1/notifications").await;
+        assert_eq!(st, StatusCode::OK);
+
+        zerf::submission_reminders::run_check(&app.state).await;
+
+        let (st, body) = emp.get("/api/v1/notifications").await;
+        assert_eq!(st, StatusCode::OK);
+        let notifications = body.as_array().expect("notifications array");
+        let reminder = notifications
+            .iter()
+            .find(|n| n["kind"] == "submission_reminder");
+        assert!(
+            reminder.is_some(),
+            "non-crediting entries must not suppress the reminder"
+        );
+    }
+
     // -- Submission deadline day setting validation --
     {
         let (st, settings) = admin.get("/api/v1/settings").await;

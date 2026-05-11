@@ -97,10 +97,12 @@ async fn find_unsubmitted_months(
              EXTRACT(MONTH FROM entry_date)::int AS m, \
              COUNT(*) AS total, \
              COUNT(*) FILTER (WHERE status = 'draft') AS drafts \
-         FROM time_entries \
-         WHERE user_id = $1 \
-           AND entry_date >= $2 \
-           AND entry_date < $3 \
+                 FROM time_entries te \
+                 JOIN categories c ON c.id = te.category_id \
+                 WHERE te.user_id = $1 \
+                     AND te.entry_date >= $2 \
+                     AND te.entry_date < $3 \
+                     AND c.counts_as_work = TRUE \
          GROUP BY y, m",
     )
     .bind(user_id)
