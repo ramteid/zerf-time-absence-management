@@ -149,6 +149,14 @@ async fn enrich_pending_review_metadata(
     Ok(())
 }
 
+/// Count contract workdays in a date range for a specific user.
+/// Respects the user's workdays_per_week configuration (1-7 days per week).
+/// Excludes public holidays.
+/// 
+/// Used throughout the absence/vacation logic to calculate:
+///   - Vacation days used
+///   - Leave balance deductions
+///   - Carryover calculations
 pub async fn workdays(
     pool: &crate::db::DatabasePool,
     user_id: i64,
@@ -1159,6 +1167,8 @@ async fn carryover_remaining_days(
 /// for the affected year(s). `exclude_id` allows excluding the current absence when
 /// editing (pass `None` when creating).
 async fn validate_vacation_balance(
+        // Validate that user has sufficient vacation balance (respecting workdays_per_week).
+        // Vacation days are counted as contract workdays only (not calendar days).
     pool: &crate::db::DatabasePool,
     tx: &mut sqlx::PgConnection,
     user: &crate::auth::User,
@@ -1419,6 +1429,8 @@ pub async fn balance(
     requester: User,
     Path(target_user_id): Path<i64>,
     Query(query): Query<BalanceQuery>,
+    // Calculate user's current annual leave balance and remaining vacation days.
+    // Respects user's workdays_per_week for counting vacation days (not calendar days).
 ) -> AppResult<Json<LeaveBalance>> {
     assert_can_access_user(&app_state, &requester, target_user_id).await?;
     // Default to the current year if none was provided.

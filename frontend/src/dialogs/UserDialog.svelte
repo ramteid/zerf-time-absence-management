@@ -317,6 +317,7 @@
             step="1"
             min="1"
             max="7"
+                        // Flexible work schedule: 1-7 workdays per week (default 5 for Mon-Fri)
             bind:value={workdays_per_week}
           />
         </div>

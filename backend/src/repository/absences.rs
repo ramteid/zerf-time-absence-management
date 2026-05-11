@@ -73,6 +73,15 @@ impl AbsenceDb {
         Ok(rows.into_iter().map(|(d,)| d).collect())
     }
 
+    /// Count contract workdays in a date range, excluding public holidays.
+    ///
+    /// Contract workdays are determined by `workdays_per_week`:
+    ///   - workdays_per_week=5: Mon-Fri (ISO weekday 0-4)
+    ///   - workdays_per_week=4: Mon-Thu (ISO weekday 0-3)
+    ///   - workdays_per_week=6: Mon-Sat (ISO weekday 0-5)
+    ///
+    /// ISO weekday mapping: 0=Monday, 1=Tuesday, ..., 6=Sunday
+    /// A day is a contract workday if: ISO_weekday < workdays_per_week
     fn workdays_in_window(
         from: NaiveDate,
         to: NaiveDate,
@@ -85,6 +94,7 @@ impl AbsenceDb {
         let mut count = 0.0;
         let mut d = from;
         while d <= to {
+            // ISO weekday 0=Mon, 6=Sun; contract workdays are first N days of week
             if d.weekday().num_days_from_monday() < workdays_per_week as u32
                 && !holidays.contains(&d)
             {
@@ -95,6 +105,8 @@ impl AbsenceDb {
         count
     }
 
+    /// Fetch the user's configured workdays_per_week (contract hours per week).
+    /// Returns 1-7; default is typically 5 (Mon-Fri).
     pub async fn user_workdays_per_week(&self, user_id: i64) -> AppResult<i16> {
         Ok(sqlx::query_scalar("SELECT workdays_per_week FROM users WHERE id=$1")
             .bind(user_id)
@@ -102,8 +114,10 @@ impl AbsenceDb {
             .await?)
     }
 
-    /// Count default contract workdays (Mon-Fri) between `from` and `to` (inclusive),
-    /// excluding public holidays.
+    /// Count default contract workdays (Mon-Fri, hardcoded 5 days) between `from` and `to`
+    /// (inclusive), excluding public holidays.
+    /// NOTE: This function is for legacy compatibility. Prefer workdays_for_user() for
+    /// per-user workday calculations.
     pub async fn workdays(&self, from: NaiveDate, to: NaiveDate) -> AppResult<f64> {
         if to < from {
             return Ok(0.0);
@@ -114,6 +128,11 @@ impl AbsenceDb {
 
     /// Count user-specific contract workdays between `from` and `to` (inclusive),
     /// excluding public holidays.
+    /// 
+    /// This respects the user's workdays_per_week setting. For example:
+    ///   - A 5-day worker: counts Mon-Fri
+    ///   - A 4-day worker: counts Mon-Thu
+    ///   - A 6-day worker: counts Mon-Sat
     pub async fn workdays_for_user(
         &self,
         user_id: i64,
@@ -125,6 +144,9 @@ impl AbsenceDb {
         }
         let holidays = self.holidays_set(from, to).await?;
         let workdays_per_week = self.user_workdays_per_week(user_id).await?;
+            // Count contract workdays for this specific user based on their workdays_per_week setting.
+            // Contract days are determined by: ISO_weekday < workdays_per_week (0=Mon, 6=Sun)
+            // Example: 5 days = Mon-Fri, 4 days = Mon-Thu, 6 days = Mon-Sat
         Ok(Self::workdays_in_window(
             from,
             to,

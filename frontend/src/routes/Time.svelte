@@ -226,6 +226,9 @@
   $: weekTargetMinutes = (() => {
     const weeklyHours = Number($currentUser?.weekly_hours || 0);
     const workdaysPerWeek = Number($currentUser?.workdays_per_week || 5);
+      // Calculate daily target based on user's workdays_per_week configuration.
+      // Example: 40h/week ÷ 5 days = 8h/day = 480 min/day (5-day worker)
+      //          40h/week ÷ 4 days = 10h/day = 600 min/day (4-day worker)
     const perDayMinutes = Math.round((weeklyHours / workdaysPerWeek) * 60);
     if (perDayMinutes <= 0) return 0;
     return weekdays.reduce((totalMinutes, day) => {
@@ -275,10 +278,13 @@
   }
 
   $: weekdays = weekFrom
+      // Dynamic weekday grid: adapt to user's workdays_per_week setting.
+      // E.g., 5-day worker sees Mon-Fri, 4-day worker sees Mon-Thu.
     ? Array.from({ length: $currentUser?.workdays_per_week || 5 }, (_, i) => i)
         .map((dayIndex) => buildWeekDay(dayIndex, entries, absences, holidays))
     : [];
   $: weekendDays = weekFrom
+      // Non-contract days shown separately (e.g., Sat-Sun for 5-day worker, Fri-Sun for 4-day).
     ? Array.from({ length: 7 - ($currentUser?.workdays_per_week || 5) }, (_, i) => ($currentUser?.workdays_per_week || 5) + i)
         .map((dayIndex) => buildWeekDay(dayIndex, entries, absences, holidays))
     : [];

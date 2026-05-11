@@ -55,6 +55,11 @@ describe("countWorkdays", () => {
   it("returns 0 for invalid dates", () => {
     expect(countWorkdays("invalid", "2026-05-04")).toBe(0);
   });
+
+  it("respects custom workdays_per_week for 4-day schedules", () => {
+    // Mon-Fri with 4-day schedule counts only Mon-Thu.
+    expect(countWorkdays("2026-05-04", "2026-05-08", new Set(), 4)).toBe(4);
+  });
 });
 
 describe("normalizeMonthReport", () => {
@@ -242,6 +247,37 @@ describe("normalizeMonthReport", () => {
         start_date: "2026-05-04",
         end_date: "2026-05-04",
         days: 1,
+      },
+    ]);
+  });
+
+  it("respects custom workdays_per_week for absence aggregation", () => {
+    const report = {
+      days: [
+        {
+          date: "2026-05-08",
+          weekday: "Friday",
+          holiday: null,
+          absence: "vacation",
+          entries: [],
+        },
+        {
+          date: "2026-05-09",
+          weekday: "Saturday",
+          holiday: null,
+          absence: "vacation",
+          entries: [],
+        },
+      ],
+    };
+
+    const result = normalizeMonthReport(report, 4);
+    expect(result.absences).toEqual([
+      {
+        kind: "vacation",
+        start_date: "2026-05-08",
+        end_date: "2026-05-09",
+        days: 0,
       },
     ]);
   });
