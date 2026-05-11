@@ -861,10 +861,10 @@ fn expand_absence_date_set(
     to: NaiveDate,
 ) -> std::collections::HashSet<NaiveDate> {
     let mut set = std::collections::HashSet::new();
-    for (range_start, range_end, kind) in ranges {
-        if !absence_removes_target(kind) {
-            continue;
-        }
+    for (range_start, range_end, _kind) in ranges {
+        // All approved absences cover the day for submission purposes: target-removing absences
+        // (vacation, sick, training, etc.) replace the work requirement entirely; flextime_reduction
+        // blocks entry creation so there is nothing for the user to submit on that day either.
         let mut day = (*range_start).max(from);
         while day <= (*range_end).min(to) {
             set.insert(day);
