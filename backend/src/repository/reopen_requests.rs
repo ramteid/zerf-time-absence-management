@@ -173,7 +173,7 @@ impl ReopenRequestDb {
             tracing::warn!(target:"zerf::reopen", "insert_auto_approved failed: {e}");
             AppError::Conflict("A pending request for this week already exists.".into())
         })?;
-        let affected = Self::perform_reopen(&mut tx, user_id, user_id, week_start).await?;
+        let affected = Self::perform_reopen(&mut tx, actor_id, user_id, week_start).await?;
         tx.commit().await?;
         Ok((req_id, affected))
     }

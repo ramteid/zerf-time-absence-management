@@ -482,7 +482,7 @@ pub async fn approve(
     // Fetch the existing entry and build effective post-change values so we can
     // run the same overlap / 14-hour / category validation as direct edits do.
     let existing_entry: crate::time_entries::TimeEntry =
-        sqlx::query_as("SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at FROM time_entries WHERE id=$1 FOR UPDATE")
+        sqlx::query_as("SELECT te.id, te.user_id, te.entry_date, te.start_time, te.end_time, te.category_id, c.counts_as_work, te.comment, te.status, te.submitted_at, te.reviewed_by, te.reviewed_at, te.rejection_reason, te.created_at, te.updated_at FROM time_entries te JOIN categories c ON c.id = te.category_id WHERE te.id=$1 FOR UPDATE")
             .bind(change_request.time_entry_id)
             .fetch_one(&mut *transaction)
             .await?;
