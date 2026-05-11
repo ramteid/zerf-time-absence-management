@@ -2,12 +2,13 @@
 //! any pending approval requests (change requests, absences, reopen requests).
 
 use crate::db::DatabasePool;
-use chrono::{Datelike, Duration, Local, TimeZone, Timelike};
+use chrono::{Datelike, Duration, TimeZone, Timelike, Utc};
 use std::time::Duration as StdDuration;
 
-/// Returns the duration to wait until the next Monday at 07:00 local time.
+/// Returns the duration to wait until the next Monday at 07:00 in the
+/// configured application timezone.
 /// If today is Monday and it is not yet 07:00, targets today.
-pub fn duration_until_next_monday_7am(now: chrono::DateTime<Local>) -> StdDuration {
+pub fn duration_until_next_monday_7am(now: chrono::DateTime<chrono_tz::Tz>) -> StdDuration {
     let weekday = now.weekday().num_days_from_monday();
     let days_ahead = if weekday == 0 && now.hour() < 7 {
         0
@@ -19,13 +20,13 @@ pub fn duration_until_next_monday_7am(now: chrono::DateTime<Local>) -> StdDurati
         Some(n) => n,
         None => return StdDuration::from_secs(3600),
     };
-    let target = match Local.from_local_datetime(&target_naive) {
+    let target = match now.timezone().from_local_datetime(&target_naive) {
         chrono::LocalResult::Single(dt) => dt,
         chrono::LocalResult::Ambiguous(earliest, _) => earliest,
         chrono::LocalResult::None => {
             // Hour falls in DST gap; try one hour later
             let fallback = target_date.and_hms_opt(8, 0, 0).unwrap();
-            match Local.from_local_datetime(&fallback).earliest() {
+            match now.timezone().from_local_datetime(&fallback).earliest() {
                 Some(dt) => dt,
                 None => return StdDuration::from_secs(3600),
             }
@@ -124,6 +125,13 @@ pub async fn run_check(state: &crate::AppState) {
         .public_url
         .clone()
         .unwrap_or_else(|| "http://localhost".to_string());
+    let timezone = crate::settings::load_setting(
+        pool,
+        crate::settings::TIMEZONE_KEY,
+        crate::settings::DEFAULT_TIMEZONE,
+    )
+    .await
+    .unwrap_or_else(|_| crate::settings::DEFAULT_TIMEZONE.to_string());
 
     let approvers = find_approvers_with_pending(pool).await;
     if approvers.is_empty() {
@@ -143,7 +151,7 @@ pub async fn run_check(state: &crate::AppState) {
             "approval_reminder_body",
             &[("count", count_str.clone())],
         );
-        let timestamp = chrono::Local::now().format("%d.%m.%Y %H:%M").to_string();
+        let timestamp = crate::i18n::format_datetime_in_timezone(&language, chrono::Utc::now(), &timezone);
         let email_body = format!(
             "{}\n\n{}",
             crate::i18n::translate(
@@ -182,7 +190,17 @@ pub async fn run_check(state: &crate::AppState) {
 /// Background loop: sleep until the next Monday at 07:00 local time, then run check.
 pub async fn run_loop(state: crate::AppState) {
     loop {
-        let wait = duration_until_next_monday_7am(Local::now());
+        let timezone = crate::settings::load_setting(
+            &state.pool,
+            crate::settings::TIMEZONE_KEY,
+            crate::settings::DEFAULT_TIMEZONE,
+        )
+        .await
+        .unwrap_or_else(|_| crate::settings::DEFAULT_TIMEZONE.to_string());
+        let tz = timezone
+            .parse::<chrono_tz::Tz>()
+            .unwrap_or(chrono_tz::Europe::Berlin);
+        let wait = duration_until_next_monday_7am(Utc::now().with_timezone(&tz));
         tracing::info!(
             target:"zerf::approval_reminders",
             "Next approval reminder check scheduled in {:?}",
@@ -198,11 +216,12 @@ pub async fn run_loop(state: crate::AppState) {
 mod tests {
     use super::*;
     use chrono::TimeZone;
+    use chrono_tz::Europe::Berlin;
 
     #[test]
     fn monday_before_7am_targets_today() {
         // Monday 2026-05-04 06:00 → should target the same day at 07:00
-        let now = Local.with_ymd_and_hms(2026, 5, 4, 6, 0, 0).unwrap();
+        let now = Berlin.with_ymd_and_hms(2026, 5, 4, 6, 0, 0).unwrap();
         let wait = duration_until_next_monday_7am(now);
         let secs = wait.as_secs();
         assert!(secs >= 3500 && secs <= 3700, "expected ~1h, got {secs}s");
@@ -211,7 +230,7 @@ mod tests {
     #[test]
     fn monday_after_7am_schedules_next_week() {
         // Monday 2026-05-04 08:00 → next Monday 2026-05-11 07:00 = ~6 days 23 h
-        let now = Local.with_ymd_and_hms(2026, 5, 4, 8, 0, 0).unwrap();
+        let now = Berlin.with_ymd_and_hms(2026, 5, 4, 8, 0, 0).unwrap();
         let wait = duration_until_next_monday_7am(now);
         let secs = wait.as_secs();
         assert!(secs > 6 * 86400, "should be >6 days, got {secs}s");
@@ -221,7 +240,7 @@ mod tests {
     #[test]
     fn mid_week_schedules_next_monday() {
         // Wednesday 2026-05-06 12:00 → next Monday 2026-05-11 07:00 = ~4 days 19 h
-        let now = Local.with_ymd_and_hms(2026, 5, 6, 12, 0, 0).unwrap();
+        let now = Berlin.with_ymd_and_hms(2026, 5, 6, 12, 0, 0).unwrap();
         let wait = duration_until_next_monday_7am(now);
         let secs = wait.as_secs();
         assert!(secs > 4 * 86400, "should be >4 days, got {secs}s");
@@ -231,7 +250,7 @@ mod tests {
     #[test]
     fn sunday_schedules_next_monday() {
         // Sunday 2026-05-10 20:00 → next Monday 2026-05-11 07:00 = ~11 h
-        let now = Local.with_ymd_and_hms(2026, 5, 10, 20, 0, 0).unwrap();
+        let now = Berlin.with_ymd_and_hms(2026, 5, 10, 20, 0, 0).unwrap();
         let wait = duration_until_next_monday_7am(now);
         let secs = wait.as_secs();
         assert!(secs > 10 * 3600, "should be >10h, got {secs}s");

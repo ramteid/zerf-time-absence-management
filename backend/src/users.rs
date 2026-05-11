@@ -8,7 +8,7 @@ use axum::{
     extract::{Path, State},
     Json,
 };
-use chrono::{Datelike, NaiveDate};
+use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 
 pub(crate) fn repo_user_to_auth_user(u: crate::repository::User) -> User {
@@ -20,6 +20,7 @@ pub(crate) fn repo_user_to_auth_user(u: crate::repository::User) -> User {
         last_name: u.last_name,
         role: u.role,
         weekly_hours: u.weekly_hours,
+        workdays_per_week: u.workdays_per_week,
         start_date: u.start_date,
         active: u.active,
         must_change_password: u.must_change_password,
@@ -166,6 +167,7 @@ pub async fn get_one(
         "last_name": user.last_name,
         "role": user.role,
         "weekly_hours": user.weekly_hours,
+        "workdays_per_week": user.workdays_per_week,
         "start_date": user.start_date,
         "active": user.active,
         "must_change_password": user.must_change_password,
@@ -185,6 +187,8 @@ pub struct NewUser {
     pub last_name: String,
     pub role: String,
     pub weekly_hours: f64,
+    #[serde(default = "default_workdays_per_week")]
+    pub workdays_per_week: i16,
     /// Leave days for the current year (required on creation).
     pub leave_days_current_year: i64,
     /// Leave days for next year (required on creation).
@@ -195,6 +199,10 @@ pub struct NewUser {
     /// Mandatory for non-admin users: list of team leads/admins who can approve this user's submissions.
     #[serde(default)]
     pub approver_ids: Vec<i64>,
+}
+
+fn default_workdays_per_week() -> i16 {
+    5
 }
 
 /// Validate that each approver_id refers to an active lead/admin and is not the user themselves.
@@ -334,6 +342,9 @@ pub async fn create(
     if !(0.0..=168.0).contains(&body.weekly_hours) {
         return Err(AppError::BadRequest("Invalid weekly_hours.".into()));
     }
+    if !(1..=7).contains(&body.workdays_per_week) {
+        return Err(AppError::BadRequest("Invalid workdays_per_week.".into()));
+    }
     if !(0..=366).contains(&body.leave_days_current_year)
         || !(0..=366).contains(&body.leave_days_next_year)
     {
@@ -353,9 +364,9 @@ pub async fn create(
     let mut transaction = app_state.pool.begin().await?;
     lock_user_graph(&mut *transaction).await?;
     validate_approver_ids(&app_state, &body.role, None, &body.approver_ids).await?;
-    let new_user_id: i64 = sqlx::query_scalar("INSERT INTO users(email,password_hash,first_name,last_name,role,weekly_hours,start_date,must_change_password,overtime_start_balance_min) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id")
+    let new_user_id: i64 = sqlx::query_scalar("INSERT INTO users(email,password_hash,first_name,last_name,role,weekly_hours,workdays_per_week,start_date,must_change_password,overtime_start_balance_min) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id")
         .bind(&normalized_email).bind(password_hash).bind(&first_name).bind(&last_name).bind(&body.role)
-        .bind(body.weekly_hours).bind(body.start_date).bind(true)
+        .bind(body.weekly_hours).bind(body.workdays_per_week).bind(body.start_date).bind(true)
         .bind(overtime_balance)
         .fetch_one(&mut *transaction).await
         .map_err(|e| {
@@ -371,7 +382,7 @@ pub async fn create(
             .await?;
     };
     // Seed leave days for current + next year
-    let current_year = chrono::Local::now().year();
+    let current_year = crate::settings::app_current_year(&app_state.pool).await;
     UserDb::set_leave_days_tx(
         &mut *transaction,
         new_user_id,
@@ -437,6 +448,7 @@ pub struct UpdateUser {
     pub last_name: Option<String>,
     pub role: Option<String>,
     pub weekly_hours: Option<f64>,
+    pub workdays_per_week: Option<i16>,
     /// If provided, sets leave days for the current year.
     pub leave_days_current_year: Option<i64>,
     /// If provided, sets leave days for next year.
@@ -498,6 +510,11 @@ pub async fn update(
             return Err(AppError::BadRequest("Invalid weekly_hours.".into()));
         }
     }
+    if let Some(workdays_per_week) = body.workdays_per_week {
+        if !(1..=7).contains(&workdays_per_week) {
+            return Err(AppError::BadRequest("Invalid workdays_per_week.".into()));
+        }
+    }
     if let Some(d) = body.leave_days_current_year {
         if !(0..=366).contains(&d) {
             return Err(AppError::BadRequest("Invalid leave_days.".into()));
@@ -526,7 +543,7 @@ pub async fn update(
     let last_name = normalize_optional_user_name(body.last_name.as_ref())?;
     let mut transaction = app_state.pool.begin().await?;
     lock_user_graph(&mut *transaction).await?;
-    let previous_user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, start_date, active, must_change_password, created_at, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1 FOR UPDATE")
+    let previous_user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, workdays_per_week, start_date, active, must_change_password, created_at, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1 FOR UPDATE")
         .bind(user_id)
         .fetch_one(&mut *transaction)
         .await?;
@@ -600,9 +617,9 @@ pub async fn update(
             ));
         }
     }
-    sqlx::query("UPDATE users SET email=COALESCE($1,email), first_name=COALESCE($2,first_name), last_name=COALESCE($3,last_name), role=COALESCE($4,role), weekly_hours=COALESCE($5,weekly_hours), start_date=COALESCE($6,start_date), active=COALESCE($7,active), allow_reopen_without_approval=COALESCE($8,allow_reopen_without_approval), overtime_start_balance_min=COALESCE($9,overtime_start_balance_min) WHERE id=$10")
+    sqlx::query("UPDATE users SET email=COALESCE($1,email), first_name=COALESCE($2,first_name), last_name=COALESCE($3,last_name), role=COALESCE($4,role), weekly_hours=COALESCE($5,weekly_hours), workdays_per_week=COALESCE($6,workdays_per_week), start_date=COALESCE($7,start_date), active=COALESCE($8,active), allow_reopen_without_approval=COALESCE($9,allow_reopen_without_approval), overtime_start_balance_min=COALESCE($10,overtime_start_balance_min) WHERE id=$11")
         .bind(normalized_email).bind(first_name).bind(last_name).bind(body.role.clone())
-        .bind(body.weekly_hours).bind(body.start_date).bind(body.active)
+        .bind(body.weekly_hours).bind(body.workdays_per_week).bind(body.start_date).bind(body.active)
         .bind(body.allow_reopen_without_approval).bind(body.overtime_start_balance_min).bind(user_id)
         .execute(&mut *transaction).await
         .map_err(|e| {
@@ -610,7 +627,7 @@ pub async fn update(
             user_unique_conflict(&e).unwrap_or_else(|| AppError::Conflict("Could not update user.".into()))
         })?;
     // Update leave days if provided
-    let current_year = chrono::Local::now().year();
+    let current_year = crate::settings::app_current_year(&app_state.pool).await;
     if let Some(d) = body.leave_days_current_year {
         UserDb::set_leave_days_tx(&mut *transaction, user_id, current_year, d).await?;
     }
@@ -680,7 +697,7 @@ pub async fn deactivate(
     }
     let mut transaction = app_state.pool.begin().await?;
     lock_user_graph(&mut *transaction).await?;
-    let previous_user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, start_date, active, must_change_password, created_at, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1 FOR UPDATE")
+    let previous_user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, workdays_per_week, start_date, active, must_change_password, created_at, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1 FOR UPDATE")
         .bind(user_id)
         .fetch_one(&mut *transaction)
         .await?;
@@ -737,7 +754,7 @@ pub async fn delete_user(
     let mut transaction = app_state.pool.begin().await?;
     lock_user_graph(&mut *transaction).await?;
     let target_user: User = sqlx::query_as(
-        "SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, \
+        "SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, workdays_per_week, \
          start_date, active, must_change_password, created_at, allow_reopen_without_approval, \
          dark_mode, overtime_start_balance_min FROM users WHERE id=$1 FOR UPDATE",
     )
@@ -862,7 +879,7 @@ pub async fn get_leave_days_handler(
     Path(user_id): Path<i64>,
 ) -> AppResult<Json<Vec<AnnualLeaveRow>>> {
     assert_can_access_user(&app_state, &requester, user_id).await?;
-    let current_year = chrono::Local::now().year();
+    let current_year = crate::settings::app_current_year(&app_state.pool).await;
     let this = get_leave_days(&app_state.pool, user_id, current_year).await?;
     let next = get_leave_days(&app_state.pool, user_id, current_year + 1).await?;
     Ok(Json(vec![
@@ -895,7 +912,7 @@ pub async fn set_leave_days_handler(
     if !requester.is_admin() {
         return Err(AppError::Forbidden);
     }
-    let current_year = chrono::Local::now().year();
+    let current_year = crate::settings::app_current_year(&app_state.pool).await;
     if body.year > current_year + 1 {
         return Err(AppError::BadRequest(
             "Leave days cannot be set more than one year ahead.".into(),

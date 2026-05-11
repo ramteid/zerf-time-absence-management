@@ -17,6 +17,7 @@
   let last_name = template.last_name || "";
   let role = template.role || "employee";
   let weekly_hours = template.weekly_hours ?? 39;
+  let workdays_per_week = template.workdays_per_week ?? 5;
   const _thisYear = new Date().getFullYear();
   const _nextYear = _thisYear + 1;
   // Leave days — two explicit fields (current year + next year)
@@ -124,6 +125,13 @@
       error = $t("Invalid date.");
       return;
     }
+    if (
+      Number(workdays_per_week) < 1 ||
+      Number(workdays_per_week) > 7
+    ) {
+      error = $t("Workdays per week must be between 1 and 7.");
+      return;
+    }
     try {
       const body = {
         email,
@@ -131,6 +139,7 @@
         last_name,
         role,
         weekly_hours: Number(weekly_hours),
+        workdays_per_week: Number(workdays_per_week),
         leave_days_current_year: Number(leave_days_current_year),
         leave_days_next_year: Number(leave_days_next_year),
         start_date,
@@ -280,8 +289,8 @@
           />
         </div>
       </div>
-      {#if isNew}
-        <div class="field-row">
+      <div class="field-row">
+        {#if isNew}
           <div>
             <label class="kz-label" for="user-weekly-hours"
               >{$t("Weekly hours")}</label
@@ -296,8 +305,22 @@
               bind:value={weekly_hours}
             />
           </div>
+        {/if}
+        <div>
+          <label class="kz-label" for="user-workdays-per-week"
+            >{$t("Workdays per week")}</label
+          >
+          <input
+            id="user-workdays-per-week"
+            class="kz-input"
+            type="number"
+            step="1"
+            min="1"
+            max="7"
+            bind:value={workdays_per_week}
+          />
         </div>
-      {/if}
+      </div>
       <div>
         <label class="kz-label" for="user-overtime-balance"
           >{$t("Overtime start balance (hours)")}</label

@@ -109,7 +109,7 @@ Daily target hours are `0` when:
 - day is before user start date,
 - day is in the future.
 
-Otherwise, target is derived from weekly hours divided by five.
+Otherwise, target is derived from weekly hours divided by the user's configured workdays per week.
 
 ## Submission status indicator
 

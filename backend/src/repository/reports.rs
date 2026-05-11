@@ -173,7 +173,7 @@ impl ReportDb {
     ) -> AppResult<Vec<User>> {
         const SEL: &str =
             "SELECT id, email, password_hash, first_name, last_name, role, \
-             weekly_hours, start_date, active, must_change_password, created_at, \
+             weekly_hours, workdays_per_week, start_date, active, must_change_password, created_at, \
              allow_reopen_without_approval, dark_mode, overtime_start_balance_min \
              FROM users";
         if is_admin {

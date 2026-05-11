@@ -4,6 +4,19 @@ import { get } from "svelte/store";
 import { settings } from "./stores.js";
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const UTC_ISO_DATETIME_RE = /^\d{4}-\d{2}-\d{2}T/;
+
+function getConfiguredTimeZone() {
+  const timezone = get(settings)?.timezone;
+  if (typeof timezone !== "string" || !timezone.trim()) {
+    return "Europe/Berlin";
+  }
+  return timezone.trim();
+}
+
+function shouldApplyConfiguredTimeZone(value) {
+  return typeof value === "string" && !ISO_DATE_RE.test(value) && UTC_ISO_DATETIME_RE.test(value);
+}
 
 export function parseDate(value) {
   if (value instanceof Date) {
@@ -19,18 +32,26 @@ export function parseDate(value) {
 }
 
 export function fmtDate(d) {
-  return parseDate(d).toLocaleDateString(getLocale(), {
+  const options = {
     weekday: "short",
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
-  });
+  };
+  if (shouldApplyConfiguredTimeZone(d)) {
+    options.timeZone = getConfiguredTimeZone();
+  }
+  return parseDate(d).toLocaleDateString(getLocale(), options);
 }
 export function fmtDateShort(d) {
-  return parseDate(d).toLocaleDateString(getLocale(), {
+  const options = {
     day: "2-digit",
     month: "2-digit",
-  });
+  };
+  if (shouldApplyConfiguredTimeZone(d)) {
+    options.timeZone = getConfiguredTimeZone();
+  }
+  return parseDate(d).toLocaleDateString(getLocale(), options);
 }
 export function fmtMonthYear(d) {
   return parseDate(d).toLocaleDateString(getLocale(), {
@@ -46,7 +67,9 @@ export function fmtMonthLabel(yearMonth) {
   return fmtMonthYear(yearMonth + "-01");
 }
 export function fmtDateTime(d) {
-  return parseDate(d).toLocaleString(getLocale());
+  return parseDate(d).toLocaleString(getLocale(), {
+    timeZone: getConfiguredTimeZone(),
+  });
 }
 export function weekdayLabels() {
   const base = new Date(Date.UTC(2024, 0, 1));

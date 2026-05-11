@@ -117,6 +117,14 @@ fn weekday_en(d: NaiveDate) -> &'static str {
     ][d.weekday().num_days_from_monday() as usize]
 }
 
+fn is_contract_workday(date: NaiveDate, workdays_per_week: i16) -> bool {
+    date.weekday().num_days_from_monday() < workdays_per_week as u32
+}
+
+fn target_minutes_per_day(weekly_hours: f64, workdays_per_week: i16) -> i64 {
+    (weekly_hours / f64::from(workdays_per_week) * 60.0).round() as i64
+}
+
 async fn build_range(
     pool: &crate::db::DatabasePool,
     user_id: i64,
@@ -129,7 +137,7 @@ async fn build_range(
         .await?
         .ok_or(AppError::NotFound)?;
     let user = crate::users::repo_user_to_auth_user(repo_user);
-    let target_per_day_min = (user.weekly_hours / 5.0 * 60.0).round() as i64;
+    let target_per_day_min = target_minutes_per_day(user.weekly_hours, user.workdays_per_week);
     let today = reporting_today();
 
     let reports_db = crate::repository::ReportDb::new(pool.clone());
@@ -182,7 +190,7 @@ async fn build_range(
 
         // A day has a work target when it is a weekday within the user's contract,
         // not covered by a holiday or absence, and not in the future.
-        let is_workday = current_date.weekday().num_days_from_monday() < 5
+        let is_workday = is_contract_workday(current_date, user.workdays_per_week)
             && holiday.is_none()
             && absence.is_none()
             && !before_start;
@@ -268,9 +276,20 @@ async fn build_month(
         .await?
         .ok_or(AppError::NotFound)?;
     let user_start_date = repo_user.start_date;
+    let workdays_per_week = repo_user.workdays_per_week;
     let mut report = build_range(pool, user_id, from, to, month).await?;
     report.weeks_all_submitted =
-        Some(all_weeks_submitted_for_month(pool, user_id, from, to, user_start_date).await?);
+        Some(
+            all_weeks_submitted_for_month(
+                pool,
+                user_id,
+                from,
+                to,
+                user_start_date,
+                workdays_per_week,
+            )
+            .await?,
+        );
     Ok(report)
 }
 
@@ -527,6 +546,7 @@ async fn all_weeks_submitted_for_month(
     month_start: NaiveDate,
     month_end: NaiveDate,
     user_start_date: NaiveDate,
+    workdays_per_week: i16,
 ) -> AppResult<bool> {
     let today = reporting_today();
 
@@ -582,8 +602,7 @@ async fn all_weeks_submitted_for_month(
 
     // Check each fully elapsed week.
     for &week_monday in &complete_week_mondays {
-        // Monday through Friday (offsets 0..5)
-        for day_offset in 0..5i64 {
+        for day_offset in 0..i64::from(workdays_per_week) {
             let day = week_monday + Duration::days(day_offset);
 
             // Skip days before the user's contract start.
@@ -713,6 +732,7 @@ pub async fn team(
             month_start,
             month_end,
             team_member.start_date,
+            team_member.workdays_per_week,
         )
         .await?;
 
@@ -1131,7 +1151,7 @@ pub async fn flextime(
             .await?
             .ok_or(AppError::NotFound)?,
     );
-    let target_per_day_min = (user.weekly_hours / 5.0 * 60.0).round() as i64;
+    let target_per_day_min = target_minutes_per_day(user.weekly_hours, user.workdays_per_week);
 
     // Seed cumulative at query.from-1 via month-level overtime plus a small
     // partial-month report, so per-day flextime processing stays within the
@@ -1239,7 +1259,7 @@ pub async fn flextime(
         let absence = absence_by_day.get(&current_date).cloned();
         let before_start = current_date < user.start_date;
         let after_today = current_date > today;
-        let is_workday = current_date.weekday().num_days_from_monday() < 5
+        let is_workday = is_contract_workday(current_date, user.workdays_per_week)
             && holiday.is_none()
             && absence.is_none()
             && !before_start

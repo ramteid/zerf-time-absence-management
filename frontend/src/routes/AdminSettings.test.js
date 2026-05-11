@@ -8,6 +8,7 @@ const mockState = vi.hoisted(() => ({
   settings: {
     ui_language: "en",
     time_format: "24h",
+    timezone: "Europe/Berlin",
     country: "DE",
     region: "",
     default_weekly_hours: 40,
@@ -78,7 +79,7 @@ describe("AdminSettings", () => {
       last_name: "User",
       must_configure_settings: true,
     });
-    appSettings.set({ ui_language: "en", time_format: "24h" });
+    appSettings.set({ ui_language: "en", time_format: "24h", timezone: "Europe/Berlin" });
     setLanguage("en");
     apiMock.mockClear();
   });

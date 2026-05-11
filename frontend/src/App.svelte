@@ -64,6 +64,7 @@
     try {
       const publicSettings = await api("/settings/public");
       if (!publicSettings.time_format) publicSettings.time_format = "24h";
+      if (!publicSettings.timezone) publicSettings.timezone = "Europe/Berlin";
       settings.set(publicSettings);
       if (publicSettings.ui_language) setLanguage(publicSettings.ui_language);
     } catch {}

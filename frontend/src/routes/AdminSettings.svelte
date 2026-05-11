@@ -19,6 +19,18 @@
   let regionLoading = false;
   let regionsLoadFailed = false;
   const languageOptions = Object.entries(LANGUAGES);
+  const fallbackTimezones = [
+    "Europe/Berlin",
+    "UTC",
+    "Europe/London",
+    "America/New_York",
+    "America/Los_Angeles",
+    "Asia/Tokyo",
+  ];
+  const timezoneOptions =
+    typeof Intl !== "undefined" && typeof Intl.supportedValuesOf === "function"
+      ? Intl.supportedValuesOf("timeZone")
+      : fallbackTimezones;
 
   function sortCountriesByName(items) {
     return [...items].sort((a, b) => a.name.localeCompare(b.name));
@@ -74,6 +86,9 @@
       api("/settings"),
       api("/holidays/countries"),
     ]);
+    if (!loadedSettings.timezone) {
+      loadedSettings.timezone = "Europe/Berlin";
+    }
     settingsForm = loadedSettings;
     appSettings.set(loadedSettings);
     if (settingsForm.ui_language) setLanguage(settingsForm.ui_language);
@@ -90,6 +105,10 @@
     }
     if (!settingsForm.country) {
       toast($t("Please select a country."), "error");
+      return;
+    }
+    if (!settingsForm.timezone || !settingsForm.timezone.trim()) {
+      toast($t("Please enter a timezone."), "error");
       return;
     }
     if (regionLoading) {
@@ -257,6 +276,26 @@
             <option value="24h">24h (14:30)</option>
             <option value="12h">12h (2:30 PM)</option>
           </select>
+        </div>
+        <div>
+          <label class="kz-label" for="settings-timezone"
+            >{$t("Timezone")}</label
+          >
+          <input
+            id="settings-timezone"
+            class="kz-input"
+            list="settings-timezone-options"
+            bind:value={settingsForm.timezone}
+            placeholder="Europe/Berlin"
+          />
+          <datalist id="settings-timezone-options">
+            {#each timezoneOptions as timezone}
+              <option value={timezone}></option>
+            {/each}
+          </datalist>
+          <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
+            {$t("Use an IANA timezone, e.g. Europe/Berlin.")}
+          </div>
         </div>
       </div>
 

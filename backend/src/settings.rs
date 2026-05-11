@@ -7,10 +7,12 @@ use crate::repository::SettingsDb;
 use crate::AppState;
 use axum::extract::State;
 use axum::Json;
+use chrono::Datelike;
 use serde::{Deserialize, Serialize};
 
 const UI_LANGUAGE_KEY: &str = "ui_language";
 const TIME_FORMAT_KEY: &str = "time_format";
+pub const TIMEZONE_KEY: &str = "timezone";
 const COUNTRY_KEY: &str = "country";
 const REGION_KEY: &str = "region";
 const DEFAULT_WEEKLY_HOURS_KEY: &str = "default_weekly_hours";
@@ -26,6 +28,7 @@ const SMTP_ENCRYPTION_KEY: &str = "smtp_encryption";
 pub const SUBMISSION_REMINDERS_ENABLED_KEY: &str = "submission_reminders_enabled";
 const DEFAULT_UI_LANGUAGE: &str = "en";
 const DEFAULT_TIME_FORMAT: &str = "24h";
+pub const DEFAULT_TIMEZONE: &str = "Europe/Berlin";
 const DEFAULT_COUNTRY: &str = "DE";
 const DEFAULT_REGION: &str = "";
 const DEFAULT_CARRYOVER_EXPIRY_DATE: &str = "03-31";
@@ -36,6 +39,7 @@ const ORGANIZATION_NAME_KEY: &str = "organization_name";
 pub struct PublicSettings {
     pub ui_language: String,
     pub time_format: String,
+    pub timezone: String,
     pub country: String,
     pub region: String,
     pub default_weekly_hours: Option<f64>,
@@ -64,6 +68,7 @@ pub struct AdminSettingsResponse {
 pub struct UpdateSettings {
     pub ui_language: String,
     pub time_format: String,
+    pub timezone: Option<String>,
     pub country: String,
     pub region: String,
     pub default_weekly_hours: Option<f64>,
@@ -98,6 +103,17 @@ fn normalize_time_format(value: &str) -> AppResult<&'static str> {
     }
 }
 
+fn normalize_timezone(value: &str) -> AppResult<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::BadRequest("Timezone is required.".into()));
+    }
+    let parsed = trimmed
+        .parse::<chrono_tz::Tz>()
+        .map_err(|_| AppError::BadRequest("Invalid timezone. Use an IANA timezone like Europe/Berlin.".into()))?;
+    Ok(parsed.to_string())
+}
+
 fn setting_value_changed(previous: Option<&str>, next: &str) -> bool {
     previous != Some(next)
 }
@@ -121,6 +137,26 @@ pub async fn load_setting(
     db.load_setting(key, default).await
 }
 
+pub async fn load_app_timezone(pool: &crate::db::DatabasePool) -> chrono_tz::Tz {
+    let raw = load_setting(pool, TIMEZONE_KEY, DEFAULT_TIMEZONE)
+        .await
+        .unwrap_or_else(|_| DEFAULT_TIMEZONE.to_string());
+    raw.parse::<chrono_tz::Tz>()
+        .unwrap_or(chrono_tz::Europe::Berlin)
+}
+
+pub async fn app_today(pool: &crate::db::DatabasePool) -> chrono::NaiveDate {
+    chrono::Utc::now()
+        .with_timezone(&load_app_timezone(pool).await)
+        .date_naive()
+}
+
+pub async fn app_current_year(pool: &crate::db::DatabasePool) -> i32 {
+    chrono::Utc::now()
+        .with_timezone(&load_app_timezone(pool).await)
+        .year()
+}
+
 async fn save_setting_exec(
     tx: &mut sqlx::PgConnection,
     key: &str,
@@ -137,6 +173,7 @@ async fn load_all_settings(pool: &crate::db::DatabasePool) -> AppResult<PublicSe
     Ok(PublicSettings {
         ui_language: load_setting(pool, UI_LANGUAGE_KEY, DEFAULT_UI_LANGUAGE).await?,
         time_format: load_setting(pool, TIME_FORMAT_KEY, DEFAULT_TIME_FORMAT).await?,
+        timezone: load_setting(pool, TIMEZONE_KEY, DEFAULT_TIMEZONE).await?,
         country: load_setting(pool, COUNTRY_KEY, DEFAULT_COUNTRY).await?,
         region: load_setting(pool, REGION_KEY, DEFAULT_REGION).await?,
         default_weekly_hours: default_weekly_hours_str.parse().ok(),
@@ -382,6 +419,11 @@ pub async fn update_admin_settings(
 
     let language = normalize_language(&body.ui_language)?;
     let time_format = normalize_time_format(&body.time_format)?;
+    let timezone = normalize_timezone(
+        body.timezone
+            .as_deref()
+            .unwrap_or(DEFAULT_TIMEZONE),
+    )?;
     let country = body.country.trim().to_uppercase();
     let region = body.region.trim().to_string();
     let previous_country = app_state.db.settings.get_raw(COUNTRY_KEY).await?;
@@ -478,7 +520,7 @@ pub async fn update_admin_settings(
         &country,
         &region,
     ) {
-        Some(holidays::prepare_holiday_refresh(&country, &region).await?)
+        Some(holidays::prepare_holiday_refresh(&app_state.pool, &country, &region).await?)
     } else {
         None
     };
@@ -508,6 +550,7 @@ pub async fn update_admin_settings(
 
     save_setting_exec(&mut *transaction, UI_LANGUAGE_KEY, &language).await?;
     save_setting_exec(&mut *transaction, TIME_FORMAT_KEY, time_format).await?;
+    save_setting_exec(&mut *transaction, TIMEZONE_KEY, &timezone).await?;
     save_setting_exec(&mut *transaction, COUNTRY_KEY, &country).await?;
     save_setting_exec(&mut *transaction, REGION_KEY, &region).await?;
     save_setting_exec(

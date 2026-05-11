@@ -262,6 +262,22 @@ pub fn format_date(language: &Language, date: chrono::NaiveDate) -> String {
     date.format(lang_def(language).date_format).to_string()
 }
 
+pub fn format_datetime_in_timezone(
+    language: &Language,
+    value: chrono::DateTime<chrono::Utc>,
+    timezone: &str,
+) -> String {
+    let tz = timezone
+        .parse::<chrono_tz::Tz>()
+        .unwrap_or(chrono_tz::UTC);
+    let local = value.with_timezone(&tz);
+    if language.code() == "de" {
+        local.format("%d.%m.%Y %H:%M %Z").to_string()
+    } else {
+        local.format("%m/%d/%Y %H:%M %Z").to_string()
+    }
+}
+
 pub fn format_month(language: &Language, year: i32, month: u32) -> String {
     let key = format!("month_{month}");
     let name = translate(language, &key, &[]);

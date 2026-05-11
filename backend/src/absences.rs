@@ -151,11 +151,14 @@ async fn enrich_pending_review_metadata(
 
 pub async fn workdays(
     pool: &crate::db::DatabasePool,
+    user_id: i64,
     from: NaiveDate,
     to: NaiveDate,
 ) -> AppResult<f64> {
     use crate::repository::AbsenceDb;
-    AbsenceDb::new(pool.clone()).workdays(from, to).await
+    AbsenceDb::new(pool.clone())
+        .workdays_for_user(user_id, from, to)
+        .await
 }
 
 pub async fn workdays_total(
@@ -187,7 +190,10 @@ pub async fn list(
     requester: User,
     Query(query): Query<YearQuery>,
 ) -> AppResult<Json<Vec<Absence>>> {
-    let year = query.year.unwrap_or_else(|| chrono::Local::now().year());
+    let year = match query.year {
+        Some(value) => value,
+        None => crate::settings::app_current_year(&app_state.pool).await,
+    };
     let (from, to) = year_bounds(year)?;
     let absences = app_state
         .db
@@ -335,12 +341,12 @@ fn validate_absence(input: &NewAbsence) -> AppResult<&str> {
     Ok(&input.kind)
 }
 
-fn validate_sick_start_date(kind: &str, start_date: NaiveDate) -> AppResult<()> {
+fn validate_sick_start_date(kind: &str, start_date: NaiveDate, today: NaiveDate) -> AppResult<()> {
     if kind != "sick" {
         return Ok(());
     }
 
-    let earliest = chrono::Local::now().date_naive() - Duration::days(30);
+    let earliest = today - Duration::days(30);
     if start_date < earliest {
         return Err(AppError::BadRequest(
             "Sick leave cannot be backdated more than 30 days.".into(),
@@ -352,10 +358,11 @@ fn validate_sick_start_date(kind: &str, start_date: NaiveDate) -> AppResult<()> 
 
 async fn validate_absence_has_workday(
     pool: &crate::db::DatabasePool,
+    user_id: i64,
     start_date: NaiveDate,
     end_date: NaiveDate,
 ) -> AppResult<()> {
-    let effective_workdays = workdays(pool, start_date, end_date).await?;
+    let effective_workdays = workdays(pool, user_id, start_date, end_date).await?;
     if effective_workdays <= 0.0 {
         return Err(AppError::BadRequest(
             "Absence must include at least one workday.".into(),
@@ -375,15 +382,17 @@ pub async fn create(
     requester: User,
     Json(body): Json<NewAbsence>,
 ) -> AppResult<Json<Absence>> {
+    let today_date = crate::settings::app_today(&app_state.pool).await;
     let kind = validate_absence(&body)?;
-    validate_sick_start_date(kind, body.start_date)?;
+    validate_sick_start_date(kind, body.start_date, today_date)?;
     // Reject absences that start before the user's start_date.
     if body.start_date < requester.start_date {
         return Err(AppError::BadRequest(
             "Absence start date is before user start date.".into(),
         ));
     }
-    validate_absence_has_workday(&app_state.pool, body.start_date, body.end_date).await?;
+    validate_absence_has_workday(&app_state.pool, requester.id, body.start_date, body.end_date)
+        .await?;
     let mut transaction = app_state.pool.begin().await?;
     crate::repository::AbsenceDb::lock_user_scope_tx(&mut transaction, requester.id).await?;
     crate::repository::AbsenceDb::assert_no_overlap_tx(&mut transaction, requester.id, body.start_date, body.end_date, None).await?;
@@ -402,7 +411,6 @@ pub async fn create(
     }
     // Sick leave is auto-approved only when it has already started (or starts today).
     // Future-dated sick leave requires review like any other request.
-    let today_date = chrono::Local::now().date_naive();
     let initial_status = if kind == "sick" && body.start_date <= today_date {
         "approved"
     } else {
@@ -448,15 +456,17 @@ pub async fn update(
     Path(absence_id): Path<i64>,
     Json(body): Json<NewAbsence>,
 ) -> AppResult<Json<Absence>> {
+    let today_date = crate::settings::app_today(&app_state.pool).await;
     let kind = validate_absence(&body)?;
-    validate_sick_start_date(kind, body.start_date)?;
+    validate_sick_start_date(kind, body.start_date, today_date)?;
     // Reject absences that start before the user's employment start date.
     if body.start_date < requester.start_date {
         return Err(AppError::BadRequest(
             "Absence start date is before user start date.".into(),
         ));
     }
-    validate_absence_has_workday(&app_state.pool, body.start_date, body.end_date).await?;
+    validate_absence_has_workday(&app_state.pool, requester.id, body.start_date, body.end_date)
+        .await?;
     let current_owner_id = absence_owner_id(&app_state.pool, absence_id).await?;
     let mut transaction = app_state.pool.begin().await?;
     crate::repository::AbsenceDb::lock_user_scope_tx(&mut transaction, current_owner_id).await?;
@@ -490,7 +500,6 @@ pub async fn update(
         .await?;
     }
     // Sick leave already started today is auto-approved; future-dated requires review.
-    let today_date = chrono::Local::now().date_naive();
     let updated_status = if kind == "sick" && body.start_date <= today_date {
         "approved"
     } else {
@@ -1043,6 +1052,7 @@ fn clamp_range_to_window(
 /// provided inclusive window.
 async fn workdays_for_ranges_in_window(
     pool: &crate::db::DatabasePool,
+    user_id: i64,
     ranges: &[(NaiveDate, NaiveDate)],
     window_start: NaiveDate,
     window_end: NaiveDate,
@@ -1052,7 +1062,7 @@ async fn workdays_for_ranges_in_window(
         if let Some((clamped_start, clamped_end)) =
             clamp_range_to_window(*start_date, *end_date, window_start, window_end)
         {
-            total += workdays(pool, clamped_start, clamped_end).await?;
+            total += workdays(pool, user_id, clamped_start, clamped_end).await?;
         }
     }
     Ok(total)
@@ -1112,6 +1122,7 @@ fn total_entitlement_with_carryover(
 /// - without expiry date, all already-taken approved days consume carryover
 async fn carryover_remaining_days(
     pool: &crate::db::DatabasePool,
+    user_id: i64,
     vacation_absences: &[Absence],
     year_start: NaiveDate,
     today: NaiveDate,
@@ -1135,10 +1146,10 @@ async fn carryover_remaining_days(
         if cutoff < year_start {
             0.0
         } else {
-            workdays_for_ranges_in_window(pool, &approved_or_pending_ranges, year_start, cutoff).await?
+            workdays_for_ranges_in_window(pool, user_id, &approved_or_pending_ranges, year_start, cutoff).await?
         }
     } else {
-        workdays_for_ranges_in_window(pool, &approved_or_pending_ranges, year_start, today).await?
+        workdays_for_ranges_in_window(pool, user_id, &approved_or_pending_ranges, year_start, today).await?
     };
 
     Ok((carryover_days as f64 - consumed).max(0.0))
@@ -1167,7 +1178,7 @@ async fn validate_vacation_balance(
     let year = start_date.year();
     let year_from = NaiveDate::from_ymd_opt(year, 1, 1).unwrap();
     let year_to = NaiveDate::from_ymd_opt(year, 12, 31).unwrap();
-    let today = chrono::Local::now().date_naive();
+    let today = crate::settings::app_today(pool).await;
     let expiry_setting =
         crate::settings::load_setting(pool, "carryover_expiry_date", "03-31").await?;
     let (effective_entitlement, carryover_days, _carryover_expired) =
@@ -1179,12 +1190,14 @@ async fn validate_vacation_balance(
     let existing_ranges =
         AbsenceDb::vacation_ranges_in_year_tx(&mut *tx, user.id, year_from, year_to, exclude_id)
             .await?;
-    let used_days = workdays_for_ranges_in_window(pool, &existing_ranges, year_from, year_to).await?;
+    let used_days =
+        workdays_for_ranges_in_window(pool, user.id, &existing_ranges, year_from, year_to)
+            .await?;
     // Clamp the new absence to this year and check whether adding it would exceed the budget.
     let new_days = if let Some((new_start, new_end)) =
         clamp_range_to_window(start_date, end_date, year_from, year_to)
     {
-        workdays(pool, new_start, new_end).await?
+        workdays(pool, user.id, new_start, new_end).await?
     } else {
         0.0
     };
@@ -1202,7 +1215,8 @@ async fn validate_vacation_balance(
         let post_window_start = expiry + Duration::days(1);
 
         let pre_existing_days = if year_from <= pre_window_end {
-            workdays_for_ranges_in_window(pool, &existing_ranges, year_from, pre_window_end).await?
+            workdays_for_ranges_in_window(pool, user.id, &existing_ranges, year_from, pre_window_end)
+                .await?
         } else {
             0.0
         };
@@ -1210,7 +1224,7 @@ async fn validate_vacation_balance(
             if let Some((pre_new_start, pre_new_end)) =
                 clamp_range_to_window(start_date, end_date, year_from, pre_window_end)
             {
-                workdays(pool, pre_new_start, pre_new_end).await?
+                workdays(pool, user.id, pre_new_start, pre_new_end).await?
             } else {
                 0.0
             }
@@ -1219,8 +1233,14 @@ async fn validate_vacation_balance(
         };
 
         let post_existing_days = if post_window_start <= year_to {
-            workdays_for_ranges_in_window(pool, &existing_ranges, post_window_start, year_to)
-                .await?
+            workdays_for_ranges_in_window(
+                pool,
+                user.id,
+                &existing_ranges,
+                post_window_start,
+                year_to,
+            )
+            .await?
         } else {
             0.0
         };
@@ -1228,7 +1248,7 @@ async fn validate_vacation_balance(
             if let Some((post_new_start, post_new_end)) =
                 clamp_range_to_window(start_date, end_date, post_window_start, year_to)
             {
-                workdays(pool, post_new_start, post_new_end).await?
+                workdays(pool, user.id, post_new_start, post_new_end).await?
             } else {
                 0.0
             }
@@ -1270,7 +1290,7 @@ async fn validate_vacation_balance(
             if let Some((current_year_new_start, current_year_new_end)) =
                 clamp_range_to_window(start_date, end_date, year_from, year_to)
             {
-                workdays(pool, current_year_new_start, current_year_new_end).await?
+                workdays(pool, user.id, current_year_new_start, current_year_new_end).await?
             } else {
                 0.0
             }
@@ -1294,13 +1314,18 @@ async fn validate_vacation_balance(
             exclude_id,
         )
         .await?;
-        let end_year_used =
-            workdays_for_ranges_in_window(pool, &end_year_existing, end_year_from, end_year_to)
-                .await?;
+        let end_year_used = workdays_for_ranges_in_window(
+            pool,
+            user.id,
+            &end_year_existing,
+            end_year_from,
+            end_year_to,
+        )
+        .await?;
         let end_new_days = if let Some((end_new_start, end_new_end)) =
             clamp_range_to_window(start_date, end_date, end_year_from, end_year_to)
         {
-            workdays(pool, end_new_start, end_new_end).await?
+            workdays(pool, user.id, end_new_start, end_new_end).await?
         } else {
             0.0
         };
@@ -1319,6 +1344,7 @@ async fn validate_vacation_balance(
             let end_pre_existing_days = if end_year_from <= end_pre_window_end {
                 workdays_for_ranges_in_window(
                     pool,
+                    user.id,
                     &end_year_existing,
                     end_year_from,
                     end_pre_window_end,
@@ -1334,7 +1360,7 @@ async fn validate_vacation_balance(
                     end_year_from,
                     end_pre_window_end,
                 ) {
-                    workdays(pool, end_pre_new_start, end_pre_new_end).await?
+                    workdays(pool, user.id, end_pre_new_start, end_pre_new_end).await?
                 } else {
                     0.0
                 }
@@ -1345,6 +1371,7 @@ async fn validate_vacation_balance(
             let end_post_existing_days = if end_post_window_start <= end_year_to {
                 workdays_for_ranges_in_window(
                     pool,
+                    user.id,
                     &end_year_existing,
                     end_post_window_start,
                     end_year_to,
@@ -1360,7 +1387,7 @@ async fn validate_vacation_balance(
                     end_post_window_start,
                     end_year_to,
                 ) {
-                    workdays(pool, end_post_new_start, end_post_new_end).await?
+                    workdays(pool, user.id, end_post_new_start, end_post_new_end).await?
                 } else {
                     0.0
                 }
@@ -1395,12 +1422,15 @@ pub async fn balance(
 ) -> AppResult<Json<LeaveBalance>> {
     assert_can_access_user(&app_state, &requester, target_user_id).await?;
     // Default to the current year if none was provided.
-    let year = query.year.unwrap_or_else(|| chrono::Local::now().year());
+    let year = match query.year {
+        Some(value) => value,
+        None => crate::settings::app_current_year(&app_state.pool).await,
+    };
     let repo_user = app_state.db.users.find_by_id(target_user_id).await?
         .ok_or(AppError::NotFound)?;
     let target_user = crate::users::repo_user_to_auth_user(repo_user);
     let (year_from, year_to) = year_bounds(year)?;
-    let today = chrono::Local::now().date_naive();
+    let today = crate::settings::app_today(&app_state.pool).await;
     // Load all vacation absences (requested + approved) in the given year.
     let vacation_absences: Vec<Absence> = app_state
         .db
@@ -1422,21 +1452,28 @@ pub async fn balance(
         if absence.status == "approved" {
             if clamped_end < today {
                 // Absence is entirely in the past.
-                taken_days += workdays(&app_state.pool, clamped_start, clamped_end).await?;
+                taken_days +=
+                    workdays(&app_state.pool, target_user.id, clamped_start, clamped_end)
+                        .await?;
             } else if clamped_start >= today {
                 // Absence is entirely in the future.
-                upcoming_days += workdays(&app_state.pool, clamped_start, clamped_end).await?;
+                upcoming_days +=
+                    workdays(&app_state.pool, target_user.id, clamped_start, clamped_end)
+                        .await?;
             } else {
                 // Absence spans today: count today as already taken and only keep
                 // days strictly after today in the upcoming bucket.
-                taken_days += workdays(&app_state.pool, clamped_start, today).await?;
+                taken_days +=
+                    workdays(&app_state.pool, target_user.id, clamped_start, today).await?;
                 let tomorrow = today + Duration::days(1);
                 if tomorrow <= clamped_end {
-                    upcoming_days += workdays(&app_state.pool, tomorrow, clamped_end).await?;
+                    upcoming_days +=
+                        workdays(&app_state.pool, target_user.id, tomorrow, clamped_end).await?;
                 }
             }
         } else if absence.status == "requested" || absence.status == "cancellation_pending" {
-            requested_days += workdays(&app_state.pool, clamped_start, clamped_end).await?;
+            requested_days +=
+                workdays(&app_state.pool, target_user.id, clamped_start, clamped_end).await?;
         }
     }
 
@@ -1454,6 +1491,7 @@ pub async fn balance(
     .await?;
     let carryover_remaining = carryover_remaining_days(
         &app_state.pool,
+        target_user.id,
         &vacation_absences,
         year_from,
         today,

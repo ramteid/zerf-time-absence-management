@@ -115,10 +115,11 @@ pub async fn available_countries(_requester: User) -> AppResult<Json<Vec<NagerCo
 /// Proxy: returns the ISO 3166-2 subdivision codes used by Nager for a given country,
 /// derived from the county fields of the current year's public holidays.
 pub async fn available_regions(
+    State(app_state): State<AppState>,
     Path(country): Path<String>,
     _requester: User,
 ) -> AppResult<Json<Vec<String>>> {
-    let year = chrono::Local::now().year();
+    let year = crate::settings::app_current_year(&app_state.pool).await;
     let holidays = fetch_nager_holidays(&country, year).await?;
     Ok(Json(collect_region_codes(&holidays)))
 }
@@ -136,6 +137,7 @@ pub async fn fetch_holidays_from_api(
 }
 
 pub async fn prepare_holiday_refresh(
+    pool: &crate::db::DatabasePool,
     country: &str,
     region: &str,
 ) -> AppResult<Vec<PreparedHoliday>> {
@@ -161,7 +163,7 @@ pub async fn prepare_holiday_refresh(
         ));
     }
 
-    let year = chrono::Local::now().year();
+    let year = crate::settings::app_current_year(pool).await;
     let current_year_holidays = fetch_nager_holidays(&normalized_country, year).await?;
     let available_regions = collect_region_codes(&current_year_holidays);
     validate_region_selection(&normalized_region, &available_regions)?;
@@ -219,7 +221,7 @@ pub async fn refresh_holidays(
     country: &str,
     region: &str,
 ) -> AppResult<()> {
-    let prepared = prepare_holiday_refresh(country, region).await?;
+    let prepared = prepare_holiday_refresh(pool, country, region).await?;
     let repo_prepared: Vec<crate::repository::PreparedHoliday> = prepared
         .iter()
         .map(|h| crate::repository::PreparedHoliday {
@@ -317,7 +319,10 @@ pub async fn list(
     _requester: User,
     Query(query): Query<HolidayQuery>,
 ) -> AppResult<Json<Vec<serde_json::Value>>> {
-    let year = query.year.unwrap_or_else(|| chrono::Local::now().year());
+    let year = match query.year {
+        Some(value) => value,
+        None => crate::settings::app_current_year(&app_state.pool).await,
+    };
 
     let language = match query.lang {
         Some(code) => i18n::Language::from_setting(&code),

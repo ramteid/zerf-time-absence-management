@@ -17,16 +17,17 @@ function formatIsoDate(value) {
   ].join("-");
 }
 
-function isWeekend(value) {
-  const weekday = value.getDay();
-  return weekday === 0 || weekday === 6;
+function isWeekend(value, workdaysPerWeek = 5) {
+  // Convert getDay (0=Sun, 1=Mon..., 6=Sat) to ISO weekday (0=Mon, 1=Tue..., 6=Sun)
+  let isoWeekday = (value.getDay() + 6) % 7;
+  return isoWeekday >= workdaysPerWeek;
 }
 
 export function holidayDateSet(holidays = []) {
   return new Set(holidays.map((holiday) => holiday.holiday_date));
 }
 
-export function countWorkdays(startDate, endDate, holidays = new Set()) {
+export function countWorkdays(startDate, endDate, holidays = new Set(), workdaysPerWeek = 5) {
   const start = parseIsoDate(startDate);
   const end = parseIsoDate(endDate);
   if (
@@ -44,7 +45,7 @@ export function countWorkdays(startDate, endDate, holidays = new Set()) {
     current = addCalendarDays(current, 1)
   ) {
     const currentDate = formatIsoDate(current);
-    if (!isWeekend(current) && !holidays.has(currentDate)) {
+    if (!isWeekend(current, workdaysPerWeek) && !holidays.has(currentDate)) {
       days += 1;
     }
   }
