@@ -532,7 +532,7 @@ async fn full_integration_suite() {
         assert_eq!(st, StatusCode::BAD_REQUEST, "inverted range rejected");
 
         // Pending absences can change type.
-        let editable_day = date_offset(100);
+        let editable_day = next_monday(100).format("%Y-%m-%d").to_string();
         let (st, body) = emp
             .post(
                 "/api/v1/absences",
@@ -557,7 +557,7 @@ async fn full_integration_suite() {
         assert_eq!(st, StatusCode::OK, "cancel edited pending absence");
 
         // Approved sick absences may be adjusted, but not converted.
-        let sick_edit_day = date_offset(110);
+        let sick_edit_day = next_monday(110).format("%Y-%m-%d").to_string();
         let (st, body) = emp
             .post(
                 "/api/v1/absences",
