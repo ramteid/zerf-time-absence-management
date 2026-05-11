@@ -131,7 +131,7 @@
         const hasDraft = entries.some(
           (entry) => entry?.status === "draft" && entryCountsAsWork(entry),
         );
-        // Any approved absence (target-removing or flextime_reduction) covers the day for
+          // Any approved absence (target-removing or flextime_reduction) covers the day for
         // submission purposes: flextime_reduction blocks entry creation, so there is nothing
         // to submit on those days either.
         const hasAnyAbsence = !!day?.absence;
@@ -143,6 +143,8 @@
         });
         return !hasDraft && (hasAnyAbsence || hasCreditedSubmittedOrApproved);
       });
+
+  }
 
   async function loadOvertimeSummary() {
     overtimeLoading = true;
