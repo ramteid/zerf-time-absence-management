@@ -186,6 +186,11 @@ async fn load_change_request_overview(
     change_request_overview_text(language, &rows, applied)
 }
 
+struct ReopenExecution {
+    reopened_entries: Vec<(i64, String)>,
+    applied_change_request_ids: Vec<i64>,
+}
+
 /// Atomically reopen a week: apply open change_requests for the week's
 /// non-draft entries, then reset those entries to draft. Caller is the
 /// **acting** user (approver or self); `subject` is the user whose week
@@ -196,7 +201,7 @@ async fn perform_reopen_in_tx(
     actor_id: i64,
     subject_id: i64,
     week_start: NaiveDate,
-) -> AppResult<Vec<(i64, String)>> {
+) -> AppResult<ReopenExecution> {
     let week_end = week_start + chrono::Duration::days(6);
 
     let affected: Vec<(i64, String)> = sqlx::query_as(
@@ -219,6 +224,14 @@ async fn perform_reopen_in_tx(
 
     // Auto-apply open change requests for these entries.
     let entry_ids: Vec<i64> = affected.iter().map(|(id, _)| *id).collect();
+    let applied_change_request_ids: Vec<i64> = sqlx::query_scalar(
+        "SELECT id FROM change_requests \
+         WHERE status='open' AND time_entry_id = ANY($1) \
+         ORDER BY id FOR UPDATE",
+    )
+    .bind(&entry_ids)
+    .fetch_all(&mut **tx)
+    .await?;
     sqlx::query(
         "UPDATE time_entries te \
          SET entry_date=COALESCE(cr.new_date, te.entry_date), \
@@ -263,7 +276,10 @@ async fn perform_reopen_in_tx(
     .execute(&mut **tx)
     .await?;
 
-    Ok(affected)
+    Ok(ReopenExecution {
+        reopened_entries: affected,
+        applied_change_request_ids,
+    })
 }
 
 async fn audit_reopened_entries(
@@ -291,29 +307,27 @@ async fn audit_applied_change_requests(
     pool: &crate::db::DatabasePool,
     actor_id: i64,
     subject_id: i64,
-    applied_entry_ids: &[i64],
+    reviewed_by: Option<i64>,
+    applied_change_request_ids: &[i64],
 ) {
-    // Load the CRs that were applied (those with status='open' for the given entries)
-    if let Ok(cr_ids) = sqlx::query_scalar::<_, i64>(
-        "SELECT id FROM change_requests WHERE status='approved' AND time_entry_id = ANY($1) \
-         AND reviewed_by IS NULL",
-    )
-    .bind(applied_entry_ids)
-    .fetch_all(pool)
-    .await
-    {
-        for cr_id in cr_ids {
-            audit::log(
-                pool,
-                actor_id,
-                "auto_applied",
-                "change_requests",
-                cr_id,
-                Some(serde_json::json!({"status": "open"})),
-                Some(serde_json::json!({"status": "approved", "reviewed_by": null, "auto_applied_by_user_id": subject_id})),
-            )
-            .await;
-        }
+    if applied_change_request_ids.is_empty() {
+        return;
+    }
+    for cr_id in applied_change_request_ids {
+        audit::log(
+            pool,
+            actor_id,
+            "auto_applied",
+            "change_requests",
+            *cr_id,
+            Some(serde_json::json!({"status": "open"})),
+            Some(serde_json::json!({
+                "status": "approved",
+                "reviewed_by": reviewed_by,
+                "auto_applied_by_user_id": subject_id
+            })),
+        )
+        .await;
     }
 }
 
@@ -424,7 +438,7 @@ pub async fn create(
         load_change_request_overview(&app_state.pool, &language, requester.id, body.week_start, true)
             .await;
 
-        let (new_request_id, entries_reopened, reopened_entries): (i64, i64, Vec<(i64, String)>) =
+    let (new_request_id, reopen_execution): (i64, Option<ReopenExecution>) =
         if should_auto_approve {
             let mut transaction = app_state.pool.begin().await?;
             let insert_result: (i64, DateTime<Utc>) = sqlx::query_as(
@@ -450,7 +464,7 @@ pub async fn create(
             )
             .await?;
             transaction.commit().await?;
-            (insert_result.0, affected.len() as i64, affected)
+            (insert_result.0, Some(affected))
         } else {
             let insert_result: (i64, DateTime<Utc>) = sqlx::query_as(
                 "INSERT INTO reopen_requests(user_id, week_start, status) \
@@ -466,13 +480,24 @@ pub async fn create(
                 tracing::warn!(target:"zerf::reopen", "create reopen failed: {e}");
                 AppError::Conflict("A pending request for this week already exists.".into())
             })?;
-            (insert_result.0, 0, vec![])
+            (insert_result.0, None)
         };
 
-    if should_auto_approve {
-        audit_reopened_entries(&app_state.pool, requester.id, &reopened_entries).await;
-        let entry_ids: Vec<i64> = reopened_entries.iter().map(|(id, _)| *id).collect();
-        audit_applied_change_requests(&app_state.pool, requester.id, requester.id, &entry_ids).await;
+    let entries_reopened = reopen_execution
+        .as_ref()
+        .map(|exec| exec.reopened_entries.len() as i64)
+        .unwrap_or(0);
+
+    if let Some(exec) = reopen_execution.as_ref() {
+        audit_reopened_entries(&app_state.pool, requester.id, &exec.reopened_entries).await;
+        audit_applied_change_requests(
+            &app_state.pool,
+            requester.id,
+            requester.id,
+            None,
+            &exec.applied_change_request_ids,
+        )
+        .await;
     }
 
     audit::log(
@@ -727,7 +752,7 @@ pub async fn approve(
         true,
     )
     .await;
-    let reopened_entries = perform_reopen_in_tx(
+    let reopen_execution = perform_reopen_in_tx(
         &mut transaction,
         requester.id,
         reopen_request.user_id,
@@ -743,8 +768,21 @@ pub async fn approve(
     .execute(&mut *transaction)
     .await?;
     transaction.commit().await?;
-    audit_reopened_entries(&app_state.pool, requester.id, &reopened_entries).await;
-    let entries_reopened = reopened_entries.len() as i64;
+    audit_reopened_entries(
+        &app_state.pool,
+        requester.id,
+        &reopen_execution.reopened_entries,
+    )
+    .await;
+    audit_applied_change_requests(
+        &app_state.pool,
+        requester.id,
+        reopen_request.user_id,
+        Some(requester.id),
+        &reopen_execution.applied_change_request_ids,
+    )
+    .await;
+    let entries_reopened = reopen_execution.reopened_entries.len() as i64;
     audit::log(
         &app_state.pool,
         requester.id,

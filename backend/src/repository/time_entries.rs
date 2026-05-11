@@ -299,8 +299,10 @@ impl TimeEntryDb {
         week_end: NaiveDate,
     ) -> AppResult<i64> {
         Ok(sqlx::query_scalar(
-            "SELECT COUNT(*) FROM time_entries \
-             WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3 AND status<>'draft'",
+            "SELECT COUNT(*) FROM time_entries te \
+             JOIN categories c ON c.id = te.category_id \
+             WHERE te.user_id=$1 AND te.entry_date BETWEEN $2 AND $3 AND te.status<>'draft' \
+             AND c.counts_as_work = TRUE",
         )
         .bind(user_id)
         .bind(week_start)
@@ -682,8 +684,10 @@ impl TimeEntryDb {
         week_end: NaiveDate,
     ) -> AppResult<Vec<(i64, String)>> {
         Ok(sqlx::query_as::<_, (i64, String)>(
-            "SELECT id, status FROM time_entries \
-             WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3 AND status<>'draft' \
+            "SELECT te.id, te.status FROM time_entries te \
+             JOIN categories c ON c.id = te.category_id \
+             WHERE te.user_id=$1 AND te.entry_date BETWEEN $2 AND $3 AND te.status<>'draft' \
+             AND c.counts_as_work = TRUE \
              FOR UPDATE",
         )
         .bind(user_id)
@@ -700,11 +704,12 @@ impl TimeEntryDb {
         week_end: NaiveDate,
     ) -> AppResult<()> {
         sqlx::query(
-            "UPDATE time_entries \
+            "UPDATE time_entries te \
              SET status='draft', submitted_at=NULL, reviewed_by=NULL, \
                  reviewed_at=NULL, rejection_reason=NULL, \
                  updated_at=CURRENT_TIMESTAMP \
-             WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3 AND status<>'draft'",
+             WHERE te.user_id=$1 AND te.entry_date BETWEEN $2 AND $3 AND te.status<>'draft' \
+             AND te.category_id IN (SELECT id FROM categories WHERE counts_as_work = TRUE)",
         )
         .bind(user_id)
         .bind(week_start)
