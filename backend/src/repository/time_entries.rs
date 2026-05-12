@@ -741,51 +741,6 @@ impl TimeEntryDb {
         Ok(rejected)
     }
 
-    // ── Report / submission-status helper queries ──────────────────────────
-
-    pub async fn get_non_draft_in_week_for_update(
-        tx: &mut sqlx::PgConnection,
-        user_id: i64,
-        week_start: NaiveDate,
-        week_end: NaiveDate,
-    ) -> AppResult<Vec<(i64, String)>> {
-                Ok(sqlx::query_as::<_, (i64, String)>(
-                        "SELECT te.id, te.status FROM time_entries te \
-                         JOIN categories c ON c.id = te.category_id \
-                         WHERE te.user_id=$1 AND te.entry_date BETWEEN $2 AND $3 \
-                         AND c.counts_as_work = TRUE \
-                         AND te.status IN ('submitted','approved') \
-                         FOR UPDATE",
-                )
-        .bind(user_id)
-        .bind(week_start)
-        .bind(week_end)
-        .fetch_all(tx)
-        .await?)
-    }
-
-    pub async fn reopen_week_tx(
-        tx: &mut sqlx::PgConnection,
-        user_id: i64,
-        week_start: NaiveDate,
-        week_end: NaiveDate,
-    ) -> AppResult<()> {
-        sqlx::query(
-            "UPDATE time_entries te \
-             SET status='draft', submitted_at=NULL, reviewed_by=NULL, \
-                 reviewed_at=NULL, rejection_reason=NULL, \
-                 updated_at=CURRENT_TIMESTAMP \
-             WHERE te.user_id=$1 AND te.entry_date BETWEEN $2 AND $3 \
-             AND te.status IN ('submitted','approved')",
-        )
-        .bind(user_id)
-        .bind(week_start)
-        .bind(week_end)
-        .execute(tx)
-        .await?;
-        Ok(())
-    }
-
     pub async fn get_by_user_in_range(
         &self,
         user_id: i64,

@@ -917,13 +917,16 @@ pub async fn categories(
     if let Some(user_id) = target_user_id {
         builder.push(" AND z.user_id = ").push_bind(user_id);
     } else if !requester.is_admin() {
-        // Non-admin lead with no specific user: include self and direct reports.
+        // Non-admin lead with no specific user: include self and direct reports,
+        // excluding admin subjects (non-admin leads cannot see admin users).
         builder
             .push(" AND z.user_id IN (SELECT id FROM users WHERE id = ")
             .push_bind(requester.id)
-            .push(" OR id IN (SELECT user_id FROM user_approvers WHERE approver_id = ")
+            .push(" OR id IN (SELECT ua.user_id FROM user_approvers ua \
+                    JOIN users u ON u.id = ua.user_id \
+                    WHERE ua.approver_id = ")
             .push_bind(requester.id)
-            .push("))");
+            .push(" AND u.role != 'admin'))");
     }
     let rows: Vec<(String, String, String, String)> =
         builder.build_query_as().fetch_all(&app_state.pool).await?;
@@ -967,12 +970,15 @@ pub async fn team_categories(
         "SELECT id, first_name, last_name FROM users WHERE active=TRUE",
     );
     if !requester.is_admin() {
+        // Non-admin lead: include self and direct reports, excluding admin subjects.
         user_builder
             .push(" AND (id = ")
             .push_bind(requester.id)
-            .push(" OR id IN (SELECT user_id FROM user_approvers WHERE approver_id = ")
+            .push(" OR id IN (SELECT ua.user_id FROM user_approvers ua \
+                    JOIN users u ON u.id = ua.user_id \
+                    WHERE ua.approver_id = ")
             .push_bind(requester.id)
-            .push(")))");
+            .push(" AND u.role != 'admin'))");
     }
     user_builder.push(" ORDER BY last_name, first_name");
     let members: Vec<(i64, String, String)> = user_builder
@@ -995,12 +1001,15 @@ pub async fn team_categories(
         .push(" AND ")
         .push_bind(effective_to);
     if !requester.is_admin() {
+        // Non-admin lead: include self and direct reports, excluding admin subjects.
         entry_builder
             .push(" AND z.user_id IN (SELECT id FROM users WHERE id = ")
             .push_bind(requester.id)
-            .push(" OR id IN (SELECT user_id FROM user_approvers WHERE approver_id = ")
+            .push(" OR id IN (SELECT ua.user_id FROM user_approvers ua \
+                    JOIN users u ON u.id = ua.user_id \
+                    WHERE ua.approver_id = ")
             .push_bind(requester.id)
-            .push("))");
+            .push(" AND u.role != 'admin'))");
     }
     let rows: Vec<(i64, String, String, String, String)> = entry_builder
         .build_query_as()

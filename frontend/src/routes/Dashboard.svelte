@@ -53,6 +53,9 @@
   let lastFocusSignature = "";
 
   // ── Reference date: derived from configured app timezone ─────────────────────
+  // Initialize with a concrete value so imperative startup code (loadPastMonthSubmissionStatus,
+  // clampFromToUserStart) can run before the reactive declaration is first evaluated.
+  let today = appTodayDate();
   $: today = appTodayDate($settings?.timezone);
   $: if (!absenceSliderWeek) {
     absenceSliderWeek = isoDate(monday(today));

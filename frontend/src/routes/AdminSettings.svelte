@@ -120,7 +120,13 @@
     }
     saving = true;
     try {
-      const saved = await api("/settings", { method: "PUT", body: settingsForm });
+      // Normalize the carryover expiry date: send null when the field is empty so the
+      // backend treats it as "no date" rather than trying to parse an empty string.
+      const body = {
+        ...settingsForm,
+        carryover_expiry_date: settingsForm.carryover_expiry_date?.trim() || null,
+      };
+      const saved = await api("/settings", { method: "PUT", body });
       settingsForm = saved;
       appSettings.set(saved);
       if (saved.ui_language) setLanguage(saved.ui_language);

@@ -517,7 +517,9 @@ const TRANSLATIONS = {
     "Counts as work": "Zählt als Arbeitszeit",
     "General Settings": "Allgemeine Einstellungen",
     General: "Allgemein",
+    Organization: "Organisation",
     "Organization name": "Organisationsname",
+    "e.g. My Company": "z.B. Mein Unternehmen",
     "Shown on the login screen and in the navigation.":
       "Wird auf dem Anmeldebildschirm und in der Navigation angezeigt.",
     "Save Changes": "Änderungen speichern",
@@ -525,6 +527,7 @@ const TRANSLATIONS = {
     "Signing in…": "Anmeldung läuft…",
     "Settings saved.": "Einstellungen gespeichert.",
     "SMTP settings saved.": "SMTP-Einstellungen gespeichert.",
+    "Email (SMTP)": "E-Mail (SMTP)",
     "Enable SMTP": "SMTP aktivieren",
     "When enabled, notification emails are sent for approvals, rejections, and reopen requests.":
       "Wenn aktiviert, werden Benachrichtigungs-E-Mails bei Genehmigungen, Ablehnungen und Wiedereröffnungsanträgen gesendet.",
@@ -536,8 +539,10 @@ const TRANSLATIONS = {
       "Wenn aktiviert, werden Genehmiger jeden Montag per E-Mail an ausstehende Genehmigungen erinnert.",
     "SMTP Host": "SMTP-Host",
     "SMTP Port": "SMTP-Port",
+    Username: "Benutzername",
     "From address": "Absenderadresse",
     Encryption: "Verschlüsselung",
+    None: "Keine",
     stored: "gespeichert",
     "Test Connection": "Verbindung testen",
     "Testing...": "Teste...",
@@ -554,6 +559,7 @@ const TRANSLATIONS = {
       "Bitte geben Sie Ihren Namen ein und konfigurieren Sie Land, Standard-Wochenstunden und Standard-Urlaubstage, bevor die Anwendung genutzt wird.",
     "Please select a country.": "Bitte ein Land auswählen.",
     "Please select a region.": "Bitte eine Region auswählen.",
+    "Please wait for regions to load.": "Bitte warten, bis die Regionen geladen sind.",
     "Could not load regions for the selected country.":
       "Regionen für das ausgewählte Land konnten nicht geladen werden.",
     "Clear stored password": "Gespeichertes Passwort löschen",
@@ -959,6 +965,9 @@ const TRANSLATIONS = {
     "Carryover expiry date (MM-DD)": "Stichtag Urlaubsverfall (MM-TT)",
     "Unused vacation from the previous year expires on this date.":
       "Nicht genommener Urlaub aus dem Vorjahr verfällt an diesem Stichtag.",
+    "Time submission deadline": "Einreichungsfrist",
+    "Submission deadline day of month": "Stichtag (Tag des Monats)",
+    "e.g. 5": "z.B. 5",
     "Users will be notified on this day of each month if they have unsubmitted time entries for previous months. Leave empty to disable. (1\u201328)":
       "Benutzer werden an diesem Tag jedes Monats benachrichtigt, wenn sie noch nicht eingereichte Wochen aus Vormonaten haben. Leer lassen zum Deaktivieren. (1\u201328)",
     "Vacation days per year": "Urlaubstage pro Jahr",

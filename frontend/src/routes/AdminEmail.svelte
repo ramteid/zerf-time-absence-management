@@ -32,7 +32,8 @@
         approval_reminders_enabled: smtpSettings.approval_reminders_enabled !== false,
       };
       const saved = await api("/settings/smtp", { method: "PUT", body });
-      Object.assign(smtpSettings, saved);
+      // Use assignment (not Object.assign) so Svelte's reactivity detects the change.
+      smtpSettings = saved;
       smtpPassword = "";
       toast($t("SMTP settings saved."), "ok");
       if (body.smtp_enabled) {
