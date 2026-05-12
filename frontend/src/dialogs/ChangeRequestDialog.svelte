@@ -3,7 +3,7 @@
   import { api } from "../api.js";
   import { categories, settings, toast } from "../stores.js";
   import { t } from "../i18n.js";
-  import { appTodayIsoDate } from "../format.js";
+  import { appCurrentTimeHM, appTodayIsoDate } from "../format.js";
   import { buildChangeRequestPayload } from "../changeRequests.js";
   import Icon from "../Icons.svelte";
   import DatePicker from "../DatePicker.svelte";
@@ -38,6 +38,13 @@
 
   async function submit() {
     error = "";
+    if (entry_date === todayIso) {
+      const currentTime = appCurrentTimeHM($settings?.timezone);
+      if (end_time > currentTime) {
+        error = $t("End time cannot be in the future.");
+        return;
+      }
+    }
     const result = buildChangeRequestPayload(entry, {
       entry_date,
       start_time,

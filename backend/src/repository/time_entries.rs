@@ -5,7 +5,7 @@ use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::{Postgres, QueryBuilder};
 
-async fn app_today(conn: &mut sqlx::PgConnection) -> AppResult<NaiveDate> {
+async fn app_now(conn: &mut sqlx::PgConnection) -> AppResult<chrono::DateTime<chrono_tz::Tz>> {
     let timezone: Option<String> = sqlx::query_scalar(
         "SELECT value FROM app_settings WHERE key = 'timezone'",
     )
@@ -15,7 +15,7 @@ async fn app_today(conn: &mut sqlx::PgConnection) -> AppResult<NaiveDate> {
     let tz = tz_name
         .parse::<chrono_tz::Tz>()
         .unwrap_or(chrono_tz::Europe::Berlin);
-    Ok(Utc::now().with_timezone(&tz).date_naive())
+    Ok(Utc::now().with_timezone(&tz))
 }
 
 #[derive(sqlx::FromRow, Serialize, Clone)]
@@ -101,7 +101,9 @@ pub(crate) async fn validate_entry(
     if !cat_active {
         return Err(AppError::BadRequest("Category is inactive.".into()));
     }
-    if te.entry_date > app_today(conn).await? {
+    let app_now = app_now(conn).await?;
+    let today = app_now.date_naive();
+    if te.entry_date > today {
         return Err(AppError::BadRequest(
             "Entries in the future are not allowed.".into(),
         ));
@@ -110,6 +112,11 @@ pub(crate) async fn validate_entry(
     let _ = duration_min(&te.start_time, &te.end_time)?;
     let start_n = parse_time(&te.start_time)?;
     let end_n = parse_time(&te.end_time)?;
+    if te.entry_date == today && end_n > app_now.time() {
+        return Err(AppError::BadRequest(
+            "End time cannot be in the future.".into(),
+        ));
+    }
 
     let existing: Vec<(i64, String, String, String, bool)> = sqlx::query_as(
         "SELECT te.id, te.start_time, te.end_time, te.status, c.counts_as_work \
@@ -131,21 +138,9 @@ pub(crate) async fn validate_entry(
         parsed_existing.push((*counts_as_work, es, ee));
     }
 
-    let has_non_crediting_on_day = parsed_existing
-        .iter()
-        .any(|(counts_as_work, _, _)| !*counts_as_work);
-
-    // Default rule: reject crediting/crediting overlaps. Exception: if the day
-    // already contains non-crediting entries, allow overlaps and enforce the
-    // credited 14h cap based on merged intervals below.
-    if new_counts_as_work && !has_non_crediting_on_day {
-        for (counts_as_work, es, ee) in &parsed_existing {
-            if !*counts_as_work {
-                continue;
-            }
-            if start_n < *ee && *es < end_n {
-                return Err(AppError::BadRequest("Overlap with an existing entry.".into()));
-            }
+    for (_, es, ee) in &parsed_existing {
+        if start_n < *ee && *es < end_n {
+            return Err(AppError::BadRequest("Overlap with an existing entry.".into()));
         }
     }
 
@@ -645,30 +640,37 @@ impl TimeEntryDb {
         reviewer_id: i64,
         reviewer_is_admin: bool,
     ) -> AppResult<Vec<TimeEntry>> {
-        let mut eligible: Vec<TimeEntry> = Vec::new();
-        for &id in ids {
-            let Some(entry) = self.find_by_id_submitted(id).await? else {
+        let mut tx = self.pool.begin().await?;
+        let mut approved = Vec::new();
+        let mut ordered_ids = ids.to_vec();
+        ordered_ids.sort_unstable();
+        ordered_ids.dedup();
+        for id in ordered_ids {
+            let Some(entry) = sqlx::query_as::<_, TimeEntry>(&format!(
+                "{TE_SELECT} WHERE id=$1 FOR UPDATE"
+            ))
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await? else {
                 continue;
             };
+            if entry.status != "submitted" {
+                continue;
+            }
             if entry.user_id == reviewer_id && !reviewer_is_admin {
                 continue;
             }
             if !reviewer_is_admin {
-                let ok = self
-                    .is_direct_report_simple(entry.user_id, reviewer_id)
-                    .await?;
+                let ok = Self::check_direct_report_for_update(
+                    &mut tx,
+                    entry.user_id,
+                    reviewer_id,
+                )
+                .await?;
                 if !ok {
                     continue;
                 }
             }
-            eligible.push(entry);
-        }
-        if eligible.is_empty() {
-            return Ok(vec![]);
-        }
-        let mut tx = self.pool.begin().await?;
-        let mut approved = Vec::new();
-        for entry in &eligible {
             let rows = sqlx::query(
                 "UPDATE time_entries \
                  SET status='approved', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP \
@@ -680,7 +682,7 @@ impl TimeEntryDb {
             .await?
             .rows_affected();
             if rows > 0 {
-                approved.push(entry.clone());
+                approved.push(entry);
             }
         }
         tx.commit().await?;
@@ -697,30 +699,37 @@ impl TimeEntryDb {
         reviewer_is_admin: bool,
         reason: &str,
     ) -> AppResult<Vec<TimeEntry>> {
-        let mut eligible: Vec<TimeEntry> = Vec::new();
-        for &id in ids {
-            let Some(entry) = self.find_by_id_submitted(id).await? else {
+        let mut tx = self.pool.begin().await?;
+        let mut rejected = Vec::new();
+        let mut ordered_ids = ids.to_vec();
+        ordered_ids.sort_unstable();
+        ordered_ids.dedup();
+        for id in ordered_ids {
+            let Some(entry) = sqlx::query_as::<_, TimeEntry>(&format!(
+                "{TE_SELECT} WHERE id=$1 FOR UPDATE"
+            ))
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await? else {
                 continue;
             };
+            if entry.status != "submitted" {
+                continue;
+            }
             if entry.user_id == reviewer_id && !reviewer_is_admin {
                 continue;
             }
             if !reviewer_is_admin {
-                let ok = self
-                    .is_direct_report_simple(entry.user_id, reviewer_id)
-                    .await?;
+                let ok = Self::check_direct_report_for_update(
+                    &mut tx,
+                    entry.user_id,
+                    reviewer_id,
+                )
+                .await?;
                 if !ok {
                     continue;
                 }
             }
-            eligible.push(entry);
-        }
-        if eligible.is_empty() {
-            return Ok(vec![]);
-        }
-        let mut tx = self.pool.begin().await?;
-        let mut rejected = Vec::new();
-        for entry in &eligible {
             let rows = sqlx::query(
                 "UPDATE time_entries \
                  SET status='rejected', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP, \
@@ -734,7 +743,7 @@ impl TimeEntryDb {
             .await?
             .rows_affected();
             if rows > 0 {
-                rejected.push(entry.clone());
+                rejected.push(entry);
             }
         }
         tx.commit().await?;
@@ -782,24 +791,6 @@ impl TimeEntryDb {
     }
 
     // ── Private helpers ────────────────────────────────────────────────────
-
-    async fn is_direct_report_simple(
-        &self,
-        subject_id: i64,
-        approver_id: i64,
-    ) -> AppResult<bool> {
-        Ok(sqlx::query_scalar::<_, Option<bool>>(
-            "SELECT TRUE FROM user_approvers ua \
-             WHERE ua.user_id = $1 AND ua.approver_id = $2 \
-             AND EXISTS (SELECT 1 FROM users u WHERE u.id=$1 AND u.role != 'admin')",
-        )
-        .bind(subject_id)
-        .bind(approver_id)
-        .fetch_optional(&self.pool)
-        .await?
-        .flatten()
-        .is_some())
-    }
 
     /// Apply a change request's fields to an existing time entry (within a tx).
     pub async fn apply_change_request_tx(

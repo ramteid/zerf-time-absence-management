@@ -536,7 +536,10 @@
           summaryMinutes +
           (reportDay.entries || []).reduce(
             (entryMinutes, entry) =>
-              entryMinutes + (entry.counts_as_work === false ? 0 : entry.minutes || 0),
+              entryMinutes +
+              (entry.status === "approved" && entry.counts_as_work !== false
+                ? entry.minutes || 0
+                : 0),
             0,
           ),
         0,
@@ -789,7 +792,10 @@
           summaryMinutes +
           (reportDay.entries || []).reduce(
             (entryMinutes, entry) =>
-              entryMinutes + (entry.counts_as_work === false ? 0 : entry.minutes || 0),
+              entryMinutes +
+              (entry.status === "approved" && entry.counts_as_work !== false
+                ? entry.minutes || 0
+                : 0),
             0,
           ),
         0,

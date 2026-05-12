@@ -46,7 +46,7 @@
       error = $t("Start cannot be after End.");
       return;
     }
-    if (isNew && entry_date === todayIso) {
+    if (entry_date === todayIso) {
       const currentTime = appCurrentTimeHM($settings?.timezone);
       if (end_time > currentTime) {
         error = $t("End time cannot be in the future.");

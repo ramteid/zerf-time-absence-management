@@ -58,7 +58,7 @@ pub async fn create(
         .unwrap_or_else(|_| crate::settings::DEFAULT_TIMEZONE.to_string());
         let timestamp = crate::i18n::format_datetime_in_timezone(&language, chrono::Utc::now(), &timezone);
         let email_body = match &state.cfg.public_url {
-            Some(url) => format!("{timestamp}\n\n{body}\n\n{url}"),
+            Some(url) => format!("{body}\n\n{timestamp}\n\n{url}"),
             None => format!("{body}\n\n{timestamp}"),
         };
         crate::email::send_async(smtp, email, title.to_string(), email_body);

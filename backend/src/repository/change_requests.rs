@@ -1,5 +1,6 @@
 use crate::db::DatabasePool;
 use crate::error::{AppError, AppResult};
+use crate::repository::time_entries::{validate_entry, NewEntryData};
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::Serialize;
 
@@ -116,11 +117,57 @@ impl ChangeRequestDb {
         reason: &str,
     ) -> AppResult<ChangeRequest> {
         let mut tx = self.pool.begin().await?;
-        // Advisory lock in namespace 2 (separate from user-level locks).
-        sqlx::query("SELECT pg_advisory_xact_lock(2, $1::int)")
-            .bind(time_entry_id)
+        sqlx::query("SELECT pg_advisory_xact_lock($1)")
+            .bind(user_id)
             .execute(&mut *tx)
             .await?;
+        let current: Option<(i64, String, NaiveDate, String, String, i64, Option<String>)> =
+            sqlx::query_as(
+                "SELECT user_id, status, entry_date, start_time, end_time, category_id, comment \
+                 FROM time_entries WHERE id=$1 FOR UPDATE",
+            )
+            .bind(time_entry_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+        let Some((
+            entry_owner_id,
+            entry_status,
+            entry_date,
+            entry_start_time,
+            entry_end_time,
+            entry_category_id,
+            entry_comment,
+        )) = current else {
+            return Err(AppError::NotFound);
+        };
+        if entry_owner_id != user_id {
+            return Err(AppError::Forbidden);
+        }
+        if entry_status == "draft" {
+            return Err(AppError::BadRequest("Edit drafts directly.".into()));
+        }
+        if entry_status == "rejected" {
+            return Err(AppError::BadRequest(
+                "Rejected entries cannot have change requests. Use the reopen workflow to edit."
+                    .into(),
+            ));
+        }
+
+        let effective_entry = NewEntryData {
+            entry_date: new_date.unwrap_or(entry_date),
+            start_time: new_start_time
+                .map(str::to_string)
+                .unwrap_or(entry_start_time),
+            end_time: new_end_time.map(str::to_string).unwrap_or(entry_end_time),
+            category_id: new_category_id.unwrap_or(entry_category_id),
+            comment: match new_comment {
+                Some("") => None,
+                Some(comment) => Some(comment.to_string()),
+                None => entry_comment,
+            },
+        };
+        validate_entry(&mut tx, user_id, &effective_entry, Some(time_entry_id)).await?;
+
         let existing: Option<i64> = sqlx::query_scalar(
             "SELECT id FROM change_requests WHERE time_entry_id=$1 AND status='open'",
         )

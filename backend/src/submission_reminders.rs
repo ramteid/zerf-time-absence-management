@@ -238,11 +238,7 @@ pub async fn run_check(state: &crate::AppState) {
     )
     .await
     .unwrap_or_else(|_| crate::settings::DEFAULT_TIMEZONE.to_string());
-    let tz = timezone
-        .parse::<chrono_tz::Tz>()
-        .unwrap_or(chrono_tz::Europe::Berlin);
-
-    let today = Utc::now().with_timezone(&tz).date_naive();
+    let today = crate::settings::app_today(pool).await;
 
     let rows: Vec<(i64, String, NaiveDate, i16)> = match state.db.users.get_active_users_with_hours().await {
         Ok(r) => r,
