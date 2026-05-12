@@ -542,14 +542,15 @@ pub async fn update_admin_settings(
     // Save all settings atomically within a transaction.
     let mut transaction = app_state.pool.begin().await?;
 
-    if let Some(ref carryover_date) = validated_carryover_date {
-        save_setting_exec(
-            &mut *transaction,
-            CARRYOVER_EXPIRY_DATE_KEY,
-            carryover_date,
-        )
-        .await?;
-    }
+    // When carryover_expiry_date is absent (null from the client), clear the stored value so
+    // the user can disable the feature. When present, use the validated date string.
+    let carryover_date_to_store = validated_carryover_date.as_deref().unwrap_or("");
+    save_setting_exec(
+        &mut *transaction,
+        CARRYOVER_EXPIRY_DATE_KEY,
+        carryover_date_to_store,
+    )
+    .await?;
 
     if let Some(day) = body.submission_deadline_day {
         save_setting_exec(
