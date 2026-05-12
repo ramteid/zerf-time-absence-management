@@ -78,13 +78,11 @@ impl ReopenRequestDb {
         week_start: NaiveDate,
         week_end: NaiveDate,
     ) -> AppResult<i64> {
-                Ok(sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM time_entries te \
-                     JOIN categories c ON c.id = te.category_id \
-                     WHERE te.user_id=$1 AND te.entry_date BETWEEN $2 AND $3 \
-                     AND c.counts_as_work = TRUE \
-                     AND te.status IN ('submitted','approved')",
-                )
+        Ok(sqlx::query_scalar(
+            "SELECT COUNT(*) FROM time_entries \
+             WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3 \
+             AND status IN ('submitted','approved')",
+        )
         .bind(user_id)
         .bind(week_start)
         .bind(week_end)
@@ -250,13 +248,11 @@ impl ReopenRequestDb {
     ) -> AppResult<Vec<(i64, String)>> {
         let week_end = week_start + chrono::Duration::days(6);
                 let affected: Vec<(i64, String)> = sqlx::query_as(
-                "SELECT te.id, te.status FROM time_entries te \
-                 JOIN categories c ON c.id = te.category_id \
-                 WHERE te.user_id=$1 AND te.entry_date BETWEEN $2 AND $3 \
-                 AND c.counts_as_work = TRUE \
-                 AND te.status IN ('submitted','approved') \
-                 FOR UPDATE",
-                )
+            "SELECT id, status FROM time_entries \
+             WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3 \
+             AND status IN ('submitted','approved') \
+             FOR UPDATE",
+        )
         .bind(subject_id)
         .bind(week_start)
         .bind(week_end)

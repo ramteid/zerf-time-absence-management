@@ -739,9 +739,9 @@ impl UserDb {
 
     // ── Submission reminder helper ─────────────────────────────────────────
 
-    pub async fn get_active_users_with_hours(&self) -> AppResult<Vec<(i64, String, NaiveDate)>> {
-        Ok(sqlx::query_as::<_, (i64, String, NaiveDate)>(
-            "SELECT id, email, start_date FROM users \
+    pub async fn get_active_users_with_hours(&self) -> AppResult<Vec<(i64, String, NaiveDate, i16)>> {
+        Ok(sqlx::query_as::<_, (i64, String, NaiveDate, i16)>(
+            "SELECT id, email, start_date, workdays_per_week FROM users \
              WHERE active = TRUE AND weekly_hours > 0",
         )
         .fetch_all(&self.pool)

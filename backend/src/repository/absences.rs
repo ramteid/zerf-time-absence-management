@@ -163,13 +163,36 @@ impl AbsenceDb {
         from: NaiveDate,
         to: NaiveDate,
     ) -> AppResult<f64> {
+        self.workdays_total_filtered(
+            user_id,
+            kind,
+            from,
+            to,
+            &["approved", "cancellation_pending"],
+        )
+        .await
+    }
+
+    /// Sum of workdays for absences of `kind` whose status is in `statuses`,
+    /// clamped to the [from, to] window. Used by carryover source calculation
+    /// (which needs `approved`-only) and by general usage queries (which need
+    /// both `approved` and `cancellation_pending`).
+    pub async fn workdays_total_filtered(
+        &self,
+        user_id: i64,
+        kind: &str,
+        from: NaiveDate,
+        to: NaiveDate,
+        statuses: &[&str],
+    ) -> AppResult<f64> {
         let ranges: Vec<(NaiveDate, NaiveDate)> = sqlx::query_as(
             "SELECT start_date, end_date FROM absences \
-             WHERE user_id=$1 AND kind=$2 AND status IN ('approved','cancellation_pending') \
-             AND end_date >= $3 AND start_date <= $4",
+             WHERE user_id=$1 AND kind=$2 AND status = ANY($3) \
+             AND end_date >= $4 AND start_date <= $5",
         )
         .bind(user_id)
         .bind(kind)
+        .bind(statuses)
         .bind(from)
         .bind(to)
         .fetch_all(&self.pool)
@@ -230,10 +253,12 @@ impl AbsenceDb {
     ) -> AppResult<Vec<Absence>> {
         let mut builder = QueryBuilder::<Postgres>::new(&format!("{ABS_SELECT} WHERE TRUE"));
         if !is_admin {
+            // Non-admin leads: only show absences from active, non-admin direct
+            // reports. Admin-subject absences are excluded from lead scope.
             builder
                 .push(" AND user_id IN (SELECT ua.user_id FROM user_approvers ua JOIN users u ON u.id=ua.user_id WHERE ua.approver_id = ")
                 .push_bind(requester_id)
-                .push(" AND u.active=TRUE)");
+                .push(" AND u.active=TRUE AND u.role != 'admin')");
         }
         if let Some(f) = from {
             builder.push(" AND end_date >= ").push_bind(f);
@@ -266,10 +291,12 @@ impl AbsenceDb {
         }
         let mut ids = vec![requester_id];
         if is_lead {
+            // Non-admin leads: exclude admin subjects from lead-scoped calendar
+            // view, consistent with the scope rule for all lead-scoped views.
             let mut reports: Vec<i64> = sqlx::query_scalar(
                 "SELECT ua.user_id FROM user_approvers ua \
                  JOIN users u ON u.id = ua.user_id \
-                 WHERE ua.approver_id=$1 AND u.active=TRUE",
+                 WHERE ua.approver_id=$1 AND u.active=TRUE AND u.role != 'admin'",
             )
             .bind(requester_id)
             .fetch_all(&self.pool)

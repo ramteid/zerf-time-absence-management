@@ -364,10 +364,19 @@ fn validate_sick_start_date(kind: &str, start_date: NaiveDate, today: NaiveDate)
     Ok(())
 }
 
-fn has_contract_workday(start_date: NaiveDate, end_date: NaiveDate, workdays_per_week: i16) -> bool {
+/// Check whether the date range contains at least one effective workday:
+/// a day that is both a contract workday (per workdays_per_week) and not a
+/// public holiday. The doc requires "not weekend-only, not holiday-only".
+fn has_effective_workday(
+    start_date: NaiveDate,
+    end_date: NaiveDate,
+    workdays_per_week: i16,
+    holidays: &std::collections::HashSet<NaiveDate>,
+) -> bool {
     let mut day = start_date;
     while day <= end_date {
-        if day.weekday().num_days_from_monday() < workdays_per_week as u32 {
+        let is_contract_day = day.weekday().num_days_from_monday() < workdays_per_week as u32;
+        if is_contract_day && !holidays.contains(&day) {
             return true;
         }
         day += Duration::days(1);
@@ -375,19 +384,24 @@ fn has_contract_workday(start_date: NaiveDate, end_date: NaiveDate, workdays_per
     false
 }
 
-fn validate_absence_has_workday(
+/// Validate that the absence range includes at least one effective workday
+/// (not weekend-only, not holiday-only) as required by the user guide.
+async fn validate_absence_has_workday(
+    pool: &crate::db::DatabasePool,
     workdays_per_week: i16,
     start_date: NaiveDate,
     end_date: NaiveDate,
 ) -> AppResult<()> {
-    if !has_contract_workday(start_date, end_date, workdays_per_week) {
+    let holidays = crate::repository::HolidayDb::new(pool.clone())
+        .get_dates_in_range(start_date, end_date)
+        .await?;
+    if !has_effective_workday(start_date, end_date, workdays_per_week, &holidays) {
         return Err(AppError::BadRequest(
-            "Absence must include at least one workday.".into(),
+            "Absence must include at least one effective workday.".into(),
         ));
     }
     Ok(())
 }
-
 
 async fn absence_owner_id(pool: &crate::db::DatabasePool, absence_id: i64) -> AppResult<i64> {
     use crate::repository::AbsenceDb;
@@ -408,7 +422,7 @@ pub async fn create(
             "Absence start date is before user start date.".into(),
         ));
     }
-    validate_absence_has_workday(requester.workdays_per_week, body.start_date, body.end_date)?;
+    validate_absence_has_workday(&app_state.pool, requester.workdays_per_week, body.start_date, body.end_date).await?;
     let mut transaction = app_state.pool.begin().await?;
     crate::repository::AbsenceDb::lock_user_scope_tx(&mut transaction, requester.id).await?;
     crate::repository::AbsenceDb::assert_no_overlap_tx(&mut transaction, requester.id, body.start_date, body.end_date, None).await?;
@@ -482,7 +496,7 @@ pub async fn update(
             "Absence start date is before user start date.".into(),
         ));
     }
-    validate_absence_has_workday(requester.workdays_per_week, body.start_date, body.end_date)?;
+    validate_absence_has_workday(&app_state.pool, requester.workdays_per_week, body.start_date, body.end_date).await?;
     let current_owner_id = absence_owner_id(&app_state.pool, absence_id).await?;
     let mut transaction = app_state.pool.begin().await?;
     crate::repository::AbsenceDb::lock_user_scope_tx(&mut transaction, current_owner_id).await?;
@@ -1093,7 +1107,12 @@ async fn workdays_for_ranges_in_window(
 ///
 /// Policy encoded here:
 /// carryover is derived from previous-year entitlement minus previous-year
-/// approved/cancellation-pending vacation usage.
+/// **approved** vacation usage. Cancellation-pending days from the previous
+/// year are intentionally excluded: while a cancellation is undecided we treat
+/// it optimistically (favoring the user) so the new year's carryover is not
+/// suppressed by a request that may yet be cancelled. If the cancellation is
+/// later rejected the day reverts to approved and the carryover recomputes
+/// downward on the next read.
 async fn vacation_year_context(
     pool: &crate::db::DatabasePool,
     user: &crate::auth::User,
@@ -1101,6 +1120,7 @@ async fn vacation_year_context(
     today: NaiveDate,
     expiry_setting: &str,
 ) -> AppResult<(i64, i64, bool)> {
+    use crate::repository::AbsenceDb;
     let entitled = effective_annual_days(pool, user, year).await?;
     let effective_entitlement = pro_rate_entitlement(user.start_date, year, entitled);
 
@@ -1109,8 +1129,10 @@ async fn vacation_year_context(
     let prev_effective = pro_rate_entitlement(user.start_date, prev_year, prev_entitled);
     let prev_year_start = NaiveDate::from_ymd_opt(prev_year, 1, 1).unwrap();
     let prev_year_end = NaiveDate::from_ymd_opt(prev_year, 12, 31).unwrap();
-    let prev_taken =
-        workdays_total(pool, user.id, "vacation", prev_year_start, prev_year_end).await?;
+    // Carryover source uses approved-only usage (see policy comment above).
+    let prev_taken = AbsenceDb::new(pool.clone())
+        .workdays_total_filtered(user.id, "vacation", prev_year_start, prev_year_end, &["approved"])
+        .await?;
     let carryover_days = std::cmp::max(0, prev_effective - prev_taken.round() as i64);
 
     let expiry_date = parse_expiry_date(expiry_setting, year);
@@ -1301,11 +1323,13 @@ async fn validate_vacation_balance(
         let end_year_effective =
             pro_rate_entitlement(user.start_date, end_year, end_year_entitled);
 
-        // Carryover source is status-based: only approved / cancellation_pending
-        // vacation reduces next year's carryover. Requested days reserve current-year
-        // availability but do not reduce the carryover source.
+        // Carryover source uses approved-only usage. Cancellation-pending and
+        // requested days do not reduce next year's carryover; they only reserve
+        // current-year availability. This is consistent with vacation_year_context.
         let end_year_expiry_date = parse_expiry_date(&expiry_setting, end_year);
-        let current_year_approved_usage = workdays_total(pool, user.id, "vacation", year_from, year_to).await?;
+        let current_year_approved_usage = crate::repository::AbsenceDb::new(pool.clone())
+            .workdays_total_filtered(user.id, "vacation", year_from, year_to, &["approved"])
+            .await?;
         let current_year_new_approved = if count_new_for_carryover_source {
             if let Some((current_year_new_start, current_year_new_end)) =
                 clamp_range_to_window(start_date, end_date, year_from, year_to)

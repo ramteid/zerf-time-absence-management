@@ -56,11 +56,13 @@ impl ChangeRequestDb {
     }
 
     pub async fn list_open_for_lead(&self, lead_id: i64) -> AppResult<Vec<ChangeRequest>> {
+        // Non-admin leads: only show open CRs from active, non-admin direct reports.
         Ok(sqlx::query_as::<_, ChangeRequest>(&format!(
             "{CR_SELECT} WHERE status='open' \
              AND user_id IN (\
-                             SELECT ua.user_id FROM user_approvers ua \
-                             WHERE ua.approver_id=$1\
+                 SELECT ua.user_id FROM user_approvers ua \
+                 JOIN users u ON u.id = ua.user_id \
+                 WHERE ua.approver_id=$1 AND u.active=TRUE AND u.role != 'admin'\
              ) ORDER BY created_at"
         ))
         .bind(lead_id)

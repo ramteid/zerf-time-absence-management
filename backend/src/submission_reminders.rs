@@ -1,9 +1,8 @@
 //! Background task: check on the configured deadline day of each month
-//! whether users have submitted all past months' time entries.
+//! whether users have submitted all past weeks' time entries.
 //! Users with weekly_hours = 0 are skipped (non-booking users).
 
 use crate::db::DatabasePool;
-
 use crate::settings::load_setting;
 use chrono::{Datelike, NaiveDate, TimeZone, Utc};
 use std::time::Duration;
@@ -80,74 +79,130 @@ pub fn last_day_of_month(year: i32, month: u32) -> u32 {
         .unwrap_or(28)
 }
 
-/// Collect (year, month) pairs where the user has unsubmitted time entries,
-/// from their start_date through the last fully completed month.
-async fn find_unsubmitted_months(
+/// Collect ISO week labels (e.g. "2026-W03") where the user has unsubmitted
+/// workdays, from their start_date up to (but not including) the current week.
+///
+/// A workday is complete when it is covered by either:
+///   - at least one submitted/approved time entry (crediting or non-crediting), OR
+///   - an approved absence.
+/// A workday with any draft or rejected entry is incomplete even if another
+/// entry on the same day is submitted.
+async fn find_unsubmitted_weeks(
     pool: &DatabasePool,
     user_id: i64,
     user_start: NaiveDate,
-    last_year: i32,
-    last_month: u32,
-) -> Vec<(i32, u32)> {
-    // Single query: for each month with any crediting entries, check if any are
-    // still not yet fully submitted (draft or rejected).
-    // Months with zero entries are also "unsubmitted" and handled separately.
-    let rows: Vec<(i32, i32, i64, i64)> = sqlx::query_as(
-        "SELECT \
-             EXTRACT(YEAR FROM entry_date)::int AS y, \
-             EXTRACT(MONTH FROM entry_date)::int AS m, \
-             COUNT(*) AS total, \
-             COUNT(*) FILTER (WHERE te.status NOT IN ('submitted','approved')) AS incomplete \
-                 FROM time_entries te \
-                 JOIN categories c ON c.id = te.category_id \
-                 WHERE te.user_id = $1 \
-                     AND te.entry_date >= $2 \
-                     AND te.entry_date < $3 \
-                     AND c.counts_as_work = TRUE \
-         GROUP BY y, m",
+    workdays_per_week: i16,
+) -> Vec<NaiveDate> {
+    let today = crate::settings::app_today(pool).await;
+
+    // Monday of the current week — we check only fully elapsed weeks.
+    let current_week_monday = today - chrono::Duration::days(
+        today.weekday().num_days_from_monday() as i64,
+    );
+    // Check range: from user start up to (but not including) current week Monday.
+    let check_to = current_week_monday - chrono::Duration::days(1);
+    if user_start > check_to {
+        return vec![];
+    }
+
+    // Align to full weeks: start from the Monday of the user_start week.
+    let first_monday = user_start - chrono::Duration::days(
+        user_start.weekday().num_days_from_monday() as i64,
+    );
+
+    // Load holidays in the check range.
+    let holiday_set = match crate::repository::HolidayDb::new(pool.clone())
+        .get_dates_in_range(first_monday, check_to)
+        .await
+    {
+        Ok(h) => h,
+        Err(_) => std::collections::HashSet::new(),
+    };
+
+    // Load submitted/approved time entry dates.
+    let submitted_dates: std::collections::HashSet<NaiveDate> = sqlx::query_as::<_, (NaiveDate,)>(
+        "SELECT DISTINCT entry_date FROM time_entries \
+         WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3 \
+         AND status IN ('submitted','approved')",
     )
     .bind(user_id)
-    .bind(user_start)
-    .bind(
-        NaiveDate::from_ymd_opt(
-            if last_month == 12 {
-                last_year + 1
-            } else {
-                last_year
-            },
-            if last_month == 12 { 1 } else { last_month + 1 },
-            1,
+    .bind(first_monday)
+    .bind(check_to)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default()
+    .into_iter()
+    .map(|(d,)| d)
+    .collect();
+
+    // Load dates with incomplete entries (draft/rejected).
+    let incomplete_dates: std::collections::HashSet<NaiveDate> =
+        sqlx::query_as::<_, (NaiveDate,)>(
+            "SELECT DISTINCT entry_date FROM time_entries \
+             WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3 \
+             AND status NOT IN ('submitted','approved')",
         )
-        .unwrap(),
+        .bind(user_id)
+        .bind(first_monday)
+        .bind(check_to)
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(d,)| d)
+        .collect();
+
+    // Load approved absence date ranges and expand to a date set.
+    let absence_rows: Vec<(NaiveDate, NaiveDate)> = sqlx::query_as(
+        "SELECT start_date, end_date FROM absences \
+         WHERE user_id=$1 AND status IN ('approved','cancellation_pending') \
+         AND start_date <= $3 AND end_date >= $2",
     )
+    .bind(user_id)
+    .bind(first_monday)
+    .bind(check_to)
     .fetch_all(pool)
     .await
     .unwrap_or_default();
 
-    // Build a set of months that have all entries submitted/approved.
-    let submitted: std::collections::HashSet<(i32, u32)> = rows
-        .into_iter()
-        .filter(|(_, _, total, incomplete)| *total > 0 && *incomplete == 0)
-        .map(|(year, month, _, _)| (year, month as u32))
-        .collect();
-
-    // Iterate all months from start to last completed month
-    let mut missing = Vec::new();
-    let mut year = user_start.year();
-    let mut month = user_start.month();
-    while year < last_year || (year == last_year && month <= last_month) {
-        if !submitted.contains(&(year, month)) {
-            missing.push((year, month));
-        }
-        if month == 12 {
-            month = 1;
-            year += 1;
-        } else {
-            month += 1;
+    let mut absent_days = std::collections::HashSet::new();
+    for (start, end) in &absence_rows {
+        let mut d = *start;
+        while d <= *end && d <= check_to {
+            if d >= first_monday {
+                absent_days.insert(d);
+            }
+            d += chrono::Duration::days(1);
         }
     }
 
-    missing
+    // Check each fully elapsed week.
+    let mut incomplete_week_mondays = Vec::new();
+    let mut week_monday = first_monday;
+    while week_monday < current_week_monday {
+        let mut week_incomplete = false;
+        for day_offset in 0..i64::from(workdays_per_week) {
+            let day = week_monday + chrono::Duration::days(day_offset);
+            // Skip days before contract start, holidays, or future days.
+            if day < user_start || holiday_set.contains(&day) || day >= today {
+                continue;
+            }
+            // Day must be covered by absence or by a submitted entry without
+            // incomplete (draft/rejected) entries on the same day.
+            let submitted_clean =
+                submitted_dates.contains(&day) && !incomplete_dates.contains(&day);
+            if !absent_days.contains(&day) && !submitted_clean {
+                week_incomplete = true;
+                break;
+            }
+        }
+        if week_incomplete {
+            incomplete_week_mondays.push(week_monday);
+        }
+        week_monday += chrono::Duration::days(7);
+    }
+
+    incomplete_week_mondays
 }
 
 /// Run one check pass for all active users with weekly_hours > 0.
@@ -188,14 +243,8 @@ pub async fn run_check(state: &crate::AppState) {
         .unwrap_or(chrono_tz::Europe::Berlin);
 
     let today = Utc::now().with_timezone(&tz).date_naive();
-    // Last fully completed month
-    let (last_year, last_month) = if today.month() == 1 {
-        (today.year() - 1, 12u32)
-    } else {
-        (today.year(), today.month() - 1)
-    };
 
-    let rows: Vec<(i64, String, NaiveDate)> = match state.db.users.get_active_users_with_hours().await {
+    let rows: Vec<(i64, String, NaiveDate, i16)> = match state.db.users.get_active_users_with_hours().await {
         Ok(r) => r,
         Err(e) => {
             tracing::warn!(target:"zerf::submission_reminders", "fetch users failed: {e}");
@@ -208,25 +257,25 @@ pub async fn run_check(state: &crate::AppState) {
         .await
         .map(std::sync::Arc::new);
 
-    for (user_id, user_email, user_start) in rows {
-        let missing =
-            find_unsubmitted_months(pool, user_id, user_start, last_year, last_month).await;
+    for (user_id, user_email, user_start, workdays_per_week) in rows {
+        let missing_weeks =
+            find_unsubmitted_weeks(pool, user_id, user_start, workdays_per_week).await;
 
-        if missing.is_empty() {
+        if missing_weeks.is_empty() {
             continue;
         }
 
-        let missing_months: Vec<String> = missing
+        let missing_labels: Vec<String> = missing_weeks
             .iter()
-            .map(|(y, m)| crate::i18n::format_month(&language, *y, *m))
+            .map(|monday| crate::i18n::format_week_label(&language, *monday))
             .collect();
 
-        let months_str = missing_months.join(", ");
+        let weeks_str = missing_labels.join(", ");
         let title = crate::i18n::translate(&language, "submission_reminder_title", &[]);
         let body = crate::i18n::translate(
             &language,
             "submission_reminder_body",
-            &[("months", months_str.clone())],
+            &[("weeks", weeks_str.clone())],
         );
         let timestamp = crate::i18n::format_datetime_in_timezone(&language, chrono::Utc::now(), &timezone);
         let email_body = format!(
@@ -235,7 +284,7 @@ pub async fn run_check(state: &crate::AppState) {
                 &language,
                 "submission_reminder_email_body",
                 &[
-                    ("months", missing_months.join("\n")),
+                    ("weeks", missing_labels.join("\n")),
                     ("app_url", app_url.clone()),
                 ],
             ),

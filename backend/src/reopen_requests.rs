@@ -205,10 +205,8 @@ async fn perform_reopen_in_tx(
 
         let affected: Vec<(i64, String)> = sqlx::query_as(
             "SELECT te.id, te.status FROM time_entries te \
-             JOIN categories c ON c.id = te.category_id \
              WHERE te.user_id=$1 AND te.entry_date BETWEEN $2 AND $3 \
              AND te.status IN ('submitted','approved') \
-             AND c.counts_as_work = TRUE \
              FOR UPDATE",
         )
     .bind(subject_id)
