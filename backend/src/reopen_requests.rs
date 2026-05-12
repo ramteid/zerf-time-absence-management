@@ -18,6 +18,7 @@ use crate::auth::User;
 use crate::error::{AppError, AppResult};
 use crate::i18n;
 use crate::notifications;
+use crate::repository::{TimeEntry, TimeEntryDb};
 use crate::AppState;
 use axum::{
     extract::{Path, State},
@@ -70,6 +71,17 @@ struct ChangeOverviewRow {
     new_start_time: Option<String>,
     new_end_time: Option<String>,
     new_category_name: Option<String>,
+    new_comment: Option<String>,
+}
+
+#[derive(FromRow)]
+struct OpenChangeRequestForReopen {
+    id: i64,
+    time_entry_id: i64,
+    new_date: Option<NaiveDate>,
+    new_start_time: Option<String>,
+    new_end_time: Option<String>,
+    new_category_id: Option<i64>,
     new_comment: Option<String>,
 }
 
@@ -203,8 +215,13 @@ async fn perform_reopen_in_tx(
 ) -> AppResult<ReopenExecution> {
     let week_end = week_start + chrono::Duration::days(6);
 
-        let affected: Vec<(i64, String)> = sqlx::query_as(
-            "SELECT te.id, te.status FROM time_entries te \
+    sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(subject_id)
+        .execute(&mut **tx)
+        .await?;
+
+    let affected: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT te.id, te.status FROM time_entries te \
              WHERE te.user_id=$1 AND te.entry_date BETWEEN $2 AND $3 \
              AND te.status IN ('submitted','approved') \
              FOR UPDATE",
@@ -223,44 +240,87 @@ async fn perform_reopen_in_tx(
 
     // Auto-apply open change requests for these entries.
     let entry_ids: Vec<i64> = affected.iter().map(|(id, _)| *id).collect();
-    let applied_change_request_ids: Vec<i64> = sqlx::query_scalar(
-        "SELECT id FROM change_requests \
+    let open_change_requests: Vec<OpenChangeRequestForReopen> = sqlx::query_as(
+        "SELECT id, time_entry_id, new_date, new_start_time, new_end_time, \
+                new_category_id, new_comment \
+         FROM change_requests \
          WHERE status='open' AND time_entry_id = ANY($1) \
          ORDER BY id FOR UPDATE",
     )
     .bind(&entry_ids)
     .fetch_all(&mut **tx)
     .await?;
-    sqlx::query(
-        "UPDATE time_entries te \
-         SET entry_date=COALESCE(cr.new_date, te.entry_date), \
-             start_time=COALESCE(cr.new_start_time, te.start_time), \
-             end_time=COALESCE(cr.new_end_time, te.end_time), \
-             category_id=COALESCE(cr.new_category_id, te.category_id), \
-             comment=CASE WHEN cr.new_comment IS NOT NULL THEN NULLIF(cr.new_comment,'') ELSE te.comment END, \
-             updated_at=CURRENT_TIMESTAMP \
-         FROM change_requests cr \
-         WHERE cr.status='open' AND te.id = cr.time_entry_id AND te.id = ANY($1)",
-    )
-    .bind(&entry_ids)
-    .execute(&mut **tx)
-    .await?;
+    let mut changed_entry_ids = Vec::new();
+    let mut applied_change_request_ids = Vec::new();
+    for change_request in open_change_requests {
+        let current_entry: TimeEntry = sqlx::query_as(
+            "SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, \
+                    submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at \
+             FROM time_entries WHERE id=$1 FOR UPDATE",
+        )
+        .bind(change_request.time_entry_id)
+        .fetch_one(&mut **tx)
+        .await?;
+        TimeEntryDb::apply_change_request_tx(
+            &mut **tx,
+            change_request.time_entry_id,
+            &current_entry.status,
+            change_request.new_date,
+            change_request.new_start_time.as_deref(),
+            change_request.new_end_time.as_deref(),
+            change_request.new_category_id,
+            change_request.new_comment.as_deref(),
+        )
+        .await?;
+        changed_entry_ids.push(current_entry.id);
+        applied_change_request_ids.push(change_request.id);
+    }
 
-    // When auto-applying CRs during reopen, set reviewed_by=NULL to indicate auto-application
-    // rather than explicit human approval. This preserves permission model semantics:
-    // CRs should only have a non-NULL reviewed_by when explicitly approved by a lead/admin.
-    sqlx::query(
-        "UPDATE change_requests \
-         SET status='approved', \
-             reviewed_by=CASE WHEN $1::bigint IS NOT NULL THEN $1 ELSE NULL END, \
-             reviewed_at=CURRENT_TIMESTAMP, \
-             rejection_reason=NULL \
-         WHERE status='open' AND time_entry_id = ANY($2)",
-    )
-    .bind(match actor_id == subject_id { true => None as Option<i64>, false => Some(actor_id) })
-    .bind(&entry_ids)
-    .execute(&mut **tx)
-    .await?;
+    for entry_id in &changed_entry_ids {
+        let updated_entry: TimeEntry = sqlx::query_as(
+            "SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, \
+                    submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at \
+             FROM time_entries WHERE id=$1 FOR UPDATE",
+        )
+        .bind(entry_id)
+        .fetch_one(&mut **tx)
+        .await?;
+        let effective_entry = crate::time_entries::NewTimeEntry {
+            entry_date: updated_entry.entry_date,
+            start_time: updated_entry.start_time.clone(),
+            end_time: updated_entry.end_time.clone(),
+            category_id: updated_entry.category_id,
+            comment: updated_entry.comment.clone(),
+        };
+        crate::time_entries::validate(
+            &mut **tx,
+            updated_entry.user_id,
+            &effective_entry,
+            Some(updated_entry.id),
+        )
+        .await?;
+    }
+
+    if !applied_change_request_ids.is_empty() {
+        let rows = sqlx::query(
+            "UPDATE change_requests \
+             SET status='approved', \
+                 reviewed_by=CASE WHEN $1::bigint IS NOT NULL THEN $1 ELSE NULL END, \
+                 reviewed_at=CURRENT_TIMESTAMP, \
+                 rejection_reason=NULL \
+             WHERE status='open' AND id = ANY($2)",
+        )
+        .bind(match actor_id == subject_id { true => None as Option<i64>, false => Some(actor_id) })
+        .bind(&applied_change_request_ids)
+        .execute(&mut **tx)
+        .await?
+        .rows_affected();
+        if rows != applied_change_request_ids.len() as u64 {
+            return Err(AppError::Conflict(
+                "Change request was already resolved by someone else.".into(),
+            ));
+        }
+    }
 
     // Reset all affected entries to draft.  We filter by their original IDs
     // (not by date range) because the CR-apply step above may have moved some

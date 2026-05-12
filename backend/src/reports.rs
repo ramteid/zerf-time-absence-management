@@ -417,7 +417,7 @@ fn csv_response(r: MonthReport, uid: i64, file_label: &str) -> AppResult<Respons
                 .map_err(csv_err)?;
         } else {
             for entry in &day.entries {
-                if entry.counts_as_work {
+                if entry.counts_as_work && entry.status == "approved" {
                     csv_total_min += entry.minutes;
                 }
                 csv_writer

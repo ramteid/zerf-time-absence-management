@@ -124,10 +124,7 @@ pub async fn run_check(state: &crate::AppState) {
     )
     .await
     .unwrap_or_else(|_| crate::settings::DEFAULT_TIMEZONE.to_string());
-    let tz = timezone
-        .parse::<chrono_tz::Tz>()
-        .unwrap_or(chrono_tz::Europe::Berlin);
-    let today_local = chrono::Utc::now().with_timezone(&tz).date_naive();
+    let today_local = crate::settings::app_today(pool).await;
 
     let approvers = find_approvers_with_pending(pool).await;
     if approvers.is_empty() {

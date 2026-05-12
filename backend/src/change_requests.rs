@@ -552,10 +552,11 @@ pub async fn approve(
         category_id: change_request
             .new_category_id
             .unwrap_or(existing_entry.category_id),
-        comment: change_request
-            .new_comment
-            .clone()
-            .or(existing_entry.comment.clone()),
+        comment: match change_request.new_comment.as_deref() {
+            Some("") => None,
+            Some(comment) => Some(comment.to_string()),
+            None => existing_entry.comment.clone(),
+        },
     };
     // Validate the resulting state on the effective (possibly changed) entry date.
     // The source day can only lose minutes when moving/changing an entry, so it
