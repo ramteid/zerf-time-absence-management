@@ -55,14 +55,15 @@ async fn submission_reminders_full_workflow() {
     }
 
     // -- Reminder skips user with all submitted --
+    //
+    // Create a user whose start date is last week's Monday so there is exactly
+    // one fully elapsed past week.  Submit entries for all 5 contract workdays
+    // of that week so the reminder check finds nothing incomplete.
     {
         let today = chrono::Local::now().date_naive();
-        let last_month_start = if today.month() == 1 {
-            chrono::NaiveDate::from_ymd_opt(today.year() - 1, 12, 1).unwrap()
-        } else {
-            chrono::NaiveDate::from_ymd_opt(today.year(), today.month() - 1, 1).unwrap()
-        };
-        let start_date = last_month_start.format("%Y-%m-%d").to_string();
+        let last_week_monday =
+            today - chrono::Duration::days(today.weekday().num_days_from_monday() as i64 + 7);
+        let start_date = last_week_monday.format("%Y-%m-%d").to_string();
 
         let (_, body) = admin.get("/api/v1/categories").await;
         let cat_id = body.as_array().unwrap()[0]["id"].as_i64().unwrap();
@@ -88,11 +89,17 @@ async fn submission_reminders_full_workflow() {
 
         let emp = login_change_pw(&app, "recent@example.com", &emp_pw).await;
 
-        let entry_date = last_month_start.format("%Y-%m-%d").to_string();
-        let eid = create_draft_entry(&emp, &entry_date, cat_id).await;
-
+        // Submit entries for all 5 workdays (Mon-Fri) of last week.
+        let mut entry_ids = Vec::new();
+        for day_offset in 0..5 {
+            let day = (last_week_monday + chrono::Duration::days(day_offset))
+                .format("%Y-%m-%d")
+                .to_string();
+            let eid = create_draft_entry(&emp, &day, cat_id).await;
+            entry_ids.push(eid);
+        }
         let (st, _) = emp
-            .post("/api/v1/time-entries/submit", &json!({"ids": [eid]}))
+            .post("/api/v1/time-entries/submit", &json!({"ids": entry_ids}))
             .await;
         assert_eq!(st, StatusCode::OK);
 

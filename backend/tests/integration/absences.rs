@@ -73,7 +73,7 @@ async fn absences_full_workflow() {
             );
             assert!(
                 body.to_string()
-                    .contains("Absence must include at least one workday"),
+                    .contains("Absence must include at least one effective workday"),
                 "error should mention missing workday for {kind}: {body}"
             );
         }
@@ -81,7 +81,10 @@ async fn absences_full_workflow() {
 
     // -- Absence update requires at least one effective workday --
     {
-        let next_week_monday = next_monday(7);
+        // Use a Monday far enough in the future to avoid public holidays
+        // (e.g. Whit Monday) that would make the single-day absence invalid,
+        // and distinct from dates used in other test sections.
+        let next_week_monday = next_monday(21);
         let monday = next_week_monday.format("%Y-%m-%d").to_string();
         let saturday = (next_week_monday + chrono::Duration::days(5))
             .format("%Y-%m-%d")
@@ -108,7 +111,7 @@ async fn absences_full_workflow() {
         assert_eq!(st, StatusCode::BAD_REQUEST, "update to weekend-only rejected");
         assert!(
             body.to_string()
-                .contains("Absence must include at least one workday"),
+                .contains("Absence must include at least one effective workday"),
             "error should mention missing workday: {body}"
         );
     }

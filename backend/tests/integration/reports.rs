@@ -251,7 +251,12 @@ async fn reports_full_workflow() {
         assert_eq!(tuesday_row["actual_min"], 0);
         assert_eq!(tuesday_row["entries"].as_array().unwrap().len(), 1);
         assert_eq!(body["submitted_min"], 0);
-        assert!(body["category_totals"].as_object().unwrap().is_empty());
+        // Category totals include all non-rejected entries regardless of
+        // crediting status (user-guide: "not only crediting categories").
+        // The approved flextime-reduction entry (4h = 240 min) appears here.
+        let cat_totals = body["category_totals"].as_object().unwrap();
+        assert_eq!(cat_totals.len(), 1, "one category in totals");
+        assert_eq!(cat_totals.get("Flextime Reduction").and_then(|v| v.as_i64()), Some(240));
         assert_eq!(body["weeks_all_submitted"], false);
 
         let (st, body) = emp
@@ -285,9 +290,14 @@ async fn reports_full_workflow() {
         assert_eq!(
             st,
             StatusCode::OK,
-            "flextime reduction category is excluded from work totals"
+            "category report includes non-crediting entries"
         );
-        assert!(body.as_array().unwrap().is_empty());
+        // Category breakdowns include all non-rejected entries regardless of
+        // crediting status (user-guide: "not only crediting categories").
+        let cat_arr = body.as_array().unwrap();
+        assert_eq!(cat_arr.len(), 1, "one category in report");
+        assert_eq!(cat_arr[0]["category"], "Flextime Reduction");
+        assert_eq!(cat_arr[0]["minutes"], 240);
 
         let (st, csv_body) = lead
             .get_raw(&format!(
