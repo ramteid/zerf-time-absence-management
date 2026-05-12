@@ -200,9 +200,15 @@ impl ReportDb {
             .fetch_all(&self.pool)
             .await?)
         } else {
+            // Non-admin leads see themselves plus direct reports, but admin
+            // subjects are excluded from lead-scoped team views (user-guide).
             Ok(sqlx::query_as::<_, User>(&format!(
                 "{SEL} WHERE active=TRUE \
-                 AND (id=$1 OR id IN (SELECT ua.user_id FROM user_approvers ua WHERE ua.approver_id=$1)) \
+                 AND (id=$1 OR id IN (\
+                     SELECT ua.user_id FROM user_approvers ua \
+                     JOIN users u ON u.id = ua.user_id \
+                     WHERE ua.approver_id=$1 AND u.role != 'admin'\
+                 )) \
                  ORDER BY last_name"
             ))
             .bind(requester_id)
@@ -295,10 +301,15 @@ impl ReportDb {
             .fetch_all(&self.pool)
             .await?)
         } else {
+            // Non-admin leads: exclude admin subjects from lead-scoped views.
             Ok(sqlx::query_as(
                 "SELECT id, first_name, last_name FROM users \
                  WHERE active=TRUE \
-                 AND (id=$1 OR id IN (SELECT ua.user_id FROM user_approvers ua WHERE ua.approver_id=$1)) \
+                 AND (id=$1 OR id IN (\
+                     SELECT ua.user_id FROM user_approvers ua \
+                     JOIN users u ON u.id = ua.user_id \
+                     WHERE ua.approver_id=$1 AND u.role != 'admin'\
+                 )) \
                  ORDER BY last_name",
             )
             .bind(requester_id)

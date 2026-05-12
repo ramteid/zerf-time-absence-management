@@ -390,7 +390,7 @@ Vacation status impact:
 
 Important distinction:
 
-- Carryover source (how many days are transferred from previous year) uses approved previous-year usage.
+- Carryover source (how many days are transferred from previous year) uses previous-year approved usage only. Cancellation-pending days from the previous year do not reduce next year's carryover: while a cancellation is undecided we favor the user and assume the day may be returned. If the cancellation is later rejected, the day reverts to approved and the carryover recomputes downward on the next read.
 - Current-year availability uses approved plus requested plus cancellation pending reservation.
 
 ### Carryover expiry behavior
@@ -456,11 +456,12 @@ Users sometimes see that available days do not increase immediately after reques
 
 ### Employee receives notifications when
 
+- time entry is approved or rejected,
 - absence is approved or rejected,
 - absence cancellation is approved or rejected,
 - change request is approved or rejected,
 - reopen request is approved or rejected,
-- a weekly submission reminder is triggered (incomplete weeks to submit).
+- a monthly submission reminder is triggered on the configured deadline day (lists past weeks that are still not submitted).
 
 ### Approver receives notifications when
 
@@ -504,16 +505,14 @@ Notification idempotency and duplicates:
 
 ### Monthly submission reminder
 
-Users with incomplete past submissions receive a monthly reminder on the configured reminder deadline day (in-app, plus email if SMTP is enabled).
+On the configured submission deadline day each month, every active user with weekly hours > 0 (employees and team leads alike) receives one reminder (in-app, plus email if SMTP is enabled) listing the past weeks that are not fully submitted up to that day. The current week is excluded.
 
-Reminder selection follows the same explicit-assignment rule as approvals.
-That means a reminder is sent to the active assigned approver(s) who are
-responsible for pending items, not to every admin in the system.
+The reminder is sent directly to the affected user, not to their approvers. Duplicate reminders for the same user and deadline day are suppressed via a dedupe key.
 
 **What triggers the reminder:**
-- Any day in past required weeks that is not covered by a submitted/approved entry or absence.
-- This includes days with only draft entries or unaccounted-for days.
-- Non-crediting entries fully participate: if a day has only unsubmitted non-crediting entries, it is flagged as incomplete.
+- Any required workday in a past week not covered by a submitted/approved entry or an approved absence.
+- Days with only draft or rejected entries count as incomplete.
+- Non-crediting entries fully participate: a day covered only by an unsubmitted non-crediting entry keeps the week incomplete.
 
 ### Weekly approval reminder
 

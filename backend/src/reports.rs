@@ -91,9 +91,7 @@ pub struct EntryDetail {
     pub comment: Option<String>,
 }
 
-fn entry_counts_as_work(counts_as_work: bool, status: &str) -> bool {
-    counts_as_work && status != "rejected"
-}
+
 
 #[derive(Serialize)]
 pub struct MonthReport {
@@ -260,8 +258,10 @@ async fn build_range(
                 if *counts_as_work && (status == "approved" || status == "submitted") {
                     submitted += entry_minutes;
                 }
-                // Category totals include every non-rejected entry.
-                if entry_counts_as_work(*counts_as_work, status) {
+                // Category totals include every non-rejected entry regardless of
+                // whether the category is crediting (user-guide: "Category
+                // breakdowns show booked non-rejected time entries in scope").
+                if status != "rejected" {
                     *category_minutes_by_name.entry(category_name.clone()).or_insert(0) +=
                         entry_minutes;
                 }
@@ -900,14 +900,14 @@ pub async fn categories(
         // No specific user requested: only leads may see aggregated team data.
         return Err(AppError::Forbidden);
     }
-    // Category reports are work-time reports: only crediting categories count.
-    // Rejected entries are excluded; effective_to ensures dates are bounded to today.
+    // Category breakdown reports include all non-rejected entries regardless of
+    // crediting status (user-guide: "not only crediting categories").
     let mut builder = QueryBuilder::<Postgres>::new(
         "SELECT c.name, c.color, z.start_time, z.end_time \
          FROM time_entries z \
          JOIN users u ON u.id=z.user_id \
          JOIN categories c ON c.id=z.category_id \
-                WHERE z.status != 'rejected' AND c.counts_as_work = TRUE AND z.entry_date >= u.start_date \
+                WHERE z.status != 'rejected' AND z.entry_date >= u.start_date \
          AND z.entry_date BETWEEN ",
     );
     builder
@@ -980,14 +980,14 @@ pub async fn team_categories(
         .fetch_all(&app_state.pool)
         .await?;
 
-    // Same as the individual breakdown: only work-crediting, non-rejected entries
-    // up to today, regardless of draft/submitted/approved state.
+    // Same as the individual breakdown: all non-rejected entries up to today,
+    // regardless of draft/submitted/approved state or crediting status.
     let mut entry_builder = QueryBuilder::<Postgres>::new(
         "SELECT z.user_id, c.name, c.color, z.start_time, z.end_time \
          FROM time_entries z \
          JOIN users u ON u.id=z.user_id \
          JOIN categories c ON c.id=z.category_id \
-                WHERE z.status != 'rejected' AND c.counts_as_work = TRUE AND z.entry_date >= u.start_date \
+                WHERE z.status != 'rejected' AND z.entry_date >= u.start_date \
          AND z.entry_date BETWEEN ",
     );
     entry_builder
