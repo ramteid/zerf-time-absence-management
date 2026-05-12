@@ -29,6 +29,7 @@
         smtp_from: smtpSettings.smtp_from || "",
         smtp_encryption: smtpSettings.smtp_encryption || "starttls",
         submission_reminders_enabled: smtpSettings.submission_reminders_enabled !== false,
+        approval_reminders_enabled: smtpSettings.approval_reminders_enabled !== false,
       };
       const saved = await api("/settings/smtp", { method: "PUT", body });
       Object.assign(smtpSettings, saved);
@@ -123,6 +124,23 @@
           </label>
           <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
             {$t("When enabled, users who have not submitted all time entries are reminded by email on the configured deadline day.")}
+          </div>
+        </div>
+      </div>
+
+      <div class="field-row" style="margin-top:8px">
+        <div>
+          <label class="kz-label" style="display:flex;align-items:center;gap:8px">
+            <input
+              type="checkbox"
+              bind:checked={smtpSettings.approval_reminders_enabled}
+              style="width:auto"
+              disabled={!smtpSettings.smtp_enabled}
+            />
+            {$t("Enable approval reminders")}
+          </label>
+          <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
+            {$t("When enabled, approvers are reminded by email about pending approvals every Monday.")}
           </div>
         </div>
       </div>

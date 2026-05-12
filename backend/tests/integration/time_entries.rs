@@ -12,6 +12,84 @@ async fn time_entries_full_workflow() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
 
+    // -- Non-crediting entries stay transparent to overlaps, but don't consume 14h cap --
+    {
+        let (_lead_id, _lead_pw, _emp_id, emp_pw, monday_iso, _cat_id) =
+            bootstrap_team_with_suffix(&app, &admin, false, "0").await;
+        let emp = login_change_pw(&app, "emp-0@example.com", &emp_pw).await;
+
+        let (st, categories_body) = emp.get("/api/v1/categories").await;
+        assert_eq!(st, StatusCode::OK, "load categories");
+        let category_rows = categories_body.as_array().expect("categories array");
+        let crediting_category_id = category_rows
+            .iter()
+            .find(|row| row["counts_as_work"].as_bool().unwrap_or(true))
+            .and_then(|row| row["id"].as_i64())
+            .expect("crediting category exists");
+        let non_crediting_category_id = category_rows
+            .iter()
+            .find(|row| row["counts_as_work"].as_bool() == Some(false))
+            .and_then(|row| row["id"].as_i64())
+            .expect("non-crediting category exists");
+        let day = monday_iso;
+
+        let (st, _) = emp
+            .post(
+                "/api/v1/time-entries",
+                &json!({
+                    "entry_date": day,
+                    "start_time": "00:00",
+                    "end_time": "10:00",
+                    "category_id": non_crediting_category_id,
+                    "comment": "flextime reduction"
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "create non-crediting entry");
+
+        let (st, _) = emp
+            .post(
+                "/api/v1/time-entries",
+                &json!({
+                    "entry_date": day,
+                    "start_time": "09:00",
+                    "end_time": "11:00",
+                    "category_id": crediting_category_id,
+                    "comment": "must be blocked by overlap"
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "overlap with non-crediting entry allowed");
+
+        let (st, _) = emp
+            .post(
+                "/api/v1/time-entries",
+                &json!({
+                    "entry_date": day,
+                    "start_time": "00:00",
+                    "end_time": "10:00",
+                    "category_id": non_crediting_category_id,
+                    "comment": "non-crediting part"
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "duplicate overlapping non-crediting entry allowed");
+
+        let (st, _) = emp
+            .post(
+                "/api/v1/time-entries",
+                &json!({
+                    "entry_date": day,
+                    "start_time": "10:00",
+                    "end_time": "23:00",
+                    "category_id": crediting_category_id,
+                    "comment": "13h crediting should still be allowed"
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "14h cap ignores non-crediting minutes");
+    }
+
     // -- Invalid category rejected --
     {
         let (st, _) = admin

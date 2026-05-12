@@ -364,14 +364,23 @@ fn validate_sick_start_date(kind: &str, start_date: NaiveDate, today: NaiveDate)
     Ok(())
 }
 
-async fn validate_absence_has_workday(
-    pool: &crate::db::DatabasePool,
-    user_id: i64,
+fn has_contract_workday(start_date: NaiveDate, end_date: NaiveDate, workdays_per_week: i16) -> bool {
+    let mut day = start_date;
+    while day <= end_date {
+        if day.weekday().num_days_from_monday() < workdays_per_week as u32 {
+            return true;
+        }
+        day += Duration::days(1);
+    }
+    false
+}
+
+fn validate_absence_has_workday(
+    workdays_per_week: i16,
     start_date: NaiveDate,
     end_date: NaiveDate,
 ) -> AppResult<()> {
-    let effective_workdays = workdays(pool, user_id, start_date, end_date).await?;
-    if effective_workdays <= 0.0 {
+    if !has_contract_workday(start_date, end_date, workdays_per_week) {
         return Err(AppError::BadRequest(
             "Absence must include at least one workday.".into(),
         ));
@@ -399,8 +408,7 @@ pub async fn create(
             "Absence start date is before user start date.".into(),
         ));
     }
-    validate_absence_has_workday(&app_state.pool, requester.id, body.start_date, body.end_date)
-        .await?;
+    validate_absence_has_workday(requester.workdays_per_week, body.start_date, body.end_date)?;
     let mut transaction = app_state.pool.begin().await?;
     crate::repository::AbsenceDb::lock_user_scope_tx(&mut transaction, requester.id).await?;
     crate::repository::AbsenceDb::assert_no_overlap_tx(&mut transaction, requester.id, body.start_date, body.end_date, None).await?;
@@ -443,7 +451,8 @@ pub async fn create(
     .await;
     if created_absence.status == "requested" {
         let language = notification_language(&app_state.pool).await;
-        let approver_ids = crate::auth::approval_recipient_ids(&app_state.pool, &requester).await;
+        let approver_ids =
+            crate::auth::required_approval_recipient_ids(&app_state.pool, &requester).await?;
         notify_approvers(
             &app_state, &language, &approver_ids, "absence_requested",
             vec![
@@ -473,8 +482,7 @@ pub async fn update(
             "Absence start date is before user start date.".into(),
         ));
     }
-    validate_absence_has_workday(&app_state.pool, requester.id, body.start_date, body.end_date)
-        .await?;
+    validate_absence_has_workday(requester.workdays_per_week, body.start_date, body.end_date)?;
     let current_owner_id = absence_owner_id(&app_state.pool, absence_id).await?;
     let mut transaction = app_state.pool.begin().await?;
     crate::repository::AbsenceDb::lock_user_scope_tx(&mut transaction, current_owner_id).await?;
@@ -533,7 +541,8 @@ pub async fn update(
     // Notify approvers of the change — they may be reviewing the previous version.
     if absence_after_update.status == "requested" {
         let language = notification_language(&app_state.pool).await;
-        let approver_ids = crate::auth::approval_recipient_ids(&app_state.pool, &requester).await;
+        let approver_ids =
+            crate::auth::required_approval_recipient_ids(&app_state.pool, &requester).await?;
         notify_approvers(
             &app_state, &language, &approver_ids, "absence_updated",
             vec![
@@ -568,7 +577,8 @@ pub async fn cancel(
 
     // Pre-load notification context — identical for both cancel paths.
     let language = notification_language(&app_state.pool).await;
-    let approver_ids = crate::auth::approval_recipient_ids(&app_state.pool, &requester).await;
+    let approver_ids =
+        crate::auth::required_approval_recipient_ids(&app_state.pool, &requester).await?;
     let approver_params = vec![
         ("requester_name", requester.full_name()),
         ("kind", i18n::absence_kind_label(&language, &absence.kind)),

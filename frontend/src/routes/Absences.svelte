@@ -1,10 +1,10 @@
 <script>
   import { tick } from "svelte";
   import { api } from "../api.js";
-  import { currentUser, toast } from "../stores.js";
+  import { currentUser, settings, toast } from "../stores.js";
   import { countWorkdays, holidayDateSet } from "../apiMappers.js";
   import { t, absenceKindLabel, statusLabel } from "../i18n.js";
-  import { fmtDate, fmtDateTime, parseDate } from "../format.js";
+  import { fmtDate, fmtDateTime, parseDate, appTodayDate } from "../format.js";
   import Icon from "../Icons.svelte";
   import AbsenceDialog from "../dialogs/AbsenceDialog.svelte";
   import { confirmDialog } from "../confirm.js";
@@ -15,8 +15,15 @@
   let holidayDates = new Set();
   let showDialog = null;
   let loadToken = 0;
-  const baseYear = new Date().getFullYear();
+  $: baseYear = appTodayDate($settings?.timezone).getFullYear();
   let selectedYear = baseYear;
+  let selectedYearTouched = false;
+
+  // Keep the initial year aligned with app timezone unless the user has
+  // deliberately selected a different year.
+  $: if (!selectedYearTouched && selectedYear !== baseYear) {
+    selectedYear = baseYear;
+  }
 
   // Detail popup state
   let detailAbsence = null;
@@ -72,6 +79,7 @@
       : null;
 
     if (savedYear && savedYear !== selectedYear) {
+      selectedYearTouched = true;
       selectedYear = savedYear;
       return;
     }
@@ -160,7 +168,10 @@
     <div class="kz-nav-slider">
       <button
         class="kz-btn kz-btn-ghost"
-        on:click={() => (selectedYear -= 1)}
+        on:click={() => {
+          selectedYearTouched = true;
+          selectedYear -= 1;
+        }}
         disabled={!canGoPrevYear}
         aria-label={$t("Previous year")}
       >
@@ -169,7 +180,10 @@
       <span class="nav-label tab-num" style="min-width:50px">{selectedYear}</span>
       <button
         class="kz-btn kz-btn-ghost"
-        on:click={() => (selectedYear += 1)}
+        on:click={() => {
+          selectedYearTouched = true;
+          selectedYear += 1;
+        }}
         disabled={!canGoNextYear}
         aria-label={$t("Next year")}
       >

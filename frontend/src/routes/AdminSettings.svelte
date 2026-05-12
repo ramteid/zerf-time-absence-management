@@ -19,18 +19,10 @@
   let regionLoading = false;
   let regionsLoadFailed = false;
   const languageOptions = Object.entries(LANGUAGES);
-  const fallbackTimezones = [
-    "Europe/Berlin",
-    "UTC",
-    "Europe/London",
-    "America/New_York",
-    "America/Los_Angeles",
-    "Asia/Tokyo",
-  ];
   const timezoneOptions =
     typeof Intl !== "undefined" && typeof Intl.supportedValuesOf === "function"
       ? Intl.supportedValuesOf("timeZone")
-      : fallbackTimezones;
+      : ["Europe/Berlin", "UTC", "Europe/London", "America/New_York", "America/Los_Angeles", "Asia/Tokyo"];
 
   function sortCountriesByName(items) {
     return [...items].sort((a, b) => a.name.localeCompare(b.name));
@@ -107,8 +99,8 @@
       toast($t("Please select a country."), "error");
       return;
     }
-    if (!settingsForm.timezone || !settingsForm.timezone.trim()) {
-      toast($t("Please enter a timezone."), "error");
+    if (!settingsForm.timezone) {
+      toast($t("Please select a timezone."), "error");
       return;
     }
     if (regionLoading) {
@@ -281,21 +273,15 @@
           <label class="kz-label" for="settings-timezone"
             >{$t("Timezone")}</label
           >
-          <input
+          <select
             id="settings-timezone"
-            class="kz-input"
-            list="settings-timezone-options"
+            class="kz-select"
             bind:value={settingsForm.timezone}
-            placeholder="Europe/Berlin"
-          />
-          <datalist id="settings-timezone-options">
-            {#each timezoneOptions as timezone}
-              <option value={timezone}></option>
+          >
+            {#each timezoneOptions as tz}
+              <option value={tz}>{tz}</option>
             {/each}
-          </datalist>
-          <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
-            {$t("Use an IANA timezone, e.g. Europe/Berlin.")}
-          </div>
+          </select>
         </div>
       </div>
 

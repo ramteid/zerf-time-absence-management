@@ -53,8 +53,9 @@ async fn notifications_full_workflow() {
 
     // -- Absence request notifies approver --
     {
-        let (_lead_id, lead_pw, _emp_id, emp_pw, monday_iso, _cat_id) =
+        let (_lead_id, lead_pw, _emp_id, emp_pw, _monday_iso, _cat_id) =
             bootstrap_team_with_suffix(&app, &admin, false, "2").await;
+        let future_monday_iso = next_monday(21).format("%Y-%m-%d").to_string();
         let emp = login_change_pw(&app, "emp-2@example.com", &emp_pw).await;
         let lead = login_change_pw(&app, "lead-2@example.com", &lead_pw).await;
 
@@ -63,8 +64,8 @@ async fn notifications_full_workflow() {
                 "/api/v1/absences",
                 &json!({
                     "kind": "vacation",
-                    "start_date": monday_iso,
-                    "end_date": monday_iso,
+                    "start_date": future_monday_iso,
+                    "end_date": future_monday_iso,
                     "comment": "need a day off"
                 }),
             )
@@ -81,6 +82,226 @@ async fn notifications_full_workflow() {
                 .any(|item| item["kind"] == "absence_requested"),
             "lead received absence request notification"
         );
+    }
+
+    // -- Multiple approvers (including non-admin leads) all get notifications --
+    {
+        let (lead_one_id, lead_one_pw, emp_id, emp_pw, monday_iso, cat_id) =
+            bootstrap_team_with_suffix(&app, &admin, false, "multi").await;
+        let future_monday_iso = next_monday(21).format("%Y-%m-%d").to_string();
+
+        let (st, body) = admin
+            .post(
+                "/api/v1/users",
+                &json!({
+                    "email":"lead-multi-two@example.com",
+                    "first_name":"LaraTwo",
+                    "last_name":"Lead",
+                    "role":"team_lead",
+                    "weekly_hours":39,
+                    "leave_days_current_year":30,
+                    "leave_days_next_year":30,
+                    "start_date":"2024-01-01",
+                    "approver_ids":[1]
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "create second lead approver");
+        let lead_two_id = id(&body);
+        let lead_two_pw = temp_pw(&body);
+
+        let (st, _) = admin
+            .put(
+                &format!("/api/v1/users/{emp_id}"),
+                &json!({"approver_ids": [lead_one_id, lead_two_id]}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "assign two approvers to employee");
+
+        let emp = login_change_pw(&app, "emp-multi@example.com", &emp_pw).await;
+        let lead_one = login_change_pw(&app, "lead-multi@example.com", &lead_one_pw).await;
+        let lead_two = login_change_pw(&app, "lead-multi-two@example.com", &lead_two_pw).await;
+
+        let _ = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
+
+        let (st, lead_one_notifications) = lead_one.get("/api/v1/notifications").await;
+        assert_eq!(st, StatusCode::OK, "lead one notifications after timesheet submit");
+        assert!(
+            lead_one_notifications
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|item| item["kind"] == "timesheet_submitted"),
+            "lead one received timesheet_submitted"
+        );
+
+        let (st, lead_two_notifications) = lead_two.get("/api/v1/notifications").await;
+        assert_eq!(st, StatusCode::OK, "lead two notifications after timesheet submit");
+        assert!(
+            lead_two_notifications
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|item| item["kind"] == "timesheet_submitted"),
+            "lead two received timesheet_submitted"
+        );
+
+        let (st, absence) = emp
+            .post(
+                "/api/v1/absences",
+                &json!({
+                    "kind": "vacation",
+                    "start_date": future_monday_iso,
+                    "end_date": future_monday_iso,
+                    "comment": "multi approver test"
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "create absence for multi approver test");
+        assert_eq!(absence["status"], "requested");
+
+        let (st, lead_one_notifications) = lead_one.get("/api/v1/notifications").await;
+        assert_eq!(st, StatusCode::OK, "lead one notifications after absence request");
+        assert!(
+            lead_one_notifications
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|item| item["kind"] == "absence_requested"),
+            "lead one received absence_requested"
+        );
+
+        let (st, lead_two_notifications) = lead_two.get("/api/v1/notifications").await;
+        assert_eq!(st, StatusCode::OK, "lead two notifications after absence request");
+        assert!(
+            lead_two_notifications
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|item| item["kind"] == "absence_requested"),
+            "lead two received absence_requested"
+        );
+    }
+
+    // -- Admin gets notifications only when explicitly assigned as approver --
+    {
+        let (_lead_id, _lead_pw, emp_id, emp_pw, monday_iso, cat_id) =
+            bootstrap_team_with_suffix(&app, &admin, false, "admin-approver").await;
+        let future_monday_iso = next_monday(21).format("%Y-%m-%d").to_string();
+
+        let (st, body) = admin
+            .post(
+                "/api/v1/users",
+                &json!({
+                    "email":"admin-a@example.com",
+                    "first_name":"AdminA",
+                    "last_name":"User",
+                    "role":"admin",
+                    "weekly_hours":39,
+                    "leave_days_current_year":30,
+                    "leave_days_next_year":30,
+                    "start_date":"2024-01-01",
+                    "approver_ids":[]
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "create admin A");
+        let admin_a_id = id(&body);
+        let admin_a_pw = temp_pw(&body);
+
+        let (st, body) = admin
+            .post(
+                "/api/v1/users",
+                &json!({
+                    "email":"admin-b@example.com",
+                    "first_name":"AdminB",
+                    "last_name":"User",
+                    "role":"admin",
+                    "weekly_hours":39,
+                    "leave_days_current_year":30,
+                    "leave_days_next_year":30,
+                    "start_date":"2024-01-01",
+                    "approver_ids":[]
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "create admin B");
+        let admin_b_id = id(&body);
+        let admin_b_pw = temp_pw(&body);
+
+        let (st, _) = admin
+            .put(
+                &format!("/api/v1/users/{emp_id}"),
+                &json!({"approver_ids": [admin_a_id]}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "assign only admin A as approver");
+
+        let emp = login_change_pw(&app, "emp-admin-approver@example.com", &emp_pw).await;
+        let admin_a = login_change_pw(&app, "admin-a@example.com", &admin_a_pw).await;
+        let admin_b = login_change_pw(&app, "admin-b@example.com", &admin_b_pw).await;
+
+        let _ = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
+
+        let (st, admin_a_notifications) = admin_a.get("/api/v1/notifications").await;
+        assert_eq!(st, StatusCode::OK, "admin A notifications after timesheet submit");
+        assert!(
+            admin_a_notifications
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|item| item["kind"] == "timesheet_submitted"),
+            "assigned admin received timesheet_submitted"
+        );
+
+        let (st, admin_b_notifications) = admin_b.get("/api/v1/notifications").await;
+        assert_eq!(st, StatusCode::OK, "admin B notifications after timesheet submit");
+        assert!(
+            !admin_b_notifications
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|item| item["kind"] == "timesheet_submitted"),
+            "unassigned admin did not receive timesheet_submitted"
+        );
+
+        let (st, absence) = emp
+            .post(
+                "/api/v1/absences",
+                &json!({
+                    "kind": "vacation",
+                    "start_date": future_monday_iso,
+                    "end_date": future_monday_iso,
+                    "comment": "admin approver notification test"
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "create absence for admin approver notification test");
+        assert_eq!(absence["status"], "requested");
+
+        let (st, admin_a_notifications) = admin_a.get("/api/v1/notifications").await;
+        assert_eq!(st, StatusCode::OK, "admin A notifications after absence request");
+        assert!(
+            admin_a_notifications
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|item| item["kind"] == "absence_requested"),
+            "assigned admin received absence_requested"
+        );
+
+        let (st, admin_b_notifications) = admin_b.get("/api/v1/notifications").await;
+        assert_eq!(st, StatusCode::OK, "admin B notifications after absence request");
+        assert!(
+            !admin_b_notifications
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|item| item["kind"] == "absence_requested"),
+            "unassigned admin did not receive absence_requested"
+        );
+
+        let _ = admin_b_id;
     }
 
     // -- Change request creation notifies approver --
@@ -123,8 +344,9 @@ async fn notifications_full_workflow() {
         let app2 = TestApp::spawn_with_public_url("https://test.example.com").await;
         let admin2 = admin_login(&app2).await;
 
-        let (_lead_id, lead_pw, _emp_id, emp_pw, monday_iso, _cat_id) =
+        let (_lead_id, lead_pw, _emp_id, emp_pw, _monday_iso, _cat_id) =
             bootstrap_team_with_suffix(&app2, &admin2, false, "3").await;
+        let future_monday_iso = next_monday(21).format("%Y-%m-%d").to_string();
         let emp = login_change_pw(&app2, "emp-3@example.com", &emp_pw).await;
         let lead = login_change_pw(&app2, "lead-3@example.com", &lead_pw).await;
 
@@ -133,8 +355,8 @@ async fn notifications_full_workflow() {
                 "/api/v1/absences",
                 &serde_json::json!({
                     "kind": "vacation",
-                    "start_date": monday_iso,
-                    "end_date": monday_iso,
+                    "start_date": future_monday_iso,
+                    "end_date": future_monday_iso,
                 }),
             )
             .await;

@@ -1,9 +1,9 @@
 <script>
   import { onMount } from "svelte";
   import { api } from "../api.js";
-  import { currentUser } from "../stores.js";
+  import { currentUser, settings } from "../stores.js";
   import { t } from "../i18n.js";
-  import { isoDate } from "../format.js";
+  import { appTodayIsoDate } from "../format.js";
   import Icon from "../Icons.svelte";
   import DatePicker from "../DatePicker.svelte";
 
@@ -12,10 +12,22 @@
   let dlg;
   $: isNew = !template.id;
   let kind = template.kind || "vacation";
-  let start_date = template.start_date || isoDate(new Date());
-  let end_date = template.end_date || isoDate(new Date());
+  let todayIso = appTodayIsoDate($settings?.timezone);
+  let lastTodayIso = todayIso;
+  let start_date = template.start_date || todayIso;
+  let end_date = template.end_date || todayIso;
   let comment = template.comment || "";
   let error = "";
+
+  // Keep untouched defaults aligned with app timezone changes.
+  $: todayIso = appTodayIsoDate($settings?.timezone);
+  $: if (isNew && !template.start_date && start_date === lastTodayIso && todayIso !== lastTodayIso) {
+    start_date = todayIso;
+  }
+  $: if (isNew && !template.end_date && end_date === lastTodayIso && todayIso !== lastTodayIso) {
+    end_date = todayIso;
+  }
+  $: lastTodayIso = todayIso;
 
   $: if (start_date && end_date && start_date > end_date) {
     end_date = start_date;

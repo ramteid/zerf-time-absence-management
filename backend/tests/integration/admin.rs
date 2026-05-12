@@ -12,7 +12,7 @@ async fn admin_full_workflow() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
 
-    // -- Self submission is visible and notifies admin --
+    // -- Self submission is visible, but does not self-notify without an explicit approver --
     {
         let (_, body) = admin.get("/api/v1/categories").await;
         let cat_id = body.as_array().unwrap()[0]["id"].as_i64().unwrap();
@@ -27,11 +27,11 @@ async fn admin_full_workflow() {
         let (st, body) = admin.get("/api/v1/notifications").await;
         assert_eq!(st, StatusCode::OK, "admin notifications");
         assert!(
-            body.as_array()
+            !body.as_array()
                 .unwrap()
                 .iter()
                 .any(|item| item["kind"] == "timesheet_submitted"),
-            "admin received self-submission notification"
+            "admin without explicit approver must not receive self-submission notification"
         );
 
         let (st, body) = admin.get("/api/v1/time-entries/all?status=submitted").await;

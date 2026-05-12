@@ -1,9 +1,5 @@
 use crate::error::{AppError, AppResult};
-use chrono::{Local, NaiveDate, NaiveTime};
-
-pub fn today_local() -> NaiveDate {
-    Local::now().date_naive()
-}
+use chrono::NaiveTime;
 
 pub fn parse_hhmm_or_hhmmss(value: &str) -> Option<NaiveTime> {
     NaiveTime::parse_from_str(value, "%H:%M")

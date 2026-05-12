@@ -59,9 +59,8 @@ impl ChangeRequestDb {
         Ok(sqlx::query_as::<_, ChangeRequest>(&format!(
             "{CR_SELECT} WHERE status='open' \
              AND user_id IN (\
-               SELECT ua.user_id FROM user_approvers ua \
-               JOIN users u ON u.id = ua.user_id \
-               WHERE ua.approver_id=$1 AND u.role!='admin'\
+                             SELECT ua.user_id FROM user_approvers ua \
+                             WHERE ua.approver_id=$1\
              ) ORDER BY created_at"
         ))
         .bind(lead_id)
@@ -219,16 +218,16 @@ impl ChangeRequestDb {
         .rows_affected())
     }
 
-    /// Check that `subject_id` is a non-admin direct report of `approver_id`.
+    /// Check that `approver_id` is explicitly assigned to `subject_id`, and subject is non-admin.
     pub async fn is_direct_report_for_update(
         tx: &mut sqlx::PgConnection,
         subject_id: i64,
         approver_id: i64,
     ) -> AppResult<bool> {
         Ok(sqlx::query_scalar::<_, Option<bool>>(
-            "SELECT TRUE FROM users u \
-             WHERE u.id=$1 AND u.role!='admin' \
-             AND EXISTS (SELECT 1 FROM user_approvers ua WHERE ua.user_id=$1 AND ua.approver_id=$2) \
+            "SELECT TRUE FROM user_approvers ua \
+             WHERE ua.user_id=$1 AND ua.approver_id=$2 \
+             AND EXISTS (SELECT 1 FROM users u WHERE u.id=$1 AND u.role != 'admin') \
              FOR UPDATE",
         )
         .bind(subject_id)

@@ -20,10 +20,6 @@ fn absence_removes_target(kind: &str) -> bool {
     kind != FLEXTIME_REDUCTION_KIND
 }
 
-fn reporting_today() -> NaiveDate {
-    time_calc::today_local()
-}
-
 /// Verify that `requester` is allowed to read data for `target_uid`.
 /// Admins may access any user. Non-admin leads may only access their direct
 /// reports (users whose `approver_id` matches the lead's id). Every user may
@@ -167,7 +163,7 @@ async fn build_range(
         .ok_or(AppError::NotFound)?;
     let user = crate::users::repo_user_to_auth_user(repo_user);
     let target_per_day_min = target_minutes_per_day(user.weekly_hours, user.workdays_per_week);
-    let today = reporting_today();
+    let today = crate::settings::app_today(pool).await;
 
     let reports_db = crate::repository::ReportDb::new(pool.clone());
 
@@ -256,7 +252,7 @@ async fn build_range(
                 // The DB schema does not constrain the text format.
                 let entry_minutes =
                     (parse_report_time(end_time)? - parse_report_time(start_time)?).num_minutes();
-                // Only approved entries count towards actual hours and the monthly diff.
+                // Actual work uses approved, crediting entries only.
                 if *counts_as_work && status == "approved" {
                     actual += entry_minutes;
                 }
@@ -596,7 +592,7 @@ async fn all_weeks_submitted_for_month(
     user_start_date: NaiveDate,
     workdays_per_week: i16,
 ) -> AppResult<bool> {
-    let today = reporting_today();
+    let today = crate::settings::app_today(pool).await;
 
     // Compute the Monday of the first and last week touched by the month.
     // Monday of the week in which the first day of the month falls.
@@ -639,20 +635,21 @@ async fn all_weeks_submitted_for_month(
         .await?;
     let absent_days = expand_absence_date_set(&absence_rows, check_from, check_to);
 
-    // Load submitted/approved time entry dates. Draft days are not submitted.
+    // Load submitted/approved time entry dates.
     let submitted_dates = reports_db
         .submitted_dates_in_range(user_id, check_from, check_to)
         .await?;
-    // A day with a draft alongside a submitted entry is not fully submitted.
-    let draft_dates = reports_db
-        .draft_dates_in_range(user_id, check_from, check_to)
+    // Any non submitted/approved entry (draft, rejected, etc.) keeps a day incomplete,
+    // even when the same day also has submitted entries.
+    let incomplete_dates = reports_db
+        .incomplete_dates_in_range(user_id, check_from, check_to)
         .await?;
 
     // Check each fully elapsed week.
     // For each complete week, check that all contract workdays are submitted.
     // A contract workday must be covered by either:
     //   1. An approved/cancellation_pending absence, OR
-    //   2. A submitted/approved time entry (with no draft conflicts)
+    //   2. A submitted/approved time entry (with no incomplete conflicts)
     for &week_monday in &complete_week_mondays {
         // Iterate only the first workdays_per_week days of the week (skip non-contract days)
         // Check only contract workdays in this week (first workdays_per_week days).
@@ -674,9 +671,9 @@ async fn all_weeks_submitted_for_month(
             }
 
             // Every working day must be covered by a target-removing absence OR a submitted entry with no
-            // outstanding drafts.
+            // outstanding incomplete entries.
             let submitted_and_clean =
-                submitted_dates.contains(&day) && !draft_dates.contains(&day);
+                submitted_dates.contains(&day) && !incomplete_dates.contains(&day);
             if !absent_days.contains(&day) && !submitted_and_clean {
                 return Ok(false);
             }
@@ -705,7 +702,7 @@ pub async fn team(
         .map(crate::users::repo_user_to_auth_user)
         .collect();
 
-    let today = reporting_today();
+    let today = crate::settings::app_today(&app_state.pool).await;
     let (month_start, month_end) = month_bounds(&query.month)?;
 
     // Vacation split for the selected month:
@@ -890,7 +887,7 @@ pub async fn categories(
 ) -> AppResult<Json<Vec<CategoryTotal>>> {
     validate_range(query.from, query.to)?;
     // Clamp to today so category reports include current-day entries but no future dates.
-    let effective_to = query.to.min(reporting_today());
+    let effective_to = query.to.min(crate::settings::app_today(&app_state.pool).await);
     if query.from > effective_to {
         return Ok(Json(Vec::new()));
     }
@@ -903,14 +900,14 @@ pub async fn categories(
         // No specific user requested: only leads may see aggregated team data.
         return Err(AppError::Forbidden);
     }
-    // The category breakdown shows booked time, not only approved work time.
+    // Category reports are work-time reports: only crediting categories count.
     // Rejected entries are excluded; effective_to ensures dates are bounded to today.
     let mut builder = QueryBuilder::<Postgres>::new(
         "SELECT c.name, c.color, z.start_time, z.end_time \
          FROM time_entries z \
          JOIN users u ON u.id=z.user_id \
          JOIN categories c ON c.id=z.category_id \
-            WHERE z.status != 'rejected' AND c.counts_as_work = TRUE AND z.entry_date >= u.start_date \
+                WHERE z.status != 'rejected' AND c.counts_as_work = TRUE AND z.entry_date >= u.start_date \
          AND z.entry_date BETWEEN ",
     );
     builder
@@ -924,9 +921,9 @@ pub async fn categories(
         builder
             .push(" AND z.user_id IN (SELECT id FROM users WHERE id = ")
             .push_bind(requester.id)
-            .push(" OR (role != 'admin' AND id IN (SELECT user_id FROM user_approvers WHERE approver_id = ")
+            .push(" OR id IN (SELECT user_id FROM user_approvers WHERE approver_id = ")
             .push_bind(requester.id)
-            .push(")))");
+            .push("))");
     }
     let rows: Vec<(String, String, String, String)> =
         builder.build_query_as().fetch_all(&app_state.pool).await?;
@@ -961,7 +958,7 @@ pub async fn team_categories(
     }
     validate_range(query.from, query.to)?;
     // Clamp to today so team category reports include current-day entries.
-    let effective_to = query.to.min(reporting_today());
+    let effective_to = query.to.min(crate::settings::app_today(&app_state.pool).await);
     if query.from > effective_to {
         return Ok(Json(Vec::new()));
     }
@@ -973,7 +970,7 @@ pub async fn team_categories(
         user_builder
             .push(" AND (id = ")
             .push_bind(requester.id)
-            .push(" OR (role != 'admin' AND id IN (SELECT user_id FROM user_approvers WHERE approver_id = ")
+            .push(" OR id IN (SELECT user_id FROM user_approvers WHERE approver_id = ")
             .push_bind(requester.id)
             .push(")))");
     }
@@ -983,14 +980,14 @@ pub async fn team_categories(
         .fetch_all(&app_state.pool)
         .await?;
 
-    // Same as the individual breakdown: include every booked, non-rejected entry
-    // up to today, including drafts and submitted entries.
+    // Same as the individual breakdown: only work-crediting, non-rejected entries
+    // up to today, regardless of draft/submitted/approved state.
     let mut entry_builder = QueryBuilder::<Postgres>::new(
         "SELECT z.user_id, c.name, c.color, z.start_time, z.end_time \
          FROM time_entries z \
          JOIN users u ON u.id=z.user_id \
          JOIN categories c ON c.id=z.category_id \
-            WHERE z.status != 'rejected' AND c.counts_as_work = TRUE AND z.entry_date >= u.start_date \
+                WHERE z.status != 'rejected' AND c.counts_as_work = TRUE AND z.entry_date >= u.start_date \
          AND z.entry_date BETWEEN ",
     );
     entry_builder
@@ -1001,9 +998,9 @@ pub async fn team_categories(
         entry_builder
             .push(" AND z.user_id IN (SELECT id FROM users WHERE id = ")
             .push_bind(requester.id)
-            .push(" OR (role != 'admin' AND id IN (SELECT user_id FROM user_approvers WHERE approver_id = ")
+            .push(" OR id IN (SELECT user_id FROM user_approvers WHERE approver_id = ")
             .push_bind(requester.id)
-            .push(")))");
+            .push("))");
     }
     let rows: Vec<(i64, String, String, String, String)> = entry_builder
         .build_query_as()
@@ -1056,14 +1053,14 @@ async fn build_overtime_rows_for_year(
     target_user_id: i64,
     year: i32,
 ) -> AppResult<Vec<MonthRow>> {
-    let now = chrono::Local::now();
-    let current_year = now.year();
+    let today = crate::settings::app_today(pool).await;
+    let current_year = today.year();
     // Cap the loop so future months (with zero actuals but full targets) do not
     // produce large artificial deficits in the cumulative balance.
     let max_month: u32 = if year < current_year {
         12
     } else if year == current_year {
-        now.month()
+        today.month()
     } else {
         // Future year - nothing has been worked yet.
         return Ok(vec![]);
@@ -1131,9 +1128,9 @@ async fn cumulative_at_month_end(
         return Ok(overtime_start_balance_min);
     }
 
-    let now = chrono::Local::now();
-    let current_year = now.year();
-    let current_month = now.month();
+    let today = crate::settings::app_today(pool).await;
+    let current_year = today.year();
+    let current_month = today.month();
 
     let rows = build_overtime_rows_for_year(pool, target_user_id, year.min(current_year)).await?;
     if rows.is_empty() {
@@ -1171,7 +1168,10 @@ pub async fn overtime(
 ) -> AppResult<Json<Vec<MonthRow>>> {
     let target_user_id = query.user_id.unwrap_or(requester.id);
     assert_can_access_user(&app_state, &requester, target_user_id).await?;
-    let year = query.year.unwrap_or_else(|| chrono::Local::now().year());
+    let year = match query.year {
+        Some(y) => y,
+        None => crate::settings::app_current_year(&app_state.pool).await,
+    };
     Ok(Json(
         build_overtime_rows_for_year(&app_state.pool, target_user_id, year).await?,
     ))
@@ -1272,14 +1272,14 @@ pub async fn flextime(
         .flextime_entries(target_user_id, query.from, query.to)
         .await?;
 
-    let mut approved_minutes_by_day: HashMap<NaiveDate, i64> = HashMap::new();
+    let mut approved_crediting_minutes_by_day: HashMap<NaiveDate, i64> = HashMap::new();
     for (entry_date, start_time, end_time, status, counts_as_work) in time_entries_raw {
-        if status != "approved" || !counts_as_work {
+        if !counts_as_work || status != "approved" {
             continue;
         }
         let minutes =
             (parse_report_time(&end_time)? - parse_report_time(&start_time)?).num_minutes();
-        *approved_minutes_by_day.entry(entry_date).or_insert(0) += minutes;
+        *approved_crediting_minutes_by_day.entry(entry_date).or_insert(0) += minutes;
     }
 
     let approved_absences = app_state
@@ -1314,7 +1314,7 @@ pub async fn flextime(
         })
         .collect();
 
-    let today = reporting_today();
+    let today = crate::settings::app_today(&app_state.pool).await;
     let mut flextime_days = vec![];
     let mut current_date = query.from;
     while current_date <= query.to {
@@ -1340,7 +1340,10 @@ pub async fn flextime(
         let actual = if before_start || after_today {
             0
         } else {
-            approved_minutes_by_day.get(&current_date).copied().unwrap_or(0)
+            approved_crediting_minutes_by_day
+                .get(&current_date)
+                .copied()
+                .unwrap_or(0)
         };
         let day_diff_min = actual - target;
         cumulative_min += day_diff_min;

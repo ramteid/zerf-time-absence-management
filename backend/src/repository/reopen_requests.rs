@@ -62,9 +62,9 @@ impl ReopenRequestDb {
         Ok(sqlx::query_as::<_, ReopenRequest>(&format!(
             "{RR_SELECT} WHERE status='pending' \
              AND user_id IN (\
-               SELECT ua.user_id FROM user_approvers ua \
-               JOIN users u ON u.id = ua.user_id \
-               WHERE ua.approver_id=$1 AND u.role!='admin'\
+                 SELECT ua.user_id FROM user_approvers ua \
+                 JOIN users u ON u.id = ua.user_id \
+                 WHERE ua.approver_id=$1 AND u.active=TRUE AND u.role != 'admin'\
              ) ORDER BY created_at"
         ))
         .bind(lead_id)
@@ -78,12 +78,13 @@ impl ReopenRequestDb {
         week_start: NaiveDate,
         week_end: NaiveDate,
     ) -> AppResult<i64> {
-        Ok(sqlx::query_scalar(
-            "SELECT COUNT(*) FROM time_entries te
-             JOIN categories c ON c.id = te.category_id
-             WHERE te.user_id=$1 AND te.entry_date BETWEEN $2 AND $3 
-             AND te.status<>'draft' AND c.counts_as_work = TRUE",
-        )
+                Ok(sqlx::query_scalar(
+                    "SELECT COUNT(*) FROM time_entries te \
+                     JOIN categories c ON c.id = te.category_id \
+                     WHERE te.user_id=$1 AND te.entry_date BETWEEN $2 AND $3 \
+                     AND c.counts_as_work = TRUE \
+                     AND te.status IN ('submitted','approved')",
+                )
         .bind(user_id)
         .bind(week_start)
         .bind(week_end)
@@ -104,16 +105,6 @@ impl ReopenRequestDb {
         .bind(week_start)
         .fetch_optional(&self.pool)
         .await?)
-    }
-
-    pub async fn get_all_admin_ids(&self) -> AppResult<Vec<i64>> {
-        Ok(
-            sqlx::query_scalar::<_, i64>(
-                "SELECT id FROM users WHERE active=TRUE AND role='admin'",
-            )
-            .fetch_all(&self.pool)
-            .await?,
-        )
     }
 
     pub async fn get_user_full_name(&self, user_id: i64) -> AppResult<String> {
@@ -248,7 +239,7 @@ impl ReopenRequestDb {
 
     // ── Internal: perform the actual reopen within a transaction ──────────
 
-    /// Apply open change requests for all non-draft entries in
+    /// Apply open change requests for all submitted/approved entries in
     /// `week_start..week_start+6`, then reset those entries to draft.
     /// Returns the list of (entry_id, previous_status) that were changed.
     pub async fn perform_reopen(
@@ -258,12 +249,14 @@ impl ReopenRequestDb {
         week_start: NaiveDate,
     ) -> AppResult<Vec<(i64, String)>> {
         let week_end = week_start + chrono::Duration::days(6);
-        let affected: Vec<(i64, String)> = sqlx::query_as(
-            "SELECT id, status FROM time_entries \
-             WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3 AND status<>'draft' \
-             AND category_id IN (SELECT id FROM categories WHERE counts_as_work = TRUE) \
-             FOR UPDATE",
-        )
+                let affected: Vec<(i64, String)> = sqlx::query_as(
+                "SELECT te.id, te.status FROM time_entries te \
+                 JOIN categories c ON c.id = te.category_id \
+                 WHERE te.user_id=$1 AND te.entry_date BETWEEN $2 AND $3 \
+                 AND c.counts_as_work = TRUE \
+                 AND te.status IN ('submitted','approved') \
+                 FOR UPDATE",
+                )
         .bind(subject_id)
         .bind(week_start)
         .bind(week_end)

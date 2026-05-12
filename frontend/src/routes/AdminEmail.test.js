@@ -12,6 +12,8 @@ const mockState = vi.hoisted(() => ({
     smtp_from: "noreply@example.com",
     smtp_encryption: "starttls",
     smtp_password_set: true,
+    submission_reminders_enabled: true,
+    approval_reminders_enabled: true,
   },
 }));
 
@@ -112,5 +114,24 @@ describe("AdminEmail", () => {
     );
     expect(saveCall).toBeTruthy();
     expect(saveCall[1].body.submission_reminders_enabled).toBe(true);
+  });
+
+  it("includes approval_reminders_enabled in the save body", async () => {
+    mockState.settings = { ...mockState.settings, approval_reminders_enabled: true };
+    component = mount(AdminEmail, { target });
+    await settle();
+
+    const saveBtn = [...target.querySelectorAll("button")].find(
+      (b) => b.textContent.trim() === "Save",
+    );
+    expect(saveBtn).not.toBeNull();
+    saveBtn.click();
+    await settle();
+
+    const saveCall = apiMock.mock.calls.find(
+      ([path, opts]) => path === "/settings/smtp" && opts?.method === "PUT",
+    );
+    expect(saveCall).toBeTruthy();
+    expect(saveCall[1].body.approval_reminders_enabled).toBe(true);
   });
 });

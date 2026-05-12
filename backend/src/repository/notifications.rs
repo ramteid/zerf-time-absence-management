@@ -86,9 +86,31 @@ impl NotificationDb {
         reference_type: Option<&str>,
         reference_id: Option<i64>,
     ) -> AppResult<bool> {
+        self.insert_idempotent_with_dedupe_key(
+            user_id,
+            kind,
+            title,
+            body,
+            reference_type,
+            reference_id,
+            None,
+        )
+        .await
+    }
+
+    pub async fn insert_idempotent_with_dedupe_key(
+        &self,
+        user_id: i64,
+        kind: &str,
+        title: &str,
+        body: &str,
+        reference_type: Option<&str>,
+        reference_id: Option<i64>,
+        dedupe_key: Option<&str>,
+    ) -> AppResult<bool> {
         let result = sqlx::query(
-            "INSERT INTO notifications(user_id,kind,title,body,reference_type,reference_id) \
-             VALUES ($1,$2,$3,$4,$5,$6) \
+            "INSERT INTO notifications(user_id,kind,title,body,reference_type,reference_id,dedupe_key) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7) \
              ON CONFLICT DO NOTHING",
         )
         .bind(user_id)
@@ -97,6 +119,7 @@ impl NotificationDb {
         .bind(body)
         .bind(reference_type)
         .bind(reference_id)
+        .bind(dedupe_key)
         .execute(&self.pool)
         .await?;
         Ok(result.rows_affected() > 0)

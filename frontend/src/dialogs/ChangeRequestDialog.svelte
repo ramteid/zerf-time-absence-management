@@ -1,9 +1,9 @@
 <script>
   import { onMount } from "svelte";
   import { api } from "../api.js";
-  import { categories, toast } from "../stores.js";
+  import { categories, settings, toast } from "../stores.js";
   import { t } from "../i18n.js";
-  import { isoDate } from "../format.js";
+  import { appTodayIsoDate } from "../format.js";
   import { buildChangeRequestPayload } from "../changeRequests.js";
   import Icon from "../Icons.svelte";
   import DatePicker from "../DatePicker.svelte";
@@ -13,13 +13,16 @@
   export let onClose;
   let dlg;
   let _closed = false;
-  let entry_date = entry.entry_date || isoDate(new Date());
+  let todayIso = appTodayIsoDate($settings?.timezone);
+  let entry_date = entry.entry_date || todayIso;
   let start_time = entry.start_time?.slice(0, 5) || "08:00";
   let end_time = entry.end_time?.slice(0, 5) || "12:00";
   let category_id = entry.category_id ?? $categories[0]?.id ?? null;
   let comment = entry.comment || "";
   let reason = "";
   let error = "";
+
+  $: todayIso = appTodayIsoDate($settings?.timezone);
 
   $: if (start_time && end_time && start_time > end_time) {
     end_time = start_time;
@@ -87,7 +90,7 @@
       <DatePicker
         id="change-request-date"
         bind:value={entry_date}
-        max={isoDate(new Date())}
+        max={todayIso}
         container={dlg}
       />
     </div>

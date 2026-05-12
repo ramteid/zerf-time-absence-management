@@ -1,9 +1,9 @@
 <script>
   import { onMount } from "svelte";
   import { api } from "../api.js";
-  import { toast } from "../stores.js";
+  import { settings, toast } from "../stores.js";
   import { t } from "../i18n.js";
-  import { isoDate } from "../format.js";
+  import { appTodayDate, appTodayIsoDate } from "../format.js";
   import Icon from "../Icons.svelte";
   import DatePicker from "../DatePicker.svelte";
 
@@ -18,12 +18,14 @@
   let role = template.role || "employee";
   let weekly_hours = template.weekly_hours ?? 39;
   let workdays_per_week = template.workdays_per_week ?? 5;
-  const _thisYear = new Date().getFullYear();
-  const _nextYear = _thisYear + 1;
+  $: _thisYear = appTodayDate($settings?.timezone).getFullYear();
+  $: _nextYear = _thisYear + 1;
   // Leave days — two explicit fields (current year + next year)
   let leave_days_current_year = 30;
   let leave_days_next_year = 30;
-  let start_date = template.start_date || isoDate(new Date());
+  let todayIso = appTodayIsoDate($settings?.timezone);
+  let lastTodayIso = todayIso;
+  let start_date = template.start_date || todayIso;
   let overtime_start_balance_hours =
     (template.overtime_start_balance_min || 0) / 60;
   let approver_ids = Array.isArray(template.approver_ids) ? template.approver_ids.map(Number) : [];
@@ -37,6 +39,13 @@
   let confirmPassword = "";
   let showTempPassword = null;
   let smtpEnabled = false;
+
+  // Keep untouched start-date default aligned with timezone changes.
+  $: todayIso = appTodayIsoDate($settings?.timezone);
+  $: if (isNew && !template.start_date && start_date === lastTodayIso && todayIso !== lastTodayIso) {
+    start_date = todayIso;
+  }
+  $: lastTodayIso = todayIso;
 
   function secureIndex(max) {
     const buf = new Uint32Array(1);

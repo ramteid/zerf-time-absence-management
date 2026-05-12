@@ -104,7 +104,7 @@ impl UserDb {
     pub async fn find_for_approver(&self, approver_id: i64) -> AppResult<Vec<User>> {
         Ok(sqlx::query_as::<_, User>(&format!(
             "{USER_SELECT} WHERE id=$1 \
-             OR (id IN (SELECT user_id FROM user_approvers WHERE approver_id=$1) AND role!='admin') \
+             OR id IN (SELECT ua.user_id FROM user_approvers ua WHERE ua.approver_id=$1) \
              ORDER BY last_name, first_name"
         ))
         .bind(approver_id)
@@ -123,8 +123,8 @@ impl UserDb {
     pub async fn find_active_team_for_lead(&self, lead_id: i64) -> AppResult<Vec<User>> {
         Ok(sqlx::query_as::<_, User>(&format!(
             "{USER_SELECT} WHERE active=TRUE \
-             AND (id=$1 OR id IN (SELECT user_id FROM user_approvers WHERE approver_id=$1)) \
-             AND role!='admin' ORDER BY last_name"
+             AND (id=$1 OR id IN (SELECT ua.user_id FROM user_approvers ua WHERE ua.approver_id=$1)) \
+             ORDER BY last_name"
         ))
         .bind(lead_id)
         .fetch_all(&self.pool)
@@ -158,11 +158,11 @@ impl UserDb {
         .await?)
     }
 
-    pub async fn count_non_admin_direct_reports(&self, user_id: i64) -> AppResult<i64> {
+    pub async fn count_direct_reports(&self, user_id: i64) -> AppResult<i64> {
         Ok(sqlx::query_scalar(
             "SELECT COUNT(*) FROM user_approvers \
              WHERE approver_id=$1 \
-             AND user_id IN (SELECT id FROM users WHERE active=TRUE AND role!='admin')",
+             AND user_id IN (SELECT id FROM users WHERE active=TRUE)",
         )
         .bind(user_id)
         .fetch_one(&self.pool)
@@ -219,8 +219,8 @@ impl UserDb {
     ) -> AppResult<bool> {
         Ok(sqlx::query_scalar::<_, Option<bool>>(
             "SELECT TRUE FROM user_approvers ua \
-             JOIN users u ON u.id = ua.user_id \
-             WHERE ua.user_id=$1 AND ua.approver_id=$2 AND u.role!='admin'",
+             WHERE ua.user_id=$1 AND ua.approver_id=$2 \
+             AND EXISTS (SELECT 1 FROM users u WHERE u.id=$1 AND u.role != 'admin')",
         )
         .bind(target_id)
         .bind(approver_id)
@@ -230,23 +230,7 @@ impl UserDb {
         .is_some())
     }
 
-    pub async fn get_primary_admin_id(&self) -> AppResult<Option<i64>> {
-        Ok(sqlx::query_scalar::<_, i64>(
-            "SELECT id FROM users WHERE active=TRUE AND role='admin' ORDER BY id LIMIT 1",
-        )
-        .fetch_optional(&self.pool)
-        .await?)
-    }
 
-    pub async fn get_all_admin_ids(&self) -> AppResult<Vec<i64>> {
-        Ok(
-            sqlx::query_scalar::<_, i64>(
-                "SELECT id FROM users WHERE active=TRUE AND role='admin'",
-            )
-            .fetch_all(&self.pool)
-            .await?,
-        )
-    }
 
     pub async fn get_start_date(&self, user_id: i64) -> AppResult<NaiveDate> {
         Ok(
@@ -329,7 +313,7 @@ impl UserDb {
             "SELECT id, email, first_name, last_name, role, \
              allow_reopen_without_approval FROM users \
              WHERE active=TRUE \
-             AND (id=$1 OR (id IN (SELECT user_id FROM user_approvers WHERE approver_id=$1) AND role!='admin')) \
+             AND (id=$1 OR id IN (SELECT ua.user_id FROM user_approvers ua WHERE ua.approver_id=$1)) \
              ORDER BY last_name, first_name",
         )
         .bind(lead_id)
@@ -347,7 +331,7 @@ impl UserDb {
                 "SELECT TRUE FROM user_approvers ua \
                  JOIN users u ON u.id = ua.user_id \
                  WHERE ua.user_id=$1 AND ua.approver_id=$2 \
-                 AND u.active=TRUE AND u.role!='admin'",
+                 AND u.active=TRUE AND u.role != 'admin'",
             )
             .bind(target_id)
             .bind(approver_id)
@@ -517,13 +501,7 @@ impl UserDb {
             .execute(&mut *tx)
             .await?;
         for &aid in approver_ids {
-            sqlx::query(
-                "INSERT INTO user_approvers(user_id, approver_id) VALUES ($1, $2)",
-            )
-            .bind(user_id)
-            .bind(aid)
-            .execute(&mut *tx)
-            .await?;
+            Self::insert_approver_tx(&mut *tx, user_id, aid).await?;
         }
         Ok(())
     }
@@ -534,13 +512,28 @@ impl UserDb {
         user_id: i64,
         approver_id: i64,
     ) -> AppResult<()> {
-        sqlx::query(
-            "INSERT INTO user_approvers(user_id, approver_id) VALUES ($1, $2)",
+        let rows = sqlx::query(
+            "INSERT INTO user_approvers(user_id, approver_id) \
+             SELECT $1, $2 \
+             WHERE EXISTS ( \
+                SELECT 1 FROM users subject, users approver \
+                WHERE subject.id = $1 AND approver.id = $2 AND approver.active = TRUE \
+                AND ( \
+                    (subject.role = 'admin' AND approver.role = 'admin') OR \
+                    (subject.role != 'admin' AND approver.role IN ('team_lead', 'admin')) \
+                ) \
+             )",
         )
         .bind(user_id)
         .bind(approver_id)
         .execute(tx)
         .await?;
+        if rows.rows_affected() == 0 {
+            return Err(AppError::BadRequest(
+                "Approver must be an active Team lead or Admin (admins may only report to active admins)."
+                    .into(),
+            ));
+        }
         Ok(())
     }
 
@@ -548,9 +541,13 @@ impl UserDb {
     pub async fn get_approver_ids(&self, user_id: i64) -> AppResult<Vec<i64>> {
         Ok(sqlx::query_scalar::<_, i64>(
             "SELECT ua.approver_id FROM user_approvers ua \
-             JOIN users u ON u.id = ua.approver_id \
-             WHERE ua.user_id = $1 AND u.active = TRUE \
-             AND (u.role = 'team_lead' OR u.role = 'admin')",
+             JOIN users approver ON approver.id = ua.approver_id \
+             JOIN users subject ON subject.id = ua.user_id \
+             WHERE ua.user_id = $1 AND approver.active = TRUE \
+             AND ( \
+                 (subject.role = 'admin' AND approver.role = 'admin') OR \
+                 (subject.role != 'admin' AND approver.role IN ('team_lead', 'admin')) \
+             )",
         )
         .bind(user_id)
         .fetch_all(&self.pool)
@@ -563,11 +560,16 @@ impl UserDb {
         user_id: i64,
     ) -> AppResult<Vec<(i64, String, String)>> {
         Ok(sqlx::query_as::<_, (i64, String, String)>(
-            "SELECT u.id, u.first_name, u.last_name FROM user_approvers ua \
-             JOIN users u ON u.id = ua.approver_id \
-             WHERE ua.user_id = $1 AND u.active = TRUE \
-             AND (u.role = 'team_lead' OR u.role = 'admin') \
-             ORDER BY u.last_name, u.first_name",
+            "SELECT approver.id, approver.first_name, approver.last_name \
+             FROM user_approvers ua \
+             JOIN users approver ON approver.id = ua.approver_id \
+             JOIN users subject ON subject.id = ua.user_id \
+             WHERE ua.user_id = $1 AND approver.active = TRUE \
+             AND ( \
+                 (subject.role = 'admin' AND approver.role = 'admin') OR \
+                 (subject.role != 'admin' AND approver.role IN ('team_lead', 'admin')) \
+             ) \
+             ORDER BY approver.last_name, approver.first_name",
         )
         .bind(user_id)
         .fetch_all(&self.pool)
