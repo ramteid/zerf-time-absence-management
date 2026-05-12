@@ -233,7 +233,7 @@ impl AbsenceDb {
             builder
                 .push(" AND user_id IN (SELECT ua.user_id FROM user_approvers ua JOIN users u ON u.id=ua.user_id WHERE ua.approver_id = ")
                 .push_bind(requester_id)
-                .push(" AND u.role != 'admin')");
+                .push(" AND u.active=TRUE)");
         }
         if let Some(f) = from {
             builder.push(" AND end_date >= ").push_bind(f);
@@ -269,7 +269,7 @@ impl AbsenceDb {
             let mut reports: Vec<i64> = sqlx::query_scalar(
                 "SELECT ua.user_id FROM user_approvers ua \
                  JOIN users u ON u.id = ua.user_id \
-                 WHERE ua.approver_id=$1 AND u.active=TRUE AND u.role!='admin'",
+                 WHERE ua.approver_id=$1 AND u.active=TRUE",
             )
             .bind(requester_id)
             .fetch_all(&self.pool)
@@ -278,12 +278,9 @@ impl AbsenceDb {
         } else {
             // Regular employee: include their approver(s) and team-mates
             // (other users who share at least one approver with them).
-            let approver_ids: Vec<i64> = sqlx::query_scalar(
-                "SELECT approver_id FROM user_approvers WHERE user_id=$1",
-            )
-            .bind(requester_id)
-            .fetch_all(&self.pool)
-            .await?;
+            let approver_ids = crate::repository::UserDb::new(self.pool.clone())
+                .get_approver_ids(requester_id)
+                .await?;
             ids.append(&mut approver_ids.clone());
             if !approver_ids.is_empty() {
                 let mut peers: Vec<i64> = sqlx::query_scalar(
@@ -608,9 +605,9 @@ impl AbsenceDb {
         approver_id: i64,
     ) -> AppResult<bool> {
         Ok(sqlx::query_scalar::<_, Option<bool>>(
-            "SELECT TRUE FROM users u \
-             WHERE u.id=$1 AND u.role!='admin' \
-             AND EXISTS (SELECT 1 FROM user_approvers ua WHERE ua.user_id=$1 AND ua.approver_id=$2) \
+            "SELECT TRUE FROM user_approvers ua \
+             WHERE ua.user_id=$1 AND ua.approver_id=$2 \
+             AND EXISTS (SELECT 1 FROM users u WHERE u.id=$1 AND u.role != 'admin') \
              FOR UPDATE",
         )
         .bind(subject_id)
@@ -684,11 +681,9 @@ impl AbsenceDb {
             return Ok(()); // sick leave doesn't block logged time
         }
         let conflict: Option<NaiveDate> = sqlx::query_scalar(
-            "SELECT entry_date FROM time_entries te \
-             JOIN categories c ON c.id = te.category_id \
-             WHERE te.user_id=$1 AND te.status <> 'rejected' \
-             AND c.counts_as_work = TRUE \
-             AND te.entry_date BETWEEN $2 AND $3 \
+                            "SELECT te.entry_date FROM time_entries te \
+                             WHERE te.user_id=$1 AND te.status <> 'rejected' \
+                         AND te.entry_date BETWEEN $2 AND $3 \
              ORDER BY te.entry_date LIMIT 1",
         )
         .bind(user_id)
@@ -775,8 +770,14 @@ impl AbsenceDb {
              status=$5, reviewed_by=NULL, reviewed_at=NULL, rejection_reason=NULL \
              WHERE id=$6",
         )
-        .bind(kind).bind(start_date).bind(end_date).bind(comment).bind(new_status).bind(absence_id)
-        .execute(&mut **tx).await?;
+        .bind(kind)
+        .bind(start_date)
+        .bind(end_date)
+        .bind(comment)
+        .bind(new_status)
+        .bind(absence_id)
+        .execute(&mut **tx)
+        .await?;
         Ok(())
     }
 

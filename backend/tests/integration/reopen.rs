@@ -12,6 +12,58 @@ async fn reopen_full_workflow() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
 
+    // -- Auto approve also reopens non-crediting submitted entries --
+    {
+        let (_lead_id, _lead_pw, _emp_id, emp_pw, monday_iso, _cat_id) =
+            bootstrap_team_with_suffix(&app, &admin, true, "0").await;
+        let emp = login_change_pw(&app, "emp-0@example.com", &emp_pw).await;
+
+        let (st, categories_body) = emp.get("/api/v1/categories").await;
+        assert_eq!(st, StatusCode::OK, "load categories");
+        let non_crediting_category_id = categories_body
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|category| category["counts_as_work"].as_bool() == Some(false))
+            .and_then(|category| category["id"].as_i64())
+            .expect("non-crediting category exists");
+
+        let (st, body) = emp
+            .post(
+                "/api/v1/time-entries",
+                &json!({
+                    "entry_date": monday_iso,
+                    "start_time":"08:00",
+                    "end_time":"12:00",
+                    "category_id": non_crediting_category_id,
+                    "comment":"flextime reduction"
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "create non-crediting entry");
+        let entry_id = id(&body);
+
+        let (st, _) = emp
+            .post("/api/v1/time-entries/submit", &json!({"ids": [entry_id]}))
+            .await;
+        assert_eq!(st, StatusCode::OK, "submit non-crediting entry");
+
+        let (st, body) = emp
+            .post(
+                "/api/v1/reopen-requests",
+                &json!({"week_start": monday_iso}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "auto reopen non-crediting week");
+        assert_eq!(body["status"], "auto_approved");
+        assert_eq!(body["entries_reopened"], 1);
+
+        let (st, body) = emp.get("/api/v1/time-entries").await;
+        assert_eq!(st, StatusCode::OK);
+        let entry = find_by_id(&body, entry_id).expect("entry present after reopen");
+        assert_eq!(entry["status"], "draft");
+    }
+
     // -- Auto approve when policy set --
     {
         let (st, _) = admin

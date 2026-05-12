@@ -6,10 +6,11 @@
   // month totals, but they count for both months when checking week submission.
 
   import { api } from "../api.js";
-  import { currentUser, toast } from "../stores.js";
+  import { currentUser, settings, toast } from "../stores.js";
   import { t, absenceKindLabel, statusLabel, formatHours } from "../i18n.js";
   import {
     isoDate,
+    appTodayDate,
     minToHM,
     fmtDate,
     fmtMonthLabel,
@@ -24,11 +25,15 @@
   import FlextimeChart from "../FlextimeChart.svelte";
   import { jsPDF } from "jspdf";
 
-  // Fixed date reference for this session.
-  const today = new Date();
-  const todayIso = isoDate(today);
-  const currentYear = today.getFullYear();
-  const currentMonthStr = `${currentYear}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+  // Date reference is tied to configured app timezone.
+  let today = new Date();
+  let todayIso = isoDate(today);
+  let currentYear = today.getFullYear();
+  let currentMonthStr = `${currentYear}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+  $: today = appTodayDate($settings?.timezone);
+  $: todayIso = isoDate(today);
+  $: currentYear = today.getFullYear();
+  $: currentMonthStr = `${currentYear}-${String(today.getMonth() + 1).padStart(2, "0")}`;
 
   // Leads and admins load all users for the employee dropdown.
   // Plain employees (role === "employee") see no dropdown - only their own data.
@@ -71,6 +76,10 @@
 
   function monthStart(monthKey) {
     return `${monthKey}-01`;
+  }
+
+  function isoMonthStart(dateValue) {
+    return `${dateValue.getFullYear()}-${String(dateValue.getMonth() + 1).padStart(2, "0")}-01`;
   }
 
   function monthEnd(monthKey) {
@@ -159,7 +168,7 @@
   // Leads/admins: employee by category matrix.
   // Note: the backend only excludes "rejected" entries, so submitted
   // (not yet approved) bookings also appear.
-  let catFrom = isoDate(new Date(currentYear, 0, 1));
+  let catFrom = `${currentYear}-01-01`;
   // Category reports now include today's entries by default.
   let catTo = todayIso;
   let catReport = null;
@@ -261,8 +270,8 @@
   // Section 5: absences.
   // Shows absence entries in the selected date range with type distribution.
   // Employees load only their own absences; leads/admins see all.
-  let absenceFrom = isoDate(new Date(currentYear, today.getMonth(), 1));
-  let absenceTo = isoDate(new Date(currentYear, 11, 31));
+  let absenceFrom = isoMonthStart(today);
+  let absenceTo = `${currentYear}-12-31`;
   let absenceReport = null;
   $: absenceTotalDays = (absenceReport || []).reduce(
     (totalDays, absenceEntry) => totalDays + (absenceEntry.days || 0),
@@ -371,10 +380,35 @@
   // Employees always export their own data.
   // Desktop layout: a new row starts after the employee dropdown.
   let csvUserId = $currentUser.id;
-  let csvFrom = isoDate(new Date(currentYear, today.getMonth(), 1));
+  let csvFrom = isoMonthStart(today);
   let csvTo = todayIso;
   let csvError = "";
   let exportInProgress = false;
+
+  // Keep untouched defaults aligned with app-timezone date changes.
+  let previousCurrentMonthStr = "";
+  let previousCurrentYear = 0;
+  let previousTodayIso = "";
+  $: {
+    if (!previousCurrentMonthStr) {
+      previousCurrentMonthStr = currentMonthStr;
+      previousCurrentYear = currentYear;
+      previousTodayIso = todayIso;
+    } else {
+      if (reportMonth === previousCurrentMonthStr) reportMonth = currentMonthStr;
+      if (teamMonth === previousCurrentMonthStr) teamMonth = currentMonthStr;
+      if (absenceFrom === `${previousCurrentMonthStr}-01`) absenceFrom = `${currentMonthStr}-01`;
+      if (csvFrom === `${previousCurrentMonthStr}-01`) csvFrom = `${currentMonthStr}-01`;
+      if (catFrom === `${previousCurrentYear}-01-01`) catFrom = `${currentYear}-01-01`;
+      if (absenceTo === `${previousCurrentYear}-12-31`) absenceTo = `${currentYear}-12-31`;
+      if (catTo === previousTodayIso) catTo = todayIso;
+      if (csvTo === previousTodayIso) csvTo = todayIso;
+
+      previousCurrentMonthStr = currentMonthStr;
+      previousCurrentYear = currentYear;
+      previousTodayIso = todayIso;
+    }
+  }
 
   $: if ($currentUser?.role === "employee") {
     reportUserId = $currentUser.id;

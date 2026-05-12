@@ -4,11 +4,11 @@
 //! request to make the week editable again.  The approver (admin or the
 //! configured team-lead) reviews the request.  When the **requester's own**
 //! flag `allow_reopen_without_approval` is TRUE, the request is auto-approved
-//! immediately and all relevant approvers (designated approver + all admins)
-//! receive an informational notification.
+//! immediately and all explicitly assigned approvers receive an informational
+//! notification.
 //!
 //! Approval / auto-approval reopens the week atomically:
-//!   * all non-draft entries for `[week_start, week_start+6 days]` are reset
+//!   * all submitted/approved entries for `[week_start, week_start+6 days]` are reset
 //!     to `'draft'` (audit-logged per entry);
 //!   * any open `change_requests` for those entries are auto-approved and
 //!     applied before the status reset.
@@ -173,7 +173,6 @@ async fn load_change_request_overview(
          JOIN categories c_old ON c_old.id = te.category_id \
          LEFT JOIN categories c_new ON c_new.id = cr.new_category_id \
          WHERE cr.status='open' AND te.user_id=$1 AND te.entry_date BETWEEN $2 AND $3 \
-         AND c_old.counts_as_work = TRUE \
          ORDER BY te.entry_date, te.start_time, cr.id",
     )
     .bind(user_id)
@@ -192,7 +191,7 @@ struct ReopenExecution {
 }
 
 /// Atomically reopen a week: apply open change_requests for the week's
-/// non-draft entries, then reset those entries to draft. Caller is the
+/// submitted/approved entries, then reset those entries to draft. Caller is the
 /// **acting** user (approver or self); `subject` is the user whose week
 /// is being reopened. Returns the affected entry ids and their previous status
 /// so the caller can commit the whole state transition first and audit after.
@@ -204,12 +203,14 @@ async fn perform_reopen_in_tx(
 ) -> AppResult<ReopenExecution> {
     let week_end = week_start + chrono::Duration::days(6);
 
-    let affected: Vec<(i64, String)> = sqlx::query_as(
-        "SELECT id, status FROM time_entries \
-         WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3 AND status<>'draft' \
-         AND category_id IN (SELECT id FROM categories WHERE counts_as_work = TRUE) \
-         FOR UPDATE",
-    )
+        let affected: Vec<(i64, String)> = sqlx::query_as(
+            "SELECT te.id, te.status FROM time_entries te \
+             JOIN categories c ON c.id = te.category_id \
+             WHERE te.user_id=$1 AND te.entry_date BETWEEN $2 AND $3 \
+             AND te.status IN ('submitted','approved') \
+             AND c.counts_as_work = TRUE \
+             FOR UPDATE",
+        )
     .bind(subject_id)
     .bind(week_start)
     .bind(week_end)
@@ -336,24 +337,15 @@ async fn audit_applied_change_requests(
 ///
 /// | Requester role | Scenario                            | Notified set                          |
 /// |----------------|-------------------------------------|---------------------------------------|
-/// | employee       | any                                 | designated approver + all admins      |
-/// | team_lead      | has designated approver             | that approver + all admins            |
-/// | admin          | any                                 | all other admins                      |
+/// | employee       | any                                 | explicitly assigned approvers         |
+/// | team_lead      | has designated approver             | explicitly assigned approvers         |
+/// | admin          | has designated approver(s)          | those assigned approver(s) only       |
 ///
-/// BTreeSet deduplicates (e.g. when the designated approver IS an admin).
+/// BTreeSet deduplicates ids.
 /// Non-admin requesters are excluded from the result.
 async fn approver_ids_to_notify(pool: &crate::db::DatabasePool, requester: &User) -> Vec<i64> {
     let mut ids: std::collections::BTreeSet<i64> = Default::default();
-    // Get all assigned approvers for this user
-    let approver_ids = crate::auth::approval_recipient_ids(pool, requester).await;
-    ids.extend(approver_ids);
-    if let Ok(admin_ids) =
-        sqlx::query_scalar::<_, i64>("SELECT id FROM users WHERE active=TRUE AND role='admin'")
-            .fetch_all(pool)
-            .await
-    {
-        ids.extend(admin_ids);
-    }
+    ids.extend(crate::auth::approval_recipient_ids(pool, requester).await);
     // Only exclude the requester when they are NOT an admin.  An admin who
     // requests a reopen for their own week still needs a notification so
     // they can approve it from the dashboard (especially when they are the
@@ -383,13 +375,13 @@ pub async fn create(
     let week_end = body.week_start + chrono::Duration::days(6);
 
     // Empty-week / nothing-to-reopen guard: only weeks with at least one
-    // non-draft entry are eligible.
-    let non_draft_entry_count = app_state
+    // submitted/approved entry are eligible.
+    let submitted_or_approved_entry_count = app_state
         .db
         .reopen_requests
         .count_non_draft_entries(requester.id, body.week_start, week_end)
         .await?;
-    if non_draft_entry_count == 0 {
+    if submitted_or_approved_entry_count == 0 {
         return Err(AppError::BadRequest(
             "Nothing to reopen — this week has no submitted or approved entries.".into(),
         ));
@@ -412,13 +404,12 @@ pub async fn create(
     //   * Otherwise → pending, notify all approvers
     let should_auto_approve = requester.allow_reopen_without_approval;
 
-    // Verify that at least one approver is available.
-    let approvers = crate::auth::approval_recipient_ids(&app_state.pool, &requester).await;
-    if approvers.is_empty() {
-        return Err(AppError::Conflict(
-            "No valid approver is available for this reopen request.".into(),
-        ));
-    }
+    // Non-admin users must have at least one explicit approver available.
+    // Admin users may still create requests without assigned approvers. Any
+    // admin can review the request, but admins are not auto-notified unless
+    // explicitly assigned.
+    let _approvers =
+        crate::auth::required_approval_recipient_ids(&app_state.pool, &requester).await?;
 
     let initial_status = if should_auto_approve {
         "auto_approved"
@@ -624,15 +615,11 @@ pub async fn list_pending(
     Ok(Json(rrs.into_iter().map(repo_rr_to_service).collect()))
 }
 
-async fn load_pending(app_state: &AppState, id: i64) -> AppResult<ReopenRequest> {
-    let rr = app_state.db.reopen_requests.find_by_id(id).await?;
-    Ok(repo_rr_to_service(rr))
-}
-
-/// If an admin acted on a request, notify all assigned team leads for the request's
-/// user so they know the item left their pending queue.
+/// If an admin acted on a request, notify all other explicitly assigned
+/// approvers for the request's user so they know the item left their pending
+/// queue.
 #[allow(clippy::too_many_arguments)]
-async fn notify_leads_if_admin_acted(
+async fn notify_assigned_approvers_if_admin_acted(
     app_state: &AppState,
     language: &i18n::Language,
     requester: &User,
@@ -648,21 +635,11 @@ async fn notify_leads_if_admin_acted(
     if !requester.is_admin() {
         return;
     }
-    // Fetch all assigned team leads for the request's user (excluding the acting admin).
-    let lead_ids: Vec<i64> = match sqlx::query_scalar::<_, i64>(
-        "SELECT ua.approver_id FROM user_approvers ua \
-         JOIN users u ON u.id = ua.approver_id \
-         WHERE ua.user_id = $1 AND u.active = TRUE AND u.role = 'team_lead' AND ua.approver_id != $2",
-    )
-    .bind(request_user_id)
-    .bind(requester.id)
-    .fetch_all(&app_state.pool)
-    .await
-    {
-        Ok(ids) => ids,
+    let approver_ids: Vec<i64> = match app_state.db.users.get_approver_ids(request_user_id).await {
+        Ok(ids) => ids.into_iter().filter(|approver_id| *approver_id != requester.id).collect(),
         Err(_) => return,
     };
-    if lead_ids.is_empty() {
+    if approver_ids.is_empty() {
         return;
     }
     let employee_full_name: String =
@@ -679,11 +656,11 @@ async fn notify_leads_if_admin_acted(
         ("change_request_overview", change_request_overview),
     ];
     params.extend(extra_params);
-    for lead_id in lead_ids {
+    for approver_id in approver_ids {
         notifications::create_translated(
             app_state,
             language,
-            lead_id,
+            approver_id,
             action_key,
             action_title_key,
             action_body_key,
@@ -809,9 +786,9 @@ pub async fn approve(
         Some(request_id),
     )
     .await;
-    // If an admin acted, notify all assigned team leads for this user so they
-    // know the item left their pending queue.
-    notify_leads_if_admin_acted(
+    // If an admin acted, notify all other explicitly assigned approvers for
+    // this user so they know the item left their pending queue.
+    notify_assigned_approvers_if_admin_acted(
         &app_state,
         &language,
         &requester,
@@ -846,7 +823,18 @@ pub async fn reject(
     if rejection_reason.len() > 2000 {
         return Err(AppError::BadRequest("Reason too long.".into()));
     }
-    let reopen_request = load_pending(&app_state, request_id).await?;
+    // Use a transaction with row-level lock, mirroring the approve handler,
+    // so that the authorization check and the status update are atomic.
+    let mut transaction = app_state.pool.begin().await?;
+    let reopen_request: ReopenRequest = sqlx::query_as(
+        "SELECT id, user_id, week_start, reviewed_by, status, reviewed_at, \
+         rejection_reason, created_at \
+         FROM reopen_requests WHERE id=$1 FOR UPDATE",
+    )
+    .bind(request_id)
+    .fetch_optional(&mut *transaction)
+    .await?
+    .ok_or(AppError::NotFound)?;
     if reopen_request.status != "pending" {
         return Err(AppError::BadRequest("Request is not pending.".into()));
     }
@@ -856,7 +844,7 @@ pub async fn reject(
         )
         .bind(reopen_request.user_id)
         .bind(requester.id)
-        .fetch_optional(&app_state.pool)
+        .fetch_optional(&mut *transaction)
         .await?;
         if is_assigned_approver.is_none() {
             return Err(AppError::Forbidden);
@@ -867,13 +855,12 @@ pub async fn reject(
         let is_admin_user: Option<bool> =
             sqlx::query_scalar("SELECT TRUE FROM users WHERE id = $1 AND role = 'admin'")
                 .bind(reopen_request.user_id)
-                .fetch_optional(&app_state.pool)
+                .fetch_optional(&mut *transaction)
                 .await?;
         if is_admin_user.is_some() {
             return Err(AppError::Forbidden);
         }
     }
-    // Use optimistic locking: only proceed if status is still 'pending'.
     let rows_claimed = sqlx::query(
         "UPDATE reopen_requests SET status='rejected', reviewed_by=$2, reviewed_at=CURRENT_TIMESTAMP, \
          rejection_reason=$3 WHERE id=$1 AND status='pending'",
@@ -881,7 +868,7 @@ pub async fn reject(
     .bind(request_id)
     .bind(requester.id)
     .bind(rejection_reason)
-    .execute(&app_state.pool)
+    .execute(&mut *transaction)
     .await?
     .rows_affected();
     if rows_claimed == 0 {
@@ -889,6 +876,7 @@ pub async fn reject(
             "Request was already resolved by someone else.".into(),
         ));
     }
+    transaction.commit().await?;
     audit::log(
         &app_state.pool,
         requester.id,
@@ -926,11 +914,12 @@ pub async fn reject(
         Some(request_id),
     )
     .await;
-    // Symmetric with approve: if an admin rejected a request, notify all assigned
-    // team leads for this user so they know the item left their queue.
+    // Symmetric with approve: if an admin rejected a request, notify all other
+    // explicitly assigned approvers for this user so they know the item left
+    // their queue.
     // NOTE: reopen_rejected_by_admin_body template does not include {change_request_overview},
     // so we pass an empty string to avoid wasted computation.
-    notify_leads_if_admin_acted(
+    notify_assigned_approvers_if_admin_acted(
         &app_state,
         &language,
         &requester,

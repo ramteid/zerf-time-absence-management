@@ -26,6 +26,7 @@ const SMTP_PASSWORD_KEY: &str = "smtp_password";
 const SMTP_FROM_KEY: &str = "smtp_from";
 const SMTP_ENCRYPTION_KEY: &str = "smtp_encryption";
 pub const SUBMISSION_REMINDERS_ENABLED_KEY: &str = "submission_reminders_enabled";
+pub const APPROVAL_REMINDERS_ENABLED_KEY: &str = "approval_reminders_enabled";
 const DEFAULT_UI_LANGUAGE: &str = "en";
 const DEFAULT_TIME_FORMAT: &str = "24h";
 pub const DEFAULT_TIMEZONE: &str = "Europe/Berlin";
@@ -62,6 +63,7 @@ pub struct AdminSettingsResponse {
     /// True when a password is stored (never returned in cleartext).
     pub smtp_password_set: bool,
     pub submission_reminders_enabled: bool,
+    pub approval_reminders_enabled: bool,
 }
 
 #[derive(Deserialize)]
@@ -88,6 +90,7 @@ pub struct UpdateSmtpSettings {
     pub smtp_from: String,
     pub smtp_encryption: Option<String>,
     pub submission_reminders_enabled: Option<bool>,
+    pub approval_reminders_enabled: Option<bool>,
 }
 
 fn normalize_language(value: &str) -> AppResult<String> {
@@ -217,8 +220,10 @@ async fn load_admin_settings_response(
     let from = load_setting(pool, SMTP_FROM_KEY, "").await?;
     let encryption = load_setting(pool, SMTP_ENCRYPTION_KEY, "starttls").await?;
     let password_set = !load_setting(pool, SMTP_PASSWORD_KEY, "").await?.is_empty();
-    let reminders_enabled =
+    let submission_reminders_enabled =
         load_setting(pool, SUBMISSION_REMINDERS_ENABLED_KEY, "true").await? != "false";
+    let approval_reminders_enabled =
+        load_setting(pool, APPROVAL_REMINDERS_ENABLED_KEY, "true").await? != "false";
     Ok(AdminSettingsResponse {
         base,
         smtp_enabled: enabled,
@@ -228,7 +233,8 @@ async fn load_admin_settings_response(
         smtp_from: from,
         smtp_encryption: encryption,
         smtp_password_set: password_set,
-        submission_reminders_enabled: reminders_enabled,
+        submission_reminders_enabled,
+        approval_reminders_enabled,
     })
 }
 
@@ -365,11 +371,19 @@ pub async fn update_smtp_settings(
     )
     .await?;
 
-    let reminders_enabled = body.submission_reminders_enabled.unwrap_or(true);
+    let submission_reminders_enabled = body.submission_reminders_enabled.unwrap_or(true);
     save_setting_exec(
         &mut *transaction,
         SUBMISSION_REMINDERS_ENABLED_KEY,
-        if reminders_enabled { "true" } else { "false" },
+        if submission_reminders_enabled { "true" } else { "false" },
+    )
+    .await?;
+
+    let approval_reminders_enabled = body.approval_reminders_enabled.unwrap_or(true);
+    save_setting_exec(
+        &mut *transaction,
+        APPROVAL_REMINDERS_ENABLED_KEY,
+        if approval_reminders_enabled { "true" } else { "false" },
     )
     .await?;
 

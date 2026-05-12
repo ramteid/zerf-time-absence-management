@@ -1,8 +1,8 @@
 <script>
   import { api } from "../api.js";
-  import { currentUser, theme, toast } from "../stores.js";
+  import { currentUser, settings, theme, toast } from "../stores.js";
   import { t, roleLabel, formatHours } from "../i18n.js";
-  import { fmtDate } from "../format.js";
+  import { fmtDate, appTodayDate } from "../format.js";
 
   let cur = "",
     nw = "",
@@ -11,8 +11,8 @@
   let savingTheme = false;
   let leaveDaysThisYear = 0;
   let leaveDaysNextYear = 0;
-  const thisYear = new Date().getFullYear();
-  const nextYear = thisYear + 1;
+  $: thisYear = appTodayDate($settings?.timezone).getFullYear();
+  $: nextYear = thisYear + 1;
 
   // Re-fetch whenever currentUser becomes available (store starts as null)
   $: if ($currentUser?.id) {

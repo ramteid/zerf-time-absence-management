@@ -160,6 +160,33 @@ async fn users_full_workflow() {
             )
             .await;
         assert_eq!(st, StatusCode::BAD_REQUEST, "missing approver row rejected");
+
+        // A regular employee cannot be used as approver for another employee.
+        let employee_approver_id = create_emp(
+            &admin,
+            "employee-approver@example.com",
+            "EmployeeApprover",
+            1,
+        )
+        .await;
+        let (st, body) = admin
+            .post(
+                "/api/v1/users",
+                &json!({"email":"employee-report@example.com","first_name":"Employee","last_name":"Report",
+                    "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
+                    "start_date":"2024-01-01","approver_ids": [employee_approver_id]}),
+            )
+            .await;
+        assert_eq!(
+            st,
+            StatusCode::BAD_REQUEST,
+            "employee approver for employee is rejected"
+        );
+        assert!(body["error"]
+            .as_str()
+            .unwrap_or_default()
+            .to_lowercase()
+            .contains("approver"));
     }
 
     // -- Duplicate user identifiers are rejected --

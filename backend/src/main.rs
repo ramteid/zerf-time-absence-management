@@ -60,7 +60,8 @@ async fn main() -> Result<()> {
         let pool = pool.clone();
         tokio::spawn(async move {
             loop {
-                let now = chrono::Local::now();
+                let tz = zerf::settings::load_app_timezone(&pool).await;
+                let now = chrono::Utc::now().with_timezone(&tz);
                 let wait = holidays::duration_until_next_monday_noon(now)
                     .unwrap_or(std::time::Duration::from_secs(3600));
                 tokio::time::sleep(wait).await;

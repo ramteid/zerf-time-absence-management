@@ -22,8 +22,8 @@ impl ReportDb {
     ) -> AppResult<bool> {
         Ok(sqlx::query_scalar::<_, Option<bool>>(
             "SELECT TRUE FROM user_approvers ua \
-             JOIN users u ON u.id = ua.user_id \
-             WHERE ua.user_id=$1 AND ua.approver_id=$2 AND u.role!='admin'",
+             WHERE ua.user_id=$1 AND ua.approver_id=$2 \
+             AND EXISTS (SELECT 1 FROM users u WHERE u.id=$1 AND u.role != 'admin')",
         )
         .bind(target_id)
         .bind(approver_id)
@@ -119,6 +119,9 @@ impl ReportDb {
     }
 
     /// Submitted/approved dates (for all_weeks_submitted check).
+    /// Includes ALL entries regardless of counts_as_work: non-crediting entries
+    /// fully participate in the submission workflow, so a day covered only by
+    /// submitted non-crediting entries still counts as submitted.
     pub async fn submitted_dates_in_range(
         &self,
         user_id: i64,
@@ -126,10 +129,8 @@ impl ReportDb {
         to: NaiveDate,
     ) -> AppResult<HashSet<NaiveDate>> {
         let rows: Vec<(NaiveDate,)> = sqlx::query_as(
-            "SELECT DISTINCT z.entry_date FROM time_entries z \
-             JOIN categories c ON c.id = z.category_id \
-             WHERE z.user_id=$1 AND z.status IN ('submitted','approved') \
-             AND c.counts_as_work = TRUE \
+            "SELECT DISTINCT entry_date FROM time_entries \
+             WHERE user_id=$1 AND status IN ('submitted','approved') \
              AND entry_date BETWEEN $2 AND $3",
         )
         .bind(user_id)
@@ -140,18 +141,18 @@ impl ReportDb {
         Ok(rows.into_iter().map(|(d,)| d).collect())
     }
 
-    /// Dates that have at least one draft entry (for all_weeks_submitted check).
-    pub async fn draft_dates_in_range(
+    /// Dates that have at least one incomplete entry (for all_weeks_submitted check).
+    /// Incomplete means any status outside submitted/approved (e.g. draft or rejected).
+    /// Includes ALL entries regardless of counts_as_work.
+    pub async fn incomplete_dates_in_range(
         &self,
         user_id: i64,
         from: NaiveDate,
         to: NaiveDate,
     ) -> AppResult<HashSet<NaiveDate>> {
         let rows: Vec<(NaiveDate,)> = sqlx::query_as(
-            "SELECT DISTINCT z.entry_date FROM time_entries z \
-             JOIN categories c ON c.id = z.category_id \
-             WHERE z.user_id=$1 AND z.status='draft' \
-             AND c.counts_as_work = TRUE \
+            "SELECT DISTINCT entry_date FROM time_entries \
+             WHERE user_id=$1 AND status NOT IN ('submitted','approved') \
              AND entry_date BETWEEN $2 AND $3",
         )
         .bind(user_id)
@@ -201,8 +202,8 @@ impl ReportDb {
         } else {
             Ok(sqlx::query_as::<_, User>(&format!(
                 "{SEL} WHERE active=TRUE \
-                 AND (id=$1 OR id IN (SELECT user_id FROM user_approvers WHERE approver_id=$1)) \
-                 AND role!='admin' ORDER BY last_name"
+                 AND (id=$1 OR id IN (SELECT ua.user_id FROM user_approvers ua WHERE ua.approver_id=$1)) \
+                 ORDER BY last_name"
             ))
             .bind(requester_id)
             .fetch_all(&self.pool)
@@ -297,8 +298,8 @@ impl ReportDb {
             Ok(sqlx::query_as(
                 "SELECT id, first_name, last_name FROM users \
                  WHERE active=TRUE \
-                 AND (id=$1 OR id IN (SELECT user_id FROM user_approvers WHERE approver_id=$1)) \
-                 AND role!='admin' ORDER BY last_name",
+                 AND (id=$1 OR id IN (SELECT ua.user_id FROM user_approvers ua WHERE ua.approver_id=$1)) \
+                 ORDER BY last_name",
             )
             .bind(requester_id)
             .fetch_all(&self.pool)

@@ -203,9 +203,10 @@ const TRANSLATIONS = {
     Empty: "Empty",
     Week: "Week",
     Timezone: "Timezone",
-    "Use an IANA timezone, e.g. Europe/Berlin.":
-      "Use an IANA timezone, e.g. Europe/Berlin.",
-    "Please enter a timezone.": "Please enter a timezone.",
+    "Please select a timezone.": "Please select a timezone.",
+    "Enable approval reminders": "Enable approval reminders",
+    "When enabled, approvers are reminded by email about pending approvals every Monday.":
+      "When enabled, approvers are reminded by email about pending approvals every Monday.",
   },
   de: {
     "Loading...": "Wird geladen...",
@@ -310,9 +311,7 @@ const TRANSLATIONS = {
     "Language settings": "Spracheinstellungen",
     "Interface language": "Oberflächensprache",
     Timezone: "Zeitzone",
-    "Use an IANA timezone, e.g. Europe/Berlin.":
-      "Verwenden Sie eine IANA-Zeitzone, z. B. Europe/Berlin.",
-    "Please enter a timezone.": "Bitte geben Sie eine Zeitzone ein.",
+    "Please select a timezone.": "Bitte wählen Sie eine Zeitzone aus.",
     "Missing translations fall back to English.":
       "Fehlende Übersetzungen fallen auf Englisch zurück.",
     "Language saved.": "Sprache gespeichert.",
@@ -532,6 +531,9 @@ const TRANSLATIONS = {
     "Enable reminders": "Erinnerungen aktivieren",
     "When enabled, users who have not submitted all time entries are reminded by email on the configured deadline day.":
       "Wenn aktiviert, werden Benutzer, die noch nicht alle Wochen eingereicht haben, am konfigurierten Stichtag per E-Mail erinnert.",
+    "Enable approval reminders": "Genehmigungs-Erinnerungen aktivieren",
+    "When enabled, approvers are reminded by email about pending approvals every Monday.":
+      "Wenn aktiviert, werden Genehmiger jeden Montag per E-Mail an ausstehende Genehmigungen erinnert.",
     "SMTP Host": "SMTP-Host",
     "SMTP Port": "SMTP-Port",
     "From address": "Absenderadresse",

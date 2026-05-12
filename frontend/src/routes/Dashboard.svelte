@@ -2,13 +2,14 @@
   import { tick } from "svelte";
   import { fly } from "svelte/transition";
   import { api } from "../api.js";
-  import { categories, currentUser, path, toast } from "../stores.js";
+  import { categories, currentUser, path, settings, toast } from "../stores.js";
   import { t, absenceKindLabel, formatHours } from "../i18n.js";
   import {
     fmtDate,
     fmtDateShort,
     fmtDateTime,
     isoDate,
+    appTodayDate,
     addDays,
     parseDate,
     monday,
@@ -35,7 +36,7 @@
   let requestDetailDlg;
 
   // Absence slider: browse approved absences week by week (leads/admins only).
-  let absenceSliderWeek;
+  let absenceSliderWeek = "";
   let absenceSliderTeamData = [];
   let absenceSliderIsLeadView = false;
   let absenceSliderDirection = 1;
@@ -51,9 +52,11 @@
   let focusedSection = "";
   let lastFocusSignature = "";
 
-  // ── Reference date: today is fixed at component mount time ───────────────────
-  const today = new Date();
-  absenceSliderWeek = isoDate(monday(today));
+  // ── Reference date: derived from configured app timezone ─────────────────────
+  $: today = appTodayDate($settings?.timezone);
+  $: if (!absenceSliderWeek) {
+    absenceSliderWeek = isoDate(monday(today));
+  }
 
   function daysAgo(numberOfDays) {
     return isoDate(addDays(today, -numberOfDays));
@@ -83,10 +86,10 @@
   let monthSubmissionError = "";
   let currentMonthSubmitted = true;
 
-  const reportYear = today.getFullYear();
-  const currentMonthIndex = today.getMonth() + 1; // 1-based
-  const currentMonthKey = `${reportYear}-${String(currentMonthIndex).padStart(2, "0")}`;
-  const todayIso = isoDate(today);
+  $: reportYear = today.getFullYear();
+  $: currentMonthIndex = today.getMonth() + 1; // 1-based
+  $: currentMonthKey = `${reportYear}-${String(currentMonthIndex).padStart(2, "0")}`;
+  $: todayIso = isoDate(today);
 
   // ── Loaders ───────────────────────────────────────────────────────────────────
 

@@ -40,15 +40,16 @@ pub fn duration_until_next_monday_7am(now: chrono::DateTime<chrono_tz::Tz>) -> S
 type PendingApproverRow = (i64, String, i64);
 
 /// Query all active approvers who currently have at least one pending item.
-/// Respects the same user_approvers → admin-fallback logic used everywhere else.
+/// Uses explicit approver assignments only.
 async fn find_approvers_with_pending(pool: &DatabasePool) -> Vec<PendingApproverRow> {
     sqlx::query_as::<_, PendingApproverRow>(
         "WITH user_pending AS (
              SELECT user_id, COUNT(*)::bigint AS pending_count
              FROM (
-                 SELECT te.user_id FROM time_entries te
-                 JOIN categories c ON c.id = te.category_id
-                 WHERE te.status = 'submitted' AND c.counts_as_work = TRUE
+                 -- Include all submitted entries: non-crediting entries also require
+                 -- approval, so approvers must be reminded about them too.
+                 SELECT user_id FROM time_entries
+                 WHERE status = 'submitted'
                  UNION ALL
                  SELECT user_id FROM change_requests    WHERE status = 'open'
                  UNION ALL
@@ -58,37 +59,23 @@ async fn find_approvers_with_pending(pool: &DatabasePool) -> Vec<PendingApprover
              ) all_pending
              GROUP BY user_id
          ),
-         -- Mirror get_approver_ids: only count an assignment as active when the
-         -- approver is active AND has an approver-eligible role.
-         assigned_user_ids AS (
-             SELECT DISTINCT ua.user_id
-             FROM user_approvers ua
-             JOIN users approver ON approver.id = ua.approver_id
-             WHERE approver.active = TRUE
-               AND approver.role IN ('team_lead', 'admin')
-         ),
-         -- path A: users who have explicit approver assignments
+         -- Only count an assignment as active when the approver is active and
+         -- role-eligible for the subject user.
          via_assignment AS (
              SELECT ua.approver_id, SUM(up.pending_count)::bigint AS pending_count
              FROM user_approvers ua
              JOIN user_pending up ON up.user_id = ua.user_id
+             JOIN users subject   ON subject.id = ua.user_id
              JOIN users approver  ON approver.id = ua.approver_id
                                  AND approver.active = TRUE
-                                 AND approver.role IN ('team_lead', 'admin')
+             WHERE (
+                 (subject.role = 'admin' AND approver.role = 'admin') OR
+                 (subject.role != 'admin' AND approver.role IN ('team_lead', 'admin'))
+             )
              GROUP BY ua.approver_id
-         ),
-         -- path B: users with NO explicit assignment → all active admins are responsible
-         via_fallback AS (
-             SELECT admins.id AS approver_id, SUM(up.pending_count)::bigint AS pending_count
-             FROM user_pending up
-             CROSS JOIN (SELECT id FROM users WHERE role = 'admin' AND active = TRUE) admins
-             WHERE up.user_id NOT IN (SELECT user_id FROM assigned_user_ids)
-             GROUP BY admins.id
          ),
          combined AS (
              SELECT approver_id, pending_count FROM via_assignment
-             UNION ALL
-             SELECT approver_id, pending_count FROM via_fallback
          )
          SELECT c.approver_id, u.email, SUM(c.pending_count)::bigint AS total_pending
          FROM combined c
@@ -105,10 +92,13 @@ async fn find_approvers_with_pending(pool: &DatabasePool) -> Vec<PendingApprover
 pub async fn run_check(state: &crate::AppState) {
     let pool = &state.pool;
 
-    let reminders_enabled =
-        crate::settings::load_setting(pool, crate::settings::SUBMISSION_REMINDERS_ENABLED_KEY, "true")
-            .await
-            .unwrap_or_else(|_| "true".to_string());
+    let reminders_enabled = crate::settings::load_setting(
+        pool,
+        crate::settings::APPROVAL_REMINDERS_ENABLED_KEY,
+        "true",
+    )
+    .await
+    .unwrap_or_else(|_| "true".to_string());
     if reminders_enabled == "false" {
         tracing::debug!(target:"zerf::approval_reminders", "Reminders are disabled, skipping check");
         return;
@@ -134,6 +124,10 @@ pub async fn run_check(state: &crate::AppState) {
     )
     .await
     .unwrap_or_else(|_| crate::settings::DEFAULT_TIMEZONE.to_string());
+    let tz = timezone
+        .parse::<chrono_tz::Tz>()
+        .unwrap_or(chrono_tz::Europe::Berlin);
+    let today_local = chrono::Utc::now().with_timezone(&tz).date_naive();
 
     let approvers = find_approvers_with_pending(pool).await;
     if approvers.is_empty() {
@@ -164,10 +158,19 @@ pub async fn run_check(state: &crate::AppState) {
             timestamp,
         );
 
+        let dedupe_key = format!("approval_reminder:{}", today_local);
         match state
             .db
             .notifications
-            .insert_idempotent(approver_id, "approval_reminder", &title, &body, None, None)
+            .insert_idempotent_with_dedupe_key(
+                approver_id,
+                "approval_reminder",
+                &title,
+                &body,
+                None,
+                None,
+                Some(&dedupe_key),
+            )
             .await
         {
             Ok(true) => {

@@ -14,6 +14,8 @@
     monday,
     addDays,
     isoDate,
+    appTodayDate,
+    appTodayIsoDate,
     dateKey,
     parseDate,
     fmtDateShort,
@@ -102,11 +104,11 @@
     const queryString = $path.includes("?") ? $path.split("?")[1] : "";
     return new URLSearchParams(queryString).get("week");
   })();
-  $: requestedWeek = weekParam || isoDate(new Date());
+  $: requestedWeek = weekParam || appTodayIsoDate($settings?.timezone);
   $: timeFormat = $settings.time_format === "12h" ? "12h" : "24h";
 
   function setWeek(dateLike) {
-    const weekStart = monday(parseDate(dateLike || new Date()));
+    const weekStart = monday(parseDate(dateLike || appTodayDate($settings?.timezone)));
     weekFrom = weekStart;
     weekTo = addDays(weekStart, 6);
     return weekStart;
@@ -196,7 +198,7 @@
     try {
       await api("/time-entries/submit", { method: "POST", body: { ids } });
       toast($t("Week submitted."), "ok");
-      await loadWeek(weekFrom || new Date());
+      await loadWeek(weekFrom || appTodayDate($settings?.timezone));
     } catch (error) {
       toast($t(error?.message || "Error"), "error");
     }
@@ -222,7 +224,7 @@
       } else {
         toast($t("Reopen request sent."), "ok");
       }
-      await loadWeek(weekFrom || new Date());
+      await loadWeek(weekFrom || appTodayDate($settings?.timezone));
     } catch (error) {
       toast($t(error?.message || "Error"), "error");
     }
@@ -352,8 +354,8 @@
     entries = entries.filter((entry) => entry.id !== id);
   }
 
-  $: today = isoDate(new Date());
-  $: currentWeekMonday = monday(new Date());
+  $: today = appTodayIsoDate($settings?.timezone);
+  $: currentWeekMonday = monday(appTodayDate($settings?.timezone));
   // Disable the "next week" arrow once the user reaches the current week; looking
   // into the future is not allowed.
   $: isAtOrPastCurrentWeek = weekFrom && isoDate(weekFrom) >= isoDate(currentWeekMonday);
@@ -398,11 +400,11 @@
   })();
 
   // Show the reopen button only when the week is fully submitted (no remaining drafts)
-  // and has at least one non-draft entry – but not while a reopen request is pending.
+  // and has at least one submitted/approved entry – but not while a reopen request is pending.
   $: canRequestReopen =
     !pendingReopen &&
     !drafts.length &&
-    entries.some((entry) => entry.status !== "draft");
+    entries.some((entry) => entry.status === "submitted" || entry.status === "approved");
 
   // The add-entry button is shown on all weekdays to keep the layout consistent,
   // but disabled on days where adding time entries makes no sense.
@@ -645,7 +647,7 @@
       if (!changed) return;
       removeEntry(deletedId);
       upsertEntry(entry);
-      loadWeek(weekFrom || new Date());
+      loadWeek(weekFrom || appTodayDate($settings?.timezone));
     }}
   />
 {/if}
@@ -654,7 +656,7 @@
     entry={showChange}
     onClose={() => {
       showChange = null;
-      loadWeek(weekFrom || new Date());
+      loadWeek(weekFrom || appTodayDate($settings?.timezone));
     }}
   />
 {/if}

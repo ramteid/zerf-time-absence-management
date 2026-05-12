@@ -6,11 +6,65 @@
 
 use reqwest::{Client, StatusCode};
 use serde_json::Value;
+use sqlx::{migrate::Migrator, postgres::PgPoolOptions};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 use testcontainers::runners::AsyncRunner;
 use testcontainers::ContainerAsync;
 use testcontainers_modules::postgres::Postgres;
 use zerf::{auth, build_app, categories, config::Config, db, holidays, users, AppState};
+
+static TEST_DB_COUNTER: AtomicU64 = AtomicU64::new(0);
+static TEST_MIGRATOR: Migrator = sqlx::migrate!("./migrations");
+
+async fn create_isolated_database(admin_database_url: &str) -> anyhow::Result<String> {
+    let db_name = format!(
+        "zerf_test_{}_{}",
+        std::process::id(),
+        TEST_DB_COUNTER.fetch_add(1, Ordering::Relaxed),
+    );
+    let admin_pool = sqlx::PgPool::connect(admin_database_url).await?;
+    sqlx::query(&format!("CREATE DATABASE \"{db_name}\""))
+        .execute(&admin_pool)
+        .await?;
+    Ok(db_name)
+}
+
+async fn init_test_database(database_url: &str) -> anyhow::Result<db::DatabasePool> {
+    let pool = PgPoolOptions::new()
+        .max_connections(8)
+        .min_connections(1)
+        .acquire_timeout(Duration::from_secs(5))
+        .idle_timeout(Duration::from_secs(600))
+        .max_lifetime(Duration::from_secs(1800))
+        .test_before_acquire(true)
+        .connect(database_url)
+        .await?;
+
+    // sqlx migrations are expected to be serialized, but in CI and highly parallel
+    // local runs we occasionally observe a duplicate insert into _sqlx_migrations.
+    // Retry a couple of times so transient migration-table races don't fail tests.
+    let mut last_err: Option<anyhow::Error> = None;
+    for _ in 0..3 {
+        match TEST_MIGRATOR.run(&pool).await {
+            Ok(_) => return Ok(pool),
+            Err(err) => {
+                let msg = err.to_string();
+                if msg.contains("_sqlx_migrations_pkey")
+                    || msg.contains("duplicate key value violates unique constraint")
+                {
+                    last_err = Some(err.into());
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    continue;
+                }
+                return Err(err.into());
+            }
+        }
+    }
+
+    Err(last_err.unwrap_or_else(|| anyhow::anyhow!("failed to run migrations")))
+}
 
 /// Seed a test admin user with a CSPRNG-generated password.
 /// Only used in test code — never compiled into the production binary.
@@ -83,9 +137,16 @@ impl TestApp {
             .await
             .expect("failed to get container port");
 
-        let database_url = format!(
+        let admin_database_url = format!(
             "postgres://postgres:postgres@127.0.0.1:{}/postgres",
             host_port
+        );
+        let database_name = create_isolated_database(&admin_database_url)
+            .await
+            .expect("failed to create isolated test database");
+        let database_url = format!(
+            "postgres://postgres:postgres@127.0.0.1:{}/{}",
+            host_port, database_name
         );
 
         let cfg = Config {
@@ -101,7 +162,9 @@ impl TestApp {
             trust_proxy: false,
         };
 
-        let pool = db::init(&cfg).await.expect("failed to init test database");
+        let pool = init_test_database(&cfg.database_url)
+            .await
+            .expect("failed to init test database");
         categories::ensure_initial(&pool)
             .await
             .expect("failed to seed categories");

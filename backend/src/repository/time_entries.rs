@@ -88,15 +88,17 @@ pub(crate) async fn validate_entry(
             "Entry date is before user start date.".into(),
         ));
     }
-    let cat_active: Option<bool> =
-        sqlx::query_scalar("SELECT active FROM categories WHERE id = $1")
-            .bind(te.category_id)
-            .fetch_optional(&mut *conn)
-            .await?;
-    if cat_active.is_none() {
+    let cat_state: Option<(bool, bool)> = sqlx::query_as(
+        "SELECT active, counts_as_work FROM categories WHERE id = $1",
+    )
+    .bind(te.category_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    if cat_state.is_none() {
         return Err(AppError::BadRequest("Category not found.".into()));
     }
-    if cat_active == Some(false) {
+    let (cat_active, new_counts_as_work) = cat_state.unwrap();
+    if !cat_active {
         return Err(AppError::BadRequest("Category is inactive.".into()));
     }
     if te.entry_date > app_today(conn).await? {
@@ -104,7 +106,8 @@ pub(crate) async fn validate_entry(
             "Entries in the future are not allowed.".into(),
         ));
     }
-    let new_min = duration_min(&te.start_time, &te.end_time)?;
+    // Validate that end is strictly after start.
+    let _ = duration_min(&te.start_time, &te.end_time)?;
     let start_n = parse_time(&te.start_time)?;
     let end_n = parse_time(&te.end_time)?;
 
@@ -118,20 +121,60 @@ pub(crate) async fn validate_entry(
     .fetch_all(&mut *conn)
     .await?;
 
-    let mut day_total = new_min;
+    let mut parsed_existing: Vec<(bool, NaiveTime, NaiveTime)> = Vec::new();
     for (eid, start_str, end_str, status, counts_as_work) in &existing {
         if Some(*eid) == exclude_id || status == "rejected" {
             continue;
         }
         let es = parse_time(start_str)?;
         let ee = parse_time(end_str)?;
-        // Only check overlap with crediting entries; non-crediting entries don't block new entries
-        if *counts_as_work && start_n < ee && es < end_n {
-            return Err(AppError::BadRequest("Overlap with an existing entry.".into()));
+        parsed_existing.push((*counts_as_work, es, ee));
+    }
+
+    let has_non_crediting_on_day = parsed_existing
+        .iter()
+        .any(|(counts_as_work, _, _)| !*counts_as_work);
+
+    // Default rule: reject crediting/crediting overlaps. Exception: if the day
+    // already contains non-crediting entries, allow overlaps and enforce the
+    // credited 14h cap based on merged intervals below.
+    if new_counts_as_work && !has_non_crediting_on_day {
+        for (counts_as_work, es, ee) in &parsed_existing {
+            if !*counts_as_work {
+                continue;
+            }
+            if start_n < *ee && *es < end_n {
+                return Err(AppError::BadRequest("Overlap with an existing entry.".into()));
+            }
         }
+    }
+
+    let mut credited_intervals: Vec<(NaiveTime, NaiveTime)> = Vec::new();
+    if new_counts_as_work {
+        credited_intervals.push((start_n, end_n));
+    }
+    for (counts_as_work, es, ee) in &parsed_existing {
         if *counts_as_work {
-            day_total += (ee - es).num_minutes();
+            credited_intervals.push((*es, *ee));
         }
+    }
+    credited_intervals.sort_by_key(|(start, _)| *start);
+    let mut day_total = 0_i64;
+    let mut merged: Option<(NaiveTime, NaiveTime)> = None;
+    for (start, end) in credited_intervals {
+        if let Some((cur_start, cur_end)) = merged {
+            if start <= cur_end {
+                merged = Some((cur_start, cur_end.max(end)));
+            } else {
+                day_total += (cur_end - cur_start).num_minutes();
+                merged = Some((start, end));
+            }
+        } else {
+            merged = Some((start, end));
+        }
+    }
+    if let Some((cur_start, cur_end)) = merged {
+        day_total += (cur_end - cur_start).num_minutes();
     }
     if day_total > 14 * 60 {
         return Err(AppError::BadRequest("Day total exceeds 14 hours.".into()));
@@ -200,7 +243,7 @@ impl TimeEntryDb {
             builder
                 .push(" AND user_id IN (SELECT ua.user_id FROM user_approvers ua JOIN users u ON u.id=ua.user_id WHERE ua.approver_id = ")
                 .push_bind(requester_id)
-                .push(" AND u.role != 'admin')");
+                .push(" AND u.active=TRUE)");
         }
         if let Some(f) = from {
             builder.push(" AND entry_date >= ").push_bind(f);
@@ -212,6 +255,9 @@ impl TimeEntryDb {
             builder.push(" AND user_id = ").push_bind(uid);
         }
         if let Some(s) = status_filter {
+            // Non-crediting entries fully participate in the approval workflow, so no
+            // counts_as_work filter here — the approval queue must show all submitted
+            // entries regardless of category.
             builder.push(" AND status = ").push_bind(s);
         }
         builder.push(" ORDER BY entry_date DESC, start_time");
@@ -270,9 +316,9 @@ impl TimeEntryDb {
         approver_id: i64,
     ) -> AppResult<bool> {
         Ok(sqlx::query_scalar::<_, Option<bool>>(
-            "SELECT TRUE FROM users u \
-             WHERE u.id = $1 AND u.role != 'admin' \
-             AND EXISTS (SELECT 1 FROM user_approvers ua WHERE ua.user_id=$1 AND ua.approver_id=$2) \
+            "SELECT TRUE FROM user_approvers ua \
+             WHERE ua.user_id=$1 AND ua.approver_id=$2 \
+             AND EXISTS (SELECT 1 FROM users u WHERE u.id=$1 AND u.role != 'admin') \
              FOR UPDATE",
         )
         .bind(subject_user_id)
@@ -290,6 +336,25 @@ impl TimeEntryDb {
             .await?)
     }
 
+    pub async fn get_credited_submitted_dates_for_entries(
+        &self,
+        user_id: i64,
+        ids: &[i64],
+    ) -> AppResult<Vec<NaiveDate>> {
+        if ids.is_empty() {
+            return Ok(vec![]);
+        }
+        Ok(sqlx::query_scalar(
+                        "SELECT te.entry_date FROM time_entries te \
+                         WHERE te.user_id = $1 AND te.id = ANY($2) \
+                         AND te.status = 'submitted'",
+        )
+        .bind(user_id)
+        .bind(ids)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
     // ── Count helpers for reopen/submission checks ─────────────────────────
 
     pub async fn count_non_draft_in_week(
@@ -299,10 +364,9 @@ impl TimeEntryDb {
         week_end: NaiveDate,
     ) -> AppResult<i64> {
         Ok(sqlx::query_scalar(
-            "SELECT COUNT(*) FROM time_entries te \
-             JOIN categories c ON c.id = te.category_id \
-             WHERE te.user_id=$1 AND te.entry_date BETWEEN $2 AND $3 AND te.status<>'draft' \
-             AND c.counts_as_work = TRUE",
+                        "SELECT COUNT(*) FROM time_entries te \
+                         WHERE te.user_id=$1 AND te.entry_date BETWEEN $2 AND $3 \
+                         AND te.status IN ('submitted','approved')",
         )
         .bind(user_id)
         .bind(week_start)
@@ -683,13 +747,14 @@ impl TimeEntryDb {
         week_start: NaiveDate,
         week_end: NaiveDate,
     ) -> AppResult<Vec<(i64, String)>> {
-        Ok(sqlx::query_as::<_, (i64, String)>(
-            "SELECT te.id, te.status FROM time_entries te \
-             JOIN categories c ON c.id = te.category_id \
-             WHERE te.user_id=$1 AND te.entry_date BETWEEN $2 AND $3 AND te.status<>'draft' \
-             AND c.counts_as_work = TRUE \
-             FOR UPDATE",
-        )
+                Ok(sqlx::query_as::<_, (i64, String)>(
+                        "SELECT te.id, te.status FROM time_entries te \
+                         JOIN categories c ON c.id = te.category_id \
+                         WHERE te.user_id=$1 AND te.entry_date BETWEEN $2 AND $3 \
+                         AND c.counts_as_work = TRUE \
+                         AND te.status IN ('submitted','approved') \
+                         FOR UPDATE",
+                )
         .bind(user_id)
         .bind(week_start)
         .bind(week_end)
@@ -708,8 +773,8 @@ impl TimeEntryDb {
              SET status='draft', submitted_at=NULL, reviewed_by=NULL, \
                  reviewed_at=NULL, rejection_reason=NULL, \
                  updated_at=CURRENT_TIMESTAMP \
-             WHERE te.user_id=$1 AND te.entry_date BETWEEN $2 AND $3 AND te.status<>'draft' \
-             AND te.category_id IN (SELECT id FROM categories WHERE counts_as_work = TRUE)",
+             WHERE te.user_id=$1 AND te.entry_date BETWEEN $2 AND $3 \
+             AND te.status IN ('submitted','approved')",
         )
         .bind(user_id)
         .bind(week_start)
@@ -743,11 +808,12 @@ impl TimeEntryDb {
         from: NaiveDate,
         to: NaiveDate,
     ) -> AppResult<Vec<NaiveDate>> {
+        // Submission completeness is workflow-based, not crediting-based: any
+        // submitted/approved entry (including non-crediting categories) marks
+        // the day as submitted.
         let rows: Vec<(NaiveDate,)> = sqlx::query_as(
-            "SELECT DISTINCT z.entry_date FROM time_entries z \
-             JOIN categories c ON c.id = z.category_id \
-             WHERE z.user_id=$1 AND z.status IN ('submitted','approved') \
-             AND c.counts_as_work = TRUE \
+            "SELECT DISTINCT entry_date FROM time_entries \
+             WHERE user_id=$1 AND status IN ('submitted','approved') \
              AND entry_date BETWEEN $2 AND $3",
         )
         .bind(user_id)
@@ -767,8 +833,8 @@ impl TimeEntryDb {
     ) -> AppResult<bool> {
         Ok(sqlx::query_scalar::<_, Option<bool>>(
             "SELECT TRUE FROM user_approvers ua \
-             JOIN users u ON u.id = ua.user_id \
-             WHERE ua.user_id = $1 AND ua.approver_id = $2 AND u.role != 'admin'",
+             WHERE ua.user_id = $1 AND ua.approver_id = $2 \
+             AND EXISTS (SELECT 1 FROM users u WHERE u.id=$1 AND u.role != 'admin')",
         )
         .bind(subject_id)
         .bind(approver_id)
@@ -817,7 +883,7 @@ impl TimeEntryDb {
         Ok(())
     }
 
-    /// For submission-style checks: credited entries by user in range grouped by month.
+    /// For submission-style checks: all entries by user in range grouped by month.
     pub async fn get_monthly_submission_stats(
         &self,
         user_id: i64,
@@ -829,11 +895,9 @@ impl TimeEntryDb {
                  EXTRACT(YEAR FROM entry_date)::int AS y, \
                  EXTRACT(MONTH FROM entry_date)::int AS m, \
                  COUNT(*) AS total, \
-                 COUNT(*) FILTER (WHERE status = 'draft') AS drafts \
-             FROM time_entries te \
-             JOIN categories c ON c.id = te.category_id \
-             WHERE te.user_id = $1 AND te.entry_date >= $2 AND te.entry_date < $3 \
-               AND c.counts_as_work = TRUE \
+                                 COUNT(*) FILTER (WHERE status NOT IN ('submitted','approved')) AS incomplete \
+                         FROM time_entries \
+                         WHERE user_id = $1 AND entry_date >= $2 AND entry_date < $3 \
              GROUP BY y, m",
         )
         .bind(user_id)

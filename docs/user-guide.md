@@ -4,12 +4,12 @@ This guide explains how to use Zerf in daily work and how core workflow logic be
 
 Use this document if you are:
 
-- a new employee who needs a quick start,
+- an employee who needs a quick start,
 - an approver who needs to review requests,
 - an admin who needs to understand role and process behavior,
 - anyone who wants clear answers about status logic, balances, and edge cases.
 
-## Quick start for new users
+## Quick start
 
 ### 1. First login
 
@@ -29,15 +29,102 @@ Use this document if you are:
 - Use `Request edit` for one specific entry.
 - Use `Request reopen` if you need to edit the whole week directly.
 
+## Core concept: crediting vs. non-crediting entries
+
+Zerf tracks two types of work time entries, and understanding the difference will help you use the system more effectively.
+
+Every work category (like "Project work", "Team meeting", etc.) is configured as either **crediting** or **non-crediting**. This determines whether the hours count toward your work targets and flextime balance.
+
+| Type | Examples | Counts toward targets? | Counts toward flextime? | Requires approval? |
+| --- | --- | --- | --- | --- |
+| **Crediting** | Project work, Client support, Sales | ✓ Yes | ✓ Yes | ✓ Yes |
+| **Non-crediting** | Meetings, Training, Internal admin | ✗ No | ✗ No | ✓ Yes (same as all entries) |
+
+### Key insight: workflow vs. work-math
+
+- **Workflow** (submission, approval, reminders): All entries participate equally, whether crediting or non-crediting.
+- **Work-math** (flextime, targets, reports): Only crediting entries count.
+
+This means:
+
+- You must submit both types of entries. Non-crediting entries do not skip the approval workflow.
+- Your weekly completeness status includes both types. If you have unsubmitted non-crediting entries, your week is incomplete.
+- Only crediting entry hours affect your flextime calculation and whether you hit your daily/monthly targets.
+- Non-crediting entries are recorded for transparency and audit, but they do not impact your work metrics.
+
+### Practical examples
+
+**Example 1: Completeness check**
+- You have 8h crediting work all week (submitted/approved).
+- You have 2h team meetings (non-crediting, still in draft).
+- Your week status: **Incomplete** — you must submit the meetings too.
+- Once you submit them, your week is **Complete** and ready for reporting.
+
+**Example 2: Flextime calculation**
+- Your daily target: 8 hours
+- You log: 6h crediting work + 2h training (non-crediting)
+- Flextime delta: 6 − 8 = **−2 hours** (only the 6h crediting work counts)
+- The 2h training is recorded but does not affect your flextime.
+
+**Example 3: Reopen request**
+- Your week has 8h crediting work and 2h meetings (both submitted).
+- You request to reopen the week.
+- Result: all submitted/approved entries in the week are reset to draft and can be edited again.
+
+If you are unsure which categories in your organization are crediting, ask your admin or check the category list in the admin settings.
+
 ## Roles and approval model
 
-Every non-admin user has one or more assigned approvers.
+Zerf uses explicit approver assignments. Approvals and notifications are not
+inferred from role alone.
 
 - Employee: records time and absences, submits weeks, requests changes.
-- Approver (team lead or admin fallback): reviews submitted weeks and requests.
-- Admin: manages users, categories, holidays, settings, and can approve as fallback.
+- Approver: a user who has been explicitly assigned in `user_approvers` and is
+	active.
+- Admin: manages users, categories, holidays, settings, and can also be an
+	approver if explicitly assigned.
 
-A user can have multiple approvers. Any one of them can review and act on that user's requests.
+Important rules:
+
+- Every approval workflow is driven by explicit assignment.
+- A user can have multiple approvers. If more than one active approver is
+	assigned, all of them are treated as valid recipients and reviewers for that
+	user's requests.
+- Admin users do not automatically receive notifications just because they are
+	admins. They only receive approval notifications when they are explicitly
+	assigned.
+- Non-admin approvers cannot act on admin users. Admin-subject requests are
+	handled by admins only.
+- Only active approvers are considered. Inactive users are ignored for routing
+	and review.
+
+This means the assignment list is the single source of truth for who gets asked
+to review a request.
+
+## Timezone and date behavior
+
+Zerf uses one configurable application timezone for all business date logic.
+
+What this means in practice:
+
+- Admins can set the app timezone in admin settings (IANA zone, for example
+	`Europe/Berlin`).
+- "Today", current year/month boundaries, reminder scheduling dates, and
+	date-based workflow checks are calculated in the configured app timezone.
+- User-facing dates and timestamps in UI, emails, and notifications are
+	formatted in the configured app timezone.
+- End users do not need to configure a personal business timezone for workflow
+	behavior; workflow date logic is consistent system-wide.
+
+Important distinction:
+
+- Business date logic uses app timezone.
+- Security and technical timestamps (for example session and audit internals)
+	remain stored and processed with standard UTC timestamp semantics in the
+	database.
+
+This prevents "wrong day" edge cases around midnight and daylight-saving
+changes when users and server run in different timezones.
 
 ## Time entry workflow
 
@@ -57,19 +144,68 @@ A user can have multiple approvers. Any one of them can review and act on that u
 3. Approver accepts or rejects entries.
 4. Approved entries remain valid unless a later request is approved.
 
-Important behavior:
+### Understanding crediting vs. non-crediting entries
 
-- Submission is done for the full week, not per single entry.
-- A not-yet-submitted week is not reviewable by approvers.
+Each work category in Zerf is configured as either **crediting** or
+**non-crediting**.
+
+**Crediting entries** (for example project work, client support):
+
+- count toward daily and monthly targets,
+- affect flextime balances.
+
+**Non-crediting entries** (for example meetings, training, internal admin):
+
+- follow the same submission and approval workflow,
+- do not change flextime or target-hour math.
+
+### Important workflow rule
+
+All entries participate in workflow equally:
+
+- submission,
+- approval/rejection,
+- completeness checks,
+- reminders,
+- change requests,
+- reopen workflows.
+
+### Approval permissions and scope
+
+- Non-admin approvers can review only users explicitly assigned to them.
+- Non-admin approvers cannot manage admin-subject workflow items.
+- Admins can review all users.
+
+The same scope rule is applied across time entries, absences, change requests,
+reopen requests, and lead-scoped team views.
 
 ## Changes after submission
 
-If something is wrong after submission:
+If something is wrong after submission, use one of two paths:
 
-- `Request edit` (`Bearbeitung anfordern`): approver updates one already submitted/approved entry.
-- `Request reopen` (`Woche zur Bearbeitung anfordern`): approver unlocks the week; affected entries move back to editable draft flow.
+### Option 1: Request edit (single entry)
 
-If rejected, existing submitted/approved data stays unchanged.
+- Use this for a focused correction on one submitted/approved entry.
+- Works for both crediting and non-crediting entries.
+
+### Option 2: Request reopen (week level)
+
+- Use this when multiple entries in a week need correction.
+- Approved reopen resets submitted/approved entries in that week to draft.
+- Reopened entries become editable and can be submitted again.
+- If a week has no submitted/approved entries, reopen is rejected as
+	"nothing to reopen".
+
+### Change requests and reopen interaction
+
+When a week is reopened:
+
+- open change requests for entries in that week are auto-applied,
+- those change requests are marked as auto-applied,
+- the requester edits reopened entries and submits the week again.
+
+Reopen requests can be pending review or auto-approved, depending on the
+requester's configuration.
 
 ## Absence workflow
 
@@ -87,6 +223,8 @@ If rejected, existing submitted/approved data stays unchanged.
 
 - Sick leave with start date on or before today is auto-approved.
 - Other absence types require explicit approval.
+- Auto-approved absences do not create an approval task, so approvers are not
+	notified for them.
 
 ### Overlap rules
 
@@ -94,30 +232,100 @@ If rejected, existing submitted/approved data stays unchanged.
 - Non-sick absence overlapping existing time entries is rejected.
 - If an approved absence covers a day that already has time entries, those entries remain and still count as worked time.
 
+Review and privacy behavior:
+
+- Non-admin approvers can approve/reject only direct-report absences for
+	non-admin users.
+- Admin-subject absences are handled by admins.
+- In the shared absence calendar, employees can see less-sensitive team
+	visibility by default. Sensitive absence kinds are not disclosed to peers;
+	leads/admins and the absence owner see full details.
+
+Vacations and sick leave are checked against the employee's own work schedule.
+A one-day request on a public holiday or on a non-working weekday does not
+count as a valid absence day.
+
 ## Flextime logic
 
-Flextime is based on:
+Flextime (positive or negative balance) is calculated as:
 
-- actual worked hours,
-- minus daily target hours.
+**Flextime = Actual work hours − Daily targets**
+
+Only **crediting entries** count as actual work hours in this calculation. Non-crediting entries are recorded and approved like all others, but they do not contribute to your flextime.
+
+### How daily targets are calculated
+
+Daily target is the number of hours you are expected to work on a given day.
 
 Daily target hours are `0` when:
 
-- day is weekend,
-- day is a public holiday,
-- day is covered by approved absence,
-- day is before user start date,
-- day is in the future.
+- Day is a weekend (for your configured work schedule),
+- Day is a public holiday,
+- Day is covered by an approved absence (vacation, sick leave, training, etc.),
+- Day is before your start date,
+- Day is in the future.
 
-Otherwise, target is derived from weekly hours divided by the user's configured workdays per week.
+Otherwise, target is calculated as:
+
+**Daily target = (Weekly hours ÷ Workdays per week) × (1 day)**
+
+Example: If you work 40 hours per week over 5 days, your daily target is 8 hours.
+
+### What counts toward flextime actuals
+
+- **Approved crediting entries:** hours count fully.
+- **Submitted crediting entries:** hours do NOT count in flextime actuals.
+- **Draft crediting entries:** hours do NOT count.
+- **Non-crediting entries (all statuses):** hours do NOT count, regardless of approval status.
+
+Example flextime scenario:
+
+- Your daily target: 8 hours
+- Monday approved work entries (crediting): 7 hours → Flextime delta: −1 hour
+- Monday team meeting (non-crediting): 1 hour → Does NOT affect flextime
+- Monday total actual hours for flextime: 7 hours (only crediting counted)
+- Your Monday flextime result: 7 − 8 = −1 hour
+
+If your team meeting were crediting instead, the result would be: (7+1) − 8 = 0 hours flextime.
 
 ## Submission status indicator
 
-The `Submission status` tile checks if all required past weeks are submitted.
+The `Submission status` tile shows whether all required past weeks have been submitted.
 
-- Scope: from user start date up to and including the last complete week.
-- Current week is excluded.
-- Approval is not required for this indicator; submission is enough.
+- **Scope:** from your start date up to and including the last complete week.
+- **Current week is excluded** from this check (it is still ongoing).
+- **Approval is not required** for this indicator; submission is enough.
+
+### How completeness is determined
+
+A week is considered **complete** (ready for flextime and monthly reports) when every required working day is accounted for by either:
+
+- At least one submitted or approved entry (crediting or non-crediting), **or**
+- An approved absence (vacation, sick leave, etc.)
+
+A week is considered **incomplete** when:
+
+- Any required working day has entries that are still in draft status, **or**
+- Any required working day has entries that were rejected, **or**
+- Any required working day has neither entries nor an absence.
+
+### Important: non-crediting entries affect completeness
+
+Non-crediting entries fully participate in the completeness check:
+
+- If you have a non-crediting entry in draft on Wednesday, your entire week remains **incomplete**.
+- You must submit the whole week, including the non-crediting entry, for the week to be marked complete.
+- This ensures nothing slips through the approval workflow.
+
+Even though non-crediting hours do not count toward flextime, their submission status is tracked because the submission workflow itself is comprehensive for all entries.
+
+**Example:**
+
+- Monday-Friday: all crediting work entries submitted/approved
+- Wednesday: one team meeting (non-crediting) still in draft
+- Week status: **Incomplete** (Wednesday's meeting must be submitted)
+- Once you submit Wednesday's meeting, the entire week becomes **Complete**
+- Flextime calculation then includes Mon-Tue, Thu-Fri crediting entries only (Wed meeting is still not counted in flextime)
 
 States:
 
@@ -251,17 +459,89 @@ Users sometimes see that available days do not increase immediately after reques
 - absence is approved or rejected,
 - absence cancellation is approved or rejected,
 - change request is approved or rejected,
-- reopen request is approved or rejected.
+- reopen request is approved or rejected,
+- a weekly submission reminder is triggered (incomplete weeks to submit).
 
 ### Approver receives notifications when
 
-- a new absence request is submitted,
+- a time entry is submitted (whether crediting or non-crediting),
+- an absence request is submitted,
 - a change request is submitted,
-- a reopen request is submitted.
+- a reopen request is submitted,
+- a weekly approval reminder is triggered (pending items awaiting review).
 
-### Monthly reminder
+### Who gets notified
+
+- Only explicitly assigned approvers receive approval notifications and reminders.
+- If a user has multiple active approvers, each of them receives the same
+	request notification.
+- Admin notifications and reminders are sent based on explicit assignment.
+- Inactive approvers are skipped.
+- For admin-subject workflows, only admins can act on the request.
+
+This also applies to reminder emails and in-app reminders: Zerf reminds the
+users who are actually assigned, not all users with a privileged role.
+
+### Important: non-crediting entries trigger reminders too
+
+Because non-crediting entries participate in the full approval workflow:
+
+- **Submission reminders** go to employees who have ANY incomplete entries (crediting or non-crediting).
+  - If you have unsubmitted crediting work and unsubmitted non-crediting meetings, you receive the reminder.
+  - If you have only unsubmitted non-crediting entries, you still receive the reminder (to complete the workflow).
+
+- **Approval reminders** go to approvers when there are submitted entries awaiting their decision.
+  - Approvers see and must review both crediting and non-crediting entries.
+  - Approval reminders are triggered by any submitted entry type.
+
+Notification idempotency and duplicates:
+
+- Reminder notifications use deterministic dedupe keys to avoid duplicate
+	reminder spam for the same user and reminder day.
+- This applies to submission reminders and approval reminders.
+- If a duplicate reminder event is attempted for the same dedupe scope, it is
+	ignored safely.
+
+### Monthly submission reminder
 
 Users with incomplete past submissions receive a monthly reminder on the configured reminder deadline day (in-app, plus email if SMTP is enabled).
+
+Reminder selection follows the same explicit-assignment rule as approvals.
+That means a reminder is sent to the active assigned approver(s) who are
+responsible for pending items, not to every admin in the system.
+
+**What triggers the reminder:**
+- Any day in past required weeks that is not covered by a submitted/approved entry or absence.
+- This includes days with only draft entries or unaccounted-for days.
+- Non-crediting entries fully participate: if a day has only unsubmitted non-crediting entries, it is flagged as incomplete.
+
+### Weekly approval reminder
+
+Zerf can send a weekly reminder to approvers when submitted items are waiting
+for review.
+
+- Reminder day/time follows app-timezone scheduling.
+- Recipients are explicit active assignees only.
+- Duplicate reminders for the same day are suppressed via dedupe keys.
+
+**What triggers the reminder:**
+- Any submitted (not approved/rejected) entries from any category type.
+- Non-crediting entries are included: if an approver has pending non-crediting entries, the reminder is sent.
+
+### Reminder toggles (admin)
+
+Admins can manage reminder behavior in settings:
+
+- submission reminders enabled/disabled,
+- approval reminders enabled/disabled.
+
+These toggles control whether the corresponding reminder background task sends
+notifications/emails.
+
+### Notification timestamp display
+
+Notification and email timestamps shown to users are rendered in the configured
+app timezone so users see consistent local business time.
 
 ## Important edge case: sick leave with existing time entries
 
@@ -296,7 +576,7 @@ flowchart TD
 	LeadB -->|approver for| LeadA
 
 	Admin -->|manages platform and users| LeadB
-	Admin -. fallback approval only .-> LeadA
+	Admin -->|can be explicitly assigned as approver| LeadA
 ```
 
 ### Example approval flow
@@ -311,17 +591,73 @@ flowchart LR
 	Rejected[Rejected]
 	LeadOwn[Team lead submits own request]
 
-	Employee -->|any assigned approver can review| Lead1
+	Employee -->|any assigned active approver can review| Lead1
 	Employee --> Lead2
 	Lead1 -->|approve| Approved
 	Lead1 -->|reject| Rejected
 	Lead2 -->|approve| Approved
 	Lead2 -->|reject| Rejected
 
-	LeadOwn -->|any assigned approver can review| LeadApprover
+	LeadOwn -->|admin-subject requests require admin reviewers| LeadApprover
 	LeadApprover -->|approve| Approved
 	LeadApprover -->|reject| Rejected
 ```
+
+### What explicit assignment means
+
+When an approver is assigned to a user:
+
+- that approver receives the user's approval-related notifications,
+- that approver can review the user's submitted requests,
+- the user appears in that approver's visible team scope,
+- the assignment must point to an active user.
+
+When no approver is assigned:
+
+- no approver notification route exists,
+- no review queue entry is created for that relationship,
+- non-admin users should be configured with at least one approver.
+
+For admins, the assignment list matters for notifications. If an admin is
+not explicitly assigned, they will not receive approval reminders or request
+notifications just because they are an admin.
+
+## Reporting behavior (important)
+
+Zerf distinguishes between workflow coverage and work-credit math.
+
+### Month and overtime/flextime math
+
+- Work-credit calculations use only entries that count as work and match the
+	relevant status rules (for example approved for actuals).
+- Non-crediting entries remain visible in workflow but do not inflate worked
+	hour balances.
+
+### Category breakdown reports
+
+- Category breakdowns show booked non-rejected time entries in scope (not only
+	crediting categories).
+- This gives a complete operational view of what was booked by category.
+
+### Team report scope
+
+- Admins can see all active users.
+- Non-admin leads see themselves plus explicitly assigned direct reports.
+- Non-admin leads do not see admin subjects in lead-scoped team reporting.
+
+## Admin checklist for a correct setup
+
+Use this checklist after initial deployment or major configuration changes.
+
+1. Set app timezone in admin settings.
+2. Assign explicit active approvers for all non-admin users.
+3. Review reminder toggles (submission and approval reminders).
+4. Confirm holiday data is loaded for current/next year.
+5. Validate one end-to-end flow:
+	 employee submits week -> approver receives notification -> approver reviews.
+
+If one step is missing (especially explicit approver assignment), approval
+notifications and pending queues will not behave as expected.
 
 ## FAQ
 

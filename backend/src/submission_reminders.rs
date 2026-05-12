@@ -89,14 +89,15 @@ async fn find_unsubmitted_months(
     last_year: i32,
     last_month: u32,
 ) -> Vec<(i32, u32)> {
-    // Single query: for each month with any entries, check if any are still draft.
+    // Single query: for each month with any crediting entries, check if any are
+    // still not yet fully submitted (draft or rejected).
     // Months with zero entries are also "unsubmitted" and handled separately.
     let rows: Vec<(i32, i32, i64, i64)> = sqlx::query_as(
         "SELECT \
              EXTRACT(YEAR FROM entry_date)::int AS y, \
              EXTRACT(MONTH FROM entry_date)::int AS m, \
              COUNT(*) AS total, \
-             COUNT(*) FILTER (WHERE status = 'draft') AS drafts \
+             COUNT(*) FILTER (WHERE te.status NOT IN ('submitted','approved')) AS incomplete \
                  FROM time_entries te \
                  JOIN categories c ON c.id = te.category_id \
                  WHERE te.user_id = $1 \
@@ -123,10 +124,10 @@ async fn find_unsubmitted_months(
     .await
     .unwrap_or_default();
 
-    // Build a set of months that have all entries submitted (total > 0 && drafts == 0)
+    // Build a set of months that have all entries submitted/approved.
     let submitted: std::collections::HashSet<(i32, u32)> = rows
         .into_iter()
-        .filter(|(_, _, total, drafts)| *total > 0 && *drafts == 0)
+        .filter(|(_, _, total, incomplete)| *total > 0 && *incomplete == 0)
         .map(|(year, month, _, _)| (year, month as u32))
         .collect();
 
@@ -241,17 +242,19 @@ pub async fn run_check(state: &crate::AppState) {
             timestamp,
         );
 
-        // Insert in-app notification; ON CONFLICT DO NOTHING prevents duplicates if the
-        // background job overlaps with itself (relies on uq_notifications_reminder_daily index).
+        // Use an app-timezone local-day dedupe key so reminders are unique per
+        // user/day in configured timezone, not by UTC date.
+        let dedupe_key = format!("submission_reminder:{}", today);
         // Only send the in-app signal and email when the row was actually inserted
         // (rows_affected == 0 means the conflict guard fired — reminder already sent today).
-        match state.db.notifications.insert_idempotent(
+        match state.db.notifications.insert_idempotent_with_dedupe_key(
             user_id,
             "submission_reminder",
             &title,
             &body,
             None,
             None,
+            Some(&dedupe_key),
         )
         .await
         {

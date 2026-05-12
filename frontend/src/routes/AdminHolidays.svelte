@@ -1,14 +1,19 @@
 <script>
   import { api } from "../api.js";
-  import { toast } from "../stores.js";
+  import { settings, toast } from "../stores.js";
   import { t } from "../i18n.js";
-  import { fmtDate } from "../format.js";
+  import { fmtDate, appTodayDate } from "../format.js";
   import Icon from "../Icons.svelte";
   import { confirmDialog } from "../confirm.js";
   import DatePicker from "../DatePicker.svelte";
 
   let holidays = [];
-  let year = new Date().getFullYear();
+  let year = appTodayDate($settings?.timezone).getFullYear();
+  let yearTouched = false;
+  $: baseYear = appTodayDate($settings?.timezone).getFullYear();
+  $: if (!yearTouched && year !== baseYear) {
+    year = baseYear;
+  }
   let newDate = "";
   let newName = "";
 
@@ -54,6 +59,7 @@
       <button
         class="kz-btn kz-btn-ghost"
         on:click={() => {
+          yearTouched = true;
           year--;
           load();
         }}
@@ -64,6 +70,7 @@
       <button
         class="kz-btn kz-btn-ghost"
         on:click={() => {
+          yearTouched = true;
           year++;
           load();
         }}

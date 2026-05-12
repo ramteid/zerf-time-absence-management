@@ -6,12 +6,49 @@ import { settings } from "./stores.js";
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const UTC_ISO_DATETIME_RE = /^\d{4}-\d{2}-\d{2}T/;
 
-function getConfiguredTimeZone() {
-  const timezone = get(settings)?.timezone;
+function getConfiguredTimeZone(timezoneOverride) {
+  const timezone =
+    typeof timezoneOverride === "string" && timezoneOverride.trim()
+      ? timezoneOverride
+      : get(settings)?.timezone;
   if (typeof timezone !== "string" || !timezone.trim()) {
     return "Europe/Berlin";
   }
   return timezone.trim();
+}
+
+function datePartsInConfiguredTimeZone(value = new Date(), timezoneOverride) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: getConfiguredTimeZone(timezoneOverride),
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(value);
+  const year = Number(parts.find((part) => part.type === "year")?.value);
+  const month = Number(parts.find((part) => part.type === "month")?.value);
+  const day = Number(parts.find((part) => part.type === "day")?.value);
+  return { year, month, day };
+}
+
+export function appTodayDate(timezoneOverride) {
+  const { year, month, day } = datePartsInConfiguredTimeZone(new Date(), timezoneOverride);
+  return new Date(year, month - 1, day);
+}
+
+export function appTodayIsoDate(timezoneOverride) {
+  return isoDate(appTodayDate(timezoneOverride));
+}
+
+export function appCurrentTimeHM(timezoneOverride) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: getConfiguredTimeZone(timezoneOverride),
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+  const hour = parts.find((part) => part.type === "hour")?.value || "00";
+  const minute = parts.find((part) => part.type === "minute")?.value || "00";
+  return `${hour}:${minute}`;
 }
 
 function shouldApplyConfiguredTimeZone(value) {

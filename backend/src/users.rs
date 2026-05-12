@@ -10,6 +10,7 @@ use axum::{
 };
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 pub(crate) fn repo_user_to_auth_user(u: crate::repository::User) -> User {
     User {
@@ -213,9 +214,17 @@ async fn validate_approver_ids(
     user_self_id: Option<i64>,
     approver_ids: &[i64],
 ) -> AppResult<()> {
+    let mut seen = HashSet::new();
+    for approver_id in approver_ids {
+        if !seen.insert(*approver_id) {
+            return Err(AppError::BadRequest(
+                "Approver list contains duplicates.".into(),
+            ));
+        }
+    }
     if role != "admin" && approver_ids.is_empty() {
         return Err(AppError::BadRequest(
-            "An approver (Team lead or Admin) is required for non-admin users.".into(),
+            "An approver is required for non-admin users.".into(),
         ));
     }
     for aid in approver_ids {
@@ -375,11 +384,7 @@ pub async fn create(
         })?;
     // Insert approver relationships into user_approvers junction table
     for approver_id in &body.approver_ids {
-        sqlx::query("INSERT INTO user_approvers(user_id, approver_id) VALUES ($1, $2)")
-            .bind(new_user_id)
-            .bind(approver_id)
-            .execute(&mut *transaction)
-            .await?;
+        UserDb::insert_approver_tx(&mut *transaction, new_user_id, *approver_id).await?;
     };
     // Seed leave days for current + next year
     let current_year = crate::settings::app_current_year(&app_state.pool).await;
@@ -576,10 +581,15 @@ pub async fn update(
         .role
         .clone()
         .unwrap_or_else(|| previous_user.role.clone());
-    // Validate new approver_ids if provided
-    if let Some(approver_ids) = &body.approver_ids {
-        validate_approver_ids(&app_state, &new_role, Some(user_id), approver_ids).await?;
-    }
+    let effective_approver_ids = if let Some(approver_ids) = &body.approver_ids {
+        approver_ids.clone()
+    } else {
+        sqlx::query_scalar("SELECT approver_id FROM user_approvers WHERE user_id=$1 ORDER BY approver_id")
+            .bind(user_id)
+            .fetch_all(&mut *transaction)
+            .await?
+    };
+    validate_approver_ids(&app_state, &new_role, Some(user_id), &effective_approver_ids).await?;
 
     let resulting_active = body.active.unwrap_or(previous_user.active);
     if !can_approve_admin_subjects(&new_role, resulting_active) {
@@ -599,11 +609,11 @@ pub async fn update(
         let non_admin_direct_reports_count = app_state
             .db
             .users
-            .count_non_admin_direct_reports(user_id)
+            .count_direct_reports(user_id)
             .await?;
         if non_admin_direct_reports_count > 0 {
             return Err(AppError::BadRequest(format!(
-                "Cannot change this user to a non-approver: {} active non-admin user(s) still have them as their approver. Reassign them first.",
+                "Cannot change this user to a non-approver: {} user(s) still have them as their approver. Reassign them first.",
                 non_admin_direct_reports_count
             )));
         }
@@ -643,11 +653,7 @@ pub async fn update(
             .await?;
         // Insert new approver relationships
         for approver_id in new_approver_ids {
-            sqlx::query("INSERT INTO user_approvers(user_id, approver_id) VALUES ($1, $2)")
-                .bind(user_id)
-                .bind(approver_id)
-                .execute(&mut *transaction)
-                .await?;
+            UserDb::insert_approver_tx(&mut *transaction, user_id, *approver_id).await?;
         }
     }
     // If role changed or user was deactivated, kill all sessions of that user

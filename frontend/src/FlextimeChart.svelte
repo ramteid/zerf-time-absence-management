@@ -1,6 +1,7 @@
 <script>
   import { t, absenceKindLabel, formatHours } from "./i18n.js";
-  import { fmtDateShort, isoDate } from "./format.js";
+  import { settings } from "./stores.js";
+  import { appTodayIsoDate, fmtDateShort } from "./format.js";
 
   /**
    * @typedef {{date: string, actual_min: number, target_min: number,
@@ -13,7 +14,7 @@
 
   // Index of the last data point up to and including today (local date).
   // The line and area fill stop here; x-axis labels cover the full range.
-  $: todayStr = isoDate(new Date());
+  $: todayStr = appTodayIsoDate($settings?.timezone);
   $: lastActualIdx = (() => {
     let lastVisibleIndex = data.length - 1;
     while (lastVisibleIndex >= 0 && data[lastVisibleIndex].date > todayStr) lastVisibleIndex--;

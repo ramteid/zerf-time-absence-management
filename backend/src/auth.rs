@@ -63,8 +63,8 @@ pub struct User {
     pub must_change_password: bool,
     pub created_at: DateTime<Utc>,
     /// When TRUE, this user's reopen requests are auto-approved without waiting
-    /// for manual review.  The designated approver and all admins still receive
-    /// an in-app + email notification that the auto-approval happened.
+    /// for manual review. Explicitly assigned approvers still receive the
+    /// corresponding in-app and email notifications.
     pub allow_reopen_without_approval: bool,
     pub dark_mode: bool,
     pub overtime_start_balance_min: i64,
@@ -82,27 +82,46 @@ impl User {
     }
 }
 
-/// Fetch all assigned approvers for a user from the user_approvers table.
-/// If the user has no assigned approvers, falls back to all active admins.
+/// Fetch all explicitly assigned approvers for a user from user_approvers.
+///
+/// Notification recipients must be explicit assignments. Global admin fallback
+/// is intentionally not used for notifications.
 pub async fn user_approver_ids(
     pool: &crate::db::DatabasePool,
     user_id: i64,
 ) -> Vec<i64> {
     let db = UserDb::new(pool.clone());
-    let ids = db.get_approver_ids(user_id).await.unwrap_or_default();
-    if !ids.is_empty() {
-        return ids;
-    }
-    db.get_all_admin_ids().await.unwrap_or_default()
+    db.get_approver_ids(user_id).await.unwrap_or_default()
 }
 
 pub async fn lock_user_graph(tx: &mut sqlx::PgConnection) -> AppResult<()> {
     UserDb::lock_user_graph_tx(tx).await
 }
 
-/// Fetch all active approvers for a user (their assigned approvers, or admins as fallback).
+/// Fetch all active notification recipients for approval workflows.
+/// Recipients are always the user's explicitly assigned approvers.
 pub async fn approval_recipient_ids(pool: &crate::db::DatabasePool, requester: &User) -> Vec<i64> {
     user_approver_ids(pool, requester.id).await
+}
+
+/// Fetch approval notification recipients and enforce that non-admin users
+/// always have at least one effective approver.
+pub async fn required_approval_recipient_ids(
+    pool: &crate::db::DatabasePool,
+    requester: &User,
+) -> AppResult<Vec<i64>> {
+    let mut recipient_ids = approval_recipient_ids(pool, requester).await;
+    if !requester.is_admin() {
+        // Legacy safety: non-admin users must never route approval notifications
+        // to themselves, even if stale user_approvers rows exist.
+        recipient_ids.retain(|recipient_id| *recipient_id != requester.id);
+    }
+    if !requester.is_admin() && recipient_ids.is_empty() {
+        return Err(AppError::Conflict(
+            "No valid approver is available for this request.".into(),
+        ));
+    }
+    Ok(recipient_ids)
 }
 
 pub fn argon2_instance() -> Argon2<'static> {

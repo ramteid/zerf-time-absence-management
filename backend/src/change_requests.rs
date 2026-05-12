@@ -390,7 +390,8 @@ pub async fn create(
     .await;
     // Notify approvers that a change request needs review.
     let requester_full_name = format!("{} {}", requester.first_name, requester.last_name);
-    let approver_ids = crate::auth::approval_recipient_ids(&app_state.pool, &requester).await;
+    let approver_ids =
+        crate::auth::required_approval_recipient_ids(&app_state.pool, &requester).await?;
     let language = notification_language(&app_state.pool).await;
     let week_label = i18n::format_week_label(&language, monday_of(entry_date));
     let current_category = category_label(&app_state.pool, &language, entry_category_id).await;
@@ -462,15 +463,25 @@ pub async fn approve(
         return Err(AppError::Forbidden);
     }
     if !requester.is_admin() {
-        // Non-admin leads may only act on requests from their direct reports.
-        let is_direct_report: Option<bool> = sqlx::query_scalar(
-            "SELECT TRUE FROM users WHERE id = $1 AND role != 'admin' AND EXISTS (SELECT 1 FROM user_approvers WHERE user_id = $1 AND approver_id = $2) FOR UPDATE",
+        // Non-admin approvers may only act if explicitly assigned.
+        let is_assigned_approver: Option<bool> = sqlx::query_scalar(
+            "SELECT TRUE FROM user_approvers WHERE user_id = $1 AND approver_id = $2 FOR UPDATE",
         )
         .bind(change_request.user_id)
         .bind(requester.id)
         .fetch_optional(&mut *transaction)
         .await?;
-        if is_direct_report.is_none() {
+        if is_assigned_approver.is_none() {
+            return Err(AppError::Forbidden);
+        }
+        // Non-admin approvers must not act on admin users.
+        let is_admin_user: Option<bool> = sqlx::query_scalar(
+            "SELECT TRUE FROM users WHERE id = $1 AND role = 'admin'"
+        )
+        .bind(change_request.user_id)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        if is_admin_user.is_some() {
             return Err(AppError::Forbidden);
         }
     }
@@ -674,16 +685,26 @@ pub async fn reject(
     if change_request.user_id == requester.id && !requester.is_admin() {
         return Err(AppError::Forbidden);
     }
-    // Non-admin leads may only act on requests from their direct reports.
+    // Non-admin approvers may only act if explicitly assigned.
     if !requester.is_admin() {
-        let is_direct_report: Option<bool> = sqlx::query_scalar(
-            "SELECT TRUE FROM users WHERE id = $1 AND role != 'admin' AND EXISTS (SELECT 1 FROM user_approvers WHERE user_id = $1 AND approver_id = $2) FOR UPDATE",
+        let is_assigned_approver: Option<bool> = sqlx::query_scalar(
+            "SELECT TRUE FROM user_approvers WHERE user_id = $1 AND approver_id = $2 FOR UPDATE",
         )
         .bind(change_request.user_id)
         .bind(requester.id)
         .fetch_optional(&mut *transaction)
         .await?;
-        if is_direct_report.is_none() {
+        if is_assigned_approver.is_none() {
+            return Err(AppError::Forbidden);
+        }
+        // Non-admin approvers must not act on admin users.
+        let is_admin_user: Option<bool> = sqlx::query_scalar(
+            "SELECT TRUE FROM users WHERE id = $1 AND role = 'admin'"
+        )
+        .bind(change_request.user_id)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        if is_admin_user.is_some() {
             return Err(AppError::Forbidden);
         }
     }

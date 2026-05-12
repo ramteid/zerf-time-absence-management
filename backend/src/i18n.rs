@@ -274,9 +274,9 @@ pub fn format_datetime_in_timezone(
         .unwrap_or(chrono_tz::UTC);
     let local = value.with_timezone(&tz);
     if language.code() == "de" {
-        local.format("%d.%m.%Y %H:%M %Z").to_string()
+        local.format("%d.%m.%Y %H:%M").to_string()
     } else {
-        local.format("%m/%d/%Y %H:%M %Z").to_string()
+        local.format("%m/%d/%Y %H:%M").to_string()
     }
 }
 

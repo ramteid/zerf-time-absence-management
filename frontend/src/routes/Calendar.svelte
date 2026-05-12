@@ -1,7 +1,7 @@
 <script>
   import { tick } from "svelte";
   import { api } from "../api.js";
-  import { path, go, currentUser, categories } from "../stores.js";
+  import { path, go, currentUser, categories, settings } from "../stores.js";
   import { t, absenceKindLabel } from "../i18n.js";
   import {
     fmtMonthYear,
@@ -9,6 +9,8 @@
     monday,
     addDays,
     isoDate,
+    appTodayDate,
+    appTodayIsoDate,
     fmtDate,
     durMin,
     minToHM,
@@ -26,7 +28,7 @@
   $: {
     const queryString = $path.includes("?") ? $path.split("?")[1] : "";
     const searchParams = new URLSearchParams(queryString);
-    const today = new Date();
+    const today = appTodayDate($settings?.timezone);
     year = Number(searchParams.get("year")) || today.getFullYear();
     month = Number(searchParams.get("month")) || today.getMonth() + 1;
   }
@@ -219,7 +221,7 @@
       ? `?year=${year + 1}&month=1`
       : `?year=${year}&month=${month + 1}`;
 
-  const todayStr = isoDate(new Date());
+  $: todayStr = appTodayIsoDate($settings?.timezone);
 
   $: cells = (() => {
     const first = new Date(year, month - 1, 1);

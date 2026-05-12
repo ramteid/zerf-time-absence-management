@@ -298,7 +298,8 @@ pub async fn submit(
     let submitted_week_count = submitted_weeks.len();
     // Phase 4: notify the approver with the actual submitted count.
     if submitted_week_count > 0 {
-        let approver_ids = crate::auth::approval_recipient_ids(&app_state.pool, &requester).await;
+        let approver_ids =
+            crate::auth::required_approval_recipient_ids(&app_state.pool, &requester).await?;
         let language = notification_language(&app_state.pool).await;
         for approver_id in approver_ids {
             crate::notifications::create_translated(

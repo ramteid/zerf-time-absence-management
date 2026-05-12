@@ -1,9 +1,9 @@
 <script>
   import { onMount } from "svelte";
   import { api } from "../api.js";
-  import { categories } from "../stores.js";
+  import { categories, settings } from "../stores.js";
   import { t } from "../i18n.js";
-  import { isoDate } from "../format.js";
+  import { appCurrentTimeHM, appTodayIsoDate } from "../format.js";
   import { confirmDialog } from "../confirm.js";
   import Icon from "../Icons.svelte";
   import DatePicker from "../DatePicker.svelte";
@@ -14,12 +14,21 @@
   let dlg;
   let _closed = false;
   $: isNew = !template.id;
-  let entry_date = template.entry_date || isoDate(new Date());
+  let todayIso = appTodayIsoDate($settings?.timezone);
+  let lastTodayIso = todayIso;
+  let entry_date = template.entry_date || todayIso;
   let start_time = template.start_time?.slice(0, 5) || "08:00";
   let end_time = template.end_time?.slice(0, 5) || "12:00";
   let category_id = template.category_id ?? $categories[0]?.id ?? null;
   let comment = template.comment || "";
   let error = "";
+
+  // Keep untouched default date aligned with app timezone changes.
+  $: todayIso = appTodayIsoDate($settings?.timezone);
+  $: if (isNew && !template.entry_date && entry_date === lastTodayIso && todayIso !== lastTodayIso) {
+    entry_date = todayIso;
+  }
+  $: lastTodayIso = todayIso;
 
   $: if (start_time && end_time && start_time > end_time) {
     end_time = start_time;
@@ -37,12 +46,8 @@
       error = $t("Start cannot be after End.");
       return;
     }
-    if (isNew && entry_date === isoDate(new Date())) {
-      const now = new Date();
-      const currentTime =
-        String(now.getHours()).padStart(2, "0") +
-        ":" +
-        String(now.getMinutes()).padStart(2, "0");
+    if (isNew && entry_date === todayIso) {
+      const currentTime = appCurrentTimeHM($settings?.timezone);
       if (end_time > currentTime) {
         error = $t("End time cannot be in the future.");
         return;
@@ -118,7 +123,7 @@
       <DatePicker
         id="entry-date"
         bind:value={entry_date}
-        max={isoDate(new Date())}
+        max={todayIso}
         container={dlg}
       />
     </div>
