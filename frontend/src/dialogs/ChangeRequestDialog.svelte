@@ -79,7 +79,7 @@
 <dialog bind:this={dlg} on:close={cancel}>
   <header>
     <span style="flex:1">{$t("Request change")}</span>
-    <button class="kz-btn-icon-sm kz-btn-ghost" on:click={cancel}>
+    <button class="zf-btn-icon-sm zf-btn-ghost" on:click={cancel}>
       <Icon name="X" size={16} />
     </button>
   </header>
@@ -89,7 +89,7 @@
       {entry.start_time?.slice(0, 5)}–{entry.end_time?.slice(0, 5)}
     </p>
     <div>
-      <label class="kz-label" for="change-request-date">{$t("Date")}</label>
+      <label class="zf-label" for="change-request-date">{$t("Date")}</label>
       <DatePicker
         id="change-request-date"
         bind:value={entry_date}
@@ -99,19 +99,19 @@
     </div>
     <div class="field-row">
       <div>
-        <label class="kz-label" for="change-request-start">{$t("Start")}</label>
+        <label class="zf-label" for="change-request-start">{$t("Start")}</label>
         <TimePicker id="change-request-start" bind:value={start_time} required />
       </div>
       <div>
-        <label class="kz-label" for="change-request-end">{$t("End")}</label>
+        <label class="zf-label" for="change-request-end">{$t("End")}</label>
         <TimePicker id="change-request-end" bind:value={end_time} required />
       </div>
     </div>
     <div>
-      <label class="kz-label" for="change-request-category">{$t("Category")}</label>
+      <label class="zf-label" for="change-request-category">{$t("Category")}</label>
       <select
         id="change-request-category"
-        class="kz-select"
+        class="zf-select"
         bind:value={category_id}
         disabled={$categories.length === 0}
       >
@@ -125,19 +125,19 @@
       </select>
     </div>
     <div>
-      <label class="kz-label" for="change-request-comment">{$t("Comment (optional)")}</label>
+      <label class="zf-label" for="change-request-comment">{$t("Comment (optional)")}</label>
       <textarea
         id="change-request-comment"
-        class="kz-textarea"
+        class="zf-textarea"
         rows="3"
         bind:value={comment}
       ></textarea>
     </div>
     <div>
-      <label class="kz-label" for="change-request-reason">{$t("Reason")}</label>
+      <label class="zf-label" for="change-request-reason">{$t("Reason")}</label>
       <textarea
         id="change-request-reason"
-        class="kz-textarea"
+        class="zf-textarea"
         rows="4"
         bind:value={reason}
         required
@@ -146,8 +146,8 @@
     <div class="error-text">{error}</div>
   </div>
   <footer>
-    <button class="kz-btn" on:click={cancel}>{$t("Cancel")}</button>
-    <button class="kz-btn kz-btn-primary" on:click={submit}
+    <button class="zf-btn" on:click={cancel}>{$t("Cancel")}</button>
+    <button class="zf-btn zf-btn-primary" on:click={submit}
       >{$t("Submit")}</button
     >
   </footer>

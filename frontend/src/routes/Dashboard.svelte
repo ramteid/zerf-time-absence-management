@@ -853,7 +853,7 @@
     <div class="dashboard-group-label" style="display:flex;align-items:center;gap:6px">
       {$t("My Balance")}
       <button
-        class="kz-btn-icon-sm kz-btn-ghost"
+        class="zf-btn-icon-sm zf-btn-ghost"
         title={$t("help_my_balance")}
         on:click={() => toggleHelp("balance")}
         style="color:var(--text-tertiary);font-size:14px;cursor:help"
@@ -871,7 +871,7 @@
     <div class="stat-cards">
 
       <!-- Cumulative overtime balance including today -->
-      <div class="kz-card stat-card">
+      <div class="zf-card stat-card">
         <div class="stat-card-label">{$t("Overtime overview")}</div>
         {#if overtimeLoading}
           <div class="stat-card-value tab-num">...</div>
@@ -896,7 +896,7 @@
       </div>
 
       <!-- Whether all weeks since the user's start date (up to last week) are submitted -->
-      <div class="kz-card stat-card">
+      <div class="zf-card stat-card">
         <div class="stat-card-label">{$t("Submissions")}</div>
         {#if monthSubmissionLoading}
           <div class="stat-card-value tab-num">...</div>
@@ -928,7 +928,7 @@
       <div class="dashboard-group-label">{$t("My Team")}</div>
       <div class="stat-cards">
 
-        <div class="kz-card stat-card">
+        <div class="zf-card stat-card">
           <div class="stat-card-label">{$t("Pending Timesheets")}</div>
           <div
             class="stat-card-value tab-num"
@@ -936,7 +936,7 @@
           >{pendingWeeks.length}</div>
         </div>
 
-        <div class="kz-card stat-card">
+        <div class="zf-card stat-card">
           <div class="stat-card-label">{$t("Change Requests")}</div>
           <div
             class="stat-card-value tab-num"
@@ -944,7 +944,7 @@
           >{visibleChangeRequests.length}</div>
         </div>
 
-        <div class="kz-card stat-card">
+        <div class="zf-card stat-card">
           <div class="stat-card-label">{$t("Absence Requests")}</div>
           <div
             class="stat-card-value tab-num"
@@ -952,7 +952,7 @@
           >{pendingAbsences.length}</div>
         </div>
 
-        <div class="kz-card stat-card">
+        <div class="zf-card stat-card">
           <div class="stat-card-label">{$t("Team Members")}</div>
           <div class="stat-card-value tab-num">{users.length}</div>
         </div>
@@ -971,7 +971,7 @@
     >
       <!-- Timesheet approvals -->
       <div
-        class="kz-card"
+        class="zf-card"
         class:dashboard-focus={focusedSection === "timesheets"}
         style="overflow-x:auto"
         bind:this={timesheetsSectionEl}
@@ -980,13 +980,13 @@
           <Icon name="FileText" size={15} sw={1.5} />
           <span class="card-header-title">{$t("Timesheet Approvals")}</span>
           {#if pendingWeeks.length + pendingReopens.length + visibleChangeRequests.length > 0}
-            <span class="kz-chip kz-chip-pending" style="font-size:10.5px">
+            <span class="zf-chip zf-chip-pending" style="font-size:10.5px">
               {pendingWeeks.length + pendingReopens.length + visibleChangeRequests.length}
               {$t("pending")}
             </span>
           {/if}
           {#if pendingWeeks.length}
-            <button class="kz-btn kz-btn-sm" on:click={batchApprove}>
+            <button class="zf-btn zf-btn-sm" on:click={batchApprove}>
               <Icon name="Check" size={13} />{$t("Approve All")}
             </button>
           {/if}
@@ -1011,7 +1011,7 @@
             <div style="flex:1;min-width:0">
               <div style="font-size:13px;font-weight:500;display:flex;align-items:center;gap:6px">
                 {userName(week.user_id, users)}
-                <span class="kz-chip kz-chip-submitted" style="font-size:10px">{$t("Approval")}</span>
+                <span class="zf-chip zf-chip-submitted" style="font-size:10px">{$t("Approval")}</span>
               </div>
               <div class="tab-num" style="font-size:11.5px;color:var(--text-tertiary)">
                 {$t("Week {week}", { week: isoWeek(parseDate(week.week_start)) })} ·
@@ -1027,7 +1027,7 @@
             </div>
             <div style="display:flex;gap:4px">
               <button
-                class="kz-btn-icon-sm"
+                class="zf-btn-icon-sm"
                 style="color:var(--success-text);background:var(--success-soft)"
                 title={$t("Approve")}
                 on:click|stopPropagation={() => approveWeek(week)}
@@ -1035,7 +1035,7 @@
                 <Icon name="Check" size={14} />
               </button>
               <button
-                class="kz-btn-icon-sm"
+                class="zf-btn-icon-sm"
                 style="color:var(--danger-text);background:var(--danger-soft)"
                 title={$t("Reject")}
                 on:click|stopPropagation={() => rejectWeek(week)}
@@ -1065,7 +1065,7 @@
             <div style="flex:1;min-width:0">
               <div style="font-size:13px;font-weight:500;display:flex;align-items:center;gap:6px">
                 {userName(reopen.user_id, users)}
-                <span class="kz-chip kz-chip-pending" style="font-size:10px">{$t("Reopen")}</span>
+                <span class="zf-chip zf-chip-pending" style="font-size:10px">{$t("Reopen")}</span>
               </div>
               <div class="tab-num" style="font-size:11.5px;color:var(--text-tertiary)">
                 {$t("wants to edit week of {date}", { date: fmtDateShort(reopen.week_start) })}
@@ -1073,7 +1073,7 @@
             </div>
             <div style="display:flex;gap:4px">
               <button
-                class="kz-btn-icon-sm"
+                class="zf-btn-icon-sm"
                 style="color:var(--success-text);background:var(--success-soft)"
                 title={$t("Approve")}
                 on:click|stopPropagation={() => approveReopen(reopen.id)}
@@ -1081,7 +1081,7 @@
                 <Icon name="Check" size={14} />
               </button>
               <button
-                class="kz-btn-icon-sm"
+                class="zf-btn-icon-sm"
                 style="color:var(--danger-text);background:var(--danger-soft)"
                 title={$t("Reject")}
                 on:click|stopPropagation={() => rejectReopen(reopen.id)}
@@ -1111,7 +1111,7 @@
             <div style="flex:1;min-width:0">
               <div style="font-size:13px;font-weight:500;display:flex;align-items:center;gap:6px">
                 {userName(cr.user_id, users)}
-                <span class="kz-chip kz-chip-warning" style="font-size:10px">
+                <span class="zf-chip zf-chip-warning" style="font-size:10px">
                   {changeRequestTypeLabel(cr)}
                 </span>
               </div>
@@ -1124,7 +1124,7 @@
             </div>
             <div style="display:flex;gap:4px">
               <button
-                class="kz-btn-icon-sm"
+                class="zf-btn-icon-sm"
                 style="color:var(--success-text);background:var(--success-soft)"
                 title={$t("Approve")}
                 on:click|stopPropagation={() => approveCR(cr.id)}
@@ -1132,7 +1132,7 @@
                 <Icon name="Check" size={14} />
               </button>
               <button
-                class="kz-btn-icon-sm"
+                class="zf-btn-icon-sm"
                 style="color:var(--danger-text);background:var(--danger-soft)"
                 title={$t("Reject")}
                 on:click|stopPropagation={() => rejectCR(cr.id)}
@@ -1154,7 +1154,7 @@
 
       <!-- Absence-request approvals -->
       <div
-        class="kz-card"
+        class="zf-card"
         class:dashboard-focus={focusedSection === "absences"}
         style="overflow-x:auto"
         bind:this={absencesSectionEl}
@@ -1163,7 +1163,7 @@
           <Icon name="Plane" size={15} sw={1.5} />
           <span class="card-header-title">{$t("Absence Requests")}</span>
           {#if pendingAbsences.length}
-            <span class="kz-chip kz-chip-pending" style="font-size:10.5px">
+            <span class="zf-chip zf-chip-pending" style="font-size:10.5px">
               {pendingAbsences.length}
               {$t("pending")}
             </span>
@@ -1189,7 +1189,7 @@
               <div style="font-size:13px;font-weight:500;display:flex;align-items:center;gap:6px">
                 {userName(absence.user_id, users)}
                 <span
-                  class="kz-chip {absence.status === 'cancellation_pending' ? 'kz-chip-cancellation_pending' : 'kz-chip-warning'}"
+                  class="zf-chip {absence.status === 'cancellation_pending' ? 'zf-chip-cancellation_pending' : 'zf-chip-warning'}"
                   style="font-size:10px"
                 >
                   {absenceRequestTypeLabel(absence)}
@@ -1202,14 +1202,14 @@
             </div>
             <div style="display:flex;gap:4px">
               <button
-                class="kz-btn-icon-sm"
+                class="zf-btn-icon-sm"
                 style="color:var(--success-text);background:var(--success-soft)"
                 on:click={() => approveAbsence(absence)}
               >
                 <Icon name="Check" size={14} />
               </button>
               <button
-                class="kz-btn-icon-sm"
+                class="zf-btn-icon-sm"
                 style="color:var(--danger-text);background:var(--danger-soft)"
                 on:click={() => rejectAbsence(absence)}
               >
@@ -1230,21 +1230,21 @@
     </div>
 
     <!-- "Who is absent" team calendar widget -->
-    <div class="kz-card" style="margin-top:16px">
+    <div class="zf-card" style="margin-top:16px">
       <div class="card-header">
         <Icon name="Users" size={15} sw={1.5} />
         <span class="card-header-title">{$t("Who is absent")}</span>
         <div class="absence-date-controls">
           <div class="absence-week-picker">
             <button
-              class="kz-btn kz-btn-icon-sm kz-btn-ghost"
+              class="zf-btn zf-btn-icon-sm zf-btn-ghost"
               on:click={absenceSliderPrevWeek}
               aria-label={$t("Previous week")}
             >
               <Icon name="ChevLeft" size={16} />
             </button>
             <button
-              class="kz-btn kz-btn-ghost absence-week-range"
+              class="zf-btn zf-btn-ghost absence-week-range"
               on:click={absenceSliderToToday}
               title={$t("Today")}
             >
@@ -1252,7 +1252,7 @@
               {fmtDateShort(isoDate(addDays(parseDate(absenceSliderWeek), 6)))}
             </button>
             <button
-              class="kz-btn kz-btn-icon-sm kz-btn-ghost"
+              class="zf-btn zf-btn-icon-sm zf-btn-ghost"
               on:click={absenceSliderNextWeek}
               aria-label={$t("Next week")}
             >
@@ -1295,14 +1295,14 @@
        FLEXTIME CHART (all users) – placed after approval sections so it
        doesn't push urgent approval work below the fold for leads/admins.
        ════════════════════════════════════════════════════════════════════════ -->
-  <div class="kz-card" style="padding:16px 20px;margin-top:16px">
+  <div class="zf-card" style="padding:16px 20px;margin-top:16px">
     <div
       style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px"
     >
       <Icon name="TrendingUp" size={15} sw={1.5} />
       <span style="font-size:14px;font-weight:400;flex:1">{$t("Flextime balance")}</span>
       <button
-        class="kz-btn-icon-sm kz-btn-ghost"
+        class="zf-btn-icon-sm zf-btn-ghost"
         title={$t("help_flextime_chart")}
         on:click={() => toggleHelp("flextime")}
         style="color:var(--text-tertiary);font-size:14px;cursor:help"
@@ -1310,16 +1310,16 @@
         <Icon name="Info" size={14} />
       </button>
       <div style="display:flex;gap:4px;flex-wrap:wrap">
-        <button class="kz-btn kz-btn-sm" on:click={() => setRange(30)}
+        <button class="zf-btn zf-btn-sm" on:click={() => setRange(30)}
           >{$t("Last 30 days")}</button
         >
-        <button class="kz-btn kz-btn-sm" on:click={() => setRange(90)}
+        <button class="zf-btn zf-btn-sm" on:click={() => setRange(90)}
           >{$t("Last 90 days")}</button
         >
-        <button class="kz-btn kz-btn-sm" on:click={() => setRange(182)}
+        <button class="zf-btn zf-btn-sm" on:click={() => setRange(182)}
           >{$t("Last 6 months")}</button
         >
-        <button class="kz-btn kz-btn-sm" on:click={() => setRange(365)}
+        <button class="zf-btn zf-btn-sm" on:click={() => setRange(365)}
           >{$t("Last year")}</button
         >
       </div>
@@ -1335,7 +1335,7 @@
           min={chartFrom}
           style="font-size:12px;padding:3px 6px;height:28px"
         />
-        <button class="kz-btn kz-btn-sm" on:click={loadChart} aria-label={$t("Show")}>
+        <button class="zf-btn zf-btn-sm" on:click={loadChart} aria-label={$t("Show")}>
           <Icon name="Search" size={13} />
         </button>
       </div>
@@ -1365,25 +1365,25 @@
   <dialog bind:this={absenceDetailDlg} on:close={closeAbsenceDetail}>
     <header>
       <span style="flex:1">{$t("Absence Request Details")}</span>
-      <button class="kz-btn-icon-sm kz-btn-ghost" on:click={closeAbsenceDetail}>
+      <button class="zf-btn-icon-sm zf-btn-ghost" on:click={closeAbsenceDetail}>
         <Icon name="X" size={16} />
       </button>
     </header>
     <div class="dialog-body">
       <div style="display:flex;flex-direction:column;gap:10px">
         <div>
-          <div class="kz-label">{$t("Employee")}</div>
+          <div class="zf-label">{$t("Employee")}</div>
           <div style="font-weight:500">{userName(absenceDetail.user_id, users)}</div>
         </div>
         <div>
-          <div class="kz-label">{$t("Absence Type")}</div>
+          <div class="zf-label">{$t("Absence Type")}</div>
           <div>{absenceKindLabel(absenceDetail.kind)}</div>
         </div>
         <div>
-          <div class="kz-label">{$t("Request Type")}</div>
+          <div class="zf-label">{$t("Request Type")}</div>
           <div>
             <span
-              class="kz-chip {absenceDetail.status === 'cancellation_pending' ? 'kz-chip-cancellation_pending' : 'kz-chip-warning'}"
+              class="zf-chip {absenceDetail.status === 'cancellation_pending' ? 'zf-chip-cancellation_pending' : 'zf-chip-warning'}"
             >
               {absenceRequestTypeLabel(absenceDetail)}
             </span>
@@ -1391,22 +1391,22 @@
         </div>
         <div class="field-row">
           <div>
-            <div class="kz-label">{$t("From")}</div>
+            <div class="zf-label">{$t("From")}</div>
             <div class="tab-num">{fmtDate(absenceDetail.start_date)}</div>
           </div>
           <div>
-            <div class="kz-label">{$t("To")}</div>
+            <div class="zf-label">{$t("To")}</div>
             <div class="tab-num">{fmtDate(absenceDetail.end_date)}</div>
           </div>
         </div>
         {#if absenceDetail.comment}
           <div>
-            <div class="kz-label">{$t("Comment")}</div>
+            <div class="zf-label">{$t("Comment")}</div>
             <div style="white-space:pre-wrap;font-size:13px">{absenceDetail.comment}</div>
           </div>
         {/if}
         <div>
-          <div class="kz-label">{$t("Requested at")}</div>
+          <div class="zf-label">{$t("Requested at")}</div>
           <div class="tab-num" style="font-size:12px">
             {fmtDateTime(absenceDetail.created_at)}
           </div>
@@ -1415,7 +1415,7 @@
           {@const diffRows = absenceDiffRows(absenceDetail)}
           {#if diffRows.length}
             <div>
-              <div class="kz-label">{$t("Changes")}</div>
+              <div class="zf-label">{$t("Changes")}</div>
               <div class="change-diff-list">
                 {#each diffRows as row}
                   <div class="change-diff-row">
@@ -1436,10 +1436,10 @@
       </div>
     </div>
     <footer>
-      <button class="kz-btn" on:click={closeAbsenceDetail}>{$t("Close")}</button>
+      <button class="zf-btn" on:click={closeAbsenceDetail}>{$t("Close")}</button>
       <span style="flex:1"></span>
       <button
-        class="kz-btn kz-btn-danger"
+        class="zf-btn zf-btn-danger"
         on:click={() => {
           const absence = absenceDetail;
           closeAbsenceDetail();
@@ -1449,7 +1449,7 @@
         <Icon name="X" size={14} />{$t("Reject")}
       </button>
       <button
-        class="kz-btn kz-btn-primary"
+        class="zf-btn zf-btn-primary"
         on:click={() => {
           const absence = absenceDetail;
           closeAbsenceDetail();
@@ -1473,7 +1473,7 @@
           {$t("Change Request Details")}
         {/if}
       </span>
-      <button class="kz-btn-icon-sm kz-btn-ghost" on:click={closeRequestDetail}>
+      <button class="zf-btn-icon-sm zf-btn-ghost" on:click={closeRequestDetail}>
         <Icon name="X" size={16} />
       </button>
     </header>
@@ -1481,22 +1481,22 @@
       {#if requestDetail.kind === "reopen"}
         <div style="display:flex;flex-direction:column;gap:10px">
           <div>
-            <div class="kz-label">{$t("Employee")}</div>
+            <div class="zf-label">{$t("Employee")}</div>
             <div style="font-weight:500">{userName(requestDetail.item.user_id, users)}</div>
           </div>
           <div>
-            <div class="kz-label">{$t("Type")}</div>
-            <div><span class="kz-chip kz-chip-pending">{$t("Reopen")}</span></div>
+            <div class="zf-label">{$t("Type")}</div>
+            <div><span class="zf-chip zf-chip-pending">{$t("Reopen")}</span></div>
           </div>
           <div>
-            <div class="kz-label">{$t("Week")}</div>
+            <div class="zf-label">{$t("Week")}</div>
             <div class="tab-num">
               {fmtDateShort(requestDetail.item.week_start)} -
               {fmtDateShort(isoDate(addDays(parseDate(requestDetail.item.week_start), 6)))}
             </div>
           </div>
           <div>
-            <div class="kz-label">{$t("Requested at")}</div>
+            <div class="zf-label">{$t("Requested at")}</div>
             <div class="tab-num" style="font-size:12px">{fmtDateTime(requestDetail.item.created_at)}</div>
           </div>
         </div>
@@ -1505,26 +1505,26 @@
         {@const diffRows = changeDiffRows(cr)}
         <div style="display:flex;flex-direction:column;gap:10px">
           <div>
-            <div class="kz-label">{$t("Employee")}</div>
+            <div class="zf-label">{$t("Employee")}</div>
             <div style="font-weight:500">{userName(cr.user_id, users)}</div>
           </div>
           <div>
-            <div class="kz-label">{$t("Type")}</div>
-            <div><span class="kz-chip kz-chip-warning">{changeRequestTypeLabel(cr)}</span></div>
+            <div class="zf-label">{$t("Type")}</div>
+            <div><span class="zf-chip zf-chip-warning">{changeRequestTypeLabel(cr)}</span></div>
           </div>
           {#if cr.reason}
             <div>
-              <div class="kz-label">{$t("Reason")}</div>
+              <div class="zf-label">{$t("Reason")}</div>
               <div style="white-space:pre-wrap;font-size:13px">{cr.reason}</div>
             </div>
           {/if}
           <div>
-            <div class="kz-label">{$t("Requested at")}</div>
+            <div class="zf-label">{$t("Requested at")}</div>
             <div class="tab-num" style="font-size:12px">{fmtDateTime(cr.created_at)}</div>
           </div>
           {#if diffRows.length}
             <div>
-              <div class="kz-label">{$t("Changes")}</div>
+              <div class="zf-label">{$t("Changes")}</div>
               <div class="change-diff-list">
                 {#each diffRows as row}
                   <div class="change-diff-row">
@@ -1545,10 +1545,10 @@
       {/if}
     </div>
     <footer>
-      <button class="kz-btn" on:click={closeRequestDetail}>{$t("Close")}</button>
+      <button class="zf-btn" on:click={closeRequestDetail}>{$t("Close")}</button>
       <span style="flex:1"></span>
       <button
-        class="kz-btn kz-btn-danger"
+        class="zf-btn zf-btn-danger"
         on:click={() => {
           const detail = requestDetail;
           closeRequestDetail();
@@ -1559,7 +1559,7 @@
         <Icon name="X" size={14} />{$t("Reject")}
       </button>
       <button
-        class="kz-btn kz-btn-primary"
+        class="zf-btn zf-btn-primary"
         on:click={() => {
           const detail = requestDetail;
           closeRequestDetail();
@@ -1580,7 +1580,7 @@
       <span style="flex:1">
         {$t("Timesheet Approvals")} · {userName(selectedWeek.user_id, users)}
       </span>
-      <button class="kz-btn-icon-sm kz-btn-ghost" on:click={closeWeekDialog}>
+      <button class="zf-btn-icon-sm zf-btn-ghost" on:click={closeWeekDialog}>
         <Icon name="X" size={16} />
       </button>
     </header>
@@ -1591,10 +1591,10 @@
       </div>
 
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <span class="kz-chip kz-chip-submitted">
+        <span class="zf-chip zf-chip-submitted">
           {selectedWeek.entries.length} {$t("Days")}
         </span>
-        <span class="kz-chip kz-chip-approved">{weekHours(selectedWeek)}</span>
+        <span class="zf-chip zf-chip-approved">{weekHours(selectedWeek)}</span>
       </div>
 
       <div class="week-entry-list">
@@ -1618,19 +1618,19 @@
       </div>
     </div>
     <footer>
-      <button class="kz-btn" on:click={closeWeekDialog} disabled={weekActionBusy}>
+      <button class="zf-btn" on:click={closeWeekDialog} disabled={weekActionBusy}>
         {$t("Close")}
       </button>
       <span style="flex:1"></span>
       <button
-        class="kz-btn kz-btn-danger"
+        class="zf-btn zf-btn-danger"
         on:click={() => rejectWeek(selectedWeek)}
         disabled={weekActionBusy}
       >
         <Icon name="X" size={14} />{$t("Reject")}
       </button>
       <button
-        class="kz-btn kz-btn-primary"
+        class="zf-btn zf-btn-primary"
         on:click={() => approveWeek(selectedWeek)}
         disabled={weekActionBusy}
       >

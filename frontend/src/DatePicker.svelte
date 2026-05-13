@@ -15,7 +15,7 @@
   export let id = "";
   export let style = "";
   export let container = null;
-  let cls = "kz-input";
+  let cls = "zf-input";
   export { cls as class };
 
   let inputElement;
@@ -155,7 +155,7 @@
     calendar.style.left = `${Math.round(left)}px`;
     calendar.style.right = "auto";
     calendar.style.setProperty(
-      "--kz-date-picker-arrow-left",
+      "--zf-date-picker-arrow-left",
       `${Math.round(arrowLeft)}px`,
     );
   }
@@ -204,9 +204,9 @@
     }
     datePickerInstance = flatpickr(inputElement, opts);
     if (value) datePickerInstance.setDate(value, false);
-    datePickerInstance.calendarContainer?.classList.add("kz-date-picker-calendar");
+    datePickerInstance.calendarContainer?.classList.add("zf-date-picker-calendar");
     if (container)
-      datePickerInstance.calendarContainer?.classList.add("kz-date-picker-overlay");
+      datePickerInstance.calendarContainer?.classList.add("zf-date-picker-overlay");
     if (id && datePickerInstance.altInput) datePickerInstance.altInput.id = id;
     if (datePickerInstance.altInput) {
       if (style) datePickerInstance.altInput.setAttribute("style", style);
@@ -259,19 +259,19 @@
     width: 100%;
   }
 
-  .date-picker-wrap :global(.kz-input) {
+  .date-picker-wrap :global(.zf-input) {
     width: 100%;
     padding-right: 34px;
   }
 
-  :global(.kz-date-picker-overlay) {
+  :global(.zf-date-picker-overlay) {
     box-shadow: var(--shadow-md);
     z-index: 999;
   }
 
-  :global(.kz-date-picker-calendar:before),
-  :global(.kz-date-picker-calendar:after) {
-    left: var(--kz-date-picker-arrow-left, 22px);
+  :global(.zf-date-picker-calendar:before),
+  :global(.zf-date-picker-calendar:after) {
+    left: var(--zf-date-picker-arrow-left, 22px);
     right: auto;
   }
 

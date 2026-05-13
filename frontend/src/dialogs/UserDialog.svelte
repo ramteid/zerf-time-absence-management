@@ -231,48 +231,48 @@
       {/if}
     </div>
     <footer>
-      <button class="kz-btn" on:click={copyPassword}>
+      <button class="zf-btn" on:click={copyPassword}>
         {copied ? $t("Copied!") : $t("Copy")}
       </button>
-      <button class="kz-btn kz-btn-primary" on:click={dismissTempPassword}
+      <button class="zf-btn zf-btn-primary" on:click={dismissTempPassword}
         >{$t("OK")}</button
       >
     </footer>
   {:else}
     <header>
       <span style="flex:1">{$t(isNew ? "Add Member" : "Edit Member")}</span>
-      <button class="kz-btn-icon-sm kz-btn-ghost" on:click={cancel}>
+      <button class="zf-btn-icon-sm zf-btn-ghost" on:click={cancel}>
         <Icon name="X" size={16} />
       </button>
     </header>
     <div class="dialog-body">
       <div class="field-row">
         <div>
-          <label class="kz-label" for="user-first-name"
+          <label class="zf-label" for="user-first-name"
             >{$t("First name")}</label
           >
           <input
             id="user-first-name"
-            class="kz-input"
+            class="zf-input"
             bind:value={first_name}
             required
           />
         </div>
         <div>
-          <label class="kz-label" for="user-last-name">{$t("Last name")}</label>
+          <label class="zf-label" for="user-last-name">{$t("Last name")}</label>
           <input
             id="user-last-name"
-            class="kz-input"
+            class="zf-input"
             bind:value={last_name}
             required
           />
         </div>
       </div>
       <div>
-        <label class="kz-label" for="user-email">{$t("Email")}</label>
+        <label class="zf-label" for="user-email">{$t("Email")}</label>
         <input
           id="user-email"
-          class="kz-input"
+          class="zf-input"
           type="email"
           bind:value={email}
           required
@@ -280,15 +280,15 @@
       </div>
       <div class="field-row">
         <div>
-          <label class="kz-label" for="user-role">{$t("Role")}</label>
-          <select id="user-role" class="kz-select" bind:value={role}>
+          <label class="zf-label" for="user-role">{$t("Role")}</label>
+          <select id="user-role" class="zf-select" bind:value={role}>
             <option value="employee">{$t("Employee")}</option>
             <option value="team_lead">{$t("Team lead")}</option>
             <option value="admin">{$t("Admin")}</option>
           </select>
         </div>
         <div>
-          <label class="kz-label" for="user-start-date"
+          <label class="zf-label" for="user-start-date"
             >{$t("Start date")}</label
           >
           <DatePicker
@@ -300,12 +300,12 @@
       </div>
       <div class="field-row">
         <div>
-          <label class="kz-label" for="user-weekly-hours"
+          <label class="zf-label" for="user-weekly-hours"
             >{$t("Weekly hours")}</label
           >
           <input
             id="user-weekly-hours"
-            class="kz-input"
+            class="zf-input"
             type="number"
             step="0.5"
             min="0"
@@ -314,12 +314,12 @@
           />
         </div>
         <div>
-          <label class="kz-label" for="user-workdays-per-week"
+          <label class="zf-label" for="user-workdays-per-week"
             >{$t("Workdays per week")}</label
           >
           <input
             id="user-workdays-per-week"
-            class="kz-input"
+            class="zf-input"
             type="number"
             step="1"
             min="1"
@@ -329,12 +329,12 @@
         </div>
       </div>
       <div>
-        <label class="kz-label" for="user-overtime-balance"
+        <label class="zf-label" for="user-overtime-balance"
           >{$t("Overtime start balance (hours)")}</label
         >
         <input
           id="user-overtime-balance"
-          class="kz-input"
+          class="zf-input"
           type="number"
           step="0.5"
           bind:value={overtime_start_balance_hours}
@@ -353,10 +353,10 @@
         </div>
         <div style="margin-bottom:10px;display:flex;gap:12px;flex-wrap:wrap">
           <div>
-            <label class="kz-label" for="leave-cur">{$t("Annual leave days")} {_thisYear}</label>
+            <label class="zf-label" for="leave-cur">{$t("Annual leave days")} {_thisYear}</label>
             <input
               id="leave-cur"
-              class="kz-input"
+              class="zf-input"
               type="number"
               min="0"
               max="366"
@@ -365,10 +365,10 @@
             />
           </div>
           <div>
-            <label class="kz-label" for="leave-nxt">{$t("Annual leave days")} {_nextYear}</label>
+            <label class="zf-label" for="leave-nxt">{$t("Annual leave days")} {_nextYear}</label>
             <input
               id="leave-nxt"
-              class="kz-input"
+              class="zf-input"
               type="number"
               min="0"
               max="366"
@@ -387,8 +387,8 @@
             </div>
           </div>
           <button
-            class="kz-btn kz-btn-sm"
-            class:kz-btn-danger={!active}
+            class="zf-btn zf-btn-sm"
+            class:zf-btn-danger={!active}
             type="button"
             on:click={() => (active = !active)}
           >
@@ -399,12 +399,12 @@
       {#if isNew}
         <div class="field-row">
           <div>
-            <label class="kz-label" for="user-password"
+            <label class="zf-label" for="user-password"
               >{$t("Password (min 12 chars)")}</label
             >
             <input
               id="user-password"
-              class="kz-input"
+              class="zf-input"
               type="password"
               bind:value={password}
               minlength="12"
@@ -412,12 +412,12 @@
             />
           </div>
           <div>
-            <label class="kz-label" for="user-confirm-password"
+            <label class="zf-label" for="user-confirm-password"
               >{$t("Confirm password")}</label
             >
             <input
               id="user-confirm-password"
-              class="kz-input"
+              class="zf-input"
               type="password"
               bind:value={confirmPassword}
               minlength="12"
@@ -427,7 +427,7 @@
         </div>
         <div>
           <button
-            class="kz-btn kz-btn-sm"
+            class="zf-btn zf-btn-sm"
             type="button"
             on:click={generatePassword}
           >
@@ -437,7 +437,7 @@
       {/if}
       {#if requiresApprover}
         <div>
-          <div class="kz-label">{$t("Approvers (Team leads / Admins)")}</div>
+          <div class="zf-label">{$t("Approvers (Team leads / Admins)")}</div>
           {#if approvers.length === 0}
             <div style="font-size:13px;color:var(--text-tertiary);padding:6px 0">
               {$t("No eligible approvers found.")}
@@ -465,8 +465,8 @@
       <div class="error-text">{error}</div>
     </div>
     <footer>
-      <button class="kz-btn" on:click={cancel}>{$t("Cancel")}</button>
-      <button class="kz-btn kz-btn-primary" on:click={save}>
+      <button class="zf-btn" on:click={cancel}>{$t("Cancel")}</button>
+      <button class="zf-btn zf-btn-primary" on:click={save}>
         {$t(isNew ? "Add Member" : "Save")}
       </button>
     </footer>

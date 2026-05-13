@@ -6,7 +6,7 @@
   export let id = "";
   export let style = "";
   export let required = false;
-  let inputClass = "kz-input tab-num";
+  let inputClass = "zf-input tab-num";
   export { inputClass as class };
 
   $: use12h = $settings.time_format === "12h";

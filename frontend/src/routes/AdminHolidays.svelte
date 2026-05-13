@@ -55,9 +55,9 @@
     <h1>{$t("Holidays")}</h1>
   </div>
   <div class="top-bar-actions">
-    <div class="kz-nav-slider">
+    <div class="zf-nav-slider">
       <button
-        class="kz-btn kz-btn-ghost"
+        class="zf-btn zf-btn-ghost"
         on:click={() => {
           yearTouched = true;
           year--;
@@ -68,7 +68,7 @@
       </button>
       <span class="nav-label tab-num" style="min-width:60px">{year}</span>
       <button
-        class="kz-btn kz-btn-ghost"
+        class="zf-btn zf-btn-ghost"
         on:click={() => {
           yearTouched = true;
           year++;
@@ -83,28 +83,28 @@
 
 <div class="content-area" style="max-width:600px">
   <!-- Add form -->
-  <div class="kz-card" style="padding:16px;margin-bottom:16px">
+  <div class="zf-card" style="padding:16px;margin-bottom:16px">
     <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
       <div style="flex:1">
-        <label class="kz-label" for="holiday-date">{$t("Date")}</label>
+        <label class="zf-label" for="holiday-date">{$t("Date")}</label>
         <DatePicker id="holiday-date" bind:value={newDate} />
       </div>
       <div style="flex:2">
-        <label class="kz-label" for="holiday-name">{$t("Name")}</label>
+        <label class="zf-label" for="holiday-name">{$t("Name")}</label>
         <input
           id="holiday-name"
-          class="kz-input"
+          class="zf-input"
           bind:value={newName}
           placeholder={$t("Holiday name")}
         />
       </div>
-      <button class="kz-btn kz-btn-primary kz-btn-sm" on:click={add}>
+      <button class="zf-btn zf-btn-primary zf-btn-sm" on:click={add}>
         <Icon name="Plus" size={13} />{$t("Add")}
       </button>
     </div>
   </div>
 
-  <div class="kz-card" style="overflow-x:auto">
+  <div class="zf-card" style="overflow-x:auto">
     {#each holidays as h, i}
       <div
         style="padding:10px 16px;{i < holidays.length - 1
@@ -122,7 +122,7 @@
           >
         {/if}
         <button
-          class="kz-btn kz-btn-ghost kz-btn-sm kz-btn-danger"
+          class="zf-btn zf-btn-ghost zf-btn-sm zf-btn-danger"
           on:click={() => del(h.id)}
         >
           <Icon name="Trash" size={13} />

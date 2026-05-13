@@ -165,7 +165,7 @@
 <div class="content-area">
   {#if isFirstSetup}
     <div
-      class="kz-card"
+      class="zf-card"
       style="padding:16px 20px;margin-bottom:16px;border-color:var(--warning)"
     >
       <strong style="color:var(--warning-text)"
@@ -181,19 +181,19 @@
     </div>
   {/if}
   {#if needsName}
-    <div class="kz-card" style="padding:20px;margin-bottom:16px">
+    <div class="zf-card" style="padding:20px;margin-bottom:16px">
       <div style="font-size:14px;font-weight:400;margin-bottom:14px">
         {$t("Your Name")}
       </div>
       <div class="field-group">
         <div class="field-row">
           <div>
-            <label class="kz-label" for="admin-first-name"
+            <label class="zf-label" for="admin-first-name"
               >{$t("First name")}</label
             >
             <input
               id="admin-first-name"
-              class="kz-input"
+              class="zf-input"
               type="text"
               maxlength="200"
               bind:value={adminFirstName}
@@ -201,12 +201,12 @@
             />
           </div>
           <div>
-            <label class="kz-label" for="admin-last-name"
+            <label class="zf-label" for="admin-last-name"
               >{$t("Last name")}</label
             >
             <input
               id="admin-last-name"
-              class="kz-input"
+              class="zf-input"
               type="text"
               maxlength="200"
               bind:value={adminLastName}
@@ -217,19 +217,19 @@
       </div>
     </div>
   {/if}
-  <div class="kz-card" style="padding:20px;margin-bottom:16px">
+  <div class="zf-card" style="padding:20px;margin-bottom:16px">
     <div style="font-size:14px;font-weight:400;margin-bottom:14px">
       {$t("Organization")}
     </div>
     <div class="field-group">
       <div class="field-row">
         <div>
-          <label class="kz-label" for="settings-org-name"
+          <label class="zf-label" for="settings-org-name"
             >{$t("Organization name")}</label
           >
           <input
             id="settings-org-name"
-            class="kz-input"
+            class="zf-input"
             type="text"
             maxlength="200"
             bind:value={settingsForm.organization_name}
@@ -242,19 +242,19 @@
       </div>
     </div>
   </div>
-  <div class="kz-card" style="padding:20px;margin-bottom:16px">
+  <div class="zf-card" style="padding:20px;margin-bottom:16px">
     <div style="font-size:14px;font-weight:400;margin-bottom:14px">
       {$t("General")}
     </div>
     <div class="field-group">
       <div class="field-row">
         <div>
-          <label class="kz-label" for="settings-language"
+          <label class="zf-label" for="settings-language"
             >{$t("Language")}</label
           >
           <select
             id="settings-language"
-            class="kz-select"
+            class="zf-select"
             bind:value={settingsForm.ui_language}
           >
             {#each languageOptions as [code, language]}
@@ -263,12 +263,12 @@
           </select>
         </div>
         <div>
-          <label class="kz-label" for="settings-time-format"
+          <label class="zf-label" for="settings-time-format"
             >{$t("Time format")}</label
           >
           <select
             id="settings-time-format"
-            class="kz-select"
+            class="zf-select"
             bind:value={settingsForm.time_format}
           >
             <option value="24h">24h (14:30)</option>
@@ -276,12 +276,12 @@
           </select>
         </div>
         <div>
-          <label class="kz-label" for="settings-timezone"
+          <label class="zf-label" for="settings-timezone"
             >{$t("Timezone")}</label
           >
           <select
             id="settings-timezone"
-            class="kz-select"
+            class="zf-select"
             bind:value={settingsForm.timezone}
           >
             {#each timezoneOptions as tz}
@@ -299,12 +299,12 @@
       </div>
       <div class="field-row">
         <div>
-          <label class="kz-label" for="settings-default-hours"
+          <label class="zf-label" for="settings-default-hours"
             >{$t("Default weekly hours")}</label
           >
           <input
             id="settings-default-hours"
-            class="kz-input"
+            class="zf-input"
             type="number"
             step="0.5"
             min="0"
@@ -313,12 +313,12 @@
           />
         </div>
         <div>
-          <label class="kz-label" for="settings-default-leave"
+          <label class="zf-label" for="settings-default-leave"
             >{$t("Default annual leave days")}</label
           >
           <input
             id="settings-default-leave"
-            class="kz-input"
+            class="zf-input"
             type="number"
             min="0"
             max="366"
@@ -335,12 +335,12 @@
       </div>
       <div class="field-row">
         <div>
-          <label class="kz-label" for="settings-carryover-expiry"
+          <label class="zf-label" for="settings-carryover-expiry"
             >{$t("Carryover expiry date (MM-DD)")}</label
           >
           <input
             id="settings-carryover-expiry"
-            class="kz-input"
+            class="zf-input"
             bind:value={settingsForm.carryover_expiry_date}
             placeholder="03-31"
             maxlength="5"
@@ -359,12 +359,12 @@
       </div>
       <div class="field-row">
         <div>
-          <label class="kz-label" for="settings-submission-deadline"
+          <label class="zf-label" for="settings-submission-deadline"
             >{$t("Submission deadline day of month")}</label
           >
           <input
             id="settings-submission-deadline"
-            class="kz-input"
+            class="zf-input"
             type="number"
             min="1"
             max="28"
@@ -386,10 +386,10 @@
       </div>
       <div class="field-row">
         <div>
-          <label class="kz-label" for="settings-country">{$t("Country")}</label>
+          <label class="zf-label" for="settings-country">{$t("Country")}</label>
           <select
             id="settings-country"
-            class="kz-select"
+            class="zf-select"
             bind:value={settingsForm.country}
             on:change={() => {
               settingsForm = { ...settingsForm, region: "" };
@@ -402,10 +402,10 @@
           </select>
         </div>
         <div>
-          <label class="kz-label" for="settings-region">{$t("Region")}</label>
+          <label class="zf-label" for="settings-region">{$t("Region")}</label>
           <select
               id="settings-region"
-              class="kz-select"
+              class="zf-select"
               bind:value={settingsForm.region}
               disabled={!settingsForm.country || regionLoading || regionsLoadFailed || countryRegions.length === 0}
             >
@@ -428,7 +428,7 @@
       </div>
 
       <div style="display:flex;justify-content:flex-end;padding-top:16px">
-        <button class="kz-btn kz-btn-primary" on:click={save} disabled={saving || regionLoading}>
+        <button class="zf-btn zf-btn-primary" on:click={save} disabled={saving || regionLoading}>
           {#if saving}
             {$t("Saving...")}
           {:else}

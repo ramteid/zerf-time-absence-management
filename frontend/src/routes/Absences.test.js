@@ -86,7 +86,7 @@ describe("Absences", () => {
     prevBtn.click();
     await settle();
 
-    const requestButton = await waitForElement(target, ".kz-btn-primary", 10000);
+    const requestButton = await waitForElement(target, ".zf-btn-primary", 10000);
     requestButton.click();
     await settle();
 
@@ -112,7 +112,7 @@ describe("Absences", () => {
     prevBtn.click();
     await settle();
 
-    const requestButton = await waitForElement(target, ".kz-btn-primary", 10000);
+    const requestButton = await waitForElement(target, ".zf-btn-primary", 10000);
     requestButton.click();
     await settle();
 
@@ -161,7 +161,7 @@ describe("Absences", () => {
       "Family trip",
     );
     expect(
-      entry.querySelector(".absence-entry-status .kz-chip-requested")
+      entry.querySelector(".absence-entry-status .zf-chip-requested")
         .textContent,
     ).toContain("Requested");
   });
@@ -199,7 +199,7 @@ describe("Absences", () => {
       ...target.querySelectorAll("dialog .field-row .tab-num"),
     ].map((element) => element.textContent.trim());
     expect(detailValues[2]).toBe("0");
-    expect(target.querySelector("dialog .kz-btn-danger").textContent).toContain(
+    expect(target.querySelector("dialog .zf-btn-danger").textContent).toContain(
       "Request cancellation",
     );
   });
@@ -228,7 +228,7 @@ describe("Absences", () => {
     target.querySelector(".absence-entry").click();
     await settle();
 
-    expect(target.querySelector("dialog .kz-btn-danger").textContent).toContain(
+    expect(target.querySelector("dialog .zf-btn-danger").textContent).toContain(
       "Stornierung beantragen",
     );
   });

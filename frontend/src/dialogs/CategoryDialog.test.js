@@ -71,7 +71,7 @@ describe("CategoryDialog", () => {
     expect(dialog).not.toBeNull();
     expect(dialog.hasAttribute("open")).toBe(true);
 
-    target.querySelector("button.kz-btn.kz-btn-primary").click();
+    target.querySelector("button.zf-btn.zf-btn-primary").click();
     await Promise.resolve();
     await Promise.resolve();
 

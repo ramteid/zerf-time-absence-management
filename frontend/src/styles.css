@@ -139,7 +139,7 @@ body {
 }
 
 /* ── Buttons ── */
-.kz-btn {
+.zf-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -160,50 +160,50 @@ body {
   white-space: nowrap;
   text-decoration: none;
 }
-.kz-btn:hover {
+.zf-btn:hover {
   background: var(--bg-muted);
 }
-.kz-btn:disabled {
+.zf-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
   pointer-events: none;
 }
-.kz-btn-primary {
+.zf-btn-primary {
   background: var(--accent);
   color: #fff;
   border-color: var(--accent);
 }
-.kz-btn-primary:hover {
+.zf-btn-primary:hover {
   background: var(--accent-hover);
   border-color: var(--accent-hover);
 }
-.kz-btn-ghost {
+.zf-btn-ghost {
   border-color: transparent;
   background: transparent;
   color: var(--text-secondary);
 }
-.kz-btn-ghost:hover {
+.zf-btn-ghost:hover {
   background: var(--bg-muted);
   color: var(--text-primary);
 }
-.kz-btn-danger {
+.zf-btn-danger {
   color: var(--danger-text);
 }
-.kz-btn-danger:hover {
+.zf-btn-danger:hover {
   background: var(--danger-soft);
   border-color: var(--danger-soft);
 }
-.kz-btn-sm {
+.zf-btn-sm {
   height: 28px;
   padding: 0 10px;
   font-size: 12.5px;
 }
-.kz-btn-icon {
+.zf-btn-icon {
   width: 34px;
   padding: 0;
   justify-content: center;
 }
-.kz-btn-icon-sm {
+.zf-btn-icon-sm {
   width: 28px;
   height: 28px;
   padding: 0;
@@ -217,7 +217,7 @@ body {
 }
 
 /* ── Chip / Badge ── */
-.kz-chip {
+.zf-chip {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -230,49 +230,49 @@ body {
   white-space: nowrap;
   text-decoration: none;
 }
-.kz-chip-draft {
+.zf-chip-draft {
   background: var(--bg-muted);
   color: var(--text-secondary);
 }
-.kz-chip-submitted {
+.zf-chip-submitted {
   background: var(--info-soft);
   color: var(--info-text);
 }
-.kz-chip-approved {
+.zf-chip-approved {
   background: var(--success-soft);
   color: var(--success-text);
 }
-.kz-chip-rejected {
+.zf-chip-rejected {
   background: var(--danger-soft);
   color: var(--danger-text);
 }
-.kz-chip-partial {
+.zf-chip-partial {
   background: var(--warning-soft);
   color: var(--warning-text);
 }
-.kz-chip-pending {
+.zf-chip-pending {
   background: var(--warning-soft);
   color: var(--warning-text);
 }
-.kz-chip-requested {
+.zf-chip-requested {
   background: var(--warning-soft);
   color: var(--warning-text);
 }
-.kz-chip-cancelled {
+.zf-chip-cancelled {
   background: var(--bg-muted);
   color: var(--text-tertiary);
 }
-.kz-chip-cancellation_pending {
+.zf-chip-cancellation_pending {
   background: var(--warning-soft);
   color: var(--warning-text);
 }
-.kz-chip-open {
+.zf-chip-open {
   background: var(--info-soft);
   color: var(--info-text);
 }
 
 /* ── Card ── */
-.kz-card {
+.zf-card {
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -280,9 +280,9 @@ body {
 }
 
 /* ── Inputs ── */
-.kz-input,
-.kz-select,
-.kz-textarea {
+.zf-input,
+.zf-select,
+.zf-textarea {
   height: 36px;
   padding: 0 10px;
   border: 1px solid var(--border);
@@ -296,19 +296,19 @@ body {
     border-color 0.12s,
     box-shadow 0.12s;
 }
-.kz-textarea {
+.zf-textarea {
   height: auto;
   padding: 10px;
   resize: none;
 }
-.kz-input:focus,
-.kz-select:focus,
-.kz-textarea:focus {
+.zf-input:focus,
+.zf-select:focus,
+.zf-textarea:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(13, 138, 122, 0.15);
 }
-.kz-label {
+.zf-label {
   font-size: 12px;
   font-weight: 500;
   color: var(--text-secondary);
@@ -318,7 +318,7 @@ body {
 }
 
 /* ── Navigation ── */
-.kz-nav-item {
+.zf-nav-item {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -334,15 +334,15 @@ body {
     color 0.12s;
   text-decoration: none;
 }
-.kz-nav-item:hover {
+.zf-nav-item:hover {
   background: var(--nav-bg-hover);
   color: var(--nav-text-active);
 }
-.kz-nav-item.active {
+.zf-nav-item.active {
   background: var(--nav-bg-active);
   color: var(--nav-text-active);
 }
-.kz-nav-section {
+.zf-nav-section {
   font-size: 10.5px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -492,18 +492,18 @@ body {
 }
 
 /* ── Nav Slider (shared week / month / year navigation) ── */
-.kz-nav-slider {
+.zf-nav-slider {
   display: flex;
   align-items: center;
   gap: 4px;
 }
-.kz-nav-slider .kz-btn {
+.zf-nav-slider .zf-btn {
   /* width: 34px; */
   height: 34px;
   padding: 0;
   justify-content: center;
 }
-.kz-nav-slider .nav-label {
+.zf-nav-slider .nav-label {
   font-size: 13.5px;
   font-weight: 500;
   text-align: center;
@@ -543,7 +543,7 @@ body {
   min-width: 0;
 }
 
-.stat-card-label-help .kz-btn-icon-sm {
+.stat-card-label-help .zf-btn-icon-sm {
   flex: 0 0 auto;
   margin: 0;
 }
@@ -578,18 +578,18 @@ body {
 }
 
 /* ── Tables ── */
-.kz-table {
+.zf-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
 }
 
-.kz-table thead tr {
+.zf-table thead tr {
   border-bottom: 1px solid var(--border);
   background: var(--bg-subtle);
 }
 
-.kz-table th {
+.zf-table th {
   padding: 8px 16px;
   text-align: left;
   font-size: 11.5px;
@@ -599,16 +599,16 @@ body {
   letter-spacing: 0.04em;
 }
 
-.kz-table tbody tr {
+.zf-table tbody tr {
   border-bottom: 1px solid var(--border);
 }
 
-.kz-table td {
+.zf-table td {
   padding: 10px 16px;
 }
 
 /* Rejected entries: strike through data cells; chips keep their own styling
-   via .kz-chip { text-decoration: none } (base) and their own color classes */
+   via .zf-chip { text-decoration: none } (base) and their own color classes */
 tr.entry-rejected > td {
   text-decoration: line-through;
   color: var(--text-tertiary);
@@ -1052,7 +1052,7 @@ dialog footer {
 }
 
 /* ── Notification panel ── */
-.kz-notif-panel {
+.zf-notif-panel {
   position: fixed;
   top: 20px;
   left: 226px;
@@ -1067,7 +1067,7 @@ dialog footer {
 }
 
 /* ── Mobile bell button (top-right corner) ── */
-.kz-mobile-bell-wrapper {
+.zf-mobile-bell-wrapper {
   display: none;
 }
 
@@ -1077,13 +1077,13 @@ dialog footer {
 }
 
 @media (min-width: 769px) and (max-width: 1024px) {
-  .kz-notif-panel {
+  .zf-notif-panel {
     left: 186px;
   }
 }
 
 @media (max-width: 768px) {
-  .kz-notif-panel {
+  .zf-notif-panel {
     top: 50px;
     bottom: auto;
     right: 12px;
@@ -1093,7 +1093,7 @@ dialog footer {
     border-radius: var(--radius-lg);
   }
 
-  .kz-mobile-bell-wrapper {
+  .zf-mobile-bell-wrapper {
     display: flex;
     align-items: center;
   }
@@ -1115,7 +1115,7 @@ dialog footer {
 }
 
 /* ── Scrollable table wrapper ── */
-.kz-table-wrap {
+.zf-table-wrap {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
 }
@@ -1298,23 +1298,23 @@ dialog footer {
   }
 
   /* Tables: allow horizontal scroll */
-  .kz-table-wrap {
+  .zf-table-wrap {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     margin: 0 -14px;
     padding: 0 14px;
   }
 
-  .kz-table {
+  .zf-table {
     min-width: 480px;
   }
 
   /* Tables that should fill the available width without forced scroll */
-  .kz-table--fit {
+  .zf-table--fit {
     min-width: 0;
   }
-  .kz-table--fit th,
-  .kz-table--fit td {
+  .zf-table--fit th,
+  .zf-table--fit td {
     padding: 8px 8px;
   }
 
@@ -1444,7 +1444,7 @@ dialog footer {
     justify-content: flex-start;
   }
 
-  .absence-top-actions .kz-btn-primary {
+  .absence-top-actions .zf-btn-primary {
     margin-left: auto;
   }
 

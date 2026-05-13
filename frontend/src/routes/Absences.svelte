@@ -193,9 +193,9 @@
     {$t("Vacation, sick leave & training days")}
   </div>
   <div class="top-bar-actions absence-top-actions">
-    <div class="kz-nav-slider">
+    <div class="zf-nav-slider">
       <button
-        class="kz-btn kz-btn-ghost"
+        class="zf-btn zf-btn-ghost"
         on:click={() => {
           selectedYearTouched = true;
           selectedYear -= 1;
@@ -209,7 +209,7 @@
         >{selectedYear}</span
       >
       <button
-        class="kz-btn kz-btn-ghost"
+        class="zf-btn zf-btn-ghost"
         on:click={() => {
           selectedYearTouched = true;
           selectedYear += 1;
@@ -220,7 +220,7 @@
         <Icon name="ChevRight" size={16} />
       </button>
     </div>
-    <button class="kz-btn kz-btn-primary" on:click={() => (showDialog = {})}>
+    <button class="zf-btn zf-btn-primary" on:click={() => (showDialog = {})}>
       <Icon name="Plus" size={14} />{$t("Request Absence")}
     </button>
   </div>
@@ -229,19 +229,19 @@
 <div class="content-area" style="overflow-x:hidden">
   {#if balance}
     <div class="stat-cards">
-      <div class="kz-card stat-card">
+      <div class="zf-card stat-card">
         <div class="stat-card-label">
           {$t("Vacation days ({year})", { year: selectedYear })}
         </div>
         <div class="stat-card-value tab-num">{balance.annual_entitlement}</div>
       </div>
-      <div class="kz-card stat-card">
+      <div class="zf-card stat-card">
         <div class="stat-card-label">
           {$t("Vacation used ({year})", { year: selectedYear })}
         </div>
         <div class="stat-card-value tab-num">{balance.already_taken}</div>
       </div>
-      <div class="kz-card stat-card">
+      <div class="zf-card stat-card">
         <div class="stat-card-label">
           {$t("Approved upcoming ({year})", { year: selectedYear })}
         </div>
@@ -250,7 +250,7 @@
         </div>
         <div class="stat-card-sub">{$t("Approved days not yet taken")}</div>
       </div>
-      <div class="kz-card stat-card">
+      <div class="zf-card stat-card">
         <div class="stat-card-label">
           {$t("Vacation pending ({year})", { year: selectedYear })}
         </div>
@@ -259,7 +259,7 @@
           {$t("Vacation requests awaiting approval")}
         </div>
       </div>
-      <div class="kz-card stat-card">
+      <div class="zf-card stat-card">
         <div class="stat-card-label">
           {$t("Vacation remaining ({year})", { year: selectedYear })}
         </div>
@@ -269,7 +269,7 @@
       </div>
       {#if balance.carryover_days > 0}
         <div
-          class="kz-card stat-card"
+          class="zf-card stat-card"
           style="border-color:{balance.carryover_expired
             ? 'var(--danger)'
             : 'var(--warning)'}"
@@ -307,7 +307,7 @@
     </div>
   {/if}
 
-  <div class="kz-card">
+  <div class="zf-card">
     <div class="card-header">
       <span class="card-header-title">{$t("Absence History")}</span>
     </div>
@@ -359,7 +359,7 @@
                 <span class="absence-entry-value">{a.comment || "-"}</span>
               </div>
               <div class="absence-entry-detail absence-entry-status">
-                <span class="kz-chip kz-chip-{a.status}"
+                <span class="zf-chip zf-chip-{a.status}"
                   >{statusLabel(a.status)}</span
                 >
               </div>
@@ -379,7 +379,7 @@
   <dialog bind:this={detailDlg} on:close={closeDetail}>
     <header>
       <span style="flex:1">{absenceKindLabel(detailAbsence.kind)}</span>
-      <button class="kz-btn-icon-sm kz-btn-ghost" on:click={closeDetail}>
+      <button class="zf-btn-icon-sm zf-btn-ghost" on:click={closeDetail}>
         <Icon name="X" size={16} />
       </button>
     </header>
@@ -387,27 +387,27 @@
       <div style="display:flex;flex-direction:column;gap:10px">
         <div class="field-row">
           <div>
-            <div class="kz-label">{$t("From")}</div>
+            <div class="zf-label">{$t("From")}</div>
             <div class="tab-num">{fmtDate(detailAbsence.start_date)}</div>
           </div>
           <div>
-            <div class="kz-label">{$t("To")}</div>
+            <div class="zf-label">{$t("To")}</div>
             <div class="tab-num">{fmtDate(detailAbsence.end_date)}</div>
           </div>
           <div>
-            <div class="kz-label">{$t("Days")}</div>
+            <div class="zf-label">{$t("Days")}</div>
             <div class="tab-num">{detailAbsence.days ?? "-"}</div>
           </div>
         </div>
         <div>
-          <div class="kz-label">{$t("Status")}</div>
-          <span class="kz-chip kz-chip-{detailAbsence.status}"
+          <div class="zf-label">{$t("Status")}</div>
+          <span class="zf-chip zf-chip-{detailAbsence.status}"
             >{statusLabel(detailAbsence.status)}</span
           >
         </div>
         {#if detailAbsence.comment}
           <div>
-            <div class="kz-label">{$t("Comment")}</div>
+            <div class="zf-label">{$t("Comment")}</div>
             <div style="white-space:pre-wrap;font-size:13px">
               {detailAbsence.comment}
             </div>
@@ -415,7 +415,7 @@
         {/if}
         {#if detailAbsence.rejection_reason}
           <div>
-            <div class="kz-label">{$t("Rejection reason")}</div>
+            <div class="zf-label">{$t("Rejection reason")}</div>
             <div
               style="white-space:pre-wrap;font-size:13px;color:var(--danger-text)"
             >
@@ -424,7 +424,7 @@
           </div>
         {/if}
         <div>
-          <div class="kz-label">{$t("Requested at")}</div>
+          <div class="zf-label">{$t("Requested at")}</div>
           <div class="tab-num" style="font-size:12px">
             {fmtDateTime(detailAbsence.created_at)}
           </div>
@@ -432,11 +432,11 @@
       </div>
     </div>
     <footer>
-      <button class="kz-btn" on:click={closeDetail}>{$t("Close")}</button>
+      <button class="zf-btn" on:click={closeDetail}>{$t("Close")}</button>
       <span style="flex:1"></span>
       {#if detailAbsence.cancellable}
         <button
-          class="kz-btn kz-btn-danger"
+          class="zf-btn zf-btn-danger"
           on:click={() => {
             const absence = detailAbsence;
             closeDetail();
@@ -448,7 +448,7 @@
       {/if}
       {#if detailAbsence.editable}
         <button
-          class="kz-btn kz-btn-primary"
+          class="zf-btn zf-btn-primary"
           on:click={() => {
             const selectedAbsence = detailAbsence;
             closeDetail();

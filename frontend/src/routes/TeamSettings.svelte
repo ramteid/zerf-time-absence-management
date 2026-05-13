@@ -51,7 +51,7 @@
     <p>{$t("Loading...")}</p>
   {:else}
     <!-- Reopen Requests section -->
-    <div class="kz-card" style="padding:20px;margin-bottom:16px">
+    <div class="zf-card" style="padding:20px;margin-bottom:16px">
       <div style="font-size:14px;font-weight:400;margin-bottom:6px">
         {$t("Reopen Requests")}
       </div>

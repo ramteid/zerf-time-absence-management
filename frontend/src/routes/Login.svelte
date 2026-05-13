@@ -151,7 +151,7 @@
 </script>
 
 <div class="login-wrap">
-  <div class="kz-card login-card">
+  <div class="zf-card login-card">
     <div class="login-logo">
       <div class="login-logo-icon">
         <Icon name="Clock" size={18} />
@@ -182,11 +182,11 @@
         on:submit={submitLogin}
       >
         <div style="margin-bottom:14px">
-          <label class="kz-label" for="email">{$t("Email")}</label>
+          <label class="zf-label" for="email">{$t("Email")}</label>
           <input
             id="email"
             name="username"
-            class="kz-input"
+            class="zf-input"
             type="email"
             bind:value={email}
             required
@@ -194,11 +194,11 @@
           />
         </div>
         <div style="margin-bottom:14px">
-          <label class="kz-label" for="password">{$t("Password")}</label>
+          <label class="zf-label" for="password">{$t("Password")}</label>
           <input
             id="password"
             name="password"
-            class="kz-input"
+            class="zf-input"
             type="password"
             bind:value={password}
             required
@@ -207,7 +207,7 @@
         </div>
         <div class="error-text" style="margin-bottom:8px">{loginError}</div>
         <button
-          class="kz-btn kz-btn-primary"
+          class="zf-btn zf-btn-primary"
           type="submit"
           disabled={submitting}
           style="width:100%;justify-content:center;height:38px"
@@ -217,7 +217,7 @@
       </form>
       <div style="text-align:center;margin-top:14px">
         <button
-          class="kz-btn kz-btn-ghost kz-btn-sm"
+          class="zf-btn zf-btn-ghost zf-btn-sm"
           type="button"
           on:click={() => {
             view = "forgot";
@@ -242,7 +242,7 @@
           )}
         </div>
         <button
-          class="kz-btn kz-btn-ghost kz-btn-sm"
+          class="zf-btn zf-btn-ghost zf-btn-sm"
           style="width:100%;justify-content:center"
           on:click={() => (view = "login")}
         >
@@ -251,10 +251,10 @@
       {:else}
         <form on:submit={submitForgot}>
           <div style="margin-bottom:14px">
-            <label class="kz-label" for="forgot-email">{$t("Email")}</label>
+            <label class="zf-label" for="forgot-email">{$t("Email")}</label>
             <input
               id="forgot-email"
-              class="kz-input"
+              class="zf-input"
               type="email"
               bind:value={forgotEmail}
               required
@@ -263,7 +263,7 @@
           </div>
           <div class="error-text" style="margin-bottom:8px">{forgotError}</div>
           <button
-            class="kz-btn kz-btn-primary"
+            class="zf-btn zf-btn-primary"
             type="submit"
             disabled={forgotBusy}
             style="width:100%;justify-content:center;height:38px"
@@ -273,7 +273,7 @@
         </form>
         <div style="text-align:center;margin-top:14px">
           <button
-            class="kz-btn kz-btn-ghost kz-btn-sm"
+            class="zf-btn zf-btn-ghost zf-btn-sm"
             type="button"
             on:click={() => (view = "login")}
           >
@@ -292,7 +292,7 @@
           {$t("Password reset successfully. Please sign in.")}
         </div>
         <button
-          class="kz-btn kz-btn-primary"
+          class="zf-btn zf-btn-primary"
           style="width:100%;justify-content:center;height:38px"
           on:click={() => {
             view = "login";
@@ -305,12 +305,12 @@
       {:else}
         <form on:submit={submitReset}>
           <div style="margin-bottom:14px">
-            <label class="kz-label" for="new-password"
+            <label class="zf-label" for="new-password"
               >{$t("New password")}</label
             >
             <input
               id="new-password"
-              class="kz-input"
+              class="zf-input"
               type="password"
               bind:value={newPassword}
               required
@@ -319,12 +319,12 @@
             />
           </div>
           <div style="margin-bottom:14px">
-            <label class="kz-label" for="new-password2"
+            <label class="zf-label" for="new-password2"
               >{$t("Confirm password")}</label
             >
             <input
               id="new-password2"
-              class="kz-input"
+              class="zf-input"
               type="password"
               bind:value={newPassword2}
               required
@@ -334,7 +334,7 @@
           </div>
           <div class="error-text" style="margin-bottom:8px">{resetError}</div>
           <button
-            class="kz-btn kz-btn-primary"
+            class="zf-btn zf-btn-primary"
             type="submit"
             disabled={resetBusy}
             style="width:100%;justify-content:center;height:38px"
@@ -344,7 +344,7 @@
         </form>
         <div style="text-align:center;margin-top:14px">
           <button
-            class="kz-btn kz-btn-ghost kz-btn-sm"
+            class="zf-btn zf-btn-ghost zf-btn-sm"
             type="button"
             on:click={() => (view = "login")}
           >

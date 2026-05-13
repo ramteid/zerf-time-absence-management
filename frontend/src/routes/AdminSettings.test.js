@@ -131,7 +131,7 @@ describe("AdminSettings", () => {
     await settle();
     await settle();
 
-    target.querySelector(".kz-btn-primary").click();
+    target.querySelector(".zf-btn-primary").click();
     await settle();
 
     const saveCall = apiMock.mock.calls.find(
@@ -148,7 +148,7 @@ describe("AdminSettings", () => {
     await settle();
     await settle();
 
-    target.querySelector(".kz-btn-primary").click();
+    target.querySelector(".zf-btn-primary").click();
     await settle();
 
     const saveCall = apiMock.mock.calls.find(
