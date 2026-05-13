@@ -1450,6 +1450,11 @@ fn total_entitlement_for_dated_vacation(
     carryover_expired: bool,
 ) -> f64 {
     if expiry_date.is_some() {
+        // When there is a carryover expiry system, the gross year budget is always
+        // effective + carryover regardless of whether today is past the expiry date.
+        // The fine-grained pre/post-expiry check in validate_vacation_balance enforces
+        // that post-expiry days may only draw from the base entitlement; this total is
+        // a conservative upper bound used only for the fast-path budget check.
         effective_entitlement as f64 + carryover_days as f64
     } else {
         total_entitlement_with_carryover(effective_entitlement, carryover_days, carryover_expired)

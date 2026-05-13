@@ -394,7 +394,7 @@ pub async fn create(
         "change_requests",
         new_change_request_id,
         None,
-        Some(serde_json::to_value(&created_change_request).unwrap()),
+        serde_json::to_value(&created_change_request).ok(),
     )
     .await;
     // Notify approvers that a change request needs review.
@@ -603,7 +603,7 @@ pub async fn approve(
         "approved",
         "change_requests",
         change_request_id,
-        Some(serde_json::to_value(&change_request).unwrap()),
+        serde_json::to_value(&change_request).ok(),
         Some(serde_json::json!({"status": "approved", "reviewed_by": requester.id})),
     )
     .await;
@@ -726,7 +726,7 @@ pub async fn reject(
         "rejected",
         "change_requests",
         change_request_id,
-        Some(serde_json::to_value(&change_request).unwrap()),
+        serde_json::to_value(&change_request).ok(),
         Some(serde_json::json!({"status": "rejected", "reason": body.reason})),
     )
     .await;

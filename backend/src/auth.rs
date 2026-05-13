@@ -319,9 +319,12 @@ pub async fn login(
         "csrf_token": csrf_token,
     }));
     let mut response = response_body.into_response();
+    let cookie_value = cookie
+        .parse()
+        .map_err(|_| AppError::Internal("Failed to build session cookie header.".into()))?;
     response
         .headers_mut()
-        .insert(header::SET_COOKIE, cookie.parse().unwrap());
+        .insert(header::SET_COOKIE, cookie_value);
     Ok(response)
 }
 
@@ -341,9 +344,12 @@ pub async fn logout(State(app_state): State<AppState>, req: Request) -> AppResul
     }
     let cookie = build_session_cookie("", 0, app_state.cfg.secure_cookies);
     let mut response = Json(serde_json::json!({"ok": true})).into_response();
+    let cookie_value = cookie
+        .parse()
+        .map_err(|_| AppError::Internal("Failed to clear session cookie header.".into()))?;
     response
         .headers_mut()
-        .insert(header::SET_COOKIE, cookie.parse().unwrap());
+        .insert(header::SET_COOKIE, cookie_value);
     Ok(response)
 }
 

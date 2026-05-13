@@ -848,7 +848,7 @@ pub async fn approve(
         "approved",
         "reopen_requests",
         request_id,
-        Some(serde_json::to_value(&reopen_request).unwrap()),
+        serde_json::to_value(&reopen_request).ok(),
         Some(serde_json::json!({"status": "approved"})),
     )
     .await;
@@ -953,7 +953,7 @@ pub async fn reject(
         "rejected",
         "reopen_requests",
         request_id,
-        Some(serde_json::to_value(&reopen_request).unwrap()),
+        serde_json::to_value(&reopen_request).ok(),
         Some(serde_json::json!({ "status": "rejected", "reason": rejection_reason })),
     )
     .await;
