@@ -434,7 +434,7 @@ pub async fn create(
         "users",
         new_user_id,
         None,
-        Some(serde_json::to_value(&created_auth_user).unwrap()),
+        serde_json::to_value(&created_auth_user).ok(),
     )
     .await;
     // Send registration email best-effort
@@ -708,8 +708,8 @@ pub async fn update(
         "updated",
         "users",
         user_id,
-        Some(serde_json::to_value(&previous_user).unwrap()),
-        Some(serde_json::to_value(&updated_auth_user).unwrap()),
+        serde_json::to_value(&previous_user).ok(),
+        serde_json::to_value(&updated_auth_user).ok(),
     )
     .await;
     Ok(Json(updated_auth_user))
@@ -766,7 +766,7 @@ pub async fn deactivate(
         "deactivated",
         "users",
         user_id,
-        Some(serde_json::to_value(&previous_user).unwrap()),
+        serde_json::to_value(&previous_user).ok(),
         Some(serde_json::json!({"active": false})),
     )
     .await;
@@ -828,7 +828,7 @@ pub async fn delete_user(
         "deleted",
         "users",
         user_id,
-        Some(serde_json::to_value(&target_user).unwrap()),
+        serde_json::to_value(&target_user).ok(),
         None,
     )
     .await;

@@ -182,7 +182,7 @@ pub async fn create(
         "time_entries",
         created_entry.id,
         None,
-        Some(serde_json::to_value(&created_entry).unwrap()),
+        serde_json::to_value(&created_entry).ok(),
     )
     .await;
     Ok(Json(created_entry))
@@ -214,8 +214,8 @@ pub async fn update(
         "updated",
         "time_entries",
         entry_id,
-        Some(serde_json::to_value(&previous_entry).unwrap()),
-        Some(serde_json::to_value(&updated_entry).unwrap()),
+        serde_json::to_value(&previous_entry).ok(),
+        serde_json::to_value(&updated_entry).ok(),
     )
     .await;
     Ok(Json(updated_entry))
@@ -238,7 +238,7 @@ pub async fn delete(
         "deleted",
         "time_entries",
         entry_id,
-        Some(serde_json::to_value(&time_entry).unwrap()),
+        serde_json::to_value(&time_entry).ok(),
         None,
     )
     .await;
@@ -354,7 +354,7 @@ pub async fn approve(
         "approved",
         "time_entries",
         entry_id,
-        Some(serde_json::to_value(&entry).unwrap()),
+        serde_json::to_value(&entry).ok(),
         Some(serde_json::json!({"status": "approved", "reviewed_by": requester.id})),
     )
     .await;
@@ -405,7 +405,7 @@ pub async fn reject(
         "rejected",
         "time_entries",
         entry_id,
-        Some(serde_json::to_value(&entry).unwrap()),
+        serde_json::to_value(&entry).ok(),
         Some(serde_json::json!({"status": "rejected", "reason": body.reason})),
     )
     .await;
@@ -455,7 +455,7 @@ pub async fn batch_approve(
             "approved",
             "time_entries",
             entry.id,
-            Some(serde_json::to_value(entry).unwrap()),
+            serde_json::to_value(entry).ok(),
             Some(serde_json::json!({"status": "approved", "reviewed_by": requester.id})),
         )
         .await;
@@ -538,7 +538,7 @@ pub async fn batch_reject(
             "rejected",
             "time_entries",
             entry.id,
-            Some(serde_json::to_value(entry).unwrap()),
+            serde_json::to_value(entry).ok(),
             Some(serde_json::json!({"status": "rejected", "reason": rejection_reason})),
         )
         .await;

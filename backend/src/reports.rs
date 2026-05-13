@@ -482,9 +482,11 @@ fn csv_response(r: MonthReport, uid: i64, file_label: &str) -> AppResult<Respons
     data.extend_from_slice(b"\xEF\xBB\xBF");
     data.extend_from_slice(&csv_bytes);
     let mut response = Response::new(axum::body::Body::from(data));
+    let content_type = axum::http::HeaderValue::from_str("text/csv; charset=utf-8")
+        .map_err(|_| AppError::Internal("Failed to build CSV content-type header.".into()))?;
     response.headers_mut().insert(
         header::CONTENT_TYPE,
-        "text/csv; charset=utf-8".parse().unwrap(),
+        content_type,
     );
     let safe_label: String = file_label
         .chars()
