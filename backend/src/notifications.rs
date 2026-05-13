@@ -74,6 +74,45 @@ pub async fn create(
     }
 }
 
+/// Insert an in-app-only notification row, skipping the email sidecar.
+/// Used when the requester is also the recipient (e.g. an admin approving
+/// or rejecting their own submission) to avoid self-addressed emails.
+pub async fn create_inapp_only(
+    state: &AppState,
+    user_id: i64,
+    kind: &str,
+    title: &str,
+    body: &str,
+    reference_type: Option<&str>,
+    reference_id: Option<i64>,
+) {
+    if let Err(e) = state
+        .db
+        .notifications
+        .insert(user_id, kind, title, body, reference_type, reference_id)
+        .await
+    {
+        tracing::warn!(target:"zerf::notifications", "insert failed: {e}");
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn create_translated_inapp_only(
+    state: &AppState,
+    language: &Language,
+    user_id: i64,
+    kind: &str,
+    title_key: &str,
+    body_key: &str,
+    params: Vec<(&'static str, String)>,
+    reference_type: Option<&str>,
+    reference_id: Option<i64>,
+) {
+    let title = crate::i18n::translate(language, title_key, &params);
+    let body = crate::i18n::translate(language, body_key, &params);
+    create_inapp_only(state, user_id, kind, &title, &body, reference_type, reference_id).await;
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn create_translated(
     state: &AppState,

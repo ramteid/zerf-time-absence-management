@@ -40,6 +40,30 @@ async fn notify_absence(
     .await;
 }
 
+/// Send one in-app-only absence notification (no email). Used when the
+/// requester is also the absence owner, e.g. an admin self-approving.
+async fn notify_absence_inapp_only(
+    app_state: &AppState,
+    language: &i18n::Language,
+    recipient_id: i64,
+    event: &str,
+    params: Vec<(&'static str, String)>,
+    absence_id: i64,
+) {
+    crate::notifications::create_translated_inapp_only(
+        app_state,
+        language,
+        recipient_id,
+        event,
+        &format!("{event}_title"),
+        &format!("{event}_body"),
+        params,
+        Some("absences"),
+        Some(absence_id),
+    )
+    .await;
+}
+
 /// Notify every approver in `recipient_ids` of the same absence event.
 async fn notify_approvers(
     app_state: &AppState,
@@ -867,24 +891,17 @@ pub async fn approve(
         )
         .await;
     }
+    let language = notification_language(&app_state.pool).await;
+    let notify_params = vec![
+        ("kind", i18n::absence_kind_label(&language, &absence.kind)),
+        ("start_date", i18n::format_date(&language, absence.start_date)),
+        ("end_date", i18n::format_date(&language, absence.end_date)),
+    ];
     if absence.user_id != requester.id {
-        let language = notification_language(&app_state.pool).await;
-        notify_absence(
-            &app_state,
-            &language,
-            absence.user_id,
-            "absence_approved",
-            vec![
-                ("kind", i18n::absence_kind_label(&language, &absence.kind)),
-                (
-                    "start_date",
-                    i18n::format_date(&language, absence.start_date),
-                ),
-                ("end_date", i18n::format_date(&language, absence.end_date)),
-            ],
-            absence_id,
-        )
-        .await;
+        notify_absence(&app_state, &language, absence.user_id, "absence_approved", notify_params, absence_id).await;
+    } else {
+        // Self-approval by admin: in-app only, no email.
+        notify_absence_inapp_only(&app_state, &language, absence.user_id, "absence_approved", notify_params, absence_id).await;
     }
     Ok(Json(serde_json::json!({"ok":true})))
 }
@@ -960,25 +977,17 @@ pub async fn reject(
         Some(serde_json::json!({"status": "rejected", "reason": body.reason})),
     )
     .await;
+    let language = notification_language(&app_state.pool).await;
+    let notify_params = vec![
+        ("kind", i18n::absence_kind_label(&language, &absence.kind)),
+        ("start_date", i18n::format_date(&language, absence.start_date)),
+        ("end_date", i18n::format_date(&language, absence.end_date)),
+        ("reason", body.reason.clone()),
+    ];
     if absence.user_id != requester.id {
-        let language = notification_language(&app_state.pool).await;
-        notify_absence(
-            &app_state,
-            &language,
-            absence.user_id,
-            "absence_rejected",
-            vec![
-                ("kind", i18n::absence_kind_label(&language, &absence.kind)),
-                (
-                    "start_date",
-                    i18n::format_date(&language, absence.start_date),
-                ),
-                ("end_date", i18n::format_date(&language, absence.end_date)),
-                ("reason", body.reason.clone()),
-            ],
-            absence_id,
-        )
-        .await;
+        notify_absence(&app_state, &language, absence.user_id, "absence_rejected", notify_params, absence_id).await;
+    } else {
+        notify_absence_inapp_only(&app_state, &language, absence.user_id, "absence_rejected", notify_params, absence_id).await;
     }
     Ok(Json(serde_json::json!({"ok":true})))
 }
@@ -1036,24 +1045,16 @@ pub async fn approve_cancellation(
         Some(serde_json::json!({"status": "cancelled", "reviewed_by": requester.id})),
     )
     .await;
+    let language = notification_language(&app_state.pool).await;
+    let notify_params = vec![
+        ("kind", i18n::absence_kind_label(&language, &absence.kind)),
+        ("start_date", i18n::format_date(&language, absence.start_date)),
+        ("end_date", i18n::format_date(&language, absence.end_date)),
+    ];
     if absence.user_id != requester.id {
-        let language = notification_language(&app_state.pool).await;
-        notify_absence(
-            &app_state,
-            &language,
-            absence.user_id,
-            "absence_cancellation_approved",
-            vec![
-                ("kind", i18n::absence_kind_label(&language, &absence.kind)),
-                (
-                    "start_date",
-                    i18n::format_date(&language, absence.start_date),
-                ),
-                ("end_date", i18n::format_date(&language, absence.end_date)),
-            ],
-            absence_id,
-        )
-        .await;
+        notify_absence(&app_state, &language, absence.user_id, "absence_cancellation_approved", notify_params, absence_id).await;
+    } else {
+        notify_absence_inapp_only(&app_state, &language, absence.user_id, "absence_cancellation_approved", notify_params, absence_id).await;
     }
     Ok(Json(serde_json::json!({"ok": true})))
 }
@@ -1111,24 +1112,16 @@ pub async fn reject_cancellation(
         Some(serde_json::json!({"status": "approved", "reviewed_by": requester.id})),
     )
     .await;
+    let language = notification_language(&app_state.pool).await;
+    let notify_params = vec![
+        ("kind", i18n::absence_kind_label(&language, &absence.kind)),
+        ("start_date", i18n::format_date(&language, absence.start_date)),
+        ("end_date", i18n::format_date(&language, absence.end_date)),
+    ];
     if absence.user_id != requester.id {
-        let language = notification_language(&app_state.pool).await;
-        notify_absence(
-            &app_state,
-            &language,
-            absence.user_id,
-            "absence_cancellation_rejected",
-            vec![
-                ("kind", i18n::absence_kind_label(&language, &absence.kind)),
-                (
-                    "start_date",
-                    i18n::format_date(&language, absence.start_date),
-                ),
-                ("end_date", i18n::format_date(&language, absence.end_date)),
-            ],
-            absence_id,
-        )
-        .await;
+        notify_absence(&app_state, &language, absence.user_id, "absence_cancellation_rejected", notify_params, absence_id).await;
+    } else {
+        notify_absence_inapp_only(&app_state, &language, absence.user_id, "absence_cancellation_rejected", notify_params, absence_id).await;
     }
     Ok(Json(serde_json::json!({"ok": true})))
 }
@@ -1166,25 +1159,17 @@ pub async fn revoke(
         Some(serde_json::json!({"status": "cancelled", "revoked_by": requester.id})),
     )
     .await;
+    // Notify the absence owner that their absence was revoked by an admin.
+    let language = notification_language(&app_state.pool).await;
+    let notify_params = vec![
+        ("kind", i18n::absence_kind_label(&language, &absence.kind)),
+        ("start_date", i18n::format_date(&language, absence.start_date)),
+        ("end_date", i18n::format_date(&language, absence.end_date)),
+    ];
     if absence.user_id != requester.id {
-        // Notify the absence owner that their absence was revoked by an admin.
-        let language = notification_language(&app_state.pool).await;
-        notify_absence(
-            &app_state,
-            &language,
-            absence.user_id,
-            "absence_revoked",
-            vec![
-                ("kind", i18n::absence_kind_label(&language, &absence.kind)),
-                (
-                    "start_date",
-                    i18n::format_date(&language, absence.start_date),
-                ),
-                ("end_date", i18n::format_date(&language, absence.end_date)),
-            ],
-            absence_id,
-        )
-        .await;
+        notify_absence(&app_state, &language, absence.user_id, "absence_revoked", notify_params, absence_id).await;
+    } else {
+        notify_absence_inapp_only(&app_state, &language, absence.user_id, "absence_revoked", notify_params, absence_id).await;
     }
     Ok(Json(serde_json::json!({"ok":true})))
 }
