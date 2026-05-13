@@ -125,7 +125,7 @@ async fn change_requests_full_workflow() {
         assert_eq!(st, StatusCode::OK, "approve entry B");
 
         // Change request for B: shift start to 09:00, overlapping with A (08:00-12:00).
-        let (st, cr_body) = emp
+        let (st, _) = emp
             .post(
                 "/api/v1/change-requests",
                 &json!({
@@ -135,19 +135,10 @@ async fn change_requests_full_workflow() {
                 }),
             )
             .await;
-        assert_eq!(st, StatusCode::OK, "create overlapping change request");
-        let cr_id = id(&cr_body);
-
-        let (st, _) = lead
-            .post(
-                &format!("/api/v1/change-requests/{}/approve", cr_id),
-                &json!({}),
-            )
-            .await;
         assert_eq!(
             st,
             StatusCode::BAD_REQUEST,
-            "approving overlapping change request -> 400"
+            "creating overlapping change request -> 400"
         );
     }
 

@@ -27,7 +27,8 @@ async fn admin_full_workflow() {
         let (st, body) = admin.get("/api/v1/notifications").await;
         assert_eq!(st, StatusCode::OK, "admin notifications");
         assert!(
-            !body.as_array()
+            !body
+                .as_array()
                 .unwrap()
                 .iter()
                 .any(|item| item["kind"] == "timesheet_submitted"),

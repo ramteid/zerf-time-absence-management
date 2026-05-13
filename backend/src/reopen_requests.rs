@@ -28,6 +28,16 @@ use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
+const ACTIVE_ASSIGNED_APPROVER_FOR_UPDATE_SQL: &str = "\
+    SELECT TRUE \
+    FROM user_approvers ua \
+    JOIN users subject ON subject.id = ua.user_id \
+    JOIN users approver ON approver.id = ua.approver_id \
+    WHERE ua.user_id = $1 AND ua.approver_id = $2 \
+    AND subject.active=TRUE AND subject.role != 'admin' \
+    AND approver.active=TRUE AND approver.role IN ('team_lead','admin') \
+    FOR UPDATE OF ua";
+
 #[derive(FromRow, Serialize)]
 pub struct ReopenRequest {
     pub id: i64,
@@ -95,26 +105,16 @@ fn change_request_overview_text(
     applied: bool,
 ) -> String {
     if rows.is_empty() {
-        return if language.code() == "de" {
-            "Keine offenen Änderungsanträge in dieser Woche.".to_string()
-        } else {
-            "No open change requests in this week.".to_string()
-        };
+        return i18n::translate(language, "reopen_change_request_none", &[]);
     }
 
-    let header = if language.code() == "de" {
-        if applied {
-            "Automatisch übernommene Änderungsanträge:"
-        } else {
-            "Offene Änderungsanträge für diese Woche:"
-        }
-    } else if applied {
-        "Automatically applied change requests:"
+    let header = if applied {
+        i18n::translate(language, "reopen_change_request_header_applied", &[])
     } else {
-        "Open change requests for this week:"
+        i18n::translate(language, "reopen_change_request_header_open", &[])
     };
 
-    let mut lines = vec![header.to_string()];
+    let mut lines = vec![header];
     for row in rows {
         let before_category = i18n::work_category_label(language, &row.old_category_name);
         let after_category = i18n::work_category_label(
@@ -126,22 +126,14 @@ fn change_request_overview_text(
         let before_comment = row.comment.as_deref().unwrap_or("").trim();
         let after_comment = row.new_comment.as_deref().unwrap_or(before_comment).trim();
         let before_comment = if before_comment.is_empty() {
-            if language.code() == "de" {
-                "(leer)"
-            } else {
-                "(empty)"
-            }
+            i18n::translate(language, "text_empty", &[])
         } else {
-            before_comment
+            before_comment.to_string()
         };
         let after_comment = if after_comment.is_empty() {
-            if language.code() == "de" {
-                "(leer)"
-            } else {
-                "(empty)"
-            }
+            i18n::translate(language, "text_empty", &[])
         } else {
-            after_comment
+            after_comment.to_string()
         };
         let base_line = format!(
             "- {} {}-{} ({}) -> {} {}-{} ({})",
@@ -156,12 +148,11 @@ fn change_request_overview_text(
         );
         lines.push(base_line);
         if before_comment != after_comment {
-            let comment_label = if language.code() == "de" {
-                "  Kommentar"
-            } else {
-                "  Comment"
-            };
-            lines.push(format!("{comment_label}: {before_comment} -> {after_comment}"));
+            let comment_label =
+                i18n::translate(language, "reopen_change_request_comment_label", &[]);
+            lines.push(format!(
+                "{comment_label}: {before_comment} -> {after_comment}"
+            ));
         }
     }
     lines.join("\n")
@@ -200,6 +191,34 @@ async fn load_change_request_overview(
 struct ReopenExecution {
     reopened_entries: Vec<(i64, String)>,
     applied_change_request_ids: Vec<i64>,
+    applied_change_overview: String,
+}
+
+async fn load_change_request_overview_for_ids_tx(
+    tx: &mut sqlx::PgConnection,
+    language: &i18n::Language,
+    change_request_ids: &[i64],
+    applied: bool,
+) -> AppResult<String> {
+    if change_request_ids.is_empty() {
+        return Ok(change_request_overview_text(language, &[], applied));
+    }
+    let rows = sqlx::query_as::<_, ChangeOverviewRow>(
+        "SELECT te.entry_date, te.start_time, te.end_time, \
+                c_old.name AS old_category_name, te.comment, \
+                cr.new_date, cr.new_start_time, cr.new_end_time, \
+                c_new.name AS new_category_name, cr.new_comment \
+         FROM change_requests cr \
+         JOIN time_entries te ON te.id = cr.time_entry_id \
+         JOIN categories c_old ON c_old.id = te.category_id \
+         LEFT JOIN categories c_new ON c_new.id = cr.new_category_id \
+         WHERE cr.id = ANY($1) \
+         ORDER BY te.entry_date, te.start_time, cr.id",
+    )
+    .bind(change_request_ids)
+    .fetch_all(tx)
+    .await?;
+    Ok(change_request_overview_text(language, &rows, applied))
 }
 
 /// Atomically reopen a week: apply open change_requests for the week's
@@ -209,6 +228,7 @@ struct ReopenExecution {
 /// so the caller can commit the whole state transition first and audit after.
 async fn perform_reopen_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    language: &i18n::Language,
     actor_id: i64,
     subject_id: i64,
     week_start: NaiveDate,
@@ -225,7 +245,7 @@ async fn perform_reopen_in_tx(
              WHERE te.user_id=$1 AND te.entry_date BETWEEN $2 AND $3 \
              AND te.status IN ('submitted','approved') \
              FOR UPDATE",
-        )
+    )
     .bind(subject_id)
     .bind(week_start)
     .bind(week_end)
@@ -250,6 +270,13 @@ async fn perform_reopen_in_tx(
     .bind(&entry_ids)
     .fetch_all(&mut **tx)
     .await?;
+    let open_change_request_ids: Vec<i64> = open_change_requests
+        .iter()
+        .map(|change_request| change_request.id)
+        .collect();
+    let applied_change_overview =
+        load_change_request_overview_for_ids_tx(tx, language, &open_change_request_ids, true)
+            .await?;
     let mut changed_entry_ids = Vec::new();
     let mut applied_change_request_ids = Vec::new();
     for change_request in open_change_requests {
@@ -262,7 +289,7 @@ async fn perform_reopen_in_tx(
         .fetch_one(&mut **tx)
         .await?;
         TimeEntryDb::apply_change_request_tx(
-            &mut **tx,
+            tx,
             change_request.time_entry_id,
             &current_entry.status,
             change_request.new_date,
@@ -293,7 +320,7 @@ async fn perform_reopen_in_tx(
             comment: updated_entry.comment.clone(),
         };
         crate::time_entries::validate(
-            &mut **tx,
+            tx,
             updated_entry.user_id,
             &effective_entry,
             Some(updated_entry.id),
@@ -305,12 +332,16 @@ async fn perform_reopen_in_tx(
         let rows = sqlx::query(
             "UPDATE change_requests \
              SET status='approved', \
-                 reviewed_by=CASE WHEN $1::bigint IS NOT NULL THEN $1 ELSE NULL END, \
+                 reviewed_by=$1, \
                  reviewed_at=CURRENT_TIMESTAMP, \
                  rejection_reason=NULL \
              WHERE status='open' AND id = ANY($2)",
         )
-        .bind(match actor_id == subject_id { true => None as Option<i64>, false => Some(actor_id) })
+        .bind(if actor_id == subject_id {
+            None::<i64>
+        } else {
+            Some(actor_id)
+        })
         .bind(&applied_change_request_ids)
         .execute(&mut **tx)
         .await?
@@ -338,6 +369,7 @@ async fn perform_reopen_in_tx(
     Ok(ReopenExecution {
         reopened_entries: affected,
         applied_change_request_ids,
+        applied_change_overview,
     })
 }
 
@@ -415,13 +447,7 @@ async fn approver_ids_to_notify(pool: &crate::db::DatabasePool, requester: &User
 }
 
 async fn notification_language(pool: &crate::db::DatabasePool) -> i18n::Language {
-    match i18n::load_ui_language(pool).await {
-        Ok(language) => language,
-        Err(e) => {
-            tracing::warn!(target:"zerf::reopen", "load notification language failed: {e}");
-            i18n::Language::default()
-        }
-    }
+    crate::notifications::load_language(pool).await
 }
 
 pub async fn create(
@@ -480,57 +506,59 @@ pub async fn create(
     let approver_ids_for_notification = approver_ids_to_notify(&app_state.pool, &requester).await;
     let language = notification_language(&app_state.pool).await;
     let week_label = i18n::format_week_label(&language, body.week_start);
-    let pending_change_overview =
-        load_change_request_overview(&app_state.pool, &language, requester.id, body.week_start, false)
-            .await;
-    let applied_change_overview =
-        load_change_request_overview(&app_state.pool, &language, requester.id, body.week_start, true)
-            .await;
-
-    let (new_request_id, reopen_execution): (i64, Option<ReopenExecution>) =
-        if should_auto_approve {
-            let mut transaction = app_state.pool.begin().await?;
-            let insert_result: (i64, DateTime<Utc>) = sqlx::query_as(
-                "INSERT INTO reopen_requests(user_id, week_start, status, reviewed_by, reviewed_at) \
+    let pending_change_overview = load_change_request_overview(
+        &app_state.pool,
+        &language,
+        requester.id,
+        body.week_start,
+        false,
+    )
+    .await;
+    let (new_request_id, reopen_execution): (i64, Option<ReopenExecution>) = if should_auto_approve
+    {
+        let mut transaction = app_state.pool.begin().await?;
+        let new_id: i64 = sqlx::query_scalar(
+            "INSERT INTO reopen_requests(user_id, week_start, status, reviewed_by, reviewed_at) \
                  VALUES ($1,$2,$3,$4, CURRENT_TIMESTAMP) \
-                 RETURNING id, created_at",
-            )
-            .bind(requester.id)
-            .bind(body.week_start)
-            .bind(initial_status)
-            .bind(requester.id)
-            .fetch_one(&mut *transaction)
-            .await
-            .map_err(|e| {
-                tracing::warn!(target:"zerf::reopen", "create reopen failed: {e}");
-                AppError::Conflict("A pending request for this week already exists.".into())
-            })?;
-            let affected = perform_reopen_in_tx(
-                &mut transaction,
-                requester.id,
-                requester.id,
-                body.week_start,
-            )
-            .await?;
-            transaction.commit().await?;
-            (insert_result.0, Some(affected))
-        } else {
-            let insert_result: (i64, DateTime<Utc>) = sqlx::query_as(
-                "INSERT INTO reopen_requests(user_id, week_start, status) \
+                 RETURNING id",
+        )
+        .bind(requester.id)
+        .bind(body.week_start)
+        .bind(initial_status)
+        .bind(requester.id)
+        .fetch_one(&mut *transaction)
+        .await
+        .map_err(|e| {
+            tracing::warn!(target:"zerf::reopen", "create reopen failed: {e}");
+            AppError::Conflict("A pending request for this week already exists.".into())
+        })?;
+        let affected = perform_reopen_in_tx(
+            &mut transaction,
+            &language,
+            requester.id,
+            requester.id,
+            body.week_start,
+        )
+        .await?;
+        transaction.commit().await?;
+        (new_id, Some(affected))
+    } else {
+        let new_id: i64 = sqlx::query_scalar(
+            "INSERT INTO reopen_requests(user_id, week_start, status) \
                  VALUES ($1,$2,$3) \
-                 RETURNING id, created_at",
-            )
-            .bind(requester.id)
-            .bind(body.week_start)
-            .bind(initial_status)
-            .fetch_one(&app_state.pool)
-            .await
-            .map_err(|e| {
-                tracing::warn!(target:"zerf::reopen", "create reopen failed: {e}");
-                AppError::Conflict("A pending request for this week already exists.".into())
-            })?;
-            (insert_result.0, None)
-        };
+                 RETURNING id",
+        )
+        .bind(requester.id)
+        .bind(body.week_start)
+        .bind(initial_status)
+        .fetch_one(&app_state.pool)
+        .await
+        .map_err(|e| {
+            tracing::warn!(target:"zerf::reopen", "create reopen failed: {e}");
+            AppError::Conflict("A pending request for this week already exists.".into())
+        })?;
+        (new_id, None)
+    };
 
     let entries_reopened = reopen_execution
         .as_ref()
@@ -563,7 +591,11 @@ pub async fn create(
     )
     .await;
 
-    let requester_full_name = format!("{} {}", requester.first_name, requester.last_name);
+    let requester_full_name = requester.full_name();
+    let applied_change_overview = reopen_execution
+        .as_ref()
+        .map(|exec| exec.applied_change_overview.clone())
+        .unwrap_or_else(|| change_request_overview_text(&language, &[], true));
 
     if should_auto_approve {
         // Notify the requester that their week was reopened automatically.
@@ -668,7 +700,11 @@ pub async fn list_pending(
     let rrs = if requester.is_admin() {
         app_state.db.reopen_requests.list_pending_admin().await?
     } else {
-        app_state.db.reopen_requests.list_pending_for_lead(requester.id).await?
+        app_state
+            .db
+            .reopen_requests
+            .list_pending_for_lead(requester.id)
+            .await?
     };
     Ok(Json(rrs.into_iter().map(repo_rr_to_service).collect()))
 }
@@ -694,7 +730,10 @@ async fn notify_assigned_approvers_if_admin_acted(
         return;
     }
     let approver_ids: Vec<i64> = match app_state.db.users.get_approver_ids(request_user_id).await {
-        Ok(ids) => ids.into_iter().filter(|approver_id| *approver_id != requester.id).collect(),
+        Ok(ids) => ids
+            .into_iter()
+            .filter(|approver_id| *approver_id != requester.id)
+            .collect(),
         Err(_) => return,
     };
     if approver_ids.is_empty() {
@@ -752,56 +791,40 @@ pub async fn approve(
         return Err(AppError::BadRequest("Request is not pending.".into()));
     }
     if !requester.is_admin() {
-        let is_assigned_approver: Option<bool> = sqlx::query_scalar(
-            "SELECT TRUE FROM user_approvers WHERE user_id = $1 AND approver_id = $2",
-        )
-        .bind(reopen_request.user_id)
-        .bind(requester.id)
-        .fetch_optional(&mut *transaction)
-        .await?;
-        if is_assigned_approver.is_none() {
-            return Err(AppError::Forbidden);
-        }
-    }
-    // Team leads must not act on reopen requests from admin users.
-    if !requester.is_admin() {
-        let is_admin_user: Option<bool> =
-            sqlx::query_scalar("SELECT TRUE FROM users WHERE id = $1 AND role = 'admin'")
+        let is_assigned_approver: Option<bool> =
+            sqlx::query_scalar(ACTIVE_ASSIGNED_APPROVER_FOR_UPDATE_SQL)
                 .bind(reopen_request.user_id)
+                .bind(requester.id)
                 .fetch_optional(&mut *transaction)
                 .await?;
-        if is_admin_user.is_some() {
+        if is_assigned_approver.is_none() {
             return Err(AppError::Forbidden);
         }
     }
     let language = notification_language(&app_state.pool).await;
     let week_label = i18n::format_week_label(&language, reopen_request.week_start);
-    // Load CR overview BEFORE transaction commit to show which CRs will be applied.
-    // The query reads committed state; the header text (applied=true) reflects the
-    // semantic intent that these CRs WILL BE applied during reopen_in_tx().
-    let applied_change_overview = load_change_request_overview(
-        &app_state.pool,
-        &language,
-        reopen_request.user_id,
-        reopen_request.week_start,
-        true,
-    )
-    .await;
     let reopen_execution = perform_reopen_in_tx(
         &mut transaction,
+        &language,
         requester.id,
         reopen_request.user_id,
         reopen_request.week_start,
     )
     .await?;
-    sqlx::query(
+    let rows_approved = sqlx::query(
         "UPDATE reopen_requests SET status='approved', reviewed_by=$2, reviewed_at=CURRENT_TIMESTAMP \
          WHERE id=$1 AND status='pending'",
     )
     .bind(request_id)
     .bind(requester.id)
     .execute(&mut *transaction)
-    .await?;
+    .await?
+    .rows_affected();
+    if rows_approved == 0 {
+        return Err(AppError::Conflict(
+            "Reopen request was already resolved by someone else.".into(),
+        ));
+    }
     transaction.commit().await?;
     audit_reopened_entries(
         &app_state.pool,
@@ -818,6 +841,7 @@ pub async fn approve(
     )
     .await;
     let entries_reopened = reopen_execution.reopened_entries.len() as i64;
+    let applied_change_overview = reopen_execution.applied_change_overview.clone();
     audit::log(
         &app_state.pool,
         requester.id,
@@ -897,25 +921,13 @@ pub async fn reject(
         return Err(AppError::BadRequest("Request is not pending.".into()));
     }
     if !requester.is_admin() {
-        let is_assigned_approver: Option<bool> = sqlx::query_scalar(
-            "SELECT TRUE FROM user_approvers WHERE user_id = $1 AND approver_id = $2",
-        )
-        .bind(reopen_request.user_id)
-        .bind(requester.id)
-        .fetch_optional(&mut *transaction)
-        .await?;
-        if is_assigned_approver.is_none() {
-            return Err(AppError::Forbidden);
-        }
-    }
-    // Team leads must not act on reopen requests from admin users.
-    if !requester.is_admin() {
-        let is_admin_user: Option<bool> =
-            sqlx::query_scalar("SELECT TRUE FROM users WHERE id = $1 AND role = 'admin'")
+        let is_assigned_approver: Option<bool> =
+            sqlx::query_scalar(ACTIVE_ASSIGNED_APPROVER_FOR_UPDATE_SQL)
                 .bind(reopen_request.user_id)
+                .bind(requester.id)
                 .fetch_optional(&mut *transaction)
                 .await?;
-        if is_admin_user.is_some() {
+        if is_assigned_approver.is_none() {
             return Err(AppError::Forbidden);
         }
     }

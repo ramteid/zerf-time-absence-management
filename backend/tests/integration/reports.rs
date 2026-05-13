@@ -58,7 +58,6 @@ async fn reports_full_workflow() {
         assert_eq!(st, StatusCode::OK, "category report with only draft");
         assert_eq!(body.as_array().unwrap()[0]["minutes"], 240);
 
-
         let (st, body) = lead
             .get(&format!(
                 "/api/v1/reports/categories?from={}&to={}",
@@ -149,10 +148,8 @@ async fn reports_full_workflow() {
             bootstrap_team_with_suffix(&app, &admin, false, "5").await;
         let lead = login_change_pw(&app, "lead-5@example.com", &lead_pw).await;
         let emp = login_change_pw(&app, "emp-5@example.com", &emp_pw).await;
-        let tuesday = (
-            chrono::NaiveDate::parse_from_str(&monday, "%Y-%m-%d").unwrap()
-                + chrono::Duration::days(1)
-        )
+        let tuesday = (chrono::NaiveDate::parse_from_str(&monday, "%Y-%m-%d").unwrap()
+            + chrono::Duration::days(1))
         .format("%Y-%m-%d")
         .to_string();
 
@@ -176,7 +173,10 @@ async fn reports_full_workflow() {
         let absence_id = id(&body);
 
         let (st, _) = lead
-            .post(&format!("/api/v1/absences/{absence_id}/approve"), &json!({}))
+            .post(
+                &format!("/api/v1/absences/{absence_id}/approve"),
+                &json!({}),
+            )
             .await;
         assert_eq!(st, StatusCode::OK, "approve flextime reduction absence");
 
@@ -256,13 +256,25 @@ async fn reports_full_workflow() {
         // The approved flextime-reduction entry (4h = 240 min) appears here.
         let cat_totals = body["category_totals"].as_object().unwrap();
         assert_eq!(cat_totals.len(), 1, "one category in totals");
-        assert_eq!(cat_totals.get("Flextime Reduction").and_then(|v| v.as_i64()), Some(240));
+        assert_eq!(
+            cat_totals
+                .get("Flextime Reduction")
+                .and_then(|v| v.as_i64()),
+            Some(240)
+        );
         assert_eq!(body["weeks_all_submitted"], false);
 
         let (st, body) = emp
-            .get(&format!("/api/v1/reports/flextime?from={}&to={}", monday, tuesday))
+            .get(&format!(
+                "/api/v1/reports/flextime?from={}&to={}",
+                monday, tuesday
+            ))
             .await;
-        assert_eq!(st, StatusCode::OK, "flextime report with flextime reduction");
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "flextime report with flextime reduction"
+        );
         let rows = body.as_array().unwrap();
         assert_eq!(rows[0]["target_min"], per_day_target_minutes(39));
         assert_eq!(rows[0]["actual_min"], 0);
@@ -402,8 +414,8 @@ async fn reports_full_workflow() {
                 "/api/v1/time-entries",
                 &json!({
                     "entry_date": today,
-                    "start_time": "08:00",
-                    "end_time": "12:00",
+                    "start_time": "00:00",
+                    "end_time": "00:01",
                     "category_id": cat_id,
                     "comment": "today should report"
                 }),
@@ -431,7 +443,7 @@ async fn reports_full_workflow() {
             .await;
         assert_eq!(st, StatusCode::OK, "month report");
         // Month report is now month-to-date and therefore includes today's approved entries.
-        assert_eq!(body["actual_min"], 240);
+        assert_eq!(body["actual_min"], 1);
         assert!(!body["category_totals"].as_object().unwrap().is_empty());
         let today_row = body["days"]
             .as_array()
@@ -439,7 +451,7 @@ async fn reports_full_workflow() {
             .iter()
             .find(|item| item["date"] == today)
             .unwrap();
-        assert_eq!(today_row["actual_min"], 240);
+        assert_eq!(today_row["actual_min"], 1);
         assert_eq!(today_row["entries"].as_array().unwrap().len(), 1);
 
         let (st, body) = emp
@@ -451,7 +463,7 @@ async fn reports_full_workflow() {
         assert_eq!(st, StatusCode::OK, "category report for today");
         let rows = body.as_array().unwrap();
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0]["minutes"], 240);
+        assert_eq!(rows[0]["minutes"], 1);
     }
 
     // -- cancellation_pending absences remove day target like approved absences --
@@ -540,7 +552,10 @@ async fn reports_full_workflow() {
             .await;
         assert_eq!(st, StatusCode::OK, "flextime for requested absence");
         assert!(body.as_array().unwrap()[0]["absence"].is_null());
-        assert_eq!(body.as_array().unwrap()[0]["target_min"], expected_day_target);
+        assert_eq!(
+            body.as_array().unwrap()[0]["target_min"],
+            expected_day_target
+        );
     }
 
     // -- Reports ignore legacy time before user start date --

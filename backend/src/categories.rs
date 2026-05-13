@@ -56,7 +56,11 @@ pub async fn create(
             body.counts_as_work.unwrap_or(true),
         )
         .await?;
-    let category = app_state.db.categories.find_by_id(new_id).await?
+    let category = app_state
+        .db
+        .categories
+        .find_by_id(new_id)
+        .await?
         .ok_or_else(|| AppError::Internal("Created category not found".into()))?;
     Ok(Json(category))
 }
@@ -94,11 +98,24 @@ pub async fn update(
     }
     let normalized_name = body.name.map(|n| n.trim().to_string());
     let normalized_color = body.color.map(|c| c.trim().to_string());
-    app_state.db.categories.update(
-        category_id, normalized_name, body.description, normalized_color,
-        body.sort_order, body.counts_as_work, body.active,
-    ).await?;
-    let category = app_state.db.categories.find_by_id(category_id).await?
-        .ok_or_else(|| AppError::Internal("Category not found".into()))?;
+    app_state
+        .db
+        .categories
+        .update(
+            category_id,
+            normalized_name,
+            body.description,
+            normalized_color,
+            body.sort_order,
+            body.counts_as_work,
+            body.active,
+        )
+        .await?;
+    let category = app_state
+        .db
+        .categories
+        .find_by_id(category_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
     Ok(Json(category))
 }

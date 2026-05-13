@@ -27,7 +27,12 @@ async fn create_lead(admin: &crate::common::TestClient, email: &str, first: &str
 }
 
 /// Create an employee whose approver is `approver_id` and return its id.
-async fn create_emp(admin: &crate::common::TestClient, email: &str, first: &str, approver_id: i64) -> i64 {
+async fn create_emp(
+    admin: &crate::common::TestClient,
+    email: &str,
+    first: &str,
+    approver_id: i64,
+) -> i64 {
     let (st, body) = admin
         .post(
             "/api/v1/users",
@@ -129,7 +134,11 @@ async fn users_full_workflow() {
         let (st, detail) = admin.get(&format!("/api/v1/users/{lead_report_id}")).await;
         assert_eq!(st, StatusCode::OK, "get lead report detail");
         assert!(
-            detail["approver_ids"].as_array().unwrap().iter().any(|v| v.as_i64() == Some(lead_approver_id)),
+            detail["approver_ids"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|v| v.as_i64() == Some(lead_approver_id)),
             "lead_approver_id should be in approver_ids"
         );
 
@@ -371,10 +380,12 @@ async fn users_full_workflow() {
         let emp_id = create_emp(&admin, "emp-del@example.com", "DelEmp", lead_id).await;
 
         // Cannot delete while emp still has lead as approver.
-        let (st, body) = admin
-            .delete(&format!("/api/v1/users/{lead_id}"))
-            .await;
-        assert_eq!(st, StatusCode::BAD_REQUEST, "delete with active reports must fail");
+        let (st, body) = admin.delete(&format!("/api/v1/users/{lead_id}")).await;
+        assert_eq!(
+            st,
+            StatusCode::BAD_REQUEST,
+            "delete with active reports must fail"
+        );
         let error_msg = body["error"].as_str().unwrap_or("").to_lowercase();
         assert!(
             error_msg.contains("approver") || error_msg.contains("reassign"),
@@ -401,7 +412,11 @@ async fn users_full_workflow() {
         let (st, list) = admin.get("/api/v1/users").await;
         assert_eq!(st, StatusCode::OK);
         assert!(
-            !list.as_array().unwrap().iter().any(|u| u["id"].as_i64() == Some(lead_id)),
+            !list
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|u| u["id"].as_i64() == Some(lead_id)),
             "deleted lead must not appear in user list"
         );
 
@@ -409,7 +424,11 @@ async fn users_full_workflow() {
         let (st, detail) = admin.get(&format!("/api/v1/users/{emp_id}")).await;
         assert_eq!(st, StatusCode::OK, "emp still exists after lead deletion");
         assert!(
-            detail["approver_ids"].as_array().unwrap().iter().any(|v| v.as_i64() == Some(1)),
+            detail["approver_ids"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|v| v.as_i64() == Some(1)),
             "emp's approver must be admin after lead deleted"
         );
 
@@ -432,13 +451,19 @@ async fn users_full_workflow() {
         // Employee submits and gets entries approved so they can request a reopen.
         let eid = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
         let (st, _) = lead
-            .post(&format!("/api/v1/time-entries/{eid}/approve"), &serde_json::json!({}))
+            .post(
+                &format!("/api/v1/time-entries/{eid}/approve"),
+                &serde_json::json!({}),
+            )
             .await;
         assert_eq!(st, StatusCode::OK, "approve entry");
 
         // Employee requests reopen; lead approves → reviewed_by = lead_id in reopen_requests.
         let (st, rr_body) = emp
-            .post("/api/v1/reopen-requests", &serde_json::json!({"week_start": monday_iso}))
+            .post(
+                "/api/v1/reopen-requests",
+                &serde_json::json!({"week_start": monday_iso}),
+            )
             .await;
         assert_eq!(st, StatusCode::OK, "create reopen request");
         let rr_id = rr_body["id"].as_i64().unwrap();
@@ -462,9 +487,7 @@ async fn users_full_workflow() {
 
         // Deleting lead must succeed even though they reviewed a reopen request.
         // This would fail with RESTRICT if migration 006 is missing.
-        let (st, _) = admin
-            .delete(&format!("/api/v1/users/{lead_id}"))
-            .await;
+        let (st, _) = admin.delete(&format!("/api/v1/users/{lead_id}")).await;
         assert_eq!(
             st,
             StatusCode::OK,
@@ -504,7 +527,9 @@ async fn users_full_workflow() {
             body["temporary_password"].as_str().unwrap().to_string()
         };
         let second_client = app.client();
-        let (st, _) = second_client.login("admin2@example.com", &second_admin_pw).await;
+        let (st, _) = second_client
+            .login("admin2@example.com", &second_admin_pw)
+            .await;
         assert_eq!(st, StatusCode::OK);
         let (st, _) = second_client
             .change_password(&second_admin_pw, "NewAdminPass!234")
@@ -556,11 +581,7 @@ async fn users_full_workflow() {
                 &serde_json::json!({}),
             )
             .await;
-        assert_eq!(
-            st,
-            StatusCode::OK,
-            "deactivate after reassign must succeed"
-        );
+        assert_eq!(st, StatusCode::OK, "deactivate after reassign must succeed");
     }
 
     // -- Cannot update active=false for user who is approver for active users --

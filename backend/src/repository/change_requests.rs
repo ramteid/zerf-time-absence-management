@@ -1,6 +1,6 @@
 use crate::db::DatabasePool;
 use crate::error::{AppError, AppResult};
-use crate::repository::time_entries::{validate_entry, NewEntryData};
+use crate::repository::time_entries::{validate_entry, NewEntryData, TimeEntryDb};
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::Serialize;
 
@@ -26,6 +26,8 @@ const CR_SELECT: &str =
     "SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, \
      new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, \
      rejection_reason, created_at FROM change_requests";
+
+type EntryChangeContext = (i64, String, NaiveDate, String, String, i64, Option<String>);
 
 #[derive(Clone)]
 pub struct ChangeRequestDb {
@@ -76,13 +78,15 @@ impl ChangeRequestDb {
         &self,
         time_entry_id: i64,
     ) -> AppResult<Option<(i64, String, NaiveDate, String, String, i64, Option<String>)>> {
-        Ok(sqlx::query_as::<_, (i64, String, NaiveDate, String, String, i64, Option<String>)>(
-            "SELECT user_id, status, entry_date, start_time, end_time, \
+        Ok(
+            sqlx::query_as::<_, (i64, String, NaiveDate, String, String, i64, Option<String>)>(
+                "SELECT user_id, status, entry_date, start_time, end_time, \
              category_id, comment FROM time_entries WHERE id=$1",
+            )
+            .bind(time_entry_id)
+            .fetch_optional(&self.pool)
+            .await?,
         )
-        .bind(time_entry_id)
-        .fetch_optional(&self.pool)
-        .await?)
     }
 
     pub async fn get_entry_date(&self, time_entry_id: i64) -> AppResult<Option<NaiveDate>> {
@@ -95,16 +99,17 @@ impl ChangeRequestDb {
     }
 
     pub async fn check_category_active(&self, category_id: i64) -> AppResult<Option<bool>> {
-        Ok(sqlx::query_scalar("SELECT active FROM categories WHERE id=$1")
-            .bind(category_id)
-            .fetch_optional(&self.pool)
-            .await?)
+        Ok(
+            sqlx::query_scalar("SELECT active FROM categories WHERE id=$1")
+                .bind(category_id)
+                .fetch_optional(&self.pool)
+                .await?,
+        )
     }
 
-    // ── Mutations ──────────────────────────────────────────────────────────
-
-    /// Insert a new change request, guarded by an advisory lock on the entry.
+    /// Insert a new change request, guarded by a per-user advisory lock.
     /// Returns the new CR row.
+    #[allow(clippy::too_many_arguments)]
     pub async fn create(
         &self,
         time_entry_id: i64,
@@ -121,14 +126,13 @@ impl ChangeRequestDb {
             .bind(user_id)
             .execute(&mut *tx)
             .await?;
-        let current: Option<(i64, String, NaiveDate, String, String, i64, Option<String>)> =
-            sqlx::query_as(
-                "SELECT user_id, status, entry_date, start_time, end_time, category_id, comment \
+        let current: Option<EntryChangeContext> = sqlx::query_as(
+            "SELECT user_id, status, entry_date, start_time, end_time, category_id, comment \
                  FROM time_entries WHERE id=$1 FOR UPDATE",
-            )
-            .bind(time_entry_id)
-            .fetch_optional(&mut *tx)
-            .await?;
+        )
+        .bind(time_entry_id)
+        .fetch_optional(&mut *tx)
+        .await?;
         let Some((
             entry_owner_id,
             entry_status,
@@ -137,7 +141,8 @@ impl ChangeRequestDb {
             entry_end_time,
             entry_category_id,
             entry_comment,
-        )) = current else {
+        )) = current
+        else {
             return Err(AppError::NotFound);
         };
         if entry_owner_id != user_id {
@@ -153,18 +158,43 @@ impl ChangeRequestDb {
             ));
         }
 
+        let effective_date = new_date.unwrap_or(entry_date);
+        let effective_start_time = new_start_time
+            .map(str::to_string)
+            .unwrap_or_else(|| entry_start_time.clone());
+        let effective_end_time = new_end_time
+            .map(str::to_string)
+            .unwrap_or_else(|| entry_end_time.clone());
+        let effective_category_id = new_category_id.unwrap_or(entry_category_id);
+        let effective_comment = match new_comment {
+            Some("") => None,
+            Some(comment) => Some(comment.to_string()),
+            None => entry_comment.clone(),
+        };
+        let current_comment = entry_comment.as_deref().filter(|value| !value.is_empty());
+        let normalized_effective_comment = effective_comment
+            .as_deref()
+            .filter(|value| !value.is_empty());
+        let current_start_time = TimeEntryDb::parse_time_pub(&entry_start_time)?;
+        let current_end_time = TimeEntryDb::parse_time_pub(&entry_end_time)?;
+        let parsed_effective_start_time = TimeEntryDb::parse_time_pub(&effective_start_time)?;
+        let parsed_effective_end_time = TimeEntryDb::parse_time_pub(&effective_end_time)?;
+        if effective_date == entry_date
+            && parsed_effective_start_time == current_start_time
+            && parsed_effective_end_time == current_end_time
+            && effective_category_id == entry_category_id
+            && normalized_effective_comment == current_comment
+        {
+            return Err(AppError::BadRequest(
+                "At least one actual change is required.".into(),
+            ));
+        }
         let effective_entry = NewEntryData {
-            entry_date: new_date.unwrap_or(entry_date),
-            start_time: new_start_time
-                .map(str::to_string)
-                .unwrap_or(entry_start_time),
-            end_time: new_end_time.map(str::to_string).unwrap_or(entry_end_time),
-            category_id: new_category_id.unwrap_or(entry_category_id),
-            comment: match new_comment {
-                Some("") => None,
-                Some(comment) => Some(comment.to_string()),
-                None => entry_comment,
-            },
+            entry_date: effective_date,
+            start_time: effective_start_time,
+            end_time: effective_end_time,
+            category_id: effective_category_id,
+            comment: effective_comment,
         };
         validate_entry(&mut tx, user_id, &effective_entry, Some(time_entry_id)).await?;
 
@@ -195,10 +225,12 @@ impl ChangeRequestDb {
         .fetch_one(&mut *tx)
         .await?;
         tx.commit().await?;
-        Ok(sqlx::query_as::<_, ChangeRequest>(&format!("{CR_SELECT} WHERE id=$1"))
-            .bind(new_id)
-            .fetch_one(&self.pool)
-            .await?)
+        Ok(
+            sqlx::query_as::<_, ChangeRequest>(&format!("{CR_SELECT} WHERE id=$1"))
+                .bind(new_id)
+                .fetch_one(&self.pool)
+                .await?,
+        )
     }
 
     /// Fetch an open CR with a row lock for approval/rejection.
@@ -217,17 +249,12 @@ impl ChangeRequestDb {
         })
     }
 
-    pub async fn fetch_open(
-        tx: &mut sqlx::PgConnection,
-        cr_id: i64,
-    ) -> AppResult<ChangeRequest> {
-        sqlx::query_as::<_, ChangeRequest>(&format!(
-            "{CR_SELECT} WHERE id=$1 AND status='open'"
-        ))
-        .bind(cr_id)
-        .fetch_optional(tx)
-        .await?
-        .ok_or_else(|| AppError::BadRequest("Change request is not open.".into()))
+    pub async fn fetch_open(tx: &mut sqlx::PgConnection, cr_id: i64) -> AppResult<ChangeRequest> {
+        sqlx::query_as::<_, ChangeRequest>(&format!("{CR_SELECT} WHERE id=$1 AND status='open'"))
+            .bind(cr_id)
+            .fetch_optional(tx)
+            .await?
+            .ok_or_else(|| AppError::BadRequest("Change request is not open.".into()))
     }
 
     /// Optimistically set CR to 'approved'. Returns rows affected.
@@ -276,7 +303,7 @@ impl ChangeRequestDb {
         Ok(sqlx::query_scalar::<_, Option<bool>>(
             "SELECT TRUE FROM user_approvers ua \
              WHERE ua.user_id=$1 AND ua.approver_id=$2 \
-             AND EXISTS (SELECT 1 FROM users u WHERE u.id=$1 AND u.role != 'admin') \
+             AND EXISTS (SELECT 1 FROM users u WHERE u.id=$1 AND u.active=TRUE AND u.role != 'admin') \
              FOR UPDATE",
         )
         .bind(subject_id)

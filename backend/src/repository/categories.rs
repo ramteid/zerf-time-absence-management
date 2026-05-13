@@ -89,10 +89,12 @@ impl CategoryDb {
 
     /// Returns `Some(active_flag)` if the category exists, or `None`.
     pub async fn get_active_flag(&self, id: i64) -> AppResult<Option<bool>> {
-        Ok(sqlx::query_scalar("SELECT active FROM categories WHERE id = $1")
-            .bind(id)
-            .fetch_optional(&self.pool)
-            .await?)
+        Ok(
+            sqlx::query_scalar("SELECT active FROM categories WHERE id = $1")
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await?,
+        )
     }
 
     pub async fn create(
@@ -117,6 +119,7 @@ impl CategoryDb {
         .map_err(|_| AppError::Conflict("Name already exists".into()))
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn update(
         &self,
         id: i64,
@@ -127,7 +130,7 @@ impl CategoryDb {
         counts_as_work: Option<bool>,
         active: Option<bool>,
     ) -> AppResult<()> {
-        sqlx::query(
+        let result = sqlx::query(
             "UPDATE categories \
              SET name=COALESCE($1,name), description=COALESCE($2,description), \
                  color=COALESCE($3,color), sort_order=COALESCE($4,sort_order), \
@@ -143,6 +146,9 @@ impl CategoryDb {
         .bind(id)
         .execute(&self.pool)
         .await?;
+        if result.rows_affected() == 0 {
+            return Err(AppError::NotFound);
+        }
         Ok(())
     }
 }

@@ -32,7 +32,9 @@ pub fn duration_until_next_monday_7am(now: chrono::DateTime<chrono_tz::Tz>) -> S
             }
         }
     };
-    (target - now).to_std().unwrap_or(StdDuration::from_secs(60))
+    (target - now)
+        .to_std()
+        .unwrap_or(StdDuration::from_secs(60))
 }
 
 /// Rows returned by the pending-approvals query:
@@ -144,7 +146,8 @@ pub async fn run_check(state: &crate::AppState) {
             "approval_reminder_body",
             &[("count", count_str.clone())],
         );
-        let timestamp = crate::i18n::format_datetime_in_timezone(&language, chrono::Utc::now(), &timezone);
+        let timestamp =
+            crate::i18n::format_datetime_in_timezone(&language, chrono::Utc::now(), &timezone);
         let email_body = format!(
             "{}\n\n{}",
             crate::i18n::translate(
@@ -173,7 +176,9 @@ pub async fn run_check(state: &crate::AppState) {
             Ok(true) => {
                 let _ = state
                     .notifications
-                    .send(crate::notifications::NotificationSignal { user_id: approver_id });
+                    .send(crate::notifications::NotificationSignal {
+                        user_id: approver_id,
+                    });
                 crate::email::send_async(smtp.clone(), approver_email, title, email_body);
             }
             Ok(false) => {
@@ -226,7 +231,7 @@ mod tests {
         let now = Berlin.with_ymd_and_hms(2026, 5, 4, 6, 0, 0).unwrap();
         let wait = duration_until_next_monday_7am(now);
         let secs = wait.as_secs();
-        assert!(secs >= 3500 && secs <= 3700, "expected ~1h, got {secs}s");
+        assert!((3500..=3700).contains(&secs), "expected ~1h, got {secs}s");
     }
 
     #[test]

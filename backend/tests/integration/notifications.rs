@@ -1,9 +1,9 @@
 //! End-to-end notification workflow tests running in a single container for efficiency.
 //! All test cases run sequentially within the same app instance.
 
+use chrono::{Duration, NaiveDate};
 use reqwest::StatusCode;
 use serde_json::json;
-use chrono::{Duration, NaiveDate};
 
 use crate::common::TestApp;
 use crate::helpers::*;
@@ -125,7 +125,11 @@ async fn notifications_full_workflow() {
         let _ = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
 
         let (st, lead_one_notifications) = lead_one.get("/api/v1/notifications").await;
-        assert_eq!(st, StatusCode::OK, "lead one notifications after timesheet submit");
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "lead one notifications after timesheet submit"
+        );
         assert!(
             lead_one_notifications
                 .as_array()
@@ -136,7 +140,11 @@ async fn notifications_full_workflow() {
         );
 
         let (st, lead_two_notifications) = lead_two.get("/api/v1/notifications").await;
-        assert_eq!(st, StatusCode::OK, "lead two notifications after timesheet submit");
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "lead two notifications after timesheet submit"
+        );
         assert!(
             lead_two_notifications
                 .as_array()
@@ -161,7 +169,11 @@ async fn notifications_full_workflow() {
         assert_eq!(absence["status"], "requested");
 
         let (st, lead_one_notifications) = lead_one.get("/api/v1/notifications").await;
-        assert_eq!(st, StatusCode::OK, "lead one notifications after absence request");
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "lead one notifications after absence request"
+        );
         assert!(
             lead_one_notifications
                 .as_array()
@@ -172,7 +184,11 @@ async fn notifications_full_workflow() {
         );
 
         let (st, lead_two_notifications) = lead_two.get("/api/v1/notifications").await;
-        assert_eq!(st, StatusCode::OK, "lead two notifications after absence request");
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "lead two notifications after absence request"
+        );
         assert!(
             lead_two_notifications
                 .as_array()
@@ -244,7 +260,11 @@ async fn notifications_full_workflow() {
         let _ = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
 
         let (st, admin_a_notifications) = admin_a.get("/api/v1/notifications").await;
-        assert_eq!(st, StatusCode::OK, "admin A notifications after timesheet submit");
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "admin A notifications after timesheet submit"
+        );
         assert!(
             admin_a_notifications
                 .as_array()
@@ -255,7 +275,11 @@ async fn notifications_full_workflow() {
         );
 
         let (st, admin_b_notifications) = admin_b.get("/api/v1/notifications").await;
-        assert_eq!(st, StatusCode::OK, "admin B notifications after timesheet submit");
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "admin B notifications after timesheet submit"
+        );
         assert!(
             !admin_b_notifications
                 .as_array()
@@ -276,11 +300,19 @@ async fn notifications_full_workflow() {
                 }),
             )
             .await;
-        assert_eq!(st, StatusCode::OK, "create absence for admin approver notification test");
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "create absence for admin approver notification test"
+        );
         assert_eq!(absence["status"], "requested");
 
         let (st, admin_a_notifications) = admin_a.get("/api/v1/notifications").await;
-        assert_eq!(st, StatusCode::OK, "admin A notifications after absence request");
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "admin A notifications after absence request"
+        );
         assert!(
             admin_a_notifications
                 .as_array()
@@ -291,7 +323,11 @@ async fn notifications_full_workflow() {
         );
 
         let (st, admin_b_notifications) = admin_b.get("/api/v1/notifications").await;
-        assert_eq!(st, StatusCode::OK, "admin B notifications after absence request");
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "admin B notifications after absence request"
+        );
         assert!(
             !admin_b_notifications
                 .as_array()
@@ -377,7 +413,10 @@ async fn notifications_full_workflow() {
             !body.contains("https://test.example.com"),
             "in-app notification body must not contain the app URL, got: {body:?}"
         );
-        assert!(!body.is_empty(), "in-app notification body must not be empty");
+        assert!(
+            !body.is_empty(),
+            "in-app notification body must not be empty"
+        );
 
         app2.cleanup().await;
     }
@@ -415,7 +454,11 @@ async fn notifications_full_workflow() {
                     }),
                 )
                 .await;
-            assert_eq!(st, StatusCode::OK, "create time entry for weekly notification test");
+            assert_eq!(
+                st,
+                StatusCode::OK,
+                "create time entry for weekly notification test"
+            );
             ids.push(id(&body));
         }
 

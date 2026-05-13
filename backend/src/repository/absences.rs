@@ -43,8 +43,7 @@ pub struct CalendarEntry {
     pub status: String,
 }
 
-const ABS_SELECT: &str =
-    "SELECT id, user_id, kind, start_date, end_date, comment, status, \
+const ABS_SELECT: &str = "SELECT id, user_id, kind, start_date, end_date, comment, status, \
      reviewed_by, reviewed_at, rejection_reason, created_at FROM absences";
 
 #[derive(Clone)]
@@ -109,10 +108,12 @@ impl AbsenceDb {
     /// Fetch the user's configured workdays_per_week (contract hours per week).
     /// Returns 1-7; default is typically 5 (Mon-Fri).
     pub async fn user_workdays_per_week(&self, user_id: i64) -> AppResult<i16> {
-        Ok(sqlx::query_scalar("SELECT workdays_per_week FROM users WHERE id=$1")
-            .bind(user_id)
-            .fetch_one(&self.pool)
-            .await?)
+        Ok(
+            sqlx::query_scalar("SELECT workdays_per_week FROM users WHERE id=$1")
+                .bind(user_id)
+                .fetch_one(&self.pool)
+                .await?,
+        )
     }
 
     /// Count default contract workdays (Mon-Fri, hardcoded 5 days) between `from` and `to`
@@ -129,7 +130,7 @@ impl AbsenceDb {
 
     /// Count user-specific contract workdays between `from` and `to` (inclusive),
     /// excluding public holidays.
-    /// 
+    ///
     /// This respects the user's workdays_per_week setting. For example:
     ///   - A 5-day worker: counts Mon-Fri
     ///   - A 4-day worker: counts Mon-Thu
@@ -145,9 +146,9 @@ impl AbsenceDb {
         }
         let holidays = self.holidays_set(from, to).await?;
         let workdays_per_week = self.user_workdays_per_week(user_id).await?;
-            // Count contract workdays for this specific user based on their workdays_per_week setting.
-            // Contract days are determined by: ISO_weekday < workdays_per_week (0=Mon, 6=Sun)
-            // Example: 5 days = Mon-Fri, 4 days = Mon-Thu, 6 days = Mon-Sat
+        // Count contract workdays for this specific user based on their workdays_per_week setting.
+        // Contract days are determined by: ISO_weekday < workdays_per_week (0=Mon, 6=Sun)
+        // Example: 5 days = Mon-Fri, 4 days = Mon-Thu, 6 days = Mon-Sat
         Ok(Self::workdays_in_window(
             from,
             to,
@@ -220,10 +221,12 @@ impl AbsenceDb {
     }
 
     pub async fn get_user_id(&self, id: i64) -> AppResult<i64> {
-        Ok(sqlx::query_scalar("SELECT user_id FROM absences WHERE id=$1")
-            .bind(id)
-            .fetch_one(&self.pool)
-            .await?)
+        Ok(
+            sqlx::query_scalar("SELECT user_id FROM absences WHERE id=$1")
+                .bind(id)
+                .fetch_one(&self.pool)
+                .await?,
+        )
     }
 
     pub async fn list_for_user(
@@ -444,6 +447,7 @@ impl AbsenceDb {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn update(
         &self,
         absence_id: i64,
@@ -456,12 +460,11 @@ impl AbsenceDb {
     ) -> AppResult<(Absence, Absence)> {
         let mut tx = self.pool.begin().await?;
         Self::lock_user_scope_tx(&mut tx, owner_id).await?;
-        let before: Absence = sqlx::query_as::<_, Absence>(&format!(
-            "{ABS_SELECT} WHERE id=$1 FOR UPDATE"
-        ))
-        .bind(absence_id)
-        .fetch_one(&mut *tx)
-        .await?;
+        let before: Absence =
+            sqlx::query_as::<_, Absence>(&format!("{ABS_SELECT} WHERE id=$1 FOR UPDATE"))
+                .bind(absence_id)
+                .fetch_one(&mut *tx)
+                .await?;
 
         let overlap: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM absences WHERE id != $1 AND user_id=$2 \
@@ -503,12 +506,11 @@ impl AbsenceDb {
     pub async fn cancel(&self, absence_id: i64, owner_id: i64) -> AppResult<Absence> {
         let mut tx = self.pool.begin().await?;
         Self::lock_user_scope_tx(&mut tx, owner_id).await?;
-        let before: Absence = sqlx::query_as::<_, Absence>(&format!(
-            "{ABS_SELECT} WHERE id=$1 FOR UPDATE"
-        ))
-        .bind(absence_id)
-        .fetch_one(&mut *tx)
-        .await?;
+        let before: Absence =
+            sqlx::query_as::<_, Absence>(&format!("{ABS_SELECT} WHERE id=$1 FOR UPDATE"))
+                .bind(absence_id)
+                .fetch_one(&mut *tx)
+                .await?;
         sqlx::query("UPDATE absences SET status='cancelled' WHERE id=$1")
             .bind(absence_id)
             .execute(&mut *tx)
@@ -618,12 +620,12 @@ impl AbsenceDb {
         tx: &mut sqlx::PgConnection,
         absence_id: i64,
     ) -> AppResult<Absence> {
-        Ok(sqlx::query_as::<_, Absence>(&format!(
-            "{ABS_SELECT} WHERE id=$1 FOR UPDATE"
-        ))
-        .bind(absence_id)
-        .fetch_one(tx)
-        .await?)
+        Ok(
+            sqlx::query_as::<_, Absence>(&format!("{ABS_SELECT} WHERE id=$1 FOR UPDATE"))
+                .bind(absence_id)
+                .fetch_one(tx)
+                .await?,
+        )
     }
 
     pub async fn is_direct_report_for_update(
@@ -634,7 +636,7 @@ impl AbsenceDb {
         Ok(sqlx::query_scalar::<_, Option<bool>>(
             "SELECT TRUE FROM user_approvers ua \
              WHERE ua.user_id=$1 AND ua.approver_id=$2 \
-             AND EXISTS (SELECT 1 FROM users u WHERE u.id=$1 AND u.role != 'admin') \
+             AND EXISTS (SELECT 1 FROM users u WHERE u.id=$1 AND u.active=TRUE AND u.role != 'admin') \
              FOR UPDATE",
         )
         .bind(subject_id)
@@ -708,7 +710,7 @@ impl AbsenceDb {
             return Ok(()); // sick leave doesn't block logged time
         }
         let conflict: Option<NaiveDate> = sqlx::query_scalar(
-                            "SELECT te.entry_date FROM time_entries te \
+            "SELECT te.entry_date FROM time_entries te \
                              WHERE te.user_id=$1 AND te.status <> 'rejected' \
                          AND te.entry_date BETWEEN $2 AND $3 \
              ORDER BY te.entry_date LIMIT 1",
@@ -747,16 +749,23 @@ impl AbsenceDb {
                  AND status IN ('requested','approved','cancellation_pending') \
                  AND end_date >= $3 AND start_date <= $4",
             )
-            .bind(excl).bind(user_id).bind(start_date).bind(end_date)
-            .fetch_one(&mut **tx).await?
+            .bind(excl)
+            .bind(user_id)
+            .bind(start_date)
+            .bind(end_date)
+            .fetch_one(&mut **tx)
+            .await?
         } else {
             sqlx::query_scalar(
                 "SELECT COUNT(*) FROM absences WHERE user_id=$1 \
                  AND status IN ('requested','approved','cancellation_pending') \
                  AND end_date >= $2 AND start_date <= $3",
             )
-            .bind(user_id).bind(start_date).bind(end_date)
-            .fetch_one(&mut **tx).await?
+            .bind(user_id)
+            .bind(start_date)
+            .bind(end_date)
+            .fetch_one(&mut **tx)
+            .await?
         };
         if count > 0 {
             return Err(AppError::Conflict("Overlap with existing absence.".into()));
@@ -778,8 +787,14 @@ impl AbsenceDb {
             "INSERT INTO absences(user_id, kind, start_date, end_date, comment, status) \
              VALUES ($1,$2,$3,$4,$5,$6) RETURNING id",
         )
-        .bind(user_id).bind(kind).bind(start_date).bind(end_date).bind(comment).bind(initial_status)
-        .fetch_one(&mut **tx).await?)
+        .bind(user_id)
+        .bind(kind)
+        .bind(start_date)
+        .bind(end_date)
+        .bind(comment)
+        .bind(initial_status)
+        .fetch_one(&mut **tx)
+        .await?)
     }
 
     /// Update mutable fields of a pending absence (resets review metadata).
@@ -837,6 +852,30 @@ impl AbsenceDb {
         .flatten())
     }
 
+    /// Batch version of `latest_update_before_data` for multiple absence IDs.
+    /// Returns a map from absence_id to the most recent 'updated' before_data JSON.
+    pub async fn latest_update_before_data_batch(
+        pool: &DatabasePool,
+        absence_ids: &[i64],
+    ) -> AppResult<std::collections::HashMap<i64, String>> {
+        if absence_ids.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+        let rows: Vec<(i64, Option<String>)> = sqlx::query_as(
+            "SELECT DISTINCT ON (record_id) record_id, before_data \
+             FROM audit_log \
+             WHERE table_name='absences' AND record_id = ANY($1) AND action='updated' \
+             ORDER BY record_id, occurred_at DESC",
+        )
+        .bind(absence_ids)
+        .fetch_all(pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|(id, data)| data.map(|d| (id, d)))
+            .collect())
+    }
+
     /// Carryover expiry setting (used in vacation balance calculation).
     pub async fn carryover_expiry_setting(&self) -> AppResult<String> {
         Ok(
@@ -848,18 +887,13 @@ impl AbsenceDb {
     }
 
     /// Effective annual leave entitlement from the `user_annual_leave` table.
-    pub async fn effective_annual_days(
-        &self,
-        user_id: i64,
-        year: i32,
-    ) -> AppResult<i64> {
-        let existing: Option<i64> = sqlx::query_scalar(
-            "SELECT days FROM user_annual_leave WHERE user_id=$1 AND year=$2",
-        )
-        .bind(user_id)
-        .bind(year)
-        .fetch_optional(&self.pool)
-        .await?;
+    pub async fn effective_annual_days(&self, user_id: i64, year: i32) -> AppResult<i64> {
+        let existing: Option<i64> =
+            sqlx::query_scalar("SELECT days FROM user_annual_leave WHERE user_id=$1 AND year=$2")
+                .bind(user_id)
+                .bind(year)
+                .fetch_optional(&self.pool)
+                .await?;
         if let Some(d) = existing {
             return Ok(d);
         }

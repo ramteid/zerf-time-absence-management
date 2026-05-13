@@ -22,11 +22,7 @@ impl SessionDb {
 
     // ── Login rate-limiting ────────────────────────────────────────────────
 
-    pub async fn count_recent_failures(
-        &self,
-        email: &str,
-        since: DateTime<Utc>,
-    ) -> AppResult<i64> {
+    pub async fn count_recent_failures(&self, email: &str, since: DateTime<Utc>) -> AppResult<i64> {
         Ok(sqlx::query_scalar(
             "SELECT COUNT(*) FROM login_attempts \
              WHERE email = $1 AND success = FALSE AND attempted_at > $2",
@@ -48,20 +44,13 @@ impl SessionDb {
 
     // ── Session management ─────────────────────────────────────────────────
 
-    pub async fn create(
-        &self,
-        token_hash: &str,
-        user_id: i64,
-        csrf_token: &str,
-    ) -> AppResult<()> {
-        sqlx::query(
-            "INSERT INTO sessions(token, user_id, csrf_token) VALUES ($1, $2, $3)",
-        )
-        .bind(token_hash)
-        .bind(user_id)
-        .bind(csrf_token)
-        .execute(&self.pool)
-        .await?;
+    pub async fn create(&self, token_hash: &str, user_id: i64, csrf_token: &str) -> AppResult<()> {
+        sqlx::query("INSERT INTO sessions(token, user_id, csrf_token) VALUES ($1, $2, $3)")
+            .bind(token_hash)
+            .bind(user_id)
+            .bind(csrf_token)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
@@ -82,10 +71,7 @@ impl SessionDb {
         Ok(())
     }
 
-    pub async fn delete_for_user_tx(
-        tx: &mut sqlx::PgConnection,
-        user_id: i64,
-    ) -> AppResult<()> {
+    pub async fn delete_for_user_tx(tx: &mut sqlx::PgConnection, user_id: i64) -> AppResult<()> {
         sqlx::query("DELETE FROM sessions WHERE user_id = $1")
             .bind(user_id)
             .execute(tx)
@@ -110,12 +96,14 @@ impl SessionDb {
         .bind(token_hash)
         .fetch_optional(&self.pool)
         .await?;
-        Ok(row.map(|(user_id, created_at, last_active_at, csrf_token)| SessionInfo {
-            user_id,
-            created_at,
-            last_active_at,
-            csrf_token,
-        }))
+        Ok(row.map(
+            |(user_id, created_at, last_active_at, csrf_token)| SessionInfo {
+                user_id,
+                created_at,
+                last_active_at,
+                csrf_token,
+            },
+        ))
     }
 
     pub async fn delete(&self, token_hash: &str) -> AppResult<()> {
@@ -182,11 +170,10 @@ impl SessionDb {
     }
 
     pub async fn cleanup_reset_tokens(&self) {
-        if let Err(e) = sqlx::query(
-            "DELETE FROM password_reset_tokens WHERE expires_at <= CURRENT_TIMESTAMP",
-        )
-        .execute(&self.pool)
-        .await
+        if let Err(e) =
+            sqlx::query("DELETE FROM password_reset_tokens WHERE expires_at <= CURRENT_TIMESTAMP")
+                .execute(&self.pool)
+                .await
         {
             tracing::warn!(target: "zerf::cleanup", "password_reset_tokens cleanup failed: {e}");
         }
@@ -194,11 +181,7 @@ impl SessionDb {
 
     // ── Password reset ─────────────────────────────────────────────────────
 
-    pub async fn count_reset_attempts(
-        &self,
-        rate_limit_key: &str,
-        since: DateTime<Utc>,
-    ) -> i64 {
+    pub async fn count_reset_attempts(&self, rate_limit_key: &str, since: DateTime<Utc>) -> i64 {
         sqlx::query_scalar(
             "SELECT COUNT(*) FROM login_attempts \
              WHERE email = $1 AND success = FALSE AND attempted_at > $2",
@@ -211,26 +194,20 @@ impl SessionDb {
     }
 
     pub async fn record_reset_attempt(&self, rate_limit_key: &str) {
-        let _ =
-            sqlx::query("INSERT INTO login_attempts(email, success) VALUES ($1, FALSE)")
-                .bind(rate_limit_key)
-                .execute(&self.pool)
-                .await;
+        let _ = sqlx::query("INSERT INTO login_attempts(email, success) VALUES ($1, FALSE)")
+            .bind(rate_limit_key)
+            .execute(&self.pool)
+            .await;
     }
 
     /// Look up an active user by email for the password-reset flow.
-    pub async fn get_active_user_by_email(
-        &self,
-        email: &str,
-    ) -> AppResult<Option<(i64, String)>> {
-        Ok(
-            sqlx::query_as::<_, (i64, String)>(
-                "SELECT id, email FROM users WHERE lower(email)=$1 AND active=TRUE",
-            )
-            .bind(email)
-            .fetch_optional(&self.pool)
-            .await?,
+    pub async fn get_active_user_by_email(&self, email: &str) -> AppResult<Option<(i64, String)>> {
+        Ok(sqlx::query_as::<_, (i64, String)>(
+            "SELECT id, email FROM users WHERE lower(email)=$1 AND active=TRUE",
         )
+        .bind(email)
+        .fetch_optional(&self.pool)
+        .await?)
     }
 
     pub async fn upsert_reset_token(
@@ -266,12 +243,8 @@ impl SessionDb {
         token_hash: &str,
         new_hash: &str,
     ) -> AppResult<()> {
-        self.consume_reset_token_and_update_password_checked(
-            token_hash,
-            new_hash,
-            None,
-        )
-        .await
+        self.consume_reset_token_and_update_password_checked(token_hash, new_hash, None)
+            .await
     }
 
     /// Delete an expired reset token matching `token_hash` and return

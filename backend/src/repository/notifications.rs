@@ -98,6 +98,7 @@ impl NotificationDb {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn insert_idempotent_with_dedupe_key(
         &self,
         user_id: i64,
@@ -137,14 +138,12 @@ impl NotificationDb {
     }
 
     pub async fn count_unread(&self, user_id: i64) -> AppResult<i64> {
-        Ok(
-            sqlx::query_scalar(
-                "SELECT COUNT(*) FROM notifications WHERE user_id=$1 AND is_read=FALSE",
-            )
-            .bind(user_id)
-            .fetch_one(&self.pool)
-            .await?,
+        Ok(sqlx::query_scalar(
+            "SELECT COUNT(*) FROM notifications WHERE user_id=$1 AND is_read=FALSE",
         )
+        .bind(user_id)
+        .fetch_one(&self.pool)
+        .await?)
     }
 
     /// Returns rows affected (0 if not found).
@@ -161,24 +160,20 @@ impl NotificationDb {
 
     pub async fn mark_all_read(&self, user_id: i64) -> AppResult<u64> {
         Ok(
-            sqlx::query(
-                "UPDATE notifications SET is_read=TRUE WHERE user_id=$1 AND is_read=FALSE",
-            )
-            .bind(user_id)
-            .execute(&self.pool)
-            .await?
-            .rows_affected(),
-        )
-    }
-
-    pub async fn delete_all(&self, user_id: i64) -> AppResult<u64> {
-        Ok(
-            sqlx::query("DELETE FROM notifications WHERE user_id=$1")
+            sqlx::query("UPDATE notifications SET is_read=TRUE WHERE user_id=$1 AND is_read=FALSE")
                 .bind(user_id)
                 .execute(&self.pool)
                 .await?
                 .rows_affected(),
         )
+    }
+
+    pub async fn delete_all(&self, user_id: i64) -> AppResult<u64> {
+        Ok(sqlx::query("DELETE FROM notifications WHERE user_id=$1")
+            .bind(user_id)
+            .execute(&self.pool)
+            .await?
+            .rows_affected())
     }
 
     /// Trim notifications older than 90 days (background cleanup).
@@ -193,13 +188,11 @@ impl NotificationDb {
 
     /// Fetch the email of an active user (used to send notification emails).
     pub async fn get_user_email(&self, user_id: i64) -> Option<String> {
-        sqlx::query_scalar::<_, String>(
-            "SELECT email FROM users WHERE id=$1 AND active=TRUE",
-        )
-        .bind(user_id)
-        .fetch_optional(&self.pool)
-        .await
-        .ok()
-        .flatten()
+        sqlx::query_scalar::<_, String>("SELECT email FROM users WHERE id=$1 AND active=TRUE")
+            .bind(user_id)
+            .fetch_optional(&self.pool)
+            .await
+            .ok()
+            .flatten()
     }
 }

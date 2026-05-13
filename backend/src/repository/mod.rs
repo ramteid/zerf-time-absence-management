@@ -16,7 +16,9 @@ pub use audit::{AuditDb, LogEntry};
 pub use categories::{Category, CategoryDb};
 pub use change_requests::{ChangeRequest, ChangeRequestDb};
 pub use holidays::{Holiday, HolidayDb, PreparedHoliday};
-pub use notifications::{new_broadcaster, NotificationBroadcaster, NotificationDb, NotificationSignal};
+pub use notifications::{
+    new_broadcaster, NotificationBroadcaster, NotificationDb, NotificationSignal,
+};
 pub use reopen_requests::{ReopenRequest, ReopenRequestDb};
 pub use reports::ReportDb;
 pub use sessions::SessionDb;

@@ -410,7 +410,6 @@
   // but disabled on days where adding time entries makes no sense.
   function isDayAddDisabled(day) {
     return (
-      day.absentForTarget ||
       day.absentForEntry ||
       day.holiday ||
       day.ds > today ||

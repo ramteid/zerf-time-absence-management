@@ -278,3 +278,4 @@ DATABASE_URL=postgres://postgres:postgres@127.0.0.1:55432/postgres cargo test
 - Prefer simple, direct solutions over clever ones. Keep it concise.
 - Apply appropriate architectural patterns (e.g., handler/service/repository separation) consistently across the codebase.
 - Add comprehensive inline comments e. g. explaining decisions, intent and high-level logic.
+- Translations must be handled centrally in i18n.rs for the backend and i18n.js for the frontend.

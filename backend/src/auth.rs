@@ -54,9 +54,9 @@ pub struct User {
     pub last_name: String,
     pub role: String,
     pub weekly_hours: f64,
-        /// User's configured contract workdays per week (1-7, default 5).
-        /// Used to calculate daily targets, vacation days, submission status, etc.
-        /// ISO weekday semantics: contract days = first N days of week (0=Mon, 1=Tue, ...)
+    /// User's configured contract workdays per week (1-7, default 5).
+    /// Used to calculate daily targets, vacation days, submission status, etc.
+    /// ISO weekday semantics: contract days = first N days of week (0=Mon, 1=Tue, ...)
     pub workdays_per_week: i16,
     pub start_date: chrono::NaiveDate,
     pub active: bool,
@@ -86,10 +86,7 @@ impl User {
 ///
 /// Notification recipients must be explicit assignments. Global admin fallback
 /// is intentionally not used for notifications.
-pub async fn user_approver_ids(
-    pool: &crate::db::DatabasePool,
-    user_id: i64,
-) -> Vec<i64> {
+pub async fn user_approver_ids(pool: &crate::db::DatabasePool, user_id: i64) -> Vec<i64> {
     let db = UserDb::new(pool.clone());
     db.get_approver_ids(user_id).await.unwrap_or_default()
 }
@@ -235,7 +232,11 @@ pub async fn login(
     }
 
     let since: DateTime<Utc> = Utc::now() - Duration::minutes(LOCKOUT_MIN);
-    let failures = app_state.db.sessions.count_recent_failures(&email, since).await?;
+    let failures = app_state
+        .db
+        .sessions
+        .count_recent_failures(&email, since)
+        .await?;
     if failures >= MAX_FAILED_LOGINS {
         // Account is in lockout. We deliberately do NOT insert another failed
         // attempt here. Doing so would let any unauthenticated attacker who
@@ -249,23 +250,28 @@ pub async fn login(
         return Err(AppError::BadRequest("Invalid email or password.".into()));
     }
 
-    let user = app_state.db.users.find_by_email(&email).await?.map(|u| User {
-        id: u.id,
-        email: u.email,
-        password_hash: u.password_hash,
-        first_name: u.first_name,
-        last_name: u.last_name,
-        role: u.role,
-        weekly_hours: u.weekly_hours,
-        workdays_per_week: u.workdays_per_week,
-        start_date: u.start_date,
-        active: u.active,
-        must_change_password: u.must_change_password,
-        created_at: u.created_at,
-        allow_reopen_without_approval: u.allow_reopen_without_approval,
-        dark_mode: u.dark_mode,
-        overtime_start_balance_min: u.overtime_start_balance_min,
-    });
+    let user = app_state
+        .db
+        .users
+        .find_by_email(&email)
+        .await?
+        .map(|u| User {
+            id: u.id,
+            email: u.email,
+            password_hash: u.password_hash,
+            first_name: u.first_name,
+            last_name: u.last_name,
+            role: u.role,
+            weekly_hours: u.weekly_hours,
+            workdays_per_week: u.workdays_per_week,
+            start_date: u.start_date,
+            active: u.active,
+            must_change_password: u.must_change_password,
+            created_at: u.created_at,
+            allow_reopen_without_approval: u.allow_reopen_without_approval,
+            dark_mode: u.dark_mode,
+            overtime_start_balance_min: u.overtime_start_balance_min,
+        });
     // Always perform a hash verification to keep timing constant for unknown emails.
     let dummy = "$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHRzYWx0c2FsdA$8ueQukxsrOwHPzjhsRTRppvNN0o3Qx0vg7HHmH64Bmw";
     let password_matches = match &user {
@@ -278,7 +284,11 @@ pub async fn login(
             false
         }
     };
-    app_state.db.sessions.record_attempt(&email, password_matches).await?;
+    app_state
+        .db
+        .sessions
+        .record_attempt(&email, password_matches)
+        .await?;
     let user = user.ok_or_else(|| AppError::BadRequest("Invalid email or password.".into()))?;
     if !password_matches {
         return Err(AppError::BadRequest("Invalid email or password.".into()));
@@ -291,7 +301,11 @@ pub async fn login(
     // is ignored; we always issue a fresh, random, never-reused token.
     let session_token = new_token();
     let csrf_token = new_token();
-    app_state.db.sessions.create(&hash_token(&session_token), user.id, &csrf_token).await?;
+    app_state
+        .db
+        .sessions
+        .create(&hash_token(&session_token), user.id, &csrf_token)
+        .await?;
 
     let cookie = build_session_cookie(
         &session_token,
@@ -316,14 +330,19 @@ pub async fn logout(State(app_state): State<AppState>, req: Request) -> AppResul
         // Per security policy: on logout, all sessions of the affected user are
         // deleted — not just the current one — so a user logging out from one
         // device invalidates all other open sessions too.
-        let user_id = app_state.db.sessions.get_user_id(&hash_token(&token)).await?;
+        let user_id = app_state
+            .db
+            .sessions
+            .get_user_id(&hash_token(&token))
+            .await?;
         if let Some(user_id) = user_id {
             app_state.db.sessions.delete_for_user(user_id).await?;
         }
     }
     let cookie = build_session_cookie("", 0, app_state.cfg.secure_cookies);
     let mut response = Json(serde_json::json!({"ok": true})).into_response();
-    response.headers_mut()
+    response
+        .headers_mut()
         .insert(header::SET_COOKIE, cookie.parse().unwrap());
     Ok(response)
 }
@@ -336,7 +355,11 @@ pub async fn me(
     // Expose the CSRF token to the SPA so it can include it on subsequent
     // state-changing requests as `X-CSRF-Token`.
     let raw_token = extract_token(&req).unwrap_or_default();
-    let csrf_token = app_state.db.sessions.get_csrf_token(&hash_token(&raw_token)).await?;
+    let csrf_token = app_state
+        .db
+        .sessions
+        .get_csrf_token(&hash_token(&raw_token))
+        .await?;
     let permissions = serde_json::json!({
         "is_admin": user.is_admin(),
         "is_lead": user.is_lead(),
@@ -360,7 +383,8 @@ pub async fn me(
         serde_json::json!({"href":"/account","key":"Account","icon":"👤"}),
     ];
     if user.is_lead() {
-        navigation_items.push(serde_json::json!({"href":"/team-settings","key":"TeamSettings","icon":"🛡"}));
+        navigation_items
+            .push(serde_json::json!({"href":"/team-settings","key":"TeamSettings","icon":"🛡"}));
     }
     if user.is_admin() {
         navigation_items.push(serde_json::json!({"href":"/admin/users","key":"Admin","icon":"⚙"}));
@@ -371,8 +395,16 @@ pub async fn me(
     // redirects to /admin/settings.
     let must_configure_settings = if user.is_admin() {
         let country = app_state.db.settings.get_raw("country").await?;
-        let default_weekly_hours = app_state.db.settings.get_raw("default_weekly_hours").await?;
-        let default_annual_leave_days = app_state.db.settings.get_raw("default_annual_leave_days").await?;
+        let default_weekly_hours = app_state
+            .db
+            .settings
+            .get_raw("default_weekly_hours")
+            .await?;
+        let default_annual_leave_days = app_state
+            .db
+            .settings
+            .get_raw("default_annual_leave_days")
+            .await?;
         let needs_name = user.first_name.is_empty() || user.last_name.is_empty();
         country.is_none_or(|value| value.is_empty())
             || default_weekly_hours.is_none_or(|value| value.is_empty())
@@ -381,7 +413,12 @@ pub async fn me(
     } else {
         false
     };
-    let approver_ids = app_state.db.users.get_approver_ids(user.id).await.unwrap_or_default();
+    let approver_ids = app_state
+        .db
+        .users
+        .get_approver_ids(user.id)
+        .await
+        .unwrap_or_default();
     let approvers: Vec<serde_json::Value> = app_state
         .db
         .users
@@ -429,7 +466,11 @@ pub async fn update_preferences(
     user: User,
     Json(body): Json<PreferencesReq>,
 ) -> AppResult<Json<serde_json::Value>> {
-    app_state.db.users.update_dark_mode(user.id, body.dark_mode).await?;
+    app_state
+        .db
+        .users
+        .update_dark_mode(user.id, body.dark_mode)
+        .await?;
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
@@ -468,10 +509,11 @@ pub async fn change_password(
     let new_password_hash = hash_password_async(body.new_password.clone()).await?;
     let current_token_hash = hash_token(&raw_token);
     let mut transaction = app_state.pool.begin().await?;
-    UserDb::update_password(&mut *transaction, user.id, &new_password_hash, false).await?;
+    UserDb::update_password(&mut transaction, user.id, &new_password_hash, false).await?;
     // On password change, all OTHER sessions for this user are revoked, but
     // the caller's current session is preserved so they remain logged in.
-    crate::repository::SessionDb::delete_except_tx(&mut *transaction, user.id, &current_token_hash).await?;
+    crate::repository::SessionDb::delete_except_tx(&mut transaction, user.id, &current_token_hash)
+        .await?;
     transaction.commit().await?;
     Ok(Json(serde_json::json!({"ok": true})).into_response())
 }
@@ -558,8 +600,7 @@ fn enforce_same_origin_headers(
             return false;
         };
         allowed_origins.iter().any(|allowed| {
-            parse_origin_parts(allowed)
-                .is_some_and(|allowed_parts| allowed_parts == req_parts)
+            parse_origin_parts(allowed).is_some_and(|allowed_parts| allowed_parts == req_parts)
         })
     };
     let is_origin_allowed = match (header_origin, header_referer) {
@@ -645,7 +686,11 @@ pub async fn auth_middleware(
     enforce_csrf(&parts, &app_state, &csrf_token).await?;
 
     app_state.db.sessions.touch(&token_hash).await?;
-    let repo_user = app_state.db.users.find_by_id_active(user_id).await?
+    let repo_user = app_state
+        .db
+        .users
+        .find_by_id_active(user_id)
+        .await?
         .ok_or(AppError::Unauthorized)?;
     let user = User {
         id: repo_user.id,
@@ -752,8 +797,8 @@ pub async fn setup(
     // advisory lock so any concurrent setup call blocks until ours commits,
     // and then sees the row we just inserted.
     let mut transaction = app_state.pool.begin().await?;
-    UserDb::lock_user_graph_tx(&mut *transaction).await?;
-    let existing_user_count = UserDb::count_tx(&mut *transaction).await?;
+    UserDb::lock_user_graph_tx(&mut transaction).await?;
+    let existing_user_count = UserDb::count_tx(&mut transaction).await?;
     if existing_user_count > 0 {
         tracing::warn!(target: "zerf::auth", "POST /auth/setup called after initial setup is already complete — possible probing");
         return Err(AppError::BadRequest(
@@ -761,7 +806,7 @@ pub async fn setup(
         ));
     }
     let new_user_id = UserDb::create_initial_admin(
-        &mut *transaction,
+        &mut transaction,
         &email,
         &password_hash,
         &first_name,
@@ -770,11 +815,16 @@ pub async fn setup(
     )
     .await?;
     let current_year = crate::settings::app_current_year(&app_state.pool).await;
-    let default_leave_days = UserDb::get_default_leave_days_tx(&mut *transaction).await?;
-    UserDb::set_leave_days_tx(&mut *transaction, new_user_id, current_year, default_leave_days)
-        .await?;
+    let default_leave_days = UserDb::get_default_leave_days_tx(&mut transaction).await?;
     UserDb::set_leave_days_tx(
-        &mut *transaction,
+        &mut transaction,
+        new_user_id,
+        current_year,
+        default_leave_days,
+    )
+    .await?;
+    UserDb::set_leave_days_tx(
+        &mut transaction,
         new_user_id,
         current_year + 1,
         default_leave_days,
@@ -799,7 +849,9 @@ pub async fn forgot_password(
     let smtp = crate::settings::load_smtp_config(&app_state.pool).await;
     if smtp.is_none() {
         tracing::warn!(target: "zerf::auth", "forgot_password called but SMTP is not configured");
-        return Err(crate::error::AppError::BadRequest("password_reset_unavailable".into()));
+        return Err(crate::error::AppError::BadRequest(
+            "password_reset_unavailable".into(),
+        ));
     }
 
     let base_url = match app_state
@@ -812,7 +864,9 @@ pub async fn forgot_password(
         Some(url) => url.to_string(),
         None => {
             tracing::warn!(target: "zerf::auth", "forgot_password called but ZERF_PUBLIC_URL is not configured");
-            return Err(crate::error::AppError::BadRequest("password_reset_unavailable".into()));
+            return Err(crate::error::AppError::BadRequest(
+                "password_reset_unavailable".into(),
+            ));
         }
     };
 
@@ -829,15 +883,27 @@ pub async fn forgot_password(
     // Rate-limit: max 3 reset attempts per email per 15 minutes.
     let since: DateTime<Utc> = Utc::now() - Duration::minutes(15);
     let rate_limit_key = format!("reset:{}", email);
-    let reset_attempts = app_state.db.sessions.count_reset_attempts(&rate_limit_key, since).await;
+    let reset_attempts = app_state
+        .db
+        .sessions
+        .count_reset_attempts(&rate_limit_key, since)
+        .await;
     if reset_attempts >= 3 {
         // Silently return OK to prevent enumeration / timing leaks.
         return Ok(Json(serde_json::json!({ "ok": true })));
     }
     // Record this reset attempt for rate-limiting purposes.
-    app_state.db.sessions.record_reset_attempt(&rate_limit_key).await;
+    app_state
+        .db
+        .sessions
+        .record_reset_attempt(&rate_limit_key)
+        .await;
 
-    let user = app_state.db.sessions.get_active_user_by_email(&email).await?;
+    let user = app_state
+        .db
+        .sessions
+        .get_active_user_by_email(&email)
+        .await?;
 
     // Always return 200 to prevent email enumeration.
     let Some((user_id, user_email)) = user else {
@@ -899,18 +965,13 @@ pub async fn reset_password_with_token(
     let new_hash = hash_password_async(body.password.clone()).await?;
 
     let password = body.password;
-    let reuse_check = move |current_hash: &str| -> bool {
-        verify_password(&password, current_hash)
-    };
+    let reuse_check =
+        move |current_hash: &str| -> bool { verify_password(&password, current_hash) };
 
     app_state
         .db
         .sessions
-        .consume_reset_token_and_update_password_checked(
-            &token_hash,
-            &new_hash,
-            Some(&reuse_check),
-        )
+        .consume_reset_token_and_update_password_checked(&token_hash, &new_hash, Some(&reuse_check))
         .await?;
 
     Ok(Json(serde_json::json!({ "ok": true })))

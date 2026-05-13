@@ -123,8 +123,8 @@
     return report?.weeks_all_submitted === true;
   }
 
-  // Current week is treated as submitted only when every required workday up
-  // to today has no draft entries and at least one submitted/approved entry.
+  // Current week follows the backend submission rule: every required workday
+  // up to today must be covered by an absence or by submitted/approved entries.
   function currentWeekFullySubmitted(report) {
     if (!report?.days?.length) return true;
     const weekStart = isoDate(monday(today));
@@ -134,22 +134,18 @@
       )
       .every((day) => {
         const entries = Array.isArray(day.entries) ? day.entries : [];
-        const hasDraft = entries.some(
-          (entry) => entry?.status === "draft" && entryCountsAsWork(entry),
+        const hasIncomplete = entries.some(
+          (entry) => entry?.status !== "submitted" && entry?.status !== "approved",
         );
-          // Any approved absence (target-removing or flextime_reduction) covers the day for
+        // Any approved absence (target-removing or flextime_reduction) covers the day for
         // submission purposes: flextime_reduction blocks entry creation, so there is nothing
         // to submit on those days either.
         const hasAnyAbsence = !!day?.absence;
-        const hasCreditedSubmittedOrApproved = entries.some((entry) => {
-          if (entry?.status !== "submitted" && entry?.status !== "approved") {
-            return false;
-          }
-          return entryCountsAsWork(entry);
-        });
-        return !hasDraft && (hasAnyAbsence || hasCreditedSubmittedOrApproved);
+        const hasSubmittedOrApproved = entries.some(
+          (entry) => entry?.status === "submitted" || entry?.status === "approved",
+        );
+        return !hasIncomplete && (hasAnyAbsence || hasSubmittedOrApproved);
       });
-
   }
 
   async function loadOvertimeSummary() {
