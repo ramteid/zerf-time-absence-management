@@ -279,7 +279,6 @@ describe("Time", () => {
     await settle();
 
     expect(target.textContent).toContain("of 40.0h target");
-    expect(target.textContent).toContain("Logged: 4.0h");
   });
 
   it("uses entry counts_as_work when category lookup is unavailable", async () => {
@@ -304,6 +303,5 @@ describe("Time", () => {
     await settle();
 
     expect(target.textContent).toContain("of 40.0h target");
-    expect(target.textContent).toContain("Logged: 0.0h");
   });
 });

@@ -248,7 +248,7 @@
   }
 
   $: drafts = entries.filter((entry) => entry.status === "draft");
-  $: contractHours = formatHours($currentUser.weekly_hours || 0);
+  $: contractHours = formatHours($currentUser?.weekly_hours || 0);
 
   // Total logged minutes this week, excluding rejected entries.
   $: weekLoggedMinutes = entries.reduce(
@@ -256,15 +256,6 @@
       totalMinutes + creditedEntryMinutes(entry, $categories),
     0,
   );
-
-  // Backend monthly "actual" uses approved entries only; keep weekly summary aligned.
-  $: weekApprovedMinutes = entries
-    .filter((entry) => entry.status === "approved")
-    .reduce(
-      (totalMinutes, entry) =>
-        totalMinutes + creditedEntryMinutes(entry, $categories),
-      0,
-    );
 
   // Weekly target is the sum of target-eligible weekdays in this week:
   // excludes holidays, absences, future days, and days before contract start.
@@ -288,7 +279,6 @@
   })();
 
   $: weekLoggedHours = formatHours((weekLoggedMinutes / 60).toFixed(1));
-  $: weekApprovedHours = formatHours((weekApprovedMinutes / 60).toFixed(1));
   $: weekTargetHours = formatHours((weekTargetMinutes / 60).toFixed(1));
 
   // Build a descriptor for one day of the week. All data is passed explicitly so
@@ -515,26 +505,24 @@
       <!-- Summary strip: rendered only once there is something to summarise. -->
       <div class="stat-cards" style="margin-bottom:16px">
         <div class="zf-card stat-card">
-          <div class="stat-card-label">{$t("Approved")}</div>
+          <div class="stat-card-label">{$t("Logged")}</div>
           <div
             class="stat-card-value tab-num"
-            style="color: {weekApprovedMinutes >= weekTargetMinutes
-              ? 'var(--accent)'
-              : 'var(--warning-text)'}"
+            style="color: {weekLoggedMinutes >= weekTargetMinutes
+              ? 'var(--success-text)'
+              : 'var(--danger-text)'}"
           >
-            {weekApprovedHours}
+            {weekLoggedHours}
           </div>
           <div class="stat-card-sub">
-            {$t("of {target} target", { target: weekTargetHours })} - {$t(
-              "Logged",
-            )}: {weekLoggedHours}
+            {$t("of {target} target", { target: weekTargetHours })}
           </div>
         </div>
         <div class="zf-card stat-card">
           <div class="stat-card-label">{$t("Status")}</div>
           <div
             class="stat-card-value tab-num"
-            style="font-size:18px;color:{weekStatusColor(weekStatus)}"
+            style="color:{weekStatusColor(weekStatus)}"
           >
             {statusLabel(weekStatus)}
           </div>

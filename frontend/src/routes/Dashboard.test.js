@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mount, unmount } from "svelte";
 import Dashboard from "./Dashboard.svelte";
+import { api } from "../api.js";
 import { categories, currentUser, path } from "../stores.js";
 import { setLanguage } from "../i18n.js";
 
@@ -232,5 +233,22 @@ describe("Dashboard", () => {
 
     await waitForText(target, "Weeks missing", 15000);
     expect(target.textContent).toContain("Weeks missing");
+  });
+
+  it("requests overtime with a concrete year", async () => {
+    mockState.monthReport = {
+      month: "2026-05",
+      days: [],
+      weeks_all_submitted: true,
+    };
+
+    component = mount(Dashboard, { target });
+    await settle();
+
+    const overtimeCall = api.mock.calls.find(([pathValue]) =>
+      String(pathValue).startsWith("/reports/overtime?year="),
+    );
+    expect(overtimeCall).toBeTruthy();
+    expect(overtimeCall[0]).toMatch(/^\/reports\/overtime\?year=\d{4}$/);
   });
 });

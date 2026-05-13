@@ -88,6 +88,7 @@
   let monthSubmissionLoading = false;
   let monthSubmissionError = "";
 
+  let reportYear = today.getFullYear();
   $: reportYear = today.getFullYear();
   $: currentMonthIndex = today.getMonth() + 1; // 1-based
   $: currentMonthKey = `${reportYear}-${String(currentMonthIndex).padStart(2, "0")}`;
@@ -126,7 +127,8 @@
     overtimeLoading = true;
     overtimeError = "";
     try {
-      overtimeRows = await api(`/reports/overtime?year=${reportYear}`);
+      const year = today.getFullYear();
+      overtimeRows = await api(`/reports/overtime?year=${year}`);
     } catch (error) {
       overtimeRows = [];
       overtimeError = error?.message || "Overtime data unavailable.";

@@ -836,9 +836,26 @@ pub async fn approve(
         Some(serde_json::json!({"status": "approved"})),
     )
     .await;
-    // Notify the employee whose week was reopened (skip when the approver approved their own request).
+    // Notify the employee whose week was reopened (in-app only when self-approved).
     if reopen_request.user_id != requester.id {
         notifications::create_translated(
+            &app_state,
+            &language,
+            reopen_request.user_id,
+            "reopen_approved",
+            "reopen_approved_title",
+            "reopen_approved_body",
+            vec![
+                ("week_label", week_label.clone()),
+                ("change_request_overview", applied_change_overview.clone()),
+            ],
+            Some("reopen_request"),
+            Some(request_id),
+        )
+        .await;
+    } else {
+        // Self-approval by admin: in-app only, no email.
+        notifications::create_translated_inapp_only(
             &app_state,
             &language,
             reopen_request.user_id,
@@ -956,9 +973,27 @@ pub async fn reject(
         false,
     )
     .await;
-    // Notify the employee whose reopen request was rejected (skip when the rejector rejected their own request).
+    // Notify the employee whose reopen request was rejected (in-app only when self-rejected).
     if reopen_request.user_id != requester.id {
         notifications::create_translated(
+            &app_state,
+            &language,
+            reopen_request.user_id,
+            "reopen_rejected",
+            "reopen_rejected_title",
+            "reopen_rejected_body",
+            vec![
+                ("week_label", week_label.clone()),
+                ("change_request_overview", pending_change_overview.clone()),
+                ("reason", rejection_reason.to_string()),
+            ],
+            Some("reopen_request"),
+            Some(request_id),
+        )
+        .await;
+    } else {
+        // Self-rejection by admin: in-app only, no email.
+        notifications::create_translated_inapp_only(
             &app_state,
             &language,
             reopen_request.user_id,

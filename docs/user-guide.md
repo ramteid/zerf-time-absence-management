@@ -144,6 +144,19 @@ changes when users and server run in different timezones.
 3. Approver accepts or rejects entries.
 4. Approved entries remain valid unless a later request is approved.
 
+### Time-entry summary tiles
+
+In the weekly Time Entry view, the first summary tile always shows recorded
+hours for the current week, independent of workflow state.
+
+- Display format: `logged hours of target hours` (for example `0.0h of 23.4h target`).
+- Display format: a highlighted logged-hours value plus a subtitle with only the target relation (for example `of 23.4h target`).
+- Color logic:
+  - red when logged hours are below the weekly target,
+  - green when logged hours are equal to or above the weekly target.
+- The `Status` tile remains workflow-only and uses the same value font size as
+  the logged-hours tile for consistent readability.
+
 ### Understanding crediting vs. non-crediting entries
 
 Each work category in Zerf is configured as either **crediting** or

@@ -358,20 +358,20 @@ pub async fn approve(
         Some(serde_json::json!({"status": "approved", "reviewed_by": requester.id})),
     )
     .await;
+    let language = notification_language(&app_state.pool).await;
+    let notify_params = vec![("entry_date", i18n::format_date(&language, entry.entry_date))];
     if entry.user_id != requester.id {
-        let language = notification_language(&app_state.pool).await;
         crate::notifications::create_translated(
-            &app_state,
-            &language,
-            entry.user_id,
-            "timesheet_approved",
-            "timesheet_approved_title",
-            "timesheet_approved_body",
-            vec![("entry_date", i18n::format_date(&language, entry.entry_date))],
-            Some("time_entries"),
-            Some(entry_id),
-        )
-        .await;
+            &app_state, &language, entry.user_id, "timesheet_approved",
+            "timesheet_approved_title", "timesheet_approved_body",
+            notify_params, Some("time_entries"), Some(entry_id),
+        ).await;
+    } else {
+        crate::notifications::create_translated_inapp_only(
+            &app_state, &language, entry.user_id, "timesheet_approved",
+            "timesheet_approved_title", "timesheet_approved_body",
+            notify_params, Some("time_entries"), Some(entry_id),
+        ).await;
     }
     Ok(Json(serde_json::json!({"ok":true})))
 }
@@ -411,23 +411,23 @@ pub async fn reject(
         Some(serde_json::json!({"status": "rejected", "reason": body.reason})),
     )
     .await;
+    let language = notification_language(&app_state.pool).await;
+    let notify_params = vec![
+        ("entry_date", i18n::format_date(&language, entry.entry_date)),
+        ("reason", body.reason.clone()),
+    ];
     if entry.user_id != requester.id {
-        let language = notification_language(&app_state.pool).await;
         crate::notifications::create_translated(
-            &app_state,
-            &language,
-            entry.user_id,
-            "timesheet_rejected",
-            "timesheet_rejected_title",
-            "timesheet_rejected_body",
-            vec![
-                ("entry_date", i18n::format_date(&language, entry.entry_date)),
-                ("reason", body.reason.clone()),
-            ],
-            Some("time_entries"),
-            Some(entry_id),
-        )
-        .await;
+            &app_state, &language, entry.user_id, "timesheet_rejected",
+            "timesheet_rejected_title", "timesheet_rejected_body",
+            notify_params, Some("time_entries"), Some(entry_id),
+        ).await;
+    } else {
+        crate::notifications::create_translated_inapp_only(
+            &app_state, &language, entry.user_id, "timesheet_rejected",
+            "timesheet_rejected_title", "timesheet_rejected_body",
+            notify_params, Some("time_entries"), Some(entry_id),
+        ).await;
     }
     Ok(Json(serde_json::json!({"ok":true})))
 }
@@ -469,30 +469,26 @@ pub async fn batch_approve(
         let mut weeks_by_user: std::collections::HashMap<i64, HashSet<NaiveDate>> =
             std::collections::HashMap::new();
         for entry in &approved_entries {
-            if entry.user_id == requester.id {
-                continue;
-            }
             weeks_by_user
                 .entry(entry.user_id)
                 .or_default()
                 .insert(week_start(entry.entry_date));
         }
         for (user_id, weeks) in weeks_by_user {
-            crate::notifications::create_translated(
-                &app_state,
-                &language,
-                user_id,
-                "timesheet_approved",
-                "timesheet_approved_title",
-                "timesheet_batch_approved_body",
-                vec![(
-                    "week_count",
-                    i18n::week_count(&language, weeks.len() as i64),
-                )],
-                Some("time_entries"),
-                None,
-            )
-            .await;
+            let week_count = i18n::week_count(&language, weeks.len() as i64);
+            if user_id != requester.id {
+                crate::notifications::create_translated(
+                    &app_state, &language, user_id, "timesheet_approved",
+                    "timesheet_approved_title", "timesheet_batch_approved_body",
+                    vec![("week_count", week_count)], Some("time_entries"), None,
+                ).await;
+            } else {
+                crate::notifications::create_translated_inapp_only(
+                    &app_state, &language, user_id, "timesheet_approved",
+                    "timesheet_approved_title", "timesheet_batch_approved_body",
+                    vec![("week_count", week_count)], Some("time_entries"), None,
+                ).await;
+            }
         }
     }
     Ok(Json(
@@ -550,24 +546,23 @@ pub async fn batch_reject(
             Some(serde_json::json!({"status": "rejected", "reason": rejection_reason})),
         )
         .await;
-        if entry.user_id == requester.id {
-            continue;
+        let notify_params = vec![
+            ("entry_date", i18n::format_date(&language, entry.entry_date)),
+            ("reason", rejection_reason.clone()),
+        ];
+        if entry.user_id != requester.id {
+            crate::notifications::create_translated(
+                &app_state, &language, entry.user_id, "timesheet_rejected",
+                "timesheet_rejected_title", "timesheet_rejected_body",
+                notify_params, Some("time_entries"), Some(entry.id),
+            ).await;
+        } else {
+            crate::notifications::create_translated_inapp_only(
+                &app_state, &language, entry.user_id, "timesheet_rejected",
+                "timesheet_rejected_title", "timesheet_rejected_body",
+                notify_params, Some("time_entries"), Some(entry.id),
+            ).await;
         }
-        crate::notifications::create_translated(
-            &app_state,
-            &language,
-            entry.user_id,
-            "timesheet_rejected",
-            "timesheet_rejected_title",
-            "timesheet_rejected_body",
-            vec![
-                ("entry_date", i18n::format_date(&language, entry.entry_date)),
-                ("reason", rejection_reason.clone()),
-            ],
-            Some("time_entries"),
-            Some(entry.id),
-        )
-        .await;
     }
     Ok(Json(
         serde_json::json!({"ok": true, "count": rejected_count}),
