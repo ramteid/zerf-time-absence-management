@@ -16,6 +16,7 @@
   let sort_order = template.sort_order || 0;
   let description = template.description || "";
   let counts_as_work = template.counts_as_work ?? true;
+  let active = template.active ?? true;
   let error = "";
 
   onMount(() => dlg.showModal());
@@ -30,6 +31,9 @@
         description: description || null,
         counts_as_work,
       };
+      if (!isNew) {
+        body.active = active;
+      }
       if (isNew) await api("/categories", { method: "POST", body });
       else await api("/categories/" + template.id, { method: "PUT", body });
       _closed = true;
@@ -91,10 +95,20 @@
         />
       </div>
     </div>
-    <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:8px">
+    <label
+      style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:8px"
+    >
       <input type="checkbox" bind:checked={counts_as_work} />
       <span>{$t("Counts as work")}</span>
     </label>
+    {#if !isNew}
+      <label
+        style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:8px"
+      >
+        <input type="checkbox" bind:checked={active} />
+        <span>{$t("Active")}</span>
+      </label>
+    {/if}
     <div class="error-text">{error}</div>
   </div>
   <footer>

@@ -159,9 +159,22 @@ impl HolidayDb {
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         holidays: &[PreparedHoliday],
     ) -> AppResult<()> {
-        sqlx::query("DELETE FROM holidays WHERE is_auto = TRUE")
-            .execute(&mut **tx)
-            .await?;
+        if holidays.is_empty() {
+            sqlx::query("DELETE FROM holidays WHERE is_auto = TRUE")
+                .execute(&mut **tx)
+                .await?;
+        } else {
+            let years: Vec<i32> = holidays
+                .iter()
+                .map(|holiday| holiday.year)
+                .collect::<HashSet<_>>()
+                .into_iter()
+                .collect();
+            sqlx::query("DELETE FROM holidays WHERE is_auto = TRUE AND year = ANY($1)")
+                .bind(&years)
+                .execute(&mut **tx)
+                .await?;
+        }
         for h in holidays {
             sqlx::query(
                 "INSERT INTO holidays(holiday_date, name, local_name, year, is_auto) \

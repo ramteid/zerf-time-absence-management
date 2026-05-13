@@ -6,7 +6,19 @@ use axum::{
     extract::{Path, State},
     Json,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
+
+fn deserialize_nullable_string<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer).map(Some)
+}
+
+fn is_valid_hex_color(color: &str) -> bool {
+    let bytes = color.as_bytes();
+    bytes.len() == 7 && bytes[0] == b'#' && bytes[1..].iter().all(|byte| byte.is_ascii_hexdigit())
+}
 
 pub async fn ensure_initial(pool: &crate::db::DatabasePool) -> AppResult<()> {
     let db = crate::repository::CategoryDb::new(pool.clone());
@@ -18,6 +30,16 @@ pub async fn list(
     _requester: User,
 ) -> AppResult<Json<Vec<Category>>> {
     Ok(Json(app_state.db.categories.list_active().await?))
+}
+
+pub async fn list_all(
+    State(app_state): State<AppState>,
+    requester: User,
+) -> AppResult<Json<Vec<Category>>> {
+    if !requester.is_admin() {
+        return Err(AppError::Forbidden);
+    }
+    Ok(Json(app_state.db.categories.list_all().await?))
 }
 
 #[derive(Deserialize)]
@@ -42,7 +64,7 @@ pub async fn create(
         return Err(AppError::BadRequest("Invalid category name.".into()));
     }
     let color = body.color.trim().to_string();
-    if color.is_empty() || color.len() > 30 {
+    if !is_valid_hex_color(&color) {
         return Err(AppError::BadRequest("Invalid color.".into()));
     }
     let new_id = app_state
@@ -68,7 +90,8 @@ pub async fn create(
 #[derive(Deserialize)]
 pub struct UpdateCategory {
     pub name: Option<String>,
-    pub description: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_nullable_string")]
+    pub description: Option<Option<String>>,
     pub color: Option<String>,
     pub sort_order: Option<i64>,
     pub counts_as_work: Option<bool>,
@@ -92,7 +115,7 @@ pub async fn update(
     }
     if let Some(ref new_color) = body.color {
         let trimmed = new_color.trim();
-        if trimmed.is_empty() || trimmed.len() > 30 {
+        if !is_valid_hex_color(trimmed) {
             return Err(AppError::BadRequest("Invalid color.".into()));
         }
     }

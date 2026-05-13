@@ -6,6 +6,7 @@
   let smtpSettings = {};
   let saving = false;
   let smtpPassword = "";
+  let clearStoredPassword = false;
   let testing = false;
   let testResult = null;
 
@@ -17,6 +18,11 @@
   }
   load();
 
+  function passwordPayload() {
+    if (clearStoredPassword) return "";
+    return smtpPassword || undefined;
+  }
+
   async function save() {
     saving = true;
     try {
@@ -25,16 +31,19 @@
         smtp_host: smtpSettings.smtp_host || "",
         smtp_port: parseInt(smtpSettings.smtp_port) || 587,
         smtp_username: smtpSettings.smtp_username || "",
-        smtp_password: smtpPassword || undefined,
+        smtp_password: passwordPayload(),
         smtp_from: smtpSettings.smtp_from || "",
         smtp_encryption: smtpSettings.smtp_encryption || "starttls",
-        submission_reminders_enabled: smtpSettings.submission_reminders_enabled !== false,
-        approval_reminders_enabled: smtpSettings.approval_reminders_enabled !== false,
+        submission_reminders_enabled:
+          smtpSettings.submission_reminders_enabled !== false,
+        approval_reminders_enabled:
+          smtpSettings.approval_reminders_enabled !== false,
       };
       const saved = await api("/settings/smtp", { method: "PUT", body });
       // Use assignment (not Object.assign) so Svelte's reactivity detects the change.
       smtpSettings = saved;
       smtpPassword = "";
+      clearStoredPassword = false;
       toast($t("SMTP settings saved."), "ok");
       if (body.smtp_enabled) {
         testConnection(true);
@@ -58,7 +67,7 @@
         smtp_host: smtpSettings.smtp_host || "",
         smtp_port: parseInt(smtpSettings.smtp_port) || 587,
         smtp_username: smtpSettings.smtp_username || "",
-        smtp_password: smtpPassword || undefined,
+        smtp_password: passwordPayload(),
         smtp_from: smtpSettings.smtp_from || "",
         smtp_encryption: smtpSettings.smtp_encryption || "starttls",
       };
@@ -85,7 +94,11 @@
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
       <span
         class="smtp-status-dot"
-        style="width:10px;height:10px;border-radius:50%;flex-shrink:0;background:{testResult ? (testResult.ok ? 'var(--success, #22c55e)' : 'var(--error, #ef4444)') : 'var(--text-tertiary, #888)'}"
+        style="width:10px;height:10px;border-radius:50%;flex-shrink:0;background:{testResult
+          ? testResult.ok
+            ? 'var(--success, #22c55e)'
+            : 'var(--error, #ef4444)'
+          : 'var(--text-tertiary, #888)'}"
       ></span>
       <span style="font-size:13px;font-weight:500;color:var(--text-secondary)">
         {#if testResult}
@@ -98,7 +111,10 @@
     <div class="field-group">
       <div class="field-row">
         <div>
-          <label class="kz-label" style="display:flex;align-items:center;gap:8px">
+          <label
+            class="kz-label"
+            style="display:flex;align-items:center;gap:8px"
+          >
             <input
               type="checkbox"
               bind:checked={smtpSettings.smtp_enabled}
@@ -107,14 +123,19 @@
             {$t("Enable SMTP")}
           </label>
           <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
-            {$t("When enabled, notification emails are sent for approvals, rejections, and reopen requests.")}
+            {$t(
+              "When enabled, notification emails are sent for approvals, rejections, and reopen requests.",
+            )}
           </div>
         </div>
       </div>
 
       <div class="field-row" style="margin-top:8px">
         <div>
-          <label class="kz-label" style="display:flex;align-items:center;gap:8px">
+          <label
+            class="kz-label"
+            style="display:flex;align-items:center;gap:8px"
+          >
             <input
               type="checkbox"
               bind:checked={smtpSettings.submission_reminders_enabled}
@@ -124,14 +145,19 @@
             {$t("Enable reminders")}
           </label>
           <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
-            {$t("When enabled, users who have not submitted all time entries are reminded by email on the configured deadline day.")}
+            {$t(
+              "When enabled, users who have not submitted all time entries are reminded by email on the configured deadline day.",
+            )}
           </div>
         </div>
       </div>
 
       <div class="field-row" style="margin-top:8px">
         <div>
-          <label class="kz-label" style="display:flex;align-items:center;gap:8px">
+          <label
+            class="kz-label"
+            style="display:flex;align-items:center;gap:8px"
+          >
             <input
               type="checkbox"
               bind:checked={smtpSettings.approval_reminders_enabled}
@@ -141,7 +167,9 @@
             {$t("Enable approval reminders")}
           </label>
           <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
-            {$t("When enabled, approvers are reminded by email about pending approvals every Monday.")}
+            {$t(
+              "When enabled, approvers are reminded by email about pending approvals every Monday.",
+            )}
           </div>
         </div>
       </div>
@@ -182,7 +210,10 @@
           <label class="kz-label" for="smtp-password">
             {$t("Password")}
             {#if smtpSettings.smtp_password_set}
-              <span style="font-size:11px;color:var(--text-tertiary);font-weight:normal">({$t("stored")})</span>
+              <span
+                style="font-size:11px;color:var(--text-tertiary);font-weight:normal"
+                >({$t("stored")})</span
+              >
             {/if}
           </label>
           <input
@@ -190,9 +221,24 @@
             class="kz-input"
             type="password"
             bind:value={smtpPassword}
+            on:input={() => (clearStoredPassword = false)}
             placeholder={smtpSettings.smtp_password_set ? "********" : ""}
             autocomplete="new-password"
           />
+          {#if smtpSettings.smtp_password_set}
+            <label
+              class="kz-label"
+              style="display:flex;align-items:center;gap:8px;margin-top:8px"
+            >
+              <input
+                type="checkbox"
+                bind:checked={clearStoredPassword}
+                disabled={!!smtpPassword}
+                style="width:auto"
+              />
+              {$t("Clear stored password")}
+            </label>
+          {/if}
         </div>
       </div>
 
@@ -203,11 +249,13 @@
             id="smtp-from"
             class="kz-input"
             bind:value={smtpSettings.smtp_from}
-            placeholder='Zerf <noreply@example.com>'
+            placeholder="Zerf <noreply@example.com>"
           />
         </div>
         <div>
-          <label class="kz-label" for="smtp-encryption">{$t("Encryption")}</label>
+          <label class="kz-label" for="smtp-encryption"
+            >{$t("Encryption")}</label
+          >
           <select
             id="smtp-encryption"
             class="kz-select"
@@ -220,15 +268,25 @@
         </div>
       </div>
 
-      <div style="display:flex;justify-content:flex-end;gap:8px;padding-top:16px">
-        <button class="kz-btn" on:click={testConnection} disabled={testing || saving}>
+      <div
+        style="display:flex;justify-content:flex-end;gap:8px;padding-top:16px"
+      >
+        <button
+          class="kz-btn"
+          on:click={testConnection}
+          disabled={testing || saving}
+        >
           {#if testing}
             {$t("Testing...")}
           {:else}
             {$t("Test Connection")}
           {/if}
         </button>
-        <button class="kz-btn kz-btn-primary" on:click={save} disabled={saving || testing}>
+        <button
+          class="kz-btn kz-btn-primary"
+          on:click={save}
+          disabled={saving || testing}
+        >
           {#if saving}
             {$t("Saving...")}
           {:else}

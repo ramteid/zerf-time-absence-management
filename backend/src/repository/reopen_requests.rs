@@ -1,6 +1,8 @@
 use crate::db::DatabasePool;
 use crate::error::{AppError, AppResult};
-use crate::repository::time_entries::{validate_entry, NewEntryData, TimeEntry, TimeEntryDb};
+use crate::repository::time_entries::{
+    validate_entries_after_reopen, TimeEntry, TimeEntryDb,
+};
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::Serialize;
 
@@ -92,7 +94,7 @@ impl ReopenRequestDb {
         Ok(sqlx::query_scalar(
             "SELECT COUNT(*) FROM time_entries \
              WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3 \
-             AND status IN ('submitted','approved')",
+             AND status IN ('submitted','approved','rejected')",
         )
         .bind(user_id)
         .bind(week_start)
@@ -253,7 +255,7 @@ impl ReopenRequestDb {
 
     // ── Internal: perform the actual reopen within a transaction ──────────
 
-    /// Apply open change requests for all submitted/approved entries in
+    /// Apply open change requests for all submitted, approved, or rejected entries in
     /// `week_start..week_start+6`, then reset those entries to draft.
     /// Returns the list of (entry_id, previous_status) that were changed.
     pub async fn perform_reopen(
@@ -270,7 +272,7 @@ impl ReopenRequestDb {
         let affected: Vec<(i64, String)> = sqlx::query_as(
             "SELECT id, status FROM time_entries \
              WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3 \
-             AND status IN ('submitted','approved') \
+             AND status IN ('submitted','approved','rejected') \
              FOR UPDATE",
         )
         .bind(subject_id)
@@ -280,7 +282,8 @@ impl ReopenRequestDb {
         .await?;
         if affected.is_empty() {
             return Err(AppError::BadRequest(
-                "Nothing to reopen — this week has no submitted or approved entries.".into(),
+                "Nothing to reopen - this week has no submitted, approved, or rejected entries."
+                    .into(),
             ));
         }
         let entry_ids: Vec<i64> = affected.iter().map(|(id, _)| *id).collect();
@@ -294,7 +297,6 @@ impl ReopenRequestDb {
         .bind(&entry_ids)
         .fetch_all(&mut **tx)
         .await?;
-        let mut changed_entry_ids = Vec::new();
         let mut applied_change_request_ids = Vec::new();
         for change_request in open_change_requests {
             let current_entry: TimeEntry = sqlx::query_as(
@@ -316,34 +318,10 @@ impl ReopenRequestDb {
                 change_request.new_comment.as_deref(),
             )
             .await?;
-            changed_entry_ids.push(current_entry.id);
             applied_change_request_ids.push(change_request.id);
         }
 
-        for entry_id in &changed_entry_ids {
-            let updated_entry: TimeEntry = sqlx::query_as(
-                "SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, \
-                        submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at \
-                 FROM time_entries WHERE id=$1 FOR UPDATE",
-            )
-            .bind(entry_id)
-            .fetch_one(&mut **tx)
-            .await?;
-            let effective_entry = NewEntryData {
-                entry_date: updated_entry.entry_date,
-                start_time: updated_entry.start_time.clone(),
-                end_time: updated_entry.end_time.clone(),
-                category_id: updated_entry.category_id,
-                comment: updated_entry.comment.clone(),
-            };
-            validate_entry(
-                tx,
-                updated_entry.user_id,
-                &effective_entry,
-                Some(updated_entry.id),
-            )
-            .await?;
-        }
+        validate_entries_after_reopen(&mut **tx, subject_id, &entry_ids).await?;
 
         if !applied_change_request_ids.is_empty() {
             let rows = sqlx::query(
@@ -372,7 +350,7 @@ impl ReopenRequestDb {
         // Reset all affected entries to draft.  We filter by their original IDs
         // (not by date range) because the CR-apply step above may have moved some
         // entries to a date outside the original week; a date-range filter would
-        // silently miss those and leave them in submitted/approved status.
+        // silently miss those and leave them in a non-draft status.
         sqlx::query(
             "UPDATE time_entries \
              SET status='draft', submitted_at=NULL, reviewed_by=NULL, \

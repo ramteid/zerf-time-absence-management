@@ -138,6 +138,7 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                     "/categories",
                     get(categories::list).post(categories::create),
                 )
+                .route("/categories/all", get(categories::list_all))
                 .route("/categories/{id}", put(categories::update))
                 .route("/holidays", get(holidays::list).post(holidays::create))
                 .route("/holidays/countries", get(holidays::available_countries))

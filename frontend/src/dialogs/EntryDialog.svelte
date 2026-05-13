@@ -25,14 +25,15 @@
 
   // Keep untouched default date aligned with app timezone changes.
   $: todayIso = appTodayIsoDate($settings?.timezone);
-  $: if (isNew && !template.entry_date && entry_date === lastTodayIso && todayIso !== lastTodayIso) {
+  $: if (
+    isNew &&
+    !template.entry_date &&
+    entry_date === lastTodayIso &&
+    todayIso !== lastTodayIso
+  ) {
     entry_date = todayIso;
   }
   $: lastTodayIso = todayIso;
-
-  $: if (start_time && end_time && start_time > end_time) {
-    end_time = start_time;
-  }
 
   onMount(() => dlg.showModal());
 
@@ -43,7 +44,7 @@
       return;
     }
     if (start_time >= end_time) {
-      error = $t("Start cannot be after End.");
+      error = $t("End time must be after start time.");
       return;
     }
     if (entry_date === todayIso) {
@@ -102,7 +103,9 @@
   }
 
   function onDialogKeydown(e) {
-    const pickerOpen = dlg.querySelector(".tp-drum") || document.querySelector(".flatpickr-calendar.open");
+    const pickerOpen =
+      dlg.querySelector(".tp-drum") ||
+      document.querySelector(".flatpickr-calendar.open");
     if (e.key === "Enter" && !pickerOpen) {
       e.preventDefault();
       save();
@@ -130,19 +133,11 @@
     <div class="field-row">
       <div>
         <label class="kz-label" for="entry-start-time">{$t("Start")}</label>
-        <TimePicker
-          id="entry-start-time"
-          bind:value={start_time}
-          required
-        />
+        <TimePicker id="entry-start-time" bind:value={start_time} required />
       </div>
       <div>
         <label class="kz-label" for="entry-end-time">{$t("End")}</label>
-        <TimePicker
-          id="entry-end-time"
-          bind:value={end_time}
-          required
-        />
+        <TimePicker id="entry-end-time" bind:value={end_time} required />
       </div>
     </div>
     <div>

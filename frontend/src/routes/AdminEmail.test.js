@@ -17,26 +17,28 @@ const mockState = vi.hoisted(() => ({
   },
 }));
 
-const apiMock = vi.hoisted(() => vi.fn(async (path, opts = {}) => {
-  if (path === "/settings" && (!opts.method || opts.method === "GET")) {
-    return mockState.settings;
-  }
-  if (path === "/settings/smtp" && opts.method === "PUT") {
-    mockState.settings = {
-      ...mockState.settings,
-      ...opts.body,
-      smtp_password_set:
-        opts.body.smtp_password !== undefined
-          ? true
-          : mockState.settings.smtp_password_set,
-    };
-    return mockState.settings;
-  }
-  if (path === "/settings/smtp/test" && opts.method === "POST") {
-    return { ok: true };
-  }
-  throw new Error(`Unhandled API path: ${path}`);
-}));
+const apiMock = vi.hoisted(() =>
+  vi.fn(async (path, opts = {}) => {
+    if (path === "/settings" && (!opts.method || opts.method === "GET")) {
+      return mockState.settings;
+    }
+    if (path === "/settings/smtp" && opts.method === "PUT") {
+      mockState.settings = {
+        ...mockState.settings,
+        ...opts.body,
+        smtp_password_set:
+          opts.body.smtp_password !== undefined
+            ? opts.body.smtp_password !== ""
+            : mockState.settings.smtp_password_set,
+      };
+      return mockState.settings;
+    }
+    if (path === "/settings/smtp/test" && opts.method === "POST") {
+      return { ok: true };
+    }
+    throw new Error(`Unhandled API path: ${path}`);
+  }),
+);
 
 vi.mock("svelte", async () => {
   return await import("../../node_modules/svelte/src/index-client.js");
@@ -72,33 +74,42 @@ describe("AdminEmail", () => {
   });
 
   it("renders submission reminders checkbox as checked when setting is true", async () => {
-    mockState.settings = { ...mockState.settings, submission_reminders_enabled: true };
+    mockState.settings = {
+      ...mockState.settings,
+      submission_reminders_enabled: true,
+    };
     component = mount(AdminEmail, { target });
     await settle();
 
     const checkboxes = target.querySelectorAll('input[type="checkbox"]');
-    const remindersCheckbox = [...checkboxes].find(
-      (cb) => cb.closest("label")?.textContent?.includes("reminders"),
+    const remindersCheckbox = [...checkboxes].find((cb) =>
+      cb.closest("label")?.textContent?.includes("reminders"),
     );
     expect(remindersCheckbox).not.toBeNull();
     expect(remindersCheckbox.checked).toBe(true);
   });
 
   it("renders submission reminders checkbox as unchecked when setting is false", async () => {
-    mockState.settings = { ...mockState.settings, submission_reminders_enabled: false };
+    mockState.settings = {
+      ...mockState.settings,
+      submission_reminders_enabled: false,
+    };
     component = mount(AdminEmail, { target });
     await settle();
 
     const checkboxes = target.querySelectorAll('input[type="checkbox"]');
-    const remindersCheckbox = [...checkboxes].find(
-      (cb) => cb.closest("label")?.textContent?.includes("reminders"),
+    const remindersCheckbox = [...checkboxes].find((cb) =>
+      cb.closest("label")?.textContent?.includes("reminders"),
     );
     expect(remindersCheckbox).not.toBeNull();
     expect(remindersCheckbox.checked).toBe(false);
   });
 
   it("includes submission_reminders_enabled in the save body", async () => {
-    mockState.settings = { ...mockState.settings, submission_reminders_enabled: true };
+    mockState.settings = {
+      ...mockState.settings,
+      submission_reminders_enabled: true,
+    };
     component = mount(AdminEmail, { target });
     await settle();
 
@@ -117,7 +128,10 @@ describe("AdminEmail", () => {
   });
 
   it("includes approval_reminders_enabled in the save body", async () => {
-    mockState.settings = { ...mockState.settings, approval_reminders_enabled: true };
+    mockState.settings = {
+      ...mockState.settings,
+      approval_reminders_enabled: true,
+    };
     component = mount(AdminEmail, { target });
     await settle();
 
@@ -133,5 +147,31 @@ describe("AdminEmail", () => {
     );
     expect(saveCall).toBeTruthy();
     expect(saveCall[1].body.approval_reminders_enabled).toBe(true);
+  });
+
+  it("can clear a stored SMTP password", async () => {
+    mockState.settings = { ...mockState.settings, smtp_password_set: true };
+    component = mount(AdminEmail, { target });
+    await settle();
+
+    const clearCheckbox = [
+      ...target.querySelectorAll('input[type="checkbox"]'),
+    ].find((cb) =>
+      cb.closest("label")?.textContent?.includes("Clear stored password"),
+    );
+    expect(clearCheckbox).not.toBeNull();
+    clearCheckbox.click();
+
+    const saveBtn = [...target.querySelectorAll("button")].find(
+      (b) => b.textContent.trim() === "Save",
+    );
+    saveBtn.click();
+    await settle();
+
+    const saveCall = apiMock.mock.calls.find(
+      ([path, opts]) => path === "/settings/smtp" && opts?.method === "PUT",
+    );
+    expect(saveCall).toBeTruthy();
+    expect(saveCall[1].body.smtp_password).toBe("");
   });
 });

@@ -77,6 +77,15 @@ impl CategoryDb {
         .await?)
     }
 
+    pub async fn list_all(&self) -> AppResult<Vec<Category>> {
+        Ok(sqlx::query_as::<_, Category>(
+            "SELECT id, name, description, color, sort_order, counts_as_work, active \
+             FROM categories ORDER BY active DESC, sort_order, name",
+        )
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
     pub async fn find_by_id(&self, id: i64) -> AppResult<Option<Category>> {
         Ok(sqlx::query_as::<_, Category>(
             "SELECT id, name, description, color, sort_order, counts_as_work, active \
@@ -124,18 +133,20 @@ impl CategoryDb {
         &self,
         id: i64,
         name: Option<String>,
-        description: Option<String>,
+        description: Option<Option<String>>,
         color: Option<String>,
         sort_order: Option<i64>,
         counts_as_work: Option<bool>,
         active: Option<bool>,
     ) -> AppResult<()> {
+        let update_description = description.is_some();
+        let description = description.flatten();
         let result = sqlx::query(
             "UPDATE categories \
-             SET name=COALESCE($1,name), description=COALESCE($2,description), \
+             SET name=COALESCE($1,name), description=CASE WHEN $7 THEN $2 ELSE description END, \
                  color=COALESCE($3,color), sort_order=COALESCE($4,sort_order), \
                  counts_as_work=COALESCE($5,counts_as_work), active=COALESCE($6,active) \
-             WHERE id=$7",
+             WHERE id=$8",
         )
         .bind(name)
         .bind(description)
@@ -143,6 +154,7 @@ impl CategoryDb {
         .bind(sort_order)
         .bind(counts_as_work)
         .bind(active)
+        .bind(update_description)
         .bind(id)
         .execute(&self.pool)
         .await?;

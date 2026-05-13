@@ -994,6 +994,7 @@ pub async fn set_leave_days_handler(
 /// Generate a 16-char temporary password with at least one of each class
 /// (lower / upper / digit / symbol) so it satisfies the strength policy.
 /// Uses the OS CSPRNG (`SysRng`) — never the thread RNG — for security.
+/// Uses rejection sampling to avoid modulo bias.
 pub fn generate_password() -> String {
     use rand::rand_core::{Rng, UnwrapErr};
     use rand::rngs::SysRng;
@@ -1006,22 +1007,31 @@ pub fn generate_password() -> String {
     let symbol_chars: &[u8] = b"!@#*-_+";
     let character_pools = [lower_chars, upper_chars, digit_chars, symbol_chars];
     let mut rng = UnwrapErr(SysRng);
-    let mut password_bytes: Vec<u8> = character_pools
-        .iter()
-        .map(|pool| {
+
+    // Pick one character from a pool using rejection sampling to avoid modulo bias.
+    let pick_from = |rng: &mut UnwrapErr<SysRng>, pool: &[u8]| -> u8 {
+        let len = pool.len();
+        let limit = 256 - (256 % len);
+        loop {
             let mut buf = [0u8; 1];
             rng.fill_bytes(&mut buf);
-            pool[(buf[0] as usize) % pool.len()]
-        })
+            let value = buf[0] as usize;
+            if value < limit {
+                return pool[value % len];
+            }
+        }
+    };
+
+    let mut password_bytes: Vec<u8> = character_pools
+        .iter()
+        .map(|pool| pick_from(&mut rng, pool))
         .collect();
     let all_chars: Vec<u8> = character_pools
         .iter()
         .flat_map(|pool| pool.iter().copied())
         .collect();
     while password_bytes.len() < 16 {
-        let mut buf = [0u8; 1];
-        rng.fill_bytes(&mut buf);
-        password_bytes.push(all_chars[(buf[0] as usize) % all_chars.len()]);
+        password_bytes.push(pick_from(&mut rng, &all_chars));
     }
     password_bytes.shuffle(&mut rng);
     String::from_utf8(password_bytes).unwrap()

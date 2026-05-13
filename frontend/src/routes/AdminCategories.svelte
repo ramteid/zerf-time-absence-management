@@ -1,14 +1,14 @@
 <script>
   import { api } from "../api.js";
-  import { categories } from "../stores.js";
   import { t } from "../i18n.js";
   import Icon from "../Icons.svelte";
   import CategoryDialog from "../dialogs/CategoryDialog.svelte";
 
   let showDialog = null;
+  let adminCategories = [];
 
   async function load() {
-    categories.set(await api("/categories"));
+    adminCategories = await api("/categories/all");
   }
   load();
 </script>
@@ -26,11 +26,13 @@
 
 <div class="content-area" style="max-width:600px">
   <div class="kz-card" style="overflow-x:auto">
-    {#each $categories as cat, i}
+    {#each adminCategories as cat, i}
       <div
-        style="padding:10px 16px;{i < $categories.length - 1
+        style="padding:10px 16px;{i < adminCategories.length - 1
           ? 'border-bottom:1px solid var(--border)'
-          : ''};display:flex;align-items:center;gap:10px"
+          : ''};display:flex;align-items:center;gap:10px;opacity:{cat.active
+          ? 1
+          : 0.55}"
       >
         <span
           class="cat-dot"
@@ -38,6 +40,9 @@
         ></span>
         <span style="font-size:13px;font-weight:500;flex:1">{$t(cat.name)}</span
         >
+        {#if !cat.active}
+          <span class="kz-chip">{$t("Inactive")}</span>
+        {/if}
         <button
           class="kz-btn kz-btn-ghost kz-btn-sm"
           on:click={() => (showDialog = cat)}

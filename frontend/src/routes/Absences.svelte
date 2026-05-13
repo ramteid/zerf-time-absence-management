@@ -35,9 +35,18 @@
   async function load() {
     const token = ++loadToken;
     const year = selectedYear;
-    const nextAbsences = await api(`/absences?year=${year}`);
-    if (token !== loadToken) return;
-    absences = nextAbsences;
+    try {
+      const nextAbsences = await api(`/absences?year=${year}`);
+      if (token !== loadToken) return;
+      absences = nextAbsences;
+    } catch (e) {
+      if (token !== loadToken) return;
+      absences = [];
+      balance = null;
+      holidayDates = new Set();
+      toast($t(e?.message || "Error"), "error");
+      return;
+    }
 
     try {
       const nextBalance = await api(
@@ -47,23 +56,30 @@
       balance = nextBalance;
     } catch (e) {
       if (token !== loadToken) return;
+      balance = null;
       toast($t(e?.message || "Leave balance unavailable."), "error");
     }
 
-    const years = [
-      ...new Set([
-        year,
-        ...absences.flatMap((absence) => [
-          parseDate(absence.start_date).getFullYear(),
-          parseDate(absence.end_date).getFullYear(),
+    try {
+      const years = [
+        ...new Set([
+          year,
+          ...absences.flatMap((absence) => [
+            parseDate(absence.start_date).getFullYear(),
+            parseDate(absence.end_date).getFullYear(),
+          ]),
         ]),
-      ]),
-    ];
-    const holidayLists = await Promise.all(
-      years.map((year) => api(`/holidays?year=${year}`)),
-    );
-    if (token !== loadToken) return;
-    holidayDates = holidayDateSet(holidayLists.flat());
+      ];
+      const holidayLists = await Promise.all(
+        years.map((year) => api(`/holidays?year=${year}`)),
+      );
+      if (token !== loadToken) return;
+      holidayDates = holidayDateSet(holidayLists.flat());
+    } catch (e) {
+      if (token !== loadToken) return;
+      holidayDates = new Set();
+      toast($t(e?.message || "Error"), "error");
+    }
   }
 
   $: if (selectedYear) {
@@ -105,7 +121,12 @@
     ...absence,
     // Count absence days respecting user's workdays_per_week setting (1-7 days per week).
     // Only contract workdays are counted (e.g., Mon-Fri for 5-day week).
-    days: countWorkdays(absence.start_date, absence.end_date, holidayDates, $currentUser?.workdays_per_week || 5),
+    days: countWorkdays(
+      absence.start_date,
+      absence.end_date,
+      holidayDates,
+      $currentUser?.workdays_per_week || 5,
+    ),
     editable: canEdit(absence),
     cancellable: canCancel(absence),
   }));
@@ -135,18 +156,25 @@
     const confirmed = await confirmDialog(
       isApproved ? $t("Request cancellation?") : $t("Cancel?"),
       isApproved
-        ? $t("Request cancellation of this approved absence? Your team lead must approve the cancellation.")
+        ? $t(
+            "Request cancellation of this approved absence? Your team lead must approve the cancellation.",
+          )
         : $t("Cancel this absence request?"),
       {
         danger: true,
-        confirm: isApproved ? $t("Yes, request cancellation") : $t("Yes, cancel absence"),
+        confirm: isApproved
+          ? $t("Yes, request cancellation")
+          : $t("Yes, cancel absence"),
       },
     );
     if (!confirmed) return;
     try {
       const result = await api("/absences/" + absence.id, { method: "DELETE" });
       if (result?.pending) {
-        toast($t("Cancellation requested. Your team lead will review it."), "ok");
+        toast(
+          $t("Cancellation requested. Your team lead will review it."),
+          "ok",
+        );
       } else {
         toast($t("Absence cancelled."), "ok");
       }
@@ -177,7 +205,9 @@
       >
         <Icon name="ChevLeft" size={16} />
       </button>
-      <span class="nav-label tab-num" style="min-width:50px">{selectedYear}</span>
+      <span class="nav-label tab-num" style="min-width:50px"
+        >{selectedYear}</span
+      >
       <button
         class="kz-btn kz-btn-ghost"
         on:click={() => {

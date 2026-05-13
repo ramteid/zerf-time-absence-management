@@ -11,6 +11,9 @@
     loading = true;
     try {
       rows = await api("/team-settings");
+    } catch (e) {
+      rows = [];
+      toast($t(e?.message || "Error"), "error");
     } finally {
       loading = false;
     }
@@ -54,7 +57,7 @@
       </div>
       <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:14px">
         {$t(
-          "When enabled for a user, their reopen requests are automatically approved. Their approver and all admins still receive a notification.",
+          "When enabled for a user, their reopen requests are automatically approved. Assigned approvers still receive a notification.",
         )}
       </div>
 

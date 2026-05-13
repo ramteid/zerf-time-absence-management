@@ -40,28 +40,39 @@
     const monthString = `${loadYear}-${String(loadMonth).padStart(2, "0")}`;
     const firstDayOfMonth = new Date(loadYear, loadMonth - 1, 1);
     const lastDayOfMonth = new Date(loadYear, loadMonth, 0);
-    const [nextEntries, nextHolidays, nextTimeEntries, nextCategories] =
-      await Promise.all([
-        api(`/absences/calendar?month=${monthString}`),
-        api(`/holidays?year=${loadYear}`),
-        api(`/time-entries?from=${isoDate(firstDayOfMonth)}&to=${isoDate(lastDayOfMonth)}`).catch(
-          () => [],
-        ),
-        api("/categories").catch(() => $categories),
-      ]);
-    if (seq !== loadSeq) return;
-    entries = nextEntries;
-    holidays = nextHolidays;
-    timeEntries = nextTimeEntries;
-    categories.set(nextCategories);
+    try {
+      const [nextEntries, nextHolidays, nextTimeEntries, nextCategories] =
+        await Promise.all([
+          api(`/absences/calendar?month=${monthString}`),
+          api(`/holidays?year=${loadYear}`),
+          api(
+            `/time-entries?from=${isoDate(firstDayOfMonth)}&to=${isoDate(lastDayOfMonth)}`,
+          ).catch(() => []),
+          api("/categories").catch(() => $categories),
+        ]);
+      if (seq !== loadSeq) return;
+      entries = nextEntries;
+      holidays = nextHolidays;
+      timeEntries = nextTimeEntries;
+      categories.set(nextCategories);
+    } catch {
+      if (seq !== loadSeq) return;
+      entries = [];
+      holidays = [];
+      timeEntries = [];
+    }
   }
   $: year && month && load().catch(() => {});
 
-  $: holidayByDate = new Map(holidays.map((holiday) => [holiday.holiday_date, holiday.name]));
+  $: holidayByDate = new Map(
+    holidays.map((holiday) => [holiday.holiday_date, holiday.name]),
+  );
 
   // The calendar API is already team-scoped. Time entries remain personal,
   // so we still filter those defensively.
-  $: myTimeEntries = timeEntries.filter((e) => e.user_id === $currentUser?.id);
+  $: myTimeEntries = timeEntries.filter(
+    (e) => e.user_id === $currentUser?.id && e.status !== "rejected",
+  );
 
   $: teMap = (() => {
     const timeEntriesByDate = new Map();
@@ -70,7 +81,8 @@
         typeof timeEntry.entry_date === "string"
           ? timeEntry.entry_date.slice(0, 10)
           : isoDate(timeEntry.entry_date);
-      if (!timeEntriesByDate.has(entryDateKey)) timeEntriesByDate.set(entryDateKey, []);
+      if (!timeEntriesByDate.has(entryDateKey))
+        timeEntriesByDate.set(entryDateKey, []);
       timeEntriesByDate.get(entryDateKey).push(timeEntry);
     }
     return timeEntriesByDate;
@@ -104,6 +116,7 @@
     special_leave: "#a855f7",
     unpaid: "#64748b",
     general_absence: "#6b7280",
+    flextime_reduction: "#6D4C41",
     absent: "#9ca3af",
   };
 
@@ -116,8 +129,13 @@
   }
 
   function fallbackColor(offset = 0, used = new Set()) {
-    for (let colorIndex = 0; colorIndex < FALLBACK_COLORS.length; colorIndex++) {
-      const color = FALLBACK_COLORS[(offset + colorIndex) % FALLBACK_COLORS.length];
+    for (
+      let colorIndex = 0;
+      colorIndex < FALLBACK_COLORS.length;
+      colorIndex++
+    ) {
+      const color =
+        FALLBACK_COLORS[(offset + colorIndex) % FALLBACK_COLORS.length];
       if (!used.has(color.toLowerCase())) return color;
     }
     const hue = (offset * 47) % 360;
@@ -166,9 +184,12 @@
     for (const entry of entryMap.get(cell.ds) || []) {
       const startTime = entry.start_time?.slice(0, 5) || "";
       const endTime = entry.end_time?.slice(0, 5) || "";
-      const durationLabel = startTime && endTime ? minToHM(durMin(startTime, endTime)) : "";
+      const durationLabel =
+        startTime && endTime ? minToHM(durMin(startTime, endTime)) : "";
       const timeRange = startTime && endTime ? `${startTime} - ${endTime}` : "";
-      const detail = durationLabel ? `${timeRange} (${durationLabel})` : timeRange;
+      const detail = durationLabel
+        ? `${timeRange} (${durationLabel})`
+        : timeRange;
       events.push({
         key: `work:${entry.category_id ?? "unknown"}`,
         color: workBaseColor(entry, events.length, categoryMap),
@@ -189,7 +210,12 @@
     const assigned = new Map();
     for (const cell of baseCells) {
       if (cell.other) continue;
-      for (const event of rawCellEvents(cell, entryMap, categoryMap, translate)) {
+      for (const event of rawCellEvents(
+        cell,
+        entryMap,
+        categoryMap,
+        translate,
+      )) {
         if (assigned.has(event.key)) continue;
         let color =
           normalizeColor(event.color) || fallbackColor(assigned.size, used);
@@ -202,10 +228,12 @@
   }
 
   function cellEvents(cell, entryMap, categoryMap, colorMap, translate) {
-    return rawCellEvents(cell, entryMap, categoryMap, translate).map((event) => ({
-      ...event,
-      color: colorMap.get(event.key) || event.color,
-    }));
+    return rawCellEvents(cell, entryMap, categoryMap, translate).map(
+      (event) => ({
+        ...event,
+        color: colorMap.get(event.key) || event.color,
+      }),
+    );
   }
 
   function calendarEventTitle(event) {
@@ -240,7 +268,10 @@
         weekend: weekdayIndex >= 5,
         today: dateString === todayStr,
         hol: holidayByDate.get(dateString),
-        absences: entries.filter((entry) => dateString >= entry.start_date && dateString <= entry.end_date),
+        absences: entries.filter(
+          (entry) =>
+            dateString >= entry.start_date && dateString <= entry.end_date,
+        ),
       });
       if (dayOffset >= 34 && other && (dayOffset + 1) % 7 === 0) break;
     }

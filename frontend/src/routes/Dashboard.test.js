@@ -179,7 +179,7 @@ describe("Dashboard", () => {
     expect(target.textContent).toContain("All submitted");
   });
 
-  it("marks current month missing when any draft remains on a target day", async () => {
+  it("ignores current-week draft entries when elapsed weeks are submitted", async () => {
     mockState.monthReport = {
       month: "2026-05",
       days: [
@@ -211,6 +211,20 @@ describe("Dashboard", () => {
         },
       ],
       weeks_all_submitted: true,
+    };
+
+    component = mount(Dashboard, { target });
+    await settle();
+
+    await waitForText(target, "All submitted", 15000);
+    expect(target.textContent).toContain("All submitted");
+  });
+
+  it("marks missing when the backend reports elapsed weeks missing", async () => {
+    mockState.monthReport = {
+      month: "2026-05",
+      days: [],
+      weeks_all_submitted: false,
     };
 
     component = mount(Dashboard, { target });

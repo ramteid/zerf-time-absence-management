@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { api, csrfToken } from "./api.js";
+import {
+  api,
+  csrfToken,
+  resetUnauthorizedGate,
+  setUnauthorizedHandler,
+} from "./api.js";
 import { setLanguage } from "./i18n.js";
 
 describe("api", () => {
@@ -8,6 +13,8 @@ describe("api", () => {
   beforeEach(() => {
     setLanguage("en");
     csrfToken.set(null);
+    resetUnauthorizedGate();
+    setUnauthorizedHandler(null);
     fetchSpy = vi.spyOn(globalThis, "fetch");
   });
 
@@ -92,7 +99,7 @@ describe("api", () => {
     await api("/create", { method: "POST", body: { name: "test" } });
     const call = fetchSpy.mock.calls[0];
     expect(call[1].body).toBe('{"name":"test"}');
-    expect(call[1].headers["Content-Type"]).toBe("application/json");
+    expect(call[1].headers.get("Content-Type")).toBe("application/json");
   });
 
   it("includes CSRF token on mutating requests", async () => {
@@ -106,7 +113,7 @@ describe("api", () => {
 
     await api("/update", { method: "POST", body: { x: 1 } });
     const headers = fetchSpy.mock.calls[0][1].headers;
-    expect(headers["X-CSRF-Token"]).toBe("tok123");
+    expect(headers.get("X-CSRF-Token")).toBe("tok123");
   });
 
   it("does not include CSRF token on GET requests", async () => {
@@ -120,7 +127,27 @@ describe("api", () => {
 
     await api("/read");
     const headers = fetchSpy.mock.calls[0][1].headers;
-    expect(headers["X-CSRF-Token"]).toBeUndefined();
+    expect(headers.has("X-CSRF-Token")).toBe(false);
+  });
+
+  it("preserves caller headers while adding CSRF", async () => {
+    csrfToken.set("tok123");
+    fetchSpy.mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ "content-type": "application/json" }),
+      json: () => Promise.resolve({}),
+    });
+
+    await api("/update", {
+      method: "POST",
+      headers: { "X-Trace-Id": "abc" },
+      body: { x: 1 },
+    });
+    const headers = fetchSpy.mock.calls[0][1].headers;
+    expect(headers.get("X-Trace-Id")).toBe("abc");
+    expect(headers.get("X-CSRF-Token")).toBe("tok123");
+    expect(headers.get("Content-Type")).toBe("application/json");
   });
 
   it("returns raw response for non-JSON ok responses", async () => {
@@ -133,5 +160,21 @@ describe("api", () => {
 
     const result = await api("/export");
     expect(result).toBe(mockResponse);
+  });
+
+  it("does not handle mutating forbidden responses as stale sessions", async () => {
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
+    fetchSpy.mockResolvedValue({
+      ok: false,
+      status: 403,
+      headers: new Headers({ "content-type": "application/json" }),
+      json: () => Promise.resolve({ error: "Forbidden" }),
+    });
+
+    await expect(api("/update", { method: "POST", body: {} })).rejects.toThrow(
+      "Forbidden",
+    );
+    expect(handler).not.toHaveBeenCalled();
   });
 });

@@ -484,10 +484,9 @@ fn csv_response(r: MonthReport, uid: i64, file_label: &str) -> AppResult<Respons
     let mut response = Response::new(axum::body::Body::from(data));
     let content_type = axum::http::HeaderValue::from_str("text/csv; charset=utf-8")
         .map_err(|_| AppError::Internal("Failed to build CSV content-type header.".into()))?;
-    response.headers_mut().insert(
-        header::CONTENT_TYPE,
-        content_type,
-    );
+    response
+        .headers_mut()
+        .insert(header::CONTENT_TYPE, content_type);
     let safe_label: String = file_label
         .chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
@@ -634,7 +633,7 @@ async fn all_weeks_submitted_for_month(
     let mut current_week_monday = first_week_monday;
     while current_week_monday <= last_week_monday {
         let week_sunday = current_week_monday + Duration::days(6);
-        if week_sunday < today {
+        if week_sunday <= today {
             complete_week_mondays.push(current_week_monday);
         }
         current_week_monday += Duration::days(7);

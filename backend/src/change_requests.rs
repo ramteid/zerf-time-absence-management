@@ -607,9 +607,12 @@ pub async fn approve(
         Some(serde_json::json!({"status": "approved", "reviewed_by": requester.id})),
     )
     .await;
-    // Notify the requester that their change request was approved.
+    // Notify the requester, except when an admin approved their own request.
+    if change_request.user_id == requester.id {
+        return Ok(Json(serde_json::json!({"ok":true})));
+    }
     let language = notification_language(&app_state.pool).await;
-    let week_label = i18n::format_week_label(&language, monday_of(existing_entry.entry_date));
+    let week_label = i18n::format_week_label(&language, monday_of(change_request.new_date.unwrap_or(existing_entry.entry_date)));
     let current_category =
         category_label(&app_state.pool, &language, existing_entry.category_id).await;
     let effective_category = match change_request.new_category_id {
@@ -730,7 +733,10 @@ pub async fn reject(
         Some(serde_json::json!({"status": "rejected", "reason": body.reason})),
     )
     .await;
-    // Notify the requester that their change request was rejected.
+    // Notify the requester, except when an admin rejected their own request.
+    if change_request.user_id == requester.id {
+        return Ok(Json(serde_json::json!({"ok":true})));
+    }
     let language = notification_language(&app_state.pool).await;
     if let Some((
         _entry_owner_id,

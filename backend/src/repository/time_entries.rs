@@ -4,6 +4,7 @@ use crate::time_calc;
 use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::{Postgres, QueryBuilder};
+use std::collections::{BTreeMap, HashSet};
 
 async fn app_now(conn: &mut sqlx::PgConnection) -> AppResult<chrono::DateTime<chrono_tz::Tz>> {
     let timezone: Option<String> =
@@ -191,6 +192,144 @@ pub(crate) async fn validate_entry(
     Ok(())
 }
 
+#[derive(sqlx::FromRow)]
+struct ReopenValidationEntry {
+    id: i64,
+    entry_date: NaiveDate,
+    start_time: String,
+    end_time: String,
+    category_id: i64,
+    comment: Option<String>,
+    status: String,
+    counts_as_work: bool,
+}
+
+pub(crate) async fn validate_entries_after_reopen(
+    conn: &mut sqlx::PgConnection,
+    user_id: i64,
+    affected_entry_ids: &[i64],
+) -> AppResult<()> {
+    if affected_entry_ids.is_empty() {
+        return Ok(());
+    }
+
+    let affected_id_set: HashSet<i64> = affected_entry_ids.iter().copied().collect();
+    let affected_entries: Vec<ReopenValidationEntry> = sqlx::query_as(
+        "SELECT te.id, te.entry_date, te.start_time, te.end_time, te.category_id, \
+                te.comment, te.status, c.counts_as_work \
+         FROM time_entries te \
+         JOIN categories c ON c.id = te.category_id \
+         WHERE te.user_id=$1 AND te.id = ANY($2) \
+         FOR UPDATE OF te",
+    )
+    .bind(user_id)
+    .bind(affected_entry_ids)
+    .fetch_all(&mut *conn)
+    .await?;
+
+    if affected_entries.len() != affected_id_set.len() {
+        return Err(AppError::Conflict(
+            "Reopen target entries changed concurrently.".into(),
+        ));
+    }
+
+    for entry in &affected_entries {
+        let effective_entry = NewEntryData {
+            entry_date: entry.entry_date,
+            start_time: entry.start_time.clone(),
+            end_time: entry.end_time.clone(),
+            category_id: entry.category_id,
+            comment: entry.comment.clone(),
+        };
+        validate_entry(conn, user_id, &effective_entry, Some(entry.id)).await?;
+    }
+
+    let mut affected_dates: Vec<NaiveDate> = affected_entries
+        .iter()
+        .map(|entry| entry.entry_date)
+        .collect();
+    affected_dates.sort_unstable();
+    affected_dates.dedup();
+    if affected_dates.is_empty() {
+        return Ok(());
+    }
+
+    let date_entries: Vec<ReopenValidationEntry> = sqlx::query_as(
+        "SELECT te.id, te.entry_date, te.start_time, te.end_time, te.category_id, \
+                te.comment, te.status, c.counts_as_work \
+         FROM time_entries te \
+         JOIN categories c ON c.id = te.category_id \
+         WHERE te.user_id=$1 AND te.entry_date = ANY($2) \
+         ORDER BY te.entry_date, te.start_time, te.id",
+    )
+    .bind(user_id)
+    .bind(&affected_dates)
+    .fetch_all(&mut *conn)
+    .await?;
+
+    let mut entries_by_date: BTreeMap<NaiveDate, Vec<(bool, NaiveTime, NaiveTime)>> =
+        BTreeMap::new();
+    for entry in date_entries {
+        if entry.status == "rejected" && !affected_id_set.contains(&entry.id) {
+            continue;
+        }
+        entries_by_date
+            .entry(entry.entry_date)
+            .or_default()
+            .push((
+                entry.counts_as_work,
+                parse_time(&entry.start_time)?,
+                parse_time(&entry.end_time)?,
+            ));
+    }
+
+    for entries in entries_by_date.values_mut() {
+        entries.sort_by_key(|(_, start, end)| (*start, *end));
+        for window in entries.windows(2) {
+            let (_, _, previous_end) = window[0];
+            let (_, next_start, _) = window[1];
+            if next_start < previous_end {
+                return Err(AppError::BadRequest(
+                    "Reopen would create overlapping draft entries.".into(),
+                ));
+            }
+        }
+
+        let mut credited_intervals: Vec<(NaiveTime, NaiveTime)> = entries
+            .iter()
+            .filter_map(|(counts_as_work, start, end)| {
+                counts_as_work.then_some((*start, *end))
+            })
+            .collect();
+        credited_intervals.sort_by_key(|(start, _)| *start);
+
+        let mut day_total = 0_i64;
+        let mut merged: Option<(NaiveTime, NaiveTime)> = None;
+        for (start, end) in credited_intervals {
+            if let Some((cur_start, cur_end)) = merged {
+                if start <= cur_end {
+                    merged = Some((cur_start, cur_end.max(end)));
+                } else {
+                    day_total += (cur_end - cur_start).num_minutes();
+                    merged = Some((start, end));
+                }
+            } else {
+                merged = Some((start, end));
+            }
+        }
+        if let Some((cur_start, cur_end)) = merged {
+            day_total += (cur_end - cur_start).num_minutes();
+        }
+        if day_total > 14 * 60 {
+            return Err(AppError::BadRequest(
+                "Reopen would exceed the 14 hour day limit.".into(),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 #[derive(Clone)]
 pub struct TimeEntryDb {
     pool: DatabasePool,
@@ -363,7 +502,7 @@ impl TimeEntryDb {
         Ok(sqlx::query_scalar(
             "SELECT COUNT(*) FROM time_entries te \
                          WHERE te.user_id=$1 AND te.entry_date BETWEEN $2 AND $3 \
-                         AND te.status IN ('submitted','approved')",
+                         AND te.status IN ('submitted','approved','rejected')",
         )
         .bind(user_id)
         .bind(week_start)
@@ -820,7 +959,7 @@ impl TimeEntryDb {
                  COUNT(*) AS total, \
                                  COUNT(*) FILTER (WHERE status NOT IN ('submitted','approved')) AS incomplete \
                          FROM time_entries \
-                         WHERE user_id = $1 AND entry_date >= $2 AND entry_date < $3 \
+                         WHERE user_id = $1 AND entry_date >= $2 AND entry_date <= $3 \
              GROUP BY y, m",
         )
         .bind(user_id)

@@ -70,11 +70,13 @@ fn filter_holidays_by_region(
     holidays
         .into_iter()
         .filter(|holiday| {
-            region.is_empty()
-                || holiday
-                    .counties
-                    .as_ref()
-                    .is_none_or(|codes| codes.iter().any(|code| code == region))
+            if region.is_empty() {
+                return holiday.counties.is_none();
+            }
+            holiday
+                .counties
+                .as_ref()
+                .is_none_or(|codes| codes.iter().any(|code| code == region))
         })
         .map(|holiday| (holiday.date, holiday.name, holiday.local_name))
         .collect()
@@ -472,5 +474,12 @@ mod tests {
         assert_eq!(filtered.len(), 2);
         assert_eq!(filtered[0].1, "New Year's Day");
         assert_eq!(filtered[1].1, "Epiphany");
+    }
+
+    #[test]
+    fn filter_holidays_by_region_without_region_keeps_only_nationwide_entries() {
+        let filtered = filter_holidays_by_region(sample_holidays(), "");
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].1, "New Year's Day");
     }
 }
