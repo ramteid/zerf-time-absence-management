@@ -53,28 +53,33 @@ function apiError(message) {
 
 // Main fetch wrapper
 export async function api(path, opts = {}) {
-  const headers = opts.body ? { "Content-Type": "application/json" } : {};
   const method = (opts.method || "GET").toUpperCase();
+  const isReadMethod = ["GET", "HEAD", "OPTIONS"].includes(method);
+  const hasBody = Object.prototype.hasOwnProperty.call(opts, "body");
+  const headers = new Headers(opts.headers || {});
+  if (hasBody && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
   if (_csrf && !["GET", "HEAD", "OPTIONS"].includes(method)) {
-    headers["X-CSRF-Token"] = _csrf;
+    headers.set("X-CSRF-Token", _csrf);
   }
 
   let response;
   try {
     response = await fetch(API + path, {
-      headers,
-      cache: ["GET", "HEAD", "OPTIONS"].includes(method)
-        ? "no-store"
-        : undefined,
-      credentials: "same-origin",
       ...opts,
-      body: opts.body ? JSON.stringify(opts.body) : undefined,
+      headers,
+      cache: opts.cache ?? (isReadMethod ? "no-store" : undefined),
+      credentials: opts.credentials ?? "same-origin",
+      body: hasBody ? JSON.stringify(opts.body) : undefined,
     });
   } catch {
     // Distinguish a real network failure (offline, DNS, etc.) from an auth
     // failure. Re-throw as a typed error so callers can handle it differently
     // from business-logic errors. Does NOT trigger the session-expiry handler.
-    const networkError = apiError("Network error. Please check your connection.");
+    const networkError = apiError(
+      "Network error. Please check your connection.",
+    );
     networkError.isNetworkError = true;
     throw networkError;
   }
@@ -83,7 +88,8 @@ export async function api(path, opts = {}) {
 
   // Session is gone or CSRF token is stale — force the user back to login.
   // Skip this for the auth endpoints themselves to avoid redirect loops.
-  if (response.status === 401 && !path.startsWith("/auth/")) {
+  const isAuthEndpoint = path.startsWith("/auth/");
+  if (response.status === 401 && !isAuthEndpoint) {
     handleUnauthorized();
     throw apiError("Session expired. Please sign in again.");
   }

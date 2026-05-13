@@ -87,7 +87,6 @@
   let monthSubmissionChecks = [];
   let monthSubmissionLoading = false;
   let monthSubmissionError = "";
-  let currentMonthSubmitted = true;
 
   $: reportYear = today.getFullYear();
   $: currentMonthIndex = today.getMonth() + 1; // 1-based
@@ -121,31 +120,6 @@
   // when the backend's weeks_all_submitted flag is true.
   function monthFullySubmitted(report) {
     return report?.weeks_all_submitted === true;
-  }
-
-  // Current week follows the backend submission rule: every required workday
-  // up to today must be covered by an absence or by submitted/approved entries.
-  function currentWeekFullySubmitted(report) {
-    if (!report?.days?.length) return true;
-    const weekStart = isoDate(monday(today));
-    return report.days
-      .filter(
-        (day) => day?.target_min > 0 && day?.date >= weekStart && day?.date <= todayIso,
-      )
-      .every((day) => {
-        const entries = Array.isArray(day.entries) ? day.entries : [];
-        const hasIncomplete = entries.some(
-          (entry) => entry?.status !== "submitted" && entry?.status !== "approved",
-        );
-        // Any approved absence (target-removing or flextime_reduction) covers the day for
-        // submission purposes: flextime_reduction blocks entry creation, so there is nothing
-        // to submit on those days either.
-        const hasAnyAbsence = !!day?.absence;
-        const hasSubmittedOrApproved = entries.some(
-          (entry) => entry?.status === "submitted" || entry?.status === "approved",
-        );
-        return !hasIncomplete && (hasAnyAbsence || hasSubmittedOrApproved);
-      });
   }
 
   async function loadOvertimeSummary() {
@@ -188,7 +162,6 @@
     const monthsToCheck = allMonthsToCheck();
     if (!monthsToCheck.length) {
       monthSubmissionChecks = [];
-      currentMonthSubmitted = true;
       return;
     }
 
@@ -197,15 +170,12 @@
     try {
       const requests = monthsToCheck.map((month) => api(`/reports/month?month=${month}`));
       const reports = await Promise.all(requests);
-      const currentMonthReport = reports[reports.length - 1];
       monthSubmissionChecks = monthsToCheck.map((month, index) => ({
         month,
         submitted: monthFullySubmitted(reports[index]),
       }));
-      currentMonthSubmitted = currentWeekFullySubmitted(currentMonthReport);
     } catch (error) {
       monthSubmissionChecks = [];
-      currentMonthSubmitted = true;
       monthSubmissionError = error?.message || "Could not check submission status.";
     } finally {
       monthSubmissionLoading = false;
@@ -221,7 +191,15 @@
   // Loads all data that is only visible to team leads and admins (can_approve).
   async function load() {
     const canApprove = !!$currentUser?.permissions?.can_approve;
-    if (!canApprove) return;
+    if (!canApprove) {
+      allTimeEntries = [];
+      pendingEntries = [];
+      pendingAbsences = [];
+      changeRequests = [];
+      pendingReopens = [];
+      users = [];
+      return;
+    }
     try {
       const [
         teamTimeEntries,
@@ -245,6 +223,12 @@
       pendingReopens = pendingReopenRequests;
       users = teamMembers;
     } catch (error) {
+      allTimeEntries = [];
+      pendingEntries = [];
+      pendingAbsences = [];
+      changeRequests = [];
+      pendingReopens = [];
+      users = [];
       toast($t(error?.message || "Error"), "error");
     }
   }
@@ -279,11 +263,10 @@
 
   // True when every month from the user's start to now has weeks_all_submitted.
   // Empty checks (no start date, or start date in the future) count as "all done".
-  // The current month is checked separately to include the current week.
+  // The backend excludes the current in-progress week from this flag.
   $: allWeeksSubmitted =
-    (monthSubmissionChecks.length === 0 ||
-      monthSubmissionChecks.every((check) => check.submitted)) &&
-    currentMonthSubmitted;
+    monthSubmissionChecks.length === 0 ||
+    monthSubmissionChecks.every((check) => check.submitted);
 
   // ── Pending-week builder (groups submitted entries by user + week) ─────────────
 

@@ -132,6 +132,7 @@
         flextimeChartData: flextimeRaw || [],
       };
     } catch (e) {
+      reportData = null;
       toast($t(e?.message || "Error"), "error");
     }
   }
@@ -159,6 +160,7 @@
     try {
       teamReport = await api(`/reports/team?month=${teamMonth}`);
     } catch (e) {
+      teamReport = null;
       toast($t(e?.message || "Error"), "error");
     }
   }
@@ -206,6 +208,10 @@
       }
       catShowFilter = false;
     } catch (e) {
+      catReport = null;
+      teamCatReport = null;
+      catFilteredCategories = [];
+      catShowFilter = false;
       toast($t(e?.message || "Error"), "error");
     }
   }
@@ -371,6 +377,8 @@
         days: absenceDays(absenceEntry),
       }));
     } catch (e) {
+      absenceReport = null;
+      absenceHolidayDates = new Set();
       toast($t(e?.message || "Error"), "error");
     }
   }

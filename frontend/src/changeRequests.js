@@ -11,7 +11,7 @@ export function buildChangeRequestPayload(entry, draft) {
     return { error: "Invalid date." };
   }
   if (draft.start_time >= draft.end_time) {
-    return { error: "Start cannot be after End." };
+    return { error: "End time must be after start time." };
   }
   if (draft.category_id == null) {
     return { error: "Category required." };

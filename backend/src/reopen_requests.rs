@@ -8,7 +8,7 @@
 //! notification.
 //!
 //! Approval / auto-approval reopens the week atomically:
-//!   * all submitted/approved entries for `[week_start, week_start+6 days]` are reset
+//!   * all submitted, approved, or rejected entries for `[week_start, week_start+6 days]` are reset
 //!     to `'draft'` (audit-logged per entry);
 //!   * any open `change_requests` for those entries are auto-approved and
 //!     applied before the status reset.
@@ -222,10 +222,11 @@ async fn load_change_request_overview_for_ids_tx(
 }
 
 /// Atomically reopen a week: apply open change_requests for the week's
-/// submitted/approved entries, then reset those entries to draft. Caller is the
-/// **acting** user (approver or self); `subject` is the user whose week
-/// is being reopened. Returns the affected entry ids and their previous status
-/// so the caller can commit the whole state transition first and audit after.
+/// submitted, approved, or rejected entries, then reset those entries to draft.
+/// Caller is the **acting** user (approver or self); `subject` is the user
+/// whose week is being reopened. Returns the affected entry ids and their
+/// previous status so the caller can commit the whole state transition first
+/// and audit after.
 async fn perform_reopen_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     language: &i18n::Language,
@@ -243,7 +244,7 @@ async fn perform_reopen_in_tx(
     let affected: Vec<(i64, String)> = sqlx::query_as(
         "SELECT te.id, te.status FROM time_entries te \
              WHERE te.user_id=$1 AND te.entry_date BETWEEN $2 AND $3 \
-             AND te.status IN ('submitted','approved') \
+             AND te.status IN ('submitted','approved','rejected') \
              FOR UPDATE",
     )
     .bind(subject_id)
@@ -254,7 +255,7 @@ async fn perform_reopen_in_tx(
 
     if affected.is_empty() {
         return Err(AppError::BadRequest(
-            "Nothing to reopen — this week has no submitted or approved entries.".into(),
+            "Nothing to reopen - this week has no submitted, approved, or rejected entries.".into(),
         ));
     }
 
@@ -277,7 +278,6 @@ async fn perform_reopen_in_tx(
     let applied_change_overview =
         load_change_request_overview_for_ids_tx(tx, language, &open_change_request_ids, true)
             .await?;
-    let mut changed_entry_ids = Vec::new();
     let mut applied_change_request_ids = Vec::new();
     for change_request in open_change_requests {
         let current_entry: TimeEntry = sqlx::query_as(
@@ -299,34 +299,15 @@ async fn perform_reopen_in_tx(
             change_request.new_comment.as_deref(),
         )
         .await?;
-        changed_entry_ids.push(current_entry.id);
         applied_change_request_ids.push(change_request.id);
     }
 
-    for entry_id in &changed_entry_ids {
-        let updated_entry: TimeEntry = sqlx::query_as(
-            "SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, \
-                    submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at \
-             FROM time_entries WHERE id=$1 FOR UPDATE",
-        )
-        .bind(entry_id)
-        .fetch_one(&mut **tx)
-        .await?;
-        let effective_entry = crate::time_entries::NewTimeEntry {
-            entry_date: updated_entry.entry_date,
-            start_time: updated_entry.start_time.clone(),
-            end_time: updated_entry.end_time.clone(),
-            category_id: updated_entry.category_id,
-            comment: updated_entry.comment.clone(),
-        };
-        crate::time_entries::validate(
-            tx,
-            updated_entry.user_id,
-            &effective_entry,
-            Some(updated_entry.id),
-        )
-        .await?;
-    }
+    crate::repository::time_entries::validate_entries_after_reopen(
+        &mut **tx,
+        subject_id,
+        &entry_ids,
+    )
+    .await?;
 
     if !applied_change_request_ids.is_empty() {
         let rows = sqlx::query(
@@ -356,7 +337,7 @@ async fn perform_reopen_in_tx(
     // Reset all affected entries to draft.  We filter by their original IDs
     // (not by date range) because the CR-apply step above may have moved some
     // entries to a date outside the original week; a date-range filter would
-    // silently miss those and leave them in submitted/approved status.
+    // silently miss those and leave them in a non-draft status.
     sqlx::query(
         "UPDATE time_entries SET status='draft', submitted_at=NULL, reviewed_by=NULL, \
          reviewed_at=NULL, rejection_reason=NULL, updated_at=CURRENT_TIMESTAMP \
@@ -459,15 +440,15 @@ pub async fn create(
     let week_end = body.week_start + chrono::Duration::days(6);
 
     // Empty-week / nothing-to-reopen guard: only weeks with at least one
-    // submitted/approved entry are eligible.
-    let submitted_or_approved_entry_count = app_state
+    // submitted, approved, or rejected entry are eligible.
+    let reopenable_entry_count = app_state
         .db
         .reopen_requests
         .count_non_draft_entries(requester.id, body.week_start, week_end)
         .await?;
-    if submitted_or_approved_entry_count == 0 {
+    if reopenable_entry_count == 0 {
         return Err(AppError::BadRequest(
-            "Nothing to reopen — this week has no submitted or approved entries.".into(),
+            "Nothing to reopen - this week has no submitted, approved, or rejected entries.".into(),
         ));
     }
 
@@ -790,6 +771,9 @@ pub async fn approve(
     if reopen_request.status != "pending" {
         return Err(AppError::BadRequest("Request is not pending.".into()));
     }
+    if reopen_request.user_id == requester.id && !requester.is_admin() {
+        return Err(AppError::Forbidden);
+    }
     if !requester.is_admin() {
         let is_assigned_approver: Option<bool> =
             sqlx::query_scalar(ACTIVE_ASSIGNED_APPROVER_FOR_UPDATE_SQL)
@@ -852,22 +836,24 @@ pub async fn approve(
         Some(serde_json::json!({"status": "approved"})),
     )
     .await;
-    // Notify the employee whose week was reopened.
-    notifications::create_translated(
-        &app_state,
-        &language,
-        reopen_request.user_id,
-        "reopen_approved",
-        "reopen_approved_title",
-        "reopen_approved_body",
-        vec![
-            ("week_label", week_label.clone()),
-            ("change_request_overview", applied_change_overview.clone()),
-        ],
-        Some("reopen_request"),
-        Some(request_id),
-    )
-    .await;
+    // Notify the employee whose week was reopened (skip when the approver approved their own request).
+    if reopen_request.user_id != requester.id {
+        notifications::create_translated(
+            &app_state,
+            &language,
+            reopen_request.user_id,
+            "reopen_approved",
+            "reopen_approved_title",
+            "reopen_approved_body",
+            vec![
+                ("week_label", week_label.clone()),
+                ("change_request_overview", applied_change_overview.clone()),
+            ],
+            Some("reopen_request"),
+            Some(request_id),
+        )
+        .await;
+    }
     // If an admin acted, notify all other explicitly assigned approvers for
     // this user so they know the item left their pending queue.
     notify_assigned_approvers_if_admin_acted(
@@ -920,6 +906,9 @@ pub async fn reject(
     if reopen_request.status != "pending" {
         return Err(AppError::BadRequest("Request is not pending.".into()));
     }
+    if reopen_request.user_id == requester.id && !requester.is_admin() {
+        return Err(AppError::Forbidden);
+    }
     if !requester.is_admin() {
         let is_assigned_approver: Option<bool> =
             sqlx::query_scalar(ACTIVE_ASSIGNED_APPROVER_FOR_UPDATE_SQL)
@@ -967,23 +956,25 @@ pub async fn reject(
         false,
     )
     .await;
-    // Notify the employee whose reopen request was rejected.
-    notifications::create_translated(
-        &app_state,
-        &language,
-        reopen_request.user_id,
-        "reopen_rejected",
-        "reopen_rejected_title",
-        "reopen_rejected_body",
-        vec![
-            ("week_label", week_label.clone()),
-            ("change_request_overview", pending_change_overview.clone()),
-            ("reason", rejection_reason.to_string()),
-        ],
-        Some("reopen_request"),
-        Some(request_id),
-    )
-    .await;
+    // Notify the employee whose reopen request was rejected (skip when the rejector rejected their own request).
+    if reopen_request.user_id != requester.id {
+        notifications::create_translated(
+            &app_state,
+            &language,
+            reopen_request.user_id,
+            "reopen_rejected",
+            "reopen_rejected_title",
+            "reopen_rejected_body",
+            vec![
+                ("week_label", week_label.clone()),
+                ("change_request_overview", pending_change_overview.clone()),
+                ("reason", rejection_reason.to_string()),
+            ],
+            Some("reopen_request"),
+            Some(request_id),
+        )
+        .await;
+    }
     // Symmetric with approve: if an admin rejected a request, notify all other
     // explicitly assigned approvers for this user so they know the item left
     // their queue.

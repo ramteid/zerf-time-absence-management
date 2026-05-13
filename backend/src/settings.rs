@@ -260,14 +260,16 @@ async fn smtp_config_from_body(
         .unwrap_or("")
         .trim()
         .to_string();
-    let password = if body.smtp_password.as_ref().is_some_and(|p| !p.is_empty()) {
-        body.smtp_password.clone()
-    } else {
-        let stored = load_setting(pool, SMTP_PASSWORD_KEY, "").await?;
-        if stored.is_empty() {
-            None
-        } else {
-            Some(stored)
+    let password = match body.smtp_password.as_ref() {
+        Some(password) if password.is_empty() => None,
+        Some(password) => Some(password.clone()),
+        None => {
+            let stored = load_setting(pool, SMTP_PASSWORD_KEY, "").await?;
+            if stored.is_empty() {
+                None
+            } else {
+                Some(stored)
+            }
         }
     };
     Ok(SmtpConfig {
@@ -300,10 +302,13 @@ pub async fn update_smtp_settings(
         return Err(AppError::Forbidden);
     }
 
-    if !matches!(
-        body.smtp_encryption.as_deref().unwrap_or("starttls").trim(),
-        "starttls" | "tls" | "none"
-    ) {
+    let smtp_encryption = body
+        .smtp_encryption
+        .as_deref()
+        .unwrap_or("starttls")
+        .trim()
+        .to_lowercase();
+    if !matches!(smtp_encryption.as_str(), "starttls" | "tls" | "none") {
         return Err(AppError::BadRequest(
             "smtp_encryption must be starttls, tls, or none.".into(),
         ));
@@ -356,11 +361,9 @@ pub async fn update_smtp_settings(
     )
     .await?;
 
-    // Overwrite password when explicitly provided.
+    // Overwrite or clear the stored password when explicitly provided.
     if let Some(ref password) = body.smtp_password {
-        if !password.is_empty() {
-            save_setting_exec(&mut transaction, SMTP_PASSWORD_KEY, password).await?;
-        }
+        save_setting_exec(&mut transaction, SMTP_PASSWORD_KEY, password).await?;
     }
 
     save_setting_exec(
@@ -450,7 +453,12 @@ pub async fn update_admin_settings(
 
     let language = normalize_language(&body.ui_language)?;
     let time_format = normalize_time_format(&body.time_format)?;
-    let timezone = normalize_timezone(body.timezone.as_deref().unwrap_or(DEFAULT_TIMEZONE))?;
+    let timezone = if let Some(tz) = body.timezone.as_deref() {
+        normalize_timezone(tz)?
+    } else {
+        let stored = app_state.db.settings.get_raw(TIMEZONE_KEY).await?;
+        normalize_timezone(stored.as_deref().unwrap_or(DEFAULT_TIMEZONE))?
+    };
     let country = body.country.trim().to_uppercase();
     let region = body.region.trim().to_string();
     let previous_country = app_state.db.settings.get_raw(COUNTRY_KEY).await?;

@@ -19,7 +19,7 @@ const TRANSLATIONS = {
   en: {
     hours_unit: "h",
     "{hours} / week": "{hours} / week",
-    "As of yesterday": "As of today",
+    "As of yesterday": "As of yesterday",
     help_monthly_report:
       "Shows the monthly report for a team member with target/actual hours and daily details.",
     help_team_report:
@@ -559,7 +559,8 @@ const TRANSLATIONS = {
       "Bitte geben Sie Ihren Namen ein und konfigurieren Sie Land, Standard-Wochenstunden und Standard-Urlaubstage, bevor die Anwendung genutzt wird.",
     "Please select a country.": "Bitte ein Land auswählen.",
     "Please select a region.": "Bitte eine Region auswählen.",
-    "Please wait for regions to load.": "Bitte warten, bis die Regionen geladen sind.",
+    "Please wait for regions to load.":
+      "Bitte warten, bis die Regionen geladen sind.",
     "Could not load regions for the selected country.":
       "Regionen für das ausgewählte Land konnten nicht geladen werden.",
     "Clear stored password": "Gespeichertes Passwort löschen",
@@ -622,7 +623,8 @@ const TRANSLATIONS = {
       "Pflichtfeld für Mitarbeitende und Teamleitungen.",
     "An approver is required for employees and team leads.":
       "Für Mitarbeitende und Teamleitungen ist eine verantwortliche Person erforderlich.",
-    "No eligible approvers found.": "Keine geeigneten Verantwortlichen gefunden.",
+    "No eligible approvers found.":
+      "Keine geeigneten Verantwortlichen gefunden.",
     "Request edit": "Bearbeitung anfordern",
     "Reopen this week?": "Diese Woche wieder bearbeiten?",
     "Your team lead will be notified and must approve before the week becomes editable again.":
@@ -740,8 +742,8 @@ const TRANSLATIONS = {
     "Conflict: {message}": "Konflikt: {message}",
     "week_start must be a Monday (ISO).":
       "Wochenbeginn muss ein Montag sein (ISO).",
-    "Nothing to reopen - this week has no submitted or approved entries.":
-      "Keine Wiederfreigabe möglich: Diese Woche enthält keine eingereichten oder genehmigten Einträge.",
+    "Nothing to reopen - this week has no submitted, approved, or rejected entries.":
+      "Keine Wiederfreigabe möglich: Diese Woche enthält keine eingereichten, genehmigten oder abgelehnten Einträge.",
     "A pending reopen request already exists (id {id}).":
       "Eine offene Wiederfreigabe-Anfrage existiert bereits (ID {id}).",
     "A pending request for this week already exists.":
@@ -754,7 +756,7 @@ const TRANSLATIONS = {
     "Overtime data unavailable.": "Überstundendaten nicht verfügbar.",
     "Overtime overview": "Überstundenübersicht",
     "This month: {value}": "Diesen Monat: {value}",
-    "Submissions": "Einreichungen",
+    Submissions: "Einreichungen",
     "Could not check submission status.":
       "Einreichungen konnte nicht geprüft werden.",
     "Auto-approve reopens": "Wiederfreigabe ohne Bestätigung",
@@ -770,7 +772,6 @@ const TRANSLATIONS = {
     "Custom range": "Benutzerdefinierter Zeitraum",
     Range: "Bereich",
     "From cannot be after To.": "Von kann nicht nach Bis liegen.",
-    "Start cannot be after End.": "Start kann nicht nach Ende liegen.",
     "Category required.": "Kategorie erforderlich.",
     // Hours unit
     hours_unit: "Std.",
@@ -805,6 +806,10 @@ const TRANSLATIONS = {
     "Entries in the future are not allowed.":
       "Einträge in der Zukunft sind nicht erlaubt.",
     "Day total exceeds 14 hours.": "Tagestotal überschreitet 14 Stunden.",
+    "Reopen would create overlapping draft entries.":
+      "Wiederfreigabe würde überschneidende Entwürfe erzeugen.",
+    "Reopen would exceed the 14 hour day limit.":
+      "Wiederfreigabe würde das Tageslimit von 14 Stunden überschreiten.",
     "End time must be after start time.":
       "Endzeit muss nach der Startzeit liegen.",
     "End time cannot be in the future.":
@@ -875,7 +880,7 @@ const TRANSLATIONS = {
     "Public holiday": "Feiertag",
     Absent: "Abwesend",
     // Reports help tooltips
-    "As of yesterday": "Stand heute",
+    "As of yesterday": "Stand gestern",
     help_monthly_report:
       "Zeigt den Monatsbericht eines Mitarbeiters mit Soll-/Ist-Stunden und Details pro Tag.",
     help_team_report:
@@ -953,8 +958,8 @@ const TRANSLATIONS = {
     Team: "Team",
     // Team Settings
     "Reopen Requests": "Wiederfreigabe-Anträge",
-    "When enabled for a user, their reopen requests are automatically approved. Their approver and all admins still receive a notification.":
-      "Wenn aktiviert, werden die Wiederfreigabe-Anträge des Benutzers automatisch genehmigt. Der Verantwortliche und alle Admins erhalten trotzdem eine Benachrichtigung.",
+    "When enabled for a user, their reopen requests are automatically approved. Assigned approvers still receive a notification.":
+      "Wenn aktiviert, werden die Wiederfreigabe-Anträge des Benutzers automatisch genehmigt. Zugewiesene Genehmiger erhalten weiterhin eine Benachrichtigung.",
     // Notification polling
     // (no new keys needed)
     // Vacation carryover
@@ -1138,8 +1143,8 @@ const ERROR_PATTERNS = Object.freeze([
   },
   {
     pattern:
-      /^Nothing to reopen [-\u2013\u2014] this week has no submitted or approved entries\.$/,
-    key: "Nothing to reopen - this week has no submitted or approved entries.",
+      /^Nothing to reopen [-\u2013\u2014] this week has no submitted, approved, or rejected entries\.$/,
+    key: "Nothing to reopen - this week has no submitted, approved, or rejected entries.",
   },
 ]);
 

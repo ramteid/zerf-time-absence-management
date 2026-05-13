@@ -65,4 +65,17 @@ describe("buildChangeRequestPayload", () => {
       },
     });
   });
+
+  it("rejects equal start and end times with the backend error text", () => {
+    const result = buildChangeRequestPayload(entry, {
+      entry_date: "2026-05-05",
+      start_time: "08:00",
+      end_time: "08:00",
+      category_id: 3,
+      comment: "initial note",
+      reason: "fix time",
+    });
+
+    expect(result).toEqual({ error: "End time must be after start time." });
+  });
 });

@@ -605,12 +605,12 @@ impl AbsenceDb {
         absence_id: i64,
         reviewer_id: i64,
     ) -> AppResult<u64> {
-        let _ = reviewer_id; // recorded in audit log; original reviewer_by preserved on the row
         Ok(sqlx::query(
-            "UPDATE absences SET status='approved' \
+            "UPDATE absences SET status='approved', reviewed_by=$2, reviewed_at=CURRENT_TIMESTAMP \
              WHERE id=$1 AND status='cancellation_pending'",
         )
         .bind(absence_id)
+        .bind(reviewer_id)
         .execute(tx)
         .await?
         .rows_affected())

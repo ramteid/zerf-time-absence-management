@@ -358,19 +358,21 @@ pub async fn approve(
         Some(serde_json::json!({"status": "approved", "reviewed_by": requester.id})),
     )
     .await;
-    let language = notification_language(&app_state.pool).await;
-    crate::notifications::create_translated(
-        &app_state,
-        &language,
-        entry.user_id,
-        "timesheet_approved",
-        "timesheet_approved_title",
-        "timesheet_approved_body",
-        vec![("entry_date", i18n::format_date(&language, entry.entry_date))],
-        Some("time_entries"),
-        Some(entry_id),
-    )
-    .await;
+    if entry.user_id != requester.id {
+        let language = notification_language(&app_state.pool).await;
+        crate::notifications::create_translated(
+            &app_state,
+            &language,
+            entry.user_id,
+            "timesheet_approved",
+            "timesheet_approved_title",
+            "timesheet_approved_body",
+            vec![("entry_date", i18n::format_date(&language, entry.entry_date))],
+            Some("time_entries"),
+            Some(entry_id),
+        )
+        .await;
+    }
     Ok(Json(serde_json::json!({"ok":true})))
 }
 
@@ -409,22 +411,24 @@ pub async fn reject(
         Some(serde_json::json!({"status": "rejected", "reason": body.reason})),
     )
     .await;
-    let language = notification_language(&app_state.pool).await;
-    crate::notifications::create_translated(
-        &app_state,
-        &language,
-        entry.user_id,
-        "timesheet_rejected",
-        "timesheet_rejected_title",
-        "timesheet_rejected_body",
-        vec![
-            ("entry_date", i18n::format_date(&language, entry.entry_date)),
-            ("reason", body.reason.clone()),
-        ],
-        Some("time_entries"),
-        Some(entry_id),
-    )
-    .await;
+    if entry.user_id != requester.id {
+        let language = notification_language(&app_state.pool).await;
+        crate::notifications::create_translated(
+            &app_state,
+            &language,
+            entry.user_id,
+            "timesheet_rejected",
+            "timesheet_rejected_title",
+            "timesheet_rejected_body",
+            vec![
+                ("entry_date", i18n::format_date(&language, entry.entry_date)),
+                ("reason", body.reason.clone()),
+            ],
+            Some("time_entries"),
+            Some(entry_id),
+        )
+        .await;
+    }
     Ok(Json(serde_json::json!({"ok":true})))
 }
 
@@ -465,6 +469,9 @@ pub async fn batch_approve(
         let mut weeks_by_user: std::collections::HashMap<i64, HashSet<NaiveDate>> =
             std::collections::HashMap::new();
         for entry in &approved_entries {
+            if entry.user_id == requester.id {
+                continue;
+            }
             weeks_by_user
                 .entry(entry.user_id)
                 .or_default()
@@ -531,6 +538,7 @@ pub async fn batch_reject(
         )
         .await?;
     let rejected_count = rejected_entries.len();
+    let language = notification_language(&app_state.pool).await;
     for entry in &rejected_entries {
         audit::log(
             &app_state.pool,
@@ -542,7 +550,9 @@ pub async fn batch_reject(
             Some(serde_json::json!({"status": "rejected", "reason": rejection_reason})),
         )
         .await;
-        let language = notification_language(&app_state.pool).await;
+        if entry.user_id == requester.id {
+            continue;
+        }
         crate::notifications::create_translated(
             &app_state,
             &language,

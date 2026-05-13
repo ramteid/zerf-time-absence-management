@@ -96,11 +96,18 @@ async fn find_unsubmitted_weeks(
 ) -> Vec<NaiveDate> {
     let today = crate::settings::app_today(pool).await;
 
-    // Monday of the current week — we check only fully elapsed weeks.
+    // Monday of the current week.
     let current_week_monday =
         today - chrono::Duration::days(today.weekday().num_days_from_monday() as i64);
-    // Check range: from user start up to (but not including) current week Monday.
-    let check_to = current_week_monday - chrono::Duration::days(1);
+    // Only check fully elapsed weeks. A week is fully elapsed when its Sunday has passed.
+    // On Sunday today IS the last day of the week, so include the current week.
+    // On any other day, the current week is still in progress — stop at last week.
+    let last_checked_monday = if today.weekday() == chrono::Weekday::Sun {
+        current_week_monday
+    } else {
+        current_week_monday - chrono::Duration::days(7)
+    };
+    let check_to = last_checked_monday + chrono::Duration::days(6);
     if user_start > check_to {
         return vec![];
     }
@@ -175,7 +182,7 @@ async fn find_unsubmitted_weeks(
     // Check each fully elapsed week.
     let mut incomplete_week_mondays = Vec::new();
     let mut week_monday = first_monday;
-    while week_monday < current_week_monday {
+    while week_monday <= last_checked_monday {
         let mut week_incomplete = false;
         for day_offset in 0..i64::from(workdays_per_week) {
             let day = week_monday + chrono::Duration::days(day_offset);
