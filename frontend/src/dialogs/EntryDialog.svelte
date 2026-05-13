@@ -116,13 +116,13 @@
 <dialog bind:this={dlg} on:keydown={onDialogKeydown} on:close={cancel}>
   <header>
     <span style="flex:1">{$t(isNew ? "Add Entry" : "Edit Entry")}</span>
-    <button class="kz-btn-icon-sm kz-btn-ghost" on:click={cancel}>
+    <button class="zf-btn-icon-sm zf-btn-ghost" on:click={cancel}>
       <Icon name="X" size={16} />
     </button>
   </header>
   <div class="dialog-body">
     <div>
-      <label class="kz-label" for="entry-date">{$t("Date")}</label>
+      <label class="zf-label" for="entry-date">{$t("Date")}</label>
       <DatePicker
         id="entry-date"
         bind:value={entry_date}
@@ -132,19 +132,19 @@
     </div>
     <div class="field-row">
       <div>
-        <label class="kz-label" for="entry-start-time">{$t("Start")}</label>
+        <label class="zf-label" for="entry-start-time">{$t("Start")}</label>
         <TimePicker id="entry-start-time" bind:value={start_time} required />
       </div>
       <div>
-        <label class="kz-label" for="entry-end-time">{$t("End")}</label>
+        <label class="zf-label" for="entry-end-time">{$t("End")}</label>
         <TimePicker id="entry-end-time" bind:value={end_time} required />
       </div>
     </div>
     <div>
-      <label class="kz-label" for="entry-category">{$t("Category")}</label>
+      <label class="zf-label" for="entry-category">{$t("Category")}</label>
       <select
         id="entry-category"
-        class="kz-select"
+        class="zf-select"
         bind:value={category_id}
         disabled={$categories.length === 0}
       >
@@ -157,12 +157,12 @@
       </select>
     </div>
     <div>
-      <label class="kz-label" for="entry-comment"
+      <label class="zf-label" for="entry-comment"
         >{$t("Comment (optional)")}</label
       >
       <textarea
         id="entry-comment"
-        class="kz-textarea"
+        class="zf-textarea"
         rows="2"
         bind:value={comment}
       ></textarea>
@@ -171,13 +171,13 @@
   </div>
   <footer>
     {#if !isNew}
-      <button class="kz-btn kz-btn-danger" on:click={remove}>
+      <button class="zf-btn zf-btn-danger" on:click={remove}>
         <Icon name="Trash" size={14} />{$t("Delete")}
       </button>
     {/if}
     <span style="flex:1"></span>
-    <button class="kz-btn" on:click={cancel}>{$t("Cancel")}</button>
-    <button class="kz-btn kz-btn-primary" on:click={save}>
+    <button class="zf-btn" on:click={cancel}>{$t("Cancel")}</button>
+    <button class="zf-btn zf-btn-primary" on:click={save}>
       {$t(isNew ? "Add Entry" : "Save")}
     </button>
   </footer>

@@ -18,14 +18,14 @@
     <h1>{$t("Time Categories")}</h1>
   </div>
   <div class="top-bar-actions">
-    <button class="kz-btn kz-btn-sm" on:click={() => (showDialog = {})}>
+    <button class="zf-btn zf-btn-sm" on:click={() => (showDialog = {})}>
       <Icon name="Plus" size={13} />{$t("Add Category")}
     </button>
   </div>
 </div>
 
 <div class="content-area" style="max-width:600px">
-  <div class="kz-card" style="overflow-x:auto">
+  <div class="zf-card" style="overflow-x:auto">
     {#each adminCategories as cat, i}
       <div
         style="padding:10px 16px;{i < adminCategories.length - 1
@@ -41,10 +41,10 @@
         <span style="font-size:13px;font-weight:500;flex:1">{$t(cat.name)}</span
         >
         {#if !cat.active}
-          <span class="kz-chip">{$t("Inactive")}</span>
+          <span class="zf-chip">{$t("Inactive")}</span>
         {/if}
         <button
-          class="kz-btn kz-btn-ghost kz-btn-sm"
+          class="zf-btn zf-btn-ghost zf-btn-sm"
           on:click={() => (showDialog = cat)}
         >
           <Icon name="Edit" size={13} />

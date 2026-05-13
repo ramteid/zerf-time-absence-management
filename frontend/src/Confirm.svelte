@@ -46,7 +46,7 @@
 <dialog bind:this={dlg} on:close={cancel}>
   <header>
     <span style="flex:1">{$t(title)}</span>
-    <button class="kz-btn-icon-sm kz-btn-ghost" on:click={cancel}>
+    <button class="zf-btn-icon-sm zf-btn-ghost" on:click={cancel}>
       <Icon name="X" size={16} />
     </button>
   </header>
@@ -56,10 +56,10 @@
       </p>{/if}
     {#if needReason}
       <div>
-        <label class="kz-label" for="confirm-reason">{$t("Reason")}</label>
+        <label class="zf-label" for="confirm-reason">{$t("Reason")}</label>
         <textarea
           id="confirm-reason"
-          class="kz-textarea"
+          class="zf-textarea"
           rows="3"
           bind:value={reason}
           required
@@ -68,11 +68,11 @@
     {/if}
   </div>
   <footer>
-    <button class="kz-btn" type="button" on:click={cancel}
+    <button class="zf-btn" type="button" on:click={cancel}
       >{$t("Cancel")}</button
     >
     <button
-      class="kz-btn {danger ? 'kz-btn-danger' : 'kz-btn-primary'}"
+      class="zf-btn {danger ? 'zf-btn-danger' : 'zf-btn-primary'}"
       type="button"
       on:click={ok}
     >

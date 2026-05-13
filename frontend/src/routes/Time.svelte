@@ -469,15 +469,15 @@
   {/if}
   <div class="top-bar-actions time-top-bar-actions">
     {#if weekFrom}
-      <div class="kz-nav-slider time-week-picker">
-        <button class="kz-btn kz-btn-ghost" on:click={() => gotoWeek(-7)}>
+      <div class="zf-nav-slider time-week-picker">
+        <button class="zf-btn zf-btn-ghost" on:click={() => gotoWeek(-7)}>
           <Icon name="ChevLeft" size={16} />
         </button>
         <span class="nav-label tab-num time-week-label">
           {fmtDateShort(weekFrom)} – {fmtDateShort(weekTo)}
         </span>
         <button
-          class="kz-btn kz-btn-ghost"
+          class="zf-btn zf-btn-ghost"
           on:click={() => gotoWeek(7)}
           disabled={isAtOrPastCurrentWeek}
         >
@@ -489,7 +489,7 @@
     <!-- Submit and reopen buttons stacked vertically. -->
     <div class="time-submit-stack">
       <button
-        class="kz-btn kz-btn-primary time-submit-button"
+        class="zf-btn zf-btn-primary time-submit-button"
         on:click={() => submitWeek(drafts.map((draft) => draft.id))}
         disabled={!drafts.length}
       >
@@ -498,7 +498,7 @@
 
       {#if canRequestReopen}
         <button
-          class="kz-btn kz-btn-sm"
+          class="zf-btn zf-btn-sm"
           on:click={requestReopen}
           title={$t("Request edit")}
         >
@@ -514,7 +514,7 @@
     {#if entries.length > 0}
       <!-- Summary strip: rendered only once there is something to summarise. -->
       <div class="stat-cards" style="margin-bottom:16px">
-        <div class="kz-card stat-card">
+        <div class="zf-card stat-card">
           <div class="stat-card-label">{$t("Approved")}</div>
           <div
             class="stat-card-value tab-num"
@@ -530,7 +530,7 @@
             )}: {weekLoggedHours}
           </div>
         </div>
-        <div class="kz-card stat-card">
+        <div class="zf-card stat-card">
           <div class="stat-card-label">{$t("Status")}</div>
           <div
             class="stat-card-value tab-num"
@@ -555,7 +555,7 @@
         )}
         {@const dailyTotalHours = (dailyTotalMinutes / 60).toFixed(1)}
         <div
-          class="kz-card day-card"
+          class="zf-card day-card"
           class:day-card--locked={weekStatus === "submitted" ||
             weekStatus === "approved"}
           class:day-card--absent={day.absent}
@@ -618,7 +618,7 @@
                   <span class="time-block-cat-name">{$t(category.name)}</span>
                   {#if entry.status !== "draft"}
                     <span
-                      class="kz-chip kz-chip-{entry.status}"
+                      class="zf-chip zf-chip-{entry.status}"
                       style="height:18px;font-size:10px"
                     >
                       {statusLabel(entry.status)}
@@ -643,7 +643,7 @@
           {#if weekStatus === "draft" || drafts.length > 0}
             <div class="day-add-btn">
               <button
-                class="kz-btn kz-btn-ghost kz-btn-sm"
+                class="zf-btn zf-btn-ghost zf-btn-sm"
                 style="width:100%;justify-content:center;border-style:dashed;border-color:var(--border)"
                 disabled={isDayAddDisabled(day)}
                 on:click={() => (showEntry = { entry_date: day.ds })}
@@ -659,7 +659,7 @@
     <!-- Weekend cards (Sat/Sun): only rendered when entries exist on those days -->
     {#each weekendDays as day (day.ds)}
       {#if day.items.length > 0}
-        <div class="kz-card" style="margin-top:12px;overflow-x:auto">
+        <div class="zf-card" style="margin-top:12px;overflow-x:auto">
           <div class="day-header">
             <div>
               <div class="day-name">{$t(day.dayName)}</div>
@@ -690,7 +690,7 @@
                   <span class="time-block-cat-name">{$t(category.name)}</span>
                   {#if entry.status !== "draft"}
                     <span
-                      class="kz-chip kz-chip-{entry.status}"
+                      class="zf-chip zf-chip-{entry.status}"
                       style="height:18px;font-size:10px"
                     >
                       {statusLabel(entry.status)}

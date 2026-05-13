@@ -99,7 +99,7 @@
 <div class="content-area" style="max-width:640px">
   {#if $currentUser.must_change_password}
     <div
-      class="kz-card"
+      class="zf-card"
       style="padding:16px 20px;margin-bottom:16px;border-color:var(--warning)"
     >
       <strong style="color:var(--warning-text)"
@@ -112,7 +112,7 @@
   {/if}
 
   <!-- Profile card -->
-  <div class="kz-card" style="padding:20px;margin-bottom:16px">
+  <div class="zf-card" style="padding:20px;margin-bottom:16px">
     <div style="display:flex;align-items:center;gap:16px;margin-bottom:20px">
       <div class="avatar" style="width:56px;height:56px;font-size:21px">
         {initials($currentUser)}
@@ -129,22 +129,22 @@
     </div>
     <div class="field-row">
       <div>
-        <label class="kz-label" for="account-email">{$t("Email")}</label>
+        <label class="zf-label" for="account-email">{$t("Email")}</label>
         <input
           id="account-email"
-          class="kz-input"
+          class="zf-input"
           value={$currentUser.email}
           readonly
           style="color:var(--text-secondary)"
         />
       </div>
       <div>
-        <label class="kz-label" for="account-weekly-hours"
+        <label class="zf-label" for="account-weekly-hours"
           >{$t("Weekly hours")}</label
         >
         <input
           id="account-weekly-hours"
-          class="kz-input"
+          class="zf-input"
           value={$t("{hours} / week", {
             hours: formatHours($currentUser.weekly_hours),
           })}
@@ -153,48 +153,48 @@
         />
       </div>
       <div>
-        <label class="kz-label" for="account-workdays-per-week"
+        <label class="zf-label" for="account-workdays-per-week"
           >{$t("Workdays per week")}</label
         >
         <input
           id="account-workdays-per-week"
-          class="kz-input"
+          class="zf-input"
           value={$currentUser.workdays_per_week}
           readonly
           style="color:var(--text-secondary)"
         />
       </div>
       <div>
-        <label class="kz-label" for="account-annual-leave-this"
+        <label class="zf-label" for="account-annual-leave-this"
           >{$t("Annual leave days")} {thisYear}</label
         >
         <input
           id="account-annual-leave-this"
-          class="kz-input"
+          class="zf-input"
           value={leaveDaysThisYear}
           readonly
           style="color:var(--text-secondary)"
         />
       </div>
       <div>
-        <label class="kz-label" for="account-annual-leave-next"
+        <label class="zf-label" for="account-annual-leave-next"
           >{$t("Annual leave days")} {nextYear}</label
         >
         <input
           id="account-annual-leave-next"
-          class="kz-input"
+          class="zf-input"
           value={leaveDaysNextYear}
           readonly
           style="color:var(--text-secondary)"
         />
       </div>
       <div>
-        <label class="kz-label" for="account-start-date"
+        <label class="zf-label" for="account-start-date"
           >{$t("Start date")}</label
         >
         <input
           id="account-start-date"
-          class="kz-input"
+          class="zf-input"
           value={fmtDate($currentUser.start_date)}
           readonly
           style="color:var(--text-secondary)"
@@ -202,7 +202,7 @@
       </div>
       {#if $currentUser.approvers && $currentUser.approvers.length > 0}
         <div>
-          <div class="kz-label">{$t("Approvers")}</div>
+          <div class="zf-label">{$t("Approvers")}</div>
           <div style="font-size:13px;color:var(--text-secondary);padding:6px 0">
             {$currentUser.approvers.map((a) => `${a.first_name} ${a.last_name}`).join(", ")}
           </div>
@@ -212,19 +212,19 @@
   </div>
 
   <!-- Password -->
-  <div class="kz-card" style="padding:20px;margin-bottom:16px">
+  <div class="zf-card" style="padding:20px;margin-bottom:16px">
     <div style="font-size:14px;font-weight:400;margin-bottom:14px">
       {$t("Change password")}
     </div>
     <div class="field-group">
       {#if !$currentUser.must_change_password}
         <div>
-          <label class="kz-label" for="account-current-password"
+          <label class="zf-label" for="account-current-password"
             >{$t("Current password")}</label
           >
           <input
             id="account-current-password"
-            class="kz-input"
+            class="zf-input"
             type="password"
             bind:value={cur}
             autocomplete="current-password"
@@ -233,12 +233,12 @@
       {/if}
       <div class="field-row">
         <div>
-          <label class="kz-label" for="account-new-password"
+          <label class="zf-label" for="account-new-password"
             >{$t("New password (min 12 chars)")}</label
           >
           <input
             id="account-new-password"
-            class="kz-input"
+            class="zf-input"
             type="password"
             bind:value={nw}
             minlength="12"
@@ -246,12 +246,12 @@
           />
         </div>
         <div>
-          <label class="kz-label" for="account-confirm-password"
+          <label class="zf-label" for="account-confirm-password"
             >{$t("Confirm new password")}</label
           >
           <input
             id="account-confirm-password"
-            class="kz-input"
+            class="zf-input"
             type="password"
             bind:value={nw2}
             minlength="12"
@@ -261,7 +261,7 @@
       </div>
       <div class="error-text">{error}</div>
       <div style="display:flex;justify-content:flex-end">
-        <button class="kz-btn kz-btn-primary" on:click={changePassword}
+        <button class="zf-btn zf-btn-primary" on:click={changePassword}
           >{$t("Save")}</button
         >
       </div>
@@ -269,7 +269,7 @@
   </div>
 
   <!-- Appearance -->
-  <div class="kz-card" style="padding:20px;margin-bottom:16px">
+  <div class="zf-card" style="padding:20px;margin-bottom:16px">
     <div style="font-size:14px;font-weight:400;margin-bottom:14px">
       {$t("Appearance")}
     </div>
@@ -281,7 +281,7 @@
         </div>
       </div>
       <button
-        class="kz-btn"
+        class="zf-btn"
         on:click={toggleDarkMode}
         aria-pressed={$theme === "dark"}
         disabled={savingTheme}

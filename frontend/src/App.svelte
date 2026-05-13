@@ -361,7 +361,7 @@
       {$t("Could not reach the server. Please check your connection.")}
     </p>
     <button
-      class="kz-btn kz-btn-primary"
+      class="zf-btn zf-btn-primary"
       on:click={async () => {
         booting = true;
         bootNetworkError = false;

@@ -92,7 +92,7 @@
 </script>
 
 <div class="login-wrap">
-  <div class="kz-card login-card">
+  <div class="zf-card login-card">
     <div class="login-logo">
       <div class="login-logo-icon">
         <Icon name="Clock" size={18} />
@@ -115,12 +115,12 @@
     >
       <div style="display:flex;gap:10px;margin-bottom:14px">
         <div style="flex:1">
-          <label class="kz-label" for="setup-first-name"
+          <label class="zf-label" for="setup-first-name"
             >{$t("First name")}</label
           >
           <input
             id="setup-first-name"
-            class="kz-input"
+            class="zf-input"
             type="text"
             bind:value={firstName}
             required
@@ -129,11 +129,11 @@
           />
         </div>
         <div style="flex:1">
-          <label class="kz-label" for="setup-last-name">{$t("Last name")}</label
+          <label class="zf-label" for="setup-last-name">{$t("Last name")}</label
           >
           <input
             id="setup-last-name"
-            class="kz-input"
+            class="zf-input"
             type="text"
             bind:value={lastName}
             required
@@ -143,11 +143,11 @@
         </div>
       </div>
       <div style="margin-bottom:14px">
-        <label class="kz-label" for="setup-email">{$t("Email")}</label>
+        <label class="zf-label" for="setup-email">{$t("Email")}</label>
         <input
           id="setup-email"
           name="username"
-          class="kz-input"
+          class="zf-input"
           type="email"
           bind:value={email}
           required
@@ -155,11 +155,11 @@
         />
       </div>
       <div style="margin-bottom:14px">
-        <label class="kz-label" for="setup-password">{$t("Password")}</label>
+        <label class="zf-label" for="setup-password">{$t("Password")}</label>
         <input
           id="setup-password"
           name="password"
-          class="kz-input"
+          class="zf-input"
           type="password"
           bind:value={password}
           required
@@ -168,13 +168,13 @@
         />
       </div>
       <div style="margin-bottom:14px">
-        <label class="kz-label" for="setup-confirm"
+        <label class="zf-label" for="setup-confirm"
           >{$t("Confirm password")}</label
         >
         <input
           id="setup-confirm"
           name="password_confirm"
-          class="kz-input"
+          class="zf-input"
           type="password"
           bind:value={confirmPassword}
           required
@@ -184,7 +184,7 @@
       </div>
       <div class="error-text" style="margin-bottom:8px">{error}</div>
       <button
-        class="kz-btn kz-btn-primary"
+        class="zf-btn zf-btn-primary"
         type="submit"
         disabled={submitting}
         style="width:100%;justify-content:center;height:38px"

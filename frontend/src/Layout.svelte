@@ -175,9 +175,9 @@
   function onDocClick(e) {
     if (!bellOpen) return;
     if (
-      !e.target.closest(".kz-bell-wrapper") &&
-      !e.target.closest(".kz-mobile-bell-wrapper") &&
-      !e.target.closest(".kz-notif-panel")
+      !e.target.closest(".zf-bell-wrapper") &&
+      !e.target.closest(".zf-mobile-bell-wrapper") &&
+      !e.target.closest(".zf-notif-panel")
     )
       bellOpen = false;
   }
@@ -272,9 +272,9 @@
         {/if}
       </div>
     </div>
-    <div class="kz-mobile-bell-wrapper mobile-title-bar-bell">
+    <div class="zf-mobile-bell-wrapper mobile-title-bar-bell">
       <button
-        class="kz-btn-icon-sm"
+        class="zf-btn-icon-sm"
         style="color:var(--nav-text-muted);position:relative"
         on:click|stopPropagation={toggleBell}
         title={$t("Notifications")}
@@ -302,9 +302,9 @@
           <span style="font-size:10px;color:var(--nav-text-muted);word-break:break-word">{$settings.organization_name}</span>
         {/if}
       </div>
-      <div class="kz-bell-wrapper" style="margin-left:auto;position:relative">
+      <div class="zf-bell-wrapper" style="margin-left:auto;position:relative">
         <button
-          class="kz-btn-icon-sm"
+          class="zf-btn-icon-sm"
           style="color:var(--nav-text-muted);position:relative"
           on:click|stopPropagation={toggleBell}
           title={$t("Notifications")}
@@ -326,7 +326,7 @@
         <a
           href={link.href}
           data-link="1"
-          class="kz-nav-item"
+          class="zf-nav-item"
           class:active={pathname === link.href ||
             pathname.startsWith(link.href + "/")}
         >
@@ -336,12 +336,12 @@
       {/each}
 
       {#if sections.employee.length}
-        <div class="kz-nav-section" style={sections.dashboard.length ? "margin-top: 8px" : ""}>{$t("Employee")}</div>
+        <div class="zf-nav-section" style={sections.dashboard.length ? "margin-top: 8px" : ""}>{$t("Employee")}</div>
         {#each sections.employee as link}
           <a
             href={link.href}
             data-link="1"
-            class="kz-nav-item"
+            class="zf-nav-item"
             class:active={pathname === link.href ||
               pathname.startsWith(link.href + "/")}
           >
@@ -352,12 +352,12 @@
       {/if}
 
       {#if sections.lead.length}
-        <div class="kz-nav-section" style="margin-top: 8px">{$t("Lead")}</div>
+        <div class="zf-nav-section" style="margin-top: 8px">{$t("Lead")}</div>
         {#each sections.lead as link}
           <a
             href={link.href}
             data-link="1"
-            class="kz-nav-item"
+            class="zf-nav-item"
             class:active={pathname === link.href ||
               pathname.startsWith(link.href + "/")}
           >
@@ -368,12 +368,12 @@
       {/if}
 
       {#if sections.admin.length}
-        <div class="kz-nav-section" style="margin-top: 8px">{$t("Admin")}</div>
+        <div class="zf-nav-section" style="margin-top: 8px">{$t("Admin")}</div>
         {#each sections.admin as link}
           <a
             href={link.href}
             data-link="1"
-            class="kz-nav-item"
+            class="zf-nav-item"
             class:active={link.key === "Admin"
               ? pathname.startsWith("/admin")
               : pathname === link.href || pathname.startsWith(link.href + "/")}
@@ -410,7 +410,7 @@
         </div>
       </a>
       <button
-        class="kz-btn-icon-sm"
+        class="zf-btn-icon-sm"
         style="color:var(--nav-text-muted)"
         on:click={logout}
         title={$t("Sign out")}
@@ -480,7 +480,7 @@
             </div>
           </a>
           <button
-            class="kz-btn-icon-sm"
+            class="zf-btn-icon-sm"
             on:click={() => (mobileMoreOpen = false)}
           >
             <Icon name="X" size={18} />
@@ -520,7 +520,7 @@
   {#if bellOpen}
     <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
     <div
-      class="kz-notif-panel"
+      class="zf-notif-panel"
       on:click|stopPropagation
       on:keydown={() => {}}
       role="dialog"
@@ -531,7 +531,7 @@
       >
         <strong style="flex:1;font-size:13px">{$t("Notifications")}</strong>
         <button
-          class="kz-btn kz-btn-sm kz-btn-ghost"
+          class="zf-btn zf-btn-sm zf-btn-ghost"
           on:click={markAllRead}
           disabled={$notificationsUnread === 0}
           title={$t("Mark all as read")}
@@ -541,7 +541,7 @@
           <Icon name="Check" size={12} />
         </button>
         <button
-          class="kz-btn kz-btn-sm kz-btn-ghost kz-btn-danger"
+          class="zf-btn zf-btn-sm zf-btn-ghost zf-btn-danger"
           on:click={clearAll}
           disabled={$notifications.length === 0}
           title={$t("Clear all")}
@@ -551,7 +551,7 @@
           <Icon name="Trash" size={12} />
         </button>
         <button
-          class="kz-btn kz-btn-sm kz-btn-ghost"
+          class="zf-btn zf-btn-sm zf-btn-ghost"
           on:click={() => (bellOpen = false)}
           title={$t("Close")}
           aria-label={$t("Close")}

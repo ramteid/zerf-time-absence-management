@@ -128,14 +128,14 @@
 <dialog bind:this={dlg} on:close={handleNativeClose}>
   <header>
     <span style="flex:1">{$t(isNew ? "Request Absence" : "Edit Absence")}</span>
-    <button class="kz-btn-icon-sm kz-btn-ghost" on:click={cancel}>
+    <button class="zf-btn-icon-sm zf-btn-ghost" on:click={cancel}>
       <Icon name="X" size={16} />
     </button>
   </header>
   <div class="dialog-body">
     <div>
-      <label class="kz-label" for="absence-kind">{$t("Type")}</label>
-      <select id="absence-kind" class="kz-select" bind:value={kind}>
+      <label class="zf-label" for="absence-kind">{$t("Type")}</label>
+      <select id="absence-kind" class="zf-select" bind:value={kind}>
         <option value="vacation">{$t("Vacation")}</option>
         <option value="sick">{$t("Sick")}</option>
         <option value="training">{$t("Training")}</option>
@@ -147,7 +147,7 @@
     </div>
     <div class="field-row">
       <div>
-        <label class="kz-label" for="absence-start-date">{$t("From")}</label>
+        <label class="zf-label" for="absence-start-date">{$t("From")}</label>
         <DatePicker
           id="absence-start-date"
           bind:value={start_date}
@@ -156,7 +156,7 @@
         />
       </div>
       <div>
-        <label class="kz-label" for="absence-end-date">{$t("To")}</label>
+        <label class="zf-label" for="absence-end-date">{$t("To")}</label>
         <DatePicker
           id="absence-end-date"
           bind:value={end_date}
@@ -165,12 +165,12 @@
       </div>
     </div>
     <div>
-      <label class="kz-label" for="absence-comment"
+      <label class="zf-label" for="absence-comment"
         >{$t("Notes (optional)")}</label
       >
       <textarea
         id="absence-comment"
-        class="kz-textarea"
+        class="zf-textarea"
         rows="3"
         bind:value={comment}
       ></textarea>
@@ -178,8 +178,8 @@
     <div class="error-text">{error}</div>
   </div>
   <footer>
-    <button class="kz-btn" on:click={cancel}>{$t("Cancel")}</button>
-    <button class="kz-btn kz-btn-primary" on:click={save}>
+    <button class="zf-btn" on:click={cancel}>{$t("Cancel")}</button>
+    <button class="zf-btn zf-btn-primary" on:click={save}>
       {$t(isNew ? "Submit Request" : "Save")}
     </button>
   </footer>

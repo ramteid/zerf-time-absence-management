@@ -85,7 +85,7 @@
   <div class="top-bar-subtitle">{$t("Manage your team")}</div>
   <div class="top-bar-actions">
     <button
-      class="kz-btn kz-btn-primary kz-btn-sm"
+      class="zf-btn zf-btn-primary zf-btn-sm"
       on:click={() => (showDialog = {})}
     >
       <Icon name="Plus" size={13} />{$t("Add Member")}
@@ -94,7 +94,7 @@
 </div>
 
 <div class="content-area" style="max-width:760px">
-  <div class="kz-card" style="overflow-x:auto">
+  <div class="zf-card" style="overflow-x:auto">
     {#each users as u, i}
       <div
         style="padding:10px 16px;{i < users.length - 1
@@ -118,27 +118,27 @@
         </div>
         <div style="display:flex;gap:4px">
           <button
-            class="kz-btn kz-btn-ghost kz-btn-sm"
+            class="zf-btn zf-btn-ghost zf-btn-sm"
             on:click={() => (showDialog = u)}
           >
             <Icon name="Edit" size={13} />
           </button>
           <button
-            class="kz-btn kz-btn-ghost kz-btn-sm"
+            class="zf-btn zf-btn-ghost zf-btn-sm"
             on:click={() => resetPw(u.id)}
           >
             <Icon name="Shield" size={13} />
           </button>
           <button
-            class="kz-btn kz-btn-ghost kz-btn-sm"
-            class:kz-btn-danger={u.active}
+            class="zf-btn zf-btn-ghost zf-btn-sm"
+            class:zf-btn-danger={u.active}
             title={u.active ? $t("Deactivate") : $t("Activate")}
             on:click={() => toggleActive(u)}
           >
             <Icon name={u.active ? "X" : "Check"} size={13} />
           </button>
           <button
-            class="kz-btn kz-btn-ghost kz-btn-sm kz-btn-danger"
+            class="zf-btn zf-btn-ghost zf-btn-sm zf-btn-danger"
             title={$t("Delete permanently")}
             on:click={() => deleteUser(u)}
           >

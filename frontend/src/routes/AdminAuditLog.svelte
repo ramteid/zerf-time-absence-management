@@ -72,9 +72,9 @@
 </div>
 
 <div class="content-area">
-  <div class="kz-card" style="overflow-x:auto">
-    <div class="kz-table-wrap">
-      <table class="kz-table">
+  <div class="zf-card" style="overflow-x:auto">
+    <div class="zf-table-wrap">
+      <table class="zf-table">
         <thead>
           <tr>
             <th>{$t("Time")}</th>

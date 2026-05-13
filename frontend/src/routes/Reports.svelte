@@ -867,12 +867,12 @@
 
 <div class="content-area">
   <!-- Card 1: employee report for the selected employee and month. -->
-  <div class="kz-card" style="padding:20px;margin-bottom:16px">
+  <div class="zf-card" style="padding:20px;margin-bottom:16px">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
       <span style="font-size:14px;font-weight:400">{$t("Employee report")}</span
       >
       <button
-        class="kz-btn-icon-sm kz-btn-ghost"
+        class="zf-btn-icon-sm zf-btn-ghost"
         title={$t("help_employee_details")}
         on:click={() => toggleHelp("report")}
         style="color:var(--text-tertiary);font-size:14px;cursor:help"
@@ -894,10 +894,10 @@
       {#if $currentUser.role !== "employee"}
         <!-- Leads and admins can select any employee. -->
         <div>
-          <label class="kz-label" for="report-user-id">{$t("Employee")}</label>
+          <label class="zf-label" for="report-user-id">{$t("Employee")}</label>
           <select
             id="report-user-id"
-            class="kz-select"
+            class="zf-select"
             bind:value={reportUserId}
           >
             {#each users as u}
@@ -907,12 +907,12 @@
         </div>
       {/if}
       <div>
-        <label class="kz-label" for="report-month">{$t("Month")}</label>
+        <label class="zf-label" for="report-month">{$t("Month")}</label>
         <DatePicker id="report-month" mode="month" bind:value={reportMonth} />
       </div>
     </div>
 
-    <button class="kz-btn kz-btn-primary" on:click={loadReport}
+    <button class="zf-btn zf-btn-primary" on:click={loadReport}
       >{$t("Show")}</button
     >
 
@@ -925,11 +925,11 @@
       </div>
       <div class="stat-cards" style="margin-bottom:16px">
         <!-- Submitted hours vs. full-month target -->
-        <div class="kz-card stat-card">
+        <div class="zf-card stat-card">
           <div class="stat-card-label stat-card-label-help">
             <span>{$t("Logged")}</span>
             <button
-              class="kz-btn-icon-sm kz-btn-ghost"
+              class="zf-btn-icon-sm zf-btn-ghost"
               title={$t("help_logged")}
               on:click={() => toggleHelp("logged")}
               style="color:var(--text-tertiary);font-size:12px;cursor:help"
@@ -960,7 +960,7 @@
         </div>
 
         <!-- Flextime balance at end of selected month -->
-        <div class="kz-card stat-card">
+        <div class="zf-card stat-card">
           <div class="stat-card-label">{$t("Flextime balance")}</div>
           <div
             class="stat-card-value tab-num"
@@ -979,11 +979,11 @@
         </div>
 
         <!-- Submission status with the same wording as on the dashboard -->
-        <div class="kz-card stat-card">
+        <div class="zf-card stat-card">
           <div class="stat-card-label stat-card-label-help">
             <span>{$t("Submissions")}</span>
             <button
-              class="kz-btn-icon-sm kz-btn-ghost"
+              class="zf-btn-icon-sm zf-btn-ghost"
               title={$t("help_submission_status")}
               on:click={() => toggleHelp("approvals")}
               style="color:var(--text-tertiary);font-size:12px;cursor:help"
@@ -1027,20 +1027,20 @@
           {$t("Vacation")}
         </div>
         <div class="stat-cards" style="margin-bottom:16px">
-          <div class="kz-card stat-card">
+          <div class="zf-card stat-card">
             <div class="stat-card-label">{$t("Entitlement")}</div>
             <div class="stat-card-value tab-num">
               {reportData.leaveBalance.annual_entitlement}
             </div>
           </div>
-          <div class="kz-card stat-card">
+          <div class="zf-card stat-card">
             <div class="stat-card-label">{$t("Taken")}</div>
             <div class="stat-card-value tab-num">
               {reportData.leaveBalance.already_taken}
             </div>
           </div>
           {#if reportData.leaveBalance.approved_upcoming > 0}
-            <div class="kz-card stat-card">
+            <div class="zf-card stat-card">
               <div class="stat-card-label">{$t("Planned")}</div>
               <div class="stat-card-value tab-num">
                 {reportData.leaveBalance.approved_upcoming}
@@ -1048,14 +1048,14 @@
             </div>
           {/if}
           {#if reportData.leaveBalance.requested > 0}
-            <div class="kz-card stat-card">
+            <div class="zf-card stat-card">
               <div class="stat-card-label">{$t("Requested")}</div>
               <div class="stat-card-value tab-num">
                 {reportData.leaveBalance.requested}
               </div>
             </div>
           {/if}
-          <div class="kz-card stat-card">
+          <div class="zf-card stat-card">
             <div class="stat-card-label">{$t("Remaining")}</div>
             <div
               class="stat-card-value tab-num"
@@ -1078,7 +1078,7 @@
         </div>
         <div class="stat-cards" style="margin-bottom:16px">
           {#each Object.entries(reportAbsenceSummary) as [kind, days]}
-            <div class="kz-card stat-card">
+            <div class="zf-card stat-card">
               <div class="stat-card-label">{absenceKindLabel(kind)}</div>
               <div class="stat-card-value tab-num">{days}</div>
               <div class="stat-card-sub">{$t("days")}</div>
@@ -1093,7 +1093,7 @@
           reportData.monthReport.category_totals,
         ).sort((a, b) => b[1] - a[1])}
         {@const catMax = catEntries[0][1]}
-        <div class="kz-card" style="padding:16px;margin-bottom:12px">
+        <div class="zf-card" style="padding:16px;margin-bottom:12px">
           <div style="font-weight:400;margin-bottom:12px">
             {$t("Category breakdown")}
           </div>
@@ -1131,11 +1131,11 @@
 
       <!-- Time entries table. -->
       {#if reportData.monthReport.entries?.length}
-        <div class="kz-card" style="overflow-x:auto;margin-bottom:12px">
+        <div class="zf-card" style="overflow-x:auto;margin-bottom:12px">
           <div style="font-weight:400;padding:16px 16px 12px">
             {$t("Entries")}
           </div>
-          <table class="kz-table">
+          <table class="zf-table">
             <thead>
               <tr>
                 <th>{$t("Date")}</th>
@@ -1155,7 +1155,7 @@
                   <td class="tab-num">{minToHM(e.minutes || 0)}</td>
                   <td>{e.category_name ? $t(e.category_name) : "-"}</td>
                   <td>
-                    <span class="kz-chip kz-chip-{e.status}"
+                    <span class="zf-chip zf-chip-{e.status}"
                       >{statusLabel(e.status)}</span
                     >
                   </td>
@@ -1168,11 +1168,11 @@
 
       <!-- Absence table. -->
       {#if reportData.monthReport.absences?.length}
-        <div class="kz-card" style="overflow-x:auto">
+        <div class="zf-card" style="overflow-x:auto">
           <div style="font-weight:400;padding:16px 16px 12px">
             {$t("Absences")}
           </div>
-          <table class="kz-table">
+          <table class="zf-table">
             <thead>
               <tr>
                 <th>{$t("Type")}</th>
@@ -1197,7 +1197,7 @@
 
       <!-- Gleitzeitkonto-Verlauf für das gewählte Jahr -->
       {#if reportData.flextimeChartData?.length}
-        <div class="kz-card" style="padding:16px;margin-top:12px">
+        <div class="zf-card" style="padding:16px;margin-top:12px">
           <div style="font-weight:400;margin-bottom:12px">
             {$t("Flextime balance")}
           </div>
@@ -1209,11 +1209,11 @@
 
   <!-- Card 3: team report for leads and admins. -->
   {#if $currentUser.permissions?.can_view_team_reports}
-    <div class="kz-card" style="padding:20px;margin-bottom:16px">
+    <div class="zf-card" style="padding:20px;margin-bottom:16px">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
         <span style="font-size:14px;font-weight:400">{$t("Team report")}</span>
         <button
-          class="kz-btn-icon-sm kz-btn-ghost"
+          class="zf-btn-icon-sm zf-btn-ghost"
           title={$t("help_team_report")}
           on:click={() => toggleHelp("team")}
           style="color:var(--text-tertiary);font-size:14px;cursor:help"
@@ -1233,18 +1233,18 @@
         style="display:flex;gap:12px;align-items:flex-end;margin-bottom:12px;flex-wrap:wrap"
       >
         <div style="flex:1">
-          <label class="kz-label" for="team-month">{$t("Month")}</label>
+          <label class="zf-label" for="team-month">{$t("Month")}</label>
           <DatePicker id="team-month" mode="month" bind:value={teamMonth} />
         </div>
-        <button class="kz-btn kz-btn-primary" on:click={showTeam}
+        <button class="zf-btn zf-btn-primary" on:click={showTeam}
           >{$t("Show")}</button
         >
       </div>
 
       {#if teamReport}
         <!-- Scrollable table with all columns -->
-        <div class="kz-table-wrap">
-          <table class="kz-table kz-table--fit">
+        <div class="zf-table-wrap">
+          <table class="zf-table zf-table--fit">
             <thead>
               <tr>
                 <!-- Name -->
@@ -1349,13 +1349,13 @@
   {/if}
 
   <!-- Card 4: category breakdown. -->
-  <div class="kz-card" style="padding:20px;margin-bottom:16px">
+  <div class="zf-card" style="padding:20px;margin-bottom:16px">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
       <span style="font-size:14px;font-weight:400"
         >{$t("Category breakdown")}</span
       >
       <button
-        class="kz-btn-icon-sm kz-btn-ghost"
+        class="zf-btn-icon-sm zf-btn-ghost"
         title={$t("help_category_breakdown")}
         on:click={() => toggleHelp("cat")}
         style="color:var(--text-tertiary);font-size:14px;cursor:help"
@@ -1373,11 +1373,11 @@
 
     <div class="field-row" style="margin-bottom:12px">
       <div>
-        <label class="kz-label" for="cat-from">{$t("From")}</label>
+        <label class="zf-label" for="cat-from">{$t("From")}</label>
         <DatePicker id="cat-from" bind:value={catFrom} max={catTo} />
       </div>
       <div>
-        <label class="kz-label" for="cat-to">{$t("To")}</label>
+        <label class="zf-label" for="cat-to">{$t("To")}</label>
         <DatePicker
           id="cat-to"
           bind:value={catTo}
@@ -1388,13 +1388,13 @@
     </div>
 
     <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
-      <button class="kz-btn kz-btn-primary" on:click={showCat}
+      <button class="zf-btn zf-btn-primary" on:click={showCat}
         >{$t("Run")}</button
       >
       <!-- Filter button: visible only when results are available -->
       {#if (catReport && catReport.length > 0) || allTeamCatColumns.length > 0}
         <button
-          class="kz-btn"
+          class="zf-btn"
           on:click={() => (catShowFilter = !catShowFilter)}
         >
           {$t("Filter")}
@@ -1460,8 +1460,8 @@
           {$t("No data.")}
         </div>
       {:else}
-        <div class="kz-table-wrap" style="margin-top:12px">
-          <table class="kz-table kz-table--fit">
+        <div class="zf-table-wrap" style="margin-top:12px">
+          <table class="zf-table zf-table--fit">
             <thead>
               <tr>
                 <th>{$t("Employee")}</th>
@@ -1520,8 +1520,8 @@
           {$t("No data.")}
         </div>
       {:else if filteredCatReport}
-        <div class="kz-table-wrap" style="margin-top:12px">
-          <table class="kz-table kz-table--fit" style="table-layout:fixed">
+        <div class="zf-table-wrap" style="margin-top:12px">
+          <table class="zf-table zf-table--fit" style="table-layout:fixed">
             <thead>
               <tr>
                 <th>{$t("Category")}</th>
@@ -1561,11 +1561,11 @@
   </div>
 
   <!-- Card 5: absences for a selectable date range. -->
-  <div class="kz-card" style="padding:20px;margin-bottom:16px">
+  <div class="zf-card" style="padding:20px;margin-bottom:16px">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
       <span style="font-size:14px;font-weight:400">{$t("Absences")}</span>
       <button
-        class="kz-btn-icon-sm kz-btn-ghost"
+        class="zf-btn-icon-sm zf-btn-ghost"
         title={$t("help_absence_report")}
         on:click={() => toggleHelp("absence")}
         style="color:var(--text-tertiary);font-size:14px;cursor:help"
@@ -1583,7 +1583,7 @@
 
     <div class="field-row" style="margin-bottom:12px">
       <div>
-        <label class="kz-label" for="absence-from">{$t("From")}</label>
+        <label class="zf-label" for="absence-from">{$t("From")}</label>
         <DatePicker
           id="absence-from"
           bind:value={absenceFrom}
@@ -1591,11 +1591,11 @@
         />
       </div>
       <div>
-        <label class="kz-label" for="absence-to">{$t("To")}</label>
+        <label class="zf-label" for="absence-to">{$t("To")}</label>
         <DatePicker id="absence-to" bind:value={absenceTo} min={absenceFrom} />
       </div>
     </div>
-    <button class="kz-btn kz-btn-primary" on:click={showAbsences}
+    <button class="zf-btn zf-btn-primary" on:click={showAbsences}
       >{$t("Run")}</button
     >
 
@@ -1606,20 +1606,20 @@
         </div>
       {:else}
         <div class="stat-cards" style="margin-top:16px">
-          <div class="kz-card stat-card">
+          <div class="zf-card stat-card">
             <div class="stat-card-label">{$t("Total days")}</div>
             <div class="stat-card-value tab-num">{absenceTotalDays}</div>
           </div>
           {#each Object.entries(absenceByKind) as [kind, days]}
-            <div class="kz-card stat-card">
+            <div class="zf-card stat-card">
               <div class="stat-card-label">{absenceKindLabel(kind)}</div>
               <div class="stat-card-value tab-num">{days}</div>
             </div>
           {/each}
         </div>
 
-        <div class="kz-card" style="overflow-x:auto;margin-top:12px">
-          <table class="kz-table">
+        <div class="zf-card" style="overflow-x:auto;margin-top:12px">
+          <table class="zf-table">
             <thead>
               <tr>
                 {#if isLeadView}<th>{$t("Employee")}</th>{/if}
@@ -1652,7 +1652,7 @@
                   >
                   <td class="tab-num" style="text-align:right">{a.days}</td>
                   <td
-                    ><span class="kz-chip kz-chip-{a.status}"
+                    ><span class="zf-chip zf-chip-{a.status}"
                       >{statusLabel(a.status)}</span
                     ></td
                   >
@@ -1666,13 +1666,13 @@
   </div>
 
   <!-- Card 6: timesheet export. -->
-  <div class="kz-card" style="padding:20px">
+  <div class="zf-card" style="padding:20px">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
       <span style="font-size:14px;font-weight:400"
         >{$t("Export timesheet")}</span
       >
       <button
-        class="kz-btn-icon-sm kz-btn-ghost"
+        class="zf-btn-icon-sm zf-btn-ghost"
         title={$t("help_csv_export")}
         on:click={() => toggleHelp("csv")}
         style="color:var(--text-tertiary);font-size:14px;cursor:help"
@@ -1693,8 +1693,8 @@
     {#if $currentUser.role !== "employee"}
       <!-- First row: employee selection only -->
       <div style="margin-bottom:12px">
-        <label class="kz-label" for="csv-user-id">{$t("Employee")}</label>
-        <select id="csv-user-id" class="kz-select" bind:value={csvUserId}>
+        <label class="zf-label" for="csv-user-id">{$t("Employee")}</label>
+        <select id="csv-user-id" class="zf-select" bind:value={csvUserId}>
           {#each users as u}
             <option value={u.id}>{u.first_name} {u.last_name}</option>
           {/each}
@@ -1704,11 +1704,11 @@
     <!-- Second row: from / to -->
     <div class="field-row" style="margin-bottom:12px">
       <div>
-        <label class="kz-label" for="csv-from">{$t("From")}</label>
+        <label class="zf-label" for="csv-from">{$t("From")}</label>
         <DatePicker id="csv-from" bind:value={csvFrom} max={csvTo} />
       </div>
       <div>
-        <label class="kz-label" for="csv-to">{$t("To")}</label>
+        <label class="zf-label" for="csv-to">{$t("To")}</label>
         <DatePicker
           id="csv-to"
           bind:value={csvTo}
@@ -1721,14 +1721,14 @@
     <div class="error-text">{csvError}</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button
-        class="kz-btn kz-btn-primary"
+        class="zf-btn zf-btn-primary"
         on:click={exportCsv}
         disabled={exportInProgress}
       >
         <Icon name="Download" size={14} />{$t("Export CSV")}
       </button>
       <button
-        class="kz-btn kz-btn-primary"
+        class="zf-btn zf-btn-primary"
         on:click={exportPdf}
         disabled={exportInProgress}
       >

@@ -113,7 +113,7 @@ describe("Reports", () => {
     component = mount(Reports, { target });
     await settle();
 
-    const showButton = target.querySelector("button.kz-btn.kz-btn-primary");
+    const showButton = target.querySelector("button.zf-btn.zf-btn-primary");
     expect(showButton).not.toBeNull();
     showButton.click();
 

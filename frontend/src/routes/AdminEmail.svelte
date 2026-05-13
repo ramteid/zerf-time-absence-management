@@ -90,7 +90,7 @@
 </div>
 
 <div class="content-area">
-  <div class="kz-card" style="padding:20px;margin-bottom:16px">
+  <div class="zf-card" style="padding:20px;margin-bottom:16px">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
       <span
         class="smtp-status-dot"
@@ -112,7 +112,7 @@
       <div class="field-row">
         <div>
           <label
-            class="kz-label"
+            class="zf-label"
             style="display:flex;align-items:center;gap:8px"
           >
             <input
@@ -133,7 +133,7 @@
       <div class="field-row" style="margin-top:8px">
         <div>
           <label
-            class="kz-label"
+            class="zf-label"
             style="display:flex;align-items:center;gap:8px"
           >
             <input
@@ -155,7 +155,7 @@
       <div class="field-row" style="margin-top:8px">
         <div>
           <label
-            class="kz-label"
+            class="zf-label"
             style="display:flex;align-items:center;gap:8px"
           >
             <input
@@ -176,19 +176,19 @@
 
       <div class="field-row" style="margin-top:12px">
         <div>
-          <label class="kz-label" for="smtp-host">{$t("SMTP Host")}</label>
+          <label class="zf-label" for="smtp-host">{$t("SMTP Host")}</label>
           <input
             id="smtp-host"
-            class="kz-input"
+            class="zf-input"
             bind:value={smtpSettings.smtp_host}
             placeholder="smtp.example.com"
           />
         </div>
         <div>
-          <label class="kz-label" for="smtp-port">{$t("SMTP Port")}</label>
+          <label class="zf-label" for="smtp-port">{$t("SMTP Port")}</label>
           <input
             id="smtp-port"
-            class="kz-input"
+            class="zf-input"
             type="number"
             bind:value={smtpSettings.smtp_port}
             placeholder="587"
@@ -198,16 +198,16 @@
 
       <div class="field-row" style="margin-top:12px">
         <div>
-          <label class="kz-label" for="smtp-username">{$t("Username")}</label>
+          <label class="zf-label" for="smtp-username">{$t("Username")}</label>
           <input
             id="smtp-username"
-            class="kz-input"
+            class="zf-input"
             bind:value={smtpSettings.smtp_username}
             autocomplete="off"
           />
         </div>
         <div>
-          <label class="kz-label" for="smtp-password">
+          <label class="zf-label" for="smtp-password">
             {$t("Password")}
             {#if smtpSettings.smtp_password_set}
               <span
@@ -218,7 +218,7 @@
           </label>
           <input
             id="smtp-password"
-            class="kz-input"
+            class="zf-input"
             type="password"
             bind:value={smtpPassword}
             on:input={() => (clearStoredPassword = false)}
@@ -227,7 +227,7 @@
           />
           {#if smtpSettings.smtp_password_set}
             <label
-              class="kz-label"
+              class="zf-label"
               style="display:flex;align-items:center;gap:8px;margin-top:8px"
             >
               <input
@@ -244,21 +244,21 @@
 
       <div class="field-row" style="margin-top:12px">
         <div>
-          <label class="kz-label" for="smtp-from">{$t("From address")}</label>
+          <label class="zf-label" for="smtp-from">{$t("From address")}</label>
           <input
             id="smtp-from"
-            class="kz-input"
+            class="zf-input"
             bind:value={smtpSettings.smtp_from}
             placeholder="Zerf <noreply@example.com>"
           />
         </div>
         <div>
-          <label class="kz-label" for="smtp-encryption"
+          <label class="zf-label" for="smtp-encryption"
             >{$t("Encryption")}</label
           >
           <select
             id="smtp-encryption"
-            class="kz-select"
+            class="zf-select"
             bind:value={smtpSettings.smtp_encryption}
           >
             <option value="starttls">STARTTLS</option>
@@ -272,7 +272,7 @@
         style="display:flex;justify-content:flex-end;gap:8px;padding-top:16px"
       >
         <button
-          class="kz-btn"
+          class="zf-btn"
           on:click={testConnection}
           disabled={testing || saving}
         >
@@ -283,7 +283,7 @@
           {/if}
         </button>
         <button
-          class="kz-btn kz-btn-primary"
+          class="zf-btn zf-btn-primary"
           on:click={save}
           disabled={saving || testing}
         >

@@ -316,9 +316,9 @@
     <h1>{$t("Calendar")}</h1>
   </div>
   <div class="top-bar-actions calendar-top-actions">
-    <div class="kz-nav-slider">
+    <div class="zf-nav-slider">
       <button
-        class="kz-btn kz-btn-ghost"
+        class="zf-btn zf-btn-ghost"
         on:click={() => go("/calendar" + prev)}
       >
         <Icon name="ChevLeft" size={16} />
@@ -327,7 +327,7 @@
         {fmtMonthYear(new Date(year, month - 1, 1))}
       </span>
       <button
-        class="kz-btn kz-btn-ghost"
+        class="zf-btn zf-btn-ghost"
         on:click={() => go("/calendar" + next)}
       >
         <Icon name="ChevRight" size={16} />
@@ -337,7 +337,7 @@
 </div>
 
 <div class="content-area">
-  <div class="kz-card" style="padding:16px">
+  <div class="zf-card" style="padding:16px">
     <div class="cal-grid" style="margin-bottom:8px">
       {#each weekdayLabels() as wd}
         <div class="cal-head">{wd}</div>
@@ -393,7 +393,7 @@
   {#if popupCell}
     <header>
       <span style="flex:1">{fmtDate(popupCell.ds)}</span>
-      <button class="kz-btn-icon-sm kz-btn-ghost" on:click={closeDlg}>
+      <button class="zf-btn-icon-sm zf-btn-ghost" on:click={closeDlg}>
         <Icon name="X" size={16} />
       </button>
     </header>
@@ -414,7 +414,7 @@
     </div>
     <footer>
       <span style="flex:1"></span>
-      <button class="kz-btn" on:click={closeDlg}>{$t("Close")}</button>
+      <button class="zf-btn" on:click={closeDlg}>{$t("Close")}</button>
     </footer>
   {/if}
 </dialog>
