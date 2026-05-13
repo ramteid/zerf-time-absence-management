@@ -340,13 +340,19 @@ async fn auth_full_workflow() {
                 &json!({"email": "admin@example.com"}),
             )
             .await;
-        assert_eq!(st, StatusCode::BAD_REQUEST, "error when public_url is missing");
-        assert_eq!(body["error"], "password_reset_unavailable", "generic error code");
+        assert_eq!(
+            st,
+            StatusCode::BAD_REQUEST,
+            "error when public_url is missing"
+        );
+        assert_eq!(
+            body["error"], "password_reset_unavailable",
+            "generic error code"
+        );
     }
 
     app.cleanup().await;
 }
-
 
 async fn create_password_reset_user(
     app: &TestApp,

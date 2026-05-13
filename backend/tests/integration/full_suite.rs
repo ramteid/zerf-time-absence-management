@@ -182,6 +182,7 @@ async fn full_integration_suite() {
 
     // -- Time entries - validations -----------------------------------------
     let today_s = today();
+    let entry_day_s = date_offset(-1);
     let future_s = date_offset(5);
     let te1: i64;
     let te2: i64;
@@ -189,7 +190,7 @@ async fn full_integration_suite() {
         let (st, body) = emp
             .post(
                 "/api/v1/time-entries",
-                &json!({"entry_date": &today_s, "start_time":"08:00","end_time":"12:00","category_id": cat_id, "comment":"morning"}),
+                &json!({"entry_date": &entry_day_s, "start_time":"08:00","end_time":"12:00","category_id": cat_id, "comment":"morning"}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "create entry 1");
@@ -198,7 +199,7 @@ async fn full_integration_suite() {
         let (st, _) = emp
             .post(
                 "/api/v1/time-entries",
-                &json!({"entry_date": &today_s, "start_time":"10:00","end_time":"11:00","category_id": cat_id}),
+                &json!({"entry_date": &entry_day_s, "start_time":"10:00","end_time":"11:00","category_id": cat_id}),
             )
             .await;
         assert_eq!(st, StatusCode::BAD_REQUEST, "overlap rejected");
@@ -206,7 +207,7 @@ async fn full_integration_suite() {
         let (st, _) = emp
             .post(
                 "/api/v1/time-entries",
-                &json!({"entry_date": &today_s, "start_time":"14:00","end_time":"13:00","category_id": cat_id}),
+                &json!({"entry_date": &entry_day_s, "start_time":"14:00","end_time":"13:00","category_id": cat_id}),
             )
             .await;
         assert_eq!(st, StatusCode::BAD_REQUEST, "end<start rejected");
@@ -222,7 +223,7 @@ async fn full_integration_suite() {
         let (st, body) = emp
             .post(
                 "/api/v1/time-entries",
-                &json!({"entry_date": &today_s, "start_time":"13:00","end_time":"15:00","category_id": cat_id}),
+                &json!({"entry_date": &entry_day_s, "start_time":"13:00","end_time":"15:00","category_id": cat_id}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "create entry 2");
@@ -232,7 +233,7 @@ async fn full_integration_suite() {
         let (st, _) = emp
             .post(
                 "/api/v1/time-entries",
-                &json!({"entry_date": &today_s, "start_time":"15:00","end_time":"23:30","category_id": cat_id}),
+                &json!({"entry_date": &entry_day_s, "start_time":"15:00","end_time":"23:30","category_id": cat_id}),
             )
             .await;
         assert_eq!(st, StatusCode::BAD_REQUEST, ">14h day rejected");
@@ -240,7 +241,7 @@ async fn full_integration_suite() {
         let (st, body) = emp
             .get(&format!(
                 "/api/v1/time-entries?from={}&to={}",
-                today_s, today_s
+                entry_day_s, entry_day_s
             ))
             .await;
         assert_eq!(st, StatusCode::OK, "list own entries");
@@ -257,7 +258,7 @@ async fn full_integration_suite() {
         let (st, _) = emp
             .put(
                 &format!("/api/v1/time-entries/{}", te1),
-                &json!({"entry_date": &today_s, "start_time":"08:00","end_time":"11:00","category_id": cat_id, "comment":"x"}),
+                &json!({"entry_date": &entry_day_s, "start_time":"08:00","end_time":"11:00","category_id": cat_id, "comment":"x"}),
             )
             .await;
         assert_eq!(st, StatusCode::BAD_REQUEST, "edit submitted entry rejected");

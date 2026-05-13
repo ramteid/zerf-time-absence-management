@@ -37,15 +37,23 @@ pub async fn create(
     reference_type: Option<&str>,
     reference_id: Option<i64>,
 ) {
-    if let Err(e) = state.db.notifications.insert(
-        user_id, kind, title, body, reference_type, reference_id,
-    ).await {
+    if let Err(e) = state
+        .db
+        .notifications
+        .insert(user_id, kind, title, body, reference_type, reference_id)
+        .await
+    {
         tracing::warn!(target:"zerf::notifications", "insert failed: {e}");
         return;
     }
     // Resolve recipient email and dispatch SMTP best-effort.
     if let Some(email) = state.db.notifications.get_user_email(user_id).await {
-        let smtp = state.db.settings.load_smtp_config().await.map(std::sync::Arc::new);
+        let smtp = state
+            .db
+            .settings
+            .load_smtp_config()
+            .await
+            .map(std::sync::Arc::new);
         let language = crate::i18n::load_ui_language(&state.pool)
             .await
             .unwrap_or_default();
@@ -56,7 +64,8 @@ pub async fn create(
         )
         .await
         .unwrap_or_else(|_| crate::settings::DEFAULT_TIMEZONE.to_string());
-        let timestamp = crate::i18n::format_datetime_in_timezone(&language, chrono::Utc::now(), &timezone);
+        let timestamp =
+            crate::i18n::format_datetime_in_timezone(&language, chrono::Utc::now(), &timezone);
         let email_body = match &state.cfg.public_url {
             Some(url) => format!("{body}\n\n{timestamp}\n\n{url}"),
             None => format!("{body}\n\n{timestamp}"),
@@ -73,7 +82,7 @@ pub async fn create_translated(
     kind: &str,
     title_key: &str,
     body_key: &str,
-    params: Vec<(&str, String)>,
+    params: Vec<(&'static str, String)>,
     reference_type: Option<&str>,
     reference_id: Option<i64>,
 ) {
@@ -95,14 +104,24 @@ pub async fn list(
     State(app_state): State<AppState>,
     requester: User,
 ) -> AppResult<Json<Vec<crate::repository::notifications::Notification>>> {
-    Ok(Json(app_state.db.notifications.list_for_user(requester.id).await?))
+    Ok(Json(
+        app_state
+            .db
+            .notifications
+            .list_for_user(requester.id)
+            .await?,
+    ))
 }
 
 pub async fn unread_count(
     State(app_state): State<AppState>,
     requester: User,
 ) -> AppResult<Json<serde_json::Value>> {
-    let count = app_state.db.notifications.count_unread(requester.id).await?;
+    let count = app_state
+        .db
+        .notifications
+        .count_unread(requester.id)
+        .await?;
     Ok(Json(serde_json::json!({ "count": count })))
 }
 
@@ -111,15 +130,16 @@ pub async fn stream(
     requester: User,
 ) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
     let requester_id = requester.id;
-    let stream = BroadcastStream::new(app_state.db.notifications.subscribe()).filter_map(move |msg| {
-        let should_refresh = match msg {
-            Ok(signal) => signal.user_id == requester_id,
-            Err(_) => true, // lagged — refresh to catch up
-        };
-        should_refresh.then_some(Ok(Event::default()
-            .event("notification")
-            .data(r#"{"type":"refresh"}"#)))
-    });
+    let stream =
+        BroadcastStream::new(app_state.db.notifications.subscribe()).filter_map(move |msg| {
+            let should_refresh = match msg {
+                Ok(signal) => signal.user_id == requester_id,
+                Err(_) => true, // lagged — refresh to catch up
+            };
+            should_refresh.then_some(Ok(Event::default()
+                .event("notification")
+                .data(r#"{"type":"refresh"}"#)))
+        });
 
     Sse::new(stream).keep_alive(
         KeepAlive::new()
@@ -133,7 +153,11 @@ pub async fn mark_read(
     requester: User,
     Path(notification_id): Path<i64>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let rows_updated = app_state.db.notifications.mark_read(notification_id, requester.id).await?;
+    let rows_updated = app_state
+        .db
+        .notifications
+        .mark_read(notification_id, requester.id)
+        .await?;
     if rows_updated == 0 {
         return Err(AppError::NotFound);
     }
@@ -144,7 +168,11 @@ pub async fn mark_all_read(
     State(app_state): State<AppState>,
     requester: User,
 ) -> AppResult<Json<serde_json::Value>> {
-    let rows_updated = app_state.db.notifications.mark_all_read(requester.id).await?;
+    let rows_updated = app_state
+        .db
+        .notifications
+        .mark_all_read(requester.id)
+        .await?;
     Ok(Json(
         serde_json::json!({ "ok": true, "count": rows_updated }),
     ))
@@ -158,6 +186,18 @@ pub async fn delete_all(
     Ok(Json(
         serde_json::json!({ "ok": true, "count": rows_deleted }),
     ))
+}
+
+/// Load the configured UI language, falling back to the default on error.
+/// Used by notification senders across all modules.
+pub async fn load_language(pool: &crate::db::DatabasePool) -> crate::i18n::Language {
+    match crate::i18n::load_ui_language(pool).await {
+        Ok(language) => language,
+        Err(e) => {
+            tracing::warn!(target: "zerf::notifications", "load notification language failed: {e}");
+            crate::i18n::Language::default()
+        }
+    }
 }
 
 /// Trim notifications older than 90 days; called from the background loop.

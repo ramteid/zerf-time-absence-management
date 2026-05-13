@@ -1,4 +1,5 @@
 pub mod absences;
+pub mod approval_reminders;
 pub mod audit;
 pub mod auth;
 pub mod categories;
@@ -14,7 +15,6 @@ pub mod reopen_requests;
 pub mod reports;
 pub mod repository;
 pub mod settings;
-pub mod approval_reminders;
 pub mod submission_reminders;
 pub mod time_calc;
 pub mod time_entries;
@@ -44,8 +44,6 @@ pub struct AppState {
     pub cfg: Arc<config::Config>,
     pub notifications: notifications::NotificationBroadcaster,
 }
-
-
 
 /// Build the API router (without static-file serving).
 pub fn build_api_router(state: AppState) -> Router<AppState> {
@@ -101,8 +99,14 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                 .route("/absences/{id}/approve", post(absences::approve))
                 .route("/absences/{id}/reject", post(absences::reject))
                 .route("/absences/{id}/revoke", post(absences::revoke))
-                .route("/absences/{id}/approve-cancellation", post(absences::approve_cancellation))
-                .route("/absences/{id}/reject-cancellation", post(absences::reject_cancellation))
+                .route(
+                    "/absences/{id}/approve-cancellation",
+                    post(absences::approve_cancellation),
+                )
+                .route(
+                    "/absences/{id}/reject-cancellation",
+                    post(absences::reject_cancellation),
+                )
                 .route("/leave-balance/{uid}", get(absences::balance))
                 .route(
                     "/change-requests",
@@ -118,7 +122,12 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                     post(change_requests::reject),
                 )
                 .route("/users", get(users::list).post(users::create))
-                .route("/users/{id}", get(users::get_one).put(users::update).delete(users::delete_user))
+                .route(
+                    "/users/{id}",
+                    get(users::get_one)
+                        .put(users::update)
+                        .delete(users::delete_user),
+                )
                 .route("/users/{id}/deactivate", post(users::deactivate))
                 .route("/users/{id}/reset-password", post(users::reset_password))
                 .route(
@@ -214,7 +223,13 @@ async fn serve_favicon(
     let body = tokio::fs::read(format!("{}/favicon.svg", state.cfg.static_dir))
         .await
         .map_err(|_| StatusCode::NOT_FOUND)?;
-    Ok(([(header::CONTENT_TYPE, HeaderValue::from_static("image/svg+xml"))], body))
+    Ok((
+        [(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("image/svg+xml"),
+        )],
+        body,
+    ))
 }
 
 async fn spa_fallback(
@@ -259,12 +274,12 @@ pub fn build_app(state: AppState) -> Router {
 
     // Long-lived immutable caching for hashed static assets (/assets/*)
     let assets_service = ServeDir::new(assets_dir);
-    let assets_router = Router::new()
-        .nest_service("/assets", assets_service)
-        .layer(SetResponseHeaderLayer::overriding(
+    let assets_router = Router::new().nest_service("/assets", assets_service).layer(
+        SetResponseHeaderLayer::overriding(
             header::CACHE_CONTROL,
             HeaderValue::from_static("public, max-age=31536000, immutable"),
-        ));
+        ),
+    );
 
     // API + SPA routes get no-store
     let app_routes = Router::new()

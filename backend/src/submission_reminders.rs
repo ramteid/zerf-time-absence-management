@@ -85,6 +85,7 @@ pub fn last_day_of_month(year: i32, month: u32) -> u32 {
 /// A workday is complete when it is covered by either:
 ///   - at least one submitted/approved time entry (crediting or non-crediting), OR
 ///   - an approved absence.
+///
 /// A workday with any draft or rejected entry is incomplete even if another
 /// entry on the same day is submitted.
 async fn find_unsubmitted_weeks(
@@ -96,9 +97,8 @@ async fn find_unsubmitted_weeks(
     let today = crate::settings::app_today(pool).await;
 
     // Monday of the current week — we check only fully elapsed weeks.
-    let current_week_monday = today - chrono::Duration::days(
-        today.weekday().num_days_from_monday() as i64,
-    );
+    let current_week_monday =
+        today - chrono::Duration::days(today.weekday().num_days_from_monday() as i64);
     // Check range: from user start up to (but not including) current week Monday.
     let check_to = current_week_monday - chrono::Duration::days(1);
     if user_start > check_to {
@@ -106,18 +106,15 @@ async fn find_unsubmitted_weeks(
     }
 
     // Align to full weeks: start from the Monday of the user_start week.
-    let first_monday = user_start - chrono::Duration::days(
-        user_start.weekday().num_days_from_monday() as i64,
-    );
+    let first_monday =
+        user_start - chrono::Duration::days(user_start.weekday().num_days_from_monday() as i64);
 
     // Load holidays in the check range.
-    let holiday_set = match crate::repository::HolidayDb::new(pool.clone())
-        .get_dates_in_range(first_monday, check_to)
-        .await
-    {
-        Ok(h) => h,
-        Err(_) => std::collections::HashSet::new(),
-    };
+    let holiday_set: std::collections::HashSet<NaiveDate> =
+        crate::repository::HolidayDb::new(pool.clone())
+            .get_dates_in_range(first_monday, check_to)
+            .await
+            .unwrap_or_default();
 
     // Load submitted/approved time entry dates.
     let submitted_dates: std::collections::HashSet<NaiveDate> = sqlx::query_as::<_, (NaiveDate,)>(
@@ -136,21 +133,20 @@ async fn find_unsubmitted_weeks(
     .collect();
 
     // Load dates with incomplete entries (draft/rejected).
-    let incomplete_dates: std::collections::HashSet<NaiveDate> =
-        sqlx::query_as::<_, (NaiveDate,)>(
-            "SELECT DISTINCT entry_date FROM time_entries \
+    let incomplete_dates: std::collections::HashSet<NaiveDate> = sqlx::query_as::<_, (NaiveDate,)>(
+        "SELECT DISTINCT entry_date FROM time_entries \
              WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3 \
              AND status NOT IN ('submitted','approved')",
-        )
-        .bind(user_id)
-        .bind(first_monday)
-        .bind(check_to)
-        .fetch_all(pool)
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .map(|(d,)| d)
-        .collect();
+    )
+    .bind(user_id)
+    .bind(first_monday)
+    .bind(check_to)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default()
+    .into_iter()
+    .map(|(d,)| d)
+    .collect();
 
     // Load approved absence date ranges and expand to a date set.
     let absence_rows: Vec<(NaiveDate, NaiveDate)> = sqlx::query_as(
@@ -210,9 +206,13 @@ pub async fn run_check(state: &crate::AppState) {
     let pool = &state.pool;
 
     // Respect the admin toggle; default is enabled (true).
-    let reminders_enabled = load_setting(pool, crate::settings::SUBMISSION_REMINDERS_ENABLED_KEY, "true")
-        .await
-        .unwrap_or_else(|_| "true".to_string());
+    let reminders_enabled = load_setting(
+        pool,
+        crate::settings::SUBMISSION_REMINDERS_ENABLED_KEY,
+        "true",
+    )
+    .await
+    .unwrap_or_else(|_| "true".to_string());
     if reminders_enabled == "false" {
         tracing::debug!(target:"zerf::submission_reminders", "Submission reminders are disabled, skipping check");
         return;
@@ -240,13 +240,14 @@ pub async fn run_check(state: &crate::AppState) {
     .unwrap_or_else(|_| crate::settings::DEFAULT_TIMEZONE.to_string());
     let today = crate::settings::app_today(pool).await;
 
-    let rows: Vec<(i64, String, NaiveDate, i16)> = match state.db.users.get_active_users_with_hours().await {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::warn!(target:"zerf::submission_reminders", "fetch users failed: {e}");
-            return;
-        }
-    };
+    let rows: Vec<(i64, String, NaiveDate, i16)> =
+        match state.db.users.get_active_users_with_hours().await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(target:"zerf::submission_reminders", "fetch users failed: {e}");
+                return;
+            }
+        };
 
     // Load SMTP config once for all users
     let smtp = crate::settings::load_smtp_config(pool)
@@ -273,7 +274,8 @@ pub async fn run_check(state: &crate::AppState) {
             "submission_reminder_body",
             &[("weeks", weeks_str.clone())],
         );
-        let timestamp = crate::i18n::format_datetime_in_timezone(&language, chrono::Utc::now(), &timezone);
+        let timestamp =
+            crate::i18n::format_datetime_in_timezone(&language, chrono::Utc::now(), &timezone);
         let email_body = format!(
             "{}\n\n{}",
             crate::i18n::translate(
@@ -292,16 +294,19 @@ pub async fn run_check(state: &crate::AppState) {
         let dedupe_key = format!("submission_reminder:{}", today);
         // Only send the in-app signal and email when the row was actually inserted
         // (rows_affected == 0 means the conflict guard fired — reminder already sent today).
-        match state.db.notifications.insert_idempotent_with_dedupe_key(
-            user_id,
-            "submission_reminder",
-            &title,
-            &body,
-            None,
-            None,
-            Some(&dedupe_key),
-        )
-        .await
+        match state
+            .db
+            .notifications
+            .insert_idempotent_with_dedupe_key(
+                user_id,
+                "submission_reminder",
+                &title,
+                &body,
+                None,
+                None,
+                Some(&dedupe_key),
+            )
+            .await
         {
             Ok(true) => {
                 let _ = state
@@ -377,9 +382,7 @@ mod tests {
     #[test]
     fn deadline_today_but_not_yet() {
         // 2026-05-15 06:00 local, deadline day 15 -> should wait ~1 hour
-        let now = Berlin
-            .with_ymd_and_hms(2026, 5, 15, 6, 0, 0)
-            .unwrap();
+        let now = Berlin.with_ymd_and_hms(2026, 5, 15, 6, 0, 0).unwrap();
         let dur = duration_until_next_deadline(now, 15);
         let secs = dur.as_secs();
         assert!(secs >= 3500, "should be about 1 hour, got {secs}");
@@ -389,9 +392,7 @@ mod tests {
     #[test]
     fn deadline_already_passed_schedules_next_month() {
         // 2026-05-15 08:00 local, deadline day 10 -> next: June 10 at 07:00
-        let now = Berlin
-            .with_ymd_and_hms(2026, 5, 15, 8, 0, 0)
-            .unwrap();
+        let now = Berlin.with_ymd_and_hms(2026, 5, 15, 8, 0, 0).unwrap();
         let dur = duration_until_next_deadline(now, 10);
         let secs = dur.as_secs();
         // ~25.96 days
@@ -413,9 +414,7 @@ mod tests {
     #[test]
     fn deadline_december_wraps_to_january() {
         // 2026-12-20 08:00, deadline day 5 -> next: Jan 5, 2027 at 07:00
-        let now = Berlin
-            .with_ymd_and_hms(2026, 12, 20, 8, 0, 0)
-            .unwrap();
+        let now = Berlin.with_ymd_and_hms(2026, 12, 20, 8, 0, 0).unwrap();
         let dur = duration_until_next_deadline(now, 5);
         let secs = dur.as_secs();
         // ~15.96 days

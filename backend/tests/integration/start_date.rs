@@ -50,8 +50,8 @@ async fn start_date_full_workflow() {
                 "/api/v1/time-entries",
                 &json!({
                     "entry_date": today(),
-                    "start_time": "08:00",
-                    "end_time": "12:00",
+                    "start_time": "00:00",
+                    "end_time": "00:01",
                     "category_id": cat_id,
                 }),
             )
@@ -279,8 +279,8 @@ async fn start_date_full_workflow() {
                 "/api/v1/time-entries",
                 &json!({
                     "entry_date": today(),
-                    "start_time": "08:00",
-                    "end_time": "12:00",
+                    "start_time": "00:00",
+                    "end_time": "00:01",
                     "category_id": cat_id,
                 }),
             )

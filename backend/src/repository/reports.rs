@@ -15,15 +15,11 @@ impl ReportDb {
     }
 
     /// Check whether `target_id` is a non-admin direct report of `requester_id`.
-    pub async fn is_direct_report(
-        &self,
-        target_id: i64,
-        approver_id: i64,
-    ) -> AppResult<bool> {
+    pub async fn is_direct_report(&self, target_id: i64, approver_id: i64) -> AppResult<bool> {
         Ok(sqlx::query_scalar::<_, Option<bool>>(
             "SELECT TRUE FROM user_approvers ua \
              WHERE ua.user_id=$1 AND ua.approver_id=$2 \
-             AND EXISTS (SELECT 1 FROM users u WHERE u.id=$1 AND u.role != 'admin')",
+             AND EXISTS (SELECT 1 FROM users u WHERE u.id=$1 AND u.active=TRUE AND u.role != 'admin')",
         )
         .bind(target_id)
         .bind(approver_id)
@@ -53,8 +49,7 @@ impl ReportDb {
             String,
             Option<String>,
         )>,
-    >
-    {
+    > {
         Ok(sqlx::query_as(
             "SELECT z.entry_date, z.start_time, z.end_time, c.name, c.color, \
              z.category_id, c.counts_as_work, z.status, z.comment \
@@ -107,7 +102,11 @@ impl ReportDb {
         .await?)
     }
 
-    pub async fn holiday_set(&self, from: NaiveDate, to: NaiveDate) -> AppResult<HashSet<NaiveDate>> {
+    pub async fn holiday_set(
+        &self,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> AppResult<HashSet<NaiveDate>> {
         let rows: Vec<(NaiveDate,)> = sqlx::query_as(
             "SELECT holiday_date FROM holidays WHERE holiday_date BETWEEN $1 AND $2",
         )
@@ -194,11 +193,11 @@ impl ReportDb {
              allow_reopen_without_approval, dark_mode, overtime_start_balance_min \
              FROM users";
         if is_admin {
-            Ok(sqlx::query_as::<_, User>(&format!(
-                "{SEL} WHERE active=TRUE ORDER BY last_name"
-            ))
-            .fetch_all(&self.pool)
-            .await?)
+            Ok(
+                sqlx::query_as::<_, User>(&format!("{SEL} WHERE active=TRUE ORDER BY last_name"))
+                    .fetch_all(&self.pool)
+                    .await?,
+            )
         } else {
             // Non-admin leads see themselves plus direct reports, but admin
             // subjects are excluded from lead-scoped team views (user-guide).
@@ -218,16 +217,13 @@ impl ReportDb {
     }
 
     /// User start date and overtime start balance (minutes).
-    pub async fn user_start_and_overtime(
-        &self,
-        user_id: i64,
-    ) -> AppResult<(NaiveDate, i64)> {
-        Ok(sqlx::query_as(
-            "SELECT start_date, overtime_start_balance_min FROM users WHERE id=$1",
+    pub async fn user_start_and_overtime(&self, user_id: i64) -> AppResult<(NaiveDate, i64)> {
+        Ok(
+            sqlx::query_as("SELECT start_date, overtime_start_balance_min FROM users WHERE id=$1")
+                .bind(user_id)
+                .fetch_one(&self.pool)
+                .await?,
         )
-        .bind(user_id)
-        .fetch_one(&self.pool)
-        .await?)
     }
 
     /// Time entry rows for flextime (raw: date, start, end, status, counts_as_work).
@@ -271,8 +267,7 @@ impl ReportDb {
             String,
             Option<String>,
         )>,
-    >
-    {
+    > {
         Ok(sqlx::query_as(
             "SELECT z.entry_date, z.start_time, z.end_time, c.name, c.color, \
              z.category_id, c.counts_as_work, z.status, z.comment \
@@ -317,5 +312,4 @@ impl ReportDb {
             .await?)
         }
     }
-
 }

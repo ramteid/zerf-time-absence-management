@@ -168,18 +168,16 @@ pub async fn prepare_holiday_refresh(
     let available_regions = collect_region_codes(&current_year_holidays);
     validate_region_selection(&normalized_region, &available_regions)?;
 
-    let mut prepared: Vec<PreparedHoliday> = filter_holidays_by_region(
-        current_year_holidays,
-        &normalized_region,
-    )
-    .into_iter()
-    .map(|(holiday_date, name, local_name)| PreparedHoliday {
-        holiday_date,
-        name,
-        local_name,
-        year,
-    })
-    .collect();
+    let mut prepared: Vec<PreparedHoliday> =
+        filter_holidays_by_region(current_year_holidays, &normalized_region)
+            .into_iter()
+            .map(|(holiday_date, name, local_name)| PreparedHoliday {
+                holiday_date,
+                name,
+                local_name,
+                year,
+            })
+            .collect();
 
     let next_year = year + 1;
     prepared.extend(
@@ -257,12 +255,14 @@ pub async fn ensure_holidays(pool: &crate::db::DatabasePool, year: i32) -> AppRe
         Ok(list) => {
             let prepared: Vec<crate::repository::PreparedHoliday> = list
                 .into_iter()
-                .map(|(date, name, local_name)| crate::repository::PreparedHoliday {
-                    holiday_date: date,
-                    name,
-                    local_name,
-                    year,
-                })
+                .map(
+                    |(date, name, local_name)| crate::repository::PreparedHoliday {
+                        holiday_date: date,
+                        name,
+                        local_name,
+                        year,
+                    },
+                )
                 .collect();
             db.insert_auto_holidays(&prepared).await?;
         }
@@ -291,7 +291,9 @@ pub fn next_monday_noon(now: DateTime<chrono_tz::Tz>) -> AppResult<DateTime<chro
         .ok_or_else(|| AppError::Internal("Failed to resolve local scheduler time.".into()))
 }
 
-pub fn duration_until_next_monday_noon(now: DateTime<chrono_tz::Tz>) -> AppResult<std::time::Duration> {
+pub fn duration_until_next_monday_noon(
+    now: DateTime<chrono_tz::Tz>,
+) -> AppResult<std::time::Duration> {
     (next_monday_noon(now)? - now)
         .to_std()
         .map_err(|_| AppError::Internal("Holiday scheduler target is in the past.".into()))
@@ -415,8 +417,7 @@ mod tests {
         day: u32,
         hour: u32,
     ) -> DateTime<chrono_tz::Tz> {
-        tz
-            .with_ymd_and_hms(year, month, day, hour, 0, 0)
+        tz.with_ymd_and_hms(year, month, day, hour, 0, 0)
             .single()
             .unwrap()
     }

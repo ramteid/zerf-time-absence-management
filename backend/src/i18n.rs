@@ -82,6 +82,16 @@ static LANGUAGES: &[LangDef] = &[
             ("change_request_approved_body", "Your time-entry change request was approved.\n\nWeek: {week_label}\nEntry: {entry_label}\n\nApplied changes:\n{change_diff}\n\nPlease verify the updated entry in your week overview."),
             ("change_request_rejected_title", "Change request rejected"),
             ("change_request_rejected_body", "Your time-entry change request was rejected.\n\nWeek: {week_label}\nEntry: {entry_label}\nReason: {reason}\n\nRequested changes:\n{change_diff}\n\nYou can submit a revised change request if needed."),
+            ("text_empty", "(empty)"),
+            ("change_diff_label_date", "Date"),
+            ("change_diff_label_time", "Time"),
+            ("change_diff_label_type", "Type"),
+            ("change_diff_label_comment", "Comment"),
+            ("change_diff_no_effective_change", "- No effective change"),
+            ("reopen_change_request_none", "No open change requests in this week."),
+            ("reopen_change_request_header_applied", "Automatically applied change requests:"),
+            ("reopen_change_request_header_open", "Open change requests for this week:"),
+            ("reopen_change_request_comment_label", "  Comment"),
             ("timesheet_submitted_title", "{submitter_name} submitted a timesheet"),
             ("timesheet_submitted_body", "A timesheet was submitted for approval.\n\nScope: {week_count}\n\nPlease review the submitted entries in the approval dashboard."),
             ("timesheet_approved_title", "Timesheet approved"),
@@ -159,6 +169,16 @@ static LANGUAGES: &[LangDef] = &[
             ("change_request_approved_body", "Ihre \u{00c4}nderungsanfrage wurde genehmigt.\n\nWoche: {week_label}\nEintrag: {entry_label}\n\n\u{00dc}bernommene \u{00c4}nderungen:\n{change_diff}\n\nBitte pr\u{00fc}fen Sie den aktualisierten Eintrag in Ihrer Wochen\u{00fc}bersicht."),
             ("change_request_rejected_title", "\u{00c4}nderungsanfrage abgelehnt"),
             ("change_request_rejected_body", "Ihre \u{00c4}nderungsanfrage wurde abgelehnt.\n\nWoche: {week_label}\nEintrag: {entry_label}\nGrund: {reason}\n\nBeantragte \u{00c4}nderungen:\n{change_diff}\n\nSie k\u{00f6}nnen bei Bedarf eine angepasste Anfrage erneut stellen."),
+            ("text_empty", "(leer)"),
+            ("change_diff_label_date", "Datum"),
+            ("change_diff_label_time", "Zeit"),
+            ("change_diff_label_type", "Typ"),
+            ("change_diff_label_comment", "Kommentar"),
+            ("change_diff_no_effective_change", "- Keine effektive \u{00c4}nderung"),
+            ("reopen_change_request_none", "Keine offenen \u{00c4}nderungsantr\u{00e4}ge in dieser Woche."),
+            ("reopen_change_request_header_applied", "Automatisch \u{00fc}bernommene \u{00c4}nderungsantr\u{00e4}ge:"),
+            ("reopen_change_request_header_open", "Offene Änderungsanträge für diese Woche:"),
+            ("reopen_change_request_comment_label", "  Kommentar"),
             ("timesheet_submitted_title", "{submitter_name} hat eine Zeiterfassung eingereicht"),
             ("timesheet_submitted_body", "Eine Zeiterfassung wurde zur Genehmigung eingereicht.\n\nUmfang: {week_count}\n\nBitte pr\u{00fc}fen Sie die eingereichten Eintr\u{00e4}ge im Dashboard."),
             ("timesheet_approved_title", "Zeiterfassung genehmigt"),
@@ -273,9 +293,7 @@ pub fn format_datetime_in_timezone(
     value: chrono::DateTime<chrono::Utc>,
     timezone: &str,
 ) -> String {
-    let tz = timezone
-        .parse::<chrono_tz::Tz>()
-        .unwrap_or(chrono_tz::UTC);
+    let tz = timezone.parse::<chrono_tz::Tz>().unwrap_or(chrono_tz::UTC);
     let local = value.with_timezone(&tz);
     if language.code() == "de" {
         local.format("%d.%m.%Y %H:%M").to_string()

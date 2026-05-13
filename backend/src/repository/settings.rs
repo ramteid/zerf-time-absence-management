@@ -87,8 +87,16 @@ impl SettingsDb {
         Some(SmtpConfig {
             host,
             port,
-            username: if username.is_empty() { None } else { Some(username) },
-            password: if password.is_empty() { None } else { Some(password) },
+            username: if username.is_empty() {
+                None
+            } else {
+                Some(username)
+            },
+            password: if password.is_empty() {
+                None
+            } else {
+                Some(password)
+            },
             from,
             encryption,
         })

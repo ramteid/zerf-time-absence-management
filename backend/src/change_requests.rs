@@ -13,14 +13,18 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
 async fn notification_language(pool: &crate::db::DatabasePool) -> i18n::Language {
-    match i18n::load_ui_language(pool).await {
-        Ok(language) => language,
-        Err(e) => {
-            tracing::warn!(target:"zerf::change_requests", "load notification language failed: {e}");
-            i18n::Language::default()
-        }
-    }
+    crate::notifications::load_language(pool).await
 }
+
+const ACTIVE_ASSIGNED_APPROVER_FOR_UPDATE_SQL: &str = "\
+    SELECT TRUE \
+    FROM user_approvers ua \
+    JOIN users subject ON subject.id = ua.user_id \
+    JOIN users approver ON approver.id = ua.approver_id \
+    WHERE ua.user_id = $1 AND ua.approver_id = $2 \
+    AND subject.active=TRUE AND subject.role != 'admin' \
+    AND approver.active=TRUE AND approver.role IN ('team_lead','admin') \
+    FOR UPDATE OF ua";
 
 #[derive(FromRow, Serialize)]
 pub struct ChangeRequest {
@@ -63,7 +67,11 @@ pub async fn list(
     State(app_state): State<AppState>,
     requester: User,
 ) -> AppResult<Json<Vec<ChangeRequest>>> {
-    let crs = app_state.db.change_requests.list_for_user(requester.id).await?;
+    let crs = app_state
+        .db
+        .change_requests
+        .list_for_user(requester.id)
+        .await?;
     Ok(Json(crs.into_iter().map(repo_cr_to_service).collect()))
 }
 
@@ -77,7 +85,11 @@ pub async fn list_all(
     let crs = if requester.is_admin() {
         app_state.db.change_requests.list_open_all().await?
     } else {
-        app_state.db.change_requests.list_open_for_lead(requester.id).await?
+        app_state
+            .db
+            .change_requests
+            .list_open_for_lead(requester.id)
+            .await?
     };
     Ok(Json(crs.into_iter().map(repo_cr_to_service).collect()))
 }
@@ -106,12 +118,8 @@ fn hhmm(time_str: &str) -> String {
     time_str.chars().take(5).collect()
 }
 
-fn empty_text(language: &i18n::Language) -> &'static str {
-    if language.code() == "de" {
-        "(leer)"
-    } else {
-        "(empty)"
-    }
+fn empty_text(language: &i18n::Language) -> String {
+    i18n::translate(language, "text_empty", &[])
 }
 
 async fn category_label(
@@ -162,14 +170,10 @@ fn change_diff(
     new_comment: Option<&str>,
 ) -> String {
     let mut lines = Vec::new();
-    let date_label = if language.code() == "de" { "Datum" } else { "Date" };
-    let time_label = if language.code() == "de" { "Zeit" } else { "Time" };
-    let type_label = if language.code() == "de" { "Typ" } else { "Type" };
-    let comment_label = if language.code() == "de" {
-        "Kommentar"
-    } else {
-        "Comment"
-    };
+    let date_label = i18n::translate(language, "change_diff_label_date", &[]);
+    let time_label = i18n::translate(language, "change_diff_label_time", &[]);
+    let type_label = i18n::translate(language, "change_diff_label_type", &[]);
+    let comment_label = i18n::translate(language, "change_diff_label_comment", &[]);
 
     if let Some(next_date) = new_date {
         if next_date != current_date {
@@ -201,22 +205,26 @@ fn change_diff(
 
     if let Some(comment) = new_comment {
         let before = current_comment.filter(|value| !value.is_empty());
-        let after = if comment.is_empty() { None } else { Some(comment) };
+        let after = if comment.is_empty() {
+            None
+        } else {
+            Some(comment)
+        };
         if before != after {
             lines.push(format!(
                 "- {comment_label}: {} -> {}",
-                before.unwrap_or(empty_text(language)),
-                after.unwrap_or(empty_text(language))
+                before
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| empty_text(language)),
+                after
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| empty_text(language))
             ));
         }
     }
 
     if lines.is_empty() {
-        if language.code() == "de" {
-            "- Keine effektive Änderung".to_string()
-        } else {
-            "- No effective change".to_string()
-        }
+        i18n::translate(language, "change_diff_no_effective_change", &[])
     } else {
         lines.join("\n")
     }
@@ -281,13 +289,6 @@ pub async fn create(
         .as_deref()
         .map(parse_change_time)
         .transpose()?;
-    if let (Some(start), Some(end)) = (proposed_start, proposed_end) {
-        if end <= start {
-            return Err(AppError::BadRequest(
-                "End time must be after start time.".into(),
-            ));
-        }
-    }
     if let Some(new_date) = body.new_date {
         let today = crate::settings::app_today(&app_state.pool).await;
         if new_date > today {
@@ -300,7 +301,15 @@ pub async fn create(
         }
     }
     // Load the target time entry to check ownership and current state.
-    let (entry_owner_id, entry_status, entry_date, entry_start_time, entry_end_time, entry_category_id, entry_comment) = app_state
+    let (
+        entry_owner_id,
+        entry_status,
+        entry_date,
+        entry_start_time,
+        entry_end_time,
+        entry_category_id,
+        entry_comment,
+    ) = app_state
         .db
         .change_requests
         .get_entry_info(body.time_entry_id)
@@ -389,7 +398,7 @@ pub async fn create(
     )
     .await;
     // Notify approvers that a change request needs review.
-    let requester_full_name = format!("{} {}", requester.first_name, requester.last_name);
+    let requester_full_name = requester.full_name();
     let approver_ids =
         crate::auth::required_approval_recipient_ids(&app_state.pool, &requester).await?;
     let language = notification_language(&app_state.pool).await;
@@ -451,6 +460,18 @@ pub async fn approve(
         return Err(AppError::Forbidden);
     }
     let mut transaction = app_state.pool.begin().await?;
+    let change_request_user_id: Option<i64> =
+        sqlx::query_scalar("SELECT user_id FROM change_requests WHERE id=$1")
+            .bind(change_request_id)
+            .fetch_optional(&mut *transaction)
+            .await?;
+    let Some(change_request_user_id) = change_request_user_id else {
+        return Err(AppError::NotFound);
+    };
+    sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(change_request_user_id)
+        .execute(&mut *transaction)
+        .await?;
     // Fetch and lock the change request — fail fast if already resolved.
     let change_request: ChangeRequest =
         sqlx::query_as("SELECT id, time_entry_id, user_id, new_date, new_start_time, new_end_time, new_category_id, new_comment, reason, status, reviewed_by, reviewed_at, rejection_reason, created_at FROM change_requests WHERE id=$1 AND status='open' FOR UPDATE")
@@ -464,32 +485,16 @@ pub async fn approve(
     }
     if !requester.is_admin() {
         // Non-admin approvers may only act if explicitly assigned.
-        let is_assigned_approver: Option<bool> = sqlx::query_scalar(
-            "SELECT TRUE FROM user_approvers WHERE user_id = $1 AND approver_id = $2 FOR UPDATE",
-        )
-        .bind(change_request.user_id)
-        .bind(requester.id)
-        .fetch_optional(&mut *transaction)
-        .await?;
+        let is_assigned_approver: Option<bool> =
+            sqlx::query_scalar(ACTIVE_ASSIGNED_APPROVER_FOR_UPDATE_SQL)
+                .bind(change_request.user_id)
+                .bind(requester.id)
+                .fetch_optional(&mut *transaction)
+                .await?;
         if is_assigned_approver.is_none() {
             return Err(AppError::Forbidden);
         }
-        // Non-admin approvers must not act on admin users.
-        let is_admin_user: Option<bool> = sqlx::query_scalar(
-            "SELECT TRUE FROM users WHERE id = $1 AND role = 'admin'"
-        )
-        .bind(change_request.user_id)
-        .fetch_optional(&mut *transaction)
-        .await?;
-        if is_admin_user.is_some() {
-            return Err(AppError::Forbidden);
-        }
     }
-    // Acquire a per-user advisory lock to serialize updates to this user's entries.
-    sqlx::query("SELECT pg_advisory_xact_lock($1)")
-        .bind(change_request.user_id)
-        .execute(&mut *transaction)
-        .await?;
     // Fetch the existing entry and build effective post-change values so we can
     // run the same overlap / 14-hour / category validation as direct edits do.
     let existing_entry: crate::time_entries::TimeEntry =
@@ -605,7 +610,8 @@ pub async fn approve(
     // Notify the requester that their change request was approved.
     let language = notification_language(&app_state.pool).await;
     let week_label = i18n::format_week_label(&language, monday_of(existing_entry.entry_date));
-    let current_category = category_label(&app_state.pool, &language, existing_entry.category_id).await;
+    let current_category =
+        category_label(&app_state.pool, &language, existing_entry.category_id).await;
     let effective_category = match change_request.new_category_id {
         Some(category_id) => category_label(&app_state.pool, &language, category_id).await,
         None => current_category.clone(),
@@ -688,24 +694,13 @@ pub async fn reject(
     }
     // Non-admin approvers may only act if explicitly assigned.
     if !requester.is_admin() {
-        let is_assigned_approver: Option<bool> = sqlx::query_scalar(
-            "SELECT TRUE FROM user_approvers WHERE user_id = $1 AND approver_id = $2 FOR UPDATE",
-        )
-        .bind(change_request.user_id)
-        .bind(requester.id)
-        .fetch_optional(&mut *transaction)
-        .await?;
+        let is_assigned_approver: Option<bool> =
+            sqlx::query_scalar(ACTIVE_ASSIGNED_APPROVER_FOR_UPDATE_SQL)
+                .bind(change_request.user_id)
+                .bind(requester.id)
+                .fetch_optional(&mut *transaction)
+                .await?;
         if is_assigned_approver.is_none() {
-            return Err(AppError::Forbidden);
-        }
-        // Non-admin approvers must not act on admin users.
-        let is_admin_user: Option<bool> = sqlx::query_scalar(
-            "SELECT TRUE FROM users WHERE id = $1 AND role = 'admin'"
-        )
-        .bind(change_request.user_id)
-        .fetch_optional(&mut *transaction)
-        .await?;
-        if is_admin_user.is_some() {
             return Err(AppError::Forbidden);
         }
     }
@@ -737,75 +732,69 @@ pub async fn reject(
     .await;
     // Notify the requester that their change request was rejected.
     let language = notification_language(&app_state.pool).await;
-    let (entry_owner_id, _entry_status, entry_date, entry_start_time, entry_end_time, entry_category_id, entry_comment) = app_state
+    if let Some((
+        _entry_owner_id,
+        _entry_status,
+        entry_date,
+        entry_start_time,
+        entry_end_time,
+        entry_category_id,
+        entry_comment,
+    )) = app_state
         .db
         .change_requests
         .get_entry_info(change_request.time_entry_id)
         .await?
-        .unwrap_or((
+    {
+        let week_label = i18n::format_week_label(&language, monday_of(entry_date));
+        let current_category = category_label(&app_state.pool, &language, entry_category_id).await;
+        let requested_category = match change_request.new_category_id {
+            Some(category_id) => category_label(&app_state.pool, &language, category_id).await,
+            None => current_category.clone(),
+        };
+        let entry_label_text = entry_label(
+            &language,
+            entry_date,
+            &entry_start_time,
+            &entry_end_time,
+            &current_category,
+        );
+        let diff_text = change_diff(
+            &language,
+            entry_date,
+            &entry_start_time,
+            &entry_end_time,
+            &current_category,
+            entry_comment.as_deref(),
+            change_request.new_date,
+            change_request.new_start_time.as_deref(),
+            change_request.new_end_time.as_deref(),
+            Some(&requested_category),
+            change_request.new_comment.as_deref(),
+        );
+        crate::notifications::create_translated(
+            &app_state,
+            &language,
             change_request.user_id,
-            "submitted".to_string(),
-            change_request
-                .new_date
-                .unwrap_or(crate::settings::app_today(&app_state.pool).await),
-            change_request
-                .new_start_time
-                .clone()
-                .unwrap_or_else(|| "00:00".to_string()),
-            change_request
-                .new_end_time
-                .clone()
-                .unwrap_or_else(|| "00:00".to_string()),
-            change_request.new_category_id.unwrap_or_default(),
-            None,
-        ));
-    let _ = entry_owner_id;
-    let week_label = i18n::format_week_label(&language, monday_of(entry_date));
-    let current_category = if entry_category_id > 0 {
-        category_label(&app_state.pool, &language, entry_category_id).await
+            "change_request_rejected",
+            "change_request_rejected_title",
+            "change_request_rejected_body",
+            vec![
+                ("week_label", week_label),
+                ("entry_label", entry_label_text),
+                ("reason", body.reason.clone()),
+                ("change_diff", diff_text),
+            ],
+            Some("change_requests"),
+            Some(change_request_id),
+        )
+        .await;
     } else {
-        "-".to_string()
-    };
-    let requested_category = match change_request.new_category_id {
-        Some(category_id) => category_label(&app_state.pool, &language, category_id).await,
-        None => current_category.clone(),
-    };
-    let entry_label_text = entry_label(
-        &language,
-        entry_date,
-        &entry_start_time,
-        &entry_end_time,
-        &current_category,
-    );
-    let diff_text = change_diff(
-        &language,
-        entry_date,
-        &entry_start_time,
-        &entry_end_time,
-        &current_category,
-        entry_comment.as_deref(),
-        change_request.new_date,
-        change_request.new_start_time.as_deref(),
-        change_request.new_end_time.as_deref(),
-        Some(&requested_category),
-        change_request.new_comment.as_deref(),
-    );
-    crate::notifications::create_translated(
-        &app_state,
-        &language,
-        change_request.user_id,
-        "change_request_rejected",
-        "change_request_rejected_title",
-        "change_request_rejected_body",
-        vec![
-            ("week_label", week_label),
-            ("entry_label", entry_label_text),
-            ("reason", body.reason.clone()),
-            ("change_diff", diff_text),
-        ],
-        Some("change_requests"),
-        Some(change_request_id),
-    )
-    .await;
+        tracing::warn!(
+            target: "zerf::change_requests",
+            "entry {} no longer exists after rejecting change request {}; skipping notification",
+            change_request.time_entry_id, change_request_id
+        );
+    }
     Ok(Json(serde_json::json!({"ok":true})))
 }

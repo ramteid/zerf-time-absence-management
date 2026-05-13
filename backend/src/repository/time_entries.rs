@@ -6,11 +6,10 @@ use serde::{Deserialize, Serialize};
 use sqlx::{Postgres, QueryBuilder};
 
 async fn app_now(conn: &mut sqlx::PgConnection) -> AppResult<chrono::DateTime<chrono_tz::Tz>> {
-    let timezone: Option<String> = sqlx::query_scalar(
-        "SELECT value FROM app_settings WHERE key = 'timezone'",
-    )
-    .fetch_optional(&mut *conn)
-    .await?;
+    let timezone: Option<String> =
+        sqlx::query_scalar("SELECT value FROM app_settings WHERE key = 'timezone'")
+            .fetch_optional(&mut *conn)
+            .await?;
     let tz_name = timezone.unwrap_or_else(|| crate::settings::DEFAULT_TIMEZONE.to_string());
     let tz = tz_name
         .parse::<chrono_tz::Tz>()
@@ -88,12 +87,11 @@ pub(crate) async fn validate_entry(
             "Entry date is before user start date.".into(),
         ));
     }
-    let cat_state: Option<(bool, bool)> = sqlx::query_as(
-        "SELECT active, counts_as_work FROM categories WHERE id = $1",
-    )
-    .bind(te.category_id)
-    .fetch_optional(&mut *conn)
-    .await?;
+    let cat_state: Option<(bool, bool)> =
+        sqlx::query_as("SELECT active, counts_as_work FROM categories WHERE id = $1")
+            .bind(te.category_id)
+            .fetch_optional(&mut *conn)
+            .await?;
     if cat_state.is_none() {
         return Err(AppError::BadRequest("Category not found.".into()));
     }
@@ -140,7 +138,9 @@ pub(crate) async fn validate_entry(
 
     for (_, es, ee) in &parsed_existing {
         if start_n < *ee && *es < end_n {
-            return Err(AppError::BadRequest("Overlap with an existing entry.".into()));
+            return Err(AppError::BadRequest(
+                "Overlap with an existing entry.".into(),
+            ));
         }
     }
 
@@ -209,9 +209,7 @@ impl TimeEntryDb {
         from: Option<NaiveDate>,
         to: Option<NaiveDate>,
     ) -> AppResult<Vec<TimeEntry>> {
-        let mut builder = QueryBuilder::<Postgres>::new(
-            &format!("{TE_SELECT} WHERE user_id = "),
-        );
+        let mut builder = QueryBuilder::<Postgres>::new(&format!("{TE_SELECT} WHERE user_id = "));
         builder.push_bind(user_id);
         if let Some(f) = from {
             builder.push(" AND entry_date >= ").push_bind(f);
@@ -220,7 +218,10 @@ impl TimeEntryDb {
             builder.push(" AND entry_date <= ").push_bind(t);
         }
         builder.push(" ORDER BY entry_date, start_time");
-        Ok(builder.build_query_as::<TimeEntry>().fetch_all(&self.pool).await?)
+        Ok(builder
+            .build_query_as::<TimeEntry>()
+            .fetch_all(&self.pool)
+            .await?)
     }
 
     pub async fn list_all(
@@ -232,8 +233,7 @@ impl TimeEntryDb {
         user_id_filter: Option<i64>,
         status_filter: Option<String>,
     ) -> AppResult<Vec<TimeEntry>> {
-        let mut builder =
-            QueryBuilder::<Postgres>::new(&format!("{TE_SELECT} WHERE TRUE"));
+        let mut builder = QueryBuilder::<Postgres>::new(&format!("{TE_SELECT} WHERE TRUE"));
         if !is_admin {
             // Non-admin leads: only show entries from active, non-admin direct
             // reports. Admin-subject entries are excluded from lead scope.
@@ -258,14 +258,19 @@ impl TimeEntryDb {
             builder.push(" AND status = ").push_bind(s);
         }
         builder.push(" ORDER BY entry_date DESC, start_time");
-        Ok(builder.build_query_as::<TimeEntry>().fetch_all(&self.pool).await?)
+        Ok(builder
+            .build_query_as::<TimeEntry>()
+            .fetch_all(&self.pool)
+            .await?)
     }
 
     pub async fn find_by_id(&self, id: i64) -> AppResult<TimeEntry> {
-        Ok(sqlx::query_as::<_, TimeEntry>(&format!("{TE_SELECT} WHERE id=$1"))
-            .bind(id)
-            .fetch_one(&self.pool)
-            .await?)
+        Ok(
+            sqlx::query_as::<_, TimeEntry>(&format!("{TE_SELECT} WHERE id=$1"))
+                .bind(id)
+                .fetch_one(&self.pool)
+                .await?,
+        )
     }
 
     pub async fn find_by_id_opt(&self, id: i64) -> AppResult<Option<TimeEntry>> {
@@ -277,32 +282,25 @@ impl TimeEntryDb {
         )
     }
 
-    pub async fn find_by_id_submitted(&self, id: i64) -> AppResult<Option<TimeEntry>> {
-        Ok(sqlx::query_as::<_, TimeEntry>(&format!(
-            "{TE_SELECT} WHERE id=$1 AND status='submitted'"
-        ))
-        .bind(id)
-        .fetch_optional(&self.pool)
-        .await?)
-    }
-
     pub async fn find_by_id_for_update(
         tx: &mut sqlx::PgConnection,
         id: i64,
     ) -> AppResult<TimeEntry> {
-        Ok(sqlx::query_as::<_, TimeEntry>(&format!(
-            "{TE_SELECT} WHERE id=$1 FOR UPDATE"
-        ))
-        .bind(id)
-        .fetch_one(tx)
-        .await?)
+        Ok(
+            sqlx::query_as::<_, TimeEntry>(&format!("{TE_SELECT} WHERE id=$1 FOR UPDATE"))
+                .bind(id)
+                .fetch_one(tx)
+                .await?,
+        )
     }
 
     pub async fn get_user_id(&self, id: i64) -> AppResult<i64> {
-        Ok(sqlx::query_scalar("SELECT user_id FROM time_entries WHERE id=$1")
-            .bind(id)
-            .fetch_one(&self.pool)
-            .await?)
+        Ok(
+            sqlx::query_scalar("SELECT user_id FROM time_entries WHERE id=$1")
+                .bind(id)
+                .fetch_one(&self.pool)
+                .await?,
+        )
     }
 
     /// Check whether `user_id` is a non-admin direct report of `approver_id`
@@ -315,7 +313,7 @@ impl TimeEntryDb {
         Ok(sqlx::query_scalar::<_, Option<bool>>(
             "SELECT TRUE FROM user_approvers ua \
              WHERE ua.user_id=$1 AND ua.approver_id=$2 \
-             AND EXISTS (SELECT 1 FROM users u WHERE u.id=$1 AND u.role != 'admin') \
+             AND EXISTS (SELECT 1 FROM users u WHERE u.id=$1 AND u.active=TRUE AND u.role != 'admin') \
              FOR UPDATE",
         )
         .bind(subject_user_id)
@@ -327,10 +325,12 @@ impl TimeEntryDb {
     }
 
     pub async fn get_date_for_entry(&self, id: i64) -> AppResult<Option<NaiveDate>> {
-        Ok(sqlx::query_scalar("SELECT entry_date FROM time_entries WHERE id=$1")
-            .bind(id)
-            .fetch_optional(&self.pool)
-            .await?)
+        Ok(
+            sqlx::query_scalar("SELECT entry_date FROM time_entries WHERE id=$1")
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await?,
+        )
     }
 
     pub async fn get_credited_submitted_dates_for_entries(
@@ -342,7 +342,7 @@ impl TimeEntryDb {
             return Ok(vec![]);
         }
         Ok(sqlx::query_scalar(
-                        "SELECT te.entry_date FROM time_entries te \
+            "SELECT te.entry_date FROM time_entries te \
                          WHERE te.user_id = $1 AND te.id = ANY($2) \
                          AND te.status = 'submitted'",
         )
@@ -361,7 +361,7 @@ impl TimeEntryDb {
         week_end: NaiveDate,
     ) -> AppResult<i64> {
         Ok(sqlx::query_scalar(
-                        "SELECT COUNT(*) FROM time_entries te \
+            "SELECT COUNT(*) FROM time_entries te \
                          WHERE te.user_id=$1 AND te.entry_date BETWEEN $2 AND $3 \
                          AND te.status IN ('submitted','approved')",
         )
@@ -374,11 +374,7 @@ impl TimeEntryDb {
 
     // ── Mutations ──────────────────────────────────────────────────────────
 
-    pub async fn create(
-        &self,
-        user_id: i64,
-        entry: &NewEntryData,
-    ) -> AppResult<TimeEntry> {
+    pub async fn create(&self, user_id: i64, entry: &NewEntryData) -> AppResult<TimeEntry> {
         let mut tx = self.pool.begin().await?;
         sqlx::query("SELECT pg_advisory_xact_lock($1)")
             .bind(user_id)
@@ -398,10 +394,12 @@ impl TimeEntryDb {
         .fetch_one(&mut *tx)
         .await?;
         tx.commit().await?;
-        Ok(sqlx::query_as::<_, TimeEntry>(&format!("{TE_SELECT} WHERE id=$1"))
-            .bind(new_id)
-            .fetch_one(&self.pool)
-            .await?)
+        Ok(
+            sqlx::query_as::<_, TimeEntry>(&format!("{TE_SELECT} WHERE id=$1"))
+                .bind(new_id)
+                .fetch_one(&self.pool)
+                .await?,
+        )
     }
 
     pub async fn update(
@@ -420,12 +418,11 @@ impl TimeEntryDb {
             .bind(owner_id)
             .execute(&mut *tx)
             .await?;
-        let prev: TimeEntry = sqlx::query_as::<_, TimeEntry>(&format!(
-            "{TE_SELECT} WHERE id=$1 FOR UPDATE"
-        ))
-        .bind(entry_id)
-        .fetch_one(&mut *tx)
-        .await?;
+        let prev: TimeEntry =
+            sqlx::query_as::<_, TimeEntry>(&format!("{TE_SELECT} WHERE id=$1 FOR UPDATE"))
+                .bind(entry_id)
+                .fetch_one(&mut *tx)
+                .await?;
 
         let admin_correction = requester_is_admin
             && prev.user_id != requester_id
@@ -474,12 +471,11 @@ impl TimeEntryDb {
             .bind(owner_id)
             .execute(&mut *tx)
             .await?;
-        let entry: TimeEntry = sqlx::query_as::<_, TimeEntry>(&format!(
-            "{TE_SELECT} WHERE id=$1 FOR UPDATE"
-        ))
-        .bind(entry_id)
-        .fetch_one(&mut *tx)
-        .await?;
+        let entry: TimeEntry =
+            sqlx::query_as::<_, TimeEntry>(&format!("{TE_SELECT} WHERE id=$1 FOR UPDATE"))
+                .bind(entry_id)
+                .fetch_one(&mut *tx)
+                .await?;
         if entry.status != "draft" {
             return Err(AppError::BadRequest("Only drafts can be deleted.".into()));
         }
@@ -489,7 +485,9 @@ impl TimeEntryDb {
             .await?
             .rows_affected();
         if rows == 0 {
-            return Err(AppError::Conflict("Entry was modified concurrently.".into()));
+            return Err(AppError::Conflict(
+                "Entry was modified concurrently.".into(),
+            ));
         }
         tx.commit().await?;
         Ok(entry)
@@ -497,11 +495,7 @@ impl TimeEntryDb {
 
     /// Atomically mark a batch of entries as submitted for a specific user.
     /// Returns the IDs that were actually transitioned from draft → submitted.
-    pub async fn submit_batch(
-        &self,
-        user_id: i64,
-        ids: &[i64],
-    ) -> AppResult<Vec<i64>> {
+    pub async fn submit_batch(&self, user_id: i64, ids: &[i64]) -> AppResult<Vec<i64>> {
         let mut tx = self.pool.begin().await?;
         let mut submitted = Vec::new();
         for &id in ids {
@@ -532,22 +526,17 @@ impl TimeEntryDb {
         reviewer_is_admin: bool,
     ) -> AppResult<TimeEntry> {
         let mut tx = self.pool.begin().await?;
-        let entry: TimeEntry = sqlx::query_as::<_, TimeEntry>(&format!(
-            "{TE_SELECT} WHERE id=$1 FOR UPDATE"
-        ))
-        .bind(entry_id)
-        .fetch_one(&mut *tx)
-        .await?;
+        let entry: TimeEntry =
+            sqlx::query_as::<_, TimeEntry>(&format!("{TE_SELECT} WHERE id=$1 FOR UPDATE"))
+                .bind(entry_id)
+                .fetch_one(&mut *tx)
+                .await?;
         if entry.user_id == reviewer_id && !reviewer_is_admin {
             return Err(AppError::Forbidden);
         }
         if !reviewer_is_admin {
-            let ok = Self::check_direct_report_for_update(
-                &mut tx,
-                entry.user_id,
-                reviewer_id,
-            )
-            .await?;
+            let ok =
+                Self::check_direct_report_for_update(&mut tx, entry.user_id, reviewer_id).await?;
             if !ok {
                 return Err(AppError::Forbidden);
             }
@@ -585,22 +574,17 @@ impl TimeEntryDb {
         reason: &str,
     ) -> AppResult<TimeEntry> {
         let mut tx = self.pool.begin().await?;
-        let entry: TimeEntry = sqlx::query_as::<_, TimeEntry>(&format!(
-            "{TE_SELECT} WHERE id=$1 FOR UPDATE"
-        ))
-        .bind(entry_id)
-        .fetch_one(&mut *tx)
-        .await?;
+        let entry: TimeEntry =
+            sqlx::query_as::<_, TimeEntry>(&format!("{TE_SELECT} WHERE id=$1 FOR UPDATE"))
+                .bind(entry_id)
+                .fetch_one(&mut *tx)
+                .await?;
         if entry.user_id == reviewer_id && !reviewer_is_admin {
             return Err(AppError::Forbidden);
         }
         if !reviewer_is_admin {
-            let ok = Self::check_direct_report_for_update(
-                &mut tx,
-                entry.user_id,
-                reviewer_id,
-            )
-            .await?;
+            let ok =
+                Self::check_direct_report_for_update(&mut tx, entry.user_id, reviewer_id).await?;
             if !ok {
                 return Err(AppError::Forbidden);
             }
@@ -646,12 +630,12 @@ impl TimeEntryDb {
         ordered_ids.sort_unstable();
         ordered_ids.dedup();
         for id in ordered_ids {
-            let Some(entry) = sqlx::query_as::<_, TimeEntry>(&format!(
-                "{TE_SELECT} WHERE id=$1 FOR UPDATE"
-            ))
-            .bind(id)
-            .fetch_optional(&mut *tx)
-            .await? else {
+            let Some(entry) =
+                sqlx::query_as::<_, TimeEntry>(&format!("{TE_SELECT} WHERE id=$1 FOR UPDATE"))
+                    .bind(id)
+                    .fetch_optional(&mut *tx)
+                    .await?
+            else {
                 continue;
             };
             if entry.status != "submitted" {
@@ -661,12 +645,8 @@ impl TimeEntryDb {
                 continue;
             }
             if !reviewer_is_admin {
-                let ok = Self::check_direct_report_for_update(
-                    &mut tx,
-                    entry.user_id,
-                    reviewer_id,
-                )
-                .await?;
+                let ok = Self::check_direct_report_for_update(&mut tx, entry.user_id, reviewer_id)
+                    .await?;
                 if !ok {
                     continue;
                 }
@@ -705,12 +685,12 @@ impl TimeEntryDb {
         ordered_ids.sort_unstable();
         ordered_ids.dedup();
         for id in ordered_ids {
-            let Some(entry) = sqlx::query_as::<_, TimeEntry>(&format!(
-                "{TE_SELECT} WHERE id=$1 FOR UPDATE"
-            ))
-            .bind(id)
-            .fetch_optional(&mut *tx)
-            .await? else {
+            let Some(entry) =
+                sqlx::query_as::<_, TimeEntry>(&format!("{TE_SELECT} WHERE id=$1 FOR UPDATE"))
+                    .bind(id)
+                    .fetch_optional(&mut *tx)
+                    .await?
+            else {
                 continue;
             };
             if entry.status != "submitted" {
@@ -720,12 +700,8 @@ impl TimeEntryDb {
                 continue;
             }
             if !reviewer_is_admin {
-                let ok = Self::check_direct_report_for_update(
-                    &mut tx,
-                    entry.user_id,
-                    reviewer_id,
-                )
-                .await?;
+                let ok = Self::check_direct_report_for_update(&mut tx, entry.user_id, reviewer_id)
+                    .await?;
                 if !ok {
                     continue;
                 }
@@ -756,16 +732,14 @@ impl TimeEntryDb {
         from: NaiveDate,
         to: NaiveDate,
     ) -> AppResult<Vec<TimeEntry>> {
-        Ok(
-            sqlx::query_as::<_, TimeEntry>(&format!(
-                "{TE_SELECT} WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3"
-            ))
-            .bind(user_id)
-            .bind(from)
-            .bind(to)
-            .fetch_all(&self.pool)
-            .await?,
-        )
+        Ok(sqlx::query_as::<_, TimeEntry>(&format!(
+            "{TE_SELECT} WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3"
+        ))
+        .bind(user_id)
+        .bind(from)
+        .bind(to)
+        .fetch_all(&self.pool)
+        .await?)
     }
 
     pub async fn get_submitted_dates_in_range(
@@ -793,6 +767,7 @@ impl TimeEntryDb {
     // ── Private helpers ────────────────────────────────────────────────────
 
     /// Apply a change request's fields to an existing time entry (within a tx).
+    #[allow(clippy::too_many_arguments)]
     pub async fn apply_change_request_tx(
         tx: &mut sqlx::PgConnection,
         entry_id: i64,

@@ -1,4 +1,3 @@
-    // workdays_per_week is included in INSERT to support flexible work schedules per user
 use crate::db::DatabasePool;
 use crate::error::{AppError, AppResult};
 use chrono::{DateTime, NaiveDate, Utc};
@@ -67,44 +66,46 @@ impl UserDb {
     // ── Lookups ────────────────────────────────────────────────────────────
 
     pub async fn find_by_email(&self, email: &str) -> AppResult<Option<User>> {
-        Ok(sqlx::query_as::<_, User>(&format!(
-            "{USER_SELECT} WHERE email = $1"
-        ))
-        .bind(email)
-        .fetch_optional(&self.pool)
-        .await?)
+        Ok(
+            sqlx::query_as::<_, User>(&format!("{USER_SELECT} WHERE email = $1"))
+                .bind(email)
+                .fetch_optional(&self.pool)
+                .await?,
+        )
     }
 
     pub async fn find_by_id(&self, id: i64) -> AppResult<Option<User>> {
-        Ok(sqlx::query_as::<_, User>(&format!(
-            "{USER_SELECT} WHERE id=$1"
-        ))
-        .bind(id)
-        .fetch_optional(&self.pool)
-        .await?)
+        Ok(
+            sqlx::query_as::<_, User>(&format!("{USER_SELECT} WHERE id=$1"))
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await?,
+        )
     }
 
     pub async fn find_by_id_active(&self, id: i64) -> AppResult<Option<User>> {
-        Ok(sqlx::query_as::<_, User>(&format!(
-            "{USER_SELECT} WHERE id=$1 AND active=TRUE"
-        ))
-        .bind(id)
-        .fetch_optional(&self.pool)
-        .await?)
+        Ok(
+            sqlx::query_as::<_, User>(&format!("{USER_SELECT} WHERE id=$1 AND active=TRUE"))
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await?,
+        )
     }
 
     pub async fn find_all_ordered(&self) -> AppResult<Vec<User>> {
-        Ok(sqlx::query_as::<_, User>(&format!(
-            "{USER_SELECT} ORDER BY last_name, first_name"
-        ))
-        .fetch_all(&self.pool)
-        .await?)
+        Ok(
+            sqlx::query_as::<_, User>(&format!("{USER_SELECT} ORDER BY last_name, first_name"))
+                .fetch_all(&self.pool)
+                .await?,
+        )
     }
 
     pub async fn find_for_approver(&self, approver_id: i64) -> AppResult<Vec<User>> {
         Ok(sqlx::query_as::<_, User>(&format!(
-            "{USER_SELECT} WHERE id=$1 \
-             OR id IN (SELECT ua.user_id FROM user_approvers ua WHERE ua.approver_id=$1) \
+            "{USER_SELECT} WHERE active=TRUE AND (id=$1 \
+             OR id IN (SELECT ua.user_id FROM user_approvers ua \
+                       JOIN users u ON u.id=ua.user_id \
+                       WHERE ua.approver_id=$1 AND u.active=TRUE AND u.role != 'admin')) \
              ORDER BY last_name, first_name"
         ))
         .bind(approver_id)
@@ -123,7 +124,9 @@ impl UserDb {
     pub async fn find_active_team_for_lead(&self, lead_id: i64) -> AppResult<Vec<User>> {
         Ok(sqlx::query_as::<_, User>(&format!(
             "{USER_SELECT} WHERE active=TRUE \
-             AND (id=$1 OR id IN (SELECT ua.user_id FROM user_approvers ua WHERE ua.approver_id=$1)) \
+             AND (id=$1 OR id IN (SELECT ua.user_id FROM user_approvers ua \
+                                  JOIN users u ON u.id=ua.user_id \
+                                  WHERE ua.approver_id=$1 AND u.active=TRUE AND u.role != 'admin')) \
              ORDER BY last_name"
         ))
         .bind(lead_id)
@@ -139,11 +142,9 @@ impl UserDb {
 
     pub async fn count_active_admins(&self) -> AppResult<i64> {
         Ok(
-            sqlx::query_scalar(
-                "SELECT COUNT(*) FROM users WHERE active=TRUE AND role='admin'",
-            )
-            .fetch_one(&self.pool)
-            .await?,
+            sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE active=TRUE AND role='admin'")
+                .fetch_one(&self.pool)
+                .await?,
         )
     }
 
@@ -170,16 +171,14 @@ impl UserDb {
     }
 
     pub async fn count_active_direct_reports(&self, user_id: i64) -> AppResult<i64> {
-        Ok(
-            sqlx::query_scalar(
-                "SELECT COUNT(*) FROM user_approvers \
+        Ok(sqlx::query_scalar(
+            "SELECT COUNT(*) FROM user_approvers \
                  WHERE approver_id=$1 \
                  AND user_id IN (SELECT id FROM users WHERE active=TRUE)",
-            )
-            .bind(user_id)
-            .fetch_one(&self.pool)
-            .await?,
         )
+        .bind(user_id)
+        .fetch_one(&self.pool)
+        .await?)
     }
 
     pub async fn get_active_flag(&self, id: i64) -> AppResult<Option<bool>> {
@@ -201,26 +200,20 @@ impl UserDb {
 
     /// Returns (id, role, active) for the given user id.
     pub async fn get_id_role_active(&self, id: i64) -> AppResult<Option<(i64, String, bool)>> {
-        Ok(
-            sqlx::query_as::<_, (i64, String, bool)>(
-                "SELECT id, role, active FROM users WHERE id=$1",
-            )
-            .bind(id)
-            .fetch_optional(&self.pool)
-            .await?,
+        Ok(sqlx::query_as::<_, (i64, String, bool)>(
+            "SELECT id, role, active FROM users WHERE id=$1",
         )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?)
     }
 
     /// Check whether `target_id` is a non-admin direct report of `approver_id`.
-    pub async fn is_direct_report(
-        &self,
-        target_id: i64,
-        approver_id: i64,
-    ) -> AppResult<bool> {
+    pub async fn is_direct_report(&self, target_id: i64, approver_id: i64) -> AppResult<bool> {
         Ok(sqlx::query_scalar::<_, Option<bool>>(
             "SELECT TRUE FROM user_approvers ua \
              WHERE ua.user_id=$1 AND ua.approver_id=$2 \
-             AND EXISTS (SELECT 1 FROM users u WHERE u.id=$1 AND u.role != 'admin')",
+             AND EXISTS (SELECT 1 FROM users u WHERE u.id=$1 AND u.active=TRUE AND u.role != 'admin')",
         )
         .bind(target_id)
         .bind(approver_id)
@@ -229,8 +222,6 @@ impl UserDb {
         .flatten()
         .is_some())
     }
-
-
 
     pub async fn get_start_date(&self, user_id: i64) -> AppResult<NaiveDate> {
         Ok(
@@ -326,34 +317,26 @@ impl UserDb {
         target_id: i64,
         approver_id: i64,
     ) -> AppResult<bool> {
-        Ok(
-            sqlx::query_scalar::<_, Option<bool>>(
-                "SELECT TRUE FROM user_approvers ua \
+        Ok(sqlx::query_scalar::<_, Option<bool>>(
+            "SELECT TRUE FROM user_approvers ua \
                  JOIN users u ON u.id = ua.user_id \
                  WHERE ua.user_id=$1 AND ua.approver_id=$2 \
                  AND u.active=TRUE AND u.role != 'admin'",
-            )
-            .bind(target_id)
-            .bind(approver_id)
-            .fetch_optional(&self.pool)
-            .await?
-            .flatten()
-            .is_some(),
         )
+        .bind(target_id)
+        .bind(approver_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .flatten()
+        .is_some())
     }
 
-    pub async fn update_allow_reopen(
-        &self,
-        target_id: i64,
-        allow: bool,
-    ) -> AppResult<()> {
-        sqlx::query(
-            "UPDATE users SET allow_reopen_without_approval=$1 WHERE id=$2",
-        )
-        .bind(allow)
-        .bind(target_id)
-        .execute(&self.pool)
-        .await?;
+    pub async fn update_allow_reopen(&self, target_id: i64, allow: bool) -> AppResult<()> {
+        sqlx::query("UPDATE users SET allow_reopen_without_approval=$1 WHERE id=$2")
+            .bind(allow)
+            .bind(target_id)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
@@ -367,16 +350,13 @@ impl UserDb {
         Ok(())
     }
 
-    pub async fn fetch_for_update(
-        tx: &mut sqlx::PgConnection,
-        id: i64,
-    ) -> AppResult<User> {
-        Ok(sqlx::query_as::<_, User>(&format!(
-            "{USER_SELECT} WHERE id=$1 FOR UPDATE"
-        ))
-        .bind(id)
-        .fetch_one(tx)
-        .await?)
+    pub async fn fetch_for_update(tx: &mut sqlx::PgConnection, id: i64) -> AppResult<User> {
+        Ok(
+            sqlx::query_as::<_, User>(&format!("{USER_SELECT} WHERE id=$1 FOR UPDATE"))
+                .bind(id)
+                .fetch_one(tx)
+                .await?,
+        )
     }
 
     pub async fn create_initial_admin(
@@ -414,6 +394,7 @@ impl UserDb {
 
     /// Insert a new non-admin user row. Approver relationships must be inserted
     /// separately via `insert_approver_tx`.
+    #[allow(clippy::too_many_arguments)]
     pub async fn create(
         tx: &mut sqlx::PgConnection,
         email: &str,
@@ -446,6 +427,7 @@ impl UserDb {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn update_basic(
         tx: &mut sqlx::PgConnection,
         id: i64,
@@ -598,11 +580,14 @@ impl UserDb {
         id: i64,
         allow_reopen_without_approval: bool,
     ) -> AppResult<()> {
-        sqlx::query("UPDATE users SET allow_reopen_without_approval=$1 WHERE id=$2")
+        let result = sqlx::query("UPDATE users SET allow_reopen_without_approval=$1 WHERE id=$2")
             .bind(allow_reopen_without_approval)
             .bind(id)
             .execute(&self.pool)
             .await?;
+        if result.rows_affected() == 0 {
+            return Err(AppError::NotFound);
+        }
         Ok(())
     }
 
@@ -612,29 +597,25 @@ impl UserDb {
         hash: &str,
         must_change_password: bool,
     ) -> AppResult<()> {
-        sqlx::query(
-            "UPDATE users SET password_hash=$1, must_change_password=$2 WHERE id=$3",
-        )
-        .bind(hash)
-        .bind(must_change_password)
-        .bind(id)
-        .execute(tx)
-        .await?;
+        let result =
+            sqlx::query("UPDATE users SET password_hash=$1, must_change_password=$2 WHERE id=$3")
+                .bind(hash)
+                .bind(must_change_password)
+                .bind(id)
+                .execute(tx)
+                .await?;
+        if result.rows_affected() == 0 {
+            return Err(AppError::NotFound);
+        }
         Ok(())
     }
 
-    pub async fn update_password_self(
-        &self,
-        id: i64,
-        hash: &str,
-    ) -> AppResult<()> {
-        sqlx::query(
-            "UPDATE users SET password_hash=$1, must_change_password=FALSE WHERE id=$2",
-        )
-        .bind(hash)
-        .bind(id)
-        .execute(&self.pool)
-        .await?;
+    pub async fn update_password_self(&self, id: i64, hash: &str) -> AppResult<()> {
+        sqlx::query("UPDATE users SET password_hash=$1, must_change_password=FALSE WHERE id=$2")
+            .bind(hash)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
@@ -648,23 +629,22 @@ impl UserDb {
     }
 
     pub async fn count_active_admins_tx(tx: &mut sqlx::PgConnection) -> AppResult<i64> {
-        Ok(sqlx::query_scalar(
-            "SELECT COUNT(*) FROM users WHERE active=TRUE AND role='admin'",
+        Ok(
+            sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE active=TRUE AND role='admin'")
+                .fetch_one(tx)
+                .await?,
         )
-        .fetch_one(tx)
-        .await?)
     }
 
     // ── Annual leave ───────────────────────────────────────────────────────
 
     pub async fn get_leave_days(&self, user_id: i64, year: i32) -> AppResult<i64> {
-        let existing: Option<i64> = sqlx::query_scalar(
-            "SELECT days FROM user_annual_leave WHERE user_id=$1 AND year=$2",
-        )
-        .bind(user_id)
-        .bind(year)
-        .fetch_optional(&self.pool)
-        .await?;
+        let existing: Option<i64> =
+            sqlx::query_scalar("SELECT days FROM user_annual_leave WHERE user_id=$1 AND year=$2")
+                .bind(user_id)
+                .bind(year)
+                .fetch_optional(&self.pool)
+                .await?;
         if let Some(days) = existing {
             return Ok(days);
         }
@@ -681,12 +661,7 @@ impl UserDb {
         Ok(default_days)
     }
 
-    pub async fn set_leave_days(
-        &self,
-        user_id: i64,
-        year: i32,
-        days: i64,
-    ) -> AppResult<()> {
+    pub async fn set_leave_days(&self, user_id: i64, year: i32, days: i64) -> AppResult<()> {
         sqlx::query(
             "INSERT INTO user_annual_leave(user_id, year, days) VALUES ($1,$2,$3) \
              ON CONFLICT (user_id, year) DO UPDATE SET days = EXCLUDED.days",
@@ -739,7 +714,9 @@ impl UserDb {
 
     // ── Submission reminder helper ─────────────────────────────────────────
 
-    pub async fn get_active_users_with_hours(&self) -> AppResult<Vec<(i64, String, NaiveDate, i16)>> {
+    pub async fn get_active_users_with_hours(
+        &self,
+    ) -> AppResult<Vec<(i64, String, NaiveDate, i16)>> {
         Ok(sqlx::query_as::<_, (i64, String, NaiveDate, i16)>(
             "SELECT id, email, start_date, workdays_per_week FROM users \
              WHERE active = TRUE AND weekly_hours > 0",

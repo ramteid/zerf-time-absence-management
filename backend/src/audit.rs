@@ -18,7 +18,8 @@ pub async fn log(
     after: Option<serde_json::Value>,
 ) {
     let db = crate::repository::AuditDb::new(pool.clone());
-    db.log(user_id, action, table_name, record_id, before, after).await;
+    db.log(user_id, action, table_name, record_id, before, after)
+        .await;
 }
 
 #[derive(Deserialize)]
@@ -36,9 +37,11 @@ pub async fn list(
     if !requester.is_admin() {
         return Err(AppError::Forbidden);
     }
-    Ok(Json(app_state.db.audit.list(
-        query.table_name,
-        query.record_id,
-        query.user_id,
-    ).await?))
+    Ok(Json(
+        app_state
+            .db
+            .audit
+            .list(query.table_name, query.record_id, query.user_id)
+            .await?,
+    ))
 }

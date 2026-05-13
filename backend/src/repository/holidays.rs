@@ -87,18 +87,22 @@ impl HolidayDb {
 
     /// Load country setting from app_settings.
     pub async fn get_country_setting(&self) -> AppResult<String> {
-        Ok(sqlx::query_scalar("SELECT value FROM app_settings WHERE key = 'country'")
-            .fetch_optional(&self.pool)
-            .await?
-            .unwrap_or_default())
+        Ok(
+            sqlx::query_scalar("SELECT value FROM app_settings WHERE key = 'country'")
+                .fetch_optional(&self.pool)
+                .await?
+                .unwrap_or_default(),
+        )
     }
 
     /// Load region setting from app_settings.
     pub async fn get_region_setting(&self) -> AppResult<String> {
-        Ok(sqlx::query_scalar("SELECT value FROM app_settings WHERE key = 'region'")
-            .fetch_optional(&self.pool)
-            .await?
-            .unwrap_or_default())
+        Ok(
+            sqlx::query_scalar("SELECT value FROM app_settings WHERE key = 'region'")
+                .fetch_optional(&self.pool)
+                .await?
+                .unwrap_or_default(),
+        )
     }
 
     pub async fn insert(
@@ -124,11 +128,7 @@ impl HolidayDb {
         Ok(())
     }
 
-    pub async fn create_manual(
-        &self,
-        holiday_date: NaiveDate,
-        name: &str,
-    ) -> AppResult<()> {
+    pub async fn create_manual(&self, holiday_date: NaiveDate, name: &str) -> AppResult<()> {
         let year = holiday_date.year();
         sqlx::query(
             "INSERT INTO holidays(holiday_date, name, year, is_auto) \
@@ -144,10 +144,13 @@ impl HolidayDb {
     }
 
     pub async fn delete(&self, id: i64) -> AppResult<()> {
-        sqlx::query("DELETE FROM holidays WHERE id=$1")
+        let result = sqlx::query("DELETE FROM holidays WHERE id=$1")
             .bind(id)
             .execute(&self.pool)
             .await?;
+        if result.rows_affected() == 0 {
+            return Err(AppError::NotFound);
+        }
         Ok(())
     }
 

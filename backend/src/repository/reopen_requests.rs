@@ -28,8 +28,7 @@ struct OpenChangeRequestForReopen {
     new_comment: Option<String>,
 }
 
-const RR_SELECT: &str =
-    "SELECT id, user_id, week_start, reviewed_by, status, \
+const RR_SELECT: &str = "SELECT id, user_id, week_start, reviewed_by, status, \
      reviewed_at, rejection_reason, created_at FROM reopen_requests";
 
 #[derive(Clone)]
@@ -118,12 +117,11 @@ impl ReopenRequestDb {
     }
 
     pub async fn get_user_full_name(&self, user_id: i64) -> AppResult<String> {
-        let (first, last): (String, String) = sqlx::query_as(
-            "SELECT first_name, last_name FROM users WHERE id=$1",
-        )
-        .bind(user_id)
-        .fetch_one(&self.pool)
-        .await?;
+        let (first, last): (String, String) =
+            sqlx::query_as("SELECT first_name, last_name FROM users WHERE id=$1")
+                .bind(user_id)
+                .fetch_one(&self.pool)
+                .await?;
         Ok(format!("{first} {last}"))
     }
 
@@ -136,7 +134,7 @@ impl ReopenRequestDb {
         user_id: i64,
         week_start: NaiveDate,
     ) -> AppResult<(i64, DateTime<Utc>)> {
-        Ok(sqlx::query_as::<_, (i64, DateTime<Utc>)>(
+        sqlx::query_as::<_, (i64, DateTime<Utc>)>(
             "INSERT INTO reopen_requests(user_id, week_start, status) \
              VALUES ($1,$2,'pending') RETURNING id, created_at",
         )
@@ -147,7 +145,7 @@ impl ReopenRequestDb {
         .map_err(|e| {
             tracing::warn!(target:"zerf::reopen", "insert_pending failed: {e}");
             AppError::Conflict("A pending request for this week already exists.".into())
-        })?)
+        })
     }
 
     /// Insert a reopen request directly as 'auto_approved' and perform the
@@ -160,10 +158,10 @@ impl ReopenRequestDb {
         actor_id: i64,
     ) -> AppResult<(i64, Vec<(i64, String)>)> {
         let mut tx = self.pool.begin().await?;
-        let (req_id, _): (i64, DateTime<Utc>) = sqlx::query_as(
+        let req_id: i64 = sqlx::query_scalar(
             "INSERT INTO reopen_requests(user_id, week_start, status, reviewed_by, reviewed_at) \
              VALUES ($1,$2,'auto_approved',$3,CURRENT_TIMESTAMP) \
-             RETURNING id, created_at",
+             RETURNING id",
         )
         .bind(user_id)
         .bind(week_start)
@@ -195,7 +193,8 @@ impl ReopenRequestDb {
         .await?
         .ok_or_else(|| AppError::Conflict("Reopen request is no longer pending.".into()))?;
 
-        let affected = Self::perform_reopen(&mut tx, reviewer_id, req.user_id, req.week_start).await?;
+        let affected =
+            Self::perform_reopen(&mut tx, reviewer_id, req.user_id, req.week_start).await?;
         let rows = sqlx::query(
             "UPDATE reopen_requests SET status='approved', reviewed_by=$1, \
              reviewed_at=CURRENT_TIMESTAMP \
@@ -217,7 +216,12 @@ impl ReopenRequestDb {
     }
 
     /// Reject a pending reopen request (optimistic locking).
-    pub async fn reject(&self, request_id: i64, reviewer_id: i64, reason: &str) -> AppResult<ReopenRequest> {
+    pub async fn reject(
+        &self,
+        request_id: i64,
+        reviewer_id: i64,
+        reason: &str,
+    ) -> AppResult<ReopenRequest> {
         let before: ReopenRequest =
             sqlx::query_as::<_, ReopenRequest>(&format!("{RR_SELECT} WHERE id=$1"))
                 .bind(request_id)
@@ -302,7 +306,7 @@ impl ReopenRequestDb {
             .fetch_one(&mut **tx)
             .await?;
             TimeEntryDb::apply_change_request_tx(
-                &mut **tx,
+                tx,
                 change_request.time_entry_id,
                 &current_entry.status,
                 change_request.new_date,
@@ -333,7 +337,7 @@ impl ReopenRequestDb {
                 comment: updated_entry.comment.clone(),
             };
             validate_entry(
-                &mut **tx,
+                tx,
                 updated_entry.user_id,
                 &effective_entry,
                 Some(updated_entry.id),
@@ -345,12 +349,16 @@ impl ReopenRequestDb {
             let rows = sqlx::query(
                 "UPDATE change_requests \
                  SET status='approved', \
-                     reviewed_by=CASE WHEN $1::bigint IS NOT NULL THEN $1 ELSE NULL END, \
+                     reviewed_by=$1, \
                      reviewed_at=CURRENT_TIMESTAMP, \
                      rejection_reason=NULL \
                  WHERE status='open' AND id = ANY($2)",
             )
-            .bind(match actor_id == subject_id { true => None as Option<i64>, false => Some(actor_id) })
+            .bind(if actor_id == subject_id {
+                None::<i64>
+            } else {
+                Some(actor_id)
+            })
             .bind(&applied_change_request_ids)
             .execute(&mut **tx)
             .await?

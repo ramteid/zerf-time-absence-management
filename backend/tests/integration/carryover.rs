@@ -68,12 +68,7 @@ async fn set_leave_days_current_and_next(
     );
 }
 
-async fn set_leave_days_for_year(
-    app: &TestApp,
-    user_id: i64,
-    year: i32,
-    days: i64,
-) {
+async fn set_leave_days_for_year(app: &TestApp, user_id: i64, year: i32, days: i64) {
     sqlx::query(
         "INSERT INTO user_annual_leave(user_id, year, days) VALUES ($1,$2,$3) \
          ON CONFLICT (user_id, year) DO UPDATE SET days = EXCLUDED.days",
@@ -96,7 +91,10 @@ async fn pick_workdays(
     assert_eq!(st, StatusCode::OK, "load holidays for year {year}");
 
     let mut holiday_set = std::collections::HashSet::<NaiveDate>::new();
-    for item in holidays_json.as_array().expect("holidays should be an array") {
+    for item in holidays_json
+        .as_array()
+        .expect("holidays should be an array")
+    {
         let date_str = item["holiday_date"]
             .as_str()
             .expect("holiday_date should be string");
@@ -153,10 +151,7 @@ fn is_workday(date: NaiveDate, holiday_set: &std::collections::HashSet<NaiveDate
     !matches!(date.weekday(), Weekday::Sat | Weekday::Sun) && !holiday_set.contains(&date)
 }
 
-async fn last_workday_in_year(
-    client: &crate::common::TestClient,
-    year: i32,
-) -> NaiveDate {
+async fn last_workday_in_year(client: &crate::common::TestClient, year: i32) -> NaiveDate {
     let holiday_set = holiday_set_for_year(client, year).await;
     let mut cursor = NaiveDate::from_ymd_opt(year, 12, 31).expect("valid year-end date");
     while cursor.year() == year {
@@ -193,10 +188,7 @@ async fn nth_workday_from(
     }
 }
 
-async fn create_vacation(
-    client: &crate::common::TestClient,
-    day: NaiveDate,
-) -> i64 {
+async fn create_vacation(client: &crate::common::TestClient, day: NaiveDate) -> i64 {
     let date = day.format("%Y-%m-%d").to_string();
     let (st, body) = client
         .post(
@@ -225,7 +217,9 @@ async fn carryover_policy_edge_cases() {
     // Edge case 1: carryover_expired reflects expiry-date boundary in current year.
     update_carryover_expiry(&admin, "12-31").await;
     let (st, bal_not_expired) = emp
-        .get(&format!("/api/v1/leave-balance/{emp_id}?year={current_year}"))
+        .get(&format!(
+            "/api/v1/leave-balance/{emp_id}?year={current_year}"
+        ))
         .await;
     assert_eq!(st, StatusCode::OK);
     assert_eq!(
@@ -235,7 +229,9 @@ async fn carryover_policy_edge_cases() {
 
     update_carryover_expiry(&admin, "01-01").await;
     let (st, bal_expired) = emp
-        .get(&format!("/api/v1/leave-balance/{emp_id}?year={current_year}"))
+        .get(&format!(
+            "/api/v1/leave-balance/{emp_id}?year={current_year}"
+        ))
         .await;
     assert_eq!(st, StatusCode::OK);
     assert_eq!(
@@ -253,7 +249,10 @@ async fn carryover_policy_edge_cases() {
     for day in &current_year_days[0..2] {
         let absence_id = create_vacation(&emp, *day).await;
         let (st, _) = lead
-            .post(&format!("/api/v1/absences/{absence_id}/approve"), &json!({}))
+            .post(
+                &format!("/api/v1/absences/{absence_id}/approve"),
+                &json!({}),
+            )
             .await;
         assert_eq!(st, StatusCode::OK, "approve current-year vacation");
     }
@@ -315,7 +314,11 @@ async fn carryover_policy_edge_cases() {
     let (st, body) = emp
         .delete(&format!("/api/v1/absences/{next_year_absence_id}"))
         .await;
-    assert_eq!(st, StatusCode::OK, "request cancellation for next-year vacation");
+    assert_eq!(
+        st,
+        StatusCode::OK,
+        "request cancellation for next-year vacation"
+    );
     assert_eq!(body["pending"], true, "must enter cancellation workflow");
 
     let (st, bal_cancellation_pending) = emp
@@ -377,7 +380,8 @@ async fn carryover_policy_edge_cases() {
         "third post-expiry day should be rejected; only annual entitlement is usable after expiry"
     );
     assert!(
-        body.to_string().contains("Not enough remaining vacation days"),
+        body.to_string()
+            .contains("Not enough remaining vacation days"),
         "error should mention remaining vacation days: {body}"
     );
 
@@ -423,7 +427,8 @@ async fn cross_year_request_enforces_end_year_post_expiry_budget() {
         "cross-year request should be rejected when post-expiry part exceeds end-year base entitlement"
     );
     assert!(
-        body.to_string().contains("Not enough remaining vacation days"),
+        body.to_string()
+            .contains("Not enough remaining vacation days"),
         "error should mention remaining vacation days: {body}"
     );
 
@@ -489,7 +494,11 @@ async fn requested_days_do_not_reduce_cross_year_carryover_source() {
             &json!({"kind":"vacation","start_date": day_iso, "end_date": day_iso}),
         )
         .await;
-    assert_eq!(st, StatusCode::OK, "create requested current-year day: {body}");
+    assert_eq!(
+        st,
+        StatusCode::OK,
+        "create requested current-year day: {body}"
+    );
 
     // Request an absence crossing into January next year. This should stay valid even
     // with a requested day in current year, because requested status must not reduce
@@ -531,7 +540,9 @@ async fn carryover_expiry_allows_leap_day_and_normalizes_non_leap_years() {
     update_carryover_expiry(&admin, "02-29").await;
 
     let (st, balance) = emp
-        .get(&format!("/api/v1/leave-balance/{emp_id}?year={current_year}"))
+        .get(&format!(
+            "/api/v1/leave-balance/{emp_id}?year={current_year}"
+        ))
         .await;
     assert_eq!(st, StatusCode::OK, "load leave balance with 02-29 expiry");
 
@@ -541,8 +552,7 @@ async fn carryover_expiry_allows_leap_day_and_normalizes_non_leap_years() {
         format!("{current_year:04}-02-28")
     };
     assert_eq!(
-        balance["carryover_expiry"],
-        expected_expiry,
+        balance["carryover_expiry"], expected_expiry,
         "carryover expiry should be year-aware"
     );
 

@@ -55,7 +55,11 @@ async fn assert_can_access_user(
     if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let is_report = app_state.db.users.is_direct_report(target_id, requester.id).await?;
+    let is_report = app_state
+        .db
+        .users
+        .is_direct_report(target_id, requester.id)
+        .await?;
     if !is_report {
         return Err(AppError::Forbidden);
     }
@@ -72,7 +76,11 @@ pub async fn team_settings_list(
     let users = if requester.is_admin() {
         app_state.db.users.find_all_active_ordered().await?
     } else {
-        app_state.db.users.find_active_team_for_lead(requester.id).await?
+        app_state
+            .db
+            .users
+            .find_active_team_for_lead(requester.id)
+            .await?
     };
     let settings_list: Vec<TeamSettings> = users
         .into_iter()
@@ -104,7 +112,11 @@ pub async fn team_settings_update(
     }
     // Team leads may only edit themselves or their direct reports.
     if !requester.is_admin() && target_id != requester.id {
-        let is_report = app_state.db.users.is_direct_report(target_id, requester.id).await?;
+        let is_report = app_state
+            .db
+            .users
+            .is_direct_report(target_id, requester.id)
+            .await?;
         if !is_report {
             return Err(AppError::Forbidden);
         }
@@ -160,7 +172,12 @@ pub async fn get_one(
         .find_by_id(user_id)
         .await?
         .ok_or(AppError::NotFound)?;
-    let approver_ids = app_state.db.users.get_approver_ids(user.id).await.unwrap_or_default();
+    let approver_ids = app_state
+        .db
+        .users
+        .get_approver_ids(user.id)
+        .await
+        .unwrap_or_default();
     let user_json = serde_json::json!({
         "id": user.id,
         "email": user.email,
@@ -371,7 +388,7 @@ pub async fn create(
     let password_hash = hash_password(&temporary_password)?;
     let overtime_balance = body.overtime_start_balance_min.unwrap_or(0);
     let mut transaction = app_state.pool.begin().await?;
-    lock_user_graph(&mut *transaction).await?;
+    lock_user_graph(&mut transaction).await?;
     validate_approver_ids(&app_state, &body.role, None, &body.approver_ids).await?;
     let new_user_id: i64 = sqlx::query_scalar("INSERT INTO users(email,password_hash,first_name,last_name,role,weekly_hours,workdays_per_week,start_date,must_change_password,overtime_start_balance_min) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id")
         .bind(&normalized_email).bind(password_hash).bind(&first_name).bind(&last_name).bind(&body.role)
@@ -384,26 +401,31 @@ pub async fn create(
         })?;
     // Insert approver relationships into user_approvers junction table
     for approver_id in &body.approver_ids {
-        UserDb::insert_approver_tx(&mut *transaction, new_user_id, *approver_id).await?;
-    };
+        UserDb::insert_approver_tx(&mut transaction, new_user_id, *approver_id).await?;
+    }
     // Seed leave days for current + next year
     let current_year = crate::settings::app_current_year(&app_state.pool).await;
     UserDb::set_leave_days_tx(
-        &mut *transaction,
+        &mut transaction,
         new_user_id,
         current_year,
         body.leave_days_current_year,
     )
     .await?;
     UserDb::set_leave_days_tx(
-        &mut *transaction,
+        &mut transaction,
         new_user_id,
         current_year + 1,
         body.leave_days_next_year,
     )
     .await?;
     transaction.commit().await?;
-    let created_user = app_state.db.users.find_by_id(new_user_id).await?.ok_or(AppError::NotFound)?;
+    let created_user = app_state
+        .db
+        .users
+        .find_by_id(new_user_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
     let created_auth_user = repo_user_to_auth_user(created_user);
     audit::log(
         &app_state.pool,
@@ -547,7 +569,7 @@ pub async fn update(
     let first_name = normalize_optional_user_name(body.first_name.as_ref())?;
     let last_name = normalize_optional_user_name(body.last_name.as_ref())?;
     let mut transaction = app_state.pool.begin().await?;
-    lock_user_graph(&mut *transaction).await?;
+    lock_user_graph(&mut transaction).await?;
     let previous_user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, workdays_per_week, start_date, active, must_change_password, created_at, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1 FOR UPDATE")
         .bind(user_id)
         .fetch_one(&mut *transaction)
@@ -584,12 +606,20 @@ pub async fn update(
     let effective_approver_ids = if let Some(approver_ids) = &body.approver_ids {
         approver_ids.clone()
     } else {
-        sqlx::query_scalar("SELECT approver_id FROM user_approvers WHERE user_id=$1 ORDER BY approver_id")
-            .bind(user_id)
-            .fetch_all(&mut *transaction)
-            .await?
+        sqlx::query_scalar(
+            "SELECT approver_id FROM user_approvers WHERE user_id=$1 ORDER BY approver_id",
+        )
+        .bind(user_id)
+        .fetch_all(&mut *transaction)
+        .await?
     };
-    validate_approver_ids(&app_state, &new_role, Some(user_id), &effective_approver_ids).await?;
+    validate_approver_ids(
+        &app_state,
+        &new_role,
+        Some(user_id),
+        &effective_approver_ids,
+    )
+    .await?;
 
     let resulting_active = body.active.unwrap_or(previous_user.active);
     if !can_approve_admin_subjects(&new_role, resulting_active) {
@@ -606,11 +636,8 @@ pub async fn update(
         }
     }
     if !can_approve_non_admin_subjects(&new_role, resulting_active) {
-        let non_admin_direct_reports_count = app_state
-            .db
-            .users
-            .count_direct_reports(user_id)
-            .await?;
+        let non_admin_direct_reports_count =
+            app_state.db.users.count_direct_reports(user_id).await?;
         if non_admin_direct_reports_count > 0 {
             return Err(AppError::BadRequest(format!(
                 "Cannot change this user to a non-approver: {} user(s) still have them as their approver. Reassign them first.",
@@ -620,7 +647,7 @@ pub async fn update(
     }
     // Last-admin protection: checked while the user graph lock is held.
     if removing_admin_rights && previous_user.active {
-        let active_admins = UserDb::count_active_admins_tx(&mut *transaction).await?;
+        let active_admins = UserDb::count_active_admins_tx(&mut transaction).await?;
         if active_admins <= 1 {
             return Err(AppError::BadRequest(
                 "Cannot remove the last active admin.".into(),
@@ -639,10 +666,10 @@ pub async fn update(
     // Update leave days if provided
     let current_year = crate::settings::app_current_year(&app_state.pool).await;
     if let Some(d) = body.leave_days_current_year {
-        UserDb::set_leave_days_tx(&mut *transaction, user_id, current_year, d).await?;
+        UserDb::set_leave_days_tx(&mut transaction, user_id, current_year, d).await?;
     }
     if let Some(d) = body.leave_days_next_year {
-        UserDb::set_leave_days_tx(&mut *transaction, user_id, current_year + 1, d).await?;
+        UserDb::set_leave_days_tx(&mut transaction, user_id, current_year + 1, d).await?;
     }
     // Handle approver_ids update if provided
     if let Some(new_approver_ids) = &body.approver_ids {
@@ -653,7 +680,7 @@ pub async fn update(
             .await?;
         // Insert new approver relationships
         for approver_id in new_approver_ids {
-            UserDb::insert_approver_tx(&mut *transaction, user_id, *approver_id).await?;
+            UserDb::insert_approver_tx(&mut transaction, user_id, *approver_id).await?;
         }
     }
     // If role changed or user was deactivated, kill all sessions of that user
@@ -665,7 +692,7 @@ pub async fn update(
         .unwrap_or(false);
     let just_deactivated = matches!(body.active, Some(false)) && previous_user.active;
     if role_changed || just_deactivated {
-        let _ = crate::repository::SessionDb::delete_for_user_tx(&mut *transaction, user_id).await;
+        let _ = crate::repository::SessionDb::delete_for_user_tx(&mut transaction, user_id).await;
     }
     transaction.commit().await?;
     let updated_user = app_state
@@ -702,13 +729,13 @@ pub async fn deactivate(
         ));
     }
     let mut transaction = app_state.pool.begin().await?;
-    lock_user_graph(&mut *transaction).await?;
+    lock_user_graph(&mut transaction).await?;
     let previous_user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, workdays_per_week, start_date, active, must_change_password, created_at, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1 FOR UPDATE")
         .bind(user_id)
         .fetch_one(&mut *transaction)
         .await?;
     if previous_user.active && previous_user.role == "admin" {
-        let active_admins = UserDb::count_active_admins_tx(&mut *transaction).await?;
+        let active_admins = UserDb::count_active_admins_tx(&mut transaction).await?;
         if active_admins <= 1 {
             return Err(AppError::BadRequest(
                 "Cannot remove the last active admin.".into(),
@@ -730,8 +757,8 @@ pub async fn deactivate(
             direct_reports_count
         )));
     }
-    UserDb::deactivate_tx(&mut *transaction, user_id).await?;
-    crate::repository::SessionDb::delete_for_user_tx(&mut *transaction, user_id).await?;
+    UserDb::deactivate_tx(&mut transaction, user_id).await?;
+    crate::repository::SessionDb::delete_for_user_tx(&mut transaction, user_id).await?;
     transaction.commit().await?;
     audit::log(
         &app_state.pool,
@@ -758,7 +785,7 @@ pub async fn delete_user(
         return Err(AppError::BadRequest("You cannot delete yourself.".into()));
     }
     let mut transaction = app_state.pool.begin().await?;
-    lock_user_graph(&mut *transaction).await?;
+    lock_user_graph(&mut transaction).await?;
     let target_user: User = sqlx::query_as(
         "SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, workdays_per_week, \
          start_date, active, must_change_password, created_at, allow_reopen_without_approval, \
@@ -769,7 +796,7 @@ pub async fn delete_user(
     .await?
     .ok_or(AppError::NotFound)?;
     if target_user.active && target_user.role == "admin" {
-        let active_admins = UserDb::count_active_admins_tx(&mut *transaction).await?;
+        let active_admins = UserDb::count_active_admins_tx(&mut transaction).await?;
         if active_admins <= 1 {
             return Err(AppError::BadRequest(
                 "Cannot delete the last active admin.".into(),
@@ -819,9 +846,19 @@ pub async fn reset_password(
     let temporary_password = generate_password();
     let new_password_hash = hash_password(&temporary_password)?;
     let mut transaction = app_state.pool.begin().await?;
-    UserDb::update_password(&mut *transaction, target_id, &new_password_hash, true).await?;
+    let target_active: Option<bool> =
+        sqlx::query_scalar("SELECT active FROM users WHERE id=$1 FOR UPDATE")
+            .bind(target_id)
+            .fetch_optional(&mut *transaction)
+            .await?;
+    match target_active {
+        Some(true) => {}
+        Some(false) => return Err(AppError::BadRequest("User is inactive.".into())),
+        None => return Err(AppError::NotFound),
+    }
+    UserDb::update_password(&mut transaction, target_id, &new_password_hash, true).await?;
     // Force re-authentication: kill any existing sessions for this user.
-    crate::repository::SessionDb::delete_for_user_tx(&mut *transaction, target_id).await?;
+    crate::repository::SessionDb::delete_for_user_tx(&mut transaction, target_id).await?;
     transaction.commit().await?;
     audit::log(
         &app_state.pool,
@@ -927,12 +964,20 @@ pub async fn set_leave_days_handler(
     if !(0..=366).contains(&body.days) {
         return Err(AppError::BadRequest("Invalid days value.".into()));
     }
-    let is_active = app_state.db.users.get_active_flag(user_id).await?
+    let is_active = app_state
+        .db
+        .users
+        .get_active_flag(user_id)
+        .await?
         .ok_or(AppError::NotFound)?;
     if !is_active {
         return Err(AppError::BadRequest("User is inactive.".into()));
     }
-    app_state.db.users.set_leave_days(user_id, body.year, body.days).await?;
+    app_state
+        .db
+        .users
+        .set_leave_days(user_id, body.year, body.days)
+        .await?;
     audit::log(
         &app_state.pool,
         requester.id,

@@ -101,7 +101,8 @@ async fn reopen_full_workflow() {
         assert_eq!(body[0]["status"], "draft");
 
         let (_, body) = emp.get("/api/v1/notifications").await;
-        let notification = body.as_array()
+        let notification = body
+            .as_array()
             .unwrap()
             .iter()
             .find(|n| n["kind"] == "reopen_auto_approved")
@@ -111,7 +112,10 @@ async fn reopen_full_workflow() {
             Some("Woche zur Bearbeitung freigegeben")
         );
         let body = notification["body"].as_str().unwrap_or("");
-        assert!(body.contains("Woche: KW"), "body should include week label: {body}");
+        assert!(
+            body.contains("Woche: KW"),
+            "body should include week label: {body}"
+        );
         assert!(
             body.contains("Keine offenen Änderungsanträge")
                 || body.contains("Automatisch übernommene Änderungsanträge"),
@@ -129,12 +133,12 @@ async fn reopen_full_workflow() {
 
         let _eid = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
 
-            let (st, body) = emp
-                .post(
-                    "/api/v1/reopen-requests",
-                    &json!({"week_start": monday_iso}),
-                )
-                .await;
+        let (st, body) = emp
+            .post(
+                "/api/v1/reopen-requests",
+                &json!({"week_start": monday_iso}),
+            )
+            .await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(body["status"], "pending");
         let req_id = id(&body);

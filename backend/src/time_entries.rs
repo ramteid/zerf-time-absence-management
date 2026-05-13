@@ -73,16 +73,16 @@ pub struct RangeQuery {
     pub status: Option<String>,
 }
 
-async fn attach_counts_as_work(
-    app_state: &AppState,
-    entries: &mut [TimeEntry],
-) -> AppResult<()> {
+async fn attach_counts_as_work(app_state: &AppState, entries: &mut [TimeEntry]) -> AppResult<()> {
     let category_ids: HashSet<i64> = entries.iter().map(|entry| entry.category_id).collect();
     let mut by_category: std::collections::HashMap<i64, bool> = std::collections::HashMap::new();
 
     for category_id in category_ids {
         let category = app_state.db.categories.find_by_id(category_id).await?;
-        by_category.insert(category_id, category.map(|item| item.counts_as_work).unwrap_or(true));
+        by_category.insert(
+            category_id,
+            category.map(|item| item.counts_as_work).unwrap_or(true),
+        );
     }
 
     for entry in entries {
@@ -291,7 +291,12 @@ pub async fn submit(
     let submitted_count = submitted_ids.len();
     let mut submitted_weeks = HashSet::new();
     for entry_id in &submitted_ids {
-        if let Some(entry_date) = app_state.db.time_entries.get_date_for_entry(*entry_id).await? {
+        if let Some(entry_date) = app_state
+            .db
+            .time_entries
+            .get_date_for_entry(*entry_id)
+            .await?
+        {
             submitted_weeks.insert(week_start(entry_date));
         }
     }
@@ -473,7 +478,10 @@ pub async fn batch_approve(
                 "timesheet_approved",
                 "timesheet_approved_title",
                 "timesheet_batch_approved_body",
-                vec![("week_count", i18n::week_count(&language, weeks.len() as i64))],
+                vec![(
+                    "week_count",
+                    i18n::week_count(&language, weeks.len() as i64),
+                )],
                 Some("time_entries"),
                 None,
             )
@@ -515,7 +523,12 @@ pub async fn batch_reject(
     let rejected_entries = app_state
         .db
         .time_entries
-        .batch_reject(&body.ids, requester.id, requester.is_admin(), &rejection_reason)
+        .batch_reject(
+            &body.ids,
+            requester.id,
+            requester.is_admin(),
+            &rejection_reason,
+        )
         .await?;
     let rejected_count = rejected_entries.len();
     for entry in &rejected_entries {

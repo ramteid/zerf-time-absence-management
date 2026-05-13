@@ -8,6 +8,7 @@ use crate::AppState;
 use axum::extract::State;
 use axum::Json;
 use chrono::Datelike;
+use lettre::message::Mailbox;
 use serde::{Deserialize, Serialize};
 
 const UI_LANGUAGE_KEY: &str = "ui_language";
@@ -111,9 +112,9 @@ fn normalize_timezone(value: &str) -> AppResult<String> {
     if trimmed.is_empty() {
         return Err(AppError::BadRequest("Timezone is required.".into()));
     }
-    let parsed = trimmed
-        .parse::<chrono_tz::Tz>()
-        .map_err(|_| AppError::BadRequest("Invalid timezone. Use an IANA timezone like Europe/Berlin.".into()))?;
+    let parsed = trimmed.parse::<chrono_tz::Tz>().map_err(|_| {
+        AppError::BadRequest("Invalid timezone. Use an IANA timezone like Europe/Berlin.".into())
+    })?;
     Ok(parsed.to_string())
 }
 
@@ -319,8 +320,6 @@ pub async fn update_smtp_settings(
                 "SMTP from address is required.".into(),
             ));
         }
-        // Validate from address is parseable as a mailbox.
-        use lettre::message::Mailbox;
         from.parse::<Mailbox>()
             .map_err(|_| AppError::BadRequest("Invalid SMTP from address.".into()))?;
 
@@ -336,22 +335,22 @@ pub async fn update_smtp_settings(
     // Save all SMTP settings atomically within a transaction.
     let mut transaction = app_state.pool.begin().await?;
 
-    save_setting_exec(&mut *transaction, SMTP_HOST_KEY, &smtp_config.host).await?;
+    save_setting_exec(&mut transaction, SMTP_HOST_KEY, &smtp_config.host).await?;
     save_setting_exec(
-        &mut *transaction,
+        &mut transaction,
         SMTP_PORT_KEY,
         &smtp_config.port.to_string(),
     )
     .await?;
     save_setting_exec(
-        &mut *transaction,
+        &mut transaction,
         SMTP_USERNAME_KEY,
         smtp_config.username.as_deref().unwrap_or(""),
     )
     .await?;
-    save_setting_exec(&mut *transaction, SMTP_FROM_KEY, &smtp_config.from).await?;
+    save_setting_exec(&mut transaction, SMTP_FROM_KEY, &smtp_config.from).await?;
     save_setting_exec(
-        &mut *transaction,
+        &mut transaction,
         SMTP_ENCRYPTION_KEY,
         &smtp_config.encryption,
     )
@@ -360,30 +359,46 @@ pub async fn update_smtp_settings(
     // Overwrite password when explicitly provided.
     if let Some(ref password) = body.smtp_password {
         if !password.is_empty() {
-            save_setting_exec(&mut *transaction, SMTP_PASSWORD_KEY, password).await?;
+            save_setting_exec(&mut transaction, SMTP_PASSWORD_KEY, password).await?;
         }
     }
 
     save_setting_exec(
-        &mut *transaction,
+        &mut transaction,
         SMTP_ENABLED_KEY,
         if body.smtp_enabled { "true" } else { "false" },
     )
     .await?;
 
-    let submission_reminders_enabled = body.submission_reminders_enabled.unwrap_or(true);
+    let current_submission_reminders_enabled =
+        load_setting(&app_state.pool, SUBMISSION_REMINDERS_ENABLED_KEY, "true").await? != "false";
+    let submission_reminders_enabled = body
+        .submission_reminders_enabled
+        .unwrap_or(current_submission_reminders_enabled);
     save_setting_exec(
-        &mut *transaction,
+        &mut transaction,
         SUBMISSION_REMINDERS_ENABLED_KEY,
-        if submission_reminders_enabled { "true" } else { "false" },
+        if submission_reminders_enabled {
+            "true"
+        } else {
+            "false"
+        },
     )
     .await?;
 
-    let approval_reminders_enabled = body.approval_reminders_enabled.unwrap_or(true);
+    let current_approval_reminders_enabled =
+        load_setting(&app_state.pool, APPROVAL_REMINDERS_ENABLED_KEY, "true").await? != "false";
+    let approval_reminders_enabled = body
+        .approval_reminders_enabled
+        .unwrap_or(current_approval_reminders_enabled);
     save_setting_exec(
-        &mut *transaction,
+        &mut transaction,
         APPROVAL_REMINDERS_ENABLED_KEY,
-        if approval_reminders_enabled { "true" } else { "false" },
+        if approval_reminders_enabled {
+            "true"
+        } else {
+            "false"
+        },
     )
     .await?;
 
@@ -413,6 +428,8 @@ pub async fn test_smtp_connection(
             "SMTP from address is required.".into(),
         ));
     }
+    from.parse::<Mailbox>()
+        .map_err(|_| AppError::BadRequest("Invalid SMTP from address.".into()))?;
 
     let test_config = smtp_config_from_body(&app_state.pool, &body).await?;
     crate::email::test_connection(&test_config)
@@ -433,11 +450,7 @@ pub async fn update_admin_settings(
 
     let language = normalize_language(&body.ui_language)?;
     let time_format = normalize_time_format(&body.time_format)?;
-    let timezone = normalize_timezone(
-        body.timezone
-            .as_deref()
-            .unwrap_or(DEFAULT_TIMEZONE),
-    )?;
+    let timezone = normalize_timezone(body.timezone.as_deref().unwrap_or(DEFAULT_TIMEZONE))?;
     let country = body.country.trim().to_uppercase();
     let region = body.region.trim().to_string();
     let previous_country = app_state.db.settings.get_raw(COUNTRY_KEY).await?;
@@ -546,7 +559,7 @@ pub async fn update_admin_settings(
     // the user can disable the feature. When present, use the validated date string.
     let carryover_date_to_store = validated_carryover_date.as_deref().unwrap_or("");
     save_setting_exec(
-        &mut *transaction,
+        &mut transaction,
         CARRYOVER_EXPIRY_DATE_KEY,
         carryover_date_to_store,
     )
@@ -554,34 +567,34 @@ pub async fn update_admin_settings(
 
     if let Some(day) = body.submission_deadline_day {
         save_setting_exec(
-            &mut *transaction,
+            &mut transaction,
             SUBMISSION_DEADLINE_DAY_KEY,
             &day.to_string(),
         )
         .await?;
     } else {
-        save_setting_exec(&mut *transaction, SUBMISSION_DEADLINE_DAY_KEY, "").await?;
+        save_setting_exec(&mut transaction, SUBMISSION_DEADLINE_DAY_KEY, "").await?;
     }
 
-    save_setting_exec(&mut *transaction, UI_LANGUAGE_KEY, &language).await?;
-    save_setting_exec(&mut *transaction, TIME_FORMAT_KEY, time_format).await?;
-    save_setting_exec(&mut *transaction, TIMEZONE_KEY, &timezone).await?;
-    save_setting_exec(&mut *transaction, COUNTRY_KEY, &country).await?;
-    save_setting_exec(&mut *transaction, REGION_KEY, &region).await?;
+    save_setting_exec(&mut transaction, UI_LANGUAGE_KEY, &language).await?;
+    save_setting_exec(&mut transaction, TIME_FORMAT_KEY, time_format).await?;
+    save_setting_exec(&mut transaction, TIMEZONE_KEY, &timezone).await?;
+    save_setting_exec(&mut transaction, COUNTRY_KEY, &country).await?;
+    save_setting_exec(&mut transaction, REGION_KEY, &region).await?;
     save_setting_exec(
-        &mut *transaction,
+        &mut transaction,
         DEFAULT_WEEKLY_HOURS_KEY,
         &default_weekly_hours_str,
     )
     .await?;
     save_setting_exec(
-        &mut *transaction,
+        &mut transaction,
         DEFAULT_ANNUAL_LEAVE_DAYS_KEY,
         &default_annual_leave_days_str,
     )
     .await?;
 
-    save_setting_exec(&mut *transaction, ORGANIZATION_NAME_KEY, &org_name).await?;
+    save_setting_exec(&mut transaction, ORGANIZATION_NAME_KEY, &org_name).await?;
 
     if let Some(ref holidays) = prepared_holidays {
         crate::holidays::replace_auto_holidays_exec(&mut transaction, holidays).await?;

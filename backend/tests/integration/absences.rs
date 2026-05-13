@@ -59,7 +59,14 @@ async fn absences_full_workflow() {
             .format("%Y-%m-%d")
             .to_string();
 
-        for kind in ["vacation", "sick", "training", "special_leave", "unpaid", "general_absence"] {
+        for kind in [
+            "vacation",
+            "sick",
+            "training",
+            "special_leave",
+            "unpaid",
+            "general_absence",
+        ] {
             let (st, body) = emp
                 .post(
                     "/api/v1/absences",
@@ -108,7 +115,11 @@ async fn absences_full_workflow() {
                 &json!({"kind":"vacation","start_date": saturday,"end_date": sunday}),
             )
             .await;
-        assert_eq!(st, StatusCode::BAD_REQUEST, "update to weekend-only rejected");
+        assert_eq!(
+            st,
+            StatusCode::BAD_REQUEST,
+            "update to weekend-only rejected"
+        );
         assert!(
             body.to_string()
                 .contains("Absence must include at least one effective workday"),
@@ -223,7 +234,8 @@ async fn absences_full_workflow() {
             .await;
         assert_eq!(st, StatusCode::BAD_REQUEST, "approved sick edit rejected");
         assert!(
-            body.to_string().contains("Cannot edit"),
+            body.to_string()
+                .contains("Only requested absences can be edited"),
             "edit failure body: {body}"
         );
 
@@ -270,17 +282,14 @@ async fn absences_full_workflow() {
             "approved absence is not editable"
         );
         assert!(
-            body.to_string().contains("Cannot edit"),
+            body.to_string()
+                .contains("Only requested absences can be edited"),
             "edit failure body: {body}"
         );
 
         // Cancelling an approved absence triggers a cancellation approval workflow.
         let (st, body) = emp.delete(&format!("/api/v1/absences/{absence_id}")).await;
-        assert_eq!(
-            st,
-            StatusCode::OK,
-            "cancellation request accepted"
-        );
+        assert_eq!(st, StatusCode::OK, "cancellation request accepted");
         assert_eq!(
             body["pending"], true,
             "cancellation requires approver review"
@@ -441,7 +450,11 @@ async fn absences_full_workflow() {
                 &json!({}),
             )
             .await;
-        assert_eq!(st, StatusCode::OK, "approve vacation before cancellation request");
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "approve vacation before cancellation request"
+        );
 
         let (st, balance_after_approval) = emp
             .get(&format!("/api/v1/leave-balance/{emp_id}?year={year}"))

@@ -35,7 +35,11 @@ async fn assert_can_access_user(
     if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let is_report = app_state.db.users.is_direct_report(target_uid, requester.id).await?;
+    let is_report = app_state
+        .db
+        .users
+        .is_direct_report(target_uid, requester.id)
+        .await?;
     if !is_report {
         return Err(AppError::Forbidden);
     }
@@ -61,9 +65,16 @@ fn month_bounds(month_str: &str) -> AppResult<(NaiveDate, NaiveDate)> {
     let from = NaiveDate::from_ymd_opt(year, month_num, 1)
         .ok_or_else(|| AppError::BadRequest("date".into()))?;
     let next = if month_num == 12 {
-        NaiveDate::from_ymd_opt(year + 1, 1, 1).unwrap()
+        NaiveDate::from_ymd_opt(
+            year.checked_add(1)
+                .ok_or_else(|| AppError::BadRequest("date".into()))?,
+            1,
+            1,
+        )
+        .ok_or_else(|| AppError::BadRequest("date".into()))?
     } else {
-        NaiveDate::from_ymd_opt(year, month_num + 1, 1).unwrap()
+        NaiveDate::from_ymd_opt(year, month_num + 1, 1)
+            .ok_or_else(|| AppError::BadRequest("date".into()))?
     };
     Ok((from, next - Duration::days(1)))
 }
@@ -90,8 +101,6 @@ pub struct EntryDetail {
     pub status: String,
     pub comment: Option<String>,
 }
-
-
 
 #[derive(Serialize)]
 pub struct MonthReport {
@@ -148,18 +157,14 @@ fn target_minutes_per_day(weekly_hours: f64, workdays_per_week: i16) -> i64 {
     (weekly_hours / f64::from(workdays_per_week) * 60.0).round() as i64
 }
 
-async fn build_range(
+async fn build_range_with_user(
     pool: &crate::db::DatabasePool,
-    user_id: i64,
+    user: &crate::auth::User,
     from: NaiveDate,
     to: NaiveDate,
     label: &str,
 ) -> AppResult<MonthReport> {
-    let repo_user = crate::repository::UserDb::new(pool.clone())
-        .find_by_id(user_id)
-        .await?
-        .ok_or(AppError::NotFound)?;
-    let user = crate::users::repo_user_to_auth_user(repo_user);
+    let user_id = user.id;
     let target_per_day_min = target_minutes_per_day(user.weekly_hours, user.workdays_per_week);
     let today = crate::settings::app_today(pool).await;
 
@@ -183,7 +188,7 @@ async fn build_range(
     let approved_absence_rows: Vec<(NaiveDate, NaiveDate, String)> =
         reports_db.approved_absence_rows(user_id, from, to).await?;
 
-    let language = i18n::load_ui_language(pool).await?;
+    let language = i18n::load_ui_language(pool).await.unwrap_or_default();
 
     let holiday_raw = reports_db.holiday_rows(from, to).await?;
     let holiday_map: HashMap<NaiveDate, String> = holiday_raw
@@ -222,7 +227,11 @@ async fn build_range(
             && holiday.is_none()
             && !absence_blocks_target
             && !before_start;
-        let target = if is_workday && !after_today { target_per_day_min } else { 0 };
+        let target = if is_workday && !after_today {
+            target_per_day_min
+        } else {
+            0
+        };
         // full_month_target counts all contract workdays without the "capped at today" cutoff.
         let full_target = if is_workday { target_per_day_min } else { 0 };
 
@@ -240,8 +249,7 @@ async fn build_range(
                 counts_as_work,
                 status,
                 comment,
-            )
-                in entries_by_date.get(&current_date).into_iter().flatten()
+            ) in entries_by_date.get(&current_date).into_iter().flatten()
             {
                 if status == "rejected" {
                     continue;
@@ -261,10 +269,10 @@ async fn build_range(
                 // Category totals include every non-rejected entry regardless of
                 // whether the category is crediting (user-guide: "Category
                 // breakdowns show booked non-rejected time entries in scope").
-                if status != "rejected" {
-                    *category_minutes_by_name.entry(category_name.clone()).or_insert(0) +=
-                        entry_minutes;
-                }
+                // Rejected entries were already skipped by the `continue` above.
+                *category_minutes_by_name
+                    .entry(category_name.clone())
+                    .or_insert(0) += entry_minutes;
                 entries.push(EntryDetail {
                     start_time: start_time.clone(),
                     end_time: end_time.clone(),
@@ -307,6 +315,21 @@ async fn build_range(
     })
 }
 
+async fn build_range(
+    pool: &crate::db::DatabasePool,
+    user_id: i64,
+    from: NaiveDate,
+    to: NaiveDate,
+    label: &str,
+) -> AppResult<MonthReport> {
+    let repo_user = crate::repository::UserDb::new(pool.clone())
+        .find_by_id(user_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let user = crate::users::repo_user_to_auth_user(repo_user);
+    build_range_with_user(pool, &user, from, to, label).await
+}
+
 async fn build_month(
     pool: &crate::db::DatabasePool,
     user_id: i64,
@@ -317,21 +340,19 @@ async fn build_month(
         .find_by_id(user_id)
         .await?
         .ok_or(AppError::NotFound)?;
-    let user_start_date = repo_user.start_date;
-    let workdays_per_week = repo_user.workdays_per_week;
-    let mut report = build_range(pool, user_id, from, to, month).await?;
-    report.weeks_all_submitted =
-        Some(
-            all_weeks_submitted_for_month(
-                pool,
-                user_id,
-                from,
-                to,
-                user_start_date,
-                workdays_per_week,
-            )
-            .await?,
-        );
+    let user = crate::users::repo_user_to_auth_user(repo_user);
+    let mut report = build_range_with_user(pool, &user, from, to, month).await?;
+    report.weeks_all_submitted = Some(
+        all_weeks_submitted_for_month(
+            pool,
+            user_id,
+            from,
+            to,
+            user.start_date,
+            user.workdays_per_week,
+        )
+        .await?,
+    );
     Ok(report)
 }
 
@@ -824,28 +845,44 @@ fn parse_report_time(raw: &str) -> AppResult<NaiveTime> {
 }
 
 // Type alias for the 8-field tuple stored per time entry after stripping the date.
-type RawEntryTuple = (String, String, String, String, i64, bool, String, Option<String>);
+type RawEntryRow = (
+    NaiveDate,
+    String,
+    String,
+    String,
+    String,
+    i64,
+    bool,
+    String,
+    Option<String>,
+);
+
+type RawEntryTuple = (
+    String,
+    String,
+    String,
+    String,
+    i64,
+    bool,
+    String,
+    Option<String>,
+);
 
 /// Pre-groups raw time entry rows (as fetched from the DB) by date.
 /// Allows O(1) per-day lookup instead of scanning the full list for each day.
-fn group_entries_by_date(
-    rows: Vec<(
-        NaiveDate,
-        String,
-        String,
-        String,
-        String,
-        i64,
-        bool,
-        String,
-        Option<String>,
-    )>,
-) -> HashMap<NaiveDate, Vec<RawEntryTuple>> {
+fn group_entries_by_date(rows: Vec<RawEntryRow>) -> HashMap<NaiveDate, Vec<RawEntryTuple>> {
     let mut map: HashMap<NaiveDate, Vec<RawEntryTuple>> = HashMap::new();
     for (date, start, end, category, color, cat_id, counts_as_work, status, comment) in rows {
-        map.entry(date)
-            .or_default()
-            .push((start, end, category, color, cat_id, counts_as_work, status, comment));
+        map.entry(date).or_default().push((
+            start,
+            end,
+            category,
+            color,
+            cat_id,
+            counts_as_work,
+            status,
+            comment,
+        ));
     }
     map
 }
@@ -872,7 +909,7 @@ fn expand_absence_date_set(
 }
 
 /// Sorts category totals descending by minutes, then ascending by name.
-fn sort_categories_desc(cats: &mut Vec<CategoryTotal>) {
+fn sort_categories_desc(cats: &mut [CategoryTotal]) {
     cats.sort_by(|a, b| {
         b.minutes
             .cmp(&a.minutes)
@@ -887,7 +924,9 @@ pub async fn categories(
 ) -> AppResult<Json<Vec<CategoryTotal>>> {
     validate_range(query.from, query.to)?;
     // Clamp to today so category reports include current-day entries but no future dates.
-    let effective_to = query.to.min(crate::settings::app_today(&app_state.pool).await);
+    let effective_to = query
+        .to
+        .min(crate::settings::app_today(&app_state.pool).await);
     if query.from > effective_to {
         return Ok(Json(Vec::new()));
     }
@@ -922,9 +961,11 @@ pub async fn categories(
         builder
             .push(" AND z.user_id IN (SELECT id FROM users WHERE id = ")
             .push_bind(requester.id)
-            .push(" OR id IN (SELECT ua.user_id FROM user_approvers ua \
+            .push(
+                " OR id IN (SELECT ua.user_id FROM user_approvers ua \
                     JOIN users u ON u.id = ua.user_id \
-                    WHERE ua.approver_id = ")
+                    WHERE ua.approver_id = ",
+            )
             .push_bind(requester.id)
             .push(" AND u.role != 'admin'))");
     }
@@ -938,7 +979,11 @@ pub async fn categories(
     }
     let mut sorted_totals: Vec<CategoryTotal> = category_minutes_map
         .into_iter()
-        .map(|((category, color), minutes)| CategoryTotal { category, color, minutes })
+        .map(|((category, color), minutes)| CategoryTotal {
+            category,
+            color,
+            minutes,
+        })
         .collect();
     sort_categories_desc(&mut sorted_totals);
     Ok(Json(sorted_totals))
@@ -961,7 +1006,9 @@ pub async fn team_categories(
     }
     validate_range(query.from, query.to)?;
     // Clamp to today so team category reports include current-day entries.
-    let effective_to = query.to.min(crate::settings::app_today(&app_state.pool).await);
+    let effective_to = query
+        .to
+        .min(crate::settings::app_today(&app_state.pool).await);
     if query.from > effective_to {
         return Ok(Json(Vec::new()));
     }
@@ -974,9 +1021,11 @@ pub async fn team_categories(
         user_builder
             .push(" AND (id = ")
             .push_bind(requester.id)
-            .push(" OR id IN (SELECT ua.user_id FROM user_approvers ua \
+            .push(
+                " OR id IN (SELECT ua.user_id FROM user_approvers ua \
                     JOIN users u ON u.id = ua.user_id \
-                    WHERE ua.approver_id = ")
+                    WHERE ua.approver_id = ",
+            )
             .push_bind(requester.id)
             .push(" AND u.role != 'admin'))");
     }
@@ -1005,9 +1054,11 @@ pub async fn team_categories(
         entry_builder
             .push(" AND z.user_id IN (SELECT id FROM users WHERE id = ")
             .push_bind(requester.id)
-            .push(" OR id IN (SELECT ua.user_id FROM user_approvers ua \
+            .push(
+                " OR id IN (SELECT ua.user_id FROM user_approvers ua \
                     JOIN users u ON u.id = ua.user_id \
-                    WHERE ua.approver_id = ")
+                    WHERE ua.approver_id = ",
+            )
             .push_bind(requester.id)
             .push(" AND u.role != 'admin'))");
     }
@@ -1034,7 +1085,11 @@ pub async fn team_categories(
                 .remove(&uid)
                 .unwrap_or_default()
                 .into_iter()
-                .map(|((category, color), minutes)| CategoryTotal { category, color, minutes })
+                .map(|((category, color), minutes)| CategoryTotal {
+                    category,
+                    color,
+                    minutes,
+                })
                 .collect();
             sort_categories_desc(&mut cats);
             UserCategoryRow {
@@ -1261,14 +1316,9 @@ pub async fn flextime(
 
         let seed_from = std::cmp::max(month_start, user.start_date);
         if seed_from <= day_before_from {
-            let month_seed_report = build_range(
-                &app_state.pool,
-                target_user_id,
-                seed_from,
-                day_before_from,
-                "seed",
-            )
-            .await?;
+            let month_seed_report =
+                build_range_with_user(&app_state.pool, &user, seed_from, day_before_from, "seed")
+                    .await?;
             cumulative_min = cumulative_before_month + month_seed_report.diff_min;
         } else {
             cumulative_min = cumulative_before_month;
@@ -1288,7 +1338,9 @@ pub async fn flextime(
         }
         let minutes =
             (parse_report_time(&end_time)? - parse_report_time(&start_time)?).num_minutes();
-        *approved_crediting_minutes_by_day.entry(entry_date).or_insert(0) += minutes;
+        *approved_crediting_minutes_by_day
+            .entry(entry_date)
+            .or_insert(0) += minutes;
     }
 
     let approved_absences = app_state
@@ -1302,7 +1354,9 @@ pub async fn flextime(
     for (absence_start, absence_end, absence_kind) in approved_absences {
         let mut day = absence_start.max(query.from);
         while day <= absence_end.min(query.to) {
-            absence_by_day.entry(day).or_insert_with(|| absence_kind.clone());
+            absence_by_day
+                .entry(day)
+                .or_insert_with(|| absence_kind.clone());
             day += Duration::days(1);
         }
     }

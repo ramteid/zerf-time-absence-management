@@ -81,7 +81,7 @@ describe("Dashboard", () => {
     target.remove();
   });
 
-  it("marks the current month as missing when only flextime reduction is submitted", async () => {
+  it("marks the current month as submitted when only flextime reduction is submitted", async () => {
     mockState.monthReport = {
       month: "2026-05",
       days: [
@@ -109,8 +109,8 @@ describe("Dashboard", () => {
     component = mount(Dashboard, { target });
     await settle();
 
-    await waitForText(target, "Weeks missing", 15000);
-    expect(target.textContent).toContain("Weeks missing");
+    await waitForText(target, "All submitted", 15000);
+    expect(target.textContent).toContain("All submitted");
   });
 
   it("marks the current month as submitted when the entry counts as work", async () => {
@@ -145,7 +145,7 @@ describe("Dashboard", () => {
     expect(target.textContent).toContain("All submitted");
   });
 
-  it("uses entry counts_as_work when category lookup is unavailable", async () => {
+  it("counts submitted entries even when category lookup is unavailable", async () => {
     categories.set([{ id: 1, name: "Core Duties", counts_as_work: true }]);
     mockState.monthReport = {
       month: "2026-05",
@@ -175,11 +175,11 @@ describe("Dashboard", () => {
     component = mount(Dashboard, { target });
     await settle();
 
-    await waitForText(target, "Weeks missing", 15000);
-    expect(target.textContent).toContain("Weeks missing");
+    await waitForText(target, "All submitted", 15000);
+    expect(target.textContent).toContain("All submitted");
   });
 
-  it("ignores non-crediting drafts when credited work is already submitted", async () => {
+  it("marks current month missing when any draft remains on a target day", async () => {
     mockState.monthReport = {
       month: "2026-05",
       days: [
@@ -216,7 +216,7 @@ describe("Dashboard", () => {
     component = mount(Dashboard, { target });
     await settle();
 
-    await waitForText(target, "All submitted", 15000);
-    expect(target.textContent).toContain("All submitted");
+    await waitForText(target, "Weeks missing", 15000);
+    expect(target.textContent).toContain("Weeks missing");
   });
 });

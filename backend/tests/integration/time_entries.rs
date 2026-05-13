@@ -12,7 +12,7 @@ async fn time_entries_full_workflow() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
 
-    // -- Non-crediting entries stay transparent to overlaps, but don't consume 14h cap --
+    // -- Non-crediting entries still block overlaps, but don't consume 14h cap --
     {
         let (_lead_id, _lead_pw, _emp_id, emp_pw, monday_iso, _cat_id) =
             bootstrap_team_with_suffix(&app, &admin, false, "0").await;
@@ -59,7 +59,11 @@ async fn time_entries_full_workflow() {
                 }),
             )
             .await;
-        assert_eq!(st, StatusCode::OK, "overlap with non-crediting entry allowed");
+        assert_eq!(
+            st,
+            StatusCode::BAD_REQUEST,
+            "overlap with non-crediting entry rejected"
+        );
 
         let (st, _) = emp
             .post(
@@ -73,7 +77,11 @@ async fn time_entries_full_workflow() {
                 }),
             )
             .await;
-        assert_eq!(st, StatusCode::OK, "duplicate overlapping non-crediting entry allowed");
+        assert_eq!(
+            st,
+            StatusCode::BAD_REQUEST,
+            "duplicate overlapping non-crediting entry rejected"
+        );
 
         let (st, _) = emp
             .post(
@@ -167,7 +175,10 @@ async fn time_entries_full_workflow() {
         let absence_id = id(&body);
 
         let (st, _) = lead
-            .post(&format!("/api/v1/absences/{absence_id}/approve"), &json!({}))
+            .post(
+                &format!("/api/v1/absences/{absence_id}/approve"),
+                &json!({}),
+            )
             .await;
         assert_eq!(st, StatusCode::OK, "approve absence");
 
@@ -198,15 +209,17 @@ async fn time_entries_full_workflow() {
     {
         let monday_iso = today();
         let (_, categories_body) = admin.get("/api/v1/categories").await;
-        let category_id = categories_body.as_array().unwrap()[0]["id"].as_i64().unwrap();
+        let category_id = categories_body.as_array().unwrap()[0]["id"]
+            .as_i64()
+            .unwrap();
 
         let (st, body) = admin
             .post(
                 "/api/v1/time-entries",
                 &json!({
                     "entry_date": monday_iso,
-                    "start_time": "08:00",
-                    "end_time": "11:00",
+                    "start_time": "00:00",
+                    "end_time": "00:01",
                     "category_id": category_id,
                     "comment": "admin entry"
                 }),
