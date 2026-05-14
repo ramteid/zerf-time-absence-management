@@ -232,7 +232,7 @@ async fn users_full_workflow() {
             .contains("overtime"));
 
         // Valid assistant creation works with zero leave and zero weekly hours.
-        let (st, _) = admin
+        let (st, body) = admin
             .post(
                 "/api/v1/users",
                 &json!({"email":"assistant-valid@example.com","first_name":"Assist","last_name":"Valid",
@@ -241,6 +241,39 @@ async fn users_full_workflow() {
             )
             .await;
         assert_eq!(st, StatusCode::OK, "create assistant user");
+        let assistant_id = id(&body);
+
+        let (st, detail) = admin.get(&format!("/api/v1/users/{assistant_id}")).await;
+        assert_eq!(st, StatusCode::OK, "fetch assistant detail");
+        assert_eq!(detail["role"], "assistant", "assistant role stored canonically");
+
+        let (st, _body) = admin
+            .put(
+                &format!("/api/v1/users/{assistant_id}"),
+                &json!({"role":" assistant ","weekly_hours":0,"approver_ids":[1]}),
+            )
+            .await;
+        assert_eq!(
+            st,
+            StatusCode::CONFLICT,
+            "assistant update still reaches later validation after normalized role handling"
+        );
+
+        let (st, body) = admin
+            .put(
+                &format!("/api/v1/users/{assistant_id}"),
+                &json!({"role":" assistant ","weekly_hours":5,"approver_ids":[1]}),
+            )
+            .await;
+        assert_eq!(
+            st,
+            StatusCode::BAD_REQUEST,
+            "assistant invariant still applies to normalized update role"
+        );
+        assert!(body["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("weekly_hours"));
     }
 
     // -- Duplicate user identifiers are rejected --

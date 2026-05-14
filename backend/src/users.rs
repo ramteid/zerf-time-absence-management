@@ -2,7 +2,10 @@ use crate::audit;
 use crate::auth::{hash_password, lock_user_graph, validate_password_strength, User};
 use crate::error::{AppError, AppResult};
 use crate::i18n;
-use crate::roles::is_assistant_role;
+use crate::roles::{
+    can_approve_admin_subjects, can_approve_non_admin_subjects, is_admin_role,
+    is_assistant_role, is_team_lead_role, normalize_role, ROLE_ASSISTANT,
+};
 use crate::repository::UserDb;
 use crate::AppState;
 use axum::{
@@ -240,7 +243,7 @@ async fn validate_approver_ids(
             ));
         }
     }
-    if role != "admin" && approver_ids.is_empty() {
+    if !is_admin_role(role) && approver_ids.is_empty() {
         return Err(AppError::BadRequest(
             "An approver is required for non-admin users.".into(),
         ));
@@ -255,10 +258,10 @@ async fn validate_approver_ids(
         match approver_row {
             None => return Err(AppError::BadRequest("Approver not found.".into())),
             Some((approver_role, true))
-                if approver_role == "admin"
-                    || (role != "admin" && approver_role == "team_lead") => {}
+                if is_admin_role(&approver_role)
+                    || (!is_admin_role(role) && is_team_lead_role(&approver_role)) => {}
             Some(_) => {
-                return Err(AppError::BadRequest(if role == "admin" {
+                return Err(AppError::BadRequest(if is_admin_role(role) {
                     "Admins may only report to an active Admin.".into()
                 } else {
                     "Approver must be an active Team lead or Admin.".into()
@@ -267,14 +270,6 @@ async fn validate_approver_ids(
         }
     }
     Ok(())
-}
-
-fn can_approve_admin_subjects(role: &str, active: bool) -> bool {
-    active && role == "admin"
-}
-
-fn can_approve_non_admin_subjects(role: &str, active: bool) -> bool {
-    active && matches!(role, "team_lead" | "admin")
 }
 
 fn normalize_user_name(first_name: &str, last_name: &str) -> AppResult<(String, String)> {
@@ -350,12 +345,13 @@ pub struct CreateResponse {
 pub async fn create(
     State(app_state): State<AppState>,
     requester: User,
-    Json(body): Json<NewUser>,
+    Json(mut body): Json<NewUser>,
 ) -> AppResult<Json<CreateResponse>> {
     if !requester.is_admin() {
         return Err(AppError::Forbidden);
     }
-    if !["employee", "team_lead", "admin", "assistant"].contains(&body.role.as_str()) {
+    body.role = normalize_role(&body.role);
+    if !["employee", "team_lead", "admin", ROLE_ASSISTANT].contains(&body.role.as_str()) {
         return Err(AppError::BadRequest("Invalid role".into()));
     }
     let normalized_email = body.email.trim().to_lowercase();
@@ -378,6 +374,14 @@ pub async fn create(
         return Err(AppError::BadRequest("Invalid leave_days.".into()));
     }
     if is_assistant_role(&body.role) {
+        tracing::warn!(
+            target: "zerf::assistant_role",
+            role = %body.role,
+            weekly_hours = body.weekly_hours,
+            overtime_start_balance_min = body.overtime_start_balance_min.unwrap_or(0),
+            email = %normalized_email,
+            "validating assistant invariants during user creation"
+        );
         if body.weekly_hours != 0.0 {
             return Err(AppError::BadRequest(
                 "Assistants must have weekly_hours set to 0.".into(),
@@ -523,8 +527,9 @@ pub async fn update(
         return Err(AppError::Forbidden);
     }
     // Role allow-list — never trust the client.
-    if let Some(role_value) = &body.role {
-        if !["employee", "team_lead", "admin", "assistant"].contains(&role_value.as_str()) {
+    let normalized_role = body.role.as_ref().map(|role_value| normalize_role(role_value));
+    if let Some(role_value) = &normalized_role {
+        if !["employee", "team_lead", "admin", ROLE_ASSISTANT].contains(&role_value.as_str()) {
             return Err(AppError::BadRequest("Invalid role".into()));
         }
     }
@@ -532,7 +537,7 @@ pub async fn update(
     // their own account; otherwise the only path back is fresh DB bootstrap.
     if user_id == requester.id {
         if let Some(role_value) = &body.role {
-            if role_value != "admin" {
+            if !is_admin_role(role_value) {
                 return Err(AppError::BadRequest(
                     "You cannot remove your own admin role.".into(),
                 ));
@@ -606,21 +611,26 @@ pub async fn update(
         .await?;
     }
     let removing_admin_rights = previous_user.role == "admin"
-        && (body
-            .role
+        && (normalized_role
             .as_deref()
             .is_some_and(|role_value| role_value != "admin")
             || matches!(body.active, Some(false)));
     // Pre-validate the post-update invariant (non-admin → has approver).
-    let new_role = body
-        .role
-        .clone()
-        .unwrap_or_else(|| previous_user.role.clone());
+    let new_role = normalized_role.unwrap_or_else(|| previous_user.role.trim().to_ascii_lowercase());
     let effective_weekly_hours = body.weekly_hours.unwrap_or(previous_user.weekly_hours);
     let effective_overtime_start_balance = body
         .overtime_start_balance_min
         .unwrap_or(previous_user.overtime_start_balance_min);
     if is_assistant_role(&new_role) {
+        tracing::warn!(
+            target: "zerf::assistant_role",
+            user_id,
+            previous_role = %previous_user.role,
+            new_role = %new_role,
+            effective_weekly_hours,
+            effective_overtime_start_balance,
+            "validating assistant invariants during user update"
+        );
         if effective_weekly_hours != 0.0 {
             return Err(AppError::BadRequest(
                 "Assistants must have weekly_hours set to 0.".into(),

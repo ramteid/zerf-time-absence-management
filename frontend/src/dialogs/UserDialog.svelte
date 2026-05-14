@@ -32,8 +32,9 @@
   let active = template.active ?? true;
   let error = "";
   let approvers = [];
-  $: requiresApprover = role !== "admin";
-  $: isAssistantRole = role === "assistant";
+  $: normalizedRole = String(role || "").trim().toLowerCase();
+  $: requiresApprover = normalizedRole !== "admin";
+  $: isAssistantRole = normalizedRole === "assistant";
   $: if (isAssistantRole) {
     weekly_hours = 0;
     overtime_start_balance_hours = 0;
@@ -155,7 +156,7 @@
         email,
         first_name,
         last_name,
-        role,
+        role: normalizedRole,
         weekly_hours: normalizedWeeklyHours,
         workdays_per_week: Number(workdays_per_week),
         leave_days_current_year: Number(leave_days_current_year),

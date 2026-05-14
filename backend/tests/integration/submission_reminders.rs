@@ -140,7 +140,53 @@ async fn submission_reminders_full_workflow() {
         assert_eq!(reminders.len(), 1, "should deduplicate");
     }
 
-    // -- Reminder skips zero hours user --
+    // -- Reminder skips assistants even if legacy data contains non-zero weekly hours --
+    {
+        let (st, body) = admin
+            .post(
+                "/api/v1/users",
+                &json!({
+                    "email": "assistant-reminder@example.com",
+                    "first_name": "Assistant",
+                    "last_name": "Reminder",
+                    "role": "assistant",
+                    "weekly_hours": 0,
+                    "leave_days_current_year": 0,
+                    "leave_days_next_year": 0,
+                    "start_date": "2024-01-01",
+                    "approver_ids": [1]
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK);
+        let assistant_id = id(&body);
+        let assistant_pw = temp_pw(&body);
+
+        sqlx::query("UPDATE users SET weekly_hours = 39 WHERE id = $1")
+            .bind(assistant_id)
+            .execute(&app.state.pool)
+            .await
+            .unwrap();
+
+        let assistant = login_change_pw(&app, "assistant-reminder@example.com", &assistant_pw).await;
+
+        let (st, _) = assistant.delete("/api/v1/notifications").await;
+        assert_eq!(st, StatusCode::OK);
+
+        zerf::submission_reminders::run_check(&app.state).await;
+
+        let (st, body) = assistant.get("/api/v1/notifications").await;
+        assert_eq!(st, StatusCode::OK);
+        let reminders: Vec<_> = body
+            .as_array()
+            .expect("notifications array")
+            .iter()
+            .filter(|n| n["kind"] == "submission_reminder")
+            .collect();
+        assert_eq!(reminders.len(), 0, "assistant is skipped by role policy");
+    }
+
+    // -- Reminder still skips legacy zero-hours employees because reminder policy is independent of assistant role --
     {
         let (st, body) = admin
             .post(

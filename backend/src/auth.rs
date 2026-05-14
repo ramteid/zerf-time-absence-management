@@ -72,10 +72,10 @@ pub struct User {
 
 impl User {
     pub fn is_admin(&self) -> bool {
-        self.role == "admin"
+        crate::roles::is_admin_role(&self.role)
     }
     pub fn is_lead(&self) -> bool {
-        self.role == "team_lead" || self.role == "admin"
+        crate::roles::is_lead_role(&self.role)
     }
     pub fn full_name(&self) -> String {
         format!("{} {}", self.first_name, self.last_name)
