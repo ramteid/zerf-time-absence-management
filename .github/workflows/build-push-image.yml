@@ -9,7 +9,7 @@ on:
   push:
     branches: [main]
     paths:
-      - Dockerfile
+      - docker/Dockerfile
       - "frontend/**"
       - "backend/Cargo.toml"
       - "backend/Cargo.lock"
@@ -56,6 +56,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: docker/Dockerfile
           push: true
           tags: |
             ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
