@@ -41,7 +41,7 @@ jobs:
       # so the team is alerted without needing to watch workflow emails.
       - name: Open issue on failure
         if: failure() && github.event_name == 'schedule'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const title = 'Nager.Date API contract tests failed';

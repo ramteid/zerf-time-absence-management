@@ -93,7 +93,7 @@ jobs:
       # complete.  On PRs or rare races we fall back to building from the
       # GHA layer cache.
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -114,11 +114,11 @@ jobs:
 
       - name: Set up Docker Buildx
         if: steps.pull.outcome == 'failure' && steps.pull-latest.outcome == 'failure'
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build app image (fallback — not in registry yet)
         if: steps.pull.outcome == 'failure' && steps.pull-latest.outcome == 'failure'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: docker/Dockerfile
@@ -163,7 +163,7 @@ jobs:
         run: echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -184,11 +184,11 @@ jobs:
 
       - name: Set up Docker Buildx
         if: steps.pull.outcome == 'failure' && steps.pull-latest.outcome == 'failure'
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build app image (fallback — uses GHA layer cache)
         if: steps.pull.outcome == 'failure' && steps.pull-latest.outcome == 'failure'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: docker/Dockerfile
