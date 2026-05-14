@@ -38,6 +38,9 @@ services:
   app:
     build:
       context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        ZERF_GIT_COMMIT: ${ZERF_GIT_COMMIT:-unknown}
     container_name: zerf-app
     restart: unless-stopped
     user: "10001:10001"
@@ -97,6 +100,7 @@ services:
       - PGPASSWORD=${ZERF_POSTGRES_PASSWORD:?ZERF_POSTGRES_PASSWORD must be set in .env}
       - BACKUP_INTERVAL_SECONDS=${BACKUP_INTERVAL_SECONDS:-86400}
       - BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-30}
+      - ZERF_GIT_COMMIT=${ZERF_GIT_COMMIT:-unknown}
     volumes:
       - ../scripts/backup.sh:/usr/local/bin/backup.sh:ro
       - backup_data:/backups

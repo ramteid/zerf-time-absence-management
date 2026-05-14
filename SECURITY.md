@@ -188,7 +188,8 @@ The reverse proxy is built with the
 The dedicated `backup` compose service runs `scripts/backup.sh` on the
 `BACKUP_INTERVAL_SECONDS` schedule and stores `pg_dump --format=custom`
 snapshots in the `zerf_backup_data` named volume with `umask 077`.
-Retention defaults to 30 days.
+Each snapshot has a `.metadata` sidecar containing `ZERF_GIT_COMMIT` and
+non-secret connection metadata. Retention defaults to 30 days.
 
 ## Supply-chain & CI
 

@@ -6,6 +6,10 @@ set -euo pipefail
 #
 # Same network behaviour as start_local.sh: published on 0.0.0.0:3333 and
 # reachable from any LAN device at http://<this-host-ip>:3333.
+if [ -z "${ZERF_GIT_COMMIT:-}" ] && git_commit="$(git rev-parse --verify HEAD 2>/dev/null)"; then
+  export ZERF_GIT_COMMIT="$git_commit"
+fi
+
 docker compose -f docker/docker-compose-local.yml -f docker/docker-compose-local-debug.yml --env-file .env up -d --build
 
 echo "Debug app is running at http://localhost:3333 (also reachable from the LAN on port 3333)"

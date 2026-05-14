@@ -573,12 +573,25 @@ pub async fn create(
     .await;
 
     let requester_full_name = requester.full_name();
+    let has_applied_changes = reopen_execution
+        .as_ref()
+        .map_or(false, |exec| !exec.applied_change_request_ids.is_empty());
     let applied_change_overview = reopen_execution
         .as_ref()
         .map(|exec| exec.applied_change_overview.clone())
-        .unwrap_or_else(|| change_request_overview_text(&language, &[], true));
+        .unwrap_or_default();
 
     if should_auto_approve {
+        let auto_body_key = if has_applied_changes {
+            "reopen_auto_approved_body_changes"
+        } else {
+            "reopen_auto_approved_body"
+        };
+        let auto_notice_body_key = if has_applied_changes {
+            "reopen_auto_approved_notice_body_changes"
+        } else {
+            "reopen_auto_approved_notice_body"
+        };
         // Notify the requester that their week was reopened automatically.
         notifications::create_translated(
             &app_state,
@@ -586,7 +599,7 @@ pub async fn create(
             requester.id,
             "reopen_auto_approved",
             "reopen_auto_approved_title",
-            "reopen_auto_approved_body",
+            auto_body_key,
             vec![
                 ("week_label", week_label.clone()),
                 ("change_request_overview", applied_change_overview.clone()),
@@ -603,7 +616,7 @@ pub async fn create(
                 *approver_id,
                 "reopen_auto_approved_notice",
                 "reopen_auto_approved_notice_title",
-                "reopen_auto_approved_notice_body",
+                auto_notice_body_key,
                 vec![
                     ("requester_name", requester_full_name.clone()),
                     ("week_label", week_label.clone()),
@@ -622,6 +635,13 @@ pub async fn create(
             "entries_reopened": entries_reopened,
         })))
     } else {
+        let has_pending_changes = pending_change_overview
+            != i18n::translate(&language, "reopen_change_request_none", &[]);
+        let created_body_key = if has_pending_changes {
+            "reopen_request_created_body_changes"
+        } else {
+            "reopen_request_created_body"
+        };
         // Notify all approvers that a manual reopen request is pending.
         for approver_id in &approver_ids_for_notification {
             notifications::create_translated(
@@ -630,7 +650,7 @@ pub async fn create(
                 *approver_id,
                 "reopen_request_created",
                 "reopen_request_created_title",
-                "reopen_request_created_body",
+                created_body_key,
                 vec![
                     ("requester_name", requester_full_name.clone()),
                     ("week_label", week_label.clone()),
@@ -825,7 +845,18 @@ pub async fn approve(
     )
     .await;
     let entries_reopened = reopen_execution.reopened_entries.len() as i64;
+    let has_applied_changes = !reopen_execution.applied_change_request_ids.is_empty();
     let applied_change_overview = reopen_execution.applied_change_overview.clone();
+    let approved_body_key = if has_applied_changes {
+        "reopen_approved_body_changes"
+    } else {
+        "reopen_approved_body"
+    };
+    let approved_by_admin_body_key = if has_applied_changes {
+        "reopen_approved_by_admin_body_changes"
+    } else {
+        "reopen_approved_by_admin_body"
+    };
     audit::log(
         &app_state.pool,
         requester.id,
@@ -844,7 +875,7 @@ pub async fn approve(
             reopen_request.user_id,
             "reopen_approved",
             "reopen_approved_title",
-            "reopen_approved_body",
+            approved_body_key,
             vec![
                 ("week_label", week_label.clone()),
                 ("change_request_overview", applied_change_overview.clone()),
@@ -861,7 +892,7 @@ pub async fn approve(
             reopen_request.user_id,
             "reopen_approved",
             "reopen_approved_title",
-            "reopen_approved_body",
+            approved_body_key,
             vec![
                 ("week_label", week_label.clone()),
                 ("change_request_overview", applied_change_overview.clone()),
@@ -881,7 +912,7 @@ pub async fn approve(
         request_id,
         "reopen_approved_by_admin",
         "reopen_approved_by_admin_title",
-        "reopen_approved_by_admin_body",
+        approved_by_admin_body_key,
         week_label,
         applied_change_overview,
         vec![],

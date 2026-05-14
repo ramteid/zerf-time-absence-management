@@ -1268,6 +1268,19 @@ Holidays define public holidays that are excluded from:
 Holidays are date-scoped. Load holiday data for the current and next year to
 ensure all checks work correctly into the near future.
 
+### Backup and restore metadata
+
+Docker start scripts pass the current Git commit into the built images as
+`ZERF_GIT_COMMIT`. Scheduled backups write the same value into a
+`zerf-<timestamp>.metadata` sidecar next to the PostgreSQL dump. The database
+also stores its created Git commit, created migration version, current runtime
+commit, and current SQLx migration version in `system_metadata`.
+
+Use this metadata during restore planning to select the matching application
+revision before starting Zerf against the restored database. Databases created
+before this metadata existed may show `unknown` for the created values; use the
+runtime values for those backups.
+
 ---
 
 ## Status transition reference

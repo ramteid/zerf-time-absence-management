@@ -15,6 +15,8 @@ services:
     build:
       context: .
       dockerfile: Caddyfile.Dockerfile
+      args:
+        ZERF_GIT_COMMIT: ${ZERF_GIT_COMMIT:-unknown}
     container_name: zerf-caddy
     restart: unless-stopped
     cap_drop: [ALL]
