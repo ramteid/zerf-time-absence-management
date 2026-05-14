@@ -29,7 +29,7 @@ jobs:
     name: cargo-audit (RustSec)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       # The action inspects the working directory's Cargo.lock; copy it.
       - name: Stage Cargo.lock for audit-check
@@ -53,8 +53,8 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm

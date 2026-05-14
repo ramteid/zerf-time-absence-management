@@ -24,7 +24,7 @@ jobs:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -46,8 +46,8 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
@@ -70,7 +70,7 @@ jobs:
     needs: [rust, frontend]
     services:
       postgres:
-        image: postgres:18
+        image: postgres:17
         env:
           POSTGRES_USER: zerf_smoke
           POSTGRES_PASSWORD: zerf_smoke
@@ -83,7 +83,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4
 
       - name: Set image name (lowercase)
         run: echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
@@ -93,7 +93,7 @@ jobs:
       # complete.  On PRs or rare races we fall back to building from the
       # GHA layer cache.
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v4
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -118,7 +118,7 @@ jobs:
 
       - name: Build app image (fallback — not in registry yet)
         if: steps.pull.outcome == 'failure' && steps.pull-latest.outcome == 'failure'
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@v6
         with:
           context: .
           load: true
@@ -156,13 +156,13 @@ jobs:
     runs-on: ubuntu-latest
     needs: docker-smoke
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4
 
       - name: Set image name (lowercase)
         run: echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v4
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -187,7 +187,7 @@ jobs:
 
       - name: Build app image (fallback — uses GHA layer cache)
         if: steps.pull.outcome == 'failure' && steps.pull-latest.outcome == 'failure'
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@v6
         with:
           context: .
           load: true
@@ -217,10 +217,10 @@ jobs:
       security-events: write
       contents: read
     steps:
-      - uses: actions/checkout@v5
-      - uses: github/codeql-action/init@v4
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
         with:
           languages: javascript
           # Restrict to the new Svelte frontend so the analysis is meaningful.
           source-root: frontend
-      - uses: github/codeql-action/analyze@v4
+      - uses: github/codeql-action/analyze@v3
