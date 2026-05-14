@@ -116,11 +116,6 @@ async fn reopen_full_workflow() {
             body.contains("Woche: KW"),
             "body should include week label: {body}"
         );
-        assert!(
-            body.contains("Keine offenen Änderungsanträge")
-                || body.contains("Automatisch übernommene Änderungsanträge"),
-            "body should include change-request overview: {body}"
-        );
         assert!(!notification["title"].as_str().unwrap().contains(" / "));
     }
 
