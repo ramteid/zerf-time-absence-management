@@ -197,7 +197,7 @@ Supported languages: `en` (en-US) and `de` (de-DE). Stored in localStorage key `
 
 ```
 /auth/*             Login, logout, setup, forgot/reset password, preferences
-/time-entries/*     CRUD, submit, approve, reject, batch operations
+/time-entries/*     CRUD, submit, batch-approve, batch-reject
 /absences/*         CRUD, approve, reject, revoke, calendar, leave balance
 /change-requests/*  CRUD, approve, reject
 /reopen-requests/*  Create, list pending, approve/reject

@@ -41,8 +41,8 @@ async fn admin_full_workflow() {
 
         let (st, _) = admin
             .post(
-                &format!("/api/v1/time-entries/{}/approve", entry_id),
-                &json!({}),
+                "/api/v1/time-entries/batch-approve",
+                &json!({"ids": [entry_id]}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "admin can approve self-submitted entry");

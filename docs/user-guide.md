@@ -146,8 +146,8 @@ changes when users and server run in different timezones.
 
 1. Create daily draft entries.
 2. Submit the full week with `Submit Week`.
-3. Approver accepts or rejects entries.
-4. Approved entries remain valid unless a later request is approved.
+3. Approver accepts or rejects the week in batch.
+4. Approved entries remain valid unless a later change request or reopen is approved.
 
 ### Time-entry summary tiles
 
@@ -936,35 +936,25 @@ approve or reject their own items.
 **Admin-subject rule:** Non-admin leads cannot act on items submitted by admin
 users. Admin-subject requests require an admin reviewer.
 
-### Reviewing a time entry (single)
+### Reviewing time entries (batch)
 
-Approve or reject a single time entry.
+Approve or reject submitted time entries. All approval and rejection operates
+at the batch level (week as the reviewable unit). There is no single-entry
+approve/reject endpoint.
 
 - You must be a team lead or admin.
-- For approve: the entry must be in `submitted` status.
-- For reject: the entry must be in `submitted` status. A rejection reason is
-  required (non-empty, max 2000 characters).
-- Non-admin leads cannot approve/reject their own entries.
-- Non-admin leads can only act on direct reports' entries.
-
-The employee is notified after approval or rejection (unless the reviewer is
-acting on their own entry as an admin — in that case no self-notification is
-sent).
-
-### Reviewing time entries in bulk (batch)
-
-Approve or reject multiple entries at once. Used for processing an entire
-team's week submissions efficiently.
-
 - Up to 500 entries per batch.
-- A rejection reason applies to all rejected entries in the batch and must be
-  provided (non-empty, max 2000 characters).
-- The same scope and self-review restrictions apply as for single review.
-- For batch approve: only `submitted` entries for users within your scope are
-  changed. Entries outside your scope are silently skipped.
-- Employees receive one grouped notification per user per batch (listing the
-  number of weeks affected for batch approve, or one notification per entry
-  for batch reject).
+- For approve: only `submitted` entries for users within your scope are
+  changed. Entries outside your scope or in a different status are silently
+  skipped.
+- For reject: a rejection reason is required (non-empty, max 2000 characters).
+  The reason applies to all rejected entries in the batch.
+- Non-admin leads cannot approve/reject their own entries (those entries are
+  silently skipped). Admins may approve their own entries.
+- Non-admin leads can only act on their direct reports' entries.
+- Employees receive one consolidated notification per batch, listing the
+  number of weeks affected. Self-reviewed entries by admins receive in-app-only
+  notifications (no email).
 
 ### Reviewing an absence
 
