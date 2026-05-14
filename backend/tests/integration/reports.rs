@@ -78,8 +78,8 @@ async fn reports_full_workflow() {
         assert_eq!(st, StatusCode::OK, "submit entry");
         let (st, _) = lead
             .post(
-                &format!("/api/v1/time-entries/{}/approve", entry_id),
-                &json!({}),
+                "/api/v1/time-entries/batch-approve",
+                &json!({"ids": [entry_id]}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "approve entry");
@@ -220,8 +220,8 @@ async fn reports_full_workflow() {
 
         let (st, _) = lead
             .post(
-                &format!("/api/v1/time-entries/{}/approve", entry_id),
-                &json!({}),
+                "/api/v1/time-entries/batch-approve",
+                &json!({"ids": [entry_id]}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "approve flextime reduction entry");
@@ -367,8 +367,8 @@ async fn reports_full_workflow() {
 
         let (st, _) = lead
             .post(
-                &format!("/api/v1/time-entries/{}/approve", entry_id),
-                &json!({}),
+                "/api/v1/time-entries/batch-approve",
+                &json!({"ids": [entry_id]}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "approve partial sick-day entry");
@@ -431,8 +431,8 @@ async fn reports_full_workflow() {
 
         let (st, _) = lead
             .post(
-                &format!("/api/v1/time-entries/{}/approve", entry_id),
-                &json!({}),
+                "/api/v1/time-entries/batch-approve",
+                &json!({"ids": [entry_id]}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "approve today entry");

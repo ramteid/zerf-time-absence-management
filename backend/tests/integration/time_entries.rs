@@ -142,14 +142,14 @@ async fn time_entries_full_workflow() {
 
         let (st, _) = lead
             .post(
-                &format!("/api/v1/time-entries/{}/reject", entry_id),
-                &json!({"reason": "   "}),
+                "/api/v1/time-entries/batch-reject",
+                &json!({"ids": [entry_id], "reason": "   "}),
             )
             .await;
         assert_eq!(
             st,
             StatusCode::BAD_REQUEST,
-            "blank reason wins over ownership check"
+            "blank reason rejected before processing"
         );
     }
 

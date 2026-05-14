@@ -40,8 +40,10 @@
   $: dataMax = data.reduce((maximumMinutes, day) => Math.max(maximumMinutes, day.cumulative_min), 0);
   $: rawRange = Math.max(dataMax - dataMin, 60); // at least 1h
 
-  // Display range with 10% padding
-  $: dispMin = dataMin - rawRange * 0.1;
+  // Display range with padding. When all values are non-negative, the Y-axis
+  // starts at 0 so the zero line sits exactly at the bottom. When negative
+  // values exist, add 10% bottom padding so the lowest point is visible.
+  $: dispMin = dataMin >= 0 ? 0 : dataMin - rawRange * 0.1;
   $: dispMax = dataMax + rawRange * 0.1;
   $: dispRange = dispMax - dispMin;
 

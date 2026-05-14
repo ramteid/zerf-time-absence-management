@@ -10,18 +10,24 @@ use axum::{
 use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// Load the UI language for notification text; falls back to English on error.
 async fn notification_language(pool: &crate::db::DatabasePool) -> i18n::Language {
     match i18n::load_ui_language(pool).await {
-        Ok(language) => language,
-        Err(error) => {
-            tracing::warn!(target:"zerf::time_entries", "load notification language failed: {error}");
+        Ok(lang) => lang,
+        Err(err) => {
+            tracing::warn!(target: "zerf::time_entries", "load notification language failed: {err}");
             i18n::Language::default()
         }
     }
 }
 
+/// Map a repository-level entry to the handler-level DTO.
 fn repo_entry_to_service(e: crate::repository::TimeEntry) -> TimeEntry {
     TimeEntry {
         id: e.id,
@@ -30,7 +36,7 @@ fn repo_entry_to_service(e: crate::repository::TimeEntry) -> TimeEntry {
         start_time: e.start_time,
         end_time: e.end_time,
         category_id: e.category_id,
-        counts_as_work: None,
+        counts_as_work: None, // filled by attach_counts_as_work
         comment: e.comment,
         status: e.status,
         submitted_at: e.submitted_at,
@@ -41,6 +47,85 @@ fn repo_entry_to_service(e: crate::repository::TimeEntry) -> TimeEntry {
         updated_at: e.updated_at,
     }
 }
+
+/// Compute the ISO week start (Monday) for a given date.
+fn week_start(date: NaiveDate) -> NaiveDate {
+    date - chrono::Duration::days(date.weekday().num_days_from_monday() as i64)
+}
+
+/// Enrich entries with the `counts_as_work` flag from their category.
+/// Fetches each distinct category only once to minimise DB round-trips.
+async fn attach_counts_as_work(app_state: &AppState, entries: &mut [TimeEntry]) -> AppResult<()> {
+    let category_ids: HashSet<i64> = entries.iter().map(|e| e.category_id).collect();
+    let mut map: HashMap<i64, bool> = HashMap::new();
+    for cat_id in category_ids {
+        let flag = app_state
+            .db
+            .categories
+            .find_by_id(cat_id)
+            .await?
+            .map(|c| c.counts_as_work)
+            .unwrap_or(true);
+        map.insert(cat_id, flag);
+    }
+    for entry in entries {
+        entry.counts_as_work = Some(*map.get(&entry.category_id).unwrap_or(&true));
+    }
+    Ok(())
+}
+
+/// Send week-level status-change notifications consolidated per user.
+///
+/// Groups the affected entries by owner, computes distinct ISO weeks per owner,
+/// and sends one notification per user (not per entry). When `reason` is
+/// `Some`, it is included as a template parameter for rejection messages.
+async fn notify_week_status_change(
+    app_state: &AppState,
+    requester_id: i64,
+    entries: &[crate::repository::TimeEntry],
+    category: &str,
+    title_key: &str,
+    body_key: &str,
+    reason: Option<&str>,
+) {
+    let language = notification_language(&app_state.pool).await;
+
+    // Group entries by owner and collect distinct week-starts per owner.
+    let mut weeks_by_user: HashMap<i64, HashSet<NaiveDate>> = HashMap::new();
+    for entry in entries {
+        weeks_by_user
+            .entry(entry.user_id)
+            .or_default()
+            .insert(week_start(entry.entry_date));
+    }
+
+    // Send one consolidated notification per affected user.
+    for (user_id, weeks) in weeks_by_user {
+        let week_count = i18n::week_count(&language, weeks.len() as i64);
+        let mut params = vec![("week_count", week_count)];
+        if let Some(r) = reason {
+            params.push(("reason", r.to_string()));
+        }
+        // Self-approved/rejected entries get in-app-only notifications (no email).
+        if user_id != requester_id {
+            crate::notifications::create_translated(
+                app_state, &language, user_id, category, title_key, body_key, params,
+                Some("time_entries"), None,
+            )
+            .await;
+        } else {
+            crate::notifications::create_translated_inapp_only(
+                app_state, &language, user_id, category, title_key, body_key, params,
+                Some("time_entries"), None,
+            )
+            .await;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DTOs
+// ---------------------------------------------------------------------------
 
 #[derive(FromRow, Serialize, Clone)]
 pub struct TimeEntry {
@@ -61,10 +146,6 @@ pub struct TimeEntry {
     pub updated_at: DateTime<Utc>,
 }
 
-fn week_start(date: NaiveDate) -> NaiveDate {
-    date - chrono::Duration::days(date.weekday().num_days_from_monday() as i64)
-}
-
 #[derive(Deserialize)]
 pub struct RangeQuery {
     pub from: Option<NaiveDate>,
@@ -73,25 +154,31 @@ pub struct RangeQuery {
     pub status: Option<String>,
 }
 
-async fn attach_counts_as_work(app_state: &AppState, entries: &mut [TimeEntry]) -> AppResult<()> {
-    let category_ids: HashSet<i64> = entries.iter().map(|entry| entry.category_id).collect();
-    let mut by_category: std::collections::HashMap<i64, bool> = std::collections::HashMap::new();
-
-    for category_id in category_ids {
-        let category = app_state.db.categories.find_by_id(category_id).await?;
-        by_category.insert(
-            category_id,
-            category.map(|item| item.counts_as_work).unwrap_or(true),
-        );
-    }
-
-    for entry in entries {
-        entry.counts_as_work = Some(*by_category.get(&entry.category_id).unwrap_or(&true));
-    }
-
-    Ok(())
+#[derive(Deserialize)]
+pub struct NewTimeEntry {
+    pub entry_date: NaiveDate,
+    pub start_time: String,
+    pub end_time: String,
+    pub category_id: i64,
+    pub comment: Option<String>,
 }
 
+#[derive(Deserialize)]
+pub struct IdsBody {
+    pub ids: Vec<i64>,
+}
+
+#[derive(Deserialize)]
+pub struct BatchRejectBody {
+    pub ids: Vec<i64>,
+    pub reason: String,
+}
+
+// ---------------------------------------------------------------------------
+// CRUD handlers
+// ---------------------------------------------------------------------------
+
+/// List time entries for the requesting user, optionally filtered by date range.
 pub async fn list(
     State(app_state): State<AppState>,
     requester: User,
@@ -107,6 +194,8 @@ pub async fn list(
     Ok(Json(mapped))
 }
 
+/// List time entries across all users (leads/admins only).
+/// Admins see everything; team leads see only their direct reports.
 pub async fn list_all(
     State(app_state): State<AppState>,
     requester: User,
@@ -132,15 +221,8 @@ pub async fn list_all(
     Ok(Json(mapped))
 }
 
-#[derive(Deserialize)]
-pub struct NewTimeEntry {
-    pub entry_date: NaiveDate,
-    pub start_time: String,
-    pub end_time: String,
-    pub category_id: i64,
-    pub comment: Option<String>,
-}
-
+/// Validate a time entry payload against business rules (overlap, date constraints).
+/// Used by both create and change-request flows.
 pub(crate) async fn validate(
     conn: &mut sqlx::PgConnection,
     user_id: i64,
@@ -157,6 +239,7 @@ pub(crate) async fn validate(
     crate::repository::time_entries::validate_entry(conn, user_id, &entry, exclude_id).await
 }
 
+/// Create a new draft time entry for the requesting user.
 pub async fn create(
     State(app_state): State<AppState>,
     requester: User,
@@ -188,6 +271,7 @@ pub async fn create(
     Ok(Json(created_entry))
 }
 
+/// Update a draft time entry. Only the owner (or an admin) may edit.
 pub async fn update(
     State(app_state): State<AppState>,
     requester: User,
@@ -221,6 +305,7 @@ pub async fn update(
     Ok(Json(updated_entry))
 }
 
+/// Delete a draft time entry. Only the owner may delete their own entries.
 pub async fn delete(
     State(app_state): State<AppState>,
     requester: User,
@@ -245,11 +330,13 @@ pub async fn delete(
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
-#[derive(Deserialize)]
-pub struct IdsBody {
-    pub ids: Vec<i64>,
-}
+// ---------------------------------------------------------------------------
+// Week-level submission, approval, and rejection
+// ---------------------------------------------------------------------------
 
+/// Submit draft entries for approval. The employee selects entries by ID;
+/// the backend transitions them from draft → submitted in a single transaction
+/// and notifies all assigned approvers.
 pub async fn submit(
     State(app_state): State<AppState>,
     requester: User,
@@ -288,6 +375,7 @@ pub async fn submit(
         )
         .await;
     }
+    // Phase 4: notify approvers with a consolidated week count.
     let submitted_count = submitted_ids.len();
     let mut submitted_weeks = HashSet::new();
     for entry_id in &submitted_ids {
@@ -300,9 +388,7 @@ pub async fn submit(
             submitted_weeks.insert(week_start(entry_date));
         }
     }
-    let submitted_week_count = submitted_weeks.len();
-    // Phase 4: notify the approver with the actual submitted count.
-    if submitted_week_count > 0 {
+    if !submitted_weeks.is_empty() {
         let approver_ids =
             crate::auth::required_approval_recipient_ids(&app_state.pool, &requester).await?;
         let language = notification_language(&app_state.pool).await;
@@ -321,7 +407,7 @@ pub async fn submit(
                     ),
                     (
                         "week_count",
-                        i18n::week_count(&language, submitted_week_count as i64),
+                        i18n::week_count(&language, submitted_weeks.len() as i64),
                     ),
                 ],
                 Some("time_entries"),
@@ -335,103 +421,10 @@ pub async fn submit(
     ))
 }
 
-pub async fn approve(
-    State(app_state): State<AppState>,
-    requester: User,
-    Path(entry_id): Path<i64>,
-) -> AppResult<Json<serde_json::Value>> {
-    if !requester.is_lead() {
-        return Err(AppError::Forbidden);
-    }
-    let entry = app_state
-        .db
-        .time_entries
-        .approve(entry_id, requester.id, requester.is_admin())
-        .await?;
-    audit::log(
-        &app_state.pool,
-        requester.id,
-        "approved",
-        "time_entries",
-        entry_id,
-        serde_json::to_value(&entry).ok(),
-        Some(serde_json::json!({"status": "approved", "reviewed_by": requester.id})),
-    )
-    .await;
-    let language = notification_language(&app_state.pool).await;
-    let notify_params = vec![("entry_date", i18n::format_date(&language, entry.entry_date))];
-    if entry.user_id != requester.id {
-        crate::notifications::create_translated(
-            &app_state, &language, entry.user_id, "timesheet_approved",
-            "timesheet_approved_title", "timesheet_approved_body",
-            notify_params, Some("time_entries"), Some(entry_id),
-        ).await;
-    } else {
-        crate::notifications::create_translated_inapp_only(
-            &app_state, &language, entry.user_id, "timesheet_approved",
-            "timesheet_approved_title", "timesheet_approved_body",
-            notify_params, Some("time_entries"), Some(entry_id),
-        ).await;
-    }
-    Ok(Json(serde_json::json!({"ok":true})))
-}
-
-#[derive(Deserialize)]
-pub struct RejectBody {
-    pub reason: String,
-}
-
-pub async fn reject(
-    State(app_state): State<AppState>,
-    requester: User,
-    Path(entry_id): Path<i64>,
-    Json(body): Json<RejectBody>,
-) -> AppResult<Json<serde_json::Value>> {
-    if !requester.is_lead() {
-        return Err(AppError::Forbidden);
-    }
-    if body.reason.trim().is_empty() {
-        return Err(AppError::BadRequest("Reason required.".into()));
-    }
-    if body.reason.len() > 2000 {
-        return Err(AppError::BadRequest("Reason too long (max 2000).".into()));
-    }
-    let entry = app_state
-        .db
-        .time_entries
-        .reject(entry_id, requester.id, requester.is_admin(), &body.reason)
-        .await?;
-    audit::log(
-        &app_state.pool,
-        requester.id,
-        "rejected",
-        "time_entries",
-        entry_id,
-        serde_json::to_value(&entry).ok(),
-        Some(serde_json::json!({"status": "rejected", "reason": body.reason})),
-    )
-    .await;
-    let language = notification_language(&app_state.pool).await;
-    let notify_params = vec![
-        ("entry_date", i18n::format_date(&language, entry.entry_date)),
-        ("reason", body.reason.clone()),
-    ];
-    if entry.user_id != requester.id {
-        crate::notifications::create_translated(
-            &app_state, &language, entry.user_id, "timesheet_rejected",
-            "timesheet_rejected_title", "timesheet_rejected_body",
-            notify_params, Some("time_entries"), Some(entry_id),
-        ).await;
-    } else {
-        crate::notifications::create_translated_inapp_only(
-            &app_state, &language, entry.user_id, "timesheet_rejected",
-            "timesheet_rejected_title", "timesheet_rejected_body",
-            notify_params, Some("time_entries"), Some(entry_id),
-        ).await;
-    }
-    Ok(Json(serde_json::json!({"ok":true})))
-}
-
+/// Approve submitted entries in batch (week-level approval).
+/// Only leads (team_lead / admin) may approve. Admins can approve any user;
+/// team leads can only approve their direct reports. Entries that are not in
+/// "submitted" status or not under the reviewer's purview are silently skipped.
 pub async fn batch_approve(
     State(app_state): State<AppState>,
     requester: User,
@@ -451,7 +444,7 @@ pub async fn batch_approve(
         .time_entries
         .batch_approve(&body.ids, requester.id, requester.is_admin())
         .await?;
-    let approved_count = approved_entries.len();
+    // Audit each entry individually for traceability.
     for entry in &approved_entries {
         audit::log(
             &app_state.pool,
@@ -464,44 +457,26 @@ pub async fn batch_approve(
         )
         .await;
     }
-    if approved_count > 0 {
-        let language = notification_language(&app_state.pool).await;
-        let mut weeks_by_user: std::collections::HashMap<i64, HashSet<NaiveDate>> =
-            std::collections::HashMap::new();
-        for entry in &approved_entries {
-            weeks_by_user
-                .entry(entry.user_id)
-                .or_default()
-                .insert(week_start(entry.entry_date));
-        }
-        for (user_id, weeks) in weeks_by_user {
-            let week_count = i18n::week_count(&language, weeks.len() as i64);
-            if user_id != requester.id {
-                crate::notifications::create_translated(
-                    &app_state, &language, user_id, "timesheet_approved",
-                    "timesheet_approved_title", "timesheet_batch_approved_body",
-                    vec![("week_count", week_count)], Some("time_entries"), None,
-                ).await;
-            } else {
-                crate::notifications::create_translated_inapp_only(
-                    &app_state, &language, user_id, "timesheet_approved",
-                    "timesheet_approved_title", "timesheet_batch_approved_body",
-                    vec![("week_count", week_count)], Some("time_entries"), None,
-                ).await;
-            }
-        }
+    // Send one consolidated notification per affected user.
+    if !approved_entries.is_empty() {
+        notify_week_status_change(
+            &app_state,
+            requester.id,
+            &approved_entries,
+            "timesheet_approved",
+            "timesheet_approved_title",
+            "timesheet_batch_approved_body",
+            None,
+        )
+        .await;
     }
     Ok(Json(
-        serde_json::json!({"ok":true, "count": approved_count}),
+        serde_json::json!({"ok": true, "count": approved_entries.len()}),
     ))
 }
 
-#[derive(Deserialize)]
-pub struct BatchRejectBody {
-    pub ids: Vec<i64>,
-    pub reason: String,
-}
-
+/// Reject submitted entries in batch (week-level rejection).
+/// Same authorization rules as batch_approve. A rejection reason is required.
 pub async fn batch_reject(
     State(app_state): State<AppState>,
     requester: User,
@@ -533,8 +508,6 @@ pub async fn batch_reject(
             &rejection_reason,
         )
         .await?;
-    let rejected_count = rejected_entries.len();
-    let language = notification_language(&app_state.pool).await;
     // Audit each rejected entry individually for traceability.
     for entry in &rejected_entries {
         audit::log(
@@ -548,39 +521,20 @@ pub async fn batch_reject(
         )
         .await;
     }
-    // Consolidate rejection notifications per user so that a batch rejection
-    // produces one notification per affected user, not one per entry.
-    if rejected_count > 0 {
-        let mut weeks_by_user: std::collections::HashMap<i64, HashSet<NaiveDate>> =
-            std::collections::HashMap::new();
-        for entry in &rejected_entries {
-            weeks_by_user
-                .entry(entry.user_id)
-                .or_default()
-                .insert(week_start(entry.entry_date));
-        }
-        for (user_id, weeks) in weeks_by_user {
-            let week_count = i18n::week_count(&language, weeks.len() as i64);
-            let notify_params = vec![
-                ("week_count", week_count),
-                ("reason", rejection_reason.clone()),
-            ];
-            if user_id != requester.id {
-                crate::notifications::create_translated(
-                    &app_state, &language, user_id, "timesheet_rejected",
-                    "timesheet_rejected_title", "timesheet_batch_rejected_body",
-                    notify_params, Some("time_entries"), None,
-                ).await;
-            } else {
-                crate::notifications::create_translated_inapp_only(
-                    &app_state, &language, user_id, "timesheet_rejected",
-                    "timesheet_rejected_title", "timesheet_batch_rejected_body",
-                    notify_params, Some("time_entries"), None,
-                ).await;
-            }
-        }
+    // Send one consolidated rejection notification per affected user.
+    if !rejected_entries.is_empty() {
+        notify_week_status_change(
+            &app_state,
+            requester.id,
+            &rejected_entries,
+            "timesheet_rejected",
+            "timesheet_rejected_title",
+            "timesheet_batch_rejected_body",
+            Some(&rejection_reason),
+        )
+        .await;
     }
     Ok(Json(
-        serde_json::json!({"ok": true, "count": rejected_count}),
+        serde_json::json!({"ok": true, "count": rejected_entries.len()}),
     ))
 }

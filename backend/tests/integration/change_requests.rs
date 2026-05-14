@@ -92,8 +92,8 @@ async fn change_requests_full_workflow() {
         let eid_a = create_and_submit_entry(&emp, &monday, cat).await;
         let (st, _) = lead
             .post(
-                &format!("/api/v1/time-entries/{}/approve", eid_a),
-                &json!({}),
+                "/api/v1/time-entries/batch-approve",
+                &json!({"ids": [eid_a]}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "approve entry A");
@@ -118,8 +118,8 @@ async fn change_requests_full_workflow() {
         assert_eq!(st, StatusCode::OK, "submit entry B");
         let (st, _) = lead
             .post(
-                &format!("/api/v1/time-entries/{}/approve", eid_b),
-                &json!({}),
+                "/api/v1/time-entries/batch-approve",
+                &json!({"ids": [eid_b]}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "approve entry B");
@@ -165,8 +165,8 @@ async fn change_requests_full_workflow() {
 
         let (st, _) = lead
             .post(
-                &format!("/api/v1/time-entries/{}/reject", eid),
-                &json!({"reason": "incorrect"}),
+                "/api/v1/time-entries/batch-reject",
+                &json!({"ids": [eid], "reason": "incorrect"}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "reject target entry");
@@ -209,7 +209,7 @@ async fn change_requests_full_workflow() {
 
         let eid = create_and_submit_entry(&emp, &monday, cat).await;
         let (st, _) = lead
-            .post(&format!("/api/v1/time-entries/{}/approve", eid), &json!({}))
+            .post("/api/v1/time-entries/batch-approve", &json!({"ids": [eid]}))
             .await;
         assert_eq!(st, StatusCode::OK, "approve original entry");
 

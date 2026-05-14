@@ -263,21 +263,24 @@ async fn full_integration_suite() {
             .await;
         assert_eq!(st, StatusCode::BAD_REQUEST, "edit submitted entry rejected");
 
-        let (st, _) = lead
-            .post(&format!("/api/v1/time-entries/{}/approve", te1), &json!({}))
+        let (st, body) = lead
+            .post("/api/v1/time-entries/batch-approve", &json!({"ids": [te1]}))
             .await;
         assert_eq!(st, StatusCode::OK, "lead approve TE1");
+        assert_eq!(body["count"], 1);
 
-        let (st, _) = lead
+        let (st, body) = lead
             .post(
-                &format!("/api/v1/time-entries/{}/reject", te2),
-                &json!({"reason":"clarify"}),
+                "/api/v1/time-entries/batch-reject",
+                &json!({"ids": [te2], "reason":"clarify"}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "lead reject TE2");
+        assert_eq!(body["count"], 1);
 
+        // Employees cannot approve — batch silently skips unauthorized entries.
         let (st, _) = emp
-            .post(&format!("/api/v1/time-entries/{}/approve", te1), &json!({}))
+            .post("/api/v1/time-entries/batch-approve", &json!({"ids": [te1]}))
             .await;
         assert_eq!(st, StatusCode::FORBIDDEN, "emp approve forbidden");
     }
@@ -1159,19 +1162,20 @@ async fn full_integration_suite() {
     {
         let (st, _) = lead
             .post(
-                &format!("/api/v1/time-entries/{}/reject", id_y1),
-                &json!({"reason":"   "}),
+                "/api/v1/time-entries/batch-reject",
+                &json!({"ids": [id_y1], "reason":"   "}),
             )
             .await;
         assert_eq!(st, StatusCode::BAD_REQUEST, "empty reject reason rejected");
 
-        let (st, _) = lead
+        let (st, body) = lead
             .post(
-                &format!("/api/v1/time-entries/{}/reject", id_y1),
-                &json!({"reason":"please add a comment"}),
+                "/api/v1/time-entries/batch-reject",
+                &json!({"ids": [id_y1], "reason":"please add a comment"}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "lead rejects Y1");
+        assert_eq!(body["count"], 1);
 
         let (st, body) = lead
             .post(
@@ -1182,12 +1186,11 @@ async fn full_integration_suite() {
         assert_eq!(st, StatusCode::OK, "batch approve");
         assert_eq!(body["count"], 5, "exactly 5 approved");
 
-        let (_, _) = lead
-            .post(
-                &format!("/api/v1/time-entries/{}/approve", id_y1),
-                &json!({}),
-            )
+        // id_y1 was rejected above — batch_approve silently skips non-submitted entries.
+        let (_, body) = lead
+            .post("/api/v1/time-entries/batch-approve", &json!({"ids": [id_y1]}))
             .await;
+        assert_eq!(body["count"], 0, "rejected entry not re-approved");
 
         let (_, body) = tina
             .get(&format!("/api/v1/time-entries?from={}&to={}", yday, yday))
@@ -1221,21 +1224,18 @@ async fn full_integration_suite() {
             .await;
         assert_eq!(st, StatusCode::OK, "lea submit own");
 
-        let (st, _) = lead
-            .post(
-                &format!("/api/v1/time-entries/{}/approve", lea_te_id),
-                &json!({}),
-            )
+        // Batch self-approve: lead is not admin, so her own entry is skipped → count=0.
+        let (st, body) = lead
+            .post("/api/v1/time-entries/batch-approve", &json!({"ids": [lea_te_id]}))
             .await;
-        assert_eq!(st, StatusCode::FORBIDDEN, "lea self-approve forbidden");
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(body["count"], 0, "lea self-approve skipped");
 
-        let (st, _) = admin
-            .post(
-                &format!("/api/v1/time-entries/{}/approve", lea_te_id),
-                &json!({}),
-            )
+        let (st, body) = admin
+            .post("/api/v1/time-entries/batch-approve", &json!({"ids": [lea_te_id]}))
             .await;
         assert_eq!(st, StatusCode::OK, "admin approves lead entry");
+        assert_eq!(body["count"], 1);
     }
 
     // -- 9. Change request on approved entry --------------------------------

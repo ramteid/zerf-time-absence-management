@@ -88,8 +88,6 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                     "/time-entries/{id}",
                     put(time_entries::update).delete(time_entries::delete),
                 )
-                .route("/time-entries/{id}/approve", post(time_entries::approve))
-                .route("/time-entries/{id}/reject", post(time_entries::reject))
                 .route("/absences", get(absences::list).post(absences::create))
                 .route("/absences/all", get(absences::list_all))
                 .route("/absences/calendar", get(absences::calendar))

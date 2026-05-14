@@ -530,8 +530,8 @@ async fn users_full_workflow() {
         let eid = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
         let (st, _) = lead
             .post(
-                &format!("/api/v1/time-entries/{eid}/approve"),
-                &serde_json::json!({}),
+                "/api/v1/time-entries/batch-approve",
+                &serde_json::json!({"ids": [eid]}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "approve entry");
