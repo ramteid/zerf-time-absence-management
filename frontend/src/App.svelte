@@ -264,8 +264,8 @@
 
   $: route = resolveRoute(pathname, $currentUser);
   $: document.title = $settings?.organization_name
-    ? `Zerf - ${$settings.organization_name}`
-    : "Zerf";
+    ? `${$t("Time tracking")} - ${$settings.organization_name}`
+    : $t("Time tracking");
   $: isAdmin =
     pathname.startsWith("/admin") &&
     !!$currentUser?.permissions?.can_manage_users;

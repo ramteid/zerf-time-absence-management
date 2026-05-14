@@ -9,6 +9,10 @@ set -euo pipefail
 # disabled in this mode so any LAN address works without extra configuration;
 # CSRF tokens are still enforced. Use start_public.sh for HTTPS deployments
 # with strict origin enforcement.
+if [ -z "${ZERF_GIT_COMMIT:-}" ] && git_commit="$(git rev-parse --verify HEAD 2>/dev/null)"; then
+  export ZERF_GIT_COMMIT="$git_commit"
+fi
+
 docker compose -f docker/docker-compose-local.yml --env-file .env up -d --build
 
 echo "App is running at http://localhost:3333 (also reachable from the LAN on port 3333)"

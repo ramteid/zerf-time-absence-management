@@ -12,6 +12,7 @@
 #   PGHOST / PGPORT / PGDATABASE / PGUSER / PGPASSWORD
 #   ZERF_POSTGRES_HOST / ZERF_POSTGRES_PORT / ZERF_POSTGRES_DB
 #   ZERF_POSTGRES_USER / ZERF_POSTGRES_PASSWORD
+#   ZERF_GIT_COMMIT        - written to the backup metadata sidecar
 set -eu
 umask 077
 
@@ -89,8 +90,34 @@ run_direct_pg_dump() {
       --no-privileges
 }
 
+metadata_value() {
+  if [ -z "${1:-}" ]; then
+    printf 'unknown'
+    return 0
+  fi
+
+  printf '%s' "$1" | tr '\n\r' '  '
+}
+
+write_backup_metadata() {
+  target_file="$1"
+  created_at="$2"
+
+  resolve_direct_connection || return 1
+
+  {
+    printf 'backup_format=pg_dump_custom\n'
+    printf 'created_at_utc=%s\n' "$(metadata_value "$created_at")"
+    printf 'ZERF_GIT_COMMIT=%s\n' "$(metadata_value "${ZERF_GIT_COMMIT:-unknown}")"
+    printf 'PGHOST=%s\n' "$(metadata_value "$DIRECT_HOST")"
+    printf 'PGPORT=%s\n' "$(metadata_value "$DIRECT_PORT")"
+    printf 'PGDATABASE=%s\n' "$(metadata_value "$DIRECT_DB")"
+    printf 'PGUSER=%s\n' "$(metadata_value "$DIRECT_USER")"
+  } > "$target_file"
+}
+
 apply_retention() {
-  find "$OUT_DIR" -type f -name 'zerf-*.dump' \
+  find "$OUT_DIR" -type f \( -name 'zerf-*.dump' -o -name 'zerf-*.metadata' \) \
     -mtime "+$RETENTION" \
     -exec rm -f {} +
 }
@@ -100,9 +127,12 @@ run_backup_once() {
 
   ts="$(date -u +%Y%m%dT%H%M%SZ)"
   output_file="$OUT_DIR/zerf-$ts.dump"
+  metadata_file="$OUT_DIR/zerf-$ts.metadata"
   temp_file="$output_file.tmp"
+  temp_metadata_file="$metadata_file.tmp"
 
   rm -f "$temp_file"
+  rm -f "$temp_metadata_file"
 
   if ! run_direct_pg_dump > "$temp_file"; then
     rm -f "$temp_file"
@@ -110,15 +140,27 @@ run_backup_once() {
     return 1
   fi
 
-  chmod 600 "$temp_file"
+  if ! write_backup_metadata "$temp_metadata_file" "$ts"; then
+    rm -f "$temp_file" "$temp_metadata_file"
+    echo "Failed to write backup metadata." >&2
+    return 1
+  fi
+
+  chmod 600 "$temp_file" "$temp_metadata_file"
   if ! mv "$temp_file" "$output_file"; then
-    rm -f "$temp_file"
+    rm -f "$temp_file" "$temp_metadata_file"
     echo "Failed to finalize backup file." >&2
+    return 1
+  fi
+  if ! mv "$temp_metadata_file" "$metadata_file"; then
+    rm -f "$output_file" "$temp_metadata_file"
+    echo "Failed to finalize backup metadata." >&2
     return 1
   fi
 
   apply_retention
   echo "Backup written: $output_file"
+  echo "Backup metadata written: $metadata_file"
 }
 
 validate_interval || exit 1

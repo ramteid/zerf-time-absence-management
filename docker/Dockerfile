@@ -52,6 +52,9 @@ RUN touch src/main.rs && \
 FROM debian:trixie-slim
 ARG APP_UID=10001
 ARG APP_GID=10001
+ARG ZERF_GIT_COMMIT=unknown
+
+LABEL org.opencontainers.image.revision="${ZERF_GIT_COMMIT}"
 
 # Minimal runtime deps: `tini` for signal handling and `wget` for health checks.
 RUN apt-get update && \
@@ -70,6 +73,7 @@ RUN chmod 0555 /app/zerf && \
 
 ENV ZERF_STATIC_DIR=/app/static \
     ZERF_BIND=0.0.0.0:3333 \
+    ZERF_GIT_COMMIT=${ZERF_GIT_COMMIT} \
     RUST_BACKTRACE=0
 
 USER zerf:zerf

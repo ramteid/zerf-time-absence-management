@@ -4,6 +4,7 @@ use std::env;
 pub struct Config {
     pub database_url: String,
     pub session_secret: String,
+    pub git_commit: String,
 
     pub bind: String,
     pub static_dir: String,
@@ -71,6 +72,7 @@ impl Config {
         Self {
             database_url,
             session_secret,
+            git_commit: env::var("ZERF_GIT_COMMIT").unwrap_or_else(|_| "unknown".into()),
             bind: env::var("ZERF_BIND").unwrap_or_else(|_| "0.0.0.0:3333".into()),
             static_dir: env::var("ZERF_STATIC_DIR").unwrap_or_else(|_| "static".into()),
             public_url,

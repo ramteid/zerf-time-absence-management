@@ -30,6 +30,7 @@ Employees capture hours and absences, team leads review requests and submitted w
 - It focuses on time, absences, approvals, and reporting instead of bundling payroll, recruiting, or multi-tenant enterprise features.
 - It is self-hosted by default, so data stays on your own infrastructure instead of in a SaaS service.
 - It is easy to operate: the provided Docker Compose entrypoints cover local, debug, and public deployments.
+- Start scripts pass the current Git commit into built images as `org.opencontainers.image.revision` and `ZERF_GIT_COMMIT`; backups include the same value in a metadata sidecar.
 - It keeps the workflow opinionated and small, which reduces setup overhead for teams that want a practical operational tool instead of a broad platform.
 
 ## User documentation

@@ -9,4 +9,7 @@ RUN xcaddy build \
     --with github.com/mholt/caddy-ratelimit
 
 FROM caddy:2-alpine
+ARG ZERF_GIT_COMMIT=unknown
+LABEL org.opencontainers.image.revision="${ZERF_GIT_COMMIT}"
+ENV ZERF_GIT_COMMIT=${ZERF_GIT_COMMIT}
 COPY --from=builder /usr/bin/caddy /usr/bin/caddy

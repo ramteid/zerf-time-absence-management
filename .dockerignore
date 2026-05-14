@@ -22,7 +22,8 @@ data
 !.env.example
 
 # Docker and deployment
-docker
+docker/*
+!docker/Dockerfile
 Caddyfile
 caddy_data
 caddy_config

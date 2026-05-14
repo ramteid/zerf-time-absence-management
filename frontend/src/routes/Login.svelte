@@ -160,7 +160,7 @@
         <h1
           style="margin:0;font-size:20px;font-weight:400;letter-spacing:-0.02em"
         >
-          ZERF {$t("Time tracking")}
+          {$t("Time tracking")}
         </h1>
         {#if $settings?.organization_name}
           <div style="font-size:12px;color:var(--text-tertiary);margin-top:2px">
