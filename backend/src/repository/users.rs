@@ -1,5 +1,6 @@
 use crate::db::DatabasePool;
 use crate::error::{AppError, AppResult};
+use crate::roles::{can_approve_non_admin_subjects, is_admin_role, ROLE_ASSISTANT};
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::Serialize;
 
@@ -30,10 +31,10 @@ pub struct User {
 
 impl User {
     pub fn is_admin(&self) -> bool {
-        self.role == "admin"
+        is_admin_role(&self.role)
     }
     pub fn is_lead(&self) -> bool {
-        self.role == "team_lead" || self.role == "admin"
+        can_approve_non_admin_subjects(&self.role, self.active)
     }
 }
 
@@ -494,20 +495,29 @@ impl UserDb {
         user_id: i64,
         approver_id: i64,
     ) -> AppResult<()> {
+        let (subject_role, _) = sqlx::query_as::<_, (String, bool)>(
+            "SELECT role, active FROM users WHERE id = $1",
+        )
+        .bind(user_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(AppError::NotFound)?;
+        let requires_admin_approver = is_admin_role(&subject_role);
         let rows = sqlx::query(
             "INSERT INTO user_approvers(user_id, approver_id) \
              SELECT $1, $2 \
              WHERE EXISTS ( \
-                SELECT 1 FROM users subject, users approver \
-                WHERE subject.id = $1 AND approver.id = $2 AND approver.active = TRUE \
+                SELECT 1 FROM users approver \
+                WHERE approver.id = $2 \
                 AND ( \
-                    (subject.role = 'admin' AND approver.role = 'admin') OR \
-                    (subject.role != 'admin' AND approver.role IN ('team_lead', 'admin')) \
+                    ($3::bool = TRUE AND approver.active = TRUE AND approver.role = 'admin') OR \
+                    ($3::bool = FALSE AND approver.active = TRUE AND approver.role IN ('team_lead', 'admin')) \
                 ) \
              )",
         )
         .bind(user_id)
         .bind(approver_id)
+        .bind(requires_admin_approver)
         .execute(tx)
         .await?;
         if rows.rows_affected() == 0 {
@@ -527,8 +537,8 @@ impl UserDb {
              JOIN users subject ON subject.id = ua.user_id \
              WHERE ua.user_id = $1 AND approver.active = TRUE \
              AND ( \
-                 (subject.role = 'admin' AND approver.role = 'admin') OR \
-                 (subject.role != 'admin' AND approver.role IN ('team_lead', 'admin')) \
+                 (lower(trim(subject.role)) = 'admin' AND approver.role = 'admin') OR \
+                 (lower(trim(subject.role)) != 'admin' AND approver.role IN ('team_lead', 'admin')) \
              )",
         )
         .bind(user_id)
@@ -548,8 +558,8 @@ impl UserDb {
              JOIN users subject ON subject.id = ua.user_id \
              WHERE ua.user_id = $1 AND approver.active = TRUE \
              AND ( \
-                 (subject.role = 'admin' AND approver.role = 'admin') OR \
-                 (subject.role != 'admin' AND approver.role IN ('team_lead', 'admin')) \
+                 (lower(trim(subject.role)) = 'admin' AND approver.role = 'admin') OR \
+                 (lower(trim(subject.role)) != 'admin' AND approver.role IN ('team_lead', 'admin')) \
              ) \
              ORDER BY approver.last_name, approver.first_name",
         )
@@ -717,12 +727,19 @@ impl UserDb {
     pub async fn get_active_non_assistant_users(
         &self,
     ) -> AppResult<Vec<(i64, String, NaiveDate, i16)>> {
-        Ok(sqlx::query_as::<_, (i64, String, NaiveDate, i16)>(
+        let rows = sqlx::query_as::<_, (i64, String, NaiveDate, i16)>(
             "SELECT id, email, start_date, workdays_per_week FROM users \
-             WHERE active = TRUE AND role != 'assistant'",
+             WHERE active = TRUE AND lower(trim(role)) != $1 AND weekly_hours > 0",
         )
+        .bind(ROLE_ASSISTANT)
         .fetch_all(&self.pool)
-        .await?)
+        .await?;
+        tracing::debug!(
+            target: "zerf::assistant_role",
+            selected_user_count = rows.len(),
+            "loaded active non-assistant users with weekly_hours > 0 for submission reminders"
+        );
+        Ok(rows)
     }
 
     /// Begin a transaction.

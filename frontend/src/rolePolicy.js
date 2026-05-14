@@ -1,7 +1,7 @@
 const ASSISTANT_ROLE = "assistant";
 
 function roleOf(user) {
-  return String(user?.role || "").toLowerCase();
+  return String(user?.role || "").trim().toLowerCase();
 }
 
 export function isAssistantUser(user) {

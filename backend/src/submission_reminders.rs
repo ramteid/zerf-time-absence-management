@@ -257,6 +257,13 @@ pub async fn run_check(state: &crate::AppState) {
                 return;
             }
         };
+    tracing::debug!(
+        target: "zerf::assistant_role",
+        reminder_candidate_count = rows.len(),
+        today = %today,
+        timezone = %timezone,
+        "submission reminder pass loaded non-assistant candidates"
+    );
 
     // Load SMTP config once for all users
     let smtp = crate::settings::load_smtp_config(pool)

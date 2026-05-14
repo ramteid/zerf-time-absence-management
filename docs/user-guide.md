@@ -80,7 +80,10 @@ inferred from role alone.
 
 - Employee: records time and absences, submits weeks, requests changes.
 - Assistant: records time and absences like an employee, but has no fixed
-  weekly target hours and no flextime account.
+  weekly target hours and no flextime account. Assistant detection is based on
+  the normalized stored role value, so case and surrounding whitespace do not
+  change this behavior. This policy is role-based only. A non-assistant user
+  with `0` weekly hours still follows the normal reminder and approval logic.
 - Approver: a user who has been explicitly assigned in `user_approvers` and is
 	active.
 - Admin: manages users, categories, holidays, settings, and can also be an
