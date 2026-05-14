@@ -248,5 +248,46 @@ async fn time_entries_full_workflow() {
         assert_eq!(entry["status"], "rejected");
     }
 
+    // -- Non-admin lead cannot batch reject own submitted entry --
+    {
+        let (_lead_id, lead_pw, _emp_id, _emp_pw, monday_iso, cat_id) =
+            bootstrap_team_with_suffix(&app, &admin, false, "3").await;
+        let lead = login_change_pw(&app, "lead-3@example.com", &lead_pw).await;
+
+        let (st, body) = lead
+            .post(
+                "/api/v1/time-entries",
+                &json!({
+                    "entry_date": monday_iso,
+                    "start_time": "08:00",
+                    "end_time": "12:00",
+                    "category_id": cat_id,
+                    "comment": "lead self-review check"
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "lead creates own entry");
+        let entry_id = id(&body);
+
+        let (st, _) = lead
+            .post("/api/v1/time-entries/submit", &json!({"ids": [entry_id]}))
+            .await;
+        assert_eq!(st, StatusCode::OK, "lead submits own entry");
+
+        let (st, body) = lead
+            .post(
+                "/api/v1/time-entries/batch-reject",
+                &json!({"ids": [entry_id], "reason": "self-review should be skipped"}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "self-reject request is processed");
+        assert_eq!(body["count"], 0, "non-admin self-reject is skipped");
+
+        let (_, entries) = lead.get("/api/v1/time-entries").await;
+        let entry = find_by_id(&entries, entry_id).expect("entry exists");
+        assert_eq!(entry["status"], "submitted");
+        assert_eq!(entry["rejection_reason"], serde_json::Value::Null);
+    }
+
     app.cleanup().await;
 }
