@@ -236,6 +236,9 @@ async fn perform_reopen_in_tx(
 ) -> AppResult<ReopenExecution> {
     let week_end = week_start + chrono::Duration::days(6);
 
+    // Advisory lock on subject_id serializes concurrent reopen attempts for the
+    // same user, preventing two simultaneous transactions from both reading
+    // 'submitted' entries and racing to reset them both to draft.
     sqlx::query("SELECT pg_advisory_xact_lock($1)")
         .bind(subject_id)
         .execute(&mut **tx)
@@ -318,6 +321,8 @@ async fn perform_reopen_in_tx(
                  rejection_reason=NULL \
              WHERE status='open' AND id = ANY($2)",
         )
+        // reviewed_by is NULL for self-applied changes (auto-approve without an
+        // explicit approver); set to the acting approver's id otherwise.
         .bind(if actor_id == subject_id {
             None::<i64>
         } else {
@@ -573,6 +578,9 @@ pub async fn create(
     .await;
 
     let requester_full_name = requester.full_name();
+    // `reopen_execution` is None only if should_auto_approve is false and the
+    // early-return path above was not taken, so the unwrap_or_default here is
+    // purely defensive — it never fires when has_applied_changes is true.
     let has_applied_changes = reopen_execution
         .as_ref()
         .map_or(false, |exec| !exec.applied_change_request_ids.is_empty());
@@ -582,6 +590,8 @@ pub async fn create(
         .unwrap_or_default();
 
     if should_auto_approve {
+        // Select the body variant that includes the change-request summary only
+        // when changes were actually applied — showing "none" would be misleading.
         let auto_body_key = if has_applied_changes {
             "reopen_auto_approved_body_changes"
         } else {
@@ -635,6 +645,8 @@ pub async fn create(
             "entries_reopened": entries_reopened,
         })))
     } else {
+        // Compare against the translated "none" sentinel so the check is
+        // language-agnostic and always consistent with what was rendered.
         let has_pending_changes = pending_change_overview
             != i18n::translate(&language, "reopen_change_request_none", &[]);
         let created_body_key = if has_pending_changes {
@@ -791,9 +803,13 @@ pub async fn approve(
     if reopen_request.status != "pending" {
         return Err(AppError::BadRequest("Request is not pending.".into()));
     }
+    // Non-admin team leads cannot approve their own reopen request — only an
+    // admin may self-approve (e.g. an admin correcting their own timesheet).
     if reopen_request.user_id == requester.id && !requester.is_admin() {
         return Err(AppError::Forbidden);
     }
+    // Non-admin team leads must be explicitly assigned as approver for this
+    // user; any admin may approve unconditionally.
     if !requester.is_admin() {
         let is_assigned_approver: Option<bool> =
             sqlx::query_scalar(ACTIVE_ASSIGNED_APPROVER_FOR_UPDATE_SQL)
@@ -845,6 +861,9 @@ pub async fn approve(
     )
     .await;
     let entries_reopened = reopen_execution.reopened_entries.len() as i64;
+    // Use the *_changes body variant only when change requests were actually
+    // applied; the plain variant avoids a misleading "no open change requests"
+    // sentence when the reopen was manual with no pending changes.
     let has_applied_changes = !reopen_execution.applied_change_request_ids.is_empty();
     let applied_change_overview = reopen_execution.applied_change_overview.clone();
     let approved_body_key = if has_applied_changes {
@@ -954,9 +973,11 @@ pub async fn reject(
     if reopen_request.status != "pending" {
         return Err(AppError::BadRequest("Request is not pending.".into()));
     }
+    // Non-admin team leads cannot reject their own reopen request.
     if reopen_request.user_id == requester.id && !requester.is_admin() {
         return Err(AppError::Forbidden);
     }
+    // Non-admin team leads must be explicitly assigned as approver for this user.
     if !requester.is_admin() {
         let is_assigned_approver: Option<bool> =
             sqlx::query_scalar(ACTIVE_ASSIGNED_APPROVER_FOR_UPDATE_SQL)
