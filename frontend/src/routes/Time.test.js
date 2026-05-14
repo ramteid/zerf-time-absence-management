@@ -209,7 +209,7 @@ describe("Time", () => {
     component = mount(Time, { target });
     await settle();
 
-    expect(target.textContent).toContain("of 40.0h target");
+    expect(target.textContent).toContain("of 40h target");
   });
 
   it("flextime reduction absences keep the weekly target", async () => {
@@ -243,7 +243,7 @@ describe("Time", () => {
     component = mount(Time, { target });
     await settle();
 
-    expect(target.textContent).toContain("of 40.0h target");
+    expect(target.textContent).toContain("of 40h target");
   });
 
   it("flextime reduction entries do not add credited weekly hours", async () => {
@@ -278,7 +278,7 @@ describe("Time", () => {
     component = mount(Time, { target });
     await settle();
 
-    expect(target.textContent).toContain("of 40.0h target");
+    expect(target.textContent).toContain("of 40h target");
   });
 
   it("uses entry counts_as_work when category lookup is unavailable", async () => {
@@ -302,6 +302,6 @@ describe("Time", () => {
     component = mount(Time, { target });
     await settle();
 
-    expect(target.textContent).toContain("of 40.0h target");
+    expect(target.textContent).toContain("of 40h target");
   });
 });
