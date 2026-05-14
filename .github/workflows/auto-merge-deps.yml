@@ -26,6 +26,7 @@ jobs:
 
       - name: Approve PR (patch & minor, incl. grouped)
         if: steps.meta.outputs.update-type != 'version-update:semver-major'
+        continue-on-error: true
         run: gh pr review --approve "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
