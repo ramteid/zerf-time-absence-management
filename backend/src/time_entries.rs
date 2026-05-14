@@ -535,6 +535,7 @@ pub async fn batch_reject(
         .await?;
     let rejected_count = rejected_entries.len();
     let language = notification_language(&app_state.pool).await;
+    // Audit each rejected entry individually for traceability.
     for entry in &rejected_entries {
         audit::log(
             &app_state.pool,
@@ -546,22 +547,37 @@ pub async fn batch_reject(
             Some(serde_json::json!({"status": "rejected", "reason": rejection_reason})),
         )
         .await;
-        let notify_params = vec![
-            ("entry_date", i18n::format_date(&language, entry.entry_date)),
-            ("reason", rejection_reason.clone()),
-        ];
-        if entry.user_id != requester.id {
-            crate::notifications::create_translated(
-                &app_state, &language, entry.user_id, "timesheet_rejected",
-                "timesheet_rejected_title", "timesheet_rejected_body",
-                notify_params, Some("time_entries"), Some(entry.id),
-            ).await;
-        } else {
-            crate::notifications::create_translated_inapp_only(
-                &app_state, &language, entry.user_id, "timesheet_rejected",
-                "timesheet_rejected_title", "timesheet_rejected_body",
-                notify_params, Some("time_entries"), Some(entry.id),
-            ).await;
+    }
+    // Consolidate rejection notifications per user so that a batch rejection
+    // produces one notification per affected user, not one per entry.
+    if rejected_count > 0 {
+        let mut weeks_by_user: std::collections::HashMap<i64, HashSet<NaiveDate>> =
+            std::collections::HashMap::new();
+        for entry in &rejected_entries {
+            weeks_by_user
+                .entry(entry.user_id)
+                .or_default()
+                .insert(week_start(entry.entry_date));
+        }
+        for (user_id, weeks) in weeks_by_user {
+            let week_count = i18n::week_count(&language, weeks.len() as i64);
+            let notify_params = vec![
+                ("week_count", week_count),
+                ("reason", rejection_reason.clone()),
+            ];
+            if user_id != requester.id {
+                crate::notifications::create_translated(
+                    &app_state, &language, user_id, "timesheet_rejected",
+                    "timesheet_rejected_title", "timesheet_batch_rejected_body",
+                    notify_params, Some("time_entries"), None,
+                ).await;
+            } else {
+                crate::notifications::create_translated_inapp_only(
+                    &app_state, &language, user_id, "timesheet_rejected",
+                    "timesheet_rejected_title", "timesheet_batch_rejected_body",
+                    notify_params, Some("time_entries"), None,
+                ).await;
+            }
         }
     }
     Ok(Json(
