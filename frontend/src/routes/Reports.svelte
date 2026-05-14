@@ -7,7 +7,14 @@
 
   import { api } from "../api.js";
   import { currentUser, settings, toast } from "../stores.js";
-  import { t, absenceKindLabel, statusLabel, formatHours } from "../i18n.js";
+  import {
+    t,
+    absenceKindLabel,
+    statusLabel,
+    formatHours,
+    fmtDecimal,
+    formatDayCount,
+  } from "../i18n.js";
   import {
     isoDate,
     appTodayDate,
@@ -24,6 +31,7 @@
   import DatePicker from "../DatePicker.svelte";
   import FlextimeChart from "../FlextimeChart.svelte";
   import { jsPDF } from "jspdf";
+  import { hasFlextimeAccount, isAssistantUser } from "../rolePolicy.js";
 
   // Date reference is tied to configured app timezone.
   let today = new Date();
@@ -34,14 +42,16 @@
   $: todayIso = isoDate(today);
   $: currentYear = today.getFullYear();
   $: currentMonthStr = `${currentYear}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+  $: canViewTeamReports = !!$currentUser?.permissions?.can_view_team_reports;
+  $: isSelfOnlyReportsView = !canViewTeamReports;
 
   // Leads and admins load all users for the employee dropdown.
-  // Plain employees (role === "employee") see no dropdown - only their own data.
+  // Non-lead roles only see their own data.
   let users = [];
   async function initUsers() {
     try {
       users =
-        $currentUser.role === "employee" ? [$currentUser] : await api("/users");
+        isSelfOnlyReportsView ? [$currentUser] : await api("/users");
     } catch (e) {
       toast($t(e?.message || "Error"), "error");
     }
@@ -65,6 +75,22 @@
   let reportMonth = currentMonthStr;
   // reportData holds all needed information after loading.
   let reportData = null;
+  $: selectedReportUser =
+    users.find((user) => user.id === Number(reportUserId)) ||
+    ($currentUser?.id === Number(reportUserId) ? $currentUser : null);
+  $: selectedUserIsAssistant = isAssistantUser(selectedReportUser);
+  $: selectedUserHasFlextime = hasFlextimeAccount(selectedReportUser);
+
+  function userById(userId) {
+    return (
+      users.find((user) => user.id === Number(userId)) ||
+      ($currentUser?.id === Number(userId) ? $currentUser : null)
+    );
+  }
+
+  function userHasFlextime(userId) {
+    return hasFlextimeAccount(userById(userId));
+  }
 
   function userWorkdaysPerWeek(userId, fallback = 5) {
     const matchedUser = users.find((user) => user.id === userId);
@@ -106,10 +132,12 @@
           api(`/leave-balance/${reportUserId}?year=${reportYear}`).catch(
             () => null,
           ),
-          api(
-            `/reports/overtime?user_id=${reportUserId}&year=${reportYear}`,
-          ).catch(() => null),
-          canFetchChart
+          selectedUserHasFlextime
+            ? api(
+                `/reports/overtime?user_id=${reportUserId}&year=${reportYear}`,
+              ).catch(() => null)
+            : Promise.resolve(null),
+          canFetchChart && selectedUserHasFlextime
             ? api(
                 `/reports/flextime?user_id=${reportUserId}&from=${chartMonthFrom}&to=${chartMonthTo}`,
               ).catch(() => [])
@@ -192,7 +220,7 @@
     if (catFrom > catTo) return;
     try {
       const params = new URLSearchParams({ from: catFrom, to: catTo });
-      if ($currentUser.role === "employee") {
+      if (isSelfOnlyReportsView) {
         // Employees see their own category breakdown.
         params.set("user_id", $currentUser.id);
         catReport = await api(`/reports/categories?${params}`);
@@ -292,7 +320,7 @@
     },
     {},
   );
-  $: isLeadView = $currentUser.role !== "employee";
+  $: isLeadView = canViewTeamReports;
   let absenceHolidayDates = new Set();
 
   // Clamps the absence date range to the selected from/to window.
@@ -327,7 +355,7 @@
     if (absenceFrom > absenceTo) return;
     try {
       let raw;
-      if ($currentUser.role === "employee") {
+      if (isSelfOnlyReportsView) {
         // The personal absence API is year-based. Cross-year ranges therefore
         // need multiple requests and id-based deduplication.
         const fromYear = parseInt(absenceFrom.slice(0, 4), 10);
@@ -418,7 +446,7 @@
     }
   }
 
-  $: if ($currentUser?.role === "employee") {
+  $: if (isSelfOnlyReportsView) {
     reportUserId = $currentUser.id;
     csvUserId = $currentUser.id;
   }
@@ -474,9 +502,12 @@
         from: csvFrom,
         to: csvTo,
       });
+      const exportUserHasFlextime = userHasFlextime(csvUserId);
       const [report, flextimeData] = await Promise.all([
         api(`/reports/range?${params}`),
-        api(`/reports/flextime?${params}`).catch(() => []),
+        exportUserHasFlextime
+          ? api(`/reports/flextime?${params}`).catch(() => [])
+          : Promise.resolve([]),
       ]);
       // Derive opening balance (cumulative at day before from) and closing
       // balance (cumulative at the last day in the range).
@@ -632,9 +663,12 @@
         from: csvFrom,
         to: csvTo,
       });
+      const exportUserHasFlextime = userHasFlextime(csvUserId);
       const [report, flextimeData] = await Promise.all([
         api(`/reports/range?${params}`),
-        api(`/reports/flextime?${params}`).catch(() => []),
+        exportUserHasFlextime
+          ? api(`/reports/flextime?${params}`).catch(() => [])
+          : Promise.resolve([]),
       ]);
       const openingBalance =
         flextimeData.length > 0
@@ -891,7 +925,7 @@
 
     <!-- Controls row: employee dropdown (leads/admins only) + month picker -->
     <div class="field-row" style="margin-bottom:12px">
-      {#if $currentUser.role !== "employee"}
+      {#if !isSelfOnlyReportsView}
         <!-- Leads and admins can select any employee. -->
         <div>
           <label class="zf-label" for="report-user-id">{$t("Employee")}</label>
@@ -939,44 +973,48 @@
           </div>
           <div
             class="stat-card-value tab-num"
-            style="color:{reportData.monthReport.submitted_min >=
-            reportData.monthReport.full_month_target_min
-              ? 'var(--accent)'
-              : 'var(--warning-text)'}"
+            style="color:{selectedUserIsAssistant
+              ? 'var(--text-primary)'
+              : reportData.monthReport.submitted_min >=
+                reportData.monthReport.full_month_target_min
+                ? 'var(--accent)'
+                : 'var(--warning-text)'}"
           >
             {formatHours(
-              ((reportData.monthReport.submitted_min || 0) / 60).toFixed(1),
+              (reportData.monthReport.submitted_min || 0) / 60,
             )}
           </div>
-          <div class="stat-card-sub">
-            {$t("of {target} target", {
-              target: formatHours(
-                (
-                  (reportData.monthReport.full_month_target_min || 0) / 60
-                ).toFixed(1),
-              ),
-            })}
-          </div>
+          {#if !selectedUserIsAssistant}
+            <div class="stat-card-sub">
+              {$t("of {target} target", {
+                target: formatHours(
+                  (reportData.monthReport.full_month_target_min || 0) / 60,
+                ),
+              })}
+            </div>
+          {/if}
         </div>
 
         <!-- Flextime balance at end of selected month -->
-        <div class="zf-card stat-card">
-          <div class="stat-card-label">{$t("Flextime balance")}</div>
-          <div
-            class="stat-card-value tab-num"
-            style="color:{(reportData.flextimeBalance ?? 0) < 0
-              ? 'var(--danger-text)'
-              : 'var(--success-text)'}"
-          >
-            {#if reportData.flextimeBalance !== null}
-              {reportData.flextimeBalance >= 0 ? "+" : ""}{minToHM(
-                reportData.flextimeBalance,
-              )}
-            {:else}
-              –
-            {/if}
+        {#if selectedUserHasFlextime}
+          <div class="zf-card stat-card">
+            <div class="stat-card-label">{$t("Flextime balance")}</div>
+            <div
+              class="stat-card-value tab-num"
+              style="color:{(reportData.flextimeBalance ?? 0) < 0
+                ? 'var(--danger-text)'
+                : 'var(--success-text)'}"
+            >
+              {#if reportData.flextimeBalance !== null}
+                {reportData.flextimeBalance >= 0 ? "+" : ""}{minToHM(
+                  reportData.flextimeBalance,
+                )}
+              {:else}
+                –
+              {/if}
+            </div>
           </div>
-        </div>
+        {/if}
 
         <!-- Submission status with the same wording as on the dashboard -->
         <div class="zf-card stat-card">
@@ -1030,20 +1068,20 @@
           <div class="zf-card stat-card">
             <div class="stat-card-label">{$t("Entitlement")}</div>
             <div class="stat-card-value tab-num">
-              {reportData.leaveBalance.annual_entitlement}
+              {formatDayCount(reportData.leaveBalance.annual_entitlement)}
             </div>
           </div>
           <div class="zf-card stat-card">
             <div class="stat-card-label">{$t("Taken")}</div>
             <div class="stat-card-value tab-num">
-              {reportData.leaveBalance.already_taken}
+              {formatDayCount(reportData.leaveBalance.already_taken)}
             </div>
           </div>
           {#if reportData.leaveBalance.approved_upcoming > 0}
             <div class="zf-card stat-card">
               <div class="stat-card-label">{$t("Planned")}</div>
               <div class="stat-card-value tab-num">
-                {reportData.leaveBalance.approved_upcoming}
+                {formatDayCount(reportData.leaveBalance.approved_upcoming)}
               </div>
             </div>
           {/if}
@@ -1051,7 +1089,7 @@
             <div class="zf-card stat-card">
               <div class="stat-card-label">{$t("Requested")}</div>
               <div class="stat-card-value tab-num">
-                {reportData.leaveBalance.requested}
+                {formatDayCount(reportData.leaveBalance.requested)}
               </div>
             </div>
           {/if}
@@ -1063,7 +1101,7 @@
                 ? 'var(--danger-text)'
                 : 'var(--success-text)'}"
             >
-              {reportData.leaveBalance.available}
+              {formatDayCount(reportData.leaveBalance.available)}
             </div>
           </div>
         </div>
@@ -1080,7 +1118,7 @@
           {#each Object.entries(reportAbsenceSummary) as [kind, days]}
             <div class="zf-card stat-card">
               <div class="stat-card-label">{absenceKindLabel(kind)}</div>
-              <div class="stat-card-value tab-num">{days}</div>
+              <div class="stat-card-value tab-num">{formatDayCount(days)}</div>
               <div class="stat-card-sub">{$t("days")}</div>
             </div>
           {/each}
@@ -1187,7 +1225,7 @@
                   <td>{absenceKindLabel(a.kind)}</td>
                   <td class="tab-num">{fmtDate(a.start_date)}</td>
                   <td class="tab-num">{fmtDate(a.end_date)}</td>
-                  <td class="tab-num">{a.days}</td>
+                  <td class="tab-num">{formatDayCount(a.days)}</td>
                 </tr>
               {/each}
             </tbody>
@@ -1196,7 +1234,7 @@
       {/if}
 
       <!-- Gleitzeitkonto-Verlauf für das gewählte Jahr -->
-      {#if reportData.flextimeChartData?.length}
+      {#if selectedUserHasFlextime && reportData.flextimeChartData?.length}
         <div class="zf-card" style="padding:16px;margin-top:12px">
           <div style="font-weight:400;margin-bottom:12px">
             {$t("Flextime balance")}
@@ -1282,23 +1320,34 @@
                   <!-- Flextime balance: red = deficit, green = zero or surplus -->
                   <td
                     class="tab-num"
-                    style="text-align:right;font-weight:500;color:{r.flextime_balance_min <
-                    0
-                      ? 'var(--danger-text)'
-                      : 'var(--success-text)'}"
+                    style="text-align:right;font-weight:500;color:{r.flextime_balance_min == null
+                      ? 'var(--text-tertiary)'
+                      : r.flextime_balance_min < 0
+                        ? 'var(--danger-text)'
+                        : 'var(--success-text)'}"
                   >
-                    {r.flextime_balance_min >= 0 ? "+" : ""}{minToHM(
-                      r.flextime_balance_min,
-                    )}
+                    {#if r.flextime_balance_min == null}
+                      -
+                    {:else}
+                      {r.flextime_balance_min >= 0 ? "+" : ""}{minToHM(
+                        r.flextime_balance_min,
+                      )}
+                    {/if}
                   </td>
                   <!-- Monthly diff -->
                   <td
                     class="tab-num"
-                    style="text-align:right;color:{r.diff_min < 0
-                      ? 'var(--danger-text)'
-                      : 'var(--success-text)'}"
+                    style="text-align:right;color:{r.diff_min == null
+                      ? 'var(--text-tertiary)'
+                      : r.diff_min < 0
+                        ? 'var(--danger-text)'
+                        : 'var(--success-text)'}"
                   >
-                    {r.diff_min >= 0 ? "+" : ""}{minToHM(r.diff_min)}
+                    {#if r.diff_min == null}
+                      -
+                    {:else}
+                      {r.diff_min >= 0 ? "+" : ""}{minToHM(r.diff_min)}
+                    {/if}
                   </td>
                   <!-- Sick days (decimal, as half-days are possible) -->
                   <td
@@ -1306,7 +1355,7 @@
                     style="text-align:right;color:var(--text-tertiary)"
                   >
                     {r.sick_days > 0
-                      ? r.sick_days.toFixed(r.sick_days % 1 === 0 ? 0 : 1)
+                      ? fmtDecimal(r.sick_days, r.sick_days % 1 === 0 ? 0 : 1)
                       : "-"}
                   </td>
                   <!-- Vacation taken -->
@@ -1315,9 +1364,7 @@
                     style="text-align:right;color:var(--text-tertiary)"
                   >
                     {r.vacation_days > 0
-                      ? r.vacation_days.toFixed(
-                          r.vacation_days % 1 === 0 ? 0 : 1,
-                        )
+                      ? fmtDecimal(r.vacation_days, r.vacation_days % 1 === 0 ? 0 : 1)
                       : "-"}
                   </td>
                   <!-- Vacation planned -->
@@ -1326,9 +1373,7 @@
                     style="text-align:right;color:var(--text-tertiary)"
                   >
                     {r.vacation_planned_days > 0
-                      ? r.vacation_planned_days.toFixed(
-                          r.vacation_planned_days % 1 === 0 ? 0 : 1,
-                        )
+                      ? fmtDecimal(r.vacation_planned_days, r.vacation_planned_days % 1 === 0 ? 0 : 1)
                       : "-"}
                   </td>
                   <!-- All weeks submitted, rendered as text for accessibility. -->
@@ -1548,7 +1593,7 @@
                   >
                   <td class="tab-num" style="text-align:right">
                     {filteredCatTotal > 0
-                      ? ((c.minutes / filteredCatTotal) * 100).toFixed(1)
+                      ? fmtDecimal((c.minutes / filteredCatTotal) * 100, 1)
                       : 0}%
                   </td>
                 </tr>
@@ -1608,12 +1653,12 @@
         <div class="stat-cards" style="margin-top:16px">
           <div class="zf-card stat-card">
             <div class="stat-card-label">{$t("Total days")}</div>
-            <div class="stat-card-value tab-num">{absenceTotalDays}</div>
+            <div class="stat-card-value tab-num">{formatDayCount(absenceTotalDays)}</div>
           </div>
           {#each Object.entries(absenceByKind) as [kind, days]}
             <div class="zf-card stat-card">
               <div class="stat-card-label">{absenceKindLabel(kind)}</div>
-              <div class="stat-card-value tab-num">{days}</div>
+              <div class="stat-card-value tab-num">{formatDayCount(days)}</div>
             </div>
           {/each}
         </div>
@@ -1650,7 +1695,7 @@
                   <td class="tab-num" style="text-align:right"
                     >{fmtDate(a.end_date)}</td
                   >
-                  <td class="tab-num" style="text-align:right">{a.days}</td>
+                  <td class="tab-num" style="text-align:right">{formatDayCount(a.days)}</td>
                   <td
                     ><span class="zf-chip zf-chip-{a.status}"
                       >{statusLabel(a.status)}</span
@@ -1690,7 +1735,7 @@
 
     <!-- Desktop layout: employee row first, then from/to row below.
          Mobile: everything stacked vertically. -->
-    {#if $currentUser.role !== "employee"}
+    {#if !isSelfOnlyReportsView}
       <!-- First row: employee selection only -->
       <div style="margin-bottom:12px">
         <label class="zf-label" for="csv-user-id">{$t("Employee")}</label>

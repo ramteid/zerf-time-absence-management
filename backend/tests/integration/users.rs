@@ -196,6 +196,51 @@ async fn users_full_workflow() {
             .unwrap_or_default()
             .to_lowercase()
             .contains("approver"));
+
+        // Assistants must not have fixed weekly target hours.
+        let (st, body) = admin
+            .post(
+                "/api/v1/users",
+                &json!({"email":"assistant-invalid-hours@example.com","first_name":"Assist","last_name":"Hours",
+                    "role":"assistant","weekly_hours":10,"leave_days_current_year":0,"leave_days_next_year":0,
+                    "start_date":"2024-01-01","approver_ids": [1]}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "assistant weekly_hours must be 0");
+        assert!(body["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("weekly_hours"));
+
+        // Assistants cannot have a flextime carry-in balance.
+        let (st, body) = admin
+            .post(
+                "/api/v1/users",
+                &json!({"email":"assistant-invalid-overtime@example.com","first_name":"Assist","last_name":"Overtime",
+                    "role":"assistant","weekly_hours":0,"leave_days_current_year":0,"leave_days_next_year":0,
+                    "start_date":"2024-01-01","approver_ids": [1],"overtime_start_balance_min":60}),
+            )
+            .await;
+        assert_eq!(
+            st,
+            StatusCode::BAD_REQUEST,
+            "assistant overtime start balance must be 0"
+        );
+        assert!(body["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("overtime"));
+
+        // Valid assistant creation works with zero leave and zero weekly hours.
+        let (st, _) = admin
+            .post(
+                "/api/v1/users",
+                &json!({"email":"assistant-valid@example.com","first_name":"Assist","last_name":"Valid",
+                    "role":"assistant","weekly_hours":0,"leave_days_current_year":0,"leave_days_next_year":0,
+                    "start_date":"2024-01-01","approver_ids": [1]}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "create assistant user");
     }
 
     // -- Duplicate user identifiers are rejected --

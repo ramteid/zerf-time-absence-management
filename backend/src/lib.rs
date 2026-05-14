@@ -12,6 +12,7 @@ pub mod holidays;
 pub mod i18n;
 pub mod notifications;
 pub mod reopen_requests;
+pub mod roles;
 pub mod reports;
 pub mod repository;
 pub mod settings;

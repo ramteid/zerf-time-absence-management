@@ -208,7 +208,9 @@ async fn find_unsubmitted_weeks(
     incomplete_week_mondays
 }
 
-/// Run one check pass for all active users with weekly_hours > 0.
+/// Run one check pass for all active non-assistant users.
+/// Assistant users have no fixed target schedule and are excluded from
+/// submission completeness reminders by role policy.
 pub async fn run_check(state: &crate::AppState) {
     let pool = &state.pool;
 
@@ -248,7 +250,7 @@ pub async fn run_check(state: &crate::AppState) {
     let today = crate::settings::app_today(pool).await;
 
     let rows: Vec<(i64, String, NaiveDate, i16)> =
-        match state.db.users.get_active_users_with_hours().await {
+        match state.db.users.get_active_non_assistant_users().await {
             Ok(r) => r,
             Err(e) => {
                 tracing::warn!(target:"zerf::submission_reminders", "fetch users failed: {e}");
