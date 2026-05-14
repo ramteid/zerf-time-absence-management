@@ -1,5 +1,5 @@
 <script>
-  import { t, absenceKindLabel, formatHours } from "./i18n.js";
+  import { t, absenceKindLabel, formatHours, fmtDecimal } from "./i18n.js";
   import { settings } from "./stores.js";
   import { appTodayIsoDate, fmtDateShort } from "./format.js";
 
@@ -297,8 +297,8 @@
           fill={tick === 0 ? "var(--text-secondary)" : "var(--text-tertiary)"}
         >
           {formatHours(
-            (tick >= 0 ? "+" : "") +
-              (tick / 60).toFixed(tick % 60 === 0 ? 0 : 1),
+            (tick >= 0 ? "+" : "-") +
+              fmtDecimal(Math.abs(tick / 60), tick % 60 === 0 ? 0 : 1),
           )}
         </text>
       {/each}

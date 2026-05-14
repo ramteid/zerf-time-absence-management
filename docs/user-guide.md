@@ -79,6 +79,8 @@ Zerf uses explicit approver assignments. Approvals and notifications are not
 inferred from role alone.
 
 - Employee: records time and absences, submits weeks, requests changes.
+- Assistant: records time and absences like an employee, but has no fixed
+  weekly target hours and no flextime account.
 - Approver: a user who has been explicitly assigned in `user_approvers` and is
 	active.
 - Admin: manages users, categories, holidays, settings, and can also be an
@@ -268,6 +270,11 @@ Flextime (positive or negative balance) is calculated as:
 
 Only **crediting entries** count as actual work hours in this calculation. Non-crediting entries are recorded and approved like all others, but they do not contribute to your flextime.
 
+Users with role `assistant` do not have a flextime account. This behavior is
+role-based (not inferred from weekly hours). For assistants, flextime and
+overtime reports return no rows and submission completeness for past weeks is
+treated as complete.
+
 ### How daily targets are calculated
 
 Daily target is the number of hours you are expected to work on a given day.
@@ -319,6 +326,9 @@ A week is considered **complete** (ready for flextime and monthly reports) when 
 
 - At least one submitted or approved entry (crediting or non-crediting), **or**
 - An approved absence (vacation, sick leave, etc.)
+
+For users with role `assistant`, past-week completeness is always treated as
+complete.
 
 A week is considered **incomplete** when:
 
@@ -1066,7 +1076,7 @@ Required fields and validation:
 
 | Field | Rule |
 | --- | --- |
-| `role` | Must be `employee`, `team_lead`, or `admin`. |
+| `role` | Must be `employee`, `assistant`, `team_lead`, or `admin`. |
 | `email` | Must be non-empty, at most 254 characters, must contain `@`. Must be unique across all users. |
 | First name + last name | The combination of first and last name must be unique. |
 | `weekly_hours` | 0.0 to 168.0 (hours per week). |
@@ -1074,6 +1084,12 @@ Required fields and validation:
 | `leave_days_current_year` | 0 to 366 (integer). |
 | `leave_days_next_year` | 0 to 366 (integer). |
 | `start_date` | The user's employment start date (used for absence validation and submission completeness). |
+
+Additional role-specific rules:
+
+- `assistant` users must have `weekly_hours = 0`.
+- `assistant` users must have `overtime_start_balance_min = 0`.
+- `assistant` users usually have annual leave set to `0` for current and next year.
 
 Optional: `overtime_start_balance_min` (signed integer, ±525 600 minutes,
 default 0). An initial flextime carry-in from before the user was created in

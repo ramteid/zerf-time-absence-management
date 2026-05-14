@@ -615,5 +615,72 @@ async fn reports_full_workflow() {
         assert!(body.as_array().unwrap().is_empty());
     }
 
+    // -- Assistant behavior is role-based, not weekly_hours-based --
+    {
+        let (lead_id, _lead_pw, _emp_id, _emp_pw, _monday, _cat_id) =
+            bootstrap_team_with_suffix(&app, &admin, false, "assistant-role").await;
+        let month = today()[..7].to_string();
+
+        let (st, body) = admin
+            .post(
+                "/api/v1/users",
+                &json!({
+                    "email":"assistant-reports@example.com",
+                    "first_name":"Role",
+                    "last_name":"Assistant",
+                    "role":"assistant",
+                    "weekly_hours":0,
+                    "leave_days_current_year":0,
+                    "leave_days_next_year":0,
+                    "start_date":"2024-01-01",
+                    "approver_ids":[lead_id]
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "create assistant for reports");
+        let assistant_id = id(&body);
+
+        // Simulate legacy/imported inconsistency that bypasses API validation.
+        sqlx::query(
+            "UPDATE users SET weekly_hours = 39.0, overtime_start_balance_min = 120 WHERE id = $1",
+        )
+        .bind(assistant_id)
+        .execute(&app.state.pool)
+        .await
+        .unwrap();
+
+        let (st, body) = admin
+            .get(&format!(
+                "/api/v1/reports/month?user_id={assistant_id}&month={month}"
+            ))
+            .await;
+        assert_eq!(st, StatusCode::OK, "assistant month report");
+        assert_eq!(body["target_min"], 0, "assistant month target must remain 0");
+        assert_eq!(
+            body["full_month_target_min"],
+            0,
+            "assistant full-month target must remain 0"
+        );
+
+        let (st, body) = admin
+            .get(&format!("/api/v1/reports/team?month={month}"))
+            .await;
+        assert_eq!(st, StatusCode::OK, "team report for assistant checks");
+        let row = body
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["user_id"].as_i64() == Some(assistant_id))
+            .expect("assistant row present in team report");
+        assert!(
+            row["flextime_balance_min"].is_null(),
+            "assistant team flextime balance must be null"
+        );
+        assert!(
+            row["diff_min"].is_null(),
+            "assistant team monthly diff must be null"
+        );
+    }
+
     app.cleanup().await;
 }

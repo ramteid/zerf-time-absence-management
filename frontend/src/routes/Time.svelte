@@ -26,6 +26,7 @@
   import Icon from "../Icons.svelte";
   import EntryDialog from "../dialogs/EntryDialog.svelte";
   import ChangeRequestDialog from "../dialogs/ChangeRequestDialog.svelte";
+  import { isAssistantUser } from "../rolePolicy.js";
 
   // Full day names indexed Monday (0) → Sunday (6), used to label each day card.
   const WEEKDAY_NAMES = [
@@ -248,6 +249,7 @@
   }
 
   $: drafts = entries.filter((entry) => entry.status === "draft");
+  $: isAssistantCurrentUser = isAssistantUser($currentUser);
   $: contractHours = formatHours($currentUser?.weekly_hours || 0);
 
   // Total logged minutes this week, excluding rejected entries.
@@ -278,8 +280,9 @@
     }, 0);
   })();
 
-  $: weekLoggedHours = formatHours((weekLoggedMinutes / 60).toFixed(1));
-  $: weekTargetHours = formatHours((weekTargetMinutes / 60).toFixed(1));
+  $: weekLoggedHours = formatHours(weekLoggedMinutes / 60);
+  $: weekTargetHours = formatHours(weekTargetMinutes / 60);
+  $: weekHasTarget = !isAssistantCurrentUser && weekTargetMinutes > 0;
 
   // Build a descriptor for one day of the week. All data is passed explicitly so
   // that Svelte's reactive system can track the dependencies correctly.
@@ -332,7 +335,7 @@
     : [];
 
   function entryDurationHours(startTime, endTime) {
-    return (durMin(startTime, endTime) / 60).toFixed(1);
+    return durMin(startTime, endTime) / 60;
   }
 
   function formatDisplayTime(rawTimeValue, format) {
@@ -453,8 +456,10 @@
   </div>
   {#if weekFrom}
     <div class="top-bar-subtitle">
-      {$t("Week {week}", { week: isoWeek(weekFrom) })} · {contractHours}
-      {$t("contract")}
+      {$t("Week {week}", { week: isoWeek(weekFrom) })}
+      {#if !isAssistantCurrentUser}
+        · {contractHours} {$t("contract")}
+      {/if}
     </div>
   {/if}
   <div class="top-bar-actions time-top-bar-actions">
@@ -508,15 +513,19 @@
           <div class="stat-card-label">{$t("Logged")}</div>
           <div
             class="stat-card-value tab-num"
-            style="color: {weekLoggedMinutes >= weekTargetMinutes
-              ? 'var(--success-text)'
-              : 'var(--danger-text)'}"
+            style="color: {weekHasTarget
+              ? weekLoggedMinutes >= weekTargetMinutes
+                ? 'var(--success-text)'
+                : 'var(--danger-text)'
+              : 'var(--text-primary)'}"
           >
             {weekLoggedHours}
           </div>
-          <div class="stat-card-sub">
-            {$t("of {target} target", { target: weekTargetHours })}
-          </div>
+          {#if weekHasTarget}
+            <div class="stat-card-sub">
+              {$t("of {target} target", { target: weekTargetHours })}
+            </div>
+          {/if}
         </div>
         <div class="zf-card stat-card">
           <div class="stat-card-label">{$t("Status")}</div>
@@ -541,7 +550,7 @@
             totalMinutes + creditedEntryMinutes(entry, $categories),
           0,
         )}
-        {@const dailyTotalHours = (dailyTotalMinutes / 60).toFixed(1)}
+        {@const dailyTotalHours = dailyTotalMinutes / 60}
         <div
           class="zf-card day-card"
           class:day-card--locked={weekStatus === "submitted" ||
@@ -557,7 +566,7 @@
             </div>
             <div
               class="day-total tab-num"
-              style="color: {dailyTotalMinutes / 60 >= dailyTargetHours
+              style="color: {!isAssistantCurrentUser && dailyTotalMinutes / 60 >= dailyTargetHours
                 ? 'var(--accent)'
                 : 'var(--text-primary)'}"
             >

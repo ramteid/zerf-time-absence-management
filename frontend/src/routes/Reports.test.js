@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mount, unmount } from "svelte";
 import Reports from "./Reports.svelte";
+import { api } from "../api.js";
 import { currentUser } from "../stores.js";
 import { setLanguage } from "../i18n.js";
 
@@ -97,6 +98,7 @@ describe("Reports", () => {
     mockState.leaveBalance = null;
     mockState.overtimeRows = [{ month: "2026-05", cumulative_min: 120, diff_min: 120 }];
     mockState.flextimeRows = [];
+    api.mockClear();
   });
 
   afterEach(() => {
@@ -144,5 +146,42 @@ describe("Reports", () => {
     await settle();
 
     expect(target.textContent).toContain(approvalsHelp);
+  }, 60000);
+
+  it("hides target subtext and skips flextime/overtime fetches for assistants", async () => {
+    currentUser.set({
+      id: 1,
+      role: "assistant",
+      weekly_hours: 0,
+      start_date: "2020-01-01",
+      permissions: {
+        can_view_team_reports: false,
+      },
+    });
+    mockState.monthReport = {
+      ...mockState.monthReport,
+      target_min: 0,
+      full_month_target_min: 0,
+    };
+
+    component = mount(Reports, { target });
+    await settle();
+
+    const showButton = target.querySelector("button.zf-btn.zf-btn-primary");
+    expect(showButton).not.toBeNull();
+    showButton.click();
+
+    await waitForElement(target, ".stat-cards", 20000);
+    const loggedLabel = Array.from(target.querySelectorAll(".stat-card-label span")).find(
+      (el) => el.textContent?.trim() === "Logged",
+    );
+    expect(loggedLabel).toBeTruthy();
+    const loggedCard = loggedLabel.closest(".stat-card");
+    expect(loggedCard).toBeTruthy();
+    expect(loggedCard.querySelector(".stat-card-sub")).toBeNull();
+
+    const calledPaths = api.mock.calls.map(([path]) => path);
+    expect(calledPaths.some((path) => path.startsWith("/reports/overtime?"))).toBe(false);
+    expect(calledPaths.some((path) => path.startsWith("/reports/flextime?"))).toBe(false);
   }, 60000);
 });

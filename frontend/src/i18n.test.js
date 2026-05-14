@@ -14,6 +14,8 @@ import {
   auditActionLabel,
   auditTableLabel,
   formatHours,
+  fmtDecimal,
+  formatDayCount,
   localizeErrorMessage,
   t,
 } from "./i18n.js";
@@ -143,6 +145,7 @@ describe("label helpers", () => {
     setLanguage("de");
     expect(roleLabel("admin")).toBe("Admin");
     expect(roleLabel("employee")).toBe("Mitarbeitende");
+    expect(roleLabel("assistant")).toBe("Aushilfe");
   });
 
   it("roleLabel falls back for unknown roles", () => {
@@ -174,6 +177,46 @@ describe("label helpers", () => {
     expect(formatHours("39")).toBe("39h");
     setLanguage("de");
     expect(formatHours("39")).toBe("39 Std.");
+  });
+
+  it("formatHours formats numbers with locale-aware decimal", () => {
+    setLanguage("en");
+    expect(formatHours(5.5)).toBe("5.5h");
+    expect(formatHours(5)).toBe("5h");
+    setLanguage("de");
+    expect(formatHours(5.5)).toBe("5,5 Std.");
+    expect(formatHours(5)).toBe("5 Std.");
+  });
+
+  it("fmtDecimal formats decimals with locale separator", () => {
+    setLanguage("en");
+    expect(fmtDecimal(1.5, 1)).toBe("1.5");
+    expect(fmtDecimal(2, 1)).toBe("2.0");
+    setLanguage("de");
+    expect(fmtDecimal(1.5, 1)).toBe("1,5");
+    expect(fmtDecimal(2, 1)).toBe("2,0");
+  });
+
+  it("fmtDecimal respects fractionDigits=0", () => {
+    setLanguage("en");
+    expect(fmtDecimal(3, 0)).toBe("3");
+    setLanguage("de");
+    expect(fmtDecimal(3, 0)).toBe("3");
+  });
+
+  it("formatDayCount formats integer and half-day values by locale", () => {
+    setLanguage("en");
+    expect(formatDayCount(2)).toBe("2");
+    expect(formatDayCount(2.5)).toBe("2.5");
+    setLanguage("de");
+    expect(formatDayCount(2)).toBe("2");
+    expect(formatDayCount(2.5)).toBe("2,5");
+  });
+
+  it("formatDayCount keeps non-number values unchanged", () => {
+    expect(formatDayCount("-")).toBe("-");
+    expect(formatDayCount(null)).toBe(null);
+    expect(formatDayCount(undefined)).toBe(undefined);
   });
 
   it("translates audit aliases and actions", () => {

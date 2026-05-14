@@ -21,6 +21,7 @@
   import { confirmDialog } from "../confirm.js";
   import FlextimeChart from "../FlextimeChart.svelte";
   import DatePicker from "../DatePicker.svelte";
+  import { isAssistantUser } from "../rolePolicy.js";
 
   // ── Approval workflow state (team leads and admins only) ──────────────────────
   let pendingEntries = [];
@@ -93,11 +94,17 @@
   $: currentMonthIndex = today.getMonth() + 1; // 1-based
   $: currentMonthKey = `${reportYear}-${String(currentMonthIndex).padStart(2, "0")}`;
   $: todayIso = isoDate(today);
+  $: isAssistantCurrentUser = isAssistantUser($currentUser);
 
   // ── Loaders ───────────────────────────────────────────────────────────────────
 
   async function loadChart() {
     if (chartFrom > chartTo) return;
+    if (isAssistantCurrentUser) {
+      chartData = [];
+      chartLoading = false;
+      return;
+    }
     chartLoading = true;
     try {
       chartData = await api(`/reports/flextime?from=${chartFrom}&to=${chartTo}`);
@@ -114,7 +121,7 @@
 
   // Convert a minute count into a formatted hours string (e.g. "1:30 h").
   function hoursFromMinutes(minutes) {
-    return formatHours(((minutes || 0) / 60).toFixed(1));
+    return formatHours((minutes || 0) / 60);
   }
 
   // A month report is considered fully submitted for week-tracking purposes
@@ -124,6 +131,12 @@
   }
 
   async function loadOvertimeSummary() {
+    if (isAssistantCurrentUser) {
+      overtimeRows = [];
+      overtimeError = "";
+      overtimeLoading = false;
+      return;
+    }
     overtimeLoading = true;
     overtimeError = "";
     try {
@@ -379,7 +392,7 @@
   }
 
   function weekHours(week) {
-    return formatHours((week.total_min / 60).toFixed(1));
+    return formatHours(week.total_min / 60);
   }
 
   function weekEntryTypeSummary(week) {
@@ -872,30 +885,32 @@
     {/if}
     <div class="stat-cards">
 
-      <!-- Cumulative overtime balance including today -->
-      <div class="zf-card stat-card">
-        <div class="stat-card-label">{$t("Overtime overview")}</div>
-        {#if overtimeLoading}
-          <div class="stat-card-value tab-num">...</div>
-        {:else}
-          <div
-            class="stat-card-value tab-num"
-            style="color:{overtimeBalanceMin < 0
-              ? 'var(--danger-text)'
-              : 'var(--success-text)'}"
-          >
-            {hoursFromMinutes(overtimeBalanceMin)}
-          </div>
-          <div class="stat-card-sub">
-            {$t("This month: {value}", { value: hoursFromMinutes(currentMonthDiffMin) })}
-          </div>
-        {/if}
-        {#if overtimeError}
-          <div class="error-text" style="font-size:11px;margin-top:4px">
-            {$t("Overtime data unavailable.")}
-          </div>
-        {/if}
-      </div>
+      {#if !isAssistantCurrentUser}
+        <!-- Cumulative overtime balance including today -->
+        <div class="zf-card stat-card">
+          <div class="stat-card-label">{$t("Overtime overview")}</div>
+          {#if overtimeLoading}
+            <div class="stat-card-value tab-num">...</div>
+          {:else}
+            <div
+              class="stat-card-value tab-num"
+              style="color:{overtimeBalanceMin < 0
+                ? 'var(--danger-text)'
+                : 'var(--success-text)'}"
+            >
+              {hoursFromMinutes(overtimeBalanceMin)}
+            </div>
+            <div class="stat-card-sub">
+              {$t("This month: {value}", { value: hoursFromMinutes(currentMonthDiffMin) })}
+            </div>
+          {/if}
+          {#if overtimeError}
+            <div class="error-text" style="font-size:11px;margin-top:4px">
+              {$t("Overtime data unavailable.")}
+            </div>
+          {/if}
+        </div>
+      {/if}
 
       <!-- Whether all weeks since the user's start date (up to last week) are submitted -->
       <div class="zf-card stat-card">
@@ -1297,68 +1312,70 @@
        FLEXTIME CHART (all users) – placed after approval sections so it
        doesn't push urgent approval work below the fold for leads/admins.
        ════════════════════════════════════════════════════════════════════════ -->
-  <div class="zf-card" style="padding:16px 20px;margin-top:16px">
-    <div
-      style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px"
-    >
-      <Icon name="TrendingUp" size={15} sw={1.5} />
-      <span style="font-size:14px;font-weight:400;flex:1">{$t("Flextime balance")}</span>
-      <button
-        class="zf-btn-icon-sm zf-btn-ghost"
-        title={$t("help_flextime_chart")}
-        on:click={() => toggleHelp("flextime")}
-        style="color:var(--text-tertiary);font-size:14px;cursor:help"
+  {#if !isAssistantCurrentUser}
+    <div class="zf-card" style="padding:16px 20px;margin-top:16px">
+      <div
+        style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px"
       >
-        <Icon name="Info" size={14} />
-      </button>
-      <div style="display:flex;gap:4px;flex-wrap:wrap">
-        <button class="zf-btn zf-btn-sm" on:click={() => setRange(30)}
-          >{$t("Last 30 days")}</button
+        <Icon name="TrendingUp" size={15} sw={1.5} />
+        <span style="font-size:14px;font-weight:400;flex:1">{$t("Flextime balance")}</span>
+        <button
+          class="zf-btn-icon-sm zf-btn-ghost"
+          title={$t("help_flextime_chart")}
+          on:click={() => toggleHelp("flextime")}
+          style="color:var(--text-tertiary);font-size:14px;cursor:help"
         >
-        <button class="zf-btn zf-btn-sm" on:click={() => setRange(90)}
-          >{$t("Last 90 days")}</button
-        >
-        <button class="zf-btn zf-btn-sm" on:click={() => setRange(182)}
-          >{$t("Last 6 months")}</button
-        >
-        <button class="zf-btn zf-btn-sm" on:click={() => setRange(365)}
-          >{$t("Last year")}</button
-        >
-      </div>
-      <div style="display:flex;align-items:center;gap:4px">
-        <DatePicker
-          bind:value={chartFrom}
-          max={chartTo}
-          style="font-size:12px;padding:3px 6px;height:28px"
-        />
-        <span style="font-size:12px;color:var(--text-tertiary)">-</span>
-        <DatePicker
-          bind:value={chartTo}
-          min={chartFrom}
-          style="font-size:12px;padding:3px 6px;height:28px"
-        />
-        <button class="zf-btn zf-btn-sm" on:click={loadChart} aria-label={$t("Show")}>
-          <Icon name="Search" size={13} />
+          <Icon name="Info" size={14} />
         </button>
+        <div style="display:flex;gap:4px;flex-wrap:wrap">
+          <button class="zf-btn zf-btn-sm" on:click={() => setRange(30)}
+            >{$t("Last 30 days")}</button
+          >
+          <button class="zf-btn zf-btn-sm" on:click={() => setRange(90)}
+            >{$t("Last 90 days")}</button
+          >
+          <button class="zf-btn zf-btn-sm" on:click={() => setRange(182)}
+            >{$t("Last 6 months")}</button
+          >
+          <button class="zf-btn zf-btn-sm" on:click={() => setRange(365)}
+            >{$t("Last year")}</button
+          >
+        </div>
+        <div style="display:flex;align-items:center;gap:4px">
+          <DatePicker
+            bind:value={chartFrom}
+            max={chartTo}
+            style="font-size:12px;padding:3px 6px;height:28px"
+          />
+          <span style="font-size:12px;color:var(--text-tertiary)">-</span>
+          <DatePicker
+            bind:value={chartTo}
+            min={chartFrom}
+            style="font-size:12px;padding:3px 6px;height:28px"
+          />
+          <button class="zf-btn zf-btn-sm" on:click={loadChart} aria-label={$t("Show")}>
+            <Icon name="Search" size={13} />
+          </button>
+        </div>
       </div>
+      {#if activeHelp === "flextime"}
+        <div
+          style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)"
+        >
+          {$t("help_flextime_chart")}
+        </div>
+      {/if}
+      {#if chartLoading}
+        <div
+          style="text-align:center;padding:40px 0;font-size:13px;color:var(--text-tertiary)"
+        >
+          {$t("Loading...")}
+        </div>
+      {:else}
+        <FlextimeChart data={chartData} />
+      {/if}
     </div>
-    {#if activeHelp === "flextime"}
-      <div
-        style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)"
-      >
-        {$t("help_flextime_chart")}
-      </div>
-    {/if}
-    {#if chartLoading}
-      <div
-        style="text-align:center;padding:40px 0;font-size:13px;color:var(--text-tertiary)"
-      >
-        {$t("Loading...")}
-      </div>
-    {:else}
-      <FlextimeChart data={chartData} />
-    {/if}
-  </div>
+  {/if}
 
 </div>
 
@@ -1607,7 +1624,7 @@
             </div>
             <div class="tab-num" style="font-size:12px;color:var(--text-secondary)">
               {entry.start_time.slice(0, 5)} - {entry.end_time.slice(0, 5)} ·
-              {formatHours((entryMinutes(entry) / 60).toFixed(1))}
+              {formatHours(entryMinutes(entry) / 60)}
             </div>
             <div style="font-size:11.5px;color:var(--text-tertiary)">
               {$t("Type")}: {categoryName(entry.category_id)}

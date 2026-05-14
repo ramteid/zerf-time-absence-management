@@ -33,6 +33,11 @@
   let error = "";
   let approvers = [];
   $: requiresApprover = role !== "admin";
+  $: isAssistantRole = role === "assistant";
+  $: if (isAssistantRole) {
+    weekly_hours = 0;
+    overtime_start_balance_hours = 0;
+  }
 
   // Password fields (only for new users)
   let password = "";
@@ -142,19 +147,21 @@
       return;
     }
     try {
+      const normalizedWeeklyHours = isAssistantRole ? 0 : Number(weekly_hours);
+      const normalizedOvertimeStartBalanceMin = isAssistantRole
+        ? 0
+        : Math.round(Number(overtime_start_balance_hours) * 60);
       const body = {
         email,
         first_name,
         last_name,
         role,
-        weekly_hours: Number(weekly_hours),
+        weekly_hours: normalizedWeeklyHours,
         workdays_per_week: Number(workdays_per_week),
         leave_days_current_year: Number(leave_days_current_year),
         leave_days_next_year: Number(leave_days_next_year),
         start_date,
-        overtime_start_balance_min: Math.round(
-          Number(overtime_start_balance_hours) * 60,
-        ),
+        overtime_start_balance_min: normalizedOvertimeStartBalanceMin,
       };
       if (requiresApprover) {
         body.approver_ids = approver_ids;
@@ -283,6 +290,7 @@
           <label class="zf-label" for="user-role">{$t("Role")}</label>
           <select id="user-role" class="zf-select" bind:value={role}>
             <option value="employee">{$t("Employee")}</option>
+            <option value="assistant">{$t("Assistant")}</option>
             <option value="team_lead">{$t("Team lead")}</option>
             <option value="admin">{$t("Admin")}</option>
           </select>
@@ -311,6 +319,7 @@
             min="0"
             max="168"
             bind:value={weekly_hours}
+            disabled={isAssistantRole}
           />
         </div>
         <div>
@@ -338,6 +347,7 @@
           type="number"
           step="0.5"
           bind:value={overtime_start_balance_hours}
+          disabled={isAssistantRole}
         />
         <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
           {$t(

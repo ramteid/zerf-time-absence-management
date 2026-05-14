@@ -3,7 +3,7 @@
   import { api } from "../api.js";
   import { currentUser, settings, toast } from "../stores.js";
   import { countWorkdays, holidayDateSet } from "../apiMappers.js";
-  import { t, absenceKindLabel, statusLabel } from "../i18n.js";
+  import { t, absenceKindLabel, statusLabel, formatDayCount } from "../i18n.js";
   import { fmtDate, fmtDateTime, parseDate, appTodayDate } from "../format.js";
   import Icon from "../Icons.svelte";
   import AbsenceDialog from "../dialogs/AbsenceDialog.svelte";
@@ -233,20 +233,20 @@
         <div class="stat-card-label">
           {$t("Vacation days ({year})", { year: selectedYear })}
         </div>
-        <div class="stat-card-value tab-num">{balance.annual_entitlement}</div>
+        <div class="stat-card-value tab-num">{formatDayCount(balance.annual_entitlement)}</div>
       </div>
       <div class="zf-card stat-card">
         <div class="stat-card-label">
           {$t("Vacation used ({year})", { year: selectedYear })}
         </div>
-        <div class="stat-card-value tab-num">{balance.already_taken}</div>
+        <div class="stat-card-value tab-num">{formatDayCount(balance.already_taken)}</div>
       </div>
       <div class="zf-card stat-card">
         <div class="stat-card-label">
           {$t("Approved upcoming ({year})", { year: selectedYear })}
         </div>
         <div class="stat-card-value tab-num">
-          {balance.approved_upcoming || 0}
+          {formatDayCount(balance.approved_upcoming || 0)}
         </div>
         <div class="stat-card-sub">{$t("Approved days not yet taken")}</div>
       </div>
@@ -254,7 +254,7 @@
         <div class="stat-card-label">
           {$t("Vacation pending ({year})", { year: selectedYear })}
         </div>
-        <div class="stat-card-value tab-num">{balance.requested || 0}</div>
+        <div class="stat-card-value tab-num">{formatDayCount(balance.requested || 0)}</div>
         <div class="stat-card-sub">
           {$t("Vacation requests awaiting approval")}
         </div>
@@ -264,7 +264,7 @@
           {$t("Vacation remaining ({year})", { year: selectedYear })}
         </div>
         <div class="stat-card-value accent tab-num">
-          {balance.available}
+          {formatDayCount(balance.available)}
         </div>
       </div>
       {#if balance.carryover_days > 0}
@@ -283,10 +283,10 @@
               ? 'var(--danger-text)'
               : 'var(--warning-text)'}"
           >
-            {balance.carryover_expired ? 0 : balance.carryover_remaining}
+            {formatDayCount(balance.carryover_expired ? 0 : balance.carryover_remaining)}
             <span
               style="font-size:11px;font-weight:400;color:var(--text-tertiary)"
-              >/ {balance.carryover_days}</span
+              >/ {formatDayCount(balance.carryover_days)}</span
             >
           </div>
           {#if balance.carryover_expiry}
@@ -350,7 +350,7 @@
               </div>
               <div class="absence-entry-field absence-entry-days">
                 <span class="absence-entry-label">{$t("Days")}</span>
-                <span class="absence-entry-value tab-num">{a.days ?? "-"}</span>
+                <span class="absence-entry-value tab-num">{a.days == null ? "-" : formatDayCount(a.days)}</span>
               </div>
             </div>
             <div class="absence-entry-bottom">
@@ -396,7 +396,7 @@
           </div>
           <div>
             <div class="zf-label">{$t("Days")}</div>
-            <div class="tab-num">{detailAbsence.days ?? "-"}</div>
+            <div class="tab-num">{detailAbsence.days == null ? "-" : formatDayCount(detailAbsence.days)}</div>
           </div>
         </div>
         <div>

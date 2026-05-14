@@ -1,6 +1,7 @@
 use crate::auth::User;
 use crate::error::{AppError, AppResult};
 use crate::i18n;
+use crate::roles::is_assistant_role;
 use crate::time_calc;
 use crate::AppState;
 use axum::{
@@ -165,7 +166,13 @@ async fn build_range_with_user(
     label: &str,
 ) -> AppResult<MonthReport> {
     let user_id = user.id;
-    let target_per_day_min = target_minutes_per_day(user.weekly_hours, user.workdays_per_week);
+    // Role is the canonical source for fixed-target behavior. Assistants never
+    // have target minutes, even if legacy/imported data contains non-zero hours.
+    let target_per_day_min = if is_assistant_role(&user.role) {
+        0
+    } else {
+        target_minutes_per_day(user.weekly_hours, user.workdays_per_week)
+    };
     let today = crate::settings::app_today(pool).await;
 
     let reports_db = crate::repository::ReportDb::new(pool.clone());
@@ -349,6 +356,7 @@ async fn build_month(
             from,
             to,
             user.start_date,
+            is_assistant_role(&user.role),
             user.workdays_per_week,
         )
         .await?,
@@ -575,16 +583,16 @@ pub struct TeamRow {
     pub target_min: i64,
     /// Actual minutes: approved time entries in the report month (including today).
     pub actual_min: i64,
-    /// Diff = actual - target for the report month.
-    pub diff_min: i64,
+    /// Diff = actual - target for the report month. None for assistants.
+    pub diff_min: Option<i64>,
     /// Vacation working-days taken in the report month (including today).
     pub vacation_days: f64,
     /// Vacation working-days planned but not yet started in the report month (from tomorrow).
     pub vacation_planned_days: f64,
     /// Sick working-days in the report month.
     pub sick_days: f64,
-    /// Current cumulative flextime balance as of today.
-    pub flextime_balance_min: i64,
+    /// Current cumulative flextime balance as of today. None for assistants.
+    pub flextime_balance_min: Option<i64>,
     /// True if all fully elapsed weeks (Sunday < today) overlapping the report month
     /// have been fully submitted.
     pub weeks_all_submitted: bool,
@@ -612,8 +620,15 @@ async fn all_weeks_submitted_for_month(
     month_start: NaiveDate,
     month_end: NaiveDate,
     user_start_date: NaiveDate,
+    is_assistant: bool,
     workdays_per_week: i16,
 ) -> AppResult<bool> {
+    // Assistant users have no fixed target schedule and therefore no mandatory
+    // day-level submission completeness for past weeks.
+    if is_assistant {
+        return Ok(true);
+    }
+
     let today = crate::settings::app_today(pool).await;
 
     // Compute the Monday of the first and last week touched by the month.
@@ -737,6 +752,7 @@ pub async fn team(
     let mut team_rows = vec![];
 
     for team_member in team_members {
+        let team_member_is_assistant = is_assistant_role(&team_member.role);
         // Reuse the month report so target, actual, and diff stay consistent.
         let month_report =
             build_month_without_submission_status(&app_state.pool, team_member.id, &query.month)
@@ -791,13 +807,19 @@ pub async fn team(
 
         // Current flextime balance is independent of the selected month.
         // The latest row of the current year is the balance as of today.
-        let current_year = today.year();
-        let overtime_rows =
-            build_overtime_rows_for_year(&app_state.pool, team_member.id, current_year).await?;
-        let flextime_balance_min = overtime_rows
-            .last()
-            .map(|r| r.cumulative_min)
-            .unwrap_or(team_member.overtime_start_balance_min);
+        let flextime_balance_min = if team_member_is_assistant {
+            None
+        } else {
+            let current_year = today.year();
+            let overtime_rows =
+                build_overtime_rows_for_year(&app_state.pool, team_member.id, current_year).await?;
+            Some(
+                overtime_rows
+                    .last()
+                    .map(|r| r.cumulative_min)
+                    .unwrap_or(team_member.overtime_start_balance_min),
+            )
+        };
 
         // Submission status uses full past weeks, including boundary weeks.
         let weeks_all_submitted = all_weeks_submitted_for_month(
@@ -806,6 +828,7 @@ pub async fn team(
             month_start,
             month_end,
             team_member.start_date,
+            team_member_is_assistant,
             team_member.workdays_per_week,
         )
         .await?;
@@ -815,7 +838,11 @@ pub async fn team(
             name: format!("{} {}", team_member.first_name, team_member.last_name),
             target_min: month_report.target_min,
             actual_min: month_report.actual_min,
-            diff_min: month_report.diff_min,
+            diff_min: if team_member_is_assistant {
+                None
+            } else {
+                Some(month_report.diff_min)
+            },
             vacation_days: vacation_taken,
             vacation_planned_days: vacation_planned,
             sick_days: sick_workdays,
@@ -1118,6 +1145,15 @@ async fn build_overtime_rows_for_year(
     target_user_id: i64,
     year: i32,
 ) -> AppResult<Vec<MonthRow>> {
+    let user = crate::repository::UserDb::new(pool.clone())
+        .find_by_id(target_user_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    // Assistant role is the canonical source for "no flextime account" behavior.
+    if is_assistant_role(&user.role) {
+        return Ok(vec![]);
+    }
+
     let today = crate::settings::app_today(pool).await;
     let current_year = today.year();
     // Cap the loop so future months (with zero actuals but full targets) do not
@@ -1284,6 +1320,10 @@ pub async fn flextime(
             .await?
             .ok_or(AppError::NotFound)?,
     );
+    // Assistant role is the canonical source for "no flextime account" behavior.
+    if is_assistant_role(&user.role) {
+        return Ok(Json(vec![]));
+    }
     let target_per_day_min = target_minutes_per_day(user.weekly_hours, user.workdays_per_week);
 
     // Seed cumulative at query.from-1 via month-level overtime plus a small

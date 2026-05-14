@@ -316,6 +316,7 @@ const TRANSLATIONS = {
       "Fehlende Übersetzungen fallen auf Englisch zurück.",
     "Language saved.": "Sprache gespeichert.",
     Employee: "Mitarbeitende",
+    Assistant: "Aushilfe",
     "Team lead": "Teamleitung",
     Users: "Benutzer",
     Categories: "Kategorien",
@@ -688,6 +689,10 @@ const TRANSLATIONS = {
     "Invalid email.": "Ungültige E-Mail-Adresse.",
     "Invalid name.": "Ungültiger Name.",
     "Invalid weekly_hours.": "Ungültige Wochenstunden.",
+    "Assistants must have weekly_hours set to 0.":
+      "Aushilfen müssen Wochenstunden auf 0 gesetzt haben.",
+    "Assistants cannot have an overtime start balance.":
+      "Aushilfen dürfen keinen Überstunden-Startsaldo haben.",
     "Invalid leave_days.": "Ungültige Urlaubstage.",
     "An approver (Team lead or Admin) is required for non-admin users.":
       "Für alle Nicht-Admin-Benutzer ist eine Teamleitung oder ein Admin als verantwortliche Person erforderlich.",
@@ -1214,9 +1219,26 @@ export function getLocale() {
   return LANGUAGES[get(language)]?.locale || LANGUAGES[DEFAULT_LANGUAGE].locale;
 }
 
+// Format a number using the current locale's decimal separator.
+// Uses Intl.NumberFormat so any locale added to LANGUAGES is handled automatically.
+export function fmtDecimal(value, fractionDigits = 1) {
+  return new Intl.NumberFormat(getLocale(), {
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
+  }).format(value);
+}
+
+export function formatDayCount(value) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return value;
+  }
+  return fmtDecimal(value, value % 1 === 0 ? 0 : 1);
+}
+
 export function roleLabel(role) {
   const labels = {
     employee: "Employee",
+    assistant: "Assistant",
     team_lead: "Team lead",
     admin: "Admin",
   };
@@ -1242,8 +1264,14 @@ export function hoursUnit() {
 }
 
 export function formatHours(value) {
+  // When a raw number is passed, apply locale-aware decimal formatting.
+  // Strings (e.g. pre-formatted HH:MM values like "+5:30") are passed through as-is.
+  const formatted =
+    typeof value === "number"
+      ? formatDayCount(value)
+      : value;
   return translate(get(language), "{value}{unit}", {
-    value,
+    value: formatted,
     unit: hoursUnit(),
   });
 }

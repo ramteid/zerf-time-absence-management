@@ -2,6 +2,7 @@ use crate::audit;
 use crate::auth::{hash_password, lock_user_graph, validate_password_strength, User};
 use crate::error::{AppError, AppResult};
 use crate::i18n;
+use crate::roles::is_assistant_role;
 use crate::repository::UserDb;
 use crate::AppState;
 use axum::{
@@ -354,7 +355,7 @@ pub async fn create(
     if !requester.is_admin() {
         return Err(AppError::Forbidden);
     }
-    if !["employee", "team_lead", "admin"].contains(&body.role.as_str()) {
+    if !["employee", "team_lead", "admin", "assistant"].contains(&body.role.as_str()) {
         return Err(AppError::BadRequest("Invalid role".into()));
     }
     let normalized_email = body.email.trim().to_lowercase();
@@ -375,6 +376,18 @@ pub async fn create(
         || !(0..=366).contains(&body.leave_days_next_year)
     {
         return Err(AppError::BadRequest("Invalid leave_days.".into()));
+    }
+    if is_assistant_role(&body.role) {
+        if body.weekly_hours != 0.0 {
+            return Err(AppError::BadRequest(
+                "Assistants must have weekly_hours set to 0.".into(),
+            ));
+        }
+        if body.overtime_start_balance_min.unwrap_or(0) != 0 {
+            return Err(AppError::BadRequest(
+                "Assistants cannot have an overtime start balance.".into(),
+            ));
+        }
     }
     ensure_email_available(&app_state, &normalized_email, None).await?;
     ensure_user_name_available(&app_state, &first_name, &last_name, None).await?;
@@ -511,7 +524,7 @@ pub async fn update(
     }
     // Role allow-list — never trust the client.
     if let Some(role_value) = &body.role {
-        if !["employee", "team_lead", "admin"].contains(&role_value.as_str()) {
+        if !["employee", "team_lead", "admin", "assistant"].contains(&role_value.as_str()) {
             return Err(AppError::BadRequest("Invalid role".into()));
         }
     }
@@ -603,6 +616,22 @@ pub async fn update(
         .role
         .clone()
         .unwrap_or_else(|| previous_user.role.clone());
+    let effective_weekly_hours = body.weekly_hours.unwrap_or(previous_user.weekly_hours);
+    let effective_overtime_start_balance = body
+        .overtime_start_balance_min
+        .unwrap_or(previous_user.overtime_start_balance_min);
+    if is_assistant_role(&new_role) {
+        if effective_weekly_hours != 0.0 {
+            return Err(AppError::BadRequest(
+                "Assistants must have weekly_hours set to 0.".into(),
+            ));
+        }
+        if effective_overtime_start_balance != 0 {
+            return Err(AppError::BadRequest(
+                "Assistants cannot have an overtime start balance.".into(),
+            ));
+        }
+    }
     let effective_approver_ids = if let Some(approver_ids) = &body.approver_ids {
         approver_ids.clone()
     } else {
