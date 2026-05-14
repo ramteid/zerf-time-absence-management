@@ -99,8 +99,8 @@ pub struct TestApp {
     pub base_url: String,
     pub admin_password: String,
     pub state: AppState,
-    /// Keep the container alive for the duration of the test.
-    _container: ContainerAsync<Postgres>,
+    /// Keep the container alive for the duration of the test (None when TEST_DATABASE_URL is set).
+    _container: Option<ContainerAsync<Postgres>>,
 }
 
 /// A cookie-jar-equipped HTTP client that targets a specific [`TestApp`].
@@ -127,27 +127,32 @@ impl TestApp {
     }
 
     async fn spawn_inner(public_url: Option<String>) -> Self {
-        let container = Postgres::default()
-            .start()
-            .await
-            .expect("failed to start Postgres container");
+        let (admin_database_url, database_url_base, _container) =
+            if let Ok(url) = std::env::var("TEST_DATABASE_URL") {
+                // No container runtime — use a pre-existing local Postgres instance.
+                let base = url.rsplitn(2, '/').nth(1).unwrap_or(&url).to_string();
+                (url, base, None)
+            } else {
+                let container = Postgres::default()
+                    .start()
+                    .await
+                    .expect("failed to start Postgres container");
+                let host_port = container
+                    .get_host_port_ipv4(5432)
+                    .await
+                    .expect("failed to get container port");
+                let admin_url = format!(
+                    "postgres://postgres:postgres@127.0.0.1:{}/postgres",
+                    host_port
+                );
+                let base = format!("postgres://postgres:postgres@127.0.0.1:{}", host_port);
+                (admin_url, base, Some(container))
+            };
 
-        let host_port = container
-            .get_host_port_ipv4(5432)
-            .await
-            .expect("failed to get container port");
-
-        let admin_database_url = format!(
-            "postgres://postgres:postgres@127.0.0.1:{}/postgres",
-            host_port
-        );
         let database_name = create_isolated_database(&admin_database_url)
             .await
             .expect("failed to create isolated test database");
-        let database_url = format!(
-            "postgres://postgres:postgres@127.0.0.1:{}/{}",
-            host_port, database_name
-        );
+        let database_url = format!("{}/{}", database_url_base, database_name);
 
         let cfg = Config {
             database_url: database_url.clone(),
@@ -230,7 +235,7 @@ impl TestApp {
             base_url: server_url,
             admin_password,
             state,
-            _container: container,
+            _container,
         }
     }
 
