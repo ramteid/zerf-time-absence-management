@@ -255,8 +255,8 @@ async fn users_full_workflow() {
             .await;
         assert_eq!(
             st,
-            StatusCode::CONFLICT,
-            "assistant update still reaches later validation after normalized role handling"
+            StatusCode::OK,
+            "valid assistant update with padded role string succeeds after normalization"
         );
 
         let (st, body) = admin
