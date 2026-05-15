@@ -80,7 +80,7 @@ async fn absences_full_workflow() {
             );
             assert!(
                 body.to_string()
-                    .contains("Absence must include at least one effective workday"),
+                    .contains("Absence must include at least one workday"),
                 "error should mention missing workday for {kind}: {body}"
             );
         }
@@ -122,7 +122,7 @@ async fn absences_full_workflow() {
         );
         assert!(
             body.to_string()
-                .contains("Absence must include at least one effective workday"),
+                .contains("Absence must include at least one workday"),
             "error should mention missing workday: {body}"
         );
     }
