@@ -101,8 +101,15 @@ async fn notify_week_status_change(
 
     // Send one consolidated notification per affected user.
     for (user_id, weeks) in weeks_by_user {
-        let week_count = i18n::week_count(&language, weeks.len() as i64);
-        let mut params = vec![("week_count", week_count)];
+        let mut sorted_weeks: Vec<NaiveDate> = weeks.into_iter().collect();
+        sorted_weeks.sort();
+        let week_list = sorted_weeks
+            .iter()
+            .map(|ws| i18n::format_week_label(&language, *ws))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let week_count = i18n::week_count(&language, sorted_weeks.len() as i64);
+        let mut params = vec![("week_list", week_list), ("week_count", week_count)];
         if let Some(r) = reason {
             params.push(("reason", r.to_string()));
         }
@@ -392,6 +399,14 @@ pub async fn submit(
         let approver_ids =
             crate::auth::required_approval_recipient_ids(&app_state.pool, &requester).await?;
         let language = notification_language(&app_state.pool).await;
+        let mut sorted_weeks: Vec<NaiveDate> = submitted_weeks.into_iter().collect();
+        sorted_weeks.sort();
+        let week_list = sorted_weeks
+            .iter()
+            .map(|ws| i18n::format_week_label(&language, *ws))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let week_count = i18n::week_count(&language, sorted_weeks.len() as i64);
         for approver_id in approver_ids {
             crate::notifications::create_translated(
                 &app_state,
@@ -406,8 +421,12 @@ pub async fn submit(
                         format!("{} {}", requester.first_name, requester.last_name),
                     ),
                     (
+                        "week_list",
+                        week_list.clone(),
+                    ),
+                    (
                         "week_count",
-                        i18n::week_count(&language, submitted_weeks.len() as i64),
+                        week_count.clone(),
                     ),
                 ],
                 Some("time_entries"),

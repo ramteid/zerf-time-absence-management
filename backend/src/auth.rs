@@ -393,7 +393,7 @@ pub async fn me(
             .push(serde_json::json!({"href":"/team-settings","key":"TeamSettings","icon":"🛡"}));
     }
     if user.is_admin() {
-        navigation_items.push(serde_json::json!({"href":"/admin/users","key":"Admin","icon":"⚙"}));
+        navigation_items.push(serde_json::json!({"href":"/admin/settings","key":"Admin","icon":"⚙"}));
     }
     let home = "/dashboard";
     // For admins: flag whether initial setup (country, working-time defaults,

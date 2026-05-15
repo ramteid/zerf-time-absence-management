@@ -607,10 +607,7 @@ pub async fn approve(
         Some(serde_json::json!({"status": "approved", "reviewed_by": requester.id})),
     )
     .await;
-    // Notify the requester, except when an admin approved their own request.
-    if change_request.user_id == requester.id {
-        return Ok(Json(serde_json::json!({"ok":true})));
-    }
+    // Notify the requester (including admins acting on their own requests).
     let language = notification_language(&app_state.pool).await;
     let week_label = i18n::format_week_label(&language, monday_of(change_request.new_date.unwrap_or(existing_entry.entry_date)));
     let current_category =
@@ -645,22 +642,27 @@ pub async fn approve(
         Some(&effective_category),
         change_request.new_comment.as_deref(),
     );
-    crate::notifications::create_translated(
-        &app_state,
-        &language,
-        change_request.user_id,
-        "change_request_approved",
-        "change_request_approved_title",
-        "change_request_approved_body",
-        vec![
-            ("week_label", week_label),
-            ("entry_label", entry_label_text),
-            ("change_diff", diff_text),
-        ],
-        Some("change_requests"),
-        Some(change_request_id),
-    )
-    .await;
+    // Skip email when an admin approved their own change request.
+    let params = vec![
+        ("week_label", week_label),
+        ("entry_label", entry_label_text),
+        ("change_diff", diff_text),
+    ];
+    if change_request.user_id == requester.id {
+        crate::notifications::create_translated_inapp_only(
+            &app_state, &language, change_request.user_id,
+            "change_request_approved", "change_request_approved_title",
+            "change_request_approved_body", params,
+            Some("change_requests"), Some(change_request_id),
+        ).await;
+    } else {
+        crate::notifications::create_translated(
+            &app_state, &language, change_request.user_id,
+            "change_request_approved", "change_request_approved_title",
+            "change_request_approved_body", params,
+            Some("change_requests"), Some(change_request_id),
+        ).await;
+    }
     Ok(Json(serde_json::json!({"ok":true})))
 }
 
@@ -733,10 +735,7 @@ pub async fn reject(
         Some(serde_json::json!({"status": "rejected", "reason": body.reason})),
     )
     .await;
-    // Notify the requester, except when an admin rejected their own request.
-    if change_request.user_id == requester.id {
-        return Ok(Json(serde_json::json!({"ok":true})));
-    }
+    // Notify the requester (including admins acting on their own requests).
     let language = notification_language(&app_state.pool).await;
     if let Some((
         _entry_owner_id,
@@ -778,23 +777,28 @@ pub async fn reject(
             Some(&requested_category),
             change_request.new_comment.as_deref(),
         );
-        crate::notifications::create_translated(
-            &app_state,
-            &language,
-            change_request.user_id,
-            "change_request_rejected",
-            "change_request_rejected_title",
-            "change_request_rejected_body",
-            vec![
-                ("week_label", week_label),
-                ("entry_label", entry_label_text),
-                ("reason", body.reason.clone()),
-                ("change_diff", diff_text),
-            ],
-            Some("change_requests"),
-            Some(change_request_id),
-        )
-        .await;
+        // Skip email when an admin rejected their own change request.
+        let params = vec![
+            ("week_label", week_label),
+            ("entry_label", entry_label_text),
+            ("reason", body.reason.clone()),
+            ("change_diff", diff_text),
+        ];
+        if change_request.user_id == requester.id {
+            crate::notifications::create_translated_inapp_only(
+                &app_state, &language, change_request.user_id,
+                "change_request_rejected", "change_request_rejected_title",
+                "change_request_rejected_body", params,
+                Some("change_requests"), Some(change_request_id),
+            ).await;
+        } else {
+            crate::notifications::create_translated(
+                &app_state, &language, change_request.user_id,
+                "change_request_rejected", "change_request_rejected_title",
+                "change_request_rejected_body", params,
+                Some("change_requests"), Some(change_request_id),
+            ).await;
+        }
     } else {
         tracing::warn!(
             target: "zerf::change_requests",

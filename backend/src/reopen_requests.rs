@@ -592,18 +592,18 @@ pub async fn create(
     if should_auto_approve {
         // Select the body variant that includes the change-request summary only
         // when changes were actually applied — showing "none" would be misleading.
-        let auto_body_key = if has_applied_changes {
-            "reopen_auto_approved_body_changes"
-        } else {
-            "reopen_auto_approved_body"
-        };
         let auto_notice_body_key = if has_applied_changes {
             "reopen_auto_approved_notice_body_changes"
         } else {
             "reopen_auto_approved_notice_body"
         };
-        // Notify the requester that their week was reopened automatically.
-        notifications::create_translated(
+        let auto_body_key = if has_applied_changes {
+            "reopen_auto_approved_body_changes"
+        } else {
+            "reopen_auto_approved_body"
+        };
+        // In-app only: the requester triggered the auto-approve themselves.
+        notifications::create_translated_inapp_only(
             &app_state,
             &language,
             requester.id,

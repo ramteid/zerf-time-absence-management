@@ -35,9 +35,6 @@ static LANGUAGES: &[LangDef] = &[
             ("month_4", "April"), ("month_5", "May"), ("month_6", "June"),
             ("month_7", "July"), ("month_8", "August"), ("month_9", "September"),
             ("month_10", "October"), ("month_11", "November"), ("month_12", "December"),
-            ("reopen_auto_approved_title", "Week reopened for editing"),
-            ("reopen_auto_approved_body", "Your week has been reopened for editing automatically.\n\nWeek: {week_label}"),
-            ("reopen_auto_approved_body_changes", "Your week has been reopened for editing automatically.\n\nWeek: {week_label}\n\nChange requests in this week were applied automatically:\n{change_request_overview}"),
             ("reopen_auto_approved_notice_title", "Week reopen auto-approved"),
             ("reopen_auto_approved_notice_body", "{requester_name}'s week reopen was auto-approved.\n\nWeek: {week_label}"),
             ("reopen_auto_approved_notice_body_changes", "{requester_name}'s week reopen was auto-approved.\n\nWeek: {week_label}\n\nChange requests in that week were applied automatically:\n{change_request_overview}"),
@@ -97,12 +94,12 @@ static LANGUAGES: &[LangDef] = &[
             ("reopen_change_request_header_applied", "Automatically applied change requests:"),
             ("reopen_change_request_header_open", "Open change requests for this week:"),
             ("reopen_change_request_comment_label", "  Comment"),
-            ("timesheet_submitted_title", "{submitter_name} submitted a timesheet"),
-            ("timesheet_submitted_body", "A timesheet was submitted for approval.\n\nScope: {week_count}"),
-            ("timesheet_approved_title", "Timesheet approved"),
-            ("timesheet_batch_approved_body", "Your timesheets were approved in batch.\n\nScope: {week_count}\n\nPlease review your dashboard for details."),
-            ("timesheet_rejected_title", "Timesheet rejected"),
-            ("timesheet_batch_rejected_body", "Your timesheets were rejected.\n\nScope: {week_count}\nReason: {reason}"),
+            ("timesheet_submitted_title", "{submitter_name} submitted {week_count}"),
+            ("timesheet_submitted_body", "Submitted for approval:\n{week_list}"),
+            ("timesheet_approved_title", "Week approved"),
+            ("timesheet_batch_approved_body", "Approved:\n{week_list}"),
+            ("timesheet_rejected_title", "Week rejected"),
+            ("timesheet_batch_rejected_body", "Rejected:\n{week_list}\nReason: {reason}"),
             ("submission_reminder_title", "Weeks not yet submitted"),
             ("submission_reminder_body", "You still have weeks that are not submitted.\n\nWeeks: {weeks}"),
             ("submission_reminder_email_body", "Hello,\n\nyou still have weeks not submitted:\n\n{weeks}\n\nPlease log in and submit your weeks:\n{app_url}\n"),
@@ -126,9 +123,6 @@ static LANGUAGES: &[LangDef] = &[
             ("month_4", "April"), ("month_5", "Mai"), ("month_6", "Juni"),
             ("month_7", "Juli"), ("month_8", "August"), ("month_9", "September"),
             ("month_10", "Oktober"), ("month_11", "November"), ("month_12", "Dezember"),
-            ("reopen_auto_approved_title", "Woche zur Bearbeitung freigegeben"),
-            ("reopen_auto_approved_body", "Ihre Woche wurde automatisch wieder zur Bearbeitung freigegeben.\n\nWoche: {week_label}"),
-            ("reopen_auto_approved_body_changes", "Ihre Woche wurde automatisch wieder zur Bearbeitung freigegeben.\n\nWoche: {week_label}\n\n\u{00c4}nderungsantr\u{00e4}ge dieser Woche wurden automatisch \u{00fc}bernommen:\n{change_request_overview}"),
             ("reopen_auto_approved_notice_title", "Wochenfreigabe automatisch genehmigt"),
             ("reopen_auto_approved_notice_body", "Die Wiederfreigabe von {requester_name} wurde automatisch genehmigt.\n\nWoche: {week_label}"),
             ("reopen_auto_approved_notice_body_changes", "Die Wiederfreigabe von {requester_name} wurde automatisch genehmigt.\n\nWoche: {week_label}\n\n\u{00c4}nderungsantr\u{00e4}ge dieser Woche wurden automatisch \u{00fc}bernommen:\n{change_request_overview}"),
@@ -188,12 +182,12 @@ static LANGUAGES: &[LangDef] = &[
             ("reopen_change_request_header_applied", "Automatisch \u{00fc}bernommene \u{00c4}nderungsantr\u{00e4}ge:"),
             ("reopen_change_request_header_open", "Offene \u{00c4}nderungsantr\u{00e4}ge f\u{00fc}r diese Woche:"),
             ("reopen_change_request_comment_label", "  Kommentar"),
-            ("timesheet_submitted_title", "{submitter_name} hat eine Zeiterfassung eingereicht"),
-            ("timesheet_submitted_body", "Eine Zeiterfassung wurde zur Genehmigung eingereicht.\n\nUmfang: {week_count}"),
-            ("timesheet_approved_title", "Zeiterfassung genehmigt"),
-            ("timesheet_batch_approved_body", "Ihre Zeiterfassungen wurden gesammelt genehmigt.\n\nUmfang: {week_count}\n\nBitte \u{00fc}berpr\u{00fc}fen Sie Ihr Dashboard f\u{00fc}r weitere Details."),
-            ("timesheet_rejected_title", "Zeiterfassung abgelehnt"),
-            ("timesheet_batch_rejected_body", "Ihre Zeiterfassungen wurden abgelehnt.\n\nUmfang: {week_count}\nGrund: {reason}"),
+            ("timesheet_submitted_title", "{submitter_name} hat {week_count} eingereicht"),
+            ("timesheet_submitted_body", "Zur Genehmigung eingereicht:\n{week_list}"),
+            ("timesheet_approved_title", "Woche genehmigt"),
+            ("timesheet_batch_approved_body", "Genehmigt:\n{week_list}"),
+            ("timesheet_rejected_title", "Woche abgelehnt"),
+            ("timesheet_batch_rejected_body", "Abgelehnt:\n{week_list}\nGrund: {reason}"),
             ("submission_reminder_title", "Arbeitszeiten noch nicht eingereicht"),
             ("submission_reminder_body", "Sie haben noch nicht eingereichte Wochen.\n\nWochen: {weeks}"),
             ("submission_reminder_email_body", "Hallo,\n\nfolgende Wochen wurden noch nicht eingereicht:\n\n{weeks}\n\nBitte melden Sie sich an und reichen Sie Ihre Wochen ein:\n{app_url}\n"),
@@ -429,13 +423,13 @@ mod tests {
         let date = chrono::NaiveDate::from_ymd_opt(2026, 4, 27).unwrap();
         let week_label = format_week_label(&language, date);
 
-        let plain = translate(&language, "reopen_auto_approved_body", &[("week_label", week_label.clone())]);
+        let plain = translate(&language, "reopen_approved_body", &[("week_label", week_label.clone())]);
         assert!(plain.contains(&week_label));
         assert!(!plain.contains("change_request_overview"), "base template must not contain unfilled placeholder");
 
         let with_changes = translate(
             &language,
-            "reopen_auto_approved_body_changes",
+            "reopen_approved_body_changes",
             &[
                 ("week_label", week_label.clone()),
                 ("change_request_overview", "- 27.04.2026 09:00-17:00 (Kernaufgaben) -> 28.04.2026 09:00-17:00 (Kernaufgaben)".to_string()),
