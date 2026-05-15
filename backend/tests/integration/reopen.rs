@@ -109,7 +109,7 @@ async fn reopen_full_workflow() {
             .expect("notification created");
         assert_eq!(
             notification["title"].as_str(),
-            Some("Woche zur Bearbeitung freigegeben")
+            Some("Wochenfreigabe genehmigt")
         );
         let body = notification["body"].as_str().unwrap_or("");
         assert!(

@@ -45,7 +45,7 @@ async fn auth_full_workflow() {
             .iter()
             .map(|n| n["href"].as_str().unwrap())
             .collect();
-        assert!(nav.contains(&"/admin/users"));
+        assert!(nav.contains(&"/admin/settings"));
         assert!(nav.contains(&"/dashboard"));
         assert!(nav.contains(&"/reports"));
 

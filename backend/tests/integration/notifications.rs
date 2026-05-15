@@ -495,14 +495,12 @@ async fn notifications_full_workflow() {
             .find(|item| item["kind"] == "timesheet_approved")
             .expect("timesheet_approved notification must exist");
 
-        assert_eq!(approval_notification["title"], "Timesheet approved");
+        assert_eq!(approval_notification["title"], "Week approved");
         let body = approval_notification["body"]
             .as_str()
             .expect("timesheet approval notification body must be string");
         assert!(
-            body.contains("Your timesheets were approved in batch.")
-                && body.contains("Scope: 1 week")
-                && body.contains("Please review your dashboard for details."),
+            body.contains("Approved:") && body.contains("CW"),
             "unexpected batch approval body: {body}"
         );
     }

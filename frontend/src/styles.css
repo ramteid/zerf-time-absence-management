@@ -369,16 +369,19 @@ body {
 .sidebar-logo {
   padding: 20px 18px 12px;
   display: flex;
-  align-items: center;
+  align-items: stretch;
   gap: 10px;
 }
 
 .sidebar-logo-icon {
-  width: 38px;
-  height: 38px;
   display: flex;
   align-items: center;
-  justify-content: center;
+  flex-shrink: 0;
+}
+
+.sidebar-logo-icon :global(.app-logo) {
+  height: 100%;
+  width: auto;
 }
 
 .sidebar-logo-text {
@@ -1180,10 +1183,21 @@ dialog footer {
 
   .mobile-title-bar-brand {
     display: flex;
-    align-items: center;
+    align-items: stretch;
     gap: 10px;
     min-width: 0;
     flex: 1;
+  }
+
+  .mobile-title-bar-logo {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+
+  .mobile-title-bar-logo :global(.app-logo) {
+    height: 100%;
+    width: auto;
   }
 
   .mobile-title-bar-icon {
