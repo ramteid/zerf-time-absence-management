@@ -499,10 +499,13 @@ async fn notifications_full_workflow() {
         let body = approval_notification["body"]
             .as_str()
             .expect("timesheet approval notification body must be string");
-        assert!(
-            body.contains("Approved:") && body.contains("CW"),
-            "unexpected batch approval body: {body}"
-        );
+        // Body is now structured JSON for frontend rendering (contains week ISO dates).
+        let parsed: serde_json::Value =
+            serde_json::from_str(body).expect("notification body must be valid JSON");
+        let weeks = parsed["weeks"]
+            .as_array()
+            .expect("JSON body must contain 'weeks' array");
+        assert_eq!(weeks.len(), 1, "one distinct week expected");
     }
 
     app.cleanup().await;
