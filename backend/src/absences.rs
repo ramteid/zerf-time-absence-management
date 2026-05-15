@@ -461,13 +461,15 @@ pub async fn create(
             "Absence start date is before user start date.".into(),
         ));
     }
-    validate_absence_has_workday(
-        &app_state.pool,
-        requester.workdays_per_week,
-        body.start_date,
-        body.end_date,
-    )
-    .await?;
+    if !crate::roles::is_assistant_role(&requester.role) {
+        validate_absence_has_workday(
+            &app_state.pool,
+            requester.workdays_per_week,
+            body.start_date,
+            body.end_date,
+        )
+        .await?;
+    }
     let mut transaction = app_state.pool.begin().await?;
     crate::repository::AbsenceDb::lock_user_scope_tx(&mut transaction, requester.id).await?;
     crate::repository::AbsenceDb::assert_no_overlap_tx(
@@ -576,13 +578,15 @@ pub async fn update(
             "Absence start date is before user start date.".into(),
         ));
     }
-    validate_absence_has_workday(
-        &app_state.pool,
-        requester.workdays_per_week,
-        body.start_date,
-        body.end_date,
-    )
-    .await?;
+    if !crate::roles::is_assistant_role(&requester.role) {
+        validate_absence_has_workday(
+            &app_state.pool,
+            requester.workdays_per_week,
+            body.start_date,
+            body.end_date,
+        )
+        .await?;
+    }
     let current_owner_id = absence_owner_id(&app_state.pool, absence_id).await?;
     let mut transaction = app_state.pool.begin().await?;
     crate::repository::AbsenceDb::lock_user_scope_tx(&mut transaction, current_owner_id).await?;

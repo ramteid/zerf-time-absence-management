@@ -274,6 +274,101 @@ async fn users_full_workflow() {
             .as_str()
             .unwrap_or_default()
             .contains("weekly_hours"));
+
+        // Assistants cannot have workdays_per_week set (they have no fixed weekdays).
+        let (st, body) = admin
+            .post(
+                "/api/v1/users",
+                &json!({"email":"assistant-invalid-workdays@example.com","first_name":"Assist","last_name":"Workdays",
+                    "role":"assistant","weekly_hours":0,"leave_days_current_year":0,"leave_days_next_year":0,
+                    "workdays_per_week":5,"start_date":"2024-01-01","approver_ids": [1]}),
+            )
+            .await;
+        assert_eq!(
+            st,
+            StatusCode::BAD_REQUEST,
+            "assistant workdays_per_week must not be set"
+        );
+        assert!(
+            body["error"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("fixed working days"),
+            "error should mention fixed working days: {body}"
+        );
+
+        // Updating an assistant with workdays_per_week is also rejected.
+        let (st, body) = admin
+            .put(
+                &format!("/api/v1/users/{assistant_id}"),
+                &json!({"workdays_per_week":3,"approver_ids":[1]}),
+            )
+            .await;
+        assert_eq!(
+            st,
+            StatusCode::BAD_REQUEST,
+            "updating assistant workdays_per_week must be rejected"
+        );
+        assert!(
+            body["error"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("fixed working days"),
+            "error should mention fixed working days: {body}"
+        );
+
+        // Assistants are stored with workdays_per_week=7 (all days possible) as a sentinel.
+        let (st, detail) = admin.get(&format!("/api/v1/users/{assistant_id}")).await;
+        assert_eq!(st, StatusCode::OK, "fetch assistant detail");
+        assert_eq!(
+            detail["workdays_per_week"], 7,
+            "assistants must be stored with workdays_per_week=7"
+        );
+    }
+
+    // -- Non-assistant users are restricted to 1-5 workdays per week --
+    {
+        let (st, body) = admin
+            .post(
+                "/api/v1/users",
+                &json!({"email":"employee-invalid-workdays@example.com","first_name":"Emp","last_name":"Wdays",
+                    "role":"employee","weekly_hours":40,"leave_days_current_year":20,"leave_days_next_year":20,
+                    "workdays_per_week":6,"start_date":"2024-01-01","approver_ids": [1]}),
+            )
+            .await;
+        assert_eq!(
+            st,
+            StatusCode::BAD_REQUEST,
+            "workdays_per_week=6 must be rejected for employees"
+        );
+        assert!(
+            body["error"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("workdays_per_week"),
+            "error should mention workdays_per_week: {body}"
+        );
+
+        let (st, body) = admin
+            .post(
+                "/api/v1/users",
+                &json!({"email":"employee-invalid-workdays7@example.com","first_name":"Emp","last_name":"Wdays7",
+                    "role":"employee","weekly_hours":40,"leave_days_current_year":20,"leave_days_next_year":20,
+                    "workdays_per_week":7,"start_date":"2024-01-01","approver_ids": [1]}),
+            )
+            .await;
+        assert_eq!(
+            st,
+            StatusCode::BAD_REQUEST,
+            "workdays_per_week=7 must be rejected for employees"
+        );
+        assert!(
+            body["error"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("workdays_per_week"),
+            "error should mention workdays_per_week: {body}"
+        );
     }
 
     // -- Duplicate user identifiers are rejected --
