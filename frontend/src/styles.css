@@ -1278,6 +1278,7 @@ dialog footer {
 
   .top-bar-actions.time-top-bar-actions {
     justify-content: flex-start;
+    align-items: flex-start;
     gap: 6px;
   }
 

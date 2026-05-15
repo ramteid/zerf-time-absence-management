@@ -323,7 +323,7 @@ pub async fn create(
     }
     if entry_status == "rejected" {
         return Err(AppError::BadRequest(
-            "Rejected entries cannot have change requests. Use the reopen workflow to edit.".into(),
+            "Rejected entries cannot have change requests. Please submit an edit request instead.".into(),
         ));
     }
     let current_start = parse_change_time(&entry_start_time)?;
@@ -512,7 +512,7 @@ pub async fn approve(
     }
     if existing_entry.status == "rejected" {
         return Err(AppError::BadRequest(
-            "Rejected entries cannot have change requests. Use the reopen workflow to edit.".into(),
+            "Rejected entries cannot have change requests. Please submit an edit request instead.".into(),
         ));
     }
     let current_start = parse_change_time(&existing_entry.start_time)?;

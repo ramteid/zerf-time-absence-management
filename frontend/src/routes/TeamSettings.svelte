@@ -50,14 +50,14 @@
   {#if loading}
     <p>{$t("Loading...")}</p>
   {:else}
-    <!-- Reopen Requests section -->
+    <!-- Edit Requests section -->
     <div class="zf-card" style="padding:20px;margin-bottom:16px">
       <div style="font-size:14px;font-weight:400;margin-bottom:6px">
-        {$t("Reopen Requests")}
+        {$t("Edit Requests")}
       </div>
       <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:14px">
         {$t(
-          "When enabled for a user, their reopen requests are automatically approved. Assigned approvers still receive a notification.",
+          "When enabled for a user, their edit requests are automatically approved. Assigned approvers still receive a notification.",
         )}
       </div>
 
@@ -94,7 +94,7 @@
                   $currentUser?.id === row.user_id)}
             />
             <span class="team-setting-checkbox-label"
-              >{$t("Auto-approve reopens")}</span
+              >{$t("Auto-approve edit requests")}</span
             >
           </label>
         </div>

@@ -77,7 +77,7 @@ const TRANSLATIONS = {
     audit_table_sessions: "Session",
     audit_table_notifications: "Notification",
     audit_table_app_settings: "Setting",
-    audit_table_reopen_requests: "Reopen Request",
+    audit_table_reopen_requests: "Edit Request",
     audit_table_change_requests: "Change Request",
     audit_action_created: "Created",
     audit_action_updated: "Updated",
@@ -89,7 +89,7 @@ const TRANSLATIONS = {
     audit_action_team_settings_updated: "Team Setting Updated",
     audit_action_password_reset: "Password Reset",
     audit_action_deactivated: "Deactivated",
-    audit_action_reopened: "Reopened",
+    audit_action_reopened: "Editing Enabled",
     "of {target} target": "of {target} target",
     "Open calendar": "Open calendar",
     "Open time picker": "Open time picker",
@@ -194,7 +194,7 @@ const TRANSLATIONS = {
     // Dashboard request detail labels
     Approval: "Approval",
     Change: "Change",
-    "Reopen Request Details": "Reopen Request Details",
+    "Edit Request Details": "Edit Request Details",
     "Change Request Details": "Change Request Details",
     "Absence Type": "Absence Type",
     "Request Type": "Request Type",
@@ -226,13 +226,13 @@ const TRANSLATIONS = {
     "notif:change_request_created": "New change request",
     "notif:change_request_approved": "Change request approved",
     "notif:change_request_rejected": "Change request rejected",
-    "notif:reopen_auto_approved": "Week reopened for editing",
-    "notif:reopen_auto_approved_notice": "Week reopen auto-approved",
-    "notif:reopen_request_created": "New week reopen request",
-    "notif:reopen_approved": "Week reopen approved",
-    "notif:reopen_approved_by_admin": "Week reopen approved by admin",
-    "notif:reopen_rejected": "Week reopen rejected",
-    "notif:reopen_rejected_by_admin": "Week reopen rejected by admin",
+    "notif:reopen_auto_approved": "Week editing enabled",
+    "notif:reopen_auto_approved_notice": "Week edit auto-approved",
+    "notif:reopen_request_created": "New week edit request",
+    "notif:reopen_approved": "Week edit request approved",
+    "notif:reopen_approved_by_admin": "Week edit request approved by admin",
+    "notif:reopen_rejected": "Week edit request rejected",
+    "notif:reopen_rejected_by_admin": "Week edit request rejected by admin",
   },
   de: {
     "Loading...": "Wird geladen...",
@@ -558,8 +558,8 @@ const TRANSLATIONS = {
     "SMTP settings saved.": "SMTP-Einstellungen gespeichert.",
     "Email (SMTP)": "E-Mail (SMTP)",
     "Enable SMTP": "SMTP aktivieren",
-    "When enabled, notification emails are sent for approvals, rejections, and reopen requests.":
-      "Wenn aktiviert, werden Benachrichtigungs-E-Mails bei Genehmigungen, Ablehnungen und Wiedereröffnungsanträgen gesendet.",
+    "When enabled, notification emails are sent for approvals, rejections, and edit requests.":
+      "Wenn aktiviert, werden Benachrichtigungs-E-Mails bei Genehmigungen, Ablehnungen und Bearbeitungsanfragen gesendet.",
     "Enable reminders": "Erinnerungen aktivieren",
     "When enabled, users who have not submitted all time entries are reminded by email on the configured deadline day.":
       "Wenn aktiviert, werden Benutzer, die noch nicht alle Wochen eingereicht haben, am konfigurierten Stichtag per E-Mail erinnert.",
@@ -655,24 +655,24 @@ const TRANSLATIONS = {
     "No eligible approvers found.":
       "Keine geeigneten Verantwortlichen gefunden.",
     "Request edit": "Bearbeitung anfordern",
-    "Reopen this week?": "Diese Woche wieder bearbeiten?",
+    "Request edit for this week?": "Bearbeitung für diese Woche anfordern?",
     "Your team lead will be notified and must approve before the week becomes editable again.":
       "Ihre Teamleitung wird benachrichtigt und muss zustimmen, bevor die Woche wieder bearbeitet werden kann.",
     "This week will be reopened immediately for editing.":
       "Diese Woche wird sofort wieder zur Bearbeitung freigegeben.",
-    "Reopen request sent.": "Anfrage zur Wiederfreigabe gesendet.",
-    "Week reopened.": "Woche wieder freigegeben.",
-    "Reopen pending approval.": "Wiederfreigabe wartet auf Genehmigung.",
-    "Reopen approved.": "Wiederfreigabe genehmigt.",
-    "Reopen rejected.": "Wiederfreigabe abgelehnt.",
-    "Week reopen requests": "Wochen-Wiederfreigaben",
-    Reopen: "Wiederfreigabe",
+    "Edit request sent.": "Bearbeitungsanfrage gesendet.",
+    "Week editing enabled.": "Woche zur Bearbeitung freigegeben.",
+    "Edit request pending approval.": "Bearbeitungsanfrage wartet auf Genehmigung.",
+    "Edit request approved.": "Bearbeitungsanfrage genehmigt.",
+    "Edit request rejected.": "Bearbeitungsanfrage abgelehnt.",
+    "Week edit requests": "Bearbeitungsanfragen",
+    "Edit request": "Bearbeitungsanfrage",
     "wants to edit week of {date}":
       "möchte die Woche ab {date} wieder bearbeiten",
     TeamSettings: "Team-Einstellungen",
     "Team Settings": "Team-Einstellungen",
-    "Allow employees to reopen weeks without approval":
-      "Mitarbeitende dürfen Wochen ohne Genehmigung wieder bearbeiten",
+    "Allow employees to submit edit requests without approval":
+      "Mitarbeitende dürfen Bearbeitungsanfragen ohne Genehmigung stellen",
     Notifications: "Benachrichtigungen",
     "No notifications.": "Keine Benachrichtigungen.",
     "No categories available.": "Keine Kategorien verfügbar.",
@@ -775,10 +775,10 @@ const TRANSLATIONS = {
     "Conflict: {message}": "Konflikt: {message}",
     "week_start must be a Monday (ISO).":
       "Wochenbeginn muss ein Montag sein (ISO).",
-    "Nothing to reopen - this week has no submitted, approved, or rejected entries.":
-      "Keine Wiederfreigabe möglich: Diese Woche enthält keine eingereichten, genehmigten oder abgelehnten Einträge.",
-    "A pending reopen request already exists (id {id}).":
-      "Eine offene Wiederfreigabe-Anfrage existiert bereits (ID {id}).",
+    "Cannot request edit - this week has no submitted, approved, or rejected entries.":
+      "Bearbeitung nicht möglich: Diese Woche enthält keine eingereichten, genehmigten oder abgelehnten Einträge.",
+    "A pending edit request already exists (id {id}).":
+      "Eine offene Bearbeitungsanfrage existiert bereits (ID {id}).",
     "A pending request for this week already exists.":
       "Für diese Woche existiert bereits eine offene Anfrage.",
     "Request was already resolved by someone else.":
@@ -792,7 +792,7 @@ const TRANSLATIONS = {
     Submissions: "Einreichungen",
     "Could not check submission status.":
       "Einreichungen konnte nicht geprüft werden.",
-    "Auto-approve reopens": "Wiederfreigabe ohne Bestätigung",
+    "Auto-approve edit requests": "Bearbeitungsanfragen automatisch genehmigen",
     // Flextime chart
     "Flextime balance": "Gleitzeitkontostand",
     "Flextime opening balance": "Gleitzeitkontostand Anfang",
@@ -839,10 +839,10 @@ const TRANSLATIONS = {
     "Entries in the future are not allowed.":
       "Einträge in der Zukunft sind nicht erlaubt.",
     "Day total exceeds 14 hours.": "Tagestotal überschreitet 14 Stunden.",
-    "Reopen would create overlapping draft entries.":
-      "Wiederfreigabe würde überschneidende Entwürfe erzeugen.",
-    "Reopen would exceed the 14 hour day limit.":
-      "Wiederfreigabe würde das Tageslimit von 14 Stunden überschreiten.",
+    "Editing would create overlapping draft entries.":
+      "Bearbeitung würde überschneidende Entwürfe erzeugen.",
+    "Editing would exceed the 14 hour day limit.":
+      "Bearbeitung würde das Tageslimit von 14 Stunden überschreiten.",
     "End time must be after start time.":
       "Endzeit muss nach der Startzeit liegen.",
     "End time cannot be in the future.":
@@ -872,8 +872,8 @@ const TRANSLATIONS = {
       "Änderungsanfrage konnte nicht mehr angewendet werden, da sich der Eintrag geändert hat.",
     "Change request was already resolved by someone else.":
       "Änderungsanfrage wurde bereits von jemand anderem bearbeitet.",
-    "Rejected entries cannot have change requests. Use the reopen workflow to edit.":
-      "Abgelehnte Einträge können keine Änderungsanfragen haben. Nutzen Sie die Wiederfreigabe.",
+    "Rejected entries cannot have change requests. Please submit an edit request instead.":
+      "Abgelehnte Einträge können keine Änderungsanfragen haben. Stellen Sie stattdessen eine Bearbeitungsanfrage.",
     // Absence errors
     "Absence start date is before user start date.":
       "Abwesenheitsbeginn liegt vor dem Startdatum des Benutzers.",
@@ -957,7 +957,7 @@ const TRANSLATIONS = {
     audit_table_sessions: "Sitzung",
     audit_table_notifications: "Benachrichtigung",
     audit_table_app_settings: "Einstellung",
-    audit_table_reopen_requests: "Wiederfreigabe",
+    audit_table_reopen_requests: "Bearbeitungsanfrage",
     audit_table_change_requests: "Änderungsanfrage",
     audit_action_created: "Erstellt",
     audit_action_updated: "Bearbeitet",
@@ -969,7 +969,7 @@ const TRANSLATIONS = {
     audit_action_team_settings_updated: "Team-Einstellung geändert",
     audit_action_password_reset: "Passwort zurückgesetzt",
     audit_action_deactivated: "Deaktiviert",
-    audit_action_reopened: "Wieder geöffnet",
+    audit_action_reopened: "Bearbeitung freigegeben",
     Data: "Daten",
     Summary: "Zusammenfassung",
     // Admin settings
@@ -990,9 +990,9 @@ const TRANSLATIONS = {
     "Temporary password:": "Temporäres Passwort:",
     Team: "Team",
     // Team Settings
-    "Reopen Requests": "Wiederfreigabe-Anträge",
-    "When enabled for a user, their reopen requests are automatically approved. Assigned approvers still receive a notification.":
-      "Wenn aktiviert, werden die Wiederfreigabe-Anträge des Benutzers automatisch genehmigt. Zugewiesene Genehmiger erhalten weiterhin eine Benachrichtigung.",
+    "Edit Requests": "Bearbeitungsanfragen",
+    "When enabled for a user, their edit requests are automatically approved. Assigned approvers still receive a notification.":
+      "Wenn aktiviert, werden die Bearbeitungsanfragen des Benutzers automatisch genehmigt. Zugewiesene Genehmiger erhalten weiterhin eine Benachrichtigung.",
     // Notification polling
     // (no new keys needed)
     // Vacation carryover
@@ -1060,7 +1060,7 @@ const TRANSLATIONS = {
     // Dashboard request detail labels
     Approval: "Genehmigung",
     Change: "Änderung",
-    "Reopen Request Details": "Details der Wiederfreigabe-Anfrage",
+    "Edit Request Details": "Details der Bearbeitungsanfrage",
     "Change Request Details": "Details der Änderungsanfrage",
     "Absence Type": "Abwesenheitstyp",
     "Request Type": "Anfragetyp",
@@ -1091,14 +1091,14 @@ const TRANSLATIONS = {
     "notif:change_request_rejected": "Änderungsanfrage abgelehnt",
     "notif:reopen_auto_approved": "Woche zur Bearbeitung freigegeben",
     "notif:reopen_auto_approved_notice":
-      "Wochenfreigabe automatisch genehmigt",
-    "notif:reopen_request_created": "Neue Anfrage zur Wochenfreigabe",
-    "notif:reopen_approved": "Wochenfreigabe genehmigt",
+      "Bearbeitungsanfrage automatisch genehmigt",
+    "notif:reopen_request_created": "Neue Bearbeitungsanfrage",
+    "notif:reopen_approved": "Bearbeitungsanfrage genehmigt",
     "notif:reopen_approved_by_admin":
-      "Wochenfreigabe durch Admin genehmigt",
-    "notif:reopen_rejected": "Wochenfreigabe abgelehnt",
+      "Bearbeitungsanfrage durch Admin genehmigt",
+    "notif:reopen_rejected": "Bearbeitungsanfrage abgelehnt",
     "notif:reopen_rejected_by_admin":
-      "Wochenfreigabe durch Admin abgelehnt",
+      "Bearbeitungsanfrage durch Admin abgelehnt",
   },
 };
 
@@ -1278,13 +1278,13 @@ const ERROR_PATTERNS = Object.freeze([
     key: "An open change request already exists for this entry (id {id}).",
   },
   {
-    pattern: /^A pending reopen request already exists \(id (?<id>\d+)\)\.$/,
-    key: "A pending reopen request already exists (id {id}).",
+    pattern: /^A pending edit request already exists \(id (?<id>\d+)\)\.$/,
+    key: "A pending edit request already exists (id {id}).",
   },
   {
     pattern:
-      /^Nothing to reopen [-\u2013\u2014] this week has no submitted, approved, or rejected entries\.$/,
-    key: "Nothing to reopen - this week has no submitted, approved, or rejected entries.",
+      /^Cannot request edit [-\u2013\u2014] this week has no submitted, approved, or rejected entries\.$/,
+    key: "Cannot request edit - this week has no submitted, approved, or rejected entries.",
   },
 ]);
 

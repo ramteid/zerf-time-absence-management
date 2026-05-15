@@ -215,7 +215,7 @@
   async function requestReopen() {
     if (!weekFrom) return;
     const confirmed = await confirmDialog(
-      $t("Reopen this week?"),
+      $t("Request edit for this week?"),
       $t(
         "Your team lead will be notified and must approve before the week becomes editable again.",
       ),
@@ -228,9 +228,9 @@
         body: { week_start: isoDate(weekFrom) },
       });
       if (response.status === "auto_approved") {
-        toast($t("Week reopened."), "ok");
+        toast($t("Week editing enabled."), "ok");
       } else {
-        toast($t("Reopen request sent."), "ok");
+        toast($t("Edit request sent."), "ok");
       }
       await loadWeek(weekFrom || appTodayDate($settings?.timezone));
     } catch (error) {
