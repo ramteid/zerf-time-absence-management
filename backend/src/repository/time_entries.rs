@@ -15,6 +15,16 @@ async fn app_now(conn: &mut sqlx::PgConnection) -> AppResult<chrono::DateTime<ch
     let tz = tz_name
         .parse::<chrono_tz::Tz>()
         .unwrap_or(chrono_tz::Europe::Berlin);
+    if let Some(d) = crate::settings::pinned_test_date() {
+        // Pin to end-of-day on the reference date so entries for that date
+        // are never rejected for having an end_time in the "future".
+        use chrono::TimeZone;
+        let dt = tz
+            .from_local_datetime(&d.and_hms_opt(23, 59, 59).unwrap())
+            .single()
+            .unwrap_or_else(|| Utc::now().with_timezone(&tz));
+        return Ok(dt);
+    }
     Ok(Utc::now().with_timezone(&tz))
 }
 

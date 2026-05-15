@@ -32,6 +32,8 @@ jobs:
       - name: Build (release)
         run: cargo build --release --locked
       - name: Integration tests (testcontainers)
+        env:
+          TEST_REFERENCE_DATE: "2030-01-07"
         run: cargo test --test integration -- --nocapture
       - name: cargo-audit (RustSec advisories — advisory; daily 'audit' workflow files an issue on findings)
         continue-on-error: true

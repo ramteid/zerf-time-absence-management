@@ -35,6 +35,8 @@ jobs:
 
       - name: Run Nager.Date contract tests
         id: tests
+        env:
+          TEST_REFERENCE_DATE: "2030-01-07"
         run: cargo test --test nager_contract -- --nocapture
 
       # Open a GitHub issue when the contract tests fail on the scheduled run

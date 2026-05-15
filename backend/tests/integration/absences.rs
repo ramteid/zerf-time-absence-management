@@ -7,7 +7,7 @@ use reqwest::StatusCode;
 use serde_json::json;
 
 use crate::common::TestApp;
-use crate::helpers::{admin_login, bootstrap_team, id, login_change_pw, next_monday, temp_pw};
+use crate::helpers::{admin_login, bootstrap_team, id, login_change_pw, next_monday, reference_date, temp_pw};
 
 #[tokio::test]
 async fn absences_full_workflow() {
@@ -131,7 +131,8 @@ async fn absences_full_workflow() {
     {
         // Use a different workday than the previous block to avoid state bleed
         // from the earlier "logged time" test case.
-        let conflict_day = (next_monday(-7) + chrono::Duration::days(1))
+        // Use next_monday(-14) + 1 day to ensure it's in the past and not a holiday.
+        let conflict_day = (next_monday(-14) + chrono::Duration::days(1))
             .format("%Y-%m-%d")
             .to_string();
         let (st, body) = emp
@@ -193,7 +194,7 @@ async fn absences_full_workflow() {
         let future_sick = id(&body);
         assert_eq!(body["status"], "requested", "future sick stays requested");
 
-        let too_old = (chrono::Local::now().date_naive() - chrono::Duration::days(31))
+        let too_old = (reference_date() - chrono::Duration::days(31))
             .format("%Y-%m-%d")
             .to_string();
         let (st, body) = emp

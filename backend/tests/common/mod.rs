@@ -75,16 +75,16 @@ async fn seed_admin(pool: &db::DatabasePool, admin_email: &str) -> anyhow::Resul
     if admin_count == 0 {
         let temp = users::generate_password();
         let hash = auth::hash_password(&temp)?;
-        let today = chrono::Local::now().date_naive();
+        let ref_date = reference_date();
         sqlx::query("INSERT INTO users(email,password_hash,first_name,last_name,role,weekly_hours,start_date,must_change_password,overtime_start_balance_min) VALUES ($1,$2,$3,$4,'admin',39.0,$5,TRUE,0)")
-            .bind(admin_email.to_lowercase()).bind(hash).bind("Test").bind("Admin").bind(today)
+            .bind(admin_email.to_lowercase()).bind(hash).bind("Test").bind("Admin").bind(ref_date)
             .execute(pool).await?;
 
         let admin_id: i64 = sqlx::query_scalar("SELECT id FROM users WHERE email=$1")
             .bind(admin_email.to_lowercase())
             .fetch_one(pool)
             .await?;
-        let current_year = chrono::Local::now().year();
+        let current_year = ref_date.year();
         users::set_leave_days(pool, admin_id, current_year, 30).await?;
         users::set_leave_days(pool, admin_id, current_year + 1, 30).await?;
 
@@ -184,7 +184,7 @@ impl TestApp {
         .execute(&pool)
         .await
         .expect("failed to seed country settings");
-        let year = chrono::Local::now().year_ce().1 as i32;
+        let year = reference_date().year();
         holidays::ensure_holidays(&pool, year)
             .await
             .expect("failed to seed holidays");
@@ -253,6 +253,17 @@ impl TestApp {
 }
 
 use chrono::Datelike;
+
+/// Returns the reference date used by all test date helpers.
+/// Reads TEST_REFERENCE_DATE (YYYY-MM-DD) when set, otherwise today.
+fn reference_date() -> chrono::NaiveDate {
+    if let Ok(s) = std::env::var("TEST_REFERENCE_DATE") {
+        chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d")
+            .expect("TEST_REFERENCE_DATE must be YYYY-MM-DD")
+    } else {
+        chrono::Local::now().date_naive()
+    }
+}
 
 impl TestClient {
     fn new(base_url: &str) -> Self {

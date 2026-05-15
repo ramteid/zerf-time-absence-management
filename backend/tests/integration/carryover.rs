@@ -3,7 +3,7 @@ use reqwest::StatusCode;
 use serde_json::{json, Value};
 
 use crate::common::TestApp;
-use crate::helpers::{admin_login, bootstrap_team, id, login_change_pw};
+use crate::helpers::{admin_login, bootstrap_team, id, login_change_pw, reference_date};
 
 fn json_f64(value: &Value, key: &str) -> f64 {
     value[key]
@@ -208,7 +208,7 @@ async fn carryover_policy_edge_cases() {
     let lead = login_change_pw(&app, "lead-r@example.com", &lead_pw).await;
     let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
 
-    let current_year = chrono::Local::now().year();
+    let current_year = reference_date().year();
     let next_year = current_year + 1;
 
     // Make yearly entitlement deterministic for this scenario.
@@ -395,7 +395,7 @@ async fn cross_year_request_enforces_end_year_post_expiry_budget() {
     let (_lead_id, _lead_pw, emp_id, emp_pw, _, _) = bootstrap_team(&app, &admin, false).await;
     let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
 
-    let current_year = chrono::Local::now().year();
+    let current_year = reference_date().year();
     let next_year = current_year + 1;
 
     update_carryover_expiry(&admin, "03-31").await;
@@ -442,7 +442,7 @@ async fn pre_expiry_days_can_be_requested_after_expiry() {
     let (_lead_id, _lead_pw, emp_id, emp_pw, _, _) = bootstrap_team(&app, &admin, false).await;
     let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
 
-    let current_year = chrono::Local::now().year();
+    let current_year = reference_date().year();
     let prev_year = current_year - 1;
 
     // Ensure carryover exists for current year and expiry is already in the past.
@@ -476,7 +476,7 @@ async fn requested_days_do_not_reduce_cross_year_carryover_source() {
     let (_lead_id, _lead_pw, emp_id, emp_pw, _, _) = bootstrap_team(&app, &admin, false).await;
     let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
 
-    let current_year = chrono::Local::now().year();
+    let current_year = reference_date().year();
     let next_year = current_year + 1;
 
     update_carryover_expiry(&admin, "03-31").await;
@@ -536,7 +536,7 @@ async fn carryover_expiry_allows_leap_day_and_normalizes_non_leap_years() {
     let (_lead_id, _lead_pw, emp_id, emp_pw, _, _) = bootstrap_team(&app, &admin, false).await;
     let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
 
-    let current_year = chrono::Local::now().year();
+    let current_year = reference_date().year();
     update_carryover_expiry(&admin, "02-29").await;
 
     let (st, balance) = emp

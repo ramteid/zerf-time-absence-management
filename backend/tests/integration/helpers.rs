@@ -4,6 +4,22 @@ use serde_json::{json, Value};
 
 use crate::common::{TestApp, TestClient};
 
+/// Returns the reference date for all date-relative helpers.
+///
+/// When `TEST_REFERENCE_DATE` is set (YYYY-MM-DD) that date is used, making
+/// the test suite fully deterministic regardless of wall-clock time.
+/// Without it the helpers fall back to today so local ad-hoc runs still work.
+///
+/// CI sets `TEST_REFERENCE_DATE=2030-01-07` (a Monday).
+pub fn reference_date() -> chrono::NaiveDate {
+    if let Ok(s) = std::env::var("TEST_REFERENCE_DATE") {
+        chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d")
+            .expect("TEST_REFERENCE_DATE must be YYYY-MM-DD")
+    } else {
+        chrono::Local::now().date_naive()
+    }
+}
+
 pub fn id(body: &Value) -> i64 {
     body["id"].as_i64().expect("missing 'id' in response")
 }
@@ -44,9 +60,9 @@ pub fn category_id_by_name(body: &Value, name: &str) -> Option<i64> {
     })
 }
 
-/// Next Monday ≥ offset days from now.
+/// Next Monday ≥ offset days from the reference date.
 pub fn next_monday(offset_days: i64) -> chrono::NaiveDate {
-    let start = chrono::Utc::now().date_naive() + chrono::Duration::days(offset_days);
+    let start = reference_date() + chrono::Duration::days(offset_days);
     let weekday = start.weekday().num_days_from_monday(); // 0=Mon
     if weekday == 0 {
         start
@@ -56,26 +72,17 @@ pub fn next_monday(offset_days: i64) -> chrono::NaiveDate {
 }
 
 pub fn today() -> String {
-    chrono::Local::now()
-        .date_naive()
-        .format("%Y-%m-%d")
-        .to_string()
+    reference_date().format("%Y-%m-%d").to_string()
 }
 
 pub fn date_offset(days: i64) -> String {
-    (chrono::Local::now().date_naive() + chrono::Duration::days(days))
+    (reference_date() + chrono::Duration::days(days))
         .format("%Y-%m-%d")
         .to_string()
 }
 
 pub fn year() -> i32 {
-    chrono::Utc::now().date_naive().year()
-}
-
-/// Compute per-day target minutes from weekly hours using the same rounding
-/// rule as backend reporting: `(weekly_hours / 5 * 60).round()`.
-pub fn per_day_target_minutes(weekly_hours: i64) -> i64 {
-    (weekly_hours as f64 / 5.0 * 60.0).round() as i64
+    reference_date().year()
 }
 
 /// Bootstrap admin (id 1, AdminPass!234), one lead, one employee.
@@ -211,6 +218,12 @@ pub async fn create_and_submit_entry(c: &TestClient, monday_iso: &str, cat_id: i
         .await;
     assert_eq!(st, StatusCode::OK, "submit entry");
     eid
+}
+
+/// Compute per-day target minutes from weekly hours using the same rounding
+/// rule as backend reporting: `(weekly_hours / 5 * 60).round()`.
+pub fn per_day_target_minutes(weekly_hours: i64) -> i64 {
+    (weekly_hours as f64 / 5.0 * 60.0).round() as i64
 }
 
 /// Login as admin and change the initial password.
