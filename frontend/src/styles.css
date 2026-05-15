@@ -380,8 +380,7 @@ body {
 }
 
 .sidebar-logo-icon :global(.app-logo) {
-  height: 100%;
-  width: auto;
+  display: block;
 }
 
 .sidebar-logo-text {
@@ -1196,8 +1195,7 @@ dialog footer {
   }
 
   .mobile-title-bar-logo :global(.app-logo) {
-    height: 100%;
-    width: auto;
+    display: block;
   }
 
   .mobile-title-bar-icon {
