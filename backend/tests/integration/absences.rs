@@ -526,3 +526,70 @@ async fn absences_full_workflow() {
 
     app.cleanup().await;
 }
+
+/// Assistants (Aushilfen) have no fixed weekdays, so they must be able to
+/// submit absences on any day of the week — including weekends.
+#[tokio::test]
+async fn assistant_absence_any_weekday() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "assistant-absences@example.com",
+                "first_name": "Assist",
+                "last_name": "AnyDay",
+                "role": "assistant",
+                "weekly_hours": 0,
+                "leave_days_current_year": 0,
+                "leave_days_next_year": 0,
+                "start_date": "2024-01-01",
+                "approver_ids": [1]
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create assistant user");
+    let assistant_pw = temp_pw(&body);
+    let assistant = login_change_pw(&app, "assistant-absences@example.com", &assistant_pw).await;
+
+    let next_week_monday = next_monday(7);
+    let saturday = (next_week_monday + chrono::Duration::days(5))
+        .format("%Y-%m-%d")
+        .to_string();
+    let sunday = (next_week_monday + chrono::Duration::days(6))
+        .format("%Y-%m-%d")
+        .to_string();
+    let next_saturday = (next_week_monday + chrono::Duration::days(12))
+        .format("%Y-%m-%d")
+        .to_string();
+
+    // Weekend-only absence must be accepted for assistants.
+    let (st, _) = assistant
+        .post(
+            "/api/v1/absences",
+            &json!({"kind": "general_absence", "start_date": saturday, "end_date": sunday}),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::OK,
+        "assistant can submit absence on Saturday+Sunday"
+    );
+
+    // Single-day Saturday absence must also be accepted.
+    let (st, _) = assistant
+        .post(
+            "/api/v1/absences",
+            &json!({"kind": "general_absence", "start_date": next_saturday, "end_date": next_saturday}),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::OK,
+        "assistant can submit single-day Saturday absence"
+    );
+
+    app.cleanup().await;
+}

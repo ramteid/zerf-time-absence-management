@@ -221,8 +221,8 @@ pub struct NewUser {
     pub last_name: String,
     pub role: String,
     pub weekly_hours: f64,
-    #[serde(default = "default_workdays_per_week")]
-    pub workdays_per_week: i16,
+    #[serde(default)]
+    pub workdays_per_week: Option<i16>,
     /// Leave days for the current year (required on creation).
     pub leave_days_current_year: i64,
     /// Leave days for next year (required on creation).
@@ -235,9 +235,7 @@ pub struct NewUser {
     pub approver_ids: Vec<i64>,
 }
 
-fn default_workdays_per_week() -> i16 {
-    5
-}
+
 
 /// Validate that each approver_id refers to an active lead/admin and is not the user themselves.
 /// Also enforces the rule that non-admin users must have at least one approver.
@@ -377,14 +375,12 @@ pub async fn create(
     if !(0.0..=168.0).contains(&body.weekly_hours) {
         return Err(AppError::BadRequest("Invalid weekly_hours.".into()));
     }
-    if !(1..=7).contains(&body.workdays_per_week) {
-        return Err(AppError::BadRequest("Invalid workdays_per_week.".into()));
-    }
     if !(0..=366).contains(&body.leave_days_current_year)
         || !(0..=366).contains(&body.leave_days_next_year)
     {
         return Err(AppError::BadRequest("Invalid leave_days.".into()));
     }
+    let effective_workdays: i16;
     if is_assistant_role(&body.role) {
         tracing::warn!(
             target: "zerf::assistant_role",
@@ -404,6 +400,18 @@ pub async fn create(
                 "Assistants cannot have an overtime start balance.".into(),
             ));
         }
+        if body.workdays_per_week.is_some() {
+            return Err(AppError::BadRequest(
+                "Assistants cannot have fixed working days per week.".into(),
+            ));
+        }
+        effective_workdays = 7;
+    } else {
+        let wdpw = body.workdays_per_week.unwrap_or(5);
+        if !(1..=5).contains(&wdpw) {
+            return Err(AppError::BadRequest("Invalid workdays_per_week.".into()));
+        }
+        effective_workdays = wdpw;
     }
     ensure_email_available(&app_state, &normalized_email, None).await?;
     ensure_user_name_available(&app_state, &first_name, &last_name, None).await?;
@@ -426,7 +434,7 @@ pub async fn create(
     validate_approver_ids(&app_state, &body.role, None, &body.approver_ids).await?;
     let new_user_id: i64 = sqlx::query_scalar("INSERT INTO users(email,password_hash,first_name,last_name,role,weekly_hours,workdays_per_week,start_date,must_change_password,overtime_start_balance_min) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id")
         .bind(&normalized_email).bind(password_hash).bind(&first_name).bind(&last_name).bind(&body.role)
-        .bind(body.weekly_hours).bind(body.workdays_per_week).bind(body.start_date).bind(true)
+        .bind(body.weekly_hours).bind(effective_workdays).bind(body.start_date).bind(true)
         .bind(overtime_balance)
         .fetch_one(&mut *transaction).await
         .map_err(|e| {
@@ -482,7 +490,15 @@ pub async fn create(
     let language = i18n::load_ui_language(&app_state.pool)
         .await
         .unwrap_or_default();
-    let subject = i18n::translate(&language, "account_created_subject", &[]);
+    let org_name_raw = crate::settings::load_setting(&app_state.pool, "organization_name", "")
+        .await
+        .unwrap_or_default();
+    let org_name = if org_name_raw.trim().is_empty() {
+        "Zerf".to_string()
+    } else {
+        org_name_raw
+    };
+    let subject = i18n::translate(&language, "account_created_subject", &[("org_name", org_name)]);
     let body_text = i18n::translate(
         &language,
         "account_created_body",
@@ -573,7 +589,7 @@ pub async fn update(
         }
     }
     if let Some(workdays_per_week) = body.workdays_per_week {
-        if !(1..=7).contains(&workdays_per_week) {
+        if !(1..=5).contains(&workdays_per_week) {
             return Err(AppError::BadRequest("Invalid workdays_per_week.".into()));
         }
     }
@@ -658,7 +674,18 @@ pub async fn update(
                 "Assistants cannot have an overtime start balance.".into(),
             ));
         }
+        if body.workdays_per_week.is_some() {
+            return Err(AppError::BadRequest(
+                "Assistants cannot have fixed working days per week.".into(),
+            ));
+        }
     }
+    // For assistants force workdays_per_week=7 (no fixed days); for others use what was provided.
+    let effective_workdays_update: Option<i16> = if is_assistant_role(&new_role) {
+        Some(7)
+    } else {
+        body.workdays_per_week
+    };
     let effective_approver_ids = if let Some(approver_ids) = &body.approver_ids {
         approver_ids.clone()
     } else {
@@ -715,7 +742,7 @@ pub async fn update(
     let role_to_store: Option<String> = if body.role.is_some() { Some(new_role.clone()) } else { None };
     sqlx::query("UPDATE users SET email=COALESCE($1,email), first_name=COALESCE($2,first_name), last_name=COALESCE($3,last_name), role=COALESCE($4,role), weekly_hours=COALESCE($5,weekly_hours), workdays_per_week=COALESCE($6,workdays_per_week), start_date=COALESCE($7,start_date), active=COALESCE($8,active), allow_reopen_without_approval=COALESCE($9,allow_reopen_without_approval), overtime_start_balance_min=COALESCE($10,overtime_start_balance_min) WHERE id=$11")
         .bind(normalized_email).bind(first_name).bind(last_name).bind(role_to_store)
-        .bind(body.weekly_hours).bind(body.workdays_per_week).bind(body.start_date).bind(body.active)
+        .bind(body.weekly_hours).bind(effective_workdays_update).bind(body.start_date).bind(body.active)
         .bind(body.allow_reopen_without_approval).bind(body.overtime_start_balance_min).bind(user_id)
         .execute(&mut *transaction).await
         .map_err(|e| {

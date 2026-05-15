@@ -50,8 +50,10 @@
   let users = [];
   async function initUsers() {
     try {
-      users =
-        isSelfOnlyReportsView ? [$currentUser] : await api("/users");
+      // Read the permission directly from the store so this is safe to call
+      // before Svelte's reactive declarations have been evaluated.
+      const canTeam = !!$currentUser?.permissions?.can_view_team_reports;
+      users = canTeam ? await api("/users") : [$currentUser];
     } catch (e) {
       toast($t(e?.message || "Error"), "error");
     }
