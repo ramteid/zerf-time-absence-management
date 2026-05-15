@@ -1068,7 +1068,7 @@
             <div style="flex:1;min-width:0">
               <div style="font-size:13px;font-weight:500;display:flex;align-items:center;gap:6px">
                 {userName(reopen.user_id, users)}
-                <span class="zf-chip zf-chip-pending" style="font-size:10px">{$t("Reopen")}</span>
+                <span class="zf-chip zf-chip-pending" style="font-size:10px">{$t("Edit request")}</span>
               </div>
               <div class="tab-num" style="font-size:11.5px;color:var(--text-tertiary)">
                 {$t("wants to edit week of {date}", { date: fmtDateShort(reopen.week_start) })}
@@ -1473,7 +1473,7 @@
     <header>
       <span style="flex:1">
         {#if requestDetail.kind === "reopen"}
-          {$t("Reopen Request Details")}
+          {$t("Edit Request Details")}
         {:else}
           {$t("Change Request Details")}
         {/if}
@@ -1491,7 +1491,7 @@
           </div>
           <div>
             <div class="zf-label">{$t("Type")}</div>
-            <div><span class="zf-chip zf-chip-pending">{$t("Reopen")}</span></div>
+            <div><span class="zf-chip zf-chip-pending">{$t("Edit request")}</span></div>
           </div>
           <div>
             <div class="zf-label">{$t("Week")}</div>

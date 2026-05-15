@@ -258,7 +258,7 @@ async fn perform_reopen_in_tx(
 
     if affected.is_empty() {
         return Err(AppError::BadRequest(
-            "Nothing to reopen - this week has no submitted, approved, or rejected entries.".into(),
+            "Cannot request edit - this week has no submitted, approved, or rejected entries.".into(),
         ));
     }
 
@@ -453,7 +453,7 @@ pub async fn create(
         .await?;
     if reopenable_entry_count == 0 {
         return Err(AppError::BadRequest(
-            "Nothing to reopen - this week has no submitted, approved, or rejected entries.".into(),
+            "Cannot request edit - this week has no submitted, approved, or rejected entries.".into(),
         ));
     }
 
@@ -465,7 +465,7 @@ pub async fn create(
         .await?;
     if let Some(existing_request_id) = existing_pending_id {
         return Err(AppError::Conflict(format!(
-            "A pending reopen request already exists (id {existing_request_id})."
+            "A pending edit request already exists (id {existing_request_id})."
         )));
     }
 

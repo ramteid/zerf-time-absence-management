@@ -45,7 +45,8 @@
     if (
       e.touches.length === 1 &&
       e.target instanceof Element &&
-      !e.target.closest(".tp-drum")
+      !e.target.closest(".tp-drum") &&
+      !e.target.closest("dialog")
     ) {
       const scrollContainer = getPullScrollContainer(e.target);
       if (scrollContainer ? scrollContainer.scrollTop > 0 : window.scrollY > 0) {
@@ -265,7 +266,7 @@
     <div class="mobile-title-bar-brand">
       <div class="mobile-title-bar-logo"><AppLogo size={30} /></div>
       <div class="mobile-title-bar-names">
-        <span class="mobile-title-bar-appname">Zerf</span>
+        <span class="mobile-title-bar-appname">Zeiterfassung</span>
         {#if $settings?.organization_name}
           <span class="mobile-title-bar-org">{$settings.organization_name}</span>
         {/if}
@@ -294,7 +295,7 @@
     <div class="sidebar-logo">
       <div class="sidebar-logo-icon"><AppLogo size={30} /></div>
       <div style="display:flex;flex-direction:column;line-height:1.2;min-width:0;flex:1">
-        <span class="sidebar-logo-text">Zerf</span>
+        <span class="sidebar-logo-text">Zeiterfassung</span>
         {#if $settings?.organization_name}
           <span style="font-size:12px;color:var(--nav-text-muted);word-break:break-word">{$settings.organization_name}</span>
         {/if}

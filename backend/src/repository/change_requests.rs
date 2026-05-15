@@ -153,7 +153,7 @@ impl ChangeRequestDb {
         }
         if entry_status == "rejected" {
             return Err(AppError::BadRequest(
-                "Rejected entries cannot have change requests. Use the reopen workflow to edit."
+                "Rejected entries cannot have change requests. Please submit an edit request instead."
                     .into(),
             ));
         }

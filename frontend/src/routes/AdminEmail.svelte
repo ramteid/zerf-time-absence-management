@@ -124,7 +124,7 @@
           </label>
           <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
             {$t(
-              "When enabled, notification emails are sent for approvals, rejections, and reopen requests.",
+              "When enabled, notification emails are sent for approvals, rejections, and edit requests.",
             )}
           </div>
         </div>

@@ -282,7 +282,7 @@ impl ReopenRequestDb {
         .await?;
         if affected.is_empty() {
             return Err(AppError::BadRequest(
-                "Nothing to reopen - this week has no submitted, approved, or rejected entries."
+                "Cannot request edit - this week has no submitted, approved, or rejected entries."
                     .into(),
             ));
         }

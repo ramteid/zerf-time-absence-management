@@ -300,7 +300,7 @@ pub(crate) async fn validate_entries_after_reopen(
             let (_, next_start, _) = window[1];
             if next_start < previous_end {
                 return Err(AppError::BadRequest(
-                    "Reopen would create overlapping draft entries.".into(),
+                    "Editing would create overlapping draft entries.".into(),
                 ));
             }
         }
@@ -332,7 +332,7 @@ pub(crate) async fn validate_entries_after_reopen(
         }
         if day_total > 14 * 60 {
             return Err(AppError::BadRequest(
-                "Reopen would exceed the 14 hour day limit.".into(),
+                "Editing would exceed the 14 hour day limit.".into(),
             ));
         }
     }
