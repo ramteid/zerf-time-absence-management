@@ -361,37 +361,52 @@
     );
   }
 
+  async function loadOwnAbsencesForRange() {
+    const fromYear = parseInt(absenceFrom.slice(0, 4), 10);
+    const toYear = parseInt(absenceTo.slice(0, 4), 10);
+    const years = Array.from(
+      { length: toYear - fromYear + 1 },
+      (_, yearOffset) => fromYear + yearOffset,
+    );
+    const absenceLists = await Promise.all(
+      years.map((yearValue) => api(`/absences?year=${yearValue}`)),
+    );
+    return absenceLists.flat().filter(
+      (absenceEntry) =>
+        absenceEntry.end_date >= absenceFrom &&
+        absenceEntry.start_date <= absenceTo,
+    );
+  }
+
+  function dedupeAbsences(absences) {
+    const seen = new Set();
+    return absences.filter((absenceEntry) => {
+      if (seen.has(absenceEntry.id)) return false;
+      seen.add(absenceEntry.id);
+      return true;
+    });
+  }
+
   async function showAbsences() {
     if (absenceFrom > absenceTo) return;
     try {
       let raw;
       if (isSelfOnlyReportsView) {
-        // The personal absence API is year-based. Cross-year ranges therefore
-        // need multiple requests and id-based deduplication.
-        const fromYear = parseInt(absenceFrom.slice(0, 4), 10);
-        const toYear = parseInt(absenceTo.slice(0, 4), 10);
-        const years = Array.from(
-          { length: toYear - fromYear + 1 },
-          (_, yearOffset) => fromYear + yearOffset,
-        );
-        const absenceLists = await Promise.all(
-          years.map((yearValue) => api(`/absences?year=${yearValue}`)),
-        );
-        const seen = new Set();
-        raw = absenceLists.flat().filter((absenceEntry) => {
-          if (seen.has(absenceEntry.id)) return false;
-          seen.add(absenceEntry.id);
-          return (
-            absenceEntry.end_date >= absenceFrom &&
-            absenceEntry.start_date <= absenceTo
-          );
-        });
+        // The personal absence API is year-based, so cross-year ranges need
+        // multiple requests before the selected date window can be applied.
+        raw = dedupeAbsences(await loadOwnAbsencesForRange());
       } else {
         const params = new URLSearchParams({
           from: absenceFrom,
           to: absenceTo,
         });
-        raw = await api(`/absences/all?${params}`);
+        const [teamAbsences, ownAbsences] = await Promise.all([
+          api(`/absences/all?${params}`),
+          loadOwnAbsencesForRange(),
+        ]);
+        // `/absences/all` is review-scoped for non-admin leads and contains
+        // direct reports, while report scope also includes the lead themself.
+        raw = dedupeAbsences([...teamAbsences, ...ownAbsences]);
       }
       // Exclude absences that are no longer valid.
       raw = raw.filter(

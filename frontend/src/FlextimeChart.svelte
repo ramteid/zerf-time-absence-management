@@ -114,7 +114,7 @@
     return tickIndexes;
   }, /** @type {number[]} */ ([]));
 
-  // Bar pixel width (for absence/holiday bands)
+  // Bar pixel width (for absence/holiday/weekend bands)
   $: barWidth = data.length > 1 ? plotWidth / (data.length - 1) : plotWidth;
 
   // ── Hover state ──────────────────────────────────────────────────────────
@@ -194,12 +194,33 @@
     unpaid: "#64748b",
     general_absence: "#6b7280",
   };
+  const HOLIDAY_COLOR = "var(--warning)";
+  const WEEKEND_COLOR = "#d97706";
 
   function absColor(kind) {
     return ABSENCE_COLORS[kind] || "var(--text-tertiary)";
   }
 
-  // Legend: distinct absence/holiday kinds present in data
+  function isWeekend(dateString) {
+    const dayOfWeek = new Date(`${dateString}T00:00:00Z`).getUTCDay();
+    return dayOfWeek === 0 || dayOfWeek === 6;
+  }
+
+  function dayBandColor(day) {
+    if (day.absence) return absColor(day.absence);
+    if (day.holiday) return HOLIDAY_COLOR;
+    if (isWeekend(day.date)) return WEEKEND_COLOR;
+    return null;
+  }
+
+  function dayContextLabel(day) {
+    if (day.absence) return absenceKindLabel(day.absence);
+    if (day.holiday) return day.holiday;
+    if (isWeekend(day.date)) return $t("Weekend");
+    return "";
+  }
+
+  // Legend: distinct absence/holiday/weekend kinds present in data
   $: legendItems = (() => {
     const seen = new Set();
     const items = [];
@@ -210,7 +231,11 @@
       }
       if (day.holiday && !seen.has("__holiday__")) {
         seen.add("__holiday__");
-        items.push({ key: "__holiday__", color: "var(--warning)" });
+        items.push({ key: "__holiday__", color: HOLIDAY_COLOR });
+      }
+      if (isWeekend(day.date) && !seen.has("__weekend__")) {
+        seen.add("__weekend__");
+        items.push({ key: "__weekend__", color: WEEKEND_COLOR });
       }
     }
     return items;
@@ -241,7 +266,7 @@
       on:touchend={onTouchEnd}
     >
       <defs>
-        <!-- clip to the full plot area (used for absence/holiday bands) -->
+        <!-- clip to the full plot area (used for absence/holiday/weekend bands) -->
         <clipPath id="clip-plot-{chartInstanceId}">
           <rect x={marginLeft} y={marginTop} width={plotWidth} height={plotHeight} />
         </clipPath>
@@ -260,18 +285,19 @@
         </clipPath>
       </defs>
 
-      <!-- ── Absence / holiday vertical bands (only past/today) ── -->
+      <!-- ── Absence / holiday / weekend vertical bands (only past/today) ── -->
       <!-- clip-path ensures bars centred on the first/last data point
            do not bleed outside the plot area boundaries. -->
       <g clip-path="url(#clip-plot-{chartInstanceId})">
         {#each data as day, pointIndex}
-          {#if pointIndex <= lastActualIdx && (day.absence || day.holiday)}
+          {@const bandColor = dayBandColor(day)}
+          {#if pointIndex <= lastActualIdx && bandColor}
             <rect
               x={pts[pointIndex].x - barWidth * 0.5}
               y={marginTop}
               width={barWidth}
               height={plotHeight}
-              fill={day.absence ? absColor(day.absence) : "var(--warning)"}
+              fill={bandColor}
               opacity="0.18"
             />
           {/if}
@@ -408,7 +434,7 @@
           stroke-width="1"
           filter="drop-shadow(0 2px 6px rgba(0,0,0,0.1))"
         />
-        <!-- Date (+ absence/holiday label) -->
+        <!-- Date (+ absence/holiday/weekend label) -->
         <text
           x={tooltipX + 9}
           y={tooltipY + 17}
@@ -416,11 +442,9 @@
           font-weight="600"
           fill="var(--text-primary)"
         >
-          {fmtDateShort(hoverD.date)}{hoverD.absence
-            ? " · " + absenceKindLabel(hoverD.absence)
-            : hoverD.holiday
-              ? " · " + hoverD.holiday
-              : ""}
+          {fmtDateShort(hoverD.date)}{dayContextLabel(hoverD)
+            ? " · " + dayContextLabel(hoverD)
+            : ""}
         </text>
         <!-- Balance -->
         <text
@@ -457,6 +481,8 @@
             ></div>
             {item.key === "__holiday__"
               ? $t("Holidays")
+              : item.key === "__weekend__"
+                ? $t("Weekends")
               : absenceKindLabel(item.key)}
           </div>
         {/each}

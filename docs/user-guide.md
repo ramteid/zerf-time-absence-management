@@ -669,6 +669,8 @@ Zerf distinguishes between workflow coverage and work-credit math.
 	relevant status rules (for example approved for actuals).
 - Non-crediting entries remain visible in workflow but do not inflate worked
 	hour balances.
+- Flextime balance charts mark absences, public holidays, and weekends with
+	colored background bars so non-working days are visible in the timeline.
 
 ### Category breakdown reports
 
