@@ -212,8 +212,9 @@ If something is wrong after submission, use one of two paths:
 - Use this when multiple entries in a week need correction.
 - Approved reopen resets submitted, approved, or rejected entries in that week to draft.
 - Reopened entries become editable and can be submitted again.
-- If a week has no submitted, approved, or rejected entries, reopen is rejected as
-	"nothing to reopen".
+- If a week has no submitted, approved, or rejected entries, the edit request is
+	rejected with a message that the week has no submitted, approved, or rejected
+	entries.
 
 ### Change requests and reopen interaction
 

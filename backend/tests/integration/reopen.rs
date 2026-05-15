@@ -243,7 +243,7 @@ async fn reopen_full_workflow() {
             .as_str()
             .unwrap()
             .to_lowercase()
-            .contains("nothing"));
+            .contains("no submitted, approved, or rejected entries"));
     }
 
     // -- Not monday rejected --
