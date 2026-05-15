@@ -20,6 +20,7 @@
   import { t, roleLabel } from "./i18n.js";
   import { fmtDate, fmtDateTime } from "./format.js";
   import Icon from "./Icons.svelte";
+  import AppLogo from "./AppLogo.svelte";
 
   // Mobile menu
   let mobileMoreOpen = false;
@@ -262,9 +263,7 @@
   <!-- Mobile title bar: logo + notification icon (mobile only) -->
   <div class="mobile-title-bar">
     <div class="mobile-title-bar-brand">
-      <div class="mobile-title-bar-icon">
-        <Icon name="Clock" size={16} />
-      </div>
+      <AppLogo size={34} />
       <div class="mobile-title-bar-names">
         <span class="mobile-title-bar-appname">Zerf</span>
         {#if $settings?.organization_name}
@@ -293,13 +292,11 @@
 
   <div class="sidebar">
     <div class="sidebar-logo">
-      <div class="sidebar-logo-icon">
-        <Icon name="Clock" size={16} />
-      </div>
+      <AppLogo size={38} />
       <div style="display:flex;flex-direction:column;line-height:1.2;min-width:0;flex:1">
         <span class="sidebar-logo-text">Zerf</span>
         {#if $settings?.organization_name}
-          <span style="font-size:10px;color:var(--nav-text-muted);word-break:break-word">{$settings.organization_name}</span>
+          <span style="font-size:12px;color:var(--nav-text-muted);word-break:break-word">{$settings.organization_name}</span>
         {/if}
       </div>
       <div class="zf-bell-wrapper" style="margin-left:auto;position:relative">
@@ -309,7 +306,7 @@
           on:click|stopPropagation={toggleBell}
           title={$t("Notifications")}
         >
-          <Icon name="Bell" size={15} />
+          <Icon name="Bell" size={17} />
           {#if $notificationsUnread > 0}
             <span
               style="position:absolute;top:-2px;right:-2px;background:var(--danger-text);color:white;border-radius:10px;font-size:9px;padding:1px 4px;line-height:1;min-width:14px;text-align:center;font-weight:400"

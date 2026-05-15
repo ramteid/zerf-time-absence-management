@@ -92,8 +92,8 @@
 <div class="top-bar">
   <div class="top-bar-title">
     <h1>{$t("Account")}</h1>
+    <div class="top-bar-subtitle">{$t("Your profile & preferences")}</div>
   </div>
-  <div class="top-bar-subtitle">{$t("Your profile & preferences")}</div>
 </div>
 
 <div class="content-area" style="max-width:640px">

@@ -374,20 +374,17 @@ body {
 }
 
 .sidebar-logo-icon {
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  background: var(--accent);
+  width: 38px;
+  height: 38px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
 }
 
 .sidebar-logo-text {
   color: var(--nav-text-active);
   font-weight: 400;
-  font-size: 16px;
+  font-size: 20px;
   letter-spacing: -0.02em;
 }
 
@@ -472,8 +469,6 @@ body {
 }
 
 .top-bar-subtitle {
-  width: 100%;
-  order: 3;
   font-size: 13px;
   color: var(--text-tertiary);
 }
@@ -1192,14 +1187,11 @@ dialog footer {
   }
 
   .mobile-title-bar-icon {
-    width: 28px;
-    height: 28px;
-    border-radius: 7px;
-    background: var(--accent);
+    width: 34px;
+    height: 34px;
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #fff;
     flex-shrink: 0;
   }
 
@@ -1213,12 +1205,12 @@ dialog footer {
   .mobile-title-bar-appname {
     color: var(--nav-text-active);
     font-weight: 400;
-    font-size: 15px;
+    font-size: 17px;
     letter-spacing: -0.02em;
   }
 
   .mobile-title-bar-org {
-    font-size: 10px;
+    font-size: 11px;
     color: var(--nav-text-muted);
     white-space: nowrap;
     overflow: hidden;

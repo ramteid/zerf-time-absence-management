@@ -37,7 +37,7 @@
   let requestDetailDlg;
 
   // Absence slider: browse approved absences week by week (leads/admins only).
-  let absenceSliderWeek = "";
+  let absenceSliderWeek = isoDate(monday(appTodayDate()));
   let absenceSliderTeamData = [];
   let absenceSliderIsLeadView = false;
   let absenceSliderDirection = 1;
@@ -58,9 +58,6 @@
   // clampFromToUserStart) can run before the reactive declaration is first evaluated.
   let today = appTodayDate();
   $: today = appTodayDate($settings?.timezone);
-  $: if (!absenceSliderWeek) {
-    absenceSliderWeek = isoDate(monday(today));
-  }
 
   function daysAgo(numberOfDays) {
     return isoDate(addDays(today, -numberOfDays));
@@ -849,13 +846,13 @@
 <div class="top-bar">
   <div class="top-bar-title">
     <h1>{$t("Dashboard")}</h1>
-  </div>
-  <div class="top-bar-subtitle">
-    {#if $currentUser?.permissions?.can_approve}
-      {$t("Approve timesheets & manage requests")}
-    {:else}
-      {$t("Your overview")}
-    {/if}
+    <div class="top-bar-subtitle">
+      {#if $currentUser?.permissions?.can_approve}
+        {$t("Approve timesheets & manage requests")}
+      {:else}
+        {$t("Your overview")}
+      {/if}
+    </div>
   </div>
 </div>
 
