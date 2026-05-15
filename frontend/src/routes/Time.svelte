@@ -453,15 +453,15 @@
 <div class="top-bar">
   <div class="top-bar-title">
     <h1>{$t("Time Entry")}</h1>
+    {#if weekFrom}
+      <div class="top-bar-subtitle">
+        {$t("Week {week}", { week: isoWeek(weekFrom) })}
+        {#if !isAssistantCurrentUser}
+          · {contractHours} {$t("contract")}
+        {/if}
+      </div>
+    {/if}
   </div>
-  {#if weekFrom}
-    <div class="top-bar-subtitle">
-      {$t("Week {week}", { week: isoWeek(weekFrom) })}
-      {#if !isAssistantCurrentUser}
-        · {contractHours} {$t("contract")}
-      {/if}
-    </div>
-  {/if}
   <div class="top-bar-actions time-top-bar-actions">
     {#if weekFrom}
       <div class="zf-nav-slider time-week-picker">

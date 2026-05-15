@@ -889,13 +889,13 @@
 <div class="top-bar">
   <div class="top-bar-title">
     <h1>{$t("Reports")}</h1>
-  </div>
-  <div class="top-bar-subtitle">
-    {#if $currentUser?.permissions?.can_view_team_reports}
-      {$t("Team hours overview")}
-    {:else}
-      {$t("Your hours overview")}
-    {/if}
+    <div class="top-bar-subtitle">
+      {#if $currentUser?.permissions?.can_view_team_reports}
+        {$t("Team hours overview")}
+      {:else}
+        {$t("Your hours overview")}
+      {/if}
+    </div>
   </div>
 </div>
 
