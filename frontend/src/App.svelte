@@ -239,7 +239,7 @@
     "/account": Account,
     "/dashboard": Dashboard,
     "/reports": Reports,
-    "/admin": AdminUsers,
+    "/admin": AdminSettings,
     "/admin/users": AdminUsers,
     "/admin/categories": AdminCategories,
     "/admin/holidays": AdminHolidays,
@@ -253,7 +253,7 @@
     "/dashboard": (user) => !!user?.permissions?.can_view_dashboard,
     "/reports": (user) => !!user?.permissions?.can_view_reports,
     "/team-settings": (user) => !!user?.permissions?.can_manage_team_settings,
-    "/admin": (user) => !!user?.permissions?.can_manage_users,
+    "/admin": (user) => !!user?.permissions?.can_manage_settings,
     "/admin/users": (user) => !!user?.permissions?.can_manage_users,
     "/admin/categories": (user) => !!user?.permissions?.can_manage_categories,
     "/admin/holidays": (user) => !!user?.permissions?.can_manage_holidays,
@@ -268,7 +268,10 @@
     : $t("Time tracking");
   $: isAdmin =
     pathname.startsWith("/admin") &&
-    !!$currentUser?.permissions?.can_manage_users;
+    !!(
+      $currentUser?.permissions?.can_manage_users ||
+      $currentUser?.permissions?.can_manage_settings
+    );
 
   function preferredHome(user) {
     const dashboardAvailable = (user?.nav || []).some(

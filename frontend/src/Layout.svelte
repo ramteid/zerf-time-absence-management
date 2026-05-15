@@ -17,7 +17,7 @@
     markNotificationRead,
     refreshNotifications,
   } from "./notificationService.js";
-  import { t, roleLabel } from "./i18n.js";
+  import { t, language, roleLabel, renderNotification } from "./i18n.js";
   import { fmtDate, fmtDateTime } from "./format.js";
   import Icon from "./Icons.svelte";
   import AppLogo from "./AppLogo.svelte";
@@ -565,6 +565,7 @@
         </div>
       {:else}
         {#each $notifications as n}
+          {@const rendered = renderNotification(n, $language)}
           <div
             on:click={() => openNotification(n)}
             on:keydown={(e) => {
@@ -579,12 +580,12 @@
               ? 'transparent'
               : 'var(--accent-soft)'}"
           >
-            <div style="font-size:12.5px;font-weight:500">{n.title}</div>
-            {#if n.body}
+            <div style="font-size:12.5px;font-weight:500">{rendered.title}</div>
+            {#if rendered.body}
               <div
                 style="font-size:11.5px;color:var(--text-secondary);margin-top:2px;line-height:1.4"
               >
-                {n.body}
+                {rendered.body}
               </div>
             {/if}
             <div

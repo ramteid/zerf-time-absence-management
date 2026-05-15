@@ -392,12 +392,7 @@
     return formatHours(week.total_min / 60);
   }
 
-  function weekEntryTypeSummary(week) {
-    const types = Array.from(
-      new Set((week?.entries || []).map((entry) => categoryName(entry.category_id))),
-    );
-    return types.join(", ");
-  }
+
 
   function categoryName(categoryId) {
     const category = $categories.find((item) => item.id === categoryId);
@@ -700,7 +695,7 @@
     if (!ids.length) return;
     const confirmed = await confirmDialog(
       $t("Approve all?"),
-      $t("Approve all {n} submissions across all users?", { n: pendingWeeks.length }),
+      $t("Approve all {n} weeks across all users?", { n: pendingWeeks.length }),
       { confirm: $t("Approve all") },
     );
     if (!confirmed) return;
@@ -848,7 +843,7 @@
     <h1>{$t("Dashboard")}</h1>
     <div class="top-bar-subtitle">
       {#if $currentUser?.permissions?.can_approve}
-        {$t("Approve timesheets & manage requests")}
+        {$t("Approve weeks & manage requests")}
       {:else}
         {$t("Your overview")}
       {/if}
@@ -943,7 +938,7 @@
       <div class="stat-cards">
 
         <div class="zf-card stat-card">
-          <div class="stat-card-label">{$t("Pending Timesheets")}</div>
+          <div class="stat-card-label">{$t("Pending Weeks")}</div>
           <div
             class="stat-card-value tab-num"
             style="color:{pendingWeeks.length > 0 ? 'var(--danger-text)' : 'var(--success-text)'}"
@@ -992,7 +987,7 @@
       >
         <div class="card-header">
           <Icon name="FileText" size={15} sw={1.5} />
-          <span class="card-header-title">{$t("Timesheet Approvals")}</span>
+          <span class="card-header-title">{$t("Week Approvals")}</span>
           {#if pendingWeeks.length + pendingReopens.length + visibleChangeRequests.length > 0}
             <span class="zf-chip zf-chip-pending" style="font-size:10.5px">
               {pendingWeeks.length + pendingReopens.length + visibleChangeRequests.length}
@@ -1031,12 +1026,6 @@
                 {$t("Week {week}", { week: isoWeek(parseDate(week.week_start)) })} ·
                 {fmtDateShort(week.week_start)} - {fmtDateShort(week.week_end)} ·
                 {weekHours(week)}
-              </div>
-              <div style="font-size:11px;color:var(--text-tertiary)">
-                {week.entries.length} {$t("Days")}
-              </div>
-              <div style="font-size:11px;color:var(--text-tertiary)">
-                {$t("Type")}: {weekEntryTypeSummary(week)}
               </div>
             </div>
             <div style="display:flex;gap:4px">
@@ -1244,7 +1233,7 @@
     </div>
 
     <!-- "Who is absent" team calendar widget -->
-    <div class="zf-card" style="margin-top:16px">
+    <div class="zf-card" style="margin-top:16px;overflow:hidden">
       <div class="card-header">
         <Icon name="Users" size={15} sw={1.5} />
         <span class="card-header-title">{$t("Who is absent")}</span>
@@ -1594,7 +1583,7 @@
   <dialog bind:this={weekDialog} on:close={closeWeekDialog}>
     <header>
       <span style="flex:1">
-        {$t("Timesheet Approvals")} · {userName(selectedWeek.user_id, users)}
+        {$t("Week Approvals")} · {userName(selectedWeek.user_id, users)}
       </span>
       <button class="zf-btn-icon-sm zf-btn-ghost" on:click={closeWeekDialog}>
         <Icon name="X" size={16} />
@@ -1607,30 +1596,7 @@
       </div>
 
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <span class="zf-chip zf-chip-submitted">
-          {selectedWeek.entries.length} {$t("Days")}
-        </span>
         <span class="zf-chip zf-chip-approved">{weekHours(selectedWeek)}</span>
-      </div>
-
-      <div class="week-entry-list">
-        {#each selectedWeek.entries as entry (entry.id)}
-          <div class="week-entry-row">
-            <div style="font-size:12.5px;font-weight:500">
-              {fmtDateShort(entry.entry_date)}
-            </div>
-            <div class="tab-num" style="font-size:12px;color:var(--text-secondary)">
-              {entry.start_time.slice(0, 5)} - {entry.end_time.slice(0, 5)} ·
-              {formatHours(entryMinutes(entry) / 60)}
-            </div>
-            <div style="font-size:11.5px;color:var(--text-tertiary)">
-              {$t("Type")}: {categoryName(entry.category_id)}
-            </div>
-            {#if entry.comment}
-              <div style="font-size:11.5px;color:var(--text-tertiary)">{entry.comment}</div>
-            {/if}
-          </div>
-        {/each}
       </div>
     </div>
     <footer>

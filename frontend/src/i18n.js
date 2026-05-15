@@ -207,6 +207,32 @@ const TRANSLATIONS = {
     "Enable approval reminders": "Enable approval reminders",
     "When enabled, approvers are reminded by email about pending approvals every Monday.":
       "When enabled, approvers are reminded by email about pending approvals every Monday.",
+    // --- In-app notification labels (rendered from notification.kind) ---
+    "notif:timesheet_submitted": "New timesheet submission",
+    "notif:timesheet_approved": "Week approved",
+    "notif:timesheet_rejected": "Week rejected",
+    "notif:submission_reminder": "Weeks not yet submitted",
+    "notif:approval_reminder": "Pending approvals",
+    "notif:absence_requested": "New absence request",
+    "notif:absence_updated": "Absence request updated",
+    "notif:absence_auto_approved_notice": "Sick leave recorded",
+    "notif:absence_approved": "Absence approved",
+    "notif:absence_rejected": "Absence rejected",
+    "notif:absence_revoked": "Absence revoked",
+    "notif:absence_cancelled": "Absence request withdrawn",
+    "notif:absence_cancellation_requested": "Absence cancellation requested",
+    "notif:absence_cancellation_approved": "Absence cancellation approved",
+    "notif:absence_cancellation_rejected": "Absence cancellation rejected",
+    "notif:change_request_created": "New change request",
+    "notif:change_request_approved": "Change request approved",
+    "notif:change_request_rejected": "Change request rejected",
+    "notif:reopen_auto_approved": "Week reopened for editing",
+    "notif:reopen_auto_approved_notice": "Week reopen auto-approved",
+    "notif:reopen_request_created": "New week reopen request",
+    "notif:reopen_approved": "Week reopen approved",
+    "notif:reopen_approved_by_admin": "Week reopen approved by admin",
+    "notif:reopen_rejected": "Week reopen rejected",
+    "notif:reopen_rejected_by_admin": "Week reopen rejected by admin",
   },
   de: {
     "Loading...": "Wird geladen...",
@@ -484,17 +510,17 @@ const TRANSLATIONS = {
     "Reject this cancellation request? The absence will remain approved.":
       "Diese Stornierungsanfrage ablehnen? Die Abwesenheit bleibt genehmigt.",
     Cancellation: "Stornierung",
-    "Approve timesheets & manage requests":
-      "Stundenzettel genehmigen & Anträge verwalten",
+    "Approve weeks & manage requests":
+      "Wochen genehmigen & Anträge verwalten",
     "Your overview": "Deine Übersicht",
     "Your hours overview": "Deine Stundenübersicht",
-    "Pending Timesheets": "Ausstehende Stundenzettel",
+    "Pending Weeks": "Ausstehende Wochen",
     "Absence Requests": "Abwesenheitsanträge",
     "Team Members": "Teammitglieder",
-    "Timesheet Approvals": "Stundenzettel-Genehmigungen",
+    "Week Approvals": "Wochen-Genehmigungen",
     "Approve All": "Alle genehmigen",
     "Approve all?": "Alle genehmigen?",
-    "Approve all {n} submissions across all users?":
+    "Approve all {n} weeks across all users?":
       "Alle {n} Wochen aller Benutzer genehmigen?",
     "All caught up!": "Alles erledigt!",
     "No pending requests": "Keine ausstehenden Anträge",
@@ -1041,6 +1067,36 @@ const TRANSLATIONS = {
       "Änderungen nicht verfügbar für diese Anfrage.",
     Empty: "Leer",
     Week: "Woche",
+    // --- In-app notification labels (rendered from notification.kind) ---
+    "notif:timesheet_submitted": "Neue Wocheneinreichung",
+    "notif:timesheet_approved": "Woche genehmigt",
+    "notif:timesheet_rejected": "Woche abgelehnt",
+    "notif:submission_reminder": "Arbeitszeiten noch nicht eingereicht",
+    "notif:approval_reminder": "Offene Genehmigungen",
+    "notif:absence_requested": "Neue Abwesenheitsanfrage",
+    "notif:absence_updated": "Abwesenheitsanfrage aktualisiert",
+    "notif:absence_auto_approved_notice": "Krankmeldung erfasst",
+    "notif:absence_approved": "Abwesenheit genehmigt",
+    "notif:absence_rejected": "Abwesenheit abgelehnt",
+    "notif:absence_revoked": "Abwesenheit widerrufen",
+    "notif:absence_cancelled": "Abwesenheitsantrag zurückgezogen",
+    "notif:absence_cancellation_requested":
+      "Stornierungsanfrage für Abwesenheit",
+    "notif:absence_cancellation_approved": "Stornierung genehmigt",
+    "notif:absence_cancellation_rejected": "Stornierung abgelehnt",
+    "notif:change_request_created": "Neue Änderungsanfrage",
+    "notif:change_request_approved": "Änderungsanfrage genehmigt",
+    "notif:change_request_rejected": "Änderungsanfrage abgelehnt",
+    "notif:reopen_auto_approved": "Woche zur Bearbeitung freigegeben",
+    "notif:reopen_auto_approved_notice":
+      "Wochenfreigabe automatisch genehmigt",
+    "notif:reopen_request_created": "Neue Anfrage zur Wochenfreigabe",
+    "notif:reopen_approved": "Wochenfreigabe genehmigt",
+    "notif:reopen_approved_by_admin":
+      "Wochenfreigabe durch Admin genehmigt",
+    "notif:reopen_rejected": "Wochenfreigabe abgelehnt",
+    "notif:reopen_rejected_by_admin":
+      "Wochenfreigabe durch Admin abgelehnt",
   },
 };
 
@@ -1086,6 +1142,22 @@ function interpolate(template, params) {
 export function translate(lang, key, params = {}) {
   const tpl = TRANSLATIONS[lang]?.[key] ?? key;
   return interpolate(tpl, params);
+}
+
+/**
+ * Render in-app notification title from the notification kind.
+ * Returns a translated label if a frontend template exists for this kind,
+ * otherwise falls back to the pre-rendered title/body from the backend.
+ */
+export function renderNotification(notification, lang) {
+  const key = `notif:${notification.kind}`;
+  const label =
+    TRANSLATIONS[lang]?.[key] ?? TRANSLATIONS[DEFAULT_LANGUAGE]?.[key];
+  if (label) {
+    return { title: label, body: null };
+  }
+  // Fallback for unknown kinds or old notifications.
+  return { title: notification.title, body: notification.body };
 }
 
 // --- Absence kind labels ---

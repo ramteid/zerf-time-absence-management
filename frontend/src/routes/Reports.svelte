@@ -80,6 +80,14 @@
     ($currentUser?.id === Number(reportUserId) ? $currentUser : null);
   $: selectedUserIsAssistant = isAssistantUser(selectedReportUser);
   $: selectedUserHasFlextime = hasFlextimeAccount(selectedReportUser);
+  // Derive the earliest selectable month from the employee's start date.
+  $: reportMinMonth = selectedReportUser?.start_date
+    ? selectedReportUser.start_date.slice(0, 7)
+    : "";
+  // Clamp selected month forward when switching to an employee with a later start date.
+  $: if (reportMinMonth && reportMonth < reportMinMonth) {
+    reportMonth = reportMinMonth;
+  }
 
   function userById(userId) {
     return (
@@ -942,7 +950,7 @@
       {/if}
       <div>
         <label class="zf-label" for="report-month">{$t("Month")}</label>
-        <DatePicker id="report-month" mode="month" bind:value={reportMonth} />
+        <DatePicker id="report-month" mode="month" bind:value={reportMonth} min={reportMinMonth} />
       </div>
     </div>
 

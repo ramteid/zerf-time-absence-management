@@ -486,7 +486,7 @@ Users sometimes see that available days do not increase immediately after reques
 
 ### Employee receives notifications when
 
-- time entry is approved or rejected,
+- a week is approved or rejected (one notification per action, identifying the affected weeks),
 - absence is approved or rejected,
 - absence cancellation is approved or rejected,
 - change request is approved or rejected,
@@ -497,7 +497,7 @@ If an admin approves or rejects their own item, Zerf records the audit event but
 
 ### Approver receives notifications when
 
-- a time entry is submitted (whether crediting or non-crediting),
+- a week is submitted (one notification identifying the submitted weeks),
 - an absence request is submitted,
 - a change request is submitted,
 - a reopen request is submitted,
@@ -764,7 +764,7 @@ Rules:
 - Once submitted, entries are locked for direct editing.
 
 After submission, all your explicitly assigned approvers receive a notification
-listing the number of weeks affected.
+identifying the submitted weeks by their week labels.
 
 ### Requesting a change (single entry)
 
@@ -936,11 +936,11 @@ approve or reject their own items.
 **Admin-subject rule:** Non-admin leads cannot act on items submitted by admin
 users. Admin-subject requests require an admin reviewer.
 
-### Reviewing time entries (batch)
+### Reviewing time entries (week level)
 
 Approve or reject submitted time entries. All approval and rejection operates
-at the batch level (week as the reviewable unit). There is no single-entry
-approve/reject endpoint.
+at the week level. The week is the primary reviewable unit; individual entries
+within a week are handled in the background.
 
 - You must be a team lead or admin.
 - Up to 500 entries per batch.
@@ -952,9 +952,9 @@ approve/reject endpoint.
 - Non-admin leads cannot approve/reject their own entries (those entries are
   silently skipped). Admins may approve their own entries.
 - Non-admin leads can only act on their direct reports' entries.
-- Employees receive one consolidated notification per batch, listing the
-  number of weeks affected. Self-reviewed entries by admins receive in-app-only
-  notifications (no email).
+- Employees receive one notification per approval or rejection, identifying
+  the affected weeks by their labels. Self-reviewed entries by admins receive
+  in-app-only notifications (no email).
 
 ### Reviewing an absence
 
