@@ -324,6 +324,20 @@ async fn users_full_workflow() {
             detail["workdays_per_week"], 7,
             "assistants must be stored with workdays_per_week=7"
         );
+
+        // Switching FROM assistant TO employee without providing workdays_per_week must
+        // reset it to 5 (the default), not leave the sentinel 7 via COALESCE.
+        let (st, detail) = admin
+            .put(
+                &format!("/api/v1/users/{assistant_id}"),
+                &json!({"role": "employee", "weekly_hours": 40.0, "approver_ids": [1]}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "role switch assistant → employee succeeds");
+        assert_eq!(
+            detail["workdays_per_week"], 5,
+            "workdays_per_week must be reset to 5 when switching away from assistant"
+        );
     }
 
     // -- Non-assistant users are restricted to 1-5 workdays per week --

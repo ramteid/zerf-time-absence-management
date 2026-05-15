@@ -1027,29 +1027,31 @@
         {/if}
 
         <!-- Submission status with the same wording as on the dashboard -->
-        <div class="zf-card stat-card">
-          <div class="stat-card-label stat-card-label-help">
-            <span>{$t("Submissions")}</span>
-            <button
-              class="zf-btn-icon-sm zf-btn-ghost"
-              title={$t("help_submission_status")}
-              on:click={() => toggleHelp("approvals")}
-              style="color:var(--text-tertiary);font-size:12px;cursor:help"
+        {#if !selectedUserIsAssistant}
+          <div class="zf-card stat-card">
+            <div class="stat-card-label stat-card-label-help">
+              <span>{$t("Submissions")}</span>
+              <button
+                class="zf-btn-icon-sm zf-btn-ghost"
+                title={$t("help_submission_status")}
+                on:click={() => toggleHelp("approvals")}
+                style="color:var(--text-tertiary);font-size:12px;cursor:help"
+              >
+                <Icon name="Info" size={12} />
+              </button>
+            </div>
+            <div
+              class="stat-card-value tab-num"
+              style="color:{reportData.monthReport.weeks_all_submitted
+                ? 'var(--success-text)'
+                : 'var(--warning-text)'}"
             >
-              <Icon name="Info" size={12} />
-            </button>
+              {reportData.monthReport.weeks_all_submitted
+                ? $t("All submitted")
+                : $t("Weeks missing")}
+            </div>
           </div>
-          <div
-            class="stat-card-value tab-num"
-            style="color:{reportData.monthReport.weeks_all_submitted
-              ? 'var(--success-text)'
-              : 'var(--warning-text)'}"
-          >
-            {reportData.monthReport.weeks_all_submitted
-              ? $t("All submitted")
-              : $t("Weeks missing")}
-          </div>
-        </div>
+        {/if}
       </div>
 
       {#if activeHelp === "logged"}
@@ -1059,7 +1061,7 @@
           {$t("help_logged")}
         </div>
       {/if}
-      {#if activeHelp === "approvals"}
+      {#if activeHelp === "approvals" && !selectedUserIsAssistant}
         <div
           style="font-size:12px;color:var(--text-tertiary);margin-top:-6px;margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)"
         >

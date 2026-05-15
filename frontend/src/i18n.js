@@ -465,6 +465,8 @@ const TRANSLATIONS = {
     Draft: "Entwurf",
     Submitted: "Eingereicht",
     Rejected: "Abgelehnt",
+    "Waiting for approval": "Warten auf Genehmigung",
+    "Waiting for release": "Warten auf Freigabe",
     Partial: "Teilweise",
     Cancelled: "Storniert",
     "Cancellation pending": "Stornierung beantragt",

@@ -3,6 +3,7 @@
   import { currentUser, settings, theme, toast } from "../stores.js";
   import { t, roleLabel, formatHours } from "../i18n.js";
   import { fmtDate, appTodayDate } from "../format.js";
+  import { isAssistantUser } from "../rolePolicy.js";
 
   let cur = "",
     nw = "",
@@ -11,6 +12,7 @@
   let savingTheme = false;
   let leaveDaysThisYear = 0;
   let leaveDaysNextYear = 0;
+  $: isAssistantCurrentUser = isAssistantUser($currentUser);
   $: thisYear = appTodayDate($settings?.timezone).getFullYear();
   $: nextYear = thisYear + 1;
 
@@ -152,18 +154,20 @@
           style="color:var(--text-secondary)"
         />
       </div>
-      <div>
-        <label class="zf-label" for="account-workdays-per-week"
-          >{$t("Workdays per week")}</label
-        >
-        <input
-          id="account-workdays-per-week"
-          class="zf-input"
-          value={$currentUser.workdays_per_week}
-          readonly
-          style="color:var(--text-secondary)"
-        />
-      </div>
+      {#if !isAssistantCurrentUser}
+        <div>
+          <label class="zf-label" for="account-workdays-per-week"
+            >{$t("Workdays per week")}</label
+          >
+          <input
+            id="account-workdays-per-week"
+            class="zf-input"
+            value={$currentUser.workdays_per_week}
+            readonly
+            style="color:var(--text-secondary)"
+          />
+        </div>
+      {/if}
       <div>
         <label class="zf-label" for="account-annual-leave-this"
           >{$t("Annual leave days")} {thisYear}</label

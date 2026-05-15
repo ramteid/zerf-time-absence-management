@@ -17,7 +17,7 @@
   let last_name = template.last_name || "";
   let role = template.role || "employee";
   let weekly_hours = template.weekly_hours ?? 39;
-  let workdays_per_week = template.workdays_per_week ?? 5;
+  let workdays_per_week = Math.min(template.workdays_per_week ?? 5, 5);
   $: _thisYear = appTodayDate($settings?.timezone).getFullYear();
   $: _nextYear = _thisYear + 1;
   // Leave days — two explicit fields (current year + next year)
@@ -146,11 +146,8 @@
       error = $t("Invalid date.");
       return;
     }
-    if (
-      Number(workdays_per_week) < 1 ||
-      Number(workdays_per_week) > 7
-    ) {
-      error = $t("Workdays per week must be between 1 and 7.");
+    if (!isAssistantRole && (Number(workdays_per_week) < 1 || Number(workdays_per_week) > 5)) {
+      error = $t("Workdays per week must be between 1 and 5.");
       return;
     }
     try {
@@ -164,7 +161,7 @@
         last_name,
         role: normalizedRole,
         weekly_hours: normalizedWeeklyHours,
-        workdays_per_week: Number(workdays_per_week),
+        ...(isAssistantRole ? {} : { workdays_per_week: Number(workdays_per_week) }),
         leave_days_current_year: Number(leave_days_current_year),
         leave_days_next_year: Number(leave_days_next_year),
         start_date,
@@ -339,8 +336,9 @@
             type="number"
             step="1"
             min="1"
-            max="7"
+            max="5"
             bind:value={workdays_per_week}
+            disabled={isAssistantRole}
           />
         </div>
       </div>

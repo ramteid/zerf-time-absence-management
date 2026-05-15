@@ -324,46 +324,47 @@ The `Submission status` tile shows whether all required past weeks have been sub
 
 ### How completeness is determined
 
-A week is considered **complete** (ready for flextime and monthly reports) when every required working day is accounted for by either:
+Completeness is checked at the **week level**, not the day level. It does not
+matter how many days you booked or whether you reached your weekly target hours.
+What counts is that you submitted the week.
 
-- At least one submitted or approved entry (crediting or non-crediting), **or**
-- An approved absence (vacation, sick leave, etc.)
+A week is considered **complete** when:
 
-Flextime reduction is included here: although it does not remove the daily
-target, it blocks time entry creation, so the day is treated as covered for
-submission completeness purposes.
+- At least one entry in the week is submitted or approved (crediting or
+  non-crediting), **and** no entry in the week is still in draft or rejected
+  state, **or**
+- The week has no entries at all and every contract workday is excused by an
+  approved absence, a public holiday, or falls before your contract start date.
+  (This covers e.g. full-vacation weeks.)
 
 For users with role `assistant`, past-week completeness is always treated as
 complete.
 
 A week is considered **incomplete** when:
 
-- Any required working day has entries that are still in draft status, **or**
-- Any required working day has entries that were rejected, **or**
-- Any required working day has neither entries nor an absence.
+- Any entry anywhere in the week is still in draft or rejected state (the week
+  has not been cleanly submitted), **or**
+- The week has no entries and at least one contract workday is not excused.
 
 ### Important: non-crediting entries affect completeness
 
-Non-crediting entries fully participate in the completeness check:
-
-- If you have a non-crediting entry in draft on Wednesday, your entire week remains **incomplete**.
-- You must submit the whole week, including the non-crediting entry, for the week to be marked complete.
-- This ensures nothing slips through the approval workflow.
-
-Even though non-crediting hours do not count toward flextime, their submission status is tracked because the submission workflow itself is comprehensive for all entries.
+Non-crediting entries count toward the submission check just like crediting
+entries. If you have a non-crediting entry in draft, your week remains
+**incomplete** until you submit it.
 
 **Example:**
 
-- Monday-Friday: all crediting work entries submitted/approved
+- Monday–Friday: all crediting work entries submitted/approved
 - Wednesday: one team meeting (non-crediting) still in draft
-- Week status: **Incomplete** (Wednesday's meeting must be submitted)
+- Week status: **Incomplete** — Wednesday's draft blocks the whole week
 - Once you submit Wednesday's meeting, the entire week becomes **Complete**
-- Flextime calculation then includes Mon-Tue, Thu-Fri crediting entries only (Wed meeting is still not counted in flextime)
+- Flextime calculation then includes Mon–Tue, Thu–Fri crediting entries only
+  (the non-crediting meeting is not counted in flextime regardless)
 
 States:
 
-- `All submitted` (green): all required days in elapsed weeks are covered by submitted or approved entries.
-- `Weeks missing` (amber): at least one elapsed week has missing submissions.
+- `All submitted` (green): every elapsed week has been submitted (at least one entry submitted/approved, no drafts or rejections remaining).
+- `Weeks missing` (amber): at least one elapsed week has missing or unfinished submissions.
 
 ## Vacation balance and carryover logic
 
