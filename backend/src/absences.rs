@@ -436,7 +436,7 @@ async fn validate_absence_has_workday(
         .await?;
     if !has_effective_workday(start_date, end_date, workdays_per_week, &holidays) {
         return Err(AppError::BadRequest(
-            "Absence must include at least one workday.".into(),
+            "Absence must include at least one effective workday.".into(),
         ));
     }
     Ok(())
