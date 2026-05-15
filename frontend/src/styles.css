@@ -543,7 +543,7 @@ body {
 
 .stat-card-label-help .zf-btn-icon-sm {
   flex: 0 0 auto;
-  margin: 0;
+  margin: -6px 0;
 }
 
 .stat-card-value {
