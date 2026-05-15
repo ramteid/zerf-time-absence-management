@@ -143,7 +143,7 @@ impl UserDb {
 
     pub async fn count_active_admins(&self) -> AppResult<i64> {
         Ok(
-            sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE active=TRUE AND role='admin'")
+            sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE active=TRUE AND lower(trim(role))='admin'")
                 .fetch_one(&self.pool)
                 .await?,
         )
@@ -153,7 +153,7 @@ impl UserDb {
         Ok(sqlx::query_scalar(
             "SELECT COUNT(*) FROM user_approvers \
              WHERE approver_id=$1 \
-             AND user_id IN (SELECT id FROM users WHERE active=TRUE AND role='admin')",
+             AND user_id IN (SELECT id FROM users WHERE active=TRUE AND lower(trim(role))='admin')",
         )
         .bind(user_id)
         .fetch_one(&self.pool)
@@ -305,7 +305,9 @@ impl UserDb {
             "SELECT id, email, first_name, last_name, role, \
              allow_reopen_without_approval FROM users \
              WHERE active=TRUE \
-             AND (id=$1 OR id IN (SELECT ua.user_id FROM user_approvers ua WHERE ua.approver_id=$1)) \
+             AND (id=$1 OR id IN (SELECT ua.user_id FROM user_approvers ua \
+                                  JOIN users u ON u.id=ua.user_id \
+                                  WHERE ua.approver_id=$1 AND u.active=TRUE AND u.role != 'admin')) \
              ORDER BY last_name, first_name",
         )
         .bind(lead_id)
@@ -640,7 +642,7 @@ impl UserDb {
 
     pub async fn count_active_admins_tx(tx: &mut sqlx::PgConnection) -> AppResult<i64> {
         Ok(
-            sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE active=TRUE AND role='admin'")
+            sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE active=TRUE AND lower(trim(role))='admin'")
                 .fetch_one(tx)
                 .await?,
         )

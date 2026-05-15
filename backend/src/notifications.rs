@@ -22,6 +22,38 @@ pub fn broadcaster() -> NotificationBroadcaster {
     crate::repository::notifications::new_broadcaster()
 }
 
+/// Send notification email best-effort (non-fatal on failure).
+async fn send_notification_email(
+    state: &AppState,
+    language: &Language,
+    user_id: i64,
+    subject: String,
+    body: &str,
+) {
+    if let Some(email) = state.db.notifications.get_user_email(user_id).await {
+        let smtp = state
+            .db
+            .settings
+            .load_smtp_config()
+            .await
+            .map(std::sync::Arc::new);
+        let timezone = crate::settings::load_setting(
+            &state.pool,
+            crate::settings::TIMEZONE_KEY,
+            crate::settings::DEFAULT_TIMEZONE,
+        )
+        .await
+        .unwrap_or_else(|_| crate::settings::DEFAULT_TIMEZONE.to_string());
+        let timestamp =
+            crate::i18n::format_datetime_in_timezone(language, chrono::Utc::now(), &timezone);
+        let email_body = match &state.cfg.public_url {
+            Some(url) => format!("{body}\n\n{timestamp}\n\n{url}"),
+            None => format!("{body}\n\n{timestamp}"),
+        };
+        crate::email::send_async(smtp, email, subject, email_body);
+    }
+}
+
 /// Insert a notification row. `email` is sent best-effort via SMTP if
 /// configured. Both operations are non-fatal: failures are logged but not
 /// propagated.
@@ -46,32 +78,10 @@ pub async fn create(
         tracing::warn!(target:"zerf::notifications", "insert failed: {e}");
         return;
     }
-    // Resolve recipient email and dispatch SMTP best-effort.
-    if let Some(email) = state.db.notifications.get_user_email(user_id).await {
-        let smtp = state
-            .db
-            .settings
-            .load_smtp_config()
-            .await
-            .map(std::sync::Arc::new);
-        let language = crate::i18n::load_ui_language(&state.pool)
-            .await
-            .unwrap_or_default();
-        let timezone = crate::settings::load_setting(
-            &state.pool,
-            crate::settings::TIMEZONE_KEY,
-            crate::settings::DEFAULT_TIMEZONE,
-        )
+    let language = crate::i18n::load_ui_language(&state.pool)
         .await
-        .unwrap_or_else(|_| crate::settings::DEFAULT_TIMEZONE.to_string());
-        let timestamp =
-            crate::i18n::format_datetime_in_timezone(&language, chrono::Utc::now(), &timezone);
-        let email_body = match &state.cfg.public_url {
-            Some(url) => format!("{body}\n\n{timestamp}\n\n{url}"),
-            None => format!("{body}\n\n{timestamp}"),
-        };
-        crate::email::send_async(smtp, email, title.to_string(), email_body);
-    }
+        .unwrap_or_default();
+    send_notification_email(state, &language, user_id, title.to_string(), body).await;
 }
 
 /// Insert an in-app-only notification row, skipping the email sidecar.
@@ -137,6 +147,40 @@ pub async fn create_translated(
         reference_id,
     )
     .await;
+}
+
+/// Create a notification storing `frontend_body` in the DB (for frontend
+/// rendering from structured data) while sending the email with the
+/// i18n-rendered body. When `send_email` is false, no email is sent
+/// (used for self-notifications).
+#[allow(clippy::too_many_arguments)]
+pub async fn create_with_frontend_body(
+    state: &AppState,
+    language: &Language,
+    user_id: i64,
+    kind: &str,
+    title_key: &str,
+    email_body_key: &str,
+    params: Vec<(&'static str, String)>,
+    frontend_body: &str,
+    send_email: bool,
+    reference_type: Option<&str>,
+    reference_id: Option<i64>,
+) {
+    let title = crate::i18n::translate(language, title_key, &params);
+    if let Err(e) = state
+        .db
+        .notifications
+        .insert(user_id, kind, &title, frontend_body, reference_type, reference_id)
+        .await
+    {
+        tracing::warn!(target:"zerf::notifications", "insert failed: {e}");
+        return;
+    }
+    if send_email {
+        let email_body = crate::i18n::translate(language, email_body_key, &params);
+        send_notification_email(state, language, user_id, title, &email_body).await;
+    }
 }
 
 pub async fn list(

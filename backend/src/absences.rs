@@ -379,7 +379,7 @@ fn validate_absence(input: &NewAbsence) -> AppResult<&str> {
             "end_date must be >= start_date.".into(),
         ));
     }
-    if (input.end_date - input.start_date).num_days() > 365 {
+    if (input.end_date - input.start_date).num_days() >= 365 {
         return Err(AppError::BadRequest(
             "Absence range exceeds one year.".into(),
         ));
@@ -715,10 +715,7 @@ pub async fn cancel(
         return Err(AppError::Forbidden);
     }
 
-    // Pre-load notification context — identical for both cancel paths.
     let language = notification_language(&app_state.pool).await;
-    let approver_ids =
-        crate::auth::required_approval_recipient_ids(&app_state.pool, &requester).await?;
     let approver_params = vec![
         ("requester_name", requester.full_name()),
         ("kind", i18n::absence_kind_label(&language, &absence.kind)),
@@ -731,6 +728,9 @@ pub async fn cancel(
 
     match absence.status.as_str() {
         // Not yet reviewed: cancel immediately and notify approvers.
+        // Use non-failing recipient lookup — cancellation of a requested absence
+        // is a withdrawal, not a routed approval, so missing approvers must not
+        // block the operation.
         "requested" => {
             crate::repository::AbsenceDb::cancel_requested_tx(&mut transaction, absence_id).await?;
             transaction.commit().await?;
@@ -744,6 +744,8 @@ pub async fn cancel(
                 Some(serde_json::json!({"status": "cancelled"})),
             )
             .await;
+            let approver_ids =
+                crate::auth::approval_recipient_ids(&app_state.pool, &requester).await;
             notify_approvers(
                 &app_state,
                 &language,
@@ -756,7 +758,10 @@ pub async fn cancel(
             Ok(Json(serde_json::json!({"ok": true})))
         }
         // Approved absence: request cancellation approval from approvers.
+        // Requires at least one active approver because this needs a review decision.
         "approved" => {
+            let approver_ids =
+                crate::auth::required_approval_recipient_ids(&app_state.pool, &requester).await?;
             let rows =
                 crate::repository::AbsenceDb::request_cancellation_tx(&mut transaction, absence_id)
                     .await?;
@@ -874,23 +879,10 @@ pub async fn approve(
         "approved",
         "absences",
         absence_id,
-        before_json.clone(),
-        Some(after_json.clone()),
+        before_json,
+        Some(after_json),
     )
     .await;
-    if absence.user_id != requester.id {
-        // Also record in the absence owner's audit trail.
-        audit::log(
-            &app_state.pool,
-            requester.id,
-            "approved",
-            "absences",
-            absence_id,
-            before_json,
-            Some(after_json),
-        )
-        .await;
-    }
     let language = notification_language(&app_state.pool).await;
     let notify_params = vec![
         ("kind", i18n::absence_kind_label(&language, &absence.kind)),

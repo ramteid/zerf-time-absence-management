@@ -32,8 +32,8 @@
       toast($t("Settings saved."), "ok");
     } catch (e) {
       toast($t(e?.message || "Error"), "error");
-      row.allow_reopen_without_approval = !row.allow_reopen_without_approval;
-      rows = rows;
+      // Re-fetch server state to ensure UI is in sync.
+      await load();
     } finally {
       saving = { ...saving, [row.user_id]: false };
     }
@@ -89,7 +89,9 @@
               type="checkbox"
               bind:checked={row.allow_reopen_without_approval}
               on:change={() => toggle(row)}
-              disabled={saving[row.user_id]}
+              disabled={saving[row.user_id] ||
+                (!$currentUser?.permissions?.is_admin &&
+                  $currentUser?.id === row.user_id)}
             />
             <span class="team-setting-checkbox-label"
               >{$t("Auto-approve reopens")}</span

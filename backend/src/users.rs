@@ -77,24 +77,24 @@ pub async fn team_settings_list(
     if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let users = if requester.is_admin() {
-        app_state.db.users.find_all_active_ordered().await?
+    let rows = if requester.is_admin() {
+        app_state.db.users.team_settings_all().await?
     } else {
         app_state
             .db
             .users
-            .find_active_team_for_lead(requester.id)
+            .team_settings_for_lead(requester.id)
             .await?
     };
-    let settings_list: Vec<TeamSettings> = users
+    let settings_list: Vec<TeamSettings> = rows
         .into_iter()
-        .map(|u| TeamSettings {
-            user_id: u.id,
-            email: u.email,
-            first_name: u.first_name,
-            last_name: u.last_name,
-            role: u.role,
-            allow_reopen_without_approval: u.allow_reopen_without_approval,
+        .map(|(id, email, first_name, last_name, role, allow_reopen)| TeamSettings {
+            user_id: id,
+            email,
+            first_name,
+            last_name,
+            role,
+            allow_reopen_without_approval: allow_reopen,
         })
         .collect();
     Ok(Json(settings_list))
@@ -114,8 +114,13 @@ pub async fn team_settings_update(
     if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
-    // Team leads may only edit themselves or their direct reports.
-    if !requester.is_admin() && target_id != requester.id {
+    // Non-admin leads cannot modify their own reopen policy — only their
+    // own approver (a higher lead or admin) may grant them auto-approval.
+    if !requester.is_admin() && target_id == requester.id {
+        return Err(AppError::Forbidden);
+    }
+    // Non-admin leads may only edit their direct reports.
+    if !requester.is_admin() {
         let is_report = app_state
             .db
             .users
@@ -125,23 +130,30 @@ pub async fn team_settings_update(
             return Err(AppError::Forbidden);
         }
     }
-    // Target must be an active user.
-    let is_active = app_state.db.users.get_active_flag(target_id).await?;
-    if !is_active.unwrap_or(false) {
+    // Transactional read-then-write to prevent TOCTOU races.
+    let mut tx = app_state.pool.begin().await?;
+    let previous_value: Option<bool> = sqlx::query_scalar(
+        "SELECT allow_reopen_without_approval FROM users WHERE id=$1 AND active=TRUE FOR UPDATE",
+    )
+    .bind(target_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some(before) = previous_value else {
         return Err(AppError::BadRequest("User not found or inactive.".into()));
-    }
-    app_state
-        .db
-        .users
-        .update_reopen_policy(target_id, body.allow_reopen_without_approval)
+    };
+    sqlx::query("UPDATE users SET allow_reopen_without_approval=$1 WHERE id=$2")
+        .bind(body.allow_reopen_without_approval)
+        .bind(target_id)
+        .execute(&mut *tx)
         .await?;
+    tx.commit().await?;
     audit::log(
         &app_state.pool,
         requester.id,
         "team_settings_updated",
         "users",
         target_id,
-        None,
+        Some(serde_json::json!({"allow_reopen_without_approval": before})),
         Some(serde_json::json!({"allow_reopen_without_approval": body.allow_reopen_without_approval})),
     )
     .await;
@@ -404,6 +416,11 @@ pub async fn create(
     };
     let password_hash = hash_password(&temporary_password)?;
     let overtime_balance = body.overtime_start_balance_min.unwrap_or(0);
+    if !(-525_600..=525_600).contains(&overtime_balance) {
+        return Err(AppError::BadRequest(
+            "Invalid overtime_start_balance_min.".into(),
+        ));
+    }
     let mut transaction = app_state.pool.begin().await?;
     lock_user_graph(&mut transaction).await?;
     validate_approver_ids(&app_state, &body.role, None, &body.approver_ids).await?;
@@ -610,7 +627,7 @@ pub async fn update(
         )
         .await?;
     }
-    let removing_admin_rights = previous_user.role == "admin"
+    let removing_admin_rights = is_admin_role(&previous_user.role)
         && (normalized_role
             .as_deref()
             .is_some_and(|role_value| role_value != "admin")
@@ -693,8 +710,11 @@ pub async fn update(
             ));
         }
     }
+    // Use the normalized role for storage so SQL queries with direct string
+    // comparisons (e.g. role = 'admin') work reliably.
+    let role_to_store: Option<String> = if body.role.is_some() { Some(new_role.clone()) } else { None };
     sqlx::query("UPDATE users SET email=COALESCE($1,email), first_name=COALESCE($2,first_name), last_name=COALESCE($3,last_name), role=COALESCE($4,role), weekly_hours=COALESCE($5,weekly_hours), workdays_per_week=COALESCE($6,workdays_per_week), start_date=COALESCE($7,start_date), active=COALESCE($8,active), allow_reopen_without_approval=COALESCE($9,allow_reopen_without_approval), overtime_start_balance_min=COALESCE($10,overtime_start_balance_min) WHERE id=$11")
-        .bind(normalized_email).bind(first_name).bind(last_name).bind(body.role.clone())
+        .bind(normalized_email).bind(first_name).bind(last_name).bind(role_to_store)
         .bind(body.weekly_hours).bind(body.workdays_per_week).bind(body.start_date).bind(body.active)
         .bind(body.allow_reopen_without_approval).bind(body.overtime_start_balance_min).bind(user_id)
         .execute(&mut *transaction).await
@@ -724,10 +744,11 @@ pub async fn update(
     }
     // If role changed or user was deactivated, kill all sessions of that user
     // so cached role/state cannot be (ab)used.
+    let previous_role_normalized = normalize_role(&previous_user.role);
     let role_changed = body
         .role
-        .as_deref()
-        .map(|role_value| role_value != previous_user.role)
+        .as_ref()
+        .map(|role_value| normalize_role(role_value) != previous_role_normalized)
         .unwrap_or(false);
     let just_deactivated = matches!(body.active, Some(false)) && previous_user.active;
     if role_changed || just_deactivated {
@@ -773,7 +794,7 @@ pub async fn deactivate(
         .bind(user_id)
         .fetch_one(&mut *transaction)
         .await?;
-    if previous_user.active && previous_user.role == "admin" {
+    if previous_user.active && is_admin_role(&previous_user.role) {
         let active_admins = UserDb::count_active_admins_tx(&mut transaction).await?;
         if active_admins <= 1 {
             return Err(AppError::BadRequest(
@@ -834,7 +855,7 @@ pub async fn delete_user(
     .fetch_optional(&mut *transaction)
     .await?
     .ok_or(AppError::NotFound)?;
-    if target_user.active && target_user.role == "admin" {
+    if target_user.active && is_admin_role(&target_user.role) {
         let active_admins = UserDb::count_active_admins_tx(&mut transaction).await?;
         if active_admins <= 1 {
             return Err(AppError::BadRequest(
@@ -995,6 +1016,11 @@ pub async fn set_leave_days_handler(
         return Err(AppError::Forbidden);
     }
     let current_year = crate::settings::app_current_year(&app_state.pool).await;
+    if body.year < current_year - 1 {
+        return Err(AppError::BadRequest(
+            "Leave days cannot be set for years before the previous year.".into(),
+        ));
+    }
     if body.year > current_year + 1 {
         return Err(AppError::BadRequest(
             "Leave days cannot be set more than one year ahead.".into(),

@@ -53,10 +53,16 @@
   }
   $: lastTodayIso = todayIso;
 
+  // Rejection sampling to avoid modulo bias (matches backend approach).
   function secureIndex(max) {
-    const buf = new Uint32Array(1);
-    crypto.getRandomValues(buf);
-    return buf[0] % max;
+    const limit = 2 ** 32 - (2 ** 32 % max);
+    let value;
+    do {
+      const buf = new Uint32Array(1);
+      crypto.getRandomValues(buf);
+      value = buf[0];
+    } while (value >= limit);
+    return value % max;
   }
 
   function pick(chars) {
@@ -73,10 +79,10 @@
   }
 
   function generatePassword() {
-    const lower = "abcdefghijkmnpqrstuvwxyz";
+    const lower = "abcdefghjkmnpqrstuvwxyz";
     const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
     const digits = "23456789";
-    const symbols = "!@#$%";
+    const symbols = "!@#*-_+";
     const all = lower + upper + digits + symbols;
     let generatedPassword = pick(lower) + pick(upper) + pick(digits) + pick(symbols);
     while (generatedPassword.length < 16) generatedPassword += pick(all);

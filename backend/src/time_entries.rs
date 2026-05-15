@@ -109,24 +109,36 @@ async fn notify_week_status_change(
             .collect::<Vec<_>>()
             .join("\n");
         let week_count = i18n::week_count(&language, sorted_weeks.len() as i64);
-        let mut params = vec![("week_list", week_list), ("week_count", week_count)];
+        let mut params: Vec<(&'static str, String)> =
+            vec![("week_list", week_list), ("week_count", week_count)];
         if let Some(r) = reason {
             params.push(("reason", r.to_string()));
         }
-        // Self-approved/rejected entries get in-app-only notifications (no email).
-        if user_id != requester_id {
-            crate::notifications::create_translated(
-                app_state, &language, user_id, category, title_key, body_key, params,
-                Some("time_entries"), None,
+
+        // Build JSON body for frontend rendering (weeks + optional reason).
+        let week_iso_strings: Vec<String> = sorted_weeks
+            .iter()
+            .map(|ws| ws.format("%Y-%m-%d").to_string())
+            .collect();
+        let frontend_body = if let Some(r) = reason {
+            format!(
+                "{{\"weeks\":[{}],\"reason\":{}}}",
+                week_iso_strings.iter().map(|w| format!("\"{}\"", w)).collect::<Vec<_>>().join(","),
+                serde_json::json!(r),
             )
-            .await;
         } else {
-            crate::notifications::create_translated_inapp_only(
-                app_state, &language, user_id, category, title_key, body_key, params,
-                Some("time_entries"), None,
+            format!(
+                "{{\"weeks\":[{}]}}",
+                week_iso_strings.iter().map(|w| format!("\"{}\"", w)).collect::<Vec<_>>().join(","),
             )
-            .await;
-        }
+        };
+
+        let send_email = user_id != requester_id;
+        crate::notifications::create_with_frontend_body(
+            app_state, &language, user_id, category, title_key, body_key, params,
+            &frontend_body, send_email, Some("time_entries"), None,
+        )
+        .await;
     }
 }
 
@@ -407,8 +419,21 @@ pub async fn submit(
             .collect::<Vec<_>>()
             .join("\n");
         let week_count = i18n::week_count(&language, sorted_weeks.len() as i64);
+        let submitter_name = format!("{} {}", requester.first_name, requester.last_name);
+
+        // Build JSON body for frontend rendering.
+        let week_iso_strings: Vec<String> = sorted_weeks
+            .iter()
+            .map(|ws| ws.format("%Y-%m-%d").to_string())
+            .collect();
+        let frontend_body = format!(
+            "{{\"submitter_name\":{},\"weeks\":[{}]}}",
+            serde_json::json!(&submitter_name),
+            week_iso_strings.iter().map(|w| format!("\"{}\"", w)).collect::<Vec<_>>().join(","),
+        );
+
         for approver_id in approver_ids {
-            crate::notifications::create_translated(
+            crate::notifications::create_with_frontend_body(
                 &app_state,
                 &language,
                 approver_id,
@@ -416,19 +441,12 @@ pub async fn submit(
                 "timesheet_submitted_title",
                 "timesheet_submitted_body",
                 vec![
-                    (
-                        "submitter_name",
-                        format!("{} {}", requester.first_name, requester.last_name),
-                    ),
-                    (
-                        "week_list",
-                        week_list.clone(),
-                    ),
-                    (
-                        "week_count",
-                        week_count.clone(),
-                    ),
+                    ("submitter_name", submitter_name.clone()),
+                    ("week_list", week_list.clone()),
+                    ("week_count", week_count.clone()),
                 ],
+                &frontend_body,
+                true,
                 Some("time_entries"),
                 None,
             )
