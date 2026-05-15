@@ -263,7 +263,7 @@
   <!-- Mobile title bar: logo + notification icon (mobile only) -->
   <div class="mobile-title-bar">
     <div class="mobile-title-bar-brand">
-      <div class="mobile-title-bar-logo"><AppLogo /></div>
+      <div class="mobile-title-bar-logo"><AppLogo size={30} /></div>
       <div class="mobile-title-bar-names">
         <span class="mobile-title-bar-appname">Zerf</span>
         {#if $settings?.organization_name}
@@ -292,7 +292,7 @@
 
   <div class="sidebar">
     <div class="sidebar-logo">
-      <div class="sidebar-logo-icon"><AppLogo /></div>
+      <div class="sidebar-logo-icon"><AppLogo size={30} /></div>
       <div style="display:flex;flex-direction:column;line-height:1.2;min-width:0;flex:1">
         <span class="sidebar-logo-text">Zerf</span>
         {#if $settings?.organization_name}
