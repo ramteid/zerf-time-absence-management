@@ -60,9 +60,9 @@ async fn submission_reminders_full_workflow() {
     // one fully elapsed past week.  Submit entries for all 5 contract workdays
     // of that week so the reminder check finds nothing incomplete.
     {
-        let today = chrono::Local::now().date_naive();
+        let ref_date = reference_date();
         let last_week_monday =
-            today - chrono::Duration::days(today.weekday().num_days_from_monday() as i64 + 7);
+            ref_date - chrono::Duration::days(ref_date.weekday().num_days_from_monday() as i64 + 7);
         let start_date = last_week_monday.format("%Y-%m-%d").to_string();
 
         let (_, body) = admin.get("/api/v1/categories").await;
@@ -227,11 +227,11 @@ async fn submission_reminders_full_workflow() {
 
     // -- Reminder still warns when the only submitted entry does not count as work --
     {
-        let today = chrono::Local::now().date_naive();
-        let last_month_start = if today.month() == 1 {
-            chrono::NaiveDate::from_ymd_opt(today.year() - 1, 12, 1).unwrap()
+        let ref_date = reference_date();
+        let last_month_start = if ref_date.month() == 1 {
+            chrono::NaiveDate::from_ymd_opt(ref_date.year() - 1, 12, 1).unwrap()
         } else {
-            chrono::NaiveDate::from_ymd_opt(today.year(), today.month() - 1, 1).unwrap()
+            chrono::NaiveDate::from_ymd_opt(ref_date.year(), ref_date.month() - 1, 1).unwrap()
         };
         let start_date = last_month_start.format("%Y-%m-%d").to_string();
 

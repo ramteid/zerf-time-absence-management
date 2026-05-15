@@ -149,13 +149,27 @@ pub async fn load_app_timezone(pool: &crate::db::DatabasePool) -> chrono_tz::Tz 
         .unwrap_or(chrono_tz::Europe::Berlin)
 }
 
+/// Returns the pinned test date from `TEST_REFERENCE_DATE` if set.
+/// In production the env var is absent and this returns `None`.
+pub fn pinned_test_date() -> Option<chrono::NaiveDate> {
+    std::env::var("TEST_REFERENCE_DATE")
+        .ok()
+        .and_then(|s| chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok())
+}
+
 pub async fn app_today(pool: &crate::db::DatabasePool) -> chrono::NaiveDate {
+    if let Some(d) = pinned_test_date() {
+        return d;
+    }
     chrono::Utc::now()
         .with_timezone(&load_app_timezone(pool).await)
         .date_naive()
 }
 
 pub async fn app_current_year(pool: &crate::db::DatabasePool) -> i32 {
+    if let Some(d) = pinned_test_date() {
+        return d.year();
+    }
     chrono::Utc::now()
         .with_timezone(&load_app_timezone(pool).await)
         .year()

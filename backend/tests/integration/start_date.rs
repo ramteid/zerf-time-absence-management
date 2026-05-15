@@ -5,7 +5,9 @@ use reqwest::StatusCode;
 use serde_json::json;
 
 use crate::common::TestApp;
-use crate::helpers::{admin_login, date_offset, next_monday, today};
+use chrono::Datelike;
+
+use crate::helpers::{admin_login, date_offset, next_monday, reference_date, today};
 
 #[tokio::test]
 async fn start_date_full_workflow() {
@@ -106,15 +108,16 @@ async fn start_date_full_workflow() {
     // current month (if any), not months before it, and the cumulative balance
     // must be non-positive only by at most one day's target.
     {
-        let year = chrono::Local::now().format("%Y").to_string();
+        let ref_date = reference_date();
+        let year = ref_date.format("%Y").to_string();
         let (st, body) = admin
             .get(&format!("/api/v1/reports/overtime?year={year}"))
             .await;
         assert_eq!(st, StatusCode::OK);
 
         let rows = body.as_array().expect("overtime should be array");
-        // Admin was seeded with today's date. Only the current month (or none) should appear.
-        let current_month = chrono::Local::now().format("%Y-%m").to_string();
+        // Admin was seeded with the reference date. Only the current month (or none) should appear.
+        let current_month = ref_date.format("%Y-%m").to_string();
         for row in rows {
             let month = row["month"].as_str().unwrap();
             assert!(
@@ -135,11 +138,7 @@ async fn start_date_full_workflow() {
 
     // -- Overtime start balance carries into later years --
     {
-        let current_year: i32 = chrono::Local::now()
-            .format("%Y")
-            .to_string()
-            .parse()
-            .unwrap();
+        let current_year: i32 = reference_date().year();
         let start_date = chrono::NaiveDate::from_ymd_opt(current_year - 1, 1, 1)
             .unwrap()
             .to_string();
