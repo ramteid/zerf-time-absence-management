@@ -492,6 +492,7 @@ pub async fn create(
     let approver_ids_for_notification = approver_ids_to_notify(&app_state.pool, &requester).await;
     let language = notification_language(&app_state.pool).await;
     let week_label = i18n::format_week_label(&language, body.week_start);
+    let week_iso = body.week_start.format("%Y-%m-%d").to_string();
     let pending_change_overview = load_change_request_overview(
         &app_state.pool,
         &language,
@@ -603,7 +604,8 @@ pub async fn create(
             "reopen_approved_body"
         };
         // In-app only: the requester triggered the auto-approve themselves.
-        notifications::create_translated_inapp_only(
+        let frontend_body_self = format!("{{\"week\":\"{}\"}}", week_iso);
+        notifications::create_with_frontend_body(
             &app_state,
             &language,
             requester.id,
@@ -614,13 +616,20 @@ pub async fn create(
                 ("week_label", week_label.clone()),
                 ("change_request_overview", applied_change_overview.clone()),
             ],
+            &frontend_body_self,
+            false,
             Some("reopen_request"),
             Some(new_request_id),
         )
         .await;
         // Notify each approver that the reopen was auto-approved (informational).
+        let frontend_body_approver = format!(
+            "{{\"week\":\"{}\",\"requester_name\":{}}}",
+            week_iso,
+            serde_json::json!(&requester_full_name),
+        );
         for approver_id in &approver_ids_for_notification {
-            notifications::create_translated(
+            notifications::create_with_frontend_body(
                 &app_state,
                 &language,
                 *approver_id,
@@ -632,6 +641,8 @@ pub async fn create(
                     ("week_label", week_label.clone()),
                     ("change_request_overview", applied_change_overview.clone()),
                 ],
+                &frontend_body_approver,
+                true,
                 Some("reopen_request"),
                 Some(new_request_id),
             )
@@ -655,8 +666,13 @@ pub async fn create(
             "reopen_request_created_body"
         };
         // Notify all approvers that a manual reopen request is pending.
+        let frontend_body_created = format!(
+            "{{\"week\":\"{}\",\"requester_name\":{}}}",
+            week_iso,
+            serde_json::json!(&requester_full_name),
+        );
         for approver_id in &approver_ids_for_notification {
-            notifications::create_translated(
+            notifications::create_with_frontend_body(
                 &app_state,
                 &language,
                 *approver_id,
@@ -668,6 +684,8 @@ pub async fn create(
                     ("week_label", week_label.clone()),
                     ("change_request_overview", pending_change_overview.clone()),
                 ],
+                &frontend_body_created,
+                true,
                 Some("reopen_request"),
                 Some(new_request_id),
             )
@@ -736,6 +754,7 @@ async fn notify_assigned_approvers_if_admin_acted(
     action_title_key: &str,
     action_body_key: &str,
     week_label: String,
+    week_iso: &str,
     change_request_overview: String,
     extra_params: Vec<(&'static str, String)>,
 ) {
@@ -760,6 +779,20 @@ async fn notify_assigned_approvers_if_admin_acted(
             .ok()
             .flatten()
             .unwrap_or_else(|| format!("User {request_user_id}"));
+
+    // Build frontend JSON with the employee's name (not the admin's).
+    let reason = extra_params.iter().find(|(k, _)| *k == "reason").map(|(_, v)| v.as_str());
+    let frontend_body = match reason {
+        Some(r) => format!(
+            "{{\"week\":\"{}\",\"requester_name\":{},\"reason\":{}}}",
+            week_iso, serde_json::json!(&employee_full_name), serde_json::json!(r)
+        ),
+        None => format!(
+            "{{\"week\":\"{}\",\"requester_name\":{}}}",
+            week_iso, serde_json::json!(&employee_full_name)
+        ),
+    };
+
     let mut params = vec![
         ("requester_name", employee_full_name),
         ("week_label", week_label),
@@ -767,7 +800,7 @@ async fn notify_assigned_approvers_if_admin_acted(
     ];
     params.extend(extra_params);
     for approver_id in approver_ids {
-        notifications::create_translated(
+        notifications::create_with_frontend_body(
             app_state,
             language,
             approver_id,
@@ -775,6 +808,8 @@ async fn notify_assigned_approvers_if_admin_acted(
             action_title_key,
             action_body_key,
             params.clone(),
+            &frontend_body,
+            true,
             Some("reopen_request"),
             Some(request_id),
         )
@@ -823,6 +858,7 @@ pub async fn approve(
     }
     let language = notification_language(&app_state.pool).await;
     let week_label = i18n::format_week_label(&language, reopen_request.week_start);
+    let week_iso = reopen_request.week_start.format("%Y-%m-%d").to_string();
     let reopen_execution = perform_reopen_in_tx(
         &mut transaction,
         &language,
@@ -887,8 +923,9 @@ pub async fn approve(
     )
     .await;
     // Notify the employee whose week was reopened (in-app only when self-approved).
+    let frontend_body_approved = format!("{{\"week\":\"{}\"}}", week_iso);
     if reopen_request.user_id != requester.id {
-        notifications::create_translated(
+        notifications::create_with_frontend_body(
             &app_state,
             &language,
             reopen_request.user_id,
@@ -899,13 +936,15 @@ pub async fn approve(
                 ("week_label", week_label.clone()),
                 ("change_request_overview", applied_change_overview.clone()),
             ],
+            &frontend_body_approved,
+            true,
             Some("reopen_request"),
             Some(request_id),
         )
         .await;
     } else {
         // Self-approval by admin: in-app only, no email.
-        notifications::create_translated_inapp_only(
+        notifications::create_with_frontend_body(
             &app_state,
             &language,
             reopen_request.user_id,
@@ -916,6 +955,8 @@ pub async fn approve(
                 ("week_label", week_label.clone()),
                 ("change_request_overview", applied_change_overview.clone()),
             ],
+            &frontend_body_approved,
+            false,
             Some("reopen_request"),
             Some(request_id),
         )
@@ -933,6 +974,7 @@ pub async fn approve(
         "reopen_approved_by_admin_title",
         approved_by_admin_body_key,
         week_label,
+        &week_iso,
         applied_change_overview,
         vec![],
     )
@@ -1017,6 +1059,7 @@ pub async fn reject(
     .await;
     let language = notification_language(&app_state.pool).await;
     let week_label = i18n::format_week_label(&language, reopen_request.week_start);
+    let week_iso = reopen_request.week_start.format("%Y-%m-%d").to_string();
     let pending_change_overview = load_change_request_overview(
         &app_state.pool,
         &language,
@@ -1026,8 +1069,13 @@ pub async fn reject(
     )
     .await;
     // Notify the employee whose reopen request was rejected (in-app only when self-rejected).
+    let frontend_body_rejected = format!(
+        "{{\"week\":\"{}\",\"reason\":{}}}",
+        week_iso,
+        serde_json::json!(rejection_reason),
+    );
     if reopen_request.user_id != requester.id {
-        notifications::create_translated(
+        notifications::create_with_frontend_body(
             &app_state,
             &language,
             reopen_request.user_id,
@@ -1039,13 +1087,15 @@ pub async fn reject(
                 ("change_request_overview", pending_change_overview.clone()),
                 ("reason", rejection_reason.to_string()),
             ],
+            &frontend_body_rejected,
+            true,
             Some("reopen_request"),
             Some(request_id),
         )
         .await;
     } else {
         // Self-rejection by admin: in-app only, no email.
-        notifications::create_translated_inapp_only(
+        notifications::create_with_frontend_body(
             &app_state,
             &language,
             reopen_request.user_id,
@@ -1057,6 +1107,8 @@ pub async fn reject(
                 ("change_request_overview", pending_change_overview.clone()),
                 ("reason", rejection_reason.to_string()),
             ],
+            &frontend_body_rejected,
+            false,
             Some("reopen_request"),
             Some(request_id),
         )
@@ -1077,6 +1129,7 @@ pub async fn reject(
         "reopen_rejected_by_admin_title",
         "reopen_rejected_by_admin_body",
         week_label,
+        &week_iso,
         String::new(),
         vec![("reason", rejection_reason.to_string())],
     )

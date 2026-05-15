@@ -648,7 +648,7 @@ async fn all_weeks_submitted_for_month(
     let mut current_week_monday = first_week_monday;
     while current_week_monday <= last_week_monday {
         let week_sunday = current_week_monday + Duration::days(6);
-        if week_sunday <= today {
+        if week_sunday < today {
             complete_week_mondays.push(current_week_monday);
         }
         current_week_monday += Duration::days(7);

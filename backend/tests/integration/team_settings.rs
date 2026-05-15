@@ -12,20 +12,20 @@ async fn team_settings_full_workflow() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
 
-    // -- Lead can only set own --
+    // -- Scope and permission checks --
     {
         let (lead_id, lead_pw, emp_id, _emp_pw, _monday, _cat) =
             bootstrap_team_with_suffix(&app, &admin, false, "1").await;
         let lead = login_change_pw(&app, "lead-1@example.com", &lead_pw).await;
 
-        // Lead can update own.
+        // Non-admin lead cannot update their own reopen policy (privilege escalation guard).
         let (st, _) = lead
             .put(
                 &format!("/api/v1/team-settings/{}", lead_id),
                 &json!({"allow_reopen_without_approval": true}),
             )
             .await;
-        assert_eq!(st, StatusCode::OK);
+        assert_eq!(st, StatusCode::FORBIDDEN);
 
         // Lead can update their direct report.
         let (st, _) = lead
@@ -45,11 +45,20 @@ async fn team_settings_full_workflow() {
             .await;
         assert_eq!(st, StatusCode::FORBIDDEN);
 
-        // Admin can update any.
+        // Admin can update any user including the lead.
         let (st, _) = admin
             .put(
                 &format!("/api/v1/team-settings/{}", lead_id),
-                &json!({"allow_reopen_without_approval": false}),
+                &json!({"allow_reopen_without_approval": true}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK);
+
+        // Admin can update themselves.
+        let (st, _) = admin
+            .put(
+                "/api/v1/team-settings/1",
+                &json!({"allow_reopen_without_approval": true}),
             )
             .await;
         assert_eq!(st, StatusCode::OK);

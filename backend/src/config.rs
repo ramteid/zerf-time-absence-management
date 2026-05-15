@@ -45,7 +45,7 @@ impl Config {
         if session_secret.len() < 32 {
             panic!("ZERF_SESSION_SECRET must be at least 32 characters");
         }
-        if session_secret.contains("please-change") || session_secret == "change-me" {
+        if session_secret.contains("please-change") || session_secret.contains("change-me") {
             panic!("ZERF_SESSION_SECRET is using a default/placeholder value — replace it with a real random secret");
         }
 

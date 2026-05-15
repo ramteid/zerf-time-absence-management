@@ -152,7 +152,7 @@ changes when users and server run in different timezones.
 ### Time-entry summary tiles
 
 In the weekly Time Entry view, the first summary tile always shows recorded
-hours for the current week, independent of workflow state.
+crediting hours for the current week (rejected entries are excluded).
 
 - Display format: `logged hours of target hours` (for example `0.0h of 23.4h target`).
 - Display format: a highlighted logged-hours value plus a subtitle with only the target relation (for example `of 23.4h target`).
@@ -241,14 +241,13 @@ requester's configuration.
 ### Auto-approval
 
 - Sick leave with start date on or before today is auto-approved.
+  Your approvers receive an informational notice (not an action request).
 - Other absence types require explicit approval.
-- Auto-approved absences do not create an approval task, so approvers are not
-	notified for them.
 
 ### Overlap rules
 
 - A request must include at least one effective workday (not weekend-only, not holiday-only).
-- An absence request can cover at most 365 calendar days.
+- An absence request can span at most 364 days (i.e., end_date - start_date < 365).
 - Non-sick absence overlapping existing time entries is rejected.
 - If an approved absence covers a day that already has time entries, those entries remain and still count as worked time.
 
@@ -329,6 +328,10 @@ A week is considered **complete** (ready for flextime and monthly reports) when 
 
 - At least one submitted or approved entry (crediting or non-crediting), **or**
 - An approved absence (vacation, sick leave, etc.)
+
+Flextime reduction is included here: although it does not remove the daily
+target, it blocks time entry creation, so the day is treated as covered for
+submission completeness purposes.
 
 For users with role `assistant`, past-week completeness is always treated as
 complete.
@@ -493,7 +496,8 @@ Users sometimes see that available days do not increase immediately after reques
 - reopen request is approved or rejected,
 - a monthly submission reminder is triggered on the configured deadline day (lists past weeks that are still not submitted).
 
-If an admin approves or rejects their own item, Zerf records the audit event but does not send a notification back to the same user.
+If an admin approves or rejects their own item, Zerf records the audit event
+and sends an in-app-only notification (no email) back to the same user.
 
 ### Approver receives notifications when
 
@@ -832,8 +836,8 @@ You can then edit and resubmit the week.
 **Validation rules that apply to all kinds:**
 
 - `end_date` must be on or after `start_date`.
-- The range must not span 365 or more calendar days (maximum is 364 days, i.e.,
-  start + 364 days inclusive).
+- The range must not exceed 365 calendar days (maximum end date is start + 364
+  days, i.e., end_date - start_date ≤ 364).
 - The range must include at least one effective workday. An effective workday
   is a day that is both a contract workday (based on your `workdays_per_week`)
   and not a public holiday. A request covering only weekends or holidays is
@@ -1035,13 +1039,17 @@ notification with the reason.
 
 ### Team settings: reopen policy
 
-Team leads (and admins) can set the `allow_reopen_without_approval` flag for
-any user within their scope (including themselves).
+Team leads can set the `allow_reopen_without_approval` flag for their direct
+reports. Admins can set it for any user (including themselves).
+
+Non-admin team leads cannot modify their own reopen policy — only their own
+approver (a higher lead or admin) may grant them auto-approval. This prevents
+a lead from bypassing their own approval chain.
 
 - When enabled: that user's future reopen requests are auto-approved
   immediately.
 - When disabled: reopen requests require manual approval.
-- The setting change is audit-logged.
+- The setting change is audit-logged (with before and after values).
 
 ### Viewing team reports
 

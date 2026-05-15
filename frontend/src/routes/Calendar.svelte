@@ -110,9 +110,9 @@
     "#0d9488",
   ];
   const absColorMap = {
-    vacation: "#f59e0b",
+    vacation: "#3b82f6",
     sick: "#ef4444",
-    training: "#3b82f6",
+    training: "#0d9488",
     special_leave: "#a855f7",
     unpaid: "#64748b",
     general_absence: "#6b7280",
@@ -201,13 +201,14 @@
   }
 
   function buildColorMap(baseCells, entryMap, categoryMap, translate) {
-    // Pre-seed reserved colors so work categories can never accidentally clash
-    // with holiday or absence colors, even in months where none of those appear.
-    const used = new Set([
+    // Reserved colors for holidays and absences. Work-category events must not
+    // use these, but holiday/absence events always keep their designated color.
+    const reservedColors = new Set([
       HOLIDAY_COLOR.toLowerCase(),
       ...Object.values(absColorMap).map((color) => color.toLowerCase()),
     ]);
     const assigned = new Map();
+    const used = new Set();
     for (const cell of baseCells) {
       if (cell.other) continue;
       for (const event of rawCellEvents(
@@ -217,9 +218,18 @@
         translate,
       )) {
         if (assigned.has(event.key)) continue;
-        let color =
-          normalizeColor(event.color) || fallbackColor(assigned.size, used);
-        if (used.has(color)) color = fallbackColor(assigned.size, used);
+        const isWorkEvent = event.key.startsWith("work:");
+        const blocked = new Set([...used, ...reservedColors]);
+        let color = normalizeColor(event.color) || fallbackColor(assigned.size, blocked);
+        if (isWorkEvent) {
+          // Work events must avoid both already-used and reserved colors.
+          if (used.has(color) || reservedColors.has(color)) {
+            color = fallbackColor(assigned.size, blocked);
+          }
+        } else {
+          // Holiday/absence events keep their color unless another event already took it.
+          if (used.has(color)) color = fallbackColor(assigned.size, blocked);
+        }
         assigned.set(event.key, color);
         used.add(color);
       }

@@ -99,14 +99,10 @@ async fn find_unsubmitted_weeks(
     // Monday of the current week.
     let current_week_monday =
         today - chrono::Duration::days(today.weekday().num_days_from_monday() as i64);
-    // Only check fully elapsed weeks. A week is fully elapsed when its Sunday has passed.
-    // On Sunday today IS the last day of the week, so include the current week.
-    // On any other day, the current week is still in progress — stop at last week.
-    let last_checked_monday = if today.weekday() == chrono::Weekday::Sun {
-        current_week_monday
-    } else {
-        current_week_monday - chrono::Duration::days(7)
-    };
+    // Only check fully elapsed weeks. A week is fully elapsed when its Sunday
+    // is strictly in the past (all 7 days have passed). The current week is
+    // always excluded because the user can still log time for today.
+    let last_checked_monday = current_week_monday - chrono::Duration::days(7);
     let check_to = last_checked_monday + chrono::Duration::days(6);
     if user_start > check_to {
         return vec![];
