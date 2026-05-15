@@ -224,6 +224,6 @@ describe("label helpers", () => {
     expect(auditTableLabel("change_requests")).toBe("Änderungsanfrage");
     expect(auditActionLabel("password_reset")).toBe("Passwort zurückgesetzt");
     expect(auditActionLabel("deactivated")).toBe("Deaktiviert");
-    expect(auditActionLabel("reopened")).toBe("Wieder geöffnet");
+    expect(auditActionLabel("reopened")).toBe("Bearbeitung freigegeben");
   });
 });

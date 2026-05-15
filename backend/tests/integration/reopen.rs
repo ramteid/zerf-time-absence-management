@@ -109,7 +109,7 @@ async fn reopen_full_workflow() {
             .expect("notification created");
         assert_eq!(
             notification["title"].as_str(),
-            Some("Wochenfreigabe genehmigt")
+            Some("Bearbeitungsanfrage genehmigt")
         );
         let body = notification["body"].as_str().unwrap_or("");
         // Body is now structured JSON for frontend rendering.
