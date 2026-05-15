@@ -10,6 +10,10 @@ const mockState = vi.hoisted(() => ({
   overtimeRows: [],
   flextimeRows: [],
   leaveBalance: null,
+  users: [],
+  teamAbsences: [],
+  ownAbsencesByYear: {},
+  holidaysByYear: {},
 }));
 
 vi.mock("svelte", async () => {
@@ -22,6 +26,16 @@ vi.mock("../api.js", () => ({
     if (path.startsWith("/leave-balance/")) return mockState.leaveBalance;
     if (path.startsWith("/reports/overtime?")) return mockState.overtimeRows;
     if (path.startsWith("/reports/flextime?")) return mockState.flextimeRows;
+    if (path === "/users") return mockState.users;
+    if (path.startsWith("/absences/all?")) return mockState.teamAbsences;
+    if (path.startsWith("/absences?year=")) {
+      const year = path.split("year=")[1];
+      return mockState.ownAbsencesByYear[year] || [];
+    }
+    if (path.startsWith("/holidays?year=")) {
+      const year = path.split("year=")[1];
+      return mockState.holidaysByYear[year] || [];
+    }
     throw new Error(`Unhandled API path: ${path}`);
   }),
 }));
@@ -98,6 +112,10 @@ describe("Reports", () => {
     mockState.leaveBalance = null;
     mockState.overtimeRows = [{ month: "2026-05", cumulative_min: 120, diff_min: 120 }];
     mockState.flextimeRows = [];
+    mockState.users = [];
+    mockState.teamAbsences = [];
+    mockState.ownAbsencesByYear = {};
+    mockState.holidaysByYear = {};
     api.mockClear();
   });
 
@@ -183,5 +201,77 @@ describe("Reports", () => {
     const calledPaths = api.mock.calls.map(([path]) => path);
     expect(calledPaths.some((path) => path.startsWith("/reports/overtime?"))).toBe(false);
     expect(calledPaths.some((path) => path.startsWith("/reports/flextime?"))).toBe(false);
+  }, 60000);
+
+  it("includes a team lead's own absences in the absence report", async () => {
+    currentUser.set({
+      id: 7,
+      role: "team_lead",
+      first_name: "Ada",
+      last_name: "Lead",
+      weekly_hours: 40,
+      workdays_per_week: 5,
+      start_date: "2020-01-01",
+      permissions: {
+        can_view_team_reports: true,
+      },
+    });
+    mockState.users = [
+      {
+        id: 7,
+        first_name: "Ada",
+        last_name: "Lead",
+        workdays_per_week: 5,
+      },
+      {
+        id: 8,
+        first_name: "Ben",
+        last_name: "Report",
+        workdays_per_week: 5,
+      },
+    ];
+    mockState.teamAbsences = [
+      {
+        id: 101,
+        user_id: 8,
+        kind: "vacation",
+        start_date: "2026-05-04",
+        end_date: "2026-05-04",
+        status: "approved",
+      },
+    ];
+    mockState.ownAbsencesByYear = {
+      2026: [
+        {
+          id: 202,
+          user_id: 7,
+          kind: "sick",
+          start_date: "2026-05-05",
+          end_date: "2026-05-05",
+          status: "approved",
+        },
+      ],
+    };
+
+    component = mount(Reports, { target });
+    await settle();
+
+    const absenceFrom = await waitForElement(target, "#absence-from", 20000);
+    const absenceCard = absenceFrom.closest(".zf-card");
+    const runButton = Array.from(absenceCard.querySelectorAll("button")).find(
+      (button) => button.textContent?.trim() === "Run",
+    );
+    expect(runButton).toBeTruthy();
+    runButton.click();
+
+    await waitForElement(absenceCard, "table.zf-table", 20000);
+
+    const calledPaths = api.mock.calls.map(([path]) => path);
+    expect(calledPaths).toContain("/absences?year=2026");
+    expect(calledPaths.some((path) => path.startsWith("/absences/all?"))).toBe(true);
+    expect(absenceCard.textContent).toContain("Ada Lead");
+    expect(absenceCard.textContent).toContain("Ben Report");
+    expect(absenceCard.textContent).toContain("Sick");
+    expect(absenceCard.textContent).toContain("Vacation");
   }, 60000);
 });
