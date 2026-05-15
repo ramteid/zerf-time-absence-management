@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 #
 # ---------- Frontend build stage ----------
-FROM node:25-trixie-slim AS frontend-builder
+FROM node:26-trixie-slim AS frontend-builder
 WORKDIR /build
 ARG ZERF_FRONTEND_DEBUG_BUILD=false
 ENV CI=1
