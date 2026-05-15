@@ -377,17 +377,21 @@ pub async fn me(
         "can_manage_team_settings": user.is_lead(),
         "can_approve": user.is_lead(),
         "can_view_team_reports": user.is_lead(),
-        "can_view_dashboard": true,
+        "can_view_dashboard": !crate::roles::is_assistant_role(&user.role),
         "can_view_reports": true,
     });
+    let is_assistant = crate::roles::is_assistant_role(&user.role);
     let mut navigation_items = vec![
         serde_json::json!({"href":"/time","key":"Time","icon":"⏱"}),
         serde_json::json!({"href":"/absences","key":"Absences","icon":"📅"}),
         serde_json::json!({"href":"/calendar","key":"Calendar","icon":"🗓"}),
-        serde_json::json!({"href":"/dashboard","key":"Dashboard","icon":"🔔"}),
-        serde_json::json!({"href":"/reports","key":"Reports","icon":"📊"}),
-        serde_json::json!({"href":"/account","key":"Account","icon":"👤"}),
     ];
+    if !is_assistant {
+        navigation_items
+            .push(serde_json::json!({"href":"/dashboard","key":"Dashboard","icon":"🔔"}));
+    }
+    navigation_items.push(serde_json::json!({"href":"/reports","key":"Reports","icon":"📊"}));
+    navigation_items.push(serde_json::json!({"href":"/account","key":"Account","icon":"👤"}));
     if user.is_lead() {
         navigation_items
             .push(serde_json::json!({"href":"/team-settings","key":"TeamSettings","icon":"🛡"}));
@@ -395,7 +399,7 @@ pub async fn me(
     if user.is_admin() {
         navigation_items.push(serde_json::json!({"href":"/admin/settings","key":"Admin","icon":"⚙"}));
     }
-    let home = "/dashboard";
+    let home = if is_assistant { "/time" } else { "/dashboard" };
     // For admins: flag whether initial setup (country, working-time defaults,
     // and admin profile name) has been completed. Until it is, the SPA
     // redirects to /admin/settings.

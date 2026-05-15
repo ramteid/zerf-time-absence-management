@@ -682,38 +682,47 @@ async fn all_weeks_submitted_for_month(
         .incomplete_dates_in_range(user_id, check_from, check_to)
         .await?;
 
-    // Check each fully elapsed week.
-    // For each complete week, check that all contract workdays are submitted.
-    // A contract workday must be covered by either:
-    //   1. An approved/cancellation_pending absence, OR
-    //   2. A submitted/approved time entry (with no incomplete conflicts)
+    // Check each fully elapsed week at the week level, not the day level.
+    //
+    // A week is considered submitted when the user has pressed "Submit Week" —
+    // i.e. at least one entry in the week is submitted/approved and no entry
+    // is still in draft or rejected state. The number of days actually booked
+    // does not matter; only that the week as a whole has been submitted.
+    //
+    // Fallback for entry-free weeks: if the user has no entries at all, the
+    // week still counts as submitted when every contract workday is excused
+    // (public holiday, approved absence, before the user's start date, or
+    // defensively in the future). This covers e.g. full-vacation weeks.
     for &week_monday in &complete_week_mondays {
-        // Iterate only the first workdays_per_week days of the week (skip non-contract days)
-        // Check only contract workdays in this week (first workdays_per_week days).
-        // Non-contract days (e.g., weekend for 5-day worker) are implicitly submitted.
-        for day_offset in 0..i64::from(workdays_per_week) {
+        // Any draft or rejected entry anywhere in the week means the week has
+        // not been cleanly submitted yet.
+        let has_incomplete_entry = (0..7i64).any(|d| {
+            incomplete_dates.contains(&(week_monday + Duration::days(d)))
+        });
+        if has_incomplete_entry {
+            return Ok(false);
+        }
+
+        // At least one submitted/approved entry anywhere in the week is
+        // sufficient — the user has submitted the week.
+        let has_submitted_entry = (0..7i64).any(|d| {
+            submitted_dates.contains(&(week_monday + Duration::days(d)))
+        });
+        if has_submitted_entry {
+            continue;
+        }
+
+        // No entries at all: the week is still OK if every contract workday is
+        // excused (holiday, approved absence, before start, or future).
+        let all_contract_days_excused = (0..i64::from(workdays_per_week)).all(|day_offset| {
             let day = week_monday + Duration::days(day_offset);
-
-            // Skip days before the user's contract start.
-            if day < user_start_date {
-                continue;
-            }
-            // Skip public holidays.
-            if holiday_set.contains(&day) {
-                continue;
-            }
-            // Skip future days (should not occur for fully elapsed weeks, but be defensive).
-            if day >= today {
-                continue;
-            }
-
-            // Every working day must be covered by a target-removing absence OR a submitted entry with no
-            // outstanding incomplete entries.
-            let submitted_and_clean =
-                submitted_dates.contains(&day) && !incomplete_dates.contains(&day);
-            if !absent_days.contains(&day) && !submitted_and_clean {
-                return Ok(false);
-            }
+            day < user_start_date
+                || holiday_set.contains(&day)
+                || absent_days.contains(&day)
+                || day >= today
+        });
+        if !all_contract_days_excused {
+            return Ok(false);
         }
     }
 

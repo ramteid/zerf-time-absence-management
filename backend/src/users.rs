@@ -680,9 +680,14 @@ pub async fn update(
             ));
         }
     }
-    // For assistants force workdays_per_week=7 (no fixed days); for others use what was provided.
+    // For assistants force workdays_per_week=7 (no fixed days).
+    // When switching FROM assistant TO another role, reset to 5 (default) unless the
+    // admin explicitly provides a value — otherwise the sentinel 7 would persist via
+    // COALESCE and produce wrong daily-target calculations for the new role.
     let effective_workdays_update: Option<i16> = if is_assistant_role(&new_role) {
         Some(7)
+    } else if is_assistant_role(&previous_user.role) {
+        Some(body.workdays_per_week.unwrap_or(5))
     } else {
         body.workdays_per_week
     };

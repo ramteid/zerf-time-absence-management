@@ -269,7 +269,7 @@
     //          40h/week ÷ 4 days = 10h/day = 600 min/day (4-day worker)
     const perDayMinutes = Math.round((weeklyHours / workdaysPerWeek) * 60);
     if (perDayMinutes <= 0) return 0;
-    return weekdays.reduce((totalMinutes, day) => {
+    return weekdays.slice(0, workdaysPerWeek).reduce((totalMinutes, day) => {
       const isBeforeStart =
         $currentUser?.start_date && day.ds < $currentUser.start_date;
       const isFuture = day.ds > today;
@@ -319,19 +319,16 @@
   }
 
   $: weekdays = weekFrom
-    ? // Dynamic weekday grid: adapt to user's workdays_per_week setting.
-      // E.g., 5-day worker sees Mon-Fri, 4-day worker sees Mon-Thu.
-      Array.from(
-        { length: $currentUser?.workdays_per_week || 5 },
-        (_, i) => i,
-      ).map((dayIndex) => buildWeekDay(dayIndex, entries, absences, holidays))
+    ? // Always show Mon–Fri (indices 0–4) regardless of workdays_per_week.
+      Array.from({ length: 5 }, (_, i) => i).map((dayIndex) =>
+        buildWeekDay(dayIndex, entries, absences, holidays),
+      )
     : [];
   $: weekendDays = weekFrom
-    ? // Non-contract days shown separately (e.g., Sat-Sun for 5-day worker, Fri-Sun for 4-day).
-      Array.from(
-        { length: 7 - ($currentUser?.workdays_per_week || 5) },
-        (_, i) => ($currentUser?.workdays_per_week || 5) + i,
-      ).map((dayIndex) => buildWeekDay(dayIndex, entries, absences, holidays))
+    ? // Always show Sat–Sun (indices 5–6).
+      Array.from({ length: 2 }, (_, i) => 5 + i).map((dayIndex) =>
+        buildWeekDay(dayIndex, entries, absences, holidays),
+      )
     : [];
 
   function entryDurationHours(startTime, endTime) {
@@ -375,17 +372,12 @@
   $: isAtOrPastCurrentWeek =
     weekFrom && isoDate(weekFrom) >= isoDate(currentWeekMonday);
 
-  // Maps a week status to a CSS color variable so the stat card text is
-  // immediately readable without needing a chip: red for actionable states
-  // (draft = still needs work, rejected = needs correction), green for
-  // positive outcomes (submitted = awaiting approval, approved = done),
-  // and orange for mixed states (partial = some approved, some rejected).
   function weekStatusColor(status) {
     switch (status) {
       case "draft":
         return "var(--danger-text)";
       case "submitted":
-        return "var(--success-text)";
+        return "var(--warning-text)";
       case "approved":
         return "var(--success-text)";
       case "rejected":
@@ -531,9 +523,13 @@
           <div class="stat-card-label">{$t("Status")}</div>
           <div
             class="stat-card-value tab-num"
-            style="color:{weekStatusColor(weekStatus)}"
+            style="color:{pendingReopen ? 'var(--warning-text)' : weekStatusColor(weekStatus)}"
           >
-            {statusLabel(weekStatus)}
+            {pendingReopen
+              ? $t("Waiting for release")
+              : weekStatus === "submitted"
+                ? $t("Waiting for approval")
+                : statusLabel(weekStatus)}
           </div>
         </div>
       </div>
@@ -541,10 +537,12 @@
 
     <!-- Week grid: one card per weekday (Mon–Fri) -->
     <div class="week-grid">
-      {#each weekdays as day (day.ds)}
+      {#each weekdays as day, dayIndex (day.ds)}
         {@const dailyTargetHours =
-          ($currentUser.weekly_hours || 0) /
-          ($currentUser.workdays_per_week || 5)}
+          dayIndex < ($currentUser.workdays_per_week || 5)
+            ? ($currentUser.weekly_hours || 0) /
+              ($currentUser.workdays_per_week || 5)
+            : 0}
         {@const dailyTotalMinutes = day.items.reduce(
           (totalMinutes, entry) =>
             totalMinutes + creditedEntryMinutes(entry, $categories),

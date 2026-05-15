@@ -55,6 +55,14 @@
     }
   }
 
+  async function editUser(u) {
+    try {
+      showDialog = await api(`/users/${u.id}`);
+    } catch (e) {
+      toast($t(e?.message || "Error"), "error");
+    }
+  }
+
   async function deleteUser(u) {
     if (
       !(await confirmDialog(
@@ -119,7 +127,7 @@
         <div style="display:flex;gap:4px">
           <button
             class="zf-btn zf-btn-ghost zf-btn-sm"
-            on:click={() => (showDialog = u)}
+            on:click={() => editUser(u)}
           >
             <Icon name="Edit" size={13} />
           </button>
