@@ -598,9 +598,9 @@ pub async fn create(
             "reopen_auto_approved_notice_body"
         };
         let auto_body_key = if has_applied_changes {
-            "reopen_auto_approved_body_changes"
+            "reopen_approved_body_changes"
         } else {
-            "reopen_auto_approved_body"
+            "reopen_approved_body"
         };
         // In-app only: the requester triggered the auto-approve themselves.
         notifications::create_translated_inapp_only(
@@ -608,7 +608,7 @@ pub async fn create(
             &language,
             requester.id,
             "reopen_auto_approved",
-            "reopen_auto_approved_title",
+            "reopen_approved_title",
             auto_body_key,
             vec![
                 ("week_label", week_label.clone()),

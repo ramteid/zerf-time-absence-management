@@ -1,5 +1,5 @@
 <script>
-  export let size = 38;
+  export let size = null;
 
   // Unique gradient ID so multiple instances don't collide in the DOM
   const uid = "logo-" + Math.random().toString(36).slice(2, 8);
@@ -11,6 +11,7 @@
   height={size}
   viewBox="0 0 32 32"
   xmlns="http://www.w3.org/2000/svg"
+  class="app-logo"
 >
   <defs>
     <linearGradient id={uid} x1="0" y1="0" x2="1" y2="1">

@@ -142,7 +142,7 @@
             title={$t("Delete permanently")}
             on:click={() => deleteUser(u)}
           >
-            <Icon name="Trash2" size={13} />
+            <Icon name="Trash" size={13} />
           </button>
         </div>
       </div>
