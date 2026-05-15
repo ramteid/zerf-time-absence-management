@@ -613,8 +613,9 @@ async fn full_integration_suite() {
 
     // -- General absence - cancel, reject & RBAC journeys -------------------
     {
-        let ga4_from = date_offset(120);
-        let ga4_to = date_offset(121);
+        let ga4_monday = next_monday(120);
+        let ga4_from = ga4_monday.format("%Y-%m-%d").to_string();
+        let ga4_to = (ga4_monday + chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
         let (st, body) = emp
             .post(
                 "/api/v1/absences",
@@ -636,8 +637,9 @@ async fn full_integration_suite() {
         assert_eq!(st, StatusCode::OK, "re-request after cancel allowed");
 
         // Reject journey.
-        let ga5_from = date_offset(200);
-        let ga5_to = date_offset(202);
+        let ga5_monday = next_monday(200);
+        let ga5_from = ga5_monday.format("%Y-%m-%d").to_string();
+        let ga5_to = (ga5_monday + chrono::Duration::days(2)).format("%Y-%m-%d").to_string();
         let (_, body) = emp
             .post(
                 "/api/v1/absences",
