@@ -32,6 +32,13 @@
   $: if (start_date && end_date && start_date > end_date) {
     end_date = start_date;
   }
+
+  $: selectedDays =
+    start_date && end_date
+      ? Math.round(
+          (new Date(end_date) - new Date(start_date)) / 86400000,
+        ) + 1
+      : null;
   let closeHandled = false;
   let closeResult = { changed: false, savedAbsence: null };
 
@@ -164,6 +171,12 @@
         />
       </div>
     </div>
+    {#if selectedDays !== null}
+      <div class="selected-days-hint">
+        {selectedDays}
+        {$t("days")}
+      </div>
+    {/if}
     <div>
       <label class="zf-label" for="absence-comment"
         >{$t("Notes (optional)")}</label
@@ -184,3 +197,11 @@
     </button>
   </footer>
 </dialog>
+
+<style>
+  .selected-days-hint {
+    font-size: 0.85rem;
+    color: var(--text-secondary, #64748b);
+    margin-top: -0.25rem;
+  }
+</style>
