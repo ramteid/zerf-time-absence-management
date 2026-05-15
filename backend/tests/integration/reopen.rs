@@ -112,9 +112,12 @@ async fn reopen_full_workflow() {
             Some("Wochenfreigabe genehmigt")
         );
         let body = notification["body"].as_str().unwrap_or("");
+        // Body is now structured JSON for frontend rendering.
+        let parsed: serde_json::Value =
+            serde_json::from_str(body).expect("notification body must be valid JSON");
         assert!(
-            body.contains("Woche: KW"),
-            "body should include week label: {body}"
+            parsed["week"].as_str().is_some(),
+            "JSON body should include 'week' field: {body}"
         );
         assert!(!notification["title"].as_str().unwrap().contains(" / "));
     }
