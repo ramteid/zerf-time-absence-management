@@ -20,6 +20,7 @@
   let entries = [];
   let holidays = [];
   let timeEntries = [];
+  let users = [];
   let year, month;
   let dlg;
   let popupCell = null;
@@ -40,26 +41,34 @@
     const monthString = `${loadYear}-${String(loadMonth).padStart(2, "0")}`;
     const firstDayOfMonth = new Date(loadYear, loadMonth - 1, 1);
     const lastDayOfMonth = new Date(loadYear, loadMonth, 0);
+    const from = isoDate(firstDayOfMonth);
+    const to = isoDate(lastDayOfMonth);
+    const isLead = $currentUser?.permissions?.can_approve ?? false;
     try {
-      const [nextEntries, nextHolidays, nextTimeEntries, nextCategories] =
+      const [nextEntries, nextHolidays, nextTimeEntries, nextCategories, nextUsers] =
         await Promise.all([
           api(`/absences/calendar?month=${monthString}`),
           api(`/holidays?year=${loadYear}`),
           api(
-            `/time-entries?from=${isoDate(firstDayOfMonth)}&to=${isoDate(lastDayOfMonth)}`,
+            isLead
+              ? `/time-entries/all?from=${from}&to=${to}`
+              : `/time-entries?from=${from}&to=${to}`,
           ).catch(() => []),
           api("/categories").catch(() => $categories),
+          isLead ? api("/users").catch(() => []) : Promise.resolve([]),
         ]);
       if (seq !== loadSeq) return;
       entries = nextEntries;
       holidays = nextHolidays;
       timeEntries = nextTimeEntries;
       categories.set(nextCategories);
+      users = nextUsers;
     } catch {
       if (seq !== loadSeq) return;
       entries = [];
       holidays = [];
       timeEntries = [];
+      users = [];
     }
   }
   $: year && month && load().catch(() => {});
@@ -68,14 +77,15 @@
     holidays.map((holiday) => [holiday.holiday_date, holiday.name]),
   );
 
-  // Time entries are filtered defensively to the current user.
-  $: myTimeEntries = timeEntries.filter(
-    (e) => e.user_id === $currentUser?.id && e.status !== "rejected",
-  );
+  // For leads, the API already scopes to direct reports; for others, to self.
+  // Rejected entries are excluded from the calendar view in all cases.
+  $: calTimeEntries = timeEntries.filter((e) => e.status !== "rejected");
+
+  $: userById = new Map(users.map((u) => [u.id, u]));
 
   $: teMap = (() => {
     const timeEntriesByDate = new Map();
-    for (const timeEntry of myTimeEntries) {
+    for (const timeEntry of calTimeEntries) {
       const entryDateKey =
         typeof timeEntry.entry_date === "string"
           ? timeEntry.entry_date.slice(0, 10)
@@ -160,7 +170,7 @@
     return [absence.name, absence.comment].filter(Boolean).join(" - ");
   }
 
-  function rawCellEvents(cell, entryMap, categoryMap, translate) {
+  function rawCellEvents(cell, entryMap, categoryMap, translate, userMap = new Map(), currentUserId = null) {
     const events = [];
     if (cell.hol) {
       events.push({
@@ -186,9 +196,13 @@
       const durationLabel =
         startTime && endTime ? minToHM(durMin(startTime, endTime)) : "";
       const timeRange = startTime && endTime ? `${startTime} - ${endTime}` : "";
-      const detail = durationLabel
-        ? `${timeRange} (${durationLabel})`
-        : timeRange;
+      const timeDetail = durationLabel ? `${timeRange} (${durationLabel})` : timeRange;
+      const isOwn = entry.user_id === currentUserId;
+      const entryUser = !isOwn ? userMap.get(entry.user_id) : null;
+      const userName = entryUser
+        ? `${entryUser.first_name} ${entryUser.last_name}`
+        : null;
+      const detail = userName ? `${userName} – ${timeDetail}` : timeDetail;
       events.push({
         key: `work:${entry.category_id ?? "unknown"}`,
         color: workBaseColor(entry, events.length, categoryMap),
@@ -236,8 +250,8 @@
     return assigned;
   }
 
-  function cellEvents(cell, entryMap, categoryMap, colorMap, translate) {
-    return rawCellEvents(cell, entryMap, categoryMap, translate).map(
+  function cellEvents(cell, entryMap, categoryMap, colorMap, translate, userMap, currentUserId) {
+    return rawCellEvents(cell, entryMap, categoryMap, translate, userMap, currentUserId).map(
       (event) => ({
         ...event,
         color: colorMap.get(event.key) || event.color,
@@ -290,7 +304,7 @@
   $: colorByKey = buildColorMap(cells, teMap, categoryById, $t);
   $: eventCells = cells.map((cell) => ({
     ...cell,
-    events: cellEvents(cell, teMap, categoryById, colorByKey, $t),
+    events: cellEvents(cell, teMap, categoryById, colorByKey, $t, userById, $currentUser?.id),
   }));
 
   $: legendItems = (() => {
