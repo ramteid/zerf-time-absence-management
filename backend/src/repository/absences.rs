@@ -305,26 +305,11 @@ impl AbsenceDb {
             .fetch_all(&self.pool)
             .await?;
             ids.append(&mut reports);
-        } else {
-            // Regular employee: include their approver(s) and team-mates
-            // (other users who share at least one approver with them).
-            let approver_ids = crate::repository::UserDb::new(self.pool.clone())
-                .get_approver_ids(requester_id)
-                .await?;
-            ids.append(&mut approver_ids.clone());
-            if !approver_ids.is_empty() {
-                let mut peers: Vec<i64> = sqlx::query_scalar(
-                    "SELECT DISTINCT ua.user_id \
-                     FROM user_approvers ua \
-                     JOIN users u ON u.id = ua.user_id \
-                     WHERE ua.approver_id = ANY($1) AND u.active=TRUE",
-                )
-                .bind(&approver_ids)
-                .fetch_all(&self.pool)
-                .await?;
-                ids.append(&mut peers);
-            }
         }
+        // Regular employees and assistants only see their own absences in the
+        // calendar. They have no business need to view team-mate or approver
+        // data, and exposing sensitive absence kinds (e.g. sick leave under
+        // GDPR Art. 9) across the team is a privacy violation.
         ids.sort_unstable();
         ids.dedup();
         Ok(Some(ids))

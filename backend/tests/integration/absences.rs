@@ -297,7 +297,7 @@ async fn absences_full_workflow() {
         );
     }
 
-    // -- Employee calendar is scoped to their team --
+    // -- Employee calendar is scoped strictly to themselves --
     {
         let (st, body) = admin
             .post(
@@ -385,6 +385,16 @@ async fn absences_full_workflow() {
             .await;
         assert_eq!(st, StatusCode::OK, "create outsider absence");
 
+        // emp also takes a vacation on the same day so the positive assertion
+        // below actually executes (visible_ids would be empty without this).
+        let (st, _) = emp
+            .post(
+                "/api/v1/absences",
+                &json!({"kind":"vacation","start_date": calendar_day,"end_date": calendar_day}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "create emp absence");
+
         let (st, body) = emp
             .get(&format!("/api/v1/absences/calendar?month={month}"))
             .await;
@@ -396,11 +406,45 @@ async fn absences_full_workflow() {
             .filter_map(|row| row["user_id"].as_i64())
             .collect();
 
-        assert!(visible_ids.contains(&lead_id), "approver is visible");
-        assert!(visible_ids.contains(&peer_id), "peer is visible");
+        // Employee must see their own absence.
+        assert!(
+            visible_ids.contains(&emp_id),
+            "employee must see their own absence"
+        );
+        // Employees and assistants must not see anyone else.
+        assert!(
+            !visible_ids.contains(&lead_id),
+            "approver must not be visible in employee calendar"
+        );
+        assert!(
+            !visible_ids.contains(&peer_id),
+            "peer must not be visible in employee calendar"
+        );
         assert!(
             !visible_ids.contains(&outsider_id),
-            "outsider should not be visible in team calendar"
+            "outsider must not be visible in employee calendar"
+        );
+        for id in &visible_ids {
+            assert_eq!(*id, emp_id, "only the requester's own entries may appear");
+        }
+
+        // Leads still see their direct reports in the calendar view.
+        let (st, body) = lead
+            .get(&format!("/api/v1/absences/calendar?month={month}"))
+            .await;
+        assert_eq!(st, StatusCode::OK, "lead calendar request");
+        let lead_visible: HashSet<i64> = body
+            .as_array()
+            .expect("calendar rows should be an array")
+            .iter()
+            .filter_map(|row| row["user_id"].as_i64())
+            .collect();
+        assert!(lead_visible.contains(&lead_id), "lead sees own entries");
+        assert!(lead_visible.contains(&peer_id), "lead sees peer (direct report)");
+        assert!(lead_visible.contains(&emp_id), "lead sees emp (direct report)");
+        assert!(
+            !lead_visible.contains(&outsider_id),
+            "lead does not see users outside their reports"
         );
     }
 

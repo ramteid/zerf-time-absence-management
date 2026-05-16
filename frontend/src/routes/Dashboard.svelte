@@ -185,6 +185,7 @@
       monthSubmissionChecks = monthsToCheck.map((month, index) => ({
         month,
         submitted: monthFullySubmitted(reports[index]),
+        approved: reports[index]?.weeks_all_approved === true,
       }));
     } catch (error) {
       monthSubmissionChecks = [];
@@ -269,6 +270,7 @@
     overtimeRows.find((row) => row.month === currentMonthKey) ??
     (overtimeRows.length ? overtimeRows[overtimeRows.length - 1] : null);
   $: overtimeBalanceMin = currentOvertimeRow?.cumulative_min || 0;
+  $: submittedOvertimeBalanceMin = currentOvertimeRow?.submitted_cumulative_min ?? overtimeBalanceMin;
   $: currentMonthDiffMin = currentOvertimeRow?.diff_min || 0;
 
   // ── Reactive derivations: submission compliance ───────────────────────────────
@@ -279,6 +281,12 @@
   $: allWeeksSubmitted =
     monthSubmissionChecks.length === 0 ||
     monthSubmissionChecks.every((check) => check.submitted);
+
+  // True when every submitted week is also fully approved (no pending approvals).
+  $: allWeeksApproved =
+    allWeeksSubmitted &&
+    (monthSubmissionChecks.length === 0 ||
+      monthSubmissionChecks.every((check) => check.approved));
 
   // ── Pending-week builder (groups submitted entries by user + week) ─────────────
 
@@ -886,14 +894,18 @@
           {:else}
             <div
               class="stat-card-value tab-num"
-              style="color:{overtimeBalanceMin < 0
+              style="color:{submittedOvertimeBalanceMin < 0
                 ? 'var(--danger-text)'
                 : 'var(--success-text)'}"
             >
-              {hoursFromMinutes(overtimeBalanceMin)}
+              {hoursFromMinutes(submittedOvertimeBalanceMin)}
             </div>
             <div class="stat-card-sub">
-              {$t("This month: {value}", { value: hoursFromMinutes(currentMonthDiffMin) })}
+              {#if submittedOvertimeBalanceMin !== overtimeBalanceMin}
+                {$t("Approved: {value}", { value: hoursFromMinutes(overtimeBalanceMin) })}
+              {:else}
+                {$t("This month: {value}", { value: hoursFromMinutes(currentMonthDiffMin) })}
+              {/if}
             </div>
           {/if}
           {#if overtimeError}
@@ -912,11 +924,15 @@
         {:else}
           <div
             class="stat-card-value tab-num"
-            style="color:{allWeeksSubmitted
-              ? 'var(--success-text)'
-              : 'var(--warning-text)'}"
+            style="color:{allWeeksApproved ? 'var(--success-text)' : 'var(--warning-text)'}"
           >
-            {allWeeksSubmitted ? $t("All submitted") : $t("Weeks missing")}
+            {#if allWeeksApproved}
+              {$t("All submitted and approved")}
+            {:else if allWeeksSubmitted}
+              {$t("All submitted (approvals pending)")}
+            {:else}
+              {$t("Weeks missing")}
+            {/if}
           </div>
         {/if}
         {#if monthSubmissionError}

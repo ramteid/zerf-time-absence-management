@@ -118,6 +118,8 @@ pub struct MonthReport {
     pub category_totals: HashMap<String, i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub weeks_all_submitted: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub weeks_all_approved: Option<bool>,
 }
 
 fn weekday_en(d: NaiveDate) -> &'static str {
@@ -319,6 +321,7 @@ async fn build_range_with_user(
         full_month_target_min: full_month_target_total,
         category_totals: category_minutes_by_name,
         weeks_all_submitted: None,
+        weeks_all_approved: None,
     })
 }
 
@@ -337,6 +340,103 @@ async fn build_range(
     build_range_with_user(pool, &user, from, to, label).await
 }
 
+/// Returns `(all_submitted, all_approved)` for fully elapsed weeks in the month.
+///
+/// `all_submitted` mirrors `all_weeks_submitted_for_month`.
+/// `all_approved` is additionally true only when no entries with status `submitted`
+/// (pending approval) remain in the checked range.
+async fn submission_status_for_month(
+    pool: &crate::db::DatabasePool,
+    user_id: i64,
+    month_start: NaiveDate,
+    month_end: NaiveDate,
+    user_start_date: NaiveDate,
+    is_assistant: bool,
+    workdays_per_week: i16,
+) -> AppResult<(bool, bool)> {
+    if is_assistant {
+        return Ok((true, true));
+    }
+
+    let today = crate::settings::app_today(pool).await;
+
+    let first_week_monday = {
+        let offset = month_start.weekday().num_days_from_monday() as i64;
+        month_start - Duration::days(offset)
+    };
+    let last_week_monday = {
+        let offset = month_end.weekday().num_days_from_monday() as i64;
+        month_end - Duration::days(offset)
+    };
+
+    let mut complete_week_mondays: Vec<NaiveDate> = Vec::new();
+    let mut current_week_monday = first_week_monday;
+    while current_week_monday <= last_week_monday {
+        let week_sunday = current_week_monday + Duration::days(6);
+        if week_sunday < today {
+            complete_week_mondays.push(current_week_monday);
+        }
+        current_week_monday += Duration::days(7);
+    }
+
+    if complete_week_mondays.is_empty() {
+        return Ok((true, true));
+    }
+
+    let check_from = complete_week_mondays[0];
+    let check_to = *complete_week_mondays.last().unwrap() + Duration::days(6);
+
+    let reports_db = crate::repository::ReportDb::new(pool.clone());
+    let holiday_set = reports_db.holiday_set(check_from, check_to).await?;
+    let absence_rows = reports_db
+        .absence_ranges_in_period(user_id, check_from, check_to)
+        .await?;
+    let absent_days = expand_absence_date_set(&absence_rows, check_from, check_to);
+    let submitted_dates = reports_db
+        .submitted_dates_in_range(user_id, check_from, check_to)
+        .await?;
+    let incomplete_dates = reports_db
+        .incomplete_dates_in_range(user_id, check_from, check_to)
+        .await?;
+
+    let mut all_submitted = true;
+    for &week_monday in &complete_week_mondays {
+        let has_incomplete = (0..7i64)
+            .any(|d| incomplete_dates.contains(&(week_monday + Duration::days(d))));
+        if has_incomplete {
+            all_submitted = false;
+            break;
+        }
+
+        let has_submitted = (0..7i64)
+            .any(|d| submitted_dates.contains(&(week_monday + Duration::days(d))));
+        if has_submitted {
+            continue;
+        }
+
+        let all_excused = (0..i64::from(workdays_per_week)).all(|d| {
+            let day = week_monday + Duration::days(d);
+            day < user_start_date
+                || holiday_set.contains(&day)
+                || absent_days.contains(&day)
+                || day >= today
+        });
+        if !all_excused {
+            all_submitted = false;
+            break;
+        }
+    }
+
+    if !all_submitted {
+        return Ok((false, false));
+    }
+
+    let has_pending = reports_db
+        .has_pending_submitted_entries_in_range(user_id, check_from, check_to)
+        .await?;
+    Ok((true, !has_pending))
+}
+
 async fn build_month(
     pool: &crate::db::DatabasePool,
     user_id: i64,
@@ -349,18 +449,18 @@ async fn build_month(
         .ok_or(AppError::NotFound)?;
     let user = crate::users::repo_user_to_auth_user(repo_user);
     let mut report = build_range_with_user(pool, &user, from, to, month).await?;
-    report.weeks_all_submitted = Some(
-        all_weeks_submitted_for_month(
-            pool,
-            user_id,
-            from,
-            to,
-            user.start_date,
-            is_assistant_role(&user.role),
-            user.workdays_per_week,
-        )
-        .await?,
-    );
+    let (all_submitted, all_approved) = submission_status_for_month(
+        pool,
+        user_id,
+        from,
+        to,
+        user.start_date,
+        is_assistant_role(&user.role),
+        user.workdays_per_week,
+    )
+    .await?;
+    report.weeks_all_submitted = Some(all_submitted);
+    report.weeks_all_approved = Some(all_approved);
     Ok(report)
 }
 
@@ -1147,6 +1247,8 @@ pub struct MonthRow {
     pub actual_min: i64,
     pub diff_min: i64,
     pub cumulative_min: i64,
+    /// Cumulative balance including submitted-but-not-yet-approved entries.
+    pub submitted_cumulative_min: i64,
 }
 
 async fn build_overtime_rows_for_year(
@@ -1193,6 +1295,7 @@ async fn build_overtime_rows_for_year(
     let mut month_rows = vec![];
     // Accumulate all prior-year months to seed the running overtime balance.
     let mut cumulative_min = overtime_start_balance_min;
+    let mut submitted_cumulative_min = overtime_start_balance_min;
     for prior_year in user_start_date.year()..year {
         let prior_year_first_month = if prior_year == user_start_date.year() {
             user_start_date.month()
@@ -1204,6 +1307,8 @@ async fn build_overtime_rows_for_year(
             let month_report =
                 build_month_without_submission_status(pool, target_user_id, &month_label).await?;
             cumulative_min += month_report.diff_min;
+            submitted_cumulative_min +=
+                month_report.submitted_min - month_report.target_min;
         }
     }
 
@@ -1212,12 +1317,14 @@ async fn build_overtime_rows_for_year(
         let month_report =
             build_month_without_submission_status(pool, target_user_id, &month_label).await?;
         cumulative_min += month_report.diff_min;
+        submitted_cumulative_min += month_report.submitted_min - month_report.target_min;
         month_rows.push(MonthRow {
             month: month_label,
             target_min: month_report.target_min,
             actual_min: month_report.actual_min,
             diff_min: month_report.diff_min,
             cumulative_min,
+            submitted_cumulative_min,
         });
     }
 

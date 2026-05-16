@@ -35,7 +35,7 @@ const TRANSLATIONS = {
     help_csv_export:
       "Exports the selected employee and date range as a CSV file.",
     help_my_balance:
-      "Overview of your current flextime balance and submission status. The overtime balance is calculated including today.",
+      "Overview of your current flextime balance and submission status. The overtime balance includes submitted hours pending approval and is calculated including today.",
     help_flextime_chart:
       "Your cumulative flextime balance over the selected period. Data is calculated including today.",
     "Counts as work": "Counts as work",
@@ -45,6 +45,9 @@ const TRANSLATIONS = {
     "All approved": "All approved",
     Incomplete: "Incomplete",
     "All submitted": "All submitted",
+    "All submitted and approved": "All submitted and approved",
+    "All submitted (approvals pending)": "All submitted (approvals pending)",
+    "Approved: {value}": "Approved: {value}",
     "Weeks missing": "Weeks missing",
     "Who is absent": "Who is absent",
     "Previous week": "Previous week",
@@ -933,7 +936,7 @@ const TRANSLATIONS = {
     help_csv_export:
       "Exportiert den gewählten Mitarbeiter und Zeitraum als CSV-Datei.",
     help_my_balance:
-      "Überblick über deinen aktuellen Gleitzeitstand und den Einreichungen. Der Gleitzeitstand wird inklusive heute berechnet.",
+      "Überblick über deinen aktuellen Gleitzeitstand und den Einreichungen. Der Gleitzeitstand umfasst eingereichte, noch ausstehende Stunden und wird inklusive heute berechnet.",
     help_flextime_chart:
       "Verlauf deines kumulierten Gleitzeitkontostands über den gewählten Zeitraum. Die Daten werden inklusive heute berechnet.",
     help_submission_status:
@@ -942,6 +945,9 @@ const TRANSLATIONS = {
     "All approved": "Alle genehmigt",
     Incomplete: "Unvollständig",
     "All submitted": "Alles eingereicht",
+    "All submitted and approved": "Alles eingereicht und genehmigt",
+    "All submitted (approvals pending)": "Alles eingereicht (Genehmigungen ausstehend)",
+    "Approved: {value}": "Genehmigt: {value}",
     "Weeks missing": "Wochen fehlen",
     "Who is absent": "Wer ist abwesend",
     "No absences this week.": "Keine Abwesenheiten diese Woche.",

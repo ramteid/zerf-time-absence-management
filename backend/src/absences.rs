@@ -336,22 +336,17 @@ pub async fn calendar(
         .absences
         .calendar_entries(from, to, scope_user_ids.as_deref())
         .await?;
-    let requester_is_lead = requester.is_lead();
-    // Privacy: only team leads / admins see the actual absence kind. For peers
-    // we collapse to a coarse label so that sensitive categories (sick leave —
-    // health data under GDPR Art. 9 — training, special leave, unpaid leave)
-    // are not disclosed across the team. Vacation stays visible because it is
-    // operationally needed to coordinate cover and is not health-related.
+    // Scope guarantees: employees/assistants receive only their own entries;
+    // leads receive their own + direct reports; admins receive all. Every
+    // returned row therefore belongs to a user the requester is authorized to
+    // see in full, so kind and comment are returned without masking.
     Ok(Json(calendar_entries.into_iter().map(|entry| {
-        let is_own_entry = entry.user_id == requester.id;
-        let kind_is_visible = requester_is_lead || is_own_entry || entry.kind == "vacation";
-        let displayed_kind = if kind_is_visible { entry.kind.clone() } else { "absent".to_string() };
         serde_json::json!({
             "id": entry.id, "user_id": entry.user_id, "name": format!("{} {}", entry.first_name, entry.last_name),
-            "kind": displayed_kind,
+            "kind": entry.kind,
             "start_date": entry.start_date, "end_date": entry.end_date,
             "status": entry.status,
-            "comment": if requester_is_lead || is_own_entry { entry.comment.clone() } else { None }
+            "comment": entry.comment
         })
     }).collect()))
 }

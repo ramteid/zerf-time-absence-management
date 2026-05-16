@@ -162,6 +162,27 @@ impl ReportDb {
         Ok(rows.into_iter().map(|(d,)| d).collect())
     }
 
+    /// Returns true when at least one entry with status='submitted' (pending approval)
+    /// exists in the given date range.
+    pub async fn has_pending_submitted_entries_in_range(
+        &self,
+        user_id: i64,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> AppResult<bool> {
+        let (count,): (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM time_entries \
+             WHERE user_id=$1 AND status='submitted' \
+             AND entry_date BETWEEN $2 AND $3",
+        )
+        .bind(user_id)
+        .bind(from)
+        .bind(to)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(count > 0)
+    }
+
     /// Absence ranges in a period (for all_weeks_submitted check).
     pub async fn absence_ranges_in_period(
         &self,
