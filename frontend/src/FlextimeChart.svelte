@@ -117,6 +117,23 @@
   // Bar pixel width (for absence/holiday/weekend bands)
   $: barWidth = data.length > 1 ? plotWidth / (data.length - 1) : plotWidth;
 
+  // Group consecutive days with the same band color into runs.
+  // Each run is rendered as a single rect spanning from the first to the last point,
+  // so multi-day spans (e.g. Sat+Sun) align exactly with their data points.
+  $: bandRuns = (() => {
+    const runs = [];
+    let i = 0;
+    while (i <= lastActualIdx) {
+      const color = dayBandColor(data[i]);
+      if (!color) { i++; continue; }
+      let j = i;
+      while (j + 1 <= lastActualIdx && dayBandColor(data[j + 1]) === color) j++;
+      runs.push({ firstIdx: i, lastIdx: j, color });
+      i = j + 1;
+    }
+    return runs;
+  })();
+
   // ── Hover state ──────────────────────────────────────────────────────────
   let hoverIdx = /** @type {number|null} */ (null);
 
@@ -194,8 +211,8 @@
     unpaid: "#64748b",
     general_absence: "#6b7280",
   };
-  const HOLIDAY_COLOR = "var(--warning)";
-  const WEEKEND_COLOR = "#d97706";
+  const HOLIDAY_COLOR = "#10b981";
+  const WEEKEND_COLOR = "#9ca3af";
 
   function absColor(kind) {
     return ABSENCE_COLORS[kind] || "var(--text-tertiary)";
@@ -286,21 +303,18 @@
       </defs>
 
       <!-- ── Absence / holiday / weekend vertical bands (only past/today) ── -->
-      <!-- clip-path ensures bars centred on the first/last data point
-           do not bleed outside the plot area boundaries. -->
+      <!-- Consecutive same-colour days are merged into a single rect so the bar
+           starts and ends exactly at the data points of the respective days. -->
       <g clip-path="url(#clip-plot-{chartInstanceId})">
-        {#each data as day, pointIndex}
-          {@const bandColor = dayBandColor(day)}
-          {#if pointIndex <= lastActualIdx && bandColor}
-            <rect
-              x={pts[pointIndex].x - barWidth * 0.5}
-              y={marginTop}
-              width={barWidth}
-              height={plotHeight}
-              fill={bandColor}
-              opacity="0.18"
-            />
-          {/if}
+        {#each bandRuns as run}
+          <rect
+            x={run.firstIdx === run.lastIdx ? pts[run.firstIdx].x - barWidth * 0.5 : pts[run.firstIdx].x}
+            y={marginTop}
+            width={run.firstIdx === run.lastIdx ? barWidth : pts[run.lastIdx].x - pts[run.firstIdx].x}
+            height={plotHeight}
+            fill={run.color}
+            opacity="0.3"
+          />
         {/each}
       </g>
 
@@ -477,7 +491,7 @@
             style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-secondary)"
           >
             <div
-              style="width:10px;height:10px;border-radius:2px;background:{item.color};opacity:0.7;flex-shrink:0"
+              style="width:12px;height:12px;border-radius:2px;background:{item.color};opacity:0.3;flex-shrink:0"
             ></div>
             {item.key === "__holiday__"
               ? $t("Holidays")
