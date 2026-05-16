@@ -358,7 +358,7 @@ async fn absences_full_workflow() {
         let peer = login_change_pw(&app, "peer@example.com", &peer_pw).await;
         let outsider = login_change_pw(&app, "outsider@example.com", &outsider_pw).await;
 
-        let calendar_day = next_monday(21).format("%Y-%m-%d").to_string();
+        let calendar_day = next_monday(35).format("%Y-%m-%d").to_string();
         let month = calendar_day[..7].to_string();
 
         let (st, _) = lead
