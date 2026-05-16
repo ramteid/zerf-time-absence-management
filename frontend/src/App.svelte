@@ -27,21 +27,7 @@
   import Layout from "./Layout.svelte";
   import Login from "./routes/Login.svelte";
   import Setup from "./routes/Setup.svelte";
-  import Time from "./routes/Time.svelte";
-  import Absences from "./routes/Absences.svelte";
-  import Calendar from "./routes/Calendar.svelte";
-  import Account from "./routes/Account.svelte";
-  import Dashboard from "./routes/Dashboard.svelte";
-  import Reports from "./routes/Reports.svelte";
-  import AdminUsers from "./routes/AdminUsers.svelte";
-  import AdminCategories from "./routes/AdminCategories.svelte";
-  import AdminHolidays from "./routes/AdminHolidays.svelte";
-  import AdminAuditLog from "./routes/AdminAuditLog.svelte";
-  import AdminSettings from "./routes/AdminSettings.svelte";
-  import AdminEmail from "./routes/AdminEmail.svelte";
   import AdminTabs from "./routes/AdminTabs.svelte";
-  import TeamSettings from "./routes/TeamSettings.svelte";
-  import NotFound from "./routes/NotFound.svelte";
 
   let booting = true;
   let bootNetworkError = false;
@@ -232,22 +218,23 @@
     return idx >= 0 ? $path.slice(0, idx) : $path;
   })();
 
-  const routeMap = {
-    "/time": Time,
-    "/absences": Absences,
-    "/calendar": Calendar,
-    "/account": Account,
-    "/dashboard": Dashboard,
-    "/reports": Reports,
-    "/admin": AdminSettings,
-    "/admin/users": AdminUsers,
-    "/admin/categories": AdminCategories,
-    "/admin/holidays": AdminHolidays,
-    "/admin/audit-log": AdminAuditLog,
-    "/admin/settings": AdminSettings,
-    "/admin/email": AdminEmail,
-    "/team-settings": TeamSettings,
+  const routeLoaders = {
+    "/time": () => import("./routes/Time.svelte"),
+    "/absences": () => import("./routes/Absences.svelte"),
+    "/calendar": () => import("./routes/Calendar.svelte"),
+    "/account": () => import("./routes/Account.svelte"),
+    "/dashboard": () => import("./routes/Dashboard.svelte"),
+    "/reports": () => import("./routes/Reports.svelte"),
+    "/admin": () => import("./routes/AdminSettings.svelte"),
+    "/admin/users": () => import("./routes/AdminUsers.svelte"),
+    "/admin/categories": () => import("./routes/AdminCategories.svelte"),
+    "/admin/holidays": () => import("./routes/AdminHolidays.svelte"),
+    "/admin/audit-log": () => import("./routes/AdminAuditLog.svelte"),
+    "/admin/settings": () => import("./routes/AdminSettings.svelte"),
+    "/admin/email": () => import("./routes/AdminEmail.svelte"),
+    "/team-settings": () => import("./routes/TeamSettings.svelte"),
   };
+  const notFoundLoader = () => import("./routes/NotFound.svelte");
 
   const routeAccess = {
     "/dashboard": (user) => !!user?.permissions?.can_view_dashboard,
@@ -262,7 +249,7 @@
     "/admin/email": (user) => !!user?.permissions?.can_manage_settings,
   };
 
-  $: route = resolveRoute(pathname, $currentUser);
+  $: routePromise = resolveRoute(pathname, $currentUser);
   $: document.title = $settings?.organization_name
     ? `${$t("Time tracking")} - ${$settings.organization_name}`
     : $t("Time tracking");
@@ -289,6 +276,14 @@
     return check ? check(user) : true;
   }
 
+  function componentFromModule(loader) {
+    return loader().then((module) => module.default);
+  }
+
+  function loadRoute(path) {
+    return componentFromModule(routeLoaders[path] || notFoundLoader);
+  }
+
   function resolveRoute(p, user) {
     debugLog("route:resolve", {
       inputPath: p,
@@ -309,12 +304,12 @@
       debugLog("route:redirect-home", { dest });
       // Update the URL bar (deferred so we don't mutate stores mid-reactive-cycle)
       setTimeout(() => go(dest, false), 0);
-      return routeMap[dest] || NotFound;
+      return loadRoute(dest);
     }
     if (user.must_change_password && p !== "/account") {
       debugLog("route:redirect-password-change");
       setTimeout(() => go("/account", false), 0);
-      return Account;
+      return loadRoute("/account");
     }
     // Only redirect to settings setup when the password is already in order,
     // so an admin with both flags can complete the password change first.
@@ -325,23 +320,23 @@
     ) {
       debugLog("route:redirect-configure-settings");
       setTimeout(() => go("/admin/settings", false), 0);
-      return AdminSettings;
+      return loadRoute("/admin/settings");
     }
-    if (routeMap[p] && !canAccessRoute(p, user)) {
+    if (routeLoaders[p] && !canAccessRoute(p, user)) {
       const dest = preferredHome(user);
       debugLog("route:redirect-unauthorized", {
         inputPath: p,
         dest,
       });
       setTimeout(() => go(dest, false), 0);
-      return routeMap[dest] || NotFound;
+      return loadRoute(dest);
     }
-    const resolved = routeMap[p] || NotFound;
+    const routeExists = !!routeLoaders[p];
     debugLog("route:resolved", {
       inputPath: p,
-      resolved: resolved?.name ?? "anonymous-component",
+      resolved: routeExists ? p : "not-found",
     });
-    return resolved;
+    return loadRoute(p);
   }
 
   // Intercept data-link clicks
@@ -384,13 +379,17 @@
   />
 {:else if !$currentUser}
   <Login initialEmail={setupEmail} />
-{:else if route}
+{:else if routePromise}
   <Layout>
     {#if isAdmin}
       <AdminTabs />
     {/if}
     {#key $path}
-      <svelte:component this={route} />
+      {#await routePromise}
+        <p style="padding: 2em">{$t("Loading...")}</p>
+      {:then route}
+        <svelte:component this={route} />
+      {/await}
     {/key}
   </Layout>
 {:else}

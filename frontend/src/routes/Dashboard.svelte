@@ -1682,22 +1682,6 @@
   .absence-week-range:hover {
     color: var(--text-primary);
   }
-  .week-entry-list {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    max-height: min(52vh, 420px);
-    overflow: auto;
-    padding-right: 2px;
-  }
-
-  .week-entry-row {
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 8px 10px;
-    background: var(--bg-subtle);
-  }
-
   .change-diff-list {
     display: flex;
     flex-direction: column;
