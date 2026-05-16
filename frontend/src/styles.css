@@ -379,7 +379,7 @@ body {
   flex-shrink: 0;
 }
 
-.sidebar-logo-icon :global(.app-logo) {
+.sidebar-logo-icon .app-logo {
   display: block;
 }
 
@@ -1194,7 +1194,7 @@ dialog footer {
     flex-shrink: 0;
   }
 
-  .mobile-title-bar-logo :global(.app-logo) {
+  .mobile-title-bar-logo .app-logo {
     display: block;
   }
 
