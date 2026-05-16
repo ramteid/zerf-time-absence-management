@@ -68,8 +68,7 @@
     holidays.map((holiday) => [holiday.holiday_date, holiday.name]),
   );
 
-  // The calendar API is already team-scoped. Time entries remain personal,
-  // so we still filter those defensively.
+  // Time entries are filtered defensively to the current user.
   $: myTimeEntries = timeEntries.filter(
     (e) => e.user_id === $currentUser?.id && e.status !== "rejected",
   );

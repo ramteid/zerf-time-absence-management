@@ -257,9 +257,14 @@ Review and privacy behavior:
 - Non-admin approvers can approve/reject only direct-report absences for
 	non-admin users.
 - Admin-subject absences are handled by admins.
-- In the shared absence calendar, employees can see less-sensitive team
-	visibility by default. Sensitive absence kinds are not disclosed to peers;
-	leads/admins and the absence owner see full details.
+- Calendar visibility is strictly role-scoped:
+	- Employees and assistants see only their own absences.
+	- Team leads see their own absences plus the absences of users who have
+		them assigned as approver (their direct reports, excluding admin
+		subjects).
+	- Admins see all users' absences regardless of approver assignments.
+- Team leads and admins see full kind and comment details for the absences
+	they are allowed to view, so they can coordinate cover.
 
 Vacations and sick leave are checked against the employee's own work schedule.
 A one-day request on a public holiday or on a non-working weekday does not
@@ -301,9 +306,11 @@ Example: If you work 40 hours per week over 5 days, your daily target is 8 hours
 ### What counts toward flextime actuals
 
 - **Approved crediting entries:** hours count fully.
-- **Submitted crediting entries:** hours do NOT count in flextime actuals.
+- **Submitted crediting entries:** hours do NOT count in the official flextime actuals, but they are included in the Overtime overview tile balance as a projected total (see note below).
 - **Draft crediting entries:** hours do NOT count.
 - **Non-crediting entries (all statuses):** hours do NOT count, regardless of approval status.
+
+**Overtime overview tile:** The balance shown in the `Overtime overview` tile on the dashboard includes both approved and submitted (pending approval) crediting hours. This gives you a projected total reflecting everything you have filed. If there are no pending approvals, the displayed value equals the official approved balance. When submitted hours are pending, the sub-text shows the approved-only balance for reference.
 
 Example flextime scenario:
 
@@ -317,11 +324,10 @@ If your team meeting were crediting instead, the result would be: (7+1) − 8 = 
 
 ## Submission status indicator
 
-The `Submission status` tile shows whether all required past weeks have been submitted.
+The `Submissions` tile shows whether all required past weeks have been submitted and approved.
 
 - **Scope:** from your start date up to and including the last complete week.
 - **Current week is excluded** from this check (it is still ongoing).
-- **Approval is not required** for this indicator; submission is enough.
 
 ### How completeness is determined
 
@@ -364,8 +370,9 @@ entries. If you have a non-crediting entry in draft, your week remains
 
 States:
 
-- `All submitted` (green): every elapsed week has been submitted (at least one entry submitted/approved, no drafts or rejections remaining).
-- `Weeks missing` (amber): at least one elapsed week has missing or unfinished submissions.
+- `All submitted and approved` (green): every elapsed week has been submitted and all entries are approved (no pending approvals remaining).
+- `All submitted (approvals pending)` (orange): every elapsed week has been submitted, but at least one entry is still waiting for approval.
+- `Weeks missing` (orange): at least one elapsed week has missing or unfinished submissions.
 
 ## Vacation balance and carryover logic
 

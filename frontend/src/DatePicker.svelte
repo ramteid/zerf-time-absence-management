@@ -275,6 +275,55 @@
     right: auto;
   }
 
+  /* Month/year navigation header layout:
+     [←][Month][→]  (left-aligned)          [Year] (right-aligned) */
+  :global(.zf-date-picker-calendar .flatpickr-months) {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+
+  /* Pull arrows out of absolute positioning into the flex row */
+  :global(.zf-date-picker-calendar .flatpickr-months .flatpickr-prev-month),
+  :global(.zf-date-picker-calendar .flatpickr-months .flatpickr-next-month) {
+    position: static;
+    top: auto;
+    height: auto;
+    padding: 4px 6px;
+  }
+
+  /* Month container: shrink to content width only */
+  :global(.zf-date-picker-calendar .flatpickr-months .flatpickr-month) {
+    flex: 0 0 auto;
+    position: static;
+    height: auto;
+    overflow: visible;
+  }
+
+  /* Current-month inner div: switch from absolute to inline-flex */
+  :global(.zf-date-picker-calendar .flatpickr-current-month) {
+    position: static;
+    width: auto;
+    left: auto;
+    padding: 0;
+    height: auto;
+    font-size: 13.5px;
+    display: inline-flex;
+    align-items: center;
+    text-align: left;
+  }
+
+  /* Year: absolutely positioned at the right edge of .flatpickr-months */
+  :global(.zf-date-picker-calendar .flatpickr-current-month .numInputWrapper) {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 6ch;
+    display: inline-flex;
+    align-items: center;
+  }
+
   .date-picker-button {
     position: absolute;
     right: 4px;
