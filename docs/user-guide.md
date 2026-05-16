@@ -258,11 +258,12 @@ Review and privacy behavior:
 	non-admin users.
 - Admin-subject absences are handled by admins.
 - Calendar visibility is strictly role-scoped:
-	- Employees and assistants see only their own absences.
-	- Team leads see their own absences plus the absences of users who have
-		them assigned as approver (their direct reports, excluding admin
-		subjects).
-	- Admins see all users' absences regardless of approver assignments.
+	- Employees and assistants see only their own absences and time entries.
+	- Team leads see their own data plus the absences and time entries of
+		every user who has them assigned as approver (their direct reports,
+		excluding admin subjects). For direct reports' time entries, the
+		person's name is shown in the event detail.
+	- Admins see all users' data regardless of approver assignments.
 - Team leads and admins see full kind and comment details for the absences
 	they are allowed to view, so they can coordinate cover.
 

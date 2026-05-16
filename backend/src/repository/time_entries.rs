@@ -384,12 +384,14 @@ impl TimeEntryDb {
     ) -> AppResult<Vec<TimeEntry>> {
         let mut builder = QueryBuilder::<Postgres>::new(&format!("{TE_SELECT} WHERE TRUE"));
         if !is_admin {
-            // Non-admin leads: only show entries from active, non-admin direct
+            // Non-admin leads: include own entries plus active, non-admin direct
             // reports. Admin-subject entries are excluded from lead scope.
             builder
-                .push(" AND user_id IN (SELECT ua.user_id FROM user_approvers ua JOIN users u ON u.id=ua.user_id WHERE ua.approver_id = ")
+                .push(" AND (user_id = ")
                 .push_bind(requester_id)
-                .push(" AND u.active=TRUE AND u.role != 'admin')");
+                .push(" OR user_id IN (SELECT ua.user_id FROM user_approvers ua JOIN users u ON u.id=ua.user_id WHERE ua.approver_id = ")
+                .push_bind(requester_id)
+                .push(" AND u.active=TRUE AND u.role != 'admin'))");
         }
         if let Some(f) = from {
             builder.push(" AND entry_date >= ").push_bind(f);
