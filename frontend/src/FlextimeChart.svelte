@@ -303,14 +303,21 @@
       </defs>
 
       <!-- ── Absence / holiday / weekend vertical bands (only past/today) ── -->
-      <!-- Consecutive same-colour days are merged into a single rect so the bar
-           starts and ends exactly at the data points of the respective days. -->
+      <!-- Each day's band starts at its own data point and extends to the
+           following day's data point, so e.g. a Sat band spans [Sat, Sun] and
+           a Sat+Sun weekend spans [Sat, Mon]. Consecutive same-colour days are
+           merged into one rect. The last day extrapolates by one barWidth and
+           is clipped to the plot area. -->
       <g clip-path="url(#clip-plot-{chartInstanceId})">
         {#each bandRuns as run}
+          {@const startX = pts[run.firstIdx].x}
+          {@const endX = run.lastIdx + 1 < data.length
+            ? pts[run.lastIdx + 1].x
+            : pts[run.lastIdx].x + barWidth}
           <rect
-            x={run.firstIdx === run.lastIdx ? pts[run.firstIdx].x - barWidth * 0.5 : pts[run.firstIdx].x}
+            x={startX}
             y={marginTop}
-            width={run.firstIdx === run.lastIdx ? barWidth : pts[run.lastIdx].x - pts[run.firstIdx].x}
+            width={endX - startX}
             height={plotHeight}
             fill={run.color}
             opacity="0.3"
