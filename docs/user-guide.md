@@ -911,8 +911,10 @@ in `user_approvers`. This applies to:
 Admin users can see and act on all users.
 
 **Self-review restriction:** Non-admin leads cannot approve or reject their
-own time entries, absences, or reopen requests. Admins may approve or reject
-their own items.
+own time entries, absences, or reopen requests. Their own submitted entries
+are not shown in the Dashboard approval queue. Admins may approve or reject
+their own items, and their own submitted entries appear in the queue like
+any other user's.
 
 **Admin-subject rule:** Non-admin leads cannot act on items submitted by admin
 users. Admin-subject requests require an admin reviewer.
