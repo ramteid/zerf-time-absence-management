@@ -26,7 +26,6 @@
   } from "../format.js";
   import Icon from "../Icons.svelte";
   import EntryDialog from "../dialogs/EntryDialog.svelte";
-  import ChangeRequestDialog from "../dialogs/ChangeRequestDialog.svelte";
   import { isAssistantUser } from "../rolePolicy.js";
 
   // Full day names indexed Monday (0) → Sunday (6), used to label each day card.
@@ -84,7 +83,6 @@
   // The Monday that anchors the displayed week (weekFrom) and the Sunday that closes it (weekTo).
   let weekFrom, weekTo;
   let showEntry = null;
-  let showChange = null;
   let myReopens = [];
   // Monotonically increasing counter: any response whose sequence number is older than the
   // latest counter value is discarded, preventing stale async results from overwriting fresh data.
@@ -600,46 +598,61 @@
 
             {#each day.items as entry}
               {@const category = categoryById(entry.category_id, $categories)}
-              <div
-                class="time-block"
-                class:time-block--rejected={entry.status === "rejected"}
-                on:click={() => {
-                  if (entry.status === "draft") showEntry = entry;
-                  else if (
-                    entry.status === "submitted" ||
-                    entry.status === "approved"
-                  )
-                    showChange = entry;
-                }}
-                on:keydown={() => {}}
-                role="button"
-                tabindex="0"
-              >
-                <div class="time-block-cat">
-                  <span class="cat-dot" style="background:{category.color}"
-                  ></span>
-                  <span class="time-block-cat-name">{$t(category.name)}</span>
-                  {#if entry.status !== "draft"}
+              {#if entry.status === "draft"}
+                <div
+                  class="time-block"
+                  on:click={() => (showEntry = entry)}
+                  on:keydown={() => {}}
+                  role="button"
+                  tabindex="0"
+                >
+                  <div class="time-block-cat">
+                    <span class="cat-dot" style="background:{category.color}"
+                    ></span>
+                    <span class="time-block-cat-name">{$t(category.name)}</span>
+                  </div>
+                  <div class="time-block-times tab-num">
+                    <span>{entryTimeRange(entry, timeFormat)}</span>
+                    <span
+                      >{formatHours(
+                        entryDurationHours(
+                          entry.start_time.slice(0, 5),
+                          entry.end_time.slice(0, 5),
+                        ),
+                      )}</span
+                    >
+                  </div>
+                </div>
+              {:else}
+                <!-- Locked: the week was submitted, so this entry is read-only. -->
+                <div
+                  class="time-block time-block--locked"
+                  class:time-block--rejected={entry.status === "rejected"}
+                >
+                  <div class="time-block-cat">
+                    <span class="cat-dot" style="background:{category.color}"
+                    ></span>
+                    <span class="time-block-cat-name">{$t(category.name)}</span>
                     <span
                       class="zf-chip zf-chip-{entry.status}"
                       style="height:18px;font-size:10px"
                     >
                       {statusLabel(entry.status)}
                     </span>
-                  {/if}
+                  </div>
+                  <div class="time-block-times tab-num">
+                    <span>{entryTimeRange(entry, timeFormat)}</span>
+                    <span
+                      >{formatHours(
+                        entryDurationHours(
+                          entry.start_time.slice(0, 5),
+                          entry.end_time.slice(0, 5),
+                        ),
+                      )}</span
+                    >
+                  </div>
                 </div>
-                <div class="time-block-times tab-num">
-                  <span>{entryTimeRange(entry, timeFormat)}</span>
-                  <span
-                    >{formatHours(
-                      entryDurationHours(
-                        entry.start_time.slice(0, 5),
-                        entry.end_time.slice(0, 5),
-                      ),
-                    )}</span
-                  >
-                </div>
-              </div>
+              {/if}
             {/each}
           </div>
 
@@ -672,38 +685,45 @@
           <div class="day-entries">
             {#each day.items as entry}
               {@const category = categoryById(entry.category_id, $categories)}
-              <div
-                class="time-block"
-                class:time-block--rejected={entry.status === "rejected"}
-                on:click={() => {
-                  if (entry.status === "draft") showEntry = entry;
-                  else if (
-                    entry.status === "submitted" ||
-                    entry.status === "approved"
-                  )
-                    showChange = entry;
-                }}
-                on:keydown={() => {}}
-                role="button"
-                tabindex="0"
-              >
-                <div class="time-block-cat">
-                  <span class="cat-dot" style="background:{category.color}"
-                  ></span>
-                  <span class="time-block-cat-name">{$t(category.name)}</span>
-                  {#if entry.status !== "draft"}
+              {#if entry.status === "draft"}
+                <div
+                  class="time-block"
+                  on:click={() => (showEntry = entry)}
+                  on:keydown={() => {}}
+                  role="button"
+                  tabindex="0"
+                >
+                  <div class="time-block-cat">
+                    <span class="cat-dot" style="background:{category.color}"
+                    ></span>
+                    <span class="time-block-cat-name">{$t(category.name)}</span>
+                  </div>
+                  <div class="time-block-times tab-num">
+                    <span>{entryTimeRange(entry, timeFormat)}</span>
+                  </div>
+                </div>
+              {:else}
+                <!-- Locked: the week was submitted, so this entry is read-only. -->
+                <div
+                  class="time-block time-block--locked"
+                  class:time-block--rejected={entry.status === "rejected"}
+                >
+                  <div class="time-block-cat">
+                    <span class="cat-dot" style="background:{category.color}"
+                    ></span>
+                    <span class="time-block-cat-name">{$t(category.name)}</span>
                     <span
                       class="zf-chip zf-chip-{entry.status}"
                       style="height:18px;font-size:10px"
                     >
                       {statusLabel(entry.status)}
                     </span>
-                  {/if}
+                  </div>
+                  <div class="time-block-times tab-num">
+                    <span>{entryTimeRange(entry, timeFormat)}</span>
+                  </div>
                 </div>
-                <div class="time-block-times tab-num">
-                  <span>{entryTimeRange(entry, timeFormat)}</span>
-                </div>
-              </div>
+              {/if}
             {/each}
           </div>
         </div>
@@ -724,21 +744,23 @@
     }}
   />
 {/if}
-{#if showChange}
-  <ChangeRequestDialog
-    entry={showChange}
-    onClose={() => {
-      showChange = null;
-      loadWeek(weekFrom || appTodayDate($settings?.timezone));
-    }}
-  />
-{/if}
 
 <style>
   .time-block--rejected .time-block-cat-name,
   .time-block--rejected .time-block-times {
     text-decoration: line-through;
     color: var(--text-tertiary);
+  }
+
+  /* Submitted, approved or rejected entries are read-only: the week is locked
+     until a reopen request makes it editable again, so we drop the pointer
+     affordance and hover effect to signal the block is not interactive. */
+  .time-block--locked {
+    cursor: default;
+  }
+
+  .time-block--locked:hover {
+    background: var(--bg-subtle);
   }
 
   .day-card--before-start {

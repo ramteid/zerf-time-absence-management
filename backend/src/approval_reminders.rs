@@ -1,5 +1,5 @@
 //! Background task: every Monday at 07:00 local time, notify approvers who have
-//! any pending approval requests (change requests, absences, reopen requests).
+//! any pending approval requests (submitted weeks, absences, reopen requests).
 
 use crate::db::DatabasePool;
 use chrono::{Datelike, Duration, TimeZone, Timelike, Utc};
@@ -52,8 +52,6 @@ async fn find_approvers_with_pending(pool: &DatabasePool) -> Vec<PendingApprover
                  -- approval, so approvers must be reminded about them too.
                  SELECT user_id FROM time_entries
                  WHERE status = 'submitted'
-                 UNION ALL
-                 SELECT user_id FROM change_requests    WHERE status = 'open'
                  UNION ALL
                  SELECT user_id FROM absences           WHERE status IN ('requested','cancellation_pending')
                  UNION ALL

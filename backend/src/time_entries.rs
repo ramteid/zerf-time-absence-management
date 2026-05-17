@@ -240,24 +240,6 @@ pub async fn list_all(
     Ok(Json(mapped))
 }
 
-/// Validate a time entry payload against business rules (overlap, date constraints).
-/// Used by both create and change-request flows.
-pub(crate) async fn validate(
-    conn: &mut sqlx::PgConnection,
-    user_id: i64,
-    te: &NewTimeEntry,
-    exclude_id: Option<i64>,
-) -> AppResult<()> {
-    let entry = crate::repository::NewEntryData {
-        entry_date: te.entry_date,
-        start_time: te.start_time.clone(),
-        end_time: te.end_time.clone(),
-        category_id: te.category_id,
-        comment: te.comment.clone(),
-    };
-    crate::repository::time_entries::validate_entry(conn, user_id, &entry, exclude_id).await
-}
-
 /// Create a new draft time entry for the requesting user.
 pub async fn create(
     State(app_state): State<AppState>,

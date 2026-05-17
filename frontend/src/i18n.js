@@ -81,7 +81,9 @@ const TRANSLATIONS = {
     audit_table_notifications: "Notification",
     audit_table_app_settings: "Setting",
     audit_table_reopen_requests: "Edit Request",
-    audit_table_change_requests: "Change Request",
+    // Kept for historical audit-log rows; the per-entry change-request
+    // workflow itself has been removed.
+    audit_table_change_requests: "Change Request (legacy)",
     audit_action_created: "Created",
     audit_action_updated: "Updated",
     audit_action_deleted: "Deleted",
@@ -200,7 +202,6 @@ const TRANSLATIONS = {
     Approval: "Approval",
     Change: "Change",
     "Edit Request Details": "Edit Request Details",
-    "Change Request Details": "Change Request Details",
     "Absence Type": "Absence Type",
     "Request Type": "Request Type",
     Changes: "Changes",
@@ -228,9 +229,6 @@ const TRANSLATIONS = {
     "notif:absence_cancellation_requested": "Absence cancellation requested",
     "notif:absence_cancellation_approved": "Absence cancellation approved",
     "notif:absence_cancellation_rejected": "Absence cancellation rejected",
-    "notif:change_request_created": "New change request",
-    "notif:change_request_approved": "Change request approved",
-    "notif:change_request_rejected": "Change request rejected",
     "notif:reopen_auto_approved": "Week editing enabled",
     "notif:reopen_auto_approved_notice": "Week edit auto-approved",
     "notif:reopen_request_created": "New week edit request",
@@ -364,16 +362,12 @@ const TRANSLATIONS = {
     "Edit entry": "Eintrag bearbeiten",
     "Delete?": "Löschen?",
     "Delete this entry?": "Diesen Eintrag löschen?",
-    "Request change": "Änderung anfordern",
     "Submit week ({count})": "Woche einreichen ({count})",
     "Submit this week?": "Diese Woche einreichen?",
     "All draft entries of this week will be submitted for approval.":
       "Alle Entwürfe dieser Woche werden zur Genehmigung eingereicht.",
     "Week submitted.": "Woche eingereicht.",
-    "Original: {date} {start}-{end}": "Original: {date} {start}-{end}",
-    "Why is the change needed?": "Warum ist die Änderung nötig?",
     "Submit request": "Anfrage senden",
-    "Change request submitted.": "Änderungsanfrage eingereicht.",
     "Annual entitlement": "Jahresanspruch",
     "Already taken": "Bereits genommen",
     "Approved upcoming": "Genehmigt bevorstehend",
@@ -420,8 +414,6 @@ const TRANSLATIONS = {
     Year: "Jahr",
     "Submitted entries": "Eingereichte Wochen",
     "Open requests": "Offene Anträge",
-    "Change requests": "Änderungsanträge",
-    "Change Requests": "Änderungsanträge",
     "Submitted time entries": "Eingereichte Wochenzeiten",
     "No open entries.": "Keine offenen Wochen.",
     Approved: "Genehmigt",
@@ -429,11 +421,7 @@ const TRANSLATIONS = {
     "Approve all": "Alle genehmigen",
     "Open absence requests": "Offene Abwesenheitsanträge",
     "No open requests.": "Keine offenen Anträge.",
-    "No open change requests.": "Keine offenen Änderungsanfragen.",
-    "Change request": "Änderungsanfrage",
     "Reason: {reason}": "Begründung: {reason}",
-    "New values: {date} {start}-{end}": "Neue Werte: {date} {start}-{end}",
-    "Approve & apply": "Genehmigen und anwenden",
     "Monthly report": "Monatsbericht",
     Export: "Export",
     "Export CSV": "CSV exportieren",
@@ -630,7 +618,6 @@ const TRANSLATIONS = {
     "Reject?": "Ablehnen?",
     "Reject this entry?": "Diese Woche ablehnen?",
     "Reject this request?": "Diese Anfrage ablehnen?",
-    "Reject this change request?": "Diese Änderungsanfrage ablehnen?",
     Request: "Anfrage",
     "Rejected.": "Abgelehnt.",
     Retry: "Erneut versuchen",
@@ -788,8 +775,6 @@ const TRANSLATIONS = {
       "Für diese Woche existiert bereits eine offene Anfrage.",
     "Request was already resolved by someone else.":
       "Anfrage wurde bereits von jemand anderem bearbeitet.",
-    "An open change request already exists for this entry (id {id}).":
-      "Für diesen Eintrag existiert bereits eine offene Änderungsanfrage (ID {id}).",
     "Leave balance unavailable.": "Urlaubsstand nicht verfügbar.",
     "Overtime data unavailable.": "Überstundendaten nicht verfügbar.",
     "Overtime overview": "Überstundenübersicht",
@@ -859,8 +844,8 @@ const TRANSLATIONS = {
     "Category not found.": "Kategorie nicht gefunden.",
     "Category is inactive.": "Kategorie ist inaktiv.",
     "Only drafts can be deleted.": "Nur Entwürfe können gelöscht werden.",
-    "Only drafts can be edited directly. Please file a change request.":
-      "Nur Entwürfe können direkt bearbeitet werden. Bitte stellen Sie eine Änderungsanfrage.",
+    "Only draft entries can be edited. Submit a week edit request to make the whole week editable again.":
+      "Nur Entwürfe können direkt bearbeitet werden. Bitte fordern Sie eine Bearbeitung der Woche an, um die gesamte Woche wieder bearbeitbar zu machen.",
     "Only submitted entries can be approved.":
       "Nur eingereichte Wochen können genehmigt werden.",
     "Only submitted entries can be rejected.":
@@ -869,18 +854,6 @@ const TRANSLATIONS = {
       "Woche wurde bereits von jemand anderem geprüft.",
     "Reason too long.": "Begründung zu lang.",
     "Reason required.": "Begründung erforderlich.",
-    // Change request errors
-    "Date cannot be before user start date.":
-      "Datum darf nicht vor dem Startdatum des Benutzers liegen.",
-    "Date cannot be in the future.": "Datum darf nicht in der Zukunft liegen.",
-    "Edit drafts directly.": "Entwürfe können direkt bearbeitet werden.",
-    "Invalid time format (HH:MM).": "Ungültiges Zeitformat (HH:MM).",
-    "Change request could no longer be applied because the entry changed.":
-      "Änderungsanfrage konnte nicht mehr angewendet werden, da sich der Eintrag geändert hat.",
-    "Change request was already resolved by someone else.":
-      "Änderungsanfrage wurde bereits von jemand anderem bearbeitet.",
-    "Rejected entries cannot have change requests. Please submit an edit request instead.":
-      "Abgelehnte Einträge können keine Änderungsanfragen haben. Stellen Sie stattdessen eine Bearbeitungsanfrage.",
     // Absence errors
     "Absence start date is before user start date.":
       "Abwesenheitsbeginn liegt vor dem Startdatum des Benutzers.",
@@ -968,7 +941,9 @@ const TRANSLATIONS = {
     audit_table_notifications: "Benachrichtigung",
     audit_table_app_settings: "Einstellung",
     audit_table_reopen_requests: "Bearbeitungsanfrage",
-    audit_table_change_requests: "Änderungsanfrage",
+    // Wird für historische Audit-Einträge beibehalten; der Workflow für
+    //     // Änderungsanfragen einzelner Einträge wurde entfernt.    // Änderungsanfragen einzelner Einträge wurde entfernt.W    // Änderungsanfragen einzelner Einträge wurde entfernt.
+    audit_table_change_requests: "Änderungsanfrage (alt)",
     audit_action_created: "Erstellt",
     audit_action_updated: "Bearbeitet",
     audit_action_deleted: "Gelöscht",
@@ -1071,7 +1046,6 @@ const TRANSLATIONS = {
     Approval: "Genehmigung",
     Change: "Änderung",
     "Edit Request Details": "Details der Bearbeitungsanfrage",
-    "Change Request Details": "Details der Änderungsanfrage",
     "Absence Type": "Abwesenheitstyp",
     "Request Type": "Anfragetyp",
     Changes: "Änderungen",
@@ -1096,9 +1070,6 @@ const TRANSLATIONS = {
       "Stornierungsanfrage für Abwesenheit",
     "notif:absence_cancellation_approved": "Stornierung genehmigt",
     "notif:absence_cancellation_rejected": "Stornierung abgelehnt",
-    "notif:change_request_created": "Neue Änderungsanfrage",
-    "notif:change_request_approved": "Änderungsanfrage genehmigt",
-    "notif:change_request_rejected": "Änderungsanfrage abgelehnt",
     "notif:reopen_auto_approved": "Woche zur Bearbeitung freigegeben",
     "notif:reopen_auto_approved_notice":
       "Bearbeitungsanfrage automatisch genehmigt",
@@ -1281,11 +1252,6 @@ const ERROR_PATTERNS = Object.freeze([
   {
     pattern: /^Invalid time: (?<time>.+)$/,
     key: "Invalid time: {time}",
-  },
-  {
-    pattern:
-      /^An open change request already exists for this entry \(id (?<id>\d+)\)\.$/,
-    key: "An open change request already exists for this entry (id {id}).",
   },
   {
     pattern: /^A pending edit request already exists \(id (?<id>\d+)\)\.$/,

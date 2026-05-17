@@ -221,7 +221,7 @@ describe("label helpers", () => {
 
   it("translates audit aliases and actions", () => {
     setLanguage("de");
-    expect(auditTableLabel("change_requests")).toBe("Änderungsanfrage");
+    expect(auditTableLabel("reopen_requests")).toBe("Bearbeitungsanfrage");
     expect(auditActionLabel("password_reset")).toBe("Passwort zurückgesetzt");
     expect(auditActionLabel("deactivated")).toBe("Deaktiviert");
     expect(auditActionLabel("reopened")).toBe("Bearbeitung freigegeben");

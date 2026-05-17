@@ -7,18 +7,17 @@
 //! immediately and all explicitly assigned approvers receive an informational
 //! notification.
 //!
-//! Approval / auto-approval reopens the week atomically:
-//!   * all submitted, approved, or rejected entries for `[week_start, week_start+6 days]` are reset
-//!     to `'draft'` (audit-logged per entry);
-//!   * any open `change_requests` for those entries are auto-approved and
-//!     applied before the status reset.
+//! Approval / auto-approval reopens the week atomically: every submitted,
+//! approved, or rejected entry for `[week_start, week_start+6 days]` is reset
+//! to `'draft'` and audit-logged.  The week is treated atomically — individual
+//! entries inside a submitted week cannot be edited, so the reopen workflow
+//! is the only way to change submitted data after the fact.
 
 use crate::audit;
 use crate::auth::User;
 use crate::error::{AppError, AppResult};
 use crate::i18n;
 use crate::notifications;
-use crate::repository::{TimeEntry, TimeEntryDb};
 use crate::AppState;
 use axum::{
     extract::{Path, State},
@@ -70,170 +69,16 @@ fn assert_monday(d: NaiveDate) -> AppResult<()> {
     Ok(())
 }
 
-#[derive(FromRow)]
-struct ChangeOverviewRow {
-    entry_date: NaiveDate,
-    start_time: String,
-    end_time: String,
-    old_category_name: String,
-    comment: Option<String>,
-    new_date: Option<NaiveDate>,
-    new_start_time: Option<String>,
-    new_end_time: Option<String>,
-    new_category_name: Option<String>,
-    new_comment: Option<String>,
-}
-
-#[derive(FromRow)]
-struct OpenChangeRequestForReopen {
-    id: i64,
-    time_entry_id: i64,
-    new_date: Option<NaiveDate>,
-    new_start_time: Option<String>,
-    new_end_time: Option<String>,
-    new_category_id: Option<i64>,
-    new_comment: Option<String>,
-}
-
-fn hhmm(value: &str) -> String {
-    value.chars().take(5).collect()
-}
-
-fn change_request_overview_text(
-    language: &i18n::Language,
-    rows: &[ChangeOverviewRow],
-    applied: bool,
-) -> String {
-    if rows.is_empty() {
-        return i18n::translate(language, "reopen_change_request_none", &[]);
-    }
-
-    let header = if applied {
-        i18n::translate(language, "reopen_change_request_header_applied", &[])
-    } else {
-        i18n::translate(language, "reopen_change_request_header_open", &[])
-    };
-
-    let mut lines = vec![header];
-    for row in rows {
-        let before_category = i18n::work_category_label(language, &row.old_category_name);
-        let after_category = i18n::work_category_label(
-            language,
-            row.new_category_name
-                .as_deref()
-                .unwrap_or(&row.old_category_name),
-        );
-        let before_comment = row.comment.as_deref().unwrap_or("").trim();
-        let after_comment = row.new_comment.as_deref().unwrap_or(before_comment).trim();
-        let before_comment = if before_comment.is_empty() {
-            i18n::translate(language, "text_empty", &[])
-        } else {
-            before_comment.to_string()
-        };
-        let after_comment = if after_comment.is_empty() {
-            i18n::translate(language, "text_empty", &[])
-        } else {
-            after_comment.to_string()
-        };
-        let base_line = format!(
-            "- {} {}-{} ({}) -> {} {}-{} ({})",
-            i18n::format_date(language, row.entry_date),
-            hhmm(&row.start_time),
-            hhmm(&row.end_time),
-            before_category,
-            i18n::format_date(language, row.new_date.unwrap_or(row.entry_date)),
-            hhmm(row.new_start_time.as_deref().unwrap_or(&row.start_time)),
-            hhmm(row.new_end_time.as_deref().unwrap_or(&row.end_time)),
-            after_category,
-        );
-        lines.push(base_line);
-        if before_comment != after_comment {
-            let comment_label =
-                i18n::translate(language, "reopen_change_request_comment_label", &[]);
-            lines.push(format!(
-                "{comment_label}: {before_comment} -> {after_comment}"
-            ));
-        }
-    }
-    lines.join("\n")
-}
-
-async fn load_change_request_overview(
-    pool: &crate::db::DatabasePool,
-    language: &i18n::Language,
-    user_id: i64,
-    week_start: NaiveDate,
-    applied: bool,
-) -> String {
-    let week_end = week_start + chrono::Duration::days(6);
-    let rows = sqlx::query_as::<_, ChangeOverviewRow>(
-        "SELECT te.entry_date, te.start_time, te.end_time, \
-                c_old.name AS old_category_name, te.comment, \
-                cr.new_date, cr.new_start_time, cr.new_end_time, \
-                c_new.name AS new_category_name, cr.new_comment \
-         FROM change_requests cr \
-         JOIN time_entries te ON te.id = cr.time_entry_id \
-         JOIN categories c_old ON c_old.id = te.category_id \
-         LEFT JOIN categories c_new ON c_new.id = cr.new_category_id \
-         WHERE cr.status='open' AND te.user_id=$1 AND te.entry_date BETWEEN $2 AND $3 \
-         ORDER BY te.entry_date, te.start_time, cr.id",
-    )
-    .bind(user_id)
-    .bind(week_start)
-    .bind(week_end)
-    .fetch_all(pool)
-    .await
-    .unwrap_or_default();
-
-    change_request_overview_text(language, &rows, applied)
-}
-
-struct ReopenExecution {
-    reopened_entries: Vec<(i64, String)>,
-    applied_change_request_ids: Vec<i64>,
-    applied_change_overview: String,
-}
-
-async fn load_change_request_overview_for_ids_tx(
-    tx: &mut sqlx::PgConnection,
-    language: &i18n::Language,
-    change_request_ids: &[i64],
-    applied: bool,
-) -> AppResult<String> {
-    if change_request_ids.is_empty() {
-        return Ok(change_request_overview_text(language, &[], applied));
-    }
-    let rows = sqlx::query_as::<_, ChangeOverviewRow>(
-        "SELECT te.entry_date, te.start_time, te.end_time, \
-                c_old.name AS old_category_name, te.comment, \
-                cr.new_date, cr.new_start_time, cr.new_end_time, \
-                c_new.name AS new_category_name, cr.new_comment \
-         FROM change_requests cr \
-         JOIN time_entries te ON te.id = cr.time_entry_id \
-         JOIN categories c_old ON c_old.id = te.category_id \
-         LEFT JOIN categories c_new ON c_new.id = cr.new_category_id \
-         WHERE cr.id = ANY($1) \
-         ORDER BY te.entry_date, te.start_time, cr.id",
-    )
-    .bind(change_request_ids)
-    .fetch_all(tx)
-    .await?;
-    Ok(change_request_overview_text(language, &rows, applied))
-}
-
-/// Atomically reopen a week: apply open change_requests for the week's
-/// submitted, approved, or rejected entries, then reset those entries to draft.
-/// Caller is the **acting** user (approver or self); `subject` is the user
-/// whose week is being reopened. Returns the affected entry ids and their
-/// previous status so the caller can commit the whole state transition first
-/// and audit after.
+/// Atomically reopen a week: reset every submitted, approved, or rejected
+/// entry in `[week_start, week_start+6]` back to draft.  Caller is the
+/// **acting** user (approver or self); `subject` is the user whose week is
+/// being reopened.  Returns the affected entry ids and their previous status
+/// so the caller can commit the whole state transition first and audit after.
 async fn perform_reopen_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    language: &i18n::Language,
-    actor_id: i64,
     subject_id: i64,
     week_start: NaiveDate,
-) -> AppResult<ReopenExecution> {
+) -> AppResult<Vec<(i64, String)>> {
     let week_end = week_start + chrono::Duration::days(6);
 
     // Advisory lock on subject_id serializes concurrent reopen attempts for the
@@ -262,48 +107,7 @@ async fn perform_reopen_in_tx(
         ));
     }
 
-    // Auto-apply open change requests for these entries.
     let entry_ids: Vec<i64> = affected.iter().map(|(id, _)| *id).collect();
-    let open_change_requests: Vec<OpenChangeRequestForReopen> = sqlx::query_as(
-        "SELECT id, time_entry_id, new_date, new_start_time, new_end_time, \
-                new_category_id, new_comment \
-         FROM change_requests \
-         WHERE status='open' AND time_entry_id = ANY($1) \
-         ORDER BY id FOR UPDATE",
-    )
-    .bind(&entry_ids)
-    .fetch_all(&mut **tx)
-    .await?;
-    let open_change_request_ids: Vec<i64> = open_change_requests
-        .iter()
-        .map(|change_request| change_request.id)
-        .collect();
-    let applied_change_overview =
-        load_change_request_overview_for_ids_tx(tx, language, &open_change_request_ids, true)
-            .await?;
-    let mut applied_change_request_ids = Vec::new();
-    for change_request in open_change_requests {
-        let current_entry: TimeEntry = sqlx::query_as(
-            "SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, \
-                    submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at \
-             FROM time_entries WHERE id=$1 FOR UPDATE",
-        )
-        .bind(change_request.time_entry_id)
-        .fetch_one(&mut **tx)
-        .await?;
-        TimeEntryDb::apply_change_request_tx(
-            tx,
-            change_request.time_entry_id,
-            &current_entry.status,
-            change_request.new_date,
-            change_request.new_start_time.as_deref(),
-            change_request.new_end_time.as_deref(),
-            change_request.new_category_id,
-            change_request.new_comment.as_deref(),
-        )
-        .await?;
-        applied_change_request_ids.push(change_request.id);
-    }
 
     crate::repository::time_entries::validate_entries_after_reopen(
         &mut **tx,
@@ -312,37 +116,6 @@ async fn perform_reopen_in_tx(
     )
     .await?;
 
-    if !applied_change_request_ids.is_empty() {
-        let rows = sqlx::query(
-            "UPDATE change_requests \
-             SET status='approved', \
-                 reviewed_by=$1, \
-                 reviewed_at=CURRENT_TIMESTAMP, \
-                 rejection_reason=NULL \
-             WHERE status='open' AND id = ANY($2)",
-        )
-        // reviewed_by is NULL for self-applied changes (auto-approve without an
-        // explicit approver); set to the acting approver's id otherwise.
-        .bind(if actor_id == subject_id {
-            None::<i64>
-        } else {
-            Some(actor_id)
-        })
-        .bind(&applied_change_request_ids)
-        .execute(&mut **tx)
-        .await?
-        .rows_affected();
-        if rows != applied_change_request_ids.len() as u64 {
-            return Err(AppError::Conflict(
-                "Change request was already resolved by someone else.".into(),
-            ));
-        }
-    }
-
-    // Reset all affected entries to draft.  We filter by their original IDs
-    // (not by date range) because the CR-apply step above may have moved some
-    // entries to a date outside the original week; a date-range filter would
-    // silently miss those and leave them in a non-draft status.
     sqlx::query(
         "UPDATE time_entries SET status='draft', submitted_at=NULL, reviewed_by=NULL, \
          reviewed_at=NULL, rejection_reason=NULL, updated_at=CURRENT_TIMESTAMP \
@@ -352,11 +125,7 @@ async fn perform_reopen_in_tx(
     .execute(&mut **tx)
     .await?;
 
-    Ok(ReopenExecution {
-        reopened_entries: affected,
-        applied_change_request_ids,
-        applied_change_overview,
-    })
+    Ok(affected)
 }
 
 async fn audit_reopened_entries(
@@ -373,36 +142,6 @@ async fn audit_reopened_entries(
             *entry_id,
             Some(serde_json::json!({"status": prev_status})),
             Some(serde_json::json!({"status":"draft"})),
-        )
-        .await;
-    }
-}
-
-/// Audit log all change requests that were auto-applied during reopen.
-/// Records which CRs were applied and by which actor/subject combination.
-async fn audit_applied_change_requests(
-    pool: &crate::db::DatabasePool,
-    actor_id: i64,
-    subject_id: i64,
-    reviewed_by: Option<i64>,
-    applied_change_request_ids: &[i64],
-) {
-    if applied_change_request_ids.is_empty() {
-        return;
-    }
-    for cr_id in applied_change_request_ids {
-        audit::log(
-            pool,
-            actor_id,
-            "auto_applied",
-            "change_requests",
-            *cr_id,
-            Some(serde_json::json!({"status": "open"})),
-            Some(serde_json::json!({
-                "status": "approved",
-                "reviewed_by": reviewed_by,
-                "auto_applied_by_user_id": subject_id
-            })),
         )
         .await;
     }
@@ -493,75 +232,54 @@ pub async fn create(
     let language = notification_language(&app_state.pool).await;
     let week_label = i18n::format_week_label(&language, body.week_start);
     let week_iso = body.week_start.format("%Y-%m-%d").to_string();
-    let pending_change_overview = load_change_request_overview(
-        &app_state.pool,
-        &language,
-        requester.id,
-        body.week_start,
-        false,
-    )
-    .await;
-    let (new_request_id, reopen_execution): (i64, Option<ReopenExecution>) = if should_auto_approve
-    {
-        let mut transaction = app_state.pool.begin().await?;
-        let new_id: i64 = sqlx::query_scalar(
-            "INSERT INTO reopen_requests(user_id, week_start, status, reviewed_by, reviewed_at) \
+
+    let (new_request_id, reopened_entries): (i64, Option<Vec<(i64, String)>>) =
+        if should_auto_approve {
+            let mut transaction = app_state.pool.begin().await?;
+            let new_id: i64 = sqlx::query_scalar(
+                "INSERT INTO reopen_requests(user_id, week_start, status, reviewed_by, reviewed_at) \
                  VALUES ($1,$2,$3,$4, CURRENT_TIMESTAMP) \
                  RETURNING id",
-        )
-        .bind(requester.id)
-        .bind(body.week_start)
-        .bind(initial_status)
-        .bind(requester.id)
-        .fetch_one(&mut *transaction)
-        .await
-        .map_err(|e| {
-            tracing::warn!(target:"zerf::reopen", "create reopen failed: {e}");
-            AppError::Conflict("A pending request for this week already exists.".into())
-        })?;
-        let affected = perform_reopen_in_tx(
-            &mut transaction,
-            &language,
-            requester.id,
-            requester.id,
-            body.week_start,
-        )
-        .await?;
-        transaction.commit().await?;
-        (new_id, Some(affected))
-    } else {
-        let new_id: i64 = sqlx::query_scalar(
-            "INSERT INTO reopen_requests(user_id, week_start, status) \
+            )
+            .bind(requester.id)
+            .bind(body.week_start)
+            .bind(initial_status)
+            .bind(requester.id)
+            .fetch_one(&mut *transaction)
+            .await
+            .map_err(|e| {
+                tracing::warn!(target:"zerf::reopen", "create reopen failed: {e}");
+                AppError::Conflict("A pending request for this week already exists.".into())
+            })?;
+            let affected = perform_reopen_in_tx(&mut transaction, requester.id, body.week_start)
+                .await?;
+            transaction.commit().await?;
+            (new_id, Some(affected))
+        } else {
+            let new_id: i64 = sqlx::query_scalar(
+                "INSERT INTO reopen_requests(user_id, week_start, status) \
                  VALUES ($1,$2,$3) \
                  RETURNING id",
-        )
-        .bind(requester.id)
-        .bind(body.week_start)
-        .bind(initial_status)
-        .fetch_one(&app_state.pool)
-        .await
-        .map_err(|e| {
-            tracing::warn!(target:"zerf::reopen", "create reopen failed: {e}");
-            AppError::Conflict("A pending request for this week already exists.".into())
-        })?;
-        (new_id, None)
-    };
+            )
+            .bind(requester.id)
+            .bind(body.week_start)
+            .bind(initial_status)
+            .fetch_one(&app_state.pool)
+            .await
+            .map_err(|e| {
+                tracing::warn!(target:"zerf::reopen", "create reopen failed: {e}");
+                AppError::Conflict("A pending request for this week already exists.".into())
+            })?;
+            (new_id, None)
+        };
 
-    let entries_reopened = reopen_execution
+    let entries_reopened = reopened_entries
         .as_ref()
-        .map(|exec| exec.reopened_entries.len() as i64)
+        .map(|entries| entries.len() as i64)
         .unwrap_or(0);
 
-    if let Some(exec) = reopen_execution.as_ref() {
-        audit_reopened_entries(&app_state.pool, requester.id, &exec.reopened_entries).await;
-        audit_applied_change_requests(
-            &app_state.pool,
-            requester.id,
-            requester.id,
-            None,
-            &exec.applied_change_request_ids,
-        )
-        .await;
+    if let Some(entries) = reopened_entries.as_ref() {
+        audit_reopened_entries(&app_state.pool, requester.id, entries).await;
     }
 
     audit::log(
@@ -579,30 +297,8 @@ pub async fn create(
     .await;
 
     let requester_full_name = requester.full_name();
-    // `reopen_execution` is None only if should_auto_approve is false and the
-    // early-return path above was not taken, so the unwrap_or_default here is
-    // purely defensive — it never fires when has_applied_changes is true.
-    let has_applied_changes = reopen_execution
-        .as_ref()
-        .map_or(false, |exec| !exec.applied_change_request_ids.is_empty());
-    let applied_change_overview = reopen_execution
-        .as_ref()
-        .map(|exec| exec.applied_change_overview.clone())
-        .unwrap_or_default();
 
     if should_auto_approve {
-        // Select the body variant that includes the change-request summary only
-        // when changes were actually applied — showing "none" would be misleading.
-        let auto_notice_body_key = if has_applied_changes {
-            "reopen_auto_approved_notice_body_changes"
-        } else {
-            "reopen_auto_approved_notice_body"
-        };
-        let auto_body_key = if has_applied_changes {
-            "reopen_approved_body_changes"
-        } else {
-            "reopen_approved_body"
-        };
         // In-app only: the requester triggered the auto-approve themselves.
         let frontend_body_self = format!("{{\"week\":\"{}\"}}", week_iso);
         notifications::create_with_frontend_body(
@@ -611,11 +307,8 @@ pub async fn create(
             requester.id,
             "reopen_auto_approved",
             "reopen_approved_title",
-            auto_body_key,
-            vec![
-                ("week_label", week_label.clone()),
-                ("change_request_overview", applied_change_overview.clone()),
-            ],
+            "reopen_approved_body",
+            vec![("week_label", week_label.clone())],
             &frontend_body_self,
             false,
             Some("reopen_request"),
@@ -635,11 +328,10 @@ pub async fn create(
                 *approver_id,
                 "reopen_auto_approved_notice",
                 "reopen_auto_approved_notice_title",
-                auto_notice_body_key,
+                "reopen_auto_approved_notice_body",
                 vec![
                     ("requester_name", requester_full_name.clone()),
                     ("week_label", week_label.clone()),
-                    ("change_request_overview", applied_change_overview.clone()),
                 ],
                 &frontend_body_approver,
                 true,
@@ -656,15 +348,6 @@ pub async fn create(
             "entries_reopened": entries_reopened,
         })))
     } else {
-        // Compare against the translated "none" sentinel so the check is
-        // language-agnostic and always consistent with what was rendered.
-        let has_pending_changes = pending_change_overview
-            != i18n::translate(&language, "reopen_change_request_none", &[]);
-        let created_body_key = if has_pending_changes {
-            "reopen_request_created_body_changes"
-        } else {
-            "reopen_request_created_body"
-        };
         // Notify all approvers that a manual reopen request is pending.
         let frontend_body_created = format!(
             "{{\"week\":\"{}\",\"requester_name\":{}}}",
@@ -678,11 +361,10 @@ pub async fn create(
                 *approver_id,
                 "reopen_request_created",
                 "reopen_request_created_title",
-                created_body_key,
+                "reopen_request_created_body",
                 vec![
                     ("requester_name", requester_full_name.clone()),
                     ("week_label", week_label.clone()),
-                    ("change_request_overview", pending_change_overview.clone()),
                 ],
                 &frontend_body_created,
                 true,
@@ -755,7 +437,6 @@ async fn notify_assigned_approvers_if_admin_acted(
     action_body_key: &str,
     week_label: String,
     week_iso: &str,
-    change_request_overview: String,
     extra_params: Vec<(&'static str, String)>,
 ) {
     if !requester.is_admin() {
@@ -796,7 +477,6 @@ async fn notify_assigned_approvers_if_admin_acted(
     let mut params = vec![
         ("requester_name", employee_full_name),
         ("week_label", week_label),
-        ("change_request_overview", change_request_overview),
     ];
     params.extend(extra_params);
     for approver_id in approver_ids {
@@ -859,14 +539,9 @@ pub async fn approve(
     let language = notification_language(&app_state.pool).await;
     let week_label = i18n::format_week_label(&language, reopen_request.week_start);
     let week_iso = reopen_request.week_start.format("%Y-%m-%d").to_string();
-    let reopen_execution = perform_reopen_in_tx(
-        &mut transaction,
-        &language,
-        requester.id,
-        reopen_request.user_id,
-        reopen_request.week_start,
-    )
-    .await?;
+    let reopened_entries =
+        perform_reopen_in_tx(&mut transaction, reopen_request.user_id, reopen_request.week_start)
+            .await?;
     let rows_approved = sqlx::query(
         "UPDATE reopen_requests SET status='approved', reviewed_by=$2, reviewed_at=CURRENT_TIMESTAMP \
          WHERE id=$1 AND status='pending'",
@@ -882,36 +557,8 @@ pub async fn approve(
         ));
     }
     transaction.commit().await?;
-    audit_reopened_entries(
-        &app_state.pool,
-        requester.id,
-        &reopen_execution.reopened_entries,
-    )
-    .await;
-    audit_applied_change_requests(
-        &app_state.pool,
-        requester.id,
-        reopen_request.user_id,
-        Some(requester.id),
-        &reopen_execution.applied_change_request_ids,
-    )
-    .await;
-    let entries_reopened = reopen_execution.reopened_entries.len() as i64;
-    // Use the *_changes body variant only when change requests were actually
-    // applied; the plain variant avoids a misleading "no open change requests"
-    // sentence when the reopen was manual with no pending changes.
-    let has_applied_changes = !reopen_execution.applied_change_request_ids.is_empty();
-    let applied_change_overview = reopen_execution.applied_change_overview.clone();
-    let approved_body_key = if has_applied_changes {
-        "reopen_approved_body_changes"
-    } else {
-        "reopen_approved_body"
-    };
-    let approved_by_admin_body_key = if has_applied_changes {
-        "reopen_approved_by_admin_body_changes"
-    } else {
-        "reopen_approved_by_admin_body"
-    };
+    audit_reopened_entries(&app_state.pool, requester.id, &reopened_entries).await;
+    let entries_reopened = reopened_entries.len() as i64;
     audit::log(
         &app_state.pool,
         requester.id,
@@ -931,11 +578,8 @@ pub async fn approve(
             reopen_request.user_id,
             "reopen_approved",
             "reopen_approved_title",
-            approved_body_key,
-            vec![
-                ("week_label", week_label.clone()),
-                ("change_request_overview", applied_change_overview.clone()),
-            ],
+            "reopen_approved_body",
+            vec![("week_label", week_label.clone())],
             &frontend_body_approved,
             true,
             Some("reopen_request"),
@@ -950,11 +594,8 @@ pub async fn approve(
             reopen_request.user_id,
             "reopen_approved",
             "reopen_approved_title",
-            approved_body_key,
-            vec![
-                ("week_label", week_label.clone()),
-                ("change_request_overview", applied_change_overview.clone()),
-            ],
+            "reopen_approved_body",
+            vec![("week_label", week_label.clone())],
             &frontend_body_approved,
             false,
             Some("reopen_request"),
@@ -972,10 +613,9 @@ pub async fn approve(
         request_id,
         "reopen_approved_by_admin",
         "reopen_approved_by_admin_title",
-        approved_by_admin_body_key,
+        "reopen_approved_by_admin_body",
         week_label,
         &week_iso,
-        applied_change_overview,
         vec![],
     )
     .await;
@@ -1060,14 +700,6 @@ pub async fn reject(
     let language = notification_language(&app_state.pool).await;
     let week_label = i18n::format_week_label(&language, reopen_request.week_start);
     let week_iso = reopen_request.week_start.format("%Y-%m-%d").to_string();
-    let pending_change_overview = load_change_request_overview(
-        &app_state.pool,
-        &language,
-        reopen_request.user_id,
-        reopen_request.week_start,
-        false,
-    )
-    .await;
     // Notify the employee whose reopen request was rejected (in-app only when self-rejected).
     let frontend_body_rejected = format!(
         "{{\"week\":\"{}\",\"reason\":{}}}",
@@ -1084,7 +716,6 @@ pub async fn reject(
             "reopen_rejected_body",
             vec![
                 ("week_label", week_label.clone()),
-                ("change_request_overview", pending_change_overview.clone()),
                 ("reason", rejection_reason.to_string()),
             ],
             &frontend_body_rejected,
@@ -1104,7 +735,6 @@ pub async fn reject(
             "reopen_rejected_body",
             vec![
                 ("week_label", week_label.clone()),
-                ("change_request_overview", pending_change_overview.clone()),
                 ("reason", rejection_reason.to_string()),
             ],
             &frontend_body_rejected,
@@ -1117,8 +747,6 @@ pub async fn reject(
     // Symmetric with approve: if an admin rejected a request, notify all other
     // explicitly assigned approvers for this user so they know the item left
     // their queue.
-    // NOTE: reopen_rejected_by_admin_body template does not include {change_request_overview},
-    // so we pass an empty string to avoid wasted computation.
     notify_assigned_approvers_if_admin_acted(
         &app_state,
         &language,
@@ -1130,7 +758,6 @@ pub async fn reject(
         "reopen_rejected_by_admin_body",
         week_label,
         &week_iso,
-        String::new(),
         vec![("reason", rejection_reason.to_string())],
     )
     .await;

@@ -13,9 +13,9 @@ Employees capture hours and absences, team leads review requests and submitted w
 
 ## Key features
 
-- Time tracking with category-based entries, weekly submission, overtime visibility, and change requests.
+- Time tracking with category-based entries, weekly submission, overtime visibility, and atomic week-level edit requests for after-the-fact corrections.
 - Absence workflows for vacation, sick leave, training, special leave, and unpaid leave.
-- Approval dashboard for submitted time, absence requests, change requests, and week reopen requests.
+- Approval dashboard for submitted weeks, absence requests, and week reopen requests.
 - Team calendar with shared absence visibility and holiday context.
 - Reports for monthly employee breakdowns and team-level reporting.
 - CSV export for report data and downstream processing.

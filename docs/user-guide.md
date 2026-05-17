@@ -26,8 +26,11 @@ Use this document if you are:
 
 ### 3. If you need to correct submitted data
 
-- Use `Request edit` for one specific entry.
-- Use `Request reopen` if you need to edit the whole week directly.
+- Click `Request edit` on the affected week. Once your team lead approves
+  (or auto-approval is enabled), every entry in that week becomes editable
+  again.
+- A submitted week is always handled as a single unit — individual entries
+  inside it cannot be modified separately.
 
 ## Core concept: crediting vs. non-crediting entries
 
@@ -147,7 +150,11 @@ changes when users and server run in different timezones.
 1. Create daily draft entries.
 2. Submit the full week with `Submit Week`.
 3. Approver accepts or rejects the week in batch.
-4. Approved entries remain valid unless a later change request or reopen is approved.
+4. Approved entries remain valid unless the whole week is reopened via a new edit request.
+
+A submitted week is treated atomically. Individual entries inside a submitted,
+approved, or rejected week cannot be clicked or edited any more — the only way
+to correct them is to reopen the whole week (see "Changes after submission").
 
 ### Time-entry summary tiles
 
@@ -185,7 +192,6 @@ All entries participate in workflow equally:
 - approval/rejection,
 - completeness checks,
 - reminders,
-- change requests,
 - reopen workflows.
 
 ### Approval permissions and scope
@@ -194,38 +200,28 @@ All entries participate in workflow equally:
 - Non-admin approvers cannot manage admin-subject workflow items.
 - Admins can review all users.
 
-The same scope rule is applied across time entries, absences, change requests,
-reopen requests, and lead-scoped team views.
+The same scope rule is applied across time entries, absences, reopen requests,
+and lead-scoped team views.
 
 ## Changes after submission
 
-If something is wrong after submission, use one of two paths:
+A submitted week is locked at the week level. There is no per-entry edit
+workflow: once you have submitted a week, clicking an individual time entry
+does nothing. The only way to make corrections is to reopen the whole week.
 
-### Option 1: Request edit (single entry)
+### Request edit (week level)
 
-- Use this for a focused correction on one submitted/approved entry.
-- Works for both crediting and non-crediting entries.
-- Rejected entries cannot use change requests; use reopen to make them editable again.
-
-### Option 2: Request reopen (week level)
-
-- Use this when multiple entries in a week need correction.
-- Approved reopen resets submitted, approved, or rejected entries in that week to draft.
-- Reopened entries become editable and can be submitted again.
-- If a week has no submitted, approved, or rejected entries, the edit request is
-	rejected with a message that the week has no submitted, approved, or rejected
-	entries.
-
-### Change requests and reopen interaction
-
-When a week is reopened:
-
-- open change requests for entries in that week are auto-applied,
-- those change requests are marked as auto-applied,
-- the requester edits reopened entries and submits the week again.
-
-Reopen requests can be pending review or auto-approved, depending on the
-requester's configuration.
+- Use this whenever a submitted, approved, or rejected entry needs to be
+  corrected — whether it is one entry or several.
+- An approved reopen resets all submitted, approved, or rejected entries in
+  that week back to `Draft`.
+- Reopened entries become editable; once the corrections are done, submit the
+  week again.
+- If a week has no submitted, approved, or rejected entries, the edit request
+  is rejected with a message that the week has no submitted, approved, or
+  rejected entries.
+- Reopen requests can be pending review or auto-approved, depending on the
+  requester's configuration (see Team Settings → "Auto-approve edit requests").
 
 ## Absence workflow
 
@@ -502,7 +498,6 @@ Users sometimes see that available days do not increase immediately after reques
 - a week is approved or rejected (one notification per action, identifying the affected weeks),
 - absence is approved or rejected,
 - absence cancellation is approved or rejected,
-- change request is approved or rejected,
 - reopen request is approved or rejected,
 - a monthly submission reminder is triggered on the configured deadline day (lists past weeks that are still not submitted).
 
@@ -513,7 +508,6 @@ and sends an in-app-only notification (no email) back to the same user.
 
 - a week is submitted (one notification identifying the submitted weeks),
 - an absence request is submitted,
-- a change request is submitted,
 - a reopen request is submitted,
 - a weekly approval reminder is triggered (pending items awaiting review).
 
@@ -757,9 +751,10 @@ A new entry is always created in `draft` status.
 
 **Edit a time entry**
 
-Only `draft` entries can be edited directly. Submitted or approved entries
-require a change request (see below). The same validation rules as creation
-apply.
+Only `draft` entries can be edited directly. Submitted, approved, or rejected
+entries are part of a locked week — to change them you must first reopen the
+whole week via a reopen request (see below). The same validation rules as
+creation apply.
 
 **Delete a time entry**
 
@@ -782,38 +777,11 @@ Rules:
 After submission, all your explicitly assigned approvers receive a notification
 identifying the submitted weeks by their week labels.
 
-### Requesting a change (single entry)
-
-Use `Request edit` when you need to correct one submitted or approved entry
-without reopening the entire week.
-
-What you can change: date, start time, end time, category, and comment.
-At least one of these must actually differ from the current values.
-
-Validation rules:
-
-- The entry must be owned by you.
-- Entry status must be `submitted` or `approved`. Draft entries can be edited
-  directly; rejected entries require a reopen instead.
-- A new date cannot be in the future and cannot be before your start date.
-- If new start or end time is provided, end must be after start.
-- A new category must exist and must be active.
-- The reason field is required and must not be empty (max 2000 characters).
-- A new comment, if provided, must not exceed 2000 characters.
-
-When created, all your assigned approvers are notified with a diff summary.
-
-Status flow: `open` → `approved` (change applied) or `rejected` (no change
-applied).
-
-If the week is reopened while an open change request exists, the change request
-is automatically applied before the week is reset to draft. The applied status
-is shown in the reopen notification.
-
 ### Requesting a week reopen
 
-Use `Request reopen` when you need to edit multiple entries in a week, or when
-the specific entry you need to change is `rejected`.
+`Request edit` (a "reopen request") is the only way to amend a week after
+submission. There is no per-entry change-request workflow — the week is the
+unit of approval.
 
 Rules:
 
@@ -832,12 +800,9 @@ receive an informational notice.
 **Manual approval path:** The request enters `pending` status and all your
 assigned approvers are notified.
 
-When a reopen is executed (either path), the system atomically:
-1. Applies all open change requests for entries in that week.
-2. Resets all submitted, approved, and rejected entries in that week to
-   `draft`.
-
-You can then edit and resubmit the week.
+When a reopen is executed (either path), all submitted, approved, and rejected
+entries in that week are atomically reset to `draft`.  You can then edit and
+resubmit the week.
 
 ### Absences: creating
 
@@ -940,14 +905,14 @@ Non-admin team leads can only act on users who are explicitly assigned to them
 in `user_approvers`. This applies to:
 
 - Viewing the team list
-- Reviewing time entries, absences, change requests, and reopen requests
+- Reviewing time entries, absences, and reopen requests
 - Team reporting
 
 Admin users can see and act on all users.
 
 **Self-review restriction:** Non-admin leads cannot approve or reject their
-own time entries, absences, change requests, or reopen requests. Admins may
-approve or reject their own items.
+own time entries, absences, or reopen requests. Admins may approve or reject
+their own items.
 
 **Admin-subject rule:** Non-admin leads cannot act on items submitted by admin
 users. Admin-subject requests require an admin reviewer.
@@ -1009,26 +974,6 @@ Approve or reject a `cancellation_pending` absence.
 | Approve cancellation | Absence status → `cancelled`. Budget released. | Yes (unless self-action by admin) |
 | Reject cancellation | Absence status → `approved` (restored). Budget still consumed. | Yes (unless self-action by admin) |
 
-### Reviewing a change request
-
-Approve or reject an open change request for an employee's time entry.
-
-- You must be a team lead or admin.
-- Non-admin leads can only act if they are explicitly assigned as approver for
-  the requesting user.
-- Non-admin leads cannot approve/reject their own change request.
-- Only `open` change requests can be reviewed.
-
-On approval: the proposed changes are applied to the time entry. The entry's
-date, time, category, and/or comment are updated according to the change
-request. The entry keeps its current status (submitted or approved).
-
-On rejection: the time entry is unchanged.
-
-**Concurrency protection:** The system acquires an advisory lock on the user and
-uses a `FOR UPDATE` row lock on the change request. A concurrent duplicate
-approval receives a conflict error.
-
 ### Reviewing a reopen request
 
 Approve or reject a `pending` reopen request.
@@ -1041,10 +986,9 @@ Approve or reject a `pending` reopen request.
 - A rejection reason is required for rejection (non-empty, max 2000
   characters).
 
-On approval: the reopen is executed atomically — open change requests are
-applied and all submitted/approved/rejected entries in the week are reset to
-`draft`. The employee receives a notification; if change requests were applied,
-the notification includes a change summary.
+On approval: the reopen is executed atomically — all submitted, approved, and
+rejected entries in the week are reset to `draft`. The employee receives a
+notification.
 
 On rejection: the week remains unchanged. The employee receives a rejection
 notification with the reason.
@@ -1206,14 +1150,13 @@ ability to act on existing open requests.
 
 If a user has no assigned approvers, the system raises an error when they try
 to submit a request that requires routing (non-admins require at least one
-approver for time entry submission, absence requests, change requests, and
-reopen requests).
+approver for time entry submission, absence requests, and reopen requests).
 
 ### Direct correction of submitted or approved entries
 
 Admins can directly edit a submitted or approved time entry that belongs to
-another user, without requiring a change request. This is the admin correction
-path.
+another user, without going through the reopen workflow. This is the admin
+correction path.
 
 Rules:
 
@@ -1222,8 +1165,9 @@ Rules:
 - The same field validation as direct creation applies (date in the past, end >
   start, no overlap, 14h crediting limit, etc.).
 
-Admins editing their own submitted or approved entries still need to use a
-change request (the admin correction path only applies to other users' entries).
+Admins editing their *own* submitted or approved entries must instead go through
+the regular reopen workflow — the admin correction path only applies to other
+users' entries.
 
 ### Managing annual leave
 
@@ -1272,7 +1216,7 @@ Categories define what employees can book time against.
 - Each category has a name and a `counts_as_work` (crediting) flag.
 - Inactive categories are hidden from time entry forms but remain visible to
   admins for maintenance.
-- A category must be active to be used in a new time entry or change request.
+- A category must be active to be used in a new time entry.
 - Deleting a category with existing time entries is not possible; deactivate
   instead.
 
@@ -1331,14 +1275,6 @@ approved  ──[cancel by employee]───> cancellation_pending
                                           ├─[approve cancellation]──> cancelled
                                           └─[reject cancellation]───> approved
 approved  ──[revoke by admin]───────> cancelled
-```
-
-### Change request statuses
-
-```
-open ──[approve]──> approved (change applied to entry)
-     └──[reject]──> rejected (entry unchanged)
-     └──[week reopened]──> approved (auto-applied)
 ```
 
 ### Reopen request statuses

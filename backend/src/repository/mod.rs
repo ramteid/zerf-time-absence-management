@@ -1,7 +1,6 @@
 pub mod absences;
 pub mod audit;
 pub mod categories;
-pub mod change_requests;
 pub mod holidays;
 pub mod notifications;
 pub mod reopen_requests;
@@ -14,7 +13,6 @@ pub mod users;
 pub use absences::{Absence, AbsenceDb, CalendarEntry};
 pub use audit::{AuditDb, LogEntry};
 pub use categories::{Category, CategoryDb};
-pub use change_requests::{ChangeRequest, ChangeRequestDb};
 pub use holidays::{Holiday, HolidayDb, PreparedHoliday};
 pub use notifications::{
     new_broadcaster, NotificationBroadcaster, NotificationDb, NotificationSignal,
@@ -37,7 +35,6 @@ pub struct Db {
     pub users: UserDb,
     pub time_entries: TimeEntryDb,
     pub absences: AbsenceDb,
-    pub change_requests: ChangeRequestDb,
     pub reopen_requests: ReopenRequestDb,
     pub categories: CategoryDb,
     pub holidays: HolidayDb,
@@ -54,7 +51,6 @@ impl Db {
             users: UserDb::new(pool.clone()),
             time_entries: TimeEntryDb::new(pool.clone()),
             absences: AbsenceDb::new(pool.clone()),
-            change_requests: ChangeRequestDb::new(pool.clone()),
             reopen_requests: ReopenRequestDb::new(pool.clone()),
             categories: CategoryDb::new(pool.clone()),
             holidays: HolidayDb::new(pool.clone()),

@@ -1,8 +1,6 @@
 use crate::db::DatabasePool;
 use crate::error::{AppError, AppResult};
-use crate::repository::time_entries::{
-    validate_entries_after_reopen, TimeEntry, TimeEntryDb,
-};
+use crate::repository::time_entries::validate_entries_after_reopen;
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::Serialize;
 
@@ -17,17 +15,6 @@ pub struct ReopenRequest {
     pub reviewed_at: Option<DateTime<Utc>>,
     pub rejection_reason: Option<String>,
     pub created_at: DateTime<Utc>,
-}
-
-#[derive(sqlx::FromRow)]
-struct OpenChangeRequestForReopen {
-    id: i64,
-    time_entry_id: i64,
-    new_date: Option<NaiveDate>,
-    new_start_time: Option<String>,
-    new_end_time: Option<String>,
-    new_category_id: Option<i64>,
-    new_comment: Option<String>,
 }
 
 const RR_SELECT: &str = "SELECT id, user_id, week_start, reviewed_by, status, \
@@ -174,7 +161,7 @@ impl ReopenRequestDb {
             tracing::warn!(target:"zerf::reopen", "insert_auto_approved failed: {e}");
             AppError::Conflict("A pending request for this week already exists.".into())
         })?;
-        let affected = Self::perform_reopen(&mut tx, actor_id, user_id, week_start).await?;
+        let affected = Self::perform_reopen(&mut tx, user_id, week_start).await?;
         tx.commit().await?;
         Ok((req_id, affected))
     }
@@ -195,8 +182,7 @@ impl ReopenRequestDb {
         .await?
         .ok_or_else(|| AppError::Conflict("Reopen request is no longer pending.".into()))?;
 
-        let affected =
-            Self::perform_reopen(&mut tx, reviewer_id, req.user_id, req.week_start).await?;
+        let affected = Self::perform_reopen(&mut tx, req.user_id, req.week_start).await?;
         let rows = sqlx::query(
             "UPDATE reopen_requests SET status='approved', reviewed_by=$1, \
              reviewed_at=CURRENT_TIMESTAMP \
@@ -255,12 +241,11 @@ impl ReopenRequestDb {
 
     // ── Internal: perform the actual reopen within a transaction ──────────
 
-    /// Apply open change requests for all submitted, approved, or rejected entries in
-    /// `week_start..week_start+6`, then reset those entries to draft.
-    /// Returns the list of (entry_id, previous_status) that were changed.
+    /// Reset every submitted, approved, or rejected entry in
+    /// `week_start..week_start+6` back to draft.  Returns the list of
+    /// (entry_id, previous_status) that were changed.
     pub async fn perform_reopen(
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        actor_id: i64,
         subject_id: i64,
         week_start: NaiveDate,
     ) -> AppResult<Vec<(i64, String)>> {
@@ -287,70 +272,9 @@ impl ReopenRequestDb {
             ));
         }
         let entry_ids: Vec<i64> = affected.iter().map(|(id, _)| *id).collect();
-        let open_change_requests: Vec<OpenChangeRequestForReopen> = sqlx::query_as(
-            "SELECT id, time_entry_id, new_date, new_start_time, new_end_time, \
-                    new_category_id, new_comment \
-             FROM change_requests \
-             WHERE status='open' AND time_entry_id = ANY($1) \
-             ORDER BY id FOR UPDATE",
-        )
-        .bind(&entry_ids)
-        .fetch_all(&mut **tx)
-        .await?;
-        let mut applied_change_request_ids = Vec::new();
-        for change_request in open_change_requests {
-            let current_entry: TimeEntry = sqlx::query_as(
-                "SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, \
-                        submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at \
-                 FROM time_entries WHERE id=$1 FOR UPDATE",
-            )
-            .bind(change_request.time_entry_id)
-            .fetch_one(&mut **tx)
-            .await?;
-            TimeEntryDb::apply_change_request_tx(
-                tx,
-                change_request.time_entry_id,
-                &current_entry.status,
-                change_request.new_date,
-                change_request.new_start_time.as_deref(),
-                change_request.new_end_time.as_deref(),
-                change_request.new_category_id,
-                change_request.new_comment.as_deref(),
-            )
-            .await?;
-            applied_change_request_ids.push(change_request.id);
-        }
 
         validate_entries_after_reopen(&mut **tx, subject_id, &entry_ids).await?;
 
-        if !applied_change_request_ids.is_empty() {
-            let rows = sqlx::query(
-                "UPDATE change_requests \
-                 SET status='approved', \
-                     reviewed_by=$1, \
-                     reviewed_at=CURRENT_TIMESTAMP, \
-                     rejection_reason=NULL \
-                 WHERE status='open' AND id = ANY($2)",
-            )
-            .bind(if actor_id == subject_id {
-                None::<i64>
-            } else {
-                Some(actor_id)
-            })
-            .bind(&applied_change_request_ids)
-            .execute(&mut **tx)
-            .await?
-            .rows_affected();
-            if rows != applied_change_request_ids.len() as u64 {
-                return Err(AppError::Conflict(
-                    "Change request was already resolved by someone else.".into(),
-                ));
-            }
-        }
-        // Reset all affected entries to draft.  We filter by their original IDs
-        // (not by date range) because the CR-apply step above may have moved some
-        // entries to a date outside the original week; a date-range filter would
-        // silently miss those and leave them in a non-draft status.
         sqlx::query(
             "UPDATE time_entries \
              SET status='draft', submitted_at=NULL, reviewed_by=NULL, \
