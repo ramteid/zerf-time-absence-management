@@ -20,6 +20,16 @@ pub struct ReopenRequest {
 const RR_SELECT: &str = "SELECT id, user_id, week_start, reviewed_by, status, \
      reviewed_at, rejection_reason, created_at FROM reopen_requests";
 
+const ACTIVE_ASSIGNED_APPROVER_FOR_UPDATE_SQL: &str = "\
+    SELECT TRUE \
+    FROM user_approvers ua \
+    JOIN users subject ON subject.id = ua.user_id \
+    JOIN users approver ON approver.id = ua.approver_id \
+    WHERE ua.user_id = $1 AND ua.approver_id = $2 \
+    AND subject.active=TRUE AND subject.role != 'admin' \
+    AND approver.active=TRUE AND approver.role IN ('team_lead','admin') \
+    FOR UPDATE OF ua";
+
 #[derive(Clone)]
 pub struct ReopenRequestDb {
     pool: DatabasePool,
@@ -168,19 +178,38 @@ impl ReopenRequestDb {
 
     /// Set a pending reopen to 'approved' and reopen the week atomically.
     /// Returns (updated request, vec of (entry_id, prev_status)).
-    pub async fn approve(
+    pub async fn approve_with_access_check(
         &self,
         request_id: i64,
         reviewer_id: i64,
+        reviewer_is_admin: bool,
     ) -> AppResult<(ReopenRequest, Vec<(i64, String)>)> {
         let mut tx = self.pool.begin().await?;
         let req: ReopenRequest = sqlx::query_as::<_, ReopenRequest>(&format!(
-            "{RR_SELECT} WHERE id=$1 AND status='pending' FOR UPDATE"
+            "{RR_SELECT} WHERE id=$1 FOR UPDATE"
         ))
         .bind(request_id)
         .fetch_optional(&mut *tx)
         .await?
-        .ok_or_else(|| AppError::Conflict("Reopen request is no longer pending.".into()))?;
+        .ok_or(AppError::NotFound)?;
+        if req.status != "pending" {
+            return Err(AppError::BadRequest("Request is not pending.".into()));
+        }
+
+        if !reviewer_is_admin {
+            if req.user_id == reviewer_id {
+                return Err(AppError::Forbidden);
+            }
+            let is_assigned_approver: Option<bool> =
+                sqlx::query_scalar(ACTIVE_ASSIGNED_APPROVER_FOR_UPDATE_SQL)
+                    .bind(req.user_id)
+                    .bind(reviewer_id)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+            if is_assigned_approver.is_none() {
+                return Err(AppError::Forbidden);
+            }
+        }
 
         let affected = Self::perform_reopen(&mut tx, req.user_id, req.week_start).await?;
         let rows = sqlx::query(
@@ -199,26 +228,42 @@ impl ReopenRequestDb {
             ));
         }
         tx.commit().await?;
-        let updated = self.find_by_id(request_id).await?;
-        Ok((updated, affected))
+        Ok((req, affected))
     }
 
-    /// Reject a pending reopen request (optimistic locking).
-    pub async fn reject(
+    /// Reject a pending reopen request atomically with access checks.
+    pub async fn reject_with_access_check(
         &self,
         request_id: i64,
         reviewer_id: i64,
+        reviewer_is_admin: bool,
         reason: &str,
     ) -> AppResult<ReopenRequest> {
-        let before: ReopenRequest =
-            sqlx::query_as::<_, ReopenRequest>(&format!("{RR_SELECT} WHERE id=$1"))
-                .bind(request_id)
-                .fetch_one(&self.pool)
-                .await?;
+        let mut tx = self.pool.begin().await?;
+        let before: ReopenRequest = sqlx::query_as::<_, ReopenRequest>(&format!(
+            "{RR_SELECT} WHERE id=$1 FOR UPDATE"
+        ))
+        .bind(request_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(AppError::NotFound)?;
         if before.status != "pending" {
-            return Err(AppError::BadRequest(
-                "Only pending reopen requests can be rejected.".into(),
-            ));
+            return Err(AppError::BadRequest("Request is not pending.".into()));
+        }
+
+        if !reviewer_is_admin {
+            if before.user_id == reviewer_id {
+                return Err(AppError::Forbidden);
+            }
+            let is_assigned_approver: Option<bool> =
+                sqlx::query_scalar(ACTIVE_ASSIGNED_APPROVER_FOR_UPDATE_SQL)
+                    .bind(before.user_id)
+                    .bind(reviewer_id)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+            if is_assigned_approver.is_none() {
+                return Err(AppError::Forbidden);
+            }
         }
         let rows = sqlx::query(
             "UPDATE reopen_requests SET status='rejected', reviewed_by=$1, \
@@ -228,14 +273,15 @@ impl ReopenRequestDb {
         .bind(reviewer_id)
         .bind(reason)
         .bind(request_id)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?
         .rows_affected();
         if rows == 0 {
             return Err(AppError::Conflict(
-                "Reopen request was already resolved by someone else.".into(),
+                "Request was already resolved by someone else.".into(),
             ));
         }
+        tx.commit().await?;
         Ok(before)
     }
 

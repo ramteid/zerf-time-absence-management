@@ -19,10 +19,10 @@ pub enum AppError {
     Internal(String),
 }
 
-impl From<sqlx::Error> for AppError {
-    fn from(e: sqlx::Error) -> Self {
+impl From<crate::db::SqlxError> for AppError {
+    fn from(e: crate::db::SqlxError) -> Self {
         match e {
-            sqlx::Error::RowNotFound => AppError::NotFound,
+            crate::db::SqlxError::RowNotFound => AppError::NotFound,
             // Stringify privately for the log; do NOT surface SQL details to the client.
             other => {
                 tracing::error!(target: "zerf::db", "sqlx error: {other}");
