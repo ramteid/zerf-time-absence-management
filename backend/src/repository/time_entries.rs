@@ -381,6 +381,7 @@ impl TimeEntryDb {
         to: Option<NaiveDate>,
         user_id_filter: Option<i64>,
         status_filter: Option<String>,
+        exclude_self: bool,
     ) -> AppResult<Vec<TimeEntry>> {
         let mut builder = QueryBuilder::<Postgres>::new(&format!("{TE_SELECT} WHERE TRUE"));
         if !is_admin {
@@ -392,6 +393,11 @@ impl TimeEntryDb {
                 .push(" OR user_id IN (SELECT ua.user_id FROM user_approvers ua JOIN users u ON u.id=ua.user_id WHERE ua.approver_id = ")
                 .push_bind(requester_id)
                 .push(" AND u.active=TRUE AND u.role != 'admin'))");
+        }
+        // For the approval queue, non-admin leads cannot act on their own entries.
+        // Excluding them server-side avoids exposing data the caller has no use for.
+        if exclude_self && !is_admin {
+            builder.push(" AND user_id != ").push_bind(requester_id);
         }
         if let Some(f) = from {
             builder.push(" AND entry_date >= ").push_bind(f);

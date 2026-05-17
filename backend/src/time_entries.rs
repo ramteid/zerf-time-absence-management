@@ -171,6 +171,10 @@ pub struct RangeQuery {
     pub to: Option<NaiveDate>,
     pub user_id: Option<i64>,
     pub status: Option<String>,
+    /// When true, exclude the requester's own entries from the result.
+    /// Non-admin leads use this for the approval queue, where self-entries
+    /// cannot be approved and must not be surfaced.
+    pub exclude_self: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -233,6 +237,7 @@ pub async fn list_all(
             query.to,
             query.user_id,
             query.status,
+            query.exclude_self.unwrap_or(false),
         )
         .await?;
     let mut mapped: Vec<TimeEntry> = entries.into_iter().map(repo_entry_to_service).collect();
