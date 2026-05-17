@@ -12,7 +12,6 @@ use axum::{
 };
 use chrono::{Datelike, Duration, NaiveDate, NaiveTime};
 use serde::{Deserialize, Serialize};
-use sqlx::{Postgres, QueryBuilder};
 use std::collections::HashMap;
 
 const FLEXTIME_REDUCTION_KIND: &str = "flextime_reduction";
@@ -1078,36 +1077,17 @@ pub async fn categories(
     }
     // Category breakdown reports include all non-rejected entries regardless of
     // crediting status (user-guide: "not only crediting categories").
-    let mut builder = QueryBuilder::<Postgres>::new(
-        "SELECT c.name, c.color, z.start_time, z.end_time \
-         FROM time_entries z \
-         JOIN users u ON u.id=z.user_id \
-         JOIN categories c ON c.id=z.category_id \
-                WHERE z.status != 'rejected' AND z.entry_date >= u.start_date \
-         AND z.entry_date BETWEEN ",
-    );
-    builder
-        .push_bind(query.from)
-        .push(" AND ")
-        .push_bind(effective_to);
-    if let Some(user_id) = target_user_id {
-        builder.push(" AND z.user_id = ").push_bind(user_id);
-    } else if !requester.is_admin() {
-        // Non-admin lead with no specific user: include self and direct reports,
-        // excluding admin subjects (non-admin leads cannot see admin users).
-        builder
-            .push(" AND z.user_id IN (SELECT id FROM users WHERE id = ")
-            .push_bind(requester.id)
-            .push(
-                " OR id IN (SELECT ua.user_id FROM user_approvers ua \
-                    JOIN users u ON u.id = ua.user_id \
-                    WHERE ua.approver_id = ",
-            )
-            .push_bind(requester.id)
-            .push(" AND u.role != 'admin'))");
-    }
-    let rows: Vec<(String, String, String, String)> =
-        builder.build_query_as().fetch_all(&app_state.pool).await?;
+    let rows = app_state
+        .db
+        .reports
+        .category_rows_for_scope(
+            requester.id,
+            requester.is_admin(),
+            target_user_id,
+            query.from,
+            effective_to,
+        )
+        .await?;
     let mut category_minutes_map: HashMap<(String, String), i64> = HashMap::new();
     for (category, color, start_time, end_time) in rows {
         let minutes =
@@ -1150,58 +1130,18 @@ pub async fn team_categories(
         return Ok(Json(Vec::new()));
     }
 
-    let mut user_builder = QueryBuilder::<Postgres>::new(
-        "SELECT id, first_name, last_name FROM users WHERE active=TRUE",
-    );
-    if !requester.is_admin() {
-        // Non-admin lead: include self and direct reports, excluding admin subjects.
-        user_builder
-            .push(" AND (id = ")
-            .push_bind(requester.id)
-            .push(
-                " OR id IN (SELECT ua.user_id FROM user_approvers ua \
-                    JOIN users u ON u.id = ua.user_id \
-                    WHERE ua.approver_id = ",
-            )
-            .push_bind(requester.id)
-            .push(" AND u.role != 'admin'))");
-    }
-    user_builder.push(" ORDER BY last_name, first_name");
-    let members: Vec<(i64, String, String)> = user_builder
-        .build_query_as()
-        .fetch_all(&app_state.pool)
+    let members = app_state
+        .db
+        .reports
+        .team_category_members(requester.id, requester.is_admin())
         .await?;
 
     // Same as the individual breakdown: all non-rejected entries up to today,
     // regardless of draft/submitted/approved state or crediting status.
-    let mut entry_builder = QueryBuilder::<Postgres>::new(
-        "SELECT z.user_id, c.name, c.color, z.start_time, z.end_time \
-         FROM time_entries z \
-         JOIN users u ON u.id=z.user_id \
-         JOIN categories c ON c.id=z.category_id \
-                WHERE z.status != 'rejected' AND z.entry_date >= u.start_date \
-         AND z.entry_date BETWEEN ",
-    );
-    entry_builder
-        .push_bind(query.from)
-        .push(" AND ")
-        .push_bind(effective_to);
-    if !requester.is_admin() {
-        // Non-admin lead: include self and direct reports, excluding admin subjects.
-        entry_builder
-            .push(" AND z.user_id IN (SELECT id FROM users WHERE id = ")
-            .push_bind(requester.id)
-            .push(
-                " OR id IN (SELECT ua.user_id FROM user_approvers ua \
-                    JOIN users u ON u.id = ua.user_id \
-                    WHERE ua.approver_id = ",
-            )
-            .push_bind(requester.id)
-            .push(" AND u.role != 'admin'))");
-    }
-    let rows: Vec<(i64, String, String, String, String)> = entry_builder
-        .build_query_as()
-        .fetch_all(&app_state.pool)
+    let rows = app_state
+        .db
+        .reports
+        .team_category_entry_rows(requester.id, requester.is_admin(), query.from, effective_to)
         .await?;
 
     let mut user_cat_map: HashMap<i64, HashMap<(String, String), i64>> = HashMap::new();

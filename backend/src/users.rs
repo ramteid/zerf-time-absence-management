@@ -131,21 +131,26 @@ pub async fn team_settings_update(
         }
     }
     // Transactional read-then-write to prevent TOCTOU races.
-    let mut tx = app_state.pool.begin().await?;
-    let previous_value: Option<bool> = sqlx::query_scalar(
-        "SELECT allow_reopen_without_approval FROM users WHERE id=$1 AND active=TRUE FOR UPDATE",
-    )
-    .bind(target_id)
-    .fetch_optional(&mut *tx)
-    .await?;
-    let Some(before) = previous_value else {
+    let mut tx = app_state.db.users.begin().await?;
+    let previous_user = UserDb::fetch_for_update(&mut tx, target_id).await?;
+    if !previous_user.active {
         return Err(AppError::BadRequest("User not found or inactive.".into()));
-    };
-    sqlx::query("UPDATE users SET allow_reopen_without_approval=$1 WHERE id=$2")
-        .bind(body.allow_reopen_without_approval)
-        .bind(target_id)
-        .execute(&mut *tx)
-        .await?;
+    }
+    UserDb::update_basic(
+        &mut tx,
+        target_id,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(body.allow_reopen_without_approval),
+        None,
+    )
+    .await?;
     tx.commit().await?;
     audit::log(
         &app_state.pool,
@@ -153,7 +158,9 @@ pub async fn team_settings_update(
         "team_settings_updated",
         "users",
         target_id,
-        Some(serde_json::json!({"allow_reopen_without_approval": before})),
+        Some(
+            serde_json::json!({"allow_reopen_without_approval": previous_user.allow_reopen_without_approval}),
+        ),
         Some(serde_json::json!({"allow_reopen_without_approval": body.allow_reopen_without_approval})),
     )
     .await;
@@ -329,8 +336,8 @@ async fn ensure_user_name_available(
         .await
 }
 
-fn user_unique_conflict(error: &sqlx::Error) -> Option<AppError> {
-    let sqlx::Error::Database(db_error) = error else {
+fn user_unique_conflict(error: &crate::db::SqlxError) -> Option<AppError> {
+    let crate::db::SqlxError::Database(db_error) = error else {
         return None;
     };
     match db_error.constraint() {
@@ -429,14 +436,23 @@ pub async fn create(
             "Invalid overtime_start_balance_min.".into(),
         ));
     }
-    let mut transaction = app_state.pool.begin().await?;
+    let mut transaction = app_state.db.users.begin().await?;
     lock_user_graph(&mut transaction).await?;
     validate_approver_ids(&app_state, &body.role, None, &body.approver_ids).await?;
-    let new_user_id: i64 = sqlx::query_scalar("INSERT INTO users(email,password_hash,first_name,last_name,role,weekly_hours,workdays_per_week,start_date,must_change_password,overtime_start_balance_min) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id")
-        .bind(&normalized_email).bind(password_hash).bind(&first_name).bind(&last_name).bind(&body.role)
-        .bind(body.weekly_hours).bind(effective_workdays).bind(body.start_date).bind(true)
-        .bind(overtime_balance)
-        .fetch_one(&mut *transaction).await
+    let new_user_id = UserDb::create(
+        &mut transaction,
+        &normalized_email,
+        &password_hash,
+        &first_name,
+        &last_name,
+        &body.role,
+        body.weekly_hours,
+        effective_workdays,
+        body.start_date,
+        true,
+        overtime_balance,
+    )
+    .await
         .map_err(|e| {
             tracing::warn!(target:"zerf::users", "create user insert failed: {e}");
             user_unique_conflict(&e).unwrap_or_else(|| AppError::Conflict("Could not create user.".into()))
@@ -619,12 +635,9 @@ pub async fn update(
     }
     let first_name = normalize_optional_user_name(body.first_name.as_ref())?;
     let last_name = normalize_optional_user_name(body.last_name.as_ref())?;
-    let mut transaction = app_state.pool.begin().await?;
+    let mut transaction = app_state.db.users.begin().await?;
     lock_user_graph(&mut transaction).await?;
-    let previous_user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, workdays_per_week, start_date, active, must_change_password, created_at, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1 FOR UPDATE")
-        .bind(user_id)
-        .fetch_one(&mut *transaction)
-        .await?;
+    let previous_user: User = repo_user_to_auth_user(UserDb::fetch_for_update(&mut transaction, user_id).await?);
     if let Some(email) = &normalized_email {
         ensure_email_available(&app_state, email, Some(user_id)).await?;
     }
@@ -694,12 +707,7 @@ pub async fn update(
     let effective_approver_ids = if let Some(approver_ids) = &body.approver_ids {
         approver_ids.clone()
     } else {
-        sqlx::query_scalar(
-            "SELECT approver_id FROM user_approvers WHERE user_id=$1 ORDER BY approver_id",
-        )
-        .bind(user_id)
-        .fetch_all(&mut *transaction)
-        .await?
+        UserDb::get_approver_ids_tx(&mut transaction, user_id).await?
     };
     validate_approver_ids(
         &app_state,
@@ -744,12 +752,26 @@ pub async fn update(
     }
     // Use the normalized role for storage so SQL queries with direct string
     // comparisons (e.g. role = 'admin') work reliably.
-    let role_to_store: Option<String> = if body.role.is_some() { Some(new_role.clone()) } else { None };
-    sqlx::query("UPDATE users SET email=COALESCE($1,email), first_name=COALESCE($2,first_name), last_name=COALESCE($3,last_name), role=COALESCE($4,role), weekly_hours=COALESCE($5,weekly_hours), workdays_per_week=COALESCE($6,workdays_per_week), start_date=COALESCE($7,start_date), active=COALESCE($8,active), allow_reopen_without_approval=COALESCE($9,allow_reopen_without_approval), overtime_start_balance_min=COALESCE($10,overtime_start_balance_min) WHERE id=$11")
-        .bind(normalized_email).bind(first_name).bind(last_name).bind(role_to_store)
-        .bind(body.weekly_hours).bind(effective_workdays_update).bind(body.start_date).bind(body.active)
-        .bind(body.allow_reopen_without_approval).bind(body.overtime_start_balance_min).bind(user_id)
-        .execute(&mut *transaction).await
+    let role_to_store: Option<String> = if body.role.is_some() {
+        Some(new_role.clone())
+    } else {
+        None
+    };
+    UserDb::update_basic(
+        &mut transaction,
+        user_id,
+        normalized_email,
+        first_name,
+        last_name,
+        role_to_store,
+        body.weekly_hours,
+        effective_workdays_update,
+        body.start_date,
+        body.active,
+        body.allow_reopen_without_approval,
+        body.overtime_start_balance_min,
+    )
+    .await
         .map_err(|e| {
             tracing::warn!(target:"zerf::users", "update user failed: {e}");
             user_unique_conflict(&e).unwrap_or_else(|| AppError::Conflict("Could not update user.".into()))
@@ -764,15 +786,7 @@ pub async fn update(
     }
     // Handle approver_ids update if provided
     if let Some(new_approver_ids) = &body.approver_ids {
-        // Delete all existing approver relationships
-        sqlx::query("DELETE FROM user_approvers WHERE user_id=$1")
-            .bind(user_id)
-            .execute(&mut *transaction)
-            .await?;
-        // Insert new approver relationships
-        for approver_id in new_approver_ids {
-            UserDb::insert_approver_tx(&mut transaction, user_id, *approver_id).await?;
-        }
+        UserDb::set_approvers_tx(&mut transaction, user_id, new_approver_ids).await?;
     }
     // If role changed or user was deactivated, kill all sessions of that user
     // so cached role/state cannot be (ab)used.
@@ -820,12 +834,9 @@ pub async fn deactivate(
             "You cannot deactivate yourself.".into(),
         ));
     }
-    let mut transaction = app_state.pool.begin().await?;
+    let mut transaction = app_state.db.users.begin().await?;
     lock_user_graph(&mut transaction).await?;
-    let previous_user: User = sqlx::query_as("SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, workdays_per_week, start_date, active, must_change_password, created_at, allow_reopen_without_approval, dark_mode, overtime_start_balance_min FROM users WHERE id=$1 FOR UPDATE")
-        .bind(user_id)
-        .fetch_one(&mut *transaction)
-        .await?;
+    let previous_user: User = repo_user_to_auth_user(UserDb::fetch_for_update(&mut transaction, user_id).await?);
     if previous_user.active && is_admin_role(&previous_user.role) {
         let active_admins = UserDb::count_active_admins_tx(&mut transaction).await?;
         if active_admins <= 1 {
@@ -836,13 +847,7 @@ pub async fn deactivate(
     }
     // Block deactivation if this person is an assigned approver for active users.
     // Run inside the transaction (under the user-graph lock) to avoid TOCTOU.
-    let direct_reports_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM user_approvers \
-         WHERE approver_id=$1 AND user_id IN (SELECT id FROM users WHERE active=TRUE)",
-    )
-    .bind(user_id)
-    .fetch_one(&mut *transaction)
-    .await?;
+    let direct_reports_count = UserDb::count_active_direct_reports_tx(&mut transaction, user_id).await?;
     if direct_reports_count > 0 {
         return Err(AppError::BadRequest(format!(
             "Cannot deactivate: {} active user(s) still have this person as their approver. Reassign them first.",
@@ -876,17 +881,9 @@ pub async fn delete_user(
     if user_id == requester.id {
         return Err(AppError::BadRequest("You cannot delete yourself.".into()));
     }
-    let mut transaction = app_state.pool.begin().await?;
+    let mut transaction = app_state.db.users.begin().await?;
     lock_user_graph(&mut transaction).await?;
-    let target_user: User = sqlx::query_as(
-        "SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, workdays_per_week, \
-         start_date, active, must_change_password, created_at, allow_reopen_without_approval, \
-         dark_mode, overtime_start_balance_min FROM users WHERE id=$1 FOR UPDATE",
-    )
-    .bind(user_id)
-    .fetch_optional(&mut *transaction)
-    .await?
-    .ok_or(AppError::NotFound)?;
+    let target_user: User = repo_user_to_auth_user(UserDb::fetch_for_update(&mut transaction, user_id).await?);
     if target_user.active && is_admin_role(&target_user.role) {
         let active_admins = UserDb::count_active_admins_tx(&mut transaction).await?;
         if active_admins <= 1 {
@@ -896,23 +893,14 @@ pub async fn delete_user(
         }
     }
     // Run inside the transaction (under the user-graph lock) to avoid TOCTOU.
-    let direct_reports_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM user_approvers \
-         WHERE approver_id=$1 AND user_id IN (SELECT id FROM users WHERE active=TRUE)",
-    )
-    .bind(user_id)
-    .fetch_one(&mut *transaction)
-    .await?;
+    let direct_reports_count = UserDb::count_active_direct_reports_tx(&mut transaction, user_id).await?;
     if direct_reports_count > 0 {
         return Err(AppError::BadRequest(format!(
             "Cannot delete: {} active user(s) still have this person as their approver. Reassign them first.",
             direct_reports_count
         )));
     }
-    sqlx::query("DELETE FROM users WHERE id = $1")
-        .bind(user_id)
-        .execute(&mut *transaction)
-        .await?;
+    UserDb::delete_tx(&mut transaction, user_id).await?;
     transaction.commit().await?;
     audit::log(
         &app_state.pool,
@@ -937,16 +925,10 @@ pub async fn reset_password(
     }
     let temporary_password = generate_password();
     let new_password_hash = hash_password(&temporary_password)?;
-    let mut transaction = app_state.pool.begin().await?;
-    let target_active: Option<bool> =
-        sqlx::query_scalar("SELECT active FROM users WHERE id=$1 FOR UPDATE")
-            .bind(target_id)
-            .fetch_optional(&mut *transaction)
-            .await?;
-    match target_active {
-        Some(true) => {}
-        Some(false) => return Err(AppError::BadRequest("User is inactive.".into())),
-        None => return Err(AppError::NotFound),
+    let mut transaction = app_state.db.users.begin().await?;
+    let target_user = UserDb::fetch_for_update(&mut transaction, target_id).await?;
+    if !target_user.active {
+        return Err(AppError::BadRequest("User is inactive.".into()));
     }
     UserDb::update_password(&mut transaction, target_id, &new_password_hash, true).await?;
     // Force re-authentication: kill any existing sessions for this user.
@@ -972,7 +954,7 @@ pub async fn reset_password(
 // ---------------------------------------------------------------------------
 
 /// Row returned by the leave endpoints.
-#[derive(serde::Serialize, sqlx::FromRow)]
+#[derive(serde::Serialize)]
 pub struct AnnualLeaveRow {
     pub user_id: i64,
     pub year: i32,
@@ -988,23 +970,6 @@ pub async fn get_leave_days(
 ) -> AppResult<i64> {
     let db = UserDb::new(pool.clone());
     db.get_leave_days(user_id, year).await
-}
-
-/// Set the leave days for `user_id` in `year` (upsert).
-pub async fn set_leave_days<'e, E>(executor: E, user_id: i64, year: i32, days: i64) -> AppResult<()>
-where
-    E: sqlx::PgExecutor<'e>,
-{
-    sqlx::query(
-        "INSERT INTO user_annual_leave(user_id, year, days) VALUES ($1,$2,$3) \
-         ON CONFLICT (user_id, year) DO UPDATE SET days = EXCLUDED.days",
-    )
-    .bind(user_id)
-    .bind(year)
-    .bind(days)
-    .execute(executor)
-    .await?;
-    Ok(())
 }
 
 // HTTP: GET /users/{id}/leave-days — returns current + next year rows

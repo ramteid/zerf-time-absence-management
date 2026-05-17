@@ -9,7 +9,6 @@ use axum::{
 };
 use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
 use std::collections::{HashMap, HashSet};
 
 // ---------------------------------------------------------------------------
@@ -146,7 +145,7 @@ async fn notify_week_status_change(
 // DTOs
 // ---------------------------------------------------------------------------
 
-#[derive(FromRow, Serialize, Clone)]
+#[derive(Serialize, Clone)]
 pub struct TimeEntry {
     pub id: i64,
     pub user_id: i64,
