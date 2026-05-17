@@ -160,6 +160,26 @@
     );
   }
 
+  // Moves prev/next arrows inside .flatpickr-current-month so the DOM order
+  // becomes [← Month → Year] instead of the flatpickr default [← Month Year →].
+  function rearrangeCalendarNav(instance) {
+    const cal = instance.calendarContainer;
+    if (!cal) return;
+    const months = cal.querySelector(".flatpickr-months");
+    if (!months) return;
+    const prevBtn = months.querySelector(".flatpickr-prev-month");
+    const nextBtn = months.querySelector(".flatpickr-next-month");
+    const currentMonthDiv = months.querySelector(".flatpickr-current-month");
+    const numWrapper = currentMonthDiv?.querySelector(".numInputWrapper");
+    if (!prevBtn || !nextBtn || !currentMonthDiv) return;
+    currentMonthDiv.insertBefore(prevBtn, currentMonthDiv.firstChild);
+    if (numWrapper) {
+      currentMonthDiv.insertBefore(nextBtn, numWrapper);
+    } else {
+      currentMonthDiv.appendChild(nextBtn);
+    }
+  }
+
   function build(lang) {
     if (datePickerInstance) {
       removeAltInputListeners();
@@ -207,6 +227,7 @@
     datePickerInstance.calendarContainer?.classList.add("zf-date-picker-calendar");
     if (container)
       datePickerInstance.calendarContainer?.classList.add("zf-date-picker-overlay");
+    rearrangeCalendarNav(datePickerInstance);
     if (id && datePickerInstance.altInput) datePickerInstance.altInput.id = id;
     if (datePickerInstance.altInput) {
       if (style) datePickerInstance.altInput.setAttribute("style", style);
@@ -253,77 +274,230 @@
 </span>
 
 <style>
+  /* ── Input wrapper ── */
   .date-picker-wrap {
     position: relative;
     display: block;
     width: 100%;
   }
-
   .date-picker-wrap :global(.zf-input) {
     width: 100%;
     padding-right: 34px;
   }
 
-  :global(.zf-date-picker-overlay) {
+  /* ── Calendar container base (light + dark theming) ── */
+  :global(.flatpickr-calendar.zf-date-picker-calendar) {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
     box-shadow: var(--shadow-md);
+    color: var(--text-primary);
+    border-radius: var(--radius-lg);
+    font-family: var(--font-sans);
+  }
+
+  /* Overlay z-index */
+  :global(.zf-date-picker-overlay) {
     z-index: 999;
   }
 
+  /* Tooltip arrow – positioning (left offset set from JS) */
   :global(.zf-date-picker-calendar:before),
   :global(.zf-date-picker-calendar:after) {
     left: var(--zf-date-picker-arrow-left, 22px);
     right: auto;
   }
+  /* Tooltip arrow – colors match calendar surface (3 classes beats flatpickr's 2) */
+  :global(.flatpickr-calendar.zf-date-picker-calendar.arrowTop:before) { border-bottom-color: var(--border); }
+  :global(.flatpickr-calendar.zf-date-picker-calendar.arrowTop:after)  { border-bottom-color: var(--bg-surface); }
+  :global(.flatpickr-calendar.zf-date-picker-calendar.arrowBottom:before) { border-top-color: var(--border); }
+  :global(.flatpickr-calendar.zf-date-picker-calendar.arrowBottom:after)  { border-top-color: var(--bg-surface); }
 
-  /* Month/year navigation header layout:
-     [←][Month][→]  (left-aligned)          [Year] (right-aligned) */
+  /* ── Month navigation header ── */
+  /* After rearrangeCalendarNav() the DOM order inside .flatpickr-current-month is:
+     [←]  [Month dropdown]  [→]  [Year]                                          */
   :global(.zf-date-picker-calendar .flatpickr-months) {
-    position: relative;
     display: flex;
     align-items: center;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
   }
-
-  /* Pull arrows out of absolute positioning into the flex row */
-  :global(.zf-date-picker-calendar .flatpickr-months .flatpickr-prev-month),
-  :global(.zf-date-picker-calendar .flatpickr-months .flatpickr-next-month) {
-    position: static;
-    top: auto;
-    height: auto;
-    padding: 4px 6px;
-  }
-
-  /* Month container: shrink to content width only */
   :global(.zf-date-picker-calendar .flatpickr-months .flatpickr-month) {
-    flex: 0 0 auto;
+    flex: 1;
     position: static;
     height: auto;
     overflow: visible;
+    background: transparent;
+    color: var(--text-primary);
+    fill: var(--text-primary);
   }
-
-  /* Current-month inner div: switch from absolute to inline-flex */
   :global(.zf-date-picker-calendar .flatpickr-current-month) {
     position: static;
-    width: auto;
+    width: 100%;
     left: auto;
     padding: 0;
     height: auto;
-    font-size: 13.5px;
-    display: inline-flex;
+    font-size: 13px;
+    font-weight: 500;
+    display: flex;
     align-items: center;
+    gap: 2px;
     text-align: left;
   }
 
-  /* Year: absolutely positioned at the right edge of .flatpickr-months */
-  :global(.zf-date-picker-calendar .flatpickr-current-month .numInputWrapper) {
-    position: absolute;
-    right: 8px;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 6ch;
-    display: inline-flex;
+  /* Prev / next arrows (moved inside .flatpickr-current-month by rearrangeCalendarNav) */
+  :global(.zf-date-picker-calendar .flatpickr-prev-month),
+  :global(.zf-date-picker-calendar .flatpickr-next-month) {
+    position: static;
+    top: auto;
+    height: auto;
+    padding: 4px;
+    color: var(--text-tertiary);
+    fill: var(--text-tertiary);
+    border-radius: var(--radius-sm);
+    flex: 0 0 auto;
+    display: flex;
     align-items: center;
+    justify-content: center;
+  }
+  :global(.zf-date-picker-calendar .flatpickr-prev-month:hover),
+  :global(.zf-date-picker-calendar .flatpickr-next-month:hover) {
+    background: var(--bg-muted);
+    color: var(--text-primary);
+  }
+  :global(.zf-date-picker-calendar .flatpickr-prev-month svg path),
+  :global(.zf-date-picker-calendar .flatpickr-next-month svg path) {
+    fill: currentColor;
+  }
+  /* Disabled arrows: always visible, just dimmed (4 classes beats flatpickr's 3) */
+  :global(.flatpickr-calendar.zf-date-picker-calendar .flatpickr-prev-month.flatpickr-disabled),
+  :global(.flatpickr-calendar.zf-date-picker-calendar .flatpickr-next-month.flatpickr-disabled) {
+    display: flex;
+    opacity: 0.3;
+    pointer-events: none;
   }
 
+  /* Month label (select dropdown or static span) */
+  :global(.zf-date-picker-calendar .flatpickr-monthDropdown-months) {
+    color: var(--text-primary);
+    background: transparent;
+    font-weight: 500;
+    font-size: 13px;
+    padding: 2px 4px;
+    margin: 0;
+    border-radius: var(--radius-sm);
+  }
+  :global(.zf-date-picker-calendar .flatpickr-monthDropdown-months:hover) {
+    background: var(--bg-muted);
+  }
+  :global(.zf-date-picker-calendar .flatpickr-monthDropdown-months option) {
+    background: var(--bg-surface);
+    color: var(--text-primary);
+  }
+  :global(.zf-date-picker-calendar .cur-month) {
+    color: var(--text-primary);
+    font-weight: 500;
+    margin-left: 0;
+    padding: 2px 4px;
+    border-radius: var(--radius-sm);
+  }
+  :global(.zf-date-picker-calendar .cur-month:hover) {
+    background: var(--bg-muted);
+  }
+
+  /* Year input wrapper – pushed to the right by margin-left: auto */
+  :global(.zf-date-picker-calendar .flatpickr-current-month .numInputWrapper) {
+    flex: 0 0 auto;
+    margin-left: auto;
+    width: 6ch;
+  }
+  :global(.zf-date-picker-calendar .flatpickr-current-month .numInputWrapper:hover) {
+    background: var(--bg-elevated);
+    border-radius: var(--radius-sm);
+  }
+  :global(.zf-date-picker-calendar .flatpickr-current-month input.cur-year) {
+    color: var(--text-primary);
+    font-weight: 500;
+  }
+
+  /* ── Weekday header row ── */
+  :global(.zf-date-picker-calendar .flatpickr-weekdays) {
+    background: transparent;
+    padding: 4px 0 2px;
+  }
+  :global(.zf-date-picker-calendar span.flatpickr-weekday) {
+    background: transparent;
+    color: var(--text-tertiary);
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  /* ── Day cells ── */
+  :global(.zf-date-picker-calendar .flatpickr-day) {
+    color: var(--text-primary);
+    border-color: transparent;
+    border-radius: var(--radius-sm);
+  }
+  :global(.zf-date-picker-calendar .flatpickr-day:hover),
+  :global(.zf-date-picker-calendar .flatpickr-day:focus) {
+    background: var(--bg-muted);
+    border-color: var(--bg-muted);
+    color: var(--text-primary);
+  }
+  :global(.zf-date-picker-calendar .flatpickr-day.today) {
+    border-color: var(--accent);
+  }
+  :global(.zf-date-picker-calendar .flatpickr-day.today:hover),
+  :global(.zf-date-picker-calendar .flatpickr-day.today:focus) {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  :global(.zf-date-picker-calendar .flatpickr-day.selected),
+  :global(.zf-date-picker-calendar .flatpickr-day.startRange),
+  :global(.zf-date-picker-calendar .flatpickr-day.endRange),
+  :global(.zf-date-picker-calendar .flatpickr-day.selected:hover),
+  :global(.zf-date-picker-calendar .flatpickr-day.startRange:hover),
+  :global(.zf-date-picker-calendar .flatpickr-day.endRange:hover) {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  :global(.zf-date-picker-calendar .flatpickr-day.inRange) {
+    background: var(--accent-soft);
+    border-color: transparent;
+    box-shadow: -5px 0 0 var(--accent-soft), 5px 0 0 var(--accent-soft);
+    color: var(--accent-text);
+  }
+  :global(.zf-date-picker-calendar .flatpickr-day.prevMonthDay),
+  :global(.zf-date-picker-calendar .flatpickr-day.nextMonthDay),
+  :global(.zf-date-picker-calendar .flatpickr-day.notAllowed),
+  :global(.zf-date-picker-calendar .flatpickr-day.flatpickr-disabled),
+  :global(.zf-date-picker-calendar .flatpickr-day.flatpickr-disabled:hover) {
+    color: var(--text-disabled);
+    background: transparent;
+    border-color: transparent;
+  }
+
+  /* ── Month-select plugin cells ── */
+  :global(.zf-date-picker-calendar .flatpickr-monthSelect-month) {
+    color: var(--text-primary);
+    border-radius: var(--radius-sm);
+  }
+  :global(.zf-date-picker-calendar .flatpickr-monthSelect-month:hover),
+  :global(.zf-date-picker-calendar .flatpickr-monthSelect-month:focus) {
+    background: var(--bg-muted);
+    color: var(--text-primary);
+  }
+  :global(.zf-date-picker-calendar .flatpickr-monthSelect-month.selected) {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  :global(.zf-date-picker-calendar .flatpickr-monthSelect-month.flatpickr-disabled) {
+    color: var(--text-disabled);
+  }
+
+  /* ── Open-calendar button ── */
   .date-picker-button {
     position: absolute;
     right: 4px;
@@ -340,7 +514,6 @@
     justify-content: center;
     cursor: pointer;
   }
-
   .date-picker-button:hover,
   .date-picker-button:focus-visible {
     background: var(--bg-muted);
