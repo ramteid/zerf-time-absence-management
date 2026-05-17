@@ -81,9 +81,6 @@ const TRANSLATIONS = {
     audit_table_notifications: "Notification",
     audit_table_app_settings: "Setting",
     audit_table_reopen_requests: "Edit Request",
-    // Kept for historical audit-log rows; the per-entry change-request
-    // workflow itself has been removed.
-    audit_table_change_requests: "Change Request (legacy)",
     audit_action_created: "Created",
     audit_action_updated: "Updated",
     audit_action_deleted: "Deleted",
@@ -941,9 +938,6 @@ const TRANSLATIONS = {
     audit_table_notifications: "Benachrichtigung",
     audit_table_app_settings: "Einstellung",
     audit_table_reopen_requests: "Bearbeitungsanfrage",
-    // Wird für historische Audit-Einträge beibehalten; der Workflow für
-    //     // Änderungsanfragen einzelner Einträge wurde entfernt.    // Änderungsanfragen einzelner Einträge wurde entfernt.W    // Änderungsanfragen einzelner Einträge wurde entfernt.
-    audit_table_change_requests: "Änderungsanfrage (alt)",
     audit_action_created: "Erstellt",
     audit_action_updated: "Bearbeitet",
     audit_action_deleted: "Gelöscht",
