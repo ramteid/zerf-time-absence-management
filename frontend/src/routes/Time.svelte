@@ -464,24 +464,41 @@
       </div>
     {/if}
 
-    <!-- Submit and reopen buttons stacked vertically. -->
+    <!-- Submit/reopen slot: while there are drafts to submit we keep the
+         primary submit button (the small request-edit button still appears
+         beneath it in the partial state, as before). Once nothing is left to
+         submit, the disabled submit button is replaced in-place by a
+         request-edit button that matches its dimensions but uses a distinct
+         palette so the submitted state is clear. -->
     <div class="time-submit-stack">
-      <button
-        class="zf-btn zf-btn-primary time-submit-button"
-        on:click={() => submitWeek(drafts.map((draft) => draft.id))}
-        disabled={!drafts.length}
-      >
-        <Icon name="Send" size={14} />{$t("Submit Week")}
-      </button>
+      {#if drafts.length || !canRequestReopen}
+        <button
+          class="zf-btn zf-btn-primary time-submit-button"
+          on:click={() => submitWeek(drafts.map((draft) => draft.id))}
+          disabled={!drafts.length}
+        >
+          <Icon name="Send" size={14} />{$t("Submit Week")}
+        </button>
+      {/if}
 
       {#if canRequestReopen}
-        <button
-          class="zf-btn zf-btn-sm"
-          on:click={requestReopen}
-          title={$t("Request edit")}
-        >
-          <Icon name="Edit" size={13} />{$t("Request edit")}
-        </button>
+        {#if drafts.length}
+          <button
+            class="zf-btn zf-btn-sm"
+            on:click={requestReopen}
+            title={$t("Request edit")}
+          >
+            <Icon name="Edit" size={13} />{$t("Request edit")}
+          </button>
+        {:else}
+          <button
+            class="zf-btn time-submit-button time-reopen-button"
+            on:click={requestReopen}
+            title={$t("Request edit")}
+          >
+            <Icon name="Edit" size={14} />{$t("Request edit")}
+          </button>
+        {/if}
       {/if}
     </div>
   </div>
