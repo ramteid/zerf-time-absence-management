@@ -16,6 +16,7 @@
     minToHM,
   } from "../format.js";
   import Icon from "../Icons.svelte";
+  import { HOLIDAY_COLOR, ABSENCE_COLORS, FALLBACK_COLORS } from "../colors.js";
 
   let entries = [];
   let holidays = [];
@@ -101,36 +102,8 @@
     $categories.map((category) => [category.id, category]),
   );
 
-  // Distinct, accessible palette. Red is reserved for error states only.
-  // Amber (#f59e0b) is reserved for holidays; yellow-adjacent tones are avoided in fallbacks.
-  const HOLIDAY_COLOR = "#f59e0b";
-  const FALLBACK_COLORS = [
-    "#2563eb",
-    "#10b981",
-    "#8b5cf6",
-    "#14b8a6",
-    "#ec4899",
-    "#64748b",
-    "#0f766e",
-    "#7c3aed",
-    "#0891b2",
-    "#d946ef",
-    "#4f46e5",
-    "#0d9488",
-  ];
-  const absColorMap = {
-    vacation: "#3b82f6",
-    sick: "#ef4444",
-    training: "#0d9488",
-    special_leave: "#a855f7",
-    unpaid: "#64748b",
-    general_absence: "#6b7280",
-    flextime_reduction: "#6D4C41",
-    absent: "#9ca3af",
-  };
-
   function absColor(kind) {
-    return absColorMap[kind] || "#9ca3af";
+    return ABSENCE_COLORS[kind] || ABSENCE_COLORS.absent;
   }
 
   function normalizeColor(color) {
@@ -218,7 +191,7 @@
     // use these, but holiday/absence events always keep their designated color.
     const reservedColors = new Set([
       HOLIDAY_COLOR.toLowerCase(),
-      ...Object.values(absColorMap).map((color) => color.toLowerCase()),
+      ...Object.values(ABSENCE_COLORS).map((color) => color.toLowerCase()),
     ]);
     const assigned = new Map();
     const used = new Set();
