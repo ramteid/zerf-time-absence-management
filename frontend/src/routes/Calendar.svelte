@@ -45,23 +45,29 @@
     const from = isoDate(firstDayOfMonth);
     const to = isoDate(lastDayOfMonth);
     const isLead = $currentUser?.permissions?.can_approve ?? false;
+    // Admins see all users via /time-entries/all (own entries included server-side).
+    // Non-admin leads: /time-entries/all returns only direct reports (own entries are
+    // excluded server-side), so fetch own entries separately and merge both lists.
+    const isAdmin = $currentUser?.role === "admin";
+    const isNonAdminLead = isLead && !isAdmin;
     try {
-      const [nextEntries, nextHolidays, nextTimeEntries, nextCategories, nextUsers] =
+      const [nextEntries, nextHolidays, teamEntries, selfEntries, nextCategories, nextUsers] =
         await Promise.all([
           api(`/absences/calendar?month=${monthString}`),
           api(`/holidays?year=${loadYear}`),
-          api(
-            isLead
-              ? `/time-entries/all?from=${from}&to=${to}`
-              : `/time-entries?from=${from}&to=${to}`,
-          ).catch(() => []),
+          isLead
+            ? api(`/time-entries/all?from=${from}&to=${to}`).catch(() => [])
+            : api(`/time-entries?from=${from}&to=${to}`).catch(() => []),
+          isNonAdminLead
+            ? api(`/time-entries?from=${from}&to=${to}`).catch(() => [])
+            : Promise.resolve([]),
           api("/categories").catch(() => $categories),
           isLead ? api("/users").catch(() => []) : Promise.resolve([]),
         ]);
       if (seq !== loadSeq) return;
       entries = nextEntries;
       holidays = nextHolidays;
-      timeEntries = nextTimeEntries;
+      timeEntries = [...teamEntries, ...selfEntries];
       categories.set(nextCategories);
       users = nextUsers;
     } catch {
@@ -78,7 +84,6 @@
     holidays.map((holiday) => [holiday.holiday_date, holiday.name]),
   );
 
-  // For leads, the API already scopes to direct reports; for others, to self.
   // Rejected entries are excluded from the calendar view in all cases.
   $: calTimeEntries = timeEntries.filter((e) => e.status !== "rejected");
 

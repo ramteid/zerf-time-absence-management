@@ -216,7 +216,7 @@
         pendingReopenRequests,
         teamMembers,
       ] = await Promise.all([
-        api("/time-entries/all?status=submitted&exclude_self=true"),
+        api("/time-entries/all?status=submitted"),
         api("/absences/all?status=pending_review"),
         api("/reopen-requests/pending"),
         api("/users"),
@@ -242,12 +242,7 @@
 
   // ── Reactive derivations: overtime balance ────────────────────────────────────
 
-  $: pendingWeeks = buildPendingWeeks(
-    pendingEntries,
-    users,
-    $currentUser?.id,
-    $currentUser?.role === "admin",
-  );
+  $: pendingWeeks = buildPendingWeeks(pendingEntries, users);
 
   $: currentOvertimeRow =
     overtimeRows.find((row) => row.month === currentMonthKey) ??
@@ -310,13 +305,13 @@
     return user ? `${user.first_name} ${user.last_name}` : `#${userId}`;
   }
 
-  function buildPendingWeeks(submittedEntries, userRows, currentUserId, isAdmin) {
+  function buildPendingWeeks(submittedEntries, userRows) {
     // Group entries by (user_id, week_start) to create per-person per-week buckets.
-    // Non-admin leads cannot approve their own entries, so exclude them from the queue.
+    // The API (/time-entries/all) already excludes the requester's own entries for
+    // non-admin leads, so no client-side self-filter is needed here.
     const weekGroupsByKey = new Map();
 
     for (const entry of submittedEntries) {
-      if (!isAdmin && entry.user_id === currentUserId) continue;
       const weekStart = weekStartOf(entry.entry_date);
       if (!weekStart) continue;
       const groupKey = `${entry.user_id}:${weekStart}`;

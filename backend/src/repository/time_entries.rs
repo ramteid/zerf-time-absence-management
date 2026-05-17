@@ -381,23 +381,17 @@ impl TimeEntryDb {
         to: Option<NaiveDate>,
         user_id_filter: Option<i64>,
         status_filter: Option<String>,
-        exclude_self: bool,
     ) -> AppResult<Vec<TimeEntry>> {
         let mut builder = QueryBuilder::<Postgres>::new(&format!("{TE_SELECT} WHERE TRUE"));
         if !is_admin {
-            // Non-admin leads: include own entries plus active, non-admin direct
-            // reports. Admin-subject entries are excluded from lead scope.
+            // Non-admin leads: team members only (active, non-admin direct reports).
+            // Own entries are unconditionally excluded — leads cannot act on their own
+            // submissions and the endpoint is a team-management view, not self+team.
+            // Callers that need the lead's own entries should use /time-entries instead.
             builder
-                .push(" AND (user_id = ")
+                .push(" AND user_id IN (SELECT ua.user_id FROM user_approvers ua JOIN users u ON u.id=ua.user_id WHERE ua.approver_id = ")
                 .push_bind(requester_id)
-                .push(" OR user_id IN (SELECT ua.user_id FROM user_approvers ua JOIN users u ON u.id=ua.user_id WHERE ua.approver_id = ")
-                .push_bind(requester_id)
-                .push(" AND u.active=TRUE AND u.role != 'admin'))");
-        }
-        // For the approval queue, non-admin leads cannot act on their own entries.
-        // Excluding them server-side avoids exposing data the caller has no use for.
-        if exclude_self && !is_admin {
-            builder.push(" AND user_id != ").push_bind(requester_id);
+                .push(" AND u.active=TRUE AND u.role != 'admin')");
         }
         if let Some(f) = from {
             builder.push(" AND entry_date >= ").push_bind(f);
