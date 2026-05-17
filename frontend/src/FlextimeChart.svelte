@@ -1,5 +1,6 @@
 <script>
   import { t, absenceKindLabel, formatHours, fmtDecimal } from "./i18n.js";
+  import { HOLIDAY_COLOR, WEEKEND_COLOR, ABSENCE_COLORS } from "./colors.js";
   import { settings } from "./stores.js";
   import { appTodayIsoDate, fmtDateShort } from "./format.js";
 
@@ -202,17 +203,6 @@
       (isNegative ? "-" : "+") + hours + ":" + String(minutes).padStart(2, "0"),
     );
   }
-
-  const ABSENCE_COLORS = {
-    vacation: "#f59e0b",
-    sick: "#ef4444",
-    training: "#3b82f6",
-    special_leave: "#a855f7",
-    unpaid: "#64748b",
-    general_absence: "#6b7280",
-  };
-  const HOLIDAY_COLOR = "#10b981";
-  const WEEKEND_COLOR = "#9ca3af";
 
   function absColor(kind) {
     return ABSENCE_COLORS[kind] || "var(--text-tertiary)";

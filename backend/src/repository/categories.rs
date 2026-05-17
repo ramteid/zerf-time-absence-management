@@ -38,6 +38,15 @@ impl CategoryDb {
         .execute(&self.pool)
         .await?;
 
+        // Fix original seed color that clashed with the holiday amber (#f59e0b).
+        sqlx::query(
+            "UPDATE categories SET color = $1 WHERE name = 'Leadership Tasks' AND color = $2",
+        )
+        .bind("#84cc16")
+        .bind("#FF9800")
+        .execute(&self.pool)
+        .await?;
+
         let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM categories")
             .fetch_one(&self.pool)
             .await?;
@@ -48,7 +57,7 @@ impl CategoryDb {
         let initial = [
             ("Core Duties", "#4CAF50", 1i64, true),
             ("Preparation Time", "#2196F3", 2, true),
-            ("Leadership Tasks", "#FF9800", 3, true),
+            ("Leadership Tasks", "#84cc16", 3, true),
             ("Team Meeting", "#9C27B0", 4, true),
             ("Training", "#795548", 5, true),
             ("Other", "#607D8B", 6, true),

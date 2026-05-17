@@ -1,5 +1,6 @@
 <script>
   import { api } from "../api.js";
+  import { ABSENCE_COLORS } from "../colors.js";
   import {
     categories,
     currentUser,
@@ -38,16 +39,6 @@
     "Saturday",
     "Sunday",
   ];
-
-  const ABSENCE_COLORS = Object.freeze({
-    vacation: "#3b82f6",
-    sick: "#ef4444",
-    training: "#0d9488",
-    special_leave: "#d97706",
-    unpaid: "#6b7280",
-    general_absence: "#475569",
-    flextime_reduction: "#6D4C41",
-  });
 
   const TARGET_REMOVING_ABSENCE_STATUSES = ["approved", "cancellation_pending"];
 
