@@ -9,7 +9,6 @@ use axum::{
 };
 use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc};
 use serde::{Deserialize, Serialize, Serializer};
-use sqlx::FromRow;
 
 async fn notification_language(pool: &crate::db::DatabasePool) -> i18n::Language {
     crate::notifications::load_language(pool).await
@@ -117,7 +116,7 @@ fn repo_absence_to_service(a: crate::repository::Absence) -> Absence {
 
 use crate::repository::absences::ALLOWED_KINDS as ALLOWED_ABSENCE_KINDS;
 
-#[derive(FromRow, Serialize, Clone)]
+#[derive(Serialize, Clone)]
 pub struct Absence {
     pub id: i64,
     pub user_id: i64,
@@ -130,15 +129,10 @@ pub struct Absence {
     pub reviewed_at: Option<DateTime<Utc>>,
     pub rejection_reason: Option<String>,
     pub created_at: DateTime<Utc>,
-    #[sqlx(default)]
     pub review_type: Option<String>,
-    #[sqlx(default)]
     pub previous_kind: Option<String>,
-    #[sqlx(default)]
     pub previous_start_date: Option<NaiveDate>,
-    #[sqlx(default)]
     pub previous_end_date: Option<NaiveDate>,
-    #[sqlx(default)]
     pub previous_comment: Option<String>,
 }
 
@@ -465,7 +459,7 @@ pub async fn create(
         )
         .await?;
     }
-    let mut transaction = app_state.pool.begin().await?;
+    let mut transaction = app_state.db.absences.begin().await?;
     crate::repository::AbsenceDb::lock_user_scope_tx(&mut transaction, requester.id).await?;
     crate::repository::AbsenceDb::assert_no_overlap_tx(
         &mut transaction,
@@ -583,7 +577,7 @@ pub async fn update(
         .await?;
     }
     let current_owner_id = absence_owner_id(&app_state.pool, absence_id).await?;
-    let mut transaction = app_state.pool.begin().await?;
+    let mut transaction = app_state.db.absences.begin().await?;
     crate::repository::AbsenceDb::lock_user_scope_tx(&mut transaction, current_owner_id).await?;
     let absence_before_update = repo_absence_to_service(
         crate::repository::AbsenceDb::find_for_update(&mut transaction, absence_id).await?,
@@ -705,7 +699,7 @@ pub async fn cancel(
     Path(absence_id): Path<i64>,
 ) -> AppResult<Json<serde_json::Value>> {
     let owner_id = absence_owner_id(&app_state.pool, absence_id).await?;
-    let mut transaction = app_state.pool.begin().await?;
+    let mut transaction = app_state.db.absences.begin().await?;
     crate::repository::AbsenceDb::lock_user_scope_tx(&mut transaction, owner_id).await?;
     let absence = repo_absence_to_service(
         crate::repository::AbsenceDb::find_for_update(&mut transaction, absence_id).await?,
@@ -806,7 +800,7 @@ pub async fn approve(
         return Err(AppError::Forbidden);
     }
     let owner_id = absence_owner_id(&app_state.pool, absence_id).await?;
-    let mut transaction = app_state.pool.begin().await?;
+    let mut transaction = app_state.db.absences.begin().await?;
     crate::repository::AbsenceDb::lock_user_scope_tx(&mut transaction, owner_id).await?;
     let absence = repo_absence_to_service(
         crate::repository::AbsenceDb::find_for_update(&mut transaction, absence_id).await?,
@@ -919,7 +913,7 @@ pub async fn reject(
         return Err(AppError::BadRequest("Reason too long (max 2000).".into()));
     }
     let owner_id = absence_owner_id(&app_state.pool, absence_id).await?;
-    let mut transaction = app_state.pool.begin().await?;
+    let mut transaction = app_state.db.absences.begin().await?;
     crate::repository::AbsenceDb::lock_user_scope_tx(&mut transaction, owner_id).await?;
     let absence = repo_absence_to_service(
         crate::repository::AbsenceDb::find_for_update(&mut transaction, absence_id).await?,
@@ -992,7 +986,7 @@ pub async fn approve_cancellation(
         return Err(AppError::Forbidden);
     }
     let owner_id = absence_owner_id(&app_state.pool, absence_id).await?;
-    let mut transaction = app_state.pool.begin().await?;
+    let mut transaction = app_state.db.absences.begin().await?;
     crate::repository::AbsenceDb::lock_user_scope_tx(&mut transaction, owner_id).await?;
     let absence =
         crate::repository::AbsenceDb::find_for_update(&mut transaction, absence_id).await?;
@@ -1059,7 +1053,7 @@ pub async fn reject_cancellation(
         return Err(AppError::Forbidden);
     }
     let owner_id = absence_owner_id(&app_state.pool, absence_id).await?;
-    let mut transaction = app_state.pool.begin().await?;
+    let mut transaction = app_state.db.absences.begin().await?;
     crate::repository::AbsenceDb::lock_user_scope_tx(&mut transaction, owner_id).await?;
     let absence =
         crate::repository::AbsenceDb::find_for_update(&mut transaction, absence_id).await?;
@@ -1128,7 +1122,7 @@ pub async fn revoke(
         return Err(AppError::Forbidden);
     }
     let owner_id = absence_owner_id(&app_state.pool, absence_id).await?;
-    let mut transaction = app_state.pool.begin().await?;
+    let mut transaction = app_state.db.absences.begin().await?;
     crate::repository::AbsenceDb::lock_user_scope_tx(&mut transaction, owner_id).await?;
     let absence = repo_absence_to_service(
         crate::repository::AbsenceDb::find_for_update(&mut transaction, absence_id).await?,
@@ -1241,14 +1235,9 @@ async fn annual_days_or_default(
     year: i32,
     default_days: i64,
 ) -> AppResult<i64> {
-    Ok(sqlx::query_scalar::<_, i64>(
-        "SELECT days FROM user_annual_leave WHERE user_id=$1 AND year=$2",
-    )
-    .bind(user_id)
-    .bind(year)
-    .fetch_optional(pool)
-    .await?
-    .unwrap_or(default_days))
+    crate::repository::UserDb::new(pool.clone())
+        .annual_days_or_default(user_id, year, default_days)
+        .await
 }
 
 /// Parse the carryover expiry date setting (MM-DD) into a NaiveDate for the given year.
@@ -1452,44 +1441,22 @@ fn exceeds_vacation_budget(required_days: f64, budget_days: f64) -> bool {
 }
 
 async fn approved_vacation_ranges_in_year_tx(
-    tx: &mut sqlx::PgConnection,
+    tx: &mut crate::db::PgConnection,
     user_id: i64,
     from: NaiveDate,
     to: NaiveDate,
     exclude_id: Option<i64>,
 ) -> AppResult<Vec<(NaiveDate, NaiveDate)>> {
-    if let Some(exclude_id) = exclude_id {
-        Ok(sqlx::query_as::<_, (NaiveDate, NaiveDate)>(
-            "SELECT start_date, end_date FROM absences \
-             WHERE id != $1 AND user_id=$2 AND kind='vacation' \
-             AND status='approved' \
-             AND end_date >= $3 AND start_date <= $4",
-        )
-        .bind(exclude_id)
-        .bind(user_id)
-        .bind(from)
-        .bind(to)
-        .fetch_all(tx)
-        .await?)
-    } else {
-        Ok(sqlx::query_as::<_, (NaiveDate, NaiveDate)>(
-            "SELECT start_date, end_date FROM absences \
-             WHERE user_id=$1 AND kind='vacation' \
-             AND status='approved' \
-             AND end_date >= $2 AND start_date <= $3",
-        )
-        .bind(user_id)
-        .bind(from)
-        .bind(to)
-        .fetch_all(tx)
-        .await?)
-    }
+    crate::repository::AbsenceDb::approved_vacation_ranges_in_year_tx(
+        tx, user_id, from, to, exclude_id,
+    )
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]
 async fn carryover_from_year_into_next_year(
     pool: &crate::db::DatabasePool,
-    tx: &mut sqlx::PgConnection,
+    tx: &mut crate::db::PgConnection,
     user_id: i64,
     year_from: NaiveDate,
     year_to: NaiveDate,
@@ -1624,7 +1591,7 @@ async fn carryover_remaining_days(input: CarryoverRemainingInput<'_>) -> AppResu
 /// editing (pass `None` when creating).
 async fn validate_vacation_balance(
     pool: &crate::db::DatabasePool,
-    tx: &mut sqlx::PgConnection,
+    tx: &mut crate::db::PgConnection,
     user: &crate::auth::User,
     start_date: NaiveDate,
     end_date: NaiveDate,

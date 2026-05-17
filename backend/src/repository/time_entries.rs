@@ -817,6 +817,25 @@ impl TimeEntryDb {
         Ok(rows.into_iter().map(|(d,)| d).collect())
     }
 
+    pub async fn get_incomplete_dates_in_range(
+        &self,
+        user_id: i64,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> AppResult<Vec<NaiveDate>> {
+        let rows: Vec<(NaiveDate,)> = sqlx::query_as(
+            "SELECT DISTINCT entry_date FROM time_entries \
+             WHERE user_id=$1 AND status NOT IN ('submitted','approved') \
+             AND entry_date BETWEEN $2 AND $3",
+        )
+        .bind(user_id)
+        .bind(from)
+        .bind(to)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(|(d,)| d).collect())
+    }
+
     // ── Private helpers ────────────────────────────────────────────────────
 
     /// For submission-style checks: all entries by user in range grouped by month.

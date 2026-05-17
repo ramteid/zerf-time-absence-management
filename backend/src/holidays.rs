@@ -200,7 +200,7 @@ pub async fn prepare_holiday_refresh(
 }
 
 pub async fn replace_auto_holidays_exec(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut crate::db::PgTransaction<'_>,
     holidays: &[PreparedHoliday],
 ) -> AppResult<()> {
     let prepared: Vec<crate::repository::PreparedHoliday> = holidays

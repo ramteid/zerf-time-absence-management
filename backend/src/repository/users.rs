@@ -47,6 +47,9 @@ const USER_SELECT: &str =
 /// Team settings row (id, email, first_name, last_name, role, allow_reopen_without_approval).
 pub type TeamSettingsRow = (i64, String, String, String, String, bool);
 
+/// Approval reminder row (approver_id, approver_email, total_pending_count).
+pub type PendingApproverReminderRow = (i64, String, i64);
+
 #[derive(Serialize, sqlx::FromRow)]
 pub struct AnnualLeaveRow {
     pub user_id: i64,
@@ -182,6 +185,20 @@ impl UserDb {
         .await?)
     }
 
+    pub async fn count_active_direct_reports_tx(
+        tx: &mut sqlx::PgConnection,
+        user_id: i64,
+    ) -> AppResult<i64> {
+        Ok(sqlx::query_scalar(
+            "SELECT COUNT(*) FROM user_approvers \
+             WHERE approver_id=$1 \
+             AND user_id IN (SELECT id FROM users WHERE active=TRUE)",
+        )
+        .bind(user_id)
+        .fetch_one(tx)
+        .await?)
+    }
+
     pub async fn get_active_flag(&self, id: i64) -> AppResult<Option<bool>> {
         Ok(sqlx::query_scalar("SELECT active FROM users WHERE id=$1")
             .bind(id)
@@ -311,6 +328,49 @@ impl UserDb {
              ORDER BY last_name, first_name",
         )
         .bind(lead_id)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// Query active approvers who currently have pending review items.
+    pub async fn pending_approvers_for_reminders(
+        &self,
+    ) -> AppResult<Vec<PendingApproverReminderRow>> {
+        Ok(sqlx::query_as::<_, PendingApproverReminderRow>(
+            "WITH user_pending AS (
+                 SELECT user_id, COUNT(*)::bigint AS pending_count
+                 FROM (
+                     SELECT user_id FROM time_entries
+                     WHERE status = 'submitted'
+                     UNION ALL
+                     SELECT user_id FROM absences           WHERE status IN ('requested','cancellation_pending')
+                     UNION ALL
+                     SELECT user_id FROM reopen_requests    WHERE status = 'pending'
+                 ) all_pending
+                 GROUP BY user_id
+             ),
+             via_assignment AS (
+                 SELECT ua.approver_id, SUM(up.pending_count)::bigint AS pending_count
+                 FROM user_approvers ua
+                 JOIN user_pending up ON up.user_id = ua.user_id
+                 JOIN users subject   ON subject.id = ua.user_id
+                 JOIN users approver  ON approver.id = ua.approver_id
+                                     AND approver.active = TRUE
+                 WHERE (
+                     (subject.role = 'admin' AND approver.role = 'admin') OR
+                     (subject.role != 'admin' AND approver.role IN ('team_lead', 'admin'))
+                 )
+                 GROUP BY ua.approver_id
+             ),
+             combined AS (
+                 SELECT approver_id, pending_count FROM via_assignment
+             )
+             SELECT c.approver_id, u.email, SUM(c.pending_count)::bigint AS total_pending
+             FROM combined c
+             JOIN users u ON u.id = c.approver_id AND u.active = TRUE
+             GROUP BY c.approver_id, u.email
+             HAVING SUM(c.pending_count) > 0",
+        )
         .fetch_all(&self.pool)
         .await?)
     }
@@ -548,6 +608,19 @@ impl UserDb {
         .await?)
     }
 
+    /// Fetch active approver IDs for a user within an existing transaction.
+    pub async fn get_approver_ids_tx(
+        tx: &mut sqlx::PgConnection,
+        user_id: i64,
+    ) -> AppResult<Vec<i64>> {
+        Ok(sqlx::query_scalar::<_, i64>(
+            "SELECT approver_id FROM user_approvers WHERE user_id=$1 ORDER BY approver_id",
+        )
+        .bind(user_id)
+        .fetch_all(tx)
+        .await?)
+    }
+
     /// Fetch approver details (id, first_name, last_name) for a user.
     pub async fn get_approver_details(
         &self,
@@ -572,6 +645,14 @@ impl UserDb {
 
     pub async fn deactivate_tx(tx: &mut sqlx::PgConnection, id: i64) -> AppResult<()> {
         sqlx::query("UPDATE users SET active=FALSE WHERE id=$1")
+            .bind(id)
+            .execute(tx)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn delete_tx(tx: &mut sqlx::PgConnection, id: i64) -> AppResult<()> {
+        sqlx::query("DELETE FROM users WHERE id=$1")
             .bind(id)
             .execute(tx)
             .await?;
@@ -712,6 +793,24 @@ impl UserDb {
         .fetch_optional(&self.pool)
         .await?
         .unwrap_or(30))
+    }
+
+    pub async fn annual_days_or_default(
+        &self,
+        user_id: i64,
+        year: i32,
+        default_days: i64,
+    ) -> AppResult<i64> {
+        Ok(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT days FROM user_annual_leave WHERE user_id=$1 AND year=$2",
+            )
+            .bind(user_id)
+            .bind(year)
+            .fetch_optional(&self.pool)
+            .await?
+            .unwrap_or(default_days),
+        )
     }
 
     pub async fn get_default_leave_days_tx(tx: &mut sqlx::PgConnection) -> AppResult<i64> {

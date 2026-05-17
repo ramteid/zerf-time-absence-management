@@ -333,4 +333,106 @@ impl ReportDb {
             .await?)
         }
     }
+
+    /// Category rows for either a specific user or the requester's team scope.
+    /// Returns (category_name, color, start_time, end_time).
+    pub async fn category_rows_for_scope(
+        &self,
+        requester_id: i64,
+        is_admin: bool,
+        target_user_id: Option<i64>,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> AppResult<Vec<(String, String, String, String)>> {
+        if let Some(user_id) = target_user_id {
+            return Ok(sqlx::query_as(
+                "SELECT c.name, c.color, z.start_time, z.end_time \
+                 FROM time_entries z \
+                 JOIN users u ON u.id=z.user_id \
+                 JOIN categories c ON c.id=z.category_id \
+                 WHERE z.status != 'rejected' AND z.entry_date >= u.start_date \
+                 AND z.entry_date BETWEEN $1 AND $2 AND z.user_id = $3",
+            )
+            .bind(from)
+            .bind(to)
+            .bind(user_id)
+            .fetch_all(&self.pool)
+            .await?);
+        }
+
+        if is_admin {
+            Ok(sqlx::query_as(
+                "SELECT c.name, c.color, z.start_time, z.end_time \
+                 FROM time_entries z \
+                 JOIN users u ON u.id=z.user_id \
+                 JOIN categories c ON c.id=z.category_id \
+                 WHERE z.status != 'rejected' AND z.entry_date >= u.start_date \
+                 AND z.entry_date BETWEEN $1 AND $2",
+            )
+            .bind(from)
+            .bind(to)
+            .fetch_all(&self.pool)
+            .await?)
+        } else {
+            Ok(sqlx::query_as(
+                "SELECT c.name, c.color, z.start_time, z.end_time \
+                 FROM time_entries z \
+                 JOIN users u ON u.id=z.user_id \
+                 JOIN categories c ON c.id=z.category_id \
+                 WHERE z.status != 'rejected' AND z.entry_date >= u.start_date \
+                 AND z.entry_date BETWEEN $1 AND $2 \
+                 AND z.user_id IN (SELECT id FROM users WHERE id = $3 \
+                     OR id IN (SELECT ua.user_id FROM user_approvers ua \
+                               JOIN users u2 ON u2.id = ua.user_id \
+                               WHERE ua.approver_id = $3 AND u2.role != 'admin'))",
+            )
+            .bind(from)
+            .bind(to)
+            .bind(requester_id)
+            .fetch_all(&self.pool)
+            .await?)
+        }
+    }
+
+    /// Team-scope category rows. Returns (user_id, category_name, color, start_time, end_time).
+    pub async fn team_category_entry_rows(
+        &self,
+        requester_id: i64,
+        is_admin: bool,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> AppResult<Vec<(i64, String, String, String, String)>> {
+        if is_admin {
+            Ok(sqlx::query_as(
+                "SELECT z.user_id, c.name, c.color, z.start_time, z.end_time \
+                 FROM time_entries z \
+                 JOIN users u ON u.id=z.user_id \
+                 JOIN categories c ON c.id=z.category_id \
+                 WHERE z.status != 'rejected' AND z.entry_date >= u.start_date \
+                 AND z.entry_date BETWEEN $1 AND $2",
+            )
+            .bind(from)
+            .bind(to)
+            .fetch_all(&self.pool)
+            .await?)
+        } else {
+            Ok(sqlx::query_as(
+                "SELECT z.user_id, c.name, c.color, z.start_time, z.end_time \
+                 FROM time_entries z \
+                 JOIN users u ON u.id=z.user_id \
+                 JOIN categories c ON c.id=z.category_id \
+                 WHERE z.status != 'rejected' AND z.entry_date >= u.start_date \
+                 AND z.entry_date BETWEEN $1 AND $2 \
+                 AND z.user_id IN (SELECT id FROM users WHERE id = $3 \
+                     OR id IN (SELECT ua.user_id FROM user_approvers ua \
+                               JOIN users u2 ON u2.id = ua.user_id \
+                               WHERE ua.approver_id = $3 AND u2.role != 'admin'))",
+            )
+            .bind(from)
+            .bind(to)
+            .bind(requester_id)
+            .fetch_all(&self.pool)
+            .await?)
+        }
+    }
 }
