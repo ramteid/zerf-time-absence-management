@@ -216,7 +216,7 @@
         pendingReopenRequests,
         teamMembers,
       ] = await Promise.all([
-        api("/time-entries/all?status=submitted"),
+        api("/time-entries/all?status=submitted&exclude_self=true"),
         api("/absences/all?status=pending_review"),
         api("/reopen-requests/pending"),
         api("/users"),
