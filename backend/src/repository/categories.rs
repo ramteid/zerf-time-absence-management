@@ -47,6 +47,33 @@ impl CategoryDb {
         .execute(&self.pool)
         .await?;
 
+        // Maximise hue distance among the six highest-frequency categories.
+        // Target hues (°): sick=0, holiday=38, LT=80, PrepTime=142, vacation=217, TM=262, CoreDuties=312.
+        // Only patches rows that still carry the original seed color so manual edits are preserved.
+        sqlx::query(
+            "UPDATE categories SET color = $1 WHERE name = 'Core Duties' AND color = $2",
+        )
+        .bind("#de35bd")
+        .bind("#4CAF50")
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            "UPDATE categories SET color = $1 WHERE name = 'Preparation Time' AND color = $2",
+        )
+        .bind("#22c55e")
+        .bind("#2196F3")
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            "UPDATE categories SET color = $1 WHERE name = 'Team Meeting' AND color = $2",
+        )
+        .bind("#7c3aed")
+        .bind("#9C27B0")
+        .execute(&self.pool)
+        .await?;
+
         let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM categories")
             .fetch_one(&self.pool)
             .await?;
@@ -55,10 +82,10 @@ impl CategoryDb {
         }
 
         let initial = [
-            ("Core Duties", "#4CAF50", 1i64, true),
-            ("Preparation Time", "#2196F3", 2, true),
+            ("Core Duties", "#de35bd", 1i64, true),
+            ("Preparation Time", "#22c55e", 2, true),
             ("Leadership Tasks", "#84cc16", 3, true),
-            ("Team Meeting", "#9C27B0", 4, true),
+            ("Team Meeting", "#7c3aed", 4, true),
             ("Training", "#795548", 5, true),
             ("Other", "#607D8B", 6, true),
             ("Flextime Reduction", "#6D4C41", 7, false),
