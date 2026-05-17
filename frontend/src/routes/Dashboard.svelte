@@ -27,9 +27,7 @@
   let pendingEntries = [];
   let pendingWeeks = [];
   let pendingAbsences = [];
-  let changeRequests = [];
   let pendingReopens = [];
-  let allTimeEntries = [];
   let users = [];
   let absenceDetail = null;
   let absenceDetailDlg;
@@ -205,41 +203,31 @@
   async function load() {
     const canApprove = !!$currentUser?.permissions?.can_approve;
     if (!canApprove) {
-      allTimeEntries = [];
       pendingEntries = [];
       pendingAbsences = [];
-      changeRequests = [];
       pendingReopens = [];
       users = [];
       return;
     }
     try {
       const [
-        teamTimeEntries,
         submittedTimeEntries,
         requestedAbsences,
-        openChangeRequests,
         pendingReopenRequests,
         teamMembers,
       ] = await Promise.all([
-        api("/time-entries/all"),
         api("/time-entries/all?status=submitted"),
         api("/absences/all?status=pending_review"),
-        api("/change-requests/all?status=open"),
         api("/reopen-requests/pending"),
         api("/users"),
       ]);
-      allTimeEntries = teamTimeEntries;
       pendingEntries = submittedTimeEntries;
       pendingAbsences = requestedAbsences;
-      changeRequests = openChangeRequests;
       pendingReopens = pendingReopenRequests;
       users = teamMembers;
     } catch (error) {
-      allTimeEntries = [];
       pendingEntries = [];
       pendingAbsences = [];
-      changeRequests = [];
       pendingReopens = [];
       users = [];
       toast($t(error?.message || "Error"), "error");
@@ -255,16 +243,6 @@
   // ── Reactive derivations: overtime balance ────────────────────────────────────
 
   $: pendingWeeks = buildPendingWeeks(pendingEntries, users);
-  $: timeEntryById = new Map(allTimeEntries.map((entry) => [entry.id, entry]));
-  $: pendingReopenWeekKeys = new Set(
-    pendingReopens.map((reopen) => `${reopen.user_id}:${dateKey(reopen.week_start)}`),
-  );
-  $: visibleChangeRequests = changeRequests.filter(
-    (changeRequest) =>
-      !pendingReopenWeekKeys.has(
-        `${changeRequest.user_id}:${dateKey(changeRequestWeekStart(changeRequest))}`,
-      ),
-  );
 
   $: currentOvertimeRow =
     overtimeRows.find((row) => row.month === currentMonthKey) ??
@@ -400,58 +378,15 @@
     return formatHours(week.total_min / 60);
   }
 
-
-
-  function categoryName(categoryId) {
-    const category = $categories.find((item) => item.id === categoryId);
-    return category ? $t(category.name) : `#${categoryId}`;
-  }
-
-  function changeRequestWeekStart(changeRequest) {
-    const entry = timeEntryById.get(changeRequest.time_entry_id);
-    return entry ? weekStartOf(entry.entry_date) : "";
-  }
-
-  function changeRequestChanges(changeRequest) {
-    const lines = [];
-    if (changeRequest.new_date) {
-      lines.push(`${$t("Date")}: ${fmtDateShort(changeRequest.new_date)}`);
-    }
-    if (changeRequest.new_start_time) {
-      lines.push(`${$t("Start")}: ${changeRequest.new_start_time.slice(0, 5)}`);
-    }
-    if (changeRequest.new_end_time) {
-      lines.push(`${$t("End")}: ${changeRequest.new_end_time.slice(0, 5)}`);
-    }
-    if (changeRequest.new_category_id) {
-      lines.push(`${$t("Category")}: ${categoryName(changeRequest.new_category_id)}`);
-    }
-    if (
-      changeRequest.new_comment !== null &&
-      changeRequest.new_comment !== undefined
-    ) {
-      lines.push(
-        changeRequest.new_comment === ""
-          ? `${$t("Comment")}: ${$t("Cleared")}`
-          : `${$t("Comment")}: ${changeRequest.new_comment}`,
-      );
-    }
-    return lines;
-  }
-
   // ── Focus/scroll-to-section logic ────────────────────────────────────────────
 
   function sectionByFocus(focus) {
     if (focus === "timesheets") return timesheetsSectionEl;
     if (focus === "absences") return absencesSectionEl;
     if (focus === "reopen") return timesheetsSectionEl;
-    if (focus === "changes") return timesheetsSectionEl;
     return null;
   }
 
-  function changeRequestTypeLabel(changeRequest) {
-    return $t("Change");
-  }
 
   function absenceRequestTypeLabel(absence) {
     if (absence.status === "cancellation_pending" || absence.review_type === "cancellation") {
@@ -497,8 +432,8 @@
     return rows;
   }
 
-  function openRequestDetail(kind, item) {
-    requestDetail = { kind, item };
+  function openReopenDetail(item) {
+    requestDetail = { item };
     tick().then(() => {
       if (requestDetailDlg && !requestDetailDlg.open) {
         try {
@@ -513,55 +448,6 @@
   function closeRequestDetail() {
     if (requestDetailDlg?.open) requestDetailDlg.close();
     requestDetail = null;
-  }
-
-  function changeDiffRows(changeRequest) {
-    const currentEntry = timeEntryById.get(changeRequest.time_entry_id);
-    if (!currentEntry) return [];
-
-    const rows = [];
-    if (changeRequest.new_date) {
-      rows.push({
-        field: $t("Date"),
-        before: fmtDateShort(currentEntry.entry_date),
-        after: fmtDateShort(changeRequest.new_date),
-      });
-    }
-    if (changeRequest.new_start_time) {
-      rows.push({
-        field: $t("Start"),
-        before: currentEntry.start_time.slice(0, 5),
-        after: changeRequest.new_start_time.slice(0, 5),
-      });
-    }
-    if (changeRequest.new_end_time) {
-      rows.push({
-        field: $t("End"),
-        before: currentEntry.end_time.slice(0, 5),
-        after: changeRequest.new_end_time.slice(0, 5),
-      });
-    }
-    if (changeRequest.new_category_id) {
-      rows.push({
-        field: $t("Category"),
-        before: categoryName(currentEntry.category_id),
-        after: categoryName(changeRequest.new_category_id),
-      });
-    }
-    if (
-      changeRequest.new_comment !== null &&
-      changeRequest.new_comment !== undefined
-    ) {
-      rows.push({
-        field: $t("Comment"),
-        before: currentEntry.comment || $t("Empty"),
-        after:
-          changeRequest.new_comment === ""
-            ? $t("Cleared")
-            : changeRequest.new_comment,
-      });
-    }
-    return rows;
   }
 
   async function revealFocusSection(focus) {
@@ -811,34 +697,6 @@
     }
   }
 
-  // ── Change-request approval ───────────────────────────────────────────────────
-
-  async function approveCR(id) {
-    try {
-      await api(`/change-requests/${id}/approve`, { method: "POST" });
-      toast($t("Approved."), "ok");
-      load();
-    } catch (error) {
-      toast($t(error?.message || "Error"), "error");
-    }
-  }
-
-  async function rejectCR(id) {
-    const reason = await confirmDialog(
-      $t("Reject?"),
-      $t("Reject this change request?"),
-      { danger: true, confirm: $t("Reject"), reason: true },
-    );
-    if (!reason) return;
-    try {
-      await api(`/change-requests/${id}/reject`, { method: "POST", body: { reason } });
-      toast($t("Rejected."), "ok");
-      load();
-    } catch (error) {
-      toast($t(error?.message || "Error"), "error");
-    }
-  }
-
   // ── Help tooltips ─────────────────────────────────────────────────────────────
   let activeHelp = null;
   function toggleHelp(id) {
@@ -962,14 +820,6 @@
         </div>
 
         <div class="zf-card stat-card">
-          <div class="stat-card-label">{$t("Change Requests")}</div>
-          <div
-            class="stat-card-value tab-num"
-            style="color:{visibleChangeRequests.length > 0 ? 'var(--danger-text)' : 'var(--success-text)'}"
-          >{visibleChangeRequests.length}</div>
-        </div>
-
-        <div class="zf-card stat-card">
           <div class="stat-card-label">{$t("Absence Requests")}</div>
           <div
             class="stat-card-value tab-num"
@@ -1004,9 +854,9 @@
         <div class="card-header">
           <Icon name="FileText" size={15} sw={1.5} />
           <span class="card-header-title">{$t("Week Approvals")}</span>
-          {#if pendingWeeks.length + pendingReopens.length + visibleChangeRequests.length > 0}
+          {#if pendingWeeks.length + pendingReopens.length > 0}
             <span class="zf-chip zf-chip-pending" style="font-size:10.5px">
-              {pendingWeeks.length + pendingReopens.length + visibleChangeRequests.length}
+              {pendingWeeks.length + pendingReopens.length}
               {$t("pending")}
             </span>
           {/if}
@@ -1067,11 +917,11 @@
         {#each pendingReopens as reopen}
           <div
             class="dashboard-click-row"
-            on:click={() => openRequestDetail("reopen", reopen)}
+            on:click={() => openReopenDetail(reopen)}
             on:keydown={(e) => {
               if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault();
-                openRequestDetail("reopen", reopen);
+                openReopenDetail(reopen);
               }
             }}
             role="button"
@@ -1110,58 +960,7 @@
             </div>
           </div>
         {/each}
-        {#each visibleChangeRequests as cr}
-          <div
-            class="dashboard-click-row"
-            on:click={() => openRequestDetail("change", cr)}
-            on:keydown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                openRequestDetail("change", cr);
-              }
-            }}
-            role="button"
-            tabindex="0"
-            title={$t("Show details")}
-          >
-            <div class="avatar" style="width:30px;height:30px;font-size:11px">
-              {userInitials(cr.user_id, users)}
-            </div>
-            <div style="flex:1;min-width:0">
-              <div style="font-size:13px;font-weight:500;display:flex;align-items:center;gap:6px">
-                {userName(cr.user_id, users)}
-                <span class="zf-chip zf-chip-warning" style="font-size:10px">
-                  {changeRequestTypeLabel(cr)}
-                </span>
-              </div>
-              <div class="tab-num" style="font-size:11.5px;color:var(--text-tertiary)">
-                {fmtDateShort(cr.created_at)}
-              </div>
-              {#if cr.reason}
-                <div style="font-size:11.5px;color:var(--text-secondary);margin-top:2px">{cr.reason}</div>
-              {/if}
-            </div>
-            <div style="display:flex;gap:4px">
-              <button
-                class="zf-btn-icon-sm"
-                style="color:var(--success-text);background:var(--success-soft)"
-                title={$t("Approve")}
-                on:click|stopPropagation={() => approveCR(cr.id)}
-              >
-                <Icon name="Check" size={14} />
-              </button>
-              <button
-                class="zf-btn-icon-sm"
-                style="color:var(--danger-text);background:var(--danger-soft)"
-                title={$t("Reject")}
-                on:click|stopPropagation={() => rejectCR(cr.id)}
-              >
-                <Icon name="X" size={14} />
-              </button>
-            </div>
-          </div>
-        {/each}
-        {#if pendingWeeks.length === 0 && pendingReopens.length === 0 && visibleChangeRequests.length === 0}
+        {#if pendingWeeks.length === 0 && pendingReopens.length === 0}
           <div
             style="padding:32px;text-align:center;color:var(--text-tertiary);font-size:13px"
           >
@@ -1483,87 +1282,37 @@
   </dialog>
 {/if}
 
-<!-- ── Time workflow detail dialog (reopen/change) ─────────────────────────── -->
+<!-- ── Reopen-request detail dialog ─────────────────────────────────────────── -->
 {#if requestDetail}
   <dialog bind:this={requestDetailDlg} on:close={closeRequestDetail}>
     <header>
-      <span style="flex:1">
-        {#if requestDetail.kind === "reopen"}
-          {$t("Edit Request Details")}
-        {:else}
-          {$t("Change Request Details")}
-        {/if}
-      </span>
+      <span style="flex:1">{$t("Edit Request Details")}</span>
       <button class="zf-btn-icon-sm zf-btn-ghost" on:click={closeRequestDetail}>
         <Icon name="X" size={16} />
       </button>
     </header>
     <div class="dialog-body">
-      {#if requestDetail.kind === "reopen"}
-        <div style="display:flex;flex-direction:column;gap:10px">
-          <div>
-            <div class="zf-label">{$t("Employee")}</div>
-            <div style="font-weight:500">{userName(requestDetail.item.user_id, users)}</div>
-          </div>
-          <div>
-            <div class="zf-label">{$t("Type")}</div>
-            <div><span class="zf-chip zf-chip-pending">{$t("Edit request")}</span></div>
-          </div>
-          <div>
-            <div class="zf-label">{$t("Week")}</div>
-            <div class="tab-num">
-              {fmtDateShort(requestDetail.item.week_start)} -
-              {fmtDateShort(isoDate(addDays(parseDate(requestDetail.item.week_start), 6)))}
-            </div>
-          </div>
-          <div>
-            <div class="zf-label">{$t("Requested at")}</div>
-            <div class="tab-num" style="font-size:12px">{fmtDateTime(requestDetail.item.created_at)}</div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div>
+          <div class="zf-label">{$t("Employee")}</div>
+          <div style="font-weight:500">{userName(requestDetail.item.user_id, users)}</div>
+        </div>
+        <div>
+          <div class="zf-label">{$t("Type")}</div>
+          <div><span class="zf-chip zf-chip-pending">{$t("Edit request")}</span></div>
+        </div>
+        <div>
+          <div class="zf-label">{$t("Week")}</div>
+          <div class="tab-num">
+            {fmtDateShort(requestDetail.item.week_start)} -
+            {fmtDateShort(isoDate(addDays(parseDate(requestDetail.item.week_start), 6)))}
           </div>
         </div>
-      {:else}
-        {@const cr = requestDetail.item}
-        {@const diffRows = changeDiffRows(cr)}
-        <div style="display:flex;flex-direction:column;gap:10px">
-          <div>
-            <div class="zf-label">{$t("Employee")}</div>
-            <div style="font-weight:500">{userName(cr.user_id, users)}</div>
-          </div>
-          <div>
-            <div class="zf-label">{$t("Type")}</div>
-            <div><span class="zf-chip zf-chip-warning">{changeRequestTypeLabel(cr)}</span></div>
-          </div>
-          {#if cr.reason}
-            <div>
-              <div class="zf-label">{$t("Reason")}</div>
-              <div style="white-space:pre-wrap;font-size:13px">{cr.reason}</div>
-            </div>
-          {/if}
-          <div>
-            <div class="zf-label">{$t("Requested at")}</div>
-            <div class="tab-num" style="font-size:12px">{fmtDateTime(cr.created_at)}</div>
-          </div>
-          {#if diffRows.length}
-            <div>
-              <div class="zf-label">{$t("Changes")}</div>
-              <div class="change-diff-list">
-                {#each diffRows as row}
-                  <div class="change-diff-row">
-                    <div class="change-diff-field">{row.field}</div>
-                    <div class="change-diff-before">{row.before}</div>
-                    <div class="change-diff-arrow">→</div>
-                    <div class="change-diff-after">{row.after}</div>
-                  </div>
-                {/each}
-              </div>
-            </div>
-          {:else}
-            <div style="font-size:12px;color:var(--text-tertiary)">
-              {$t("Diff unavailable for this request.")}
-            </div>
-          {/if}
+        <div>
+          <div class="zf-label">{$t("Requested at")}</div>
+          <div class="tab-num" style="font-size:12px">{fmtDateTime(requestDetail.item.created_at)}</div>
         </div>
-      {/if}
+      </div>
     </div>
     <footer>
       <button class="zf-btn" on:click={closeRequestDetail}>{$t("Close")}</button>
@@ -1573,8 +1322,7 @@
         on:click={() => {
           const detail = requestDetail;
           closeRequestDetail();
-          if (detail.kind === "reopen") rejectReopen(detail.item.id);
-          else rejectCR(detail.item.id);
+          rejectReopen(detail.item.id);
         }}
       >
         <Icon name="X" size={14} />{$t("Reject")}
@@ -1584,8 +1332,7 @@
         on:click={() => {
           const detail = requestDetail;
           closeRequestDetail();
-          if (detail.kind === "reopen") approveReopen(detail.item.id);
-          else approveCR(detail.item.id);
+          approveReopen(detail.item.id);
         }}
       >
         <Icon name="Check" size={14} />{$t("Approve")}

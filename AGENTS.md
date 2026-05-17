@@ -45,8 +45,7 @@ scripts/      Backup utility
 | `users.rs` | User management, approver hierarchy |
 | `time_entries.rs` | Daily time entries (draft/submitted/approved/rejected) |
 | `absences.rs` | Absence requests (vacation, sick, training, etc.) |
-| `change_requests.rs` | Change requests for submitted entries |
-| `reopen_requests.rs` | Week reopen requests |
+| `reopen_requests.rs` | Week reopen requests (atomic week-level edit workflow) |
 | `categories.rs` | Work categories (color-coded) |
 | `holidays.rs` | Public holidays (auto-fetched and manual) |
 | `reports.rs` | Monthly and team reports, CSV/PDF export |
@@ -72,7 +71,7 @@ The backend uses a **repository façade** (`repository::Db`) as the single entry
 
 **Sub-repositories** (fields on `repository::Db`):
 
-`sessions`, `users`, `time_entries`, `absences`, `change_requests`, `reopen_requests`, `categories`, `holidays`, `notifications`, `audit`, `settings`, `reports`
+`sessions`, `users`, `time_entries`, `absences`, `reopen_requests`, `categories`, `holidays`, `notifications`, `audit`, `settings`, `reports`
 
 **Access patterns in handlers:**
 
@@ -91,7 +90,7 @@ let user = UserDb::new(pool.clone()).find_by_id(id).await?;
 
 **Type conversion:** Repository structs (`repository::User`, `repository::TimeEntry`, etc.) are converted to handler-level types via `repo_*_to_service()` helper functions (e.g. `crate::users::repo_user_to_auth_user()`).
 
-**Migration status:** Read paths are fully migrated through the repository. Complex transactional write handlers (absences create/approve/reject, reopen approve/reject, change_requests approve/reject) still use `sqlx` directly via `app_state.pool` for multi-statement transactions with `FOR UPDATE` locks and cross-table validation.
+**Migration status:** Read paths are fully migrated through the repository. Complex transactional write handlers (absences create/approve/reject, reopen approve/reject) still use `sqlx` directly via `app_state.pool` for multi-statement transactions with `FOR UPDATE` locks and cross-table validation.
 
 ### Background tasks (spawned in main.rs)
 
@@ -128,7 +127,6 @@ let user = UserDb::new(pool.clone()).find_by_id(id).await?;
 | `categories` | Work categories |
 | `time_entries` | Daily entries (date, start/end, category, status) |
 | `absences` | Absence requests with status workflow |
-| `change_requests` | Proposals to amend submitted entries |
 | `holidays` | Public holidays (auto-fetched or manual) |
 | `reopen_requests` | Requests to reopen a submitted week |
 | `notifications` | Per-user in-app notifications |
@@ -199,7 +197,6 @@ Supported languages: `en` (en-US) and `de` (de-DE). Stored in localStorage key `
 /auth/*             Login, logout, setup, forgot/reset password, preferences
 /time-entries/*     CRUD, submit, batch-approve, batch-reject
 /absences/*         CRUD, approve, reject, revoke, calendar, leave balance
-/change-requests/*  CRUD, approve, reject
 /reopen-requests/*  Create, list pending, approve/reject
 /users/*            CRUD, deactivate, reset password, annual leave days
 /categories/*       CRUD

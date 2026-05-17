@@ -340,38 +340,6 @@ async fn notifications_full_workflow() {
         let _ = admin_b_id;
     }
 
-    // -- Change request creation notifies approver --
-    {
-        let (_lead_id, lead_pw, _emp_id, emp_pw, monday_iso, cat_id) =
-            bootstrap_team_with_suffix(&app, &admin, true, "3").await;
-        let emp = login_change_pw(&app, "emp-3@example.com", &emp_pw).await;
-        let lead = login_change_pw(&app, "lead-3@example.com", &lead_pw).await;
-
-        let eid = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
-        let (st, body) = emp
-            .post(
-                "/api/v1/change-requests",
-                &json!({
-                    "time_entry_id": eid,
-                    "new_start_time": "09:00",
-                    "reason": "came in later"
-                }),
-            )
-            .await;
-        assert_eq!(st, StatusCode::OK, "create change request");
-        assert_eq!(body["status"], "open");
-
-        let (st, body) = lead.get("/api/v1/notifications").await;
-        assert_eq!(st, StatusCode::OK, "lead notifications");
-        assert!(
-            body.as_array()
-                .unwrap()
-                .iter()
-                .any(|item| item["kind"] == "change_request_created"),
-            "lead received change request notification"
-        );
-    }
-
     // -- Notification in-app body has no URL even when public URL is set --
     // When public_url is configured, the app URL must appear in email bodies but
     // must NOT be stored in the in-app notification body (which is shown inside the

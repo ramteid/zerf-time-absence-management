@@ -584,7 +584,7 @@ impl TimeEntryDb {
             }
             if prev.status != "draft" {
                 return Err(AppError::BadRequest(
-                    "Only drafts can be edited directly. Please file a change request.".into(),
+                    "Only draft entries can be edited. Submit a week edit request to make the whole week editable again.".into(),
                 ));
             }
         }
@@ -818,46 +818,6 @@ impl TimeEntryDb {
     }
 
     // ── Private helpers ────────────────────────────────────────────────────
-
-    /// Apply a change request's fields to an existing time entry (within a tx).
-    #[allow(clippy::too_many_arguments)]
-    pub async fn apply_change_request_tx(
-        tx: &mut sqlx::PgConnection,
-        entry_id: i64,
-        current_status: &str,
-        new_date: Option<NaiveDate>,
-        new_start_time: Option<&str>,
-        new_end_time: Option<&str>,
-        new_category_id: Option<i64>,
-        new_comment: Option<&str>,
-    ) -> AppResult<()> {
-        let rows = sqlx::query(
-            "UPDATE time_entries \
-             SET entry_date=COALESCE($1,entry_date), \
-                 start_time=COALESCE($2,start_time), \
-                 end_time=COALESCE($3,end_time), \
-                 category_id=COALESCE($4,category_id), \
-                 comment=CASE WHEN $5 IS NOT NULL THEN NULLIF($5,'') ELSE comment END, \
-                 updated_at=CURRENT_TIMESTAMP \
-             WHERE id=$6 AND status=$7",
-        )
-        .bind(new_date)
-        .bind(new_start_time)
-        .bind(new_end_time)
-        .bind(new_category_id)
-        .bind(new_comment)
-        .bind(entry_id)
-        .bind(current_status)
-        .execute(tx)
-        .await?
-        .rows_affected();
-        if rows == 0 {
-            return Err(AppError::Conflict(
-                "Change request could no longer be applied because the entry changed.".into(),
-            ));
-        }
-        Ok(())
-    }
 
     /// For submission-style checks: all entries by user in range grouped by month.
     pub async fn get_monthly_submission_stats(

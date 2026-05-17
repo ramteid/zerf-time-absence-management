@@ -214,7 +214,7 @@ async fn auth_and_rbac_workflow() {
 async fn time_entry_and_cr_workflow() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
-    let (_, lead_pw, emp_id, emp_pw, _, cat_id) = bootstrap_team(&app, &admin, false).await;
+    let (lead_id, lead_pw, emp_id, emp_pw, _, cat_id) = bootstrap_team(&app, &admin, false).await;
     let lead = login_change_pw(&app, "lead-r@example.com", &lead_pw).await;
     let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
 
@@ -318,31 +318,28 @@ async fn time_entry_and_cr_workflow() {
         assert_eq!(st, StatusCode::FORBIDDEN, "emp approve forbidden");
     }
 
-    // -- Change request workflow ----------------------------------------------
-    {
-        let (st, body) = emp
-            .post(
-                "/api/v1/change-requests",
-                &json!({"time_entry_id": te1, "new_end_time":"12:30", "reason":"forgot 30 min"}),
-            )
-            .await;
-        assert_eq!(st, StatusCode::OK, "create change request");
-        let cr = id(&body);
-
-        let (st, _) = lead
-            .post(&format!("/api/v1/change-requests/{}/approve", cr), &json!({}))
-            .await;
-        assert_eq!(st, StatusCode::OK, "approve change request");
-    }
-
-    // -- Audit log contains entries -------------------------------------------
+    // -- Audit log contains entries for employee and reviewer actions ---------
     {
         let (st, body) = admin
             .get(&format!("/api/v1/audit-log?user_id={}", emp_id))
             .await;
         assert_eq!(st, StatusCode::OK, "audit log");
         let lc = count_ids(&body);
-        assert!(lc > 4, "audit entries={} (need >4)", lc);
+        assert!(lc >= 4, "employee audit entries={} (need >=4)", lc);
+
+        let (st, body) = admin
+            .get(&format!("/api/v1/audit-log?user_id={}", lead_id))
+            .await;
+        assert_eq!(st, StatusCode::OK, "lead audit log");
+        let reviewer_entries = serde_json::to_string(&body)
+            .unwrap()
+            .matches("\"table_name\":\"time_entries\"")
+            .count();
+        assert!(
+            reviewer_entries >= 2,
+            "reviewer time-entry audit entries={} (need >=2)",
+            reviewer_entries
+        );
     }
 
     app.cleanup().await;
@@ -873,7 +870,6 @@ async fn tina_time_tracking_journey() {
     let yday = date_offset(-1);
     let day2 = date_offset(-2);
     let day3 = date_offset(-3);
-    let day4 = date_offset(-4);
     let day7 = date_offset(-7);
     let today_s = today();
     let tina_month = (reference_date() + chrono::Duration::days(-1))
@@ -1146,51 +1142,35 @@ async fn tina_time_tracking_journey() {
         assert_eq!(body["count"], 1);
     }
 
-    // -- 9. Change request on approved entry ----------------------------------
+    // -- 9. Submitted entries are immutable until a reopen request lands ------
+    // A submitted week is treated atomically: individual entries inside it
+    // cannot be edited, and the per-entry change-request endpoint no longer
+    // exists.  Direct PUTs on a non-draft entry must therefore fail.
     {
         let (st, _) = tina
-            .post("/api/v1/change-requests", &json!({"time_entry_id": id_y3, "new_end_time":"12:30", "reason":""}))
+            .put(
+                &format!("/api/v1/time-entries/{}", id_y3),
+                &json!({"entry_date": &yday, "start_time":"10:30","end_time":"11:45","category_id": cat_prep, "comment":"reclassified"}),
+            )
             .await;
-        assert_eq!(st, StatusCode::BAD_REQUEST, "no-reason CR rejected");
-
-        // Try CR on a foreign entry (use a non-existent id → NOT_FOUND / FORBIDDEN).
-        let (st, _) = tina
-            .post("/api/v1/change-requests", &json!({"time_entry_id": 999999999, "new_end_time":"12:00", "reason":"x"}))
-            .await;
-        assert!(
-            st == StatusCode::FORBIDDEN || st == StatusCode::NOT_FOUND,
-            "foreign CR forbidden (got {})",
-            st
+        assert_eq!(
+            st,
+            StatusCode::BAD_REQUEST,
+            "direct PUT on submitted entry rejected"
         );
 
-        let (st, body) = tina
-            .post("/api/v1/time-entries", &json!({"entry_date": &day4, "start_time":"08:00","end_time":"09:00","category_id": cat_core, "comment":"draft"}))
-            .await;
-        assert_eq!(st, StatusCode::OK, "create draft for CR test");
-        let id_draft = id(&body);
-
+        // The /api/v1/change-requests endpoint is no longer routed.
         let (st, _) = tina
-            .post("/api/v1/change-requests", &json!({"time_entry_id": id_draft, "new_end_time":"09:30", "reason":"x"}))
+            .post(
+                "/api/v1/change-requests",
+                &json!({"time_entry_id": id_y3, "new_end_time":"12:30", "reason":"forgot 30 min"}),
+            )
             .await;
-        assert_eq!(st, StatusCode::BAD_REQUEST, "CR on draft rejected");
-
-        let (st, body) = tina
-            .post("/api/v1/change-requests", &json!({"time_entry_id": id_y3, "new_start_time":"10:30","new_end_time":"11:45","new_category_id": cat_prep, "new_comment":"reclassified", "reason":"misclassified"}))
-            .await;
-        assert_eq!(st, StatusCode::OK, "multi-field CR created");
-        let cr2 = id(&body);
-
-        let (st, _) = lead
-            .post(&format!("/api/v1/change-requests/{}/approve", cr2), &json!({}))
-            .await;
-        assert_eq!(st, StatusCode::OK, "lead approve CR");
-
-        let (_, body) = tina
-            .get(&format!("/api/v1/time-entries?from={}&to={}", yday, yday))
-            .await;
-        let y3_obj = find_by_id(&body, id_y3).expect("Y3 not in list after CR");
-        let end_time = y3_obj["end_time"].as_str().unwrap_or("");
-        assert!(end_time.starts_with("11:45"), "CR applied (end_time={})", end_time);
+        assert!(
+            st == StatusCode::NOT_FOUND || st == StatusCode::METHOD_NOT_ALLOWED,
+            "change-requests endpoint no longer accepts requests (got {})",
+            st
+        );
     }
 
     // -- 10. Reports reflect Tina's data --------------------------------------

@@ -261,40 +261,6 @@ async fn reopen_full_workflow() {
         assert_eq!(st, StatusCode::BAD_REQUEST, "tuesday rejected");
     }
 
-    // -- Applies open change requests --
-    {
-        let (_lead_id, _lead_pw, _emp_id, emp_pw, monday_iso, cat_id) =
-            bootstrap_team_with_suffix(&app, &admin, true, "6").await;
-        let emp = login_change_pw(&app, "emp-6@example.com", &emp_pw).await;
-        let eid = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
-
-        let (st, body) = emp
-            .post(
-                "/api/v1/change-requests",
-                &json!({"time_entry_id": eid, "reason": "fix typo", "new_comment": "edited"}),
-            )
-            .await;
-        assert_eq!(st, StatusCode::OK);
-        let cr_id = id(&body);
-
-        let (st, _) = emp
-            .post(
-                "/api/v1/reopen-requests",
-                &json!({"week_start": monday_iso}),
-            )
-            .await;
-        assert_eq!(st, StatusCode::OK);
-
-        let (_, body) = emp.get("/api/v1/change-requests").await;
-        let cr = find_by_id(&body, cr_id).expect("cr present");
-        assert_eq!(cr["status"], "approved");
-
-        let (_, body) = emp.get("/api/v1/time-entries").await;
-        let entry = find_by_id(&body, eid).expect("entry present");
-        assert_eq!(entry["status"], "draft");
-        assert_eq!(entry["comment"], "edited");
-    }
-
     // -- Lead self-service --
     {
         let (st, body) = admin

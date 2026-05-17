@@ -3,7 +3,6 @@ pub mod approval_reminders;
 pub mod audit;
 pub mod auth;
 pub mod categories;
-pub mod change_requests;
 pub mod config;
 pub mod db;
 pub mod email;
@@ -107,19 +106,6 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                     post(absences::reject_cancellation),
                 )
                 .route("/leave-balance/{uid}", get(absences::balance))
-                .route(
-                    "/change-requests",
-                    get(change_requests::list).post(change_requests::create),
-                )
-                .route("/change-requests/all", get(change_requests::list_all))
-                .route(
-                    "/change-requests/{id}/approve",
-                    post(change_requests::approve),
-                )
-                .route(
-                    "/change-requests/{id}/reject",
-                    post(change_requests::reject),
-                )
                 .route("/users", get(users::list).post(users::create))
                 .route(
                     "/users/{id}",
