@@ -242,7 +242,12 @@
 
   // ── Reactive derivations: overtime balance ────────────────────────────────────
 
-  $: pendingWeeks = buildPendingWeeks(pendingEntries, users);
+  $: pendingWeeks = buildPendingWeeks(
+    pendingEntries,
+    users,
+    $currentUser?.id,
+    $currentUser?.role === "admin",
+  );
 
   $: currentOvertimeRow =
     overtimeRows.find((row) => row.month === currentMonthKey) ??
@@ -305,11 +310,13 @@
     return user ? `${user.first_name} ${user.last_name}` : `#${userId}`;
   }
 
-  function buildPendingWeeks(submittedEntries, userRows) {
+  function buildPendingWeeks(submittedEntries, userRows, currentUserId, isAdmin) {
     // Group entries by (user_id, week_start) to create per-person per-week buckets.
+    // Non-admin leads cannot approve their own entries, so exclude them from the queue.
     const weekGroupsByKey = new Map();
 
     for (const entry of submittedEntries) {
+      if (!isAdmin && entry.user_id === currentUserId) continue;
       const weekStart = weekStartOf(entry.entry_date);
       if (!weekStart) continue;
       const groupKey = `${entry.user_id}:${weekStart}`;
@@ -545,11 +552,13 @@
     if (!week?.entries?.length || weekActionBusy) return;
     weekActionBusy = true;
     try {
-      await api("/time-entries/batch-approve", {
+      const result = await api("/time-entries/batch-approve", {
         method: "POST",
         body: { ids: week.entries.map((entry) => entry.id) },
       });
-      toast($t("Approved."), "ok");
+      if ((result?.count ?? 0) > 0) {
+        toast($t("Approved."), "ok");
+      }
       closeWeekDialog();
       await load();
     } catch (error) {
