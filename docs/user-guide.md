@@ -1029,6 +1029,14 @@ themselves.
 Admins have all team lead privileges plus exclusive access to user management,
 system settings, and sensitive operations.
 
+### Reading the audit log
+
+- Audit rows are shown in a human-readable format (for example names, date
+  ranges, category names, or setting keys) instead of raw field dumps.
+- Time-entry audit events are grouped by week and action. This reflects the
+  product workflow, where submitted weeks are handled as one unit rather than
+  as separate per-day operations.
+
 ### Creating a user
 
 Creating a user requires admin role.
