@@ -32,8 +32,8 @@
       }
       if (isNew) await api("/categories", { method: "POST", body });
       else await api("/categories/" + template.id, { method: "PUT", body });
-      onClose(true);
       dialog.close(true);
+      onClose(true);
     } catch (e) {
       error = $t(e?.message || "Error");
     }
