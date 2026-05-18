@@ -31,9 +31,7 @@
   let pendingReopens = [];
   let users = [];
   let absenceDetail = null;
-  let absenceDetailDlg;
   let requestDetail = null;
-  let requestDetailDlg;
 
   // Absence slider: browse approved absences week by week (leads/admins only).
   let absenceSliderWeek = isoDate(monday(appTodayDate()));
@@ -43,7 +41,6 @@
 
   // Week details dialog (for inspecting a single pending timesheet).
   let selectedWeek = null;
-  let weekDialog;
   let weekActionBusy = false;
 
   // Section element refs used to scroll-to-section when navigating from a badge.
@@ -437,21 +434,8 @@
 
   function openReopenDetail(item) {
     requestDetail = { item };
-    tick().then(() => {
-      if (requestDetailDlg && !requestDetailDlg.open) {
-        try {
-          requestDetailDlg.showModal();
-        } catch {
-          requestDetailDlg.setAttribute("open", "open");
-        }
-      }
-    });
   }
 
-  function closeRequestDetail() {
-    if (requestDetailDlg?.open) requestDetailDlg.close();
-    requestDetail = null;
-  }
 
   async function revealFocusSection(focus) {
     await tick();
@@ -525,24 +509,6 @@
     selectedWeek = week;
   }
 
-  function closeWeekDialog() {
-    selectedWeek = null;
-  }
-
-  $: if (selectedWeek) {
-    tick().then(() => {
-      if (!weekDialog || weekDialog.open) return;
-      try {
-        if (typeof weekDialog.showModal === "function") {
-          weekDialog.showModal();
-        } else {
-          weekDialog.setAttribute("open", "open");
-        }
-      } catch {
-        weekDialog.setAttribute("open", "open");
-      }
-    });
-  }
 
   async function approveWeek(week) {
     if (!week?.entries?.length || weekActionBusy) return;
@@ -555,7 +521,7 @@
       if ((result?.count ?? 0) > 0) {
         toast($t("Approved."), "ok");
       }
-      closeWeekDialog();
+      selectedWeek = null;
       await load();
     } catch (error) {
       toast($t(error?.message || "Error"), "error");
@@ -580,7 +546,7 @@
         body: { ids: week.entries.map((entry) => entry.id), reason },
       });
       toast($t("Rejected."), "ok");
-      closeWeekDialog();
+      selectedWeek = null;
       await load();
     } catch (error) {
       toast($t(error?.message || "Error"), "error");
@@ -611,21 +577,8 @@
 
   function showAbsenceDetail(absence) {
     absenceDetail = absence;
-    tick().then(() => {
-      if (absenceDetailDlg && !absenceDetailDlg.open) {
-        try {
-          absenceDetailDlg.showModal();
-        } catch {
-          absenceDetailDlg.setAttribute("open", "open");
-        }
-      }
-    });
   }
 
-  function closeAbsenceDetail() {
-    if (absenceDetailDlg?.open) absenceDetailDlg.close();
-    absenceDetail = null;
-  }
 
   async function approveAbsence(absence) {
     const isCancellation = absence.status === "cancellation_pending";
@@ -1192,15 +1145,8 @@
 
 <!-- ── Absence detail dialog ─────────────────────────────────────────────────── -->
 {#if absenceDetail}
-  <dialog bind:this={absenceDetailDlg} on:close={closeAbsenceDetail}>
-    <header>
-      <span style="flex:1">{$t("Absence Request Details")}</span>
-      <button class="zf-btn-icon-sm zf-btn-ghost" on:click={closeAbsenceDetail}>
-        <Icon name="X" size={16} />
-      </button>
-    </header>
-    <div class="dialog-body">
-      <div style="display:flex;flex-direction:column;gap:10px">
+  <Dialog title={$t("Absence Request Details")} onClose={() => (absenceDetail = null)}>
+    <div style="display:flex;flex-direction:column;gap:10px">
         <div>
           <div class="zf-label">{$t("Employee")}</div>
           <div style="font-weight:500">{userName(absenceDetail.user_id, users)}</div>
@@ -1263,16 +1209,15 @@
             </div>
           {/if}
         {/if}
-      </div>
     </div>
-    <footer>
-      <button class="zf-btn" on:click={closeAbsenceDetail}>{$t("Close")}</button>
+    <svelte:fragment slot="footer">
+      <button class="zf-btn" on:click={() => (absenceDetail = null)}>{$t("Close")}</button>
       <span style="flex:1"></span>
       <button
         class="zf-btn zf-btn-danger"
         on:click={() => {
           const absence = absenceDetail;
-          closeAbsenceDetail();
+          absenceDetail = null;
           rejectAbsence(absence);
         }}
       >
@@ -1282,62 +1227,54 @@
         class="zf-btn zf-btn-primary"
         on:click={() => {
           const absence = absenceDetail;
-          closeAbsenceDetail();
+          absenceDetail = null;
           approveAbsence(absence);
         }}
       >
         <Icon name="Check" size={14} />{$t("Approve")}
       </button>
-    </footer>
-  </dialog>
+    </svelte:fragment>
+  </Dialog>
 {/if}
 
 <!-- ── Reopen-request detail dialog ─────────────────────────────────────────── -->
 {#if requestDetail}
-  <dialog bind:this={requestDetailDlg} on:close={closeRequestDetail}>
-    <header>
-      <span style="flex:1">{$t("Edit Request Details")}</span>
-      <button class="zf-btn-icon-sm zf-btn-ghost" on:click={closeRequestDetail}>
-        <Icon name="X" size={16} />
-      </button>
-    </header>
-    <div class="dialog-body">
-      <div style="display:flex;flex-direction:column;gap:10px">
-        <div>
-          <div class="zf-label">{$t("Employee")}</div>
-          <div style="font-weight:500">{userName(requestDetail.item.user_id, users)}</div>
-        </div>
-        <div>
-          <div class="zf-label">{$t("Type")}</div>
-          <div><span class="zf-chip zf-chip-pending">{$t("Edit request")}</span></div>
-        </div>
-        <div>
-          <div class="zf-label">{$t("Week")}</div>
-          <div class="tab-num">
-            {fmtDateShort(requestDetail.item.week_start)} -
-            {fmtDateShort(isoDate(addDays(parseDate(requestDetail.item.week_start), 6)))}
-          </div>
-        </div>
-        <div>
-          <div class="zf-label">{$t("Requested at")}</div>
-          <div class="tab-num" style="font-size:12px">{fmtDateTime(requestDetail.item.created_at)}</div>
-        </div>
-        {#if requestDetail.item.reason}
-          <div>
-            <div class="zf-label">{$t("Reason")}</div>
-            <div style="font-size:13px;white-space:pre-wrap;word-break:break-word">{requestDetail.item.reason}</div>
-          </div>
-        {/if}
+  <Dialog title={$t("Edit Request Details")} onClose={() => (requestDetail = null)}>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div>
+        <div class="zf-label">{$t("Employee")}</div>
+        <div style="font-weight:500">{userName(requestDetail.item.user_id, users)}</div>
       </div>
+      <div>
+        <div class="zf-label">{$t("Type")}</div>
+        <div><span class="zf-chip zf-chip-pending">{$t("Edit request")}</span></div>
+      </div>
+      <div>
+        <div class="zf-label">{$t("Week")}</div>
+        <div class="tab-num">
+          {fmtDateShort(requestDetail.item.week_start)} -
+          {fmtDateShort(isoDate(addDays(parseDate(requestDetail.item.week_start), 6)))}
+        </div>
+      </div>
+      <div>
+        <div class="zf-label">{$t("Requested at")}</div>
+        <div class="tab-num" style="font-size:12px">{fmtDateTime(requestDetail.item.created_at)}</div>
+      </div>
+      {#if requestDetail.item.reason}
+        <div>
+          <div class="zf-label">{$t("Reason")}</div>
+          <div style="font-size:13px;white-space:pre-wrap;word-break:break-word">{requestDetail.item.reason}</div>
+        </div>
+      {/if}
     </div>
-    <footer>
-      <button class="zf-btn" on:click={closeRequestDetail}>{$t("Close")}</button>
+    <svelte:fragment slot="footer">
+      <button class="zf-btn" on:click={() => (requestDetail = null)}>{$t("Close")}</button>
       <span style="flex:1"></span>
       <button
         class="zf-btn zf-btn-danger"
         on:click={() => {
           const detail = requestDetail;
-          closeRequestDetail();
+          requestDetail = null;
           rejectReopen(detail.item.id);
         }}
       >
@@ -1347,39 +1284,37 @@
         class="zf-btn zf-btn-primary"
         on:click={() => {
           const detail = requestDetail;
-          closeRequestDetail();
+          requestDetail = null;
           approveReopen(detail.item.id);
         }}
       >
         <Icon name="Check" size={14} />{$t("Approve")}
       </button>
-    </footer>
-  </dialog>
+    </svelte:fragment>
+  </Dialog>
 {/if}
 
 <!-- ── Week detail dialog ────────────────────────────────────────────────────── -->
 {#if selectedWeek}
-  <dialog bind:this={weekDialog} on:close={closeWeekDialog}>
-    <header>
+  <Dialog
+    title={$t("Week Approvals")}
+    onClose={() => (selectedWeek = null)}
+  >
+    <svelte:fragment slot="title">
       <span style="flex:1">
         {$t("Week Approvals")} · {userName(selectedWeek.user_id, users)}
       </span>
-      <button class="zf-btn-icon-sm zf-btn-ghost" on:click={closeWeekDialog}>
-        <Icon name="X" size={16} />
-      </button>
-    </header>
-    <div class="dialog-body">
-      <div class="tab-num" style="font-size:12px;color:var(--text-secondary)">
-        {$t("Week {week}", { week: isoWeek(parseDate(selectedWeek.week_start)) })} ·
-        {fmtDateShort(selectedWeek.week_start)} - {fmtDateShort(selectedWeek.week_end)}
-      </div>
-
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <span class="zf-chip zf-chip-approved">{weekHours(selectedWeek)}</span>
-      </div>
+    </svelte:fragment>
+    <div class="tab-num" style="font-size:12px;color:var(--text-secondary)">
+      {$t("Week {week}", { week: isoWeek(parseDate(selectedWeek.week_start)) })} ·
+      {fmtDateShort(selectedWeek.week_start)} - {fmtDateShort(selectedWeek.week_end)}
     </div>
-    <footer>
-      <button class="zf-btn" on:click={closeWeekDialog} disabled={weekActionBusy}>
+
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <span class="zf-chip zf-chip-approved">{weekHours(selectedWeek)}</span>
+    </div>
+    <svelte:fragment slot="footer">
+      <button class="zf-btn" on:click={() => (selectedWeek = null)} disabled={weekActionBusy}>
         {$t("Close")}
       </button>
       <span style="flex:1"></span>
@@ -1397,8 +1332,8 @@
       >
         <Icon name="Check" size={14} />{$t("Approve")}
       </button>
-    </footer>
-  </dialog>
+    </svelte:fragment>
+  </Dialog>
 {/if}
 
 <style>
