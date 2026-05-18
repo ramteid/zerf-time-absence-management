@@ -300,23 +300,6 @@
           <span style="font-size:12px;color:var(--nav-text-muted);word-break:break-word">{$settings.organization_name}</span>
         {/if}
       </div>
-      <div class="zf-bell-wrapper" style="margin-left:auto;position:relative">
-        <button
-          class="zf-btn-icon-sm"
-          style="color:var(--nav-text-muted);position:relative"
-          on:click|stopPropagation={toggleBell}
-          title={$t("Notifications")}
-        >
-          <Icon name="Bell" size={17} />
-          {#if $notificationsUnread > 0}
-            <span
-              style="position:absolute;top:-2px;right:-2px;background:var(--danger-text);color:white;border-radius:10px;font-size:9px;padding:1px 4px;line-height:1;min-width:14px;text-align:center;font-weight:400"
-            >
-              {$notificationsUnread > 99 ? "99+" : $notificationsUnread}
-            </span>
-          {/if}
-        </button>
-      </div>
     </div>
 
     <div class="sidebar-nav">
@@ -407,6 +390,23 @@
           <div class="sidebar-user-role">{roleLabel($currentUser.role)}</div>
         </div>
       </a>
+      <div class="zf-bell-wrapper" style="position:relative">
+        <button
+          class="zf-btn-icon-sm"
+          style="color:var(--nav-text-muted);position:relative"
+          on:click|stopPropagation={toggleBell}
+          title={$t("Notifications")}
+        >
+          <Icon name="Bell" size={17} />
+          {#if $notificationsUnread > 0}
+            <span
+              style="position:absolute;top:-2px;right:-2px;background:var(--danger-text);color:white;border-radius:10px;font-size:9px;padding:1px 4px;line-height:1;min-width:14px;text-align:center;font-weight:400"
+            >
+              {$notificationsUnread > 99 ? "99+" : $notificationsUnread}
+            </span>
+          {/if}
+        </button>
+      </div>
       <button
         class="zf-btn-icon-sm"
         style="color:var(--nav-text-muted)"
