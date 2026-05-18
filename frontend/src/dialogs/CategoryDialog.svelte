@@ -45,7 +45,6 @@
   title={$t(isNew ? "Add Category" : "Edit Category")}
   onClose={() => onClose(false)}
 >
-  <div class="dialog-body">
   <div>
     <label class="zf-label" for="cat-name">{$t("Name")}</label>
     <input

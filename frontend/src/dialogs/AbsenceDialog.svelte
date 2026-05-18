@@ -116,6 +116,7 @@
   bind:this={dialog}
   title={$t(isNew ? "Request Absence" : "Edit Absence")}
   onClose={() => onClose(pendingClose?.changed ?? false, pendingClose?.savedAbsence ?? null)}
+  let:dlg
 >
   <div>
     <label class="zf-label" for="absence-kind">{$t("Type")}</label>
@@ -136,7 +137,7 @@
         id="absence-start-date"
         bind:value={start_date}
         min={$currentUser?.start_date}
-        container={dialog}
+        container={dlg}
       />
     </div>
     <div>
@@ -144,7 +145,7 @@
       <DatePicker
         id="absence-end-date"
         bind:value={end_date}
-        container={dialog}
+        container={dlg}
       />
     </div>
   </div>
