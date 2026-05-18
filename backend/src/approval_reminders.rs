@@ -38,8 +38,8 @@ pub fn duration_until_next_monday_7am(now: chrono::DateTime<chrono_tz::Tz>) -> S
 }
 
 /// Rows returned by the pending-approvals query:
-/// (approver_id, approver_email, total_pending_count)
-type PendingApproverRow = (i64, String, i64);
+/// (approver_id, approver_email, first_name, last_name, total_pending_count)
+type PendingApproverRow = (i64, String, String, String, i64);
 
 /// Query all active approvers who currently have at least one pending item.
 /// Uses explicit approver assignments only.
@@ -98,7 +98,7 @@ pub async fn run_check(state: &crate::AppState) {
         .await
         .map(std::sync::Arc::new);
 
-    for (approver_id, approver_email, pending_count) in approvers {
+    for (approver_id, approver_email, first_name, last_name, pending_count) in approvers {
         let count_str = pending_count.to_string();
         let title = crate::i18n::translate(&language, "approval_reminder_title", &[]);
         let body = crate::i18n::translate(
@@ -139,7 +139,7 @@ pub async fn run_check(state: &crate::AppState) {
                     .send(crate::notifications::NotificationSignal {
                         user_id: approver_id,
                     });
-                crate::email::send_async(smtp.clone(), approver_email, title, email_body);
+                crate::email::send_async(smtp.clone(), approver_email, format!("{} {}", first_name, last_name), title, email_body);
             }
             Ok(false) => {
                 // Already reminded today (idempotency guard).

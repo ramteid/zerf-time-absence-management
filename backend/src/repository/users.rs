@@ -47,8 +47,18 @@ const USER_SELECT: &str =
 /// Team settings row (id, email, first_name, last_name, role, allow_reopen_without_approval).
 pub type TeamSettingsRow = (i64, String, String, String, String, bool);
 
-/// Approval reminder row (approver_id, approver_email, total_pending_count).
-pub type PendingApproverReminderRow = (i64, String, i64);
+/// Lightweight user record returned by the submission-reminder query.
+pub struct ActiveUserRow {
+    pub id: i64,
+    pub email: String,
+    pub first_name: String,
+    pub last_name: String,
+    pub start_date: NaiveDate,
+    pub workdays_per_week: i16,
+}
+
+/// Approval reminder row (approver_id, approver_email, first_name, last_name, total_pending_count).
+pub type PendingApproverReminderRow = (i64, String, String, String, i64);
 
 #[derive(Serialize, sqlx::FromRow)]
 pub struct AnnualLeaveRow {
@@ -365,10 +375,10 @@ impl UserDb {
              combined AS (
                  SELECT approver_id, pending_count FROM via_assignment
              )
-             SELECT c.approver_id, u.email, SUM(c.pending_count)::bigint AS total_pending
+             SELECT c.approver_id, u.email, u.first_name, u.last_name, SUM(c.pending_count)::bigint AS total_pending
              FROM combined c
              JOIN users u ON u.id = c.approver_id AND u.active = TRUE
-             GROUP BY c.approver_id, u.email
+             GROUP BY c.approver_id, u.email, u.first_name, u.last_name
              HAVING SUM(c.pending_count) > 0",
         )
         .fetch_all(&self.pool)
@@ -827,9 +837,9 @@ impl UserDb {
 
     pub async fn get_active_non_assistant_users(
         &self,
-    ) -> AppResult<Vec<(i64, String, NaiveDate, i16)>> {
-        let rows = sqlx::query_as::<_, (i64, String, NaiveDate, i16)>(
-            "SELECT id, email, start_date, workdays_per_week FROM users \
+    ) -> AppResult<Vec<ActiveUserRow>> {
+        let rows = sqlx::query_as::<_, (i64, String, String, String, NaiveDate, i16)>(
+            "SELECT id, email, first_name, last_name, start_date, workdays_per_week FROM users \
              WHERE active = TRUE AND lower(trim(role)) != $1 AND weekly_hours > 0",
         )
         .bind(ROLE_ASSISTANT)
@@ -840,7 +850,12 @@ impl UserDb {
             selected_user_count = rows.len(),
             "loaded active non-assistant users with weekly_hours > 0 for submission reminders"
         );
-        Ok(rows)
+        Ok(rows
+            .into_iter()
+            .map(|(id, email, first_name, last_name, start_date, workdays_per_week)| {
+                ActiveUserRow { id, email, first_name, last_name, start_date, workdays_per_week }
+            })
+            .collect())
     }
 
     /// Begin a transaction.

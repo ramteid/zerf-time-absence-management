@@ -225,7 +225,7 @@ pub async fn run_check(state: &crate::AppState) {
     .unwrap_or_else(|_| crate::settings::DEFAULT_TIMEZONE.to_string());
     let today = crate::settings::app_today(pool).await;
 
-    let rows: Vec<(i64, String, NaiveDate, i16)> =
+    let rows: Vec<crate::repository::ActiveUserRow> =
         match state.db.users.get_active_non_assistant_users().await {
             Ok(r) => r,
             Err(e) => {
@@ -246,7 +246,7 @@ pub async fn run_check(state: &crate::AppState) {
         .await
         .map(std::sync::Arc::new);
 
-    for (user_id, user_email, user_start, workdays_per_week) in rows {
+    for crate::repository::ActiveUserRow { id: user_id, email: user_email, first_name, last_name, start_date: user_start, workdays_per_week } in rows {
         let missing_weeks =
             find_unsubmitted_weeks(pool, user_id, user_start, workdays_per_week).await;
 
@@ -305,7 +305,7 @@ pub async fn run_check(state: &crate::AppState) {
                     .notifications
                     .send(crate::notifications::NotificationSignal { user_id });
                 // Send email best-effort
-                crate::email::send_async(smtp.clone(), user_email, title, email_body);
+                crate::email::send_async(smtp.clone(), user_email, format!("{} {}", first_name, last_name), title, email_body);
             }
             Ok(_) => {
                 // Conflict guard fired: reminder already sent today, skip email too.

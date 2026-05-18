@@ -915,7 +915,7 @@ pub async fn forgot_password(
         .await?;
 
     // Always return 200 to prevent email enumeration.
-    let Some((user_id, user_email)) = user else {
+    let Some((user_id, user_email, first_name, last_name)) = user else {
         return Ok(Json(serde_json::json!({ "ok": true })));
     };
 
@@ -945,7 +945,7 @@ pub async fn forgot_password(
         &[("reset_link", reset_link)],
     );
 
-    crate::email::send_async(smtp.map(Arc::new), user_email, subject, body_text);
+    crate::email::send_async(smtp.map(Arc::new), user_email, format!("{} {}", first_name, last_name), subject, body_text);
 
     Ok(Json(serde_json::json!({ "ok": true })))
 }
