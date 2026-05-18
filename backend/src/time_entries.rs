@@ -350,11 +350,13 @@ pub async fn submit(
     }
     // Phase 1: validate ownership for ALL entries before any writes, so a
     // mixed-ownership batch never partially submits.
-    for entry_id in &body.ids {
-        let owner_id = app_state.db.time_entries.get_user_id(*entry_id).await?;
-        if owner_id != requester.id {
-            return Err(AppError::Forbidden);
-        }
+    if !app_state
+        .db
+        .time_entries
+        .all_entries_owned_by_user(&body.ids, requester.id)
+        .await?
+    {
+        return Err(AppError::Forbidden);
     }
     // Phase 2: atomically submit all draft entries in a single transaction.
     let submitted_ids = app_state
@@ -378,15 +380,13 @@ pub async fn submit(
     // Phase 4: notify approvers with a consolidated week count.
     let submitted_count = submitted_ids.len();
     let mut submitted_weeks = HashSet::new();
-    for entry_id in &submitted_ids {
-        if let Some(entry_date) = app_state
-            .db
-            .time_entries
-            .get_date_for_entry(*entry_id)
-            .await?
-        {
-            submitted_weeks.insert(week_start(entry_date));
-        }
+    for entry_date in app_state
+        .db
+        .time_entries
+        .entry_dates_for_ids(&submitted_ids)
+        .await?
+    {
+        submitted_weeks.insert(week_start(entry_date));
     }
     if !submitted_weeks.is_empty() {
         let approver_ids =
@@ -407,11 +407,11 @@ pub async fn submit(
             .iter()
             .map(|ws| ws.format("%Y-%m-%d").to_string())
             .collect();
-        let frontend_body = format!(
-            "{{\"submitter_name\":{},\"weeks\":[{}]}}",
-            serde_json::json!(&submitter_name),
-            week_iso_strings.iter().map(|w| format!("\"{}\"", w)).collect::<Vec<_>>().join(","),
-        );
+        let frontend_body = serde_json::json!({
+            "submitter_name": submitter_name,
+            "weeks": week_iso_strings,
+        })
+        .to_string();
 
         for approver_id in approver_ids {
             crate::notifications::create_with_frontend_body(

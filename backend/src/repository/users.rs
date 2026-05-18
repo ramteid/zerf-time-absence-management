@@ -175,9 +175,7 @@ impl UserDb {
 
     pub async fn count_direct_reports(&self, user_id: i64) -> AppResult<i64> {
         Ok(sqlx::query_scalar(
-            "SELECT COUNT(*) FROM user_approvers \
-             WHERE approver_id=$1 \
-             AND user_id IN (SELECT id FROM users WHERE active=TRUE)",
+            "SELECT COUNT(*) FROM user_approvers WHERE approver_id=$1",
         )
         .bind(user_id)
         .fetch_one(&self.pool)

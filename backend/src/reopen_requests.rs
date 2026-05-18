@@ -143,12 +143,12 @@ pub async fn create(
     //   * Otherwise → pending, notify all approvers
     let should_auto_approve = requester.allow_reopen_without_approval;
 
-    // Non-admin users must have at least one explicit approver available.
-    // Admin users may still create requests without assigned approvers. Any
-    // admin can review the request, but admins are not auto-notified unless
-    // explicitly assigned.
-    let _approvers =
+    // Non-admin users who need a reviewer must have at least one active approver.
+    // Auto-approve requests resolve immediately without any reviewer action, so
+    // skip this check when the request will be auto-approved.
+    if !should_auto_approve {
         crate::auth::required_approval_recipient_ids(&app_state.pool, &requester).await?;
+    }
 
     let initial_status = if should_auto_approve {
         "auto_approved"
@@ -207,7 +207,7 @@ pub async fn create(
 
     if should_auto_approve {
         // In-app only: the requester triggered the auto-approve themselves.
-        let frontend_body_self = format!("{{\"week\":\"{}\"}}", week_iso);
+        let frontend_body_self = serde_json::json!({"week": week_iso}).to_string();
         notifications::create_with_frontend_body(
             &app_state,
             &language,
@@ -223,11 +223,11 @@ pub async fn create(
         )
         .await;
         // Notify each approver that the reopen was auto-approved (informational).
-        let frontend_body_approver = format!(
-            "{{\"week\":\"{}\",\"requester_name\":{}}}",
-            week_iso,
-            serde_json::json!(&requester_full_name),
-        );
+        let frontend_body_approver = serde_json::json!({
+            "week": week_iso,
+            "requester_name": requester_full_name,
+        })
+        .to_string();
         for approver_id in &approver_ids_for_notification {
             notifications::create_with_frontend_body(
                 &app_state,
@@ -256,11 +256,11 @@ pub async fn create(
         })))
     } else {
         // Notify all approvers that a manual reopen request is pending.
-        let frontend_body_created = format!(
-            "{{\"week\":\"{}\",\"requester_name\":{}}}",
-            week_iso,
-            serde_json::json!(&requester_full_name),
-        );
+        let frontend_body_created = serde_json::json!({
+            "week": week_iso,
+            "requester_name": requester_full_name,
+        })
+        .to_string();
         for approver_id in &approver_ids_for_notification {
             notifications::create_with_frontend_body(
                 &app_state,
@@ -368,16 +368,12 @@ async fn notify_assigned_approvers_if_admin_acted(
 
     // Build frontend JSON with the employee's name (not the admin's).
     let reason = extra_params.iter().find(|(k, _)| *k == "reason").map(|(_, v)| v.as_str());
-    let frontend_body = match reason {
-        Some(r) => format!(
-            "{{\"week\":\"{}\",\"requester_name\":{},\"reason\":{}}}",
-            week_iso, serde_json::json!(&employee_full_name), serde_json::json!(r)
-        ),
-        None => format!(
-            "{{\"week\":\"{}\",\"requester_name\":{}}}",
-            week_iso, serde_json::json!(&employee_full_name)
-        ),
-    };
+    let frontend_body = if let Some(r) = reason {
+        serde_json::json!({"week": week_iso, "requester_name": employee_full_name, "reason": r})
+    } else {
+        serde_json::json!({"week": week_iso, "requester_name": employee_full_name})
+    }
+    .to_string();
 
     let mut params = vec![
         ("requester_name", employee_full_name),
