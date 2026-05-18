@@ -37,7 +37,11 @@
 
   $: if (isNew && start_time >= end_time) {
     const [h, m] = start_time.split(":").map(Number);
-    end_time = String((h + 1) % 24).padStart(2, "0") + ":" + String(m).padStart(2, "0");
+    if (h >= 23) {
+      end_time = "23:59";
+    } else {
+      end_time = String(h + 1).padStart(2, "0") + ":" + String(m).padStart(2, "0");
+    }
   }
 
   onMount(() => dlg.showModal());

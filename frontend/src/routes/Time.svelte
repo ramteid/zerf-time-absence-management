@@ -258,7 +258,8 @@
     //          40h/week ÷ 4 days = 10h/day = 600 min/day (4-day worker)
     const perDayMinutes = Math.round((weeklyHours / workdaysPerWeek) * 60);
     if (perDayMinutes <= 0) return 0;
-    return weekdays.slice(0, workdaysPerWeek).reduce((totalMinutes, day) => {
+    const allDays = [...weekdays, ...weekendDays];
+    return allDays.slice(0, workdaysPerWeek).reduce((totalMinutes, day) => {
       const isBeforeStart =
         $currentUser?.start_date && day.ds < $currentUser.start_date;
       const isFuture = day.ds > today;

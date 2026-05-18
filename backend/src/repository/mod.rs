@@ -7,6 +7,7 @@ pub mod reopen_requests;
 pub mod reports;
 pub mod sessions;
 pub mod settings;
+pub mod system_metadata;
 pub mod time_entries;
 pub mod users;
 
@@ -21,8 +22,9 @@ pub use reopen_requests::{ReopenRequest, ReopenRequestDb};
 pub use reports::ReportDb;
 pub use sessions::SessionDb;
 pub use settings::SettingsDb;
+pub use system_metadata::SystemMetadataDb;
 pub use time_entries::{NewEntryData, TimeEntry, TimeEntryDb};
-pub use users::{User, UserDb};
+pub use users::{ActiveUserRow, User, UserDb};
 
 use crate::db::DatabasePool;
 

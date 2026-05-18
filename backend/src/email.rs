@@ -12,16 +12,25 @@ use lettre::{AsyncSmtpTransport, AsyncTransport, Tokio1Executor};
 use std::sync::Arc;
 use std::time::Duration;
 
-/// Send `subject` / `body_text` to `to`. Returns immediately and runs the
-/// actual SMTP transaction in a detached task. Safe to call from any async
-/// handler.  When `smtp` is `None`, this is a silent no-op.
-pub fn send_async(smtp: Option<Arc<SmtpConfig>>, to: String, subject: String, body_text: String) {
+/// Send `subject` / `body_text` to `to`. `to_name` is the recipient's display
+/// name (e.g. `"Jane Doe"`); when non-empty the envelope becomes
+/// `"Jane Doe" <jane@example.com>` so it renders correctly in email clients.
+/// Returns immediately and runs the actual SMTP transaction in a detached
+/// task. Safe to call from any async handler. When `smtp` is `None`, this is
+/// a silent no-op.
+pub fn send_async(
+    smtp: Option<Arc<SmtpConfig>>,
+    to: String,
+    to_name: String,
+    subject: String,
+    body_text: String,
+) {
     let Some(cfg) = smtp else { return };
     if to.trim().is_empty() {
         return;
     }
     tokio::spawn(async move {
-        if let Err(e) = send_now(&cfg, &to, &subject, &body_text).await {
+        if let Err(e) = send_now(&cfg, &to, &to_name, &subject, &body_text).await {
             tracing::warn!(target:"zerf::email", "failed to send email to {}: {}", to, e);
         }
     });
@@ -60,11 +69,18 @@ fn build_mailer(
 async fn send_now(
     cfg: &SmtpConfig,
     to: &str,
+    to_name: &str,
     subject: &str,
     body_text: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let from: Mailbox = cfg.from.parse()?;
-    let to_box: Mailbox = to.parse()?;
+    // Build a properly quoted RFC 5322 display-name when a name is provided.
+    let to_box: Mailbox = if to_name.trim().is_empty() {
+        to.parse()?
+    } else {
+        let quoted_name = to_name.trim().replace('\\', "\\\\").replace('"', "\\\"");
+        format!("\"{}\" <{}>", quoted_name, to).parse()?
+    };
     let email = Message::builder()
         .from(from)
         .to(to_box)

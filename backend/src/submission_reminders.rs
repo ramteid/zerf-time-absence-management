@@ -119,53 +119,33 @@ async fn find_unsubmitted_weeks(
             .await
             .unwrap_or_default();
 
+    let time_db = crate::repository::TimeEntryDb::new(pool.clone());
+    let absence_db = crate::repository::AbsenceDb::new(pool.clone());
+
     // Load submitted/approved time entry dates.
-    let submitted_dates: std::collections::HashSet<NaiveDate> = sqlx::query_as::<_, (NaiveDate,)>(
-        "SELECT DISTINCT entry_date FROM time_entries \
-         WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3 \
-         AND status IN ('submitted','approved')",
-    )
-    .bind(user_id)
-    .bind(first_monday)
-    .bind(check_to)
-    .fetch_all(pool)
-    .await
-    .unwrap_or_default()
-    .into_iter()
-    .map(|(d,)| d)
-    .collect();
+    let submitted_dates: std::collections::HashSet<NaiveDate> = time_db
+        .get_submitted_dates_in_range(user_id, first_monday, check_to)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
 
     // Load dates with incomplete entries (draft/rejected).
-    let incomplete_dates: std::collections::HashSet<NaiveDate> = sqlx::query_as::<_, (NaiveDate,)>(
-        "SELECT DISTINCT entry_date FROM time_entries \
-             WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3 \
-             AND status NOT IN ('submitted','approved')",
-    )
-    .bind(user_id)
-    .bind(first_monday)
-    .bind(check_to)
-    .fetch_all(pool)
-    .await
-    .unwrap_or_default()
-    .into_iter()
-    .map(|(d,)| d)
-    .collect();
+    let incomplete_dates: std::collections::HashSet<NaiveDate> = time_db
+        .get_incomplete_dates_in_range(user_id, first_monday, check_to)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
 
     // Load approved absence date ranges and expand to a date set.
-    let absence_rows: Vec<(NaiveDate, NaiveDate)> = sqlx::query_as(
-        "SELECT start_date, end_date FROM absences \
-         WHERE user_id=$1 AND status IN ('approved','cancellation_pending') \
-         AND start_date <= $3 AND end_date >= $2",
-    )
-    .bind(user_id)
-    .bind(first_monday)
-    .bind(check_to)
-    .fetch_all(pool)
-    .await
-    .unwrap_or_default();
+    let absence_rows: Vec<(NaiveDate, NaiveDate, String)> = absence_db
+        .approved_ranges_in_period(user_id, first_monday, check_to)
+        .await
+        .unwrap_or_default();
 
     let mut absent_days = std::collections::HashSet::new();
-    for (start, end) in &absence_rows {
+    for (start, end, _) in &absence_rows {
         let mut d = *start;
         while d <= *end && d <= check_to {
             if d >= first_monday {
@@ -245,7 +225,7 @@ pub async fn run_check(state: &crate::AppState) {
     .unwrap_or_else(|_| crate::settings::DEFAULT_TIMEZONE.to_string());
     let today = crate::settings::app_today(pool).await;
 
-    let rows: Vec<(i64, String, NaiveDate, i16)> =
+    let rows: Vec<crate::repository::ActiveUserRow> =
         match state.db.users.get_active_non_assistant_users().await {
             Ok(r) => r,
             Err(e) => {
@@ -266,7 +246,7 @@ pub async fn run_check(state: &crate::AppState) {
         .await
         .map(std::sync::Arc::new);
 
-    for (user_id, user_email, user_start, workdays_per_week) in rows {
+    for crate::repository::ActiveUserRow { id: user_id, email: user_email, first_name, last_name, start_date: user_start, workdays_per_week } in rows {
         let missing_weeks =
             find_unsubmitted_weeks(pool, user_id, user_start, workdays_per_week).await;
 
@@ -325,7 +305,7 @@ pub async fn run_check(state: &crate::AppState) {
                     .notifications
                     .send(crate::notifications::NotificationSignal { user_id });
                 // Send email best-effort
-                crate::email::send_async(smtp.clone(), user_email, title, email_body);
+                crate::email::send_async(smtp.clone(), user_email, format!("{} {}", first_name, last_name), title, email_body);
             }
             Ok(_) => {
                 // Conflict guard fired: reminder already sent today, skip email too.

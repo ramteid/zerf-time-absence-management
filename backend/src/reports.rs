@@ -12,7 +12,6 @@ use axum::{
 };
 use chrono::{Datelike, Duration, NaiveDate, NaiveTime};
 use serde::{Deserialize, Serialize};
-use sqlx::{Postgres, QueryBuilder};
 use std::collections::HashMap;
 
 const FLEXTIME_REDUCTION_KIND: &str = "flextime_reduction";
@@ -340,6 +339,88 @@ async fn build_range(
     build_range_with_user(pool, &user, from, to, label).await
 }
 
+/// Collects the Monday of every fully elapsed week (Sunday < today) that overlaps the given month.
+fn complete_weeks_in_month(month_start: NaiveDate, month_end: NaiveDate, today: NaiveDate) -> Vec<NaiveDate> {
+    let first_monday = month_start - Duration::days(month_start.weekday().num_days_from_monday() as i64);
+    let last_monday = month_end - Duration::days(month_end.weekday().num_days_from_monday() as i64);
+    let mut mondays = Vec::new();
+    let mut current = first_monday;
+    while current <= last_monday {
+        if current + Duration::days(6) < today {
+            mondays.push(current);
+        }
+        current += Duration::days(7);
+    }
+    mondays
+}
+
+/// Fetches holidays, absent days, submitted dates, and incomplete dates for the
+/// range covered by `complete_week_mondays`. Assumes the slice is non-empty.
+async fn load_week_check_data(
+    pool: &crate::db::DatabasePool,
+    user_id: i64,
+    complete_week_mondays: &[NaiveDate],
+) -> AppResult<(
+    std::collections::HashSet<NaiveDate>,
+    std::collections::HashSet<NaiveDate>,
+    std::collections::HashSet<NaiveDate>,
+    std::collections::HashSet<NaiveDate>,
+)> {
+    let check_from = complete_week_mondays[0];
+    let check_to = *complete_week_mondays.last().unwrap() + Duration::days(6);
+    let reports_db = crate::repository::ReportDb::new(pool.clone());
+    let holiday_set = reports_db.holiday_set(check_from, check_to).await?;
+    let absence_rows = reports_db
+        .absence_ranges_in_period(user_id, check_from, check_to)
+        .await?;
+    let absent_days = expand_absence_date_set(&absence_rows, check_from, check_to);
+    let submitted_dates = reports_db
+        .submitted_dates_in_range(user_id, check_from, check_to)
+        .await?;
+    let incomplete_dates = reports_db
+        .incomplete_dates_in_range(user_id, check_from, check_to)
+        .await?;
+    Ok((holiday_set, absent_days, submitted_dates, incomplete_dates))
+}
+
+/// Returns true when every week in `complete_week_mondays` is considered submitted.
+///
+/// A week is submitted when at least one entry has status "submitted" or "approved"
+/// and no entry is in "draft" or "rejected" state.
+/// Entry-free weeks still pass if every contract workday is excused (public holiday,
+/// approved absence, before the user's start date, or in the future).
+fn check_weeks_all_submitted(
+    complete_week_mondays: &[NaiveDate],
+    holiday_set: &std::collections::HashSet<NaiveDate>,
+    absent_days: &std::collections::HashSet<NaiveDate>,
+    submitted_dates: &std::collections::HashSet<NaiveDate>,
+    incomplete_dates: &std::collections::HashSet<NaiveDate>,
+    user_start_date: NaiveDate,
+    workdays_per_week: i16,
+    today: NaiveDate,
+) -> bool {
+    for &week_monday in complete_week_mondays {
+        let has_incomplete = (0..7i64)
+            .any(|d| incomplete_dates.contains(&(week_monday + Duration::days(d))));
+        if has_incomplete {
+            return false;
+        }
+        let has_submitted = (0..7i64)
+            .any(|d| submitted_dates.contains(&(week_monday + Duration::days(d))));
+        if has_submitted {
+            continue;
+        }
+        let all_excused = (0..i64::from(workdays_per_week)).all(|d| {
+            let day = week_monday + Duration::days(d);
+            day < user_start_date || holiday_set.contains(&day) || absent_days.contains(&day) || day >= today
+        });
+        if !all_excused {
+            return false;
+        }
+    }
+    true
+}
+
 /// Returns `(all_submitted, all_approved)` for fully elapsed weeks in the month.
 ///
 /// `all_submitted` mirrors `all_weeks_submitted_for_month`.
@@ -357,80 +438,28 @@ async fn submission_status_for_month(
     if is_assistant {
         return Ok((true, true));
     }
-
     let today = crate::settings::app_today(pool).await;
-
-    let first_week_monday = {
-        let offset = month_start.weekday().num_days_from_monday() as i64;
-        month_start - Duration::days(offset)
-    };
-    let last_week_monday = {
-        let offset = month_end.weekday().num_days_from_monday() as i64;
-        month_end - Duration::days(offset)
-    };
-
-    let mut complete_week_mondays: Vec<NaiveDate> = Vec::new();
-    let mut current_week_monday = first_week_monday;
-    while current_week_monday <= last_week_monday {
-        let week_sunday = current_week_monday + Duration::days(6);
-        if week_sunday < today {
-            complete_week_mondays.push(current_week_monday);
-        }
-        current_week_monday += Duration::days(7);
-    }
-
+    let complete_week_mondays = complete_weeks_in_month(month_start, month_end, today);
     if complete_week_mondays.is_empty() {
         return Ok((true, true));
     }
-
     let check_from = complete_week_mondays[0];
     let check_to = *complete_week_mondays.last().unwrap() + Duration::days(6);
-
-    let reports_db = crate::repository::ReportDb::new(pool.clone());
-    let holiday_set = reports_db.holiday_set(check_from, check_to).await?;
-    let absence_rows = reports_db
-        .absence_ranges_in_period(user_id, check_from, check_to)
-        .await?;
-    let absent_days = expand_absence_date_set(&absence_rows, check_from, check_to);
-    let submitted_dates = reports_db
-        .submitted_dates_in_range(user_id, check_from, check_to)
-        .await?;
-    let incomplete_dates = reports_db
-        .incomplete_dates_in_range(user_id, check_from, check_to)
-        .await?;
-
-    let mut all_submitted = true;
-    for &week_monday in &complete_week_mondays {
-        let has_incomplete = (0..7i64)
-            .any(|d| incomplete_dates.contains(&(week_monday + Duration::days(d))));
-        if has_incomplete {
-            all_submitted = false;
-            break;
-        }
-
-        let has_submitted = (0..7i64)
-            .any(|d| submitted_dates.contains(&(week_monday + Duration::days(d))));
-        if has_submitted {
-            continue;
-        }
-
-        let all_excused = (0..i64::from(workdays_per_week)).all(|d| {
-            let day = week_monday + Duration::days(d);
-            day < user_start_date
-                || holiday_set.contains(&day)
-                || absent_days.contains(&day)
-                || day >= today
-        });
-        if !all_excused {
-            all_submitted = false;
-            break;
-        }
-    }
-
-    if !all_submitted {
+    let (holiday_set, absent_days, submitted_dates, incomplete_dates) =
+        load_week_check_data(pool, user_id, &complete_week_mondays).await?;
+    if !check_weeks_all_submitted(
+        &complete_week_mondays,
+        &holiday_set,
+        &absent_days,
+        &submitted_dates,
+        &incomplete_dates,
+        user_start_date,
+        workdays_per_week,
+        today,
+    ) {
         return Ok((false, false));
     }
-
+    let reports_db = crate::repository::ReportDb::new(pool.clone());
     let has_pending = reports_db
         .has_pending_submitted_entries_in_range(user_id, check_from, check_to)
         .await?;
@@ -707,12 +736,10 @@ pub struct TeamQuery {
 /// have been submitted for the user.
 ///
 /// A week is "fully elapsed" when its Sunday falls before today.
-/// A boundary week spanning two months (e.g. Mon 28 Apr - Sun 3 May) counts
-/// for both months: all five weekdays of the week are checked, not just the
-/// days that fall within the target month.
+/// A boundary week spanning two months (e.g. Mon 28 Apr - Sun 3 May) counts for both months.
 ///
 /// A working day is considered submitted when either:
-///   - an approved absence that removes the daily target covers the day, OR
+///   - an approved absence covers the day, OR
 ///   - at least one time entry with status "submitted" or "approved" exists.
 async fn all_weeks_submitted_for_month(
     pool: &crate::db::DatabasePool,
@@ -723,110 +750,27 @@ async fn all_weeks_submitted_for_month(
     is_assistant: bool,
     workdays_per_week: i16,
 ) -> AppResult<bool> {
-    // Assistant users have no fixed target schedule and therefore no mandatory
-    // day-level submission completeness for past weeks.
+    // Assistants have no fixed target schedule and no mandatory day-level submission.
     if is_assistant {
         return Ok(true);
     }
-
     let today = crate::settings::app_today(pool).await;
-
-    // Compute the Monday of the first and last week touched by the month.
-    // Monday of the week in which the first day of the month falls.
-    let first_week_monday = {
-        let offset = month_start.weekday().num_days_from_monday() as i64;
-        month_start - Duration::days(offset)
-    };
-    // Monday of the week in which the last day of the month falls.
-    let last_week_monday = {
-        let offset = month_end.weekday().num_days_from_monday() as i64;
-        month_end - Duration::days(offset)
-    };
-
-    // Collect all fully elapsed weeks (Sunday < today).
-    let mut complete_week_mondays: Vec<NaiveDate> = Vec::new();
-    let mut current_week_monday = first_week_monday;
-    while current_week_monday <= last_week_monday {
-        let week_sunday = current_week_monday + Duration::days(6);
-        if week_sunday < today {
-            complete_week_mondays.push(current_week_monday);
-        }
-        current_week_monday += Duration::days(7);
-    }
-
-    // No fully elapsed past weeks - nothing to check.
+    let complete_week_mondays = complete_weeks_in_month(month_start, month_end, today);
     if complete_week_mondays.is_empty() {
         return Ok(true);
     }
-
-    let check_from = complete_week_mondays[0];
-    let check_to = *complete_week_mondays.last().unwrap() + Duration::days(6);
-
-    // Load public holidays in the check range once, then use a set for cheap lookups.
-    let reports_db = crate::repository::ReportDb::new(pool.clone());
-    let holiday_set = reports_db.holiday_set(check_from, check_to).await?;
-
-    // Build a set of approved absence days, clamped to the week check range.
-    let absence_rows = reports_db
-        .absence_ranges_in_period(user_id, check_from, check_to)
-        .await?;
-    let absent_days = expand_absence_date_set(&absence_rows, check_from, check_to);
-
-    // Load submitted/approved time entry dates.
-    let submitted_dates = reports_db
-        .submitted_dates_in_range(user_id, check_from, check_to)
-        .await?;
-    // Any non submitted/approved entry (draft, rejected, etc.) keeps a day incomplete,
-    // even when the same day also has submitted entries.
-    let incomplete_dates = reports_db
-        .incomplete_dates_in_range(user_id, check_from, check_to)
-        .await?;
-
-    // Check each fully elapsed week at the week level, not the day level.
-    //
-    // A week is considered submitted when the user has pressed "Submit Week" —
-    // i.e. at least one entry in the week is submitted/approved and no entry
-    // is still in draft or rejected state. The number of days actually booked
-    // does not matter; only that the week as a whole has been submitted.
-    //
-    // Fallback for entry-free weeks: if the user has no entries at all, the
-    // week still counts as submitted when every contract workday is excused
-    // (public holiday, approved absence, before the user's start date, or
-    // defensively in the future). This covers e.g. full-vacation weeks.
-    for &week_monday in &complete_week_mondays {
-        // Any draft or rejected entry anywhere in the week means the week has
-        // not been cleanly submitted yet.
-        let has_incomplete_entry = (0..7i64).any(|d| {
-            incomplete_dates.contains(&(week_monday + Duration::days(d)))
-        });
-        if has_incomplete_entry {
-            return Ok(false);
-        }
-
-        // At least one submitted/approved entry anywhere in the week is
-        // sufficient — the user has submitted the week.
-        let has_submitted_entry = (0..7i64).any(|d| {
-            submitted_dates.contains(&(week_monday + Duration::days(d)))
-        });
-        if has_submitted_entry {
-            continue;
-        }
-
-        // No entries at all: the week is still OK if every contract workday is
-        // excused (holiday, approved absence, before start, or future).
-        let all_contract_days_excused = (0..i64::from(workdays_per_week)).all(|day_offset| {
-            let day = week_monday + Duration::days(day_offset);
-            day < user_start_date
-                || holiday_set.contains(&day)
-                || absent_days.contains(&day)
-                || day >= today
-        });
-        if !all_contract_days_excused {
-            return Ok(false);
-        }
-    }
-
-    Ok(true)
+    let (holiday_set, absent_days, submitted_dates, incomplete_dates) =
+        load_week_check_data(pool, user_id, &complete_week_mondays).await?;
+    Ok(check_weeks_all_submitted(
+        &complete_week_mondays,
+        &holiday_set,
+        &absent_days,
+        &submitted_dates,
+        &incomplete_dates,
+        user_start_date,
+        workdays_per_week,
+        today,
+    ))
 }
 
 pub async fn team(
@@ -1068,46 +1012,28 @@ pub async fn categories(
         return Ok(Json(Vec::new()));
     }
 
-    let target_user_id = query.user_id;
-    if let Some(user_id) = target_user_id {
-        // Requesting a specific user: verify access rights.
-        assert_can_access_user(&app_state, &requester, user_id).await?;
-    } else if !requester.is_lead() {
-        // No specific user requested: only leads may see aggregated team data.
-        return Err(AppError::Forbidden);
-    }
+    // When no user_id is given: leads see team aggregate, non-leads see their own data.
+    let target_user_id = if let Some(uid) = query.user_id {
+        assert_can_access_user(&app_state, &requester, uid).await?;
+        Some(uid)
+    } else if requester.is_lead() {
+        None
+    } else {
+        Some(requester.id)
+    };
     // Category breakdown reports include all non-rejected entries regardless of
     // crediting status (user-guide: "not only crediting categories").
-    let mut builder = QueryBuilder::<Postgres>::new(
-        "SELECT c.name, c.color, z.start_time, z.end_time \
-         FROM time_entries z \
-         JOIN users u ON u.id=z.user_id \
-         JOIN categories c ON c.id=z.category_id \
-                WHERE z.status != 'rejected' AND z.entry_date >= u.start_date \
-         AND z.entry_date BETWEEN ",
-    );
-    builder
-        .push_bind(query.from)
-        .push(" AND ")
-        .push_bind(effective_to);
-    if let Some(user_id) = target_user_id {
-        builder.push(" AND z.user_id = ").push_bind(user_id);
-    } else if !requester.is_admin() {
-        // Non-admin lead with no specific user: include self and direct reports,
-        // excluding admin subjects (non-admin leads cannot see admin users).
-        builder
-            .push(" AND z.user_id IN (SELECT id FROM users WHERE id = ")
-            .push_bind(requester.id)
-            .push(
-                " OR id IN (SELECT ua.user_id FROM user_approvers ua \
-                    JOIN users u ON u.id = ua.user_id \
-                    WHERE ua.approver_id = ",
-            )
-            .push_bind(requester.id)
-            .push(" AND u.role != 'admin'))");
-    }
-    let rows: Vec<(String, String, String, String)> =
-        builder.build_query_as().fetch_all(&app_state.pool).await?;
+    let rows = app_state
+        .db
+        .reports
+        .category_rows_for_scope(
+            requester.id,
+            requester.is_admin(),
+            target_user_id,
+            query.from,
+            effective_to,
+        )
+        .await?;
     let mut category_minutes_map: HashMap<(String, String), i64> = HashMap::new();
     for (category, color, start_time, end_time) in rows {
         let minutes =
@@ -1150,58 +1076,18 @@ pub async fn team_categories(
         return Ok(Json(Vec::new()));
     }
 
-    let mut user_builder = QueryBuilder::<Postgres>::new(
-        "SELECT id, first_name, last_name FROM users WHERE active=TRUE",
-    );
-    if !requester.is_admin() {
-        // Non-admin lead: include self and direct reports, excluding admin subjects.
-        user_builder
-            .push(" AND (id = ")
-            .push_bind(requester.id)
-            .push(
-                " OR id IN (SELECT ua.user_id FROM user_approvers ua \
-                    JOIN users u ON u.id = ua.user_id \
-                    WHERE ua.approver_id = ",
-            )
-            .push_bind(requester.id)
-            .push(" AND u.role != 'admin'))");
-    }
-    user_builder.push(" ORDER BY last_name, first_name");
-    let members: Vec<(i64, String, String)> = user_builder
-        .build_query_as()
-        .fetch_all(&app_state.pool)
+    let members = app_state
+        .db
+        .reports
+        .team_category_members(requester.id, requester.is_admin())
         .await?;
 
     // Same as the individual breakdown: all non-rejected entries up to today,
     // regardless of draft/submitted/approved state or crediting status.
-    let mut entry_builder = QueryBuilder::<Postgres>::new(
-        "SELECT z.user_id, c.name, c.color, z.start_time, z.end_time \
-         FROM time_entries z \
-         JOIN users u ON u.id=z.user_id \
-         JOIN categories c ON c.id=z.category_id \
-                WHERE z.status != 'rejected' AND z.entry_date >= u.start_date \
-         AND z.entry_date BETWEEN ",
-    );
-    entry_builder
-        .push_bind(query.from)
-        .push(" AND ")
-        .push_bind(effective_to);
-    if !requester.is_admin() {
-        // Non-admin lead: include self and direct reports, excluding admin subjects.
-        entry_builder
-            .push(" AND z.user_id IN (SELECT id FROM users WHERE id = ")
-            .push_bind(requester.id)
-            .push(
-                " OR id IN (SELECT ua.user_id FROM user_approvers ua \
-                    JOIN users u ON u.id = ua.user_id \
-                    WHERE ua.approver_id = ",
-            )
-            .push_bind(requester.id)
-            .push(" AND u.role != 'admin'))");
-    }
-    let rows: Vec<(i64, String, String, String, String)> = entry_builder
-        .build_query_as()
-        .fetch_all(&app_state.pool)
+    let rows = app_state
+        .db
+        .reports
+        .team_category_entry_rows(requester.id, requester.is_admin(), query.from, effective_to)
         .await?;
 
     let mut user_cat_map: HashMap<i64, HashMap<(String, String), i64>> = HashMap::new();

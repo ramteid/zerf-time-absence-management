@@ -244,7 +244,7 @@ does nothing. The only way to make corrections is to reopen the whole week.
 ### Overlap rules
 
 - A request must include at least one effective workday (not weekend-only, not holiday-only).
-- An absence request can span at most 364 days (i.e., end_date - start_date < 365).
+- An absence request can span at most 365 days (i.e., end_date - start_date ≤ 365).
 - Non-sick absence overlapping existing time entries is rejected.
 - If an approved absence covers a day that already has time entries, those entries remain and still count as worked time.
 
@@ -813,8 +813,8 @@ resubmit the week.
 **Validation rules that apply to all kinds:**
 
 - `end_date` must be on or after `start_date`.
-- The range must not exceed 365 calendar days (maximum end date is start + 364
-  days, i.e., end_date - start_date ≤ 364).
+- The range must not exceed one year (maximum end date is start + 365
+  days, i.e., end_date - start_date ≤ 365).
 - The range must include at least one effective workday. An effective workday
   is a day that is both a contract workday (based on your `workdays_per_week`)
   and not a public holiday. A request covering only weekends or holidays is

@@ -13,7 +13,7 @@ use std::time::Duration;
 use testcontainers::runners::AsyncRunner;
 use testcontainers::ContainerAsync;
 use testcontainers_modules::postgres::Postgres;
-use zerf::{auth, build_app, categories, config::Config, db, holidays, users, AppState};
+use zerf::{auth, build_app, categories, config::Config, db, holidays, repository::UserDb, users, AppState};
 
 static TEST_DB_COUNTER: AtomicU64 = AtomicU64::new(0);
 static TEST_MIGRATOR: Migrator = sqlx::migrate!("./migrations");
@@ -85,8 +85,11 @@ async fn seed_admin(pool: &db::DatabasePool, admin_email: &str) -> anyhow::Resul
             .fetch_one(pool)
             .await?;
         let current_year = ref_date.year();
-        users::set_leave_days(pool, admin_id, current_year, 30).await?;
-        users::set_leave_days(pool, admin_id, current_year + 1, 30).await?;
+        let user_db = UserDb::new(pool.clone());
+        user_db.set_leave_days(admin_id, current_year, 30).await?;
+        user_db
+            .set_leave_days(admin_id, current_year + 1, 30)
+            .await?;
 
         Ok(Some(temp))
     } else {

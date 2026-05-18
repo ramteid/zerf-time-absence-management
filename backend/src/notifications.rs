@@ -30,7 +30,10 @@ async fn send_notification_email(
     subject: String,
     body: &str,
 ) {
-    if let Some(email) = state.db.notifications.get_user_email(user_id).await {
+    if let Some((email, first_name, last_name)) =
+        state.db.notifications.get_user_email(user_id).await
+    {
+        let recipient_name = format!("{} {}", first_name, last_name);
         let smtp = state
             .db
             .settings
@@ -50,7 +53,7 @@ async fn send_notification_email(
             Some(url) => format!("{body}\n\n{timestamp}\n\n{url}"),
             None => format!("{body}\n\n{timestamp}"),
         };
-        crate::email::send_async(smtp, email, subject, email_body);
+        crate::email::send_async(smtp, email, recipient_name, subject, email_body);
     }
 }
 

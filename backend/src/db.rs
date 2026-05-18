@@ -1,9 +1,13 @@
 use crate::config::Config;
+use crate::repository::SystemMetadataDb;
 use anyhow::Result;
 use sqlx::{migrate::Migrator, postgres::PgPoolOptions};
 use std::time::Duration;
 
 pub type DatabasePool = sqlx::PgPool;
+pub type PgConnection = sqlx::PgConnection;
+pub type PgTransaction<'a> = sqlx::Transaction<'a, sqlx::Postgres>;
+pub type SqlxError = sqlx::Error;
 
 static MIGRATOR: Migrator = sqlx::migrate!();
 const UNKNOWN_GIT_COMMIT: &str = "unknown";
@@ -25,15 +29,11 @@ pub async fn init(cfg: &Config) -> Result<DatabasePool> {
 }
 
 async fn record_system_metadata(pool: &DatabasePool, git_commit: &str) -> Result<()> {
-    let migration_version: i64 =
-        sqlx::query_scalar("SELECT COALESCE(MAX(version), 0) FROM _sqlx_migrations WHERE success")
-            .fetch_one(pool)
-            .await?;
+    let metadata_db = SystemMetadataDb::new(pool.clone());
+    let migration_version = metadata_db.max_successful_migration_version().await?;
     let migration_version = migration_version.to_string();
     let git_commit = normalize_git_commit(git_commit);
-    let users_exist: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM users)")
-        .fetch_one(pool)
-        .await?;
+    let users_exist = metadata_db.users_exist().await?;
     let created_git_commit = if users_exist {
         UNKNOWN_GIT_COMMIT
     } else {
@@ -45,17 +45,14 @@ async fn record_system_metadata(pool: &DatabasePool, git_commit: &str) -> Result
         &migration_version
     };
 
-    let mut tx = pool.begin().await?;
-    insert_metadata_if_missing(&mut tx, "database_created_git_commit", created_git_commit).await?;
-    insert_metadata_if_missing(
-        &mut tx,
-        "database_created_migration_version",
-        created_migration_version,
-    )
-    .await?;
-    upsert_metadata(&mut tx, "runtime_git_commit", git_commit).await?;
-    upsert_metadata(&mut tx, "runtime_migration_version", &migration_version).await?;
-    tx.commit().await?;
+    metadata_db
+        .record_runtime_metadata(
+            created_git_commit,
+            created_migration_version,
+            git_commit,
+            &migration_version,
+        )
+        .await?;
 
     tracing::info!(
         "Database metadata recorded: git_commit={}, migration_version={}",
@@ -72,37 +69,4 @@ fn normalize_git_commit(raw: &str) -> &str {
     } else {
         trimmed
     }
-}
-
-async fn insert_metadata_if_missing(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    key: &str,
-    value: &str,
-) -> Result<()> {
-    sqlx::query(
-        "INSERT INTO system_metadata(key, value) VALUES ($1, $2) \
-         ON CONFLICT (key) DO NOTHING",
-    )
-    .bind(key)
-    .bind(value)
-    .execute(&mut **tx)
-    .await?;
-    Ok(())
-}
-
-async fn upsert_metadata(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    key: &str,
-    value: &str,
-) -> Result<()> {
-    sqlx::query(
-        "INSERT INTO system_metadata(key, value) VALUES ($1, $2) \
-         ON CONFLICT (key) DO UPDATE \
-         SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP",
-    )
-    .bind(key)
-    .bind(value)
-    .execute(&mut **tx)
-    .await?;
-    Ok(())
 }

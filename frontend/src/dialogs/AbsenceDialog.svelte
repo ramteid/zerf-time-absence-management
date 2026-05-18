@@ -35,9 +35,19 @@
 
   $: selectedDays =
     start_date && end_date
-      ? Math.round(
-          (new Date(end_date) - new Date(start_date)) / 86400000,
-        ) + 1
+      ? (() => {
+          const start = new Date(start_date);
+          const end = new Date(end_date);
+          const workdaysPerWeek = Number($currentUser?.workdays_per_week || 5);
+          let count = 0;
+          for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+            const dow = d.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+            // Map JS day-of-week to Monday-based index (Mon=0 .. Sun=6)
+            const mondayIndex = dow === 0 ? 6 : dow - 1;
+            if (mondayIndex < workdaysPerWeek) count++;
+          }
+          return count;
+        })()
       : null;
   let closeHandled = false;
   let closeResult = { changed: false, savedAbsence: null };

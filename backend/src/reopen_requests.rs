@@ -25,19 +25,8 @@ use axum::{
 };
 use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
 
-const ACTIVE_ASSIGNED_APPROVER_FOR_UPDATE_SQL: &str = "\
-    SELECT TRUE \
-    FROM user_approvers ua \
-    JOIN users subject ON subject.id = ua.user_id \
-    JOIN users approver ON approver.id = ua.approver_id \
-    WHERE ua.user_id = $1 AND ua.approver_id = $2 \
-    AND subject.active=TRUE AND subject.role != 'admin' \
-    AND approver.active=TRUE AND approver.role IN ('team_lead','admin') \
-    FOR UPDATE OF ua";
-
-#[derive(FromRow, Serialize)]
+#[derive(Serialize)]
 pub struct ReopenRequest {
     pub id: i64,
     pub user_id: i64,
@@ -67,65 +56,6 @@ fn assert_monday(d: NaiveDate) -> AppResult<()> {
         ));
     }
     Ok(())
-}
-
-/// Atomically reopen a week: reset every submitted, approved, or rejected
-/// entry in `[week_start, week_start+6]` back to draft.  Caller is the
-/// **acting** user (approver or self); `subject` is the user whose week is
-/// being reopened.  Returns the affected entry ids and their previous status
-/// so the caller can commit the whole state transition first and audit after.
-async fn perform_reopen_in_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    subject_id: i64,
-    week_start: NaiveDate,
-) -> AppResult<Vec<(i64, String)>> {
-    let week_end = week_start + chrono::Duration::days(6);
-
-    // Advisory lock on subject_id serializes concurrent reopen attempts for the
-    // same user, preventing two simultaneous transactions from both reading
-    // 'submitted' entries and racing to reset them both to draft.
-    sqlx::query("SELECT pg_advisory_xact_lock($1)")
-        .bind(subject_id)
-        .execute(&mut **tx)
-        .await?;
-
-    let affected: Vec<(i64, String)> = sqlx::query_as(
-        "SELECT te.id, te.status FROM time_entries te \
-             WHERE te.user_id=$1 AND te.entry_date BETWEEN $2 AND $3 \
-             AND te.status IN ('submitted','approved','rejected') \
-             FOR UPDATE",
-    )
-    .bind(subject_id)
-    .bind(week_start)
-    .bind(week_end)
-    .fetch_all(&mut **tx)
-    .await?;
-
-    if affected.is_empty() {
-        return Err(AppError::BadRequest(
-            "Cannot request edit - this week has no submitted, approved, or rejected entries.".into(),
-        ));
-    }
-
-    let entry_ids: Vec<i64> = affected.iter().map(|(id, _)| *id).collect();
-
-    crate::repository::time_entries::validate_entries_after_reopen(
-        &mut **tx,
-        subject_id,
-        &entry_ids,
-    )
-    .await?;
-
-    sqlx::query(
-        "UPDATE time_entries SET status='draft', submitted_at=NULL, reviewed_by=NULL, \
-         reviewed_at=NULL, rejection_reason=NULL, updated_at=CURRENT_TIMESTAMP \
-         WHERE id = ANY($1)",
-    )
-    .bind(&entry_ids)
-    .execute(&mut **tx)
-    .await?;
-
-    Ok(affected)
 }
 
 async fn audit_reopened_entries(
@@ -213,12 +143,12 @@ pub async fn create(
     //   * Otherwise → pending, notify all approvers
     let should_auto_approve = requester.allow_reopen_without_approval;
 
-    // Non-admin users must have at least one explicit approver available.
-    // Admin users may still create requests without assigned approvers. Any
-    // admin can review the request, but admins are not auto-notified unless
-    // explicitly assigned.
-    let _approvers =
+    // Non-admin users who need a reviewer must have at least one active approver.
+    // Auto-approve requests resolve immediately without any reviewer action, so
+    // skip this check when the request will be auto-approved.
+    if !should_auto_approve {
         crate::auth::required_approval_recipient_ids(&app_state.pool, &requester).await?;
+    }
 
     let initial_status = if should_auto_approve {
         "auto_approved"
@@ -233,45 +163,22 @@ pub async fn create(
     let week_label = i18n::format_week_label(&language, body.week_start);
     let week_iso = body.week_start.format("%Y-%m-%d").to_string();
 
-    let (new_request_id, reopened_entries): (i64, Option<Vec<(i64, String)>>) =
-        if should_auto_approve {
-            let mut transaction = app_state.pool.begin().await?;
-            let new_id: i64 = sqlx::query_scalar(
-                "INSERT INTO reopen_requests(user_id, week_start, status, reviewed_by, reviewed_at) \
-                 VALUES ($1,$2,$3,$4, CURRENT_TIMESTAMP) \
-                 RETURNING id",
-            )
-            .bind(requester.id)
-            .bind(body.week_start)
-            .bind(initial_status)
-            .bind(requester.id)
-            .fetch_one(&mut *transaction)
-            .await
-            .map_err(|e| {
-                tracing::warn!(target:"zerf::reopen", "create reopen failed: {e}");
-                AppError::Conflict("A pending request for this week already exists.".into())
-            })?;
-            let affected = perform_reopen_in_tx(&mut transaction, requester.id, body.week_start)
-                .await?;
-            transaction.commit().await?;
-            (new_id, Some(affected))
-        } else {
-            let new_id: i64 = sqlx::query_scalar(
-                "INSERT INTO reopen_requests(user_id, week_start, status) \
-                 VALUES ($1,$2,$3) \
-                 RETURNING id",
-            )
-            .bind(requester.id)
-            .bind(body.week_start)
-            .bind(initial_status)
-            .fetch_one(&app_state.pool)
-            .await
-            .map_err(|e| {
-                tracing::warn!(target:"zerf::reopen", "create reopen failed: {e}");
-                AppError::Conflict("A pending request for this week already exists.".into())
-            })?;
-            (new_id, None)
-        };
+    let (new_request_id, reopened_entries): (i64, Option<Vec<(i64, String)>>) = if should_auto_approve
+    {
+        let (new_id, affected) = app_state
+            .db
+            .reopen_requests
+            .insert_auto_approved(requester.id, body.week_start, requester.id)
+            .await?;
+        (new_id, Some(affected))
+    } else {
+        let (new_id, _created_at) = app_state
+            .db
+            .reopen_requests
+            .insert_pending(requester.id, body.week_start)
+            .await?;
+        (new_id, None)
+    };
 
     let entries_reopened = reopened_entries
         .as_ref()
@@ -300,7 +207,7 @@ pub async fn create(
 
     if should_auto_approve {
         // In-app only: the requester triggered the auto-approve themselves.
-        let frontend_body_self = format!("{{\"week\":\"{}\"}}", week_iso);
+        let frontend_body_self = serde_json::json!({"week": week_iso}).to_string();
         notifications::create_with_frontend_body(
             &app_state,
             &language,
@@ -316,11 +223,11 @@ pub async fn create(
         )
         .await;
         // Notify each approver that the reopen was auto-approved (informational).
-        let frontend_body_approver = format!(
-            "{{\"week\":\"{}\",\"requester_name\":{}}}",
-            week_iso,
-            serde_json::json!(&requester_full_name),
-        );
+        let frontend_body_approver = serde_json::json!({
+            "week": week_iso,
+            "requester_name": requester_full_name,
+        })
+        .to_string();
         for approver_id in &approver_ids_for_notification {
             notifications::create_with_frontend_body(
                 &app_state,
@@ -349,11 +256,11 @@ pub async fn create(
         })))
     } else {
         // Notify all approvers that a manual reopen request is pending.
-        let frontend_body_created = format!(
-            "{{\"week\":\"{}\",\"requester_name\":{}}}",
-            week_iso,
-            serde_json::json!(&requester_full_name),
-        );
+        let frontend_body_created = serde_json::json!({
+            "week": week_iso,
+            "requester_name": requester_full_name,
+        })
+        .to_string();
         for approver_id in &approver_ids_for_notification {
             notifications::create_with_frontend_body(
                 &app_state,
@@ -452,27 +359,21 @@ async fn notify_assigned_approvers_if_admin_acted(
     if approver_ids.is_empty() {
         return;
     }
-    let employee_full_name: String =
-        sqlx::query_scalar("SELECT first_name || ' ' || last_name FROM users WHERE id=$1")
-            .bind(request_user_id)
-            .fetch_optional(&app_state.pool)
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| format!("User {request_user_id}"));
+    let employee_full_name: String = app_state
+        .db
+        .reopen_requests
+        .get_user_full_name(request_user_id)
+        .await
+        .unwrap_or_else(|_| format!("User {request_user_id}"));
 
     // Build frontend JSON with the employee's name (not the admin's).
     let reason = extra_params.iter().find(|(k, _)| *k == "reason").map(|(_, v)| v.as_str());
-    let frontend_body = match reason {
-        Some(r) => format!(
-            "{{\"week\":\"{}\",\"requester_name\":{},\"reason\":{}}}",
-            week_iso, serde_json::json!(&employee_full_name), serde_json::json!(r)
-        ),
-        None => format!(
-            "{{\"week\":\"{}\",\"requester_name\":{}}}",
-            week_iso, serde_json::json!(&employee_full_name)
-        ),
-    };
+    let frontend_body = if let Some(r) = reason {
+        serde_json::json!({"week": week_iso, "requester_name": employee_full_name, "reason": r})
+    } else {
+        serde_json::json!({"week": week_iso, "requester_name": employee_full_name})
+    }
+    .to_string();
 
     let mut params = vec![
         ("requester_name", employee_full_name),
@@ -505,58 +406,15 @@ pub async fn approve(
     if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let mut transaction = app_state.pool.begin().await?;
-    let reopen_request: ReopenRequest = sqlx::query_as(
-        "SELECT id, user_id, week_start, reviewed_by, status, reviewed_at, \
-         rejection_reason, created_at \
-         FROM reopen_requests WHERE id=$1 FOR UPDATE",
-    )
-    .bind(request_id)
-    .fetch_optional(&mut *transaction)
-    .await?
-    .ok_or(AppError::NotFound)?;
-    if reopen_request.status != "pending" {
-        return Err(AppError::BadRequest("Request is not pending.".into()));
-    }
-    // Non-admin team leads cannot approve their own reopen request — only an
-    // admin may self-approve (e.g. an admin correcting their own timesheet).
-    if reopen_request.user_id == requester.id && !requester.is_admin() {
-        return Err(AppError::Forbidden);
-    }
-    // Non-admin team leads must be explicitly assigned as approver for this
-    // user; any admin may approve unconditionally.
-    if !requester.is_admin() {
-        let is_assigned_approver: Option<bool> =
-            sqlx::query_scalar(ACTIVE_ASSIGNED_APPROVER_FOR_UPDATE_SQL)
-                .bind(reopen_request.user_id)
-                .bind(requester.id)
-                .fetch_optional(&mut *transaction)
-                .await?;
-        if is_assigned_approver.is_none() {
-            return Err(AppError::Forbidden);
-        }
-    }
+    let (reopen_request_repo, reopened_entries) = app_state
+        .db
+        .reopen_requests
+        .approve_with_access_check(request_id, requester.id, requester.is_admin())
+        .await?;
+    let reopen_request = repo_rr_to_service(reopen_request_repo);
     let language = notification_language(&app_state.pool).await;
     let week_label = i18n::format_week_label(&language, reopen_request.week_start);
     let week_iso = reopen_request.week_start.format("%Y-%m-%d").to_string();
-    let reopened_entries =
-        perform_reopen_in_tx(&mut transaction, reopen_request.user_id, reopen_request.week_start)
-            .await?;
-    let rows_approved = sqlx::query(
-        "UPDATE reopen_requests SET status='approved', reviewed_by=$2, reviewed_at=CURRENT_TIMESTAMP \
-         WHERE id=$1 AND status='pending'",
-    )
-    .bind(request_id)
-    .bind(requester.id)
-    .execute(&mut *transaction)
-    .await?
-    .rows_affected();
-    if rows_approved == 0 {
-        return Err(AppError::Conflict(
-            "Reopen request was already resolved by someone else.".into(),
-        ));
-    }
-    transaction.commit().await?;
     audit_reopened_entries(&app_state.pool, requester.id, &reopened_entries).await;
     let entries_reopened = reopened_entries.len() as i64;
     audit::log(
@@ -640,77 +498,36 @@ pub async fn reject(
     if rejection_reason.len() > 2000 {
         return Err(AppError::BadRequest("Reason too long.".into()));
     }
-    // Use a transaction with row-level lock, mirroring the approve handler,
-    // so that the authorization check and the status update are atomic.
-    let mut transaction = app_state.pool.begin().await?;
-    let reopen_request: ReopenRequest = sqlx::query_as(
-        "SELECT id, user_id, week_start, reviewed_by, status, reviewed_at, \
-         rejection_reason, created_at \
-         FROM reopen_requests WHERE id=$1 FOR UPDATE",
-    )
-    .bind(request_id)
-    .fetch_optional(&mut *transaction)
-    .await?
-    .ok_or(AppError::NotFound)?;
-    if reopen_request.status != "pending" {
-        return Err(AppError::BadRequest("Request is not pending.".into()));
-    }
-    // Non-admin team leads cannot reject their own reopen request.
-    if reopen_request.user_id == requester.id && !requester.is_admin() {
-        return Err(AppError::Forbidden);
-    }
-    // Non-admin team leads must be explicitly assigned as approver for this user.
-    if !requester.is_admin() {
-        let is_assigned_approver: Option<bool> =
-            sqlx::query_scalar(ACTIVE_ASSIGNED_APPROVER_FOR_UPDATE_SQL)
-                .bind(reopen_request.user_id)
-                .bind(requester.id)
-                .fetch_optional(&mut *transaction)
-                .await?;
-        if is_assigned_approver.is_none() {
-            return Err(AppError::Forbidden);
-        }
-    }
-    let rows_claimed = sqlx::query(
-        "UPDATE reopen_requests SET status='rejected', reviewed_by=$2, reviewed_at=CURRENT_TIMESTAMP, \
-         rejection_reason=$3 WHERE id=$1 AND status='pending'",
-    )
-    .bind(request_id)
-    .bind(requester.id)
-    .bind(rejection_reason)
-    .execute(&mut *transaction)
-    .await?
-    .rows_affected();
-    if rows_claimed == 0 {
-        return Err(AppError::Conflict(
-            "Request was already resolved by someone else.".into(),
-        ));
-    }
-    transaction.commit().await?;
+    let before = app_state
+        .db
+        .reopen_requests
+        .reject_with_access_check(request_id, requester.id, requester.is_admin(), rejection_reason)
+        .await?;
+    let before = repo_rr_to_service(before);
     audit::log(
         &app_state.pool,
         requester.id,
         "rejected",
         "reopen_requests",
         request_id,
-        serde_json::to_value(&reopen_request).ok(),
+        serde_json::to_value(&before).ok(),
         Some(serde_json::json!({ "status": "rejected", "reason": rejection_reason })),
     )
     .await;
     let language = notification_language(&app_state.pool).await;
-    let week_label = i18n::format_week_label(&language, reopen_request.week_start);
-    let week_iso = reopen_request.week_start.format("%Y-%m-%d").to_string();
+    let week_label = i18n::format_week_label(&language, before.week_start);
+    let week_iso = before.week_start.format("%Y-%m-%d").to_string();
     // Notify the employee whose reopen request was rejected (in-app only when self-rejected).
     let frontend_body_rejected = format!(
         "{{\"week\":\"{}\",\"reason\":{}}}",
         week_iso,
         serde_json::json!(rejection_reason),
     );
-    if reopen_request.user_id != requester.id {
+    if before.user_id != requester.id {
         notifications::create_with_frontend_body(
             &app_state,
             &language,
-            reopen_request.user_id,
+            before.user_id,
             "reopen_rejected",
             "reopen_rejected_title",
             "reopen_rejected_body",
@@ -729,7 +546,7 @@ pub async fn reject(
         notifications::create_with_frontend_body(
             &app_state,
             &language,
-            reopen_request.user_id,
+            before.user_id,
             "reopen_rejected",
             "reopen_rejected_title",
             "reopen_rejected_body",
@@ -751,7 +568,7 @@ pub async fn reject(
         &app_state,
         &language,
         &requester,
-        reopen_request.user_id,
+        before.user_id,
         request_id,
         "reopen_rejected_by_admin",
         "reopen_rejected_by_admin_title",

@@ -484,6 +484,36 @@ impl TimeEntryDb {
         )
     }
 
+    /// Returns true if every entry in `ids` is owned by `user_id`.
+    /// A single query replaces the previous N+1 per-entry ownership loop.
+    pub async fn all_entries_owned_by_user(&self, ids: &[i64], user_id: i64) -> AppResult<bool> {
+        if ids.is_empty() {
+            return Ok(true);
+        }
+        let unowned: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM time_entries WHERE id = ANY($1) AND user_id != $2",
+        )
+        .bind(ids)
+        .bind(user_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(unowned == 0)
+    }
+
+    /// Returns the distinct entry dates for the given entry IDs.
+    /// A single query replaces the previous N+1 per-entry date fetches.
+    pub async fn entry_dates_for_ids(&self, ids: &[i64]) -> AppResult<Vec<NaiveDate>> {
+        if ids.is_empty() {
+            return Ok(vec![]);
+        }
+        Ok(sqlx::query_scalar(
+            "SELECT DISTINCT entry_date FROM time_entries WHERE id = ANY($1)",
+        )
+        .bind(ids)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
     pub async fn get_credited_submitted_dates_for_entries(
         &self,
         user_id: i64,
@@ -807,6 +837,25 @@ impl TimeEntryDb {
         let rows: Vec<(NaiveDate,)> = sqlx::query_as(
             "SELECT DISTINCT entry_date FROM time_entries \
              WHERE user_id=$1 AND status IN ('submitted','approved') \
+             AND entry_date BETWEEN $2 AND $3",
+        )
+        .bind(user_id)
+        .bind(from)
+        .bind(to)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(|(d,)| d).collect())
+    }
+
+    pub async fn get_incomplete_dates_in_range(
+        &self,
+        user_id: i64,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> AppResult<Vec<NaiveDate>> {
+        let rows: Vec<(NaiveDate,)> = sqlx::query_as(
+            "SELECT DISTINCT entry_date FROM time_entries \
+             WHERE user_id=$1 AND status NOT IN ('submitted','approved') \
              AND entry_date BETWEEN $2 AND $3",
         )
         .bind(user_id)
