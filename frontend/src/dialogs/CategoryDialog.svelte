@@ -1,13 +1,11 @@
 <script>
-  import { onMount } from "svelte";
   import { api } from "../api.js";
   import { t } from "../i18n.js";
-  import Icon from "../Icons.svelte";
+  import Dialog from "../Dialog.svelte";
 
   export let template;
   export let onClose;
-  let dlg;
-  let _closed = false;
+  let dialog;
   $: isNew = !template.id;
   let canonicalName = template.name || "";
   let name = template.id ? $t(canonicalName) : canonicalName;
@@ -18,8 +16,6 @@
   let counts_as_work = template.counts_as_work ?? true;
   let active = template.active ?? true;
   let error = "";
-
-  onMount(() => dlg.showModal());
 
   async function save() {
     error = "";
@@ -36,83 +32,72 @@
       }
       if (isNew) await api("/categories", { method: "POST", body });
       else await api("/categories/" + template.id, { method: "PUT", body });
-      _closed = true;
-      dlg.close();
       onClose(true);
+      dialog.close(true);
     } catch (e) {
       error = $t(e?.message || "Error");
     }
   }
-
-  function cancel() {
-    if (_closed) return;
-    _closed = true;
-    dlg.close();
-    onClose(false);
-  }
 </script>
 
-<dialog bind:this={dlg} on:close={cancel}>
-  <header>
-    <span style="flex:1">{$t(isNew ? "Add Category" : "Edit Category")}</span>
-    <button class="zf-btn-icon-sm zf-btn-ghost" on:click={cancel}>
-      <Icon name="X" size={16} />
-    </button>
-  </header>
+<Dialog
+  bind:this={dialog}
+  title={$t(isNew ? "Add Category" : "Edit Category")}
+  onClose={() => onClose(false)}
+>
   <div class="dialog-body">
+  <div>
+    <label class="zf-label" for="cat-name">{$t("Name")}</label>
+    <input
+      id="cat-name"
+      class="zf-input"
+      bind:value={name}
+      on:input={() => (nameChanged = true)}
+      required
+    />
+  </div>
+  <div>
+    <label class="zf-label" for="cat-description">{$t("Description")}</label>
+    <input id="cat-description" class="zf-input" bind:value={description} />
+  </div>
+  <div class="field-row">
     <div>
-      <label class="zf-label" for="cat-name">{$t("Name")}</label>
+      <label class="zf-label" for="cat-color">{$t("Color")}</label>
       <input
-        id="cat-name"
+        id="cat-color"
         class="zf-input"
-        bind:value={name}
-        on:input={() => (nameChanged = true)}
-        required
+        type="color"
+        bind:value={color}
+        style="height:36px;padding:4px"
       />
     </div>
     <div>
-      <label class="zf-label" for="cat-description">{$t("Description")}</label>
-      <input id="cat-description" class="zf-input" bind:value={description} />
+      <label class="zf-label" for="cat-order">{$t("Order")}</label>
+      <input
+        id="cat-order"
+        class="zf-input"
+        type="number"
+        bind:value={sort_order}
+      />
     </div>
-    <div class="field-row">
-      <div>
-        <label class="zf-label" for="cat-color">{$t("Color")}</label>
-        <input
-          id="cat-color"
-          class="zf-input"
-          type="color"
-          bind:value={color}
-          style="height:36px;padding:4px"
-        />
-      </div>
-      <div>
-        <label class="zf-label" for="cat-order">{$t("Order")}</label>
-        <input
-          id="cat-order"
-          class="zf-input"
-          type="number"
-          bind:value={sort_order}
-        />
-      </div>
-    </div>
+  </div>
+  <label
+    style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:8px"
+  >
+    <input type="checkbox" bind:checked={counts_as_work} />
+    <span>{$t("Counts as work")}</span>
+  </label>
+  {#if !isNew}
     <label
       style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:8px"
     >
-      <input type="checkbox" bind:checked={counts_as_work} />
-      <span>{$t("Counts as work")}</span>
+      <input type="checkbox" bind:checked={active} />
+      <span>{$t("Active")}</span>
     </label>
-    {#if !isNew}
-      <label
-        style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:8px"
-      >
-        <input type="checkbox" bind:checked={active} />
-        <span>{$t("Active")}</span>
-      </label>
-    {/if}
-    <div class="error-text">{error}</div>
-  </div>
-  <footer>
-    <button class="zf-btn" on:click={cancel}>{$t("Cancel")}</button>
+  {/if}
+  <div class="error-text">{error}</div>
+  <svelte:fragment slot="footer">
+    <button class="zf-btn" on:click={() => dialog.close()}>{$t("Cancel")}</button>
     <button class="zf-btn zf-btn-primary" on:click={save}>{$t("Save")}</button>
-  </footer>
-</dialog>
+  </svelte:fragment>
+</Dialog>

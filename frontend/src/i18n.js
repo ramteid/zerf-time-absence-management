@@ -92,6 +92,8 @@ const TRANSLATIONS = {
     audit_action_password_reset: "Password Reset",
     audit_action_deactivated: "Deactivated",
     audit_action_reopened: "Editing Enabled",
+    Before: "Before",
+    After: "After",
     "of {target} target": "of {target} target",
     "Open calendar": "Open calendar",
     "Open time picker": "Open time picker",
@@ -949,6 +951,8 @@ const TRANSLATIONS = {
     audit_action_password_reset: "Passwort zurückgesetzt",
     audit_action_deactivated: "Deaktiviert",
     audit_action_reopened: "Bearbeitung freigegeben",
+    Before: "Vorher",
+    After: "Nachher",
     Data: "Daten",
     Summary: "Zusammenfassung",
     // Admin settings

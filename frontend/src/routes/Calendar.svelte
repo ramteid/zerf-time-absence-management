@@ -16,6 +16,7 @@
     minToHM,
   } from "../format.js";
   import Icon from "../Icons.svelte";
+  import Dialog from "../Dialog.svelte";
   import { HOLIDAY_COLOR, ABSENCE_COLORS, FALLBACK_COLORS } from "../colors.js";
 
   let entries = [];
@@ -23,7 +24,6 @@
   let timeEntries = [];
   let users = [];
   let year, month;
-  let dlg;
   let popupCell = null;
   let loadSeq = 0;
 
@@ -298,17 +298,10 @@
     return [...seen.values()];
   })();
 
-  async function clickDay(cell) {
+  function clickDay(cell) {
     const cellEventsList = cell.events;
     if (cellEventsList.length === 0) return;
     popupCell = { ...cell, events: cellEventsList };
-    await tick();
-    dlg?.showModal();
-  }
-
-  function closeDlg() {
-    dlg?.close();
-    popupCell = null;
   }
 </script>
 
@@ -390,32 +383,24 @@
   </div>
 </div>
 
-<dialog bind:this={dlg} on:close={() => (popupCell = null)}>
-  {#if popupCell}
-    <header>
-      <span style="flex:1">{fmtDate(popupCell.ds)}</span>
-      <button class="zf-btn-icon-sm zf-btn-ghost" on:click={closeDlg}>
-        <Icon name="X" size={16} />
-      </button>
-    </header>
-    <div class="dialog-body">
-      {#each popupCell.events as ev}
-        <div
-          style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:13px"
-        >
-          <span
-            style="display:inline-block;width:10px;height:10px;border-radius:2px;background:{ev.color};flex-shrink:0"
-          ></span>
-          <span style="font-weight:500">{ev.popupLabel || ev.label}</span>
-          {#if ev.detail}
-            <span style="color:var(--text-muted)">{ev.detail}</span>
-          {/if}
-        </div>
-      {/each}
-    </div>
-    <footer>
+{#if popupCell}
+  <Dialog title={fmtDate(popupCell.ds)} onClose={() => (popupCell = null)}>
+    {#each popupCell.events as ev}
+      <div
+        style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:13px"
+      >
+        <span
+          style="display:inline-block;width:10px;height:10px;border-radius:2px;background:{ev.color};flex-shrink:0"
+        ></span>
+        <span style="font-weight:500">{ev.popupLabel || ev.label}</span>
+        {#if ev.detail}
+          <span style="color:var(--text-muted)">{ev.detail}</span>
+        {/if}
+      </div>
+    {/each}
+    <svelte:fragment slot="footer">
       <span style="flex:1"></span>
-      <button class="zf-btn" on:click={closeDlg}>{$t("Close")}</button>
-    </footer>
-  {/if}
-</dialog>
+      <button class="zf-btn" on:click={() => (popupCell = null)}>{$t("Close")}</button>
+    </svelte:fragment>
+  </Dialog>
+{/if}
