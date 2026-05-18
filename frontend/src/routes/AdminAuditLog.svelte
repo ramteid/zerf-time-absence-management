@@ -1,7 +1,7 @@
 <script>
   import { api } from "../api.js";
-  import { t, auditTableLabel, auditActionLabel } from "../i18n.js";
-  import { fmtDateTime } from "../format.js";
+  import { t, auditTableLabel, auditActionLabel, absenceKindLabel } from "../i18n.js";
+  import { fmtDateTime, fmtDate, fmtDateShort, parseDate, monday, addDays, isoDate, isoWeek } from "../format.js";
   import Dialog from "../Dialog.svelte";
 
   let log = [];
@@ -24,29 +24,92 @@
   }
   load();
 
-  function userLabel(userId, userMap) {
-    return userMap.get(userId) || (userId == null ? "System" : `#${userId}`);
+  const TIME_ENTRY_GROUP_WINDOW_MS = 45 * 1000;
+
+  function safeParseJson(raw) {
+    if (!raw) return null;
+    try {
+      return typeof raw === "string" ? JSON.parse(raw) : raw;
+    } catch {
+      return null;
+    }
   }
 
-  function dataSummary(entry) {
-    const raw =
-      entry.action === "deleted" ? entry.before_data : entry.after_data;
-    if (!raw) return "";
-    try {
-      const parsedData = typeof raw === "string" ? JSON.parse(raw) : raw;
-      const keys = [
-        "name", "email", "kind", "status", "entry_date",
-        "start_date", "end_date", "start_time", "end_time",
-        "role", "key", "value",
-      ];
-      const parts = [];
-      for (const fieldKey of keys) {
-        if (parsedData[fieldKey] != null) parts.push(`${fieldKey}: ${parsedData[fieldKey]}`);
-      }
-      return parts.join(", ");
-    } catch {
+  function relevantPayload(entry) {
+    const payload = entry.action === "deleted" ? entry.before_data : entry.after_data;
+    return safeParseJson(payload);
+  }
+
+  function weekInfoFromEntry(entry) {
+    if (entry.table_name !== "time_entries") return null;
+    const payload = relevantPayload(entry);
+    const entryDate = payload?.entry_date;
+    if (!entryDate) return null;
+
+    const weekStartDate = monday(parseDate(entryDate));
+    const weekEndDate = addDays(weekStartDate, 6);
+    return {
+      week_start: isoDate(weekStartDate),
+      week_end: isoDate(weekEndDate),
+      week_number: isoWeek(weekStartDate),
+    };
+  }
+
+  function summarize(entry, translate) {
+    const payload = relevantPayload(entry);
+    if (!payload) return "";
+
+    if (entry.table_name === "users") {
+      const fullName = `${payload.first_name || ""} ${payload.last_name || ""}`.trim();
+      if (fullName && payload.email) return `${fullName} (${payload.email})`;
+      if (fullName) return fullName;
+      if (payload.email) return payload.email;
       return "";
     }
+
+    if (entry.table_name === "absences") {
+      const kind = payload.kind ? absenceKindLabel(payload.kind) : null;
+      if (payload.start_date && payload.end_date) {
+        const range = `${fmtDateShort(payload.start_date)} - ${fmtDateShort(payload.end_date)}`;
+        return kind ? `${kind}, ${range}` : range;
+      }
+      if (kind) return kind;
+      return "";
+    }
+
+    if (entry.table_name === "categories") {
+      return payload.name || "";
+    }
+
+    if (entry.table_name === "holidays") {
+      if (payload.holiday_date && payload.name) {
+        return `${fmtDate(payload.holiday_date)}, ${payload.name}`;
+      }
+      return payload.name || "";
+    }
+
+    if (entry.table_name === "app_settings") {
+      return payload.key || "";
+    }
+
+    if (entry.table_name === "reopen_requests") {
+      if (payload.week_start_date) {
+        const start = parseDate(payload.week_start_date);
+        const end = addDays(start, 6);
+        return translate("Week {week}: {from} - {to}", {
+          week: isoWeek(start),
+          from: fmtDateShort(start),
+          to: fmtDateShort(end),
+        });
+      }
+      return "";
+    }
+
+    return "";
+  }
+
+  function userLabel(userId, userMap, translate) {
+    return userMap.get(userId) || (userId == null ? translate("audit_system_user") : `#${userId}`);
   }
 
   function formatJson(raw) {
@@ -66,11 +129,67 @@
     return "action-muted";
   }
 
-  $: rows = log.map((entry) => ({
-    ...entry,
-    user_label: userLabel(entry.user_id, usersById),
-    data_summary: dataSummary(entry),
-  }));
+  function canMergeTimeEntryRows(previous, current, currentWeek) {
+    if (!previous || !currentWeek || !previous.is_time_entry_week) return false;
+    if (previous.table_name !== "time_entries" || current.table_name !== "time_entries") return false;
+    if (previous.action !== current.action || previous.user_id !== current.user_id) return false;
+    if (previous.week_start !== currentWeek.week_start) return false;
+
+    const previousTs = Date.parse(previous.occurred_at);
+    const currentTs = Date.parse(current.occurred_at);
+    if (Number.isNaN(previousTs) || Number.isNaN(currentTs)) return false;
+    return Math.abs(previousTs - currentTs) <= TIME_ENTRY_GROUP_WINDOW_MS;
+  }
+
+  function buildRows(entries, userMap, translate) {
+    const nextRows = [];
+
+    for (const entry of entries) {
+      const baseRow = {
+        ...entry,
+        user_label: userLabel(entry.user_id, userMap, translate),
+        data_summary: summarize(entry, translate),
+        is_time_entry_week: false,
+      };
+
+      const weekInfo = weekInfoFromEntry(entry);
+      if (!weekInfo) {
+        nextRows.push(baseRow);
+        continue;
+      }
+
+      const previous = nextRows[nextRows.length - 1];
+      if (canMergeTimeEntryRows(previous, entry, weekInfo)) {
+        previous.group_count += 1;
+        previous.data_summary = translate("audit_time_entries_week_summary", {
+          week: previous.week_number,
+          from: fmtDateShort(previous.week_start),
+          to: fmtDateShort(previous.week_end),
+          count: previous.group_count,
+        });
+        continue;
+      }
+
+      nextRows.push({
+        ...baseRow,
+        is_time_entry_week: true,
+        week_start: weekInfo.week_start,
+        week_end: weekInfo.week_end,
+        week_number: weekInfo.week_number,
+        group_count: 1,
+        data_summary: translate("audit_time_entries_week_summary", {
+          week: weekInfo.week_number,
+          from: fmtDateShort(weekInfo.week_start),
+          to: fmtDateShort(weekInfo.week_end),
+          count: 1,
+        }),
+      });
+    }
+
+    return nextRows;
+  }
+
+  $: rows = buildRows(log, usersById, $t);
 
   function openDetail(entry) {
     selected = entry;
@@ -116,17 +235,32 @@
       <span class="detail-label">{$t("User")}</span>
       <span>{selected.user_label}</span>
     </div>
-    {#if selected.before_data}
-      <div class="detail-section">
-        <span class="detail-label">{$t("Before")}</span>
-        <pre class="detail-json">{formatJson(selected.before_data)}</pre>
+    {#if selected.is_time_entry_week}
+      <div class="detail-row">
+        <span class="detail-label">{$t("Week")}</span>
+        <span>{$t("Week {week}: {from} - {to}", {
+          week: selected.week_number,
+          from: fmtDateShort(selected.week_start),
+          to: fmtDateShort(selected.week_end),
+        })}</span>
       </div>
-    {/if}
-    {#if selected.after_data}
-      <div class="detail-section">
-        <span class="detail-label">{$t("After")}</span>
-        <pre class="detail-json">{formatJson(selected.after_data)}</pre>
+      <div class="detail-row">
+        <span class="detail-label">{$t("Days")}</span>
+        <span>{selected.group_count}</span>
       </div>
+    {:else}
+      {#if selected.before_data}
+        <div class="detail-section">
+          <span class="detail-label">{$t("Before")}</span>
+          <pre class="detail-json">{formatJson(selected.before_data)}</pre>
+        </div>
+      {/if}
+      {#if selected.after_data}
+        <div class="detail-section">
+          <span class="detail-label">{$t("After")}</span>
+          <pre class="detail-json">{formatJson(selected.after_data)}</pre>
+        </div>
+      {/if}
     {/if}
   </Dialog>
 {/if}

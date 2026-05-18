@@ -92,6 +92,9 @@ const TRANSLATIONS = {
     audit_action_password_reset: "Password Reset",
     audit_action_deactivated: "Deactivated",
     audit_action_reopened: "Editing Enabled",
+    audit_system_user: "System",
+    audit_time_entries_week_summary:
+      "Week {week}: {from} - {to} ({count} day entries)",
     Before: "Before",
     After: "After",
     "of {target} target": "of {target} target",
@@ -350,6 +353,9 @@ const TRANSLATIONS = {
     Categories: "Kategorien",
     Holidays: "Feiertage",
     "Audit log": "Audit-Protokoll",
+    audit_system_user: "System",
+    audit_time_entries_week_summary:
+      "Woche {week}: {from} - {to} ({count} Tagesbuchungen)",
     "Time tracking": "Zeiterfassung",
     "Previous week": "Vorherige Woche",
     "Next week": "Nächste Woche",

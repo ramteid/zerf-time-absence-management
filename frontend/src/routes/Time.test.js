@@ -40,7 +40,10 @@ function pastMonday() {
   const diff = day === 0 ? 6 : day - 1;
   const mon = new Date(now);
   mon.setDate(mon.getDate() - diff - 7); // last week's Monday
-  return mon.toISOString().slice(0, 10);
+  const year = mon.getFullYear();
+  const month = String(mon.getMonth() + 1).padStart(2, "0");
+  const dayOfMonth = String(mon.getDate()).padStart(2, "0");
+  return `${year}-${month}-${dayOfMonth}`;
 }
 
 describe("Time", () => {

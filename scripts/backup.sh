@@ -125,14 +125,18 @@ apply_retention() {
 run_backup_once() {
   validate_retention || return 1
 
+  # Sweep stale temp files from previous runs interrupted by SIGTERM/SIGKILL.
+  # The retention pattern matches only finalized snapshots, so orphan .tmp
+  # files would otherwise accumulate forever in the backup volume.
+  find "$OUT_DIR" -maxdepth 1 -type f \
+    \( -name 'zerf-*.dump.tmp' -o -name 'zerf-*.metadata.tmp' \) \
+    -exec rm -f {} +
+
   ts="$(date -u +%Y%m%dT%H%M%SZ)"
   output_file="$OUT_DIR/zerf-$ts.dump"
   metadata_file="$OUT_DIR/zerf-$ts.metadata"
   temp_file="$output_file.tmp"
   temp_metadata_file="$metadata_file.tmp"
-
-  rm -f "$temp_file"
-  rm -f "$temp_metadata_file"
 
   if ! run_direct_pg_dump > "$temp_file"; then
     rm -f "$temp_file"
@@ -164,11 +168,18 @@ run_backup_once() {
 }
 
 validate_interval || exit 1
-run_backup_once
 
 if [ -z "$INTERVAL" ]; then
+  # One-shot mode: propagate failure so ad-hoc callers see a non-zero exit.
+  run_backup_once
   exit 0
 fi
+
+# Daemon mode: tolerate failures on every attempt — including the first —
+# so a transient pg_dump error on startup does not turn into a Docker
+# restart loop against `restart: unless-stopped`. The container stays up
+# and the next scheduled attempt still fires.
+run_backup_once || echo "Initial backup attempt failed; will retry in ${INTERVAL}s." >&2
 
 while :; do
   sleep "$INTERVAL"
