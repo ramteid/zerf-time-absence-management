@@ -1,5 +1,4 @@
 <script>
-  import { tick } from "svelte";
   import { api } from "../api.js";
   import { path, go, currentUser, categories, settings } from "../stores.js";
   import { t, absenceKindLabel } from "../i18n.js";

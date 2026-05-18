@@ -78,7 +78,7 @@
 
   function closeDialog(changed, savedAbsence = null) {
     pendingClose = { changed, savedAbsence };
-    dialog.close(true);
+    dialog.close();
   }
 
   async function save() {
@@ -115,7 +115,7 @@
 <Dialog
   bind:this={dialog}
   title={$t(isNew ? "Request Absence" : "Edit Absence")}
-  onClose={() => pendingClose && onClose(pendingClose.changed, pendingClose.savedAbsence)}
+  onClose={() => onClose(pendingClose?.changed ?? false, pendingClose?.savedAbsence ?? null)}
 >
   <div>
     <label class="zf-label" for="absence-kind">{$t("Type")}</label>

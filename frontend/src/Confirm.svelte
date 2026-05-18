@@ -17,8 +17,8 @@
       toast($t("Reason required"), "error");
       return;
     }
-    onResolve(needReason ? reason : true);
     dialog.close(true);
+    onResolve(needReason ? reason : true);
   }
 </script>
 

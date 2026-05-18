@@ -75,8 +75,8 @@
       const saved = isNew
         ? await api("/time-entries", { method: "POST", body })
         : await api("/time-entries/" + template.id, { method: "PUT", body });
-      onClose({ changed: true, entry: saved, deletedId: null });
       dialog.close(true);
+      onClose({ changed: true, entry: saved, deletedId: null });
     } catch (e) {
       error = $t(e?.message || "Error");
     }
@@ -92,8 +92,8 @@
       return;
     try {
       await api("/time-entries/" + template.id, { method: "DELETE" });
-      onClose({ changed: true, entry: null, deletedId: template.id });
       dialog.close(true);
+      onClose({ changed: true, entry: null, deletedId: template.id });
     } catch (e) {
       error = $t(e?.message || "Error");
     }

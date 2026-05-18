@@ -182,8 +182,8 @@
       } else {
         await api("/users/" + template.id, { method: "PUT", body });
         toast($t("User updated."), "ok");
-        onClose(true);
         dialog.close(true);
+        onClose(true);
       }
     } catch (e) {
       error = $t(e?.message || "Error");
@@ -201,8 +201,8 @@
 
   function dismissTempPassword() {
     showTempPassword = null;
-    onClose(true);
     dialog.close(true);
+    onClose(true);
   }
 </script>
 
