@@ -22,7 +22,7 @@ async fn notifications_full_workflow() {
         let (st, _) = emp
             .post(
                 "/api/v1/reopen-requests",
-                &json!({"week_start": monday_iso}),
+                &json!({"week_start": monday_iso, "reason": "Test reason"}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "create reopen request");
