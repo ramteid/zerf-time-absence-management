@@ -679,6 +679,8 @@ Zerf distinguishes between workflow coverage and work-credit math.
 - Category breakdowns show booked non-rejected time entries in scope (not only
 	crediting categories).
 - This gives a complete operational view of what was booked by category.
+- Employees must supply an explicit `user_id` to query their own breakdown.
+- Leads and admins may omit `user_id` to get a team aggregate view.
 
 ### Team report scope
 

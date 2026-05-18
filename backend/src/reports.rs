@@ -1012,14 +1012,15 @@ pub async fn categories(
         return Ok(Json(Vec::new()));
     }
 
-    // When no user_id is given: leads see team aggregate, non-leads see their own data.
+    // When no user_id is given: leads see team aggregate. Non-leads must provide
+    // user_id explicitly (user-guide: team report scope is leads/admins only).
     let target_user_id = if let Some(uid) = query.user_id {
         assert_can_access_user(&app_state, &requester, uid).await?;
         Some(uid)
     } else if requester.is_lead() {
         None
     } else {
-        Some(requester.id)
+        return Err(AppError::Forbidden);
     };
     // Category breakdown reports include all non-rejected entries regardless of
     // crediting status (user-guide: "not only crediting categories").
