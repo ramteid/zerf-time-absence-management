@@ -229,9 +229,11 @@ pub fn per_day_target_minutes(weekly_hours: i64) -> i64 {
 /// Login as admin and change the initial password.
 pub async fn admin_login(app: &TestApp) -> TestClient {
     let admin = app.client();
-    admin.login("admin@example.com", &app.admin_password).await;
-    admin
+    let (st, _) = admin.login("admin@example.com", &app.admin_password).await;
+    assert_eq!(st, StatusCode::OK, "admin login");
+    let (st, _) = admin
         .change_password(&app.admin_password, "AdminPass!234")
         .await;
+    assert_eq!(st, StatusCode::OK, "admin change password");
     admin
 }

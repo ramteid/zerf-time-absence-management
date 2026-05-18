@@ -19,24 +19,41 @@ async fn notifications_full_workflow() {
             bootstrap_team_with_suffix(&app, &admin, true, "1").await;
         let emp = login_change_pw(&app, "emp-1@example.com", &emp_pw).await;
         let _ = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
-        emp.post(
-            "/api/v1/reopen-requests",
-            &json!({"week_start": monday_iso}),
-        )
-        .await;
+        let (st, _) = emp
+            .post(
+                "/api/v1/reopen-requests",
+                &json!({"week_start": monday_iso}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "create reopen request");
 
         let (st, body) = emp.get("/api/v1/notifications/unread-count").await;
         assert_eq!(st, StatusCode::OK);
-        assert!(body["count"].as_i64().unwrap() >= 1);
+        assert_eq!(
+            body["count"].as_i64().expect("unread-count must be integer"),
+            1,
+            "employee should have exactly 1 notification after auto-approved reopen"
+        );
 
         let (st, list) = emp.get("/api/v1/notifications").await;
         assert_eq!(st, StatusCode::OK);
-        let nid = list[0]["id"].as_i64().unwrap();
+        let notifications = list.as_array().expect("notifications must be an array");
+        assert!(!notifications.is_empty(), "notifications list must not be empty");
+        let nid = notifications[0]["id"]
+            .as_i64()
+            .expect("notification id must be integer");
 
         let (st, _) = emp
             .post(&format!("/api/v1/notifications/{}/read", nid), &json!({}))
             .await;
+        assert_eq!(st, StatusCode::OK, "mark single notification read");
+
+        let (st, body) = emp.get("/api/v1/notifications/unread-count").await;
         assert_eq!(st, StatusCode::OK);
+        assert_eq!(
+            body["count"], 0,
+            "unread count must be 0 after marking the only notification as read"
+        );
 
         let (st, _) = emp.post("/api/v1/notifications/read-all", &json!({})).await;
         assert_eq!(st, StatusCode::OK);
@@ -47,7 +64,8 @@ async fn notifications_full_workflow() {
 
         let (st, _) = emp.delete("/api/v1/notifications").await;
         assert_eq!(st, StatusCode::OK);
-        let (_, list) = emp.get("/api/v1/notifications").await;
+        let (st, list) = emp.get("/api/v1/notifications").await;
+        assert_eq!(st, StatusCode::OK, "fetch notifications after delete");
         assert_eq!(list.as_array().unwrap().len(), 0);
     }
 
@@ -354,20 +372,21 @@ async fn notifications_full_workflow() {
         let emp = login_change_pw(&app2, "emp-3@example.com", &emp_pw).await;
         let lead = login_change_pw(&app2, "lead-3@example.com", &lead_pw).await;
 
-        let (st, _) = emp
+        let (st, body) = emp
             .post(
                 "/api/v1/absences",
-                &serde_json::json!({
+                &json!({
                     "kind": "vacation",
                     "start_date": future_monday_iso,
                     "end_date": future_monday_iso,
                 }),
             )
             .await;
-        assert_eq!(st, reqwest::StatusCode::OK);
+        assert_eq!(st, StatusCode::OK, "create absence for public URL test");
+        assert_eq!(body["status"], "requested");
 
         let (st, notifications) = lead.get("/api/v1/notifications").await;
-        assert_eq!(st, reqwest::StatusCode::OK);
+        assert_eq!(st, StatusCode::OK);
 
         let notification = notifications
             .as_array()
