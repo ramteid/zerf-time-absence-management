@@ -231,14 +231,6 @@
         </div>
       </div>
     {/if}
-    <svelte:fragment slot="footer">
-      <button class="zf-btn" on:click={copyPassword}>
-        {copied ? $t("Copied!") : $t("Copy")}
-      </button>
-      <button class="zf-btn zf-btn-primary" on:click={dismissTempPassword}
-        >{$t("OK")}</button
-      >
-    </svelte:fragment>
   {:else}
     <div>
       <div class="field-row">
@@ -463,11 +455,20 @@
       {/if}
       <div class="error-text">{error}</div>
     </div>
-    <svelte:fragment slot="footer">
+  {/if}
+  <svelte:fragment slot="footer">
+    {#if showTempPassword}
+      <button class="zf-btn" on:click={copyPassword}>
+        {copied ? $t("Copied!") : $t("Copy")}
+      </button>
+      <button class="zf-btn zf-btn-primary" on:click={dismissTempPassword}
+        >{$t("OK")}</button
+      >
+    {:else}
       <button class="zf-btn" on:click={() => dialog.close()}>{$t("Cancel")}</button>
       <button class="zf-btn zf-btn-primary" on:click={save}>
         {$t(isNew ? "Add Member" : "Save")}
       </button>
-    </svelte:fragment>
-  {/if}
+    {/if}
+  </svelte:fragment>
 </Dialog>
