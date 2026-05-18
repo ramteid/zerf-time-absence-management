@@ -368,7 +368,7 @@ fn validate_absence(input: &NewAbsence) -> AppResult<&str> {
             "end_date must be >= start_date.".into(),
         ));
     }
-    if (input.end_date - input.start_date).num_days() >= 365 {
+    if (input.end_date - input.start_date).num_days() > 365 {
         return Err(AppError::BadRequest(
             "Absence range exceeds one year.".into(),
         ));
@@ -1122,7 +1122,7 @@ pub async fn revoke(
         return Err(AppError::Forbidden);
     }
     let owner_id = absence_owner_id(&app_state.pool, absence_id).await?;
-    let mut transaction = app_state.db.absences.begin().await?;
+    let mut transaction = app_state.pool.begin().await?;
     crate::repository::AbsenceDb::lock_user_scope_tx(&mut transaction, owner_id).await?;
     let absence = repo_absence_to_service(
         crate::repository::AbsenceDb::find_for_update(&mut transaction, absence_id).await?,
@@ -1235,9 +1235,14 @@ async fn annual_days_or_default(
     year: i32,
     default_days: i64,
 ) -> AppResult<i64> {
-    crate::repository::UserDb::new(pool.clone())
-        .annual_days_or_default(user_id, year, default_days)
-        .await
+    Ok(sqlx::query_scalar::<_, i64>(
+        "SELECT days FROM user_annual_leave WHERE user_id=$1 AND year=$2",
+    )
+    .bind(user_id)
+    .bind(year)
+    .fetch_optional(pool)
+    .await?
+    .unwrap_or(default_days))
 }
 
 /// Parse the carryover expiry date setting (MM-DD) into a NaiveDate for the given year.
