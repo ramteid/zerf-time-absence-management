@@ -115,6 +115,7 @@
   title={$t(isNew ? "Add Entry" : "Edit Entry")}
   onClose={() => onClose({ changed: false, entry: null, deletedId: null })}
   on:keydown={onDialogKeydown}
+  let:dlg
 >
   <div>
     <div>
@@ -123,7 +124,7 @@
         id="entry-date"
         bind:value={entry_date}
         max={todayIso}
-        container={dialog.element}
+        container={dlg}
       />
     </div>
     <div class="field-row">

@@ -9,7 +9,13 @@
   let dlg;
   let _silent = false;
 
-  onMount(() => dlg.showModal());
+  onMount(() => {
+    try {
+      dlg.showModal();
+    } catch {
+      dlg.setAttribute("open", "open");
+    }
+  });
 
   export function close(silent = false) {
     _silent = silent;
@@ -31,9 +37,9 @@
     </button>
   </header>
   <div class="dialog-body">
-    <slot />
+    <slot {dlg} />
   </div>
   {#if $$slots.footer}
-    <footer><slot name="footer" /></footer>
+    <footer><slot name="footer" {dlg} /></footer>
   {/if}
 </dialog>

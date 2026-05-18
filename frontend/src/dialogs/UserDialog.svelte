@@ -211,6 +211,7 @@
   title={showTempPassword ? $t("User created.") : $t(isNew ? "Add Member" : "Edit Member")}
   onClose={() => showTempPassword ? dismissTempPassword() : onClose(false)}
   style="max-width:520px"
+  let:dlg
 >
   {#if showTempPassword}
     <div
