@@ -18,6 +18,7 @@
     dateKey,
   } from "../format.js";
   import Icon from "../Icons.svelte";
+  import Dialog from "../Dialog.svelte";
   import { confirmDialog } from "../confirm.js";
   import FlextimeChart from "../FlextimeChart.svelte";
   import DatePicker from "../DatePicker.svelte";

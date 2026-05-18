@@ -4,13 +4,12 @@
   import { settings, toast } from "../stores.js";
   import { t } from "../i18n.js";
   import { appTodayDate, appTodayIsoDate } from "../format.js";
-  import Icon from "../Icons.svelte";
+  import Dialog from "../Dialog.svelte";
   import DatePicker from "../DatePicker.svelte";
 
   export let template;
   export let onClose;
-  let dlg;
-  let _closed = false;
+  let dialog;
   $: isNew = !template.id;
   let email = template.email || "";
   let first_name = template.first_name || "";
@@ -92,7 +91,6 @@
   }
 
   onMount(async () => {
-    dlg.showModal();
     try {
       const allUsers = await api("/users");
       approvers = allUsers.filter(
@@ -184,9 +182,8 @@
       } else {
         await api("/users/" + template.id, { method: "PUT", body });
         toast($t("User updated."), "ok");
-        _closed = true;
-        dlg.close();
         onClose(true);
+        dialog.close(true);
       }
     } catch (e) {
       error = $t(e?.message || "Error");
@@ -203,60 +200,46 @@
   }
 
   function dismissTempPassword() {
-    _closed = true;
     showTempPassword = null;
-    dlg.close();
     onClose(true);
-  }
-
-  function cancel() {
-    if (_closed) return;
-    _closed = true;
-    dlg.close();
-    onClose(false);
+    dialog.close(true);
   }
 </script>
 
-<dialog bind:this={dlg} on:close={cancel} style="max-width:520px">
+<Dialog
+  bind:this={dialog}
+  title={showTempPassword ? $t("User created.") : $t(isNew ? "Add Member" : "Edit Member")}
+  onClose={() => showTempPassword ? dismissTempPassword() : onClose(false)}
+  style="max-width:520px"
+>
   {#if showTempPassword}
-    <header>
-      <span style="flex:1">{$t("User created.")}</span>
-    </header>
-    <div class="dialog-body">
-      <div
-        style="padding:12px;background:var(--bg-muted);border-radius:var(--radius-sm);font-family:monospace;font-size:14px;word-break:break-all"
-      >
-        {$t("Temporary password:")} <strong>{showTempPassword}</strong>
-      </div>
-      {#if smtpEnabled}
-        <div style="font-size:12px;color:var(--text-tertiary);margin-top:8px">
-          {$t("Registration email will be sent.")}
-        </div>
-      {:else}
-        <div style="margin-top:10px;padding:10px 14px;background:var(--danger-bg, #fef2f2);border:2px solid var(--danger, #dc2626);border-radius:var(--radius-sm)">
-          <strong style="color:var(--danger, #dc2626);font-size:14px">{$t("No email was sent! Email / SMTP is not configured.")}</strong>
-          <div style="color:var(--danger, #dc2626);font-size:13px;margin-top:4px;font-weight:400">
-            {$t("You must deliver this password to the user in person!")}
-          </div>
-        </div>
-      {/if}
+    <div
+      style="padding:12px;background:var(--bg-muted);border-radius:var(--radius-sm);font-family:monospace;font-size:14px;word-break:break-all"
+    >
+      {$t("Temporary password:")} <strong>{showTempPassword}</strong>
     </div>
-    <footer>
+    {#if smtpEnabled}
+      <div style="font-size:12px;color:var(--text-tertiary);margin-top:8px">
+        {$t("Registration email will be sent.")}
+      </div>
+    {:else}
+      <div style="margin-top:10px;padding:10px 14px;background:var(--danger-bg, #fef2f2);border:2px solid var(--danger, #dc2626);border-radius:var(--radius-sm)">
+        <strong style="color:var(--danger, #dc2626);font-size:14px">{$t("No email was sent! Email / SMTP is not configured.")}</strong>
+        <div style="color:var(--danger, #dc2626);font-size:13px;margin-top:4px;font-weight:400">
+          {$t("You must deliver this password to the user in person!")}
+        </div>
+      </div>
+    {/if}
+    <svelte:fragment slot="footer">
       <button class="zf-btn" on:click={copyPassword}>
         {copied ? $t("Copied!") : $t("Copy")}
       </button>
       <button class="zf-btn zf-btn-primary" on:click={dismissTempPassword}
         >{$t("OK")}</button
       >
-    </footer>
+    </svelte:fragment>
   {:else}
-    <header>
-      <span style="flex:1">{$t(isNew ? "Add Member" : "Edit Member")}</span>
-      <button class="zf-btn-icon-sm zf-btn-ghost" on:click={cancel}>
-        <Icon name="X" size={16} />
-      </button>
-    </header>
-    <div class="dialog-body">
+    <div>
       <div class="field-row">
         <div>
           <label class="zf-label" for="user-first-name"
@@ -479,11 +462,11 @@
       {/if}
       <div class="error-text">{error}</div>
     </div>
-    <footer>
-      <button class="zf-btn" on:click={cancel}>{$t("Cancel")}</button>
+    <svelte:fragment slot="footer">
+      <button class="zf-btn" on:click={() => dialog.close()}>{$t("Cancel")}</button>
       <button class="zf-btn zf-btn-primary" on:click={save}>
         {$t(isNew ? "Add Member" : "Save")}
       </button>
-    </footer>
+    </svelte:fragment>
   {/if}
-</dialog>
+</Dialog>

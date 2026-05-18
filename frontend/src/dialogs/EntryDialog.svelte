@@ -1,18 +1,17 @@
 <script>
-  import { onMount } from "svelte";
   import { api } from "../api.js";
   import { categories, settings } from "../stores.js";
   import { t } from "../i18n.js";
   import { appCurrentTimeHM, appTodayIsoDate } from "../format.js";
   import { confirmDialog } from "../confirm.js";
   import Icon from "../Icons.svelte";
+  import Dialog from "../Dialog.svelte";
   import DatePicker from "../DatePicker.svelte";
   import TimePicker from "../TimePicker.svelte";
 
   export let template;
   export let onClose;
-  let dlg;
-  let _closed = false;
+  let dialog;
   $: isNew = !template.id;
   let todayIso = appTodayIsoDate($settings?.timezone);
   let lastTodayIso = todayIso;
@@ -43,8 +42,6 @@
       end_time = String(h + 1).padStart(2, "0") + ":" + String(m).padStart(2, "0");
     }
   }
-
-  onMount(() => dlg.showModal());
 
   async function save() {
     error = "";
@@ -78,9 +75,8 @@
       const saved = isNew
         ? await api("/time-entries", { method: "POST", body })
         : await api("/time-entries/" + template.id, { method: "PUT", body });
-      _closed = true;
-      dlg.close();
       onClose({ changed: true, entry: saved, deletedId: null });
+      dialog.close(true);
     } catch (e) {
       error = $t(e?.message || "Error");
     }
@@ -96,24 +92,16 @@
       return;
     try {
       await api("/time-entries/" + template.id, { method: "DELETE" });
-      _closed = true;
-      dlg.close();
       onClose({ changed: true, entry: null, deletedId: template.id });
+      dialog.close(true);
     } catch (e) {
       error = $t(e?.message || "Error");
     }
   }
 
-  function cancel() {
-    if (_closed) return;
-    _closed = true;
-    dlg.close();
-    onClose({ changed: false, entry: null, deletedId: null });
-  }
-
   function onDialogKeydown(e) {
     const pickerOpen =
-      dlg.querySelector(".tp-drum") ||
+      dialog.querySelector(".tp-drum") ||
       document.querySelector(".flatpickr-calendar.open");
     if (e.key === "Enter" && !pickerOpen) {
       e.preventDefault();
@@ -122,21 +110,20 @@
   }
 </script>
 
-<dialog bind:this={dlg} on:keydown={onDialogKeydown} on:close={cancel}>
-  <header>
-    <span style="flex:1">{$t(isNew ? "Add Entry" : "Edit Entry")}</span>
-    <button class="zf-btn-icon-sm zf-btn-ghost" on:click={cancel}>
-      <Icon name="X" size={16} />
-    </button>
-  </header>
-  <div class="dialog-body">
+<Dialog
+  bind:this={dialog}
+  title={$t(isNew ? "Add Entry" : "Edit Entry")}
+  onClose={() => onClose({ changed: false, entry: null, deletedId: null })}
+  on:keydown={onDialogKeydown}
+>
+  <div>
     <div>
       <label class="zf-label" for="entry-date">{$t("Date")}</label>
       <DatePicker
         id="entry-date"
         bind:value={entry_date}
         max={todayIso}
-        container={dlg}
+        container={dialog.element}
       />
     </div>
     <div class="field-row">
@@ -178,16 +165,16 @@
     </div>
     <div class="error-text">{error}</div>
   </div>
-  <footer>
+  <svelte:fragment slot="footer">
     {#if !isNew}
       <button class="zf-btn zf-btn-danger" on:click={remove}>
         <Icon name="Trash" size={14} />{$t("Delete")}
       </button>
     {/if}
     <span style="flex:1"></span>
-    <button class="zf-btn" on:click={cancel}>{$t("Cancel")}</button>
+    <button class="zf-btn" on:click={() => dialog.close()}>{$t("Cancel")}</button>
     <button class="zf-btn zf-btn-primary" on:click={save}>
       {$t(isNew ? "Add Entry" : "Save")}
     </button>
-  </footer>
-</dialog>
+  </svelte:fragment>
+</Dialog>

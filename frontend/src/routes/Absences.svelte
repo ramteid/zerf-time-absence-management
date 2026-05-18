@@ -1,11 +1,11 @@
 <script>
-  import { tick } from "svelte";
   import { api } from "../api.js";
   import { currentUser, settings, toast } from "../stores.js";
   import { countWorkdays, holidayDateSet } from "../apiMappers.js";
   import { t, absenceKindLabel, statusLabel, formatDayCount } from "../i18n.js";
   import { fmtDate, fmtDateTime, parseDate, appTodayDate } from "../format.js";
   import Icon from "../Icons.svelte";
+  import Dialog from "../Dialog.svelte";
   import AbsenceDialog from "../dialogs/AbsenceDialog.svelte";
   import { confirmDialog } from "../confirm.js";
 
@@ -27,7 +27,6 @@
 
   // Detail popup state
   let detailAbsence = null;
-  let detailDlg;
 
   $: canGoPrevYear = selectedYear > baseYear - 1;
   $: canGoNextYear = selectedYear < baseYear + 1;
@@ -133,22 +132,6 @@
 
   function showDetail(absence) {
     detailAbsence = absence;
-    tick().then(() => {
-      if (detailDlg && !detailDlg.open) {
-        try {
-          detailDlg.showModal();
-        } catch {
-          detailDlg.setAttribute("open", "open");
-        }
-      }
-    });
-  }
-
-  function closeDetail() {
-    if (detailDlg?.open) {
-      detailDlg.close();
-    }
-    detailAbsence = null;
   }
 
   async function cancel(absence) {
@@ -376,70 +359,62 @@
 {/if}
 
 {#if detailAbsence}
-  <dialog bind:this={detailDlg} on:close={closeDetail}>
-    <header>
-      <span style="flex:1">{absenceKindLabel(detailAbsence.kind)}</span>
-      <button class="zf-btn-icon-sm zf-btn-ghost" on:click={closeDetail}>
-        <Icon name="X" size={16} />
-      </button>
-    </header>
-    <div class="dialog-body">
-      <div style="display:flex;flex-direction:column;gap:10px">
-        <div class="field-row">
-          <div>
-            <div class="zf-label">{$t("From")}</div>
-            <div class="tab-num">{fmtDate(detailAbsence.start_date)}</div>
-          </div>
-          <div>
-            <div class="zf-label">{$t("To")}</div>
-            <div class="tab-num">{fmtDate(detailAbsence.end_date)}</div>
-          </div>
-          <div>
-            <div class="zf-label">{$t("Days")}</div>
-            <div class="tab-num">{detailAbsence.days == null ? "-" : formatDayCount(detailAbsence.days)}</div>
-          </div>
+  <Dialog title={absenceKindLabel(detailAbsence.kind)} onClose={() => (detailAbsence = null)}>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div class="field-row">
+        <div>
+          <div class="zf-label">{$t("From")}</div>
+          <div class="tab-num">{fmtDate(detailAbsence.start_date)}</div>
         </div>
         <div>
-          <div class="zf-label">{$t("Status")}</div>
-          <span class="zf-chip zf-chip-{detailAbsence.status}"
-            >{statusLabel(detailAbsence.status)}</span
+          <div class="zf-label">{$t("To")}</div>
+          <div class="tab-num">{fmtDate(detailAbsence.end_date)}</div>
+        </div>
+        <div>
+          <div class="zf-label">{$t("Days")}</div>
+          <div class="tab-num">{detailAbsence.days == null ? "-" : formatDayCount(detailAbsence.days)}</div>
+        </div>
+      </div>
+      <div>
+        <div class="zf-label">{$t("Status")}</div>
+        <span class="zf-chip zf-chip-{detailAbsence.status}"
+          >{statusLabel(detailAbsence.status)}</span
+        >
+      </div>
+      {#if detailAbsence.comment}
+        <div>
+          <div class="zf-label">{$t("Comment")}</div>
+          <div style="white-space:pre-wrap;font-size:13px">
+            {detailAbsence.comment}
+          </div>
+        </div>
+      {/if}
+      {#if detailAbsence.rejection_reason}
+        <div>
+          <div class="zf-label">{$t("Rejection reason")}</div>
+          <div
+            style="white-space:pre-wrap;font-size:13px;color:var(--danger-text)"
           >
+            {detailAbsence.rejection_reason}
+          </div>
         </div>
-        {#if detailAbsence.comment}
-          <div>
-            <div class="zf-label">{$t("Comment")}</div>
-            <div style="white-space:pre-wrap;font-size:13px">
-              {detailAbsence.comment}
-            </div>
-          </div>
-        {/if}
-        {#if detailAbsence.rejection_reason}
-          <div>
-            <div class="zf-label">{$t("Rejection reason")}</div>
-            <div
-              style="white-space:pre-wrap;font-size:13px;color:var(--danger-text)"
-            >
-              {detailAbsence.rejection_reason}
-            </div>
-          </div>
-        {/if}
-        <div>
-          <div class="zf-label">{$t("Requested at")}</div>
-          <div class="tab-num" style="font-size:12px">
-            {fmtDateTime(detailAbsence.created_at)}
-          </div>
+      {/if}
+      <div>
+        <div class="zf-label">{$t("Requested at")}</div>
+        <div class="tab-num" style="font-size:12px">
+          {fmtDateTime(detailAbsence.created_at)}
         </div>
       </div>
     </div>
-    <footer>
-      <button class="zf-btn" on:click={closeDetail}>{$t("Close")}</button>
+    <svelte:fragment slot="footer">
+      <button class="zf-btn" on:click={() => (detailAbsence = null)}>{$t("Close")}</button>
       <span style="flex:1"></span>
       {#if detailAbsence.cancellable}
         <button
           class="zf-btn zf-btn-danger"
           on:click={() => {
             const absence = detailAbsence;
-            closeDetail();
+            detailAbsence = null;
             cancel(absence);
           }}
         >
@@ -451,15 +426,15 @@
           class="zf-btn zf-btn-primary"
           on:click={() => {
             const selectedAbsence = detailAbsence;
-            closeDetail();
+            detailAbsence = null;
             showDialog = selectedAbsence;
           }}
         >
           <Icon name="Edit" size={13} />{$t("Edit")}
         </button>
       {/if}
-    </footer>
-  </dialog>
+    </svelte:fragment>
+  </Dialog>
 {/if}
 
 <style>

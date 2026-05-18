@@ -1,8 +1,7 @@
 <script>
-  import { onMount } from "svelte";
   import { t } from "./i18n.js";
   import { toast } from "./stores.js";
-  import Icon from "./Icons.svelte";
+  import Dialog from "./Dialog.svelte";
 
   export let title = "OK";
   export let text = "";
@@ -10,67 +9,43 @@
   export let danger = false;
   export let needReason = false;
   export let onResolve;
-  let dlg;
+  let dialog;
   let reason = "";
-  let _closed = false;
-  onMount(() => {
-    try {
-      if (typeof dlg?.showModal === "function") {
-        dlg.showModal();
-      } else {
-        dlg?.setAttribute("open", "open");
-      }
-    } catch {
-      dlg?.setAttribute("open", "open");
-    }
-  });
 
   function ok() {
     if (needReason && !reason.trim()) {
       toast($t("Reason required"), "error");
       return;
     }
-    _closed = true;
-    dlg.close();
     onResolve(needReason ? reason : true);
-  }
-
-  function cancel() {
-    if (_closed) return;
-    _closed = true;
-    dlg.close();
-    onResolve(null);
+    dialog.close(true);
   }
 </script>
 
-<dialog bind:this={dlg} on:close={cancel}>
-  <header>
-    <span style="flex:1">{$t(title)}</span>
-    <button class="zf-btn-icon-sm zf-btn-ghost" on:click={cancel}>
-      <Icon name="X" size={16} />
+<Dialog
+  bind:this={dialog}
+  title={$t(title)}
+  onClose={() => onResolve(null)}
+>
+  {#if text}<p style="font-size:13px;color:var(--text-secondary)">
+      {$t(text)}
+    </p>{/if}
+  {#if needReason}
+    <div>
+      <label class="zf-label" for="confirm-reason">{$t("Reason")}</label>
+      <textarea
+        id="confirm-reason"
+        class="zf-textarea"
+        rows="3"
+        bind:value={reason}
+        required
+      ></textarea>
+    </div>
+  {/if}
+  <svelte:fragment slot="footer">
+    <button class="zf-btn" type="button" on:click={() => dialog.close()}>
+      {$t("Cancel")}
     </button>
-  </header>
-  <div class="dialog-body">
-    {#if text}<p style="font-size:13px;color:var(--text-secondary)">
-        {$t(text)}
-      </p>{/if}
-    {#if needReason}
-      <div>
-        <label class="zf-label" for="confirm-reason">{$t("Reason")}</label>
-        <textarea
-          id="confirm-reason"
-          class="zf-textarea"
-          rows="3"
-          bind:value={reason}
-          required
-        ></textarea>
-      </div>
-    {/if}
-  </div>
-  <footer>
-    <button class="zf-btn" type="button" on:click={cancel}
-      >{$t("Cancel")}</button
-    >
     <button
       class="zf-btn {danger ? 'zf-btn-danger' : 'zf-btn-primary'}"
       type="button"
@@ -78,5 +53,5 @@
     >
       {$t(confirmLabel)}
     </button>
-  </footer>
-</dialog>
+  </svelte:fragment>
+</Dialog>

@@ -1,6 +1,5 @@
 <script>
   import { t, absenceKindLabel, formatHours, fmtDecimal } from "./i18n.js";
-  import { HOLIDAY_COLOR, WEEKEND_COLOR, ABSENCE_COLORS } from "./colors.js";
   import { settings } from "./stores.js";
   import { appTodayIsoDate, fmtDateShort } from "./format.js";
 
@@ -204,8 +203,19 @@
     );
   }
 
+  const ABSENCE_BAND_VARS = {
+    vacation:           "var(--band-vacation)",
+    sick:               "var(--band-sick)",
+    training:           "var(--band-training)",
+    special_leave:      "var(--band-special-leave)",
+    unpaid:             "var(--band-unpaid)",
+    general_absence:    "var(--band-general-absence)",
+    flextime_reduction: "var(--band-flextime-reduction)",
+    absent:             "var(--band-absent)",
+  };
+
   function absColor(kind) {
-    return ABSENCE_COLORS[kind] || "var(--text-tertiary)";
+    return ABSENCE_BAND_VARS[kind] || "var(--text-tertiary)";
   }
 
   function isWeekend(dateString) {
@@ -215,8 +225,8 @@
 
   function dayBandColor(day) {
     if (day.absence) return absColor(day.absence);
-    if (day.holiday) return HOLIDAY_COLOR;
-    if (isWeekend(day.date)) return WEEKEND_COLOR;
+    if (day.holiday) return "var(--band-holiday)";
+    if (isWeekend(day.date)) return "var(--band-weekend)";
     return null;
   }
 
@@ -238,11 +248,11 @@
       }
       if (day.holiday && !seen.has("__holiday__")) {
         seen.add("__holiday__");
-        items.push({ key: "__holiday__", color: HOLIDAY_COLOR });
+        items.push({ key: "__holiday__", color: "var(--band-holiday)" });
       }
       if (isWeekend(day.date) && !seen.has("__weekend__")) {
         seen.add("__weekend__");
-        items.push({ key: "__weekend__", color: WEEKEND_COLOR });
+        items.push({ key: "__weekend__", color: "var(--band-weekend)" });
       }
     }
     return items;
