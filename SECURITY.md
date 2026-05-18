@@ -52,6 +52,12 @@ Out of scope (v1): payroll integrations, SSO, multi-tenant isolation.
 
 * 256-bit random token (hex-encoded), stored hashed in `sessions.token`.
 * Cookie flags: `HttpOnly; Secure; SameSite=Strict; Path=/`.
+* **`__Host-` prefix** is applied to the cookie name in production
+  (`__Host-zerf_session`). The prefix forces `Path=/`, forbids a `Domain=`
+  attribute, and requires HTTPS — preventing a sibling subdomain or a network
+  attacker from overwriting or fixating the session cookie. In dev mode (plain
+  HTTP) the prefix is dropped (`zerf_session`) because browsers reject
+  `__Host-` cookies on non-HTTPS origins.
 * **Session fixation**: a fresh token is issued on every successful login;
   any pre-existing token in the request is ignored.
 * **Idle timeout 8 h**, **absolute timeout 7 days** — whichever fires
@@ -60,8 +66,10 @@ Out of scope (v1): payroll integrations, SSO, multi-tenant isolation.
   window where idle sessions remained valid). The hourly cleanup loop
   uses the same constants as the middleware so the two layers cannot
   drift apart.
-* **Session invalidation**: on password change, password reset, deactivation
-  and on logout, all sessions of the affected user are deleted server-side.
+* **Session invalidation**: on password reset, deactivation, and logout, all
+  sessions of the affected user are deleted server-side. On a voluntary password
+  change the caller's current session is preserved (so they remain logged in)
+  while all other sessions for that user are revoked.
 * **First-boot setup race**: `POST /auth/setup` now takes a Postgres
   transaction-scoped advisory lock around the count/insert, so two
   concurrent setup requests cannot both create an admin on a fresh
@@ -88,6 +96,8 @@ Every API handler checks the role on the authenticated `User` extension
 inserted by the auth middleware:
 
 * **employee** — only own data (time entries, absences, balance, calendar);
+* **assistant** — like employee but without access to the dashboard; intended for
+  part-time or supporting staff who do not track flextime;
 * **team\_lead** — read team data, approve/reject; cannot self-approve;
 * **admin** — full management; can self-approve as documented exception.
 
@@ -112,15 +122,17 @@ before/after row. Admin-only endpoints additionally check `is_admin()`.
 Backend (tower-http `SetResponseHeaderLayer`) and Caddy both emit:
 
 * `Strict-Transport-Security: max-age=63072000; includeSubDomains; preload` (Caddy)
-* `Content-Security-Policy: default-src 'self'; ... frame-ancestors 'none'; object-src 'none'`
+* `Content-Security-Policy: default-src 'self'; img-src 'self' data:; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'`
 * `X-Content-Type-Options: nosniff`
 * `X-Frame-Options: DENY`
 * `Referrer-Policy: strict-origin-when-cross-origin`
-* `Permissions-Policy: accelerometer=(), camera=(), geolocation=(), microphone=(), ...`
+* `Permissions-Policy: accelerometer=(), camera=(), geolocation=(), gyroscope=(), microphone=(), payment=(), usb=()`
 * `Cross-Origin-Opener-Policy: same-origin`
 * `Cross-Origin-Resource-Policy: same-origin`
 * Server / X-Powered-By suppressed.
-* `Cache-Control: no-store` for dynamic responses.
+* `Cache-Control: no-store` for all dynamic (API/SPA) responses; hashed static
+  assets under `/assets/*` receive `public, max-age=31536000, immutable` for
+  long-lived browser caching.
 
 Caddy also bumps to TLS 1.2+/H2/H3 and renews certificates via Let's Encrypt
 (`tls-alpn-01`), with HTTP→HTTPS redirect enabled by default.
