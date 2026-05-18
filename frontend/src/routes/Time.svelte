@@ -1,6 +1,4 @@
 <script>
-  import { api } from "../api.js";
-  import { ABSENCE_COLORS } from "../colors.js";
   import {
     categories,
     currentUser,
@@ -9,7 +7,7 @@
     toast,
     settings,
   } from "../stores.js";
-  import { t, statusLabel, formatHours, absenceKindLabel } from "../i18n.js";
+  import { t, formatHours } from "../i18n.js";
   import { confirmDialog } from "../confirm.js";
   import {
     monday,
@@ -19,64 +17,30 @@
     appTodayIsoDate,
     dateKey,
     parseDate,
-    fmtDateShort,
-    isoWeek,
-    durMin,
-    formatTimeValue,
   } from "../format.js";
-  import Icon from "../Icons.svelte";
   import EntryDialog from "../dialogs/EntryDialog.svelte";
   import { isAssistantUser } from "../rolePolicy.js";
-
-  // Full day names indexed Monday (0) → Sunday (6), used to label each day card.
-  const WEEKDAY_NAMES = [
-    "Monday",
-    "Tuesday",
-    "Wednesday",
-    "Thursday",
-    "Friday",
-    "Saturday",
-    "Sunday",
-  ];
-
-  const TARGET_REMOVING_ABSENCE_STATUSES = ["approved", "cancellation_pending"];
-
-  function categoryCountsAsWork(categoryId, categoryRows) {
-    const category = categoryRows.find((item) => item.id === categoryId);
-    return category?.counts_as_work !== false;
-  }
-
-  function entryCountsAsWork(entry, categoryRows) {
-    if (entry?.counts_as_work === false) return false;
-    if (entry?.counts_as_work === true) return true;
-    return categoryCountsAsWork(entry?.category_id, categoryRows);
-  }
-
-  function creditedEntryMinutes(entry, categoryRows) {
-    if (
-      !entry?.start_time ||
-      !entry?.end_time ||
-      entry.status === "rejected" ||
-      !entryCountsAsWork(entry, categoryRows)
-    ) {
-      return 0;
-    }
-    return durMin(entry.start_time.slice(0, 5), entry.end_time.slice(0, 5));
-  }
-
-  function absenceRemovesTarget(absence) {
-    return absence
-      ? TARGET_REMOVING_ABSENCE_STATUSES.includes(absence.status) &&
-          absence.kind !== "flextime_reduction"
-      : false;
-  }
-
-  function absenceBlocksEntry(absence) {
-    return absence
-      ? TARGET_REMOVING_ABSENCE_STATUSES.includes(absence.status) &&
-          absence.kind !== "sick"
-      : false;
-  }
+  import {
+    getWeekData,
+    requestWeekReopen,
+    submitWeekEntries,
+  } from "../lib/api/timeApi.js";
+  import {
+    isoWeekRange,
+    sortByIsoDateAndStartTime,
+    yearsInWeek,
+  } from "../lib/domain/dates.js";
+  import {
+    buildWeekDays,
+    creditedEntryMinutes,
+    filterWeekAbsences,
+    weekStatus as calculateWeekStatus,
+    weekTargetMinutes as calculateWeekTargetMinutes,
+  } from "../lib/domain/time.js";
+  import TimeWeekHeader from "./time/TimeWeekHeader.svelte";
+  import TimeWeekSummary from "./time/TimeWeekSummary.svelte";
+  import WeekGrid from "./time/WeekGrid.svelte";
+  import WeekendEntries from "./time/WeekendEntries.svelte";
 
   let entries = [];
   let absences = [];
@@ -111,57 +75,27 @@
     // Increment the counter so any in-flight responses from earlier loads are discarded.
     const requestId = ++loadRequestCounter;
     const weekStart = setWeek(dateLike);
-    const from = isoDate(weekStart);
-    const weekEndIsoDate = isoDate(addDays(weekStart, 6));
-    // A week can span two calendar years, so we may need holidays for both years.
-    const yearsInWeek = Array.from(
-      new Set([weekStart.getFullYear(), addDays(weekStart, 6).getFullYear()]),
-    );
+    const { from, to } = isoWeekRange(weekStart);
 
     try {
-      const [
-        weekEntries,
+      const {
+        entries: weekEntries,
         reopenRows,
         categoryRows,
         absenceRowsByYear,
         holidayRowsByYear,
-      ] = await Promise.all([
-        api(`/time-entries?from=${from}&to=${weekEndIsoDate}`),
-        api("/reopen-requests").catch(() => []),
-        api("/categories").catch(() => $categories),
-        Promise.all(
-          yearsInWeek.map((yearValue) =>
-            api(`/absences?year=${yearValue}`).catch(() => []),
-          ),
-        ),
-        Promise.all(
-          yearsInWeek.map((yearValue) =>
-            api(`/holidays?year=${yearValue}`).catch(() => []),
-          ),
-        ),
-      ]);
+      } = await getWeekData({
+        from,
+        to,
+        years: yearsInWeek(weekStart),
+        fallbackCategories: $categories,
+      });
       // Discard results from a superseded load – a newer request is already in flight.
       if (requestId !== loadRequestCounter) return;
       categories.set(categoryRows);
-      entries = [...weekEntries].sort((a, b) => {
-        const dateDiff = dateKey(a.entry_date).localeCompare(
-          dateKey(b.entry_date),
-        );
-        if (dateDiff !== 0) return dateDiff;
-        return a.start_time.localeCompare(b.start_time);
-      });
+      entries = sortByIsoDateAndStartTime(weekEntries);
       myReopens = reopenRows;
-      const seenAbsenceIds = new Set();
-      absences = absenceRowsByYear.flat().filter((absence) => {
-        if (seenAbsenceIds.has(absence.id)) return false;
-        seenAbsenceIds.add(absence.id);
-        return (
-          absence.end_date >= from &&
-          absence.start_date <= weekEndIsoDate &&
-          absence.status !== "rejected" &&
-          absence.status !== "cancelled"
-        );
-      });
+      absences = filterWeekAbsences(absenceRowsByYear, from, to);
       holidays = holidayRowsByYear.flat();
     } catch {
       if (requestId !== loadRequestCounter) return;
@@ -193,7 +127,7 @@
     );
     if (!confirmed) return;
     try {
-      await api("/time-entries/submit", { method: "POST", body: { ids } });
+      await submitWeekEntries(ids);
       toast($t("Week submitted."), "ok");
       await loadWeek(weekFrom || appTodayDate($settings?.timezone));
     } catch (error) {
@@ -212,10 +146,7 @@
     );
     if (!reason) return;
     try {
-      const response = await api("/reopen-requests", {
-        method: "POST",
-        body: { week_start: isoDate(weekFrom), reason },
-      });
+      const response = await requestWeekReopen(isoDate(weekFrom), reason);
       if (response.status === "auto_approved") {
         toast($t("Week editing enabled."), "ok");
       } else {
@@ -225,16 +156,6 @@
     } catch (error) {
       toast($t(error?.message || "Error"), "error");
     }
-  }
-
-  // Returns the category object for a given ID, falling back to a placeholder when not found.
-  function categoryById(categoryId, categoryRows) {
-    return (
-      categoryRows.find((category) => category.id === categoryId) || {
-        name: "?",
-        color: "#999",
-      }
-    );
   }
 
   $: drafts = entries.filter((entry) => entry.status === "draft");
@@ -251,89 +172,24 @@
   // Weekly target is the sum of target-eligible weekdays in this week:
   // excludes holidays, absences, future days, and days before contract start.
   $: weekTargetMinutes = (() => {
-    const weeklyHours = Number($currentUser?.weekly_hours || 0);
-    const workdaysPerWeek = Number($currentUser?.workdays_per_week || 5);
-    // Calculate daily target based on user's workdays_per_week configuration.
-    // Example: 40h/week ÷ 5 days = 8h/day = 480 min/day (5-day worker)
-    //          40h/week ÷ 4 days = 10h/day = 600 min/day (4-day worker)
-    const perDayMinutes = Math.round((weeklyHours / workdaysPerWeek) * 60);
-    if (perDayMinutes <= 0) return 0;
-    const allDays = [...weekdays, ...weekendDays];
-    return allDays.slice(0, workdaysPerWeek).reduce((totalMinutes, day) => {
-      const isBeforeStart =
-        $currentUser?.start_date && day.ds < $currentUser.start_date;
-      const isFuture = day.ds > today;
-      if (day.absentForTarget || day.holiday || isBeforeStart || isFuture) {
-        return totalMinutes;
-      }
-      return totalMinutes + perDayMinutes;
-    }, 0);
+    return calculateWeekTargetMinutes({
+      weekdays,
+      weekendDays,
+      currentUser: $currentUser,
+      todayIso: today,
+    });
   })();
 
   $: weekLoggedHours = formatHours(weekLoggedMinutes / 60);
   $: weekTargetHours = formatHours(weekTargetMinutes / 60);
   $: weekHasTarget = !isAssistantCurrentUser && weekTargetMinutes > 0;
 
-  // Build a descriptor for one day of the week. All data is passed explicitly so
-  // that Svelte's reactive system can track the dependencies correctly.
-  function buildWeekDay(dayIndex, entryRows, absenceRows, holidayRows) {
-    const dayDate = addDays(weekFrom, dayIndex);
-    const dayDateStr = isoDate(dayDate);
-    const matchingAbsence = absenceRows.find(
-      (absence) =>
-        absence.start_date <= dayDateStr && absence.end_date >= dayDateStr,
-    );
-    const matchingHoliday = holidayRows.find(
-      (holiday) => holiday.holiday_date === dayDateStr,
-    );
-    return {
-      d: dayDate,
-      ds: dayDateStr,
-      dayName: WEEKDAY_NAMES[dayIndex],
-      absent: !!matchingAbsence,
-      absentForEntry: absenceBlocksEntry(matchingAbsence),
-      // Keep day-level target rules aligned with backend reports:
-      // only approved/cancellation_pending absences remove daily target.
-      absentForTarget: absenceRemovesTarget(matchingAbsence),
-      holiday: !!matchingHoliday,
-      absenceKind: matchingAbsence?.kind || null,
-      holidayName: matchingHoliday?.name || null,
-      items: entryRows
-        .filter((entry) => dateKey(entry.entry_date) === dayDateStr)
-        .sort((a, b) => a.start_time.localeCompare(b.start_time)),
-    };
-  }
-
-  function absenceColor(kind) {
-    return ABSENCE_COLORS[kind] || "var(--text-tertiary)";
-  }
-
-  $: weekdays = weekFrom
-    ? // Always show Mon–Fri (indices 0–4) regardless of workdays_per_week.
-      Array.from({ length: 5 }, (_, i) => i).map((dayIndex) =>
-        buildWeekDay(dayIndex, entries, absences, holidays),
-      )
-    : [];
-  $: weekendDays = weekFrom
-    ? // Always show Sat–Sun (indices 5–6).
-      Array.from({ length: 2 }, (_, i) => 5 + i).map((dayIndex) =>
-        buildWeekDay(dayIndex, entries, absences, holidays),
-      )
-    : [];
-
-  function entryDurationHours(startTime, endTime) {
-    return durMin(startTime, endTime) / 60;
-  }
-
-  function formatDisplayTime(rawTimeValue, format) {
-    return formatTimeValue(rawTimeValue?.slice(0, 5) || "", format);
-  }
-
-  function entryTimeRange(entry, format) {
-    return `${formatDisplayTime(entry.start_time, format)} - ${formatDisplayTime(
-      entry.end_time,
-      format,
-    )}`;
+  $: {
+    const builtWeek = weekFrom
+      ? buildWeekDays(weekFrom, entries, absences, holidays)
+      : { weekdays: [], weekendDays: [] };
+    weekdays = builtWeek.weekdays;
+    weekendDays = builtWeek.weekendDays;
   }
 
   // Insert or replace a single entry in the local list and re-sort.
@@ -341,13 +197,7 @@
     if (!entry) return;
     const otherEntries = entries.filter((existing) => existing.id !== entry.id);
     otherEntries.push(entry);
-    entries = otherEntries.sort((a, b) => {
-      const dateDiff = dateKey(a.entry_date).localeCompare(
-        dateKey(b.entry_date),
-      );
-      if (dateDiff !== 0) return dateDiff;
-      return a.start_time.localeCompare(b.start_time);
-    });
+    entries = sortByIsoDateAndStartTime(otherEntries);
   }
 
   function removeEntry(id) {
@@ -362,43 +212,7 @@
   $: isAtOrPastCurrentWeek =
     weekFrom && isoDate(weekFrom) >= isoDate(currentWeekMonday);
 
-  function weekStatusColor(status) {
-    switch (status) {
-      case "draft":
-        return "var(--danger-text)";
-      case "submitted":
-        return "var(--warning-text)";
-      case "approved":
-        return "var(--success-text)";
-      case "rejected":
-        return "var(--danger-text)";
-      case "partial":
-        return "var(--warning-text)";
-      default:
-        return "var(--text-primary)";
-    }
-  }
-
-  $: weekStatus = (() => {
-    if (entries.length === 0) return "draft";
-    const nonDraftEntries = entries.filter((entry) => entry.status !== "draft");
-    if (drafts.length > 0) {
-      return nonDraftEntries.length > 0 ? "partial" : "draft";
-    }
-    if (nonDraftEntries.length === 0) return "draft";
-    if (
-      nonDraftEntries.length === entries.length &&
-      nonDraftEntries.every((entry) => entry.status === "approved")
-    )
-      return "approved";
-    if (nonDraftEntries.some((entry) => entry.status === "submitted"))
-      return "submitted";
-    if (nonDraftEntries.every((entry) => entry.status === "rejected"))
-      return "rejected";
-    // Mix of approved + rejected with nothing pending: surface as "partial" so
-    // the user knows there are rejected entries without hiding the approvals.
-    return "partial";
-  })();
+  $: weekStatus = calculateWeekStatus(entries, drafts);
 
   $: pendingReopen = (() => {
     if (!weekFrom) return null;
@@ -420,316 +234,56 @@
       ["submitted", "approved", "rejected"].includes(entry.status),
     );
 
-  // The add-entry button is shown on all weekdays to keep the layout consistent,
-  // but disabled on days where adding time entries makes no sense.
-  function isDayAddDisabled(day) {
-    return (
-      day.absentForEntry ||
-      day.holiday ||
-      day.ds > today ||
-      ($currentUser?.start_date && day.ds < $currentUser.start_date)
-    );
-  }
 </script>
 
-<div class="top-bar">
-  <div class="top-bar-title">
-    <h1>{$t("Time Entry")}</h1>
-    {#if weekFrom}
-      <div class="top-bar-subtitle">
-        {$t("Week {week}", { week: isoWeek(weekFrom) })}
-        {#if !isAssistantCurrentUser}
-          · {contractHours} {$t("contract")}
-        {/if}
-      </div>
-    {/if}
-  </div>
-  <div class="top-bar-actions time-top-bar-actions">
-    {#if weekFrom}
-      <div class="zf-nav-slider time-week-picker">
-        <button class="zf-btn zf-btn-ghost" on:click={() => gotoWeek(-7)}>
-          <Icon name="ChevLeft" size={16} />
-        </button>
-        <span class="nav-label tab-num time-week-label">
-          {fmtDateShort(weekFrom)} – {fmtDateShort(weekTo)}
-        </span>
-        <button
-          class="zf-btn zf-btn-ghost"
-          on:click={() => gotoWeek(7)}
-          disabled={isAtOrPastCurrentWeek}
-        >
-          <Icon name="ChevRight" size={16} />
-        </button>
-      </div>
-    {/if}
-
-    <!-- Submit/reopen slot: while there are drafts to submit we keep the
-         primary submit button (the small request-edit button still appears
-         beneath it in the partial state, as before). Once nothing is left to
-         submit, the disabled submit button is replaced in-place by a
-         request-edit button that matches its dimensions but uses a distinct
-         palette so the submitted state is clear. -->
-    <div class="time-submit-stack">
-      {#if drafts.length || !canRequestReopen}
-        <button
-          class="zf-btn zf-btn-primary time-submit-button"
-          on:click={() => submitWeek(drafts.map((draft) => draft.id))}
-          disabled={!drafts.length}
-        >
-          <Icon name="Send" size={14} />{$t("Submit Week")}
-        </button>
-      {/if}
-
-      {#if canRequestReopen}
-        {#if drafts.length}
-          <button
-            class="zf-btn zf-btn-sm"
-            on:click={requestReopen}
-            title={$t("Request edit")}
-          >
-            <Icon name="Edit" size={13} />{$t("Request edit")}
-          </button>
-        {:else}
-          <button
-            class="zf-btn time-submit-button time-reopen-button"
-            on:click={requestReopen}
-            title={$t("Request edit")}
-          >
-            <Icon name="Edit" size={14} />{$t("Request edit")}
-          </button>
-        {/if}
-      {/if}
-    </div>
-  </div>
-</div>
+<TimeWeekHeader
+  {weekFrom}
+  {weekTo}
+  isAssistant={isAssistantCurrentUser}
+  {contractHours}
+  {drafts}
+  {canRequestReopen}
+  {isAtOrPastCurrentWeek}
+  on:prev={() => gotoWeek(-7)}
+  on:next={() => gotoWeek(7)}
+  on:submit={() => submitWeek(drafts.map((draft) => draft.id))}
+  on:requestReopen={requestReopen}
+/>
 
 <div class="content-area">
   {#if weekFrom}
-    {#if entries.length > 0}
-      <!-- Summary strip: rendered only once there is something to summarise. -->
-      <div class="stat-cards" style="margin-bottom:16px">
-        <div class="zf-card stat-card">
-          <div class="stat-card-label">{$t("Logged")}</div>
-          <div
-            class="stat-card-value tab-num"
-            style="color: {weekHasTarget
-              ? weekLoggedMinutes >= weekTargetMinutes
-                ? 'var(--success-text)'
-                : 'var(--danger-text)'
-              : 'var(--text-primary)'}"
-          >
-            {weekLoggedHours}
-          </div>
-          {#if weekHasTarget}
-            <div class="stat-card-sub">
-              {$t("of {target} target", { target: weekTargetHours })}
-            </div>
-          {/if}
-        </div>
-        <div class="zf-card stat-card">
-          <div class="stat-card-label">{$t("Status")}</div>
-          <div
-            class="stat-card-value tab-num"
-            style="color:{pendingReopen ? 'var(--warning-text)' : weekStatusColor(weekStatus)}"
-          >
-            {pendingReopen
-              ? $t("Waiting for release")
-              : weekStatus === "submitted"
-                ? $t("Waiting for approval")
-                : statusLabel(weekStatus)}
-          </div>
-        </div>
-      </div>
-    {/if}
+    <TimeWeekSummary
+      {entries}
+      {weekHasTarget}
+      {weekLoggedMinutes}
+      {weekTargetMinutes}
+      {weekLoggedHours}
+      {weekTargetHours}
+      {pendingReopen}
+      status={weekStatus}
+    />
 
-    <!-- Week grid: one card per weekday (Mon–Fri) -->
-    <div class="week-grid">
-      {#each weekdays as day, dayIndex (day.ds)}
-        {@const dailyTargetHours =
-          dayIndex < ($currentUser.workdays_per_week || 5)
-            ? ($currentUser.weekly_hours || 0) /
-              ($currentUser.workdays_per_week || 5)
-            : 0}
-        {@const dailyTotalMinutes = day.items.reduce(
-          (totalMinutes, entry) =>
-            totalMinutes + creditedEntryMinutes(entry, $categories),
-          0,
-        )}
-        {@const dailyTotalHours = dailyTotalMinutes / 60}
-        <div
-          class="zf-card day-card"
-          class:day-card--locked={weekStatus === "submitted" ||
-            weekStatus === "approved"}
-          class:day-card--absent={day.absent}
-          class:day-card--before-start={$currentUser?.start_date &&
-            day.ds < $currentUser.start_date}
-        >
-          <div class="day-header">
-            <div>
-              <div class="day-name">{$t(day.dayName)}</div>
-              <div class="day-date tab-num">{fmtDateShort(day.d)}</div>
-            </div>
-            <div
-              class="day-total tab-num"
-              style="color: {!isAssistantCurrentUser && dailyTotalMinutes / 60 >= dailyTargetHours
-                ? 'var(--accent)'
-                : 'var(--text-primary)'}"
-            >
-              {formatHours(dailyTotalHours)}
-            </div>
-          </div>
+    <WeekGrid
+      {weekdays}
+      currentUser={$currentUser}
+      categories={$categories}
+      {weekStatus}
+      {drafts}
+      {timeFormat}
+      {today}
+      isAssistant={isAssistantCurrentUser}
+      on:edit={(event) => (showEntry = event.detail)}
+      on:add={(event) => (showEntry = event.detail)}
+    />
 
-          <div class="day-entries">
-            {#if day.absenceKind || day.holiday}
-              {@const statusColor = day.absenceKind
-                ? absenceColor(day.absenceKind)
-                : "var(--warning-text)"}
-              <div
-                class="day-status-indicator"
-                style={`--status-color:${statusColor}`}
-              >
-                <span class="day-status-dot" aria-hidden="true"></span>
-                <span class="day-status-text"
-                  >{day.absenceKind
-                    ? absenceKindLabel(day.absenceKind)
-                    : day.holidayName || $t("Public holiday")}</span
-                >
-              </div>
-            {/if}
-
-            {#each day.items as entry}
-              {@const category = categoryById(entry.category_id, $categories)}
-              {#if entry.status === "draft"}
-                <div
-                  class="time-block"
-                  on:click={() => (showEntry = entry)}
-                  on:keydown={() => {}}
-                  role="button"
-                  tabindex="0"
-                >
-                  <div class="time-block-cat">
-                    <span class="cat-dot" style="background:{category.color}"
-                    ></span>
-                    <span class="time-block-cat-name">{$t(category.name)}</span>
-                  </div>
-                  <div class="time-block-times tab-num">
-                    <span>{entryTimeRange(entry, timeFormat)}</span>
-                    <span
-                      >{formatHours(
-                        entryDurationHours(
-                          entry.start_time.slice(0, 5),
-                          entry.end_time.slice(0, 5),
-                        ),
-                      )}</span
-                    >
-                  </div>
-                </div>
-              {:else}
-                <!-- Locked: the week was submitted, so this entry is read-only. -->
-                <div
-                  class="time-block time-block--locked"
-                  class:time-block--rejected={entry.status === "rejected"}
-                >
-                  <div class="time-block-cat">
-                    <span class="cat-dot" style="background:{category.color}"
-                    ></span>
-                    <span class="time-block-cat-name">{$t(category.name)}</span>
-                    <span
-                      class="zf-chip zf-chip-{entry.status}"
-                      style="height:18px;font-size:10px"
-                    >
-                      {statusLabel(entry.status)}
-                    </span>
-                  </div>
-                  <div class="time-block-times tab-num">
-                    <span>{entryTimeRange(entry, timeFormat)}</span>
-                    <span
-                      >{formatHours(
-                        entryDurationHours(
-                          entry.start_time.slice(0, 5),
-                          entry.end_time.slice(0, 5),
-                        ),
-                      )}</span
-                    >
-                  </div>
-                </div>
-              {/if}
-            {/each}
-          </div>
-
-          {#if weekStatus === "draft" || drafts.length > 0}
-            <div class="day-add-btn">
-              <button
-                class="zf-btn zf-btn-ghost zf-btn-sm"
-                style="width:100%;justify-content:center;border-style:dashed;border-color:var(--border)"
-                disabled={isDayAddDisabled(day)}
-                on:click={() => (showEntry = { entry_date: day.ds })}
-              >
-                <Icon name="Plus" size={13} />{$t("Add")}
-              </button>
-            </div>
-          {/if}
-        </div>
-      {/each}
-    </div>
-
-    <!-- Weekend cards (Sat/Sun): only rendered when entries exist on those days -->
-    {#each weekendDays as day (day.ds)}
-      {#if day.items.length > 0}
-        <div class="zf-card" style="margin-top:12px;overflow-x:auto">
-          <div class="day-header">
-            <div>
-              <div class="day-name">{$t(day.dayName)}</div>
-              <div class="day-date tab-num">{fmtDateShort(day.d)}</div>
-            </div>
-          </div>
-          <div class="day-entries">
-            {#each day.items as entry}
-              {@const category = categoryById(entry.category_id, $categories)}
-              {#if entry.status === "draft"}
-                <div
-                  class="time-block"
-                  on:click={() => (showEntry = entry)}
-                  on:keydown={() => {}}
-                  role="button"
-                  tabindex="0"
-                >
-                  <div class="time-block-cat">
-                    <span class="cat-dot" style="background:{category.color}"
-                    ></span>
-                    <span class="time-block-cat-name">{$t(category.name)}</span>
-                  </div>
-                  <div class="time-block-times tab-num">
-                    <span>{entryTimeRange(entry, timeFormat)}</span>
-                  </div>
-                </div>
-              {:else}
-                <!-- Locked: the week was submitted, so this entry is read-only. -->
-                <div
-                  class="time-block time-block--locked"
-                  class:time-block--rejected={entry.status === "rejected"}
-                >
-                  <div class="time-block-cat">
-                    <span class="cat-dot" style="background:{category.color}"
-                    ></span>
-                    <span class="time-block-cat-name">{$t(category.name)}</span>
-                    <span
-                      class="zf-chip zf-chip-{entry.status}"
-                      style="height:18px;font-size:10px"
-                    >
-                      {statusLabel(entry.status)}
-                    </span>
-                  </div>
-                  <div class="time-block-times tab-num">
-                    <span>{entryTimeRange(entry, timeFormat)}</span>
-                  </div>
-                </div>
-              {/if}
-            {/each}
-          </div>
-        </div>
-      {/if}
-    {/each}
+    <WeekendEntries
+      {weekendDays}
+      currentUser={$currentUser}
+      categories={$categories}
+      {weekStatus}
+      {timeFormat}
+      on:edit={(event) => (showEntry = event.detail)}
+    />
   {/if}
 </div>
 
@@ -745,58 +299,3 @@
     }}
   />
 {/if}
-
-<style>
-  .time-block--rejected .time-block-cat-name,
-  .time-block--rejected .time-block-times {
-    text-decoration: line-through;
-    color: var(--text-tertiary);
-  }
-
-  /* Submitted, approved or rejected entries are read-only: the week is locked
-     until a reopen request makes it editable again, so we drop the pointer
-     affordance and hover effect to signal the block is not interactive. */
-  .time-block--locked {
-    cursor: default;
-  }
-
-  .time-block--locked:hover {
-    background: var(--bg-subtle);
-  }
-
-  .day-card--before-start {
-    opacity: 0.4;
-  }
-
-  .day-status-indicator {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    align-self: center;
-    gap: 8px;
-    margin: auto;
-    max-width: 100%;
-    padding: 6px 10px;
-    border-radius: 999px;
-    border: 1px solid color-mix(in srgb, var(--status-color) 28%, transparent);
-    background: color-mix(in srgb, var(--status-color) 12%, transparent);
-    color: var(--status-color);
-    font-size: 12px;
-    font-weight: 600;
-    text-align: center;
-  }
-
-  .day-status-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
-    background: var(--status-color);
-  }
-
-  .day-status-text {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-</style>
