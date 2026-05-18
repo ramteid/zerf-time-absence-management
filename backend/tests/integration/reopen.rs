@@ -51,7 +51,7 @@ async fn reopen_full_workflow() {
         let (st, body) = emp
             .post(
                 "/api/v1/reopen-requests",
-                &json!({"week_start": monday_iso}),
+                &json!({"week_start": monday_iso, "reason": "Test reason"}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "auto reopen non-crediting week");
@@ -89,7 +89,7 @@ async fn reopen_full_workflow() {
         let (st, body) = emp
             .post(
                 "/api/v1/reopen-requests",
-                &json!({"week_start": monday_iso}),
+                &json!({"week_start": monday_iso, "reason": "Test reason"}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "auto reopen");
@@ -134,7 +134,7 @@ async fn reopen_full_workflow() {
         let (st, body) = emp
             .post(
                 "/api/v1/reopen-requests",
-                &json!({"week_start": monday_iso}),
+                &json!({"week_start": monday_iso, "reason": "Need to fix an entry"}),
             )
             .await;
         assert_eq!(st, StatusCode::OK);
@@ -145,7 +145,7 @@ async fn reopen_full_workflow() {
         let (st, _) = emp
             .post(
                 "/api/v1/reopen-requests",
-                &json!({"week_start": monday_iso}),
+                &json!({"week_start": monday_iso, "reason": "Need to fix an entry"}),
             )
             .await;
         assert_eq!(st, StatusCode::CONFLICT, "duplicate rejected");
@@ -186,7 +186,7 @@ async fn reopen_full_workflow() {
         let (_, body) = emp
             .post(
                 "/api/v1/reopen-requests",
-                &json!({"week_start": monday_iso}),
+                &json!({"week_start": monday_iso, "reason": "Forgot to add overtime"}),
             )
             .await;
         let req_id = id(&body);
@@ -293,7 +293,7 @@ async fn reopen_full_workflow() {
         let (st, body) = lead
             .post(
                 "/api/v1/reopen-requests",
-                &json!({"week_start": monday_iso}),
+                &json!({"week_start": monday_iso, "reason": "Self-service reopen"}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "lead self-service auto");

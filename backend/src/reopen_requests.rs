@@ -36,12 +36,15 @@ pub struct ReopenRequest {
     pub status: String,
     pub reviewed_at: Option<DateTime<Utc>>,
     pub rejection_reason: Option<String>,
+    pub reason: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
 #[derive(Deserialize)]
 pub struct NewReopen {
     pub week_start: NaiveDate,
+    #[serde(default)]
+    pub reason: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -138,6 +141,17 @@ pub async fn create(
         )));
     }
 
+    // Validate reason (required, max 2000 chars).
+    let request_reason = body
+        .reason
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| AppError::BadRequest("Reason required.".into()))?;
+    if request_reason.len() > 2000 {
+        return Err(AppError::BadRequest("Reason too long.".into()));
+    }
+
     // Determine flow:
     //   * User has `allow_reopen_without_approval=TRUE` → auto_approved
     //   * Otherwise → pending, notify all approvers
@@ -168,14 +182,14 @@ pub async fn create(
         let (new_id, affected) = app_state
             .db
             .reopen_requests
-            .insert_auto_approved(requester.id, body.week_start, requester.id)
+            .insert_auto_approved(requester.id, body.week_start, requester.id, request_reason)
             .await?;
         (new_id, Some(affected))
     } else {
         let (new_id, _created_at) = app_state
             .db
             .reopen_requests
-            .insert_pending(requester.id, body.week_start)
+            .insert_pending(requester.id, body.week_start, request_reason)
             .await?;
         (new_id, None)
     };
@@ -199,6 +213,7 @@ pub async fn create(
         Some(serde_json::json!({
             "week_start": body.week_start,
             "status": initial_status,
+            "reason": request_reason,
         })),
     )
     .await;
@@ -298,6 +313,7 @@ fn repo_rr_to_service(r: crate::repository::ReopenRequest) -> ReopenRequest {
         status: r.status,
         reviewed_at: r.reviewed_at,
         rejection_reason: r.rejection_reason,
+        reason: r.reason,
         created_at: r.created_at,
     }
 }

@@ -943,6 +943,11 @@
               <div class="tab-num" style="font-size:11.5px;color:var(--text-tertiary)">
                 {$t("wants to edit week of {date}", { date: fmtDateShort(reopen.week_start) })}
               </div>
+              {#if reopen.reason}
+                <div style="font-size:11px;color:var(--text-tertiary);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px" title={reopen.reason}>
+                  {reopen.reason}
+                </div>
+              {/if}
             </div>
             <div style="display:flex;gap:4px">
               <button
@@ -1316,6 +1321,12 @@
           <div class="zf-label">{$t("Requested at")}</div>
           <div class="tab-num" style="font-size:12px">{fmtDateTime(requestDetail.item.created_at)}</div>
         </div>
+        {#if requestDetail.item.reason}
+          <div>
+            <div class="zf-label">{$t("Reason")}</div>
+            <div style="font-size:13px;white-space:pre-wrap;word-break:break-word">{requestDetail.item.reason}</div>
+          </div>
+        {/if}
       </div>
     </div>
     <footer>
