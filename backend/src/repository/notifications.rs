@@ -186,13 +186,16 @@ impl NotificationDb {
         .await;
     }
 
-    /// Fetch the email of an active user (used to send notification emails).
-    pub async fn get_user_email(&self, user_id: i64) -> Option<String> {
-        sqlx::query_scalar::<_, String>("SELECT email FROM users WHERE id=$1 AND active=TRUE")
-            .bind(user_id)
-            .fetch_optional(&self.pool)
-            .await
-            .ok()
-            .flatten()
+    /// Fetch the email and display name of an active user (used to send
+    /// notification emails). Returns `(email, first_name, last_name)`.
+    pub async fn get_user_email(&self, user_id: i64) -> Option<(String, String, String)> {
+        sqlx::query_as::<_, (String, String, String)>(
+            "SELECT email, first_name, last_name FROM users WHERE id=$1 AND active=TRUE",
+        )
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await
+        .ok()
+        .flatten()
     }
 }

@@ -526,7 +526,7 @@ pub async fn create(
             ("login_line", login_line),
         ],
     );
-    crate::email::send_async(smtp, normalized_email, subject, body_text);
+    crate::email::send_async(smtp, normalized_email, format!("{} {}", first_name, last_name), subject, body_text);
     Ok(Json(CreateResponse {
         id: new_user_id,
         user: created_auth_user,

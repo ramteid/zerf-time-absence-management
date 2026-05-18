@@ -24,7 +24,7 @@ pub use sessions::SessionDb;
 pub use settings::SettingsDb;
 pub use system_metadata::SystemMetadataDb;
 pub use time_entries::{NewEntryData, TimeEntry, TimeEntryDb};
-pub use users::{User, UserDb};
+pub use users::{ActiveUserRow, User, UserDb};
 
 use crate::db::DatabasePool;
 
