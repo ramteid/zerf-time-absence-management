@@ -550,21 +550,7 @@ pub async fn create(
         )
         .await;
     } else if created_absence.kind == "sick" && created_absence.status == "approved" {
-        let language = notification_language(&app_state.pool).await;
-        let mut approver_ids =
-            crate::auth::approval_recipient_ids(&app_state.pool, &requester).await;
-        if !requester.is_admin() {
-            approver_ids.retain(|recipient_id| *recipient_id != requester.id);
-        }
-        notify_approvers(
-            &app_state,
-            &language,
-            &approver_ids,
-            "absence_auto_approved_notice",
-            absence_period_params(&language, &requester, &created_absence),
-            new_absence_id,
-        )
-        .await;
+        notify_sick_auto_approved(&app_state, &requester, &created_absence, new_absence_id).await;
     }
     Ok(Json(created_absence))
 }
@@ -689,23 +675,34 @@ pub async fn update(
         )
         .await;
     } else if absence_after_update.kind == "sick" && absence_after_update.status == "approved" {
-        let language = notification_language(&app_state.pool).await;
-        let mut approver_ids =
-            crate::auth::approval_recipient_ids(&app_state.pool, &requester).await;
-        if !requester.is_admin() {
-            approver_ids.retain(|recipient_id| *recipient_id != requester.id);
-        }
-        notify_approvers(
-            &app_state,
-            &language,
-            &approver_ids,
-            "absence_auto_approved_notice",
-            absence_period_params(&language, &requester, &absence_after_update),
-            absence_id,
-        )
-        .await;
+        notify_sick_auto_approved(&app_state, &requester, &absence_after_update, absence_id).await;
     }
     Ok(Json(absence_after_update))
+}
+
+/// Notifies approvers when a sick leave absence is auto-approved.
+/// Approvers are informational recipients; the requester is excluded since they
+/// initiated the request and are already aware of the auto-approval.
+async fn notify_sick_auto_approved(
+    app_state: &AppState,
+    requester: &User,
+    absence: &Absence,
+    absence_id: i64,
+) {
+    let language = notification_language(&app_state.pool).await;
+    let mut approver_ids = crate::auth::approval_recipient_ids(&app_state.pool, requester).await;
+    // The requester cannot be their own approver (enforced by DB constraint), but
+    // filter defensively to avoid a redundant self-notification.
+    approver_ids.retain(|id| *id != requester.id);
+    notify_approvers(
+        app_state,
+        &language,
+        &approver_ids,
+        "absence_auto_approved_notice",
+        absence_period_params(&language, requester, absence),
+        absence_id,
+    )
+    .await;
 }
 
 pub async fn cancel(

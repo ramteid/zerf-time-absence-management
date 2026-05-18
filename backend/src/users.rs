@@ -1,5 +1,5 @@
 use crate::audit;
-use crate::auth::{hash_password, lock_user_graph, validate_password_strength, User};
+use crate::auth::{lock_user_graph, validate_password_strength, User};
 use crate::error::{AppError, AppResult};
 use crate::i18n;
 use crate::roles::{
@@ -429,7 +429,7 @@ pub async fn create(
         }
         _ => generate_password(),
     };
-    let password_hash = hash_password(&temporary_password)?;
+    let password_hash = crate::auth::hash_password_async(temporary_password.clone()).await?;
     let overtime_balance = body.overtime_start_balance_min.unwrap_or(0);
     if !(-525_600..=525_600).contains(&overtime_balance) {
         return Err(AppError::BadRequest(
@@ -924,7 +924,7 @@ pub async fn reset_password(
         return Err(AppError::Forbidden);
     }
     let temporary_password = generate_password();
-    let new_password_hash = hash_password(&temporary_password)?;
+    let new_password_hash = crate::auth::hash_password_async(temporary_password.clone()).await?;
     let mut transaction = app_state.db.users.begin().await?;
     let target_user = UserDb::fetch_for_update(&mut transaction, target_id).await?;
     if !target_user.active {
