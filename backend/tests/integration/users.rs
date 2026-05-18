@@ -649,7 +649,7 @@ async fn users_full_workflow() {
         let (st, rr_body) = emp
             .post(
                 "/api/v1/reopen-requests",
-                &serde_json::json!({"week_start": monday_iso}),
+                &serde_json::json!({"week_start": monday_iso, "reason": "Test reason"}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "create reopen request");
