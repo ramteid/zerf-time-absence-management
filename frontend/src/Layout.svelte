@@ -21,70 +21,11 @@
   import { fmtDate, fmtDateTime } from "./format.js";
   import Icon from "./Icons.svelte";
   import AppLogo from "./AppLogo.svelte";
+  import PullToRefresh from "./lib/ui/PullToRefresh.svelte";
+  import { notificationTarget } from "./lib/domain/dashboard.js";
 
   // Mobile menu
   let mobileMoreOpen = false;
-
-  // Pull-to-refresh
-  let pullStartY = 0;
-  let pulling = false;
-  let pullDistance = 0;
-  let refreshing = false;
-  const PULL_THRESHOLD = 80;
-  let pullEl;
-
-  function getPullScrollContainer(target) {
-    if (target instanceof Element) {
-      const container = target.closest(".content-area");
-      if (container) return container;
-    }
-    return document.querySelector(".main-content .content-area");
-  }
-
-  function onTouchStart(e) {
-    if (
-      e.touches.length === 1 &&
-      e.target instanceof Element &&
-      !e.target.closest(".tp-drum") &&
-      !e.target.closest("dialog")
-    ) {
-      const scrollContainer = getPullScrollContainer(e.target);
-      if (scrollContainer ? scrollContainer.scrollTop > 0 : window.scrollY > 0) {
-        pulling = false;
-        pullDistance = 0;
-        return;
-      }
-      pullStartY = e.touches[0].clientY;
-      pulling = true;
-    }
-  }
-  function onTouchMove(e) {
-    if (!pulling) return;
-    const dragDistanceY = e.touches[0].clientY - pullStartY;
-    if (dragDistanceY > 0) {
-      const wasHidden = pullDistance === 0;
-      pullDistance = Math.min(dragDistanceY * 0.5, 120);
-      if (wasHidden) try { pullEl?.showPopover?.(); } catch {}
-    } else {
-      pulling = false;
-      pullDistance = 0;
-      try { pullEl?.hidePopover?.(); } catch {}
-    }
-  }
-  async function onTouchEnd() {
-    if (!pulling) return;
-    if (pullDistance >= PULL_THRESHOLD && !refreshing) {
-      refreshing = true;
-      pullDistance = PULL_THRESHOLD;
-      // reload current page
-      await new Promise((resolveDelay) => setTimeout(resolveDelay, 300));
-      location.reload();
-      return;
-    }
-    pulling = false;
-    pullDistance = 0;
-    try { pullEl?.hidePopover?.(); } catch {}
-  }
 
   // Bottom nav: show max 4 primary items + "More"
   $: mobileNavItems = (() => {
@@ -120,32 +61,6 @@
       // Refresh on open so the list is current.
       refreshNotifications().catch(() => {});
     }
-  }
-
-  function notificationTarget(notification) {
-    const query = `n=${notification.id}-${Date.now()}`;
-    if (
-      notification.kind === "timesheet_submitted" ||
-      notification.reference_type === "time_entries"
-    ) {
-      return `/dashboard?focus=timesheets&${query}`;
-    }
-    if (
-      notification.kind === "reopen_request_created" ||
-      notification.reference_type === "reopen_request"
-    ) {
-      return `/dashboard?focus=reopen&${query}`;
-    }
-    if (
-      notification.kind === "absence_requested" ||
-      notification.reference_type === "absences"
-    ) {
-      return `/dashboard?focus=absences&${query}`;
-    }
-    if (notification.kind === "submission_reminder") {
-      return `/dashboard?${query}`;
-    }
-    return "";
   }
 
   async function openNotification(notification) {
@@ -231,36 +146,10 @@
   }
 </script>
 
-<svelte:window
-  on:click={onDocClick}
-  on:touchstart={onTouchStart}
-  on:touchmove={onTouchMove}
-  on:touchend={onTouchEnd}
-/>
+<svelte:window on:click={onDocClick} />
 
 <div class="app-layout">
-  <!-- Pull-to-refresh indicator: uses Popover API to appear above native dialogs (top layer) -->
-  <div
-    class="pull-to-refresh"
-    class:ptr-open={pullDistance > 0}
-    style="height:{pullDistance}px"
-    popover="manual"
-    bind:this={pullEl}
-  >
-    {#if pullDistance > 0}
-      <div class="pull-spinner" class:active={pullDistance >= PULL_THRESHOLD}>
-        {#if refreshing}
-          <Icon name="Clock" size={20} />
-        {:else}
-          <span
-            style="transform:rotate({pullDistance * 3}deg);display:inline-block"
-          >
-            ↓
-          </span>
-        {/if}
-      </div>
-    {/if}
-  </div>
+  <PullToRefresh />
   <!-- Mobile title bar: logo + notification icon (mobile only) -->
   <div class="mobile-title-bar">
     <div class="mobile-title-bar-brand">

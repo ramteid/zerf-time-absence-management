@@ -1,7 +1,6 @@
 <script>
   import { tick } from "svelte";
   import { fly } from "svelte/transition";
-  import { api } from "../api.js";
   import { categories, currentUser, path, settings, toast } from "../stores.js";
   import { t, absenceKindLabel, formatHours } from "../i18n.js";
   import {
@@ -14,8 +13,6 @@
     parseDate,
     monday,
     isoWeek,
-    durMin,
-    dateKey,
   } from "../format.js";
   import Icon from "../Icons.svelte";
   import Dialog from "../Dialog.svelte";
@@ -23,6 +20,28 @@
   import FlextimeChart from "../FlextimeChart.svelte";
   import DatePicker from "../DatePicker.svelte";
   import { isAssistantUser } from "../rolePolicy.js";
+  import {
+    approveAbsenceById,
+    approveReopen as approveReopenRequest,
+    approveWeek as approveWeekEntries,
+    getApprovalDashboard,
+    getFlextime,
+    getMonthSubmissionReport,
+    getOvertimeSummary,
+    getTeamAbsences,
+    rejectAbsenceById,
+    rejectReopen as rejectReopenRequest,
+    rejectWeek as rejectWeekEntries,
+  } from "../lib/api/dashboardApi.js";
+  import {
+    allMonthsToCheck,
+    buildPendingWeeks,
+    buildSubmissionChecks,
+  } from "../lib/domain/dashboard.js";
+  import {
+    userInitialsFromRows,
+    userNameFromRows,
+  } from "../lib/domain/users.js";
 
   // ── Approval workflow state (team leads and admins only) ──────────────────────
   let pendingEntries = [];
@@ -100,7 +119,7 @@
     }
     chartLoading = true;
     try {
-      chartData = await api(`/reports/flextime?from=${chartFrom}&to=${chartTo}`);
+      chartData = await getFlextime({ from: chartFrom, to: chartTo });
     } catch {
       chartData = [];
     } finally {
@@ -108,19 +127,9 @@
     }
   }
 
-  function monthKey(year, month) {
-    return `${year}-${String(month).padStart(2, "0")}`;
-  }
-
   // Convert a minute count into a formatted hours string (e.g. "1:30 h").
   function hoursFromMinutes(minutes) {
     return formatHours((minutes || 0) / 60);
-  }
-
-  // A month report is considered fully submitted for week-tracking purposes
-  // when the backend's weeks_all_submitted flag is true.
-  function monthFullySubmitted(report) {
-    return report?.weeks_all_submitted === true;
   }
 
   async function loadOvertimeSummary() {
@@ -134,7 +143,7 @@
     overtimeError = "";
     try {
       const year = today.getFullYear();
-      overtimeRows = await api(`/reports/overtime?year=${year}`);
+      overtimeRows = await getOvertimeSummary(year);
     } catch (error) {
       overtimeRows = [];
       overtimeError = error?.message || "Overtime data unavailable.";
@@ -143,31 +152,8 @@
     }
   }
 
-  // Builds all YYYY-MM month keys from the user's start month (inclusive) to
-  // the current month (inclusive), spanning multiple years. The backend's
-  // weeks_all_submitted flag correctly limits checking to fully elapsed weeks
-  // (Sunday < today), including boundary weeks across month edges.
-  function allMonthsToCheck() {
-    const userStart = $currentUser?.start_date;
-    if (!userStart) return [];
-    const startYear = parseInt(userStart.slice(0, 4), 10);
-    const startMonth = parseInt(userStart.slice(5, 7), 10);
-    const endYear = today.getFullYear();
-    const endMonth = today.getMonth() + 1;
-    if (startYear > endYear || (startYear === endYear && startMonth > endMonth)) return [];
-    const months = [];
-    for (let y = startYear; y <= endYear; y++) {
-      const fromMonth = y === startYear ? startMonth : 1;
-      const toMonth = y === endYear ? endMonth : 12;
-      for (let m = fromMonth; m <= toMonth; m++) {
-        months.push(monthKey(y, m));
-      }
-    }
-    return months;
-  }
-
   async function loadPastMonthSubmissionStatus() {
-    const monthsToCheck = allMonthsToCheck();
+    const monthsToCheck = allMonthsToCheck($currentUser?.start_date, today);
     if (!monthsToCheck.length) {
       monthSubmissionChecks = [];
       return;
@@ -176,13 +162,11 @@
     monthSubmissionLoading = true;
     monthSubmissionError = "";
     try {
-      const requests = monthsToCheck.map((month) => api(`/reports/month?month=${month}`));
+      const requests = monthsToCheck.map((month) =>
+        getMonthSubmissionReport(month),
+      );
       const reports = await Promise.all(requests);
-      monthSubmissionChecks = monthsToCheck.map((month, index) => ({
-        month,
-        submitted: monthFullySubmitted(reports[index]),
-        approved: reports[index]?.weeks_all_approved === true,
-      }));
+      monthSubmissionChecks = buildSubmissionChecks(monthsToCheck, reports);
     } catch (error) {
       monthSubmissionChecks = [];
       monthSubmissionError = error?.message || "Could not check submission status.";
@@ -208,17 +192,12 @@
       return;
     }
     try {
-      const [
+      const {
         submittedTimeEntries,
         requestedAbsences,
         pendingReopenRequests,
-        teamMembers,
-      ] = await Promise.all([
-        api("/time-entries/all?status=submitted"),
-        api("/absences/all?status=pending_review"),
-        api("/reopen-requests/pending"),
-        api("/users"),
-      ]);
+        users: teamMembers,
+      } = await getApprovalDashboard();
       pendingEntries = submittedTimeEntries;
       pendingAbsences = requestedAbsences;
       pendingReopens = pendingReopenRequests;
@@ -240,7 +219,7 @@
 
   // ── Reactive derivations: overtime balance ────────────────────────────────────
 
-  $: pendingWeeks = buildPendingWeeks(pendingEntries, users);
+  $: pendingWeeks = buildPendingWeeks(pendingEntries, users, $categories);
 
   $: currentOvertimeRow =
     overtimeRows.find((row) => row.month === currentMonthKey) ??
@@ -264,94 +243,6 @@
     (monthSubmissionChecks.length === 0 ||
       monthSubmissionChecks.every((check) => check.approved));
 
-  // ── Pending-week builder (groups submitted entries by user + week) ─────────────
-
-  function entryCountsAsWork(entry) {
-    if (entry?.counts_as_work === false) return false;
-    if (entry?.counts_as_work === true) return true;
-
-    if (entry?.category_id != null) {
-      const categoryById = $categories.find((item) => item.id === entry.category_id);
-      if (categoryById) return categoryById.counts_as_work !== false;
-    }
-
-    if (entry?.category) {
-      const categoryByName = $categories.find((item) => item.name === entry.category);
-      if (categoryByName) return categoryByName.counts_as_work !== false;
-    }
-
-    return true;
-  }
-
-  function entryMinutes(entry) {
-    if (!entry?.start_time || !entry?.end_time || !entryCountsAsWork(entry)) {
-      return 0;
-    }
-    const start = entry.start_time.slice(0, 5);
-    const end = entry.end_time.slice(0, 5);
-    return Math.max(0, durMin(start, end));
-  }
-
-  function weekStartOf(entryDate) {
-    const day = dateKey(entryDate);
-    if (!day) return "";
-    return isoDate(monday(parseDate(day)));
-  }
-
-  function userNameFromRows(userId, userRows) {
-    const user = userRows.find((u) => u.id === userId);
-    return user ? `${user.first_name} ${user.last_name}` : `#${userId}`;
-  }
-
-  function buildPendingWeeks(submittedEntries, userRows) {
-    // Group entries by (user_id, week_start) to create per-person per-week buckets.
-    // The API (/time-entries/all) already excludes the requester's own entries for
-    // non-admin leads, so no client-side self-filter is needed here.
-    const weekGroupsByKey = new Map();
-
-    for (const entry of submittedEntries) {
-      const weekStart = weekStartOf(entry.entry_date);
-      if (!weekStart) continue;
-      const groupKey = `${entry.user_id}:${weekStart}`;
-
-      if (!weekGroupsByKey.has(groupKey)) {
-        weekGroupsByKey.set(groupKey, {
-          key: groupKey,
-          user_id: entry.user_id,
-          week_start: weekStart,
-          week_end: isoDate(addDays(parseDate(weekStart), 6)),
-          entries: [],
-          total_min: 0,
-        });
-      }
-
-      const weekGroup = weekGroupsByKey.get(groupKey);
-      weekGroup.entries.push(entry);
-      weekGroup.total_min += entryMinutes(entry);
-    }
-
-    // Sort entries within each group chronologically, then sort groups newest-first
-    // and alphabetically by employee name within the same week.
-    const sortedWeekGroups = Array.from(weekGroupsByKey.values()).map((group) => ({
-      ...group,
-      entries: group.entries.sort((a, b) => {
-        const dateDiff = dateKey(a.entry_date).localeCompare(dateKey(b.entry_date));
-        if (dateDiff !== 0) return dateDiff;
-        return a.start_time.localeCompare(b.start_time);
-      }),
-    }));
-
-    sortedWeekGroups.sort((a, b) => {
-      const weekDiff = b.week_start.localeCompare(a.week_start);
-      if (weekDiff !== 0) return weekDiff;
-      return userNameFromRows(a.user_id, userRows).localeCompare(
-        userNameFromRows(b.user_id, userRows),
-      );
-    });
-
-    return sortedWeekGroups;
-  }
-
   // ── Reactive: keep selectedWeek in sync after a refresh ──────────────────────
 
   $: if (selectedWeek) {
@@ -363,15 +254,11 @@
   // ── Utility helpers ───────────────────────────────────────────────────────────
 
   function userName(userId, userRows) {
-    const user = userRows.find((u) => u.id === userId);
-    return user ? `${user.first_name} ${user.last_name}` : `#${userId}`;
+    return userNameFromRows(userId, userRows);
   }
 
   function userInitials(userId, userRows) {
-    const user = userRows.find((u) => u.id === userId);
-    return user
-      ? ((user.first_name?.[0] || "") + (user.last_name?.[0] || "")).toUpperCase()
-      : "?";
+    return userInitialsFromRows(userId, userRows) || "?";
   }
 
   function weekHours(week) {
@@ -460,7 +347,7 @@
         to: weekEnd,
         status: "approved",
       });
-      absenceSliderTeamData = await api(`/absences/all?${params}`);
+      absenceSliderTeamData = await getTeamAbsences(params);
     } catch {
       absenceSliderTeamData = [];
     }
@@ -514,10 +401,9 @@
     if (!week?.entries?.length || weekActionBusy) return;
     weekActionBusy = true;
     try {
-      const result = await api("/time-entries/batch-approve", {
-        method: "POST",
-        body: { ids: week.entries.map((entry) => entry.id) },
-      });
+      const result = await approveWeekEntries(
+        week.entries.map((entry) => entry.id),
+      );
       if ((result?.count ?? 0) > 0) {
         toast($t("Approved."), "ok");
       }
@@ -541,10 +427,10 @@
 
     weekActionBusy = true;
     try {
-      await api("/time-entries/batch-reject", {
-        method: "POST",
-        body: { ids: week.entries.map((entry) => entry.id), reason },
-      });
+      await rejectWeekEntries(
+        week.entries.map((entry) => entry.id),
+        reason,
+      );
       toast($t("Rejected."), "ok");
       selectedWeek = null;
       await load();
@@ -565,7 +451,7 @@
     );
     if (!confirmed) return;
     try {
-      await api("/time-entries/batch-approve", { method: "POST", body: { ids } });
+      await approveWeekEntries(ids);
       toast($t("All approved."), "ok");
       load();
     } catch (error) {
@@ -581,12 +467,8 @@
 
 
   async function approveAbsence(absence) {
-    const isCancellation = absence.status === "cancellation_pending";
-    const endpoint = isCancellation
-      ? `/absences/${absence.id}/approve-cancellation`
-      : `/absences/${absence.id}/approve`;
     try {
-      await api(endpoint, { method: "POST" });
+      await approveAbsenceById(absence);
       toast($t("Approved."), "ok");
       load();
     } catch (error) {
@@ -604,7 +486,7 @@
       );
       if (!confirmed) return;
       try {
-        await api(`/absences/${absence.id}/reject-cancellation`, { method: "POST" });
+        await rejectAbsenceById(absence);
         toast($t("Rejected."), "ok");
         load();
       } catch (error) {
@@ -618,7 +500,7 @@
       );
       if (!reason) return;
       try {
-        await api(`/absences/${absence.id}/reject`, { method: "POST", body: { reason } });
+        await rejectAbsenceById(absence, reason);
         toast($t("Rejected."), "ok");
         load();
       } catch (error) {
@@ -631,7 +513,7 @@
 
   async function approveReopen(id) {
     try {
-      await api(`/reopen-requests/${id}/approve`, { method: "POST", body: {} });
+      await approveReopenRequest(id);
       toast($t("Approved."), "ok");
       load();
     } catch (error) {
@@ -647,7 +529,7 @@
     );
     if (!reason) return;
     try {
-      await api(`/reopen-requests/${id}/reject`, { method: "POST", body: { reason } });
+      await rejectReopenRequest(id, reason);
       toast($t("Rejected."), "ok");
       load();
     } catch (error) {

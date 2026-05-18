@@ -5,7 +5,6 @@
   // Current-day hours are included in the monthly report. Boundary weeks count by day for
   // month totals, but they count for both months when checking week submission.
 
-  import { api } from "../api.js";
   import { currentUser, settings, toast } from "../stores.js";
   import {
     t,
@@ -32,6 +31,43 @@
   import FlextimeChart from "../FlextimeChart.svelte";
   import { jsPDF } from "jspdf";
   import { hasFlextimeAccount, isAssistantUser } from "../rolePolicy.js";
+  import {
+    getAbsenceReport,
+    getCategoryReport,
+    getFlextimeReport,
+    getHolidaysByYear,
+    getLeaveBalance,
+    getMonthReport,
+    getOvertimeReport,
+    getRangeReport,
+    getTeamCategoryReport,
+    getTeamReport,
+    getUserAbsencesByYear,
+    getUsersForReports,
+  } from "../lib/api/reportsApi.js";
+  import {
+    isoMonthStart,
+    monthEnd,
+    monthStart,
+    yearsBetweenDates,
+  } from "../lib/domain/dates.js";
+  import {
+    absenceKindTotals,
+    categoryColumnsFromTeamReport,
+    categoryNamesFromTeamReport,
+    dedupeAbsences,
+    filterCategories,
+    filterTeamCategoryColumns,
+    summarizeAbsences,
+    teamCategoryMinutes,
+    teamCategoryRowTotal,
+    totalAbsenceDays,
+    totalCategoryMinutes,
+  } from "../lib/domain/reports.js";
+  import {
+    findUserById,
+    userWorkdaysPerWeekById,
+  } from "../lib/domain/users.js";
 
   // Date reference is tied to configured app timezone.
   let today = new Date();
@@ -53,7 +89,7 @@
       // Read the permission directly from the store so this is safe to call
       // before Svelte's reactive declarations have been evaluated.
       const canTeam = !!$currentUser?.permissions?.can_view_team_reports;
-      users = canTeam ? await api("/users") : [$currentUser];
+      users = await getUsersForReports(canTeam, $currentUser);
     } catch (e) {
       toast($t(e?.message || "Error"), "error");
     }
@@ -77,9 +113,7 @@
   let reportMonth = currentMonthStr;
   // reportData holds all needed information after loading.
   let reportData = null;
-  $: selectedReportUser =
-    users.find((user) => user.id === Number(reportUserId)) ||
-    ($currentUser?.id === Number(reportUserId) ? $currentUser : null);
+  $: selectedReportUser = findUserById(users, reportUserId, $currentUser);
   $: selectedUserIsAssistant = isAssistantUser(selectedReportUser);
   $: selectedUserHasFlextime = hasFlextimeAccount(selectedReportUser);
   // Derive the earliest selectable month from the employee's start date.
@@ -92,10 +126,7 @@
   }
 
   function userById(userId) {
-    return (
-      users.find((user) => user.id === Number(userId)) ||
-      ($currentUser?.id === Number(userId) ? $currentUser : null)
-    );
+    return findUserById(users, userId, $currentUser);
   }
 
   function userHasFlextime(userId) {
@@ -103,27 +134,7 @@
   }
 
   function userWorkdaysPerWeek(userId, fallback = 5) {
-    const matchedUser = users.find((user) => user.id === userId);
-    const value = Number(matchedUser?.workdays_per_week);
-    return Number.isFinite(value) && value >= 1 && value <= 7
-      ? value
-      : fallback;
-  }
-
-  function monthStart(monthKey) {
-    return `${monthKey}-01`;
-  }
-
-  function isoMonthStart(dateValue) {
-    return `${dateValue.getFullYear()}-${String(dateValue.getMonth() + 1).padStart(2, "0")}-01`;
-  }
-
-  function monthEnd(monthKey) {
-    const [yearPart, monthPart] = monthKey.split("-");
-    const year = Number(yearPart);
-    const month = Number(monthPart);
-    const lastDay = new Date(year, month, 0).getDate();
-    return `${monthKey}-${String(lastDay).padStart(2, "0")}`;
+    return userWorkdaysPerWeekById(users, userId, fallback);
   }
 
   async function loadReport() {
@@ -138,19 +149,22 @@
 
       const [monthRaw, leaveRaw, overtimeRows, flextimeRaw] =
         await Promise.all([
-          api(`/reports/month?user_id=${reportUserId}&month=${reportMonth}`),
-          api(`/leave-balance/${reportUserId}?year=${reportYear}`).catch(
+          getMonthReport({ userId: reportUserId, month: reportMonth }),
+          getLeaveBalance({ userId: reportUserId, year: reportYear }).catch(
             () => null,
           ),
           selectedUserHasFlextime
-            ? api(
-                `/reports/overtime?user_id=${reportUserId}&year=${reportYear}`,
-              ).catch(() => null)
+            ? getOvertimeReport({
+                userId: reportUserId,
+                year: reportYear,
+              }).catch(() => null)
             : Promise.resolve(null),
           canFetchChart && selectedUserHasFlextime
-            ? api(
-                `/reports/flextime?user_id=${reportUserId}&from=${chartMonthFrom}&to=${chartMonthTo}`,
-              ).catch(() => [])
+            ? getFlextimeReport({
+                userId: reportUserId,
+                from: chartMonthFrom,
+                to: chartMonthTo,
+              }).catch(() => [])
             : Promise.resolve([]),
         ]);
 
@@ -176,15 +190,9 @@
   }
 
   // Absence summary for stat cards: { vacation: 2, sick: 1, ... }
-  $: reportAbsenceSummary = (() => {
-    if (!reportData) return {};
-    const map = {};
-    for (const absenceEntry of reportData.monthReport.absences || []) {
-      map[absenceEntry.kind] =
-        (map[absenceEntry.kind] || 0) + (absenceEntry.days || 0);
-    }
-    return map;
-  })();
+  $: reportAbsenceSummary = reportData
+    ? summarizeAbsences(reportData.monthReport.absences)
+    : {};
 
   // Section 3: team report per employee.
   // Visible for leads and admins only.
@@ -196,7 +204,7 @@
 
   async function showTeam() {
     try {
-      teamReport = await api(`/reports/team?month=${teamMonth}`);
+      teamReport = await getTeamReport({ month: teamMonth });
     } catch (e) {
       teamReport = null;
       toast($t(e?.message || "Error"), "error");
@@ -216,31 +224,26 @@
   let catFilteredCategories = [];
   let catShowFilter = false;
 
-  function categoryNamesFromTeamReport(rows) {
-    return [
-      ...new Set(
-        (rows || []).flatMap((row) =>
-          (row.categories || []).map((categoryEntry) => categoryEntry.category),
-        ),
-      ),
-    ];
-  }
-
   async function showCat() {
     if (catFrom > catTo) return;
     try {
-      const params = new URLSearchParams({ from: catFrom, to: catTo });
       if (isSelfOnlyReportsView) {
         // Employees see their own category breakdown.
-        params.set("user_id", $currentUser.id);
-        catReport = await api(`/reports/categories?${params}`);
+        catReport = await getCategoryReport({
+          userId: $currentUser.id,
+          from: catFrom,
+          to: catTo,
+        });
         teamCatReport = null;
         catFilteredCategories = catReport.map(
           (categoryEntry) => categoryEntry.category,
         );
       } else {
         // Leads and admins see the team matrix, including their own row.
-        teamCatReport = await api(`/reports/team-categories?${params}`);
+        teamCatReport = await getTeamCategoryReport({
+          from: catFrom,
+          to: catTo,
+        });
         catReport = null;
         catFilteredCategories = categoryNamesFromTeamReport(teamCatReport);
       }
@@ -264,51 +267,24 @@
 
   // Apply the active category filter to the individual list.
   $: filteredCatReport = catReport
-    ? catReport.filter((categoryRow) =>
-        catFilteredCategories.includes(categoryRow.category),
-      )
+    ? filterCategories(catReport, catFilteredCategories)
     : catReport;
-  $: filteredCatTotal = (filteredCatReport || []).reduce(
-    (totalMinutes, categoryRow) => totalMinutes + categoryRow.minutes,
-    0,
-  );
+  $: filteredCatTotal = totalCategoryMinutes(filteredCatReport);
 
   // Columns for the team matrix (sorted descending by total minutes).
-  $: allTeamCatColumns = (() => {
-    if (!teamCatReport) return [];
-    const totals = new Map();
-    for (const row of teamCatReport) {
-      for (const categoryEntry of row.categories) {
-        const entryTotals = totals.get(categoryEntry.category) || {
-          color: categoryEntry.color,
-          total: 0,
-        };
-        entryTotals.total += categoryEntry.minutes;
-        totals.set(categoryEntry.category, entryTotals);
-      }
-    }
-    return [...totals.entries()]
-      .sort((a, b) => b[1].total - a[1].total)
-      .map(([category, { color }]) => ({ category, color }));
-  })();
-  $: visibleTeamCatColumns = allTeamCatColumns.filter((column) =>
-    catFilteredCategories.includes(column.category),
+  $: allTeamCatColumns = teamCatReport
+    ? categoryColumnsFromTeamReport(teamCatReport)
+    : [];
+  $: visibleTeamCatColumns = filterTeamCategoryColumns(
+    allTeamCatColumns,
+    catFilteredCategories,
   );
 
   function teamCatMinutes(row, category) {
-    const categoryEntry = row.categories.find(
-      (categoryRow) => categoryRow.category === category,
-    );
-    return categoryEntry ? categoryEntry.minutes : 0;
+    return teamCategoryMinutes(row, category);
   }
   function teamCatRowTotal(row) {
-    return row.categories.reduce(
-      (totalMinutes, categoryEntry) =>
-        catFilteredCategories.includes(categoryEntry.category)
-          ? totalMinutes + categoryEntry.minutes
-          : totalMinutes,
-      0,
-    );
+    return teamCategoryRowTotal(row, catFilteredCategories);
   }
 
   // Section 5: absences.
@@ -317,19 +293,8 @@
   let absenceFrom = isoMonthStart(today);
   let absenceTo = `${currentYear}-12-31`;
   let absenceReport = null;
-  $: absenceTotalDays = (absenceReport || []).reduce(
-    (totalDays, absenceEntry) => totalDays + (absenceEntry.days || 0),
-    0,
-  );
-  $: absenceByKind = (absenceReport || []).reduce(
-    (daysByKind, absenceEntry) => {
-      const absenceKind = absenceEntry.kind || "unknown";
-      daysByKind[absenceKind] =
-        (daysByKind[absenceKind] || 0) + (absenceEntry.days || 0);
-      return daysByKind;
-    },
-    {},
-  );
+  $: absenceTotalDays = totalAbsenceDays(absenceReport);
+  $: absenceByKind = absenceKindTotals(absenceReport);
   $: isLeadView = canViewTeamReports;
   let absenceHolidayDates = new Set();
 
@@ -362,29 +327,15 @@
   }
 
   async function loadOwnAbsencesForRange() {
-    const fromYear = parseInt(absenceFrom.slice(0, 4), 10);
-    const toYear = parseInt(absenceTo.slice(0, 4), 10);
-    const years = Array.from(
-      { length: toYear - fromYear + 1 },
-      (_, yearOffset) => fromYear + yearOffset,
-    );
+    const years = yearsBetweenDates(absenceFrom, absenceTo);
     const absenceLists = await Promise.all(
-      years.map((yearValue) => api(`/absences?year=${yearValue}`)),
+      years.map((yearValue) => getUserAbsencesByYear(yearValue)),
     );
     return absenceLists.flat().filter(
       (absenceEntry) =>
         absenceEntry.end_date >= absenceFrom &&
         absenceEntry.start_date <= absenceTo,
     );
-  }
-
-  function dedupeAbsences(absences) {
-    const seen = new Set();
-    return absences.filter((absenceEntry) => {
-      if (seen.has(absenceEntry.id)) return false;
-      seen.add(absenceEntry.id);
-      return true;
-    });
   }
 
   async function showAbsences() {
@@ -396,12 +347,8 @@
         // multiple requests before the selected date window can be applied.
         raw = dedupeAbsences(await loadOwnAbsencesForRange());
       } else {
-        const params = new URLSearchParams({
-          from: absenceFrom,
-          to: absenceTo,
-        });
         const [teamAbsences, ownAbsences] = await Promise.all([
-          api(`/absences/all?${params}`),
+          getAbsenceReport({ from: absenceFrom, to: absenceTo }),
           loadOwnAbsencesForRange(),
         ]);
         // `/absences/all` is review-scoped for non-admin leads and contains
@@ -422,7 +369,7 @@
         ),
       ];
       const holidayLists = await Promise.all(
-        allYears.map((yearValue) => api(`/holidays?year=${yearValue}`)),
+        allYears.map((yearValue) => getHolidaysByYear(yearValue)),
       );
       absenceHolidayDates = holidayDateSet(holidayLists.flat());
       absenceReport = raw.map((absenceEntry) => ({
@@ -522,16 +469,15 @@
     }
     exportInProgress = true;
     try {
-      const params = new URLSearchParams({
-        user_id: String(csvUserId),
-        from: csvFrom,
-        to: csvTo,
-      });
       const exportUserHasFlextime = userHasFlextime(csvUserId);
       const [report, flextimeData] = await Promise.all([
-        api(`/reports/range?${params}`),
+        getRangeReport({ userId: csvUserId, from: csvFrom, to: csvTo }),
         exportUserHasFlextime
-          ? api(`/reports/flextime?${params}`).catch(() => [])
+          ? getFlextimeReport({
+              userId: csvUserId,
+              from: csvFrom,
+              to: csvTo,
+            }).catch(() => [])
           : Promise.resolve([]),
       ]);
       // Derive opening balance (cumulative at day before from) and closing
@@ -683,16 +629,15 @@
     }
     exportInProgress = true;
     try {
-      const params = new URLSearchParams({
-        user_id: String(csvUserId),
-        from: csvFrom,
-        to: csvTo,
-      });
       const exportUserHasFlextime = userHasFlextime(csvUserId);
       const [report, flextimeData] = await Promise.all([
-        api(`/reports/range?${params}`),
+        getRangeReport({ userId: csvUserId, from: csvFrom, to: csvTo }),
         exportUserHasFlextime
-          ? api(`/reports/flextime?${params}`).catch(() => [])
+          ? getFlextimeReport({
+              userId: csvUserId,
+              from: csvFrom,
+              to: csvTo,
+            }).catch(() => [])
           : Promise.resolve([]),
       ]);
       const openingBalance =
