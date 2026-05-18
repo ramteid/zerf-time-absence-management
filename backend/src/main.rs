@@ -20,9 +20,7 @@ async fn main() -> Result<()> {
     holidays::ensure_holidays(&pool, year + 1).await?;
 
     // Check if initial setup is needed (no users exist).
-    let user_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
-        .fetch_one(&pool)
-        .await?;
+    let user_count = zerf::repository::UserDb::new(pool.clone()).count().await?;
     if user_count == 0 {
         tracing::info!("==========================================================");
         tracing::info!("No admin account found.");

@@ -59,7 +59,8 @@ scripts/      Backup utility
 
 ### Architecture: Repository Pattern
 
-The backend uses a **repository façade** (`repository::Db`) as the single entry point for all database access. Service modules (handlers) should never import `sqlx` directly for new code.
+The backend uses a **repository façade** (`repository::Db`) as the single entry point for all database access.
+Service modules (handlers, schedulers, helpers, startup code) must not execute SQL directly.
 
 **Key types:**
 
@@ -79,8 +80,8 @@ The backend uses a **repository façade** (`repository::Db`) as the single entry
 // Simple reads via the façade (preferred)
 let entries = app_state.db.time_entries.list_for_user(user_id, from, to).await?;
 
-// Transaction-bound writes (still use pool directly)
-let mut tx = app_state.pool.begin().await?;
+// Transaction-bound writes via repository API
+let mut tx = app_state.db.users.begin().await?;
 SubDb::method_tx(&mut *tx, ...).await?;
 tx.commit().await?;
 
@@ -90,7 +91,17 @@ let user = UserDb::new(pool.clone()).find_by_id(id).await?;
 
 **Type conversion:** Repository structs (`repository::User`, `repository::TimeEntry`, etc.) are converted to handler-level types via `repo_*_to_service()` helper functions (e.g. `crate::users::repo_user_to_auth_user()`).
 
-**Migration status:** Read paths are fully migrated through the repository. Complex transactional write handlers (absences create/approve/reject, reopen approve/reject) still use `sqlx` directly via `app_state.pool` for multi-statement transactions with `FOR UPDATE` locks and cross-table validation.
+**Rule:** SQL is allowed only in `backend/src/repository/*.rs` (plus migration/bootstrap infrastructure in `db.rs`).
+All new code must expose database operations through repository methods.
+
+**Temporary exceptions for legacy code:**
+- Existing direct SQL outside repositories must be migrated when touched.
+- Any unavoidable temporary exception requires a code comment with: issue link, owner, and removal deadline.
+- Exceptions are short-lived and must not be copied into new code paths.
+
+**Enforcement guidance:**
+- PR review must reject direct `sqlx::query*` usage outside `backend/src/repository/*.rs`.
+- CI should include a guard (for production backend files) that fails when direct SQL patterns are introduced outside repository modules.
 
 ### Background tasks (spawned in main.rs)
 
@@ -274,6 +285,9 @@ DATABASE_URL=postgres://postgres:postgres@127.0.0.1:55432/postgres cargo test
 - Reduce complexity: avoid unnecessary abstractions, indirection, and nesting.
 - Prefer simple, direct solutions over clever ones. Keep it concise.
 - Apply appropriate architectural patterns (e.g., handler/service/repository separation) consistently across the codebase.
+- Keep database logic in repository modules only; handlers/services orchestrate business flow and call repository APIs.
+- Do not introduce new `sqlx::query*` calls outside `backend/src/repository/*.rs`.
+- Prefer adding repository methods over duplicating SQL in callers.
 - Add comprehensive inline comments e. g. explaining decisions, intent and high-level logic.
 - Translate all texts that are displayed to the user (UI, errors, E-Mail, etc.)
 - Translations must be handled centrally in i18n.rs for the backend and i18n.js for the frontend.

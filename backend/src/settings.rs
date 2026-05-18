@@ -176,7 +176,7 @@ pub async fn app_current_year(pool: &crate::db::DatabasePool) -> i32 {
 }
 
 async fn save_setting_exec(
-    tx: &mut sqlx::PgConnection,
+    tx: &mut crate::db::PgConnection,
     key: &str,
     value: &str,
 ) -> AppResult<String> {
@@ -352,7 +352,7 @@ pub async fn update_smtp_settings(
     let smtp_config = smtp_config_from_body(&app_state.pool, &body).await?;
 
     // Save all SMTP settings atomically within a transaction.
-    let mut transaction = app_state.pool.begin().await?;
+    let mut transaction = app_state.db.settings.begin().await?;
 
     save_setting_exec(&mut transaction, SMTP_HOST_KEY, &smtp_config.host).await?;
     save_setting_exec(
@@ -575,7 +575,7 @@ pub async fn update_admin_settings(
     };
 
     // Save all settings atomically within a transaction.
-    let mut transaction = app_state.pool.begin().await?;
+    let mut transaction = app_state.db.settings.begin().await?;
 
     // When carryover_expiry_date is absent (null from the client), clear the stored value so
     // the user can disable the feature. When present, use the validated date string.

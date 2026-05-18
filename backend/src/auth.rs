@@ -14,7 +14,6 @@ use axum::Json;
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use sqlx::FromRow;
 use std::sync::Arc;
 use subtle::ConstantTimeEq;
 
@@ -44,7 +43,7 @@ const LOCKOUT_MIN: i64 = 15;
 const MIN_PW_LEN: usize = 12;
 const PASSWORD_RESET_TTL_HOURS: i64 = 1;
 
-#[derive(Debug, Clone, FromRow, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct User {
     pub id: i64,
     pub email: String,
@@ -91,7 +90,7 @@ pub async fn user_approver_ids(pool: &crate::db::DatabasePool, user_id: i64) -> 
     db.get_approver_ids(user_id).await.unwrap_or_default()
 }
 
-pub async fn lock_user_graph(tx: &mut sqlx::PgConnection) -> AppResult<()> {
+pub async fn lock_user_graph(tx: &mut crate::db::PgConnection) -> AppResult<()> {
     UserDb::lock_user_graph_tx(tx).await
 }
 
@@ -518,7 +517,7 @@ pub async fn change_password(
     }
     let new_password_hash = hash_password_async(body.new_password.clone()).await?;
     let current_token_hash = hash_token(&raw_token);
-    let mut transaction = app_state.pool.begin().await?;
+    let mut transaction = app_state.db.users.begin().await?;
     UserDb::update_password(&mut transaction, user.id, &new_password_hash, false).await?;
     // On password change, all OTHER sessions for this user are revoked, but
     // the caller's current session is preserved so they remain logged in.
@@ -801,12 +800,12 @@ pub async fn setup(
     let today = crate::settings::app_today(&app_state.pool).await;
 
     // Prevent race conditions where two concurrent requests both observe
-    // zero users and both insert an admin. `pool.begin()` runs at the
+    // zero users and both insert an admin. The transaction runs at the
     // default READ COMMITTED isolation, which does NOT serialize the
     // SELECT/INSERT pair on its own. We take a transaction-scoped Postgres
     // advisory lock so any concurrent setup call blocks until ours commits,
     // and then sees the row we just inserted.
-    let mut transaction = app_state.pool.begin().await?;
+    let mut transaction = app_state.db.users.begin().await?;
     UserDb::lock_user_graph_tx(&mut transaction).await?;
     let existing_user_count = UserDb::count_tx(&mut transaction).await?;
     if existing_user_count > 0 {
@@ -916,7 +915,7 @@ pub async fn forgot_password(
         .await?;
 
     // Always return 200 to prevent email enumeration.
-    let Some((user_id, user_email)) = user else {
+    let Some((user_id, user_email, first_name, last_name)) = user else {
         return Ok(Json(serde_json::json!({ "ok": true })));
     };
 
@@ -946,7 +945,7 @@ pub async fn forgot_password(
         &[("reset_link", reset_link)],
     );
 
-    crate::email::send_async(smtp.map(Arc::new), user_email, subject, body_text);
+    crate::email::send_async(smtp.map(Arc::new), user_email, format!("{} {}", first_name, last_name), subject, body_text);
 
     Ok(Json(serde_json::json!({ "ok": true })))
 }

@@ -201,9 +201,13 @@ impl SessionDb {
     }
 
     /// Look up an active user by email for the password-reset flow.
-    pub async fn get_active_user_by_email(&self, email: &str) -> AppResult<Option<(i64, String)>> {
-        Ok(sqlx::query_as::<_, (i64, String)>(
-            "SELECT id, email FROM users WHERE lower(email)=$1 AND active=TRUE",
+    /// Returns `(id, email, first_name, last_name)`.
+    pub async fn get_active_user_by_email(
+        &self,
+        email: &str,
+    ) -> AppResult<Option<(i64, String, String, String)>> {
+        Ok(sqlx::query_as::<_, (i64, String, String, String)>(
+            "SELECT id, email, first_name, last_name FROM users WHERE lower(email)=$1 AND active=TRUE",
         )
         .bind(email)
         .fetch_optional(&self.pool)

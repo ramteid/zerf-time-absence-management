@@ -38,54 +38,16 @@ pub fn duration_until_next_monday_7am(now: chrono::DateTime<chrono_tz::Tz>) -> S
 }
 
 /// Rows returned by the pending-approvals query:
-/// (approver_id, approver_email, total_pending_count)
-type PendingApproverRow = (i64, String, i64);
+/// (approver_id, approver_email, first_name, last_name, total_pending_count)
+type PendingApproverRow = (i64, String, String, String, i64);
 
 /// Query all active approvers who currently have at least one pending item.
 /// Uses explicit approver assignments only.
 async fn find_approvers_with_pending(pool: &DatabasePool) -> Vec<PendingApproverRow> {
-    sqlx::query_as::<_, PendingApproverRow>(
-        "WITH user_pending AS (
-             SELECT user_id, COUNT(*)::bigint AS pending_count
-             FROM (
-                 -- Include all submitted entries: non-crediting entries also require
-                 -- approval, so approvers must be reminded about them too.
-                 SELECT user_id FROM time_entries
-                 WHERE status = 'submitted'
-                 UNION ALL
-                 SELECT user_id FROM absences           WHERE status IN ('requested','cancellation_pending')
-                 UNION ALL
-                 SELECT user_id FROM reopen_requests    WHERE status = 'pending'
-             ) all_pending
-             GROUP BY user_id
-         ),
-         -- Only count an assignment as active when the approver is active and
-         -- role-eligible for the subject user.
-         via_assignment AS (
-             SELECT ua.approver_id, SUM(up.pending_count)::bigint AS pending_count
-             FROM user_approvers ua
-             JOIN user_pending up ON up.user_id = ua.user_id
-             JOIN users subject   ON subject.id = ua.user_id
-             JOIN users approver  ON approver.id = ua.approver_id
-                                 AND approver.active = TRUE
-             WHERE (
-                 (subject.role = 'admin' AND approver.role = 'admin') OR
-                 (subject.role != 'admin' AND approver.role IN ('team_lead', 'admin'))
-             )
-             GROUP BY ua.approver_id
-         ),
-         combined AS (
-             SELECT approver_id, pending_count FROM via_assignment
-         )
-         SELECT c.approver_id, u.email, SUM(c.pending_count)::bigint AS total_pending
-         FROM combined c
-         JOIN users u ON u.id = c.approver_id AND u.active = TRUE
-         GROUP BY c.approver_id, u.email
-         HAVING SUM(c.pending_count) > 0",
-    )
-    .fetch_all(pool)
-    .await
-    .unwrap_or_default()
+    crate::repository::UserDb::new(pool.clone())
+        .pending_approvers_for_reminders()
+        .await
+        .unwrap_or_default()
 }
 
 /// Run one check pass: notify every approver who has pending items.
@@ -136,7 +98,7 @@ pub async fn run_check(state: &crate::AppState) {
         .await
         .map(std::sync::Arc::new);
 
-    for (approver_id, approver_email, pending_count) in approvers {
+    for (approver_id, approver_email, first_name, last_name, pending_count) in approvers {
         let count_str = pending_count.to_string();
         let title = crate::i18n::translate(&language, "approval_reminder_title", &[]);
         let body = crate::i18n::translate(
@@ -177,7 +139,7 @@ pub async fn run_check(state: &crate::AppState) {
                     .send(crate::notifications::NotificationSignal {
                         user_id: approver_id,
                     });
-                crate::email::send_async(smtp.clone(), approver_email, title, email_body);
+                crate::email::send_async(smtp.clone(), approver_email, format!("{} {}", first_name, last_name), title, email_body);
             }
             Ok(false) => {
                 // Already reminded today (idempotency guard).
