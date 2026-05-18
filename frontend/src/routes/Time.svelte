@@ -203,18 +203,18 @@
 
   async function requestReopen() {
     if (!weekFrom) return;
-    const confirmed = await confirmDialog(
+    const reason = await confirmDialog(
       $t("Request edit for this week?"),
       $t(
         "Your team lead will be notified and must approve before the week becomes editable again.",
       ),
-      { confirm: $t("Request edit") },
+      { confirm: $t("Request edit"), reason: true },
     );
-    if (!confirmed) return;
+    if (!reason) return;
     try {
       const response = await api("/reopen-requests", {
         method: "POST",
-        body: { week_start: isoDate(weekFrom) },
+        body: { week_start: isoDate(weekFrom), reason },
       });
       if (response.status === "auto_approved") {
         toast($t("Week editing enabled."), "ok");

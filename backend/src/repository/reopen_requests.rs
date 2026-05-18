@@ -14,11 +14,12 @@ pub struct ReopenRequest {
     pub status: String,
     pub reviewed_at: Option<DateTime<Utc>>,
     pub rejection_reason: Option<String>,
+    pub reason: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
 const RR_SELECT: &str = "SELECT id, user_id, week_start, reviewed_by, status, \
-     reviewed_at, rejection_reason, created_at FROM reopen_requests";
+     reviewed_at, rejection_reason, reason, created_at FROM reopen_requests";
 
 const ACTIVE_ASSIGNED_APPROVER_FOR_UPDATE_SQL: &str = "\
     SELECT TRUE \
@@ -132,13 +133,15 @@ impl ReopenRequestDb {
         &self,
         user_id: i64,
         week_start: NaiveDate,
+        reason: &str,
     ) -> AppResult<(i64, DateTime<Utc>)> {
         sqlx::query_as::<_, (i64, DateTime<Utc>)>(
-            "INSERT INTO reopen_requests(user_id, week_start, status) \
-             VALUES ($1,$2,'pending') RETURNING id, created_at",
+            "INSERT INTO reopen_requests(user_id, week_start, status, reason) \
+             VALUES ($1,$2,'pending',$3) RETURNING id, created_at",
         )
         .bind(user_id)
         .bind(week_start)
+        .bind(reason)
         .fetch_one(&self.pool)
         .await
         .map_err(|e| {
@@ -155,16 +158,18 @@ impl ReopenRequestDb {
         user_id: i64,
         week_start: NaiveDate,
         actor_id: i64,
+        reason: &str,
     ) -> AppResult<(i64, Vec<(i64, String)>)> {
         let mut tx = self.pool.begin().await?;
         let req_id: i64 = sqlx::query_scalar(
-            "INSERT INTO reopen_requests(user_id, week_start, status, reviewed_by, reviewed_at) \
-             VALUES ($1,$2,'auto_approved',$3,CURRENT_TIMESTAMP) \
+            "INSERT INTO reopen_requests(user_id, week_start, status, reviewed_by, reviewed_at, reason) \
+             VALUES ($1,$2,'auto_approved',$3,CURRENT_TIMESTAMP,$4) \
              RETURNING id",
         )
         .bind(user_id)
         .bind(week_start)
         .bind(actor_id)
+        .bind(reason)
         .fetch_one(&mut *tx)
         .await
         .map_err(|e| {
