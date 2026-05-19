@@ -273,7 +273,7 @@ async fn start_date_full_workflow() {
         );
 
         // Entry today should succeed
-        let (st, _) = new_client
+        let (st, body) = new_client
             .post(
                 "/api/v1/time-entries",
                 &json!({
@@ -284,7 +284,7 @@ async fn start_date_full_workflow() {
                 }),
             )
             .await;
-        assert_eq!(st, StatusCode::OK, "entry on start_date for new user");
+        assert_eq!(st, StatusCode::OK, "entry on start_date for new user: {body}");
     }
 
     app.cleanup().await;
