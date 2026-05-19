@@ -365,6 +365,16 @@
     max-width: 300px;
   }
 
+  @media (max-width: 768px) {
+    .audit-list {
+      overflow-x: auto;
+    }
+
+    .audit-row {
+      flex-wrap: nowrap;
+      min-width: max-content;
+    }
+  }
 
   .detail-row {
     display: flex;
