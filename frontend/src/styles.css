@@ -60,18 +60,6 @@
 
   --font-sans:
     "Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-
-  /* Chart band fill colors (used in FlextimeChart vertical bands) */
-  --band-holiday: #f59e0b;
-  --band-weekend: #9ca3af;
-  --band-vacation: #3b82f6;
-  --band-sick: #ef4444;
-  --band-training: #0d9488;
-  --band-special-leave: #a855f7;
-  --band-unpaid: #64748b;
-  --band-general-absence: #6b7280;
-  --band-flextime-reduction: #6d4c41;
-  --band-absent: #78716c;
 }
 
 [data-theme="dark"] {
@@ -117,18 +105,6 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
   --shadow-md: 0 1px 3px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.2);
   --shadow-lg: 0 8px 28px rgba(0, 0, 0, 0.4), 0 2px 6px rgba(0, 0, 0, 0.3);
-
-  /* Chart band fill colors: lighter variants for better visibility on dark backgrounds */
-  --band-holiday: #fbbf24;
-  --band-weekend: #94a3b8;
-  --band-vacation: #60a5fa;
-  --band-sick: #f87171;
-  --band-training: #2dd4bf;
-  --band-special-leave: #c084fc;
-  --band-unpaid: #94a3b8;
-  --band-general-absence: #9ca3af;
-  --band-flextime-reduction: #a1887f;
-  --band-absent: #a8a29e;
 }
 
 /* ── Reset ── */

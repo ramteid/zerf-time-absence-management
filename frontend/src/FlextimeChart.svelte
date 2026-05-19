@@ -2,6 +2,7 @@
   import { t, absenceKindLabel, formatHours, fmtDecimal } from "./i18n.js";
   import { settings } from "./stores.js";
   import { appTodayIsoDate, fmtDateShort } from "./format.js";
+  import { HOLIDAY_COLOR, WEEKEND_COLOR, ABSENCE_COLORS } from "./colors.js";
 
   /**
    * @typedef {{date: string, actual_min: number, target_min: number,
@@ -67,16 +68,24 @@
   // Points subset: only up to today (for line and area)
   $: actualPts = lastActualIdx >= 0 ? pts.slice(0, lastActualIdx + 1) : [];
 
-  // SVG path strings (only drawn up to today)
+  // SVG path strings (only drawn up to today).
+  // Step-after curve: each day's balance is held horizontally until the next
+  // day's x-coordinate, then jumps vertically to that day's balance. This
+  // avoids the visual artifact of a diagonal line rising across a non-working
+  // day (e.g. a Sunday) toward the next working day's higher balance.
   $: linePath =
     actualPts.length < 2
       ? ""
-      : actualPts
-          .map(
-            (point, pointIndex) =>
-              `${pointIndex === 0 ? "M" : "L"}${point.x.toFixed(1)},${point.y.toFixed(1)}`,
-          )
-          .join(" ");
+      : (() => {
+          let path = `M${actualPts[0].x.toFixed(1)},${actualPts[0].y.toFixed(1)}`;
+          for (let i = 1; i < actualPts.length; i++) {
+            const prevY = actualPts[i - 1].y.toFixed(1);
+            const curX = actualPts[i].x.toFixed(1);
+            const curY = actualPts[i].y.toFixed(1);
+            path += ` L${curX},${prevY} L${curX},${curY}`;
+          }
+          return path;
+        })();
 
   $: areaPath =
     actualPts.length < 2
@@ -84,11 +93,17 @@
       : (() => {
           const firstPoint = actualPts[0];
           const lastPoint = actualPts[actualPts.length - 1];
-          const innerPath = actualPts
-            .map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`)
-            .join(" L");
           const zeroLineY = zeroY.toFixed(1);
-          return `M${firstPoint.x.toFixed(1)},${zeroLineY} L${innerPath} L${lastPoint.x.toFixed(1)},${zeroLineY} Z`;
+          let path = `M${firstPoint.x.toFixed(1)},${zeroLineY}`;
+          path += ` L${firstPoint.x.toFixed(1)},${firstPoint.y.toFixed(1)}`;
+          for (let i = 1; i < actualPts.length; i++) {
+            const prevY = actualPts[i - 1].y.toFixed(1);
+            const curX = actualPts[i].x.toFixed(1);
+            const curY = actualPts[i].y.toFixed(1);
+            path += ` L${curX},${prevY} L${curX},${curY}`;
+          }
+          path += ` L${lastPoint.x.toFixed(1)},${zeroLineY} Z`;
+          return path;
         })();
 
   // Y-axis ticks
@@ -203,19 +218,10 @@
     );
   }
 
-  const ABSENCE_BAND_VARS = {
-    vacation:           "var(--band-vacation)",
-    sick:               "var(--band-sick)",
-    training:           "var(--band-training)",
-    special_leave:      "var(--band-special-leave)",
-    unpaid:             "var(--band-unpaid)",
-    general_absence:    "var(--band-general-absence)",
-    flextime_reduction: "var(--band-flextime-reduction)",
-    absent:             "var(--band-absent)",
-  };
-
+  // Use the same color constants as the calendar so chart bands match the
+  // calendar's category colors exactly (and stay identical in dark mode).
   function absColor(kind) {
-    return ABSENCE_BAND_VARS[kind] || "var(--text-tertiary)";
+    return ABSENCE_COLORS[kind] || ABSENCE_COLORS.absent;
   }
 
   function isWeekend(dateString) {
@@ -225,8 +231,8 @@
 
   function dayBandColor(day) {
     if (day.absence) return absColor(day.absence);
-    if (day.holiday) return "var(--band-holiday)";
-    if (isWeekend(day.date)) return "var(--band-weekend)";
+    if (day.holiday) return HOLIDAY_COLOR;
+    if (isWeekend(day.date)) return WEEKEND_COLOR;
     return null;
   }
 
@@ -248,11 +254,11 @@
       }
       if (day.holiday && !seen.has("__holiday__")) {
         seen.add("__holiday__");
-        items.push({ key: "__holiday__", color: "var(--band-holiday)" });
+        items.push({ key: "__holiday__", color: HOLIDAY_COLOR });
       }
       if (isWeekend(day.date) && !seen.has("__weekend__")) {
         seen.add("__weekend__");
-        items.push({ key: "__weekend__", color: "var(--band-weekend)" });
+        items.push({ key: "__weekend__", color: WEEKEND_COLOR });
       }
     }
     return items;
