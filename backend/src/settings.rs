@@ -718,4 +718,12 @@ mod tests {
             assert!(pinned_test_date().is_none());
         });
     }
+
+    #[test]
+    fn pinned_reference_date_drives_today_and_year_helpers() {
+        with_test_reference_date(Some("2024-02-29"), || {
+            assert_eq!(pinned_test_date().unwrap().year(), 2024);
+            assert_eq!(pinned_test_date().unwrap().day(), 29);
+        });
+    }
 }

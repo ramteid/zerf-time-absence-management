@@ -682,5 +682,186 @@ async fn reports_full_workflow() {
         );
     }
 
+    // -- Range, overtime, and team category reports enforce scope and aggregate correctly --
+    {
+        let (lead_id, lead_pw, emp_id, emp_pw, monday, cat_id) =
+            bootstrap_team_with_suffix(&app, &admin, false, "6").await;
+        let lead = login_change_pw(&app, "lead-6@example.com", &lead_pw).await;
+        let emp = login_change_pw(&app, "emp-6@example.com", &emp_pw).await;
+        let tuesday = (chrono::NaiveDate::parse_from_str(&monday, "%Y-%m-%d").unwrap()
+            + chrono::Duration::days(1))
+        .format("%Y-%m-%d")
+        .to_string();
+
+        let (st, body) = emp
+            .post(
+                "/api/v1/time-entries",
+                &json!({
+                    "entry_date": monday,
+                    "start_time": "08:00",
+                    "end_time": "12:00",
+                    "category_id": cat_id,
+                    "comment": "range approved"
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "create monday entry");
+        let monday_entry = id(&body);
+
+        let (st, body) = emp
+            .post(
+                "/api/v1/time-entries",
+                &json!({
+                    "entry_date": tuesday,
+                    "start_time": "09:00",
+                    "end_time": "11:00",
+                    "category_id": cat_id,
+                    "comment": "range draft"
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "create tuesday entry");
+        let tuesday_entry = id(&body);
+
+        let (st, _) = emp
+            .post(
+                "/api/v1/time-entries/submit",
+                &json!({"ids": [monday_entry, tuesday_entry]}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "submit both entries");
+
+        let (st, _) = lead
+            .post(
+                "/api/v1/time-entries/batch-approve",
+                &json!({"ids": [monday_entry]}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "approve monday entry");
+
+        let (st, range_body) = emp
+            .get(&format!("/api/v1/reports/range?from={}&to={}", monday, tuesday))
+            .await;
+        assert_eq!(st, StatusCode::OK, "own range report");
+        assert_eq!(range_body["actual_min"], 240, "range actual counts only approved time");
+        assert_eq!(
+            range_body["submitted_min"],
+            360,
+            "submitted_min includes submitted-but-not-yet-approved work"
+        );
+
+        let (st, _) = emp
+            .get(&format!(
+                "/api/v1/reports/range?user_id={lead_id}&from={}&to={}",
+                monday, tuesday
+            ))
+            .await;
+        assert_eq!(st, StatusCode::FORBIDDEN, "employee cannot read another user's range report");
+
+        let previous_reference_date = std::env::var("TEST_REFERENCE_DATE").ok();
+        std::env::set_var("TEST_REFERENCE_DATE", monday.clone());
+        let (st, overtime_body) = emp.get("/api/v1/reports/overtime").await;
+        match previous_reference_date {
+            Some(value) => std::env::set_var("TEST_REFERENCE_DATE", value),
+            None => std::env::remove_var("TEST_REFERENCE_DATE"),
+        }
+        assert_eq!(st, StatusCode::OK, "own overtime report");
+        assert!(
+            overtime_body
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|row| row["month"] == monday[..7]),
+            "overtime contains the active month"
+        );
+
+        let (st, lead_team_categories) = lead
+            .get(&format!("/api/v1/reports/team-categories?from={}&to={}", monday, tuesday))
+            .await;
+        assert_eq!(st, StatusCode::OK, "lead team category report");
+        let rows = lead_team_categories.as_array().unwrap();
+        assert!(rows.iter().any(|row| row["user_id"].as_i64() == Some(emp_id)));
+        let emp_row = rows
+            .iter()
+            .find(|row| row["user_id"].as_i64() == Some(emp_id))
+            .expect("employee row in team categories");
+        assert!(
+            emp_row["categories"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|cat| cat["minutes"].as_i64().unwrap_or(0) >= 360),
+            "team categories aggregate submitted and approved entry minutes"
+        );
+    }
+
+    // -- Assistant overtime is empty and admin subjects are excluded from lead-scoped team categories --
+    {
+        let (lead_id, lead_pw, _emp_id, _emp_pw, monday, _cat_id) =
+            bootstrap_team_with_suffix(&app, &admin, false, "7").await;
+        let lead = login_change_pw(&app, "lead-7@example.com", &lead_pw).await;
+
+        let (st, body) = admin
+            .post(
+                "/api/v1/users",
+                &json!({
+                    "email":"assistant-report@example.com",
+                    "first_name":"Assist",
+                    "last_name":"Report",
+                    "role":"assistant",
+                    "weekly_hours":0,
+                    "leave_days_current_year":0,
+                    "leave_days_next_year":0,
+                    "start_date":"2024-01-01",
+                    "approver_ids":[lead_id]
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "create assistant report user");
+        let assistant_id = id(&body);
+        let assistant_pw = temp_pw(&body);
+        let assistant = login_change_pw(&app, "assistant-report@example.com", &assistant_pw).await;
+
+        let (st, body) = admin
+            .post(
+                "/api/v1/users",
+                &json!({
+                    "email":"admin-report-subject@example.com",
+                    "first_name":"Admin",
+                    "last_name":"Subject",
+                    "role":"admin",
+                    "weekly_hours":39,
+                    "leave_days_current_year":30,
+                    "leave_days_next_year":30,
+                    "start_date":"2024-01-01",
+                    "approver_ids":[1]
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "create admin subject");
+        let admin_subject_id = id(&body);
+
+        let previous_reference_date = std::env::var("TEST_REFERENCE_DATE").ok();
+        std::env::set_var("TEST_REFERENCE_DATE", monday.clone());
+        let (st, assistant_overtime) = assistant.get("/api/v1/reports/overtime").await;
+        match previous_reference_date {
+            Some(value) => std::env::set_var("TEST_REFERENCE_DATE", value),
+            None => std::env::remove_var("TEST_REFERENCE_DATE"),
+        }
+        assert_eq!(st, StatusCode::OK, "assistant overtime request succeeds");
+        assert_eq!(assistant_overtime.as_array().unwrap().len(), 0, "assistants have no overtime rows");
+
+        let (st, team_categories) = lead
+            .get(&format!("/api/v1/reports/team-categories?from={}&to={}", monday, monday))
+            .await;
+        assert_eq!(st, StatusCode::OK, "lead team categories loads");
+        let rows = team_categories.as_array().unwrap();
+        assert!(rows.iter().any(|row| row["user_id"].as_i64() == Some(assistant_id)), "assistant direct report stays visible");
+        assert!(
+            !rows.iter().any(|row| row["user_id"].as_i64() == Some(admin_subject_id)),
+            "admin subjects are excluded from lead-scoped team category reports"
+        );
+    }
+
     app.cleanup().await;
 }

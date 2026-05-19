@@ -4,7 +4,7 @@ use reqwest::StatusCode;
 use serde_json::json;
 
 use crate::common::TestApp;
-use crate::helpers::{temp_pw, today};
+use crate::helpers::{admin_login, temp_pw, today};
 use zerf::auth::{hash_password, hash_token};
 
 #[tokio::test]
@@ -350,6 +350,97 @@ async fn auth_full_workflow() {
             "generic error code"
         );
     }
+
+    // -- Preferences persist and logout revokes all sessions for the same user --
+    {
+        let admin = admin_login(&app).await;
+        let second_session = app.client();
+        let (st, _) = second_session.login("admin@example.com", "AdminPass!234").await;
+        assert_eq!(st, StatusCode::OK, "second admin session login");
+
+        let (st, body) = admin
+            .put("/api/v1/auth/preferences", &json!({"dark_mode": true}))
+            .await;
+        assert_eq!(st, StatusCode::OK, "update preferences");
+        assert_eq!(body["ok"], true);
+
+        let (st, me) = admin.get("/api/v1/auth/me").await;
+        assert_eq!(st, StatusCode::OK, "me after preferences update");
+        assert_eq!(me["dark_mode"], true, "dark mode persisted");
+
+        let (st, body) = admin.post("/api/v1/auth/logout", &json!({})).await;
+        assert_eq!(st, StatusCode::OK, "logout succeeds");
+        assert_eq!(body["ok"], true);
+
+        let (st, _) = admin.get("/api/v1/auth/me").await;
+        assert_eq!(st, StatusCode::UNAUTHORIZED, "current session revoked");
+
+        let (st, _) = second_session.get("/api/v1/auth/me").await;
+        assert_eq!(st, StatusCode::UNAUTHORIZED, "other sessions revoked too");
+    }
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn forgot_password_rate_limit_and_generic_responses() {
+    let app = TestApp::spawn_with_public_url("https://zerf.example.test").await;
+
+    sqlx::query(
+        "INSERT INTO app_settings(key, value) VALUES \
+         ('smtp_enabled', 'true'), \
+         ('smtp_host', 'localhost'), \
+         ('smtp_from', 'noreply@example.com') \
+         ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value",
+    )
+    .execute(&app.state.pool)
+    .await
+    .expect("seed smtp settings");
+
+    let anon = app.client();
+    for attempt in 1..=4 {
+        let (st, body) = anon
+            .post(
+                "/api/v1/auth/forgot-password",
+                &json!({"email": "admin@example.com"}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "forgot-password attempt {attempt}");
+        assert_eq!(body["ok"], true, "generic success response");
+    }
+
+    let reset_attempts = zerf::repository::SessionDb::new(app.state.pool.clone())
+        .count_reset_attempts(
+            "reset:admin@example.com",
+            chrono::Utc::now() - chrono::Duration::minutes(15),
+        )
+        .await;
+    assert_eq!(reset_attempts, 3, "rate limiter stores at most 3 attempts");
+
+    let token_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM password_reset_tokens WHERE user_id=1")
+            .fetch_one(&app.state.pool)
+            .await
+            .expect("count admin reset tokens");
+    assert_eq!(token_count, 1, "tokens are upserted, not multiplied");
+
+    let (st, body) = anon
+        .post(
+            "/api/v1/auth/forgot-password",
+            &json!({"email": "unknown@example.com"}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "unknown email response stays generic");
+    assert_eq!(body["ok"], true);
+
+    let (st, body) = anon
+        .post(
+            "/api/v1/auth/forgot-password",
+            &json!({"email": "x".repeat(300)}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "oversized email response stays generic");
+    assert_eq!(body["ok"], true);
 
     app.cleanup().await;
 }
