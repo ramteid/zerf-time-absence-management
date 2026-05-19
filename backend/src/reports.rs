@@ -24,11 +24,19 @@ fn absence_removes_target(kind: &str) -> bool {
 /// Admins may access any user. Non-admin leads may only access their direct
 /// reports (users whose `approver_id` matches the lead's id). Every user may
 /// always access their own data.
+///
+/// Additionally, pure-admin users (tracks_time=false) are blocked from
+/// accessing their own reports since they have no time-tracking data.
+/// They may still access other users' reports as admins.
 async fn assert_can_access_user(
     app_state: &AppState,
     requester: &User,
     target_uid: i64,
 ) -> AppResult<()> {
+    // Pure-admin users (tracks_time=false) may not view their own report data.
+    if !requester.tracks_time && requester.id == target_uid {
+        return Err(AppError::Forbidden);
+    }
     if requester.id == target_uid || requester.is_admin() {
         return Ok(());
     }
@@ -789,6 +797,9 @@ pub async fn team(
         .active_team_members(requester.id, requester.is_admin())
         .await?
         .into_iter()
+        // Pure-admin users (tracks_time=false) have no own tracking dataset and
+        // are excluded from team report rows.
+        .filter(|team_member| team_member.tracks_time)
         .map(crate::users::repo_user_to_auth_user)
         .collect();
 
@@ -1503,4 +1514,272 @@ pub async fn flextime(
         current_date += Duration::days(1);
     }
     Ok(Json(flextime_days))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::to_bytes;
+    use std::collections::HashSet;
+
+    #[test]
+    fn absence_removes_target_keeps_flextime_reduction_as_exception() {
+        assert!(absence_removes_target("vacation"));
+        assert!(absence_removes_target("sick"));
+        assert!(!absence_removes_target("flextime_reduction"));
+    }
+
+    #[test]
+    fn month_bounds_parses_and_validates_inputs() {
+        let (from, to) = month_bounds("2026-02").unwrap();
+        assert_eq!(from, NaiveDate::from_ymd_opt(2026, 2, 1).unwrap());
+        assert_eq!(to, NaiveDate::from_ymd_opt(2026, 2, 28).unwrap());
+
+        let (dec_from, dec_to) = month_bounds("2024-12").unwrap();
+        assert_eq!(dec_from, NaiveDate::from_ymd_opt(2024, 12, 1).unwrap());
+        assert_eq!(dec_to, NaiveDate::from_ymd_opt(2024, 12, 31).unwrap());
+
+        assert!(month_bounds("2026/02").is_err());
+        assert!(month_bounds("x-02").is_err());
+        assert!(month_bounds("2026-99").is_err());
+    }
+
+    #[test]
+    fn weekday_and_contract_workday_follow_iso_week_rules() {
+        let monday = NaiveDate::from_ymd_opt(2026, 5, 4).unwrap();
+        let friday = NaiveDate::from_ymd_opt(2026, 5, 8).unwrap();
+        let saturday = NaiveDate::from_ymd_opt(2026, 5, 9).unwrap();
+
+        assert_eq!(weekday_en(monday), "Monday");
+        assert_eq!(weekday_en(friday), "Friday");
+        assert!(is_contract_workday(monday, 5));
+        assert!(is_contract_workday(friday, 5));
+        assert!(!is_contract_workday(saturday, 5));
+        assert!(!is_contract_workday(friday, 4));
+    }
+
+    #[test]
+    fn target_minutes_per_day_uses_weekly_hours_divided_by_workdays() {
+        assert_eq!(target_minutes_per_day(40.0, 5), 480);
+        assert_eq!(target_minutes_per_day(40.0, 4), 600);
+        assert_eq!(target_minutes_per_day(37.5, 5), 450);
+    }
+
+    #[test]
+    fn complete_weeks_in_month_includes_only_fully_elapsed_weeks() {
+        let month_start = NaiveDate::from_ymd_opt(2026, 5, 1).unwrap();
+        let month_end = NaiveDate::from_ymd_opt(2026, 5, 31).unwrap();
+        let today = NaiveDate::from_ymd_opt(2026, 5, 20).unwrap();
+
+        let mondays = complete_weeks_in_month(month_start, month_end, today);
+        assert_eq!(
+            mondays,
+            vec![
+                NaiveDate::from_ymd_opt(2026, 4, 27).unwrap(),
+                NaiveDate::from_ymd_opt(2026, 5, 4).unwrap(),
+                NaiveDate::from_ymd_opt(2026, 5, 11).unwrap(),
+            ]
+        );
+    }
+
+    #[test]
+    fn check_weeks_all_submitted_handles_submitted_and_excused_weeks() {
+        let monday = NaiveDate::from_ymd_opt(2026, 5, 4).unwrap();
+        let complete_week_mondays = vec![monday];
+        let mut submitted_dates = HashSet::new();
+        submitted_dates.insert(monday + Duration::days(1));
+
+        assert!(check_weeks_all_submitted(
+            &complete_week_mondays,
+            &HashSet::new(),
+            &HashSet::new(),
+            &submitted_dates,
+            &HashSet::new(),
+            NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
+            5,
+            NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
+        ));
+
+        let holiday_set: HashSet<NaiveDate> = (0..5)
+            .map(|d| monday + Duration::days(d))
+            .collect();
+        assert!(check_weeks_all_submitted(
+            &complete_week_mondays,
+            &holiday_set,
+            &HashSet::new(),
+            &HashSet::new(),
+            &HashSet::new(),
+            NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
+            5,
+            NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
+        ));
+
+        let mut incomplete = HashSet::new();
+        incomplete.insert(monday + Duration::days(2));
+        assert!(!check_weeks_all_submitted(
+            &complete_week_mondays,
+            &HashSet::new(),
+            &HashSet::new(),
+            &HashSet::new(),
+            &incomplete,
+            NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
+            5,
+            NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
+        ));
+    }
+
+    #[test]
+    fn validate_range_checks_order_and_max_window() {
+        let from = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        let ok_to = NaiveDate::from_ymd_opt(2026, 12, 31).unwrap();
+        assert!(validate_range(from, ok_to).is_ok());
+
+        assert!(validate_range(ok_to, from).is_err());
+        let too_far = NaiveDate::from_ymd_opt(2027, 1, 5).unwrap();
+        assert!(validate_range(from, too_far).is_err());
+    }
+
+    #[test]
+    fn parse_and_group_helpers_handle_rows_and_time_parsing() {
+        assert_eq!(
+            parse_report_time("08:30:00").unwrap(),
+            NaiveTime::from_hms_opt(8, 30, 0).unwrap()
+        );
+        assert!(parse_report_time("bad-time").is_err());
+
+        let day = NaiveDate::from_ymd_opt(2026, 5, 5).unwrap();
+        let grouped = group_entries_by_date(vec![
+            (
+                day,
+                "08:00".to_string(),
+                "12:00".to_string(),
+                "Project".to_string(),
+                "#111".to_string(),
+                1,
+                true,
+                "approved".to_string(),
+                None,
+            ),
+            (
+                day,
+                "13:00".to_string(),
+                "17:00".to_string(),
+                "Meeting".to_string(),
+                "#222".to_string(),
+                2,
+                false,
+                "submitted".to_string(),
+                Some("note".to_string()),
+            ),
+        ]);
+        assert_eq!(grouped.len(), 1);
+        assert_eq!(grouped.get(&day).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn expand_absence_date_set_clamps_to_requested_window() {
+        let from = NaiveDate::from_ymd_opt(2026, 5, 10).unwrap();
+        let to = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
+        let ranges = vec![(
+            NaiveDate::from_ymd_opt(2026, 5, 8).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 5, 11).unwrap(),
+            "vacation".to_string(),
+        )];
+        let set = expand_absence_date_set(&ranges, from, to);
+        assert_eq!(set.len(), 2);
+        assert!(set.contains(&NaiveDate::from_ymd_opt(2026, 5, 10).unwrap()));
+        assert!(set.contains(&NaiveDate::from_ymd_opt(2026, 5, 11).unwrap()));
+    }
+
+    #[test]
+    fn sort_categories_desc_orders_by_minutes_then_name() {
+        let mut categories = vec![
+            CategoryTotal {
+                category: "B".to_string(),
+                color: "#2".to_string(),
+                minutes: 120,
+            },
+            CategoryTotal {
+                category: "A".to_string(),
+                color: "#1".to_string(),
+                minutes: 120,
+            },
+            CategoryTotal {
+                category: "C".to_string(),
+                color: "#3".to_string(),
+                minutes: 30,
+            },
+        ];
+        sort_categories_desc(&mut categories);
+        assert_eq!(categories[0].category, "A");
+        assert_eq!(categories[1].category, "B");
+        assert_eq!(categories[2].category, "C");
+    }
+
+    #[tokio::test]
+    async fn csv_response_adds_formula_injection_guard_and_headers() {
+        let day = DayDetail {
+            date: NaiveDate::from_ymd_opt(2026, 5, 1).unwrap(),
+            weekday: "Friday".to_string(),
+            entries: vec![EntryDetail {
+                start_time: "08:00".to_string(),
+                end_time: "10:00".to_string(),
+                category: "=cmd".to_string(),
+                color: "#000".to_string(),
+                minutes: 120,
+                counts_as_work: true,
+                status: "approved".to_string(),
+                comment: Some("@note".to_string()),
+            }],
+            actual_min: 120,
+            target_min: 480,
+            absence: Some("+absence".to_string()),
+            holiday: Some("\tholiday".to_string()),
+        };
+        let report = MonthReport {
+            user_id: 1,
+            month: "2026-05".to_string(),
+            days: vec![day],
+            target_min: 480,
+            actual_min: 120,
+            diff_min: -360,
+            submitted_min: 120,
+            full_month_target_min: 480,
+            category_totals: HashMap::new(),
+            weeks_all_submitted: Some(true),
+            weeks_all_approved: Some(true),
+        };
+
+        let response = csv_response(report, 1, "2026/05").unwrap();
+        assert_eq!(
+            response
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            "text/csv; charset=utf-8"
+        );
+        assert_eq!(
+            response
+                .headers()
+                .get(header::CONTENT_DISPOSITION)
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            "attachment; filename=\"report-user-1-202605.csv\""
+        );
+
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert!(body.starts_with(&[0xEF, 0xBB, 0xBF]));
+
+        let mut reader = csv::Reader::from_reader(&body[3..]);
+        let rows: Vec<csv::StringRecord> = reader.records().map(|r| r.unwrap()).collect();
+        assert_eq!(rows[0].get(4).unwrap(), "'=cmd");
+        assert_eq!(rows[0].get(7).unwrap(), "'@note");
+        assert_eq!(rows[0].get(8).unwrap(), "'+absence");
+        assert_eq!(rows[0].get(9).unwrap(), "'\tholiday");
+        assert_eq!(rows[1].get(1).unwrap(), "Total");
+        assert_eq!(rows[1].get(5).unwrap(), "120");
+    }
 }

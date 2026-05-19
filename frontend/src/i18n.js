@@ -752,6 +752,16 @@ const TRANSLATIONS = {
     "Cannot delete the last active admin.":
       "Der letzte aktive Administrator kann nicht gelöscht werden.",
     "User not found or inactive.": "Benutzer nicht gefunden oder inaktiv.",
+    // tracks_time
+    "Enable time tracking": "Zeiterfassung aktivieren",
+    "Disable time tracking": "Zeiterfassung deaktivieren",
+    "Disable time tracking?": "Zeiterfassung deaktivieren?",
+    "When disabled, this admin works in management-only mode (no time entries or absences).":
+      "Wenn deaktiviert, arbeitet dieser Admin nur in der Verwaltung (keine Zeiteinträge oder Abwesenheiten).",
+    "Disabling time tracking will permanently delete all time entries, absences, and edit requests for this user. This cannot be undone.":
+      "Das Deaktivieren der Zeiterfassung löscht dauerhaft alle Zeiteinträge, Abwesenheiten und Bearbeitungsanfragen dieses Benutzers. Diese Aktion kann nicht rückgängig gemacht werden.",
+    'Type "{phrase}" to confirm': 'Geben Sie "{phrase}" zur Bestätigung ein',
+    "I understand": "Ich verstehe",
     "Cannot log time on a day with an approved absence ({kind}). Please cancel or adjust the absence first.":
       "An einem Tag mit genehmigter Abwesenheit ({kind}) kann keine Zeit erfasst werden. Bitte stornieren oder ändern Sie zuerst die Abwesenheit.",
     "Invalid time: {time}": "Ungültige Uhrzeit: {time}",

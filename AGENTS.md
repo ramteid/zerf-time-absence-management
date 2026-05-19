@@ -261,11 +261,20 @@ Tests use Vitest + jsdom. Test files are co-located with source under `src/` and
 
 ### Backend
 
-Integration tests are in `backend/tests/integration/`. Each test gets an isolated PostgreSQL database created and dropped automatically via `tests/common/mod.rs` (testcontainers).
+Integration tests are in `backend/tests/integration/`. By default, each test gets an isolated PostgreSQL database created and dropped automatically via `tests/common/mod.rs` (testcontainers).
+
+If Docker is not available, start a local PostgreSQL instance manually and set `TEST_DATABASE_URL` to a reachable admin database URL (for example `postgres://postgres:postgres@127.0.0.1:5432/postgres`). The test harness then skips containers and creates isolated databases on that instance.
 
 ```bash
 cd backend
 DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/postgres cargo test
+```
+
+Without Docker:
+
+```bash
+cd backend
+TEST_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/postgres cargo test --test integration
 ```
 
 For a local Postgres container:

@@ -70,3 +70,19 @@ fn normalize_git_commit(raw: &str) -> &str {
         trimmed
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_git_commit_uses_unknown_for_empty_values() {
+        assert_eq!(normalize_git_commit(""), "unknown");
+        assert_eq!(normalize_git_commit("   \n\t"), "unknown");
+    }
+
+    #[test]
+    fn normalize_git_commit_trims_valid_hash() {
+        assert_eq!(normalize_git_commit("  abc1234  "), "abc1234");
+    }
+}

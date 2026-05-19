@@ -32,6 +32,7 @@
   let confirmPassword = "";
   let firstName = "";
   let lastName = "";
+  let tracksTime = true;
   let error = "";
   let submitting = false;
 
@@ -77,6 +78,7 @@
           password,
           first_name: firstName.trim(),
           last_name: lastName.trim(),
+          tracks_time: tracksTime,
         },
       });
       await storePasswordCredential(form);
@@ -182,6 +184,10 @@
           autocomplete="new-password"
         />
       </div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:14px;cursor:pointer">
+        <input type="checkbox" bind:checked={tracksTime} />
+        {$t("Enable time tracking")}
+      </label>
       <div class="error-text" style="margin-bottom:8px">{error}</div>
       <button
         class="zf-btn zf-btn-primary"

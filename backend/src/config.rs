@@ -84,3 +84,125 @@ impl Config {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn with_env<F: FnOnce()>(overrides: &[(&str, Option<&str>)], test: F) {
+        let _guard = env_lock().lock().expect("env lock poisoned");
+        let keys = [
+            "ZERF_DATABASE_URL",
+            "ZERF_SESSION_SECRET",
+            "ZERF_GIT_COMMIT",
+            "ZERF_BIND",
+            "ZERF_STATIC_DIR",
+            "ZERF_PUBLIC_URL",
+            "ZERF_ALLOWED_ORIGINS",
+            "ZERF_DEV",
+            "ZERF_SECURE_COOKIES",
+            "ZERF_ENFORCE_ORIGIN",
+            "ZERF_ENFORCE_CSRF",
+            "ZERF_TRUST_PROXY",
+        ];
+        let snapshot: Vec<(String, Option<String>)> = keys
+            .iter()
+            .map(|k| (k.to_string(), std::env::var(k).ok()))
+            .collect();
+
+        for (key, value) in overrides {
+            match value {
+                Some(v) => std::env::set_var(key, v),
+                None => std::env::remove_var(key),
+            }
+        }
+
+        test();
+
+        for (key, value) in snapshot {
+            match value {
+                Some(v) => std::env::set_var(key, v),
+                None => std::env::remove_var(key),
+            }
+        }
+    }
+
+    #[test]
+    fn env_bool_parses_truthy_values_and_defaults_falsey() {
+        with_env(&[("ZERF_DEV", Some("YES"))], || {
+            assert!(env_bool("ZERF_DEV", false));
+        });
+        with_env(&[("ZERF_DEV", Some("off"))], || {
+            assert!(!env_bool("ZERF_DEV", true));
+        });
+        with_env(&[("ZERF_DEV", None)], || {
+            assert!(env_bool("ZERF_DEV", true));
+            assert!(!env_bool("ZERF_DEV", false));
+        });
+    }
+
+    #[test]
+    fn from_env_uses_public_url_as_default_allowed_origin() {
+        with_env(
+            &[
+                ("ZERF_DATABASE_URL", Some("postgres://localhost/db")),
+                (
+                    "ZERF_SESSION_SECRET",
+                    Some("01234567890123456789012345678901"),
+                ),
+                ("ZERF_PUBLIC_URL", Some("https://zerf.example/")),
+                ("ZERF_ALLOWED_ORIGINS", None),
+                ("ZERF_DEV", Some("false")),
+                ("ZERF_SECURE_COOKIES", None),
+                ("ZERF_ENFORCE_CSRF", None),
+                ("ZERF_ENFORCE_ORIGIN", None),
+            ],
+            || {
+                let cfg = Config::from_env();
+                assert_eq!(cfg.public_url.as_deref(), Some("https://zerf.example/"));
+                assert_eq!(cfg.allowed_origins, vec!["https://zerf.example"]);
+                assert!(cfg.secure_cookies);
+                assert!(cfg.enforce_csrf);
+                assert!(cfg.enforce_origin);
+            },
+        );
+    }
+
+    #[test]
+    fn from_env_parses_allowed_origins_and_dev_defaults() {
+        with_env(
+            &[
+                ("ZERF_DATABASE_URL", Some("postgres://localhost/db")),
+                (
+                    "ZERF_SESSION_SECRET",
+                    Some("01234567890123456789012345678901"),
+                ),
+                ("ZERF_PUBLIC_URL", Some("https://public.example")),
+                (
+                    "ZERF_ALLOWED_ORIGINS",
+                    Some(" https://a.example/,https://b.example ,,https://c.example/ "),
+                ),
+                ("ZERF_DEV", Some("true")),
+                ("ZERF_SECURE_COOKIES", None),
+                ("ZERF_ENFORCE_CSRF", None),
+                ("ZERF_ENFORCE_ORIGIN", None),
+            ],
+            || {
+                let cfg = Config::from_env();
+                assert_eq!(
+                    cfg.allowed_origins,
+                    vec!["https://a.example", "https://b.example", "https://c.example"]
+                );
+                assert!(!cfg.secure_cookies);
+                assert!(!cfg.enforce_csrf);
+                assert!(cfg.enforce_origin);
+            },
+        );
+    }
+}

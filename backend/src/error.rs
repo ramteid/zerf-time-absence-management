@@ -60,3 +60,57 @@ impl IntoResponse for AppError {
 }
 
 pub type AppResult<T> = Result<T, AppError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::to_bytes;
+
+    async fn response_error_message(response: Response) -> String {
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body should be readable");
+        let value: serde_json::Value =
+            serde_json::from_slice(&body).expect("response body should be valid json");
+        value
+            .get("error")
+            .and_then(serde_json::Value::as_str)
+            .expect("error field should be present")
+            .to_string()
+    }
+
+    #[tokio::test]
+    async fn maps_public_error_variants_to_expected_status_and_message() {
+        let cases = vec![
+            (AppError::Unauthorized, StatusCode::UNAUTHORIZED, "Not authenticated"),
+            (AppError::Forbidden, StatusCode::FORBIDDEN, "Forbidden"),
+            (AppError::NotFound, StatusCode::NOT_FOUND, "Not found"),
+            (
+                AppError::BadRequest("invalid input".into()),
+                StatusCode::BAD_REQUEST,
+                "invalid input",
+            ),
+            (
+                AppError::Conflict("already exists".into()),
+                StatusCode::CONFLICT,
+                "Conflict: already exists",
+            ),
+        ];
+
+        for (error, expected_status, expected_message) in cases {
+            let response = error.into_response();
+            assert_eq!(response.status(), expected_status);
+            assert_eq!(response_error_message(response).await, expected_message);
+        }
+    }
+
+    #[tokio::test]
+    async fn internal_errors_hide_private_details() {
+        let response = AppError::Internal("db: relation users missing".into()).into_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            response_error_message(response).await,
+            "Internal server error"
+        );
+    }
+}

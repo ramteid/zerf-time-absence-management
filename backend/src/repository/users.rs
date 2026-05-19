@@ -27,6 +27,9 @@ pub struct User {
     pub allow_reopen_without_approval: bool,
     pub dark_mode: bool,
     pub overtime_start_balance_min: i64,
+    /// When FALSE (admin only), this user has no time/absence tracking.
+    /// All related endpoints are blocked; navigation items are hidden.
+    pub tracks_time: bool,
 }
 
 impl User {
@@ -41,7 +44,7 @@ impl User {
 const USER_SELECT: &str =
     "SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, workdays_per_week, \
      start_date, active, must_change_password, created_at, \
-     allow_reopen_without_approval, dark_mode, overtime_start_balance_min \
+     allow_reopen_without_approval, dark_mode, overtime_start_balance_min, tracks_time \
      FROM users";
 
 /// Team settings row (id, email, first_name, last_name, role, allow_reopen_without_approval).
@@ -437,17 +440,20 @@ impl UserDb {
         first_name: &str,
         last_name: &str,
         start_date: NaiveDate,
+        tracks_time: bool,
     ) -> AppResult<i64> {
         sqlx::query(
             "INSERT INTO users(email, password_hash, first_name, last_name, role, \
-               weekly_hours, workdays_per_week, start_date, must_change_password, overtime_start_balance_min) \
-               VALUES ($1, $2, $3, $4, 'admin', 39.0, 5, $5, FALSE, 0)",
+               weekly_hours, workdays_per_week, start_date, must_change_password, \
+               overtime_start_balance_min, tracks_time) \
+               VALUES ($1, $2, $3, $4, 'admin', 39.0, 5, $5, FALSE, 0, $6)",
         )
         .bind(email)
         .bind(password_hash)
         .bind(first_name)
         .bind(last_name)
         .bind(start_date)
+        .bind(tracks_time)
         .execute(&mut *tx)
         .await?;
         let id: i64 = sqlx::query_scalar("SELECT id FROM users WHERE email=$1")
@@ -478,11 +484,13 @@ impl UserDb {
         start_date: NaiveDate,
         must_change_password: bool,
         overtime_start_balance_min: i64,
+        tracks_time: bool,
     ) -> Result<i64, sqlx::Error> {
         sqlx::query_scalar(
             "INSERT INTO users(email, password_hash, first_name, last_name, role, \
-             weekly_hours, workdays_per_week, start_date, must_change_password, overtime_start_balance_min) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id",
+             weekly_hours, workdays_per_week, start_date, must_change_password, \
+             overtime_start_balance_min, tracks_time) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id",
         )
         .bind(email)
         .bind(password_hash)
@@ -494,6 +502,7 @@ impl UserDb {
         .bind(start_date)
         .bind(must_change_password)
         .bind(overtime_start_balance_min)
+        .bind(tracks_time)
         .fetch_one(tx)
         .await
     }
@@ -512,6 +521,7 @@ impl UserDb {
         active: Option<bool>,
         allow_reopen_without_approval: Option<bool>,
         overtime_start_balance_min: Option<i64>,
+        tracks_time: Option<bool>,
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
             "UPDATE users \
@@ -524,8 +534,9 @@ impl UserDb {
                  start_date=COALESCE($7,start_date), \
                  active=COALESCE($8,active), \
                  allow_reopen_without_approval=COALESCE($9,allow_reopen_without_approval), \
-                 overtime_start_balance_min=COALESCE($10,overtime_start_balance_min) \
-             WHERE id=$11",
+                 overtime_start_balance_min=COALESCE($10,overtime_start_balance_min), \
+                 tracks_time=COALESCE($11,tracks_time) \
+             WHERE id=$12",
         )
         .bind(email)
         .bind(first_name)
@@ -537,9 +548,32 @@ impl UserDb {
         .bind(active)
         .bind(allow_reopen_without_approval)
         .bind(overtime_start_balance_min)
+        .bind(tracks_time)
         .bind(id)
         .execute(tx)
         .await?;
+        Ok(())
+    }
+
+    /// Delete all time entries, absences, and reopen requests for a user within
+    /// an existing transaction. Used when an admin disables their own time
+    /// tracking — all historical data is purged atomically.
+    pub async fn delete_time_data_for_user_tx(
+        tx: &mut sqlx::PgConnection,
+        user_id: i64,
+    ) -> AppResult<()> {
+        sqlx::query("DELETE FROM reopen_requests WHERE user_id=$1")
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM absences WHERE user_id=$1")
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM time_entries WHERE user_id=$1")
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await?;
         Ok(())
     }
 
@@ -838,7 +872,8 @@ impl UserDb {
     ) -> AppResult<Vec<ActiveUserRow>> {
         let rows = sqlx::query_as::<_, (i64, String, String, String, NaiveDate, i16)>(
             "SELECT id, email, first_name, last_name, start_date, workdays_per_week FROM users \
-             WHERE active = TRUE AND lower(trim(role)) != $1 AND weekly_hours > 0",
+             WHERE active = TRUE AND lower(trim(role)) != $1 AND weekly_hours > 0 \
+             AND tracks_time = TRUE",
         )
         .bind(ROLE_ASSISTANT)
         .fetch_all(&self.pool)

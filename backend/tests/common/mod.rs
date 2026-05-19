@@ -2,7 +2,10 @@
 //!
 //! Provides [`TestApp`] which spins up an ephemeral Postgres container via
 //! testcontainers, runs migrations, seeds initial data, and starts the Axum
-//! server on a random port. Each test session gets a fully isolated database.
+//! server on a random port. If `TEST_DATABASE_URL` is set, the harness skips
+//! containers and provisions isolated databases on that existing, manually
+//! started Postgres instance instead. Each test session gets a fully isolated
+//! database.
 
 use reqwest::{Client, StatusCode};
 use serde_json::Value;

@@ -33,6 +33,7 @@ pub(crate) fn repo_user_to_auth_user(u: crate::repository::User) -> User {
         allow_reopen_without_approval: u.allow_reopen_without_approval,
         dark_mode: u.dark_mode,
         overtime_start_balance_min: u.overtime_start_balance_min,
+        tracks_time: u.tracks_time,
     }
 }
 
@@ -149,6 +150,7 @@ pub async fn team_settings_update(
         None,
         Some(body.allow_reopen_without_approval),
         None,
+        None,
     )
     .await?;
     tx.commit().await?;
@@ -216,6 +218,7 @@ pub async fn get_one(
         "allow_reopen_without_approval": user.allow_reopen_without_approval,
         "dark_mode": user.dark_mode,
         "overtime_start_balance_min": user.overtime_start_balance_min,
+        "tracks_time": user.tracks_time,
         "approver_ids": approver_ids,
     });
     Ok(Json(user_json))
@@ -240,6 +243,14 @@ pub struct NewUser {
     /// Mandatory for non-admin users: list of team leads/admins who can approve this user's submissions.
     #[serde(default)]
     pub approver_ids: Vec<i64>,
+    /// For admin users only: when FALSE the user is in pure-admin mode with no
+    /// time or absence tracking. Defaults to TRUE (normal tracking enabled).
+    #[serde(default = "default_tracks_time")]
+    pub tracks_time: bool,
+}
+
+fn default_tracks_time() -> bool {
+    true
 }
 
 
@@ -422,6 +433,12 @@ pub async fn create(
     }
     ensure_email_available(&app_state, &normalized_email, None).await?;
     ensure_user_name_available(&app_state, &first_name, &last_name, None).await?;
+    // tracks_time=false is only valid for admin users.
+    if !is_admin_role(&body.role) && !body.tracks_time {
+        return Err(AppError::BadRequest(
+            "tracks_time can only be disabled for admin users.".into(),
+        ));
+    }
     let temporary_password = match body.password {
         Some(provided) if !provided.is_empty() => {
             validate_password_strength(&provided)?;
@@ -451,6 +468,7 @@ pub async fn create(
         body.start_date,
         true,
         overtime_balance,
+        body.tracks_time,
     )
     .await
         .map_err(|e| {
@@ -554,6 +572,10 @@ pub struct UpdateUser {
     pub approver_ids: Option<Vec<i64>>,
     pub allow_reopen_without_approval: Option<bool>,
     pub overtime_start_balance_min: Option<i64>,
+    /// For admin users only: when FALSE the user is in pure-admin mode with no
+    /// time or absence tracking. Setting to FALSE deletes all existing time and
+    /// absence data for the user.
+    pub tracks_time: Option<bool>,
 }
 
 fn deserialize_optional_vec<'de, D>(de: D) -> Result<Option<Vec<i64>>, D::Error>
@@ -750,6 +772,30 @@ pub async fn update(
             ));
         }
     }
+    // tracks_time=false is only valid for admin users. Reject explicit attempts
+    // to set it on a non-admin, and auto-restore it to true when an admin is
+    // demoted (the DB CHECK constraint enforces the same invariant as a safety net).
+    if let Some(false) = body.tracks_time {
+        if !is_admin_role(&new_role) {
+            return Err(AppError::BadRequest(
+                "tracks_time can only be disabled for admin users.".into(),
+            ));
+        }
+    }
+    // When the role changes away from admin and the user currently has
+    // tracks_time=false, silently restore tracking. No data to delete since
+    // they never had tracking enabled as a non-admin.
+    let effective_tracks_time: Option<bool> = if !is_admin_role(&new_role) && !previous_user.tracks_time {
+        Some(true)
+    } else {
+        body.tracks_time
+    };
+    // When disabling time tracking for an admin who previously had it enabled,
+    // delete all their time entries, absences, and reopen requests atomically.
+    let disabling_time_tracking = effective_tracks_time == Some(false) && previous_user.tracks_time;
+    if disabling_time_tracking {
+        UserDb::delete_time_data_for_user_tx(&mut transaction, user_id).await?;
+    }
     // Use the normalized role for storage so SQL queries with direct string
     // comparisons (e.g. role = 'admin') work reliably.
     let role_to_store: Option<String> = if body.role.is_some() {
@@ -770,6 +816,7 @@ pub async fn update(
         body.active,
         body.allow_reopen_without_approval,
         body.overtime_start_balance_min,
+        effective_tracks_time,
     )
     .await
         .map_err(|e| {
@@ -1097,4 +1144,71 @@ pub fn generate_password() -> String {
     }
     password_bytes.shuffle(&mut rng);
     String::from_utf8(password_bytes).unwrap()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_user_name_trims_and_accepts_valid_names() {
+        let (first, last) = normalize_user_name("  Alice  ", "  Smith ").unwrap();
+        assert_eq!(first, "Alice");
+        assert_eq!(last, "Smith");
+    }
+
+    #[test]
+    fn normalize_user_name_rejects_empty_or_too_long_names() {
+        assert!(normalize_user_name("", "Smith").is_err());
+        assert!(normalize_user_name("Alice", " ").is_err());
+
+        let too_long = "x".repeat(201);
+        assert!(normalize_user_name(&too_long, "Smith").is_err());
+        assert!(normalize_user_name("Alice", &too_long).is_err());
+    }
+
+    #[test]
+    fn normalize_optional_user_name_handles_none_and_validation() {
+        assert_eq!(normalize_optional_user_name(None).unwrap(), None);
+        assert_eq!(
+            normalize_optional_user_name(Some(&"  Bob ".to_string())).unwrap(),
+            Some("Bob".to_string())
+        );
+        assert!(normalize_optional_user_name(Some(&"   ".to_string())).is_err());
+    }
+
+    #[test]
+    fn deserialize_optional_vec_distinguishes_absent_null_and_values() {
+        let absent: UpdateUser = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(absent.approver_ids, None);
+
+        let null_value: UpdateUser =
+            serde_json::from_value(serde_json::json!({"approver_ids": null})).unwrap();
+        assert_eq!(null_value.approver_ids, None);
+
+        let explicit_list: UpdateUser =
+            serde_json::from_value(serde_json::json!({"approver_ids": [1, 2]})).unwrap();
+        assert_eq!(explicit_list.approver_ids, Some(vec![1, 2]));
+
+        let explicit_empty: UpdateUser =
+            serde_json::from_value(serde_json::json!({"approver_ids": []})).unwrap();
+        assert_eq!(explicit_empty.approver_ids, Some(Vec::new()));
+    }
+
+    #[test]
+    fn default_tracks_time_is_enabled() {
+        assert!(default_tracks_time());
+    }
+
+    #[test]
+    fn generated_password_has_required_strength_character_classes() {
+        for _ in 0..128 {
+            let password = generate_password();
+            assert_eq!(password.len(), 16);
+            assert!(password.chars().any(|c| c.is_ascii_lowercase()));
+            assert!(password.chars().any(|c| c.is_ascii_uppercase()));
+            assert!(password.chars().any(|c| c.is_ascii_digit()));
+            assert!(password.chars().any(|c| "!@#*-_+".contains(c)));
+        }
+    }
 }

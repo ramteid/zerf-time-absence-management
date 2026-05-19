@@ -220,11 +220,22 @@ fn year_bounds(year: i32) -> AppResult<(NaiveDate, NaiveDate)> {
     Ok((from, to))
 }
 
+/// Return `Forbidden` when the requesting user has time tracking disabled.
+/// Absence tracking is part of time tracking; this guard is applied on all
+/// handlers that read or modify the requester's own absence data.
+fn require_tracks_time(user: &User) -> AppResult<()> {
+    if !user.tracks_time {
+        return Err(AppError::Forbidden);
+    }
+    Ok(())
+}
+
 pub async fn list(
     State(app_state): State<AppState>,
     requester: User,
     Query(query): Query<YearQuery>,
 ) -> AppResult<Json<Vec<Absence>>> {
+    require_tracks_time(&requester)?;
     let year = match query.year {
         Some(value) => value,
         None => crate::settings::app_current_year(&app_state.pool).await,
@@ -460,6 +471,7 @@ pub async fn create(
     requester: User,
     Json(body): Json<NewAbsence>,
 ) -> AppResult<Json<Absence>> {
+    require_tracks_time(&requester)?;
     let today_date = crate::settings::app_today(&app_state.pool).await;
     let kind = validate_absence(&body)?;
     validate_sick_start_date(kind, body.start_date, today_date)?;
@@ -561,6 +573,7 @@ pub async fn update(
     Path(absence_id): Path<i64>,
     Json(body): Json<NewAbsence>,
 ) -> AppResult<Json<Absence>> {
+    require_tracks_time(&requester)?;
     let today_date = crate::settings::app_today(&app_state.pool).await;
     let kind = validate_absence(&body)?;
     validate_sick_start_date(kind, body.start_date, today_date)?;
@@ -710,6 +723,7 @@ pub async fn cancel(
     requester: User,
     Path(absence_id): Path<i64>,
 ) -> AppResult<Json<serde_json::Value>> {
+    require_tracks_time(&requester)?;
     let owner_id = absence_owner_id(&app_state.pool, absence_id).await?;
     let mut transaction = app_state.db.absences.begin().await?;
     crate::repository::AbsenceDb::lock_user_scope_tx(&mut transaction, owner_id).await?;
