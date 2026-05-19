@@ -5,7 +5,7 @@ use serde_json::json;
 use crate::common::TestApp;
 use crate::helpers::{
     admin_login, bootstrap_team_with_suffix, create_and_submit_entry, id, login_change_pw,
-    temp_pw,
+    reference_date, temp_pw,
 };
 
 #[tokio::test]
@@ -493,9 +493,11 @@ async fn users_repository_workflow() {
     assert_eq!(users.get_leave_days(emp_id, 2030).await.expect("lazy leave days"), 30);
     users.set_leave_days(emp_id, 2030, 27).await.expect("set leave days");
     assert_eq!(users.get_leave_days(emp_id, 2030).await.expect("stored leave days"), 27);
+    // Use a year far enough in the future that no row is auto-created during user seeding
+    let far_future_year = reference_date().year() + 5;
     assert_eq!(
         users
-            .annual_days_or_default(emp_id, 2031, 33)
+            .annual_days_or_default(emp_id, far_future_year, 33)
             .await
             .expect("annual days or default"),
         33
@@ -835,7 +837,7 @@ async fn holidays_repository_workflow() {
     let app = TestApp::spawn().await;
 
     let holidays = zerf::repository::HolidayDb::new(app.state.pool.clone());
-    let current_year = chrono::Local::now().date_naive().year();
+    let current_year = reference_date().year();
     assert_eq!(holidays.get_country_setting().await.expect("country setting"), "DE");
     assert_eq!(holidays.get_region_setting().await.expect("region setting"), "DE-BW");
     assert!(holidays.count_auto_for_year(current_year).await.expect("auto holiday count") > 0);
@@ -1308,7 +1310,7 @@ async fn time_entries_repository_validation_guards() {
     assert!(inactive_category.is_err());
     assert!(inactive_category.err().unwrap().to_string().contains("Category is inactive"));
 
-    let future_date = chrono::Local::now().date_naive() + Duration::days(2);
+    let future_date = reference_date() + Duration::days(2);
     let future_entry = time_entries
         .create(
             emp_id,
