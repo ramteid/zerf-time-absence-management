@@ -1,5 +1,16 @@
 # Zerf Work Time Tracking
 
+[![CI](https://github.com/ramteid/zerf-work-time-tracking/actions/workflows/ci.yml/badge.svg)](https://github.com/ramteid/zerf-work-time-tracking/actions/workflows/ci.yml)
+[![Security Audit](https://github.com/ramteid/zerf-work-time-tracking/actions/workflows/audit.yml/badge.svg)](https://github.com/ramteid/zerf-work-time-tracking/actions/workflows/audit.yml)
+[![Build & Push Image](https://github.com/ramteid/zerf-work-time-tracking/actions/workflows/build-push-image.yml/badge.svg)](https://github.com/ramteid/zerf-work-time-tracking/actions/workflows/build-push-image.yml)
+[![Nager.Date Contract](https://github.com/ramteid/zerf-work-time-tracking/actions/workflows/nager-contract.yml/badge.svg)](https://github.com/ramteid/zerf-work-time-tracking/actions/workflows/nager-contract.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Backend: Rust](https://img.shields.io/badge/backend-Rust-orange.svg)](https://www.rust-lang.org)
+[![Frontend: Svelte](https://img.shields.io/badge/frontend-Svelte-FF3E00.svg)](https://svelte.dev)
+[![Database: PostgreSQL](https://img.shields.io/badge/database-PostgreSQL-336791.svg)](https://www.postgresql.org)
+[![Deploy: Docker](https://img.shields.io/badge/deploy-Docker-2496ED.svg)](https://www.docker.com)
+[![Self-hosted](https://img.shields.io/badge/self--hosted-yes-success.svg)](#quick-setup)
+
 Simple but powerful self-hosted time tracking and absence management for teams.
 
 Zerf covers working hours, leave and absence requests, approvals, and monthly reports in one operational tool. It supports the daily workflow between employees, team leads, and admins without expanding into a full HR or payroll suite.
