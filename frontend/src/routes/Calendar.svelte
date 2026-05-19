@@ -284,6 +284,31 @@
     events: cellEvents(cell, teMap, categoryById, colorByKey, $t, userById, $currentUser?.id),
   }));
 
+  // ── Heading: switches to "Team Calendar" when any visible entry or absence
+  // belongs to a user other than the current user. Otherwise "My Calendar".
+  $: hasOtherUserEvents = (() => {
+    const ownId = $currentUser?.id;
+    if (ownId == null) return false;
+    if (entries.some((absence) => absence.user_id !== ownId)) return true;
+    if (calTimeEntries.some((timeEntry) => timeEntry.user_id !== ownId)) return true;
+    return false;
+  })();
+  $: calendarHeadingKey = hasOtherUserEvents ? "Team Calendar" : "My Calendar";
+
+  // ── Weekend column visibility: only render Sat/Sun columns when at least
+  // one visible cell on Saturday or Sunday actually has events. If either
+  // weekend day has events, both columns are shown so the week stays paired.
+  $: showWeekends = eventCells.some(
+    (cell) => cell.weekend && cell.events.length > 0,
+  );
+  $: visibleWeekdayLabels = showWeekends
+    ? weekdayLabels()
+    : weekdayLabels().slice(0, 5);
+  $: visibleEventCells = showWeekends
+    ? eventCells
+    : eventCells.filter((cell) => !cell.weekend);
+  $: calGridColumns = showWeekends ? 7 : 5;
+
   $: legendItems = (() => {
     const seen = new Map();
     for (const cell of eventCells) {
@@ -306,7 +331,7 @@
 
 <div class="top-bar">
   <div class="top-bar-title">
-    <h1>{$t("Calendar")}</h1>
+    <h1>{$t(calendarHeadingKey)}</h1>
   </div>
   <div class="top-bar-actions calendar-top-actions">
     <div class="zf-nav-slider">
@@ -331,13 +356,19 @@
 
 <div class="content-area">
   <div class="zf-card" style="padding:16px">
-    <div class="cal-grid" style="margin-bottom:8px">
-      {#each weekdayLabels() as wd}
+    <div
+      class="cal-grid"
+      style="grid-template-columns:repeat({calGridColumns},minmax(28px,1fr));margin-bottom:8px"
+    >
+      {#each visibleWeekdayLabels as wd}
         <div class="cal-head">{wd}</div>
       {/each}
     </div>
-    <div class="cal-grid">
-      {#each eventCells as c}
+    <div
+      class="cal-grid"
+      style="grid-template-columns:repeat({calGridColumns},minmax(28px,1fr))"
+    >
+      {#each visibleEventCells as c}
         {@const evts = c.events}
         <button
           type="button"
