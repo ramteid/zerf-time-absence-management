@@ -35,9 +35,9 @@ const TRANSLATIONS = {
     help_csv_export:
       "Exports the selected employee and date range as a CSV file.",
     help_my_balance:
-      "Overview of your current flextime balance and submission status. The overtime balance includes submitted hours pending approval and is calculated including today.",
+      "Overview of your current flextime balance and submission status. The balance is calculated up to and including yesterday; today's hours are not yet counted. The overtime overview also factors in submitted hours pending approval.",
     help_flextime_chart:
-      "Your cumulative flextime balance over the selected period. Data is calculated including today.",
+      "Your cumulative flextime balance over the selected period. The balance is calculated up to and including yesterday; today's hours are not yet counted.",
     "Counts as work": "Counts as work",
     help_submission_status:
       "Whether all required weeks in the selected month have been submitted.",
@@ -914,9 +914,9 @@ const TRANSLATIONS = {
     help_csv_export:
       "Exportiert den gewählten Mitarbeiter und Zeitraum als CSV-Datei.",
     help_my_balance:
-      "Überblick über deinen aktuellen Gleitzeitstand und den Einreichungen. Der Gleitzeitstand umfasst eingereichte, noch ausstehende Stunden und wird inklusive heute berechnet.",
+      "Überblick über deinen aktuellen Gleitzeitstand und den Einreichungen. Der Gleitzeitstand wird bis einschließlich gestern berechnet; die heute geleisteten Stunden werden noch nicht mitgezählt. Die Überstundenübersicht berücksichtigt zusätzlich eingereichte, noch ausstehende Stunden.",
     help_flextime_chart:
-      "Verlauf deines kumulierten Gleitzeitkontostands über den gewählten Zeitraum. Die Daten werden inklusive heute berechnet.",
+      "Verlauf deines kumulierten Gleitzeitkontostands über den gewählten Zeitraum. Der Gleitzeitstand wird bis einschließlich gestern berechnet; die heute geleisteten Stunden werden noch nicht mitgezählt.",
     help_submission_status:
       "Zeigt an, ob alle erforderlichen Wochen im gewählten Monat eingereicht wurden.",
     Approvals: "Genehmigungen",

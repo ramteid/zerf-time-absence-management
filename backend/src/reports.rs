@@ -1199,10 +1199,38 @@ async fn build_overtime_rows_for_year(
         }
     }
 
+    let last_balance_day = today - Duration::days(1);
     for month_num in first_month_in_year..=max_month {
         let month_label = format!("{:04}-{:02}", year, month_num);
-        let month_report =
-            build_month_without_submission_status(pool, target_user_id, &month_label).await?;
+        let is_current_month = year == current_year && month_num == today.month();
+        // The flextime balance is defined as "up to and including yesterday".
+        // For the current month, build the report from month-start to yesterday
+        // so today's diff is not included in the balance. Past months are
+        // unaffected and use the regular full-month build.
+        let month_report = if is_current_month {
+            let (month_start, month_end) = month_bounds(&month_label)?;
+            let cutoff = month_end.min(last_balance_day);
+            if cutoff < month_start {
+                // Today is the 1st of the month: no balance contribution yet.
+                MonthReport {
+                    user_id: target_user_id,
+                    month: month_label.clone(),
+                    days: vec![],
+                    target_min: 0,
+                    actual_min: 0,
+                    diff_min: 0,
+                    submitted_min: 0,
+                    full_month_target_min: 0,
+                    category_totals: HashMap::new(),
+                    weeks_all_submitted: None,
+                    weeks_all_approved: None,
+                }
+            } else {
+                build_range(pool, target_user_id, month_start, cutoff, &month_label).await?
+            }
+        } else {
+            build_month_without_submission_status(pool, target_user_id, &month_label).await?
+        };
         cumulative_min += month_report.diff_min;
         submitted_cumulative_min += month_report.submitted_min - month_report.target_min;
         month_rows.push(MonthRow {
@@ -1332,13 +1360,21 @@ pub async fn flextime(
     // Seed cumulative at query.from-1 via month-level overtime plus a small
     // partial-month report, so per-day flextime processing stays within the
     // requested output range.
+    // Fetch today early so the seed clamp below can use it. The flextime balance
+    // is defined as "balance at end of yesterday", so seed and main loop alike
+    // must never include today's contribution.
+    let today = crate::settings::app_today(&app_state.pool).await;
+    let last_balance_day = today - Duration::days(1);
+
     let mut cumulative_min = if query.from < user.start_date {
         0
     } else {
         user.overtime_start_balance_min
     };
     if query.from > user.start_date {
-        let day_before_from = query.from - Duration::days(1);
+        // Cap the seed end at yesterday so today's diff cannot leak into the
+        // seeded cumulative when the requested range starts at or after today.
+        let day_before_from = (query.from - Duration::days(1)).min(last_balance_day);
         let month_start =
             NaiveDate::from_ymd_opt(day_before_from.year(), day_before_from.month(), 1)
                 .ok_or_else(|| AppError::BadRequest("date".into()))?;
@@ -1421,7 +1457,6 @@ pub async fn flextime(
         })
         .collect();
 
-    let today = crate::settings::app_today(&app_state.pool).await;
     let mut flextime_days = vec![];
     let mut current_date = query.from;
     while current_date <= query.to {
@@ -1433,7 +1468,9 @@ pub async fn flextime(
         let holiday = holiday_map.get(&current_date).cloned();
         let absence = absence_by_day.get(&current_date).cloned();
         let before_start = current_date < user.start_date;
-        let after_today = current_date > today;
+        // The flextime balance is defined as "up to and including yesterday";
+        // today and any future day contribute zero to the cumulative balance.
+        let after_today = current_date >= today;
         let absence_blocks_target = absence
             .as_deref()
             .map(absence_removes_target)
