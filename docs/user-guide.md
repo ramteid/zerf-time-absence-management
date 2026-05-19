@@ -83,11 +83,9 @@ inferred from role alone.
 
 - Employee: records time and absences, submits weeks, requests changes.
 - Assistant: records time and absences like an employee, but has no fixed
-  weekly target hours and no flextime account. Assistant detection is based on
-  the normalized stored role value, so case and surrounding whitespace do not
-  change this behavior. This policy is role-based only. A non-assistant user
-  with `0` weekly hours still follows the normal reminder and approval logic.
-- Approver: a user who has been explicitly assigned in `user_approvers` and is
+  weekly target hours and no flextime account. An employee with zero weekly
+  hours still follows the normal reminder and approval logic.
+- Approver: a user who has been explicitly assigned to another user and is
 	active.
 - Admin: manages users, categories, holidays, settings, and can also be an
 	approver if explicitly assigned.
@@ -124,13 +122,6 @@ What this means in practice:
 - End users do not need to configure a personal business timezone for workflow
 	behavior; workflow date logic is consistent system-wide.
 
-Important distinction:
-
-- Business date logic uses app timezone.
-- Security and technical timestamps (for example session and audit internals)
-	remain stored and processed with standard UTC timestamp semantics in the
-	database.
-
 This prevents "wrong day" edge cases around midnight and daylight-saving
 changes when users and server run in different timezones.
 
@@ -161,8 +152,7 @@ to correct them is to reopen the whole week (see "Changes after submission").
 In the weekly Time Entry view, the first summary tile always shows recorded
 crediting hours for the current week (rejected entries are excluded).
 
-- Display format: `logged hours of target hours` (for example `0.0h of 23.4h target`).
-- Display format: a highlighted logged-hours value plus a subtitle with only the target relation (for example `of 23.4h target`).
+- Display format: logged hours and target hours (for example `6.0h of 8.0h target`).
 - Color logic:
   - red when logged hours are below the weekly target,
   - green when logged hours are equal to or above the weekly target.
@@ -390,7 +380,7 @@ This section explains exactly how vacation balances are calculated, including ca
 | Annual entitlement | Configured annual leave for the selected year (after start-date pro-rating). |
 | Carryover days | Unused vacation from previous year that can be transferred into selected year. |
 | Carryover remaining | Portion of transferred carryover that is still unused. |
-| Carryover expiry | Date when carryover becomes unusable (MM-DD from settings, applied to selected year). |
+| Carryover expiry | Date when carryover becomes unusable (month and day configured by admin, applied to the selected year). |
 | Already taken | Approved vacation days in the selected year that are already in the past (or up to today). |
 | Approved upcoming | Approved vacation days in the selected year that are still in the future. |
 | Requested | Vacation requests waiting for approval. Includes cancellation pending days. |
@@ -409,8 +399,7 @@ For selected year Y:
 - Subtract previous year approved vacation usage.
 - Never below zero.
 
-In short:
-- Carryover days Y = max(0, previous-year entitlement - previous-year approved usage)
+In short: carryover equals any unused days from the previous year (never below zero).
 
 3. Total usable budget in Y:
 - If carryover has expired: only annual entitlement.
@@ -442,9 +431,9 @@ Important distinction:
 
 ### Carryover expiry behavior
 
-The carryover expiry setting is configured as MM-DD in admin settings.
+The carryover expiry date is configured in admin settings as a month and day (for example 03-31 for March 31).
 
-- Example setting 03-31 means carryover for year Y expires on Y-03-31.
+- Carryover for a given year expires on that date within the year.
 - After expiry, transferred carryover is not part of total usable budget.
 
 Carryover remaining is consumed by approved taken days:
@@ -543,19 +532,13 @@ Because non-crediting entries participate in the full approval workflow:
   - Approvers see and must review both crediting and non-crediting entries.
   - Approval reminders are triggered by any submitted entry type.
 
-Notification idempotency and duplicates:
-
-- Reminder notifications use deterministic dedupe keys to avoid duplicate
-	reminder spam for the same user and reminder day.
-- This applies to submission reminders and approval reminders.
-- If a duplicate reminder event is attempted for the same dedupe scope, it is
-	ignored safely.
+Duplicate reminders are automatically suppressed — you will not receive the same reminder twice for the same day.
 
 ### Monthly submission reminder
 
 On the configured submission deadline day each month, every active user with weekly hours > 0 (employees and team leads alike) receives one reminder (in-app, plus email if SMTP is enabled) listing the past weeks that are not fully submitted up to that day. The current week is excluded.
 
-The reminder is sent directly to the affected user, not to their approvers. Duplicate reminders for the same user and deadline day are suppressed via a dedupe key.
+The reminder is sent directly to the affected user, not to their approvers. Duplicate reminders for the same user and deadline day are suppressed.
 
 **What triggers the reminder:**
 - Any required workday in a past week not covered by a submitted/approved entry or an approved absence.
@@ -567,9 +550,9 @@ The reminder is sent directly to the affected user, not to their approvers. Dupl
 Zerf can send a weekly reminder to approvers when submitted items are waiting
 for review.
 
-- Reminder day/time follows app-timezone scheduling.
+- Reminder day/time follows the configured app timezone.
 - Recipients are explicit active assignees only.
-- Duplicate reminders for the same day are suppressed via dedupe keys.
+- Duplicate reminders for the same day are suppressed.
 
 **What triggers the reminder:**
 - Any submitted (not approved/rejected) entries from any category type.
@@ -689,11 +672,10 @@ Zerf distinguishes between workflow coverage and work-credit math.
 
 ### Category breakdown reports
 
-- Category breakdowns show booked non-rejected time entries in scope (not only
+- Category breakdowns show all booked non-rejected time entries in scope (not only
 	crediting categories).
 - This gives a complete operational view of what was booked by category.
-- Employees must supply an explicit `user_id` to query their own breakdown.
-- Leads and admins may omit `user_id` to get a team aggregate view.
+- Employees see their own breakdown. Leads and admins can view a team aggregate.
 
 ### Team report scope
 
@@ -756,21 +738,19 @@ rules enforced by the system.
 **Create a time entry**
 
 A time entry requires a date, a start time, an end time, and a category. The
-system validates:
+following rules apply:
 
-- `entry_date` must be today or in the past (future dates are rejected).
-- `entry_date` must be on or after your personal start date.
-- `end_time` must be later than `start_time`.
-- When `entry_date` is today, `end_time` must also not be in the future (cannot
-  log an end time that has not yet occurred).
+- The date must be today or in the past (future dates are not allowed).
+- The date must be on or after your employment start date.
+- End time must be later than start time.
+- When the date is today, end time must not be in the future.
 - Total crediting hours on that day must not exceed 14 hours.
 - The time range must not overlap with any existing non-rejected entry on the
   same day.
-- The day must not already be covered by an approved or cancellation-pending
-  non-sick absence. Sick leave does not block time entry creation; all other
-  absence kinds in `approved` or `cancellation_pending` status do.
+- The day must not already be covered by an approved non-sick absence. Sick
+  leave does not block time entry creation; all other absence types do.
 
-A new entry is always created in `draft` status.
+A new entry is always created in draft status.
 
 **Edit a time entry**
 
@@ -791,10 +771,7 @@ approvers can review them.
 
 Rules:
 
-- You can submit up to 500 entries per batch.
-- All entries in the batch must belong to you.
-- Only `draft` entries change status; entries already in another status are
-  skipped silently.
+- Only your own draft entries are submitted; entries in another status are skipped.
 - Once submitted, entries are locked for direct editing.
 
 After submission, all your explicitly assigned approvers receive a notification
@@ -808,17 +785,15 @@ unit of approval.
 
 Rules:
 
-- `week_start` must be a Monday.
-- The week must contain at least one entry with status `submitted`, `approved`,
-  or `rejected`. An entirely draft week cannot be reopened (it is already
-  editable).
+- The week must contain at least one submitted, approved, or rejected entry.
+  A week that is entirely draft is already editable and cannot be reopened.
 - You cannot submit a second reopen request for the same week while one is
-  still `pending`.
+  still pending.
 
-**Auto-approval:** If your `allow_reopen_without_approval` flag is enabled (set
-by your team lead or admin), the reopen takes effect immediately without
-requiring approval. You receive a confirmation notification; your approvers
-receive an informational notice.
+**Auto-approval:** If your team lead or admin has enabled auto-approval for your
+reopen requests, the reopen takes effect immediately without requiring approval.
+You receive a confirmation notification; your approvers receive an informational
+notice.
 
 **Manual approval path:** The request enters `pending` status and all your
 assigned approvers are notified.
@@ -830,19 +805,16 @@ resubmit the week.
 ### Absences: creating
 
 **Allowed absence kinds:**
-`vacation`, `sick`, `training`, `special_leave`, `unpaid`,
-`general_absence`, `flextime_reduction`
+Vacation, sick leave, training, special leave, unpaid leave, general absence, and flextime reduction.
 
-**Validation rules that apply to all kinds:**
+**Rules that apply to all kinds:**
 
-- `end_date` must be on or after `start_date`.
-- The range must not exceed one year (maximum end date is start + 365
-  days, i.e., end_date - start_date ≤ 365).
+- End date must be on or after start date.
+- The range must not exceed one year.
 - The range must include at least one effective workday. An effective workday
-  is a day that is both a contract workday (based on your `workdays_per_week`)
-  and not a public holiday. A request covering only weekends or holidays is
-  rejected.
-- `start_date` must be on or after your employment start date.
+  is a contract workday that is not a public holiday. A request covering only
+  weekends or public holidays is not valid.
+- Start date must be on or after your employment start date.
 - Comment, if provided, must not exceed 2000 characters.
 
 **Additional rules for vacation:**
@@ -852,11 +824,10 @@ resubmit the week.
 
 **Additional rules for sick leave:**
 
-- `start_date` cannot be more than 30 days before today.
-- If `start_date` is today or earlier: sick leave is **auto-approved** immediately.
+- Start date cannot be more than 30 days before today.
+- If the start date is today or earlier: sick leave is **auto-approved** immediately.
   Your approvers receive an informational notice (not an action request).
-- If `start_date` is in the future: sick leave enters `requested` status and
-  requires approval like any other absence.
+- If the start date is in the future: sick leave requires approval like any other absence.
 
 **Overlap and time-entry conflict:**
 
@@ -901,10 +872,8 @@ Your vacation balance is visible in the leave overview. The balance fields are:
 
 - **Annual entitlement**: configured leave days for the year, pro-rated if you
   started during the year.
-- **Carryover days**: unused days from the previous year (max(0, prev-year
-  entitlement − prev-year approved usage)).
-- **Carryover expiry**: date after which carryover is no longer usable (set by
-  admin as MM-DD).
+- **Carryover days**: unused vacation days carried over from the previous year (never below zero).
+- **Carryover expiry**: date after which carryover is no longer usable (configured by your admin).
 - **Already taken**: approved vacation days that are today or in the past.
 - **Approved upcoming**: approved vacation days that are in the future.
 - **Requested**: days in `requested` or `cancellation_pending` status.
@@ -924,8 +893,8 @@ otherwise noted, all lead actions below apply to both roles.
 
 ### Scope of lead authority
 
-Non-admin team leads can only act on users who are explicitly assigned to them
-in `user_approvers`. This applies to:
+Non-admin team leads can only act on users who are explicitly assigned to them.
+This applies to:
 
 - Viewing the team list
 - Reviewing time entries, absences, and reopen requests
@@ -948,19 +917,16 @@ Approve or reject submitted time entries. All approval and rejection operates
 at the week level. The week is the primary reviewable unit; individual entries
 within a week are handled in the background.
 
-- You must be a team lead or admin.
-- Up to 500 entries per batch.
-- For approve: only `submitted` entries for users within your scope are
-  changed. Entries outside your scope or in a different status are silently
-  skipped.
-- For reject: a rejection reason is required (non-empty, max 2000 characters).
-  The reason applies to all rejected entries in the batch.
-- Non-admin leads cannot approve/reject their own entries (those entries are
-  silently skipped). Admins may approve their own entries.
+- For approve: only submitted entries for users within your scope are changed.
+  Entries outside your scope or in a different status are skipped.
+- For reject: a rejection reason is required. The reason applies to all rejected
+  entries in the batch.
+- Non-admin leads cannot approve or reject their own entries. Admins may approve
+  their own entries.
 - Non-admin leads can only act on their direct reports' entries.
 - Employees receive one notification per approval or rejection, identifying
-  the affected weeks by their labels. Self-reviewed entries by admins receive
-  in-app-only notifications (no email).
+  the affected weeks. Admins who review their own entries receive an in-app
+  notification only (no email).
 
 ### Reviewing an absence
 
@@ -980,10 +946,6 @@ budget, the approval is blocked.
 **Time-entry conflict check at approval:** For non-sick absences, the system
 re-checks that no time entries exist on the covered days at approval time. If
 entries were created after the request was submitted, the approval is blocked.
-
-**Concurrency protection:** If two approvers attempt to approve/reject the same
-absence at the same time, the second request receives a conflict error and must
-retry.
 
 ### Reviewing an absence cancellation
 
@@ -1006,10 +968,9 @@ Approve or reject a `pending` reopen request.
 - You must be a team lead or admin.
 - Non-admin leads can only act if explicitly assigned as approver for the
   requesting user.
-- Non-admin leads cannot approve/reject their own reopen request.
-- Only `pending` reopen requests can be reviewed.
-- A rejection reason is required for rejection (non-empty, max 2000
-  characters).
+- Non-admin leads cannot approve or reject their own reopen request.
+- Only pending reopen requests can be reviewed.
+- A rejection reason is required for rejection.
 
 On approval: the reopen is executed atomically — all submitted, approved, and
 rejected entries in the week are reset to `draft`. The employee receives a
@@ -1020,17 +981,16 @@ notification with the reason.
 
 ### Team settings: reopen policy
 
-Team leads can set the `allow_reopen_without_approval` flag for their direct
-reports. Admins can set it for any user (including themselves).
+Team leads can enable or disable auto-approval of reopen requests for their
+direct reports. Admins can set it for any user (including themselves).
 
 Non-admin team leads cannot modify their own reopen policy — only their own
 approver (a higher lead or admin) may grant them auto-approval. This prevents
 a lead from bypassing their own approval chain.
 
-- When enabled: that user's future reopen requests are auto-approved
-  immediately.
+- When enabled: that user's future reopen requests are auto-approved immediately.
 - When disabled: reopen requests require manual approval.
-- The setting change is audit-logged (with before and after values).
+- Changes are recorded in the audit log.
 
 ### Viewing team reports
 
@@ -1062,65 +1022,49 @@ system settings, and sensitive operations.
 
 Creating a user requires admin role.
 
-Required fields and validation:
+Required information:
 
-| Field | Rule |
-| --- | --- |
-| `role` | Must be `employee`, `assistant`, `team_lead`, or `admin`. |
-| `email` | Must be non-empty, at most 254 characters, must contain `@`. Must be unique across all users. |
-| First name + last name | The combination of first and last name must be unique. |
-| `weekly_hours` | 0.0 to 168.0 (hours per week). |
-| `workdays_per_week` | 1 to 7 (integer). |
-| `leave_days_current_year` | 0 to 366 (integer). |
-| `leave_days_next_year` | 0 to 366 (integer). |
-| `start_date` | The user's employment start date (used for absence validation and submission completeness). |
+- Role (employee, assistant, team lead, or admin)
+- Email address (must be unique)
+- First and last name (the combination must be unique)
+- Weekly hours and workdays per week
+- Annual leave days for the current and next year
+- Employment start date
 
-Additional role-specific rules:
+Role-specific rules:
 
-- `assistant` users must have `weekly_hours = 0`.
-- `assistant` users must have `overtime_start_balance_min = 0`.
-- `assistant` users usually have annual leave set to `0` for current and next year.
+- Assistants must have zero weekly hours.
+- Assistants typically have no annual leave configured.
 
-Optional: `overtime_start_balance_min` (signed integer, ±525 600 minutes,
-default 0). An initial flextime carry-in from before the user was created in
-the system.
+Optional: an initial flextime balance to carry in from before the user was
+created in the system.
 
-Optional: `approver_ids` — list of active team lead or admin user IDs to
-assign as approvers.
+Optional: one or more approvers to assign to the new user.
 
-Optional: `password` — if not provided, a 16-character random password is
-generated using a cryptographically secure generator (rejection-sampling,
-no modulo bias).
-
-All new users are created with `must_change_password = true`. The user will be
-forced to set a new password on first login.
-
-A registration email is sent to the new user's address with the temporary
-password (if SMTP is configured).
+A temporary password is generated automatically. The user must change it on
+first login. A registration email with the temporary password is sent if
+email delivery is configured.
 
 After creation, assign at least one active approver for non-admin users so that
 approval routing works.
 
 ### Updating a user
 
-All fields are optional in an update request. Only provided fields are changed.
+Only provided fields are changed when updating a user. The same rules as
+creation apply to each field.
 
-Validation rules follow the same bounds as creation for each provided field.
-
-**Anti-lockout guards:**
+**Guards to prevent accidental lockout:**
 
 - An admin cannot set their own role to a non-admin value.
-- An admin cannot deactivate their own account via the update endpoint.
+- An admin cannot deactivate their own account.
 - Removing admin rights from a user requires at least 2 active admins
   remaining after the change.
-- A user with active direct reports in `user_approvers` cannot have their role
-  changed to a non-approver role. Reassign their direct reports first (the
-  error message states the count).
-- A user who is the sole approver for admin users cannot be downgraded from
-  admin to a role that cannot approve admin subjects.
+- A user who still has direct reports assigned cannot have their role changed
+  to a non-approver role. Reassign those users first.
+- A user who is the sole approver for admin users cannot be downgraded to a
+  role that cannot approve admin-subject requests.
 
-When a user's role is changed or they are deactivated, all their existing
-sessions are invalidated immediately.
+When a user's role is changed or they are deactivated, they are signed out immediately.
 
 ### Deactivating a user
 
@@ -1134,8 +1078,7 @@ Guards:
   The error message includes the count of affected users. Reassign those users
   to a different approver first.
 
-On success: the user's `active` flag is set to false and all their sessions
-are deleted.
+On success: the user can no longer log in and any active sessions end immediately.
 
 ### Deleting a user
 
@@ -1154,36 +1097,31 @@ There is no undo. Use deactivation if you want to preserve history.
 
 Resets the password for any active user.
 
-- Only active users can have their password reset (inactive users return an
-  error).
-- A new 16-character CSPRNG password is generated.
-- `must_change_password` is set to `true` so the user is forced to change it
-  after login.
-- All existing sessions for that user are invalidated immediately.
+- Only active users can have their password reset.
+- A new temporary password is generated automatically.
+- The user is required to change it on next login.
+- All existing sessions for that user end immediately.
 
-The new temporary password is returned in the response (show it to the user
-directly or communicate it securely — it is not re-derivable).
+Show the new temporary password to the user directly or communicate it securely.
 
 ### Managing approver assignments
 
-Each user's `approver_ids` list controls who receives notifications and can
+The approver list for a user controls who receives notifications and can
 review that user's requests.
 
-Rules for valid approver entries:
+Rules for valid approvers:
 
 - The approver must be an active user.
-- The approver must have role `team_lead` or `admin`.
+- The approver must have the team lead or admin role.
 - Non-admin approvers cannot review admin users (even if assigned). Only
   admins can act on admin-subject requests.
 
-When an approver is removed (by updating `approver_ids`), approval routing for
-that user's future requests changes immediately. In-flight pending requests
-are not automatically re-routed; previously notified approvers retain their
-ability to act on existing open requests.
+When an approver is removed, the change takes effect immediately for future
+requests. Pending requests that were already routed are not re-routed;
+previously notified approvers can still act on them.
 
-If a user has no assigned approvers, the system raises an error when they try
-to submit a request that requires routing (non-admins require at least one
-approver for time entry submission, absence requests, and reopen requests).
+Non-admin users without an assigned approver cannot submit time entries,
+absence requests, or reopen requests.
 
 ### Direct correction of submitted or approved entries
 
@@ -1194,9 +1132,8 @@ correction path.
 Rules:
 
 - The admin must be a different user from the entry owner (not editing their own entry).
-- Entry status must be `submitted` or `approved`.
-- The same field validation as direct creation applies (date in the past, end >
-  start, no overlap, 14h crediting limit, etc.).
+- Entry status must be submitted or approved.
+- The same validation rules as time entry creation apply.
 
 Admins editing their *own* submitted or approved entries must instead go through
 the regular reopen workflow — the admin correction path only applies to other
@@ -1206,8 +1143,7 @@ users' entries.
 
 Annual leave entitlements can be set per user per year.
 
-- Set via `leave_days_current_year` and `leave_days_next_year` when creating
-  or updating a user, or via the dedicated leave-days endpoints.
+- Entitlements can be set when creating or updating a user, or adjusted directly in the leave settings.
 - Valid range: 0 to 366 days per year.
 - Changes take effect immediately for balance calculations. If you reduce a
   user's entitlement after they have already used vacation, their available
@@ -1218,10 +1154,9 @@ Annual leave entitlements can be set per user per year.
 Admins can forcibly cancel an approved absence (for example, to fix a mistaken
 approval).
 
-- Only `approved` absences can be revoked.
-- Revocation transitions the absence to `cancelled` and updates `reviewed_by`.
-- The absence owner receives a cancellation notification (unless the admin is
-  revoking their own absence).
+- Only approved absences can be revoked.
+- The absence is cancelled and the absence owner receives a notification
+  (unless the admin is revoking their own absence).
 - Budget freed by the revocation is reflected immediately in the balance
   calculation.
 
@@ -1234,19 +1169,19 @@ Admins configure system-wide behavior in the settings panel:
 
 | Setting | Description |
 | --- | --- |
-| App timezone | IANA zone name (e.g. `Europe/Berlin`). All date logic uses this timezone. |
-| Carryover expiry (MM-DD) | Vacation carryover from the previous year expires on this date each year. Empty = no expiry. |
+| App timezone | Timezone name (e.g. `Europe/Berlin`). All date logic uses this timezone. |
+| Carryover expiry | Vacation carryover from the previous year expires on this date each year (enter as month-day, e.g. 03-31). Empty = no expiry. |
 | Submission deadline day | Day of the month (1–28) when the monthly submission reminder is sent. |
-| Submission reminders enabled | Enable/disable the monthly submission reminder background task. |
-| Approval reminders enabled | Enable/disable the weekly approval reminder background task. |
-| SMTP configuration | Server, port, credentials for outgoing email. Required for registration emails and email reminders. |
+| Submission reminders enabled | Enable or disable the monthly submission reminder. |
+| Approval reminders enabled | Enable or disable the weekly approval reminder. |
+| SMTP configuration | Server, port, and credentials for outgoing email. Required for registration emails and email reminders. |
 | Public URL | Used to construct login links in registration emails. |
 
 ### Managing categories
 
 Categories define what employees can book time against.
 
-- Each category has a name and a `counts_as_work` (crediting) flag.
+- Each category has a name and a crediting flag.
 - Inactive categories are hidden from time entry forms but remain visible to
   admins for maintenance.
 - A category must be active to be used in a new time entry.
@@ -1265,18 +1200,12 @@ Holidays define public holidays that are excluded from:
 Holidays are date-scoped. Load holiday data for the current and next year to
 ensure all checks work correctly into the near future.
 
-### Backup and restore metadata
+### Backup and restore
 
-Docker start scripts pass the current Git commit into the built images as
-`ZERF_GIT_COMMIT`. Scheduled backups write the same value into a
-`zerf-<timestamp>.metadata` sidecar next to the PostgreSQL dump. The database
-also stores its created Git commit, created migration version, current runtime
-commit, and current SQLx migration version in `system_metadata`.
-
-Use this metadata during restore planning to select the matching application
-revision before starting Zerf against the restored database. Databases created
-before this metadata existed may show `unknown` for the created values; use the
-runtime values for those backups.
+Scheduled backups capture a full snapshot of the database. Each backup includes
+version metadata so that the correct application revision can be matched when
+restoring. Consult your deployment documentation for backup scheduling and
+restore procedures.
 
 ---
 
@@ -1314,9 +1243,8 @@ approved  ──[revoke by admin]───────> cancelled
 
 ```
 (creation)
-  allow_reopen_without_approval=true  ──> auto_approved (week immediately reopened)
-  otherwise                           ──> pending
-
-pending ──[approve]──> approved (week reopened)
-        └──[reject]──> rejected
+  sick (start <= today)        --> approved (auto)
+  other / future sick          --> requested
+  reopen auto-approval enabled --> auto_approved (week immediately reopened)
+  otherwise                    --> pending
 ```

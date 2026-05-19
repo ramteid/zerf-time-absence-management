@@ -345,6 +345,28 @@ async fn users_full_workflow() {
         let (st, body) = admin
             .post(
                 "/api/v1/users",
+                &json!({"email":"employee-invalid-overtime@example.com","first_name":"Emp","last_name":"Overtime",
+                    "role":"employee","weekly_hours":40,"leave_days_current_year":20,"leave_days_next_year":20,
+                    "overtime_start_balance_min":600001,"start_date":"2024-01-01","approver_ids":[1]}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "create rejects overtime balance above range");
+        assert!(body["error"].as_str().unwrap_or_default().contains("overtime"));
+
+        let (st, body) = admin
+            .post(
+                "/api/v1/users",
+                &json!({"email":"employee-tracks-off@example.com","first_name":"Emp","last_name":"TracksOff",
+                    "role":"employee","weekly_hours":40,"leave_days_current_year":20,"leave_days_next_year":20,
+                    "tracks_time": false,"start_date":"2024-01-01","approver_ids":[1]}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "create rejects tracks_time=false for non-admins");
+        assert!(body["error"].as_str().unwrap_or_default().contains("tracks_time"));
+
+        let (st, body) = admin
+            .post(
+                "/api/v1/users",
                 &json!({"email":"employee-invalid-workdays@example.com","first_name":"Emp","last_name":"Wdays",
                     "role":"employee","weekly_hours":40,"leave_days_current_year":20,"leave_days_next_year":20,
                     "workdays_per_week":6,"start_date":"2024-01-01","approver_ids": [1]}),
@@ -494,6 +516,15 @@ async fn users_full_workflow() {
         );
         assert_eq!(body["first_name"], "Unique");
         assert_eq!(body["last_name"], "Person");
+
+        let (st, body) = admin
+            .put(
+                &format!("/api/v1/users/{second_id}"),
+                &json!({"email":"unique@example.com"}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::CONFLICT, "duplicate email update rejected");
+        assert!(body["error"].as_str().unwrap().contains("Email already exists."));
     }
 
     // -- Creation password modes set must change correctly --
@@ -793,6 +824,240 @@ async fn users_full_workflow() {
             error_msg.contains("approver") || error_msg.contains("reassign"),
             "error must mention approver/reassign, got: {error_msg}"
         );
+    }
+
+    // -- Leave-days endpoint scope and validation --
+    {
+        let (st, _) = admin
+            .post(
+                "/api/v1/users",
+                &json!({"email":"emp-invalid-leave@example.com","first_name":"Leave","last_name":"Invalid",
+                    "role":"employee","weekly_hours":39,"leave_days_current_year":367,"leave_days_next_year":30,
+                    "start_date":"2024-01-01","approver_ids":[1]}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "create rejects invalid leave_days_current_year");
+
+        let lead_id = create_lead(&admin, "lead-leave@example.com", "LeaveLead").await;
+        let emp_id = create_emp(&admin, "emp-leave@example.com", "LeaveEmp", lead_id).await;
+
+        let (st, body) = admin.get(&format!("/api/v1/users/{emp_id}/leave-days")).await;
+        assert_eq!(st, StatusCode::OK, "admin can read leave days");
+        assert_eq!(body.as_array().unwrap().len(), 2, "returns current + next year rows");
+
+        let (st, body) = admin
+            .put(
+                &format!("/api/v1/users/{emp_id}/leave-days"),
+                &json!({"year": year(), "days": 25}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "admin can set leave days for current year");
+        assert_eq!(body["ok"], true);
+
+        let (st, body) = admin.get(&format!("/api/v1/users/{emp_id}/leave-days")).await;
+        assert_eq!(st, StatusCode::OK);
+        assert!(body
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["year"].as_i64() == Some(year() as i64) && row["days"].as_i64() == Some(25)));
+
+        let (st, _) = admin
+            .put(
+                &format!("/api/v1/users/{emp_id}/leave-days"),
+                &json!({"year": year() + 2, "days": 25}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "cannot set leave days more than one year ahead");
+
+        let (st, _) = admin
+            .put(
+                &format!("/api/v1/users/{emp_id}/leave-days"),
+                &json!({"year": year() - 2, "days": 25}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "cannot set leave days before previous year");
+
+        let (st, _) = admin
+            .put(
+                &format!("/api/v1/users/{emp_id}/leave-days"),
+                &json!({"year": year(), "days": 367}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "days upper bound enforced");
+
+        let lead_pw = {
+            let (st, body) = admin
+                .post(
+                    &format!("/api/v1/users/{lead_id}/reset-password"),
+                    &json!({}),
+                )
+                .await;
+            assert_eq!(st, StatusCode::OK, "reset lead password");
+            body["temporary_password"].as_str().unwrap().to_string()
+        };
+        let lead = login_change_pw(&app, "lead-leave@example.com", &lead_pw).await;
+
+        let (st, _) = lead.get(&format!("/api/v1/users/{emp_id}/leave-days")).await;
+        assert_eq!(st, StatusCode::OK, "lead can read direct report leave days");
+        let (st, _) = lead
+            .put(
+                &format!("/api/v1/users/{emp_id}/leave-days"),
+                &json!({"year": year(), "days": 24}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::FORBIDDEN, "non-admin cannot set leave days");
+
+        let (other_lead_id, other_lead_pw, _other_emp_id, _other_emp_pw, _monday, _cat) =
+            bootstrap_team_with_suffix(&app, &admin, false, "leave-other").await;
+        let other_lead = login_change_pw(&app, "lead-leave-other@example.com", &other_lead_pw).await;
+        let (st, _) = other_lead.get(&format!("/api/v1/users/{emp_id}/leave-days")).await;
+        assert_eq!(st, StatusCode::FORBIDDEN, "unrelated lead cannot read leave days");
+
+        let emp_pw = {
+            let (st, body) = admin
+                .post(
+                    &format!("/api/v1/users/{emp_id}/reset-password"),
+                    &json!({}),
+                )
+                .await;
+            assert_eq!(st, StatusCode::OK, "reset employee password");
+            body["temporary_password"].as_str().unwrap().to_string()
+        };
+        let emp = login_change_pw(&app, "emp-leave@example.com", &emp_pw).await;
+        let (st, _) = emp.get(&format!("/api/v1/users/{other_lead_id}/leave-days")).await;
+        assert_eq!(st, StatusCode::FORBIDDEN, "employee cannot read another user's leave days");
+
+        let (st, _) = admin
+            .post(&format!("/api/v1/users/{emp_id}/deactivate"), &json!({}))
+            .await;
+        assert_eq!(st, StatusCode::OK, "deactivate employee");
+        let (st, _) = admin
+            .put(
+                &format!("/api/v1/users/{emp_id}/leave-days"),
+                &json!({"year": year(), "days": 20}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "cannot set leave days for inactive user");
+
+            let (st, _) = admin.post("/api/v1/users/1/deactivate", &json!({})).await;
+            assert_eq!(st, StatusCode::BAD_REQUEST, "admin cannot deactivate self");
+
+            let (st, _) = admin.delete("/api/v1/users/1").await;
+            assert_eq!(st, StatusCode::BAD_REQUEST, "admin cannot delete self");
+
+            let (st, _) = admin
+                .post(&format!("/api/v1/users/{emp_id}/reset-password"), &json!({}))
+                .await;
+            assert_eq!(st, StatusCode::BAD_REQUEST, "reset password rejects inactive target");
+
+            let (st, _) = admin
+                .put(
+                    &format!("/api/v1/users/{emp_id}"),
+                    &json!({"leave_days_next_year": 367}),
+                )
+                .await;
+            assert_eq!(st, StatusCode::BAD_REQUEST, "update rejects invalid leave_days_next_year");
+
+            let (st, _) = admin
+                .put(
+                    &format!("/api/v1/users/{lead_id}"),
+                    &json!({"active": false}),
+                )
+                .await;
+            assert_eq!(st, StatusCode::BAD_REQUEST, "cannot deactivate a lead with active direct reports");
+
+            let (st, _) = admin
+                .put(
+                    &format!("/api/v1/users/{lead_id}"),
+                    &json!({"role": "employee"}),
+                )
+                .await;
+            assert_eq!(st, StatusCode::BAD_REQUEST, "cannot remove a lead with direct reports from approver role");
+
+            let (st, _) = admin
+                .put(
+                    &format!("/api/v1/users/{lead_id}"),
+                    &json!({"tracks_time": false}),
+                )
+                .await;
+            assert_eq!(st, StatusCode::BAD_REQUEST, "tracks_time cannot be disabled on non-admins");
+    }
+
+    // -- Additional auth/validation guards for user lifecycle endpoints --
+    {
+        let lead_id = create_lead(&admin, "lead-guards-extra@example.com", "GuardLead").await;
+        let emp_id = create_emp(&admin, "emp-guards-extra@example.com", "GuardEmpExtra", lead_id).await;
+
+        let lead_pw = {
+            let (st, body) = admin
+                .post(&format!("/api/v1/users/{lead_id}/reset-password"), &json!({}))
+                .await;
+            assert_eq!(st, StatusCode::OK, "reset lead password for extra guards");
+            body["temporary_password"].as_str().unwrap().to_string()
+        };
+        let lead = login_change_pw(&app, "lead-guards-extra@example.com", &lead_pw).await;
+
+        let (st, _) = lead
+            .post(&format!("/api/v1/users/{emp_id}/deactivate"), &json!({}))
+            .await;
+        assert_eq!(st, StatusCode::FORBIDDEN, "non-admin cannot deactivate users");
+
+        let (st, _) = lead.delete(&format!("/api/v1/users/{emp_id}")).await;
+        assert_eq!(st, StatusCode::FORBIDDEN, "non-admin cannot delete users");
+
+        let (st, _) = lead
+            .post(&format!("/api/v1/users/{emp_id}/reset-password"), &json!({}))
+            .await;
+        assert_eq!(st, StatusCode::FORBIDDEN, "non-admin cannot reset passwords");
+
+        let (st, _) = admin
+            .put(
+                &format!("/api/v1/users/{emp_id}"),
+                &json!({"weekly_hours": 169.0}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "update rejects weekly_hours > 168");
+
+        let (st, _) = admin
+            .put(
+                &format!("/api/v1/users/{emp_id}"),
+                &json!({"workdays_per_week": 6}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "update rejects invalid workdays_per_week");
+
+        let (st, _) = admin
+            .put(
+                &format!("/api/v1/users/{emp_id}"),
+                &json!({"overtime_start_balance_min": 600000}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "update rejects overtime balance out of range");
+
+        let (st, _) = admin
+            .put(
+                &format!("/api/v1/users/{emp_id}"),
+                &json!({"email": "not-an-email"}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "update rejects malformed email");
+
+        let (st, _) = admin
+            .put(
+                &format!("/api/v1/users/{emp_id}"),
+                &json!({"role":"assistant","weekly_hours":0,"overtime_start_balance_min":5,"approver_ids":[1]}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "assistant update rejects overtime start balance");
+
+        let (st, _) = admin
+            .put(
+                &format!("/api/v1/users/{emp_id}"),
+                &json!({"role":"employee","tracks_time":false,"approver_ids":[1]}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "non-admin roles cannot disable tracks_time");
     }
 
     app.cleanup().await;

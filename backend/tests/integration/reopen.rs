@@ -300,5 +300,120 @@ async fn reopen_full_workflow() {
         assert_eq!(body["status"], "auto_approved");
     }
 
+    // -- Employees cannot see pending queue and pure-admins cannot use reopen workflow --
+    {
+        let (_lead_id, _lead_pw, _emp_id, emp_pw, _monday_iso, _cat_id) =
+            bootstrap_team_with_suffix(&app, &admin, false, "6").await;
+        let emp = login_change_pw(&app, "emp-6@example.com", &emp_pw).await;
+
+        let (st, _) = emp.get("/api/v1/reopen-requests/pending").await;
+        assert_eq!(st, StatusCode::FORBIDDEN, "employees have no pending queue");
+
+        let (st, body) = admin
+            .post(
+                "/api/v1/users",
+                &json!({
+                    "email":"pure-admin-reopen@example.com",
+                    "first_name":"Pure",
+                    "last_name":"Admin",
+                    "role":"admin",
+                    "weekly_hours":39,
+                    "leave_days_current_year":30,
+                    "leave_days_next_year":30,
+                    "start_date":"2024-01-01",
+                    "approver_ids":[],
+                    "tracks_time": false
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "create pure admin");
+        let pure_admin_pw = temp_pw(&body);
+        let pure_admin = login_change_pw(&app, "pure-admin-reopen@example.com", &pure_admin_pw).await;
+
+        let (st, _) = pure_admin.get("/api/v1/reopen-requests").await;
+        assert_eq!(st, StatusCode::FORBIDDEN, "pure-admin cannot list own reopen requests");
+
+        let (st, _) = pure_admin
+            .post(
+                "/api/v1/reopen-requests",
+                &json!({
+                    "week_start": next_monday(-14).format("%Y-%m-%d").to_string(),
+                    "reason": "n/a"
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::FORBIDDEN, "pure-admin cannot create reopen request");
+    }
+
+    // -- Admin action on a pending request notifies other explicit approvers --
+    {
+        let (lead_one_id, lead_one_pw, emp_id, emp_pw, monday_iso, cat_id) =
+            bootstrap_team_with_suffix(&app, &admin, false, "7").await;
+
+        let (st, body) = admin
+            .post(
+                "/api/v1/users",
+                &json!({
+                    "email":"lead-7b@example.com",
+                    "first_name":"LaraB",
+                    "last_name":"LeadB",
+                    "role":"team_lead",
+                    "weekly_hours":39,
+                    "leave_days_current_year":30,
+                    "leave_days_next_year":30,
+                    "start_date":"2024-01-01",
+                    "approver_ids":[1]
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "create second approver lead");
+        let lead_two_id = id(&body);
+        let lead_two_pw = temp_pw(&body);
+
+        let (st, _) = admin
+            .put(
+                &format!("/api/v1/users/{emp_id}"),
+                &json!({"approver_ids": [lead_one_id, lead_two_id]}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "assign both approvers");
+
+        let emp = login_change_pw(&app, "emp-7@example.com", &emp_pw).await;
+        let lead_one = login_change_pw(&app, "lead-7@example.com", &lead_one_pw).await;
+        let lead_two = login_change_pw(&app, "lead-7b@example.com", &lead_two_pw).await;
+
+        let _ = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
+        let (st, body) = emp
+            .post(
+                "/api/v1/reopen-requests",
+                &json!({"week_start": monday_iso, "reason": "Admin will approve this"}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "create pending request");
+        let req_id = id(&body);
+
+        let (st, body) = admin
+            .post(
+                &format!("/api/v1/reopen-requests/{req_id}/approve"),
+                &json!({}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "admin approval succeeds");
+        assert_eq!(body["entries_reopened"], 1);
+
+        for lead_client in [&lead_one, &lead_two] {
+            let (st, notifications) = lead_client.get("/api/v1/notifications").await;
+            assert_eq!(st, StatusCode::OK, "load approver notifications");
+            assert!(
+                notifications
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|row| row["kind"] == "reopen_approved_by_admin"),
+                "other explicit approvers are informed when admin resolves the request"
+            );
+        }
+    }
+
     app.cleanup().await;
 }

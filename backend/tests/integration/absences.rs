@@ -568,6 +568,150 @@ async fn absences_full_workflow() {
         );
     }
 
+    // -- Cancellation approval and rejection follow distinct status and balance paths --
+    {
+        let approval_day = next_monday(49).format("%Y-%m-%d").to_string();
+        let rejection_day = next_monday(56).format("%Y-%m-%d").to_string();
+        let year = &approval_day[..4];
+
+        let (st, body) = emp
+            .post(
+                "/api/v1/absences",
+                &json!({"kind":"vacation","start_date": approval_day,"end_date": approval_day}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "create approval-path vacation");
+        let approval_absence_id = id(&body);
+
+        let (st, _) = lead
+            .post(
+                &format!("/api/v1/absences/{approval_absence_id}/approve"),
+                &json!({}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "approve vacation before cancellation");
+
+        let (st, _) = emp.delete(&format!("/api/v1/absences/{approval_absence_id}")).await;
+        assert_eq!(st, StatusCode::OK, "request cancellation");
+
+        let (st, body) = lead
+            .post(
+                &format!("/api/v1/absences/{approval_absence_id}/approve-cancellation"),
+                &json!({}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "approve cancellation");
+        assert_eq!(body["ok"], true);
+
+        let (st, list) = emp.get(&format!("/api/v1/absences?year={year}")).await;
+        assert_eq!(st, StatusCode::OK);
+        let approved_cancelled = list
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["id"].as_i64() == Some(approval_absence_id))
+            .expect("approved-cancellation absence present");
+        assert_eq!(approved_cancelled["status"], "cancelled");
+
+        let (st, body) = emp
+            .post(
+                "/api/v1/absences",
+                &json!({"kind":"vacation","start_date": rejection_day,"end_date": rejection_day}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "create rejection-path vacation");
+        let rejection_absence_id = id(&body);
+
+        let (st, _) = lead
+            .post(
+                &format!("/api/v1/absences/{rejection_absence_id}/approve"),
+                &json!({}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "approve second vacation");
+
+        let (st, _) = emp.delete(&format!("/api/v1/absences/{rejection_absence_id}")).await;
+        assert_eq!(st, StatusCode::OK, "request second cancellation");
+
+        let (st, body) = lead
+            .post(
+                &format!("/api/v1/absences/{rejection_absence_id}/reject-cancellation"),
+                &json!({}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "reject cancellation");
+        assert_eq!(body["ok"], true);
+
+        let (st, list) = emp.get(&format!("/api/v1/absences?year={year}")).await;
+        assert_eq!(st, StatusCode::OK);
+        let rejection_restored = list
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["id"].as_i64() == Some(rejection_absence_id))
+            .expect("rejected-cancellation absence present");
+        assert_eq!(rejection_restored["status"], "approved");
+
+        let (st, body) = emp
+            .get(&format!("/api/v1/leave-balance/{emp_id}?year={year}"))
+            .await;
+        assert_eq!(st, StatusCode::OK, "load balance after cancellation decisions");
+        assert!(
+            body["approved_upcoming"].as_f64().unwrap_or(0.0) >= 1.0,
+            "rejected cancellation keeps approved future vacation reserved"
+        );
+    }
+
+    // -- Admin revoke cancels approved absence and non-admins cannot revoke --
+    {
+        let revoke_day = next_monday(63).format("%Y-%m-%d").to_string();
+
+        let (st, body) = emp
+            .post(
+                "/api/v1/absences",
+                &json!({"kind":"vacation","start_date": revoke_day,"end_date": revoke_day}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "create revoke candidate");
+        let revoke_absence_id = id(&body);
+
+        let (st, _) = lead
+            .post(
+                &format!("/api/v1/absences/{revoke_absence_id}/approve"),
+                &json!({}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "approve revoke candidate");
+
+        let (st, _) = lead
+            .post(
+                &format!("/api/v1/absences/{revoke_absence_id}/revoke"),
+                &json!({}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::FORBIDDEN, "only admins can revoke");
+
+        let (st, body) = admin
+            .post(
+                &format!("/api/v1/absences/{revoke_absence_id}/revoke"),
+                &json!({}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "admin revoke succeeds");
+        assert_eq!(body["ok"], true);
+
+        let year = &revoke_day[..4];
+        let (st, list) = emp.get(&format!("/api/v1/absences?year={year}")).await;
+        assert_eq!(st, StatusCode::OK);
+        let revoked = list
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["id"].as_i64() == Some(revoke_absence_id))
+            .expect("revoked absence present");
+        assert_eq!(revoked["status"], "cancelled");
+    }
+
     app.cleanup().await;
 }
 
