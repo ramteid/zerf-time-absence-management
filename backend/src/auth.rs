@@ -67,6 +67,10 @@ pub struct User {
     pub allow_reopen_without_approval: bool,
     pub dark_mode: bool,
     pub overtime_start_balance_min: i64,
+    /// When FALSE (admin only), this user operates in pure-admin mode: no time
+    /// entries or absences are tracked, all related endpoints are blocked, and
+    /// the corresponding navigation items are hidden in the frontend.
+    pub tracks_time: bool,
 }
 
 impl User {
@@ -270,6 +274,7 @@ pub async fn login(
             allow_reopen_without_approval: u.allow_reopen_without_approval,
             dark_mode: u.dark_mode,
             overtime_start_balance_min: u.overtime_start_balance_min,
+            tracks_time: u.tracks_time,
         });
     // Always perform a hash verification to keep timing constant for unknown emails.
     let dummy = "$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHRzYWx0c2FsdA$8ueQukxsrOwHPzjhsRTRppvNN0o3Qx0vg7HHmH64Bmw";
@@ -380,16 +385,22 @@ pub async fn me(
         "can_view_reports": true,
     });
     let is_assistant = crate::roles::is_assistant_role(&user.role);
-    let mut navigation_items = vec![
-        serde_json::json!({"href":"/time","key":"Time","icon":"⏱"}),
-        serde_json::json!({"href":"/absences","key":"Absences","icon":"📅"}),
-        serde_json::json!({"href":"/calendar","key":"Calendar","icon":"🗓"}),
-    ];
-    if !is_assistant {
+    // Admins with tracks_time=false are in pure-admin mode: they have no time
+    // tracking or absence management, so those nav items are hidden.
+    let has_time_tracking = user.tracks_time;
+    let mut navigation_items = vec![];
+    if has_time_tracking {
+        navigation_items.push(serde_json::json!({"href":"/time","key":"Time","icon":"⏱"}));
+        navigation_items.push(serde_json::json!({"href":"/absences","key":"Absences","icon":"📅"}));
+        navigation_items.push(serde_json::json!({"href":"/calendar","key":"Calendar","icon":"🗓"}));
+    }
+    if !is_assistant && has_time_tracking {
         navigation_items
             .push(serde_json::json!({"href":"/dashboard","key":"Dashboard","icon":"🔔"}));
     }
-    navigation_items.push(serde_json::json!({"href":"/reports","key":"Reports","icon":"📊"}));
+    if has_time_tracking {
+        navigation_items.push(serde_json::json!({"href":"/reports","key":"Reports","icon":"📊"}));
+    }
     navigation_items.push(serde_json::json!({"href":"/account","key":"Account","icon":"👤"}));
     if user.is_lead() {
         navigation_items
@@ -398,7 +409,15 @@ pub async fn me(
     if user.is_admin() {
         navigation_items.push(serde_json::json!({"href":"/admin/settings","key":"Admin","icon":"⚙"}));
     }
-    let home = if is_assistant { "/time" } else { "/dashboard" };
+    // For pure-admin users (tracks_time=false) the home is admin/settings;
+    // for assistants it's /time; for everyone else /dashboard.
+    let home = if !has_time_tracking {
+        "/admin/settings"
+    } else if is_assistant {
+        "/time"
+    } else {
+        "/dashboard"
+    };
     // For admins: flag whether initial setup (country, working-time defaults,
     // and admin profile name) has been completed. Until it is, the SPA
     // redirects to /admin/settings.
@@ -452,6 +471,7 @@ pub async fn me(
         "approvers": approvers,
         "allow_reopen_without_approval": user.allow_reopen_without_approval,
         "dark_mode": user.dark_mode,
+        "tracks_time": user.tracks_time,
         "csrf_token": csrf_token.unwrap_or_default(),
         "permissions": permissions,
         "nav": navigation_items,
@@ -717,6 +737,7 @@ pub async fn auth_middleware(
         allow_reopen_without_approval: repo_user.allow_reopen_without_approval,
         dark_mode: repo_user.dark_mode,
         overtime_start_balance_min: repo_user.overtime_start_balance_min,
+        tracks_time: repo_user.tracks_time,
     };
     parts.extensions.insert(user);
     Ok(next.run(Request::from_parts(parts, body)).await)
@@ -771,6 +792,14 @@ pub struct SetupRequest {
     pub password: String,
     pub first_name: String,
     pub last_name: String,
+    /// Whether this admin tracks their own working time.
+    /// Defaults to TRUE when omitted; set to FALSE for a pure-admin account.
+    #[serde(default = "default_tracks_time")]
+    pub tracks_time: bool,
+}
+
+fn default_tracks_time() -> bool {
+    true
 }
 
 /// Create the initial admin user. Only works when no users exist yet.
@@ -821,6 +850,7 @@ pub async fn setup(
         &first_name,
         &last_name,
         today,
+        body.tracks_time,
     )
     .await?;
     let current_year = crate::settings::app_current_year(&app_state.pool).await;
@@ -984,4 +1014,152 @@ pub async fn reset_password_with_token(
         .await?;
 
     Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_user(role: &str) -> User {
+        User {
+            id: 1,
+            email: "user@example.com".to_string(),
+            password_hash: "hash".to_string(),
+            first_name: "Ada".to_string(),
+            last_name: "Lovelace".to_string(),
+            role: role.to_string(),
+            weekly_hours: 40.0,
+            workdays_per_week: 5,
+            start_date: chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
+            active: true,
+            must_change_password: false,
+            created_at: Utc::now(),
+            allow_reopen_without_approval: false,
+            dark_mode: false,
+            overtime_start_balance_min: 0,
+            tracks_time: true,
+        }
+    }
+
+    #[test]
+    fn user_role_helpers_follow_normalized_role_rules() {
+        let admin = sample_user(" Admin ");
+        assert!(admin.is_admin());
+        assert!(admin.is_lead());
+
+        let lead = sample_user("team_lead");
+        assert!(!lead.is_admin());
+        assert!(lead.is_lead());
+
+        let employee = sample_user("employee");
+        assert!(!employee.is_admin());
+        assert!(!employee.is_lead());
+        assert_eq!(employee.full_name(), "Ada Lovelace");
+    }
+
+    #[test]
+    fn cookie_name_switches_between_secure_and_plain() {
+        assert_eq!(cookie_name(true), "__Host-zerf_session");
+        assert_eq!(cookie_name(false), "zerf_session");
+    }
+
+    #[test]
+    fn build_session_cookie_contains_expected_flags() {
+        let secure = build_session_cookie("token", 3600, true);
+        assert!(secure.contains("__Host-zerf_session=token"));
+        assert!(secure.contains("HttpOnly"));
+        assert!(secure.contains("SameSite=Strict"));
+        assert!(secure.contains("Max-Age=3600"));
+        assert!(secure.contains("; Secure"));
+
+        let insecure = build_session_cookie("token", 60, false);
+        assert!(insecure.contains("zerf_session=token"));
+        assert!(!insecure.contains("; Secure"));
+    }
+
+    #[test]
+    fn extract_token_prefers_host_cookie_and_respects_secure_mode() {
+        let mixed = "foo=bar; zerf_session=plain; __Host-zerf_session=secure";
+        assert_eq!(
+            extract_token_from_cookie_str_secure(mixed, false),
+            Some("plain".to_string())
+        );
+        assert_eq!(
+            extract_token_from_cookie_str_secure(mixed, true),
+            Some("secure".to_string())
+        );
+
+        let host_first = "foo=bar; __Host-zerf_session=secure; zerf_session=plain";
+        assert_eq!(
+            extract_token_from_cookie_str_secure(host_first, false),
+            Some("secure".to_string())
+        );
+
+        let plain_only = "foo=bar; zerf_session=plain";
+        assert_eq!(
+            extract_token_from_cookie_str_secure(plain_only, false),
+            Some("plain".to_string())
+        );
+        assert_eq!(extract_token_from_cookie_str_secure(plain_only, true), None);
+    }
+
+    #[test]
+    fn parse_origin_parts_normalizes_and_derives_ports() {
+        assert_eq!(
+            parse_origin_parts("https://Example.COM."),
+            Some(("https".to_string(), "example.com".to_string(), 443))
+        );
+        assert_eq!(
+            parse_origin_parts("http://example.com:8080/path?x=1"),
+            Some(("http".to_string(), "example.com".to_string(), 8080))
+        );
+        assert_eq!(
+            parse_origin_parts("custom://host"),
+            Some(("custom".to_string(), "host".to_string(), 0))
+        );
+        assert_eq!(parse_origin_parts("example.com"), None);
+    }
+
+    #[test]
+    fn password_strength_policy_enforces_length_and_character_classes() {
+        assert!(validate_password_strength("short").is_err());
+        assert!(validate_password_strength("alllowercase123").is_err());
+        assert!(validate_password_strength("NOLOWERCASE123").is_err());
+        assert!(validate_password_strength("NoDigitsOnly!").is_ok());
+        assert!(validate_password_strength("StrongPass123!").is_ok());
+
+        let too_long = "A1!".repeat(90);
+        assert!(validate_password_strength(&too_long).is_err());
+    }
+
+    #[test]
+    fn token_helpers_generate_hex_and_hash_is_deterministic() {
+        let t1 = new_token();
+        let t2 = new_token();
+        assert_eq!(t1.len(), 64);
+        assert_eq!(t2.len(), 64);
+        assert_ne!(t1, t2);
+        assert!(t1.chars().all(|c| c.is_ascii_hexdigit()));
+
+        let h1 = hash_token("abc");
+        let h2 = hash_token("abc");
+        let h3 = hash_token("xyz");
+        assert_eq!(h1.len(), 64);
+        assert_eq!(h1, h2);
+        assert_ne!(h1, h3);
+    }
+
+    #[test]
+    fn password_hash_and_verify_roundtrip() {
+        let password = "StrongPass123!";
+        let hash = hash_password(password).unwrap();
+        assert!(verify_password(password, &hash));
+        assert!(!verify_password("WrongPass123!", &hash));
+        assert!(!verify_password(password, "not-a-valid-hash"));
+    }
+
+    #[test]
+    fn setup_default_tracks_time_is_true() {
+        assert!(default_tracks_time());
+    }
 }

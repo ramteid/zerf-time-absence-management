@@ -19,6 +19,7 @@ export function confirmDialog(title, text, opts = {}) {
         confirmLabel: opts.confirm || "OK",
         danger: !!opts.danger,
         needReason: !!opts.reason,
+        requirePhrase: opts.requirePhrase || "",
         onResolve,
       },
     });

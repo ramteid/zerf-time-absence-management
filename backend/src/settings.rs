@@ -630,6 +630,26 @@ pub async fn update_admin_settings(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn with_test_reference_date<F: FnOnce()>(value: Option<&str>, test: F) {
+        let _guard = env_lock().lock().expect("env lock poisoned");
+        let previous = std::env::var("TEST_REFERENCE_DATE").ok();
+        match value {
+            Some(v) => std::env::set_var("TEST_REFERENCE_DATE", v),
+            None => std::env::remove_var("TEST_REFERENCE_DATE"),
+        }
+        test();
+        match previous {
+            Some(v) => std::env::set_var("TEST_REFERENCE_DATE", v),
+            None => std::env::remove_var("TEST_REFERENCE_DATE"),
+        }
+    }
 
     #[test]
     fn holiday_location_changed_treats_missing_rows_as_changes() {
@@ -652,5 +672,50 @@ mod tests {
             "AT",
             "",
         ));
+    }
+
+    #[test]
+    fn normalize_time_format_accepts_only_supported_values() {
+        assert_eq!(normalize_time_format("24h").unwrap(), "24h");
+        assert_eq!(normalize_time_format("12h").unwrap(), "12h");
+        assert!(normalize_time_format(" 13h ").is_err());
+    }
+
+    #[test]
+    fn normalize_timezone_validates_iana_identifiers() {
+        assert_eq!(normalize_timezone("Europe/Berlin").unwrap(), "Europe/Berlin");
+        assert!(normalize_timezone(" ").is_err());
+        assert!(normalize_timezone("Mars/Olympus").is_err());
+    }
+
+    #[test]
+    fn normalize_language_accepts_supported_and_locale_forms() {
+        assert_eq!(normalize_language("de").unwrap(), "de");
+        assert_eq!(normalize_language("en-US").unwrap(), "en-us");
+        assert_eq!(normalize_language("zz").unwrap(), "zz");
+        assert!(normalize_language(" ").is_err());
+    }
+
+    #[test]
+    fn setting_value_changed_detects_exact_changes() {
+        assert!(!setting_value_changed(Some("value"), "value"));
+        assert!(setting_value_changed(Some("value"), "other"));
+        assert!(setting_value_changed(None, "value"));
+    }
+
+    #[test]
+    fn pinned_test_date_parses_valid_iso_date_only() {
+        with_test_reference_date(Some("2026-05-19"), || {
+            assert_eq!(
+                pinned_test_date().unwrap(),
+                chrono::NaiveDate::from_ymd_opt(2026, 5, 19).unwrap()
+            );
+        });
+        with_test_reference_date(Some("19-05-2026"), || {
+            assert!(pinned_test_date().is_none());
+        });
+        with_test_reference_date(None, || {
+            assert!(pinned_test_date().is_none());
+        });
     }
 }

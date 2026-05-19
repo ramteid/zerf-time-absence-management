@@ -225,6 +225,53 @@ async fn submission_reminders_full_workflow() {
         assert_eq!(reminders.len(), 0, "zero-hours user skipped");
     }
 
+    // -- Reminder skips admins even when they have weekly hours and incomplete weeks --
+    {
+        let ref_date = reference_date();
+        let last_month_start = if ref_date.month() == 1 {
+            chrono::NaiveDate::from_ymd_opt(ref_date.year() - 1, 12, 1).unwrap()
+        } else {
+            chrono::NaiveDate::from_ymd_opt(ref_date.year(), ref_date.month() - 1, 1).unwrap()
+        };
+        let start_date = last_month_start.format("%Y-%m-%d").to_string();
+
+        let (st, body) = admin
+            .post(
+                "/api/v1/users",
+                &json!({
+                    "email": "admin-reminder@example.com",
+                    "first_name": "Admin",
+                    "last_name": "Reminder",
+                    "role": "admin",
+                    "tracks_time": false,
+                    "weekly_hours": 20,
+                    "leave_days_current_year": 10,
+                    "leave_days_next_year": 10,
+                    "start_date": start_date
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "create admin user");
+        let admin_pw = temp_pw(&body);
+
+        let admin_user = login_change_pw(&app, "admin-reminder@example.com", &admin_pw).await;
+
+        let (st, _) = admin_user.delete("/api/v1/notifications").await;
+        assert_eq!(st, StatusCode::OK);
+
+        zerf::submission_reminders::run_check(&app.state).await;
+
+        let (st, body) = admin_user.get("/api/v1/notifications").await;
+        assert_eq!(st, StatusCode::OK);
+        let reminders: Vec<_> = body
+            .as_array()
+            .expect("notifications array")
+            .iter()
+            .filter(|n| n["kind"] == "submission_reminder")
+            .collect();
+        assert_eq!(reminders.len(), 0, "admins are excluded from reminders");
+    }
+
     // -- Reminder still warns when the only submitted entry does not count as work --
     {
         let ref_date = reference_date();
@@ -366,6 +413,233 @@ async fn submission_reminders_full_workflow() {
         assert_eq!(st, StatusCode::OK);
         assert!(cleared["submission_deadline_day"].is_null());
     }
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn submission_reminders_respects_enabled_toggle() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (_lead_id, _lead_pw, _emp_id, emp_pw, _monday_iso, _cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "toggle").await;
+    let emp = login_change_pw(&app, "emp-toggle@example.com", &emp_pw).await;
+
+    let (st, _) = emp.delete("/api/v1/notifications").await;
+    assert_eq!(st, StatusCode::OK);
+
+    let (st, settings) = admin.get("/api/v1/settings").await;
+    assert_eq!(st, StatusCode::OK);
+
+    let (st, _) = admin
+        .put(
+            "/api/v1/settings/smtp",
+            &json!({
+                "smtp_enabled": settings["smtp_enabled"],
+                "smtp_host": settings["smtp_host"],
+                "smtp_port": settings["smtp_port"],
+                "smtp_username": settings["smtp_username"],
+                "smtp_from": settings["smtp_from"],
+                "smtp_encryption": settings["smtp_encryption"],
+                "submission_reminders_enabled": false,
+                "approval_reminders_enabled": settings["approval_reminders_enabled"]
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "disable reminders");
+
+    zerf::submission_reminders::run_check(&app.state).await;
+
+    let (st, body) = emp.get("/api/v1/notifications").await;
+    assert_eq!(st, StatusCode::OK);
+    let reminders_disabled: Vec<_> = body
+        .as_array()
+        .expect("notifications array")
+        .iter()
+        .filter(|n| n["kind"] == "submission_reminder")
+        .collect();
+    assert_eq!(reminders_disabled.len(), 0, "disabled toggle suppresses reminders");
+
+    let (st, _) = admin
+        .put(
+            "/api/v1/settings/smtp",
+            &json!({
+                "smtp_enabled": settings["smtp_enabled"],
+                "smtp_host": settings["smtp_host"],
+                "smtp_port": settings["smtp_port"],
+                "smtp_username": settings["smtp_username"],
+                "smtp_from": settings["smtp_from"],
+                "smtp_encryption": settings["smtp_encryption"],
+                "submission_reminders_enabled": true,
+                "approval_reminders_enabled": settings["approval_reminders_enabled"]
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "enable reminders");
+
+    zerf::submission_reminders::run_check(&app.state).await;
+
+    let (st, body) = emp.get("/api/v1/notifications").await;
+    assert_eq!(st, StatusCode::OK);
+    let reminders_enabled: Vec<_> = body
+        .as_array()
+        .expect("notifications array")
+        .iter()
+        .filter(|n| n["kind"] == "submission_reminder")
+        .collect();
+    assert_eq!(
+        reminders_enabled.len(),
+        1,
+        "enabled toggle allows reminders"
+    );
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn submission_reminders_treat_approved_absence_as_covered_week() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+
+    let ref_date = reference_date();
+    let last_week_monday =
+        ref_date - chrono::Duration::days(ref_date.weekday().num_days_from_monday() as i64 + 7);
+    let week_start = last_week_monday.format("%Y-%m-%d").to_string();
+    let week_end = (last_week_monday + chrono::Duration::days(4))
+        .format("%Y-%m-%d")
+        .to_string();
+
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "absence-reminder@example.com",
+                "first_name": "Absence",
+                "last_name": "Reminder",
+                "role": "employee",
+                "weekly_hours": 20,
+                "leave_days_current_year": 10,
+                "leave_days_next_year": 10,
+                "start_date": week_start,
+                "approver_ids": [1]
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create employee");
+    let emp_pw = temp_pw(&body);
+
+    let emp = login_change_pw(&app, "absence-reminder@example.com", &emp_pw).await;
+
+    let (st, body) = emp
+        .post(
+            "/api/v1/absences",
+            &json!({"kind":"vacation","start_date": week_start,"end_date": week_end}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create requested absence");
+    let absence_id = id(&body);
+
+    let (st, _) = admin
+        .post(&format!("/api/v1/absences/{absence_id}/approve"), &json!({}))
+        .await;
+    assert_eq!(st, StatusCode::OK, "approve absence");
+
+    let (st, _) = emp.delete("/api/v1/notifications").await;
+    assert_eq!(st, StatusCode::OK);
+
+    zerf::submission_reminders::run_check(&app.state).await;
+
+    let (st, body) = emp.get("/api/v1/notifications").await;
+    assert_eq!(st, StatusCode::OK);
+    let reminders: Vec<_> = body
+        .as_array()
+        .expect("notifications array")
+        .iter()
+        .filter(|n| n["kind"] == "submission_reminder")
+        .collect();
+    assert_eq!(
+        reminders.len(),
+        0,
+        "approved absence should suppress reminder for that week"
+    );
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn submission_reminders_treat_cancellation_pending_absence_as_covered_week() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+
+    let ref_date = reference_date();
+    let last_week_monday =
+        ref_date - chrono::Duration::days(ref_date.weekday().num_days_from_monday() as i64 + 7);
+    let week_start = last_week_monday.format("%Y-%m-%d").to_string();
+    let week_end = (last_week_monday + chrono::Duration::days(4))
+        .format("%Y-%m-%d")
+        .to_string();
+
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "cancel-pending-reminder@example.com",
+                "first_name": "Cancel",
+                "last_name": "Pending",
+                "role": "employee",
+                "weekly_hours": 20,
+                "leave_days_current_year": 10,
+                "leave_days_next_year": 10,
+                "start_date": week_start,
+                "approver_ids": [1]
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create employee");
+    let emp_pw = temp_pw(&body);
+
+    let emp = login_change_pw(&app, "cancel-pending-reminder@example.com", &emp_pw).await;
+
+    let (st, body) = emp
+        .post(
+            "/api/v1/absences",
+            &json!({"kind":"vacation","start_date": week_start,"end_date": week_end}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create requested absence");
+    let absence_id = id(&body);
+
+    let (st, _) = admin
+        .post(&format!("/api/v1/absences/{absence_id}/approve"), &json!({}))
+        .await;
+    assert_eq!(st, StatusCode::OK, "approve absence");
+
+    let (st, body) = emp.delete(&format!("/api/v1/absences/{absence_id}")).await;
+    assert_eq!(st, StatusCode::OK, "request cancellation");
+    assert_eq!(
+        body["pending"],
+        serde_json::Value::Bool(true),
+        "approved absence cancellation should become pending"
+    );
+
+    let (st, _) = emp.delete("/api/v1/notifications").await;
+    assert_eq!(st, StatusCode::OK);
+
+    zerf::submission_reminders::run_check(&app.state).await;
+
+    let (st, body) = emp.get("/api/v1/notifications").await;
+    assert_eq!(st, StatusCode::OK);
+    let reminders: Vec<_> = body
+        .as_array()
+        .expect("notifications array")
+        .iter()
+        .filter(|n| n["kind"] == "submission_reminder")
+        .collect();
+    assert_eq!(
+        reminders.len(),
+        0,
+        "cancellation_pending absence should still suppress reminder for that week"
+    );
 
     app.cleanup().await;
 }

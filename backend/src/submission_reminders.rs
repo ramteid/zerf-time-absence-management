@@ -440,4 +440,26 @@ mod tests {
         let next = advance_one_month(d, 31);
         assert_eq!(next, NaiveDate::from_ymd_opt(2026, 2, 28).unwrap());
     }
+
+    #[test]
+    fn deadline_after_month_end_clamps_to_shorter_next_month() {
+        // When the configured deadline day does not exist in the next month,
+        // the scheduler must still pick the last valid day of that month.
+        let now = Berlin.with_ymd_and_hms(2026, 3, 31, 8, 0, 0).unwrap();
+        let dur = duration_until_next_deadline(now, 31);
+        let secs = dur.as_secs();
+        assert!(secs > 29 * 86400, "should be well over 29 days, got {secs}");
+        assert!(secs < 31 * 86400, "should be less than 31 days, got {secs}");
+    }
+
+    #[test]
+    fn deadline_rollover_uses_next_year_when_month_wraps() {
+        // The scheduler must move from December into January of the next year
+        // instead of attempting to stay in the current calendar year.
+        let now = Berlin.with_ymd_and_hms(2026, 12, 31, 8, 0, 0).unwrap();
+        let dur = duration_until_next_deadline(now, 5);
+        let secs = dur.as_secs();
+        assert!(secs > 4 * 86400, "should be more than 4 days, got {secs}");
+        assert!(secs < 6 * 86400, "should be less than 6 days, got {secs}");
+    }
 }

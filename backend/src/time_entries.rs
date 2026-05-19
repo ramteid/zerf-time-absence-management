@@ -196,12 +196,24 @@ pub struct BatchRejectBody {
 // CRUD handlers
 // ---------------------------------------------------------------------------
 
+/// Return `Forbidden` when the requesting user has time tracking disabled.
+/// Only admin users can have this flag set to false; all other roles always
+/// track time. Called at the start of every handler that reads or writes the
+/// requesting user's own time data.
+fn require_tracks_time(user: &User) -> AppResult<()> {
+    if !user.tracks_time {
+        return Err(AppError::Forbidden);
+    }
+    Ok(())
+}
+
 /// List time entries for the requesting user, optionally filtered by date range.
 pub async fn list(
     State(app_state): State<AppState>,
     requester: User,
     Query(query): Query<RangeQuery>,
 ) -> AppResult<Json<Vec<TimeEntry>>> {
+    require_tracks_time(&requester)?;
     let entries = app_state
         .db
         .time_entries
@@ -245,6 +257,7 @@ pub async fn create(
     requester: User,
     Json(body): Json<NewTimeEntry>,
 ) -> AppResult<Json<TimeEntry>> {
+    require_tracks_time(&requester)?;
     let entry_data = crate::repository::NewEntryData {
         entry_date: body.entry_date,
         start_time: body.start_time,
@@ -272,12 +285,22 @@ pub async fn create(
 }
 
 /// Update a draft time entry. Only the owner (or an admin) may edit.
+/// Admins with `tracks_time=false` are in pure-admin mode and cannot manage
+/// their own time data, but they CAN edit other users' entries (admin
+/// correction path). The guard is applied only when the requester owns the
+/// entry being edited.
 pub async fn update(
     State(app_state): State<AppState>,
     requester: User,
     Path(entry_id): Path<i64>,
     Json(body): Json<NewTimeEntry>,
 ) -> AppResult<Json<TimeEntry>> {
+    let owner_id = app_state.db.time_entries.get_user_id(entry_id).await?;
+    // Block pure-admin users from editing their own entries; admin correction
+    // (editing another user's submitted/approved entry) is still allowed.
+    if owner_id == requester.id {
+        require_tracks_time(&requester)?;
+    }
     let entry_data = crate::repository::NewEntryData {
         entry_date: body.entry_date,
         start_time: body.start_time,
@@ -311,6 +334,7 @@ pub async fn delete(
     requester: User,
     Path(entry_id): Path<i64>,
 ) -> AppResult<Json<serde_json::Value>> {
+    require_tracks_time(&requester)?;
     let owner_id = app_state.db.time_entries.get_user_id(entry_id).await?;
     if owner_id != requester.id {
         return Err(AppError::Forbidden);
@@ -342,6 +366,7 @@ pub async fn submit(
     requester: User,
     Json(body): Json<IdsBody>,
 ) -> AppResult<Json<serde_json::Value>> {
+    require_tracks_time(&requester)?;
     if body.ids.is_empty() {
         return Ok(Json(serde_json::json!({"ok": true, "count": 0})));
     }

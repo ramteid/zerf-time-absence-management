@@ -3,6 +3,7 @@
   import { api } from "../api.js";
   import { settings, toast } from "../stores.js";
   import { t } from "../i18n.js";
+  import { confirmDialog } from "../confirm.js";
   import { appTodayDate, appTodayIsoDate } from "../format.js";
   import Dialog from "../Dialog.svelte";
   import DatePicker from "../DatePicker.svelte";
@@ -29,6 +30,7 @@
     (template.overtime_start_balance_min || 0) / 60;
   let approver_ids = Array.isArray(template.approver_ids) ? template.approver_ids.map(Number) : [];
   let active = template.active ?? true;
+  let tracks_time = template.tracks_time ?? true;
   let error = "";
   let approvers = [];
   $: normalizedRole = String(role || "").trim().toLowerCase();
@@ -38,6 +40,8 @@
     weekly_hours = 0;
     overtime_start_balance_hours = 0;
   }
+  // Non-admin users always have tracks_time=true (backend enforces this too).
+  $: if (normalizedRole !== "admin") tracks_time = true;
 
   // Password fields (only for new users)
   let password = "";
@@ -148,6 +152,23 @@
       error = $t("Workdays per week must be between 1 and 5.");
       return;
     }
+    // Double-confirmation when disabling time tracking for an existing admin user.
+    // All their time entries, absences, and edit requests will be permanently deleted.
+    const wasTracksTime = template.tracks_time ?? true;
+    if (!isNew && !tracks_time && wasTracksTime && normalizedRole === "admin") {
+      const firstConfirmed = await confirmDialog(
+        $t("Disable time tracking?"),
+        $t("Disabling time tracking will permanently delete all time entries, absences, and edit requests for this user. This cannot be undone."),
+        { danger: true, confirm: $t("Disable time tracking") },
+      );
+      if (!firstConfirmed) return;
+      const secondConfirmed = await confirmDialog(
+        $t("Disable time tracking?"),
+        $t("Disabling time tracking will permanently delete all time entries, absences, and edit requests for this user. This cannot be undone."),
+        { danger: true, confirm: $t("Disable time tracking"), requirePhrase: $t("I understand") },
+      );
+      if (!secondConfirmed) return;
+    }
     try {
       const normalizedWeeklyHours = isAssistantRole ? 0 : Number(weekly_hours);
       const normalizedOvertimeStartBalanceMin = isAssistantRole
@@ -176,6 +197,9 @@
       if (!isNew) {
         body.active = active;
       }
+      // Only admin users may have tracks_time=false; non-admin always sends true
+      // to be consistent with the backend's auto-restore on demotion.
+      body.tracks_time = normalizedRole === "admin" ? tracks_time : true;
       if (isNew) {
         const createdUser = await api("/users", { method: "POST", body });
         showTempPassword = createdUser.temporary_password;
@@ -384,6 +408,24 @@
             on:click={() => (active = !active)}
           >
             {active ? $t("Active") : $t("Inactive")}
+          </button>
+        </div>
+      {/if}
+      {#if normalizedRole === "admin"}
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--border)">
+          <div>
+            <div style="font-size:13px;font-weight:500">{$t("Enable time tracking")}</div>
+            <div style="font-size:11px;color:var(--text-tertiary);margin-top:2px">
+              {$t("When disabled, this admin works in management-only mode (no time entries or absences).")}
+            </div>
+          </div>
+          <button
+            class="zf-btn zf-btn-sm"
+            class:zf-btn-danger={!tracks_time}
+            type="button"
+            on:click={() => (tracks_time = !tracks_time)}
+          >
+            {tracks_time ? $t("Active") : $t("Inactive")}
           </button>
         </div>
       {/if}

@@ -113,6 +113,10 @@ pub async fn create(
     requester: User,
     Json(body): Json<NewReopen>,
 ) -> AppResult<Json<serde_json::Value>> {
+    // Pure-admin users have no time entries and therefore no weeks to reopen.
+    if !requester.tracks_time {
+        return Err(AppError::Forbidden);
+    }
     assert_monday(body.week_start)?;
     let week_end = body.week_start + chrono::Duration::days(6);
 
@@ -322,6 +326,10 @@ pub async fn list_mine(
     State(app_state): State<AppState>,
     requester: User,
 ) -> AppResult<Json<Vec<ReopenRequest>>> {
+    // Pure-admin users have no reopen requests.
+    if !requester.tracks_time {
+        return Err(AppError::Forbidden);
+    }
     let rrs = app_state.db.reopen_requests.list_mine(requester.id).await?;
     Ok(Json(rrs.into_iter().map(repo_rr_to_service).collect()))
 }
