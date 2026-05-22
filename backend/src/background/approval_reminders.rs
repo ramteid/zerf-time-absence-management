@@ -2,6 +2,10 @@
 //! any pending approval requests (submitted weeks, absences, reopen requests).
 
 use crate::db::DatabasePool;
+use crate::services::settings::{
+    load_setting, load_smtp_config, app_today, APPROVAL_REMINDERS_ENABLED_KEY,
+    DEFAULT_TIMEZONE, TIMEZONE_KEY,
+};
 use chrono::{Datelike, Duration, TimeZone, Timelike, Utc};
 use std::time::Duration as StdDuration;
 
@@ -54,13 +58,9 @@ async fn find_approvers_with_pending(pool: &DatabasePool) -> Vec<PendingApprover
 pub async fn run_check(state: &crate::AppState) {
     let pool = &state.pool;
 
-    let reminders_enabled = crate::settings::load_setting(
-        pool,
-        crate::settings::APPROVAL_REMINDERS_ENABLED_KEY,
-        "true",
-    )
-    .await
-    .unwrap_or_else(|_| "true".to_string());
+    let reminders_enabled = load_setting(pool, APPROVAL_REMINDERS_ENABLED_KEY, "true")
+        .await
+        .unwrap_or_else(|_| "true".to_string());
     if reminders_enabled == "false" {
         tracing::debug!(target:"zerf::approval_reminders", "Reminders are disabled, skipping check");
         return;
@@ -79,14 +79,10 @@ pub async fn run_check(state: &crate::AppState) {
         .public_url
         .clone()
         .unwrap_or_else(|| "http://localhost".to_string());
-    let timezone = crate::settings::load_setting(
-        pool,
-        crate::settings::TIMEZONE_KEY,
-        crate::settings::DEFAULT_TIMEZONE,
-    )
-    .await
-    .unwrap_or_else(|_| crate::settings::DEFAULT_TIMEZONE.to_string());
-    let today_local = crate::settings::app_today(pool).await;
+    let timezone = load_setting(pool, TIMEZONE_KEY, DEFAULT_TIMEZONE)
+        .await
+        .unwrap_or_else(|_| DEFAULT_TIMEZONE.to_string());
+    let today_local = app_today(pool).await;
 
     let approvers = find_approvers_with_pending(pool).await;
     if approvers.is_empty() {
@@ -94,9 +90,7 @@ pub async fn run_check(state: &crate::AppState) {
         return;
     }
 
-    let smtp = crate::settings::load_smtp_config(pool)
-        .await
-        .map(std::sync::Arc::new);
+    let smtp = load_smtp_config(pool).await.map(std::sync::Arc::new);
 
     for (approver_id, approver_email, first_name, last_name, pending_count) in approvers {
         let count_str = pending_count.to_string();
@@ -136,10 +130,16 @@ pub async fn run_check(state: &crate::AppState) {
             Ok(true) => {
                 let _ = state
                     .notifications
-                    .send(crate::notifications::NotificationSignal {
+                    .send(crate::services::notifications::NotificationSignal {
                         user_id: approver_id,
                     });
-                crate::email::send_async(smtp.clone(), approver_email, format!("{} {}", first_name, last_name), title, email_body);
+                crate::email::send_async(
+                    smtp.clone(),
+                    approver_email,
+                    format!("{} {}", first_name, last_name),
+                    title,
+                    email_body,
+                );
             }
             Ok(false) => {
                 // Already reminded today (idempotency guard).
@@ -157,13 +157,9 @@ pub async fn run_check(state: &crate::AppState) {
 /// Background loop: sleep until the next Monday at 07:00 local time, then run check.
 pub async fn run_loop(state: crate::AppState) {
     loop {
-        let timezone = crate::settings::load_setting(
-            &state.pool,
-            crate::settings::TIMEZONE_KEY,
-            crate::settings::DEFAULT_TIMEZONE,
-        )
-        .await
-        .unwrap_or_else(|_| crate::settings::DEFAULT_TIMEZONE.to_string());
+        let timezone = load_setting(&state.pool, TIMEZONE_KEY, DEFAULT_TIMEZONE)
+            .await
+            .unwrap_or_else(|_| DEFAULT_TIMEZONE.to_string());
         let tz = timezone
             .parse::<chrono_tz::Tz>()
             .unwrap_or(chrono_tz::Europe::Berlin);

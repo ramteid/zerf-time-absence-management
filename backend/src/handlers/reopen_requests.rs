@@ -1,48 +1,25 @@
-//! Weekly reopen-request workflow.
-//!
-//! An employee whose week is fully `submitted` or partially `approved` can
-//! request to make the week editable again.  The approver (admin or the
-//! configured team-lead) reviews the request.  When the **requester's own**
-//! flag `allow_reopen_without_approval` is TRUE, the request is auto-approved
-//! immediately and all explicitly assigned approvers receive an informational
-//! notification.
-//!
-//! Approval / auto-approval reopens the week atomically: every submitted,
-//! approved, or rejected entry for `[week_start, week_start+6 days]` is reset
-//! to `'draft'` and audit-logged.  The week is treated atomically — individual
-//! entries inside a submitted week cannot be edited, so the reopen workflow
-//! is the only way to change submitted data after the fact.
+//! Weekly reopen-request workflow HTTP handlers.
 
 use crate::audit;
-use crate::auth::User;
 use crate::error::{AppError, AppResult};
 use crate::i18n;
-use crate::notifications;
+use crate::middleware::auth::User;
+use crate::services::notifications as notifications;
+use crate::services::reopen_requests::{
+    assert_monday, audit_reopened_entries, approver_ids_to_notify,
+    notification_language, notify_assigned_approvers_if_admin_acted, repo_rr_to_service,
+    ReopenRequest,
+};
 use crate::AppState;
 use axum::{
     extract::{Path, State},
     Json,
 };
-use chrono::{DateTime, Datelike, NaiveDate, Utc};
-use serde::{Deserialize, Serialize};
-
-#[derive(Serialize)]
-pub struct ReopenRequest {
-    pub id: i64,
-    pub user_id: i64,
-    pub week_start: NaiveDate,
-    /// Set once the request is approved or rejected (NULL while pending).
-    pub reviewed_by: Option<i64>,
-    pub status: String,
-    pub reviewed_at: Option<DateTime<Utc>>,
-    pub rejection_reason: Option<String>,
-    pub reason: Option<String>,
-    pub created_at: DateTime<Utc>,
-}
+use serde::Deserialize;
 
 #[derive(Deserialize)]
 pub struct NewReopen {
-    pub week_start: NaiveDate,
+    pub week_start: chrono::NaiveDate,
     #[serde(default)]
     pub reason: Option<String>,
 }
@@ -50,62 +27,6 @@ pub struct NewReopen {
 #[derive(Deserialize)]
 pub struct RejectBody {
     pub reason: String,
-}
-
-fn assert_monday(d: NaiveDate) -> AppResult<()> {
-    if d.weekday() != chrono::Weekday::Mon {
-        return Err(AppError::BadRequest(
-            "week_start must be a Monday (ISO).".into(),
-        ));
-    }
-    Ok(())
-}
-
-async fn audit_reopened_entries(
-    pool: &crate::db::DatabasePool,
-    actor_id: i64,
-    affected: &[(i64, String)],
-) {
-    for (entry_id, prev_status) in affected {
-        audit::log(
-            pool,
-            actor_id,
-            "reopened",
-            "time_entries",
-            *entry_id,
-            Some(serde_json::json!({"status": prev_status})),
-            Some(serde_json::json!({"status":"draft"})),
-        )
-        .await;
-    }
-}
-
-/// Collect all user-ids that should be notified as "approver" for a reopen
-/// request created by `requester`.  Rules:
-///
-/// | Requester role | Scenario                            | Notified set                          |
-/// |----------------|-------------------------------------|---------------------------------------|
-/// | employee       | any                                 | explicitly assigned approvers         |
-/// | team_lead      | has designated approver             | explicitly assigned approvers         |
-/// | admin          | has designated approver(s)          | those assigned approver(s) only       |
-///
-/// BTreeSet deduplicates ids.
-/// Non-admin requesters are excluded from the result.
-async fn approver_ids_to_notify(pool: &crate::db::DatabasePool, requester: &User) -> Vec<i64> {
-    let mut ids: std::collections::BTreeSet<i64> = Default::default();
-    ids.extend(crate::auth::approval_recipient_ids(pool, requester).await);
-    // Only exclude the requester when they are NOT an admin.  An admin who
-    // requests a reopen for their own week still needs a notification so
-    // they can approve it from the dashboard (especially when they are the
-    // only admin).
-    if !requester.is_admin() {
-        ids.remove(&requester.id);
-    }
-    ids.into_iter().collect()
-}
-
-async fn notification_language(pool: &crate::db::DatabasePool) -> i18n::Language {
-    crate::notifications::load_language(pool).await
 }
 
 pub async fn create(
@@ -165,7 +86,7 @@ pub async fn create(
     // Auto-approve requests resolve immediately without any reviewer action, so
     // skip this check when the request will be auto-approved.
     if !should_auto_approve {
-        crate::auth::required_approval_recipient_ids(&app_state.pool, &requester).await?;
+        crate::services::auth::required_approval_recipient_ids(&app_state.pool, &requester).await?;
     }
 
     let initial_status = if should_auto_approve {
@@ -308,20 +229,6 @@ pub async fn create(
     }
 }
 
-fn repo_rr_to_service(r: crate::repository::ReopenRequest) -> ReopenRequest {
-    ReopenRequest {
-        id: r.id,
-        user_id: r.user_id,
-        week_start: r.week_start,
-        reviewed_by: r.reviewed_by,
-        status: r.status,
-        reviewed_at: r.reviewed_at,
-        rejection_reason: r.rejection_reason,
-        reason: r.reason,
-        created_at: r.created_at,
-    }
-}
-
 pub async fn list_mine(
     State(app_state): State<AppState>,
     requester: User,
@@ -351,75 +258,6 @@ pub async fn list_pending(
             .await?
     };
     Ok(Json(rrs.into_iter().map(repo_rr_to_service).collect()))
-}
-
-/// If an admin acted on a request, notify all other explicitly assigned
-/// approvers for the request's user so they know the item left their pending
-/// queue.
-#[allow(clippy::too_many_arguments)]
-async fn notify_assigned_approvers_if_admin_acted(
-    app_state: &AppState,
-    language: &i18n::Language,
-    requester: &User,
-    request_user_id: i64,
-    request_id: i64,
-    action_key: &str,
-    action_title_key: &str,
-    action_body_key: &str,
-    week_label: String,
-    week_iso: &str,
-    extra_params: Vec<(&'static str, String)>,
-) {
-    if !requester.is_admin() {
-        return;
-    }
-    let approver_ids: Vec<i64> = match app_state.db.users.get_approver_ids(request_user_id).await {
-        Ok(ids) => ids
-            .into_iter()
-            .filter(|approver_id| *approver_id != requester.id)
-            .collect(),
-        Err(_) => return,
-    };
-    if approver_ids.is_empty() {
-        return;
-    }
-    let employee_full_name: String = app_state
-        .db
-        .reopen_requests
-        .get_user_full_name(request_user_id)
-        .await
-        .unwrap_or_else(|_| format!("User {request_user_id}"));
-
-    // Build frontend JSON with the employee's name (not the admin's).
-    let reason = extra_params.iter().find(|(k, _)| *k == "reason").map(|(_, v)| v.as_str());
-    let frontend_body = if let Some(r) = reason {
-        serde_json::json!({"week": week_iso, "requester_name": employee_full_name, "reason": r})
-    } else {
-        serde_json::json!({"week": week_iso, "requester_name": employee_full_name})
-    }
-    .to_string();
-
-    let mut params = vec![
-        ("requester_name", employee_full_name),
-        ("week_label", week_label),
-    ];
-    params.extend(extra_params);
-    for approver_id in approver_ids {
-        notifications::create_with_frontend_body(
-            app_state,
-            language,
-            approver_id,
-            action_key,
-            action_title_key,
-            action_body_key,
-            params.clone(),
-            &frontend_body,
-            true,
-            Some("reopen_request"),
-            Some(request_id),
-        )
-        .await;
-    }
 }
 
 pub async fn approve(

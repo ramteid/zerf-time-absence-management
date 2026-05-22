@@ -20,8 +20,8 @@ async fn approval_reminders_full_workflow() {
     let (st, _) = lead.delete("/api/v1/notifications").await;
     assert_eq!(st, StatusCode::OK);
 
-    zerf::approval_reminders::run_check(&app.state).await;
-    zerf::approval_reminders::run_check(&app.state).await;
+    zerf::background::approval_reminders::run_check(&app.state).await;
+    zerf::background::approval_reminders::run_check(&app.state).await;
 
     let (st, body) = lead.get("/api/v1/notifications").await;
     assert_eq!(st, StatusCode::OK);
@@ -45,7 +45,7 @@ async fn approval_reminders_full_workflow() {
     let (st, _) = lead.delete("/api/v1/notifications").await;
     assert_eq!(st, StatusCode::OK);
 
-    zerf::approval_reminders::run_check(&app.state).await;
+    zerf::background::approval_reminders::run_check(&app.state).await;
 
     let (st, body) = lead.get("/api/v1/notifications").await;
     assert_eq!(st, StatusCode::OK);

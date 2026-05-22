@@ -19,6 +19,20 @@ pub enum AppError {
     Internal(String),
 }
 
+impl AppError {
+    pub fn bad_request(message: impl Into<String>) -> Self {
+        Self::BadRequest(message.into())
+    }
+
+    pub fn conflict(message: impl Into<String>) -> Self {
+        Self::Conflict(message.into())
+    }
+
+    pub fn forbidden() -> Self {
+        Self::Forbidden
+    }
+}
+
 impl From<crate::db::SqlxError> for AppError {
     fn from(e: crate::db::SqlxError) -> Self {
         match e {

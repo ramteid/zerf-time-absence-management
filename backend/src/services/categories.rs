@@ -1,18 +1,12 @@
-use crate::auth::User;
 use crate::error::{AppError, AppResult};
-use crate::repository::categories::Category;
+use crate::middleware::auth::User;
 use crate::AppState;
-use axum::{
-    extract::{Path, State},
-    Json,
-};
-use serde::{Deserialize, Deserializer};
 
-fn deserialize_nullable_string<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    Option::<String>::deserialize(deserializer).map(Some)
+pub use crate::repository::categories::Category;
+
+pub async fn ensure_initial(pool: &crate::db::DatabasePool) -> AppResult<()> {
+    let db = crate::repository::CategoryDb::new(pool.clone());
+    db.ensure_initial().await
 }
 
 fn is_valid_hex_color(color: &str) -> bool {
@@ -20,50 +14,34 @@ fn is_valid_hex_color(color: &str) -> bool {
     bytes.len() == 7 && bytes[0] == b'#' && bytes[1..].iter().all(|byte| byte.is_ascii_hexdigit())
 }
 
-pub async fn ensure_initial(pool: &crate::db::DatabasePool) -> AppResult<()> {
-    let db = crate::repository::CategoryDb::new(pool.clone());
-    db.ensure_initial().await
+pub async fn list(app_state: &AppState) -> AppResult<Vec<Category>> {
+    app_state.db.categories.list_active().await
 }
 
-pub async fn list(
-    State(app_state): State<AppState>,
-    _requester: User,
-) -> AppResult<Json<Vec<Category>>> {
-    Ok(Json(app_state.db.categories.list_active().await?))
-}
-
-pub async fn list_all(
-    State(app_state): State<AppState>,
-    requester: User,
-) -> AppResult<Json<Vec<Category>>> {
+pub async fn list_all(app_state: &AppState, requester: &User) -> AppResult<Vec<Category>> {
     if !requester.is_admin() {
         return Err(AppError::Forbidden);
     }
-    Ok(Json(app_state.db.categories.list_all().await?))
-}
-
-#[derive(Deserialize)]
-pub struct NewCategory {
-    pub name: String,
-    pub description: Option<String>,
-    pub color: String,
-    pub sort_order: Option<i64>,
-    pub counts_as_work: Option<bool>,
+    app_state.db.categories.list_all().await
 }
 
 pub async fn create(
-    State(app_state): State<AppState>,
-    requester: User,
-    Json(body): Json<NewCategory>,
-) -> AppResult<Json<Category>> {
+    app_state: &AppState,
+    requester: &User,
+    name: String,
+    description: Option<String>,
+    color: String,
+    sort_order: Option<i64>,
+    counts_as_work: Option<bool>,
+) -> AppResult<Category> {
     if !requester.is_admin() {
         return Err(AppError::Forbidden);
     }
-    let name = body.name.trim().to_string();
+    let name = name.trim().to_string();
     if name.is_empty() || name.len() > 200 {
         return Err(AppError::BadRequest("Invalid category name.".into()));
     }
-    let color = body.color.trim().to_string();
+    let color = color.trim().to_string();
     if !is_valid_hex_color(&color) {
         return Err(AppError::BadRequest("Invalid color.".into()));
     }
@@ -72,25 +50,22 @@ pub async fn create(
         .categories
         .create(
             &name,
-            body.description.as_deref(),
+            description.as_deref(),
             &color,
-            body.sort_order.unwrap_or(0),
-            body.counts_as_work.unwrap_or(true),
+            sort_order.unwrap_or(0),
+            counts_as_work.unwrap_or(true),
         )
         .await?;
-    let category = app_state
+    app_state
         .db
         .categories
         .find_by_id(new_id)
         .await?
-        .ok_or_else(|| AppError::Internal("Created category not found".into()))?;
-    Ok(Json(category))
+        .ok_or_else(|| AppError::Internal("Created category not found".into()))
 }
 
-#[derive(Deserialize)]
 pub struct UpdateCategory {
     pub name: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_nullable_string")]
     pub description: Option<Option<String>>,
     pub color: Option<String>,
     pub sort_order: Option<i64>,
@@ -99,11 +74,11 @@ pub struct UpdateCategory {
 }
 
 pub async fn update(
-    State(app_state): State<AppState>,
-    requester: User,
-    Path(category_id): Path<i64>,
-    Json(body): Json<UpdateCategory>,
-) -> AppResult<Json<Category>> {
+    app_state: &AppState,
+    requester: &User,
+    category_id: i64,
+    body: UpdateCategory,
+) -> AppResult<Category> {
     if !requester.is_admin() {
         return Err(AppError::Forbidden);
     }
@@ -134,11 +109,10 @@ pub async fn update(
             body.active,
         )
         .await?;
-    let category = app_state
+    app_state
         .db
         .categories
         .find_by_id(category_id)
         .await?
-        .ok_or(AppError::NotFound)?;
-    Ok(Json(category))
+        .ok_or(AppError::NotFound)
 }

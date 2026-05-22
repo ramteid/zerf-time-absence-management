@@ -287,7 +287,7 @@ impl UserDb {
         .fetch_optional(&self.pool)
         .await?;
         if existing.is_some() {
-            return Err(AppError::Conflict("Email already exists.".into()));
+            return Err(AppError::conflict("Email already exists."));
         }
         Ok(())
     }
@@ -309,8 +309,8 @@ impl UserDb {
         .fetch_optional(&self.pool)
         .await?;
         if existing.is_some() {
-            return Err(AppError::Conflict(
-                "First name and last name already exist.".into(),
+            return Err(AppError::conflict(
+                "First name and last name already exist.",
             ));
         }
         Ok(())
@@ -625,9 +625,8 @@ impl UserDb {
         .execute(tx)
         .await?;
         if rows.rows_affected() == 0 {
-            return Err(AppError::BadRequest(
-                "Approver must be an active Team lead or Admin (admins may only report to active admins)."
-                    .into(),
+            return Err(AppError::bad_request(
+                "Approver must be an active Team lead or Admin (admins may only report to active admins).",
             ));
         }
         Ok(())

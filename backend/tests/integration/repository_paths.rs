@@ -108,7 +108,7 @@ async fn sessions_repository_workflow() {
     );
 
     // Create and consume expired token first to hit explicit expired branch.
-    let expired_hash = zerf::auth::hash_token("repo-expired-token");
+    let expired_hash = zerf::middleware::auth::hash_token("repo-expired-token");
     sessions
         .upsert_reset_token(&expired_hash, user_id, Utc::now() - Duration::minutes(1))
         .await
@@ -122,7 +122,7 @@ async fn sessions_repository_workflow() {
         "expired branch should return reset_token_expired"
     );
 
-    let old_hash = zerf::auth::hash_password("RepoCurrent!234").expect("hash old password");
+    let old_hash = zerf::services::auth::hash_password("RepoCurrent!234").expect("hash old password");
     sqlx::query("UPDATE users SET password_hash=$1, must_change_password=TRUE WHERE id=$2")
         .bind(old_hash)
         .bind(user_id)
@@ -135,8 +135,8 @@ async fn sessions_repository_workflow() {
         .await
         .expect("create session c");
 
-    let reset_hash = zerf::auth::hash_token("repo-valid-token");
-    let new_hash = zerf::auth::hash_password("RepoFresh!234").expect("hash new password");
+    let reset_hash = zerf::middleware::auth::hash_token("repo-valid-token");
+    let new_hash = zerf::services::auth::hash_password("RepoFresh!234").expect("hash new password");
     sessions
         .upsert_reset_token(&reset_hash, user_id, Utc::now() + Duration::hours(1))
         .await
@@ -201,7 +201,7 @@ async fn sessions_repository_workflow() {
             .is_none()
     );
 
-    let reset_hash_two = zerf::auth::hash_token("repo-valid-token-two");
+    let reset_hash_two = zerf::middleware::auth::hash_token("repo-valid-token-two");
     sessions
         .upsert_reset_token(&reset_hash_two, user_id, Utc::now() + Duration::hours(1))
         .await
@@ -477,7 +477,7 @@ async fn users_repository_workflow() {
         .expect("update dark mode");
     assert!(users.find_by_id(emp_id).await.expect("find emp").unwrap().dark_mode);
 
-    let new_hash = zerf::auth::hash_password("RepoUserPass!234").expect("hash repo user password");
+    let new_hash = zerf::services::auth::hash_password("RepoUserPass!234").expect("hash repo user password");
     users
         .update_password_self(emp_id, &new_hash)
         .await
@@ -520,7 +520,7 @@ async fn users_repository_workflow() {
         30
     );
 
-    let seeded_hash = zerf::auth::hash_password("RepoSeedAdmin!234").expect("hash seeded admin");
+    let seeded_hash = zerf::services::auth::hash_password("RepoSeedAdmin!234").expect("hash seeded admin");
     let seeded_admin_id = zerf::repository::UserDb::create_initial_admin(
         &mut tx_conn,
         "repo-seeded-admin@example.com",

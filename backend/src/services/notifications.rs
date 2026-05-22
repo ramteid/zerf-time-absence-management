@@ -1,22 +1,16 @@
-//! Persistent in-app notification center plus best-effort email sidecar.
+//! Notification service: create in-app notifications with optional email sidecars,
+//! load UI language, clean up old records.
 //!
 //! Notifications are immutable once created (only `is_read` flips).
-//! Cleanup beyond 90 days happens in the background loop in `lib.rs`.
+//! Cleanup beyond 90 days happens in the background loop in `main.rs`.
 
-use crate::auth::User;
 use crate::error::{AppError, AppResult};
 use crate::i18n::Language;
 use crate::AppState;
-use axum::{
-    extract::{Path, State},
-    response::sse::{Event, KeepAlive, Sse},
-    Json,
-};
-use std::{convert::Infallible, time::Duration};
-use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 
-// Re-export the canonical types from the repository layer.
-pub use crate::repository::notifications::{NotificationBroadcaster, NotificationSignal};
+// Re-export canonical types from the repository layer so callers only need
+// to import from this module.
+pub use crate::repository::notifications::{Notification, NotificationBroadcaster, NotificationSignal};
 
 pub fn broadcaster() -> NotificationBroadcaster {
     crate::repository::notifications::new_broadcaster()
@@ -40,13 +34,13 @@ async fn send_notification_email(
             .load_smtp_config()
             .await
             .map(std::sync::Arc::new);
-        let timezone = crate::settings::load_setting(
+        let timezone = crate::services::settings::load_setting(
             &state.pool,
-            crate::settings::TIMEZONE_KEY,
-            crate::settings::DEFAULT_TIMEZONE,
+            crate::services::settings::TIMEZONE_KEY,
+            crate::services::settings::DEFAULT_TIMEZONE,
         )
         .await
-        .unwrap_or_else(|_| crate::settings::DEFAULT_TIMEZONE.to_string());
+        .unwrap_or_else(|_| crate::services::settings::DEFAULT_TIMEZONE.to_string());
         let timestamp =
             crate::i18n::format_datetime_in_timezone(language, chrono::Utc::now(), &timezone);
         let email_body = match &state.cfg.public_url {
@@ -186,94 +180,6 @@ pub async fn create_with_frontend_body(
     }
 }
 
-pub async fn list(
-    State(app_state): State<AppState>,
-    requester: User,
-) -> AppResult<Json<Vec<crate::repository::notifications::Notification>>> {
-    Ok(Json(
-        app_state
-            .db
-            .notifications
-            .list_for_user(requester.id)
-            .await?,
-    ))
-}
-
-pub async fn unread_count(
-    State(app_state): State<AppState>,
-    requester: User,
-) -> AppResult<Json<serde_json::Value>> {
-    let count = app_state
-        .db
-        .notifications
-        .count_unread(requester.id)
-        .await?;
-    Ok(Json(serde_json::json!({ "count": count })))
-}
-
-pub async fn stream(
-    State(app_state): State<AppState>,
-    requester: User,
-) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
-    let requester_id = requester.id;
-    let stream =
-        BroadcastStream::new(app_state.db.notifications.subscribe()).filter_map(move |msg| {
-            let should_refresh = match msg {
-                Ok(signal) => signal.user_id == requester_id,
-                Err(_) => true, // lagged — refresh to catch up
-            };
-            should_refresh.then_some(Ok(Event::default()
-                .event("notification")
-                .data(r#"{"type":"refresh"}"#)))
-        });
-
-    Sse::new(stream).keep_alive(
-        KeepAlive::new()
-            .interval(Duration::from_secs(30))
-            .text("keep-alive"),
-    )
-}
-
-pub async fn mark_read(
-    State(app_state): State<AppState>,
-    requester: User,
-    Path(notification_id): Path<i64>,
-) -> AppResult<Json<serde_json::Value>> {
-    let rows_updated = app_state
-        .db
-        .notifications
-        .mark_read(notification_id, requester.id)
-        .await?;
-    if rows_updated == 0 {
-        return Err(AppError::NotFound);
-    }
-    Ok(Json(serde_json::json!({ "ok": true })))
-}
-
-pub async fn mark_all_read(
-    State(app_state): State<AppState>,
-    requester: User,
-) -> AppResult<Json<serde_json::Value>> {
-    let rows_updated = app_state
-        .db
-        .notifications
-        .mark_all_read(requester.id)
-        .await?;
-    Ok(Json(
-        serde_json::json!({ "ok": true, "count": rows_updated }),
-    ))
-}
-
-pub async fn delete_all(
-    State(app_state): State<AppState>,
-    requester: User,
-) -> AppResult<Json<serde_json::Value>> {
-    let rows_deleted = app_state.db.notifications.delete_all(requester.id).await?;
-    Ok(Json(
-        serde_json::json!({ "ok": true, "count": rows_deleted }),
-    ))
-}
-
 /// Load the configured UI language, falling back to the default on error.
 /// Used by notification senders across all modules.
 pub async fn load_language(pool: &crate::db::DatabasePool) -> crate::i18n::Language {
@@ -289,4 +195,32 @@ pub async fn load_language(pool: &crate::db::DatabasePool) -> crate::i18n::Langu
 /// Trim notifications older than 90 days; called from the background loop.
 pub async fn cleanup_old(db: &crate::repository::Db) {
     db.notifications.cleanup_old().await;
+}
+
+pub async fn list_for_user(state: &AppState, user_id: i64) -> AppResult<Vec<Notification>> {
+    state.db.notifications.list_for_user(user_id).await
+}
+
+pub async fn unread_count(state: &AppState, user_id: i64) -> AppResult<i64> {
+    state.db.notifications.count_unread(user_id).await
+}
+
+pub async fn mark_read(state: &AppState, user_id: i64, notification_id: i64) -> AppResult<()> {
+    let rows_updated = state
+        .db
+        .notifications
+        .mark_read(notification_id, user_id)
+        .await?;
+    if rows_updated == 0 {
+        return Err(AppError::NotFound);
+    }
+    Ok(())
+}
+
+pub async fn mark_all_read(state: &AppState, user_id: i64) -> AppResult<u64> {
+    state.db.notifications.mark_all_read(user_id).await
+}
+
+pub async fn delete_all(state: &AppState, user_id: i64) -> AppResult<u64> {
+    state.db.notifications.delete_all(user_id).await
 }

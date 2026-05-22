@@ -1,0 +1,403 @@
+//! Auth middleware: session validation, User extractor, cookie/CSRF helpers.
+//! This module is the single source of the `User` type.
+
+use crate::error::{AppError, AppResult};
+use crate::AppState;
+use axum::extract::{Request, State};
+use axum::http::{header, Method};
+use axum::middleware::Next;
+use axum::response::Response;
+use chrono::{DateTime, Duration, Utc};
+use serde::Serialize;
+
+// Session timing policy — also referenced by services::auth::cleanup_loop.
+pub const SESSION_COOKIE_SECURE: &str = "__Host-zerf_session";
+pub const SESSION_COOKIE_PLAIN: &str = "zerf_session";
+pub const ABSOLUTE_TIMEOUT_HOURS: i64 = 168; // 7 days absolute timeout (since session creation)
+pub const IDLE_TIMEOUT_HOURS: i64 = 8; // sliding idle timeout (since last_active_at)
+pub const MAX_FAILED_LOGINS: i64 = 5;
+pub const LOCKOUT_MIN: i64 = 15;
+
+pub fn cookie_name(secure: bool) -> &'static str {
+    if secure {
+        SESSION_COOKIE_SECURE
+    } else {
+        SESSION_COOKIE_PLAIN
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct User {
+    pub id: i64,
+    pub email: String,
+    #[serde(skip_serializing)]
+    pub password_hash: String,
+    pub first_name: String,
+    pub last_name: String,
+    pub role: String,
+    pub weekly_hours: f64,
+    /// User's configured contract workdays per week (1-7, default 5).
+    /// Used to calculate daily targets, vacation days, submission status, etc.
+    /// ISO weekday semantics: contract days = first N days of week (0=Mon, 1=Tue, ...)
+    pub workdays_per_week: i16,
+    pub start_date: chrono::NaiveDate,
+    pub active: bool,
+    pub must_change_password: bool,
+    pub created_at: DateTime<Utc>,
+    /// When TRUE, this user's reopen requests are auto-approved without waiting
+    /// for manual review. Explicitly assigned approvers still receive the
+    /// corresponding in-app and email notifications.
+    pub allow_reopen_without_approval: bool,
+    pub dark_mode: bool,
+    pub overtime_start_balance_min: i64,
+    /// When FALSE (admin only), this user operates in pure-admin mode: no time
+    /// entries or absences are tracked, all related endpoints are blocked, and
+    /// the corresponding navigation items are hidden in the frontend.
+    pub tracks_time: bool,
+}
+
+impl User {
+    pub fn is_admin(&self) -> bool {
+        crate::roles::is_admin_role(&self.role)
+    }
+    pub fn is_lead(&self) -> bool {
+        crate::roles::is_lead_role(&self.role)
+    }
+    pub fn full_name(&self) -> String {
+        format!("{} {}", self.first_name, self.last_name)
+    }
+}
+
+/// Hash a raw session token with SHA-256 before storing in the DB.
+/// The cookie always carries the raw token; only the hash is persisted,
+/// so a DB breach cannot be used to directly replay session cookies.
+pub fn hash_token(token: &str) -> String {
+    use sha2::{Digest, Sha256};
+    hex::encode(Sha256::digest(token.as_bytes()))
+}
+
+pub fn build_session_cookie(token: &str, max_age: i64, secure: bool) -> String {
+    let secure_flag = if secure { "; Secure" } else { "" };
+    let name = cookie_name(secure);
+    format!("{name}={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={max_age}{secure_flag}")
+}
+
+/// Extract the raw session token from an Axum `Request`'s cookie header.
+pub fn extract_token(req: &Request) -> Option<String> {
+    let cookie_header = req.headers().get(header::COOKIE)?.to_str().ok()?;
+    extract_token_from_cookie_str(cookie_header)
+}
+
+fn extract_token_from_cookie_str(cookie_str: &str) -> Option<String> {
+    extract_token_from_cookie_str_secure(cookie_str, false)
+}
+
+pub fn extract_token_from_cookie_str_secure(cookie_str: &str, secure_only: bool) -> Option<String> {
+    // When secure_cookies is enabled, only accept the `__Host-` prefixed cookie
+    // to prevent sibling-subdomain fixation attacks via the plain name.
+    let prefixes: &[&str] = if secure_only {
+        &[concat!("__Host-zerf_session", "=")]
+    } else {
+        &[
+            concat!("__Host-zerf_session", "="),
+            concat!("zerf_session", "="),
+        ]
+    };
+    for part in cookie_str.split(';') {
+        let cookie_part = part.trim();
+        for prefix in prefixes {
+            if let Some(token_value) = cookie_part.strip_prefix(prefix) {
+                return Some(token_value.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Extract scheme + lowercase host + port from a URL or origin string.
+/// Returns `None` for unparseable or opaque values.
+fn parse_origin_parts(value: &str) -> Option<(String, String, u16)> {
+    // The Origin header is just `scheme://host[:port]`, while Referer is a
+    // full URL.  We parse the first slash-delimited authority regardless.
+    let trimmed = value.trim();
+    // Find scheme
+    let (scheme, rest) = trimmed.split_once("://")?;
+    let scheme = scheme.to_ascii_lowercase();
+    // Strip path / query / fragment (take authority only)
+    let authority = rest.split('/').next().unwrap_or(rest);
+    let (host, port) = if let Some((h, p)) = authority.rsplit_once(':') {
+        // Only treat as port if it parses as a number; otherwise it may be
+        // part of an IPv6 address without brackets.
+        if let Ok(port_num) = p.parse::<u16>() {
+            (h.to_ascii_lowercase(), port_num)
+        } else {
+            (authority.to_ascii_lowercase(), default_port(&scheme))
+        }
+    } else {
+        (authority.to_ascii_lowercase(), default_port(&scheme))
+    };
+    // Strip trailing dot from DNS names
+    let host = host.trim_end_matches('.').to_string();
+    Some((scheme, host, port))
+}
+
+fn default_port(scheme: &str) -> u16 {
+    match scheme {
+        "https" => 443,
+        "http" => 80,
+        _ => 0,
+    }
+}
+
+pub fn enforce_same_origin_headers(
+    headers: &axum::http::HeaderMap,
+    app_state: &AppState,
+) -> AppResult<()> {
+    if !app_state.cfg.enforce_origin {
+        return Ok(());
+    }
+    let header_origin = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok());
+    let header_referer = headers.get(header::REFERER).and_then(|v| v.to_str().ok());
+    let allowed_origins = &app_state.cfg.allowed_origins;
+
+    let origin_matches = |origin_value: &str| {
+        let Some(req_parts) = parse_origin_parts(origin_value) else {
+            return false;
+        };
+        allowed_origins.iter().any(|allowed| {
+            parse_origin_parts(allowed).is_some_and(|allowed_parts| allowed_parts == req_parts)
+        })
+    };
+    let is_origin_allowed = match (header_origin, header_referer) {
+        (Some(origin), _) => origin_matches(origin),
+        (None, Some(referer)) => origin_matches(referer),
+        (None, None) => false,
+    };
+    if !is_origin_allowed {
+        return Err(AppError::Forbidden);
+    }
+    Ok(())
+}
+
+/// CSRF: for non-GET/HEAD/OPTIONS, require the same Origin/Referer to match the
+/// configured allow-list AND a double-submit `X-CSRF-Token` header that matches
+/// the session's csrf_token. SameSite=Strict already prevents most CSRF, this
+/// is defence-in-depth.
+async fn enforce_csrf(
+    parts: &axum::http::request::Parts,
+    app_state: &AppState,
+    csrf_token: &str,
+) -> AppResult<()> {
+    use subtle::ConstantTimeEq;
+    if matches!(parts.method, Method::GET | Method::HEAD | Method::OPTIONS) {
+        return Ok(());
+    }
+    enforce_same_origin_headers(&parts.headers, app_state)?;
+    if !app_state.cfg.enforce_csrf {
+        return Ok(());
+    }
+    let header_token = parts
+        .headers
+        .get("x-csrf-token")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if header_token.is_empty()
+        || header_token
+            .as_bytes()
+            .ct_eq(csrf_token.as_bytes())
+            .unwrap_u8()
+            == 0
+    {
+        return Err(AppError::Forbidden);
+    }
+    Ok(())
+}
+
+pub async fn auth_middleware(
+    State(app_state): State<AppState>,
+    req: Request,
+    next: Next,
+) -> Result<Response, AppError> {
+    let (mut parts, body) = req.into_parts();
+    let session_token = extract_token_from_cookie_str_secure(
+        parts
+            .headers
+            .get(header::COOKIE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or(""),
+        app_state.cfg.secure_cookies,
+    )
+    .ok_or(AppError::Unauthorized)?;
+
+    let token_hash = hash_token(&session_token);
+    let session_info = app_state.db.sessions.get_session_info(&token_hash).await?;
+    let session_info = session_info.ok_or(AppError::Unauthorized)?;
+    let (user_id, session_created_at, session_last_active_at, csrf_token) = (
+        session_info.user_id,
+        session_info.created_at,
+        session_info.last_active_at,
+        session_info.csrf_token,
+    );
+    let now = Utc::now();
+    // Enforce BOTH the absolute lifetime (since creation) and the sliding idle
+    // timeout (since last activity) directly in the middleware, so we never
+    // depend on the background cleanup task for authn correctness.
+    if now - session_created_at > Duration::hours(ABSOLUTE_TIMEOUT_HOURS)
+        || now - session_last_active_at > Duration::hours(IDLE_TIMEOUT_HOURS)
+    {
+        app_state.db.sessions.delete(&token_hash).await?;
+        return Err(AppError::Unauthorized);
+    }
+
+    enforce_csrf(&parts, &app_state, &csrf_token).await?;
+
+    app_state.db.sessions.touch(&token_hash).await?;
+    let repo_user = app_state
+        .db
+        .users
+        .find_by_id_active(user_id)
+        .await?
+        .ok_or(AppError::Unauthorized)?;
+    let user = User {
+        id: repo_user.id,
+        email: repo_user.email,
+        password_hash: repo_user.password_hash,
+        first_name: repo_user.first_name,
+        last_name: repo_user.last_name,
+        role: repo_user.role,
+        weekly_hours: repo_user.weekly_hours,
+        workdays_per_week: repo_user.workdays_per_week,
+        start_date: repo_user.start_date,
+        active: repo_user.active,
+        must_change_password: repo_user.must_change_password,
+        created_at: repo_user.created_at,
+        allow_reopen_without_approval: repo_user.allow_reopen_without_approval,
+        dark_mode: repo_user.dark_mode,
+        overtime_start_balance_min: repo_user.overtime_start_balance_min,
+        tracks_time: repo_user.tracks_time,
+    };
+    parts.extensions.insert(user);
+    Ok(next.run(Request::from_parts(parts, body)).await)
+}
+
+impl<S> axum::extract::FromRequestParts<S> for User
+where
+    S: Send + Sync,
+{
+    type Rejection = AppError;
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        _: &S,
+    ) -> Result<Self, Self::Rejection> {
+        parts
+            .extensions
+            .get::<User>()
+            .cloned()
+            .ok_or(AppError::Unauthorized)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_user(role: &str) -> User {
+        User {
+            id: 1,
+            email: "user@example.com".to_string(),
+            password_hash: "hash".to_string(),
+            first_name: "Ada".to_string(),
+            last_name: "Lovelace".to_string(),
+            role: role.to_string(),
+            weekly_hours: 40.0,
+            workdays_per_week: 5,
+            start_date: chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
+            active: true,
+            must_change_password: false,
+            created_at: Utc::now(),
+            allow_reopen_without_approval: false,
+            dark_mode: false,
+            overtime_start_balance_min: 0,
+            tracks_time: true,
+        }
+    }
+
+    #[test]
+    fn user_role_helpers_follow_normalized_role_rules() {
+        let admin = sample_user(" Admin ");
+        assert!(admin.is_admin());
+        assert!(admin.is_lead());
+
+        let lead = sample_user("team_lead");
+        assert!(!lead.is_admin());
+        assert!(lead.is_lead());
+
+        let employee = sample_user("employee");
+        assert!(!employee.is_admin());
+        assert!(!employee.is_lead());
+        assert_eq!(employee.full_name(), "Ada Lovelace");
+    }
+
+    #[test]
+    fn cookie_name_switches_between_secure_and_plain() {
+        assert_eq!(cookie_name(true), "__Host-zerf_session");
+        assert_eq!(cookie_name(false), "zerf_session");
+    }
+
+    #[test]
+    fn build_session_cookie_contains_expected_flags() {
+        let secure = build_session_cookie("token", 3600, true);
+        assert!(secure.contains("__Host-zerf_session=token"));
+        assert!(secure.contains("HttpOnly"));
+        assert!(secure.contains("SameSite=Strict"));
+        assert!(secure.contains("Max-Age=3600"));
+        assert!(secure.contains("; Secure"));
+
+        let insecure = build_session_cookie("token", 60, false);
+        assert!(insecure.contains("zerf_session=token"));
+        assert!(!insecure.contains("; Secure"));
+    }
+
+    #[test]
+    fn extract_token_prefers_host_cookie_and_respects_secure_mode() {
+        let mixed = "foo=bar; zerf_session=plain; __Host-zerf_session=secure";
+        assert_eq!(
+            extract_token_from_cookie_str_secure(mixed, false),
+            Some("plain".to_string())
+        );
+        assert_eq!(
+            extract_token_from_cookie_str_secure(mixed, true),
+            Some("secure".to_string())
+        );
+
+        let host_first = "foo=bar; __Host-zerf_session=secure; zerf_session=plain";
+        assert_eq!(
+            extract_token_from_cookie_str_secure(host_first, false),
+            Some("secure".to_string())
+        );
+
+        let plain_only = "foo=bar; zerf_session=plain";
+        assert_eq!(
+            extract_token_from_cookie_str_secure(plain_only, false),
+            Some("plain".to_string())
+        );
+        assert_eq!(extract_token_from_cookie_str_secure(plain_only, true), None);
+    }
+
+    #[test]
+    fn parse_origin_parts_normalizes_and_derives_ports() {
+        assert_eq!(
+            parse_origin_parts("https://Example.COM."),
+            Some(("https".to_string(), "example.com".to_string(), 443))
+        );
+        assert_eq!(
+            parse_origin_parts("http://example.com:8080/path?x=1"),
+            Some(("http".to_string(), "example.com".to_string(), 8080))
+        );
+        assert_eq!(
+            parse_origin_parts("custom://host"),
+            Some(("custom".to_string(), "host".to_string(), 0))
+        );
+        assert_eq!(parse_origin_parts("example.com"), None);
+    }
+}

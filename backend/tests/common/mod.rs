@@ -16,7 +16,8 @@ use std::time::Duration;
 use testcontainers::runners::AsyncRunner;
 use testcontainers::ContainerAsync;
 use testcontainers_modules::postgres::Postgres;
-use zerf::{auth, build_app, categories, config::Config, db, holidays, repository::UserDb, users, AppState};
+use zerf::{build_app, config::Config, db, repository::UserDb, AppState};
+use zerf::services::{auth, categories, holidays, users};
 
 static TEST_DB_COUNTER: AtomicU64 = AtomicU64::new(0);
 static TEST_MIGRATOR: Migrator = sqlx::migrate!("./migrations");
@@ -203,7 +204,7 @@ impl TestApp {
             .expect("failed to seed admin")
             .expect("admin should have been created");
 
-        let broadcaster = zerf::notifications::broadcaster();
+        let broadcaster = zerf::services::notifications::broadcaster();
         let db = zerf::repository::Db::new(pool.clone(), broadcaster.clone());
         let state = AppState {
             pool: pool.clone(),
