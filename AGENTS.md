@@ -263,7 +263,15 @@ Tests use Vitest + jsdom. Test files are co-located with source under `src/` and
 
 Integration tests are in `backend/tests/integration/`. By default, each test gets an isolated PostgreSQL database created and dropped automatically via `tests/common/mod.rs` (testcontainers).
 
-If Docker is not available, start a local PostgreSQL instance manually and set `TEST_DATABASE_URL` to a reachable admin database URL (for example `postgres://postgres:postgres@127.0.0.1:5432/postgres`). The test harness then skips containers and creates isolated databases on that instance.
+If Docker is not available, use a local PostgreSQL service and set `TEST_DATABASE_URL` to a reachable admin database URL. The integration harness skips testcontainers when `TEST_DATABASE_URL` is set, creates isolated `zerf_test_*` databases on that instance, and leaves the server process alone.
+
+For local service testing:
+
+- Start PostgreSQL first, for example `service postgresql start`.
+- Verify it is reachable with `pg_isready -h 127.0.0.1 -p 5432 -U <role>`.
+- Use the actual local admin role. In some dev containers this is `vscode`, not `postgres`.
+- Ensure the role can connect over TCP and create databases. If needed, set a password from a local peer-authenticated shell, for example `psql postgres -c "ALTER USER vscode PASSWORD 'postgres';"`.
+- Prefer serial integration tests on small local clusters to avoid exhausting `max_connections`.
 
 ```bash
 cd backend
@@ -275,6 +283,13 @@ Without Docker:
 ```bash
 cd backend
 TEST_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/postgres cargo test --test integration
+```
+
+Without Docker on a constrained local PostgreSQL instance:
+
+```bash
+cd backend
+TEST_DATABASE_URL=postgres://vscode:postgres@127.0.0.1:5432/postgres cargo test --test integration -- --test-threads=1
 ```
 
 For a local Postgres container:
