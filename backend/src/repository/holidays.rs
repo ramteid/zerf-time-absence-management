@@ -139,7 +139,7 @@ impl HolidayDb {
         .bind(year)
         .execute(&self.pool)
         .await
-        .map_err(|_| AppError::Conflict("Holiday already exists".into()))?;
+        .map_err(|_| AppError::conflict("Holiday already exists"))?;
         Ok(())
     }
 

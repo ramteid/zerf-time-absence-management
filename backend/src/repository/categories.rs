@@ -161,7 +161,7 @@ impl CategoryDb {
         .bind(counts_as_work)
         .fetch_one(&self.pool)
         .await
-        .map_err(|_| AppError::Conflict("Name already exists".into()))
+        .map_err(|_| AppError::conflict("Name already exists"))
     }
 
     #[allow(clippy::too_many_arguments)]

@@ -407,7 +407,7 @@ impl AbsenceDb {
         .fetch_one(&mut *tx)
         .await?;
         if overlap > 0 {
-            return Err(AppError::Conflict("Overlap with existing absence.".into()));
+            return Err(AppError::conflict("Overlap with existing absence."));
         }
         Self::ensure_no_time_conflict_tx(&mut tx, user_id, kind, start_date, end_date).await?;
 
@@ -463,7 +463,7 @@ impl AbsenceDb {
         .fetch_one(&mut *tx)
         .await?;
         if overlap > 0 {
-            return Err(AppError::Conflict("Overlap with existing absence.".into()));
+            return Err(AppError::conflict("Overlap with existing absence."));
         }
         Self::ensure_no_time_conflict_tx(&mut tx, owner_id, kind, start_date, end_date).await?;
 
@@ -742,10 +742,9 @@ impl AbsenceDb {
         .fetch_optional(&mut **tx)
         .await?;
         if conflict.is_some() {
-            return Err(AppError::BadRequest(
+            return Err(AppError::bad_request(
                 "Non-sick absences cannot overlap days with logged time. \
-                 Please remove or reject the time entries first."
-                    .into(),
+                 Please remove or reject the time entries first.",
             ));
         }
         Ok(())
@@ -789,7 +788,7 @@ impl AbsenceDb {
             .await?
         };
         if count > 0 {
-            return Err(AppError::Conflict("Overlap with existing absence.".into()));
+            return Err(AppError::conflict("Overlap with existing absence."));
         }
         Ok(())
     }

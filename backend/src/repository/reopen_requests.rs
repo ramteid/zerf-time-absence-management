@@ -146,7 +146,7 @@ impl ReopenRequestDb {
         .await
         .map_err(|e| {
             tracing::warn!(target:"zerf::reopen", "insert_pending failed: {e}");
-            AppError::Conflict("A pending request for this week already exists.".into())
+            AppError::conflict("A pending request for this week already exists.")
         })
     }
 
@@ -174,7 +174,7 @@ impl ReopenRequestDb {
         .await
         .map_err(|e| {
             tracing::warn!(target:"zerf::reopen", "insert_auto_approved failed: {e}");
-            AppError::Conflict("A pending request for this week already exists.".into())
+            AppError::conflict("A pending request for this week already exists.")
         })?;
         let affected = Self::perform_reopen(&mut tx, user_id, week_start).await?;
         tx.commit().await?;
@@ -198,12 +198,12 @@ impl ReopenRequestDb {
         .await?
         .ok_or(AppError::NotFound)?;
         if req.status != "pending" {
-            return Err(AppError::BadRequest("Request is not pending.".into()));
+            return Err(AppError::bad_request("Request is not pending."));
         }
 
         if !reviewer_is_admin {
             if req.user_id == reviewer_id {
-                return Err(AppError::Forbidden);
+                return Err(AppError::forbidden());
             }
             let is_assigned_approver: Option<bool> =
                 sqlx::query_scalar(ACTIVE_ASSIGNED_APPROVER_FOR_UPDATE_SQL)
@@ -212,7 +212,7 @@ impl ReopenRequestDb {
                     .fetch_optional(&mut *tx)
                     .await?;
             if is_assigned_approver.is_none() {
-                return Err(AppError::Forbidden);
+                return Err(AppError::forbidden());
             }
         }
 
@@ -228,8 +228,8 @@ impl ReopenRequestDb {
         .await?
         .rows_affected();
         if rows == 0 {
-            return Err(AppError::Conflict(
-                "Reopen request was already resolved by someone else.".into(),
+            return Err(AppError::conflict(
+                "Reopen request was already resolved by someone else.",
             ));
         }
         tx.commit().await?;
@@ -253,12 +253,12 @@ impl ReopenRequestDb {
         .await?
         .ok_or(AppError::NotFound)?;
         if before.status != "pending" {
-            return Err(AppError::BadRequest("Request is not pending.".into()));
+            return Err(AppError::bad_request("Request is not pending."));
         }
 
         if !reviewer_is_admin {
             if before.user_id == reviewer_id {
-                return Err(AppError::Forbidden);
+                return Err(AppError::forbidden());
             }
             let is_assigned_approver: Option<bool> =
                 sqlx::query_scalar(ACTIVE_ASSIGNED_APPROVER_FOR_UPDATE_SQL)
@@ -267,7 +267,7 @@ impl ReopenRequestDb {
                     .fetch_optional(&mut *tx)
                     .await?;
             if is_assigned_approver.is_none() {
-                return Err(AppError::Forbidden);
+                return Err(AppError::forbidden());
             }
         }
         let rows = sqlx::query(
@@ -282,8 +282,8 @@ impl ReopenRequestDb {
         .await?
         .rows_affected();
         if rows == 0 {
-            return Err(AppError::Conflict(
-                "Request was already resolved by someone else.".into(),
+            return Err(AppError::conflict(
+                "Request was already resolved by someone else.",
             ));
         }
         tx.commit().await?;
@@ -317,14 +317,13 @@ impl ReopenRequestDb {
         .fetch_all(&mut **tx)
         .await?;
         if affected.is_empty() {
-            return Err(AppError::BadRequest(
-                "Cannot request edit - this week has no submitted, approved, or rejected entries."
-                    .into(),
+            return Err(AppError::bad_request(
+                "Cannot request edit - this week has no submitted, approved, or rejected entries.",
             ));
         }
         let entry_ids: Vec<i64> = affected.iter().map(|(id, _)| *id).collect();
 
-        validate_entries_after_reopen(&mut **tx, subject_id, &entry_ids).await?;
+        validate_entries_after_reopen(&mut *tx, subject_id, &entry_ids).await?;
 
         sqlx::query(
             "UPDATE time_entries \

@@ -5,7 +5,8 @@ use serde_json::json;
 
 use crate::common::TestApp;
 use crate::helpers::{admin_login, temp_pw, today};
-use zerf::auth::{hash_password, hash_token};
+use zerf::services::auth::hash_password;
+use zerf::middleware::auth::hash_token;
 
 #[tokio::test]
 async fn auth_full_workflow() {

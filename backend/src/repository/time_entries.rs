@@ -11,11 +11,11 @@ async fn app_now(conn: &mut sqlx::PgConnection) -> AppResult<chrono::DateTime<ch
         sqlx::query_scalar("SELECT value FROM app_settings WHERE key = 'timezone'")
             .fetch_optional(&mut *conn)
             .await?;
-    let tz_name = timezone.unwrap_or_else(|| crate::settings::DEFAULT_TIMEZONE.to_string());
+    let tz_name = timezone.unwrap_or_else(|| crate::services::settings::DEFAULT_TIMEZONE.to_string());
     let tz = tz_name
         .parse::<chrono_tz::Tz>()
         .unwrap_or(chrono_tz::Europe::Berlin);
-    if let Some(d) = crate::settings::pinned_test_date() {
+    if let Some(d) = crate::services::settings::pinned_test_date() {
         // Pin to end-of-day on the reference date so entries for that date
         // are never rejected for having an end_time in the "future".
         use chrono::TimeZone;
@@ -64,8 +64,8 @@ fn duration_min(start: &str, end: &str) -> AppResult<i64> {
     let s = parse_time(start)?;
     let e = parse_time(end)?;
     if e <= s {
-        return Err(AppError::BadRequest(
-            "End time must be after start time.".into(),
+        return Err(AppError::bad_request(
+            "End time must be after start time.",
         ));
     }
     Ok((e - s).num_minutes())
@@ -86,7 +86,7 @@ pub(crate) async fn validate_entry(
 ) -> AppResult<()> {
     if let Some(c) = &te.comment {
         if c.len() > 2000 {
-            return Err(AppError::BadRequest("Comment too long (max 2000).".into()));
+            return Err(AppError::bad_request("Comment too long (max 2000)."));
         }
     }
     let user_start: NaiveDate = sqlx::query_scalar("SELECT start_date FROM users WHERE id = $1")
@@ -94,8 +94,8 @@ pub(crate) async fn validate_entry(
         .fetch_one(&mut *conn)
         .await?;
     if te.entry_date < user_start {
-        return Err(AppError::BadRequest(
-            "Entry date is before user start date.".into(),
+        return Err(AppError::bad_request(
+            "Entry date is before user start date.",
         ));
     }
     let cat_state: Option<(bool, bool)> =
@@ -104,17 +104,17 @@ pub(crate) async fn validate_entry(
             .fetch_optional(&mut *conn)
             .await?;
     if cat_state.is_none() {
-        return Err(AppError::BadRequest("Category not found.".into()));
+        return Err(AppError::bad_request("Category not found."));
     }
     let (cat_active, new_counts_as_work) = cat_state.unwrap();
     if !cat_active {
-        return Err(AppError::BadRequest("Category is inactive.".into()));
+        return Err(AppError::bad_request("Category is inactive."));
     }
     let app_now = app_now(conn).await?;
     let today = app_now.date_naive();
     if te.entry_date > today {
-        return Err(AppError::BadRequest(
-            "Entries in the future are not allowed.".into(),
+        return Err(AppError::bad_request(
+            "Entries in the future are not allowed.",
         ));
     }
     // Validate that end is strictly after start.
@@ -122,8 +122,8 @@ pub(crate) async fn validate_entry(
     let start_n = parse_time(&te.start_time)?;
     let end_n = parse_time(&te.end_time)?;
     if te.entry_date == today && end_n > app_now.time() {
-        return Err(AppError::BadRequest(
-            "End time cannot be in the future.".into(),
+        return Err(AppError::bad_request(
+            "End time cannot be in the future.",
         ));
     }
 
@@ -149,8 +149,8 @@ pub(crate) async fn validate_entry(
 
     for (_, es, ee) in &parsed_existing {
         if start_n < *ee && *es < end_n {
-            return Err(AppError::BadRequest(
-                "Overlap with an existing entry.".into(),
+            return Err(AppError::bad_request(
+                "Overlap with an existing entry.",
             ));
         }
     }
@@ -183,7 +183,7 @@ pub(crate) async fn validate_entry(
         day_total += (cur_end - cur_start).num_minutes();
     }
     if day_total > 14 * 60 {
-        return Err(AppError::BadRequest("Day total exceeds 14 hours.".into()));
+        return Err(AppError::bad_request("Day total exceeds 14 hours."));
     }
     let absence_on_day: Option<String> = sqlx::query_scalar(
         "SELECT kind FROM absences WHERE user_id=$1 AND status IN ('approved','cancellation_pending') \
@@ -194,7 +194,7 @@ pub(crate) async fn validate_entry(
     .fetch_optional(&mut *conn)
     .await?;
     if let Some(kind) = absence_on_day {
-        return Err(AppError::BadRequest(format!(
+        return Err(AppError::bad_request(format!(
             "Cannot log time on a day with an approved absence ({kind}). \
              Please cancel or adjust the absence first."
         )));
@@ -238,8 +238,8 @@ pub(crate) async fn validate_entries_after_reopen(
     .await?;
 
     if affected_entries.len() != affected_id_set.len() {
-        return Err(AppError::Conflict(
-            "Reopen target entries changed concurrently.".into(),
+        return Err(AppError::conflict(
+            "Reopen target entries changed concurrently.",
         ));
     }
 
@@ -299,8 +299,8 @@ pub(crate) async fn validate_entries_after_reopen(
             let (_, _, previous_end) = window[0];
             let (_, next_start, _) = window[1];
             if next_start < previous_end {
-                return Err(AppError::BadRequest(
-                    "Editing would create overlapping draft entries.".into(),
+                return Err(AppError::bad_request(
+                    "Editing would create overlapping draft entries.",
                 ));
             }
         }
@@ -331,8 +331,8 @@ pub(crate) async fn validate_entries_after_reopen(
             day_total += (cur_end - cur_start).num_minutes();
         }
         if day_total > 14 * 60 {
-            return Err(AppError::BadRequest(
-                "Editing would exceed the 14 hour day limit.".into(),
+            return Err(AppError::bad_request(
+                "Editing would exceed the 14 hour day limit.",
             ));
         }
     }
@@ -610,11 +610,11 @@ impl TimeEntryDb {
             && (prev.status == "approved" || prev.status == "submitted");
         if !admin_correction {
             if prev.user_id != requester_id {
-                return Err(AppError::Forbidden);
+                return Err(AppError::forbidden());
             }
             if prev.status != "draft" {
-                return Err(AppError::BadRequest(
-                    "Only draft entries can be edited. Submit a week edit request to make the whole week editable again.".into(),
+                return Err(AppError::bad_request(
+                    "Only draft entries can be edited. Submit a week edit request to make the whole week editable again.",
                 ));
             }
         }
@@ -658,7 +658,7 @@ impl TimeEntryDb {
                 .fetch_one(&mut *tx)
                 .await?;
         if entry.status != "draft" {
-            return Err(AppError::BadRequest("Only drafts can be deleted.".into()));
+            return Err(AppError::bad_request("Only drafts can be deleted."));
         }
         let rows = sqlx::query("DELETE FROM time_entries WHERE id=$1 AND status='draft'")
             .bind(entry_id)
@@ -666,8 +666,8 @@ impl TimeEntryDb {
             .await?
             .rows_affected();
         if rows == 0 {
-            return Err(AppError::Conflict(
-                "Entry was modified concurrently.".into(),
+            return Err(AppError::conflict(
+                "Entry was modified concurrently.",
             ));
         }
         tx.commit().await?;

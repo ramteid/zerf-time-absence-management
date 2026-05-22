@@ -1,0 +1,241 @@
+use crate::error::AppResult;
+use crate::middleware::auth::User;
+use crate::services::absences::{
+    Absence, NewAbsence, LeaveBalance, approve_absence, approve_cancellation_absence,
+    cancel_absence, compute_balance, create_absence, enrich_absence_with_metadata,
+    reject_absence, reject_cancellation_absence, repo_absence_to_service, require_tracks_time,
+    revoke_absence, update_absence, assert_can_access_user,
+};
+use crate::AppState;
+use axum::{
+    extract::{Path, Query, State},
+    Json,
+};
+use chrono::NaiveDate;
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+pub struct YearQuery {
+    pub year: Option<i32>,
+}
+
+#[derive(Deserialize)]
+pub struct AllQuery {
+    pub from: Option<NaiveDate>,
+    pub to: Option<NaiveDate>,
+    pub status: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct MonthQuery {
+    pub month: String,
+}
+
+#[derive(Deserialize)]
+pub struct BalanceQuery {
+    pub year: Option<i32>,
+}
+
+#[derive(Deserialize)]
+pub struct RejectBody {
+    pub reason: String,
+}
+
+pub async fn list(
+    State(app_state): State<AppState>,
+    requester: User,
+    Query(query): Query<YearQuery>,
+) -> AppResult<Json<Vec<Absence>>> {
+    require_tracks_time(&requester)?;
+    let year = match query.year {
+        Some(value) => value,
+        None => crate::services::settings::app_current_year(&app_state.pool).await,
+    };
+    let year_from = chrono::NaiveDate::from_ymd_opt(year, 1, 1)
+        .ok_or_else(|| crate::error::AppError::BadRequest("Invalid year.".into()))?;
+    let year_to = chrono::NaiveDate::from_ymd_opt(year, 12, 31)
+        .ok_or_else(|| crate::error::AppError::BadRequest("Invalid year.".into()))?;
+    let absences = app_state
+        .db
+        .absences
+        .list_for_user(requester.id, year_from, year_to)
+        .await?;
+    Ok(Json(
+        absences.into_iter().map(repo_absence_to_service).collect(),
+    ))
+}
+
+pub async fn list_all(
+    State(app_state): State<AppState>,
+    requester: User,
+    Query(query): Query<AllQuery>,
+) -> AppResult<Json<Vec<Absence>>> {
+    if !requester.is_lead() {
+        return Err(crate::error::AppError::Forbidden);
+    }
+    let absences = app_state
+        .db
+        .absences
+        .list_all(
+            requester.is_admin(),
+            requester.id,
+            query.from,
+            query.to,
+            query.status.as_deref(),
+        )
+        .await?;
+
+    let mut mapped: Vec<Absence> = absences.into_iter().map(repo_absence_to_service).collect();
+    if query.status.as_deref() == Some("pending_review") {
+        let ids: Vec<i64> = mapped.iter().map(|a| a.id).collect();
+        let before_data_map =
+            crate::services::absences::latest_update_before_data_batch(&app_state, &ids).await?;
+        for absence in &mut mapped {
+            enrich_absence_with_metadata(absence, &before_data_map);
+        }
+    }
+    Ok(Json(mapped))
+}
+
+pub async fn calendar(
+    State(app_state): State<AppState>,
+    requester: User,
+    Query(query): Query<MonthQuery>,
+) -> AppResult<Json<Vec<serde_json::Value>>> {
+    use chrono::Duration;
+    let (year_str, month_str) = query
+        .month
+        .split_once('-')
+        .ok_or_else(|| crate::error::AppError::BadRequest("month=YYYY-MM required".into()))?;
+    let year: i32 = year_str
+        .parse()
+        .map_err(|_| crate::error::AppError::BadRequest("Invalid year".into()))?;
+    let month: u32 = month_str
+        .parse()
+        .map_err(|_| crate::error::AppError::BadRequest("Invalid month".into()))?;
+    let from = NaiveDate::from_ymd_opt(year, month, 1)
+        .ok_or_else(|| crate::error::AppError::BadRequest("Invalid date".into()))?;
+    let next_month_first = if month == 12 {
+        let next_year = year
+            .checked_add(1)
+            .ok_or_else(|| crate::error::AppError::BadRequest("Invalid date".into()))?;
+        NaiveDate::from_ymd_opt(next_year, 1, 1)
+            .ok_or_else(|| crate::error::AppError::BadRequest("Invalid date".into()))?
+    } else {
+        NaiveDate::from_ymd_opt(year, month + 1, 1)
+            .ok_or_else(|| crate::error::AppError::BadRequest("Invalid date".into()))?
+    };
+    let to = next_month_first - Duration::days(1);
+    let scope_user_ids = app_state
+        .db
+        .absences
+        .calendar_scope_user_ids(requester.id, requester.is_admin(), requester.is_lead())
+        .await?;
+    let calendar_entries = app_state
+        .db
+        .absences
+        .calendar_entries(from, to, scope_user_ids.as_deref())
+        .await?;
+    let requester_is_lead = requester.is_lead();
+    Ok(Json(calendar_entries.into_iter().map(|entry| {
+        let is_own_entry = entry.user_id == requester.id;
+        let kind_visible = requester_is_lead || is_own_entry || entry.kind == "vacation";
+        let displayed_kind = if kind_visible { entry.kind.clone() } else { "absent".to_string() };
+        serde_json::json!({
+            "id": entry.id, "user_id": entry.user_id, "name": format!("{} {}", entry.first_name, entry.last_name),
+            "kind": displayed_kind,
+            "start_date": entry.start_date, "end_date": entry.end_date,
+            "status": entry.status,
+            "comment": if requester_is_lead || is_own_entry { entry.comment.clone() } else { None }
+        })
+    }).collect()))
+}
+
+pub async fn create(
+    State(app_state): State<AppState>,
+    requester: User,
+    Json(body): Json<NewAbsence>,
+) -> AppResult<Json<Absence>> {
+    let created = create_absence(&app_state, &requester, body).await?;
+    Ok(Json(created))
+}
+
+pub async fn update(
+    State(app_state): State<AppState>,
+    requester: User,
+    Path(absence_id): Path<i64>,
+    Json(body): Json<NewAbsence>,
+) -> AppResult<Json<Absence>> {
+    let updated = update_absence(&app_state, &requester, absence_id, body).await?;
+    Ok(Json(updated))
+}
+
+pub async fn cancel(
+    State(app_state): State<AppState>,
+    requester: User,
+    Path(absence_id): Path<i64>,
+) -> AppResult<Json<serde_json::Value>> {
+    let result = cancel_absence(&app_state, &requester, absence_id).await?;
+    Ok(Json(result))
+}
+
+pub async fn approve(
+    State(app_state): State<AppState>,
+    requester: User,
+    Path(absence_id): Path<i64>,
+) -> AppResult<Json<serde_json::Value>> {
+    let result = approve_absence(&app_state, &requester, absence_id).await?;
+    Ok(Json(result))
+}
+
+pub async fn reject(
+    State(app_state): State<AppState>,
+    requester: User,
+    Path(absence_id): Path<i64>,
+    Json(body): Json<RejectBody>,
+) -> AppResult<Json<serde_json::Value>> {
+    let result = reject_absence(&app_state, &requester, absence_id, &body.reason).await?;
+    Ok(Json(result))
+}
+
+pub async fn revoke(
+    State(app_state): State<AppState>,
+    requester: User,
+    Path(absence_id): Path<i64>,
+) -> AppResult<Json<serde_json::Value>> {
+    let result = revoke_absence(&app_state, &requester, absence_id).await?;
+    Ok(Json(result))
+}
+
+pub async fn approve_cancellation(
+    State(app_state): State<AppState>,
+    requester: User,
+    Path(absence_id): Path<i64>,
+) -> AppResult<Json<serde_json::Value>> {
+    let result = approve_cancellation_absence(&app_state, &requester, absence_id).await?;
+    Ok(Json(result))
+}
+
+pub async fn reject_cancellation(
+    State(app_state): State<AppState>,
+    requester: User,
+    Path(absence_id): Path<i64>,
+) -> AppResult<Json<serde_json::Value>> {
+    let result = reject_cancellation_absence(&app_state, &requester, absence_id).await?;
+    Ok(Json(result))
+}
+
+pub async fn balance(
+    State(app_state): State<AppState>,
+    requester: User,
+    Path(target_user_id): Path<i64>,
+    Query(query): Query<BalanceQuery>,
+) -> AppResult<Json<LeaveBalance>> {
+    assert_can_access_user(&app_state, &requester, target_user_id).await?;
+    let year = match query.year {
+        Some(value) => value,
+        None => crate::services::settings::app_current_year(&app_state.pool).await,
+    };
+    let balance = compute_balance(&app_state, &requester, target_user_id, year).await?;
+    Ok(Json(balance))
+}

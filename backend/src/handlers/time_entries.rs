@@ -1,168 +1,19 @@
 use crate::audit;
-use crate::auth::User;
 use crate::error::{AppError, AppResult};
 use crate::i18n;
+use crate::middleware::auth::User;
+use crate::services::time_entries::{
+    attach_counts_as_work, notification_language, notify_week_status_change, repo_entry_to_service,
+    require_tracks_time, week_start, TimeEntry,
+};
 use crate::AppState;
 use axum::{
     extract::{Path, Query, State},
     Json,
 };
-use chrono::{DateTime, Datelike, NaiveDate, Utc};
-use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/// Load the UI language for notification text; falls back to English on error.
-async fn notification_language(pool: &crate::db::DatabasePool) -> i18n::Language {
-    match i18n::load_ui_language(pool).await {
-        Ok(lang) => lang,
-        Err(err) => {
-            tracing::warn!(target: "zerf::time_entries", "load notification language failed: {err}");
-            i18n::Language::default()
-        }
-    }
-}
-
-/// Map a repository-level entry to the handler-level DTO.
-fn repo_entry_to_service(e: crate::repository::TimeEntry) -> TimeEntry {
-    TimeEntry {
-        id: e.id,
-        user_id: e.user_id,
-        entry_date: e.entry_date,
-        start_time: e.start_time,
-        end_time: e.end_time,
-        category_id: e.category_id,
-        counts_as_work: None, // filled by attach_counts_as_work
-        comment: e.comment,
-        status: e.status,
-        submitted_at: e.submitted_at,
-        reviewed_by: e.reviewed_by,
-        reviewed_at: e.reviewed_at,
-        rejection_reason: e.rejection_reason,
-        created_at: e.created_at,
-        updated_at: e.updated_at,
-    }
-}
-
-/// Compute the ISO week start (Monday) for a given date.
-fn week_start(date: NaiveDate) -> NaiveDate {
-    date - chrono::Duration::days(date.weekday().num_days_from_monday() as i64)
-}
-
-/// Enrich entries with the `counts_as_work` flag from their category.
-/// Fetches each distinct category only once to minimise DB round-trips.
-async fn attach_counts_as_work(app_state: &AppState, entries: &mut [TimeEntry]) -> AppResult<()> {
-    let category_ids: HashSet<i64> = entries.iter().map(|e| e.category_id).collect();
-    let mut map: HashMap<i64, bool> = HashMap::new();
-    for cat_id in category_ids {
-        let flag = app_state
-            .db
-            .categories
-            .find_by_id(cat_id)
-            .await?
-            .map(|c| c.counts_as_work)
-            .unwrap_or(true);
-        map.insert(cat_id, flag);
-    }
-    for entry in entries {
-        entry.counts_as_work = Some(*map.get(&entry.category_id).unwrap_or(&true));
-    }
-    Ok(())
-}
-
-/// Send week-level status-change notifications consolidated per user.
-///
-/// Groups the affected entries by owner, computes distinct ISO weeks per owner,
-/// and sends one notification per user (not per entry). When `reason` is
-/// `Some`, it is included as a template parameter for rejection messages.
-async fn notify_week_status_change(
-    app_state: &AppState,
-    requester_id: i64,
-    entries: &[crate::repository::TimeEntry],
-    category: &str,
-    title_key: &str,
-    body_key: &str,
-    reason: Option<&str>,
-) {
-    let language = notification_language(&app_state.pool).await;
-
-    // Group entries by owner and collect distinct week-starts per owner.
-    let mut weeks_by_user: HashMap<i64, HashSet<NaiveDate>> = HashMap::new();
-    for entry in entries {
-        weeks_by_user
-            .entry(entry.user_id)
-            .or_default()
-            .insert(week_start(entry.entry_date));
-    }
-
-    // Send one consolidated notification per affected user.
-    for (user_id, weeks) in weeks_by_user {
-        let mut sorted_weeks: Vec<NaiveDate> = weeks.into_iter().collect();
-        sorted_weeks.sort();
-        let week_list = sorted_weeks
-            .iter()
-            .map(|ws| i18n::format_week_label(&language, *ws))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let week_count = i18n::week_count(&language, sorted_weeks.len() as i64);
-        let mut params: Vec<(&'static str, String)> =
-            vec![("week_list", week_list), ("week_count", week_count)];
-        if let Some(r) = reason {
-            params.push(("reason", r.to_string()));
-        }
-
-        // Build JSON body for frontend rendering (weeks + optional reason).
-        let week_iso_strings: Vec<String> = sorted_weeks
-            .iter()
-            .map(|ws| ws.format("%Y-%m-%d").to_string())
-            .collect();
-        let frontend_body = if let Some(r) = reason {
-            format!(
-                "{{\"weeks\":[{}],\"reason\":{}}}",
-                week_iso_strings.iter().map(|w| format!("\"{}\"", w)).collect::<Vec<_>>().join(","),
-                serde_json::json!(r),
-            )
-        } else {
-            format!(
-                "{{\"weeks\":[{}]}}",
-                week_iso_strings.iter().map(|w| format!("\"{}\"", w)).collect::<Vec<_>>().join(","),
-            )
-        };
-
-        let send_email = user_id != requester_id;
-        crate::notifications::create_with_frontend_body(
-            app_state, &language, user_id, category, title_key, body_key, params,
-            &frontend_body, send_email, Some("time_entries"), None,
-        )
-        .await;
-    }
-}
-
-// ---------------------------------------------------------------------------
-// DTOs
-// ---------------------------------------------------------------------------
-
-#[derive(Serialize, Clone)]
-pub struct TimeEntry {
-    pub id: i64,
-    pub user_id: i64,
-    pub entry_date: NaiveDate,
-    pub start_time: String,
-    pub end_time: String,
-    pub category_id: i64,
-    pub counts_as_work: Option<bool>,
-    pub comment: Option<String>,
-    pub status: String,
-    pub submitted_at: Option<DateTime<Utc>>,
-    pub reviewed_by: Option<i64>,
-    pub reviewed_at: Option<DateTime<Utc>>,
-    pub rejection_reason: Option<String>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
+use chrono::NaiveDate;
+use serde::Deserialize;
+use std::collections::HashSet;
 
 #[derive(Deserialize)]
 pub struct RangeQuery {
@@ -195,17 +46,6 @@ pub struct BatchRejectBody {
 // ---------------------------------------------------------------------------
 // CRUD handlers
 // ---------------------------------------------------------------------------
-
-/// Return `Forbidden` when the requesting user has time tracking disabled.
-/// Only admin users can have this flag set to false; all other roles always
-/// track time. Called at the start of every handler that reads or writes the
-/// requesting user's own time data.
-fn require_tracks_time(user: &User) -> AppResult<()> {
-    if !user.tracks_time {
-        return Err(AppError::Forbidden);
-    }
-    Ok(())
-}
 
 /// List time entries for the requesting user, optionally filtered by date range.
 pub async fn list(
@@ -258,30 +98,18 @@ pub async fn create(
     Json(body): Json<NewTimeEntry>,
 ) -> AppResult<Json<TimeEntry>> {
     require_tracks_time(&requester)?;
-    let entry_data = crate::repository::NewEntryData {
-        entry_date: body.entry_date,
-        start_time: body.start_time,
-        end_time: body.end_time,
-        category_id: body.category_id,
-        comment: body.comment,
-    };
-    let created = app_state
-        .db
-        .time_entries
-        .create(requester.id, &entry_data)
-        .await?;
-    let created_entry = repo_entry_to_service(created);
-    audit::log(
-        &app_state.pool,
-        requester.id,
-        "created",
-        "time_entries",
-        created_entry.id,
-        None,
-        serde_json::to_value(&created_entry).ok(),
-    )
-    .await;
-    Ok(Json(created_entry))
+    Ok(Json(
+        crate::services::time_entries::create(
+            &app_state,
+            &requester,
+            body.entry_date,
+            body.start_time,
+            body.end_time,
+            body.category_id,
+            body.comment,
+        )
+        .await?,
+    ))
 }
 
 /// Update a draft time entry. Only the owner (or an admin) may edit.
@@ -295,37 +123,21 @@ pub async fn update(
     Path(entry_id): Path<i64>,
     Json(body): Json<NewTimeEntry>,
 ) -> AppResult<Json<TimeEntry>> {
-    let owner_id = app_state.db.time_entries.get_user_id(entry_id).await?;
-    // Block pure-admin users from editing their own entries; admin correction
-    // (editing another user's submitted/approved entry) is still allowed.
-    if owner_id == requester.id {
-        require_tracks_time(&requester)?;
-    }
-    let entry_data = crate::repository::NewEntryData {
-        entry_date: body.entry_date,
-        start_time: body.start_time,
-        end_time: body.end_time,
-        category_id: body.category_id,
-        comment: body.comment,
-    };
-    let (prev, updated) = app_state
-        .db
-        .time_entries
-        .update(entry_id, requester.id, requester.is_admin(), &entry_data)
-        .await?;
-    let previous_entry = repo_entry_to_service(prev);
-    let updated_entry = repo_entry_to_service(updated);
-    audit::log(
-        &app_state.pool,
-        requester.id,
-        "updated",
-        "time_entries",
-        entry_id,
-        serde_json::to_value(&previous_entry).ok(),
-        serde_json::to_value(&updated_entry).ok(),
-    )
-    .await;
-    Ok(Json(updated_entry))
+    Ok(Json(
+        crate::services::time_entries::update(
+            &app_state,
+            &requester,
+            entry_id,
+            crate::services::time_entries::TimeEntryInput {
+                entry_date: body.entry_date,
+                start_time: body.start_time,
+                end_time: body.end_time,
+                category_id: body.category_id,
+                comment: body.comment,
+            },
+        )
+        .await?,
+    ))
 }
 
 /// Delete a draft time entry. Only the owner may delete their own entries.
@@ -415,7 +227,7 @@ pub async fn submit(
     }
     if !submitted_weeks.is_empty() {
         let approver_ids =
-            crate::auth::required_approval_recipient_ids(&app_state.pool, &requester).await?;
+            crate::services::auth::required_approval_recipient_ids(&app_state.pool, &requester).await?;
         let language = notification_language(&app_state.pool).await;
         let mut sorted_weeks: Vec<NaiveDate> = submitted_weeks.into_iter().collect();
         sorted_weeks.sort();
@@ -439,7 +251,7 @@ pub async fn submit(
         .to_string();
 
         for approver_id in approver_ids {
-            crate::notifications::create_with_frontend_body(
+            crate::services::notifications::create_with_frontend_body(
                 &app_state,
                 &language,
                 approver_id,

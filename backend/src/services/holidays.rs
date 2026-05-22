@@ -1,23 +1,16 @@
-use crate::auth::User;
 use crate::error::{AppError, AppResult};
-use crate::i18n;
-use crate::AppState;
-use axum::{
-    extract::{Path, Query, State},
-    Json,
-};
 use chrono::{DateTime, Datelike, Duration, NaiveDate, TimeZone, Timelike};
 use serde::{Deserialize, Serialize};
 
 /// A single holiday from the Nager.Date API.
 #[derive(Clone, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
-struct NagerHoliday {
-    date: NaiveDate,
-    local_name: String,
-    name: String,
+pub struct NagerHoliday {
+    pub date: NaiveDate,
+    pub local_name: String,
+    pub name: String,
     /// County codes like ["DE-BW","DE-BY"]. null means nation-wide.
-    counties: Option<Vec<String>>,
+    pub counties: Option<Vec<String>>,
 }
 
 /// A country entry from the Nager.Date AvailableCountries API.
@@ -37,7 +30,7 @@ pub struct PreparedHoliday {
 
 const NAGER_BASE_URL: &str = "https://date.nager.at/api/v3";
 
-async fn fetch_available_countries() -> Result<Vec<NagerCountry>, AppError> {
+pub async fn fetch_available_countries() -> Result<Vec<NagerCountry>, AppError> {
     let url = format!("{}/AvailableCountries", NAGER_BASE_URL);
     let resp = reqwest::get(&url)
         .await
@@ -109,26 +102,9 @@ async fn fetch_nager_holidays(country: &str, year: i32) -> Result<Vec<NagerHolid
         .map_err(|e| AppError::Internal(format!("Nager parse failed: {e}")))
 }
 
-/// Proxy: returns all countries supported by Nager.Date.
-pub async fn available_countries(_requester: User) -> AppResult<Json<Vec<NagerCountry>>> {
-    Ok(Json(fetch_available_countries().await?))
-}
-
-/// Proxy: returns the ISO 3166-2 subdivision codes used by Nager for a given country,
-/// derived from the county fields of the current year's public holidays.
-pub async fn available_regions(
-    State(app_state): State<AppState>,
-    Path(country): Path<String>,
-    _requester: User,
-) -> AppResult<Json<Vec<String>>> {
-    let year = crate::settings::app_current_year(&app_state.pool).await;
-    let holidays = fetch_nager_holidays(&country, year).await?;
-    Ok(Json(collect_region_codes(&holidays)))
-}
-
 /// Fetch holidays from https://date.nager.at for a given year and country.
 /// Optionally filter by region (e.g. "DE-BW").
-pub async fn fetch_holidays_from_api(
+pub async fn fetch_holidays_for_year(
     country: &str,
     region: &str,
     year: i32,
@@ -136,6 +112,15 @@ pub async fn fetch_holidays_from_api(
     let holidays = fetch_nager_holidays(country, year).await?;
 
     Ok(filter_holidays_by_region(holidays, region))
+}
+
+pub async fn fetch_available_regions(
+    pool: &crate::db::DatabasePool,
+    country: &str,
+) -> AppResult<Vec<String>> {
+    let year = crate::services::settings::app_current_year(pool).await;
+    let holidays = fetch_nager_holidays(country, year).await?;
+    Ok(collect_region_codes(&holidays))
 }
 
 pub async fn prepare_holiday_refresh(
@@ -165,7 +150,7 @@ pub async fn prepare_holiday_refresh(
         ));
     }
 
-    let year = crate::settings::app_current_year(pool).await;
+    let year = crate::services::settings::app_current_year(pool).await;
     let current_year_holidays = fetch_nager_holidays(&normalized_country, year).await?;
     let available_regions = collect_region_codes(&current_year_holidays);
     validate_region_selection(&normalized_region, &available_regions)?;
@@ -253,7 +238,7 @@ pub async fn ensure_holidays(pool: &crate::db::DatabasePool, year: i32) -> AppRe
         return Ok(());
     }
 
-    match fetch_holidays_from_api(&country, &region, year).await {
+    match fetch_holidays_for_year(&country, &region, year).await {
         Ok(list) => {
             let prepared: Vec<crate::repository::PreparedHoliday> = list
                 .into_iter()
@@ -301,94 +286,14 @@ pub fn duration_until_next_monday_noon(
         .map_err(|_| AppError::Internal("Holiday scheduler target is in the past.".into()))
 }
 
-#[derive(Serialize)]
-pub struct Holiday {
-    pub id: i64,
-    pub holiday_date: NaiveDate,
-    pub name: String,
-    pub local_name: Option<String>,
-    pub year: i32,
-    pub is_auto: bool,
-}
-
-#[derive(Deserialize)]
-pub struct HolidayQuery {
-    pub year: Option<i32>,
-    /// Optional UI language code used to choose the display name.
-    pub lang: Option<String>,
-}
-
-pub async fn list(
-    State(app_state): State<AppState>,
-    _requester: User,
-    Query(query): Query<HolidayQuery>,
-) -> AppResult<Json<Vec<serde_json::Value>>> {
-    let year = match query.year {
-        Some(value) => value,
-        None => crate::settings::app_current_year(&app_state.pool).await,
-    };
-
-    let language = match query.lang {
-        Some(code) => i18n::Language::from_setting(&code),
-        None => i18n::load_ui_language(&app_state.pool).await?,
-    };
-
-    let holiday_rows = app_state.db.holidays.list_for_year(year).await?;
-
-    let result: Vec<serde_json::Value> = holiday_rows
-        .into_iter()
-        .map(|holiday| {
-            let display_name =
-                i18n::holiday_display_name(&language, holiday.name, holiday.local_name);
-            serde_json::json!({
-                "id": holiday.id,
-                "holiday_date": holiday.holiday_date,
-                "name": display_name,
-                "year": holiday.year,
-                "is_auto": holiday.is_auto,
-            })
-        })
-        .collect();
-
-    Ok(Json(result))
-}
-
-#[derive(Deserialize)]
-pub struct NewHoliday {
-    pub holiday_date: NaiveDate,
-    pub name: String,
-}
-
-pub async fn create(
-    State(app_state): State<AppState>,
-    requester: User,
-    Json(body): Json<NewHoliday>,
-) -> AppResult<Json<serde_json::Value>> {
-    if !requester.is_admin() {
-        return Err(AppError::Forbidden);
-    }
-    let holiday_name = body.name.trim().to_string();
-    if holiday_name.is_empty() || holiday_name.len() > 200 {
-        return Err(AppError::BadRequest("Invalid holiday name.".into()));
-    }
-    app_state
-        .db
-        .holidays
-        .create_manual(body.holiday_date, &holiday_name)
-        .await?;
-    Ok(Json(serde_json::json!({"ok":true})))
-}
-
-pub async fn delete(
-    State(app_state): State<AppState>,
-    requester: User,
-    Path(holiday_id): Path<i64>,
-) -> AppResult<Json<serde_json::Value>> {
-    if !requester.is_admin() {
-        return Err(AppError::Forbidden);
-    }
-    app_state.db.holidays.delete(holiday_id).await?;
-    Ok(Json(serde_json::json!({"ok":true})))
+/// Prepare holidays from an API fetch for use in a query context.
+/// This is a named alias for the function previously called `fetch_holidays_from_api`.
+pub async fn prepare_holidays(
+    country: &str,
+    region: &str,
+    year: i32,
+) -> Result<Vec<(NaiveDate, String, String)>, AppError> {
+    fetch_holidays_for_year(country, region, year).await
 }
 
 #[cfg(test)]

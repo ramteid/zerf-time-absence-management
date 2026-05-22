@@ -3,7 +3,10 @@
 //! Users with weekly_hours = 0 are skipped (non-booking users).
 
 use crate::db::DatabasePool;
-use crate::settings::load_setting;
+use crate::services::settings::{
+    load_setting, load_smtp_config, app_today, DEFAULT_TIMEZONE, SUBMISSION_REMINDERS_ENABLED_KEY,
+    TIMEZONE_KEY,
+};
 use chrono::{Datelike, NaiveDate, TimeZone, Utc};
 use std::time::Duration;
 
@@ -94,7 +97,7 @@ async fn find_unsubmitted_weeks(
     user_start: NaiveDate,
     workdays_per_week: i16,
 ) -> Vec<NaiveDate> {
-    let today = crate::settings::app_today(pool).await;
+    let today = app_today(pool).await;
 
     // Monday of the current week.
     let current_week_monday =
@@ -191,13 +194,9 @@ pub async fn run_check(state: &crate::AppState) {
     let pool = &state.pool;
 
     // Respect the admin toggle; default is enabled (true).
-    let reminders_enabled = load_setting(
-        pool,
-        crate::settings::SUBMISSION_REMINDERS_ENABLED_KEY,
-        "true",
-    )
-    .await
-    .unwrap_or_else(|_| "true".to_string());
+    let reminders_enabled = load_setting(pool, SUBMISSION_REMINDERS_ENABLED_KEY, "true")
+        .await
+        .unwrap_or_else(|_| "true".to_string());
     if reminders_enabled == "false" {
         tracing::debug!(target:"zerf::submission_reminders", "Submission reminders are disabled, skipping check");
         return;
@@ -216,14 +215,10 @@ pub async fn run_check(state: &crate::AppState) {
         .public_url
         .clone()
         .unwrap_or_else(|| "http://localhost".to_string());
-    let timezone = crate::settings::load_setting(
-        pool,
-        crate::settings::TIMEZONE_KEY,
-        crate::settings::DEFAULT_TIMEZONE,
-    )
-    .await
-    .unwrap_or_else(|_| crate::settings::DEFAULT_TIMEZONE.to_string());
-    let today = crate::settings::app_today(pool).await;
+    let timezone = load_setting(pool, TIMEZONE_KEY, DEFAULT_TIMEZONE)
+        .await
+        .unwrap_or_else(|_| DEFAULT_TIMEZONE.to_string());
+    let today = app_today(pool).await;
 
     let rows: Vec<crate::repository::ActiveUserRow> =
         match state.db.users.get_active_non_assistant_users().await {
@@ -242,11 +237,17 @@ pub async fn run_check(state: &crate::AppState) {
     );
 
     // Load SMTP config once for all users
-    let smtp = crate::settings::load_smtp_config(pool)
-        .await
-        .map(std::sync::Arc::new);
+    let smtp = load_smtp_config(pool).await.map(std::sync::Arc::new);
 
-    for crate::repository::ActiveUserRow { id: user_id, email: user_email, first_name, last_name, start_date: user_start, workdays_per_week } in rows {
+    for crate::repository::ActiveUserRow {
+        id: user_id,
+        email: user_email,
+        first_name,
+        last_name,
+        start_date: user_start,
+        workdays_per_week,
+    } in rows
+    {
         let missing_weeks =
             find_unsubmitted_weeks(pool, user_id, user_start, workdays_per_week).await;
 
@@ -303,9 +304,15 @@ pub async fn run_check(state: &crate::AppState) {
             Ok(true) => {
                 let _ = state
                     .notifications
-                    .send(crate::notifications::NotificationSignal { user_id });
+                    .send(crate::services::notifications::NotificationSignal { user_id });
                 // Send email best-effort
-                crate::email::send_async(smtp.clone(), user_email, format!("{} {}", first_name, last_name), title, email_body);
+                crate::email::send_async(
+                    smtp.clone(),
+                    user_email,
+                    format!("{} {}", first_name, last_name),
+                    title,
+                    email_body,
+                );
             }
             Ok(_) => {
                 // Conflict guard fired: reminder already sent today, skip email too.
@@ -329,13 +336,9 @@ pub async fn run_loop(pool: DatabasePool, state: crate::AppState) {
         let day: Option<u8> = day_str.parse().ok().filter(|&d: &u8| (1..=28).contains(&d));
 
         if let Some(d) = day {
-            let timezone = load_setting(
-                &pool,
-                crate::settings::TIMEZONE_KEY,
-                crate::settings::DEFAULT_TIMEZONE,
-            )
-            .await
-            .unwrap_or_else(|_| crate::settings::DEFAULT_TIMEZONE.to_string());
+            let timezone = load_setting(&pool, TIMEZONE_KEY, DEFAULT_TIMEZONE)
+                .await
+                .unwrap_or_else(|_| DEFAULT_TIMEZONE.to_string());
             let tz = timezone
                 .parse::<chrono_tz::Tz>()
                 .unwrap_or(chrono_tz::Europe::Berlin);
@@ -443,8 +446,6 @@ mod tests {
 
     #[test]
     fn deadline_after_month_end_clamps_to_shorter_next_month() {
-        // When the configured deadline day does not exist in the next month,
-        // the scheduler must still pick the last valid day of that month.
         let now = Berlin.with_ymd_and_hms(2026, 3, 31, 8, 0, 0).unwrap();
         let dur = duration_until_next_deadline(now, 31);
         let secs = dur.as_secs();
@@ -454,8 +455,6 @@ mod tests {
 
     #[test]
     fn deadline_rollover_uses_next_year_when_month_wraps() {
-        // The scheduler must move from December into January of the next year
-        // instead of attempting to stay in the current calendar year.
         let now = Berlin.with_ymd_and_hms(2026, 12, 31, 8, 0, 0).unwrap();
         let dur = duration_until_next_deadline(now, 5);
         let secs = dur.as_secs();

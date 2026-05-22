@@ -1,7 +1,9 @@
 use anyhow::Result;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use zerf::{build_app, categories, config, db, holidays, AppState};
+use zerf::{build_app, config, db, AppState};
+use zerf::services::{categories, holidays, notifications, settings, auth as auth_service};
+use zerf::background;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -15,7 +17,7 @@ async fn main() -> Result<()> {
     let config = config::Config::from_env();
     let pool = db::init(&config).await?;
     categories::ensure_initial(&pool).await?;
-    let year = zerf::settings::app_current_year(&pool).await;
+    let year = settings::app_current_year(&pool).await;
     holidays::ensure_holidays(&pool, year).await?;
     holidays::ensure_holidays(&pool, year + 1).await?;
 
@@ -29,7 +31,7 @@ async fn main() -> Result<()> {
         tracing::info!("==========================================================");
     }
 
-    let broadcaster = zerf::notifications::broadcaster();
+    let broadcaster = notifications::broadcaster();
     let db = zerf::repository::Db::new(pool.clone(), broadcaster.clone());
 
     let state = AppState {
@@ -41,49 +43,29 @@ async fn main() -> Result<()> {
 
     // Background hygiene: clean expired sessions, old login attempts, and
     // old notifications (>90 days).
-    tokio::spawn(zerf::auth::cleanup_loop(pool.clone()));
+    tokio::spawn(auth_service::cleanup_loop(pool.clone()));
     {
         let db = state.db.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(86_400));
             loop {
                 interval.tick().await;
-                zerf::notifications::cleanup_old(&db).await;
+                notifications::cleanup_old(&db).await;
             }
         });
     }
 
     // Weekly holiday scheduler: every Monday at 12:00, check if next year holidays exist.
-    {
-        let pool = pool.clone();
-        tokio::spawn(async move {
-            loop {
-                let tz = zerf::settings::load_app_timezone(&pool).await;
-                let now = chrono::Utc::now().with_timezone(&tz);
-                let wait = holidays::duration_until_next_monday_noon(now)
-                    .unwrap_or(std::time::Duration::from_secs(3600));
-                tokio::time::sleep(wait).await;
-
-                let next_year = zerf::settings::app_current_year(&pool).await + 1;
-                if let Err(error) = holidays::ensure_holidays(&pool, next_year).await {
-                    tracing::warn!(
-                        "Holiday scheduler: failed to ensure holidays for {next_year}: {error:?}"
-                    );
-                } else {
-                    tracing::info!("Holiday scheduler: ensured holidays for {next_year}");
-                }
-            }
-        });
-    }
+    tokio::spawn(background::holidays::run_loop(pool.clone()));
 
     // Submission reminder scheduler: wakes at 07:00 on the configured deadline day.
-    tokio::spawn(zerf::submission_reminders::run_loop(
+    tokio::spawn(background::submission_reminders::run_loop(
         pool.clone(),
         state.clone(),
     ));
 
     // Approval reminder scheduler: wakes every Monday at 07:00.
-    tokio::spawn(zerf::approval_reminders::run_loop(state.clone()));
+    tokio::spawn(background::approval_reminders::run_loop(state.clone()));
 
     let app = build_app(state);
 

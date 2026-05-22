@@ -40,7 +40,7 @@ async fn submission_reminders_full_workflow() {
         let (st, _) = emp.delete("/api/v1/notifications").await;
         assert_eq!(st, StatusCode::OK);
 
-        zerf::submission_reminders::run_check(&app.state).await;
+        zerf::background::submission_reminders::run_check(&app.state).await;
 
         let (st, body) = emp.get("/api/v1/notifications").await;
         assert_eq!(st, StatusCode::OK);
@@ -106,7 +106,7 @@ async fn submission_reminders_full_workflow() {
         let (st, _) = emp.delete("/api/v1/notifications").await;
         assert_eq!(st, StatusCode::OK);
 
-        zerf::submission_reminders::run_check(&app.state).await;
+        zerf::background::submission_reminders::run_check(&app.state).await;
 
         let (st, body) = emp.get("/api/v1/notifications").await;
         assert_eq!(st, StatusCode::OK);
@@ -126,8 +126,8 @@ async fn submission_reminders_full_workflow() {
         let (st, _) = emp.delete("/api/v1/notifications").await;
         assert_eq!(st, StatusCode::OK);
 
-        zerf::submission_reminders::run_check(&app.state).await;
-        zerf::submission_reminders::run_check(&app.state).await;
+        zerf::background::submission_reminders::run_check(&app.state).await;
+        zerf::background::submission_reminders::run_check(&app.state).await;
 
         let (st, body) = emp.get("/api/v1/notifications").await;
         assert_eq!(st, StatusCode::OK);
@@ -173,7 +173,7 @@ async fn submission_reminders_full_workflow() {
         let (st, _) = assistant.delete("/api/v1/notifications").await;
         assert_eq!(st, StatusCode::OK);
 
-        zerf::submission_reminders::run_check(&app.state).await;
+        zerf::background::submission_reminders::run_check(&app.state).await;
 
         let (st, body) = assistant.get("/api/v1/notifications").await;
         assert_eq!(st, StatusCode::OK);
@@ -212,7 +212,7 @@ async fn submission_reminders_full_workflow() {
         let (st, _) = emp.delete("/api/v1/notifications").await;
         assert_eq!(st, StatusCode::OK);
 
-        zerf::submission_reminders::run_check(&app.state).await;
+        zerf::background::submission_reminders::run_check(&app.state).await;
 
         let (st, body) = emp.get("/api/v1/notifications").await;
         assert_eq!(st, StatusCode::OK);
@@ -259,7 +259,7 @@ async fn submission_reminders_full_workflow() {
         let (st, _) = admin_user.delete("/api/v1/notifications").await;
         assert_eq!(st, StatusCode::OK);
 
-        zerf::submission_reminders::run_check(&app.state).await;
+        zerf::background::submission_reminders::run_check(&app.state).await;
 
         let (st, body) = admin_user.get("/api/v1/notifications").await;
         assert_eq!(st, StatusCode::OK);
@@ -318,7 +318,7 @@ async fn submission_reminders_full_workflow() {
         let (st, _) = emp.delete("/api/v1/notifications").await;
         assert_eq!(st, StatusCode::OK);
 
-        zerf::submission_reminders::run_check(&app.state).await;
+        zerf::background::submission_reminders::run_check(&app.state).await;
 
         let (st, body) = emp.get("/api/v1/notifications").await;
         assert_eq!(st, StatusCode::OK);
@@ -448,7 +448,7 @@ async fn submission_reminders_respects_enabled_toggle() {
         .await;
     assert_eq!(st, StatusCode::OK, "disable reminders");
 
-    zerf::submission_reminders::run_check(&app.state).await;
+    zerf::background::submission_reminders::run_check(&app.state).await;
 
     let (st, body) = emp.get("/api/v1/notifications").await;
     assert_eq!(st, StatusCode::OK);
@@ -477,7 +477,7 @@ async fn submission_reminders_respects_enabled_toggle() {
         .await;
     assert_eq!(st, StatusCode::OK, "enable reminders");
 
-    zerf::submission_reminders::run_check(&app.state).await;
+    zerf::background::submission_reminders::run_check(&app.state).await;
 
     let (st, body) = emp.get("/api/v1/notifications").await;
     assert_eq!(st, StatusCode::OK);
@@ -547,7 +547,7 @@ async fn submission_reminders_treat_approved_absence_as_covered_week() {
     let (st, _) = emp.delete("/api/v1/notifications").await;
     assert_eq!(st, StatusCode::OK);
 
-    zerf::submission_reminders::run_check(&app.state).await;
+    zerf::background::submission_reminders::run_check(&app.state).await;
 
     let (st, body) = emp.get("/api/v1/notifications").await;
     assert_eq!(st, StatusCode::OK);
@@ -625,7 +625,7 @@ async fn submission_reminders_treat_cancellation_pending_absence_as_covered_week
     let (st, _) = emp.delete("/api/v1/notifications").await;
     assert_eq!(st, StatusCode::OK);
 
-    zerf::submission_reminders::run_check(&app.state).await;
+    zerf::background::submission_reminders::run_check(&app.state).await;
 
     let (st, body) = emp.get("/api/v1/notifications").await;
     assert_eq!(st, StatusCode::OK);

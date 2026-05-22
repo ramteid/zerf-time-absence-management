@@ -252,7 +252,7 @@ impl SessionDb {
     }
 
     /// Delete an expired reset token matching `token_hash` and return
-    /// `AppError::BadRequest("reset_token_expired")` if one was found.
+    /// `AppError::bad_request("reset_token_expired")` if one was found.
     /// Returns `Ok(())` when no expired token matched (the token may be valid
     /// or non-existent — that is determined by the subsequent call to
     /// `consume_reset_token_and_update_password_checked`).
@@ -266,8 +266,8 @@ impl SessionDb {
         .fetch_optional(&self.pool)
         .await?;
         if expired.is_some() {
-            return Err(crate::error::AppError::BadRequest(
-                "reset_token_expired".into(),
+            return Err(crate::error::AppError::bad_request(
+                "reset_token_expired",
             ));
         }
         Ok(())
@@ -276,7 +276,7 @@ impl SessionDb {
     /// Like `consume_reset_token_and_update_password` but also checks that the
     /// new password doesn't match the current hash. If `verify_not_reused` is
     /// provided, it is called with the current password_hash to check reuse.
-    /// Returns `AppError::BadRequest` if reuse is detected.
+    /// Returns a bad-request application error if reuse is detected.
     pub async fn consume_reset_token_and_update_password_checked(
         &self,
         token_hash: &str,
@@ -296,8 +296,8 @@ impl SessionDb {
         .await?;
         if expired.is_some() {
             tx.commit().await?;
-            return Err(crate::error::AppError::BadRequest(
-                "reset_token_expired".into(),
+            return Err(crate::error::AppError::bad_request(
+                "reset_token_expired",
             ));
         }
 
@@ -312,8 +312,8 @@ impl SessionDb {
         let user_id = match user_id {
             Some(id) => id,
             None => {
-                return Err(crate::error::AppError::BadRequest(
-                    "reset_token_invalid".into(),
+                return Err(crate::error::AppError::bad_request(
+                    "reset_token_invalid",
                 ))
             }
         };
@@ -327,8 +327,8 @@ impl SessionDb {
         .await?;
         let Some(current_hash) = current_hash else {
             tx.commit().await?;
-            return Err(crate::error::AppError::BadRequest(
-                "reset_token_invalid".into(),
+            return Err(crate::error::AppError::bad_request(
+                "reset_token_invalid",
             ));
         };
 
@@ -336,8 +336,8 @@ impl SessionDb {
         if let Some(check_reuse) = verify_not_reused {
             if check_reuse(&current_hash) {
                 tx.rollback().await?;
-                return Err(crate::error::AppError::BadRequest(
-                    "New password must differ from the current one.".into(),
+                return Err(crate::error::AppError::bad_request(
+                    "New password must differ from the current one.",
                 ));
             }
         }
@@ -353,8 +353,8 @@ impl SessionDb {
         .rows_affected();
         if rows != 1 {
             tx.commit().await?;
-            return Err(crate::error::AppError::BadRequest(
-                "reset_token_invalid".into(),
+            return Err(crate::error::AppError::bad_request(
+                "reset_token_invalid",
             ));
         }
 
