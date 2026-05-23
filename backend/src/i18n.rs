@@ -475,4 +475,134 @@ mod tests {
             "Tag der Arbeit"
         );
     }
+
+    /// When local_name is absent or blank, holiday_display_name must fall back
+    /// to the English name.
+    #[test]
+    fn holiday_display_name_falls_back_to_english_name_when_local_name_absent() {
+        let language = Language::from_setting("en");
+        assert_eq!(
+            holiday_display_name(&language, "Labor Day".to_string(), None),
+            "Labor Day"
+        );
+        assert_eq!(
+            holiday_display_name(&language, "Labor Day".to_string(), Some("  ".to_string())),
+            "Labor Day"
+        );
+    }
+
+    /// `Language::name` must return the human-readable name for each supported code.
+    #[test]
+    fn language_name_returns_display_name() {
+        assert_eq!(Language::from_setting("en").name(), "English");
+        assert_eq!(Language::from_setting("de").name(), "Deutsch");
+    }
+
+    /// `Language::code` must survive a round-trip through `from_setting`.
+    #[test]
+    fn language_code_round_trips_through_from_setting() {
+        let lang = Language::from_setting("en");
+        assert_eq!(lang.code(), "en");
+        let lang_de = Language::from_setting("de");
+        assert_eq!(lang_de.code(), "de");
+    }
+
+    /// `work_category_label` must translate known German category names and pass
+    /// unknown names through unchanged.
+    #[test]
+    fn work_category_label_translates_known_german_categories() {
+        let de = Language::from_setting("de");
+        assert_eq!(work_category_label(&de, "Core Duties"), "Kernaufgaben");
+        assert_eq!(work_category_label(&de, "Training"), "Fortbildung");
+        assert_eq!(work_category_label(&de, "Other"), "Sonstiges");
+        assert_eq!(work_category_label(&de, "Flextime Reduction"), "Gleitzeitabbau");
+        // Unknown category must pass through unchanged.
+        assert_eq!(work_category_label(&de, "Custom Project"), "Custom Project");
+    }
+
+    /// English leaves category names unchanged.
+    #[test]
+    fn work_category_label_returns_name_unchanged_for_english() {
+        let en = Language::from_setting("en");
+        assert_eq!(work_category_label(&en, "Core Duties"), "Core Duties");
+        assert_eq!(work_category_label(&en, "Training"), "Training");
+    }
+
+    /// `absence_kind_label` must produce localised strings for known kinds and
+    /// fall back to the raw key for unknown kinds.
+    #[test]
+    fn absence_kind_label_localises_known_kinds() {
+        let en = Language::from_setting("en");
+        assert_eq!(absence_kind_label(&en, "vacation"), "Vacation");
+        assert_eq!(absence_kind_label(&en, "sick"), "Sick");
+        assert_eq!(absence_kind_label(&en, "flextime_reduction"), "Flextime Reduction");
+
+        let de = Language::from_setting("de");
+        assert_eq!(absence_kind_label(&de, "vacation"), "Urlaub");
+        assert_eq!(absence_kind_label(&de, "sick"), "Krankmeldung");
+        // Unknown kind falls back to the key itself.
+        assert_eq!(absence_kind_label(&de, "mystery"), "absence_kind_mystery");
+    }
+
+    /// `format_datetime_in_timezone` must apply the given timezone offset and
+    /// produce a properly formatted string.
+    #[test]
+    fn format_datetime_in_timezone_applies_tz_and_formats_correctly() {
+        use chrono::{TimeZone, Utc};
+        let utc_time = Utc.with_ymd_and_hms(2026, 5, 1, 10, 30, 0).unwrap();
+
+        // German format (Berlin = UTC+2 in summer): "01.05.2026 12:30"
+        let de = Language::from_setting("de");
+        let formatted_de = format_datetime_in_timezone(&de, utc_time, "Europe/Berlin");
+        assert_eq!(formatted_de, "01.05.2026 12:30");
+
+        // English format: "05/01/2026 12:30"
+        let en = Language::from_setting("en");
+        let formatted_en = format_datetime_in_timezone(&en, utc_time, "Europe/Berlin");
+        assert_eq!(formatted_en, "05/01/2026 12:30");
+    }
+
+    /// `format_datetime_in_timezone` must fall back to UTC when the timezone
+    /// string is unrecognised.
+    #[test]
+    fn format_datetime_in_timezone_falls_back_to_utc_for_unknown_tz() {
+        use chrono::{TimeZone, Utc};
+        let utc_time = Utc.with_ymd_and_hms(2026, 5, 1, 10, 30, 0).unwrap();
+        let en = Language::from_setting("en");
+        // An invalid timezone should fall back to UTC.
+        let formatted = format_datetime_in_timezone(&en, utc_time, "Mars/Olympus");
+        // UTC time is 10:30, so the formatted string should contain 10:30.
+        assert!(formatted.contains("10:30"), "expected UTC time in output, got: {formatted}");
+    }
+
+    /// `week_count` must use the singular form for exactly 1 and the plural
+    /// template for any other count.
+    #[test]
+    fn week_count_uses_singular_for_one_and_plural_for_others() {
+        let en = Language::from_setting("en");
+        assert_eq!(week_count(&en, 1), "1 week");
+        assert_eq!(week_count(&en, 3), "3 weeks");
+        assert_eq!(week_count(&en, 0), "0 weeks");
+
+        let de = Language::from_setting("de");
+        assert_eq!(week_count(&de, 1), "1 Woche");
+        assert_eq!(week_count(&de, 5), "5 Wochen");
+    }
+
+    /// `format_week_label` must include the ISO week number and date range.
+    #[test]
+    fn format_week_label_includes_week_number_and_date_range() {
+        // 2026-04-27 is Monday of ISO week 18.
+        let monday = chrono::NaiveDate::from_ymd_opt(2026, 4, 27).unwrap();
+
+        let en = Language::from_setting("en");
+        let label_en = format_week_label(&en, monday);
+        assert!(label_en.starts_with("CW 18"), "expected CW prefix, got: {label_en}");
+        assert!(label_en.contains("to"), "expected 'to' separator, got: {label_en}");
+
+        let de = Language::from_setting("de");
+        let label_de = format_week_label(&de, monday);
+        assert!(label_de.starts_with("KW 18"), "expected KW prefix, got: {label_de}");
+        assert!(label_de.contains("bis"), "expected 'bis' separator, got: {label_de}");
+    }
 }

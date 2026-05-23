@@ -515,6 +515,334 @@ pub struct LeaveBalance {
     pub carryover_expired: bool,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Helpers
+    // ──────────────────────────────────────────────────────────────────────
+
+    fn sample_user(tracks_time: bool) -> User {
+        User {
+            id: 1,
+            email: "user@example.com".to_string(),
+            password_hash: "hash".to_string(),
+            first_name: "Alice".to_string(),
+            last_name: "Smith".to_string(),
+            role: "employee".to_string(),
+            weekly_hours: 40.0,
+            workdays_per_week: 5,
+            start_date: NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
+            active: true,
+            must_change_password: false,
+            created_at: Utc::now(),
+            allow_reopen_without_approval: false,
+            dark_mode: false,
+            overtime_start_balance_min: 0,
+            tracks_time,
+        }
+    }
+
+    fn sample_absence(id: i64, status: &str, kind: &str) -> Absence {
+        Absence {
+            id,
+            user_id: 1,
+            kind: kind.to_string(),
+            start_date: NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
+            end_date: NaiveDate::from_ymd_opt(2026, 6, 5).unwrap(),
+            comment: None,
+            status: status.to_string(),
+            reviewed_by: None,
+            reviewed_at: None,
+            rejection_reason: None,
+            created_at: Utc::now(),
+            review_type: None,
+            previous_kind: None,
+            previous_start_date: None,
+            previous_end_date: None,
+            previous_comment: None,
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // validate_absence
+    // ──────────────────────────────────────────────────────────────────────
+
+    /// A well-formed absence must pass validation and return the kind.
+    #[test]
+    fn validate_absence_accepts_valid_input() {
+        let input = NewAbsence {
+            kind: "vacation".to_string(),
+            start_date: NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
+            end_date: NaiveDate::from_ymd_opt(2026, 6, 5).unwrap(),
+            comment: None,
+        };
+        assert_eq!(validate_absence(&input).unwrap(), "vacation");
+    }
+
+    /// An unrecognised kind must be rejected.
+    #[test]
+    fn validate_absence_rejects_unknown_kind() {
+        let input = NewAbsence {
+            kind: "funday".to_string(),
+            start_date: NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
+            end_date: NaiveDate::from_ymd_opt(2026, 6, 5).unwrap(),
+            comment: None,
+        };
+        assert!(matches!(
+            validate_absence(&input).unwrap_err(),
+            AppError::BadRequest(_)
+        ));
+    }
+
+    /// A comment exceeding 2000 characters must be rejected.
+    #[test]
+    fn validate_absence_rejects_oversized_comment() {
+        let input = NewAbsence {
+            kind: "sick".to_string(),
+            start_date: NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
+            end_date: NaiveDate::from_ymd_opt(2026, 6, 5).unwrap(),
+            comment: Some("x".repeat(2001)),
+        };
+        assert!(matches!(
+            validate_absence(&input).unwrap_err(),
+            AppError::BadRequest(_)
+        ));
+    }
+
+    /// end_date < start_date must be rejected.
+    #[test]
+    fn validate_absence_rejects_inverted_date_range() {
+        let input = NewAbsence {
+            kind: "vacation".to_string(),
+            start_date: NaiveDate::from_ymd_opt(2026, 6, 10).unwrap(),
+            end_date: NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
+            comment: None,
+        };
+        assert!(matches!(
+            validate_absence(&input).unwrap_err(),
+            AppError::BadRequest(_)
+        ));
+    }
+
+    /// A range spanning more than 365 days must be rejected.
+    #[test]
+    fn validate_absence_rejects_range_exceeding_one_year() {
+        let input = NewAbsence {
+            kind: "general_absence".to_string(),
+            start_date: NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
+            end_date: NaiveDate::from_ymd_opt(2027, 1, 3).unwrap(), // 367 days
+            comment: None,
+        };
+        assert!(matches!(
+            validate_absence(&input).unwrap_err(),
+            AppError::BadRequest(_)
+        ));
+    }
+
+    /// All documented allowed kinds must pass `validate_absence`.
+    #[test]
+    fn validate_absence_accepts_all_allowed_kinds() {
+        for kind in crate::repository::absences::ALLOWED_KINDS {
+            let input = NewAbsence {
+                kind: kind.to_string(),
+                start_date: NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
+                end_date: NaiveDate::from_ymd_opt(2026, 6, 3).unwrap(),
+                comment: None,
+            };
+            assert!(
+                validate_absence(&input).is_ok(),
+                "kind '{kind}' should be allowed"
+            );
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // require_tracks_time
+    // ──────────────────────────────────────────────────────────────────────
+
+    /// A user with tracks_time = true must not be blocked.
+    #[test]
+    fn require_tracks_time_allows_tracking_user() {
+        let user = sample_user(true);
+        assert!(require_tracks_time(&user).is_ok());
+    }
+
+    /// A user with tracks_time = false (pure-admin mode) must be blocked
+    /// with Forbidden.
+    #[test]
+    fn require_tracks_time_blocks_non_tracking_user() {
+        let user = sample_user(false);
+        assert!(matches!(
+            require_tracks_time(&user).unwrap_err(),
+            AppError::Forbidden
+        ));
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // enrich_absence_with_metadata
+    // ──────────────────────────────────────────────────────────────────────
+
+    /// A `cancellation_pending` absence must get review_type = "cancellation"
+    /// and the function must return early without reading the before_data map.
+    #[test]
+    fn enrich_absence_sets_cancellation_type_for_pending_cancellations() {
+        let mut absence = sample_absence(1, "cancellation_pending", "vacation");
+        let map = std::collections::HashMap::new();
+        enrich_absence_with_metadata(&mut absence, &map);
+        assert_eq!(absence.review_type.as_deref(), Some("cancellation"));
+        assert!(absence.previous_kind.is_none());
+    }
+
+    /// An absence without a matching entry in before_data_map must get
+    /// review_type = "approval" (initial submission, nothing to diff).
+    #[test]
+    fn enrich_absence_sets_approval_type_when_no_before_data() {
+        let mut absence = sample_absence(42, "requested", "vacation");
+        let map = std::collections::HashMap::new(); // absence id 42 not in map
+        enrich_absence_with_metadata(&mut absence, &map);
+        assert_eq!(absence.review_type.as_deref(), Some("approval"));
+        assert!(absence.previous_kind.is_none());
+    }
+
+    /// An absence with valid before_data JSON must get review_type = "change"
+    /// and have the previous fields populated from the JSON.
+    #[test]
+    fn enrich_absence_sets_change_type_with_previous_data_when_before_data_present() {
+        let mut absence = sample_absence(5, "requested", "vacation");
+        let mut map = std::collections::HashMap::new();
+        map.insert(
+            5i64,
+            r#"{"kind":"sick","start_date":"2026-05-01","end_date":"2026-05-03","comment":"was sick"}"#
+                .to_string(),
+        );
+        enrich_absence_with_metadata(&mut absence, &map);
+        assert_eq!(absence.review_type.as_deref(), Some("change"));
+        assert_eq!(absence.previous_kind.as_deref(), Some("sick"));
+        assert_eq!(
+            absence.previous_start_date,
+            NaiveDate::from_ymd_opt(2026, 5, 1)
+        );
+        assert_eq!(
+            absence.previous_end_date,
+            NaiveDate::from_ymd_opt(2026, 5, 3)
+        );
+        assert_eq!(absence.previous_comment.as_deref(), Some("was sick"));
+    }
+
+    /// Invalid JSON in before_data must leave the absence as review_type =
+    /// "approval" (graceful degradation, not a hard error).
+    #[test]
+    fn enrich_absence_falls_back_to_approval_on_invalid_before_json() {
+        let mut absence = sample_absence(7, "requested", "sick");
+        let mut map = std::collections::HashMap::new();
+        map.insert(7i64, "not-valid-json".to_string());
+        enrich_absence_with_metadata(&mut absence, &map);
+        // The function sets "approval" before trying to parse JSON, and the
+        // parse failure causes an early return without overwriting to "change".
+        assert_eq!(absence.review_type.as_deref(), Some("approval"));
+        assert!(absence.previous_kind.is_none());
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // absence_period_params
+    // ──────────────────────────────────────────────────────────────────────
+
+    /// The helper must produce four parameters with non-empty values
+    /// for requester_name, kind, start_date, and end_date.
+    #[test]
+    fn absence_period_params_includes_all_required_keys() {
+        use crate::i18n::Language;
+        let language = Language::from_setting("en");
+        let user = sample_user(true);
+        let absence = sample_absence(1, "requested", "vacation");
+        let params = absence_period_params(&language, &user, &absence);
+
+        let keys: Vec<&str> = params.iter().map(|(k, _)| *k).collect();
+        assert!(keys.contains(&"requester_name"));
+        assert!(keys.contains(&"kind"));
+        assert!(keys.contains(&"start_date"));
+        assert!(keys.contains(&"end_date"));
+
+        let by_key = |key: &str| {
+            params
+                .iter()
+                .find(|(k, _)| *k == key)
+                .map(|(_, v)| v.as_str())
+                .unwrap_or("")
+        };
+        assert_eq!(by_key("requester_name"), "Alice Smith");
+        // "vacation" localises to "Vacation" in English.
+        assert_eq!(by_key("kind"), "Vacation");
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // repo_absence_to_service
+    // ──────────────────────────────────────────────────────────────────────
+
+    /// The mapper must copy all repository fields and zero-initialise the
+    /// service-only review metadata fields.
+    #[test]
+    fn repo_absence_to_service_maps_fields_and_clears_review_metadata() {
+        let repo = crate::repository::Absence {
+            id: 99,
+            user_id: 7,
+            kind: "sick".to_string(),
+            start_date: NaiveDate::from_ymd_opt(2026, 3, 1).unwrap(),
+            end_date: NaiveDate::from_ymd_opt(2026, 3, 5).unwrap(),
+            comment: Some("flu".to_string()),
+            status: "approved".to_string(),
+            reviewed_by: Some(2),
+            reviewed_at: Some(Utc::now()),
+            rejection_reason: None,
+            created_at: Utc::now(),
+        };
+        let svc = repo_absence_to_service(repo.clone());
+        assert_eq!(svc.id, 99);
+        assert_eq!(svc.user_id, 7);
+        assert_eq!(svc.kind, "sick");
+        assert_eq!(svc.status, "approved");
+        assert_eq!(svc.comment.as_deref(), Some("flu"));
+        assert_eq!(svc.reviewed_by, Some(2));
+        // Service-specific fields must default to None.
+        assert!(svc.review_type.is_none());
+        assert!(svc.previous_kind.is_none());
+        assert!(svc.previous_start_date.is_none());
+        assert!(svc.previous_end_date.is_none());
+        assert!(svc.previous_comment.is_none());
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // serialize_day_count (tested through LeaveBalance serialisation)
+    // ──────────────────────────────────────────────────────────────────────
+
+    /// Whole-number values must serialise as integers, fractional values as
+    /// floats — this ensures the JSON surface stays clean for the frontend.
+    #[test]
+    fn serialize_day_count_emits_integer_for_whole_numbers_and_float_for_fractions() {
+        let balance = LeaveBalance {
+            annual_entitlement: 25,
+            already_taken: 3.0,
+            approved_upcoming: 2.5,
+            requested: 0.0,
+            available: 19.5,
+            carryover_days: 0,
+            carryover_remaining: 0.0,
+            carryover_expiry: None,
+            carryover_expired: false,
+        };
+        let json = serde_json::to_value(&balance).unwrap();
+        // Whole numbers must serialise as JSON integers, not floats.
+        assert_eq!(json["already_taken"], serde_json::json!(3));
+        assert_eq!(json["requested"], serde_json::json!(0));
+        // Fractional values must serialise as JSON floats.
+        assert_eq!(json["approved_upcoming"], serde_json::json!(2.5));
+        assert_eq!(json["available"], serde_json::json!(19.5));
+    }
+}
+
 pub async fn compute_balance(
     app_state: &AppState,
     requester: &User,
