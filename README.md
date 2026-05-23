@@ -17,6 +17,10 @@ Zerf covers working hours, leave and absence requests, approvals, and monthly re
 
 `Zerf` is derived from the German word "Zeiterfassung" which means "time tracking".
 
+<p align="center">
+  <img src="docs/screenshots/tour.gif" alt="Animated tour of Zerf: dashboard, time entry, absences, team calendar, and reports" width="320">
+</p>
+
 ## Overview
 
 Zerf is built for day-to-day team operations.
@@ -35,16 +39,6 @@ Employees capture hours and absences, team leads review requests and submitted w
 - Localized user interface in English and German.
 - Automated submission reminders: on a configured deadline day each month, users who have not yet submitted all past months' time entries receive an in-app notification and, if SMTP is enabled, an email reminder.
 - Self-hosted Docker deployment with a scripted backup utility that writes to a local Docker volume.
-
-## Screenshots
-
-<p align="center">
-  <img src="docs/screenshots/tour.gif" alt="Animated tour of Zerf: dashboard, time entry, absences, team calendar, and reports" width="320">
-</p>
-
-<p align="center">
-  <sub>Auto-cycling preview &middot; individual frames in <a href="docs/screenshots/">docs/screenshots/</a></sub>
-</p>
 
 ## How it differs from comparable software
 
