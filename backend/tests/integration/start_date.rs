@@ -88,8 +88,12 @@ async fn start_date_full_workflow() {
 
     // -- Absence on start date accepted --
     // Absence on or after start_date should be accepted.
+    //
+    // Use next_monday(7) (the second upcoming Monday, ≥8 days out) rather than
+    // next_monday(0) so that the range is never entirely consumed by the
+    // immediate next Monday being a public holiday (e.g. Pfingst Montag 2026).
     {
-        let sick_end = next_monday(0).to_string();
+        let sick_end = next_monday(7).to_string();
         let (st, _) = admin
             .post(
                 "/api/v1/absences",
@@ -182,6 +186,16 @@ async fn start_date_full_workflow() {
 
     // -- Flextime start balance begins on start date --
     {
+        // Use the next Monday ≥8 days from now as start_date so the report
+        // always includes a proper workday row.  When today is a weekend,
+        // using today() as start_date produces no workday row and the
+        // cumulative never reaches 120.
+        let start_day = next_monday(7);
+        let start_day_str = start_day.format("%Y-%m-%d").to_string();
+        let day_before_str = (start_day - chrono::Duration::days(1))
+            .format("%Y-%m-%d")
+            .to_string();
+
         let (st, body) = admin
             .post(
                 "/api/v1/users",
@@ -192,7 +206,7 @@ async fn start_date_full_workflow() {
                     "role": "admin",
                     "weekly_hours": 0,
                     "leave_days_current_year":0,"leave_days_next_year":0,
-                    "start_date": today(),
+                    "start_date": start_day_str,
                     "overtime_start_balance_min": 120
                 }),
             )
@@ -200,11 +214,12 @@ async fn start_date_full_workflow() {
         assert_eq!(st, StatusCode::OK, "create flex carry user: {body}");
         let uid = body["id"].as_i64().unwrap();
 
-        let from = date_offset(-1);
-        let to = today();
+        // Report spans the day before start_date (Sunday) through start_date
+        // (Monday).  The Sunday row should show cumulative=0 (before the user
+        // exists) and the Monday row cumulative=120 (balance kicks in).
         let (st, body) = admin
             .get(&format!(
-                "/api/v1/reports/flextime?user_id={uid}&from={from}&to={to}"
+                "/api/v1/reports/flextime?user_id={uid}&from={day_before_str}&to={start_day_str}"
             ))
             .await;
         assert_eq!(st, StatusCode::OK, "flextime report");

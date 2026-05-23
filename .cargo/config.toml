@@ -1,0 +1,9 @@
+[test]
+# Run integration tests with 8 parallel threads.
+# Each test uses its own isolated database (zerf_test_{pid}_{n}),
+# so tests do not share state. With max_connections=3 per pool and
+# 8 threads, peak usage is ~24 connections — well within the
+# PostgreSQL max_connections=200 limit.
+#
+# To override locally: cargo test -- --test-threads=N
+test-threads = 8

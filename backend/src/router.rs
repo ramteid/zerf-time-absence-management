@@ -65,7 +65,9 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                 .route("/absences/calendar", get(handlers::absences::calendar))
                 .route(
                     "/absences/{id}",
-                    put(handlers::absences::update).delete(handlers::absences::cancel),
+                    get(handlers::absences::get_one)
+                        .put(handlers::absences::update)
+                        .delete(handlers::absences::cancel),
                 )
                 .route("/absences/{id}/approve", post(handlers::absences::approve))
                 .route("/absences/{id}/reject", post(handlers::absences::reject))

@@ -197,30 +197,6 @@ pub async fn fetch_for_update(tx: &mut crate::db::PgConnection, user_id: i64) ->
         .map(repo_user_to_auth_user)
 }
 
-pub async fn update_team_settings_basic(
-    tx: &mut crate::db::PgConnection,
-    target_id: i64,
-    allow_reopen_without_approval: bool,
-) -> AppResult<()> {
-    UserDb::update_basic(
-        tx,
-        target_id,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        Some(allow_reopen_without_approval),
-        None,
-        None,
-    )
-    .await?;
-    Ok(())
-}
-
 #[allow(clippy::too_many_arguments)]
 pub async fn create_repo_user(
     tx: &mut crate::db::PgConnection,
@@ -637,6 +613,63 @@ pub async fn create(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
+
+    // Helper: construct a repository User with minimal fields.
+    fn repo_user(id: i64, email: &str, role: &str) -> crate::repository::User {
+        crate::repository::User {
+            id,
+            email: email.to_string(),
+            password_hash: "hash".to_string(),
+            first_name: "Alice".to_string(),
+            last_name: "Smith".to_string(),
+            role: role.to_string(),
+            weekly_hours: 39.0,
+            workdays_per_week: 5,
+            start_date: chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
+            active: true,
+            must_change_password: false,
+            created_at: Utc::now(),
+            allow_reopen_without_approval: false,
+            dark_mode: false,
+            overtime_start_balance_min: 0,
+            tracks_time: true,
+        }
+    }
+
+    /// `repo_user_to_auth_user` must copy every field from the repository type
+    /// to the middleware `User` type unchanged.
+    #[test]
+    fn repo_user_to_auth_user_maps_all_fields() {
+        let src = repo_user(42, "alice@example.com", "admin");
+        let auth = repo_user_to_auth_user(src);
+        assert_eq!(auth.id, 42);
+        assert_eq!(auth.email, "alice@example.com");
+        assert_eq!(auth.role, "admin");
+        assert_eq!(auth.weekly_hours, 39.0);
+        assert_eq!(auth.workdays_per_week, 5);
+        assert!(auth.active);
+        assert!(!auth.must_change_password);
+        assert_eq!(auth.overtime_start_balance_min, 0);
+        assert!(auth.tracks_time);
+    }
+
+    /// The mapping must faithfully reflect non-default boolean flags.
+    #[test]
+    fn repo_user_to_auth_user_respects_flag_fields() {
+        let mut src = repo_user(7, "bob@example.com", "employee");
+        src.must_change_password = true;
+        src.allow_reopen_without_approval = true;
+        src.dark_mode = true;
+        src.tracks_time = false;
+        src.overtime_start_balance_min = 480;
+        let auth = repo_user_to_auth_user(src);
+        assert!(auth.must_change_password);
+        assert!(auth.allow_reopen_without_approval);
+        assert!(auth.dark_mode);
+        assert!(!auth.tracks_time);
+        assert_eq!(auth.overtime_start_balance_min, 480);
+    }
 
     #[test]
     fn normalize_user_name_trims_and_accepts_valid_names() {

@@ -149,6 +149,30 @@ fn default_port(scheme: &str) -> u16 {
     }
 }
 
+/// Pure inner logic for same-origin checking: returns `true` when either the
+/// `Origin` or (as fallback) the `Referer` header matches one of the
+/// `allowed_origins` entries.  Extracted from `enforce_same_origin_headers` so
+/// it can be exercised by unit tests without needing an `AppState`.
+pub fn check_origin_allowed(
+    header_origin: Option<&str>,
+    header_referer: Option<&str>,
+    allowed_origins: &[String],
+) -> bool {
+    let origin_matches = |origin_value: &str| {
+        let Some(req_parts) = parse_origin_parts(origin_value) else {
+            return false;
+        };
+        allowed_origins.iter().any(|allowed| {
+            parse_origin_parts(allowed).is_some_and(|allowed_parts| allowed_parts == req_parts)
+        })
+    };
+    match (header_origin, header_referer) {
+        (Some(origin), _) => origin_matches(origin),
+        (None, Some(referer)) => origin_matches(referer),
+        (None, None) => false,
+    }
+}
+
 pub fn enforce_same_origin_headers(
     headers: &axum::http::HeaderMap,
     app_state: &AppState,
@@ -159,24 +183,22 @@ pub fn enforce_same_origin_headers(
     let header_origin = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok());
     let header_referer = headers.get(header::REFERER).and_then(|v| v.to_str().ok());
     let allowed_origins = &app_state.cfg.allowed_origins;
-
-    let origin_matches = |origin_value: &str| {
-        let Some(req_parts) = parse_origin_parts(origin_value) else {
-            return false;
-        };
-        allowed_origins.iter().any(|allowed| {
-            parse_origin_parts(allowed).is_some_and(|allowed_parts| allowed_parts == req_parts)
-        })
-    };
-    let is_origin_allowed = match (header_origin, header_referer) {
-        (Some(origin), _) => origin_matches(origin),
-        (None, Some(referer)) => origin_matches(referer),
-        (None, None) => false,
-    };
-    if !is_origin_allowed {
+    if !check_origin_allowed(header_origin, header_referer, allowed_origins) {
         return Err(AppError::Forbidden);
     }
     Ok(())
+}
+
+/// Pure CSRF-token comparison: returns `true` when `header_token` is
+/// non-empty and matches `csrf_token` in constant time.
+pub fn csrf_token_matches(header_token: &str, csrf_token: &str) -> bool {
+    use subtle::ConstantTimeEq;
+    !header_token.is_empty()
+        && header_token
+            .as_bytes()
+            .ct_eq(csrf_token.as_bytes())
+            .unwrap_u8()
+            == 1
 }
 
 /// CSRF: for non-GET/HEAD/OPTIONS, require the same Origin/Referer to match the
@@ -188,7 +210,6 @@ async fn enforce_csrf(
     app_state: &AppState,
     csrf_token: &str,
 ) -> AppResult<()> {
-    use subtle::ConstantTimeEq;
     if matches!(parts.method, Method::GET | Method::HEAD | Method::OPTIONS) {
         return Ok(());
     }
@@ -201,13 +222,7 @@ async fn enforce_csrf(
         .get("x-csrf-token")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    if header_token.is_empty()
-        || header_token
-            .as_bytes()
-            .ct_eq(csrf_token.as_bytes())
-            .unwrap_u8()
-            == 0
-    {
+    if !csrf_token_matches(header_token, csrf_token) {
         return Err(AppError::Forbidden);
     }
     Ok(())
@@ -399,5 +414,124 @@ mod tests {
             Some(("custom".to_string(), "host".to_string(), 0))
         );
         assert_eq!(parse_origin_parts("example.com"), None);
+    }
+
+    // ── check_origin_allowed ──────────────────────────────────────────────────
+
+    fn origins(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// An exact match on the Origin header must be accepted.
+    #[test]
+    fn check_origin_allowed_accepts_matching_origin() {
+        let allowed = origins(&["https://app.example.com"]);
+        assert!(check_origin_allowed(
+            Some("https://app.example.com"),
+            None,
+            &allowed
+        ));
+    }
+
+    /// A different scheme (http vs https) must be rejected even if host/port match.
+    #[test]
+    fn check_origin_allowed_rejects_wrong_scheme() {
+        let allowed = origins(&["https://app.example.com"]);
+        assert!(!check_origin_allowed(
+            Some("http://app.example.com"),
+            None,
+            &allowed
+        ));
+    }
+
+    /// A different host must be rejected even if the scheme matches.
+    #[test]
+    fn check_origin_allowed_rejects_wrong_host() {
+        let allowed = origins(&["https://app.example.com"]);
+        assert!(!check_origin_allowed(
+            Some("https://evil.example.com"),
+            None,
+            &allowed
+        ));
+    }
+
+    /// When no Origin header is present the Referer is used as a fallback.
+    #[test]
+    fn check_origin_allowed_falls_back_to_referer() {
+        let allowed = origins(&["https://app.example.com"]);
+        // No Origin, Referer contains a path → still accepted if host matches.
+        assert!(check_origin_allowed(
+            None,
+            Some("https://app.example.com/some/path?q=1"),
+            &allowed
+        ));
+    }
+
+    /// When both Origin and Referer are absent the request must be rejected.
+    #[test]
+    fn check_origin_allowed_rejects_when_both_headers_absent() {
+        let allowed = origins(&["https://app.example.com"]);
+        assert!(!check_origin_allowed(None, None, &allowed));
+    }
+
+    /// An unparseable Origin value (no scheme) must be rejected.
+    #[test]
+    fn check_origin_allowed_rejects_unparseable_origin() {
+        let allowed = origins(&["https://app.example.com"]);
+        assert!(!check_origin_allowed(
+            Some("not-a-valid-origin"),
+            None,
+            &allowed
+        ));
+    }
+
+    /// Origin with an explicit non-standard port must match exactly.
+    #[test]
+    fn check_origin_allowed_matches_non_standard_port() {
+        let allowed = origins(&["http://localhost:3000"]);
+        assert!(check_origin_allowed(
+            Some("http://localhost:3000"),
+            None,
+            &allowed
+        ));
+        // Port 3001 ≠ 3000 → rejected.
+        assert!(!check_origin_allowed(
+            Some("http://localhost:3001"),
+            None,
+            &allowed
+        ));
+    }
+
+    /// Multiple allowed origins: any one matching is sufficient.
+    #[test]
+    fn check_origin_allowed_accepts_any_from_allowed_list() {
+        let allowed = origins(&["https://app.example.com", "https://admin.example.com"]);
+        assert!(check_origin_allowed(
+            Some("https://admin.example.com"),
+            None,
+            &allowed
+        ));
+    }
+
+    // ── csrf_token_matches ────────────────────────────────────────────────────
+
+    /// Identical tokens must match in constant time.
+    #[test]
+    fn csrf_token_matches_accepts_identical_tokens() {
+        assert!(csrf_token_matches("secret-token-123", "secret-token-123"));
+    }
+
+    /// A different token must be rejected.
+    #[test]
+    fn csrf_token_matches_rejects_wrong_token() {
+        assert!(!csrf_token_matches("bad-token", "secret-token-123"));
+    }
+
+    /// An empty header token must always be rejected, even if the session
+    /// CSRF token were somehow also empty.
+    #[test]
+    fn csrf_token_matches_rejects_empty_header_token() {
+        assert!(!csrf_token_matches("", "secret-token-123"));
+        assert!(!csrf_token_matches("", ""));
     }
 }

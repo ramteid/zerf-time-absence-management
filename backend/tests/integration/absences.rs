@@ -715,6 +715,197 @@ async fn absences_full_workflow() {
     app.cleanup().await;
 }
 
+/// Covers the "no valid approver" conflict error path in
+/// `services::auth::required_approval_recipient_ids`.
+///
+/// This path triggers when a non-admin employee submits an absence but their
+/// only approver has been deactivated, leaving the approver list empty.
+#[tokio::test]
+async fn absence_request_fails_when_approver_is_deactivated() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+
+    // Create a lead and an employee who reports to that lead.
+    let (lead_id, lead_pw, emp_id, emp_pw, _, _) = bootstrap_team(&app, &admin, false).await;
+    let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
+    // The lead must first change their password too.
+    let _lead = login_change_pw(&app, "lead-r@example.com", &lead_pw).await;
+
+    // Deactivate the lead (the employee's only approver).
+    // First, reassign the employee's time entries lead by removing direct reports.
+    let (st, body) = admin
+        .put(&format!("/api/v1/users/{emp_id}"), &json!({"approver_ids": [1]}))
+        .await;
+    assert_eq!(st, StatusCode::OK, "reassign emp to admin approver: {body}");
+
+    let (st, _) = admin
+        .post(&format!("/api/v1/users/{lead_id}/deactivate"), &json!({}))
+        .await;
+    assert_eq!(st, StatusCode::OK, "deactivate lead");
+
+    // Reassign back to the now-deactivated lead at DB level to simulate the
+    // scenario where the lead was deactivated after the approver relationship
+    // was set up.  The application service filters inactive approvers, so the
+    // list will come back empty.
+    sqlx::query("DELETE FROM user_approvers WHERE user_id=$1")
+        .bind(emp_id)
+        .execute(&app.state.pool)
+        .await
+        .expect("remove current approvers");
+    sqlx::query(
+        "INSERT INTO user_approvers(user_id, approver_id) VALUES ($1, $2)",
+    )
+    .bind(emp_id)
+    .bind(lead_id)
+    .execute(&app.state.pool)
+    .await
+    .expect("force stale approver row");
+
+    // Employee tries to create a vacation absence — must fail because the
+    // deactivated lead is filtered out and no valid approver remains.
+    let vac_start = next_monday(7).format("%Y-%m-%d").to_string();
+    let vac_end = vac_start.clone();
+    let (st, body) = emp
+        .post(
+            "/api/v1/absences",
+            &json!({"kind":"vacation","start_date": vac_start,"end_date": vac_end}),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::CONFLICT,
+        "absence request must fail when all approvers are inactive: {body}"
+    );
+
+    app.cleanup().await;
+}
+
+/// Verifies the in-app-only notification path taken when an admin approves,
+/// rejects, or processes a cancellation of their **own** absence.
+///
+/// When `absence.user_id == requester.id`, the service calls
+/// `notify_absence_inapp_only` instead of the email-enabled `notify_absence`.
+/// This exercises `services::notifications::create_inapp_only` and
+/// `create_translated_inapp_only` which are otherwise never reached in the
+/// regular integration-test flows (where a lead approves an employee's absence).
+#[tokio::test]
+async fn absences_admin_self_approval_uses_inapp_only_notifications() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+
+    // Create a future vacation for the admin (id=1) so the admin can approve it.
+    // Use a Monday ≥ 14 days out to avoid upcoming public holidays.
+    let vac_start = next_monday(14).format("%Y-%m-%d").to_string();
+    let vac_end = (next_monday(14) + chrono::Duration::days(2))
+        .format("%Y-%m-%d")
+        .to_string();
+
+    let (st, body) = admin
+        .post(
+            "/api/v1/absences",
+            &json!({
+                "kind": "vacation",
+                "start_date": vac_start,
+                "end_date": vac_end,
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "admin creates own vacation: {body}");
+    let abs_id = id(&body);
+    assert_eq!(body["status"], "requested", "vacation starts as requested");
+
+    // Admin approves their own vacation → triggers notify_absence_inapp_only
+    // (absence_approved path), covering create_translated_inapp_only and
+    // create_inapp_only in services::notifications.
+    let (st, body) = admin
+        .post(&format!("/api/v1/absences/{abs_id}/approve"), &json!({}))
+        .await;
+    assert_eq!(st, StatusCode::OK, "admin approves own vacation: {body}");
+
+    // Verify the absence is now approved.
+    let (st, body) = admin.get(&format!("/api/v1/absences/{abs_id}")).await;
+    assert_eq!(st, StatusCode::OK, "get approved absence");
+    assert_eq!(body["status"], "approved", "absence should be approved");
+
+    // Admin requests cancellation of the just-approved absence.
+    let (st, body) = admin.delete(&format!("/api/v1/absences/{abs_id}")).await;
+    assert_eq!(st, StatusCode::OK, "admin requests cancellation: {body}");
+    assert_eq!(body["pending"], true, "cancellation enters pending workflow");
+
+    // Admin approves the cancellation of their own absence →
+    // notify_absence_inapp_only (absence_cancellation_approved path).
+    let (st, body) = admin
+        .post(
+            &format!("/api/v1/absences/{abs_id}/approve-cancellation"),
+            &json!({}),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::OK,
+        "admin approves own cancellation: {body}"
+    );
+
+    // ── reject path ──────────────────────────────────────────────────────────
+    // Create a second vacation and have the admin reject it themselves.
+    let vac2_start = next_monday(21).format("%Y-%m-%d").to_string();
+    let vac2_end = (next_monday(21) + chrono::Duration::days(1))
+        .format("%Y-%m-%d")
+        .to_string();
+
+    let (st, body) = admin
+        .post(
+            "/api/v1/absences",
+            &json!({"kind": "vacation", "start_date": vac2_start, "end_date": vac2_end}),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::OK,
+        "admin creates second own vacation: {body}"
+    );
+    let abs2_id = id(&body);
+
+    // Admin rejects their own vacation →
+    // notify_absence_inapp_only (absence_rejected path).
+    let (st, body) = admin
+        .post(
+            &format!("/api/v1/absences/{abs2_id}/reject"),
+            &json!({"reason": "test self-rejection"}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "admin rejects own vacation: {body}");
+
+    // ── revoke path: create + approve + revoke ────────────────────────────────
+    let vac3_start = next_monday(28).format("%Y-%m-%d").to_string();
+    let vac3_end = (next_monday(28) + chrono::Duration::days(1))
+        .format("%Y-%m-%d")
+        .to_string();
+
+    let (st, body) = admin
+        .post(
+            "/api/v1/absences",
+            &json!({"kind": "vacation", "start_date": vac3_start, "end_date": vac3_end}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create vac3: {body}");
+    let abs3_id = id(&body);
+
+    let (st, _) = admin
+        .post(&format!("/api/v1/absences/{abs3_id}/approve"), &json!({}))
+        .await;
+    assert_eq!(st, StatusCode::OK, "approve vac3");
+
+    // Admin revokes their own approved absence →
+    // notify_absence_inapp_only (absence_revoked path).
+    let (st, body) = admin
+        .post(&format!("/api/v1/absences/{abs3_id}/revoke"), &json!({}))
+        .await;
+    assert_eq!(st, StatusCode::OK, "admin revokes own absence: {body}");
+
+    app.cleanup().await;
+}
+
 /// Assistants (Aushilfen) have no fixed weekdays, so they must be able to
 /// submit absences on any day of the week — including weekends.
 #[tokio::test]

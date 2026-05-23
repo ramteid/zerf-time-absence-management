@@ -197,6 +197,55 @@ async fn users_full_workflow() {
             .to_lowercase()
             .contains("approver"));
 
+        // Duplicate approver IDs in the list are rejected.
+        let (st, body) = admin
+            .post(
+                "/api/v1/users",
+                &json!({"email":"dup-approver@example.com","first_name":"Dup","last_name":"Approver",
+                    "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
+                    "start_date":"2024-01-01","approver_ids": [1, 1]}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "duplicate approver rejected");
+        assert!(
+            body["error"]
+                .as_str()
+                .unwrap_or_default()
+                .to_lowercase()
+                .contains("duplicate"),
+            "error mentions duplicate: {body}"
+        );
+
+        // A user cannot list themselves as their own approver.
+        // To get the user's own ID we create them first with a valid approver,
+        // then try to update with self as the approver.
+        let (st, body) = admin
+            .post(
+                "/api/v1/users",
+                &json!({"email":"self-approver@example.com","first_name":"Self","last_name":"Approver",
+                    "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
+                    "start_date":"2024-01-01","approver_ids": [1]}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "create self-approver user: {body}");
+        let self_user_id = id(&body);
+
+        let (st, body) = admin
+            .put(
+                &format!("/api/v1/users/{self_user_id}"),
+                &json!({"approver_ids": [self_user_id]}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "self as approver rejected");
+        assert!(
+            body["error"]
+                .as_str()
+                .unwrap_or_default()
+                .to_lowercase()
+                .contains("themselves"),
+            "error mentions themselves: {body}"
+        );
+
         // Assistants must not have fixed weekly target hours.
         let (st, body) = admin
             .post(
@@ -1058,6 +1107,36 @@ async fn users_full_workflow() {
             )
             .await;
         assert_eq!(st, StatusCode::BAD_REQUEST, "non-admin roles cannot disable tracks_time");
+
+        // Out-of-range leave_days_current_year (branch not otherwise tested — only
+        // leave_days_next_year is tested above).
+        let (st, body) = admin
+            .put(
+                &format!("/api/v1/users/{emp_id}"),
+                &json!({"leave_days_current_year": 400}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "leave_days_current_year=400 rejected: {body}");
+
+        // Admin user may only have another admin as approver (not a team lead).
+        // Use the lead_id from the test bootstrap which is a team_lead.
+        // This covers the "Admins may only report to an active Admin" branch in
+        // services::users::validate_approver_ids.
+        let (st, body) = admin
+            .put(
+                "/api/v1/users/1",
+                &json!({"approver_ids": [lead_id]}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "admin with team_lead approver rejected: {body}");
+        assert!(
+            body["error"]
+                .as_str()
+                .unwrap_or_default()
+                .to_lowercase()
+                .contains("admin"),
+            "error mentions admin: {body}"
+        );
     }
 
     app.cleanup().await;

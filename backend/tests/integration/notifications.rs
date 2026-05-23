@@ -497,3 +497,22 @@ async fn notifications_full_workflow() {
 
     app.cleanup().await;
 }
+
+/// Attempting to mark a non-existent notification as read must return 404.
+/// This covers the `rows_updated == 0` branch in `services::notifications::mark_read`.
+#[tokio::test]
+async fn mark_read_nonexistent_notification_returns_not_found() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+
+    let (st, _) = admin
+        .post("/api/v1/notifications/999999/read", &json!({}))
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::NOT_FOUND,
+        "marking a non-existent notification should return 404"
+    );
+
+    app.cleanup().await;
+}

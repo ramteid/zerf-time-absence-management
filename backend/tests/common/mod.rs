@@ -37,9 +37,9 @@ async fn create_isolated_database(admin_database_url: &str) -> anyhow::Result<St
 
 async fn init_test_database(database_url: &str) -> anyhow::Result<db::DatabasePool> {
     let pool = PgPoolOptions::new()
-        .max_connections(8)
+        .max_connections(3)
         .min_connections(1)
-        .acquire_timeout(Duration::from_secs(5))
+        .acquire_timeout(Duration::from_secs(10))
         .idle_timeout(Duration::from_secs(600))
         .max_lifetime(Duration::from_secs(1800))
         .test_before_acquire(true)
@@ -108,6 +108,10 @@ pub struct TestApp {
     pub state: AppState,
     /// Keep the container alive for the duration of the test (None when TEST_DATABASE_URL is set).
     _container: Option<ContainerAsync<Postgres>>,
+    /// Admin URL used to drop the database on cleanup (Some only when TEST_DATABASE_URL is set).
+    admin_database_url: Option<String>,
+    /// Name of the isolated test database to drop on cleanup.
+    database_name: String,
 }
 
 /// A cookie-jar-equipped HTTP client that targets a specific [`TestApp`].
@@ -133,12 +137,19 @@ impl TestApp {
         Self::spawn_inner(Some(public_url.to_string())).await
     }
 
-    async fn spawn_inner(public_url: Option<String>) -> Self {
-        let (admin_database_url, database_url_base, _container) =
+    /// Like [`spawn`] but skips the admin seed step, leaving the database
+    /// completely empty of users.  Use this when testing the initial-setup
+    /// endpoint (`POST /api/v1/auth/setup`) so the call can actually succeed.
+    pub async fn spawn_unseeded() -> (Self, String) {
+        Self::spawn_unseeded_inner().await
+    }
+
+    async fn spawn_unseeded_inner() -> (Self, String) {
+        let (admin_database_url, database_url_base, cleanup_admin_url, _container) =
             if let Ok(url) = std::env::var("TEST_DATABASE_URL") {
-                // No container runtime — use a pre-existing local Postgres instance.
                 let base = url.rsplitn(2, '/').nth(1).unwrap_or(&url).to_string();
-                (url, base, None)
+                let cleanup_url = Some(url.clone());
+                (url, base, cleanup_url, None)
             } else {
                 let container = Postgres::default()
                     .start()
@@ -153,7 +164,124 @@ impl TestApp {
                     host_port
                 );
                 let base = format!("postgres://postgres:postgres@127.0.0.1:{}", host_port);
-                (admin_url, base, Some(container))
+                (admin_url, base, None, Some(container))
+            };
+
+        let database_name = create_isolated_database(&admin_database_url)
+            .await
+            .expect("failed to create isolated test database");
+        let database_url = format!("{}/{}", database_url_base, database_name);
+
+        let cfg = Config {
+            database_url: database_url.clone(),
+            session_secret: "integration-test-secret-do-not-use-in-prod-32-characters".into(),
+            git_commit: "test".into(),
+            bind: "127.0.0.1:0".into(),
+            static_dir: "static".into(),
+            public_url: None,
+            allowed_origins: vec![],
+            secure_cookies: false,
+            enforce_origin: false,
+            enforce_csrf: false,
+            trust_proxy: false,
+        };
+
+        let pool = init_test_database(&cfg.database_url)
+            .await
+            .expect("failed to init test database");
+        categories::ensure_initial(&pool)
+            .await
+            .expect("failed to seed categories");
+        sqlx::query(
+            "INSERT INTO app_settings(key, value) \
+             VALUES ('country', 'DE'), ('region', 'DE-BW') \
+             ON CONFLICT (key) DO NOTHING",
+        )
+        .execute(&pool)
+        .await
+        .expect("failed to seed country settings");
+        let year = reference_date().year();
+        holidays::ensure_holidays(&pool, year)
+            .await
+            .expect("failed to seed holidays");
+        holidays::ensure_holidays(&pool, year + 1)
+            .await
+            .expect("failed to seed holidays+1");
+
+        // Intentionally skip seed_admin so the DB has no users.
+
+        let broadcaster = zerf::services::notifications::broadcaster();
+        let db = zerf::repository::Db::new(pool.clone(), broadcaster.clone());
+        let state = AppState {
+            pool: pool.clone(),
+            db,
+            cfg: Arc::new(cfg),
+            notifications: broadcaster,
+        };
+
+        let app = build_app(state.clone());
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("failed to bind test listener");
+        let addr = listener.local_addr().unwrap();
+        let server_url = format!("http://{}", addr);
+
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.ok();
+        });
+
+        let client = reqwest::Client::new();
+        for _ in 0..50 {
+            if client
+                .get(format!("{}/healthz", server_url))
+                .send()
+                .await
+                .is_ok()
+            {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+
+        // Return a dummy password for the unseeded app (the caller will set the real
+        // password via the setup endpoint).
+        let dummy_password = String::new();
+        (
+            Self {
+                base_url: server_url,
+                admin_password: dummy_password.clone(),
+                state,
+                _container,
+                admin_database_url: cleanup_admin_url,
+                database_name,
+            },
+            dummy_password,
+        )
+    }
+
+    async fn spawn_inner(public_url: Option<String>) -> Self {
+        let (admin_database_url, database_url_base, cleanup_admin_url, _container) =
+            if let Ok(url) = std::env::var("TEST_DATABASE_URL") {
+                // No container runtime — use a pre-existing local Postgres instance.
+                let base = url.rsplitn(2, '/').nth(1).unwrap_or(&url).to_string();
+                let cleanup_url = Some(url.clone());
+                (url, base, cleanup_url, None)
+            } else {
+                let container = Postgres::default()
+                    .start()
+                    .await
+                    .expect("failed to start Postgres container");
+                let host_port = container
+                    .get_host_port_ipv4(5432)
+                    .await
+                    .expect("failed to get container port");
+                let admin_url = format!(
+                    "postgres://postgres:postgres@127.0.0.1:{}/postgres",
+                    host_port
+                );
+                let base = format!("postgres://postgres:postgres@127.0.0.1:{}", host_port);
+                (admin_url, base, None, Some(container))
             };
 
         let database_name = create_isolated_database(&admin_database_url)
@@ -244,6 +372,8 @@ impl TestApp {
             admin_password,
             state,
             _container,
+            admin_database_url: cleanup_admin_url,
+            database_name,
         }
     }
 
@@ -254,6 +384,18 @@ impl TestApp {
 
     /// Cleanup: container is dropped automatically when TestApp is dropped.
     pub async fn cleanup(self) {
+        // When using TEST_DATABASE_URL (no container), explicitly drop the
+        // isolated test database so it doesn't accumulate between runs.
+        if let Some(admin_url) = self.admin_database_url {
+            if let Ok(pool) = sqlx::PgPool::connect(&admin_url).await {
+                let _ = sqlx::query(&format!(
+                    "DROP DATABASE IF EXISTS \"{}\" WITH (FORCE)",
+                    self.database_name
+                ))
+                .execute(&pool)
+                .await;
+            }
+        }
         // Container is dropped when `self` goes out of scope, which stops
         // and removes the Postgres container automatically.
     }

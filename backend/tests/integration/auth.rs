@@ -383,6 +383,43 @@ async fn auth_full_workflow() {
     app.cleanup().await;
 }
 
+/// Expired sessions must be rejected by the auth middleware with 401.
+/// This covers the timeout-check branch in `auth_middleware` (lines 245-250) that
+/// deletes the session row and returns Unauthorized.
+#[tokio::test]
+async fn expired_session_returns_unauthorized() {
+    let app = TestApp::spawn().await;
+    let admin = app.client();
+    let (st, _) = admin.login("admin@example.com", &app.admin_password).await;
+    assert_eq!(st, StatusCode::OK, "admin login");
+
+    // The admin is authenticated — verify a protected endpoint works.
+    let (st, _) = admin.get("/api/v1/auth/me").await;
+    assert_eq!(st, StatusCode::OK, "me before session expiry");
+
+    // Manually expire the session by back-dating both timestamps past their
+    // respective timeouts in the database.  This simulates what happens after
+    // `ABSOLUTE_TIMEOUT_HOURS` (168 h) without a refresh.
+    sqlx::query(
+        "UPDATE sessions SET \
+         created_at = CURRENT_TIMESTAMP - INTERVAL '200 hours', \
+         last_active_at = CURRENT_TIMESTAMP - INTERVAL '200 hours'",
+    )
+    .execute(&app.state.pool)
+    .await
+    .expect("expire all sessions");
+
+    // The middleware must detect the expired session, delete it, and return 401.
+    let (st, _) = admin.get("/api/v1/auth/me").await;
+    assert_eq!(
+        st,
+        StatusCode::UNAUTHORIZED,
+        "expired session must be rejected"
+    );
+
+    app.cleanup().await;
+}
+
 #[tokio::test]
 async fn forgot_password_rate_limit_and_generic_responses() {
     let app = TestApp::spawn_with_public_url("https://zerf.example.test").await;
@@ -442,6 +479,175 @@ async fn forgot_password_rate_limit_and_generic_responses() {
         .await;
     assert_eq!(st, StatusCode::OK, "oversized email response stays generic");
     assert_eq!(body["ok"], true);
+
+    app.cleanup().await;
+}
+
+/// Covers the `create_initial_admin` success path on a fresh database that has
+/// no users yet.  Uses `TestApp::spawn_unseeded` to get a completely empty DB so
+/// the setup endpoint can actually create the first admin user.
+#[tokio::test]
+async fn setup_success_creates_admin_on_empty_database() {
+    let (app, _) = TestApp::spawn_unseeded().await;
+    let anon = app.client();
+
+    // -- setup-status confirms no users exist --
+    {
+        let (st, body) = anon.get("/api/v1/auth/setup-status").await;
+        assert_eq!(st, StatusCode::OK, "setup-status on fresh db");
+        assert_eq!(
+            body["needs_setup"], true,
+            "fresh DB needs setup: {body}"
+        );
+    }
+
+    // -- Valid setup call creates the first admin --
+    {
+        let (st, body) = anon
+            .post(
+                "/api/v1/auth/setup",
+                &json!({
+                    "email": "root@example.com",
+                    "password": "SecureAdmin!234",
+                    "first_name": "Root",
+                    "last_name": "Admin",
+                    "tracks_time": false
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "setup succeeds on fresh db: {body}");
+        assert_eq!(body["ok"], true, "setup returns ok");
+    }
+
+    // -- setup-status now reports setup is done --
+    {
+        let (st, body) = anon.get("/api/v1/auth/setup-status").await;
+        assert_eq!(st, StatusCode::OK, "setup-status after setup");
+        assert_eq!(
+            body["needs_setup"], false,
+            "setup is done: {body}"
+        );
+    }
+
+    // -- The created admin can log in --
+    {
+        let (st, _) = anon
+            .login("root@example.com", "SecureAdmin!234")
+            .await;
+        assert_eq!(st, StatusCode::OK, "initial admin can log in");
+    }
+
+    app.cleanup().await;
+}
+
+/// Exercises the input-validation branches of `services::auth::create_initial_admin`.
+///
+/// The validation runs BEFORE the DB is consulted for all but the last case, so
+/// even a fully-seeded TestApp (where setup is already "done") reaches every
+/// early-return branch.
+#[tokio::test]
+async fn setup_validation_rejects_bad_inputs_and_duplicate_call() {
+    let app = TestApp::spawn().await;
+    let anon = app.client();
+
+    // -- Invalid email (no @) --
+    {
+        let (st, body) = anon
+            .post(
+                "/api/v1/auth/setup",
+                &json!({
+                    "email": "not-an-email",
+                    "password": "ValidPass!234",
+                    "first_name": "Alice",
+                    "last_name": "Admin",
+                    "tracks_time": true
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "invalid email: {body}");
+        assert!(
+            body["error"].as_str().unwrap_or("").contains("email"),
+            "error mentions email: {body}"
+        );
+    }
+
+    // -- Empty first name --
+    {
+        let (st, body) = anon
+            .post(
+                "/api/v1/auth/setup",
+                &json!({
+                    "email": "admin@setup.example.com",
+                    "password": "ValidPass!234",
+                    "first_name": "",
+                    "last_name": "Admin",
+                    "tracks_time": true
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "empty first_name: {body}");
+        assert!(
+            body["error"]
+                .as_str()
+                .unwrap_or("")
+                .to_lowercase()
+                .contains("name"),
+            "error mentions name: {body}"
+        );
+    }
+
+    // -- Name too long (> 200 chars) --
+    {
+        let long_name = "x".repeat(201);
+        let (st, body) = anon
+            .post(
+                "/api/v1/auth/setup",
+                &json!({
+                    "email": "admin@setup.example.com",
+                    "password": "ValidPass!234",
+                    "first_name": long_name,
+                    "last_name": "Admin",
+                    "tracks_time": true
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "name too long: {body}");
+        assert!(
+            body["error"]
+                .as_str()
+                .unwrap_or("")
+                .to_lowercase()
+                .contains("name"),
+            "error mentions name: {body}"
+        );
+    }
+
+    // -- Setup already completed (admin was seeded by TestApp::spawn) --
+    // Valid input but the DB already has a user, so the "already done" branch
+    // inside the transaction is hit.
+    {
+        let (st, body) = anon
+            .post(
+                "/api/v1/auth/setup",
+                &json!({
+                    "email": "admin2@setup.example.com",
+                    "password": "ValidPass!234",
+                    "first_name": "Alice",
+                    "last_name": "Admin",
+                    "tracks_time": true
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "already setup: {body}");
+        assert!(
+            body["error"]
+                .as_str()
+                .unwrap_or("")
+                .to_lowercase()
+                .contains("setup"),
+            "error mentions setup: {body}"
+        );
+    }
 
     app.cleanup().await;
 }

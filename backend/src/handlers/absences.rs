@@ -160,6 +160,23 @@ pub async fn create(
     Ok(Json(created))
 }
 
+pub async fn get_one(
+    State(app_state): State<AppState>,
+    requester: User,
+    Path(absence_id): Path<i64>,
+) -> AppResult<Json<Absence>> {
+    let absence = app_state.db.absences.find_by_id(absence_id).await?;
+    // Only the owner or a lead/admin may fetch a single absence.
+    if absence.user_id != requester.id && !requester.is_lead() {
+        return Err(crate::error::AppError::Forbidden);
+    }
+    let mut mapped = repo_absence_to_service(absence);
+    let before_data_map =
+        crate::services::absences::latest_update_before_data_batch(&app_state, &[mapped.id]).await?;
+    enrich_absence_with_metadata(&mut mapped, &before_data_map);
+    Ok(Json(mapped))
+}
+
 pub async fn update(
     State(app_state): State<AppState>,
     requester: User,
