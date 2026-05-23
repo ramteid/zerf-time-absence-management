@@ -373,8 +373,11 @@ async fn absence_and_report_workflow() {
         abs_id = id(&body);
         assert_eq!(body["status"], "requested");
 
-        // Sick: auto-approved. Extend to next_monday(0) so range always has a workday.
-        let sick_end = next_monday(0).to_string();
+        // Sick: auto-approved. End before the upcoming vacation so the workflow
+        // verifies sick auto-approval itself, not the overlap guard. This is
+        // intentionally derived from `v_from`; date-relative helpers can land on
+        // the same Monday for different offsets when the reference day is midweek.
+        let sick_end = (v_from - chrono::Duration::days(1)).to_string();
         let (st, body) = emp
             .post(
                 "/api/v1/absences",
@@ -640,8 +643,9 @@ async fn absence_and_report_workflow() {
 
     // -- General absence: cancel, reject and RBAC journeys -------------------
     {
-        // Use offset 60 to avoid holidays.
-        let ga4_monday = next_monday(60);
+        // Use a later offset to keep this cancellation journey isolated from the
+        // pending sick-edit scenario above while still avoiding common holidays.
+        let ga4_monday = next_monday(120);
         let ga4_from = ga4_monday.format("%Y-%m-%d").to_string();
         let ga4_to = (ga4_monday + chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
 
