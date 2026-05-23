@@ -36,12 +36,19 @@ export function allMonthsToCheck(userStart, today) {
   return months;
 }
 
+const OPEN_WEEK_STATUSES = new Set(["draft", "partial", "rejected"]);
+
 export function buildSubmissionChecks(months, reports) {
   return months.map((month, index) => ({
     month,
     submitted: monthFullySubmitted(reports[index]),
     approved: reports[index]?.weeks_all_approved === true,
+    currentWeekStatus: reports[index]?.current_week_status ?? null,
   }));
+}
+
+export function currentWeekIsOpen(checks) {
+  return (checks || []).some((c) => OPEN_WEEK_STATUSES.has(c.currentWeekStatus));
 }
 
 export function entryCountsAsWork(entry, categories = []) {

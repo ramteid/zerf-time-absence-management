@@ -37,6 +37,7 @@
     allMonthsToCheck,
     buildPendingWeeks,
     buildSubmissionChecks,
+    currentWeekIsOpen,
   } from "../lib/domain/dashboard.js";
   import {
     userInitialsFromRows,
@@ -242,6 +243,11 @@
     allWeeksSubmitted &&
     (monthSubmissionChecks.length === 0 ||
       monthSubmissionChecks.every((check) => check.approved));
+
+  // True when the calendar week containing today is in draft, partial, or
+  // rejected state — i.e., the Zeiterfassung view would show something other
+  // than "Eingereicht"/"Genehmigt". Drives the sub-line on the submission tile.
+  $: currentWeekOpen = currentWeekIsOpen(monthSubmissionChecks);
 
   // ── Reactive: keep selectedWeek in sync after a refresh ──────────────────────
 
@@ -632,6 +638,14 @@
               {$t("Weeks missing")}
             {/if}
           </div>
+          {#if currentWeekOpen}
+            <div
+              class="stat-card-sub"
+              style="color:var(--text-tertiary);font-size:11px;margin-top:4px"
+            >
+              {$t("Current week: still open")}
+            </div>
+          {/if}
         {/if}
         {#if monthSubmissionError}
           <div class="error-text" style="font-size:11px;margin-top:4px">

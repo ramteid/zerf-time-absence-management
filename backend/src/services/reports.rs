@@ -119,6 +119,12 @@ pub struct MonthReport {
     pub weeks_all_submitted: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub weeks_all_approved: Option<bool>,
+    /// Status of the calendar week containing `today`, but only when `today`
+    /// falls inside this month. One of `draft | partial | submitted | approved
+    /// | rejected`, mirroring the frontend `weekStatus` helper exactly. `None`
+    /// when the report does not cover today (past months) or for assistants.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_week_status: Option<String>,
 }
 
 fn weekday_en(d: NaiveDate) -> &'static str {
@@ -305,6 +311,7 @@ pub async fn build_range_with_user(
         category_totals: category_minutes_by_name,
         weeks_all_submitted: None,
         weeks_all_approved: None,
+        current_week_status: None,
     })
 }
 
@@ -442,6 +449,63 @@ pub async fn submission_status_for_month(
     Ok((true, !has_pending))
 }
 
+/// Mirrors the frontend `weekStatus` helper (frontend/src/lib/domain/time.js)
+/// exactly so the Dashboard/Reports tiles can't disagree with the Zeiterfassung
+/// view. Returns one of: `draft | partial | submitted | approved | rejected`.
+pub fn compute_current_week_status(
+    has_draft: bool,
+    has_submitted: bool,
+    has_approved: bool,
+    has_rejected: bool,
+) -> &'static str {
+    let any_non_draft = has_submitted || has_approved || has_rejected;
+    if !has_draft && !any_non_draft {
+        return "draft"; // no entries at all
+    }
+    if has_draft {
+        return if any_non_draft { "partial" } else { "draft" };
+    }
+    if has_approved && !has_submitted && !has_rejected {
+        return "approved";
+    }
+    if has_submitted {
+        return "submitted";
+    }
+    if has_rejected && !has_approved && !has_submitted {
+        return "rejected";
+    }
+    "partial"
+}
+
+/// Returns the current week's status as a string only when `today` falls inside
+/// the report's month range. `None` for past/future months and for assistants.
+pub async fn current_week_status(
+    pool: &crate::db::DatabasePool,
+    user_id: i64,
+    month_start: NaiveDate,
+    month_end: NaiveDate,
+    is_assistant: bool,
+) -> AppResult<Option<String>> {
+    if is_assistant {
+        return Ok(None);
+    }
+    let today = crate::services::settings::app_today(pool).await;
+    if today < month_start || today > month_end {
+        return Ok(None);
+    }
+    let week_monday =
+        today - Duration::days(i64::from(today.weekday().num_days_from_monday()));
+    let week_sunday = week_monday + Duration::days(6);
+    let reports_db = crate::repository::ReportDb::new(pool.clone());
+    let (has_draft, has_submitted, has_approved, has_rejected) = reports_db
+        .week_status_flags(user_id, week_monday, week_sunday)
+        .await?;
+    Ok(Some(
+        compute_current_week_status(has_draft, has_submitted, has_approved, has_rejected)
+            .to_string(),
+    ))
+}
+
 pub async fn build_month(
     pool: &crate::db::DatabasePool,
     user_id: i64,
@@ -453,6 +517,7 @@ pub async fn build_month(
         .await?
         .ok_or(AppError::NotFound)?;
     let user = crate::services::users::repo_user_to_auth_user(repo_user);
+    let is_assistant = is_assistant_role(&user.role);
     let mut report = build_range_with_user(pool, &user, from, to, month).await?;
     let (all_submitted, all_approved) = submission_status_for_month(
         pool,
@@ -460,12 +525,14 @@ pub async fn build_month(
         from,
         to,
         user.start_date,
-        is_assistant_role(&user.role),
+        is_assistant,
         user.workdays_per_week,
     )
     .await?;
     report.weeks_all_submitted = Some(all_submitted);
     report.weeks_all_approved = Some(all_approved);
+    report.current_week_status =
+        current_week_status(pool, user_id, from, to, is_assistant).await?;
     Ok(report)
 }
 
@@ -802,6 +869,7 @@ pub async fn build_overtime_rows_for_year(
                     category_totals: HashMap::new(),
                     weeks_all_submitted: None,
                     weeks_all_approved: None,
+                    current_week_status: None,
                 }
             } else {
                 build_range(pool, target_user_id, month_start, cutoff, &month_label).await?
@@ -961,6 +1029,62 @@ mod tests {
         assert_eq!(target_minutes_per_day(40.0, 5), 480);
         assert_eq!(target_minutes_per_day(40.0, 4), 600);
         assert_eq!(target_minutes_per_day(37.5, 5), 450);
+    }
+
+    #[test]
+    fn current_week_status_empty_week_is_draft() {
+        assert_eq!(
+            compute_current_week_status(false, false, false, false),
+            "draft"
+        );
+    }
+
+    #[test]
+    fn current_week_status_only_drafts_is_draft() {
+        assert_eq!(
+            compute_current_week_status(true, false, false, false),
+            "draft"
+        );
+    }
+
+    #[test]
+    fn current_week_status_draft_plus_submitted_is_partial() {
+        assert_eq!(
+            compute_current_week_status(true, true, false, false),
+            "partial"
+        );
+    }
+
+    #[test]
+    fn current_week_status_only_approved_is_approved() {
+        assert_eq!(
+            compute_current_week_status(false, false, true, false),
+            "approved"
+        );
+    }
+
+    #[test]
+    fn current_week_status_any_submitted_dominates_approved() {
+        assert_eq!(
+            compute_current_week_status(false, true, true, false),
+            "submitted"
+        );
+    }
+
+    #[test]
+    fn current_week_status_only_rejected_is_rejected() {
+        assert_eq!(
+            compute_current_week_status(false, false, false, true),
+            "rejected"
+        );
+    }
+
+    #[test]
+    fn current_week_status_rejected_plus_approved_is_partial() {
+        assert_eq!(
+            compute_current_week_status(false, false, true, true),
+            "partial"
+        );
     }
 
     #[test]
@@ -1254,6 +1378,7 @@ mod tests {
             category_totals: HashMap::new(),
             weeks_all_submitted: Some(true),
             weeks_all_approved: Some(true),
+            current_week_status: None,
         };
 
         let response = csv_response(report, 1, "2026/05").unwrap();

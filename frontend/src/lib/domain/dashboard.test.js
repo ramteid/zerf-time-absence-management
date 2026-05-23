@@ -3,6 +3,7 @@ import {
   allMonthsToCheck,
   buildPendingWeeks,
   buildSubmissionChecks,
+  currentWeekIsOpen,
   notificationTarget,
 } from "./dashboard.js";
 
@@ -20,9 +21,35 @@ describe("dashboard domain helpers", () => {
     expect(
       buildSubmissionChecks(
         ["2026-01"],
-        [{ weeks_all_submitted: true, weeks_all_approved: false }],
+        [
+          {
+            weeks_all_submitted: true,
+            weeks_all_approved: false,
+            current_week_status: "draft",
+          },
+        ],
       ),
-    ).toEqual([{ month: "2026-01", submitted: true, approved: false }]);
+    ).toEqual([
+      {
+        month: "2026-01",
+        submitted: true,
+        approved: false,
+        currentWeekStatus: "draft",
+      },
+    ]);
+  });
+
+  it("treats draft, partial, and rejected as an open current week", () => {
+    for (const status of ["draft", "partial", "rejected"]) {
+      expect(currentWeekIsOpen([{ currentWeekStatus: status }])).toBe(true);
+    }
+  });
+
+  it("treats submitted and approved current weeks as closed", () => {
+    for (const status of ["submitted", "approved", null]) {
+      expect(currentWeekIsOpen([{ currentWeekStatus: status }])).toBe(false);
+    }
+    expect(currentWeekIsOpen([])).toBe(false);
   });
 
   it("groups pending entries by user and week with category work rules", () => {
