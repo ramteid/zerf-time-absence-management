@@ -224,7 +224,7 @@ pub fn build_app(state: AppState) -> Router {
         .layer(SetResponseHeaderLayer::overriding(HeaderName::from_static("cross-origin-opener-policy"), HeaderValue::from_static("same-origin")))
         .layer(SetResponseHeaderLayer::overriding(HeaderName::from_static("cross-origin-resource-policy"), HeaderValue::from_static("same-origin")))
         .layer(SetResponseHeaderLayer::overriding(HeaderName::from_static("content-security-policy"), HeaderValue::from_static(
-            "default-src 'self'; img-src 'self' data:; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+            "default-src 'self'; img-src 'self' data:; script-src 'self'; style-src 'self' 'Un safe-inline'; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
         )));
 
     // no-store for API, SPA index, and fallback — but NOT for hashed /assets/*
