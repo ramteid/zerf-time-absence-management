@@ -36,6 +36,16 @@ Employees capture hours and absences, team leads review requests and submitted w
 - Automated submission reminders: on a configured deadline day each month, users who have not yet submitted all past months' time entries receive an in-app notification and, if SMTP is enabled, an email reminder.
 - Self-hosted Docker deployment with a scripted backup utility that writes to a local Docker volume.
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/tour.gif" alt="Animated tour of Zerf: dashboard, time entry, absences, team calendar, and reports" width="320">
+</p>
+
+<p align="center">
+  <sub>Auto-cycling preview &middot; individual frames in <a href="docs/screenshots/">docs/screenshots/</a></sub>
+</p>
+
 ## How it differs from comparable software
 
 - It is designed for teams that want focused operational workflows rather than a generic corporate HR suite.
