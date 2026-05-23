@@ -387,4 +387,30 @@ mod tests {
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].1, "New Year's Day");
     }
+
+    #[test]
+    fn duration_until_next_monday_noon_is_positive_from_tuesday() {
+        // Tuesday 2026-05-05 09:00 — next Monday noon is 2026-05-11 12:00 (6 days 3 h)
+        let now = local_at(chrono_tz::Europe::Berlin, 2026, 5, 5, 9);
+        let dur = duration_until_next_monday_noon(now).unwrap();
+        assert!(dur.as_secs() > 0, "duration must be positive");
+        // 6 days 3 hours = 6*86400 + 3*3600 = 529200 seconds
+        assert_eq!(dur.as_secs(), 6 * 86_400 + 3 * 3_600);
+    }
+
+    #[test]
+    fn duration_until_next_monday_noon_same_day_before_noon() {
+        // Monday 2026-05-04 09:00 — same-day noon is in 3 hours
+        let now = local_at(chrono_tz::Europe::Berlin, 2026, 5, 4, 9);
+        let dur = duration_until_next_monday_noon(now).unwrap();
+        assert_eq!(dur.as_secs(), 3 * 3_600);
+    }
+
+    #[test]
+    fn validate_region_selection_rejects_unknown_code() {
+        let available = vec!["DE-BW".to_string()];
+        let err = validate_region_selection("DE-ZZ", &available).unwrap_err();
+        // Ensure the error is a BadRequest variant
+        assert!(matches!(err, AppError::BadRequest(_)));
+    }
 }

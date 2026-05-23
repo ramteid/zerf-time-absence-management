@@ -37,6 +37,10 @@ LICENSE
 
 # Tests and scripts
 backend/tests
+frontend/**/*.test.js
+frontend/**/*.test.ts
+frontend/**/*.spec.js
+frontend/**/*.spec.ts
 scripts
 
 # Shell scripts
