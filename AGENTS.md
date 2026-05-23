@@ -34,74 +34,73 @@ scripts/      Backup utility
 | tracing | Structured logging |
 | testcontainers | Postgres containers for integration tests |
 
-### Modules
+### Architecture: 3-layer structure
 
-| File | Responsibility |
-|------|---------------|
-| `main.rs` | Startup: config, DB init, migrations, background tasks, Axum server |
-| `config.rs` | Environment variable loading and validation |
+The backend is organised into three strict layers. See `ARCHITECTURE.md` for the full spec.
+
+```
+handlers/ → services/ → repository/
+```
+
+| Layer | Location | Rule |
+|-------|----------|------|
+| **Handlers** | `src/handlers/*.rs` | HTTP only. Extract request, call service, return JSON. No `sqlx`, no `repository` imports. |
+| **Services** | `src/services/*.rs` | Business logic. Own transactions, dispatch notifications. No `axum::extract/response`. |
+| **Repository** | `src/repository/*.rs` | SQL only. No business rules. Only `AppError::NotFound` via `From<sqlx::Error>`. |
+
+Additional modules:
+
+| Module | Purpose |
+|--------|---------|
+| `middleware/auth.rs` | `auth_middleware`, `User` struct, cookie/token/CSRF helpers — single source of `User` |
+| `background/` | Scheduled loops: submission reminders, approval reminders, holiday seeding |
+| `state.rs` | `AppState` definition |
+| `router.rs` | Route declarations (`build_api_router`, `build_app`) |
+| `config.rs` | Environment variable loading |
 | `db.rs` | Connection pool setup |
-| `auth.rs` | Login, sessions, password hashing, CSRF |
-| `users.rs` | User management, approver hierarchy |
-| `time_entries.rs` | Daily time entries (draft/submitted/approved/rejected) |
-| `absences.rs` | Absence requests (vacation, sick, training, etc.) |
-| `reopen_requests.rs` | Week reopen requests (atomic week-level edit workflow) |
-| `categories.rs` | Work categories (color-coded) |
-| `holidays.rs` | Public holidays (auto-fetched and manual) |
-| `reports.rs` | Monthly and team reports, CSV/PDF export |
-| `notifications.rs` | In-app and email notifications |
-| `submission_reminders.rs` | Scheduled weekly submission reminders |
-| `audit.rs` | Audit log (JSON before/after snapshots) |
-| `settings.rs` | App-wide key-value settings |
+| `error.rs` | `AppError`, `AppResult` |
+| `audit.rs` | Audit log dispatch |
 | `email.rs` | SMTP delivery via lettre |
 | `i18n.rs` | Backend translations |
-| `error.rs` | Error types |
-
-### Architecture: Repository Pattern
-
-The backend uses a **repository façade** (`repository::Db`) as the single entry point for all database access.
-Service modules (handlers, schedulers, helpers, startup code) must not execute SQL directly.
+| `time_calc.rs` | Time duration helpers |
 
 **Key types:**
 
 | Type | Location | Role |
 |------|----------|------|
-| `AppState` | `lib.rs` | Holds `pool`, `db` (repo façade), `cfg`, `notifications` |
+| `AppState` | `state.rs` | Holds `pool`, `db` (repo façade), `cfg`, `notifications` |
+| `User` | `middleware/auth.rs` | Authenticated requester extracted by `auth_middleware` |
 | `repository::Db` | `repository/mod.rs` | Façade owning all sub-repositories |
-| `*Db` (e.g. `UserDb`, `TimeEntryDb`) | `repository/*.rs` | Domain-specific query collections |
+| `*Db` (e.g. `UserDb`) | `repository/*.rs` | Domain-specific query collections |
 
 **Sub-repositories** (fields on `repository::Db`):
 
 `sessions`, `users`, `time_entries`, `absences`, `reopen_requests`, `categories`, `holidays`, `notifications`, `audit`, `settings`, `reports`
 
-**Access patterns in handlers:**
+**Access patterns in services:**
 
 ```rust
-// Simple reads via the façade (preferred)
+// Simple reads via the façade
 let entries = app_state.db.time_entries.list_for_user(user_id, from, to).await?;
 
-// Transaction-bound writes via repository API
+// Transaction-bound writes (services own the transaction lifecycle)
 let mut tx = app_state.db.users.begin().await?;
 SubDb::method_tx(&mut *tx, ...).await?;
 tx.commit().await?;
+// Dispatch notifications AFTER commit:
+services::notifications::create(...).await?;
 
-// Standalone context (background tasks, cross-module helpers)
+// Standalone context (background tasks)
 let user = UserDb::new(pool.clone()).find_by_id(id).await?;
 ```
 
-**Type conversion:** Repository structs (`repository::User`, `repository::TimeEntry`, etc.) are converted to handler-level types via `repo_*_to_service()` helper functions (e.g. `crate::users::repo_user_to_auth_user()`).
+**Type conversion:** Repository structs are converted to service/response types via `repo_*_to_service()` helpers located in the relevant service module (e.g. `services::users::repo_user_to_auth_user()`).
 
-**Rule:** SQL is allowed only in `backend/src/repository/*.rs` (plus migration/bootstrap infrastructure in `db.rs`).
-All new code must expose database operations through repository methods.
-
-**Temporary exceptions for legacy code:**
-- Existing direct SQL outside repositories must be migrated when touched.
-- Any unavoidable temporary exception requires a code comment with: issue link, owner, and removal deadline.
-- Exceptions are short-lived and must not be copied into new code paths.
-
-**Enforcement guidance:**
-- PR review must reject direct `sqlx::query*` usage outside `backend/src/repository/*.rs`.
-- CI should include a guard (for production backend files) that fails when direct SQL patterns are introduced outside repository modules.
+**Rules:**
+- SQL is allowed only in `backend/src/repository/*.rs` (plus `db.rs` bootstrap).
+- Handlers must not import `sqlx` or `crate::repository`.
+- Services must not import `axum::extract`, `axum::response`, or `axum::routing`.
+- All new database operations must go through repository methods.
 
 ### Background tasks (spawned in main.rs)
 
@@ -261,42 +260,50 @@ Tests use Vitest + jsdom. Test files are co-located with source under `src/` and
 
 ### Backend
 
-Integration tests are in `backend/tests/integration/`. By default, each test gets an isolated PostgreSQL database created and dropped automatically via `tests/common/mod.rs` (testcontainers).
-
-If Docker is not available, use a local PostgreSQL service and set `TEST_DATABASE_URL` to a reachable admin database URL. The integration harness skips testcontainers when `TEST_DATABASE_URL` is set, creates isolated `zerf_test_*` databases on that instance, and leaves the server process alone.
-
-For local service testing:
-
-- Start PostgreSQL first, for example `service postgresql start`.
-- Verify it is reachable with `pg_isready -h 127.0.0.1 -p 5432 -U <role>`.
-- Use the actual local admin role. In some dev containers this is `vscode`, not `postgres`.
-- Ensure the role can connect over TCP and create databases. If needed, set a password from a local peer-authenticated shell, for example `psql postgres -c "ALTER USER vscode PASSWORD 'postgres';"`.
-- Prefer serial integration tests on small local clusters to avoid exhausting `max_connections`.
-
 ```bash
 cd backend
-DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/postgres cargo test
+
+# Unit tests only (no database required, ~3 s)
+cargo test --lib
+
+# Integration tests with Docker (each test gets its own container)
+cargo test --test integration
+
+# Integration tests without Docker — requires a local PostgreSQL instance
+TEST_DATABASE_URL=postgres://<role>:<password>@127.0.0.1/<admin-db> cargo test --test integration
 ```
 
-Without Docker:
+**Integration test isolation:** every `TestApp::spawn()` call creates a unique database
+(`zerf_test_{pid}_{counter}`), migrates it, seeds it, and drops it via `cleanup()`.
+Tests never share rows, ports, or sessions — parallel execution is safe.
+
+**Parallelism:** `.cargo/config.toml` sets `test-threads = 8` by default, matching the
+8-CPU dev container. Each test pool uses 3 connections max; peak usage is ~24 connections.
+PostgreSQL `max_connections` must be ≥ 50 (set to 200 in the dev container).
+The full suite runs in ~2 minutes.
+
+**Running without Docker (local PostgreSQL):**
+
+- Start PostgreSQL: `pg_ctlcluster 14 main start` (or `service postgresql start`).
+- Verify: `pg_isready -h 127.0.0.1`.
+- The local superuser role is `vscode` in this dev container. Enable TCP auth if needed:
+  ```bash
+  psql -h /var/run/postgresql -U vscode -d postgres -c "ALTER USER vscode PASSWORD 'secret';"
+  ```
+- Run tests:
+  ```bash
+  TEST_DATABASE_URL=postgres://vscode:secret@127.0.0.1/postgres cargo test --test integration
+  ```
+
+**Verification after changes:**
 
 ```bash
-cd backend
-TEST_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/postgres cargo test --test integration
-```
-
-Without Docker on a constrained local PostgreSQL instance:
-
-```bash
-cd backend
-TEST_DATABASE_URL=postgres://vscode:postgres@127.0.0.1:5432/postgres cargo test --test integration -- --test-threads=1
-```
-
-For a local Postgres container:
-
-```bash
-docker run -d -p 55432:5432 -e POSTGRES_PASSWORD=postgres postgres
-DATABASE_URL=postgres://postgres:postgres@127.0.0.1:55432/postgres cargo test
+cargo build                              # zero compilation errors
+cargo clippy -- -D warnings             # zero warnings
+cargo test --lib                        # unit tests (no DB)
+TEST_DATABASE_URL=... cargo test        # full suite including integration
+grep -rn "sqlx::" backend/src/handlers/ # must be empty (no SQL in handlers)
+grep -rn "axum::extract\|axum::response\|axum::routing\|axum::Json" backend/src/services/ # must be empty
 ```
 
 `backend/tests/nager_contract.rs` validates the external Nager.Date holiday API contract.
