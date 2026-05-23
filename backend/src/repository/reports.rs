@@ -162,6 +162,37 @@ impl ReportDb {
         Ok(rows.into_iter().map(|(d,)| d).collect())
     }
 
+    /// Returns presence flags `(has_draft, has_submitted, has_approved, has_rejected)`
+    /// for time entries in the given range. Used to derive the frontend
+    /// `weekStatus` value on the backend without shipping every entry.
+    pub async fn week_status_flags(
+        &self,
+        user_id: i64,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> AppResult<(bool, bool, bool, bool)> {
+        let row: (Option<bool>, Option<bool>, Option<bool>, Option<bool>) = sqlx::query_as(
+            "SELECT \
+                BOOL_OR(status = 'draft'), \
+                BOOL_OR(status = 'submitted'), \
+                BOOL_OR(status = 'approved'), \
+                BOOL_OR(status = 'rejected') \
+             FROM time_entries \
+             WHERE user_id = $1 AND entry_date BETWEEN $2 AND $3",
+        )
+        .bind(user_id)
+        .bind(from)
+        .bind(to)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok((
+            row.0.unwrap_or(false),
+            row.1.unwrap_or(false),
+            row.2.unwrap_or(false),
+            row.3.unwrap_or(false),
+        ))
+    }
+
     /// Returns true when at least one entry with status='submitted' (pending approval)
     /// exists in the given date range.
     pub async fn has_pending_submitted_entries_in_range(

@@ -1010,6 +1010,28 @@
                 ? $t("All submitted")
                 : $t("Weeks missing")}
             </div>
+            {#if reportData.monthReport.current_week_status === "draft"}
+              <div
+                class="stat-card-sub"
+                style="color:var(--text-tertiary);font-size:11px;margin-top:4px"
+              >
+                {$t("Current week: draft")}
+              </div>
+            {:else if reportData.monthReport.current_week_status === "partial"}
+              <div
+                class="stat-card-sub"
+                style="color:var(--text-tertiary);font-size:11px;margin-top:4px"
+              >
+                {$t("Current week: partially submitted")}
+              </div>
+            {:else if reportData.monthReport.current_week_status === "rejected"}
+              <div
+                class="stat-card-sub"
+                style="color:var(--text-tertiary);font-size:11px;margin-top:4px"
+              >
+                {$t("Current week: needs revision")}
+              </div>
+            {/if}
           </div>
         {/if}
       </div>
