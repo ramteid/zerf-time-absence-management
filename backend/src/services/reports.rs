@@ -1114,6 +1114,114 @@ mod tests {
         assert_eq!(categories[2].category, "C");
     }
 
+    /// `complete_weeks_in_month` returns an empty vec when today is the very
+    /// first day of the month (no week can have elapsed yet).
+    #[test]
+    fn complete_weeks_in_month_returns_empty_when_no_week_elapsed() {
+        // May 1, 2026 is a Friday. The first overlapping week starts on
+        // April 27 (Monday); its Sunday is May 3. With today = May 1, even
+        // that partial week is not yet complete (May 3 >= May 1).
+        let month_start = NaiveDate::from_ymd_opt(2026, 5, 1).unwrap();
+        let month_end   = NaiveDate::from_ymd_opt(2026, 5, 31).unwrap();
+        let today       = NaiveDate::from_ymd_opt(2026, 5, 1).unwrap(); // first of month
+
+        let mondays = complete_weeks_in_month(month_start, month_end, today);
+        assert!(mondays.is_empty(), "expected no complete weeks, got {mondays:?}");
+    }
+
+    /// `check_weeks_all_submitted` considers a week fully excused when every
+    /// contract workday is before the user's start date.
+    #[test]
+    fn check_weeks_all_submitted_excuses_week_before_user_start() {
+        let monday = NaiveDate::from_ymd_opt(2026, 5, 4).unwrap();
+        let complete_weeks = vec![monday];
+        // User starts on the Monday of the NEXT week.
+        let user_start = NaiveDate::from_ymd_opt(2026, 5, 11).unwrap();
+        let today      = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
+
+        // No submitted entries, no holidays, no absences, but all workdays are
+        // before user_start — the week must be considered excused.
+        assert!(check_weeks_all_submitted(
+            &complete_weeks,
+            &HashSet::new(),
+            &HashSet::new(),
+            &HashSet::new(),
+            &HashSet::new(),
+            user_start,
+            5,
+            today,
+        ));
+    }
+
+    /// `check_weeks_all_submitted` returns false when a week has no submitted
+    /// days and at least one workday is not excused.
+    #[test]
+    fn check_weeks_all_submitted_returns_false_for_unsubmitted_unexcused_week() {
+        let monday = NaiveDate::from_ymd_opt(2026, 5, 4).unwrap();
+        let complete_weeks = vec![monday];
+        let user_start = NaiveDate::from_ymd_opt(2020, 1, 1).unwrap();
+        let today      = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
+
+        assert!(!check_weeks_all_submitted(
+            &complete_weeks,
+            &HashSet::new(),   // no holidays
+            &HashSet::new(),   // no absences
+            &HashSet::new(),   // no submitted dates
+            &HashSet::new(),   // no incomplete dates
+            user_start,
+            5,
+            today,
+        ));
+    }
+
+    /// `validate_range` accepts a single-day range (from == to).
+    #[test]
+    fn validate_range_accepts_single_day_range() {
+        let d = NaiveDate::from_ymd_opt(2026, 5, 1).unwrap();
+        assert!(validate_range(d, d).is_ok());
+    }
+
+    /// `validate_range` accepts exactly 366 days (the maximum allowed).
+    #[test]
+    fn validate_range_accepts_exactly_366_days() {
+        let from = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        let to   = NaiveDate::from_ymd_opt(2027, 1, 2).unwrap(); // 366 days
+        assert_eq!((to - from).num_days(), 366);
+        assert!(validate_range(from, to).is_ok());
+    }
+
+    /// `month_bounds` handles December correctly (wraps year to January next year).
+    #[test]
+    fn month_bounds_december_wraps_to_january_next_year() {
+        let (from, to) = month_bounds("2026-12").unwrap();
+        assert_eq!(from, NaiveDate::from_ymd_opt(2026, 12, 1).unwrap());
+        assert_eq!(to,   NaiveDate::from_ymd_opt(2026, 12, 31).unwrap());
+    }
+
+    /// `expand_absence_date_set` returns an empty set for empty input.
+    #[test]
+    fn expand_absence_date_set_returns_empty_for_no_ranges() {
+        let from = NaiveDate::from_ymd_opt(2026, 5, 1).unwrap();
+        let to   = NaiveDate::from_ymd_opt(2026, 5, 31).unwrap();
+        let set = expand_absence_date_set(&[], from, to);
+        assert!(set.is_empty());
+    }
+
+    /// `sort_categories_desc` is stable: equal-minute categories are sorted by
+    /// name ascending, preserving a consistent ordering across runs.
+    #[test]
+    fn sort_categories_desc_with_all_equal_minutes_sorts_by_name() {
+        let mut cats = vec![
+            CategoryTotal { category: "Zebra".to_string(), color: "#3".to_string(), minutes: 60 },
+            CategoryTotal { category: "Alpha".to_string(), color: "#1".to_string(), minutes: 60 },
+            CategoryTotal { category: "Mango".to_string(), color: "#2".to_string(), minutes: 60 },
+        ];
+        sort_categories_desc(&mut cats);
+        assert_eq!(cats[0].category, "Alpha");
+        assert_eq!(cats[1].category, "Mango");
+        assert_eq!(cats[2].category, "Zebra");
+    }
+
     #[tokio::test]
     async fn csv_response_adds_formula_injection_guard_and_headers() {
         let day = DayDetail {

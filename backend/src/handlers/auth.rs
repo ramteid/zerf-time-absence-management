@@ -528,4 +528,83 @@ mod tests {
     fn setup_default_tracks_time_is_true() {
         assert!(default_tracks_time());
     }
+
+    /// `SetupRequest` deserialisation must set `tracks_time = true` when the
+    /// field is omitted, and honour an explicit `false` value when provided.
+    #[test]
+    fn setup_request_tracks_time_defaults_to_true_when_absent() {
+        let without_field: SetupRequest = serde_json::from_value(serde_json::json!({
+            "email": "admin@example.com",
+            "password": "StrongPass1!",
+            "first_name": "Ada",
+            "last_name": "Lovelace"
+        }))
+        .unwrap();
+        assert!(
+            without_field.tracks_time,
+            "tracks_time must default to true when omitted"
+        );
+
+        let with_false: SetupRequest = serde_json::from_value(serde_json::json!({
+            "email": "admin@example.com",
+            "password": "StrongPass1!",
+            "first_name": "Ada",
+            "last_name": "Lovelace",
+            "tracks_time": false
+        }))
+        .unwrap();
+        assert!(
+            !with_false.tracks_time,
+            "tracks_time must honour an explicit false value"
+        );
+    }
+
+    /// `LoginReq` must deserialise correctly from a standard JSON body.
+    #[test]
+    fn login_req_deserialises_email_and_password() {
+        let req: LoginReq = serde_json::from_value(serde_json::json!({
+            "email": "user@example.com",
+            "password": "hunter2"
+        }))
+        .unwrap();
+        assert_eq!(req.email, "user@example.com");
+        assert_eq!(req.password, "hunter2");
+    }
+
+    /// `ForgotPasswordReq` must deserialise correctly.
+    #[test]
+    fn forgot_password_req_deserialises_email() {
+        let req: ForgotPasswordReq =
+            serde_json::from_value(serde_json::json!({"email": "test@example.com"})).unwrap();
+        assert_eq!(req.email, "test@example.com");
+    }
+
+    /// `ResetPasswordTokenReq` must deserialise token and password.
+    #[test]
+    fn reset_password_token_req_deserialises_token_and_password() {
+        let req: ResetPasswordTokenReq = serde_json::from_value(serde_json::json!({
+            "token": "abc123",
+            "password": "NewSecure1!"
+        }))
+        .unwrap();
+        assert_eq!(req.token, "abc123");
+        assert_eq!(req.password, "NewSecure1!");
+    }
+
+    /// `PasswordReq` must treat a missing `current_password` field as `None`.
+    #[test]
+    fn password_req_current_password_is_optional() {
+        let with_current: PasswordReq = serde_json::from_value(serde_json::json!({
+            "current_password": "OldPass1!",
+            "new_password": "NewPass1!"
+        }))
+        .unwrap();
+        assert_eq!(with_current.current_password.as_deref(), Some("OldPass1!"));
+
+        let without_current: PasswordReq = serde_json::from_value(serde_json::json!({
+            "new_password": "NewPass1!"
+        }))
+        .unwrap();
+        assert!(without_current.current_password.is_none());
+    }
 }

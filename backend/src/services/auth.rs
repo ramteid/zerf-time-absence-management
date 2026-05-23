@@ -285,4 +285,64 @@ mod tests {
         assert!(!verify_password("WrongPass123!", &hash));
         assert!(!verify_password(password, "not-a-valid-hash"));
     }
+
+    /// The boundary values of the password length constraint must be treated
+    /// correctly: exactly MIN_PW_LEN passes, one below fails.
+    #[test]
+    fn password_strength_boundary_values() {
+        // Exactly 12 characters with 3 character classes → accepted.
+        assert!(validate_password_strength("Abcdefghi12!").is_ok()); // 12 chars
+
+        // 11 characters → too short.
+        assert!(validate_password_strength("Abcdefgh12!").is_err()); // 11 chars
+
+        // Exactly 256 characters with 3 character classes → accepted.
+        let exactly_256 = format!("Aa1!{}", "x".repeat(252));
+        assert_eq!(exactly_256.len(), 256);
+        assert!(validate_password_strength(&exactly_256).is_ok());
+
+        // 257 characters → too long.
+        let over_256 = format!("Aa1!{}", "x".repeat(253));
+        assert_eq!(over_256.len(), 257);
+        assert!(validate_password_strength(&over_256).is_err());
+    }
+
+    /// A password meeting exactly three of the four character classes must pass.
+    /// All four classes must also pass.
+    #[test]
+    fn password_strength_three_and_four_classes_both_pass() {
+        // Lower + Upper + Digit (3 classes, no symbol)
+        assert!(validate_password_strength("SecurePass1234").is_ok());
+        // Lower + Upper + Symbol (3 classes, no digit)
+        assert!(validate_password_strength("SecurePasswd!!").is_ok());
+        // Lower + Digit + Symbol (3 classes, no upper)
+        assert!(validate_password_strength("securepass12!!").is_ok());
+        // All four classes
+        assert!(validate_password_strength("SecurePass12!!").is_ok());
+    }
+
+    /// A password with fewer than three character classes must be rejected
+    /// regardless of length.
+    #[test]
+    fn password_strength_rejects_less_than_three_classes() {
+        // Only lowercase + digit (2 classes)
+        assert!(validate_password_strength("alllower12345678").is_err());
+        // Only uppercase (1 class)
+        assert!(validate_password_strength("ALLUPPERCASEONLY").is_err());
+        // Only lowercase + uppercase (2 classes)
+        assert!(validate_password_strength("OnlyLettersABCDE").is_err());
+    }
+
+    /// `argon2_instance` must return a valid Argon2id instance without panicking.
+    #[test]
+    fn argon2_instance_creates_valid_configuration() {
+        // Simply ensure the function returns without panicking (the Params::new
+        // call inside has `expect`, which would panic on invalid parameters).
+        let instance = argon2_instance();
+        // Verify it can actually hash a password (smoke test).
+        use argon2::password_hash::{PasswordHasher, SaltString};
+        use argon2::password_hash::rand_core::OsRng;
+        let salt = SaltString::generate(&mut OsRng);
+        assert!(instance.hash_password(b"test", &salt).is_ok());
+    }
 }

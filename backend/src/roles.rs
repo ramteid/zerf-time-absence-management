@@ -50,3 +50,70 @@ pub fn can_approve_admin_subjects(role: &str, active: bool) -> bool {
 pub fn can_approve_non_admin_subjects(role: &str, active: bool) -> bool {
     active && is_lead_role(role)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `normalize_role` must strip surrounding whitespace and lowercase the value.
+    #[test]
+    fn normalize_role_trims_and_lowercases() {
+        assert_eq!(normalize_role("  Admin  "), "admin");
+        assert_eq!(normalize_role("TEAM_LEAD"), "team_lead");
+        assert_eq!(normalize_role("employee"), "employee");
+        assert_eq!(normalize_role(""), "");
+    }
+
+    /// Each `is_*_role` predicate must match exactly its own role after
+    /// normalization and reject all other roles.
+    #[test]
+    fn role_predicates_identify_correct_roles() {
+        assert!(is_assistant_role("assistant"));
+        assert!(is_assistant_role(" ASSISTANT "));
+        assert!(!is_assistant_role("admin"));
+        assert!(!is_assistant_role("employee"));
+
+        assert!(is_admin_role("admin"));
+        assert!(is_admin_role("  Admin "));
+        assert!(!is_admin_role("team_lead"));
+
+        assert!(is_team_lead_role("team_lead"));
+        assert!(is_team_lead_role("TEAM_LEAD"));
+        assert!(!is_team_lead_role("admin"));
+        assert!(!is_team_lead_role("employee"));
+    }
+
+    /// `is_lead_role` must return true for both team_lead and admin.
+    #[test]
+    fn is_lead_role_accepts_team_lead_and_admin() {
+        assert!(is_lead_role("team_lead"));
+        assert!(is_lead_role("admin"));
+        assert!(is_lead_role(" Admin "));
+        assert!(!is_lead_role("employee"));
+        assert!(!is_lead_role("assistant"));
+    }
+
+    /// `can_approve_admin_subjects` requires the approver to be an active admin.
+    #[test]
+    fn can_approve_admin_subjects_requires_active_admin() {
+        assert!(can_approve_admin_subjects("admin", true));
+        // Inactive admin must not approve.
+        assert!(!can_approve_admin_subjects("admin", false));
+        // Team lead can never approve admin subjects regardless of active flag.
+        assert!(!can_approve_admin_subjects("team_lead", true));
+        assert!(!can_approve_admin_subjects("employee", true));
+    }
+
+    /// `can_approve_non_admin_subjects` accepts any active team_lead or admin.
+    #[test]
+    fn can_approve_non_admin_subjects_accepts_any_active_lead() {
+        assert!(can_approve_non_admin_subjects("team_lead", true));
+        assert!(can_approve_non_admin_subjects("admin", true));
+        // Inactive leads must not approve.
+        assert!(!can_approve_non_admin_subjects("team_lead", false));
+        assert!(!can_approve_non_admin_subjects("admin", false));
+        // Employees and assistants are never eligible.
+        assert!(!can_approve_non_admin_subjects("employee", true));
+        assert!(!can_approve_non_admin_subjects("assistant", true));
+    }
+}

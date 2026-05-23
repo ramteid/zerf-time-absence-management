@@ -691,3 +691,302 @@ pub async fn workdays_per_kind(
 ) -> AppResult<f64> {
     workdays_total(pool, user_id, kind, from, to).await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    // ──────────────────────────────────────────────────────────────────────
+    // validate_sick_start_date
+    // ──────────────────────────────────────────────────────────────────────
+
+    /// Non-sick absence kinds must always pass regardless of start date.
+    #[test]
+    fn validate_sick_start_date_skips_non_sick_kinds() {
+        let today = NaiveDate::from_ymd_opt(2026, 5, 22).unwrap();
+        // A date far in the past must be fine for non-sick kinds.
+        let old_start = NaiveDate::from_ymd_opt(2020, 1, 1).unwrap();
+        assert!(validate_sick_start_date("vacation", old_start, today).is_ok());
+        assert!(validate_sick_start_date("training", old_start, today).is_ok());
+        assert!(validate_sick_start_date("general_absence", old_start, today).is_ok());
+    }
+
+    /// Sick leave is accepted when the start date is within 30 days.
+    #[test]
+    fn validate_sick_start_date_accepts_recent_sick_start() {
+        let today = NaiveDate::from_ymd_opt(2026, 5, 22).unwrap();
+        // Exactly 30 days ago is the boundary (allowed).
+        let boundary = today - Duration::days(30);
+        assert!(validate_sick_start_date("sick", boundary, today).is_ok());
+        // Even today is fine.
+        assert!(validate_sick_start_date("sick", today, today).is_ok());
+    }
+
+    /// Sick leave must be rejected when the start date is older than 30 days.
+    #[test]
+    fn validate_sick_start_date_rejects_old_sick_start() {
+        let today = NaiveDate::from_ymd_opt(2026, 5, 22).unwrap();
+        // 31 days ago — one day past the allowed window.
+        let too_old = today - Duration::days(31);
+        let err = validate_sick_start_date("sick", too_old, today).unwrap_err();
+        assert!(matches!(err, crate::error::AppError::BadRequest(_)));
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // has_effective_workday
+    // ──────────────────────────────────────────────────────────────────────
+
+    /// A range that contains at least one Mon–Fri day and no holidays must
+    /// return true.
+    #[test]
+    fn has_effective_workday_returns_true_when_workday_present() {
+        // 2026-05-18 is a Monday.
+        let monday = NaiveDate::from_ymd_opt(2026, 5, 18).unwrap();
+        let friday = NaiveDate::from_ymd_opt(2026, 5, 22).unwrap();
+        assert!(has_effective_workday(monday, friday, 5, &HashSet::new()));
+    }
+
+    /// A range that only covers Saturday and Sunday must return false for a
+    /// standard 5-day contract.
+    #[test]
+    fn has_effective_workday_returns_false_for_weekend_only_range() {
+        // 2026-05-23 Saturday, 2026-05-24 Sunday.
+        let sat = NaiveDate::from_ymd_opt(2026, 5, 23).unwrap();
+        let sun = NaiveDate::from_ymd_opt(2026, 5, 24).unwrap();
+        assert!(!has_effective_workday(sat, sun, 5, &HashSet::new()));
+    }
+
+    /// A holiday falling on the only workday must result in false.
+    #[test]
+    fn has_effective_workday_returns_false_when_sole_workday_is_holiday() {
+        // 2026-05-18 Monday — add it as a holiday.
+        let monday = NaiveDate::from_ymd_opt(2026, 5, 18).unwrap();
+        let mut holidays = HashSet::new();
+        holidays.insert(monday);
+        // Range is exactly one Monday — blocked by holiday.
+        assert!(!has_effective_workday(monday, monday, 5, &holidays));
+    }
+
+    /// A 4-day contract (Mon–Thu) means Friday is not a workday.
+    #[test]
+    fn has_effective_workday_respects_workdays_per_week() {
+        // 2026-05-22 is a Friday.
+        let friday = NaiveDate::from_ymd_opt(2026, 5, 22).unwrap();
+        // Friday is NOT a contract workday for a 4-day week.
+        assert!(!has_effective_workday(friday, friday, 4, &HashSet::new()));
+        // Thursday is the last contract workday for a 4-day week.
+        let thursday = NaiveDate::from_ymd_opt(2026, 5, 21).unwrap();
+        assert!(has_effective_workday(thursday, thursday, 4, &HashSet::new()));
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // clamp_range_to_window
+    // ──────────────────────────────────────────────────────────────────────
+
+    /// A range fully inside the window must pass through unchanged.
+    #[test]
+    fn clamp_range_to_window_returns_unchanged_when_inside_window() {
+        let start = NaiveDate::from_ymd_opt(2026, 3, 10).unwrap();
+        let end   = NaiveDate::from_ymd_opt(2026, 3, 20).unwrap();
+        let ws    = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        let we    = NaiveDate::from_ymd_opt(2026, 12, 31).unwrap();
+        assert_eq!(clamp_range_to_window(start, end, ws, we), Some((start, end)));
+    }
+
+    /// A range that starts before the window and ends inside it must be
+    /// clamped to the window start.
+    #[test]
+    fn clamp_range_to_window_clamps_left_overhang() {
+        let start = NaiveDate::from_ymd_opt(2025, 12, 20).unwrap();
+        let end   = NaiveDate::from_ymd_opt(2026, 1, 10).unwrap();
+        let ws    = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        let we    = NaiveDate::from_ymd_opt(2026, 12, 31).unwrap();
+        let result = clamp_range_to_window(start, end, ws, we).unwrap();
+        assert_eq!(result.0, ws);
+        assert_eq!(result.1, end);
+    }
+
+    /// A range that starts inside the window and ends beyond it must be
+    /// clamped to the window end.
+    #[test]
+    fn clamp_range_to_window_clamps_right_overhang() {
+        let start = NaiveDate::from_ymd_opt(2026, 12, 20).unwrap();
+        let end   = NaiveDate::from_ymd_opt(2027, 1, 5).unwrap();
+        let ws    = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        let we    = NaiveDate::from_ymd_opt(2026, 12, 31).unwrap();
+        let result = clamp_range_to_window(start, end, ws, we).unwrap();
+        assert_eq!(result.0, start);
+        assert_eq!(result.1, we);
+    }
+
+    /// A range entirely outside (before) the window must return None.
+    #[test]
+    fn clamp_range_to_window_returns_none_when_no_overlap() {
+        let start = NaiveDate::from_ymd_opt(2025, 1, 1).unwrap();
+        let end   = NaiveDate::from_ymd_opt(2025, 12, 31).unwrap();
+        let ws    = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        let we    = NaiveDate::from_ymd_opt(2026, 12, 31).unwrap();
+        assert!(clamp_range_to_window(start, end, ws, we).is_none());
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // pro_rate_entitlement
+    // ──────────────────────────────────────────────────────────────────────
+
+    /// A user who started before the year receives the full entitlement.
+    #[test]
+    fn pro_rate_entitlement_returns_full_when_started_before_year() {
+        let start = NaiveDate::from_ymd_opt(2025, 6, 1).unwrap();
+        assert_eq!(pro_rate_entitlement(start, 2026, 30), 30);
+    }
+
+    /// A user whose start date is after the end of the year gets 0.
+    #[test]
+    fn pro_rate_entitlement_returns_zero_when_not_yet_started() {
+        let start = NaiveDate::from_ymd_opt(2027, 1, 1).unwrap();
+        assert_eq!(pro_rate_entitlement(start, 2026, 30), 0);
+    }
+
+    /// A user who started on Jan 1 of the target year gets the full entitlement.
+    #[test]
+    fn pro_rate_entitlement_full_when_start_is_jan_first() {
+        let start = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        assert_eq!(pro_rate_entitlement(start, 2026, 30), 30);
+    }
+
+    /// A user who started on July 1 (month 7) has 6 remaining months:
+    /// ceil(30 * 6 / 12) = 15.
+    #[test]
+    fn pro_rate_entitlement_mid_year_rounds_up() {
+        let start = NaiveDate::from_ymd_opt(2026, 7, 1).unwrap();
+        // months_remaining = 13 - 7 = 6; ceil(30 * 6 / 12) = ceil(15.0) = 15
+        assert_eq!(pro_rate_entitlement(start, 2026, 30), 15);
+    }
+
+    /// A user who started on December 1 has 1 remaining month:
+    /// ceil(30 * 1 / 12) = ceil(2.5) = 3.
+    #[test]
+    fn pro_rate_entitlement_december_start_rounds_up_to_minimum() {
+        let start = NaiveDate::from_ymd_opt(2026, 12, 1).unwrap();
+        // months_remaining = 13 - 12 = 1; ceil(30 * 1 / 12) = ceil(2.5) = 3
+        assert_eq!(pro_rate_entitlement(start, 2026, 30), 3);
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // parse_expiry_date
+    // ──────────────────────────────────────────────────────────────────────
+
+    /// A standard "03-31" setting must parse to March 31.
+    #[test]
+    fn parse_expiry_date_standard_setting() {
+        let result = parse_expiry_date("03-31", 2026).unwrap();
+        assert_eq!(result, NaiveDate::from_ymd_opt(2026, 3, 31).unwrap());
+    }
+
+    /// "02-30" must be clamped to Feb 28 (or 29 in a leap year) because
+    /// February never has 30 days.
+    #[test]
+    fn parse_expiry_date_clamps_to_month_end() {
+        let normal = parse_expiry_date("02-30", 2026).unwrap();
+        assert_eq!(normal, NaiveDate::from_ymd_opt(2026, 2, 28).unwrap());
+
+        let leap = parse_expiry_date("02-30", 2024).unwrap();
+        assert_eq!(leap, NaiveDate::from_ymd_opt(2024, 2, 29).unwrap());
+    }
+
+    /// "12-31" must parse correctly (December 31).
+    #[test]
+    fn parse_expiry_date_december() {
+        let result = parse_expiry_date("12-31", 2026).unwrap();
+        assert_eq!(result, NaiveDate::from_ymd_opt(2026, 12, 31).unwrap());
+    }
+
+    /// Invalid formats must return None.
+    #[test]
+    fn parse_expiry_date_returns_none_for_invalid_input() {
+        assert!(parse_expiry_date("", 2026).is_none());
+        assert!(parse_expiry_date("13-01", 2026).is_none());  // month 13 invalid
+        assert!(parse_expiry_date("03/31", 2026).is_none());  // wrong separator
+        assert!(parse_expiry_date("abc-def", 2026).is_none());
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // total_entitlement_with_carryover
+    // ──────────────────────────────────────────────────────────────────────
+
+    /// When carryover has not expired the total includes the carryover days.
+    #[test]
+    fn total_entitlement_with_carryover_adds_days_when_not_expired() {
+        assert_eq!(
+            total_entitlement_with_carryover(20, 5, false),
+            25.0
+        );
+    }
+
+    /// When carryover has expired only the base entitlement is returned.
+    #[test]
+    fn total_entitlement_with_carryover_ignores_days_when_expired() {
+        assert_eq!(
+            total_entitlement_with_carryover(20, 5, true),
+            20.0
+        );
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // total_entitlement_for_dated_vacation
+    // ──────────────────────────────────────────────────────────────────────
+
+    /// When an expiry date is configured the full entitlement including
+    /// carryover is always returned (regardless of the expired flag), because
+    /// the expiry is enforced date-by-date rather than globally.
+    #[test]
+    fn total_entitlement_for_dated_vacation_always_includes_carryover_when_expiry_set() {
+        let expiry = NaiveDate::from_ymd_opt(2026, 3, 31);
+        // Expired = true, but expiry date is set → carryover still applies.
+        assert_eq!(
+            total_entitlement_for_dated_vacation(20, 5, expiry, true),
+            25.0
+        );
+        // Not expired with expiry date set → same result.
+        assert_eq!(
+            total_entitlement_for_dated_vacation(20, 5, expiry, false),
+            25.0
+        );
+    }
+
+    /// Without an expiry date the expired flag controls whether carryover
+    /// is included (delegating to `total_entitlement_with_carryover`).
+    #[test]
+    fn total_entitlement_for_dated_vacation_delegates_to_carryover_when_no_expiry() {
+        assert_eq!(
+            total_entitlement_for_dated_vacation(20, 5, None, false),
+            25.0
+        );
+        assert_eq!(
+            total_entitlement_for_dated_vacation(20, 5, None, true),
+            20.0
+        );
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // exceeds_vacation_budget
+    // ──────────────────────────────────────────────────────────────────────
+
+    /// Using more days than the budget must return true.
+    #[test]
+    fn exceeds_vacation_budget_returns_true_when_over_budget() {
+        assert!(exceeds_vacation_budget(10.0, 9.0));
+        // Just one epsilon over the limit.
+        assert!(exceeds_vacation_budget(10.0 + VACATION_DAY_EPSILON * 2.0, 10.0));
+    }
+
+    /// Using exactly the budget or less must return false.
+    #[test]
+    fn exceeds_vacation_budget_returns_false_within_budget() {
+        assert!(!exceeds_vacation_budget(10.0, 10.0));
+        assert!(!exceeds_vacation_budget(9.0, 10.0));
+        // Sub-epsilon surplus must be treated as within budget (floating-point guard).
+        assert!(!exceeds_vacation_budget(10.0 + VACATION_DAY_EPSILON / 2.0, 10.0));
+    }
+}
