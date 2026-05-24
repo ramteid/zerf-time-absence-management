@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: write
+  issues: write
   pull-requests: write
 
 jobs:
@@ -37,4 +38,22 @@ jobs:
         run: gh pr merge --auto --squash --delete-branch "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  notify-failure:
+    name: Open issue on failure
+    needs: automerge
+    if: failure() && github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Create failure issue
+        run: |
+          gh issue create \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Auto-merge failed for Dependabot PR #${{ github.event.pull_request.number }}" \
+            --body "The [auto-merge workflow](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) failed for ${{ github.event.pull_request.html_url }}. Please check the logs and merge manually if appropriate." \
+            --label "dependencies"
+        env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
