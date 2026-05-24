@@ -1,5 +1,25 @@
 use crate::error::{AppError, AppResult};
-use chrono::NaiveTime;
+use chrono::{Datelike, Duration, NaiveDate, NaiveTime};
+
+/// Compute the Monday of the ISO week that contains `date`.
+/// This is the canonical implementation used across services and background tasks.
+pub fn week_monday(date: NaiveDate) -> NaiveDate {
+    date - Duration::days(date.weekday().num_days_from_monday() as i64)
+}
+
+/// Return the number of days in a given month (month is 1-based).
+/// Returns 28 as a safe fallback if the arithmetic overflows (unreachable in practice).
+pub fn last_day_of_month(year: i32, month: u32) -> u32 {
+    let next_month = if month == 12 {
+        NaiveDate::from_ymd_opt(year + 1, 1, 1)
+    } else {
+        NaiveDate::from_ymd_opt(year, month + 1, 1)
+    };
+    next_month
+        .and_then(|date| date.pred_opt())
+        .map(|date| date.day())
+        .unwrap_or(28)
+}
 
 pub fn parse_hhmm_or_hhmmss(value: &str) -> Option<NaiveTime> {
     NaiveTime::parse_from_str(value, "%H:%M")
@@ -20,6 +40,27 @@ pub fn parse_stored_time(value: &str) -> AppResult<NaiveTime> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::NaiveDate;
+
+    #[test]
+    fn week_monday_returns_monday_for_any_weekday() {
+        // 2026-05-11 is a Monday
+        let monday = NaiveDate::from_ymd_opt(2026, 5, 11).unwrap();
+        let friday = NaiveDate::from_ymd_opt(2026, 5, 15).unwrap();
+        let sunday = NaiveDate::from_ymd_opt(2026, 5, 17).unwrap();
+        assert_eq!(week_monday(monday), monday);
+        assert_eq!(week_monday(friday), monday);
+        assert_eq!(week_monday(sunday), monday);
+    }
+
+    #[test]
+    fn last_day_of_month_handles_standard_and_edge_cases() {
+        assert_eq!(last_day_of_month(2026, 1), 31);
+        assert_eq!(last_day_of_month(2026, 4), 30);
+        assert_eq!(last_day_of_month(2026, 12), 31);
+        assert_eq!(last_day_of_month(2025, 2), 28);
+        assert_eq!(last_day_of_month(2024, 2), 29); // leap year
+    }
 
     /// `parse_hhmm_or_hhmmss` must accept both the HH:MM and HH:MM:SS formats
     /// and return `None` for anything else.

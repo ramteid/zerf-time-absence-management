@@ -21,7 +21,7 @@ pub fn duration_until_next_deadline(
     let today = now.date_naive();
 
     // Try this month's deadline day
-    let candidate_day = day.min(last_day_of_month(today.year(), today.month()));
+    let candidate_day = day.min(crate::time_calc::last_day_of_month(today.year(), today.month()));
     let Some(candidate) = NaiveDate::from_ymd_opt(today.year(), today.month(), candidate_day)
     else {
         return Duration::from_secs(60);
@@ -66,21 +66,10 @@ fn advance_one_month(date: NaiveDate, desired_day: u32) -> NaiveDate {
     } else {
         (date.year(), date.month() + 1)
     };
-    let actual_day = desired_day.min(last_day_of_month(year, month));
+    let actual_day = desired_day.min(crate::time_calc::last_day_of_month(year, month));
     NaiveDate::from_ymd_opt(year, month, actual_day).unwrap_or(date)
 }
 
-pub fn last_day_of_month(year: i32, month: u32) -> u32 {
-    let next_month = if month == 12 {
-        NaiveDate::from_ymd_opt(year + 1, 1, 1)
-    } else {
-        NaiveDate::from_ymd_opt(year, month + 1, 1)
-    };
-    next_month
-        .and_then(|date| date.pred_opt())
-        .map(|date| date.day())
-        .unwrap_or(28)
-}
 
 /// Collect ISO week labels (e.g. "2026-W03") where the user has unsubmitted
 /// workdays, from their start_date up to (but not including) the current week.
@@ -100,8 +89,7 @@ async fn find_unsubmitted_weeks(
     let today = app_today(pool).await;
 
     // Monday of the current week.
-    let current_week_monday =
-        today - chrono::Duration::days(today.weekday().num_days_from_monday() as i64);
+    let current_week_monday = crate::time_calc::week_monday(today);
     // Only check fully elapsed weeks. A week is fully elapsed when its Sunday
     // is strictly in the past (all 7 days have passed). The current week is
     // always excluded because the user can still log time for today.
@@ -112,8 +100,7 @@ async fn find_unsubmitted_weeks(
     }
 
     // Align to full weeks: start from the Monday of the user_start week.
-    let first_monday =
-        user_start - chrono::Duration::days(user_start.weekday().num_days_from_monday() as i64);
+    let first_monday = crate::time_calc::week_monday(user_start);
 
     // Load holidays in the check range.
     let holiday_set: std::collections::HashSet<NaiveDate> =
@@ -147,16 +134,8 @@ async fn find_unsubmitted_weeks(
         .await
         .unwrap_or_default();
 
-    let mut absent_days = std::collections::HashSet::new();
-    for (start, end, _) in &absence_rows {
-        let mut d = *start;
-        while d <= *end && d <= check_to {
-            if d >= first_monday {
-                absent_days.insert(d);
-            }
-            d += chrono::Duration::days(1);
-        }
-    }
+    let absent_days =
+        crate::services::reports::expand_absence_date_set(&absence_rows, first_monday, check_to);
 
     // Check each fully elapsed week using the same three-step logic as
     // `check_weeks_all_submitted` in services/reports.rs so that reminders
@@ -428,18 +407,7 @@ mod tests {
         assert!(secs < 17 * 86400, "should be <17 days, got {secs}");
     }
 
-    #[test]
-    fn last_day_of_month_february_leap_year() {
-        assert_eq!(last_day_of_month(2024, 2), 29);
-        assert_eq!(last_day_of_month(2025, 2), 28);
-    }
-
-    #[test]
-    fn last_day_of_month_various() {
-        assert_eq!(last_day_of_month(2026, 1), 31);
-        assert_eq!(last_day_of_month(2026, 4), 30);
-        assert_eq!(last_day_of_month(2026, 12), 31);
-    }
+    // last_day_of_month tests moved to time_calc::tests (canonical location).
 
     #[test]
     fn advance_one_month_wraps_year() {

@@ -50,6 +50,15 @@ pub fn repo_user_to_auth_user(u: crate::repository::User) -> User {
     }
 }
 
+/// Return `Forbidden` when the requesting user has time tracking disabled.
+/// This is the canonical implementation — service-level copies delegate here.
+pub fn require_tracks_time(user: &User) -> AppResult<()> {
+    if !user.tracks_time {
+        return Err(AppError::Forbidden);
+    }
+    Ok(())
+}
+
 pub async fn assert_can_access_user(
     app_state: &AppState,
     requester: &User,
