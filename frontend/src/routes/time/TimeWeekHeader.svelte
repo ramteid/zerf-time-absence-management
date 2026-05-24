@@ -2,7 +2,7 @@
   import { createEventDispatcher } from "svelte";
   import Icon from "../../Icons.svelte";
   import { t } from "../../i18n.js";
-  import { fmtDateShort, isoWeek } from "../../format.js";
+  import { fmtDateShort, fmtWeekLabel } from "../../format.js";
 
   export let weekFrom = null;
   export let weekTo = null;
@@ -20,7 +20,7 @@
     <h1>{$t("Time Entry")}</h1>
     {#if weekFrom}
       <div class="top-bar-subtitle">
-        {$t("Week {week}", { week: isoWeek(weekFrom) })}
+        {fmtWeekLabel(weekFrom)}
         {#if !isAssistant}
           · {contractHours} {$t("contract")}
         {/if}

@@ -670,8 +670,8 @@ const TRANSLATIONS = {
     "Edit request rejected.": "Bearbeitungsanfrage abgelehnt.",
     "Week edit requests": "Bearbeitungsanfragen",
     "Edit request": "Bearbeitungsanfrage",
-    "wants to edit week of {date}":
-      "möchte die Woche ab {date} wieder bearbeiten",
+    "wants to edit {week_label}":
+      "möchte {week_label} wieder bearbeiten",
     TeamSettings: "Team-Einstellungen",
     "Team Settings": "Team-Einstellungen",
     "Allow employees to submit edit requests without approval":
