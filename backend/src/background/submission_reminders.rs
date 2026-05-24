@@ -158,26 +158,37 @@ async fn find_unsubmitted_weeks(
         }
     }
 
-    // Check each fully elapsed week.
+    // Check each fully elapsed week using the same three-step logic as
+    // `check_weeks_all_submitted` in services/reports.rs so that reminders
+    // are only sent for weeks that are genuinely not yet submitted.
     let mut incomplete_week_mondays = Vec::new();
     let mut week_monday = first_monday;
     while week_monday <= last_checked_monday {
-        let mut week_incomplete = false;
-        for day_offset in 0..i64::from(workdays_per_week) {
-            let day = week_monday + chrono::Duration::days(day_offset);
-            // Skip days before contract start, holidays, or future days.
-            if day < user_start || holiday_set.contains(&day) || day >= today {
-                continue;
-            }
-            // Day must be covered by absence or by a submitted entry without
-            // incomplete (draft/rejected) entries on the same day.
-            let submitted_clean =
-                submitted_dates.contains(&day) && !incomplete_dates.contains(&day);
-            if !absent_days.contains(&day) && !submitted_clean {
-                week_incomplete = true;
-                break;
-            }
-        }
+        // Step 1: any incomplete (draft/rejected) entry anywhere in the
+        // Mon–Sun window means the week is not fully submitted.
+        let has_incomplete = (0..7i64).any(|d| {
+            incomplete_dates.contains(&(week_monday + chrono::Duration::days(d)))
+        });
+
+        // Step 2: if at least one day has a submitted/approved entry (and no
+        // incomplete entries per step 1), treat the whole week as submitted.
+        let has_submitted = (0..7i64).any(|d| {
+            submitted_dates.contains(&(week_monday + chrono::Duration::days(d)))
+        });
+
+        // Step 3: if nothing was submitted, the week is only "excused" when
+        // every contract workday is either before the contract start, a
+        // public holiday, covered by an approved absence, or in the future.
+        let all_excused = !has_submitted
+            && (0..i64::from(workdays_per_week)).all(|d| {
+                let day = week_monday + chrono::Duration::days(d);
+                day < user_start
+                    || holiday_set.contains(&day)
+                    || absent_days.contains(&day)
+                    || day >= today
+            });
+
+        let week_incomplete = has_incomplete || (!has_submitted && !all_excused);
         if week_incomplete {
             incomplete_week_mondays.push(week_monday);
         }
