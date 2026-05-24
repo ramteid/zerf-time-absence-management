@@ -7,10 +7,33 @@ use serde_json::json;
 use crate::common::TestApp;
 use chrono::Datelike;
 
-use crate::helpers::{admin_login, date_offset, next_monday, reference_date, today};
+use crate::helpers::{admin_login, reference_date};
 
 #[tokio::test]
 async fn start_date_full_workflow() {
+    // Capture all dates synchronously (before any await) from a single
+    // reference_date() call so that concurrent tests temporarily mutating the
+    // process-wide TEST_REFERENCE_DATE env var cannot skew the values we use
+    // throughout this long-running test.
+    let ref_date = reference_date();
+    let today_str = ref_date.format("%Y-%m-%d").to_string();
+    let yesterday_str = (ref_date - chrono::Duration::days(1))
+        .format("%Y-%m-%d")
+        .to_string();
+    // Next Monday ≥8 days out — used as the sick-absence end date.
+    let sick_end_str = {
+        let start = ref_date + chrono::Duration::days(7);
+        let wd = start.weekday().num_days_from_monday();
+        let monday = if wd == 0 { start } else { start + chrono::Duration::days((7 - wd) as i64) };
+        monday.format("%Y-%m-%d").to_string()
+    };
+    // Next Monday ≥8 days out as a NaiveDate — used as the flex-carry user's start_date.
+    let flex_start_day = {
+        let start = ref_date + chrono::Duration::days(7);
+        let wd = start.weekday().num_days_from_monday();
+        if wd == 0 { start } else { start + chrono::Duration::days((7 - wd) as i64) }
+    };
+
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
 
@@ -21,7 +44,7 @@ async fn start_date_full_workflow() {
     // Admin's start_date is set to today during seed. Verify that creating a time
     // entry before that date is rejected.
     {
-        let yesterday = date_offset(-1);
+        let yesterday = yesterday_str.clone();
         let (st, body) = admin
             .post(
                 "/api/v1/time-entries",
@@ -51,7 +74,7 @@ async fn start_date_full_workflow() {
             .post(
                 "/api/v1/time-entries",
                 &json!({
-                    "entry_date": today(),
+                    "entry_date": today_str,
                     "start_time": "00:00",
                     "end_time": "00:01",
                     "category_id": cat_id,
@@ -64,7 +87,7 @@ async fn start_date_full_workflow() {
     // -- Absence before start date rejected --
     // Absence that starts before the user's start_date must be rejected.
     {
-        let yesterday = date_offset(-1);
+        let yesterday = yesterday_str.clone();
         let (st, body) = admin
             .post(
                 "/api/v1/absences",
@@ -93,14 +116,13 @@ async fn start_date_full_workflow() {
     // next_monday(0) so that the range is never entirely consumed by the
     // immediate next Monday being a public holiday (e.g. Pfingst Montag 2026).
     {
-        let sick_end = next_monday(7).to_string();
         let (st, _) = admin
             .post(
                 "/api/v1/absences",
                 &json!({
                     "kind": "sick",
-                    "start_date": today(),
-                    "end_date": sick_end,
+                    "start_date": today_str,
+                    "end_date": sick_end_str,
                 }),
             )
             .await;
@@ -112,7 +134,6 @@ async fn start_date_full_workflow() {
     // current month (if any), not months before it, and the cumulative balance
     // must be non-positive only by at most one day's target.
     {
-        let ref_date = reference_date();
         let year = ref_date.format("%Y").to_string();
         let (st, body) = admin
             .get(&format!("/api/v1/reports/overtime?year={year}"))
@@ -142,7 +163,7 @@ async fn start_date_full_workflow() {
 
     // -- Overtime start balance carries into later years --
     {
-        let current_year: i32 = reference_date().year();
+        let current_year: i32 = ref_date.year();
         let start_date = chrono::NaiveDate::from_ymd_opt(current_year - 1, 1, 1)
             .unwrap()
             .to_string();
@@ -186,13 +207,9 @@ async fn start_date_full_workflow() {
 
     // -- Flextime start balance begins on start date --
     {
-        // Use the next Monday ≥8 days from now as start_date so the report
-        // always includes a proper workday row.  When today is a weekend,
-        // using today() as start_date produces no workday row and the
-        // cumulative never reaches 120.
-        let start_day = next_monday(7);
-        let start_day_str = start_day.format("%Y-%m-%d").to_string();
-        let day_before_str = (start_day - chrono::Duration::days(1))
+        // Use flex_start_day (captured at the top, before any await).
+        let start_day_str = flex_start_day.format("%Y-%m-%d").to_string();
+        let day_before_str = (flex_start_day - chrono::Duration::days(1))
             .format("%Y-%m-%d")
             .to_string();
 
@@ -240,16 +257,11 @@ async fn start_date_full_workflow() {
     // A newly created user with a future-ish start_date should not be able to
     // create entries before that date.
     {
-        // Snapshot the reference date once so that `start_date` and
-        // `before_start` are derived from the same instant.  Parallel tests
-        // (e.g. reports tests) temporarily mutate the process-wide
-        // TEST_REFERENCE_DATE env var, so calling today() / date_offset()
-        // multiple times across async await-points is a data race that can
-        // give start_date a value that is *after* before_start, making the
-        // expected 400 never fire.
-        let ref_day = reference_date();
-        let start_date_str = ref_day.format("%Y-%m-%d").to_string();
-        let before_start_str = (ref_day - chrono::Duration::days(1))
+        // Use the top-level ref_date (captured before any await) so that
+        // concurrent TEST_REFERENCE_DATE mutations by other parallel tests
+        // cannot skew start_date_str and before_start_str against each other.
+        let start_date_str = ref_date.format("%Y-%m-%d").to_string();
+        let before_start_str = (ref_date - chrono::Duration::days(1))
             .format("%Y-%m-%d")
             .to_string();
 
