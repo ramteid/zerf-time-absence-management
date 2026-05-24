@@ -7,12 +7,12 @@
     fmtDate,
     fmtDateShort,
     fmtDateTime,
+    fmtWeekLabel,
     isoDate,
     appTodayDate,
     addDays,
     parseDate,
     monday,
-    isoWeek,
   } from "../format.js";
   import Icon from "../Icons.svelte";
   import Dialog from "../Dialog.svelte";
@@ -743,9 +743,7 @@
                 <span class="zf-chip zf-chip-submitted" style="font-size:10px">{$t("Approval")}</span>
               </div>
               <div class="tab-num" style="font-size:11.5px;color:var(--text-tertiary)">
-                {$t("Week {week}", { week: isoWeek(parseDate(week.week_start)) })} ·
-                {fmtDateShort(week.week_start)} - {fmtDateShort(week.week_end)} ·
-                {weekHours(week)}
+                {fmtWeekLabel(week.week_start)} · {weekHours(week)}
               </div>
             </div>
             <div style="display:flex;gap:4px">
@@ -791,7 +789,7 @@
                 <span class="zf-chip zf-chip-pending" style="font-size:10px">{$t("Edit request")}</span>
               </div>
               <div class="tab-num" style="font-size:11.5px;color:var(--text-tertiary)">
-                {$t("wants to edit week of {date}", { date: fmtDateShort(reopen.week_start) })}
+                {$t("wants to edit {week_label}", { week_label: fmtWeekLabel(reopen.week_start) })}
               </div>
               {#if reopen.reason}
                 <div style="font-size:11px;color:var(--text-tertiary);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px" title={reopen.reason}>
@@ -1148,8 +1146,7 @@
       <div>
         <div class="zf-label">{$t("Week")}</div>
         <div class="tab-num">
-          {fmtDateShort(requestDetail.item.week_start)} -
-          {fmtDateShort(isoDate(addDays(parseDate(requestDetail.item.week_start), 6)))}
+          {fmtWeekLabel(requestDetail.item.week_start)}
         </div>
       </div>
       <div>
@@ -1202,8 +1199,7 @@
       </span>
     </svelte:fragment>
     <div class="tab-num" style="font-size:12px;color:var(--text-secondary)">
-      {$t("Week {week}", { week: isoWeek(parseDate(selectedWeek.week_start)) })} ·
-      {fmtDateShort(selectedWeek.week_start)} - {fmtDateShort(selectedWeek.week_end)}
+      {fmtWeekLabel(selectedWeek.week_start)}
     </div>
 
     <div style="display:flex;gap:8px;flex-wrap:wrap">

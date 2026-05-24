@@ -208,6 +208,20 @@ export function isoWeek(d) {
   );
 }
 
+/// Returns a canonical week label that includes the ISO calendar week number
+/// and the full Monday–Sunday date range, e.g. "KW 21 (18.05. – 24.05.2026)".
+/// Locale-aware: uses "KW" for German, "Week" for all other locales.
+export function fmtWeekLabel(weekStart) {
+  const d = parseDate(weekStart);
+  const kw = isoWeek(d);
+  const end = addDays(d, 6);
+  const locale = getLocale();
+  const prefix = locale.startsWith("de") ? "KW" : "Week";
+  const startStr = d.toLocaleDateString(locale, { day: "2-digit", month: "2-digit" });
+  const endStr = end.toLocaleDateString(locale, { day: "2-digit", month: "2-digit", year: "numeric" });
+  return `${prefix} ${kw} (${startStr}–${endStr})`;
+}
+
 export function getTimeFormat() {
   return get(settings).time_format === "12h" ? "12h" : "24h";
 }
