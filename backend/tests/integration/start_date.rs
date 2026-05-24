@@ -240,6 +240,19 @@ async fn start_date_full_workflow() {
     // A newly created user with a future-ish start_date should not be able to
     // create entries before that date.
     {
+        // Snapshot the reference date once so that `start_date` and
+        // `before_start` are derived from the same instant.  Parallel tests
+        // (e.g. reports tests) temporarily mutate the process-wide
+        // TEST_REFERENCE_DATE env var, so calling today() / date_offset()
+        // multiple times across async await-points is a data race that can
+        // give start_date a value that is *after* before_start, making the
+        // expected 400 never fire.
+        let ref_day = reference_date();
+        let start_date_str = ref_day.format("%Y-%m-%d").to_string();
+        let before_start_str = (ref_day - chrono::Duration::days(1))
+            .format("%Y-%m-%d")
+            .to_string();
+
         // Create a user with start_date = today
         let (st, body) = admin
             .post(
@@ -251,7 +264,7 @@ async fn start_date_full_workflow() {
                     "role": "admin",
                     "weekly_hours": 39,
                     "leave_days_current_year":30,"leave_days_next_year":30,
-                    "start_date": today(),
+                    "start_date": start_date_str,
                 }),
             )
             .await;
@@ -268,13 +281,12 @@ async fn start_date_full_workflow() {
         let (_, cats) = new_client.get("/api/v1/categories").await;
         let cat_id = cats.as_array().unwrap()[0]["id"].as_i64().unwrap();
 
-        // Entry yesterday (before start_date) should fail
-        let yesterday = date_offset(-1);
+        // Entry one day before start_date should fail
         let (st, _) = new_client
             .post(
                 "/api/v1/time-entries",
                 &json!({
-                    "entry_date": yesterday,
+                    "entry_date": before_start_str,
                     "start_time": "08:00",
                     "end_time": "12:00",
                     "category_id": cat_id,
@@ -287,12 +299,12 @@ async fn start_date_full_workflow() {
             "entry before start_date for new user"
         );
 
-        // Entry today should succeed
+        // Entry on start_date should succeed
         let (st, body) = new_client
             .post(
                 "/api/v1/time-entries",
                 &json!({
-                    "entry_date": today(),
+                    "entry_date": start_date_str,
                     "start_time": "00:00",
                     "end_time": "00:01",
                     "category_id": cat_id,
