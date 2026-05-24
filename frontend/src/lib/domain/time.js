@@ -48,7 +48,7 @@ export function creditedEntryMinutes(entry, categoryRows) {
   ) {
     return 0;
   }
-  return durMin(entry.start_time.slice(0, 5), entry.end_time.slice(0, 5));
+  return Math.max(0, durMin(entry.start_time.slice(0, 5), entry.end_time.slice(0, 5)));
 }
 
 export function absenceRemovesTarget(absence) {
