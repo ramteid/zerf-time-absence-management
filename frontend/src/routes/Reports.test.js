@@ -259,7 +259,7 @@ describe("Reports", () => {
     const absenceFrom = await waitForElement(target, "#absence-from", 20000);
     const absenceCard = absenceFrom.closest(".zf-card");
     const runButton = Array.from(absenceCard.querySelectorAll("button")).find(
-      (button) => button.textContent?.trim() === "Run",
+      (button) => button.textContent?.trim() === "Show",
     );
     expect(runButton).toBeTruthy();
     runButton.click();
