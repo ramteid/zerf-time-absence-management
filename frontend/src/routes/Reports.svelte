@@ -1428,7 +1428,7 @@
 
     <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
       <button class="zf-btn zf-btn-primary" on:click={showCat}
-        >{$t("Run")}</button
+        >{$t("Show")}</button
       >
       <!-- Filter button: visible only when results are available -->
       {#if (catReport && catReport.length > 0) || allTeamCatColumns.length > 0}
@@ -1635,7 +1635,7 @@
       </div>
     </div>
     <button class="zf-btn zf-btn-primary" on:click={showAbsences}
-      >{$t("Run")}</button
+      >{$t("Show")}</button
     >
 
     {#if absenceReport}
