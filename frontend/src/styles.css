@@ -339,8 +339,8 @@ body {
   color: var(--nav-text-active);
 }
 .zf-nav-item.active {
-  background: var(--nav-bg-active);
-  color: var(--nav-text-active);
+  background: var(--accent-soft);
+  color: var(--accent-text);
 }
 .zf-nav-section {
   font-size: 10.5px;
@@ -1563,7 +1563,7 @@ dialog footer {
 }
 
 .mobile-more-item.active {
-  color: var(--accent);
+  color: var(--accent-text);
   font-weight: 500;
 }
 

@@ -196,33 +196,20 @@ pub struct NewAbsence {
     pub comment: Option<String>,
 }
 
+/// Return `Forbidden` when the requesting user has time tracking disabled.
+/// Delegates to the canonical implementation in `services::users`.
 pub fn require_tracks_time(user: &User) -> AppResult<()> {
-    if !user.tracks_time {
-        return Err(AppError::Forbidden);
-    }
-    Ok(())
+    crate::services::users::require_tracks_time(user)
 }
 
+/// Verify that `requester` is allowed to access data for `target_uid`.
+/// Delegates to the canonical implementation in `services::users`.
 pub async fn assert_can_access_user(
     app_state: &AppState,
     requester: &User,
     target_uid: i64,
 ) -> AppResult<()> {
-    if requester.id == target_uid || requester.is_admin() {
-        return Ok(());
-    }
-    if !requester.is_lead() {
-        return Err(AppError::Forbidden);
-    }
-    let is_report = app_state
-        .db
-        .users
-        .is_direct_report(target_uid, requester.id)
-        .await?;
-    if !is_report {
-        return Err(AppError::Forbidden);
-    }
-    Ok(())
+    crate::services::users::assert_can_access_user(app_state, requester, target_uid).await
 }
 
 pub async fn create_absence(

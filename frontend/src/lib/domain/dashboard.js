@@ -6,9 +6,11 @@ import {
   monday,
   parseDate,
 } from "../../format.js";
+import { sortByIsoDateAndStartTime } from "./dates.js";
+import { entryCountsAsWork } from "./time.js";
 import { userNameFromRows } from "./users.js";
 
-export function monthKey(year, month) {
+function monthKey(year, month) {
   return `${year}-${String(month).padStart(2, "0")}`;
 }
 
@@ -49,27 +51,6 @@ export function buildSubmissionChecks(months, reports) {
 
 export function currentWeekIsOpen(checks) {
   return (checks || []).some((c) => OPEN_WEEK_STATUSES.has(c.currentWeekStatus));
-}
-
-export function entryCountsAsWork(entry, categories = []) {
-  if (entry?.counts_as_work === false) return false;
-  if (entry?.counts_as_work === true) return true;
-
-  if (entry?.category_id != null) {
-    const categoryById = categories.find(
-      (item) => item.id === entry.category_id,
-    );
-    if (categoryById) return categoryById.counts_as_work !== false;
-  }
-
-  if (entry?.category) {
-    const categoryByName = categories.find(
-      (item) => item.name === entry.category,
-    );
-    if (categoryByName) return categoryByName.counts_as_work !== false;
-  }
-
-  return true;
 }
 
 export function entryMinutes(entry, categories = []) {
@@ -113,15 +94,7 @@ export function buildPendingWeeks(submittedEntries, userRows, categories = []) {
   const sortedWeekGroups = Array.from(weekGroupsByKey.values()).map(
     (group) => ({
       ...group,
-      entries: group.entries.sort((a, b) => {
-        const dateDiff = dateKey(a.entry_date).localeCompare(
-          dateKey(b.entry_date),
-        );
-        if (dateDiff !== 0) return dateDiff;
-        return String(a.start_time || "").localeCompare(
-          String(b.start_time || ""),
-        );
-      }),
+      entries: sortByIsoDateAndStartTime(group.entries),
     }),
   );
 

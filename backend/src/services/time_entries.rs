@@ -3,7 +3,7 @@ use crate::error::AppResult;
 use crate::i18n;
 use crate::middleware::auth::User;
 use crate::AppState;
-use chrono::{Datelike, DateTime, NaiveDate, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 
@@ -35,14 +35,9 @@ pub struct TimeEntry {
 // ---------------------------------------------------------------------------
 
 /// Load the UI language for notification text; falls back to English on error.
+/// Delegates to the canonical implementation in `services::notifications`.
 pub async fn notification_language(pool: &crate::db::DatabasePool) -> i18n::Language {
-    match i18n::load_ui_language(pool).await {
-        Ok(lang) => lang,
-        Err(err) => {
-            tracing::warn!(target: "zerf::time_entries", "load notification language failed: {err}");
-            i18n::Language::default()
-        }
-    }
+    crate::services::notifications::load_language(pool).await
 }
 
 /// Map a repository-level entry to the service-level DTO.
@@ -67,8 +62,9 @@ pub fn repo_entry_to_service(e: crate::repository::TimeEntry) -> TimeEntry {
 }
 
 /// Compute the ISO week start (Monday) for a given date.
+/// Delegates to the canonical implementation in `time_calc`.
 pub fn week_start(date: NaiveDate) -> NaiveDate {
-    date - chrono::Duration::days(date.weekday().num_days_from_monday() as i64)
+    crate::time_calc::week_monday(date)
 }
 
 /// Enrich entries with the `counts_as_work` flag from their category.
@@ -161,11 +157,9 @@ pub async fn notify_week_status_change(
 }
 
 /// Return `Forbidden` when the requesting user has time tracking disabled.
+/// Delegates to the canonical implementation in `services::users`.
 pub fn require_tracks_time(user: &User) -> AppResult<()> {
-    if !user.tracks_time {
-        return Err(crate::error::AppError::Forbidden);
-    }
-    Ok(())
+    crate::services::users::require_tracks_time(user)
 }
 
 pub async fn create(

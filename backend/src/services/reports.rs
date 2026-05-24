@@ -32,24 +32,11 @@ pub async fn assert_can_access_user(
     target_uid: i64,
 ) -> AppResult<()> {
     // Pure-admin users (tracks_time=false) may not view their own report data.
+    // This check is report-specific and runs before the shared base logic.
     if !requester.tracks_time && requester.id == target_uid {
         return Err(AppError::Forbidden);
     }
-    if requester.id == target_uid || requester.is_admin() {
-        return Ok(());
-    }
-    if !requester.is_lead() {
-        return Err(AppError::Forbidden);
-    }
-    let is_report = app_state
-        .db
-        .users
-        .is_direct_report(target_uid, requester.id)
-        .await?;
-    if !is_report {
-        return Err(AppError::Forbidden);
-    }
-    Ok(())
+    crate::services::users::assert_can_access_user(app_state, requester, target_uid).await
 }
 
 pub fn month_bounds(month_str: &str) -> AppResult<(NaiveDate, NaiveDate)> {
@@ -64,19 +51,10 @@ pub fn month_bounds(month_str: &str) -> AppResult<(NaiveDate, NaiveDate)> {
         .map_err(|_| AppError::BadRequest("month".into()))?;
     let from = NaiveDate::from_ymd_opt(year, month_num, 1)
         .ok_or_else(|| AppError::BadRequest("date".into()))?;
-    let next = if month_num == 12 {
-        NaiveDate::from_ymd_opt(
-            year.checked_add(1)
-                .ok_or_else(|| AppError::BadRequest("date".into()))?,
-            1,
-            1,
-        )
-        .ok_or_else(|| AppError::BadRequest("date".into()))?
-    } else {
-        NaiveDate::from_ymd_opt(year, month_num + 1, 1)
-            .ok_or_else(|| AppError::BadRequest("date".into()))?
-    };
-    Ok((from, next - Duration::days(1)))
+    let last_day = crate::time_calc::last_day_of_month(year, month_num);
+    let to = NaiveDate::from_ymd_opt(year, month_num, last_day)
+        .ok_or_else(|| AppError::BadRequest("date".into()))?;
+    Ok((from, to))
 }
 
 #[derive(Serialize)]
@@ -332,8 +310,8 @@ pub async fn build_range(
 
 /// Collects the Monday of every fully elapsed week (Sunday < today) that overlaps the given month.
 pub fn complete_weeks_in_month(month_start: NaiveDate, month_end: NaiveDate, today: NaiveDate) -> Vec<NaiveDate> {
-    let first_monday = month_start - Duration::days(month_start.weekday().num_days_from_monday() as i64);
-    let last_monday = month_end - Duration::days(month_end.weekday().num_days_from_monday() as i64);
+    let first_monday = crate::time_calc::week_monday(month_start);
+    let last_monday = crate::time_calc::week_monday(month_end);
     let mut mondays = Vec::new();
     let mut current = first_monday;
     while current <= last_monday {
@@ -493,8 +471,7 @@ pub async fn current_week_status(
     if today < month_start || today > month_end {
         return Ok(None);
     }
-    let week_monday =
-        today - Duration::days(i64::from(today.weekday().num_days_from_monday()));
+    let week_monday = crate::time_calc::week_monday(today);
     let week_sunday = week_monday + Duration::days(6);
     let reports_db = crate::repository::ReportDb::new(pool.clone());
     let (has_draft, has_submitted, has_approved, has_rejected) = reports_db

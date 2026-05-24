@@ -36,7 +36,18 @@ export function categoryCountsAsWork(categoryId, categoryRows) {
 export function entryCountsAsWork(entry, categoryRows) {
   if (entry?.counts_as_work === false) return false;
   if (entry?.counts_as_work === true) return true;
-  return categoryCountsAsWork(entry?.category_id, categoryRows);
+  // Look up by id first (the common case for server entries).
+  if (entry?.category_id != null) {
+    const byId = (categoryRows || []).find((c) => c.id === entry.category_id);
+    if (byId) return byId.counts_as_work !== false;
+  }
+  // Fall back to name-based lookup (used by dashboard pending-week entries
+  // that carry a `category` string field instead of a numeric id).
+  if (entry?.category) {
+    const byName = (categoryRows || []).find((c) => c.name === entry.category);
+    if (byName) return byName.counts_as_work !== false;
+  }
+  return true;
 }
 
 export function creditedEntryMinutes(entry, categoryRows) {
