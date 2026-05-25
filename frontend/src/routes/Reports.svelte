@@ -5,7 +5,7 @@
   // Current-day hours are included in the monthly report. Boundary weeks count by day for
   // month totals, but they count for both months when checking week submission.
 
-  import { currentUser, settings, toast } from "../stores.js";
+  import { currentUser, earliestStartDate, settings, toast } from "../stores.js";
   import {
     t,
     absenceKindLabel,
@@ -119,7 +119,8 @@
   // Derive the earliest selectable month from the employee's start date.
   $: reportMinMonth = selectedReportUser?.start_date
     ? selectedReportUser.start_date.slice(0, 7)
-    : "";
+    : ($earliestStartDate?.slice(0, 7) ?? "");
+  $: earliestStartMonth = $earliestStartDate?.slice(0, 7) ?? null;
   // Clamp selected month forward when switching to an employee with a later start date.
   $: if (reportMinMonth && reportMonth < reportMinMonth) {
     reportMonth = reportMinMonth;
@@ -1266,7 +1267,7 @@
       >
         <div style="flex:1">
           <label class="zf-label" for="team-month">{$t("Month")}</label>
-          <DatePicker id="team-month" mode="month" bind:value={teamMonth} max={currentMonthStr} />
+          <DatePicker id="team-month" mode="month" bind:value={teamMonth} min={earliestStartMonth} max={currentMonthStr} />
         </div>
         <button class="zf-btn zf-btn-primary" on:click={showTeam}
           >{$t("Show")}</button
@@ -1413,7 +1414,7 @@
     <div class="field-row" style="margin-bottom:12px">
       <div>
         <label class="zf-label" for="cat-from">{$t("From")}</label>
-        <DatePicker id="cat-from" bind:value={catFrom} max={catTo} />
+        <DatePicker id="cat-from" bind:value={catFrom} min={$earliestStartDate} max={catTo} />
       </div>
       <div>
         <label class="zf-label" for="cat-to">{$t("To")}</label>
@@ -1626,6 +1627,7 @@
         <DatePicker
           id="absence-from"
           bind:value={absenceFrom}
+          min={$earliestStartDate}
           max={absenceTo}
         />
       </div>
@@ -1744,7 +1746,7 @@
     <div class="field-row" style="margin-bottom:12px">
       <div>
         <label class="zf-label" for="csv-from">{$t("From")}</label>
-        <DatePicker id="csv-from" bind:value={csvFrom} max={csvTo} />
+        <DatePicker id="csv-from" bind:value={csvFrom} min={$earliestStartDate} max={csvTo} />
       </div>
       <div>
         <label class="zf-label" for="csv-to">{$t("To")}</label>

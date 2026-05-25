@@ -9,6 +9,7 @@
   } from "./api.js";
   import {
     currentUser,
+    earliestStartDate,
     categories,
     settings,
     theme,
@@ -69,6 +70,10 @@
       csrfToken.set(currentUserResponse.csrf_token || null);
       theme.set(currentUserResponse.dark_mode ? "dark" : "light");
       bootNetworkError = false;
+      try {
+        const { earliest_start_date } = await api("/users/earliest-start-date");
+        earliestStartDate.set(earliest_start_date ?? null);
+      } catch {}
       if (!$categories.length) {
         try {
           categories.set(await api("/categories"));

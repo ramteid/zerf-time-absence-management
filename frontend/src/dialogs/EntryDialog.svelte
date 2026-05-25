@@ -1,6 +1,6 @@
 <script>
   import { api } from "../api.js";
-  import { categories, settings } from "../stores.js";
+  import { categories, currentUser, settings } from "../stores.js";
   import { t } from "../i18n.js";
   import { appCurrentTimeHM, appTodayIsoDate } from "../format.js";
   import { confirmDialog } from "../confirm.js";
@@ -123,6 +123,7 @@
       <DatePicker
         id="entry-date"
         bind:value={entry_date}
+        min={$currentUser?.start_date}
         max={todayIso}
         container={dlg}
       />

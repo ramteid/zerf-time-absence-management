@@ -82,6 +82,14 @@ pub async fn team_settings_update(
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
+pub async fn earliest_start_date(
+    State(app_state): State<AppState>,
+    _requester: User,
+) -> AppResult<Json<serde_json::Value>> {
+    let date = app_state.db.users.earliest_active_start_date().await?;
+    Ok(Json(serde_json::json!({ "earliest_start_date": date })))
+}
+
 pub async fn list(
     State(app_state): State<AppState>,
     requester: User,
