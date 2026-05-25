@@ -105,7 +105,7 @@
   </div>
 
   <div class="zf-card" style="overflow-x:auto">
-    {#each holidays as h, i}
+    {#each holidays as h, i (h.id)}
       <div
         style="padding:10px 16px;{i < holidays.length - 1
           ? 'border-bottom:1px solid var(--border)'

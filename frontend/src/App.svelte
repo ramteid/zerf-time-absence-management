@@ -5,7 +5,6 @@
     csrfToken,
     setUnauthorizedHandler,
     setGateResetHandler,
-    resetUnauthorizedGate,
   } from "./api.js";
   import {
     currentUser,

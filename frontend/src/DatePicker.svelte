@@ -281,8 +281,11 @@
     datePickerInstance &&
     ($language !== lastLang || mode !== lastMode || container !== lastContainer)
   ) {
+    // eslint-disable-next-line no-useless-assignment
     lastLang = $language;
+    // eslint-disable-next-line no-useless-assignment
     lastMode = mode;
+    // eslint-disable-next-line no-useless-assignment
     lastContainer = container;
     build($language);
   }

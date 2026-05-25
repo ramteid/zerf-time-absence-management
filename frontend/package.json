@@ -16,6 +16,7 @@
     "@eslint/js": "^10.0.1",
     "@sveltejs/vite-plugin-svelte": "^7.1.2",
     "eslint": "^10.4.0",
+    "eslint-plugin-svelte": "^3.17.1",
     "globals": "^17.6.0",
     "jsdom": "^29.1.1",
     "prettier": "^3.8.3",

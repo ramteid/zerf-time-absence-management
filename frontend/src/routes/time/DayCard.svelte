@@ -78,7 +78,7 @@
       </div>
     {/if}
 
-    {#each day.items as entry}
+    {#each day.items as entry (entry.id)}
       {@const category = categoryById(entry.category_id, categories)}
       <EntryBlock
         {entry}

@@ -4,7 +4,6 @@
     currentUser,
     path,
     go,
-    theme,
     notifications,
     notificationsUnread,
     toast,
@@ -18,7 +17,7 @@
     refreshNotifications,
   } from "./notificationService.js";
   import { t, language, roleLabel, renderNotification } from "./i18n.js";
-  import { fmtDate, fmtDateTime } from "./format.js";
+  import { fmtDateTime } from "./format.js";
   import Icon from "./Icons.svelte";
   import AppLogo from "./AppLogo.svelte";
   import PullToRefresh from "./lib/ui/PullToRefresh.svelte";
@@ -192,7 +191,7 @@
     </div>
 
     <div class="sidebar-nav">
-      {#each sections.dashboard as link}
+      {#each sections.dashboard as link (link.href)}
         <a
           href={link.href}
           data-link="1"
@@ -207,7 +206,7 @@
 
       {#if sections.employee.length}
         <div class="zf-nav-section" style={sections.dashboard.length ? "margin-top: 8px" : ""}>{$t("Employee")}</div>
-        {#each sections.employee as link}
+        {#each sections.employee as link (link.href)}
           <a
             href={link.href}
             data-link="1"
@@ -223,7 +222,7 @@
 
       {#if sections.lead.length}
         <div class="zf-nav-section" style="margin-top: 8px">{$t("Lead")}</div>
-        {#each sections.lead as link}
+        {#each sections.lead as link (link.href)}
           <a
             href={link.href}
             data-link="1"
@@ -239,7 +238,7 @@
 
       {#if sections.admin.length}
         <div class="zf-nav-section" style="margin-top: 8px">{$t("Admin")}</div>
-        {#each sections.admin as link}
+        {#each sections.admin as link (link.href)}
           <a
             href={link.href}
             data-link="1"
@@ -313,7 +312,7 @@
 
   <!-- Mobile bottom navigation -->
   <nav class="mobile-bottom-nav">
-    {#each mobileNavItems.shown as link}
+    {#each mobileNavItems.shown as link (link.href)}
       <a
         href={link.href}
         data-link="1"
@@ -373,7 +372,7 @@
             <Icon name="X" size={18} />
           </button>
         </div>
-        {#each mobileNavItems.overflow as link}
+        {#each mobileNavItems.overflow as link (link.href)}
           <a
             href={link.href}
             data-link="1"
@@ -405,7 +404,6 @@
 
   <!-- Notification panel -->
   {#if bellOpen}
-    <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
     <div
       class="zf-notif-panel"
       on:click|stopPropagation
@@ -454,7 +452,7 @@
           {$t("No notifications.")}
         </div>
       {:else}
-        {#each $notifications as n}
+        {#each $notifications as n (n.id)}
           {@const rendered = renderNotification(n, $language)}
           <div
             on:click={() => openNotification(n)}

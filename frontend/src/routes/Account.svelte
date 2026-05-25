@@ -22,7 +22,9 @@
       .then((rows) => {
         const cur = rows.find((r) => r.year === thisYear);
         const nxt = rows.find((r) => r.year === nextYear);
+        // eslint-disable-next-line svelte/infinite-reactive-loop
         leaveDaysThisYear = cur?.days ?? 0;
+        // eslint-disable-next-line svelte/infinite-reactive-loop
         leaveDaysNextYear = nxt?.days ?? 0;
       })
       .catch(() => {});

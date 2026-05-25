@@ -364,7 +364,7 @@
       class="cal-grid"
       style="grid-template-columns:repeat({calGridColumns},minmax(28px,1fr));margin-bottom:8px"
     >
-      {#each visibleWeekdayLabels as wd}
+      {#each visibleWeekdayLabels as wd (wd)}
         <div class="cal-head">{wd}</div>
       {/each}
     </div>
@@ -372,7 +372,7 @@
       class="cal-grid"
       style="grid-template-columns:repeat({calGridColumns},minmax(28px,1fr))"
     >
-      {#each visibleEventCells as c}
+      {#each visibleEventCells as c (c.ds)}
         {@const evts = c.events}
         <button
           type="button"
@@ -390,7 +390,7 @@
           <div class="cal-day-number tab-num">{c.d.getDate()}</div>
           {#if evts.length}
             <div class="cal-events">
-              {#each evts.slice(0, 3) as ev}
+              {#each evts.slice(0, 3) as ev (ev.key)}
                 <div class="cal-event" style="background:{ev.color}">
                   {calendarEventTitle(ev)}
                 </div>
@@ -406,7 +406,7 @@
   </div>
 
   <div style="display:flex;gap:12px;margin-top:16px;flex-wrap:wrap">
-    {#each legendItems as item}
+    {#each legendItems as item (item.label)}
       <div style="display:flex;align-items:center;gap:6px;font-size:12px">
         <span
           style="display:inline-block;width:12px;height:12px;border-radius:2px;background:{item.color}"
@@ -419,7 +419,7 @@
 
 {#if popupCell}
   <Dialog title={fmtDate(popupCell.ds)} onClose={() => (popupCell = null)}>
-    {#each popupCell.events as ev}
+    {#each popupCell.events as ev (ev.key)}
       <div
         style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:13px"
       >

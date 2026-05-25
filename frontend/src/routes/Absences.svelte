@@ -10,6 +10,7 @@
   import { confirmDialog } from "../confirm.js";
 
   let absences = [];
+  // eslint-disable-next-line no-useless-assignment
   let absenceRows = [];
   let balance = null;
   let holidayDates = new Set();
@@ -300,7 +301,7 @@
       </div>
     {:else}
       <div class="absence-list">
-        {#each absenceRows as a}
+        {#each absenceRows as a (a.id)}
           <div
             class="absence-entry"
             class:absence-entry--rejected={a.status === "rejected"}

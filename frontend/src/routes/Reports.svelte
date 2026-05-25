@@ -409,8 +409,11 @@
   let previousTodayIso = "";
   $: {
     if (!previousCurrentMonthStr) {
+      // eslint-disable-next-line no-useless-assignment
       previousCurrentMonthStr = currentMonthStr;
+      // eslint-disable-next-line no-useless-assignment
       previousCurrentYear = currentYear;
+      // eslint-disable-next-line no-useless-assignment
       previousTodayIso = todayIso;
     } else {
       if (reportMonth === previousCurrentMonthStr) reportMonth = currentMonthStr;
@@ -422,8 +425,11 @@
       if (catTo === previousTodayIso) catTo = todayIso;
       if (csvTo === previousTodayIso) csvTo = todayIso;
 
+      // eslint-disable-next-line no-useless-assignment
       previousCurrentMonthStr = currentMonthStr;
+      // eslint-disable-next-line no-useless-assignment
       previousCurrentYear = currentYear;
+      // eslint-disable-next-line no-useless-assignment
       previousTodayIso = todayIso;
     }
   }
@@ -926,7 +932,7 @@
             class="zf-select"
             bind:value={reportUserId}
           >
-            {#each users as u}
+            {#each users as u (u.id)}
               <option value={u.id}>{u.first_name} {u.last_name}</option>
             {/each}
           </select>
@@ -1133,7 +1139,7 @@
           {$t("Absences")}
         </div>
         <div class="stat-cards" style="margin-bottom:16px">
-          {#each Object.entries(reportAbsenceSummary) as [kind, days]}
+          {#each Object.entries(reportAbsenceSummary) as [kind, days] (kind)}
             <div class="zf-card stat-card">
               <div class="stat-card-label">{absenceKindLabel(kind)}</div>
               <div class="stat-card-value tab-num">{formatDayCount(days)}</div>
@@ -1154,7 +1160,7 @@
             {$t("Category breakdown")}
           </div>
           <div style="display:flex;flex-direction:column;gap:8px">
-            {#each catEntries as [cat, mins]}
+            {#each catEntries as [cat, mins] (cat)}
               <div
                 style="display:grid;grid-template-columns:130px 1fr 52px;align-items:center;gap:8px;font-size:12px"
               >
@@ -1203,7 +1209,7 @@
               </tr>
             </thead>
             <tbody>
-              {#each reportData.monthReport.entries as e}
+              {#each reportData.monthReport.entries as e (e.id)}
                 <tr class:entry-rejected={e.status === "rejected"}>
                   <td class="tab-num">{fmtDate(e.entry_date)}</td>
                   <td class="tab-num">{e.start_time?.slice(0, 5)}</td>
@@ -1238,7 +1244,7 @@
               </tr>
             </thead>
             <tbody>
-              {#each reportData.monthReport.absences as a}
+              {#each reportData.monthReport.absences as a (a.id)}
                 <tr>
                   <td>{absenceKindLabel(a.kind)}</td>
                   <td class="tab-num">{fmtDate(a.start_date)}</td>
@@ -1332,7 +1338,7 @@
               </tr>
             </thead>
             <tbody>
-              {#each teamReport as r}
+              {#each teamReport as r (r.user_id)}
                 <tr>
                   <td style="font-weight:500">{r.name}</td>
                   <!-- Flextime balance: red = deficit, green = zero or surplus -->
@@ -1474,7 +1480,7 @@
         style="padding:12px;background:var(--bg-muted);border-radius:var(--radius-sm);margin-bottom:12px"
       >
         <div style="display:flex;flex-wrap:wrap;gap:8px">
-          {#each allTeamCatColumns as col}
+          {#each allTeamCatColumns as col (col.category)}
             <label
               style="display:flex;align-items:center;gap:6px;cursor:pointer"
             >
@@ -1498,7 +1504,7 @@
         style="padding:12px;background:var(--bg-muted);border-radius:var(--radius-sm);margin-bottom:12px"
       >
         <div style="display:flex;flex-wrap:wrap;gap:8px">
-          {#each catReport as cat}
+          {#each catReport as cat (cat.category)}
             <label
               style="display:flex;align-items:center;gap:6px;cursor:pointer"
             >
@@ -1528,7 +1534,7 @@
             <thead>
               <tr>
                 <th>{$t("Employee")}</th>
-                {#each visibleTeamCatColumns as col}
+                {#each visibleTeamCatColumns as col (col.category)}
                   <th style="text-align:right">
                     <span
                       style="display:inline-flex;align-items:center;gap:4px;justify-content:flex-end"
@@ -1545,11 +1551,11 @@
               </tr>
             </thead>
             <tbody>
-              {#each teamCatReport as row}
+              {#each teamCatReport as row (row.user_id)}
                 {@const rowTotal = teamCatRowTotal(row)}
                 <tr>
                   <td style="font-weight:500">{row.name}</td>
-                  {#each visibleTeamCatColumns as col}
+                  {#each visibleTeamCatColumns as col (col.category)}
                     {@const cellMin = teamCatMinutes(row, col.category)}
                     <td
                       class="tab-num"
@@ -1594,7 +1600,7 @@
               </tr>
             </thead>
             <tbody>
-              {#each filteredCatReport as c}
+              {#each filteredCatReport as c (c.category)}
                 <tr>
                   <td style="font-weight:500">
                     <span
@@ -1676,7 +1682,7 @@
               <div class="stat-card-label">{$t("Total days")}</div>
               <div class="stat-card-value tab-num">{formatDayCount(absenceTotalDays)}</div>
             </div>
-            {#each Object.entries(absenceByKind) as [kind, days]}
+            {#each Object.entries(absenceByKind) as [kind, days] (kind)}
               <div class="zf-card stat-card">
                 <div class="stat-card-label">{absenceKindLabel(kind)}</div>
                 <div class="stat-card-value tab-num">{formatDayCount(days)}</div>
@@ -1698,7 +1704,7 @@
               </tr>
             </thead>
             <tbody>
-              {#each absenceReport as a}
+              {#each absenceReport as a (a.id)}
                 {@const absUser = isLeadView
                   ? users.find((u) => u.id === a.user_id)
                   : null}
@@ -1762,7 +1768,7 @@
       <div style="margin-bottom:12px">
         <label class="zf-label" for="csv-user-id">{$t("Employee")}</label>
         <select id="csv-user-id" class="zf-select" bind:value={csvUserId}>
-          {#each users as u}
+          {#each users as u (u.id)}
             <option value={u.id}>{u.first_name} {u.last_name}</option>
           {/each}
         </select>

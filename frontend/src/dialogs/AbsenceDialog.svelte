@@ -26,6 +26,7 @@
   $: if (isNew && !template.end_date && end_date === lastTodayIso && todayIso !== lastTodayIso) {
     end_date = todayIso;
   }
+  // eslint-disable-next-line no-useless-assignment
   $: lastTodayIso = todayIso;
 
   $: if (start_date && end_date && start_date > end_date) {

@@ -32,6 +32,7 @@
   ) {
     entry_date = todayIso;
   }
+  // eslint-disable-next-line no-useless-assignment
   $: lastTodayIso = todayIso;
 
   $: if (isNew && start_time >= end_time) {
@@ -149,7 +150,7 @@
         {#if $categories.length === 0}
           <option value={null}>{$t("No categories available.")}</option>
         {:else}
-          {#each $categories as c}<option value={c.id}>{$t(c.name)}</option
+          {#each $categories as c (c.id)}<option value={c.id}>{$t(c.name)}</option
             >{/each}
         {/if}
       </select>

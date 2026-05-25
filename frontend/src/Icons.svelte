@@ -57,5 +57,6 @@
   stroke-linecap="round"
   stroke-linejoin="round"
 >
+  <!-- eslint-disable-next-line svelte/no-at-html-tags -->
   {@html d}
 </svg>
