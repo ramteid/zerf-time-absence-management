@@ -1390,4 +1390,28 @@ mod tests {
         assert_eq!(rows[1].get(1).unwrap(), "Total");
         assert_eq!(rows[1].get(5).unwrap(), "120");
     }
+
+    /// Bug B10: `validate_range` is the shared helper used by the flextime
+    /// endpoint (replacing the previously inlined duplicate). Verify it rejects
+    /// an inverted range and a range that exceeds 366 days — the same edge
+    /// cases the inline code guarded against.
+    #[test]
+    fn validate_range_rejects_inverted_and_too_long_ranges() {
+        let from = NaiveDate::from_ymd_opt(2026, 5, 1).unwrap();
+        let to   = NaiveDate::from_ymd_opt(2026, 4, 1).unwrap(); // inverted
+        assert!(validate_range(from, to).is_err());
+
+        let long_to = NaiveDate::from_ymd_opt(2027, 5, 3).unwrap(); // > 366 days
+        assert!((long_to - from).num_days() > 366);
+        assert!(validate_range(from, long_to).is_err());
+    }
+
+    /// `validate_range` accepts a range that is exactly at the 366-day boundary.
+    #[test]
+    fn validate_range_accepts_366_day_flextime_window() {
+        let from = NaiveDate::from_ymd_opt(2025, 5, 1).unwrap();
+        let to   = NaiveDate::from_ymd_opt(2026, 5, 2).unwrap(); // 366 days
+        assert_eq!((to - from).num_days(), 366);
+        assert!(validate_range(from, to).is_ok());
+    }
 }

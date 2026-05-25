@@ -490,3 +490,55 @@ async fn pure_admin_team_report_accessible_and_excludes_pure_admin_rows() {
         "pure-admin users are excluded from team report rows"
     );
 }
+
+/// Bug B10: team-categories endpoint must exclude pure-admin users (tracks_time=FALSE)
+/// the same way the team overview report does. Before the fix, `team_category_members`
+/// fetched all active users without filtering on `tracks_time`, so pure-admin users
+/// appeared as empty rows in the team category breakdown while being absent from the
+/// team overview — an inconsistency visible to admins.
+#[tokio::test]
+async fn pure_admin_excluded_from_team_category_report() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "pure-admin-cat@example.com",
+                "first_name": "Pure",
+                "last_name": "AdminCat",
+                "role": "admin",
+                "tracks_time": false,
+                "weekly_hours": 39,
+                "leave_days_current_year": 30,
+                "leave_days_next_year": 30,
+                "start_date": "2024-01-01"
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create pure-admin for cat test");
+    let pure_admin_cat_id = id(&body);
+
+    // Ensure at least one tracked team member exists.
+    let (_lead_id, _lead_pw, emp_id, _emp_pw, monday, _cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "catbug").await;
+
+    let (st, body) = admin
+        .get(&format!(
+            "/api/v1/reports/team-categories?from={monday}&to={monday}"
+        ))
+        .await;
+    assert_eq!(st, StatusCode::OK, "team-categories request succeeds");
+    let rows = body.as_array().expect("team-categories response array");
+
+    assert!(
+        rows.iter().any(|row| row["user_id"].as_i64() == Some(emp_id)),
+        "time-tracking employee is included in team category report"
+    );
+    assert!(
+        rows.iter()
+            .all(|row| row["user_id"].as_i64() != Some(pure_admin_cat_id)),
+        "pure-admin users are excluded from team category report rows"
+    );
+}

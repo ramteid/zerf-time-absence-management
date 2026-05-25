@@ -416,14 +416,7 @@ pub async fn flextime(
 ) -> AppResult<Json<Vec<FlextimeDay>>> {
     let target_user_id = query.user_id.unwrap_or(requester.id);
     assert_can_access_user(&app_state, &requester, target_user_id).await?;
-    if query.from > query.to {
-        return Err(AppError::BadRequest("from must not be after to.".into()));
-    }
-    if (query.to - query.from).num_days() > 366 {
-        return Err(AppError::BadRequest(
-            "Date range must not exceed 366 days.".into(),
-        ));
-    }
+    validate_range(query.from, query.to)?;
 
     let user: crate::middleware::auth::User = crate::services::users::repo_user_to_auth_user(
         app_state
