@@ -124,15 +124,79 @@
     return userMap.get(subjectId) || `#${subjectId}`;
   }
 
-  function formatJson(raw) {
-    if (!raw) return null;
-    try {
-      const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
-      return JSON.stringify(parsed, null, 2);
-    } catch {
-      return String(raw);
-    }
+  // Which fields to show in the detail popup, per table
+  const TABLE_FIELDS = {
+    time_entries:    ["entry_date", "start_time", "end_time", "status", "note"],
+    users:           ["first_name", "last_name", "email", "role", "active"],
+    absences:        ["kind", "start_date", "end_date", "status", "note"],
+    categories:      ["name", "color", "description", "counts_as_work", "active"],
+    holidays:        ["name", "holiday_date"],
+    app_settings:    ["key", "value"],
+    reopen_requests: ["week_start_date", "status"],
+  };
+
+  const FIELD_LABEL_KEYS = {
+    entry_date:     "Date",
+    start_time:     "Start",
+    end_time:       "End",
+    status:         "Status",
+    note:           "Note",
+    first_name:     "First name",
+    last_name:      "Last name",
+    email:          "Email",
+    role:           "Role",
+    active:         "Active",
+    kind:           "Type",
+    start_date:     "From",
+    end_date:       "To",
+    name:           "Name",
+    color:          "Color",
+    description:    "Description",
+    counts_as_work: "Counts as work",
+    holiday_date:   "Date",
+    key:            "Setting",
+    value:          "Value",
+    week_start_date: "Week start",
+  };
+
+  const DATE_FIELDS = new Set([
+    "entry_date", "holiday_date", "start_date", "end_date", "week_start_date",
+  ]);
+
+  function fmtFieldVal(key, val, userMap, translate) {
+    if (val == null) return null;
+    if (key === "user_id") return userMap.get(val) || `#${val}`;
+    if (DATE_FIELDS.has(key)) { try { return fmtDate(val); } catch { return String(val); } }
+    if (key === "kind") return absenceKindLabel(val);
+    if (typeof val === "boolean") return val ? translate("Yes") : translate("No");
+    return String(val);
   }
+
+  function extractDetailRows(entry, userMap, translate) {
+    const fields = TABLE_FIELDS[entry.table_name];
+    if (!fields) return null;
+
+    const before = safeParseJson(entry.before_data);
+    const after  = safeParseJson(entry.after_data);
+    const hasBoth = before != null && after != null;
+    const result = [];
+
+    for (const key of fields) {
+      const bFmt = fmtFieldVal(key, before?.[key] ?? null, userMap, translate);
+      const aFmt = fmtFieldVal(key, after?.[key]  ?? null, userMap, translate);
+      if (bFmt == null && aFmt == null) continue;   // nothing to show
+      if (hasBoth && bFmt === aFmt) continue;        // unchanged in an update
+      result.push({
+        label: translate(FIELD_LABEL_KEYS[key] ?? key),
+        before: bFmt,
+        after: aFmt,
+      });
+    }
+
+    return result.length > 0 ? result : null;
+  }
+
+  $: selectedDetails = selected ? extractDetailRows(selected, usersById, $t) : null;
 
   function actionClass(action) {
     if (action === "created" || action === "approved" || action === "reopened") return "action-success";
@@ -267,18 +331,22 @@
         <span>{selected.group_count}</span>
       </div>
     {:else}
-      {#if selected.before_data}
-        <div class="detail-section">
-          <span class="detail-label">{$t("Before")}</span>
-          <pre class="detail-json">{formatJson(selected.before_data)}</pre>
+      {#each selectedDetails ?? [] as field}
+        <div class="detail-field-row">
+          <span class="detail-label">{field.label}</span>
+          <span class="detail-value">
+            {#if field.before != null && field.after != null}
+              <span class="detail-old">{field.before}</span>
+              <span class="detail-sep"> → </span>
+              <span class="detail-new">{field.after}</span>
+            {:else if field.after != null}
+              {field.after}
+            {:else}
+              {field.before}
+            {/if}
+          </span>
         </div>
-      {/if}
-      {#if selected.after_data}
-        <div class="detail-section">
-          <span class="detail-label">{$t("After")}</span>
-          <pre class="detail-json">{formatJson(selected.after_data)}</pre>
-        </div>
-      {/if}
+      {/each}
     {/if}
   </Dialog>
 {/if}
@@ -407,34 +475,40 @@
     font-size: 13px;
   }
 
-  .detail-section {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    font-size: 13px;
-  }
-
   .detail-label {
     font-size: 11.5px;
     font-weight: 500;
     color: var(--text-tertiary);
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    min-width: 48px;
+    min-width: 80px;
+    flex-shrink: 0;
   }
 
-  .detail-json {
-    background: var(--bg-subtle);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    padding: 10px 12px;
-    font-size: 12px;
-    font-family: ui-monospace, monospace;
-    overflow-x: auto;
-    white-space: pre;
-    margin: 0;
-    color: var(--text-secondary);
-    max-height: 300px;
-    overflow-y: auto;
+  .detail-field-row {
+    display: flex;
+    gap: 12px;
+    align-items: baseline;
+    font-size: 13px;
+  }
+
+  .detail-value {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+
+  .detail-old {
+    color: var(--text-tertiary);
+    text-decoration: line-through;
+  }
+
+  .detail-sep {
+    color: var(--text-tertiary);
+  }
+
+  .detail-new {
+    color: var(--text-primary);
   }
 </style>

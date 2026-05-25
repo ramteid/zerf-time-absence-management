@@ -238,8 +238,13 @@
           ]
         : [],
     };
-    opts.onYearChange = (_, __, inst) => updateNextYearBtnState(inst);
-    opts.onOpen = (_, __, inst) => updateNextYearBtnState(inst);
+    // In month mode the arrows navigate by year, so we manage the next-year
+    // button state ourselves. In date mode flatpickr handles it natively via
+    // updateNavigationCurrentMonth (the arrows navigate month-by-month there).
+    if (isMonth) {
+      opts.onYearChange = (_, __, inst) => updateNextYearBtnState(inst);
+      opts.onOpen = (_, __, inst) => updateNextYearBtnState(inst);
+    }
     // When rendered inside a <dialog>, append the calendar to the dialog so it
     // participates in the top-layer stacking context. Use absolute positioning
     // with dialog-relative coordinates to avoid disrupting the dialog layout.
@@ -254,7 +259,7 @@
       datePickerInstance.calendarContainer?.classList.add("zf-date-picker-overlay");
     rearrangeCalendarNav(datePickerInstance);
     lockYearInput(datePickerInstance);
-    updateNextYearBtnState(datePickerInstance);
+    if (isMonth) updateNextYearBtnState(datePickerInstance);
     if (id && datePickerInstance.altInput) datePickerInstance.altInput.id = id;
     if (datePickerInstance.altInput) {
       if (style) datePickerInstance.altInput.setAttribute("style", style);
