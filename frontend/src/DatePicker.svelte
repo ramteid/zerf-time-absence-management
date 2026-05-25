@@ -160,6 +160,29 @@
     );
   }
 
+  // For month pickers: disables the "next year" button when already at the max year.
+  function updateNextYearBtnState(instance) {
+    const cal = instance?.calendarContainer;
+    if (!cal) return;
+    const nextBtn = cal.querySelector(".flatpickr-next-month");
+    if (!nextBtn) return;
+    const maxDate = instance.config.maxDate;
+    const maxYear = maxDate ? maxDate.getFullYear() : null;
+    const atMax = maxYear !== null && instance.currentYear >= maxYear;
+    nextBtn.classList.toggle("flatpickr-disabled", atMax);
+  }
+
+  // For month pickers: makes the year display read-only (navigation via ← → arrows only).
+  function lockYearInput(instance) {
+    const cal = instance?.calendarContainer;
+    if (!cal) return;
+    const yearInput = cal.querySelector("input.cur-year");
+    if (yearInput) {
+      yearInput.readOnly = true;
+      yearInput.tabIndex = -1;
+    }
+  }
+
   // Moves prev/next arrows inside .flatpickr-current-month so the DOM order
   // becomes [← Month → Year] instead of the flatpickr default [← Month Year →].
   function rearrangeCalendarNav(instance) {
@@ -215,6 +238,8 @@
           ]
         : [],
     };
+    opts.onYearChange = (_, __, inst) => updateNextYearBtnState(inst);
+    opts.onOpen = (_, __, inst) => updateNextYearBtnState(inst);
     // When rendered inside a <dialog>, append the calendar to the dialog so it
     // participates in the top-layer stacking context. Use absolute positioning
     // with dialog-relative coordinates to avoid disrupting the dialog layout.
@@ -228,6 +253,8 @@
     if (container)
       datePickerInstance.calendarContainer?.classList.add("zf-date-picker-overlay");
     rearrangeCalendarNav(datePickerInstance);
+    lockYearInput(datePickerInstance);
+    updateNextYearBtnState(datePickerInstance);
     if (id && datePickerInstance.altInput) datePickerInstance.altInput.id = id;
     if (datePickerInstance.altInput) {
       if (style) datePickerInstance.altInput.setAttribute("style", style);
@@ -257,7 +284,10 @@
   // Reactive value/min/max sync
   $: if (datePickerInstance && datePickerInstance.input.value !== value) datePickerInstance.setDate(value || null, false);
   $: if (datePickerInstance) datePickerInstance.set("minDate", min || null);
-  $: if (datePickerInstance) datePickerInstance.set("maxDate", max || null);
+  $: if (datePickerInstance) {
+    datePickerInstance.set("maxDate", max || null);
+    if (mode === "month") updateNextYearBtnState(datePickerInstance);
+  }
 </script>
 
 <span class="date-picker-wrap">
@@ -404,19 +434,25 @@
     background: var(--bg-muted);
   }
 
-  /* Year input wrapper – pushed to the right by margin-left: auto */
+  /* Year input wrapper – pushed to the right by margin-left: auto.
+     Year is display-only in all pickers; navigation uses ← → arrows. */
   :global(.zf-date-picker-calendar .flatpickr-current-month .numInputWrapper) {
     flex: 0 0 auto;
     margin-left: auto;
     width: 6ch;
+    pointer-events: none;
   }
   :global(.zf-date-picker-calendar .flatpickr-current-month .numInputWrapper:hover) {
-    background: var(--bg-elevated);
-    border-radius: var(--radius-sm);
+    background: transparent;
   }
   :global(.zf-date-picker-calendar .flatpickr-current-month input.cur-year) {
     color: var(--text-primary);
     font-weight: 500;
+  }
+  /* Hide year spin arrows */
+  :global(.zf-date-picker-calendar .flatpickr-current-month .numInputWrapper .arrowUp),
+  :global(.zf-date-picker-calendar .flatpickr-current-month .numInputWrapper .arrowDown) {
+    display: none !important;
   }
 
   /* ── Weekday header row ── */

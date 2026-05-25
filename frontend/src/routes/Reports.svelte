@@ -912,7 +912,7 @@
       {/if}
       <div>
         <label class="zf-label" for="report-month">{$t("Month")}</label>
-        <DatePicker id="report-month" mode="month" bind:value={reportMonth} min={reportMinMonth} />
+        <DatePicker id="report-month" mode="month" bind:value={reportMonth} min={reportMinMonth} max={currentMonthStr} />
       </div>
     </div>
 
@@ -1266,7 +1266,7 @@
       >
         <div style="flex:1">
           <label class="zf-label" for="team-month">{$t("Month")}</label>
-          <DatePicker id="team-month" mode="month" bind:value={teamMonth} />
+          <DatePicker id="team-month" mode="month" bind:value={teamMonth} max={currentMonthStr} />
         </div>
         <button class="zf-btn zf-btn-primary" on:click={showTeam}
           >{$t("Show")}</button
