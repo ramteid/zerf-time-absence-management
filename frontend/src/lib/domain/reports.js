@@ -3,7 +3,8 @@ export function summarizeAbsences(absences) {
   for (const absence of absences || []) {
     summary[absence.kind] = (summary[absence.kind] || 0) + (absence.days || 0);
   }
-  return summary;
+  // Exclude kinds whose total is zero so stat cards don't display "Sick: 0 days".
+  return Object.fromEntries(Object.entries(summary).filter(([, days]) => days > 0));
 }
 
 export function categoryNamesFromTeamReport(rows) {

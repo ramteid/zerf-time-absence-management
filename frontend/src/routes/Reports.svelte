@@ -19,7 +19,6 @@
     appTodayDate,
     minToHM,
     fmtDate,
-    fmtMonthLabel,
   } from "../format.js";
   import {
     normalizeMonthReport,
@@ -135,7 +134,14 @@
   }
 
   function userHasFlextime(userId) {
-    return hasFlextimeAccount(userById(userId));
+    // When the userId matches the current user, use their data directly so we
+    // always have the correct answer (even before the users list has loaded).
+    // For other users, look them up in the already-loaded list; return false
+    // (safe default: skip flextime fetch) rather than falling back to the
+    // current user's account type, which could be wrong.
+    if (userId === $currentUser?.id) return hasFlextimeAccount($currentUser);
+    const found = users.find((u) => u.id === userId);
+    return found ? hasFlextimeAccount(found) : false;
   }
 
   function userWorkdaysPerWeek(userId, fallback = 5) {
@@ -143,6 +149,7 @@
   }
 
   async function loadReport() {
+    reportData = null;
     try {
       const reportYear = reportMonth.slice(0, 4);
       const reportYearNum = parseInt(reportYear);
@@ -208,6 +215,7 @@
   let teamReport = null;
 
   async function showTeam() {
+    teamReport = null;
     try {
       teamReport = await getTeamReport({ month: teamMonth });
     } catch (e) {
@@ -231,6 +239,8 @@
 
   async function showCat() {
     if (catFrom > catTo) return;
+    catReport = null;
+    teamCatReport = null;
     try {
       if (isSelfOnlyReportsView) {
         // Employees see their own category breakdown.
@@ -343,6 +353,7 @@
 
   async function showAbsences() {
     if (absenceFrom > absenceTo) return;
+    absenceReport = null;
     try {
       let raw;
       if (isSelfOnlyReportsView) {
@@ -451,7 +462,8 @@
         const stringValue = fieldValue == null ? "" : String(fieldValue);
         return stringValue.includes(",") ||
           stringValue.includes('"') ||
-          stringValue.includes("\n")
+          stringValue.includes("\n") ||
+          stringValue.includes("\r")
           ? '"' + stringValue.replace(/"/g, '""') + '"'
           : stringValue;
       })
@@ -615,7 +627,7 @@
           ]),
         );
       }
-      const blob = new Blob(["\uFEFF" + rows.join("\n")], {
+      const blob = new Blob(["\uFEFF" + rows.join("\r\n")], {
         type: "text/csv;charset=utf-8",
       });
       downloadBlob(

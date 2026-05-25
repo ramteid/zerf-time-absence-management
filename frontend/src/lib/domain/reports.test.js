@@ -134,4 +134,33 @@ describe("reports domain helpers", () => {
       teamCategoryMinutes({ categories: [{ category: "Admin", minutes: 30 }] }, "Project"),
     ).toBe(0);
   });
+
+  // Bug B1: summarizeAbsences excludes zero-day kinds
+  it("summarizeAbsences excludes absence kinds whose total is zero", () => {
+    expect(
+      summarizeAbsences([
+        { kind: "vacation", days: 2 },
+        { kind: "sick", days: 0 },
+      ]),
+    ).toEqual({ vacation: 2 });
+  });
+
+  it("summarizeAbsences returns empty object when all kinds total zero", () => {
+    expect(
+      summarizeAbsences([
+        { kind: "sick", days: 0 },
+        { kind: "vacation", days: 0 },
+      ]),
+    ).toEqual({});
+  });
+
+  it("summarizeAbsences still sums partial days before filtering", () => {
+    expect(
+      summarizeAbsences([
+        { kind: "vacation", days: 0.5 },
+        { kind: "vacation", days: 0.5 },
+        { kind: "sick", days: 0 },
+      ]),
+    ).toEqual({ vacation: 1 });
+  });
 });

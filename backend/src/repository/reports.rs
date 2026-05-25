@@ -337,7 +337,9 @@ impl ReportDb {
         .await?)
     }
 
-    /// All active users in the team scope for the category report.
+    /// All active time-tracking users in the team scope for the category report.
+    /// Pure-admin users (tracks_time=FALSE) are excluded to stay consistent with the
+    /// team overview report, which filters them out via `.filter(|m| m.tracks_time)`.
     pub async fn team_category_members(
         &self,
         requester_id: i64,
@@ -346,7 +348,7 @@ impl ReportDb {
         if is_admin {
             Ok(sqlx::query_as(
                 "SELECT id, first_name, last_name FROM users \
-                 WHERE active=TRUE ORDER BY last_name",
+                 WHERE active=TRUE AND tracks_time=TRUE ORDER BY last_name",
             )
             .fetch_all(&self.pool)
             .await?)
@@ -354,7 +356,7 @@ impl ReportDb {
             // Non-admin leads: exclude admin subjects from lead-scoped views.
             Ok(sqlx::query_as(
                 "SELECT id, first_name, last_name FROM users \
-                 WHERE active=TRUE \
+                 WHERE active=TRUE AND tracks_time=TRUE \
                  AND (id=$1 OR id IN (\
                      SELECT ua.user_id FROM user_approvers ua \
                      JOIN users u ON u.id = ua.user_id \
