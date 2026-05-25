@@ -1,6 +1,6 @@
 <script>
   import { api } from "../api.js";
-  import { path, go, currentUser, categories, settings } from "../stores.js";
+  import { path, go, currentUser, categories, settings, earliestStartDate } from "../stores.js";
   import { t, absenceKindLabel } from "../i18n.js";
   import {
     fmtMonthYear,
@@ -284,16 +284,19 @@
     events: cellEvents(cell, teMap, categoryById, colorByKey, $t, userById, $currentUser?.id),
   }));
 
-  // ── Heading: switches to "Team Calendar" when any visible entry or absence
-  // belongs to a user other than the current user. Otherwise "My Calendar".
-  $: hasOtherUserEvents = (() => {
-    const ownId = $currentUser?.id;
-    if (ownId == null) return false;
-    if (entries.some((absence) => absence.user_id !== ownId)) return true;
-    if (calTimeEntries.some((timeEntry) => timeEntry.user_id !== ownId)) return true;
-    return false;
-  })();
-  $: calendarHeadingKey = hasOtherUserEvents ? "Team Calendar" : "My Calendar";
+  // ── Heading: "Team Calendar" for team leads and admins (they can always see
+  // other users' data), "My Calendar" for employees and assistants.
+  $: calendarHeadingKey =
+    $currentUser?.role === "team_lead" || $currentUser?.role === "admin"
+      ? "Team Calendar"
+      : "My Calendar";
+
+  // ── Earliest navigable month: derived from the global earliest start date
+  // (the month the first user started). The prev button is disabled when the
+  // current month is already at or before this lower bound.
+  $: earliestMonth = $earliestStartDate?.slice(0, 7) ?? null; // "YYYY-MM" or null
+  $: currentMonthStr = `${year}-${String(month).padStart(2, "0")}`;
+  $: prevDisabled = earliestMonth != null && currentMonthStr <= earliestMonth;
 
   // ── Weekend column visibility: only render Sat/Sun columns when at least
   // one visible cell on Saturday or Sunday actually has events. If either
@@ -338,6 +341,7 @@
       <button
         class="zf-btn zf-btn-ghost"
         on:click={() => go("/calendar" + prev)}
+        disabled={prevDisabled}
       >
         <Icon name="ChevLeft" size={16} />
       </button>
