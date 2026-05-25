@@ -162,7 +162,7 @@ cargo build --release
 **Framework**: Svelte 5.55.5
 **Build tool**: Vite 8.0.10
 **Test runner**: Vitest 4.1.5 + jsdom
-**Linter**: ESLint 10.3.0
+**Linter**: ESLint 10 + eslint-plugin-svelte (covers JS and `.svelte` files)
 **Dev server port**: 5173 (proxies `/api` and `/healthz` to `http://127.0.0.1:3333`)
 **Build output**: `frontend/dist/`
 
@@ -172,10 +172,33 @@ cargo build --release
 |--------|---------|---------|
 | `dev` | `vite` | Start dev server |
 | `build` | `vite build` | Production build |
-| `lint` | `eslint .` | Lint source |
+| `lint` | `eslint .` | Lint all JS and Svelte files |
 | `format` | `prettier --check` | Check formatting |
 | `format:write` | `prettier --write` | Auto-format |
 | `test` | `vitest run` | Run tests |
+
+### Linting
+
+ESLint is configured via `frontend/eslint.config.js` and covers **both** `.js` and `.svelte` files using `eslint-plugin-svelte`.
+
+**Run before committing:**
+```bash
+cd frontend
+npm run lint
+```
+
+**Key rules in effect:**
+- `no-unused-vars` / `no-unused-imports` — remove dead imports/variables
+- `svelte/require-each-key` — every `{#each}` block must have a key expression `(item.id)`
+- `no-dupe-keys` — no duplicate keys in object literals (catches i18n mistakes)
+- `svelte/no-immutable-reactive-statements` — don't write `$:` blocks whose inputs never change
+
+**Intentional suppressions (do not remove):**
+- `svelte/prefer-svelte-reactivity` — disabled globally; using native `Map`/`Set`/`Date` is acceptable
+- `svelte/no-reactive-functions` — disabled; Svelte 4-era rule that crashes on ESLint 10
+- `<!-- eslint-disable-next-line svelte/no-at-html-tags -->` in `Icons.svelte` — SVG icon content is trusted static markup
+- `// eslint-disable-next-line no-useless-assignment` on reactive tracker variables — ESLint cannot see cross-reactive-statement usage (e.g. `$: lastX = x;` paired with `$: if (x !== lastX) { ... }`)
+- `// eslint-disable-next-line svelte/infinite-reactive-loop` — false positives when assignments occur inside `.then()` callbacks within `$:` blocks
 
 ### Key source files
 
@@ -253,10 +276,13 @@ Caddy handles HTTPS termination and serves the frontend static assets. Backend l
 
 ```bash
 cd frontend
-npm run lint && npm test -- --run && npm run build
+npm run lint   # see Linting section above — must pass before committing
+npm test -- --run && npm run build
 ```
 
 Tests use Vitest + jsdom. Test files are co-located with source under `src/` and `src/routes/`.
+
+> **Note:** Lint is not part of CI — run it locally before committing.
 
 ### Backend
 

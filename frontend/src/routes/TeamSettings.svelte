@@ -61,7 +61,7 @@
         )}
       </div>
 
-      {#each rows as row, i}
+      {#each rows as row, i (row.user_id)}
         <div
           class="team-setting-row"
           style={i < rows.length - 1

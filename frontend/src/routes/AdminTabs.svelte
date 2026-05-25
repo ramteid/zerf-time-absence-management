@@ -21,7 +21,7 @@
   class="admin-tabs"
   style="display:flex;flex-wrap:wrap;gap:2px;padding:0 28px;border-bottom:1px solid var(--border);background:var(--bg-surface)"
 >
-  {#each tabs as tab}
+  {#each tabs as tab (tab.href)}
     <a
       href={tab.href}
       data-link="1"

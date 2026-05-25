@@ -69,6 +69,7 @@
 
   $: selectedCountry = settingsForm.country || "";
   $: if (selectedCountry !== regionsCountry) {
+    // eslint-disable-next-line no-useless-assignment
     regionsCountry = selectedCountry;
     void syncRegionsFor(selectedCountry);
   }
@@ -257,7 +258,7 @@
             class="zf-select"
             bind:value={settingsForm.ui_language}
           >
-            {#each languageOptions as [code, language]}
+            {#each languageOptions as [code, language] (code)}
               <option value={code}>{language.label}</option>
             {/each}
           </select>
@@ -284,7 +285,7 @@
             class="zf-select"
             bind:value={settingsForm.timezone}
           >
-            {#each timezoneOptions as tz}
+            {#each timezoneOptions as tz (tz)}
               <option value={tz}>{tz}</option>
             {/each}
           </select>
@@ -396,7 +397,7 @@
             }}
           >
             <option value="">{$t("- Please select -")}</option>
-            {#each countries as countryOption}
+            {#each countries as countryOption (countryOption.countryCode)}
               <option value={countryOption.countryCode}>{countryOption.name}</option>
             {/each}
           </select>
@@ -420,7 +421,7 @@
               {:else}
                 <option value="">{$t("- Please select -")}</option>
               {/if}
-              {#each countryRegions as regionOption}
+              {#each countryRegions as regionOption (regionOption)}
                 <option value={regionOption}>{regionOption}</option>
               {/each}
             </select>

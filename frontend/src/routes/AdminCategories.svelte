@@ -26,7 +26,7 @@
 
 <div class="content-area" style="max-width:600px">
   <div class="zf-card" style="overflow-x:auto">
-    {#each adminCategories as cat, i}
+    {#each adminCategories as cat, i (cat.id)}
       <div
         style="padding:10px 16px;{i < adminCategories.length - 1
           ? 'border-bottom:1px solid var(--border)'

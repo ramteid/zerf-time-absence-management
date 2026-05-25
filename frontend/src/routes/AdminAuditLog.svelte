@@ -6,6 +6,7 @@
 
   let log = [];
   let usersById = new Map();
+  // eslint-disable-next-line no-useless-assignment
   let rows = [];
   let selected = null;
 
@@ -277,7 +278,7 @@
 
 <div class="content-area">
   <div class="zf-card audit-list">
-    {#each rows as entry}
+    {#each rows as entry (entry.id)}
       <button class="audit-row" on:click={() => openDetail(entry)}>
         <span class="audit-time">{fmtDateTime(entry.occurred_at)}</span>
         <span class="audit-user">{entry.user_label}</span>
@@ -331,7 +332,7 @@
         <span>{selected.group_count}</span>
       </div>
     {:else}
-      {#each selectedDetails ?? [] as field}
+      {#each selectedDetails ?? [] as field (field.label)}
         <div class="detail-field-row">
           <span class="detail-label">{field.label}</span>
           <span class="detail-value">

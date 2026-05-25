@@ -31,7 +31,8 @@
 
   let containerW = 640;
   $: plotWidth = Math.max(1, containerW - marginLeft - marginRight);
-  $: plotHeight = Math.max(1, chartHeight - marginTop - marginBottom);
+  // plotHeight is constant since chartHeight/margins are all compile-time consts
+  const plotHeight = Math.max(1, chartHeight - marginTop - marginBottom);
 
   // Unique id to avoid clip-path collisions when multiple instances exist
   const chartInstanceId = Math.random().toString(36).slice(2, 8);
@@ -315,7 +316,7 @@
            merged into one rect. The last day extrapolates by one barWidth and
            is clipped to the plot area. -->
       <g clip-path="url(#clip-plot-{chartInstanceId})">
-        {#each bandRuns as run}
+        {#each bandRuns as run (run.firstIdx)}
           {@const startX = pts[run.firstIdx].x}
           {@const endX = run.lastIdx + 1 < data.length
             ? pts[run.lastIdx + 1].x
@@ -332,7 +333,7 @@
       </g>
 
       <!-- ── Y-axis grid lines & labels ── -->
-      {#each yTicks as tick}
+      {#each yTicks as tick (tick)}
         {@const tickY = yOf(tick)}
         <line
           x1={marginLeft}
@@ -405,7 +406,7 @@
       />
 
       <!-- ── X-axis tick labels ── -->
-      {#each xTicks as i}
+      {#each xTicks as i (i)}
         <text
           x={pts[i].x}
           y={chartHeight - marginBottom + 14}
@@ -499,7 +500,7 @@
       <div
         style="display:flex;gap:14px;flex-wrap:wrap;margin-top:4px;padding-left:{marginLeft}px"
       >
-        {#each legendItems as item}
+        {#each legendItems as item (item.key)}
           <div
             style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-secondary)"
           >

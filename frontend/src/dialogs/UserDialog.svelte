@@ -54,6 +54,7 @@
   $: if (isNew && !template.start_date && start_date === lastTodayIso && todayIso !== lastTodayIso) {
     start_date = todayIso;
   }
+  // eslint-disable-next-line no-useless-assignment
   $: lastTodayIso = todayIso;
 
   // Rejection sampling to avoid modulo bias (matches backend approach).
@@ -477,7 +478,7 @@
             </div>
           {:else}
             <div style="display:flex;flex-direction:column;gap:6px;max-height:180px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px">
-              {#each approvers as a}
+              {#each approvers as a (a.id)}
                 <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
                   <input
                     type="checkbox"

@@ -103,7 +103,7 @@
 
 <div class="content-area" style="max-width:760px">
   <div class="zf-card" style="overflow-x:auto">
-    {#each users as u, i}
+    {#each users as u, i (u.id)}
       <div
         style="padding:10px 16px;{i < users.length - 1
           ? 'border-bottom:1px solid var(--border)'

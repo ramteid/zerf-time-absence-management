@@ -102,6 +102,7 @@
   let monthSubmissionLoading = false;
   let monthSubmissionError = "";
 
+  // eslint-disable-next-line no-useless-assignment
   let reportYear = today.getFullYear();
   $: reportYear = today.getFullYear();
   $: currentMonthIndex = today.getMonth() + 1; // 1-based
@@ -391,6 +392,7 @@
     // A nonce ensures the scroll fires even when navigating to the same section twice.
     const signature = focusTarget ? `${focusTarget}:${focusNonce}` : "";
     if (signature && signature !== lastFocusSignature) {
+      // eslint-disable-next-line no-useless-assignment
       lastFocusSignature = signature;
       revealFocusSection(focusTarget);
     }
@@ -766,7 +768,7 @@
             </div>
           </div>
         {/each}
-        {#each pendingReopens as reopen}
+        {#each pendingReopens as reopen (reopen.id)}
           <div
             class="dashboard-click-row"
             on:click={() => openReopenDetail(reopen)}
@@ -844,7 +846,7 @@
             </span>
           {/if}
         </div>
-        {#each pendingAbsences as absence}
+        {#each pendingAbsences as absence (absence.id)}
           <div
             style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px"
           >
@@ -944,7 +946,7 @@
               {$t("No absences this week.")}
             </div>
           {:else}
-              {#each absenceSliderTeamData as absence}
+              {#each absenceSliderTeamData as absence (absence.user_id)}
                 {@const absentUser = users.find((u) => u.id === absence.user_id)}
                 <div class="dropdown-slider-item">
                   <div>
@@ -1089,7 +1091,7 @@
             <div>
               <div class="zf-label">{$t("Changes")}</div>
               <div class="change-diff-list">
-                {#each diffRows as row}
+                {#each diffRows as row (row.field)}
                   <div class="change-diff-row">
                     <div class="change-diff-field">{row.field}</div>
                     <div class="change-diff-before">{row.before}</div>
