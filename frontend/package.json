@@ -20,9 +20,9 @@
     "jsdom": "^29.1.1",
     "prettier": "^3.8.3",
     "prettier-plugin-svelte": "^3.5.2",
-    "svelte": "^5.55.7",
-    "vite": "^8.0.13",
-    "vitest": "^4.1.6"
+    "svelte": "^5.55.9",
+    "vite": "^8.0.14",
+    "vitest": "^4.1.7"
   },
   "dependencies": {
     "flatpickr": "^4.6.13",
