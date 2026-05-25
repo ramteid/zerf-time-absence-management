@@ -2,6 +2,7 @@ use crate::db::DatabasePool;
 use crate::error::AppResult;
 use crate::repository::users::User;
 use chrono::NaiveDate;
+use sqlx::{Postgres, QueryBuilder};
 use std::collections::HashSet;
 
 #[derive(Clone)]
@@ -246,14 +247,15 @@ impl ReportDb {
              FROM users";
         if is_admin {
             Ok(
-                sqlx::query_as::<_, User>(&format!("{SEL} WHERE active=TRUE ORDER BY last_name"))
+                QueryBuilder::<Postgres>::new(format!("{SEL} WHERE active=TRUE ORDER BY last_name"))
+                    .build_query_as::<User>()
                     .fetch_all(&self.pool)
                     .await?,
             )
         } else {
             // Non-admin leads see themselves plus direct reports, but admin
             // subjects are excluded from lead-scoped team views (user-guide).
-            Ok(sqlx::query_as::<_, User>(&format!(
+            Ok(QueryBuilder::<Postgres>::new(format!(
                 "{SEL} WHERE active=TRUE \
                  AND (id=$1 OR id IN (\
                      SELECT ua.user_id FROM user_approvers ua \
@@ -262,6 +264,7 @@ impl ReportDb {
                  )) \
                  ORDER BY last_name"
             ))
+            .build_query_as::<User>()
             .bind(requester_id)
             .fetch_all(&self.pool)
             .await?)
