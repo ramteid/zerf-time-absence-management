@@ -125,6 +125,10 @@
   $: if (reportMinMonth && reportMonth < reportMinMonth) {
     reportMonth = reportMinMonth;
   }
+  // Clamp teamMonth to the earliest start month (mirrors the employee report clamping).
+  $: if (earliestStartMonth && teamMonth < earliestStartMonth) {
+    teamMonth = earliestStartMonth;
+  }
 
   function userById(userId) {
     return findUserById(users, userId, $currentUser);
@@ -423,6 +427,17 @@
     reportUserId = $currentUser.id;
     csvUserId = $currentUser.id;
   }
+
+  // Export lower bound: the selected export user's own start date (most specific context).
+  // Falls back to the current user's start date while the users list is still loading.
+  $: csvUserMinDate = findUserById(users, csvUserId, $currentUser)?.start_date || null;
+
+  // Clamp all range "from" dates so they never fall before their respective lower bound.
+  // This matters for users whose start_date is after the hardcoded defaults
+  // (e.g. a user who joined in May would see catFrom = Jan 1 as invalid).
+  $: if ($earliestStartDate && catFrom < $earliestStartDate) catFrom = $earliestStartDate;
+  $: if ($earliestStartDate && absenceFrom < $earliestStartDate) absenceFrom = $earliestStartDate;
+  $: if (csvUserMinDate && csvFrom < csvUserMinDate) csvFrom = csvUserMinDate;
 
   // CSV formula-injection guard: cells starting with =, +, -, @, etc.
   // are prefixed with a leading single-quote so spreadsheets treat them as text.
@@ -1746,7 +1761,7 @@
     <div class="field-row" style="margin-bottom:12px">
       <div>
         <label class="zf-label" for="csv-from">{$t("From")}</label>
-        <DatePicker id="csv-from" bind:value={csvFrom} min={$earliestStartDate} max={csvTo} />
+        <DatePicker id="csv-from" bind:value={csvFrom} min={csvUserMinDate} max={csvTo} />
       </div>
       <div>
         <label class="zf-label" for="csv-to">{$t("To")}</label>
