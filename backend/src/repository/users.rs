@@ -260,6 +260,14 @@ impl UserDb {
         .is_some())
     }
 
+    pub async fn earliest_active_start_date(&self) -> AppResult<Option<NaiveDate>> {
+        Ok(
+            sqlx::query_scalar("SELECT MIN(start_date) FROM users WHERE active = true")
+                .fetch_one(&self.pool)
+                .await?,
+        )
+    }
+
     pub async fn get_start_date(&self, user_id: i64) -> AppResult<NaiveDate> {
         Ok(
             sqlx::query_scalar("SELECT start_date FROM users WHERE id=$1")

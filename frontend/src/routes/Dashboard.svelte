@@ -1002,6 +1002,7 @@
         <div style="display:flex;align-items:center;gap:4px">
           <DatePicker
             bind:value={chartFrom}
+            min={$currentUser?.start_date}
             max={chartTo}
             style="font-size:12px;padding:3px 6px;height:28px"
           />

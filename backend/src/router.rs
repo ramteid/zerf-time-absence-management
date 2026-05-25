@@ -81,6 +81,7 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                     post(handlers::absences::reject_cancellation),
                 )
                 .route("/leave-balance/{uid}", get(handlers::absences::balance))
+                .route("/users/earliest-start-date", get(handlers::users::earliest_start_date))
                 .route("/users", get(handlers::users::list).post(handlers::users::create))
                 .route(
                     "/users/{id}",
