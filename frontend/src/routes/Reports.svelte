@@ -129,10 +129,6 @@
     teamMonth = earliestStartMonth;
   }
 
-  function userById(userId) {
-    return findUserById(users, userId, $currentUser);
-  }
-
   function userHasFlextime(userId) {
     // When the userId matches the current user, use their data directly so we
     // always have the correct answer (even before the users list has loaded).
