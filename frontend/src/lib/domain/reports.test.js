@@ -6,7 +6,10 @@ import {
   filterTeamCategoryColumns,
   absenceKindTotals,
   summarizeAbsences,
+  teamCategoryMinutes,
   teamCategoryRowTotal,
+  totalAbsenceDays,
+  totalCategoryMinutes,
 } from "./reports.js";
 
 describe("reports domain helpers", () => {
@@ -69,5 +72,66 @@ describe("reports domain helpers", () => {
 
   it("uses unknown for missing absence kinds", () => {
     expect(absenceKindTotals([{ days: 1 }])).toEqual({ unknown: 1 });
+  });
+
+  // Bug 6: categoryColumnsFromTeamReport secondary sort
+  it("sorts equal-minute categories alphabetically as secondary sort", () => {
+    const columns = categoryColumnsFromTeamReport([
+      {
+        categories: [
+          { category: "Zebra", color: "#z", minutes: 60 },
+          { category: "Alpha", color: "#a", minutes: 60 },
+          { category: "Mango", color: "#m", minutes: 60 },
+        ],
+      },
+    ]);
+    expect(columns.map((c) => c.category)).toEqual(["Alpha", "Mango", "Zebra"]);
+  });
+
+  it("primary sort by descending minutes takes precedence over name", () => {
+    const columns = categoryColumnsFromTeamReport([
+      {
+        categories: [
+          { category: "Alpha", color: "#a", minutes: 10 },
+          { category: "Zebra", color: "#z", minutes: 200 },
+        ],
+      },
+    ]);
+    expect(columns.map((c) => c.category)).toEqual(["Zebra", "Alpha"]);
+  });
+
+  // Bug 7: absenceKindTotals excludes zero-day kinds
+  it("excludes absence kinds whose total is zero", () => {
+    expect(
+      absenceKindTotals([
+        { kind: "vacation", days: 2 },
+        { kind: "sick", days: 0 },
+      ]),
+    ).toEqual({ vacation: 2 });
+  });
+
+  it("returns empty object when all absence kinds total zero", () => {
+    expect(
+      absenceKindTotals([
+        { kind: "sick", days: 0 },
+        { kind: "vacation", days: 0 },
+      ]),
+    ).toEqual({});
+  });
+
+  // totalAbsenceDays and totalCategoryMinutes edge cases
+  it("totalAbsenceDays returns 0 for null input", () => {
+    expect(totalAbsenceDays(null)).toBe(0);
+  });
+
+  it("totalCategoryMinutes returns 0 for empty list", () => {
+    expect(totalCategoryMinutes([])).toBe(0);
+  });
+
+  // teamCategoryMinutes returns 0 for missing category
+  it("teamCategoryMinutes returns 0 when category is not in row", () => {
+    expect(
+      teamCategoryMinutes({ categories: [{ category: "Admin", minutes: 30 }] }, "Project"),
+    ).toBe(0);
   });
 });

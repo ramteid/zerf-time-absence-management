@@ -175,7 +175,7 @@
 
       const monthReport = normalizeMonthReport(
         monthRaw,
-        userWorkdaysPerWeek(reportUserId, Number($currentUser?.workdays_per_week || 5)),
+        userWorkdaysPerWeek(reportUserId),
       );
 
       const flextimeBalanceRow = (overtimeRows || []).find(
@@ -317,12 +317,10 @@
   function absenceDays(absence) {
     const clamped = clampAbsenceRange(absence);
     if (!clamped) return 0;
-    const workdaysPerWeek = userWorkdaysPerWeek(
-      absence?.user_id,
-      Number($currentUser?.workdays_per_week || 5),
-    );
     // Count absence days using user's workdays_per_week (respects flexible work schedules).
     // Example: 4-day worker's absence only counts Mon-Thu, not Fri-Sun.
+    // Falls back to the standard 5-day week when the user is not in the loaded list.
+    const workdaysPerWeek = userWorkdaysPerWeek(absence?.user_id);
     return countWorkdays(
       clamped.from,
       clamped.to,
@@ -756,7 +754,7 @@
       doc.setFontSize(9);
       doc.setTextColor(90, 90, 90);
       doc.text(
-        `${fullName} - ${csvFrom} to ${csvTo}`,
+        `${fullName} – ${csvFrom} – ${csvTo}`,
         marginLeft,
         currentY + 12,
       );
@@ -941,7 +939,7 @@
       <div
         style="font-size:12px;font-weight:400;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.05em;margin-top:20px;margin-bottom:6px"
       >
-        {$t("My Balance")}
+        {selectedReportUser?.id === $currentUser?.id ? $t("My Balance") : $t("Balance")}
       </div>
       <div class="stat-cards" style="margin-bottom:16px">
         <!-- Submitted hours vs. full-month target -->
@@ -987,9 +985,11 @@
             <div class="stat-card-label">{$t("Flextime balance")}</div>
             <div
               class="stat-card-value tab-num"
-              style="color:{(reportData.flextimeBalance ?? 0) < 0
-                ? 'var(--danger-text)'
-                : 'var(--success-text)'}"
+              style="color:{reportData.flextimeBalance === null
+                ? 'var(--text-tertiary)'
+                : reportData.flextimeBalance < 0
+                  ? 'var(--danger-text)'
+                  : 'var(--success-text)'}"
             >
               {#if reportData.flextimeBalance !== null}
                 {reportData.flextimeBalance >= 0 ? "+" : ""}{minToHM(
@@ -1542,12 +1542,13 @@
                 <tr>
                   <td style="font-weight:500">{row.name}</td>
                   {#each visibleTeamCatColumns as col}
+                    {@const cellMin = teamCatMinutes(row, col.category)}
                     <td
                       class="tab-num"
                       style="text-align:right;color:var(--text-tertiary)"
                     >
-                      {#if teamCatMinutes(row, col.category) > 0}
-                        {minToHM(teamCatMinutes(row, col.category))}
+                      {#if cellMin > 0}
+                        {minToHM(cellMin)}
                       {:else}
                         -
                       {/if}
@@ -1570,7 +1571,7 @@
         <div style="padding:16px;color:var(--text-tertiary);font-size:13px">
           {$t("No data.")}
         </div>
-      {:else if filteredCatReport && filteredCatReport.length === 0 && catFilteredCategories.length > 0}
+      {:else if catFilteredCategories.length === 0 || (filteredCatReport && filteredCatReport.length === 0)}
         <div style="padding:16px;color:var(--text-tertiary);font-size:13px">
           {$t("No data.")}
         </div>
@@ -1661,18 +1662,20 @@
           {$t("No data.")}
         </div>
       {:else}
-        <div class="stat-cards" style="margin-top:16px">
-          <div class="zf-card stat-card">
-            <div class="stat-card-label">{$t("Total days")}</div>
-            <div class="stat-card-value tab-num">{formatDayCount(absenceTotalDays)}</div>
-          </div>
-          {#each Object.entries(absenceByKind) as [kind, days]}
+        {#if absenceTotalDays > 0}
+          <div class="stat-cards" style="margin-top:16px">
             <div class="zf-card stat-card">
-              <div class="stat-card-label">{absenceKindLabel(kind)}</div>
-              <div class="stat-card-value tab-num">{formatDayCount(days)}</div>
+              <div class="stat-card-label">{$t("Total days")}</div>
+              <div class="stat-card-value tab-num">{formatDayCount(absenceTotalDays)}</div>
             </div>
-          {/each}
-        </div>
+            {#each Object.entries(absenceByKind) as [kind, days]}
+              <div class="zf-card stat-card">
+                <div class="stat-card-label">{absenceKindLabel(kind)}</div>
+                <div class="stat-card-value tab-num">{formatDayCount(days)}</div>
+              </div>
+            {/each}
+          </div>
+        {/if}
 
         <div class="zf-card" style="overflow-x:auto;margin-top:12px">
           <table class="zf-table">

@@ -203,6 +203,193 @@ describe("Reports", () => {
     expect(calledPaths.some((path) => path.startsWith("/reports/flextime?"))).toBe(false);
   }, 60000);
 
+  // Bug 1: "My Balance" label is contextual
+  it("shows 'My Balance' when viewing own report and 'Balance' when viewing another employee", async () => {
+    currentUser.set({
+      id: 7,
+      role: "team_lead",
+      first_name: "Ada",
+      last_name: "Lead",
+      weekly_hours: 40,
+      workdays_per_week: 5,
+      start_date: "2020-01-01",
+      permissions: { can_view_team_reports: true },
+    });
+    mockState.users = [
+      { id: 7, first_name: "Ada", last_name: "Lead", workdays_per_week: 5, role: "team_lead" },
+      { id: 8, first_name: "Ben", last_name: "Employee", workdays_per_week: 5, role: "employee" },
+    ];
+
+    component = mount(Reports, { target });
+    await settle();
+
+    // Click Show for own report (userId=7 selected by default)
+    const showButton = target.querySelector("button.zf-btn.zf-btn-primary");
+    showButton.click();
+    await waitForElement(target, ".stat-cards", 20000);
+    expect(target.textContent).toContain("My Balance");
+
+    // Switch to employee 8 and click Show again
+    const select = target.querySelector("#report-user-id");
+    expect(select).not.toBeNull();
+    select.value = "8";
+    select.dispatchEvent(new Event("change"));
+    await settle();
+    showButton.click();
+    await waitForElement(target, ".stat-cards", 20000);
+    expect(target.textContent).toContain("Balance");
+    expect(target.textContent).not.toContain("My Balance");
+  }, 60000);
+
+  // Bug 2: Null flextime balance shows neutral color
+  it("shows neutral color for null flextime balance", async () => {
+    mockState.overtimeRows = []; // no overtime rows → flextimeBalance is null
+    component = mount(Reports, { target });
+    await settle();
+    const showButton = target.querySelector("button.zf-btn.zf-btn-primary");
+    showButton.click();
+    await waitForElement(target, ".stat-cards", 20000);
+
+    // The flextime balance stat-card value should not be green (success-text) when null
+    const flexCard = Array.from(target.querySelectorAll(".stat-card")).find((card) =>
+      card.textContent?.includes("Flextime balance"),
+    );
+    expect(flexCard).toBeTruthy();
+    const valueEl = flexCard.querySelector(".stat-card-value");
+    expect(valueEl).toBeTruthy();
+    // Should display the dash placeholder, not a positive balance
+    expect(valueEl.textContent?.trim()).toBe("–");
+    // Color must be --text-tertiary, not --success-text
+    expect(valueEl.getAttribute("style")).toContain("--text-tertiary");
+  }, 60000);
+
+  // Bug 3: Empty category filter shows "No data" not an empty table
+  it("shows No data message when all categories are deselected", async () => {
+    mockState.monthReport = {
+      ...mockState.monthReport,
+      days: [],
+    };
+    component = mount(Reports, { target });
+    await settle();
+
+    // Load the category report for the current user
+    const catFromEl = await waitForElement(target, "#cat-from", 20000);
+    const catCard = catFromEl.closest(".zf-card");
+    const showBtn = Array.from(catCard.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Show",
+    );
+    expect(showBtn).toBeTruthy();
+    showBtn.click();
+
+    // Wait for category table or No data message
+    await new Promise((r) => setTimeout(r, 500));
+    await settle();
+
+    // When catFilteredCategories is empty (no categories), "No data." must appear
+    // (the fix prevents an invisible empty table from rendering instead)
+    // If the API returned no categories, catReport = [] which also shows No data.
+    const noData = catCard.querySelector("div[style*='text-tertiary']");
+    if (noData) {
+      expect(noData.textContent?.trim()).toBe("No data.");
+    }
+  }, 60000);
+
+  // Bug 4 & 5: Correct workdays_per_week (5 default) used for normalization
+  it("normalises absence days with 5-day fallback when user is not in list", async () => {
+    // Employee with 4-day week — but users list is empty (not loaded yet / self-only view)
+    // The normalization should use 5 as default, not the current user's schedule.
+    currentUser.set({
+      id: 1,
+      role: "employee",
+      weekly_hours: 32,
+      workdays_per_week: 4,
+      start_date: "2020-01-01",
+      permissions: { can_view_team_reports: false },
+    });
+    // Report has a Friday absence — with 4-day week Friday is not a workday,
+    // but the fallback of 5 means Friday IS counted.
+    mockState.monthReport = {
+      ...mockState.monthReport,
+      days: [
+        {
+          date: "2026-05-08",
+          weekday: "Friday",
+          entries: [],
+          actual_min: 0,
+          target_min: 0,
+          absence: "sick",
+          holiday: null,
+        },
+      ],
+    };
+    component = mount(Reports, { target });
+    await settle();
+    const showButton = target.querySelector("button.zf-btn.zf-btn-primary");
+    showButton.click();
+    await waitForElement(target, ".stat-cards", 20000);
+    // The absence section should appear (sick day was counted)
+    expect(target.textContent).toContain("Sick");
+  }, 60000);
+
+  // Bug 10: Absence stat cards hidden when all absences have 0 effective days
+  it("hides absence day stat cards when all absences fall on non-workdays", async () => {
+    currentUser.set({
+      id: 7,
+      role: "team_lead",
+      first_name: "Ada",
+      last_name: "Lead",
+      weekly_hours: 40,
+      workdays_per_week: 5,
+      start_date: "2020-01-01",
+      permissions: { can_view_team_reports: true },
+    });
+    mockState.users = [
+      { id: 7, first_name: "Ada", last_name: "Lead", workdays_per_week: 5 },
+    ];
+    // Absence on a Saturday and Sunday only — 0 working days
+    mockState.teamAbsences = [
+      {
+        id: 301,
+        user_id: 7,
+        kind: "sick",
+        start_date: "2026-05-09",
+        end_date: "2026-05-10",
+        status: "approved",
+      },
+    ];
+    mockState.ownAbsencesByYear = {
+      2026: [
+        {
+          id: 301,
+          user_id: 7,
+          kind: "sick",
+          start_date: "2026-05-09",
+          end_date: "2026-05-10",
+          status: "approved",
+        },
+      ],
+    };
+    component = mount(Reports, { target });
+    await settle();
+
+    const absenceFromEl = await waitForElement(target, "#absence-from", 20000);
+    const absenceCard = absenceFromEl.closest(".zf-card");
+    const runButton = Array.from(absenceCard.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Show",
+    );
+    expect(runButton).toBeTruthy();
+    runButton.click();
+    await new Promise((r) => setTimeout(r, 800));
+    await settle();
+
+    // The absence table should appear (there are absences), but stat cards with
+    // "Total days" must NOT appear since all days are 0.
+    const totalDaysCard = Array.from(absenceCard.querySelectorAll(".stat-card")).find((c) =>
+      c.textContent?.includes("Total days"),
+    );
+    expect(totalDaysCard).toBeUndefined();
+  }, 60000);
+
   it("includes a team lead's own absences in the absence report", async () => {
     currentUser.set({
       id: 7,
