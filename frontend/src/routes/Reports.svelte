@@ -119,7 +119,7 @@
   // Derive the earliest selectable month from the employee's start date.
   $: reportMinMonth = selectedReportUser?.start_date
     ? selectedReportUser.start_date.slice(0, 7)
-    : ($earliestStartDate?.slice(0, 7) ?? "");
+    : ($earliestStartDate?.slice(0, 7) ?? null);
   $: earliestStartMonth = $earliestStartDate?.slice(0, 7) ?? null;
   // Clamp selected month forward when switching to an employee with a later start date.
   $: if (reportMinMonth && reportMonth < reportMinMonth) {
