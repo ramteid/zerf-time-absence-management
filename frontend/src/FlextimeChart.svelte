@@ -1,7 +1,7 @@
 <script>
   import { t, absenceKindLabel, formatHours, fmtDecimal } from "./i18n.js";
   import { settings } from "./stores.js";
-  import { appTodayIsoDate, fmtDateShort } from "./format.js";
+  import { appTodayIsoDate, fmtDateShort, fmtDateWeekday } from "./format.js";
   import { HOLIDAY_COLOR, WEEKEND_COLOR, ABSENCE_COLORS } from "./colors.js";
 
   /**
@@ -194,7 +194,7 @@
   $: hoverPt = hoverIdx !== null ? pts[hoverIdx] : null;
 
   // ── Tooltip ──────────────────────────────────────────────────────────────
-  const tooltipWidth = 172;
+  const tooltipWidth = 190;
   const tooltipHeight = 70;
 
   $: tooltipX =
@@ -469,7 +469,7 @@
           font-weight="600"
           fill="var(--text-primary)"
         >
-          {fmtDateShort(hoverD.date)}{dayContextLabel(hoverD)
+          {fmtDateWeekday(hoverD.date)}{dayContextLabel(hoverD)
             ? " · " + dayContextLabel(hoverD)
             : ""}
         </text>
