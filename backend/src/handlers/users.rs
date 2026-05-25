@@ -84,9 +84,15 @@ pub async fn team_settings_update(
 
 pub async fn earliest_start_date(
     State(app_state): State<AppState>,
-    _requester: User,
+    requester: User,
 ) -> AppResult<Json<serde_json::Value>> {
-    let date = app_state.db.users.earliest_active_start_date().await?;
+    // Leads and admins see data across all users → return global minimum.
+    // Regular employees only see their own data → return their own start date.
+    let date: Option<NaiveDate> = if requester.is_lead() {
+        app_state.db.users.earliest_active_start_date().await?
+    } else {
+        Some(requester.start_date)
+    };
     Ok(Json(serde_json::json!({ "earliest_start_date": date })))
 }
 
