@@ -3,6 +3,7 @@ use crate::error::{AppError, AppResult};
 use crate::repository::time_entries::validate_entries_after_reopen;
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::Serialize;
+use sqlx::{Postgres, QueryBuilder};
 
 #[derive(sqlx::FromRow, Serialize)]
 pub struct ReopenRequest {
@@ -45,7 +46,8 @@ impl ReopenRequestDb {
 
     pub async fn find_by_id(&self, id: i64) -> AppResult<ReopenRequest> {
         Ok(
-            sqlx::query_as::<_, ReopenRequest>(&format!("{RR_SELECT} WHERE id=$1"))
+            QueryBuilder::<Postgres>::new(format!("{RR_SELECT} WHERE id=$1"))
+                .build_query_as::<ReopenRequest>()
                 .bind(id)
                 .fetch_one(&self.pool)
                 .await?,
@@ -53,24 +55,26 @@ impl ReopenRequestDb {
     }
 
     pub async fn list_mine(&self, user_id: i64) -> AppResult<Vec<ReopenRequest>> {
-        Ok(sqlx::query_as::<_, ReopenRequest>(&format!(
+        Ok(QueryBuilder::<Postgres>::new(format!(
             "{RR_SELECT} WHERE user_id=$1 ORDER BY created_at DESC"
         ))
+        .build_query_as::<ReopenRequest>()
         .bind(user_id)
         .fetch_all(&self.pool)
         .await?)
     }
 
     pub async fn list_pending_admin(&self) -> AppResult<Vec<ReopenRequest>> {
-        Ok(sqlx::query_as::<_, ReopenRequest>(&format!(
+        Ok(QueryBuilder::<Postgres>::new(format!(
             "{RR_SELECT} WHERE status='pending' ORDER BY created_at"
         ))
+        .build_query_as::<ReopenRequest>()
         .fetch_all(&self.pool)
         .await?)
     }
 
     pub async fn list_pending_for_lead(&self, lead_id: i64) -> AppResult<Vec<ReopenRequest>> {
-        Ok(sqlx::query_as::<_, ReopenRequest>(&format!(
+        Ok(QueryBuilder::<Postgres>::new(format!(
             "{RR_SELECT} WHERE status='pending' \
              AND user_id IN (\
                  SELECT ua.user_id FROM user_approvers ua \
@@ -78,6 +82,7 @@ impl ReopenRequestDb {
                  WHERE ua.approver_id=$1 AND u.active=TRUE AND u.role != 'admin'\
              ) ORDER BY created_at"
         ))
+        .build_query_as::<ReopenRequest>()
         .bind(lead_id)
         .fetch_all(&self.pool)
         .await?)
@@ -190,9 +195,10 @@ impl ReopenRequestDb {
         reviewer_is_admin: bool,
     ) -> AppResult<(ReopenRequest, Vec<(i64, String)>)> {
         let mut tx = self.pool.begin().await?;
-        let req: ReopenRequest = sqlx::query_as::<_, ReopenRequest>(&format!(
+        let req: ReopenRequest = QueryBuilder::<Postgres>::new(format!(
             "{RR_SELECT} WHERE id=$1 FOR UPDATE"
         ))
+        .build_query_as::<ReopenRequest>()
         .bind(request_id)
         .fetch_optional(&mut *tx)
         .await?
@@ -245,9 +251,10 @@ impl ReopenRequestDb {
         reason: &str,
     ) -> AppResult<ReopenRequest> {
         let mut tx = self.pool.begin().await?;
-        let before: ReopenRequest = sqlx::query_as::<_, ReopenRequest>(&format!(
+        let before: ReopenRequest = QueryBuilder::<Postgres>::new(format!(
             "{RR_SELECT} WHERE id=$1 FOR UPDATE"
         ))
+        .build_query_as::<ReopenRequest>()
         .bind(request_id)
         .fetch_optional(&mut *tx)
         .await?

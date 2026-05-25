@@ -417,7 +417,8 @@ impl TimeEntryDb {
 
     pub async fn find_by_id(&self, id: i64) -> AppResult<TimeEntry> {
         Ok(
-            sqlx::query_as::<_, TimeEntry>(&format!("{TE_SELECT} WHERE id=$1"))
+            QueryBuilder::<Postgres>::new(format!("{TE_SELECT} WHERE id=$1"))
+                .build_query_as::<TimeEntry>()
                 .bind(id)
                 .fetch_one(&self.pool)
                 .await?,
@@ -426,7 +427,8 @@ impl TimeEntryDb {
 
     pub async fn find_by_id_opt(&self, id: i64) -> AppResult<Option<TimeEntry>> {
         Ok(
-            sqlx::query_as::<_, TimeEntry>(&format!("{TE_SELECT} WHERE id=$1"))
+            QueryBuilder::<Postgres>::new(format!("{TE_SELECT} WHERE id=$1"))
+                .build_query_as::<TimeEntry>()
                 .bind(id)
                 .fetch_optional(&self.pool)
                 .await?,
@@ -438,7 +440,8 @@ impl TimeEntryDb {
         id: i64,
     ) -> AppResult<TimeEntry> {
         Ok(
-            sqlx::query_as::<_, TimeEntry>(&format!("{TE_SELECT} WHERE id=$1 FOR UPDATE"))
+            QueryBuilder::<Postgres>::new(format!("{TE_SELECT} WHERE id=$1 FOR UPDATE"))
+                .build_query_as::<TimeEntry>()
                 .bind(id)
                 .fetch_one(tx)
                 .await?,
@@ -576,7 +579,8 @@ impl TimeEntryDb {
         .await?;
         tx.commit().await?;
         Ok(
-            sqlx::query_as::<_, TimeEntry>(&format!("{TE_SELECT} WHERE id=$1"))
+            QueryBuilder::<Postgres>::new(format!("{TE_SELECT} WHERE id=$1"))
+                .build_query_as::<TimeEntry>()
                 .bind(new_id)
                 .fetch_one(&self.pool)
                 .await?,
@@ -600,7 +604,8 @@ impl TimeEntryDb {
             .execute(&mut *tx)
             .await?;
         let prev: TimeEntry =
-            sqlx::query_as::<_, TimeEntry>(&format!("{TE_SELECT} WHERE id=$1 FOR UPDATE"))
+            QueryBuilder::<Postgres>::new(format!("{TE_SELECT} WHERE id=$1 FOR UPDATE"))
+                .build_query_as::<TimeEntry>()
                 .bind(entry_id)
                 .fetch_one(&mut *tx)
                 .await?;
@@ -635,7 +640,8 @@ impl TimeEntryDb {
         .await?;
         tx.commit().await?;
         let updated: TimeEntry =
-            sqlx::query_as::<_, TimeEntry>(&format!("{TE_SELECT} WHERE id=$1"))
+            QueryBuilder::<Postgres>::new(format!("{TE_SELECT} WHERE id=$1"))
+                .build_query_as::<TimeEntry>()
                 .bind(entry_id)
                 .fetch_one(&self.pool)
                 .await?;
@@ -653,7 +659,8 @@ impl TimeEntryDb {
             .execute(&mut *tx)
             .await?;
         let entry: TimeEntry =
-            sqlx::query_as::<_, TimeEntry>(&format!("{TE_SELECT} WHERE id=$1 FOR UPDATE"))
+            QueryBuilder::<Postgres>::new(format!("{TE_SELECT} WHERE id=$1 FOR UPDATE"))
+                .build_query_as::<TimeEntry>()
                 .bind(entry_id)
                 .fetch_one(&mut *tx)
                 .await?;
@@ -714,7 +721,8 @@ impl TimeEntryDb {
         ordered_ids.dedup();
         for id in ordered_ids {
             let Some(entry) =
-                sqlx::query_as::<_, TimeEntry>(&format!("{TE_SELECT} WHERE id=$1 FOR UPDATE"))
+                QueryBuilder::<Postgres>::new(format!("{TE_SELECT} WHERE id=$1 FOR UPDATE"))
+                    .build_query_as::<TimeEntry>()
                     .bind(id)
                     .fetch_optional(&mut *tx)
                     .await?
@@ -769,7 +777,8 @@ impl TimeEntryDb {
         ordered_ids.dedup();
         for id in ordered_ids {
             let Some(entry) =
-                sqlx::query_as::<_, TimeEntry>(&format!("{TE_SELECT} WHERE id=$1 FOR UPDATE"))
+                QueryBuilder::<Postgres>::new(format!("{TE_SELECT} WHERE id=$1 FOR UPDATE"))
+                    .build_query_as::<TimeEntry>()
                     .bind(id)
                     .fetch_optional(&mut *tx)
                     .await?
@@ -815,9 +824,10 @@ impl TimeEntryDb {
         from: NaiveDate,
         to: NaiveDate,
     ) -> AppResult<Vec<TimeEntry>> {
-        Ok(sqlx::query_as::<_, TimeEntry>(&format!(
+        Ok(QueryBuilder::<Postgres>::new(format!(
             "{TE_SELECT} WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3"
         ))
+        .build_query_as::<TimeEntry>()
         .bind(user_id)
         .bind(from)
         .bind(to)

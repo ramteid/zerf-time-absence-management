@@ -5,11 +5,9 @@ use crate::error::{AppError, AppResult};
 use crate::middleware::auth::{ABSOLUTE_TIMEOUT_HOURS, IDLE_TIMEOUT_HOURS, User};
 use crate::repository::{SessionDb, UserDb};
 use crate::AppState;
-use argon2::password_hash::{
-    rand_core::{OsRng, RngCore},
-    PasswordHash, PasswordHasher, PasswordVerifier, SaltString,
-};
+use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::{Algorithm, Argon2, Params, Version};
+use rand_core::{OsRng, RngCore};
 
 const MIN_PW_LEN: usize = 12;
 
@@ -341,7 +339,7 @@ mod tests {
         let instance = argon2_instance();
         // Verify it can actually hash a password (smoke test).
         use argon2::password_hash::{PasswordHasher, SaltString};
-        use argon2::password_hash::rand_core::OsRng;
+        use rand_core::OsRng;
         let salt = SaltString::generate(&mut OsRng);
         assert!(instance.hash_password(b"test", &salt).is_ok());
     }

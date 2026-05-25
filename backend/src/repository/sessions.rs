@@ -147,12 +147,16 @@ impl SessionDb {
     // ── Background cleanup ─────────────────────────────────────────────────
 
     pub async fn cleanup_expired_sessions(&self, idle_hours: i64, absolute_hours: i64) {
-        let sql = format!(
+        let result = sqlx::query(
             "DELETE FROM sessions \
-             WHERE last_active_at < CURRENT_TIMESTAMP - INTERVAL '{idle_hours} hours' \
-                OR created_at < CURRENT_TIMESTAMP - INTERVAL '{absolute_hours} hours'"
-        );
-        if let Err(e) = sqlx::query(&sql).execute(&self.pool).await {
+             WHERE last_active_at < CURRENT_TIMESTAMP - ($1 * INTERVAL '1 hour') \
+                OR created_at < CURRENT_TIMESTAMP - ($2 * INTERVAL '1 hour')",
+        )
+        .bind(idle_hours)
+        .bind(absolute_hours)
+        .execute(&self.pool)
+        .await;
+        if let Err(e) = result {
             tracing::warn!(target: "zerf::cleanup", "session cleanup failed: {e}");
         }
     }

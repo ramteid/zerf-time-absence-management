@@ -213,7 +213,8 @@ impl AbsenceDb {
 
     pub async fn find_by_id(&self, id: i64) -> AppResult<Absence> {
         Ok(
-            sqlx::query_as::<_, Absence>(&format!("{ABS_SELECT} WHERE id=$1"))
+            QueryBuilder::<Postgres>::new(format!("{ABS_SELECT} WHERE id=$1"))
+                .build_query_as::<Absence>()
                 .bind(id)
                 .fetch_one(&self.pool)
                 .await?,
@@ -235,10 +236,11 @@ impl AbsenceDb {
         from: NaiveDate,
         to: NaiveDate,
     ) -> AppResult<Vec<Absence>> {
-        Ok(sqlx::query_as::<_, Absence>(&format!(
+        Ok(QueryBuilder::<Postgres>::new(format!(
             "{ABS_SELECT} WHERE user_id=$1 AND end_date >= $2 AND start_date <= $3 \
              ORDER BY start_date DESC"
         ))
+        .build_query_as::<Absence>()
         .bind(user_id)
         .bind(from)
         .bind(to)
@@ -352,11 +354,12 @@ impl AbsenceDb {
         from: NaiveDate,
         to: NaiveDate,
     ) -> AppResult<Vec<Absence>> {
-        Ok(sqlx::query_as::<_, Absence>(&format!(
+        Ok(QueryBuilder::<Postgres>::new(format!(
             "{ABS_SELECT} WHERE user_id=$1 AND kind='vacation' \
              AND status IN ('requested','approved','cancellation_pending') \
              AND end_date >= $2 AND start_date <= $3"
         ))
+        .build_query_as::<Absence>()
         .bind(user_id)
         .bind(from)
         .bind(to)
@@ -425,7 +428,8 @@ impl AbsenceDb {
         .await?;
         tx.commit().await?;
         Ok(
-            sqlx::query_as::<_, Absence>(&format!("{ABS_SELECT} WHERE id=$1"))
+            QueryBuilder::<Postgres>::new(format!("{ABS_SELECT} WHERE id=$1"))
+                .build_query_as::<Absence>()
                 .bind(new_id)
                 .fetch_one(&self.pool)
                 .await?,
@@ -446,7 +450,8 @@ impl AbsenceDb {
         let mut tx = self.pool.begin().await?;
         Self::lock_user_scope_tx(&mut tx, owner_id).await?;
         let before: Absence =
-            sqlx::query_as::<_, Absence>(&format!("{ABS_SELECT} WHERE id=$1 FOR UPDATE"))
+            QueryBuilder::<Postgres>::new(format!("{ABS_SELECT} WHERE id=$1 FOR UPDATE"))
+                .build_query_as::<Absence>()
                 .bind(absence_id)
                 .fetch_one(&mut *tx)
                 .await?;
@@ -481,10 +486,12 @@ impl AbsenceDb {
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
-        let after: Absence = sqlx::query_as::<_, Absence>(&format!("{ABS_SELECT} WHERE id=$1"))
-            .bind(absence_id)
-            .fetch_one(&self.pool)
-            .await?;
+        let after: Absence =
+            QueryBuilder::<Postgres>::new(format!("{ABS_SELECT} WHERE id=$1"))
+                .build_query_as::<Absence>()
+                .bind(absence_id)
+                .fetch_one(&self.pool)
+                .await?;
         Ok((before, after))
     }
 
@@ -492,7 +499,8 @@ impl AbsenceDb {
         let mut tx = self.pool.begin().await?;
         Self::lock_user_scope_tx(&mut tx, owner_id).await?;
         let before: Absence =
-            sqlx::query_as::<_, Absence>(&format!("{ABS_SELECT} WHERE id=$1 FOR UPDATE"))
+            QueryBuilder::<Postgres>::new(format!("{ABS_SELECT} WHERE id=$1 FOR UPDATE"))
+                .build_query_as::<Absence>()
                 .bind(absence_id)
                 .fetch_one(&mut *tx)
                 .await?;
@@ -606,7 +614,8 @@ impl AbsenceDb {
         absence_id: i64,
     ) -> AppResult<Absence> {
         Ok(
-            sqlx::query_as::<_, Absence>(&format!("{ABS_SELECT} WHERE id=$1 FOR UPDATE"))
+            QueryBuilder::<Postgres>::new(format!("{ABS_SELECT} WHERE id=$1 FOR UPDATE"))
+                .build_query_as::<Absence>()
                 .bind(absence_id)
                 .fetch_one(tx)
                 .await?,

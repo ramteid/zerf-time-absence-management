@@ -15,7 +15,7 @@ pub async fn create_isolated_database(admin_database_url: &str) -> anyhow::Resul
         TEST_DB_COUNTER.fetch_add(1, Ordering::Relaxed),
     );
     let admin_pool = sqlx::PgPool::connect(admin_database_url).await?;
-    sqlx::query(&format!("CREATE DATABASE \"{db_name}\""))
+    sqlx::query(sqlx::AssertSqlSafe(format!("CREATE DATABASE \"{db_name}\"")))
         .execute(&admin_pool)
         .await?;
     Ok(db_name)

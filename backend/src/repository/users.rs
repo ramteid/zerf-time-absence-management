@@ -3,6 +3,7 @@ use crate::error::{AppError, AppResult};
 use crate::roles::{can_approve_non_admin_subjects, is_admin_role, ROLE_ASSISTANT};
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::Serialize;
+use sqlx::{Postgres, QueryBuilder};
 
 const USER_GRAPH_LOCK_KEY: i64 = 0x7A_45_52_46_5F_53_54_55_i64;
 
@@ -84,7 +85,8 @@ impl UserDb {
 
     pub async fn find_by_email(&self, email: &str) -> AppResult<Option<User>> {
         Ok(
-            sqlx::query_as::<_, User>(&format!("{USER_SELECT} WHERE email = $1"))
+            QueryBuilder::<Postgres>::new(format!("{USER_SELECT} WHERE email = $1"))
+                .build_query_as::<User>()
                 .bind(email)
                 .fetch_optional(&self.pool)
                 .await?,
@@ -93,7 +95,8 @@ impl UserDb {
 
     pub async fn find_by_id(&self, id: i64) -> AppResult<Option<User>> {
         Ok(
-            sqlx::query_as::<_, User>(&format!("{USER_SELECT} WHERE id=$1"))
+            QueryBuilder::<Postgres>::new(format!("{USER_SELECT} WHERE id=$1"))
+                .build_query_as::<User>()
                 .bind(id)
                 .fetch_optional(&self.pool)
                 .await?,
@@ -102,7 +105,8 @@ impl UserDb {
 
     pub async fn find_by_id_active(&self, id: i64) -> AppResult<Option<User>> {
         Ok(
-            sqlx::query_as::<_, User>(&format!("{USER_SELECT} WHERE id=$1 AND active=TRUE"))
+            QueryBuilder::<Postgres>::new(format!("{USER_SELECT} WHERE id=$1 AND active=TRUE"))
+                .build_query_as::<User>()
                 .bind(id)
                 .fetch_optional(&self.pool)
                 .await?,
@@ -111,41 +115,45 @@ impl UserDb {
 
     pub async fn find_all_ordered(&self) -> AppResult<Vec<User>> {
         Ok(
-            sqlx::query_as::<_, User>(&format!("{USER_SELECT} ORDER BY last_name, first_name"))
+            QueryBuilder::<Postgres>::new(format!("{USER_SELECT} ORDER BY last_name, first_name"))
+                .build_query_as::<User>()
                 .fetch_all(&self.pool)
                 .await?,
         )
     }
 
     pub async fn find_for_approver(&self, approver_id: i64) -> AppResult<Vec<User>> {
-        Ok(sqlx::query_as::<_, User>(&format!(
+        Ok(QueryBuilder::<Postgres>::new(format!(
             "{USER_SELECT} WHERE active=TRUE AND (id=$1 \
              OR id IN (SELECT ua.user_id FROM user_approvers ua \
                        JOIN users u ON u.id=ua.user_id \
                        WHERE ua.approver_id=$1 AND u.active=TRUE AND u.role != 'admin')) \
              ORDER BY last_name, first_name"
         ))
+        .build_query_as::<User>()
         .bind(approver_id)
         .fetch_all(&self.pool)
         .await?)
     }
 
     pub async fn find_all_active_ordered(&self) -> AppResult<Vec<User>> {
-        Ok(sqlx::query_as::<_, User>(&format!(
+        Ok(QueryBuilder::<Postgres>::new(format!(
             "{USER_SELECT} WHERE active=TRUE ORDER BY last_name"
         ))
+        .build_query_as::<User>()
         .fetch_all(&self.pool)
         .await?)
     }
 
     pub async fn find_active_team_for_lead(&self, lead_id: i64) -> AppResult<Vec<User>> {
-        Ok(sqlx::query_as::<_, User>(&format!(
+        Ok(QueryBuilder::<Postgres>::new(format!(
             "{USER_SELECT} WHERE active=TRUE \
              AND (id=$1 OR id IN (SELECT ua.user_id FROM user_approvers ua \
                                   JOIN users u ON u.id=ua.user_id \
                                   WHERE ua.approver_id=$1 AND u.active=TRUE AND u.role != 'admin')) \
              ORDER BY last_name"
         ))
+        .build_query_as::<User>()
         .bind(lead_id)
         .fetch_all(&self.pool)
         .await?)
@@ -426,7 +434,8 @@ impl UserDb {
 
     pub async fn fetch_for_update(tx: &mut sqlx::PgConnection, id: i64) -> AppResult<User> {
         Ok(
-            sqlx::query_as::<_, User>(&format!("{USER_SELECT} WHERE id=$1 FOR UPDATE"))
+            QueryBuilder::<Postgres>::new(format!("{USER_SELECT} WHERE id=$1 FOR UPDATE"))
+                .build_query_as::<User>()
                 .bind(id)
                 .fetch_one(tx)
                 .await?,

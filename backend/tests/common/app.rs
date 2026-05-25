@@ -289,10 +289,10 @@ impl TestApp {
         // isolated test database so it doesn't accumulate between runs.
         if let Some(admin_url) = self.admin_database_url {
             if let Ok(pool) = sqlx::PgPool::connect(&admin_url).await {
-                let _ = sqlx::query(&format!(
+                let _ = sqlx::query(sqlx::AssertSqlSafe(format!(
                     "DROP DATABASE IF EXISTS \"{}\" WITH (FORCE)",
                     self.database_name
-                ))
+                )))
                 .execute(&pool)
                 .await;
             }
