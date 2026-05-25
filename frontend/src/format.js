@@ -90,6 +90,17 @@ export function fmtDateShort(d) {
   }
   return parseDate(d).toLocaleDateString(getLocale(), options);
 }
+export function fmtDateWeekday(d) {
+  const options = {
+    weekday: "short",
+    day: "2-digit",
+    month: "2-digit",
+  };
+  if (shouldApplyConfiguredTimeZone(d)) {
+    options.timeZone = getConfiguredTimeZone();
+  }
+  return parseDate(d).toLocaleDateString(getLocale(), options);
+}
 export function fmtMonthYear(d) {
   return parseDate(d).toLocaleDateString(getLocale(), {
     month: "long",
