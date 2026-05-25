@@ -10,7 +10,7 @@ export const WEEKEND_COLOR = "#9ca3af";
 // One canonical color per absence kind. All views must use these values.
 export const ABSENCE_COLORS = Object.freeze({
   vacation:           "#3b82f6", // blue
-  sick:               "#ef4444", // red
+  sick:               "#dc2626", // red-600 (deeper red, less coral than red-500)
   training:           "#0d9488", // teal
   special_leave:      "#a855f7", // purple
   unpaid:             "#64748b", // slate
