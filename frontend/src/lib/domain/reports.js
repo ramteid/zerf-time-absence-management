@@ -29,7 +29,7 @@ export function categoryColumnsFromTeamReport(rows) {
     }
   }
   return [...totals.entries()]
-    .sort((a, b) => b[1].total - a[1].total)
+    .sort((a, b) => b[1].total - a[1].total || a[0].localeCompare(b[0]))
     .map(([category, { color }]) => ({ category, color }));
 }
 
@@ -85,7 +85,8 @@ export function absenceKindTotals(absences) {
     const kind = absence.kind || "unknown";
     totals[kind] = (totals[kind] || 0) + (absence.days || 0);
   }
-  return totals;
+  // Exclude kinds whose total is zero so stat cards don't display "Sick: 0".
+  return Object.fromEntries(Object.entries(totals).filter(([, days]) => days > 0));
 }
 
 export function totalAbsenceDays(absences) {
