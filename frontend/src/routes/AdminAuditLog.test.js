@@ -86,7 +86,7 @@ describe("AdminAuditLog", () => {
     expect(target.textContent).toContain("2");
   });
 
-  it("does not merge rows when entries are outside merge time window", async () => {
+  it("merges time entry rows regardless of time gap between them", async () => {
     mockState.users = [{ id: 7, first_name: "Alex", last_name: "Admin" }];
     mockState.entries = [
       {
@@ -115,8 +115,40 @@ describe("AdminAuditLog", () => {
     await settle();
 
     const rows = target.querySelectorAll(".audit-row");
+    expect(rows).toHaveLength(1);
+    expect(target.textContent).toMatch(/\(2 day entries\)/);
+  });
+
+  it("does not merge time entry rows from different weeks", async () => {
+    mockState.users = [{ id: 7, first_name: "Alex", last_name: "Admin" }];
+    mockState.entries = [
+      {
+        id: 13,
+        user_id: 7,
+        action: "approved",
+        table_name: "time_entries",
+        record_id: 301,
+        before_data: null,
+        after_data: JSON.stringify({ entry_date: "2026-05-04" }), // week 19
+        occurred_at: "2026-05-04T09:00:00Z",
+      },
+      {
+        id: 14,
+        user_id: 7,
+        action: "approved",
+        table_name: "time_entries",
+        record_id: 302,
+        before_data: null,
+        after_data: JSON.stringify({ entry_date: "2026-05-11" }), // week 20
+        occurred_at: "2026-05-04T09:00:01Z",
+      },
+    ];
+
+    component = mount(AdminAuditLog, { target });
+    await settle();
+
+    const rows = target.querySelectorAll(".audit-row");
     expect(rows).toHaveLength(2);
-    expect(target.textContent).toMatch(/\(1 day entries\)/);
   });
 
   it("renders readable user summary instead of raw field keys", async () => {

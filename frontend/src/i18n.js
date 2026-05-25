@@ -101,6 +101,7 @@ const TRANSLATIONS = {
       "Week {week}: {from} - {to} ({count} day entries)",
     Before: "Before",
     After: "After",
+    For: "For",
     "of {target} target": "of {target} target",
     "Open calendar": "Open calendar",
     "Open time picker": "Open time picker",
@@ -979,6 +980,7 @@ const TRANSLATIONS = {
     audit_action_reopened: "Bearbeitung freigegeben",
     Before: "Vorher",
     After: "Nachher",
+    For: "Für",
     Data: "Daten",
     Summary: "Zusammenfassung",
     // Admin settings

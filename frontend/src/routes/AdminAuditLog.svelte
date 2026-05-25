@@ -24,8 +24,6 @@
   }
   load();
 
-  const TIME_ENTRY_GROUP_WINDOW_MS = 45 * 1000;
-
   function safeParseJson(raw) {
     if (!raw) return null;
     try {
@@ -112,6 +110,20 @@
     return userMap.get(userId) || (userId == null ? translate("audit_system_user") : `#${userId}`);
   }
 
+  // Returns the ID of the user whose data is being acted on (may differ from the acting user).
+  // For "users" table: the record itself is the subject. For other tables: look in the payload.
+  function subjectUserId(entry) {
+    if (entry.table_name === "users") return entry.record_id ?? null;
+    const payload = relevantPayload(entry);
+    return payload?.user_id ?? null;
+  }
+
+  function subjectUserLabel(entry, userMap) {
+    const subjectId = subjectUserId(entry);
+    if (subjectId == null || subjectId === entry.user_id) return null;
+    return userMap.get(subjectId) || `#${subjectId}`;
+  }
+
   function formatJson(raw) {
     if (!raw) return null;
     try {
@@ -129,64 +141,61 @@
     return "action-muted";
   }
 
-  function canMergeTimeEntryRows(previous, current, currentWeek) {
-    if (!previous || !currentWeek || !previous.is_time_entry_week) return false;
-    if (previous.table_name !== "time_entries" || current.table_name !== "time_entries") return false;
-    if (previous.action !== current.action || previous.user_id !== current.user_id) return false;
-    if (previous.week_start !== currentWeek.week_start) return false;
-
-    const previousTs = Date.parse(previous.occurred_at);
-    const currentTs = Date.parse(current.occurred_at);
-    if (Number.isNaN(previousTs) || Number.isNaN(currentTs)) return false;
-    return Math.abs(previousTs - currentTs) <= TIME_ENTRY_GROUP_WINDOW_MS;
-  }
-
   function buildRows(entries, userMap, translate) {
-    const nextRows = [];
+    const result = [];
+    // Maps "(user_id):(action):(week_start)" -> index in result
+    const weekGroupIndex = new Map();
 
     for (const entry of entries) {
-      const baseRow = {
-        ...entry,
-        user_label: userLabel(entry.user_id, userMap, translate),
-        data_summary: summarize(entry, translate),
-        is_time_entry_week: false,
-      };
+      const weekInfo = entry.table_name === "time_entries"
+        ? weekInfoFromEntry(entry)
+        : null;
 
-      const weekInfo = weekInfoFromEntry(entry);
       if (!weekInfo) {
-        nextRows.push(baseRow);
-        continue;
-      }
-
-      const previous = nextRows[nextRows.length - 1];
-      if (canMergeTimeEntryRows(previous, entry, weekInfo)) {
-        previous.group_count += 1;
-        previous.data_summary = translate("audit_time_entries_week_summary", {
-          week: previous.week_number,
-          from: fmtDateShort(previous.week_start),
-          to: fmtDateShort(previous.week_end),
-          count: previous.group_count,
+        result.push({
+          ...entry,
+          user_label: userLabel(entry.user_id, userMap, translate),
+          subject_user_label: subjectUserLabel(entry, userMap),
+          data_summary: summarize(entry, translate),
+          is_time_entry_week: false,
         });
         continue;
       }
 
-      nextRows.push({
-        ...baseRow,
-        is_time_entry_week: true,
-        week_start: weekInfo.week_start,
-        week_end: weekInfo.week_end,
-        week_number: weekInfo.week_number,
-        group_count: 1,
-        data_summary: translate("audit_time_entries_week_summary", {
-          week: weekInfo.week_number,
-          from: fmtDateShort(weekInfo.week_start),
-          to: fmtDateShort(weekInfo.week_end),
-          count: 1,
-        }),
-      });
+      const groupKey = `${entry.user_id ?? ""}:${entry.action}:${weekInfo.week_start}`;
+      const existingIdx = weekGroupIndex.get(groupKey);
+
+      if (existingIdx !== undefined) {
+        const group = result[existingIdx];
+        group.group_count += 1;
+        group.data_summary = translate("audit_time_entries_week_summary", {
+          week: group.week_number,
+          from: fmtDateShort(group.week_start),
+          to: fmtDateShort(group.week_end),
+          count: group.group_count,
+        });
+      } else {
+        weekGroupIndex.set(groupKey, result.length);
+        result.push({
+          ...entry,
+          user_label: userLabel(entry.user_id, userMap, translate),
+          subject_user_label: subjectUserLabel(entry, userMap),
+          is_time_entry_week: true,
+          week_start: weekInfo.week_start,
+          week_end: weekInfo.week_end,
+          week_number: weekInfo.week_number,
+          group_count: 1,
+          data_summary: translate("audit_time_entries_week_summary", {
+            week: weekInfo.week_number,
+            from: fmtDateShort(weekInfo.week_start),
+            to: fmtDateShort(weekInfo.week_end),
+            count: 1,
+          }),
+        });
+      }
     }
 
-    return nextRows;
+    return result;
   }
 
   $: rows = buildRows(log, usersById, $t);
@@ -208,6 +217,9 @@
       <button class="audit-row" on:click={() => openDetail(entry)}>
         <span class="audit-time">{fmtDateTime(entry.occurred_at)}</span>
         <span class="audit-user">{entry.user_label}</span>
+        {#if entry.subject_user_label}
+          <span class="audit-subject">→ {entry.subject_user_label}</span>
+        {/if}
         <span class="audit-action {actionClass(entry.action)}">{auditActionLabel(entry.action)}</span>
         <span class="audit-table">{auditTableLabel(entry.table_name)}</span>
         {#if entry.data_summary}
@@ -235,6 +247,12 @@
       <span class="detail-label">{$t("User")}</span>
       <span>{selected.user_label}</span>
     </div>
+    {#if selected.subject_user_label}
+      <div class="detail-row">
+        <span class="detail-label">{$t("For")}</span>
+        <span>{selected.subject_user_label}</span>
+      </div>
+    {/if}
     {#if selected.is_time_entry_week}
       <div class="detail-row">
         <span class="detail-label">{$t("Week")}</span>
@@ -317,6 +335,12 @@
   }
 
   .audit-user {
+    color: var(--text-secondary);
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .audit-subject {
     color: var(--text-secondary);
     font-size: 12px;
     white-space: nowrap;
