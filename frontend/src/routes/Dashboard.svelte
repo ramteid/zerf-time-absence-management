@@ -1009,6 +1009,7 @@
           <DatePicker
             bind:value={chartTo}
             min={chartFrom}
+            max={todayIso}
             style="font-size:12px;padding:3px 6px;height:28px"
           />
           <button class="zf-btn zf-btn-sm" on:click={loadChart} aria-label={$t("Show")}>
