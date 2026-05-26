@@ -9,16 +9,27 @@
 
 CREATE EXTENSION IF NOT EXISTS pg_tde;
 
--- File-based key provider, pointing at the in-memory tmpfs.  pg_tde writes
--- the principal key here; the surrounding entrypoint script later wraps it
--- with ZERF_DB_ENCRYPTION_KEY and persists the ciphertext to /data/.
+-- ── Database-level key (table encryption) ────────────────────────────────────
+-- File-based key provider pointing at the in-memory tmpfs.  pg_tde appends
+-- key material here; the custom entrypoint later wraps the file with
+-- ZERF_DB_ENCRYPTION_KEY and persists the ciphertext to /data/.
 SELECT pg_tde_add_database_key_provider_file(
     'file-vault',
     '/var/lib/pg_tde_keyring/keyring.per'
 );
-
 SELECT pg_tde_create_key_using_database_key_provider('zerf-principal-key', 'file-vault');
 SELECT pg_tde_set_key_using_database_key_provider('zerf-principal-key', 'file-vault');
+
+-- ── Global/server key (WAL encryption) ───────────────────────────────────────
+-- pg_tde.wal_encrypt requires a *server-level* principal key registered via
+-- pg_tde_set_server_key_using_global_key_provider().  Both providers point at
+-- the same single keyring file; keys are stored by name so they coexist safely.
+SELECT pg_tde_add_global_key_provider_file(
+    'global-file-vault',
+    '/var/lib/pg_tde_keyring/keyring.per'
+);
+SELECT pg_tde_create_key_using_global_key_provider('zerf-global-key', 'global-file-vault');
+SELECT pg_tde_set_server_key_using_global_key_provider('zerf-global-key', 'global-file-vault');
 
 -- Encrypt the Write-Ahead Log so WAL segments on disk are also ciphertext.
 -- ALTER SYSTEM persists this to postgresql.auto.conf; it takes effect when
