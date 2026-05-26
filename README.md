@@ -150,3 +150,27 @@ docker exec zerf-postgres rm /tmp/pre-enc.dump
 ### 3. Initial setup
 
 On first launch, open the application in your browser. You will be prompted to create the initial administrator account with your email, name, and password.
+
+### Demo data (optional)
+
+For evaluations, demos, and screencasts there is a Python seeder that fills a *freshly migrated, never-bootstrapped* database with a complete and internally consistent set of test data — one user per role (admin, team lead, employee, assistant), several months of approved/submitted/draft time entries per user, mixed absences in every status (`vacation`, `sick`, `training`, `special_leave`, `unpaid`, `general_absence`, `flextime_reduction`, including `cancelled` and `cancellation_pending`), and reopen-requests covering the `pending`, `approved`, and `rejected` paths. Generation is deterministic (fixed RNG seed) so re-runs produce byte-identical data.
+
+> **Safety guard.** The seeder refuses to run as soon as the `users` table contains any row — that is, as soon as someone has gone through the `/auth/setup` flow. There is no `--force` flag. To re-seed an already-bootstrapped deployment, drop the postgres data volume and redeploy first.
+
+```bash
+# On the host that runs the docker stack (no port-forwarding required —
+# the script resolves the zerf-postgres container's docker IP on its own):
+sudo apt install -y python3-psycopg2 python3-dotenv python3-argon2
+python3 scripts/seed_test_data.py --yes
+
+# Dry-run that connects and exercises the full insert path, then rolls back:
+python3 scripts/seed_test_data.py --yes --dry-run
+```
+
+If `python3-psycopg2` / `python3-dotenv` are not packaged on your distro, install via pip instead:
+
+```bash
+pip install --break-system-packages psycopg2-binary argon2-cffi python-dotenv
+```
+
+The script writes one transaction; either every row lands or nothing does. Login passwords for the generated personas are printed to stderr on success.
