@@ -21,7 +21,9 @@
   export let isSelfOnlyReportsView = false;
 
   let today = appTodayDate();
+  // eslint-disable-next-line no-useless-assignment
   let todayIso = isoDate(today);
+  // eslint-disable-next-line no-useless-assignment
   let currentYear = today.getFullYear();
   $: today = appTodayDate($settings?.timezone);
   $: todayIso = isoDate(today);
