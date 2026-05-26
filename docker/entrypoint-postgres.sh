@@ -63,6 +63,20 @@ chmod 700 "$KEYRING_DIR"
 mkdir -p /data
 chown "$PG_UID:$PG_GID" /data
 
+# --- Recover from interrupted initdb (stale .tmp, no .enc) --------------
+#
+# 99-encrypt-keyring.sh uses an atomic write: openssl → KEYRING_ENC.tmp,
+# then mv KEYRING_ENC.tmp → KEYRING_ENC.  If the container is SIGKILL'd in
+# the ~1 ms window after the openssl write but before the mv, the .tmp file
+# exists but .enc does not.  Every subsequent start would skip decryption
+# (no .enc found), postgres would fail with "principal key not configured",
+# and the volume would be permanently bricked without manual intervention.
+# Complete the interrupted rename here so the next decrypt step succeeds.
+if [ ! -f "$KEYRING_ENC" ] && [ -f "${KEYRING_ENC}.tmp" ]; then
+    echo "Zerf: WARNING: completing interrupted keyring encryption (found .tmp, no .enc)." >&2
+    mv "${KEYRING_ENC}.tmp" "$KEYRING_ENC"
+fi
+
 # --- Decrypt keyring on subsequent starts -------------------------------
 
 if [ -f "$KEYRING_ENC" ]; then
