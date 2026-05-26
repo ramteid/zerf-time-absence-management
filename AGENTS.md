@@ -245,7 +245,9 @@ Supported languages: `en` (en-US) and `de` (de-DE). Stored in localStorage key `
 - **Passwords**: Argon2id; 5 failed attempts per 15 min lockout
 - **Sessions**: 256-bit random tokens (HttpOnly/Secure/SameSite=Strict), 8h idle / 7d absolute timeout
 - **CSRF**: SameSite=Strict + Origin/Referer check + X-CSRF-Token double-submit
-- **Database**: SCRAM auth, checksums, internal-only network
+- **Database auth**: SCRAM-SHA-256, checksums, internal-only Docker network
+- **Data at rest**: [pg_tde](https://docs.percona.com/pg-tde/) (Percona Transparent Data Encryption) encrypts all tables and WAL segments at the PostgreSQL storage layer. The pg_tde principal key is auto-generated on first start, then encrypted with `ZERF_DB_ENCRYPTION_KEY` (AES-256-CBC, PBKDF2) and stored as `pg_tde_keyring.enc` in the data volume. On each container start the custom entrypoint decrypts the blob into a Docker-managed in-memory tmpfs (`/var/lib/pg_tde_keyring`); no elevated container capabilities are needed.
+- **Backups**: Each `.dump.enc` file is AES-256-CBC encrypted (PBKDF2, 100 000 iterations) using the same `ZERF_DB_ENCRYPTION_KEY`. One key governs both layers.
 - **Audit log**: All mutations logged with JSON snapshots; passwords and secrets never logged
 - **Password reset**: One-time 1h tokens, forced change on first login
 
@@ -261,6 +263,8 @@ Three Docker Compose configurations in `docker/`:
 
 Caddy handles HTTPS termination and serves the frontend static assets. Backend listens on port 3333.
 
+The PostgreSQL container is built from `docker/Dockerfile.postgres` (based on `percona/percona-distribution-postgresql:18`, which bundles pg_tde). A custom entrypoint (`docker/entrypoint-postgres.sh`) decrypts the pg_tde keyring from the data volume into an in-memory tmpfs before handing off to the official postgres entrypoint. No elevated container capabilities are required.
+
 ### Start scripts
 
 | Script | Purpose |
@@ -268,7 +272,18 @@ Caddy handles HTTPS termination and serves the frontend static assets. Backend l
 | `start_local.sh` | Start local stack |
 | `start_local_debug.sh` | Start local debug stack |
 | `start_public.sh` | Start public stack |
-| `scripts/backup.sh` | Backup PostgreSQL data to local Docker volume |
+| `scripts/backup.sh` | Dump and AES-encrypt the database to the backup volume |
+| `scripts/restore.sh` | Interactive: decrypt a backup and restore it into the live instance |
+
+### Key environment variables (encryption)
+
+| Variable | Purpose |
+|----------|---------|
+| `ZERF_DB_ENCRYPTION_KEY` | Single passphrase for gocryptfs (DB at rest) and openssl (backups). Generate: `openssl rand -hex 32`. **Losing this key makes both the database and all backups unreadable.** |
+
+### Integration tests
+
+Integration tests use `testcontainers_modules::postgres::Postgres` (plain `postgres` image, no gocryptfs). This is intentional: gocryptfs is a deployment concern and has no effect on application logic or SQL correctness.
 
 ## Testing
 
