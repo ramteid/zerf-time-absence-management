@@ -249,8 +249,16 @@ echo "Restoring…"
 # --if-exists  suppress errors for objects that don't exist in the target db
 # --no-owner   do not set ownership (current db role owns everything)
 # --no-privileges  skip GRANT/REVOKE (the app role uses its own fixed grants)
+#
+# PGOPTIONS --statement_timeout=0: the postgres server has statement_timeout=30s
+# to protect the application, but this also applies to sessions opened by
+# docker exec.  Schema recreations and large-table COPY operations during
+# pg_restore can exceed 30 s; cancel them and the entire restore aborts mid-way
+# leaving the database in a partially-cleaned, unusable state.  Override the
+# timeout to 0 for this session only, exactly as we do for pg_dump.
 docker exec \
     -e PGPASSWORD="$ZERF_POSTGRES_PASSWORD" \
+    -e PGOPTIONS='--statement_timeout=0' \
     "$POSTGRES_CONTAINER" \
     pg_restore \
         --host 127.0.0.1 \

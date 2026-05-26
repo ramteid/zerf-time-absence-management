@@ -13,6 +13,13 @@ services:
     # for the keyring file (typically a few hundred bytes).
     tmpfs:
       - /var/lib/pg_tde_keyring:size=1m
+      # /tmp inside the postgres container is used during restore
+      # (docker cp copies the decrypted dump there before pg_restore reads it).
+      # Without an explicit tmpfs, /tmp is disk-backed (overlay filesystem),
+      # meaning the full plaintext dump briefly touches the host disk.
+      # A RAM-backed tmpfs ensures the plaintext never reaches persistent storage.
+      # 256 MiB is ample for both pg_restore's own temp files and the dump file.
+      - /tmp:size=256m
     environment:
       - POSTGRES_DB=${ZERF_POSTGRES_DB:-zerf}
       - POSTGRES_USER=${ZERF_POSTGRES_USER:-zerf}
