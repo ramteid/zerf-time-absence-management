@@ -22,6 +22,11 @@ export function findUserById(users, userId, fallbackUser = null) {
   );
 }
 
+export function hasUserId(users, userId) {
+  const id = Number(userId);
+  return Number.isFinite(id) && (users || []).some((user) => Number(user?.id) === id);
+}
+
 export function userFullName(user, fallback = "") {
   if (!user) return fallback;
   const name = [user.first_name, user.last_name].filter(Boolean).join(" ");

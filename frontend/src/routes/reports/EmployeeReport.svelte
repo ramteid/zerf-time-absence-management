@@ -35,6 +35,7 @@
   import { summarizeAbsences } from "../../lib/domain/reports.js";
   import {
     findUserById,
+    hasUserId,
     userWorkdaysPerWeekById,
   } from "../../lib/domain/users.js";
 
@@ -62,7 +63,7 @@
   }
 
   $: if (
-    (reportUserId == null || !users.some((u) => u.id === reportUserId)) &&
+    (reportUserId == null || !hasUserId(users, reportUserId)) &&
     users.length > 0
   ) {
     reportUserId = users[0].id;

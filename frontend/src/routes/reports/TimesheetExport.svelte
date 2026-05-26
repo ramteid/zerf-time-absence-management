@@ -15,7 +15,7 @@
     getRangeReport,
   } from "../../lib/api/reportsApi.js";
   import { isoMonthStart } from "../../lib/domain/dates.js";
-  import { findUserById } from "../../lib/domain/users.js";
+  import { findUserById, hasUserId } from "../../lib/domain/users.js";
   import { buildReportPdf } from "../../lib/exports/reportPdf.js";
 
   export let users = [];
@@ -49,7 +49,7 @@
   // is missing (e.g. pure-admin login who has no own row in `users`).
   $: if (
     !isSelfOnlyReportsView &&
-    (csvUserId == null || !users.some((u) => u.id === csvUserId)) &&
+    (csvUserId == null || !hasUserId(users, csvUserId)) &&
     users.length > 0
   ) {
     csvUserId = users[0].id;
@@ -84,7 +84,7 @@
 
   function userHasFlextime(userId) {
     if (userId === $currentUser?.id) return hasFlextimeAccount($currentUser);
-    const found = users.find((u) => u.id === userId);
+    const found = findUserById(users, userId);
     return found ? hasFlextimeAccount(found) : false;
   }
 
@@ -294,7 +294,7 @@
     exportInProgress = true;
     try {
       const [report, flextimeData] = await fetchExportData();
-      const selectedUser = users.find((u) => u.id === csvUserId);
+      const selectedUser = findUserById(users, csvUserId);
       const fullName = selectedUser
         ? `${selectedUser.first_name} ${selectedUser.last_name}`
         : String(csvUserId);
