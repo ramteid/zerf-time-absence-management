@@ -19,8 +19,8 @@ export async function getApprovalDashboard() {
     pendingReopenRequests,
     // Pure-admin users (tracks_time=false) have no time/absence data of their
     // own, so they are excluded from the team roster used by approval queues
-    // and the team-members count.
-    users: (users || []).filter(tracksOwnTime),
+    // and the team-members count. Inactive users are also excluded.
+    users: (users || []).filter((u) => tracksOwnTime(u) && u.active !== false),
   };
 }
 

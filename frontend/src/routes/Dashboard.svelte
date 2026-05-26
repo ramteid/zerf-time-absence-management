@@ -1,5 +1,6 @@
 <script>
   import { tick } from "svelte";
+  import { get } from "svelte/store";
   import { categories, currentUser, path, settings, toast } from "../stores.js";
   import { t } from "../i18n.js";
   import { isoDate, appTodayDate, addDays } from "../format.js";
@@ -91,6 +92,9 @@
   $: isAssistantCurrentUser = isAssistantUser($currentUser);
   // Pure-admin users (tracks_time=false) have no own time/absence data, so the
   // personal Balance and Flextime panels are suppressed for them.
+  // Initialize eagerly so that the imperative load calls below already have the
+  // correct value during component init (before the first $: update cycle).
+  let hasOwnTrackingData = tracksOwnTime(get(currentUser));
   $: hasOwnTrackingData = tracksOwnTime($currentUser);
 
   // ── Loaders ───────────────────────────────────────────────────────────────────

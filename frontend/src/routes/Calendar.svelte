@@ -76,7 +76,8 @@
       categories.set(nextCategories);
       // Pure-admin users (tracks_time=false) never have calendar entries; drop
       // them from the lookup so they can't appear in calendar event labels.
-      users = (nextUsers || []).filter(tracksOwnTime);
+      // Inactive users are also excluded.
+      users = (nextUsers || []).filter((u) => tracksOwnTime(u) && u.active !== false);
     } catch {
       if (seq !== loadSeq) return;
       entries = [];

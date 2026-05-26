@@ -252,4 +252,83 @@ describe("Dashboard", () => {
     expect(overtimeCall).toBeTruthy();
     expect(overtimeCall[0]).toMatch(/^\/reports\/overtime\?year=\d{4}$/);
   });
+
+  describe("pure-admin (tracks_time=false)", () => {
+    beforeEach(() => {
+      currentUser.set({
+        id: 1,
+        role: "admin",
+        tracks_time: false,
+        weekly_hours: 0,
+        start_date: "2026-01-01",
+        permissions: {
+          can_approve: true,
+          can_view_dashboard: true,
+          can_view_team_reports: true,
+        },
+      });
+      api.mockImplementation(async (urlPath) => {
+        if (urlPath === "/time-entries/all?status=submitted") return [];
+        if (urlPath === "/absences/all?status=pending_review") return [];
+        if (urlPath === "/reopen-requests/pending") return [];
+        if (urlPath === "/users")
+          return [
+            { id: 2, first_name: "Tabea", last_name: "T", role: "team_lead", tracks_time: true, active: true },
+            { id: 3, first_name: "Eva", last_name: "E", role: "employee", tracks_time: true, active: true },
+          ];
+        if (urlPath.startsWith("/reports/month?")) return mockState.monthReport;
+        if (urlPath.startsWith("/reports/overtime?")) return [];
+        if (urlPath.startsWith("/reports/flextime?")) return [];
+        return [];
+      });
+    });
+
+    it("does not call personal report endpoints (flextime, overtime, month)", async () => {
+      component = mount(Dashboard, { target });
+      await settle();
+      await settle();
+
+      const flextimeCall = api.mock.calls.find(([p]) =>
+        String(p).startsWith("/reports/flextime?"),
+      );
+      const overtimeCall = api.mock.calls.find(([p]) =>
+        String(p).startsWith("/reports/overtime?"),
+      );
+      const monthCall = api.mock.calls.find(([p]) =>
+        String(p).startsWith("/reports/month?"),
+      );
+      expect(flextimeCall).toBeUndefined();
+      expect(overtimeCall).toBeUndefined();
+      expect(monthCall).toBeUndefined();
+    });
+
+    it("calls approval-related endpoints (time-entries/all, absences/all, reopen-requests)", async () => {
+      component = mount(Dashboard, { target });
+      await settle();
+      await settle();
+
+      const submittedCall = api.mock.calls.find(
+        ([p]) => p === "/time-entries/all?status=submitted",
+      );
+      const absenceCall = api.mock.calls.find(
+        ([p]) => p === "/absences/all?status=pending_review",
+      );
+      const reopenCall = api.mock.calls.find(
+        ([p]) => p === "/reopen-requests/pending",
+      );
+      expect(submittedCall).toBeTruthy();
+      expect(absenceCall).toBeTruthy();
+      expect(reopenCall).toBeTruthy();
+    });
+
+    it("hides personal balance section", async () => {
+      component = mount(Dashboard, { target });
+      await settle();
+      await settle();
+
+      // The BalanceSection shows overtime balance text; it should not be present
+      expect(target.textContent).not.toContain("Overtime balance");
+      expect(target.textContent).not.toContain("Überstundensaldo");
+    });
+  });
 });
