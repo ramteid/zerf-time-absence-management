@@ -101,8 +101,8 @@ async fn tracks_time_full_workflow() {
         assert_eq!(me["tracks_time"], false, "me tracks_time=false");
         assert_eq!(
             me["home"],
-            "/admin/settings",
-            "pure-admin home is admin/settings"
+            "/dashboard",
+            "pure-admin home is /dashboard so they land on approvals first"
         );
 
         let nav_hrefs: Vec<&str> = me["nav"]
@@ -121,8 +121,12 @@ async fn tracks_time_full_workflow() {
             "pure-admin nav lacks /calendar"
         );
         assert!(
-            !nav_hrefs.contains(&"/dashboard"),
-            "pure-admin nav lacks /dashboard"
+            nav_hrefs.contains(&"/dashboard"),
+            "pure-admin nav has /dashboard (approvals + team views)"
+        );
+        assert!(
+            nav_hrefs.contains(&"/reports"),
+            "pure-admin nav has /reports (team reports)"
         );
         assert!(
             nav_hrefs.contains(&"/admin/settings"),
@@ -344,6 +348,18 @@ async fn tracks_time_full_workflow() {
             .put(&format!("/api/v1/users/{admin2_id}"), &json!({ "tracks_time": true }))
             .await;
         assert_eq!(st, StatusCode::OK, "admin re-enables admin2 tracks_time");
+
+        // Re-enabling tracks_time must reset start_date to today so the admin
+        // doesn't suddenly accrue years of missed expected hours / minus flextime
+        // from before they were tracking. The reset only happens when the caller
+        // does not pass an explicit start_date.
+        let (st, user_body) = admin.get(&format!("/api/v1/users/{admin2_id}")).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(
+            user_body["start_date"].as_str().unwrap(),
+            today(),
+            "start_date reset to today when re-enabling tracks_time"
+        );
 
         let (st, entries) = admin2.get("/api/v1/time-entries").await;
         assert_eq!(st, StatusCode::OK);

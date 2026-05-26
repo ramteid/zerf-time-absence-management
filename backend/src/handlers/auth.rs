@@ -195,8 +195,9 @@ pub async fn me(
         "can_view_reports": true,
     });
     let is_assistant = crate::roles::is_assistant_role(&user.role);
-    // Admins with tracks_time=false are in pure-admin mode: they have no time
-    // tracking or absence management, so those nav items are hidden.
+    // Admins with tracks_time=false are in pure-admin mode: their own time
+    // tracking / absence views are hidden, but they still need Dashboard and
+    // Reports so they can approve work and inspect team data.
     let has_time_tracking = user.tracks_time;
     let mut navigation_items = vec![];
     if has_time_tracking {
@@ -204,13 +205,11 @@ pub async fn me(
         navigation_items.push(serde_json::json!({"href":"/absences","key":"Absences","icon":"📅"}));
         navigation_items.push(serde_json::json!({"href":"/calendar","key":"Calendar","icon":"🗓"}));
     }
-    if !is_assistant && has_time_tracking {
+    if !is_assistant {
         navigation_items
             .push(serde_json::json!({"href":"/dashboard","key":"Dashboard","icon":"🔔"}));
     }
-    if has_time_tracking {
-        navigation_items.push(serde_json::json!({"href":"/reports","key":"Reports","icon":"📊"}));
-    }
+    navigation_items.push(serde_json::json!({"href":"/reports","key":"Reports","icon":"📊"}));
     navigation_items.push(serde_json::json!({"href":"/account","key":"Account","icon":"👤"}));
     if user.is_lead() {
         navigation_items
@@ -219,15 +218,8 @@ pub async fn me(
     if user.is_admin() {
         navigation_items.push(serde_json::json!({"href":"/admin/settings","key":"Admin","icon":"⚙"}));
     }
-    // For pure-admin users (tracks_time=false) the home is admin/settings;
-    // for assistants it's /time; for everyone else /dashboard.
-    let home = if !has_time_tracking {
-        "/admin/settings"
-    } else if is_assistant {
-        "/time"
-    } else {
-        "/dashboard"
-    };
+    // Assistants go to /time (no dashboard); everyone else lands on /dashboard.
+    let home = if is_assistant { "/time" } else { "/dashboard" };
     // For admins: flag whether initial setup (country, working-time defaults,
     // and admin profile name) has been completed. Until it is, the SPA
     // redirects to /admin/settings.

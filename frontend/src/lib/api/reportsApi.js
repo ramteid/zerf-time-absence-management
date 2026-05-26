@@ -1,4 +1,5 @@
 import { api } from "../../api.js";
+import { tracksOwnTime } from "../../rolePolicy.js";
 
 function paramsFrom(values) {
   const params = new URLSearchParams();
@@ -11,7 +12,13 @@ function paramsFrom(values) {
 }
 
 export async function getUsersForReports(canViewTeamReports, currentUser) {
-  return canViewTeamReports ? api("/users") : [currentUser];
+  if (!canViewTeamReports) {
+    return tracksOwnTime(currentUser) ? [currentUser] : [];
+  }
+  // Pure-admin users (tracks_time=false) have no time/absence data of their own,
+  // so they are excluded from any per-user employee dropdown.
+  const allUsers = await api("/users");
+  return (allUsers || []).filter(tracksOwnTime);
 }
 
 export function getMonthReport({ userId, month }) {

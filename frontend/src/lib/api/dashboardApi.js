@@ -1,4 +1,5 @@
 import { api } from "../../api.js";
+import { tracksOwnTime } from "../../rolePolicy.js";
 
 export async function getApprovalDashboard() {
   const [
@@ -16,7 +17,10 @@ export async function getApprovalDashboard() {
     submittedTimeEntries,
     requestedAbsences,
     pendingReopenRequests,
-    users,
+    // Pure-admin users (tracks_time=false) have no time/absence data of their
+    // own, so they are excluded from the team roster used by approval queues
+    // and the team-members count.
+    users: (users || []).filter(tracksOwnTime),
   };
 }
 

@@ -19,6 +19,7 @@
     calendarEventTitle,
     cellEvents,
   } from "../lib/domain/calendar.js";
+  import { tracksOwnTime } from "../rolePolicy.js";
 
   let entries = [];
   let holidays = [];
@@ -73,7 +74,9 @@
       holidays = nextHolidays;
       timeEntries = [...teamEntries, ...selfEntries];
       categories.set(nextCategories);
-      users = nextUsers;
+      // Pure-admin users (tracks_time=false) never have calendar entries; drop
+      // them from the lookup so they can't appear in calendar event labels.
+      users = (nextUsers || []).filter(tracksOwnTime);
     } catch {
       if (seq !== loadSeq) return;
       entries = [];

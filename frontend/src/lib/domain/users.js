@@ -1,6 +1,18 @@
-import { hasFlextimeAccount, isAssistantUser } from "../../rolePolicy.js";
+import {
+  hasFlextimeAccount,
+  isAssistantUser,
+  isPureAdminUser,
+  tracksOwnTime,
+} from "../../rolePolicy.js";
 
-export { hasFlextimeAccount, isAssistantUser };
+export { hasFlextimeAccount, isAssistantUser, isPureAdminUser, tracksOwnTime };
+
+// Filters out users who don't track their own time (pure admins). Use this for
+// any employee-selection dropdown that drives a report about a single user's
+// own time or absences.
+export function timeTrackingUsers(users) {
+  return (users || []).filter(tracksOwnTime);
+}
 
 export function findUserById(users, userId, fallbackUser = null) {
   const id = Number(userId);

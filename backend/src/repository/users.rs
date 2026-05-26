@@ -335,10 +335,13 @@ impl UserDb {
     // ── Team settings ──────────────────────────────────────────────────────
 
     pub async fn team_settings_all(&self) -> AppResult<Vec<TeamSettingsRow>> {
+        // Pure-admin users (tracks_time=false) have no time entries of their own
+        // and so the reopen-policy flag never applies to them; exclude them so
+        // the team settings page doesn't show meaningless rows.
         Ok(sqlx::query_as::<_, TeamSettingsRow>(
             "SELECT id, email, first_name, last_name, role, \
              allow_reopen_without_approval FROM users \
-             WHERE active=TRUE ORDER BY last_name, first_name",
+             WHERE active=TRUE AND tracks_time=TRUE ORDER BY last_name, first_name",
         )
         .fetch_all(&self.pool)
         .await?)
@@ -348,7 +351,7 @@ impl UserDb {
         Ok(sqlx::query_as::<_, TeamSettingsRow>(
             "SELECT id, email, first_name, last_name, role, \
              allow_reopen_without_approval FROM users \
-             WHERE active=TRUE \
+             WHERE active=TRUE AND tracks_time=TRUE \
              AND (id=$1 OR id IN (SELECT ua.user_id FROM user_approvers ua \
                                   JOIN users u ON u.id=ua.user_id \
                                   WHERE ua.approver_id=$1 AND u.active=TRUE AND u.role != 'admin')) \

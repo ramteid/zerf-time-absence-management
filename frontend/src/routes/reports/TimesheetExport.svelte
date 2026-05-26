@@ -9,7 +9,7 @@
   import Icon from "../../Icons.svelte";
   import DatePicker from "../../DatePicker.svelte";
   import SectionCard from "../../lib/ui/SectionCard.svelte";
-  import { hasFlextimeAccount } from "../../rolePolicy.js";
+  import { hasFlextimeAccount, tracksOwnTime } from "../../rolePolicy.js";
   import {
     getFlextimeReport,
     getRangeReport,
@@ -27,7 +27,9 @@
   $: today = appTodayDate($settings?.timezone);
   $: todayIso = isoDate(today);
 
-  let csvUserId = $currentUser.id;
+  // Pure-admin users (tracks_time=false) don't appear in `users`, so default
+  // the export selection to the first available employee instead of themselves.
+  let csvUserId = tracksOwnTime($currentUser) ? $currentUser.id : null;
   let csvFrom = isoMonthStart(today);
   let csvTo = todayIso;
   let csvError = "";
@@ -41,6 +43,16 @@
   // Force own user when in self-only mode.
   $: if (isSelfOnlyReportsView) {
     csvUserId = $currentUser.id;
+  }
+
+  // Fall back to the first available employee whenever the current selection
+  // is missing (e.g. pure-admin login who has no own row in `users`).
+  $: if (
+    !isSelfOnlyReportsView &&
+    (csvUserId == null || !users.some((u) => u.id === csvUserId)) &&
+    users.length > 0
+  ) {
+    csvUserId = users[0].id;
   }
 
   // Lower bound: the selected export user's own start date.
