@@ -17,8 +17,11 @@ export async function getUsersForReports(canViewTeamReports, currentUser) {
   }
   // Pure-admin users (tracks_time=false) have no time/absence data of their own,
   // so they are excluded from any per-user employee dropdown.
+  // Inactive users are also excluded — they no longer participate in time tracking.
   const allUsers = await api("/users");
-  return (allUsers || []).filter(tracksOwnTime);
+  return (allUsers || []).filter(
+    (u) => tracksOwnTime(u) && u.active !== false,
+  );
 }
 
 export function getMonthReport({ userId, month }) {
