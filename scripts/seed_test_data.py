@@ -353,10 +353,12 @@ ABSENCE_SCRIPT: list[tuple[str, str, date, date, str, str | None]] = [
 # Statuses follow migration 001 + 002: pending, approved, auto_approved, rejected.
 # 'pending' requires reviewed_by IS NULL (CHECK reopen_requests_reviewed_by_pending).
 REOPEN_SCRIPT: list[tuple[str, date, str, str, str | None]] = [
-    # Eva: corrected a Friday entry from week 14 — approved by Tabea.
-    ("employee", date(2026, 3, 30), "approved", "Falsche Endzeit am Freitag, bitte um Korrektur.", None),
-    # Eva: tried to reopen week 16 but Tabea rejected (week already closed).
-    ("employee", date(2026, 4, 20), "rejected", "Pausen vergessen einzutragen.", "Bitte nächste Woche direkt korrekt erfassen."),
+    # Eva: corrected a Thursday entry from week 14 — approved by Tabea.
+    # Friday of this week is Good Friday (no entry), so the correction must
+    # target Thursday 2026-04-02 which does have entries.
+    ("employee", date(2026, 3, 30), "approved", "Falsche Endzeit am Donnerstag, bitte um Korrektur.", None),
+    # Eva: tried to reopen week 16 — Tabea rejected (week already closed).
+    ("employee", date(2026, 4, 20), "rejected", "Falsche Startzeit am Dienstag.", "Bitte nächste Woche direkt korrekt erfassen."),
     # Eva: more recent reopen, escalated directly to Arnold (admin) because
     # the correction was time-sensitive and Tabea hadn't reviewed yet.
     ("employee", date(2026, 5, 4),  "approved", "Pausenzeiten am Mittwoch korrigieren.", None),
@@ -757,7 +759,7 @@ def absence_timestamps(
     kind: str, start: date, status: str,
 ) -> tuple[datetime, datetime | None]:
     """Return (created_at, reviewed_at) tuples that are *plausible* for the
-    absence kind and status.
+    absence kind, status, and how far in the future the absence sits.
 
     Real-world rules we enforce:
       * sick absences are reported on or shortly after the start date — the
@@ -767,25 +769,47 @@ def absence_timestamps(
         flextime_reduction) are requested days or weeks in advance and reviewed
         before they start.
       * `cancellation_pending` stores the *original* approval timestamp — the
-        cancellation request itself has not yet been actioned, so reviewed_at
-        is still the moment the leave was approved (before start).
+        cancellation request itself has not yet been actioned.
+      * Neither created_at nor reviewed_at may be in the future: an operator
+        on TODAY cannot have requested or approved anything from a date that
+        has not happened yet.  For future absences we anchor both timestamps
+        to a recent past window relative to TODAY.
     """
+    today_dt = datetime.combine(TODAY, time(12, 0), tzinfo=timezone.utc)
+
     if kind == "sick":
-        # Reported the morning of the sick day, approved by lunchtime.
+        # Sick absences are always in the past (you don't pre-plan illness).
         created_at = datetime.combine(start, time(7, 30), tzinfo=timezone.utc)
         if status in ("approved", "rejected"):
             reviewed_at: datetime | None = datetime.combine(start, time(11, 0), tzinfo=timezone.utc)
         elif status == "cancelled":
-            # User cancelled the sick day after recovering quickly.
             reviewed_at = datetime.combine(start, time(15, 0), tzinfo=timezone.utc)
         else:
             reviewed_at = None
         return created_at, reviewed_at
 
-    # Planned absences — requested in advance.  cancellation_pending records
-    # were created earliest because they have already been approved AND a
-    # cancellation request has been filed on top — three discrete events on
-    # the same row.
+    # Future-anchored: timestamps relative to TODAY, not start_date.  Pattern:
+    # the operator filed the request recently and (if applicable) it was
+    # reviewed recently too.  Created always precedes reviewed.
+    if start > TODAY:
+        if status == "requested":
+            return today_dt - timedelta(days=5), None
+        if status == "approved":
+            return today_dt - timedelta(days=14), today_dt - timedelta(days=7)
+        if status == "rejected":
+            return today_dt - timedelta(days=14), today_dt - timedelta(days=10)
+        if status == "cancelled":
+            return today_dt - timedelta(days=14), today_dt - timedelta(days=3)
+        if status == "cancellation_pending":
+            # Original request placed 30 days ago, originally approved 2 weeks
+            # ago, cancellation now sitting in approver's inbox.
+            return today_dt - timedelta(days=30), today_dt - timedelta(days=14)
+        return today_dt - timedelta(days=5), None
+
+    # Past-anchored: planned absences requested in advance and reviewed before
+    # they started.  cancellation_pending records were created earliest
+    # because they have already been approved AND a cancellation request has
+    # been filed on top — three discrete events on the same row.
     if status == "cancellation_pending":
         created_at = datetime.combine(start - timedelta(days=30), time(9, 0), tzinfo=timezone.utc)
     else:
@@ -795,12 +819,9 @@ def absence_timestamps(
     elif status == "rejected":
         reviewed_at = datetime.combine(start - timedelta(days=3), time(11, 0), tzinfo=timezone.utc)
     elif status == "cancelled":
-        # Originally approved, then cancelled a few days before start.
         reviewed_at = datetime.combine(start - timedelta(days=5), time(11, 0), tzinfo=timezone.utc)
     elif status == "cancellation_pending":
-        # Original approval timestamp — cancellation request has not yet
-        # been actioned, so reviewed_at still reflects when the leave was
-        # initially approved (16 days after creation, 14 days before start).
+        # Original approval — 14 days before start, 16 days after creation.
         reviewed_at = datetime.combine(start - timedelta(days=14), time(16, 0), tzinfo=timezone.utc)
     else:  # requested → still pending
         reviewed_at = None
