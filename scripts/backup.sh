@@ -8,7 +8,7 @@
 # Required env:
 #   ZERF_DB_ENCRYPTION_KEY  - passphrase for AES-256-CBC backup encryption
 #                             (same key used by the Postgres container for
-#                              gocryptfs data-at-rest encryption).
+#                              pg_tde transparent data encryption).
 #                             Generate with: openssl rand -hex 32
 #
 # Optional env:
@@ -96,7 +96,17 @@ run_direct_pg_dump() {
   command -v pg_dump >/dev/null 2>&1 || return 1
   resolve_direct_connection || return 1
 
+  # statement_timeout=30000 is set server-wide in docker-compose to protect the
+  # application, but it also applies to pg_dump's COPY statements.  A large table
+  # that takes >30 s to stream would be killed, aborting the backup.  Override it
+  # to 0 (no timeout) for this session only via PGOPTIONS.
+  #
+  # --lock-wait-timeout=30s: if another session holds an AccessExclusiveLock
+  # (e.g. a long-running ALTER TABLE or VACUUM FULL), pg_dump would otherwise
+  # wait indefinitely.  This makes it fail fast and retry on the next interval
+  # instead of hanging forever and blocking the container.
   PGPASSWORD="$DIRECT_PASSWORD" \
+  PGOPTIONS='--statement_timeout=0' \
     pg_dump \
       --host "$DIRECT_HOST" \
       --port "$DIRECT_PORT" \
@@ -104,7 +114,8 @@ run_direct_pg_dump() {
       --dbname "$DIRECT_DB" \
       --format=custom \
       --no-owner \
-      --no-privileges
+      --no-privileges \
+      --lock-wait-timeout=30s
 }
 
 metadata_value() {
