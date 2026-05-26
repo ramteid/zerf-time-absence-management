@@ -54,6 +54,7 @@ describe("Dashboard", () => {
       disconnect() {}
     };
     path.set("/dashboard");
+    api.mockClear();
     currentUser.set({
       id: 1,
       role: "employee",
