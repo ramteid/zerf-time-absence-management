@@ -400,7 +400,7 @@
             </tr>
           </thead>
           <tbody>
-            {#each reportData.monthReport.entries as e (e.id)}
+            {#each reportData.monthReport.entries as e, i (`${e.entry_date}-${e.start_time}-${e.end_time}-${i}`)}
               <tr class:entry-rejected={e.status === "rejected"}>
                 <td class="tab-num">{fmtDate(e.entry_date)}</td>
                 <td class="tab-num">{e.start_time?.slice(0, 5)}</td>
@@ -431,7 +431,7 @@
             </tr>
           </thead>
           <tbody>
-            {#each reportData.monthReport.absences as a (a.id)}
+            {#each reportData.monthReport.absences as a, i (`${a.kind}-${a.start_date}-${a.end_date}-${i}`)}
               <tr>
                 <td>{absenceKindLabel(a.kind)}</td>
                 <td class="tab-num">{fmtDate(a.start_date)}</td>
