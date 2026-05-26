@@ -30,6 +30,35 @@
   let popupCell = null;
   let loadSeq = 0;
 
+  async function fallbackToEmpty(promise) {
+    try {
+      return await promise;
+    } catch {
+      return [];
+    }
+  }
+
+  function calendarGridDateRange(loadYear, loadMonth) {
+    const first = new Date(loadYear, loadMonth - 1, 1);
+    const start = monday(first);
+    let end = start;
+    for (let dayOffset = 0; dayOffset < 42; dayOffset++) {
+      const date = addDays(start, dayOffset);
+      const other = date.getMonth() !== loadMonth - 1;
+      end = date;
+      if (dayOffset >= 34 && other && (dayOffset + 1) % 7 === 0) break;
+    }
+    return { start, end };
+  }
+
+  function yearsInRange(start, end) {
+    const years = [];
+    for (let y = start.getFullYear(); y <= end.getFullYear(); y++) {
+      years.push(y);
+    }
+    return years;
+  }
+
   $: {
     const queryString = $path.includes("?") ? $path.split("?")[1] : "";
     const searchParams = new URLSearchParams(queryString);
@@ -49,6 +78,8 @@
     const lastDayOfMonth = new Date(loadYear, loadMonth, 0);
     const from = isoDate(firstDayOfMonth);
     const to = isoDate(lastDayOfMonth);
+    const gridRange = calendarGridDateRange(loadYear, loadMonth);
+    const holidayYears = yearsInRange(gridRange.start, gridRange.end);
     const isLead = $currentUser?.permissions?.can_approve ?? false;
     // Admins see all users via /time-entries/all (own entries included server-side).
     // Non-admin leads: /time-entries/all returns only direct reports (own entries are
@@ -58,16 +89,20 @@
     try {
       const [nextEntries, nextHolidays, teamEntries, selfEntries, nextCategories, nextUsers] =
         await Promise.all([
-          api(`/absences/calendar?month=${monthString}`),
-          api(`/holidays?year=${loadYear}`),
+          fallbackToEmpty(api(`/absences/calendar?month=${monthString}`)),
+          Promise.all(
+            holidayYears.map((holidayYear) =>
+              fallbackToEmpty(api(`/holidays?year=${holidayYear}`)),
+            ),
+          ).then((yearRows) => yearRows.flat()),
           isLead
-            ? api(`/time-entries/all?from=${from}&to=${to}`).catch(() => [])
-            : api(`/time-entries?from=${from}&to=${to}`).catch(() => []),
+            ? fallbackToEmpty(api(`/time-entries/all?from=${from}&to=${to}`))
+            : fallbackToEmpty(api(`/time-entries?from=${from}&to=${to}`)),
           isNonAdminLead
-            ? api(`/time-entries?from=${from}&to=${to}`).catch(() => [])
+            ? fallbackToEmpty(api(`/time-entries?from=${from}&to=${to}`))
             : Promise.resolve([]),
           api("/categories").catch(() => $categories),
-          isLead ? api("/users").catch(() => []) : Promise.resolve([]),
+          isLead ? fallbackToEmpty(api("/users")) : Promise.resolve([]),
         ]);
       if (seq !== loadSeq) return;
       entries = nextEntries;
@@ -86,7 +121,18 @@
       users = [];
     }
   }
-  $: year && month && load().catch(() => {});
+  $: loadKey =
+    year && month
+      ? [
+          year,
+          month,
+          $currentUser?.id ?? "",
+          $currentUser?.role ?? "",
+          $currentUser?.permissions?.can_approve ? "lead" : "self",
+          $settings?.timezone ?? "",
+        ].join(":")
+      : "";
+  $: loadKey && load().catch(() => {});
 
   $: holidayByDate = new Map(
     holidays.map((holiday) => [holiday.holiday_date, holiday.name]),

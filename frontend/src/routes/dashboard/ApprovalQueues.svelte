@@ -35,7 +35,7 @@
     bind:this={timesheetsSectionEl}
   >
     <div class="card-header">
-      <Icon name="FileText" size={15} sw={1.5} />
+      <Icon name="CalendarCheck" size={15} sw={1.5} />
       <span class="card-header-title">{$t("Week Approvals")}</span>
       {#if pendingWeeks.length + pendingReopens.length > 0}
         <span class="zf-chip zf-chip-pending" style="font-size:10.5px">

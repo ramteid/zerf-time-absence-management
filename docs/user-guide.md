@@ -1199,6 +1199,9 @@ Holidays define public holidays that are excluded from:
 
 Holidays are date-scoped. Load holiday data for the current and next year to
 ensure all checks work correctly into the near future.
+Auto-imported holidays are compared with the configured country/region source
+when Zerf ensures a year, so missing or changed imported holidays are refreshed
+without removing manually added holidays.
 
 ### Backup and restore
 

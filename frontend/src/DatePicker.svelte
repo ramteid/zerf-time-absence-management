@@ -23,6 +23,7 @@
   let lastLang;
   let lastMode = mode;
   let lastContainer = container;
+  let cleanupNavHandlers = null;
   const overlayGap = 6;
   const overlayMargin = 8;
 
@@ -89,6 +90,12 @@
     const input = datePickerInstance?.altInput;
     if (!input) return;
     input.removeEventListener("click", handleInputClick);
+  }
+
+  function removeCalendarNavHandlers() {
+    if (!cleanupNavHandlers) return;
+    cleanupNavHandlers();
+    cleanupNavHandlers = null;
   }
 
   function clamp(val, lo, hi) {
@@ -203,8 +210,39 @@
     }
   }
 
+  function bindCalendarNavHandlers(instance) {
+    removeCalendarNavHandlers();
+    if (mode === "month") return;
+    const cal = instance.calendarContainer;
+    const prevBtn = cal?.querySelector(".flatpickr-prev-month");
+    const nextBtn = cal?.querySelector(".flatpickr-next-month");
+    if (!prevBtn || !nextBtn) return;
+
+    const handlePrev = (event) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (!prevBtn.classList.contains("flatpickr-disabled")) {
+        instance.changeMonth(-1);
+      }
+    };
+    const handleNext = (event) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (!nextBtn.classList.contains("flatpickr-disabled")) {
+        instance.changeMonth(1);
+      }
+    };
+    prevBtn.addEventListener("click", handlePrev, true);
+    nextBtn.addEventListener("click", handleNext, true);
+    cleanupNavHandlers = () => {
+      prevBtn.removeEventListener("click", handlePrev, true);
+      nextBtn.removeEventListener("click", handleNext, true);
+    };
+  }
+
   function build(lang) {
     if (datePickerInstance) {
+      removeCalendarNavHandlers();
       removeAltInputListeners();
       datePickerInstance.destroy();
     }
@@ -258,6 +296,7 @@
     if (container)
       datePickerInstance.calendarContainer?.classList.add("zf-date-picker-overlay");
     rearrangeCalendarNav(datePickerInstance);
+    bindCalendarNavHandlers(datePickerInstance);
     lockYearInput(datePickerInstance);
     if (isMonth) updateNextYearBtnState(datePickerInstance);
     if (id && datePickerInstance.altInput) datePickerInstance.altInput.id = id;
@@ -272,6 +311,7 @@
 
   onMount(() => build($language));
   onDestroy(() => {
+    removeCalendarNavHandlers();
     removeAltInputListeners();
     if (datePickerInstance) datePickerInstance.destroy();
   });
