@@ -95,3 +95,102 @@ describe("Layout pull to refresh", () => {
     expect(target.querySelector(".pull-to-refresh.ptr-open")).not.toBeNull();
   });
 });
+
+describe("Layout navigation for pure-admin", () => {
+  let target;
+  let component;
+
+  beforeEach(() => {
+    target = document.createElement("div");
+    document.body.appendChild(target);
+    setLanguage("en");
+  });
+
+  afterEach(() => {
+    if (component) {
+      unmount(component);
+      component = null;
+    }
+    target.remove();
+  });
+
+  it("shows Dashboard and Reports in the sidebar for pure-admin", async () => {
+    currentUser.set({
+      id: 1,
+      first_name: "Arnold",
+      last_name: "Admin",
+      role: "admin",
+      tracks_time: false,
+      nav: [
+        { href: "/dashboard", key: "Dashboard", icon: "🔔" },
+        { href: "/reports", key: "Reports", icon: "📊" },
+        { href: "/account", key: "Account", icon: "👤" },
+        { href: "/team-settings", key: "TeamSettings", icon: "🛡" },
+        { href: "/admin/settings", key: "Admin", icon: "⚙" },
+      ],
+      permissions: { can_approve: true, can_view_dashboard: true },
+    });
+    component = mount(Layout, { target });
+    await settle();
+
+    const navLinks = target.querySelectorAll(".sidebar-nav a.zf-nav-item");
+    const navTexts = Array.from(navLinks).map((el) => el.textContent.trim());
+    expect(navTexts).toContain("Dashboard");
+    expect(navTexts).toContain("Reports");
+  });
+
+  it("does not show Time, Absences, or Calendar in the sidebar for pure-admin", async () => {
+    currentUser.set({
+      id: 1,
+      first_name: "Arnold",
+      last_name: "Admin",
+      role: "admin",
+      tracks_time: false,
+      nav: [
+        { href: "/dashboard", key: "Dashboard", icon: "🔔" },
+        { href: "/reports", key: "Reports", icon: "📊" },
+        { href: "/account", key: "Account", icon: "👤" },
+        { href: "/team-settings", key: "TeamSettings", icon: "🛡" },
+        { href: "/admin/settings", key: "Admin", icon: "⚙" },
+      ],
+      permissions: { can_approve: true, can_view_dashboard: true },
+    });
+    component = mount(Layout, { target });
+    await settle();
+
+    const navLinks = target.querySelectorAll(".sidebar-nav a.zf-nav-item");
+    const navTexts = Array.from(navLinks).map((el) => el.textContent.trim());
+    expect(navTexts).not.toContain("Time");
+    expect(navTexts).not.toContain("Absences");
+    expect(navTexts).not.toContain("Calendar");
+  });
+
+  it("shows Time, Absences, Calendar for normal employee", async () => {
+    currentUser.set({
+      id: 2,
+      first_name: "Eva",
+      last_name: "Employee",
+      role: "employee",
+      tracks_time: true,
+      nav: [
+        { href: "/time", key: "Time", icon: "⏱" },
+        { href: "/absences", key: "Absences", icon: "📅" },
+        { href: "/calendar", key: "Calendar", icon: "🗓" },
+        { href: "/dashboard", key: "Dashboard", icon: "🔔" },
+        { href: "/reports", key: "Reports", icon: "📊" },
+        { href: "/account", key: "Account", icon: "👤" },
+      ],
+      permissions: { can_approve: false, can_view_dashboard: true },
+    });
+    component = mount(Layout, { target });
+    await settle();
+
+    const navLinks = target.querySelectorAll(".sidebar-nav a.zf-nav-item");
+    const navTexts = Array.from(navLinks).map((el) => el.textContent.trim());
+    expect(navTexts).toContain("Time");
+    expect(navTexts).toContain("Absences");
+    expect(navTexts).toContain("Calendar");
+    expect(navTexts).toContain("Dashboard");
+    expect(navTexts).toContain("Reports");
+  });
+});
