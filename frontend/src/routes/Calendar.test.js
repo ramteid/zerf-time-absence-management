@@ -153,9 +153,8 @@ describe("Calendar", () => {
     component = mount(Calendar, { target });
     await settle();
 
-    const buttons = target.querySelectorAll(".calendar-top-actions button");
-    const previousButton = buttons[0];
-    const nextButton = buttons[1];
+    const previousButton = target.querySelector('[aria-label="Previous month"]');
+    const nextButton = target.querySelector('[aria-label="Next month"]');
 
     previousButton.click();
     await waitForPath("/calendar?year=2026&month=4");
@@ -168,5 +167,24 @@ describe("Calendar", () => {
     nextButton.click();
     await waitForPath("/calendar?year=2026&month=4");
     await waitForText(target, "April 2026");
+  });
+
+  it("calculates repeated navigation from the latest path state", async () => {
+    component = mount(Calendar, { target });
+    await settle();
+
+    path.set("/calendar?year=2026&month=11");
+    history.replaceState({}, "", "/calendar?year=2026&month=11");
+    await settle();
+
+    const nextButton = target.querySelector('[aria-label="Next month"]');
+
+    nextButton.click();
+    await waitForPath("/calendar?year=2026&month=12");
+    await waitForText(target, "December 2026");
+
+    nextButton.click();
+    await waitForPath("/calendar?year=2027&month=1");
+    await waitForText(target, "January 2027");
   });
 });

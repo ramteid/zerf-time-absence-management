@@ -161,15 +161,6 @@
     $categories.map((category) => [category.id, category]),
   );
 
-  $: prev =
-    month === 1
-      ? `?year=${year - 1}&month=12`
-      : `?year=${year}&month=${month - 1}`;
-  $: next =
-    month === 12
-      ? `?year=${year + 1}&month=1`
-      : `?year=${year}&month=${month + 1}`;
-
   $: todayStr = appTodayIsoDate($settings?.timezone);
 
   $: cells = (() => {
@@ -254,6 +245,22 @@
     if (cellEventsList.length === 0) return;
     popupCell = { ...cell, events: cellEventsList };
   }
+
+  function monthFromPath() {
+    const queryString = $path.includes("?") ? $path.split("?")[1] : "";
+    const searchParams = new URLSearchParams(queryString);
+    const today = appTodayDate($settings?.timezone);
+    return {
+      year: Number(searchParams.get("year")) || year || today.getFullYear(),
+      month: Number(searchParams.get("month")) || month || today.getMonth() + 1,
+    };
+  }
+
+  function navigateMonth(delta) {
+    const current = monthFromPath();
+    const target = new Date(current.year, current.month - 1 + delta, 1);
+    go(`/calendar?year=${target.getFullYear()}&month=${target.getMonth() + 1}`);
+  }
 </script>
 
 <div class="top-bar">
@@ -263,8 +270,10 @@
   <div class="top-bar-actions calendar-top-actions">
     <div class="zf-nav-slider">
       <button
+        type="button"
         class="zf-btn zf-btn-ghost"
-        on:click={() => go("/calendar" + prev)}
+        aria-label={$t("Previous month")}
+        on:click={() => navigateMonth(-1)}
         disabled={prevDisabled}
       >
         <Icon name="ChevLeft" size={16} />
@@ -273,8 +282,10 @@
         {fmtMonthYear(new Date(year, month - 1, 1))}
       </span>
       <button
+        type="button"
         class="zf-btn zf-btn-ghost"
-        on:click={() => go("/calendar" + next)}
+        aria-label={$t("Next month")}
+        on:click={() => navigateMonth(1)}
       >
         <Icon name="ChevRight" size={16} />
       </button>
