@@ -119,13 +119,21 @@ if [ -z "$BACKUP_FILE" ]; then
 
     # Copy the chosen file out of the volume to a host temp location.  The
     # cleanup trap removes it when the script exits.
+    #
+    # We pass SELECTED and the basename via -e so the helper's `sh -c` sees
+    # them as environment variables, never as part of the command string.
+    # Any shell metacharacters in the filename are therefore inert — they
+    # only matter if the inner shell evaluates them, and "$SRC" / "$DST"
+    # in -c '...' don't expand or word-split a single env var.
     TMP_COPY="$(mktemp /tmp/zerf-backup-XXXXXX.dump.enc)"
     docker run --rm \
         -v "$BACKUP_VOLUME:/backups:ro" \
         -v "$(dirname "$TMP_COPY"):/out" \
+        -e "SRC=$SELECTED" \
+        -e "DST=$(basename "$TMP_COPY")" \
         --entrypoint sh \
         "$HELPER_IMAGE" \
-        -c "cp /backups/$SELECTED /out/$(basename "$TMP_COPY")" \
+        -c 'cp "/backups/$SRC" "/out/$DST"' \
         || die "Could not copy $SELECTED out of the backup volume."
 
     BACKUP_FILE="$TMP_COPY"
@@ -144,9 +152,11 @@ if [ ! -f "$METADATA_FILE" ] && [ "$BACKUP_CAME_FROM_VOLUME" = "1" ]; then
     docker run --rm \
         -v "$BACKUP_VOLUME:/backups:ro" \
         -v "$(dirname "$META_TMP"):/out" \
+        -e "SRC=$META_NAME" \
+        -e "DST=$(basename "$META_TMP")" \
         --entrypoint sh \
         "$HELPER_IMAGE" \
-        -c "cp /backups/$META_NAME /out/$(basename "$META_TMP") 2>/dev/null" \
+        -c 'cp "/backups/$SRC" "/out/$DST" 2>/dev/null' \
         2>/dev/null || true
     [ -s "$META_TMP" ] && METADATA_FILE="$META_TMP" || { rm -f "$META_TMP"; META_TMP=""; }
 fi

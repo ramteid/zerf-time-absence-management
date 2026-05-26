@@ -175,6 +175,16 @@ run_backup_once() {
     return 1
   fi
 
+  # pg_dump should never exit 0 with empty output, but if a future bug or odd
+  # signal handling produces that combination, encrypting 0 bytes would silently
+  # advance the backup timestamp and (under retention) push out a real backup.
+  # Reject it explicitly so monitoring catches the broken state.
+  if [ ! -s "$plain_temp_file" ]; then
+    rm -f "$plain_temp_file"
+    echo "pg_dump produced empty output — refusing to encrypt a zero-byte backup." >&2
+    return 1
+  fi
+
   # Step 2: encrypt the plaintext dump.  AES-256-CBC with a PBKDF2-derived key
   # (100 000 iterations) prevents the backup from being read without the key.
   # The passphrase is read from the environment variable by openssl so it never
