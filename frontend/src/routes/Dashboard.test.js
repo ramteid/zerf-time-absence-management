@@ -57,6 +57,7 @@ describe("Dashboard", () => {
     currentUser.set({
       id: 1,
       role: "employee",
+      tracks_time: true,
       weekly_hours: 40,
       start_date: "2026-05-01",
       permissions: {
