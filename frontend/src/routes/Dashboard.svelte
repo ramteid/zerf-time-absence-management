@@ -97,7 +97,9 @@
 
   async function loadChart() {
     if (chartFrom > chartTo) return;
-    if (isAssistantUser($currentUser) || !tracksOwnTime($currentUser)) {
+    // Use the reactive vars (not raw $currentUser) so that an uninitialised
+    // undefined value doesn't look like a pure-admin "false" and kill the load.
+    if (isAssistantCurrentUser || hasOwnTrackingData === false) {
       chartData = [];
       chartLoading = false;
       return;
@@ -113,7 +115,8 @@
   }
 
   async function loadOvertimeSummary() {
-    if (isAssistantUser($currentUser) || !tracksOwnTime($currentUser)) {
+    // Same guard: use reactive vars so undefined doesn't suppress the load.
+    if (isAssistantCurrentUser || hasOwnTrackingData === false) {
       overtimeRows = [];
       overtimeError = "";
       overtimeLoading = false;
@@ -133,7 +136,8 @@
   }
 
   async function loadPastMonthSubmissionStatus() {
-    if (!tracksOwnTime($currentUser)) {
+    // Same guard: use reactive var so undefined doesn't suppress the load.
+    if (hasOwnTrackingData === false) {
       monthSubmissionChecks = [];
       monthSubmissionError = "";
       monthSubmissionLoading = false;
