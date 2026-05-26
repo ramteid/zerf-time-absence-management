@@ -4,7 +4,7 @@
   import { t } from "../i18n.js";
   import { isoDate, appTodayDate, addDays } from "../format.js";
   import { confirmDialog } from "../confirm.js";
-  import { isAssistantUser } from "../rolePolicy.js";
+  import { isAssistantUser, tracksOwnTime } from "../rolePolicy.js";
   import {
     approveAbsenceById,
     approveReopen as approveReopenRequest,
@@ -89,12 +89,15 @@
   $: currentMonthKey = `${reportYear}-${String(currentMonthIndex).padStart(2, "0")}`;
   $: todayIso = isoDate(today);
   $: isAssistantCurrentUser = isAssistantUser($currentUser);
+  // Pure-admin users (tracks_time=false) have no own time/absence data, so the
+  // personal Balance and Flextime panels are suppressed for them.
+  $: hasOwnTrackingData = tracksOwnTime($currentUser);
 
   // ── Loaders ───────────────────────────────────────────────────────────────────
 
   async function loadChart() {
     if (chartFrom > chartTo) return;
-    if (isAssistantCurrentUser) {
+    if (isAssistantUser($currentUser) || !tracksOwnTime($currentUser)) {
       chartData = [];
       chartLoading = false;
       return;
@@ -110,7 +113,7 @@
   }
 
   async function loadOvertimeSummary() {
-    if (isAssistantCurrentUser) {
+    if (isAssistantUser($currentUser) || !tracksOwnTime($currentUser)) {
       overtimeRows = [];
       overtimeError = "";
       overtimeLoading = false;
@@ -130,6 +133,12 @@
   }
 
   async function loadPastMonthSubmissionStatus() {
+    if (!tracksOwnTime($currentUser)) {
+      monthSubmissionChecks = [];
+      monthSubmissionError = "";
+      monthSubmissionLoading = false;
+      return;
+    }
     const monthsToCheck = allMonthsToCheck($currentUser?.start_date, today);
     if (!monthsToCheck.length) {
       monthSubmissionChecks = [];
@@ -420,21 +429,23 @@
 </div>
 
 <div class="content-area">
-  <BalanceSection
-    {isAssistantCurrentUser}
-    {overtimeLoading}
-    {submittedOvertimeBalanceMin}
-    {overtimeBalanceMin}
-    {currentMonthDiffMin}
-    {overtimeError}
-    {monthSubmissionLoading}
-    {allWeeksApproved}
-    {allWeeksSubmitted}
-    {currentWeekOpen}
-    {monthSubmissionError}
-    {activeHelp}
-    onHelpToggle={toggleHelp}
-  />
+  {#if hasOwnTrackingData}
+    <BalanceSection
+      {isAssistantCurrentUser}
+      {overtimeLoading}
+      {submittedOvertimeBalanceMin}
+      {overtimeBalanceMin}
+      {currentMonthDiffMin}
+      {overtimeError}
+      {monthSubmissionLoading}
+      {allWeeksApproved}
+      {allWeeksSubmitted}
+      {currentWeekOpen}
+      {monthSubmissionError}
+      {activeHelp}
+      onHelpToggle={toggleHelp}
+    />
+  {/if}
 
   {#if $currentUser?.permissions?.can_approve}
     <TeamSummary {pendingWeeks} {pendingAbsences} {users} />
@@ -464,7 +475,7 @@
     <AbsenceSlider {users} />
   {/if}
 
-  {#if !isAssistantCurrentUser}
+  {#if !isAssistantCurrentUser && hasOwnTrackingData}
     <FlextimeSection
       bind:chartFrom
       bind:chartTo

@@ -3,6 +3,7 @@
   // Delegates each section to a sub-component in routes/reports/.
   import { currentUser, toast } from "../stores.js";
   import { t } from "../i18n.js";
+  import { tracksOwnTime } from "../rolePolicy.js";
   import { getUsersForReports } from "../lib/api/reportsApi.js";
   import EmployeeReport from "./reports/EmployeeReport.svelte";
   import TeamReport from "./reports/TeamReport.svelte";
@@ -24,7 +25,12 @@
   initUsers();
 
   $: canViewTeamReports = !!$currentUser?.permissions?.can_view_team_reports;
-  $: isSelfOnlyReportsView = !canViewTeamReports;
+  // Pure-admin users (admins with tracks_time=false) have no personal data, so
+  // the self-only sections (Category, Absence, Timesheet self-views) collapse
+  // into team-style views as well. Also covers any other future case where the
+  // logged-in user can view team reports but doesn't track their own time.
+  $: currentUserTracksTime = tracksOwnTime($currentUser);
+  $: isSelfOnlyReportsView = !canViewTeamReports && currentUserTracksTime;
 </script>
 
 <div class="top-bar">

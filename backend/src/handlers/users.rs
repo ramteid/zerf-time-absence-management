@@ -459,6 +459,18 @@ pub async fn update(
     if disabling_time_tracking {
         crate::services::users::delete_time_data_for_user_tx(&mut transaction, user_id).await?;
     }
+    // When (re-)enabling time tracking for an admin who currently has it
+    // disabled, reset the start_date to today unless the caller is explicitly
+    // setting a different start_date. Without this, the admin's old start_date
+    // (e.g. years in the past from when the account was first created) would
+    // produce a huge negative flextime balance the moment tracking is turned
+    // back on.
+    let enabling_time_tracking = effective_tracks_time == Some(true) && !previous_user.tracks_time;
+    let effective_start_date = if enabling_time_tracking && body.start_date.is_none() {
+        Some(crate::services::settings::app_today(&app_state.pool).await)
+    } else {
+        body.start_date
+    };
     // Use the normalized role for storage so SQL queries with direct string
     // comparisons (e.g. role = 'admin') work reliably.
     let role_to_store: Option<String> = if body.role.is_some() {
@@ -475,7 +487,7 @@ pub async fn update(
         role_to_store,
         body.weekly_hours,
         effective_workdays_update,
-        body.start_date,
+        effective_start_date,
         body.active,
         body.allow_reopen_without_approval,
         body.overtime_start_balance_min,

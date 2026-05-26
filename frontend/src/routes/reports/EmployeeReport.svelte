@@ -20,7 +20,11 @@
   import SectionCard from "../../lib/ui/SectionCard.svelte";
   import StatCard from "../../lib/ui/StatCard.svelte";
   import DataTable from "../../lib/ui/DataTable.svelte";
-  import { hasFlextimeAccount, isAssistantUser } from "../../rolePolicy.js";
+  import {
+    hasFlextimeAccount,
+    isAssistantUser,
+    tracksOwnTime,
+  } from "../../rolePolicy.js";
   import {
     getFlextimeReport,
     getLeaveBalance,
@@ -46,13 +50,22 @@
   $: currentYear = today.getFullYear();
   $: currentMonthStr = `${currentYear}-${String(today.getMonth() + 1).padStart(2, "0")}`;
 
-  let reportUserId = $currentUser.id;
+  // Pure-admin users (tracks_time=false) don't appear in `users`, so default
+  // the report selection to the first available employee instead of themselves.
+  let reportUserId = tracksOwnTime($currentUser) ? $currentUser.id : null;
   let reportMonth = currentMonthStr;
   let reportData = null;
   let activeHelp = null;
 
   function toggleHelp(id) {
     activeHelp = activeHelp === id ? null : id;
+  }
+
+  $: if (
+    (reportUserId == null || !users.some((u) => u.id === reportUserId)) &&
+    users.length > 0
+  ) {
+    reportUserId = users[0].id;
   }
 
   $: selectedReportUser = findUserById(users, reportUserId, $currentUser);
