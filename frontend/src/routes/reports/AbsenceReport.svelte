@@ -8,8 +8,10 @@
   } from "../../i18n.js";
   import { appTodayDate, fmtDate } from "../../format.js";
   import { countWorkdays, holidayDateSet } from "../../apiMappers.js";
-  import Icon from "../../Icons.svelte";
   import DatePicker from "../../DatePicker.svelte";
+  import SectionCard from "../../lib/ui/SectionCard.svelte";
+  import StatCard from "../../lib/ui/StatCard.svelte";
+  import DataTable from "../../lib/ui/DataTable.svelte";
   import {
     getAbsenceReport,
     getHolidaysByYear,
@@ -142,26 +144,12 @@
 
 </script>
 
-<div class="zf-card" style="padding:20px;margin-bottom:16px">
-  <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
-    <span style="font-size:14px;font-weight:400">{$t("Absences")}</span>
-    <button
-      class="zf-btn-icon-sm zf-btn-ghost"
-      title={$t("help_absence_report")}
-      on:click={() => toggleHelp("absence")}
-      style="color:var(--text-tertiary);font-size:14px;cursor:help"
-    >
-      <Icon name="Info" size={14} />
-    </button>
-  </div>
-  {#if activeHelp === "absence"}
-    <div
-      style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)"
-    >
-      {$t("help_absence_report")}
-    </div>
-  {/if}
-
+<SectionCard
+  title={$t("Absences")}
+  helpText={$t("help_absence_report")}
+  helpOpen={activeHelp === "absence"}
+  onHelpToggle={() => toggleHelp("absence")}
+>
   <div class="field-row" style="margin-bottom:12px">
     <div>
       <label class="zf-label" for="absence-from">{$t("From")}</label>
@@ -187,21 +175,21 @@
     {:else}
       {#if absenceTotalDays > 0}
         <div class="stat-cards" style="margin-top:16px">
-          <div class="zf-card stat-card">
-            <div class="stat-card-label">{$t("Total days")}</div>
-            <div class="stat-card-value tab-num">{formatDayCount(absenceTotalDays)}</div>
-          </div>
+          <StatCard
+            label={$t("Total days")}
+            value={formatDayCount(absenceTotalDays)}
+          />
           {#each Object.entries(absenceByKind) as [kind, days] (kind)}
-            <div class="zf-card stat-card">
-              <div class="stat-card-label">{absenceKindLabel(kind)}</div>
-              <div class="stat-card-value tab-num">{formatDayCount(days)}</div>
-            </div>
+            <StatCard
+              label={absenceKindLabel(kind)}
+              value={formatDayCount(days)}
+            />
           {/each}
         </div>
       {/if}
 
-      <div class="zf-card" style="overflow-x:auto;margin-top:12px">
-        <table class="zf-table">
+      <div style="margin-top:12px">
+        <DataTable>
           <thead>
             <tr>
               {#if isLeadView}<th>{$t("Employee")}</th>{/if}
@@ -235,8 +223,8 @@
               </tr>
             {/each}
           </tbody>
-        </table>
+        </DataTable>
       </div>
     {/if}
   {/if}
-</div>
+</SectionCard>

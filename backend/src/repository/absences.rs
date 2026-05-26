@@ -256,7 +256,7 @@ impl AbsenceDb {
         to: Option<NaiveDate>,
         status_filter: Option<&str>,
     ) -> AppResult<Vec<Absence>> {
-        let mut builder = QueryBuilder::<Postgres>::new(&format!("{ABS_SELECT} WHERE TRUE"));
+        let mut builder = QueryBuilder::<Postgres>::new(format!("{ABS_SELECT} WHERE TRUE"));
         if !is_admin {
             // Non-admin leads: only show absences from active, non-admin direct
             // reports. Admin-subject absences are excluded from lead scope.

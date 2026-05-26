@@ -25,11 +25,22 @@ RETENTION="${BACKUP_RETENTION_DAYS:-30}"
 mkdir -p "$OUT_DIR"
 chmod 700 "$OUT_DIR"
 
+# ZERF_DB_ENCRYPTION_KEY must be a non-empty string used to derive the AES-256
+# backup encryption key via PBKDF2. Generate with: openssl rand -hex 32
+ENCRYPTION_KEY="${ZERF_DB_ENCRYPTION_KEY:-}"
+
 DIRECT_HOST=""
 DIRECT_PORT=""
 DIRECT_DB=""
 DIRECT_USER=""
 DIRECT_PASSWORD=""
+
+validate_encryption_key() {
+  if [ -z "$ENCRYPTION_KEY" ]; then
+    echo "ZERF_DB_ENCRYPTION_KEY must be set in .env (generate with: openssl rand -hex 32)." >&2
+    return 1
+  fi
+}
 
 validate_interval() {
   if [ -z "$INTERVAL" ]; then
@@ -117,7 +128,7 @@ write_backup_metadata() {
 }
 
 apply_retention() {
-  find "$OUT_DIR" -type f \( -name 'zerf-*.dump' -o -name 'zerf-*.metadata' \) \
+  find "$OUT_DIR" -type f \( -name 'zerf-*.dump.enc' -o -name 'zerf-*.metadata' \) \
     -mtime "+$RETENTION" \
     -exec rm -f {} +
 }

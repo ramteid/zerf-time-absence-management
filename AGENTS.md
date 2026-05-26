@@ -318,8 +318,12 @@ The full suite runs in ~2 minutes.
   ```
 - Run tests:
   ```bash
-  TEST_DATABASE_URL=postgres://vscode:secret@127.0.0.1/postgres cargo test --test integration
+  TEST_REFERENCE_DATE=2030-01-07 TEST_DATABASE_URL=postgres://vscode:secret@127.0.0.1/postgres cargo test --test integration
   ```
+
+  > **Important:** Always set `TEST_REFERENCE_DATE=2030-01-07` (a Monday with no nearby public holidays)
+  > when running locally. Without it the helpers fall back to wall-clock time and date-relative tests
+  > will fail whenever today's date lands on or near a public holiday.
 
 **Verification after changes:**
 
@@ -327,7 +331,7 @@ The full suite runs in ~2 minutes.
 cargo build                              # zero compilation errors
 cargo clippy -- -D warnings             # zero warnings
 cargo test --lib                        # unit tests (no DB)
-TEST_DATABASE_URL=... cargo test        # full suite including integration
+TEST_REFERENCE_DATE=2030-01-07 TEST_DATABASE_URL=... cargo test  # full suite including integration
 grep -rn "sqlx::" backend/src/handlers/ # must be empty (no SQL in handlers)
 grep -rn "axum::extract\|axum::response\|axum::routing\|axum::Json" backend/src/services/ # must be empty
 ```

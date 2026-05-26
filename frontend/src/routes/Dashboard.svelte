@@ -1,17 +1,8 @@
 <script>
   import { tick } from "svelte";
   import { categories, currentUser, path, settings, toast } from "../stores.js";
-  import { t, formatHours, absenceKindLabel } from "../i18n.js";
-  import {
-    fmtDateShort,
-    fmtWeekLabel,
-    isoDate,
-    appTodayDate,
-    addDays,
-  } from "../format.js";
-  import Icon from "../Icons.svelte";
-  import FlextimeChart from "../FlextimeChart.svelte";
-  import DatePicker from "../DatePicker.svelte";
+  import { t } from "../i18n.js";
+  import { isoDate, appTodayDate, addDays } from "../format.js";
   import { confirmDialog } from "../confirm.js";
   import { isAssistantUser } from "../rolePolicy.js";
   import {
@@ -27,20 +18,19 @@
     rejectWeek as rejectWeekEntries,
   } from "../lib/api/dashboardApi.js";
   import {
-    absenceRequestTypeLabelKey,
     allMonthsToCheck,
     buildPendingWeeks,
     buildSubmissionChecks,
     currentWeekIsOpen,
   } from "../lib/domain/dashboard.js";
-  import {
-    userInitialsFromRows,
-    userNameFromRows,
-  } from "../lib/domain/users.js";
   import AbsenceReviewDialog from "../dialogs/AbsenceReviewDialog.svelte";
   import ReopenReviewDialog from "../dialogs/ReopenReviewDialog.svelte";
   import WeekReviewDialog from "../dialogs/WeekReviewDialog.svelte";
+  import ApprovalQueues from "./dashboard/ApprovalQueues.svelte";
   import AbsenceSlider from "./dashboard/AbsenceSlider.svelte";
+  import BalanceSection from "./dashboard/BalanceSection.svelte";
+  import FlextimeSection from "./dashboard/FlextimeSection.svelte";
+  import TeamSummary from "./dashboard/TeamSummary.svelte";
 
   // ── Approval workflow state (team leads and admins only) ──────────────────────
   let pendingEntries = [];
@@ -430,416 +420,63 @@
 </div>
 
 <div class="content-area">
+  <BalanceSection
+    {isAssistantCurrentUser}
+    {overtimeLoading}
+    {submittedOvertimeBalanceMin}
+    {overtimeBalanceMin}
+    {currentMonthDiffMin}
+    {overtimeError}
+    {monthSubmissionLoading}
+    {allWeeksApproved}
+    {allWeeksSubmitted}
+    {currentWeekOpen}
+    {monthSubmissionError}
+    {activeHelp}
+    onHelpToggle={toggleHelp}
+  />
 
-  <!-- ════════════════════════════════════════════════════════════════════════
-       SECTION 1 – "Meine Bilanz": running balance & compliance (all users)
-       ════════════════════════════════════════════════════════════════════════ -->
-  <div class="dashboard-group">
-    <div class="dashboard-group-label" style="display:flex;align-items:center;gap:6px">
-      {$t("My Balance")}
-      <button
-        class="zf-btn-icon-sm zf-btn-ghost"
-        title={$t("help_my_balance")}
-        on:click={() => toggleHelp("balance")}
-        style="color:var(--text-tertiary);font-size:14px;cursor:help"
-      >
-        <Icon name="Info" size={14} />
-      </button>
-    </div>
-    {#if activeHelp === "balance"}
-      <div
-        style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)"
-      >
-        {$t("help_my_balance")}
-      </div>
-    {/if}
-    <div class="stat-cards">
-
-      {#if !isAssistantCurrentUser}
-        <div class="zf-card stat-card">
-          <div class="stat-card-label">{$t("Overtime overview")}</div>
-          {#if overtimeLoading}
-            <div class="stat-card-value tab-num">...</div>
-          {:else}
-            <div
-              class="stat-card-value tab-num"
-              style="color:{submittedOvertimeBalanceMin < 0
-                ? 'var(--danger-text)'
-                : 'var(--success-text)'}"
-            >
-              {formatHours((submittedOvertimeBalanceMin || 0) / 60)}
-            </div>
-            <div class="stat-card-sub">
-              {#if submittedOvertimeBalanceMin !== overtimeBalanceMin}
-                {$t("Approved: {value}", { value: formatHours((overtimeBalanceMin || 0) / 60) })}
-              {:else}
-                {$t("This month: {value}", { value: formatHours((currentMonthDiffMin || 0) / 60) })}
-              {/if}
-            </div>
-          {/if}
-          {#if overtimeError}
-            <div class="error-text" style="font-size:11px;margin-top:4px">
-              {$t("Overtime data unavailable.")}
-            </div>
-          {/if}
-        </div>
-      {/if}
-
-      <div class="zf-card stat-card">
-        <div class="stat-card-label">{$t("Submissions")}</div>
-        {#if monthSubmissionLoading}
-          <div class="stat-card-value tab-num">...</div>
-        {:else}
-          <div
-            class="stat-card-value tab-num"
-            style="color:{allWeeksApproved ? 'var(--success-text)' : 'var(--warning-text)'}"
-          >
-            {#if allWeeksApproved}
-              {$t("All submitted and approved")}
-            {:else if allWeeksSubmitted}
-              {$t("All submitted (approvals pending)")}
-            {:else}
-              {$t("Weeks missing")}
-            {/if}
-          </div>
-          {#if currentWeekOpen}
-            <div
-              class="stat-card-sub"
-              style="color:var(--text-tertiary);font-size:11px;margin-top:4px"
-            >
-              {$t("Current week: still open")}
-            </div>
-          {/if}
-        {/if}
-        {#if monthSubmissionError}
-          <div class="error-text" style="font-size:11px;margin-top:4px">
-            {$t("Could not check submission status.")}
-          </div>
-        {/if}
-      </div>
-
-    </div>
-  </div>
-
-  <!-- ════════════════════════════════════════════════════════════════════════
-       SECTION 3 – "Mein Team": approval counters (team leads & admins only)
-       ════════════════════════════════════════════════════════════════════════ -->
   {#if $currentUser?.permissions?.can_approve}
-    <div class="dashboard-group">
-      <div class="dashboard-group-label">{$t("My Team")}</div>
-      <div class="stat-cards">
-
-        <div class="zf-card stat-card">
-          <div class="stat-card-label">{$t("Pending Weeks")}</div>
-          <div
-            class="stat-card-value tab-num"
-            style="color:{pendingWeeks.length > 0 ? 'var(--danger-text)' : 'var(--success-text)'}"
-          >{pendingWeeks.length}</div>
-        </div>
-
-        <div class="zf-card stat-card">
-          <div class="stat-card-label">{$t("Absence Requests")}</div>
-          <div
-            class="stat-card-value tab-num"
-            style="color:{pendingAbsences.length > 0 ? 'var(--danger-text)' : 'var(--success-text)'}"
-          >{pendingAbsences.length}</div>
-        </div>
-
-        <div class="zf-card stat-card">
-          <div class="stat-card-label">{$t("Team Members")}</div>
-          <div class="stat-card-value tab-num">{users.length}</div>
-        </div>
-
-      </div>
-    </div>
+    <TeamSummary {pendingWeeks} {pendingAbsences} {users} />
   {/if}
 
-  <!-- ════════════════════════════════════════════════════════════════════════
-       APPROVAL GRIDS (team leads & admins only)
-       ════════════════════════════════════════════════════════════════════════ -->
   {#if $currentUser?.permissions?.can_approve}
-    <div
-      class="dashboard-approval-grid"
-      style="display:grid;grid-template-columns:1fr 1fr;gap:16px"
-    >
-      <div
-        class="zf-card"
-        class:dashboard-focus={focusedSection === "timesheets"}
-        style="overflow-x:auto"
-        bind:this={timesheetsSectionEl}
-      >
-        <div class="card-header">
-          <Icon name="FileText" size={15} sw={1.5} />
-          <span class="card-header-title">{$t("Week Approvals")}</span>
-          {#if pendingWeeks.length + pendingReopens.length > 0}
-            <span class="zf-chip zf-chip-pending" style="font-size:10.5px">
-              {pendingWeeks.length + pendingReopens.length}
-              {$t("pending")}
-            </span>
-          {/if}
-          {#if pendingWeeks.length}
-            <button class="zf-btn zf-btn-sm" on:click={batchApprove}>
-              <Icon name="Check" size={13} />{$t("Approve All")}
-            </button>
-          {/if}
-        </div>
-        {#each pendingWeeks as week (week.key)}
-          <div
-            class="dashboard-click-row"
-            on:click={() => openWeekDetails(week)}
-            on:keydown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                openWeekDetails(week);
-              }
-            }}
-            role="button"
-            tabindex="0"
-            title={$t("Show")}
-          >
-            <div class="avatar" style="width:30px;height:30px;font-size:11px">
-              {userInitialsFromRows(week.user_id, users) || "?"}
-            </div>
-            <div style="flex:1;min-width:0">
-              <div style="font-size:13px;font-weight:500;display:flex;align-items:center;gap:6px">
-                {userNameFromRows(week.user_id, users)}
-                <span class="zf-chip zf-chip-submitted" style="font-size:10px">{$t("Approval")}</span>
-              </div>
-              <div class="tab-num" style="font-size:11.5px;color:var(--text-tertiary)">
-                {fmtWeekLabel(week.week_start)} · {formatHours(week.total_min / 60)}
-              </div>
-            </div>
-            <div style="display:flex;gap:4px">
-              <button
-                class="zf-btn-icon-sm"
-                style="color:var(--success-text);background:var(--success-soft)"
-                title={$t("Approve")}
-                on:click|stopPropagation={() => approveWeek(week)}
-              >
-                <Icon name="Check" size={14} />
-              </button>
-              <button
-                class="zf-btn-icon-sm"
-                style="color:var(--danger-text);background:var(--danger-soft)"
-                title={$t("Reject")}
-                on:click|stopPropagation={() => rejectWeek(week)}
-              >
-                <Icon name="X" size={14} />
-              </button>
-            </div>
-          </div>
-        {/each}
-        {#each pendingReopens as reopen (reopen.id)}
-          <div
-            class="dashboard-click-row"
-            on:click={() => openReopenDetail(reopen)}
-            on:keydown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                openReopenDetail(reopen);
-              }
-            }}
-            role="button"
-            tabindex="0"
-            title={$t("Show details")}
-          >
-            <div class="avatar" style="width:30px;height:30px;font-size:11px">
-              {userInitialsFromRows(reopen.user_id, users) || "?"}
-            </div>
-            <div style="flex:1;min-width:0">
-              <div style="font-size:13px;font-weight:500;display:flex;align-items:center;gap:6px">
-                {userNameFromRows(reopen.user_id, users)}
-                <span class="zf-chip zf-chip-pending" style="font-size:10px">{$t("Edit request")}</span>
-              </div>
-              <div class="tab-num" style="font-size:11.5px;color:var(--text-tertiary)">
-                {$t("wants to edit {week_label}", { week_label: fmtWeekLabel(reopen.week_start) })}
-              </div>
-              {#if reopen.reason}
-                <div style="font-size:11px;color:var(--text-tertiary);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px" title={reopen.reason}>
-                  {reopen.reason}
-                </div>
-              {/if}
-            </div>
-            <div style="display:flex;gap:4px">
-              <button
-                class="zf-btn-icon-sm"
-                style="color:var(--success-text);background:var(--success-soft)"
-                title={$t("Approve")}
-                on:click|stopPropagation={() => approveReopen(reopen.id)}
-              >
-                <Icon name="Check" size={14} />
-              </button>
-              <button
-                class="zf-btn-icon-sm"
-                style="color:var(--danger-text);background:var(--danger-soft)"
-                title={$t("Reject")}
-                on:click|stopPropagation={() => rejectReopen(reopen.id)}
-              >
-                <Icon name="X" size={14} />
-              </button>
-            </div>
-          </div>
-        {/each}
-        {#if pendingWeeks.length === 0 && pendingReopens.length === 0}
-          <div
-            style="padding:32px;text-align:center;color:var(--text-tertiary);font-size:13px"
-          >
-            <Icon name="Check" size={24} sw={1.2} />
-            <div style="margin-top:8px">{$t("All caught up!")}</div>
-          </div>
-        {/if}
-      </div>
-
-      <div
-        class="zf-card"
-        class:dashboard-focus={focusedSection === "absences"}
-        style="overflow-x:auto"
-        bind:this={absencesSectionEl}
-      >
-        <div class="card-header">
-          <Icon name="Plane" size={15} sw={1.5} />
-          <span class="card-header-title">{$t("Absence Requests")}</span>
-          {#if pendingAbsences.length}
-            <span class="zf-chip zf-chip-pending" style="font-size:10.5px">
-              {pendingAbsences.length}
-              {$t("pending")}
-            </span>
-          {/if}
-        </div>
-        {#each pendingAbsences as absence (absence.id)}
-          <div
-            style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px"
-          >
-            <div class="avatar" style="width:30px;height:30px;font-size:11px">
-              {userInitialsFromRows(absence.user_id, users) || "?"}
-            </div>
-            <div
-              style="flex:1;min-width:0;cursor:pointer"
-              on:click={() => showAbsenceDetail(absence)}
-              on:keydown={(e) => {
-                if (e.key === "Enter") showAbsenceDetail(absence);
-              }}
-              role="button"
-              tabindex="0"
-              title={$t("Show details")}
-            >
-              <div style="font-size:13px;font-weight:500;display:flex;align-items:center;gap:6px">
-                {userNameFromRows(absence.user_id, users)}
-                <span
-                  class="zf-chip {absence.status === 'cancellation_pending' ? 'zf-chip-cancellation_pending' : 'zf-chip-warning'}"
-                  style="font-size:10px"
-                >
-                  {$t(absenceRequestTypeLabelKey(absence))}
-                </span>
-              </div>
-              <div class="tab-num" style="font-size:11.5px;color:var(--text-tertiary)">
-                {absenceKindLabel(absence.kind)} · {fmtDateShort(absence.start_date)} -
-                {fmtDateShort(absence.end_date)}
-              </div>
-            </div>
-            <div style="display:flex;gap:4px">
-              <button
-                class="zf-btn-icon-sm"
-                style="color:var(--success-text);background:var(--success-soft)"
-                on:click={() => approveAbsence(absence)}
-              >
-                <Icon name="Check" size={14} />
-              </button>
-              <button
-                class="zf-btn-icon-sm"
-                style="color:var(--danger-text);background:var(--danger-soft)"
-                on:click={() => rejectAbsence(absence)}
-              >
-                <Icon name="X" size={14} />
-              </button>
-            </div>
-          </div>
-        {/each}
-        {#if pendingAbsences.length === 0}
-          <div
-            style="padding:32px;text-align:center;color:var(--text-tertiary);font-size:13px"
-          >
-            <Icon name="Plane" size={24} sw={1.2} />
-            <div style="margin-top:8px">{$t("No pending requests")}</div>
-          </div>
-        {/if}
-      </div>
-    </div>
+    <ApprovalQueues
+      {pendingWeeks}
+      {pendingReopens}
+      {pendingAbsences}
+      {users}
+      {focusedSection}
+      bind:timesheetsSectionEl
+      bind:absencesSectionEl
+      onBatchApprove={batchApprove}
+      onOpenWeekDetails={openWeekDetails}
+      onApproveWeek={approveWeek}
+      onRejectWeek={rejectWeek}
+      onOpenReopenDetail={openReopenDetail}
+      onApproveReopen={approveReopen}
+      onRejectReopen={rejectReopen}
+      onShowAbsenceDetail={showAbsenceDetail}
+      onApproveAbsence={approveAbsence}
+      onRejectAbsence={rejectAbsence}
+    />
 
     <AbsenceSlider {users} />
-
   {/if}
 
-  <!-- ════════════════════════════════════════════════════════════════════════
-       FLEXTIME CHART (all users)
-       ════════════════════════════════════════════════════════════════════════ -->
   {#if !isAssistantCurrentUser}
-    <div class="zf-card" style="padding:16px 20px;margin-top:16px">
-      <div
-        style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px"
-      >
-        <Icon name="TrendingUp" size={15} sw={1.5} />
-        <span style="font-size:14px;font-weight:400;flex:1">{$t("Flextime balance")}</span>
-        <button
-          class="zf-btn-icon-sm zf-btn-ghost"
-          title={$t("help_flextime_chart")}
-          on:click={() => toggleHelp("flextime")}
-          style="color:var(--text-tertiary);font-size:14px;cursor:help"
-        >
-          <Icon name="Info" size={14} />
-        </button>
-        <div style="display:flex;gap:4px;flex-wrap:wrap">
-          <button class="zf-btn zf-btn-sm" on:click={() => setRange(30)}
-            >{$t("Last 30 days")}</button
-          >
-          <button class="zf-btn zf-btn-sm" on:click={() => setRange(90)}
-            >{$t("Last 90 days")}</button
-          >
-          <button class="zf-btn zf-btn-sm" on:click={() => setRange(182)}
-            >{$t("Last 6 months")}</button
-          >
-          <button class="zf-btn zf-btn-sm" on:click={() => setRange(365)}
-            >{$t("Last year")}</button
-          >
-        </div>
-        <div style="display:flex;align-items:center;gap:4px">
-          <DatePicker
-            bind:value={chartFrom}
-            min={$currentUser?.start_date}
-            max={chartTo}
-            style="font-size:12px;padding:3px 6px;height:28px"
-          />
-          <span style="font-size:12px;color:var(--text-tertiary)">-</span>
-          <DatePicker
-            bind:value={chartTo}
-            min={chartFrom}
-            max={todayIso}
-            style="font-size:12px;padding:3px 6px;height:28px"
-          />
-          <button class="zf-btn zf-btn-sm" on:click={loadChart} aria-label={$t("Show")}>
-            <Icon name="Search" size={13} />
-          </button>
-        </div>
-      </div>
-      {#if activeHelp === "flextime"}
-        <div
-          style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)"
-        >
-          {$t("help_flextime_chart")}
-        </div>
-      {/if}
-      {#if chartLoading}
-        <div
-          style="text-align:center;padding:40px 0;font-size:13px;color:var(--text-tertiary)"
-        >
-          {$t("Loading...")}
-        </div>
-      {:else}
-        <FlextimeChart data={chartData} />
-      {/if}
-    </div>
+    <FlextimeSection
+      bind:chartFrom
+      bind:chartTo
+      {todayIso}
+      {chartData}
+      {chartLoading}
+      {activeHelp}
+      onHelpToggle={toggleHelp}
+      onSetRange={setRange}
+      onLoadChart={loadChart}
+    />
   {/if}
-
 </div>
 
 {#if absenceDetail}
@@ -884,22 +521,3 @@
     onReject={rejectWeek}
   />
 {/if}
-
-<style>
-  .dashboard-click-row {
-    padding: 10px 16px;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    cursor: pointer;
-  }
-
-  .dashboard-click-row:hover {
-    background: var(--bg-subtle);
-  }
-
-  .dashboard-focus {
-    box-shadow: 0 0 0 2px var(--accent);
-  }
-</style>

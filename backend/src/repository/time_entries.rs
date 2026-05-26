@@ -358,7 +358,7 @@ impl TimeEntryDb {
         from: Option<NaiveDate>,
         to: Option<NaiveDate>,
     ) -> AppResult<Vec<TimeEntry>> {
-        let mut builder = QueryBuilder::<Postgres>::new(&format!("{TE_SELECT} WHERE user_id = "));
+        let mut builder = QueryBuilder::<Postgres>::new(format!("{TE_SELECT} WHERE user_id = "));
         builder.push_bind(user_id);
         if let Some(f) = from {
             builder.push(" AND entry_date >= ").push_bind(f);
@@ -382,7 +382,7 @@ impl TimeEntryDb {
         user_id_filter: Option<i64>,
         status_filter: Option<String>,
     ) -> AppResult<Vec<TimeEntry>> {
-        let mut builder = QueryBuilder::<Postgres>::new(&format!("{TE_SELECT} WHERE TRUE"));
+        let mut builder = QueryBuilder::<Postgres>::new(format!("{TE_SELECT} WHERE TRUE"));
         if !is_admin {
             // Non-admin leads: team members only (active, non-admin direct reports).
             // Own entries are unconditionally excluded — leads cannot act on their own
