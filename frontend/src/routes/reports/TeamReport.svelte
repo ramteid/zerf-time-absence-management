@@ -8,6 +8,7 @@
 
   let today = appTodayDate();
   let currentYear = today.getFullYear();
+  // eslint-disable-next-line no-useless-assignment
   let currentMonthStr = `${currentYear}-${String(today.getMonth() + 1).padStart(2, "0")}`;
   $: today = appTodayDate($settings?.timezone);
   $: currentYear = today.getFullYear();

@@ -23,6 +23,7 @@
   let timeEntries = [];
   let users = [];
   let year, month;
+  // eslint-disable-next-line no-useless-assignment
   let popupCell = null;
   let loadSeq = 0;
 

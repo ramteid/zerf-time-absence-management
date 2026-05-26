@@ -1,5 +1,5 @@
 <script>
-  import { currentUser, earliestStartDate, settings, toast } from "../../stores.js";
+  import { earliestStartDate, settings, toast } from "../../stores.js";
   import {
     t,
     absenceKindLabel,
@@ -27,6 +27,7 @@
   export let isSelfOnlyReportsView = false;
 
   let today = appTodayDate();
+  // eslint-disable-next-line no-useless-assignment
   let currentYear = today.getFullYear();
   $: today = appTodayDate($settings?.timezone);
   $: currentYear = today.getFullYear();
