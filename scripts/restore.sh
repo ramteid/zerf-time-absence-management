@@ -20,6 +20,12 @@
 #                                     the app before restarting after restore.
 set -euo pipefail
 
+# Ensure all temp files (PLAIN_TMP, TMP_COPY, META_TMP) are created 0600 from
+# the instant they appear, not just after a follow-up chmod.  On Linux mktemp
+# already creates 0600 files (glibc default), but the explicit umask makes the
+# intent clear and is defensive against environments where that default differs.
+umask 077
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ENV_FILE="$ROOT/.env"
