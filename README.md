@@ -77,6 +77,7 @@ The application is deliberately small in scope and operationally simple: a Rust 
 cp .env.example .env && chmod 600 .env
 sed -i "s|ZERF_SESSION_SECRET=.*|ZERF_SESSION_SECRET=$(openssl rand -hex 32)|" .env
 sed -i "s|ZERF_POSTGRES_PASSWORD=.*|ZERF_POSTGRES_PASSWORD=$(openssl rand -hex 32)|" .env
+sed -i "s|ZERF_DB_ENCRYPTION_KEY=.*|ZERF_DB_ENCRYPTION_KEY=$(openssl rand -hex 32)|" .env
 ```
 
 Edit `.env` and set the remaining required values:
@@ -84,6 +85,59 @@ Edit `.env` and set the remaining required values:
 - `ZERF_POSTGRES_DB` and `ZERF_POSTGRES_USER`: choose any names for the database and user.
 - `ZERF_DOMAIN`: required only for public deployment (`start_public.sh`) — set this to your public hostname (e.g. `zerf.example.com`). Not needed for local deployment.
 - `ZERF_PUBLIC_URL`: required for password reset emails. The provided start scripts set it automatically for local and public deployments.
+
+#### Data encryption
+
+`ZERF_DB_ENCRYPTION_KEY` is a single key that protects data at two layers:
+
+1. **Database at rest** — all tables and WAL segments are transparently encrypted by [pg_tde](https://docs.percona.com/pg-tde/) (AES-256). The pg_tde principal key is wrapped with `ZERF_DB_ENCRYPTION_KEY` and stored encrypted on disk; the plaintext key exists only in an in-memory tmpfs during a running container. No elevated container capabilities are required.
+2. **Backups** — every automated backup file (`.dump.enc`) is encrypted with AES-256-CBC before being written to the backup volume. Decryption requires the same key.
+
+> **Keep this key safe.** Losing `ZERF_DB_ENCRYPTION_KEY` while the stack is stopped makes the database and all encrypted backups permanently unreadable. Store it in a password manager or secrets vault alongside your `.env` file.
+
+#### Restoring a backup
+
+Use the interactive restore script:
+
+```bash
+./scripts/restore.sh                        # pick from available backups
+./scripts/restore.sh path/to/file.dump.enc  # restore a specific file
+```
+
+The script decrypts the backup, stops the app to prevent mid-restore writes, restores the data, and tells you when to restart. On restart the app automatically applies any pending schema migrations.
+
+**Migration compatibility:**
+- Backup older than current code → the app applies pending migrations on start (safe).
+- Backup newer than current code → update the app binary before restarting.
+
+#### Migrating an existing deployment (adding encryption)
+
+If you are upgrading from a version without encryption, follow these steps once:
+
+```bash
+# 1. Take an unencrypted dump from the currently running stack.
+docker exec zerf-postgres pg_dump \
+    -U "$ZERF_POSTGRES_USER" "$ZERF_POSTGRES_DB" \
+    --format=custom > zerf-pre-encryption.dump
+
+# 2. Stop the stack and remove the data volume.
+docker compose -f docker/docker-compose-local.yml down
+docker volume rm zerf_postgres_data
+
+# 3. Set ZERF_DB_ENCRYPTION_KEY in .env and start the new stack.
+#    The Percona-based postgres image initialises a fresh encrypted database.
+./start_local.sh
+
+# 4. Restore the unencrypted dump into the now-encrypted database.
+docker cp zerf-pre-encryption.dump zerf-postgres:/tmp/pre-enc.dump
+docker exec -e PGPASSWORD="$ZERF_POSTGRES_PASSWORD" zerf-postgres \
+    pg_restore --host 127.0.0.1 \
+               --username "$ZERF_POSTGRES_USER" \
+               --dbname "$ZERF_POSTGRES_DB" \
+               --no-owner --clean --if-exists \
+               /tmp/pre-enc.dump
+docker exec zerf-postgres rm /tmp/pre-enc.dump
+```
 
 ### 2. Start the stack
 

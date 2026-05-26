@@ -5,6 +5,12 @@
 # Intended for the dedicated backup container service or other one-off runs
 # with explicit PostgreSQL connection settings.
 #
+# Required env:
+#   ZERF_DB_ENCRYPTION_KEY  - passphrase for AES-256-CBC backup encryption
+#                             (same key used by the Postgres container for
+#                              gocryptfs data-at-rest encryption).
+#                             Generate with: openssl rand -hex 32
+#
 # Optional env:
 #   BACKUP_INTERVAL_SECONDS - if set to a positive integer, keep running and
 #                             create a new backup after each interval.
@@ -140,20 +146,41 @@ run_backup_once() {
   # The retention pattern matches only finalized snapshots, so orphan .tmp
   # files would otherwise accumulate forever in the backup volume.
   find "$OUT_DIR" -maxdepth 1 -type f \
-    \( -name 'zerf-*.dump.tmp' -o -name 'zerf-*.metadata.tmp' \) \
+    \( -name 'zerf-*.dump.enc.tmp' -o -name 'zerf-*.dump.plain.tmp' -o -name 'zerf-*.metadata.tmp' \) \
     -exec rm -f {} +
 
   ts="$(date -u +%Y%m%dT%H%M%SZ)"
-  output_file="$OUT_DIR/zerf-$ts.dump"
+  # Backup files are AES-256-CBC encrypted via openssl; the .enc suffix makes
+  # this explicit so operators know decryption is required before pg_restore.
+  output_file="$OUT_DIR/zerf-$ts.dump.enc"
   metadata_file="$OUT_DIR/zerf-$ts.metadata"
+  # Intermediate plaintext dump before encryption — deleted immediately after.
+  plain_temp_file="$OUT_DIR/zerf-$ts.dump.plain.tmp"
   temp_file="$output_file.tmp"
   temp_metadata_file="$metadata_file.tmp"
 
-  if ! run_direct_pg_dump > "$temp_file"; then
-    rm -f "$temp_file"
+  # Step 1: dump to a temporary plaintext file.
+  if ! run_direct_pg_dump > "$plain_temp_file"; then
+    rm -f "$plain_temp_file"
     echo "PostgreSQL connection settings are incomplete or pg_dump is unavailable." >&2
     return 1
   fi
+
+  # Step 2: encrypt the plaintext dump.  AES-256-CBC with a PBKDF2-derived key
+  # (100 000 iterations) prevents the backup from being read without the key.
+  # The passphrase is read from the environment variable by openssl so it never
+  # appears in process arguments.
+  if ! openssl enc -aes-256-cbc -salt -pbkdf2 -iter 100000 \
+      -pass env:ZERF_DB_ENCRYPTION_KEY \
+      -in  "$plain_temp_file" \
+      -out "$temp_file"; then
+    rm -f "$plain_temp_file" "$temp_file"
+    echo "Failed to encrypt backup." >&2
+    return 1
+  fi
+
+  # Remove the plaintext file as soon as the encrypted copy exists.
+  rm -f "$plain_temp_file"
 
   if ! write_backup_metadata "$temp_metadata_file" "$ts"; then
     rm -f "$temp_file" "$temp_metadata_file"
@@ -178,6 +205,7 @@ run_backup_once() {
   echo "Backup metadata written: $metadata_file"
 }
 
+validate_encryption_key || exit 1
 validate_interval || exit 1
 
 if [ -z "$INTERVAL" ]; then

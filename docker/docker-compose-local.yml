@@ -1,17 +1,31 @@
 services:
   postgres:
-    image: postgres:18
+    build:
+      context: .
+      dockerfile: Dockerfile.postgres
     container_name: zerf-postgres
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
+    # The pg_tde principal key lives on an in-memory tmpfs so it is never
+    # written to disk.  No elevated capabilities are required — pg_tde is a
+    # PostgreSQL storage extension, not a FUSE filesystem.  1 MiB is plenty
+    # for the keyring file (typically a few hundred bytes).
+    tmpfs:
+      - /var/lib/pg_tde_keyring:size=1m
     environment:
       - POSTGRES_DB=${ZERF_POSTGRES_DB:-zerf}
       - POSTGRES_USER=${ZERF_POSTGRES_USER:-zerf}
       - POSTGRES_PASSWORD=${ZERF_POSTGRES_PASSWORD:?ZERF_POSTGRES_PASSWORD must be set in .env (openssl rand -hex 32)}
       - POSTGRES_INITDB_ARGS=--auth-host=scram-sha-256 --auth-local=scram-sha-256 --data-checksums
+      # Single key for both DB-at-rest (pg_tde keyring wrap) and backup (openssl) encryption.
+      - ZERF_DB_ENCRYPTION_KEY=${ZERF_DB_ENCRYPTION_KEY:?ZERF_DB_ENCRYPTION_KEY must be set in .env (openssl rand -hex 32)}
     command:
       - postgres
+      - -c
+      # Load pg_tde so the tde_heap access method and WAL encryption are
+      # available before any user connection opens.
+      - shared_preload_libraries=pg_tde
       - -c
       - password_encryption=scram-sha-256
       - -c
@@ -21,7 +35,10 @@ services:
       - -c
       - statement_timeout=30000
     volumes:
-      - postgres_data:/var/lib/postgresql
+      # The Percona PostgreSQL 18 image uses PGDATA=/data/db; mount the named
+      # volume at /data so PGDATA and the wrapped keyring at /data/pg_tde_keyring.enc
+      # both persist.
+      - postgres_data:/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\" -h 127.0.0.1 || exit 1"]
       interval: 15s
@@ -104,6 +121,8 @@ services:
       - BACKUP_INTERVAL_SECONDS=${BACKUP_INTERVAL_SECONDS:-86400}
       - BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-30}
       - ZERF_GIT_COMMIT=${ZERF_GIT_COMMIT:-unknown}
+      # Same key used to encrypt backup files with AES-256-CBC via openssl.
+      - ZERF_DB_ENCRYPTION_KEY=${ZERF_DB_ENCRYPTION_KEY:?ZERF_DB_ENCRYPTION_KEY must be set in .env (openssl rand -hex 32)}
     volumes:
       - ../scripts/backup.sh:/usr/local/bin/backup.sh:ro
       - backup_data:/backups
