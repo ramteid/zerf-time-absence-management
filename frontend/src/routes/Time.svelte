@@ -57,6 +57,8 @@
 
   $: weekParam = (() => {
     const queryString = $path.includes("?") ? $path.split("?")[1] : "";
+    // Close any open entry dialog when the week changes (URL-driven navigation).
+    showEntry = null;
     return new URLSearchParams(queryString).get("week");
   })();
   $: requestedWeek = weekParam || appTodayIsoDate($settings?.timezone);

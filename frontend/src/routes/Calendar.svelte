@@ -32,6 +32,8 @@
     const today = appTodayDate($settings?.timezone);
     year = Number(searchParams.get("year")) || today.getFullYear();
     month = Number(searchParams.get("month")) || today.getMonth() + 1;
+    // Close any open day-detail popup when navigating to a different month.
+    popupCell = null;
   }
 
   async function load() {

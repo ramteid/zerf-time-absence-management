@@ -388,7 +388,7 @@
     {#if isAdmin}
       <AdminTabs />
     {/if}
-    {#key $path}
+    {#key pathname}
       {#await routePromise}
         <p style="padding: 2em">{$t("Loading...")}</p>
       {:then route}
