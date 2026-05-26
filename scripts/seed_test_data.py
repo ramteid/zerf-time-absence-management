@@ -124,16 +124,20 @@ ARGON2 = PasswordHasher(
 
 # Category IDs reflect the order the application bootstraps them in.
 # The script creates the exact same set deterministically so generated
-# time entries can reference them by stable id.
+# time entries can reference them by stable id.  Names and description
+# are in German to match the seeded `ui_language=de` setting (the
+# application's auto-seed uses English names; we override here for a
+# coherent German demo experience).
 CATEGORIES = [
-    # (id, name, color, sort_order, counts_as_work)
-    (1, "Arbeit am Kind",     "#4CAF50", 1, True),
-    (2, "Preparation Time",   "#22c55e", 2, True),
-    (3, "Leadership Tasks",   "#84cc16", 3, True),
-    (4, "Team Meeting",       "#7c3aed", 4, True),
-    (5, "Training",           "#795548", 5, True),
-    (6, "Other",              "#607D8B", 6, True),
-    (7, "Flextime Reduction", "#6D4C41", 7, False),
+    # (id, name, color, sort_order, counts_as_work, description)
+    (1, "Arbeit am Kind",  "#4CAF50", 1, True,  None),
+    (2, "Vorbereitung",    "#22c55e", 2, True,  None),
+    (3, "Leitungsaufgaben","#84cc16", 3, True,  None),
+    (4, "Teambesprechung", "#7c3aed", 4, True,  None),
+    (5, "Fortbildung",     "#795548", 5, True,  None),
+    (6, "Sonstiges",       "#607D8B", 6, True,  None),
+    (7, "Gleitzeitabbau",  "#6D4C41", 7, False,
+     "Blockt Zeit ohne Arbeitsstunden gutzuschreiben."),
 ]
 
 CAT_WORK = 1
@@ -644,13 +648,13 @@ def clear_support_tables(cur) -> None:
 
 
 def insert_categories(cur) -> None:
-    for cat_id, name, color, sort_order, counts_as_work in CATEGORIES:
+    for cat_id, name, color, sort_order, counts_as_work, description in CATEGORIES:
         cur.execute(
             """
             INSERT INTO categories(id, name, description, color, sort_order, active, counts_as_work)
-            VALUES (%s, %s, NULL, %s, %s, TRUE, %s)
+            VALUES (%s, %s, %s, %s, %s, TRUE, %s)
             """,
-            (cat_id, name, color, sort_order, counts_as_work),
+            (cat_id, name, description, color, sort_order, counts_as_work),
         )
     # Bump the sequence past our explicit ids so future inserts don't collide.
     cur.execute("SELECT setval(pg_get_serial_sequence('categories', 'id'), %s, true)",
@@ -1045,6 +1049,15 @@ def write_pattern(
 
     submitted_at_val = submitted_at if status in ("submitted", "approved", "rejected") else None
     reviewed_by_val = reviewer.user_id if status in ("approved", "rejected") else None
+    # updated_at must reflect the most recent state-changing write.  The app
+    # bumps it on every UPDATE (draft → submit, submit → approve/reject), so
+    # for seeded data it should equal the last lifecycle timestamp present.
+    if status in ("approved", "rejected"):
+        updated_at = reviewed_at
+    elif status == "submitted":
+        updated_at = submitted_at
+    else:  # draft
+        updated_at = created_at
     reviewed_at_val = reviewed_at if status in ("approved", "rejected") else None
 
     for start_s, end_s, cat_id in pattern:
@@ -1060,7 +1073,7 @@ def write_pattern(
             (
                 persona.user_id, d, start_s, end_s, cat_id, status,
                 submitted_at_val, reviewed_by_val, reviewed_at_val,
-                created_at, created_at,
+                created_at, updated_at,
             ),
         )
 
