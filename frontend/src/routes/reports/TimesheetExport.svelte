@@ -8,6 +8,7 @@
   import { isoDate, appTodayDate, minToHM } from "../../format.js";
   import Icon from "../../Icons.svelte";
   import DatePicker from "../../DatePicker.svelte";
+  import SectionCard from "../../lib/ui/SectionCard.svelte";
   import { hasFlextimeAccount } from "../../rolePolicy.js";
   import {
     getFlextimeReport,
@@ -304,26 +305,12 @@
   }
 </script>
 
-<div class="zf-card" style="padding:20px">
-  <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
-    <span style="font-size:14px;font-weight:400">{$t("Export timesheet")}</span>
-    <button
-      class="zf-btn-icon-sm zf-btn-ghost"
-      title={$t("help_csv_export")}
-      on:click={() => toggleHelp("csv")}
-      style="color:var(--text-tertiary);font-size:14px;cursor:help"
-    >
-      <Icon name="Info" size={14} />
-    </button>
-  </div>
-  {#if activeHelp === "csv"}
-    <div
-      style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)"
-    >
-      {$t("help_csv_export")}
-    </div>
-  {/if}
-
+<SectionCard
+  title={$t("Export timesheet")}
+  helpText={$t("help_csv_export")}
+  helpOpen={activeHelp === "csv"}
+  onHelpToggle={() => toggleHelp("csv")}
+>
   {#if !isSelfOnlyReportsView}
     <div style="margin-bottom:12px">
       <label class="zf-label" for="csv-user-id">{$t("Employee")}</label>
@@ -367,4 +354,4 @@
       <Icon name="FileText" size={14} />{$t("Export PDF")}
     </button>
   </div>
-</div>
+</SectionCard>

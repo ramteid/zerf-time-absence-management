@@ -2,8 +2,9 @@
   import { earliestStartDate, settings, toast } from "../../stores.js";
   import { t, fmtDecimal } from "../../i18n.js";
   import { appTodayDate, minToHM } from "../../format.js";
-  import Icon from "../../Icons.svelte";
   import DatePicker from "../../DatePicker.svelte";
+  import SectionCard from "../../lib/ui/SectionCard.svelte";
+  import DataTable from "../../lib/ui/DataTable.svelte";
   import { getTeamReport } from "../../lib/api/reportsApi.js";
 
   let today = appTodayDate();
@@ -53,26 +54,12 @@
 
 </script>
 
-<div class="zf-card" style="padding:20px;margin-bottom:16px">
-  <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
-    <span style="font-size:14px;font-weight:400">{$t("Team report")}</span>
-    <button
-      class="zf-btn-icon-sm zf-btn-ghost"
-      title={$t("help_team_report")}
-      on:click={() => toggleHelp("team")}
-      style="color:var(--text-tertiary);font-size:14px;cursor:help"
-    >
-      <Icon name="Info" size={14} />
-    </button>
-  </div>
-  {#if activeHelp === "team"}
-    <div
-      style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)"
-    >
-      {$t("help_team_report")}
-    </div>
-  {/if}
-
+<SectionCard
+  title={$t("Team report")}
+  helpText={$t("help_team_report")}
+  helpOpen={activeHelp === "team"}
+  onHelpToggle={() => toggleHelp("team")}
+>
   <div
     style="display:flex;gap:12px;align-items:flex-end;margin-bottom:12px;flex-wrap:wrap"
   >
@@ -84,8 +71,7 @@
   </div>
 
   {#if teamReport}
-    <div class="zf-table-wrap">
-      <table class="zf-table zf-table--fit">
+    <DataTable fit>
         <thead>
           <tr>
             <th style="min-width:120px">{$t("Employee")}</th>
@@ -156,7 +142,6 @@
             </tr>
           {/each}
         </tbody>
-      </table>
-    </div>
+    </DataTable>
   {/if}
-</div>
+</SectionCard>

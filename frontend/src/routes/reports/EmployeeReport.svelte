@@ -17,6 +17,9 @@
   import Icon from "../../Icons.svelte";
   import DatePicker from "../../DatePicker.svelte";
   import FlextimeChart from "../../FlextimeChart.svelte";
+  import SectionCard from "../../lib/ui/SectionCard.svelte";
+  import StatCard from "../../lib/ui/StatCard.svelte";
+  import DataTable from "../../lib/ui/DataTable.svelte";
   import { hasFlextimeAccount, isAssistantUser } from "../../rolePolicy.js";
   import {
     getFlextimeReport,
@@ -140,27 +143,12 @@
     : {};
 </script>
 
-<div class="zf-card" style="padding:20px;margin-bottom:16px">
-  <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
-    <span style="font-size:14px;font-weight:400">{$t("Employee report")}</span>
-    <button
-      class="zf-btn-icon-sm zf-btn-ghost"
-      title={$t("help_employee_details")}
-      on:click={() => toggleHelp("report")}
-      style="color:var(--text-tertiary);font-size:14px;cursor:help"
-    >
-      <Icon name="Info" size={14} />
-    </button>
-  </div>
-
-  {#if activeHelp === "report"}
-    <div
-      style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)"
-    >
-      {$t("help_employee_details")}
-    </div>
-  {/if}
-
+<SectionCard
+  title={$t("Employee report")}
+  helpText={$t("help_employee_details")}
+  helpOpen={activeHelp === "report"}
+  onHelpToggle={() => toggleHelp("report")}
+>
   <div class="field-row" style="margin-bottom:12px">
     {#if !isSelfOnlyReportsView}
       <div>
@@ -191,8 +179,22 @@
       {selectedReportUser?.id === $currentUser?.id ? $t("My Balance") : $t("Balance")}
     </div>
     <div class="stat-cards" style="margin-bottom:16px">
-      <div class="zf-card stat-card">
-        <div class="stat-card-label stat-card-label-help">
+      <StatCard
+        color={selectedUserIsAssistant
+          ? "var(--text-primary)"
+          : reportData.monthReport.submitted_min >=
+              reportData.monthReport.full_month_target_min
+            ? "var(--accent)"
+            : "var(--warning-text)"}
+        sub={selectedUserIsAssistant
+          ? ""
+          : $t("of {target} target", {
+              target: formatHours(
+                (reportData.monthReport.full_month_target_min || 0) / 60,
+              ),
+            })}
+      >
+        <span slot="label" class="stat-card-label-help">
           <span>{$t("Logged")}</span>
           <button
             class="zf-btn-icon-sm zf-btn-ghost"
@@ -202,54 +204,46 @@
           >
             <Icon name="Info" size={12} />
           </button>
-        </div>
-        <div
-          class="stat-card-value tab-num"
-          style="color:{selectedUserIsAssistant
-            ? 'var(--text-primary)'
-            : reportData.monthReport.submitted_min >=
-                reportData.monthReport.full_month_target_min
-              ? 'var(--accent)'
-              : 'var(--warning-text)'}"
-        >
-          {formatHours((reportData.monthReport.submitted_min || 0) / 60)}
-        </div>
-        {#if !selectedUserIsAssistant}
-          <div class="stat-card-sub">
-            {$t("of {target} target", {
-              target: formatHours(
-                (reportData.monthReport.full_month_target_min || 0) / 60,
-              ),
-            })}
-          </div>
-        {/if}
-      </div>
+        </span>
+        {formatHours((reportData.monthReport.submitted_min || 0) / 60)}
+      </StatCard>
 
       {#if selectedUserHasFlextime}
-        <div class="zf-card stat-card">
-          <div class="stat-card-label">{$t("Flextime balance")}</div>
-          <div
-            class="stat-card-value tab-num"
-            style="color:{reportData.flextimeBalance === null
-              ? 'var(--text-tertiary)'
-              : reportData.flextimeBalance < 0
-                ? 'var(--danger-text)'
-                : 'var(--success-text)'}"
-          >
-            {#if reportData.flextimeBalance !== null}
-              {reportData.flextimeBalance >= 0 ? "+" : ""}{minToHM(
-                reportData.flextimeBalance,
-              )}
-            {:else}
-              –
-            {/if}
-          </div>
-        </div>
+        <StatCard
+          label={$t("Flextime balance")}
+          color={reportData.flextimeBalance === null
+            ? "var(--text-tertiary)"
+            : reportData.flextimeBalance < 0
+              ? "var(--danger-text)"
+              : "var(--success-text)"}
+        >
+          {#if reportData.flextimeBalance !== null}
+            {reportData.flextimeBalance >= 0 ? "+" : ""}{minToHM(
+              reportData.flextimeBalance,
+            )}
+          {:else}
+            –
+          {/if}
+        </StatCard>
       {/if}
 
       {#if !selectedUserIsAssistant}
-        <div class="zf-card stat-card">
-          <div class="stat-card-label stat-card-label-help">
+        {@const currentWeekStatus = reportData.monthReport.current_week_status}
+        {@const currentWeekSub =
+          currentWeekStatus === "draft"
+            ? $t("Current week: draft")
+            : currentWeekStatus === "partial"
+              ? $t("Current week: partially submitted")
+              : currentWeekStatus === "rejected"
+                ? $t("Current week: needs revision")
+                : ""}
+        <StatCard
+          color={reportData.monthReport.weeks_all_submitted
+            ? "var(--success-text)"
+            : "var(--warning-text)"}
+          sub={currentWeekSub}
+        >
+          <span slot="label" class="stat-card-label-help">
             <span>{$t("Submissions")}</span>
             <button
               class="zf-btn-icon-sm zf-btn-ghost"
@@ -259,40 +253,11 @@
             >
               <Icon name="Info" size={12} />
             </button>
-          </div>
-          <div
-            class="stat-card-value tab-num"
-            style="color:{reportData.monthReport.weeks_all_submitted
-              ? 'var(--success-text)'
-              : 'var(--warning-text)'}"
-          >
-            {reportData.monthReport.weeks_all_submitted
-              ? $t("All submitted")
-              : $t("Weeks missing")}
-          </div>
-          {#if reportData.monthReport.current_week_status === "draft"}
-            <div
-              class="stat-card-sub"
-              style="color:var(--text-tertiary);font-size:11px;margin-top:4px"
-            >
-              {$t("Current week: draft")}
-            </div>
-          {:else if reportData.monthReport.current_week_status === "partial"}
-            <div
-              class="stat-card-sub"
-              style="color:var(--text-tertiary);font-size:11px;margin-top:4px"
-            >
-              {$t("Current week: partially submitted")}
-            </div>
-          {:else if reportData.monthReport.current_week_status === "rejected"}
-            <div
-              class="stat-card-sub"
-              style="color:var(--text-tertiary);font-size:11px;margin-top:4px"
-            >
-              {$t("Current week: needs revision")}
-            </div>
-          {/if}
-        </div>
+          </span>
+          {reportData.monthReport.weeks_all_submitted
+            ? $t("All submitted")
+            : $t("Weeks missing")}
+        </StatCard>
       {/if}
     </div>
 
@@ -318,45 +283,33 @@
         {$t("Vacation")}
       </div>
       <div class="stat-cards" style="margin-bottom:16px">
-        <div class="zf-card stat-card">
-          <div class="stat-card-label">{$t("Entitlement")}</div>
-          <div class="stat-card-value tab-num">
-            {formatDayCount(reportData.leaveBalance.annual_entitlement)}
-          </div>
-        </div>
-        <div class="zf-card stat-card">
-          <div class="stat-card-label">{$t("Taken")}</div>
-          <div class="stat-card-value tab-num">
-            {formatDayCount(reportData.leaveBalance.already_taken)}
-          </div>
-        </div>
+        <StatCard
+          label={$t("Entitlement")}
+          value={formatDayCount(reportData.leaveBalance.annual_entitlement)}
+        />
+        <StatCard
+          label={$t("Taken")}
+          value={formatDayCount(reportData.leaveBalance.already_taken)}
+        />
         {#if reportData.leaveBalance.approved_upcoming > 0}
-          <div class="zf-card stat-card">
-            <div class="stat-card-label">{$t("Planned")}</div>
-            <div class="stat-card-value tab-num">
-              {formatDayCount(reportData.leaveBalance.approved_upcoming)}
-            </div>
-          </div>
+          <StatCard
+            label={$t("Planned")}
+            value={formatDayCount(reportData.leaveBalance.approved_upcoming)}
+          />
         {/if}
         {#if reportData.leaveBalance.requested > 0}
-          <div class="zf-card stat-card">
-            <div class="stat-card-label">{$t("Requested")}</div>
-            <div class="stat-card-value tab-num">
-              {formatDayCount(reportData.leaveBalance.requested)}
-            </div>
-          </div>
+          <StatCard
+            label={$t("Requested")}
+            value={formatDayCount(reportData.leaveBalance.requested)}
+          />
         {/if}
-        <div class="zf-card stat-card">
-          <div class="stat-card-label">{$t("Remaining")}</div>
-          <div
-            class="stat-card-value tab-num"
-            style="color:{reportData.leaveBalance.available < 0
-              ? 'var(--danger-text)'
-              : 'var(--success-text)'}"
-          >
-            {formatDayCount(reportData.leaveBalance.available)}
-          </div>
-        </div>
+        <StatCard
+          label={$t("Remaining")}
+          value={formatDayCount(reportData.leaveBalance.available)}
+          color={reportData.leaveBalance.available < 0
+            ? "var(--danger-text)"
+            : "var(--success-text)"}
+        />
       </div>
     {/if}
 
@@ -368,11 +321,11 @@
       </div>
       <div class="stat-cards" style="margin-bottom:16px">
         {#each Object.entries(reportAbsenceSummary) as [kind, days] (kind)}
-          <div class="zf-card stat-card">
-            <div class="stat-card-label">{absenceKindLabel(kind)}</div>
-            <div class="stat-card-value tab-num">{formatDayCount(days)}</div>
-            <div class="stat-card-sub">{$t("days")}</div>
-          </div>
+          <StatCard
+            label={absenceKindLabel(kind)}
+            value={formatDayCount(days)}
+            sub={$t("days")}
+          />
         {/each}
       </div>
     {/if}
@@ -382,10 +335,7 @@
         reportData.monthReport.category_totals,
       ).sort((a, b) => b[1] - a[1])}
       {@const catMax = catEntries[0][1]}
-      <div class="zf-card" style="padding:16px;margin-bottom:12px">
-        <div style="font-weight:400;margin-bottom:12px">
-          {$t("Category breakdown")}
-        </div>
+      <SectionCard title={$t("Category breakdown")}>
         <div style="display:flex;flex-direction:column;gap:8px">
           {#each catEntries as [cat, mins] (cat)}
             <div
@@ -415,15 +365,12 @@
             </div>
           {/each}
         </div>
-      </div>
+      </SectionCard>
     {/if}
 
     {#if reportData.monthReport.entries?.length}
-      <div class="zf-card" style="overflow-x:auto;margin-bottom:12px">
-        <div style="font-weight:400;padding:16px 16px 12px">
-          {$t("Entries")}
-        </div>
-        <table class="zf-table">
+      <SectionCard title={$t("Entries")} padded={false}>
+        <DataTable>
           <thead>
             <tr>
               <th>{$t("Date")}</th>
@@ -450,16 +397,13 @@
               </tr>
             {/each}
           </tbody>
-        </table>
-      </div>
+        </DataTable>
+      </SectionCard>
     {/if}
 
     {#if reportData.monthReport.absences?.length}
-      <div class="zf-card" style="overflow-x:auto">
-        <div style="font-weight:400;padding:16px 16px 12px">
-          {$t("Absences")}
-        </div>
-        <table class="zf-table">
+      <SectionCard title={$t("Absences")} padded={false}>
+        <DataTable>
           <thead>
             <tr>
               <th>{$t("Type")}</th>
@@ -478,17 +422,14 @@
               </tr>
             {/each}
           </tbody>
-        </table>
-      </div>
+        </DataTable>
+      </SectionCard>
     {/if}
 
     {#if selectedUserHasFlextime && reportData.flextimeChartData?.length}
-      <div class="zf-card" style="padding:16px;margin-top:12px">
-        <div style="font-weight:400;margin-bottom:12px">
-          {$t("Flextime balance")}
-        </div>
+      <SectionCard title={$t("Flextime balance")}>
         <FlextimeChart data={reportData.flextimeChartData} />
-      </div>
+      </SectionCard>
     {/if}
   {/if}
-</div>
+</SectionCard>

@@ -2,8 +2,9 @@
   import { currentUser, earliestStartDate, settings, toast } from "../../stores.js";
   import { t, fmtDecimal } from "../../i18n.js";
   import { isoDate, appTodayDate, minToHM } from "../../format.js";
-  import Icon from "../../Icons.svelte";
   import DatePicker from "../../DatePicker.svelte";
+  import SectionCard from "../../lib/ui/SectionCard.svelte";
+  import DataTable from "../../lib/ui/DataTable.svelte";
   import {
     getCategoryReport,
     getTeamCategoryReport,
@@ -122,26 +123,12 @@
   }
 </script>
 
-<div class="zf-card" style="padding:20px;margin-bottom:16px">
-  <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
-    <span style="font-size:14px;font-weight:400">{$t("Category breakdown")}</span>
-    <button
-      class="zf-btn-icon-sm zf-btn-ghost"
-      title={$t("help_category_breakdown")}
-      on:click={() => toggleHelp("cat")}
-      style="color:var(--text-tertiary);font-size:14px;cursor:help"
-    >
-      <Icon name="Info" size={14} />
-    </button>
-  </div>
-  {#if activeHelp === "cat"}
-    <div
-      style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)"
-    >
-      {$t("help_category_breakdown")}
-    </div>
-  {/if}
-
+<SectionCard
+  title={$t("Category breakdown")}
+  helpText={$t("help_category_breakdown")}
+  helpOpen={activeHelp === "cat"}
+  onHelpToggle={() => toggleHelp("cat")}
+>
   <div class="field-row" style="margin-bottom:12px">
     <div>
       <label class="zf-label" for="cat-from">{$t("From")}</label>
@@ -216,8 +203,8 @@
         {$t("No data.")}
       </div>
     {:else}
-      <div class="zf-table-wrap" style="margin-top:12px">
-        <table class="zf-table zf-table--fit">
+      <div style="margin-top:12px">
+        <DataTable fit>
           <thead>
             <tr>
               <th>{$t("Employee")}</th>
@@ -255,7 +242,7 @@
               </tr>
             {/each}
           </tbody>
-        </table>
+        </DataTable>
       </div>
     {/if}
   {/if}
@@ -270,8 +257,8 @@
         {$t("No data.")}
       </div>
     {:else if filteredCatReport}
-      <div class="zf-table-wrap" style="margin-top:12px">
-        <table class="zf-table zf-table--fit" style="table-layout:fixed">
+      <div class="cat-totals-wrap" style="margin-top:12px">
+        <DataTable fit>
           <thead>
             <tr>
               <th>{$t("Category")}</th>
@@ -297,11 +284,11 @@
               </tr>
             {/each}
           </tbody>
-        </table>
+        </DataTable>
       </div>
     {/if}
   {/if}
-</div>
+</SectionCard>
 
 <style>
   .cat-dot {
@@ -310,5 +297,8 @@
     border-radius: 50%;
     display: inline-block;
     flex-shrink: 0;
+  }
+  .cat-totals-wrap :global(table) {
+    table-layout: fixed;
   }
 </style>
