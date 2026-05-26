@@ -1,5 +1,5 @@
 <script>
-  import { earliestStartDate, settings, toast } from "../../stores.js";
+  import { currentUser, earliestStartDate, settings, toast } from "../../stores.js";
   import {
     t,
     absenceKindLabel,
@@ -8,6 +8,7 @@
   } from "../../i18n.js";
   import { appTodayDate, fmtDate } from "../../format.js";
   import { countWorkdays, holidayDateSet } from "../../apiMappers.js";
+  import { tracksOwnTime } from "../../rolePolicy.js";
   import DatePicker from "../../DatePicker.svelte";
   import SectionCard from "../../lib/ui/SectionCard.svelte";
   import StatCard from "../../lib/ui/StatCard.svelte";
@@ -113,9 +114,12 @@
       if (isSelfOnlyReportsView) {
         raw = dedupeAbsences(await loadOwnAbsencesForRange());
       } else {
+        // Pure-admin users (tracks_time=false) have no own absence data and the
+        // /absences endpoint is blocked for them server-side (403). Only fetch
+        // own absences when the current user actually tracks their own time.
         const [teamAbsences, ownAbsences] = await Promise.all([
           getAbsenceReport({ from: absenceFrom, to: absenceTo }),
-          loadOwnAbsencesForRange(),
+          tracksOwnTime($currentUser) ? loadOwnAbsencesForRange() : Promise.resolve([]),
         ]);
         raw = dedupeAbsences([...teamAbsences, ...ownAbsences]);
       }

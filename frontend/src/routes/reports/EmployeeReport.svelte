@@ -101,6 +101,10 @@
   }
 
   async function loadReport() {
+    // Guard: no user selected yet (pure-admin before users have loaded).
+    // Without this, the API is called without user_id which returns 403 for
+    // pure-admin users on the backend (their own report is blocked).
+    if (reportUserId == null) return;
     reportData = null;
     try {
       const reportYear = reportMonth.slice(0, 4);
@@ -183,7 +187,7 @@
     </div>
   </div>
 
-  <button class="zf-btn zf-btn-primary" on:click={loadReport}>{$t("Show")}</button>
+  <button class="zf-btn zf-btn-primary" on:click={loadReport} disabled={reportUserId == null}>{$t("Show")}</button>
 
   {#if reportData}
     <div
