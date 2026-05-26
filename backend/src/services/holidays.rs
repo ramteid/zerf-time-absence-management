@@ -30,6 +30,48 @@ pub struct PreparedHoliday {
 
 const NAGER_BASE_URL: &str = "https://date.nager.at/api/v3";
 
+fn prepared_holiday_from_tuple(
+    year: i32,
+    (holiday_date, name, local_name): (NaiveDate, String, String),
+) -> PreparedHoliday {
+    PreparedHoliday {
+        holiday_date,
+        name,
+        local_name,
+        year,
+    }
+}
+
+fn prepared_holidays_match_existing_auto(
+    existing: &[crate::repository::Holiday],
+    prepared: &[PreparedHoliday],
+) -> bool {
+    let mut existing_auto: Vec<_> = existing
+        .iter()
+        .filter(|holiday| holiday.is_auto)
+        .map(|holiday| {
+            (
+                holiday.holiday_date,
+                holiday.name.as_str(),
+                holiday.local_name.as_deref().unwrap_or(""),
+            )
+        })
+        .collect();
+    let mut prepared_rows: Vec<_> = prepared
+        .iter()
+        .map(|holiday| {
+            (
+                holiday.holiday_date,
+                holiday.name.as_str(),
+                holiday.local_name.as_str(),
+            )
+        })
+        .collect();
+    existing_auto.sort_unstable();
+    prepared_rows.sort_unstable();
+    existing_auto == prepared_rows
+}
+
 pub async fn fetch_available_countries() -> Result<Vec<NagerCountry>, AppError> {
     let url = format!("{}/AvailableCountries", NAGER_BASE_URL);
     let resp = reqwest::get(&url)
@@ -158,12 +200,7 @@ pub async fn prepare_holiday_refresh(
     let mut prepared: Vec<PreparedHoliday> =
         filter_holidays_by_region(current_year_holidays, &normalized_region)
             .into_iter()
-            .map(|(holiday_date, name, local_name)| PreparedHoliday {
-                holiday_date,
-                name,
-                local_name,
-                year,
-            })
+            .map(|holiday| prepared_holiday_from_tuple(year, holiday))
             .collect();
 
     let next_year = year + 1;
@@ -173,12 +210,7 @@ pub async fn prepare_holiday_refresh(
             &normalized_region,
         )
         .into_iter()
-        .map(|(holiday_date, name, local_name)| PreparedHoliday {
-            holiday_date,
-            name,
-            local_name,
-            year: next_year,
-        }),
+        .map(|holiday| prepared_holiday_from_tuple(next_year, holiday)),
     );
 
     Ok(prepared)
@@ -223,12 +255,7 @@ pub async fn refresh_holidays(
 /// Ensure holidays exist for a given year (called on startup).
 pub async fn ensure_holidays(pool: &crate::db::DatabasePool, year: i32) -> AppResult<()> {
     let db = crate::repository::HolidayDb::new(pool.clone());
-    let count = db.count_auto_for_year(year).await?;
-    if count > 0 {
-        return Ok(());
-    }
-
-    // Load country/region from settings
+    // Load country/region from settings.
     let settings_db = crate::repository::SettingsDb::new(pool.clone());
     let country = settings_db.get_raw("country").await?.unwrap_or_default();
     let region = settings_db.get_raw("region").await?.unwrap_or_default();
@@ -242,16 +269,29 @@ pub async fn ensure_holidays(pool: &crate::db::DatabasePool, year: i32) -> AppRe
         Ok(list) => {
             let prepared: Vec<crate::repository::PreparedHoliday> = list
                 .into_iter()
-                .map(
-                    |(date, name, local_name)| crate::repository::PreparedHoliday {
-                        holiday_date: date,
-                        name,
-                        local_name,
-                        year,
-                    },
-                )
+                .map(|holiday| {
+                    let prepared = prepared_holiday_from_tuple(year, holiday);
+                    crate::repository::PreparedHoliday {
+                        holiday_date: prepared.holiday_date,
+                        name: prepared.name,
+                        local_name: prepared.local_name,
+                        year: prepared.year,
+                    }
+                })
                 .collect();
-            db.insert_auto_holidays(&prepared).await?;
+            let existing = db.list_for_year(year).await?;
+            let service_prepared: Vec<PreparedHoliday> = prepared
+                .iter()
+                .map(|holiday| PreparedHoliday {
+                    holiday_date: holiday.holiday_date,
+                    name: holiday.name.clone(),
+                    local_name: holiday.local_name.clone(),
+                    year: holiday.year,
+                })
+                .collect();
+            if !prepared_holidays_match_existing_auto(&existing, &service_prepared) {
+                db.replace_auto_holidays_for_year(year, &prepared).await?;
+            }
         }
         Err(e) => {
             tracing::warn!("Failed to fetch holidays for {}/{}: {:?}", country, year, e);
@@ -315,6 +355,37 @@ mod tests {
                 counties: Some(vec!["DE-BW".into(), "DE-BY".into()]),
             },
         ]
+    }
+
+    fn repo_holiday(
+        date: NaiveDate,
+        name: &str,
+        local_name: Option<&str>,
+        year: i32,
+        is_auto: bool,
+    ) -> crate::repository::Holiday {
+        crate::repository::Holiday {
+            id: 1,
+            holiday_date: date,
+            name: name.into(),
+            local_name: local_name.map(str::to_string),
+            year,
+            is_auto,
+        }
+    }
+
+    fn prepared_holiday(
+        date: NaiveDate,
+        name: &str,
+        local_name: &str,
+        year: i32,
+    ) -> PreparedHoliday {
+        PreparedHoliday {
+            holiday_date: date,
+            name: name.into(),
+            local_name: local_name.into(),
+            year,
+        }
     }
 
     fn local_at(
@@ -386,6 +457,43 @@ mod tests {
         let filtered = filter_holidays_by_region(sample_holidays(), "");
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].1, "New Year's Day");
+    }
+
+    #[test]
+    fn prepared_holidays_match_existing_auto_ignores_manual_holidays() {
+        let new_year = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        let manual = NaiveDate::from_ymd_opt(2026, 2, 2).unwrap();
+        let existing = vec![
+            repo_holiday(new_year, "New Year's Day", Some("Neujahr"), 2026, true),
+            repo_holiday(manual, "Company Holiday", None, 2026, false),
+        ];
+        let prepared = vec![prepared_holiday(
+            new_year,
+            "New Year's Day",
+            "Neujahr",
+            2026,
+        )];
+
+        assert!(prepared_holidays_match_existing_auto(&existing, &prepared));
+    }
+
+    #[test]
+    fn prepared_holidays_match_existing_auto_detects_missing_holiday() {
+        let new_year = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        let whit_monday = NaiveDate::from_ymd_opt(2026, 5, 25).unwrap();
+        let existing = vec![repo_holiday(
+            new_year,
+            "New Year's Day",
+            Some("Neujahr"),
+            2026,
+            true,
+        )];
+        let prepared = vec![
+            prepared_holiday(new_year, "New Year's Day", "Neujahr", 2026),
+            prepared_holiday(whit_monday, "Whit Monday", "Pfingstmontag", 2026),
+        ];
+
+        assert!(!prepared_holidays_match_existing_auto(&existing, &prepared));
     }
 
     #[test]

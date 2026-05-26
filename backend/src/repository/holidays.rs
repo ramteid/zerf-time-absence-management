@@ -204,6 +204,35 @@ impl HolidayDb {
         Ok(())
     }
 
+    /// Delete auto-imported holidays for one year and re-insert the prepared
+    /// list. Manual holidays are preserved.
+    pub async fn replace_auto_holidays_for_year(
+        &self,
+        year: i32,
+        holidays: &[PreparedHoliday],
+    ) -> AppResult<()> {
+        let mut tx = self.begin().await?;
+        sqlx::query("DELETE FROM holidays WHERE is_auto = TRUE AND year = $1")
+            .bind(year)
+            .execute(&mut *tx)
+            .await?;
+        for h in holidays {
+            sqlx::query(
+                "INSERT INTO holidays(holiday_date, name, local_name, year, is_auto) \
+                 VALUES ($1, $2, $3, $4, TRUE) \
+                 ON CONFLICT (holiday_date) DO NOTHING",
+            )
+            .bind(h.holiday_date)
+            .bind(&h.name)
+            .bind(&h.local_name)
+            .bind(h.year)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
     /// Insert auto holidays without deleting existing ones (for initial population).
     pub async fn insert_auto_holidays(&self, holidays: &[PreparedHoliday]) -> AppResult<()> {
         for h in holidays {
