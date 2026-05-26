@@ -234,6 +234,10 @@ fi
 # ── Restore ───────────────────────────────────────────────────────────────────
 
 echo "Copying dump into postgres container…"
+# Pre-clear any stale dump left by a previous restore that was hard-killed
+# (SIGKILL bypasses the EXIT trap, so the cleanup inside the container may
+# not have run).  Idempotent: a missing file is silently ignored.
+docker exec "$POSTGRES_CONTAINER" rm -f /tmp/zerf-restore.dump 2>/dev/null || true
 docker cp "$PLAIN_TMP" "$POSTGRES_CONTAINER:/tmp/zerf-restore.dump"
 
 echo "Restoring…"
