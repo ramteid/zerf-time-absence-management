@@ -162,7 +162,10 @@ if [ -f "$METADATA_FILE" ]; then
     [ -n "$BACKUP_TS" ]     && info "Created:  $BACKUP_TS"
     [ -n "$BACKUP_COMMIT" ] && info "Commit:   $BACKUP_COMMIT"
 
-    CURRENT_COMMIT="${ZERF_GIT_COMMIT:-$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)}"
+    # Use the full SHA on both sides so the equality check matches: backups
+    # produced by start_public.sh record the full hash via `git rev-parse HEAD`,
+    # so comparing against the short hash would always trigger the warning.
+    CURRENT_COMMIT="${ZERF_GIT_COMMIT:-$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)}"
     if [ -n "$BACKUP_COMMIT" ] \
        && [ "$BACKUP_COMMIT" != "$CURRENT_COMMIT" ] \
        && [ "$BACKUP_COMMIT" != "unknown" ]; then
@@ -195,6 +198,12 @@ openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 \
     -in  "$BACKUP_FILE" \
     -out "$PLAIN_TMP" \
     || die "Decryption failed — wrong ZERF_DB_ENCRYPTION_KEY or corrupted file."
+
+# openssl can exit 0 on a truncated input that still parses as a (very small)
+# valid stream.  Reject empty decrypted output before we touch the live DB.
+if [ ! -s "$PLAIN_TMP" ]; then
+    die "Decrypted dump is empty — refusing to restore.  Backup file is likely truncated or corrupted."
+fi
 
 # ── Stop the app to prevent mid-restore writes ───────────────────────────────
 
