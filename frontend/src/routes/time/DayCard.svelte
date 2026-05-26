@@ -120,6 +120,8 @@
     max-width: 100%;
     padding: 6px 10px;
     border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--bg-subtle);
     border: 1px solid color-mix(in srgb, var(--status-color) 28%, transparent);
     background: color-mix(in srgb, var(--status-color) 12%, transparent);
     color: var(--status-color);

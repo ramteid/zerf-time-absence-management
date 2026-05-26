@@ -58,6 +58,9 @@
   --shadow-lg:
     0 8px 28px rgba(20, 22, 26, 0.1), 0 2px 6px rgba(20, 22, 26, 0.06);
 
+  --mobile-bottom-nav-height: 56px;
+  --mobile-safe-area-bottom: env(safe-area-inset-bottom, 0px);
+
   --font-sans:
     "Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
 }
@@ -642,9 +645,16 @@ dialog {
   left: 50%;
   transform: translate(-50%, -50%);
   margin: 0;
-  display: flex;
   flex-direction: column;
   overflow: visible;
+}
+
+dialog:not([open]) {
+  display: none;
+}
+
+dialog[open] {
+  display: flex;
 }
 
 dialog::backdrop {
@@ -1252,7 +1262,9 @@ dialog footer {
   .main-content {
     /* Account for fixed title bar + bottom nav height + safe-area */
     padding-top: 50px;
-    padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(
+      var(--mobile-bottom-nav-height) + var(--mobile-safe-area-bottom)
+    );
   }
 
   .content-area {
@@ -1410,26 +1422,43 @@ dialog footer {
     align-items: flex-start;
     justify-content: space-around;
     padding: 0 4px;
-    padding-bottom: env(safe-area-inset-bottom, 0px);
-    height: calc(56px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: var(--mobile-safe-area-bottom);
+    height: calc(
+      var(--mobile-bottom-nav-height) + var(--mobile-safe-area-bottom)
+    );
   }
 
   .mobile-nav-item {
+    appearance: none;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: 2px;
     flex: 1;
-    height: 56px;
+    min-width: 0;
+    height: var(--mobile-bottom-nav-height);
     border: none;
     background: none;
     color: var(--text-secondary);
+    font-family: inherit;
     font-size: 10px;
+    line-height: 1.1;
     text-decoration: none;
     cursor: pointer;
     padding: 4px 0;
     transition: color 0.15s;
+  }
+
+  .mobile-nav-item svg {
+    flex: 0 0 auto;
+  }
+
+  .mobile-nav-item span {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .mobile-nav-item.active {
@@ -1442,7 +1471,9 @@ dialog footer {
 
   /* Toast: above bottom nav */
   .toast-container {
-    bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(
+      var(--mobile-bottom-nav-height) + 8px + var(--mobile-safe-area-bottom)
+    );
     right: 12px;
     left: 12px;
     align-items: stretch;
@@ -1500,6 +1531,12 @@ dialog footer {
 
   .pull-spinner.active {
     color: var(--accent);
+  }
+}
+
+@-moz-document url-prefix() {
+  :root {
+    --mobile-safe-area-bottom: 0px;
   }
 }
 
