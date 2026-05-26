@@ -25,16 +25,14 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Approve PR (patch & minor, incl. grouped)
-        if: steps.meta.outputs.update-type != 'version-update:semver-major'
+      - name: Approve PR
         continue-on-error: true
         run: gh pr review --approve "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Enable auto-merge (patch & minor, incl. grouped)
-        if: steps.meta.outputs.update-type != 'version-update:semver-major'
+      - name: Enable auto-merge
         run: gh pr merge --auto --squash --delete-branch "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
