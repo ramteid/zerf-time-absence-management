@@ -73,11 +73,15 @@ set +a
 
 PLAIN_TMP=""
 TMP_COPY=""
+TMP_COPY_DIR=""   # isolated dir — only this dir is mounted into helper containers
 META_TMP=""
+META_TMP_DIR=""   # isolated dir — same reason
 cleanup() {
-    [ -n "$PLAIN_TMP" ] && rm -f "$PLAIN_TMP"
-    [ -n "$TMP_COPY" ]  && rm -f "$TMP_COPY"
-    [ -n "$META_TMP" ]  && rm -f "$META_TMP"
+    [ -n "$PLAIN_TMP" ]    && rm -f  "$PLAIN_TMP"
+    [ -n "$TMP_COPY" ]     && rm -f  "$TMP_COPY"
+    [ -n "$TMP_COPY_DIR" ] && rm -rf "$TMP_COPY_DIR"
+    [ -n "$META_TMP" ]     && rm -f  "$META_TMP"
+    [ -n "$META_TMP_DIR" ] && rm -rf "$META_TMP_DIR"
     # Best-effort: remove the temp dump from inside the postgres container.
     # Suppress errors so cleanup never masks the real exit status.
     docker exec "$POSTGRES_CONTAINER" rm -f /tmp/zerf-restore.dump 2>/dev/null || true
@@ -126,20 +130,20 @@ if [ -z "$BACKUP_FILE" ]; then
     # Copy the chosen file out of the volume to a host temp location.  The
     # cleanup trap removes it when the script exits.
     #
-    # We pass SELECTED and the basename via -e so the helper's `sh -c` sees
-    # them as environment variables, never as part of the command string.
-    # Any shell metacharacters in the filename are therefore inert — they
-    # only matter if the inner shell evaluates them, and "$SRC" / "$DST"
-    # in -c '...' don't expand or word-split a single env var.
-    TMP_COPY="$(mktemp /tmp/zerf-backup-XXXXXX.dump.enc)"
+    # Use an isolated temp directory (not all of /tmp) as the bind-mount so
+    # the helper container only sees one file, not every process's temp files.
+    # We pass SELECTED via -e so the helper's `sh -c` sees it as an env var,
+    # never as part of the command string — shell metacharacters in the
+    # filename are therefore inert.
+    TMP_COPY_DIR="$(mktemp -d)"
+    TMP_COPY="$TMP_COPY_DIR/backup.dump.enc"
     docker run --rm \
         -v "$BACKUP_VOLUME:/backups:ro" \
-        -v "$(dirname "$TMP_COPY"):/out" \
+        -v "$TMP_COPY_DIR:/out" \
         -e "SRC=$SELECTED" \
-        -e "DST=$(basename "$TMP_COPY")" \
         --entrypoint sh \
         "$HELPER_IMAGE" \
-        -c 'cp "/backups/$SRC" "/out/$DST"' \
+        -c 'cp "/backups/$SRC" "/out/backup.dump.enc"' \
         || die "Could not copy $SELECTED out of the backup volume."
 
     BACKUP_FILE="$TMP_COPY"
@@ -154,17 +158,17 @@ METADATA_FILE="${BACKUP_FILE%.dump.enc}.metadata"
 
 if [ ! -f "$METADATA_FILE" ] && [ "$BACKUP_CAME_FROM_VOLUME" = "1" ]; then
     META_NAME="${SELECTED%.dump.enc}.metadata"
-    META_TMP="$(mktemp /tmp/zerf-meta-XXXXXX.metadata)"
+    META_TMP_DIR="$(mktemp -d)"
+    META_TMP="$META_TMP_DIR/metadata"
     docker run --rm \
         -v "$BACKUP_VOLUME:/backups:ro" \
-        -v "$(dirname "$META_TMP"):/out" \
+        -v "$META_TMP_DIR:/out" \
         -e "SRC=$META_NAME" \
-        -e "DST=$(basename "$META_TMP")" \
         --entrypoint sh \
         "$HELPER_IMAGE" \
-        -c 'cp "/backups/$SRC" "/out/$DST" 2>/dev/null' \
+        -c 'cp "/backups/$SRC" "/out/metadata" 2>/dev/null' \
         2>/dev/null || true
-    [ -s "$META_TMP" ] && METADATA_FILE="$META_TMP" || { rm -f "$META_TMP"; META_TMP=""; }
+    [ -s "$META_TMP" ] && METADATA_FILE="$META_TMP" || { rm -rf "$META_TMP_DIR"; META_TMP_DIR=""; META_TMP=""; }
 fi
 
 # ── Show metadata and confirm ────────────────────────────────────────────────
