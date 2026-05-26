@@ -144,7 +144,9 @@ run_backup_once() {
 
   # Sweep stale temp files from previous runs interrupted by SIGTERM/SIGKILL.
   # The retention pattern matches only finalized snapshots, so orphan .tmp
-  # files would otherwise accumulate forever in the backup volume.
+  # files would otherwise accumulate forever in the backup volume.  The
+  # `dump.plain.tmp` pattern is kept here to clean up leftovers from older
+  # versions of this script that staged plaintext in $OUT_DIR.
   find "$OUT_DIR" -maxdepth 1 -type f \
     \( -name 'zerf-*.dump.enc.tmp' -o -name 'zerf-*.dump.plain.tmp' -o -name 'zerf-*.metadata.tmp' \) \
     -exec rm -f {} +
@@ -154,12 +156,19 @@ run_backup_once() {
   # this explicit so operators know decryption is required before pg_restore.
   output_file="$OUT_DIR/zerf-$ts.dump.enc"
   metadata_file="$OUT_DIR/zerf-$ts.metadata"
-  # Intermediate plaintext dump before encryption — deleted immediately after.
-  plain_temp_file="$OUT_DIR/zerf-$ts.dump.plain.tmp"
+  # Stage the plaintext dump in $TMPDIR (defaults to /tmp), NOT in $OUT_DIR.
+  # The backup container mounts /tmp as a RAM-backed tmpfs (compose), so the
+  # plaintext copy never touches the persistent backup volume.  Even if the
+  # container is killed mid-dump, the plaintext disappears with the tmpfs.
+  if ! plain_temp_file="$(mktemp "${TMPDIR:-/tmp}/zerf-$ts.dump.plain.XXXXXX")"; then
+    echo "Failed to create plaintext temp file in ${TMPDIR:-/tmp}." >&2
+    return 1
+  fi
+  chmod 600 "$plain_temp_file"
   temp_file="$output_file.tmp"
   temp_metadata_file="$metadata_file.tmp"
 
-  # Step 1: dump to a temporary plaintext file.
+  # Step 1: dump to the in-RAM plaintext temp file.
   if ! run_direct_pg_dump > "$plain_temp_file"; then
     rm -f "$plain_temp_file"
     echo "PostgreSQL connection settings are incomplete or pg_dump is unavailable." >&2
