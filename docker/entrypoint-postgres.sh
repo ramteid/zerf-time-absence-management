@@ -23,6 +23,12 @@
 #      directly; pg_tde finds the keyring at its catalog-recorded path.
 set -euo pipefail
 
+# Any new file we create (decrypted keyring, etc.) must be private to the
+# postgres user from the moment it appears, not just after a follow-up chmod.
+# 077 → 0600 for files, 0700 for dirs — closes the TOCTOU window where a
+# default-umask file would briefly be world-readable.
+umask 077
+
 KEYRING_DIR="/var/lib/pg_tde_keyring"
 KEYRING_PLAIN="$KEYRING_DIR/keyring.per"
 # /data is the parent of Percona's PGDATA (/data/db).  Storing the encrypted

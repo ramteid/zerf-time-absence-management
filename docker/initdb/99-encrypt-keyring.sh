@@ -11,6 +11,10 @@
 # key.  The host volume never contains the plaintext keyring.
 set -euo pipefail
 
+# Created files (encrypted keyring + sibling .tmp) must be private to the
+# postgres user the instant they appear, not just after a follow-up chmod.
+umask 077
+
 KEYRING_PLAIN="/var/lib/pg_tde_keyring/keyring.per"
 # /data is the Docker volume root; /data/db is PGDATA.  Keep the encrypted
 # keyring next to PGDATA (not inside it) so it's clearly a separate artifact.
