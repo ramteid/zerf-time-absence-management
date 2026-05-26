@@ -1,0 +1,369 @@
+<script>
+  import { currentUser, settings, toast } from "../../stores.js";
+  import {
+    t,
+    absenceKindLabel,
+    statusLabel,
+  } from "../../i18n.js";
+  import { isoDate, appTodayDate, minToHM } from "../../format.js";
+  import Icon from "../../Icons.svelte";
+  import DatePicker from "../../DatePicker.svelte";
+  import { hasFlextimeAccount } from "../../rolePolicy.js";
+  import {
+    getFlextimeReport,
+    getRangeReport,
+  } from "../../lib/api/reportsApi.js";
+  import { isoMonthStart } from "../../lib/domain/dates.js";
+  import { findUserById } from "../../lib/domain/users.js";
+  import { buildReportPdf } from "../../lib/exports/reportPdf.js";
+
+  export let users = [];
+  export let isSelfOnlyReportsView = false;
+
+  let today = appTodayDate();
+  let todayIso = isoDate(today);
+  $: today = appTodayDate($settings?.timezone);
+  $: todayIso = isoDate(today);
+
+  let csvUserId = $currentUser.id;
+  let csvFrom = isoMonthStart(today);
+  let csvTo = todayIso;
+  let csvError = "";
+  let exportInProgress = false;
+  let activeHelp = null;
+
+  function toggleHelp(id) {
+    activeHelp = activeHelp === id ? null : id;
+  }
+
+  // Force own user when in self-only mode.
+  $: if (isSelfOnlyReportsView) {
+    csvUserId = $currentUser.id;
+  }
+
+  // Lower bound: the selected export user's own start date.
+  $: csvUserMinDate = findUserById(users, csvUserId, $currentUser)?.start_date || null;
+
+  // Keep defaults aligned with app-timezone date changes if untouched.
+  let previousCurrentMonthStr = "";
+  let previousTodayIso = "";
+  $: currentYear = today.getFullYear();
+  $: currentMonthStr = `${currentYear}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+  $: {
+    if (!previousCurrentMonthStr) {
+      // eslint-disable-next-line no-useless-assignment
+      previousCurrentMonthStr = currentMonthStr;
+      // eslint-disable-next-line no-useless-assignment
+      previousTodayIso = todayIso;
+    } else {
+      if (csvFrom === `${previousCurrentMonthStr}-01`)
+        csvFrom = `${currentMonthStr}-01`;
+      if (csvTo === previousTodayIso) csvTo = todayIso;
+      // eslint-disable-next-line no-useless-assignment
+      previousCurrentMonthStr = currentMonthStr;
+      // eslint-disable-next-line no-useless-assignment
+      previousTodayIso = todayIso;
+    }
+  }
+
+  $: if (csvUserMinDate && csvFrom < csvUserMinDate) csvFrom = csvUserMinDate;
+
+  function userHasFlextime(userId) {
+    if (userId === $currentUser?.id) return hasFlextimeAccount($currentUser);
+    const found = users.find((u) => u.id === userId);
+    return found ? hasFlextimeAccount(found) : false;
+  }
+
+  // Cells starting with =, +, -, @, etc. are prefixed with a leading single-quote so
+  // spreadsheets treat them as text (CSV formula-injection guard).
+  function csvSafe(cellValue) {
+    if (cellValue && /^[=+\-@\t\r]/.test(cellValue)) return "'" + cellValue;
+    return cellValue;
+  }
+
+  function csvEncode(fields) {
+    return fields
+      .map((fieldValue) => {
+        const s = fieldValue == null ? "" : String(fieldValue);
+        return s.includes(",") ||
+          s.includes('"') ||
+          s.includes("\n") ||
+          s.includes("\r")
+          ? '"' + s.replace(/"/g, '""') + '"'
+          : s;
+      })
+      .join(",");
+  }
+
+  function downloadBlob(blob, fileName) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  async function fetchExportData() {
+    const exportUserHasFlextime = userHasFlextime(csvUserId);
+    return Promise.all([
+      getRangeReport({ userId: csvUserId, from: csvFrom, to: csvTo }),
+      exportUserHasFlextime
+        ? getFlextimeReport({
+            userId: csvUserId,
+            from: csvFrom,
+            to: csvTo,
+          }).catch(() => [])
+        : Promise.resolve([]),
+    ]);
+  }
+
+  function flextimeBounds(flextimeData) {
+    if (!flextimeData || flextimeData.length === 0) {
+      return { opening: null, closing: null };
+    }
+    return {
+      opening: flextimeData[0].cumulative_min - flextimeData[0].diff_min,
+      closing: flextimeData[flextimeData.length - 1].cumulative_min,
+    };
+  }
+
+  function validateRange() {
+    csvError = "";
+    if (!csvFrom || !csvTo) {
+      csvError = $t("Invalid date.");
+      return false;
+    }
+    if (csvFrom > csvTo) {
+      csvError = $t("From cannot be after To.");
+      return false;
+    }
+    return true;
+  }
+
+  async function exportCsv() {
+    if (exportInProgress) return;
+    if (!validateRange()) return;
+    exportInProgress = true;
+    try {
+      const [report, flextimeData] = await fetchExportData();
+      const { opening, closing } = flextimeBounds(flextimeData);
+      const header = csvEncode([
+        $t("Date"),
+        $t("Weekday"),
+        $t("Start"),
+        $t("End"),
+        $t("Category"),
+        $t("Duration"),
+        $t("Status"),
+        $t("Comment"),
+        $t("Absence"),
+        $t("Holiday"),
+      ]);
+      const rows = [header];
+      for (const day of report.days) {
+        const weekday = $t(day.weekday);
+        const absence = day.absence ? absenceKindLabel(day.absence) : "";
+        const holiday = day.holiday || "";
+        if (!day.entries || day.entries.length === 0) {
+          rows.push(
+            csvEncode([
+              day.date,
+              weekday,
+              "",
+              "",
+              "",
+              "0:00",
+              "",
+              "",
+              csvSafe(absence),
+              csvSafe(holiday),
+            ]),
+          );
+        } else {
+          for (const entry of day.entries) {
+            rows.push(
+              csvEncode([
+                day.date,
+                weekday,
+                entry.start_time,
+                entry.end_time,
+                csvSafe($t(entry.category)),
+                minToHM(entry.minutes || 0),
+                statusLabel(entry.status),
+                csvSafe(entry.comment || ""),
+                csvSafe(absence),
+                csvSafe(holiday),
+              ]),
+            );
+          }
+        }
+      }
+      const totalMin = report.days.reduce(
+        (sum, d) =>
+          sum +
+          (d.entries || []).reduce(
+            (entrySum, e) =>
+              entrySum +
+              (e.status === "approved" && e.counts_as_work !== false
+                ? e.minutes || 0
+                : 0),
+            0,
+          ),
+        0,
+      );
+      rows.push(
+        csvEncode([
+          "",
+          $t("Total"),
+          "",
+          "",
+          "",
+          minToHM(totalMin),
+          "",
+          "",
+          "",
+          "",
+        ]),
+      );
+      if (opening !== null) {
+        rows.push(
+          csvEncode([
+            "",
+            $t("Flextime opening balance"),
+            "",
+            "",
+            "",
+            (opening >= 0 ? "+" : "") + minToHM(opening),
+            "",
+            "",
+            "",
+            "",
+          ]),
+        );
+      }
+      if (closing !== null) {
+        rows.push(
+          csvEncode([
+            "",
+            $t("Flextime closing balance"),
+            "",
+            "",
+            "",
+            (closing >= 0 ? "+" : "") + minToHM(closing),
+            "",
+            "",
+            "",
+            "",
+          ]),
+        );
+      }
+      const blob = new Blob(["\uFEFF" + rows.join("\r\n")], {
+        type: "text/csv;charset=utf-8",
+      });
+      downloadBlob(blob, `stundennachweis-${csvUserId}-${csvFrom}_${csvTo}.csv`);
+      toast($t("CSV download started."), "ok");
+    } catch (e) {
+      csvError = $t(e?.message || "Export failed.");
+    } finally {
+      exportInProgress = false;
+    }
+  }
+
+  async function exportPdf() {
+    if (exportInProgress) return;
+    if (!validateRange()) return;
+    exportInProgress = true;
+    try {
+      const [report, flextimeData] = await fetchExportData();
+      const selectedUser = users.find((u) => u.id === csvUserId);
+      const fullName = selectedUser
+        ? `${selectedUser.first_name} ${selectedUser.last_name}`
+        : String(csvUserId);
+      const blob = buildReportPdf({
+        report,
+        flextimeData,
+        userName: fullName,
+        from: csvFrom,
+        to: csvTo,
+        t: $t,
+      });
+      downloadBlob(
+        blob,
+        `stundennachweis-${fullName.replace(/\s+/g, "-")}-${csvFrom}_${csvTo}.pdf`,
+      );
+      toast($t("PDF download started."), "ok");
+    } catch (e) {
+      csvError = $t(e?.message || "Export failed.");
+    } finally {
+      exportInProgress = false;
+    }
+  }
+</script>
+
+<div class="zf-card" style="padding:20px">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+    <span style="font-size:14px;font-weight:400">{$t("Export timesheet")}</span>
+    <button
+      class="zf-btn-icon-sm zf-btn-ghost"
+      title={$t("help_csv_export")}
+      on:click={() => toggleHelp("csv")}
+      style="color:var(--text-tertiary);font-size:14px;cursor:help"
+    >
+      <Icon name="Info" size={14} />
+    </button>
+  </div>
+  {#if activeHelp === "csv"}
+    <div
+      style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)"
+    >
+      {$t("help_csv_export")}
+    </div>
+  {/if}
+
+  {#if !isSelfOnlyReportsView}
+    <div style="margin-bottom:12px">
+      <label class="zf-label" for="csv-user-id">{$t("Employee")}</label>
+      <select id="csv-user-id" class="zf-select" bind:value={csvUserId}>
+        {#each users as u (u.id)}
+          <option value={u.id}>{u.first_name} {u.last_name}</option>
+        {/each}
+      </select>
+    </div>
+  {/if}
+  <div class="field-row" style="margin-bottom:12px">
+    <div>
+      <label class="zf-label" for="csv-from">{$t("From")}</label>
+      <DatePicker id="csv-from" bind:value={csvFrom} min={csvUserMinDate} max={csvTo} />
+    </div>
+    <div>
+      <label class="zf-label" for="csv-to">{$t("To")}</label>
+      <DatePicker
+        id="csv-to"
+        bind:value={csvTo}
+        min={csvFrom}
+        max={todayIso}
+      />
+    </div>
+  </div>
+
+  <div class="error-text">{csvError}</div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <button
+      class="zf-btn zf-btn-primary"
+      on:click={exportCsv}
+      disabled={exportInProgress}
+    >
+      <Icon name="Download" size={14} />{$t("Export CSV")}
+    </button>
+    <button
+      class="zf-btn zf-btn-primary"
+      on:click={exportPdf}
+      disabled={exportInProgress}
+    >
+      <Icon name="FileText" size={14} />{$t("Export PDF")}
+    </button>
+  </div>
+</div>

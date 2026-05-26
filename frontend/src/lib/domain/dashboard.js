@@ -2,10 +2,12 @@ import {
   addDays,
   dateKey,
   durMin,
+  fmtDateShort,
   isoDate,
   monday,
   parseDate,
 } from "../../format.js";
+import { absenceKindLabel } from "../../i18n.js";
 import { sortByIsoDateAndStartTime } from "./dates.js";
 import { entryCountsAsWork } from "./time.js";
 import { userNameFromRows } from "./users.js";
@@ -107,6 +109,57 @@ export function buildPendingWeeks(submittedEntries, userRows, categories = []) {
   });
 
   return sortedWeekGroups;
+}
+
+export function absenceDiffRows(absence, translate) {
+  if (absence.review_type !== "change") return [];
+  const rows = [];
+  if (absence.previous_kind && absence.previous_kind !== absence.kind) {
+    rows.push({
+      field: translate("Type"),
+      before: absenceKindLabel(absence.previous_kind),
+      after: absenceKindLabel(absence.kind),
+    });
+  }
+  if (
+    absence.previous_start_date &&
+    absence.previous_start_date !== absence.start_date
+  ) {
+    rows.push({
+      field: translate("From"),
+      before: fmtDateShort(absence.previous_start_date),
+      after: fmtDateShort(absence.start_date),
+    });
+  }
+  if (
+    absence.previous_end_date &&
+    absence.previous_end_date !== absence.end_date
+  ) {
+    rows.push({
+      field: translate("To"),
+      before: fmtDateShort(absence.previous_end_date),
+      after: fmtDateShort(absence.end_date),
+    });
+  }
+  if ((absence.previous_comment || "") !== (absence.comment || "")) {
+    rows.push({
+      field: translate("Comment"),
+      before: absence.previous_comment || translate("Empty"),
+      after: absence.comment || translate("Empty"),
+    });
+  }
+  return rows;
+}
+
+export function absenceRequestTypeLabelKey(absence) {
+  if (
+    absence.status === "cancellation_pending" ||
+    absence.review_type === "cancellation"
+  ) {
+    return "Cancellation";
+  }
+  if (absence.review_type === "change") return "Change";
+  return "Approval";
 }
 
 export function notificationTarget(notification, now = Date.now()) {

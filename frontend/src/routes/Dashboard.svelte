@@ -1,24 +1,18 @@
 <script>
   import { tick } from "svelte";
-  import { fly } from "svelte/transition";
   import { categories, currentUser, path, settings, toast } from "../stores.js";
-  import { t, absenceKindLabel, formatHours } from "../i18n.js";
+  import { t, formatHours, absenceKindLabel } from "../i18n.js";
   import {
-    fmtDate,
     fmtDateShort,
-    fmtDateTime,
     fmtWeekLabel,
     isoDate,
     appTodayDate,
     addDays,
-    parseDate,
-    monday,
   } from "../format.js";
   import Icon from "../Icons.svelte";
-  import Dialog from "../Dialog.svelte";
-  import { confirmDialog } from "../confirm.js";
   import FlextimeChart from "../FlextimeChart.svelte";
   import DatePicker from "../DatePicker.svelte";
+  import { confirmDialog } from "../confirm.js";
   import { isAssistantUser } from "../rolePolicy.js";
   import {
     approveAbsenceById,
@@ -28,12 +22,12 @@
     getFlextime,
     getMonthSubmissionReport,
     getOvertimeSummary,
-    getTeamAbsences,
     rejectAbsenceById,
     rejectReopen as rejectReopenRequest,
     rejectWeek as rejectWeekEntries,
   } from "../lib/api/dashboardApi.js";
   import {
+    absenceRequestTypeLabelKey,
     allMonthsToCheck,
     buildPendingWeeks,
     buildSubmissionChecks,
@@ -43,6 +37,10 @@
     userInitialsFromRows,
     userNameFromRows,
   } from "../lib/domain/users.js";
+  import AbsenceReviewDialog from "../dialogs/AbsenceReviewDialog.svelte";
+  import ReopenReviewDialog from "../dialogs/ReopenReviewDialog.svelte";
+  import WeekReviewDialog from "../dialogs/WeekReviewDialog.svelte";
+  import AbsenceSlider from "./dashboard/AbsenceSlider.svelte";
 
   // ── Approval workflow state (team leads and admins only) ──────────────────────
   let pendingEntries = [];
@@ -52,12 +50,6 @@
   let users = [];
   let absenceDetail = null;
   let requestDetail = null;
-
-  // Absence slider: browse approved absences week by week (leads/admins only).
-  let absenceSliderWeek = isoDate(monday(appTodayDate()));
-  let absenceSliderTeamData = [];
-  let absenceSliderIsLeadView = false;
-  let absenceSliderDirection = 1;
 
   // Week details dialog (for inspecting a single pending timesheet).
   let selectedWeek = null;
@@ -70,8 +62,6 @@
   let lastFocusSignature = "";
 
   // ── Reference date: derived from configured app timezone ─────────────────────
-  // Initialize with a concrete value so imperative startup code (loadPastMonthSubmissionStatus,
-  // clampFromToUserStart) can run before the reactive declaration is first evaluated.
   let today = appTodayDate();
   $: today = appTodayDate($settings?.timezone);
 
@@ -129,11 +119,6 @@
     }
   }
 
-  // Convert a minute count into a formatted hours string (e.g. "1:30 h").
-  function hoursFromMinutes(minutes) {
-    return formatHours((minutes || 0) / 60);
-  }
-
   async function loadOvertimeSummary() {
     if (isAssistantCurrentUser) {
       overtimeRows = [];
@@ -183,7 +168,7 @@
     loadChart();
   }
 
-  // Loads all data that is only visible to team leads and admins (can_approve).
+  // Loads data only visible to team leads and admins (can_approve).
   async function load() {
     const canApprove = !!$currentUser?.permissions?.can_approve;
     if (!canApprove) {
@@ -217,7 +202,6 @@
   loadChart();
   loadOvertimeSummary();
   loadPastMonthSubmissionStatus();
-  loadAbsenceSliderTeamData(absenceSliderWeek);
 
   // ── Reactive derivations: overtime balance ────────────────────────────────────
 
@@ -232,22 +216,15 @@
 
   // ── Reactive derivations: submission compliance ───────────────────────────────
 
-  // True when every month from the user's start to now has weeks_all_submitted.
-  // Empty checks (no start date, or start date in the future) count as "all done".
-  // The backend excludes the current in-progress week from this flag.
   $: allWeeksSubmitted =
     monthSubmissionChecks.length === 0 ||
     monthSubmissionChecks.every((check) => check.submitted);
 
-  // True when every submitted week is also fully approved (no pending approvals).
   $: allWeeksApproved =
     allWeeksSubmitted &&
     (monthSubmissionChecks.length === 0 ||
       monthSubmissionChecks.every((check) => check.approved));
 
-  // True when the calendar week containing today is in draft, partial, or
-  // rejected state — i.e., the Zeiterfassung view would show something other
-  // than "Eingereicht"/"Genehmigt". Drives the sub-line on the submission tile.
   $: currentWeekOpen = currentWeekIsOpen(monthSubmissionChecks);
 
   // ── Reactive: keep selectedWeek in sync after a refresh ──────────────────────
@@ -256,20 +233,6 @@
     const next = pendingWeeks.find((week) => week.key === selectedWeek.key);
     if (!next) selectedWeek = null;
     else if (next !== selectedWeek) selectedWeek = next;
-  }
-
-  // ── Utility helpers ───────────────────────────────────────────────────────────
-
-  function userName(userId, userRows) {
-    return userNameFromRows(userId, userRows);
-  }
-
-  function userInitials(userId, userRows) {
-    return userInitialsFromRows(userId, userRows) || "?";
-  }
-
-  function weekHours(week) {
-    return formatHours(week.total_min / 60);
   }
 
   // ── Focus/scroll-to-section logic ────────────────────────────────────────────
@@ -281,55 +244,9 @@
     return null;
   }
 
-
-  function absenceRequestTypeLabel(absence) {
-    if (absence.status === "cancellation_pending" || absence.review_type === "cancellation") {
-      return $t("Cancellation");
-    }
-    if (absence.review_type === "change") {
-      return $t("Change");
-    }
-    return $t("Approval");
-  }
-
-  function absenceDiffRows(absence) {
-    if (absence.review_type !== "change") return [];
-    const rows = [];
-    if (absence.previous_kind && absence.previous_kind !== absence.kind) {
-      rows.push({
-        field: $t("Type"),
-        before: absenceKindLabel(absence.previous_kind),
-        after: absenceKindLabel(absence.kind),
-      });
-    }
-    if (absence.previous_start_date && absence.previous_start_date !== absence.start_date) {
-      rows.push({
-        field: $t("From"),
-        before: fmtDateShort(absence.previous_start_date),
-        after: fmtDateShort(absence.start_date),
-      });
-    }
-    if (absence.previous_end_date && absence.previous_end_date !== absence.end_date) {
-      rows.push({
-        field: $t("To"),
-        before: fmtDateShort(absence.previous_end_date),
-        after: fmtDateShort(absence.end_date),
-      });
-    }
-    if ((absence.previous_comment || "") !== (absence.comment || "")) {
-      rows.push({
-        field: $t("Comment"),
-        before: absence.previous_comment || $t("Empty"),
-        after: absence.comment || $t("Empty"),
-      });
-    }
-    return rows;
-  }
-
   function openReopenDetail(item) {
     requestDetail = { item };
   }
-
 
   async function revealFocusSection(focus) {
     await tick();
@@ -340,42 +257,6 @@
     setTimeout(() => {
       if (focusedSection === focus) focusedSection = "";
     }, 1400);
-  }
-
-  // ── Absence slider (team view, leads/admins only) ─────────────────────────────
-
-  async function loadAbsenceSliderTeamData(weekStartDate) {
-    absenceSliderIsLeadView = $currentUser?.permissions?.can_approve || false;
-    if (!absenceSliderIsLeadView) return;
-    try {
-      const weekEnd = isoDate(addDays(parseDate(weekStartDate), 6));
-      const params = new URLSearchParams({
-        from: weekStartDate,
-        to: weekEnd,
-        status: "approved",
-      });
-      absenceSliderTeamData = await getTeamAbsences(params);
-    } catch {
-      absenceSliderTeamData = [];
-    }
-  }
-
-  function absenceSliderPrevWeek() {
-    absenceSliderDirection = -1;
-    absenceSliderWeek = isoDate(addDays(parseDate(absenceSliderWeek), -7));
-    loadAbsenceSliderTeamData(absenceSliderWeek);
-  }
-
-  function absenceSliderNextWeek() {
-    absenceSliderDirection = 1;
-    absenceSliderWeek = isoDate(addDays(parseDate(absenceSliderWeek), 7));
-    loadAbsenceSliderTeamData(absenceSliderWeek);
-  }
-
-  function absenceSliderToToday() {
-    absenceSliderDirection = 0;
-    absenceSliderWeek = isoDate(monday(today));
-    loadAbsenceSliderTeamData(absenceSliderWeek);
   }
 
   // ── URL-driven section focus ──────────────────────────────────────────────────
@@ -389,7 +270,6 @@
   $: focusNonce = dashboardQuery.get("n") || "";
 
   $: {
-    // A nonce ensures the scroll fires even when navigating to the same section twice.
     const signature = focusTarget ? `${focusTarget}:${focusNonce}` : "";
     if (signature && signature !== lastFocusSignature) {
       // eslint-disable-next-line no-useless-assignment
@@ -403,7 +283,6 @@
   function openWeekDetails(week) {
     selectedWeek = week;
   }
-
 
   async function approveWeek(week) {
     if (!week?.entries?.length || weekActionBusy) return;
@@ -473,7 +352,6 @@
     absenceDetail = absence;
   }
 
-
   async function approveAbsence(absence) {
     try {
       await approveAbsenceById(absence);
@@ -486,34 +364,20 @@
 
   async function rejectAbsence(absence) {
     const isCancellation = absence.status === "cancellation_pending";
-    if (isCancellation) {
-      const confirmed = await confirmDialog(
-        $t("Reject cancellation?"),
-        $t("Reject this cancellation request? The absence will remain approved."),
-        { danger: true, confirm: $t("Reject") },
-      );
-      if (!confirmed) return;
-      try {
-        await rejectAbsenceById(absence);
-        toast($t("Rejected."), "ok");
-        load();
-      } catch (error) {
-        toast($t(error?.message || "Error"), "error");
-      }
-    } else {
-      const reason = await confirmDialog(
-        $t("Reject?"),
-        $t("Reject this request?"),
-        { danger: true, confirm: $t("Reject"), reason: true },
-      );
-      if (!reason) return;
-      try {
-        await rejectAbsenceById(absence, reason);
-        toast($t("Rejected."), "ok");
-        load();
-      } catch (error) {
-        toast($t(error?.message || "Error"), "error");
-      }
+    const result = await confirmDialog(
+      isCancellation ? $t("Reject cancellation?") : $t("Reject?"),
+      isCancellation
+        ? $t("Reject this cancellation request? The absence will remain approved.")
+        : $t("Reject this request?"),
+      { danger: true, confirm: $t("Reject"), reason: !isCancellation },
+    );
+    if (!result) return;
+    try {
+      await rejectAbsenceById(absence, isCancellation ? undefined : result);
+      toast($t("Rejected."), "ok");
+      load();
+    } catch (error) {
+      toast($t(error?.message || "Error"), "error");
     }
   }
 
@@ -592,7 +456,6 @@
     <div class="stat-cards">
 
       {#if !isAssistantCurrentUser}
-        <!-- Cumulative overtime balance including today -->
         <div class="zf-card stat-card">
           <div class="stat-card-label">{$t("Overtime overview")}</div>
           {#if overtimeLoading}
@@ -604,13 +467,13 @@
                 ? 'var(--danger-text)'
                 : 'var(--success-text)'}"
             >
-              {hoursFromMinutes(submittedOvertimeBalanceMin)}
+              {formatHours((submittedOvertimeBalanceMin || 0) / 60)}
             </div>
             <div class="stat-card-sub">
               {#if submittedOvertimeBalanceMin !== overtimeBalanceMin}
-                {$t("Approved: {value}", { value: hoursFromMinutes(overtimeBalanceMin) })}
+                {$t("Approved: {value}", { value: formatHours((overtimeBalanceMin || 0) / 60) })}
               {:else}
-                {$t("This month: {value}", { value: hoursFromMinutes(currentMonthDiffMin) })}
+                {$t("This month: {value}", { value: formatHours((currentMonthDiffMin || 0) / 60) })}
               {/if}
             </div>
           {/if}
@@ -622,7 +485,6 @@
         </div>
       {/if}
 
-      <!-- Whether all weeks since the user's start date (up to last week) are submitted -->
       <div class="zf-card stat-card">
         <div class="stat-card-label">{$t("Submissions")}</div>
         {#if monthSubmissionLoading}
@@ -700,7 +562,6 @@
       class="dashboard-approval-grid"
       style="display:grid;grid-template-columns:1fr 1fr;gap:16px"
     >
-      <!-- Timesheet approvals -->
       <div
         class="zf-card"
         class:dashboard-focus={focusedSection === "timesheets"}
@@ -737,15 +598,15 @@
             title={$t("Show")}
           >
             <div class="avatar" style="width:30px;height:30px;font-size:11px">
-              {userInitials(week.user_id, users)}
+              {userInitialsFromRows(week.user_id, users) || "?"}
             </div>
             <div style="flex:1;min-width:0">
               <div style="font-size:13px;font-weight:500;display:flex;align-items:center;gap:6px">
-                {userName(week.user_id, users)}
+                {userNameFromRows(week.user_id, users)}
                 <span class="zf-chip zf-chip-submitted" style="font-size:10px">{$t("Approval")}</span>
               </div>
               <div class="tab-num" style="font-size:11.5px;color:var(--text-tertiary)">
-                {fmtWeekLabel(week.week_start)} · {weekHours(week)}
+                {fmtWeekLabel(week.week_start)} · {formatHours(week.total_min / 60)}
               </div>
             </div>
             <div style="display:flex;gap:4px">
@@ -783,11 +644,11 @@
             title={$t("Show details")}
           >
             <div class="avatar" style="width:30px;height:30px;font-size:11px">
-              {userInitials(reopen.user_id, users)}
+              {userInitialsFromRows(reopen.user_id, users) || "?"}
             </div>
             <div style="flex:1;min-width:0">
               <div style="font-size:13px;font-weight:500;display:flex;align-items:center;gap:6px">
-                {userName(reopen.user_id, users)}
+                {userNameFromRows(reopen.user_id, users)}
                 <span class="zf-chip zf-chip-pending" style="font-size:10px">{$t("Edit request")}</span>
               </div>
               <div class="tab-num" style="font-size:11.5px;color:var(--text-tertiary)">
@@ -829,7 +690,6 @@
         {/if}
       </div>
 
-      <!-- Absence-request approvals -->
       <div
         class="zf-card"
         class:dashboard-focus={focusedSection === "absences"}
@@ -851,7 +711,7 @@
             style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px"
           >
             <div class="avatar" style="width:30px;height:30px;font-size:11px">
-              {userInitials(absence.user_id, users)}
+              {userInitialsFromRows(absence.user_id, users) || "?"}
             </div>
             <div
               style="flex:1;min-width:0;cursor:pointer"
@@ -864,12 +724,12 @@
               title={$t("Show details")}
             >
               <div style="font-size:13px;font-weight:500;display:flex;align-items:center;gap:6px">
-                {userName(absence.user_id, users)}
+                {userNameFromRows(absence.user_id, users)}
                 <span
                   class="zf-chip {absence.status === 'cancellation_pending' ? 'zf-chip-cancellation_pending' : 'zf-chip-warning'}"
                   style="font-size:10px"
                 >
-                  {absenceRequestTypeLabel(absence)}
+                  {$t(absenceRequestTypeLabelKey(absence))}
                 </span>
               </div>
               <div class="tab-num" style="font-size:11.5px;color:var(--text-tertiary)">
@@ -906,71 +766,12 @@
       </div>
     </div>
 
-    <!-- "Who is absent" team calendar widget -->
-    <div class="zf-card" style="margin-top:16px;overflow:hidden">
-      <div class="card-header">
-        <Icon name="Users" size={15} sw={1.5} />
-        <span class="card-header-title">{$t("Who is absent")}</span>
-        <div class="absence-date-controls">
-          <div class="absence-week-picker">
-            <button
-              class="zf-btn zf-btn-icon-sm zf-btn-ghost"
-              on:click={absenceSliderPrevWeek}
-              aria-label={$t("Previous week")}
-            >
-              <Icon name="ChevLeft" size={16} />
-            </button>
-            <button
-              class="zf-btn zf-btn-ghost absence-week-range"
-              on:click={absenceSliderToToday}
-              title={$t("Today")}
-            >
-              {fmtDateShort(absenceSliderWeek)} -
-              {fmtDateShort(isoDate(addDays(parseDate(absenceSliderWeek), 6)))}
-            </button>
-            <button
-              class="zf-btn zf-btn-icon-sm zf-btn-ghost"
-              on:click={absenceSliderNextWeek}
-              aria-label={$t("Next week")}
-            >
-              <Icon name="ChevRight" size={16} />
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {#key absenceSliderWeek}
-        <div class="dropdown-slider" in:fly={{ x: absenceSliderDirection * 80, duration: 200 }}>
-          {#if absenceSliderTeamData.length === 0}
-            <div style="padding:12px;color:var(--text-tertiary);font-size:13px">
-              {$t("No absences this week.")}
-            </div>
-          {:else}
-              {#each absenceSliderTeamData as absence (absence.user_id)}
-                {@const absentUser = users.find((u) => u.id === absence.user_id)}
-                <div class="dropdown-slider-item">
-                  <div>
-                    <div style="font-weight:500;font-size:13px">
-                      {absentUser
-                        ? `${absentUser.first_name} ${absentUser.last_name}`
-                        : `#${absence.user_id}`}
-                    </div>
-                    <div style="font-size:12px;color:var(--text-tertiary)">
-                      {absenceKindLabel(absence.kind)} · {fmtDateShort(absence.start_date)}{#if absence.start_date !== absence.end_date} - {fmtDateShort(absence.end_date)}{/if}
-                    </div>
-                  </div>
-                </div>
-              {/each}
-          {/if}
-        </div>
-      {/key}
-    </div>
+    <AbsenceSlider {users} />
 
   {/if}
 
   <!-- ════════════════════════════════════════════════════════════════════════
-       FLEXTIME CHART (all users) – placed after approval sections so it
-       doesn't push urgent approval work below the fold for leads/admins.
+       FLEXTIME CHART (all users)
        ════════════════════════════════════════════════════════════════════════ -->
   {#if !isAssistantCurrentUser}
     <div class="zf-card" style="padding:16px 20px;margin-top:16px">
@@ -1041,195 +842,47 @@
 
 </div>
 
-<!-- ── Absence detail dialog ─────────────────────────────────────────────────── -->
 {#if absenceDetail}
-  <Dialog title={$t("Absence Request Details")} onClose={() => (absenceDetail = null)}>
-    <div style="display:flex;flex-direction:column;gap:10px">
-        <div>
-          <div class="zf-label">{$t("Employee")}</div>
-          <div style="font-weight:500">{userName(absenceDetail.user_id, users)}</div>
-        </div>
-        <div>
-          <div class="zf-label">{$t("Absence Type")}</div>
-          <div>{absenceKindLabel(absenceDetail.kind)}</div>
-        </div>
-        <div>
-          <div class="zf-label">{$t("Request Type")}</div>
-          <div>
-            <span
-              class="zf-chip {absenceDetail.status === 'cancellation_pending' ? 'zf-chip-cancellation_pending' : 'zf-chip-warning'}"
-            >
-              {absenceRequestTypeLabel(absenceDetail)}
-            </span>
-          </div>
-        </div>
-        <div class="field-row">
-          <div>
-            <div class="zf-label">{$t("From")}</div>
-            <div class="tab-num">{fmtDate(absenceDetail.start_date)}</div>
-          </div>
-          <div>
-            <div class="zf-label">{$t("To")}</div>
-            <div class="tab-num">{fmtDate(absenceDetail.end_date)}</div>
-          </div>
-        </div>
-        {#if absenceDetail.comment}
-          <div>
-            <div class="zf-label">{$t("Comment")}</div>
-            <div style="white-space:pre-wrap;font-size:13px">{absenceDetail.comment}</div>
-          </div>
-        {/if}
-        <div>
-          <div class="zf-label">{$t("Requested at")}</div>
-          <div class="tab-num" style="font-size:12px">
-            {fmtDateTime(absenceDetail.created_at)}
-          </div>
-        </div>
-        {#if absenceDetail.review_type === "change"}
-          {@const diffRows = absenceDiffRows(absenceDetail)}
-          {#if diffRows.length}
-            <div>
-              <div class="zf-label">{$t("Changes")}</div>
-              <div class="change-diff-list">
-                {#each diffRows as row (row.field)}
-                  <div class="change-diff-row">
-                    <div class="change-diff-field">{row.field}</div>
-                    <div class="change-diff-before">{row.before}</div>
-                    <div class="change-diff-arrow">→</div>
-                    <div class="change-diff-after">{row.after}</div>
-                  </div>
-                {/each}
-              </div>
-            </div>
-          {:else}
-            <div style="font-size:12px;color:var(--text-tertiary)">
-              {$t("Diff unavailable for this request.")}
-            </div>
-          {/if}
-        {/if}
-    </div>
-    <svelte:fragment slot="footer">
-      <button class="zf-btn" on:click={() => (absenceDetail = null)}>{$t("Close")}</button>
-      <span style="flex:1"></span>
-      <button
-        class="zf-btn zf-btn-danger"
-        on:click={() => {
-          const absence = absenceDetail;
-          absenceDetail = null;
-          rejectAbsence(absence);
-        }}
-      >
-        <Icon name="X" size={14} />{$t("Reject")}
-      </button>
-      <button
-        class="zf-btn zf-btn-primary"
-        on:click={() => {
-          const absence = absenceDetail;
-          absenceDetail = null;
-          approveAbsence(absence);
-        }}
-      >
-        <Icon name="Check" size={14} />{$t("Approve")}
-      </button>
-    </svelte:fragment>
-  </Dialog>
+  <AbsenceReviewDialog
+    absence={absenceDetail}
+    {users}
+    onClose={() => (absenceDetail = null)}
+    onApprove={(absence) => {
+      absenceDetail = null;
+      approveAbsence(absence);
+    }}
+    onReject={(absence) => {
+      absenceDetail = null;
+      rejectAbsence(absence);
+    }}
+  />
 {/if}
 
-<!-- ── Reopen-request detail dialog ─────────────────────────────────────────── -->
 {#if requestDetail}
-  <Dialog title={$t("Edit Request Details")} onClose={() => (requestDetail = null)}>
-    <div style="display:flex;flex-direction:column;gap:10px">
-      <div>
-        <div class="zf-label">{$t("Employee")}</div>
-        <div style="font-weight:500">{userName(requestDetail.item.user_id, users)}</div>
-      </div>
-      <div>
-        <div class="zf-label">{$t("Type")}</div>
-        <div><span class="zf-chip zf-chip-pending">{$t("Edit request")}</span></div>
-      </div>
-      <div>
-        <div class="zf-label">{$t("Week")}</div>
-        <div class="tab-num">
-          {fmtWeekLabel(requestDetail.item.week_start)}
-        </div>
-      </div>
-      <div>
-        <div class="zf-label">{$t("Requested at")}</div>
-        <div class="tab-num" style="font-size:12px">{fmtDateTime(requestDetail.item.created_at)}</div>
-      </div>
-      {#if requestDetail.item.reason}
-        <div>
-          <div class="zf-label">{$t("Reason")}</div>
-          <div style="font-size:13px;white-space:pre-wrap;word-break:break-word">{requestDetail.item.reason}</div>
-        </div>
-      {/if}
-    </div>
-    <svelte:fragment slot="footer">
-      <button class="zf-btn" on:click={() => (requestDetail = null)}>{$t("Close")}</button>
-      <span style="flex:1"></span>
-      <button
-        class="zf-btn zf-btn-danger"
-        on:click={() => {
-          const detail = requestDetail;
-          requestDetail = null;
-          rejectReopen(detail.item.id);
-        }}
-      >
-        <Icon name="X" size={14} />{$t("Reject")}
-      </button>
-      <button
-        class="zf-btn zf-btn-primary"
-        on:click={() => {
-          const detail = requestDetail;
-          requestDetail = null;
-          approveReopen(detail.item.id);
-        }}
-      >
-        <Icon name="Check" size={14} />{$t("Approve")}
-      </button>
-    </svelte:fragment>
-  </Dialog>
+  <ReopenReviewDialog
+    item={requestDetail.item}
+    {users}
+    onClose={() => (requestDetail = null)}
+    onApprove={(id) => {
+      requestDetail = null;
+      approveReopen(id);
+    }}
+    onReject={(id) => {
+      requestDetail = null;
+      rejectReopen(id);
+    }}
+  />
 {/if}
 
-<!-- ── Week detail dialog ────────────────────────────────────────────────────── -->
 {#if selectedWeek}
-  <Dialog
-    title={$t("Week Approvals")}
+  <WeekReviewDialog
+    week={selectedWeek}
+    {users}
+    busy={weekActionBusy}
     onClose={() => (selectedWeek = null)}
-  >
-    <svelte:fragment slot="title">
-      <span style="flex:1">
-        {$t("Week Approvals")} · {userName(selectedWeek.user_id, users)}
-      </span>
-    </svelte:fragment>
-    <div class="tab-num" style="font-size:12px;color:var(--text-secondary)">
-      {fmtWeekLabel(selectedWeek.week_start)}
-    </div>
-
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <span class="zf-chip zf-chip-approved">{weekHours(selectedWeek)}</span>
-    </div>
-    <svelte:fragment slot="footer">
-      <button class="zf-btn" on:click={() => (selectedWeek = null)} disabled={weekActionBusy}>
-        {$t("Close")}
-      </button>
-      <span style="flex:1"></span>
-      <button
-        class="zf-btn zf-btn-danger"
-        on:click={() => rejectWeek(selectedWeek)}
-        disabled={weekActionBusy}
-      >
-        <Icon name="X" size={14} />{$t("Reject")}
-      </button>
-      <button
-        class="zf-btn zf-btn-primary"
-        on:click={() => approveWeek(selectedWeek)}
-        disabled={weekActionBusy}
-      >
-        <Icon name="Check" size={14} />{$t("Approve")}
-      </button>
-    </svelte:fragment>
-  </Dialog>
+    onApprove={approveWeek}
+    onReject={rejectWeek}
+  />
 {/if}
 
 <style>
@@ -1246,70 +899,7 @@
     background: var(--bg-subtle);
   }
 
-  /* Highlight ring for scroll-to-section navigation. */
   .dashboard-focus {
     box-shadow: 0 0 0 2px var(--accent);
-  }
-
-  .absence-date-controls {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 6px;
-  }
-
-  .absence-week-picker {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-  }
-
-  .absence-week-range {
-    color: var(--text-tertiary);
-    font-size: 12px;
-    min-width: 108px;
-    justify-content: center;
-    padding: 2px 6px;
-    height: auto;
-  }
-
-  .absence-week-range:hover {
-    color: var(--text-primary);
-  }
-  .change-diff-list {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .change-diff-row {
-    display: grid;
-    grid-template-columns: minmax(70px, auto) 1fr auto 1fr;
-    gap: 8px;
-    align-items: center;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--bg-subtle);
-    padding: 8px 10px;
-    font-size: 12px;
-  }
-
-  .change-diff-field {
-    color: var(--text-secondary);
-    font-weight: 500;
-  }
-
-  .change-diff-before {
-    color: var(--text-tertiary);
-    text-decoration: line-through;
-  }
-
-  .change-diff-arrow {
-    color: var(--text-tertiary);
-  }
-
-  .change-diff-after {
-    color: var(--text-primary);
-    font-weight: 500;
   }
 </style>
