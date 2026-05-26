@@ -571,4 +571,243 @@ describe("Reports", () => {
     const calledPaths = api.mock.calls.map(([path]) => path);
     expect(calledPaths.some((path) => path.startsWith("/reports/flextime?"))).toBe(false);
   }, 60000);
+
+  // Bug: pure-admin (tracks_time=false) gets "Kein Zugriff" when clicking
+  // AbsenceReport "Show" because loadOwnAbsencesForRange() is always called
+  // in the team-view branch, hitting /absences which is blocked for pure-admin.
+  it("pure-admin absence report does not call own /absences endpoint and shows team absences", async () => {
+    currentUser.set({
+      id: 99,
+      role: "admin",
+      tracks_time: false,
+      first_name: "Pure",
+      last_name: "Admin",
+      weekly_hours: 0,
+      start_date: "2024-01-01",
+      permissions: {
+        can_view_team_reports: true,
+        can_approve: true,
+      },
+    });
+    mockState.users = [
+      {
+        id: 1,
+        first_name: "Alice",
+        last_name: "Employee",
+        workdays_per_week: 5,
+        tracks_time: true,
+        role: "employee",
+      },
+    ];
+    mockState.teamAbsences = [
+      {
+        id: 101,
+        user_id: 1,
+        kind: "vacation",
+        start_date: "2026-05-04",
+        end_date: "2026-05-04",
+        status: "approved",
+      },
+    ];
+
+    component = mount(Reports, { target });
+    await settle();
+
+    const absenceFromEl = await waitForElement(target, "#absence-from", 20000);
+    const absenceCard = absenceFromEl.closest(".zf-card");
+    const runButton = Array.from(absenceCard.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Show",
+    );
+    expect(runButton).toBeTruthy();
+    runButton.click();
+
+    await new Promise((r) => setTimeout(r, 500));
+    await settle();
+
+    // Before the fix: /absences?year=... IS called (causing 403 in production).
+    // After the fix: it must NOT be called for a pure-admin.
+    const calledPaths = api.mock.calls.map(([path]) => path);
+    expect(
+      calledPaths.some((path) => path.startsWith("/absences?year=")),
+      "pure-admin must not call own /absences endpoint — it is blocked server-side",
+    ).toBe(false);
+
+    // The team absences should still be shown.
+    await waitForElement(absenceCard, "table.zf-table", 20000);
+    expect(absenceCard.textContent).toContain("Alice Employee");
+  }, 60000);
+
+  // Bug: pure-admin (tracks_time=false) clicking Show before users load must NOT
+  // fire a /reports/month call without user_id (that returns 403 in production).
+  it("EmployeeReport Show button is disabled when no user is selected (pure-admin, users not yet loaded)", async () => {
+    currentUser.set({
+      id: 99,
+      role: "admin",
+      tracks_time: false,
+      first_name: "Pure",
+      last_name: "Admin",
+      weekly_hours: 0,
+      start_date: "2024-01-01",
+      permissions: {
+        can_view_team_reports: true,
+        can_approve: true,
+      },
+    });
+    // Keep users empty so reportUserId stays null.
+    mockState.users = [];
+
+    component = mount(Reports, { target });
+    await settle();
+
+    // Show button should exist but be disabled when reportUserId == null.
+    const showButton = target.querySelector("button.zf-btn.zf-btn-primary");
+    expect(showButton).not.toBeNull();
+    expect(showButton.disabled).toBe(true);
+
+    // Clicking a disabled button must not trigger any month report API call.
+    showButton.click();
+    await settle();
+
+    const calledPaths = api.mock.calls.map(([path]) => path);
+    expect(calledPaths.some((p) => p.startsWith("/reports/month?"))).toBe(false);
+  }, 60000);
+
+  // Bug: pure-admin (tracks_time=false) can view employee month report for
+  // another user (clicking Show should load data, not do nothing).
+  it("pure-admin can load employee report for another user by clicking Show", async () => {
+    currentUser.set({
+      id: 99,
+      role: "admin",
+      tracks_time: false,
+      first_name: "Pure",
+      last_name: "Admin",
+      weekly_hours: 0,
+      start_date: "2024-01-01",
+      permissions: {
+        can_view_team_reports: true,
+        can_approve: true,
+      },
+    });
+    mockState.users = [
+      {
+        id: 1,
+        first_name: "Alice",
+        last_name: "Employee",
+        workdays_per_week: 5,
+        role: "employee",
+        start_date: "2023-01-01",
+      },
+      {
+        id: 2,
+        first_name: "Bob",
+        last_name: "Worker",
+        workdays_per_week: 5,
+        role: "employee",
+        start_date: "2023-01-01",
+      },
+    ];
+
+    component = mount(Reports, { target });
+    await settle();
+
+    // The employee select must show (since pure-admin is not in self-only view).
+    const select = await waitForElement(target, "#report-user-id", 20000);
+    expect(select).not.toBeNull();
+
+    // Click Show — Alice (id=1) is auto-selected as the first user.
+    const showButton = Array.from(target.querySelectorAll("button.zf-btn.zf-btn-primary")).find(
+      (b) => b.closest(".zf-card")?.querySelector("#report-user-id") != null,
+    ) || target.querySelector("button.zf-btn.zf-btn-primary");
+    expect(showButton).not.toBeNull();
+    showButton.click();
+
+    // Data should appear (Balance section with stats).
+    await waitForElement(target, ".stat-cards", 20000);
+    // The report-user-id select is visible for team-view (pure-admin case).
+    expect(target.textContent).toContain("Balance");
+
+    // Verify the /reports/month API was called with a user_id (Alice's id=1),
+    // not without — no user_id would mean the backend uses the admin's own ID,
+    // which is blocked and returns 403 in production.
+    const calledPaths = api.mock.calls.map(([path]) => path);
+    const monthCalls = calledPaths.filter((p) => p.startsWith("/reports/month?"));
+    expect(monthCalls.length).toBeGreaterThan(0);
+    expect(
+      monthCalls.some((p) => p.includes("user_id=1") || p.includes("user_id=2")),
+      "month report must be requested with a concrete employee user_id, not the admin's own",
+    ).toBe(true);
+  }, 60000);
+
+  // Bug: admin with tracks_time=true (re-enabled) can view reports for other
+  // employees — not just their own.
+  it("re-enabled admin (tracks_time=true) can view reports for other employees", async () => {
+    currentUser.set({
+      id: 5,
+      role: "admin",
+      tracks_time: true,
+      first_name: "Admin",
+      last_name: "User",
+      weekly_hours: 40,
+      workdays_per_week: 5,
+      start_date: "2026-05-26",
+      permissions: {
+        can_view_team_reports: true,
+        can_approve: true,
+      },
+    });
+    mockState.users = [
+      {
+        id: 5,
+        first_name: "Admin",
+        last_name: "User",
+        workdays_per_week: 5,
+        role: "admin",
+        tracks_time: true,
+        start_date: "2026-05-26",
+      },
+      {
+        id: 1,
+        first_name: "Alice",
+        last_name: "Employee",
+        workdays_per_week: 5,
+        role: "employee",
+        start_date: "2023-01-01",
+      },
+    ];
+
+    component = mount(Reports, { target });
+    await settle();
+
+    // First, show own report (admin, id=5 is default).
+    const showButton = target.querySelector("button.zf-btn.zf-btn-primary");
+    expect(showButton).not.toBeNull();
+    showButton.click();
+    await waitForElement(target, ".stat-cards", 20000);
+    expect(target.textContent).toContain("My Balance");
+
+    api.mockClear();
+
+    // Switch to Alice (id=1) and click Show.
+    const select = target.querySelector("#report-user-id");
+    expect(select).not.toBeNull();
+    select.value = "1";
+    select.dispatchEvent(new Event("change"));
+    await settle();
+    showButton.click();
+    await settle();
+    await waitForElement(target, ".stat-cards", 20000);
+    expect(target.textContent).toContain("Balance");
+    expect(target.textContent).not.toContain("My Balance");
+
+    // Crucially: the month report must be fetched with user_id=1 (Alice), not
+    // user_id=5 (admin). Without this, the "Show" would display the admin's own
+    // data (or nothing, if the admin's own report is blocked).
+    const calledPaths = api.mock.calls.map(([path]) => path);
+    const monthCalls = calledPaths.filter((p) => p.startsWith("/reports/month?"));
+    expect(monthCalls.length).toBeGreaterThan(0);
+    expect(
+      monthCalls.every((p) => p.includes("user_id=1")),
+      "month report after switching to Alice must use user_id=1",
+    ).toBe(true);
+  }, 60000);
 });

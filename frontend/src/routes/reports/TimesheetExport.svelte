@@ -158,6 +158,8 @@
   }
 
   async function exportCsv() {
+    // Guard: no user selected yet (pure-admin before users have loaded).
+    if (csvUserId == null) return;
     if (exportInProgress) return;
     if (!validateRange()) return;
     exportInProgress = true;
