@@ -1,6 +1,6 @@
 <script>
-  import { api } from "../api.js";
-  import { toast } from "../stores.js";
+  import { api, csrfToken } from "../api.js";
+  import { currentUser, toast } from "../stores.js";
   import { t, roleLabel } from "../i18n.js";
   import Icon from "../Icons.svelte";
   import UserDialog from "../dialogs/UserDialog.svelte";
@@ -13,6 +13,12 @@
     users = await api("/users");
   }
   load();
+
+  async function refreshCurrentUser() {
+    const refreshedUser = await api("/auth/me");
+    currentUser.set(refreshedUser);
+    csrfToken.set(refreshedUser.csrf_token || null);
+  }
 
   async function resetPw(userId) {
     if (
@@ -161,9 +167,19 @@
 {#if showDialog}
   <UserDialog
     template={showDialog}
-    onClose={(changed) => {
+    onClose={async (changed) => {
+      const editedUserId = showDialog?.id;
       showDialog = null;
-      if (changed) load();
+      if (changed) {
+        if (editedUserId === $currentUser?.id) {
+          try {
+            await refreshCurrentUser();
+          } catch (e) {
+            toast($t(e?.message || "Error"), "error");
+          }
+        }
+        load();
+      }
     }}
   />
 {/if}
