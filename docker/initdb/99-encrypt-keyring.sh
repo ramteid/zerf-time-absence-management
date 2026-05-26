@@ -38,7 +38,11 @@ fi
 
 # Atomic write: encrypt to a sibling .tmp then rename, so a partial file
 # never appears at KEYRING_ENC (which would brick subsequent starts).
+# Remove any stale .tmp left over from a previous crashed initdb run before
+# writing a new one — if we don't, a race between two parallel initdb
+# invocations (unlikely but possible) could leave a partial file behind.
 TMP="$KEYRING_ENC.tmp"
+rm -f "$TMP"
 openssl enc -aes-256-cbc -salt -pbkdf2 -iter 100000 \
     -pass env:ZERF_DB_ENCRYPTION_KEY \
     -in  "$KEYRING_PLAIN" \
