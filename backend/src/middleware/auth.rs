@@ -299,7 +299,7 @@ pub async fn auth_middleware(
     // credentials from being used to access sensitive data.
     if user.must_change_password {
         let request_path = parts.uri.path();
-        let allowed_paths = ["/api/v1/auth/me", "/api/v1/auth/password", "/api/v1/auth/logout", "/api/v1/auth/preferences", "/api/v1/settings/public"];
+        let allowed_paths = ["/auth/me", "/auth/password", "/auth/logout", "/auth/preferences", "/settings/public"];
         if !allowed_paths.iter().any(|p| request_path == *p) {
             return Err(AppError::Forbidden);
         }
