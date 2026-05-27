@@ -33,6 +33,20 @@ export function yearsBetweenDates(from, to) {
   );
 }
 
+export function daysBetweenIsoDates(from, to) {
+  const start = parseDate(from);
+  const end = parseDate(to);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return null;
+  }
+  return Math.round((end - start) / 86400000);
+}
+
+export function isReportRangeTooLong(from, to, maxDays = 366) {
+  const days = daysBetweenIsoDates(from, to);
+  return days != null && days > maxDays;
+}
+
 export function yearsInWeek(weekStart) {
   const start = parseDate(weekStart);
   const end = addDays(start, 6);

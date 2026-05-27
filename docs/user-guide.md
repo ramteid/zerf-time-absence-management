@@ -675,13 +675,17 @@ Zerf distinguishes between workflow coverage and work-credit math.
 - Category breakdowns show all booked non-rejected time entries in scope (not only
 	crediting categories).
 - This gives a complete operational view of what was booked by category.
-- Employees see their own breakdown. Leads and admins can view a team aggregate.
+- Employees see their own breakdown. Leads and admins can view a team aggregate
+  for active time-tracking users in their reporting scope.
 
 ### Team report scope
 
-- Admins can see all active users.
+- Admins can see all active users who track time.
 - Non-admin leads see themselves plus explicitly assigned direct reports.
 - Non-admin leads do not see admin subjects in lead-scoped team reporting.
+- Personal report endpoints (month, range, CSV export, categories, overtime,
+	flextime) are available only for active users who track time. Pure-admin
+	accounts and inactive users do not have reportable personal datasets.
 
 ## Admin checklist for a correct setup
 
@@ -997,11 +1001,11 @@ a lead from bypassing their own approval chain.
 Team leads can access team-scoped reports covering their direct reports plus
 themselves.
 
-- Report date ranges are validated: from must be ≤ to, and the range must be
-  less than 366 calendar days.
+- Report date ranges are validated: from must be ≤ to, and the date span must
+  not exceed 366 days.
 - Non-admin leads see only users explicitly assigned to them (plus themselves).
   Admin users are not visible in non-admin lead team reports.
-- Admins see all active users.
+- Admins see all active users who track time.
 
 ---
 

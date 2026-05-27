@@ -4,8 +4,13 @@
 use reqwest::StatusCode;
 use serde_json::json;
 
-use crate::common::TestApp;
+use crate::common::{TestApp, TestClient};
 use crate::helpers::*;
+
+async fn assert_get_forbidden(client: &TestClient, path: &str, label: &str) {
+    let (status, _) = client.get(path).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{label}");
+}
 
 #[tokio::test]
 async fn reports_full_workflow() {
@@ -48,6 +53,66 @@ async fn reports_full_workflow() {
             .await;
         assert_eq!(st, StatusCode::OK, "create lead draft entry");
 
+        let (st, body) = admin
+            .post(
+                "/api/v1/users",
+                &json!({
+                    "email": "pure-admin-category-scope@example.com",
+                    "first_name": "Pure",
+                    "last_name": "CategoryScope",
+                    "role": "admin",
+                    "weekly_hours": 0,
+                    "leave_days_current_year": 0,
+                    "leave_days_next_year": 0,
+                    "start_date": "2024-01-01",
+                    "approver_ids": [1],
+                    "tracks_time": false
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "create pure-admin scope fixture");
+        let pure_admin_id = id(&body);
+
+        let (st, body) = admin
+            .post(
+                "/api/v1/users",
+                &json!({
+                    "email": "inactive-category-scope@example.com",
+                    "first_name": "Inactive",
+                    "last_name": "CategoryScope",
+                    "role": "employee",
+                    "weekly_hours": 39,
+                    "leave_days_current_year": 30,
+                    "leave_days_next_year": 30,
+                    "start_date": "2024-01-01",
+                    "approver_ids": [lead_id]
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "create inactive scope fixture");
+        let inactive_id = id(&body);
+        let (st, _) = admin
+            .put(
+                &format!("/api/v1/users/{inactive_id}"),
+                &json!({"active": false}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "deactivate scope fixture");
+
+        for excluded_user_id in [pure_admin_id, inactive_id] {
+            sqlx::query(
+                "INSERT INTO time_entries(user_id, entry_date, start_time, end_time, category_id, status, reviewed_by, reviewed_at) \
+                 VALUES ($1,$2,'08:00','12:00',$3,'approved',$4,CURRENT_TIMESTAMP)",
+            )
+            .bind(excluded_user_id)
+            .bind(chrono::NaiveDate::parse_from_str(&monday, "%Y-%m-%d").unwrap())
+            .bind(cat_id)
+            .bind(lead_id)
+            .execute(&app.state.pool)
+            .await
+            .unwrap();
+        }
+
         // Draft entries are booked time and should appear in category totals.
         let (st, body) = lead
             .get(&format!(
@@ -69,6 +134,19 @@ async fn reports_full_workflow() {
             body.as_array().unwrap()[0]["minutes"],
             480,
             "aggregate must include lead + direct report booked time"
+        );
+
+        let (st, body) = admin
+            .get(&format!(
+                "/api/v1/reports/categories?from={}&to={}",
+                monday, monday
+            ))
+            .await;
+        assert_eq!(st, StatusCode::OK, "admin aggregate category scope");
+        assert_eq!(
+            body.as_array().unwrap()[0]["minutes"],
+            480,
+            "admin aggregate must exclude pure-admin and inactive legacy entries"
         );
 
         // Submit and approve the entry
@@ -655,10 +733,12 @@ async fn reports_full_workflow() {
             ))
             .await;
         assert_eq!(st, StatusCode::OK, "assistant month report");
-        assert_eq!(body["target_min"], 0, "assistant month target must remain 0");
         assert_eq!(
-            body["full_month_target_min"],
-            0,
+            body["target_min"], 0,
+            "assistant month target must remain 0"
+        );
+        assert_eq!(
+            body["full_month_target_min"], 0,
             "assistant full-month target must remain 0"
         );
 
@@ -740,13 +820,18 @@ async fn reports_full_workflow() {
         assert_eq!(st, StatusCode::OK, "approve monday entry");
 
         let (st, range_body) = emp
-            .get(&format!("/api/v1/reports/range?from={}&to={}", monday, tuesday))
+            .get(&format!(
+                "/api/v1/reports/range?from={}&to={}",
+                monday, tuesday
+            ))
             .await;
         assert_eq!(st, StatusCode::OK, "own range report");
-        assert_eq!(range_body["actual_min"], 240, "range actual counts only approved time");
         assert_eq!(
-            range_body["submitted_min"],
-            360,
+            range_body["actual_min"], 240,
+            "range actual counts only approved time"
+        );
+        assert_eq!(
+            range_body["submitted_min"], 360,
             "submitted_min includes submitted-but-not-yet-approved work"
         );
 
@@ -756,7 +841,11 @@ async fn reports_full_workflow() {
                 monday, tuesday
             ))
             .await;
-        assert_eq!(st, StatusCode::FORBIDDEN, "employee cannot read another user's range report");
+        assert_eq!(
+            st,
+            StatusCode::FORBIDDEN,
+            "employee cannot read another user's range report"
+        );
 
         let previous_reference_date = std::env::var("TEST_REFERENCE_DATE").ok();
         std::env::set_var("TEST_REFERENCE_DATE", monday.clone());
@@ -776,11 +865,16 @@ async fn reports_full_workflow() {
         );
 
         let (st, lead_team_categories) = lead
-            .get(&format!("/api/v1/reports/team-categories?from={}&to={}", monday, tuesday))
+            .get(&format!(
+                "/api/v1/reports/team-categories?from={}&to={}",
+                monday, tuesday
+            ))
             .await;
         assert_eq!(st, StatusCode::OK, "lead team category report");
         let rows = lead_team_categories.as_array().unwrap();
-        assert!(rows.iter().any(|row| row["user_id"].as_i64() == Some(emp_id)));
+        assert!(rows
+            .iter()
+            .any(|row| row["user_id"].as_i64() == Some(emp_id)));
         let emp_row = rows
             .iter()
             .find(|row| row["user_id"].as_i64() == Some(emp_id))
@@ -849,18 +943,132 @@ async fn reports_full_workflow() {
             None => std::env::remove_var("TEST_REFERENCE_DATE"),
         }
         assert_eq!(st, StatusCode::OK, "assistant overtime request succeeds");
-        assert_eq!(assistant_overtime.as_array().unwrap().len(), 0, "assistants have no overtime rows");
+        assert_eq!(
+            assistant_overtime.as_array().unwrap().len(),
+            0,
+            "assistants have no overtime rows"
+        );
 
         let (st, team_categories) = lead
-            .get(&format!("/api/v1/reports/team-categories?from={}&to={}", monday, monday))
+            .get(&format!(
+                "/api/v1/reports/team-categories?from={}&to={}",
+                monday, monday
+            ))
             .await;
         assert_eq!(st, StatusCode::OK, "lead team categories loads");
         let rows = team_categories.as_array().unwrap();
-        assert!(rows.iter().any(|row| row["user_id"].as_i64() == Some(assistant_id)), "assistant direct report stays visible");
         assert!(
-            !rows.iter().any(|row| row["user_id"].as_i64() == Some(admin_subject_id)),
+            rows.iter()
+                .any(|row| row["user_id"].as_i64() == Some(assistant_id)),
+            "assistant direct report stays visible"
+        );
+        assert!(
+            !rows
+                .iter()
+                .any(|row| row["user_id"].as_i64() == Some(admin_subject_id)),
             "admin subjects are excluded from lead-scoped team category reports"
         );
+    }
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn report_permission_guards_reject_non_reportable_users_on_every_personal_endpoint() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, _lead_pw, _emp_id, _emp_pw, monday, _cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "permission-guard").await;
+    let month = monday[..7].to_string();
+    let year = &monday[..4];
+
+    let (status, pure_admin_body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "reports-pure-admin-target@example.com",
+                "first_name": "Pure",
+                "last_name": "ReportTarget",
+                "role": "admin",
+                "tracks_time": false,
+                "weekly_hours": 39,
+                "leave_days_current_year": 30,
+                "leave_days_next_year": 30,
+                "start_date": "2024-01-01"
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create pure-admin report target");
+    let pure_admin_id = id(&pure_admin_body);
+    let pure_admin_password = temp_pw(&pure_admin_body);
+    let pure_admin = login_change_pw(
+        &app,
+        "reports-pure-admin-target@example.com",
+        &pure_admin_password,
+    )
+    .await;
+
+    let (status, inactive_body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "reports-inactive-target@example.com",
+                "first_name": "Inactive",
+                "last_name": "ReportTarget",
+                "role": "employee",
+                "weekly_hours": 39,
+                "leave_days_current_year": 30,
+                "leave_days_next_year": 30,
+                "start_date": "2024-01-01",
+                "approver_ids": [lead_id]
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create inactive report target");
+    let inactive_id = id(&inactive_body);
+    let (status, _) = admin
+        .post(
+            &format!("/api/v1/users/{inactive_id}/deactivate"),
+            &json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "deactivate report target");
+
+    let personal_paths = |target_id: i64| {
+        vec![
+            format!("/api/v1/reports/month?user_id={target_id}&month={month}"),
+            format!("/api/v1/reports/month/csv?user_id={target_id}&month={month}"),
+            format!("/api/v1/reports/range?user_id={target_id}&from={monday}&to={monday}"),
+            format!("/api/v1/reports/csv?user_id={target_id}&from={monday}&to={monday}"),
+            format!("/api/v1/reports/categories?user_id={target_id}&from={monday}&to={monday}"),
+            format!("/api/v1/reports/overtime?user_id={target_id}&year={year}"),
+            format!("/api/v1/reports/flextime?user_id={target_id}&from={monday}&to={monday}"),
+        ]
+    };
+
+    for path in personal_paths(pure_admin_id) {
+        assert_get_forbidden(&admin, &path, "admin cannot report on a pure-admin account").await;
+    }
+    for path in personal_paths(inactive_id) {
+        assert_get_forbidden(&admin, &path, "admin cannot report on an inactive account").await;
+    }
+
+    let self_paths = vec![
+        format!("/api/v1/reports/month?month={month}"),
+        format!("/api/v1/reports/month/csv?month={month}"),
+        format!("/api/v1/reports/range?from={monday}&to={monday}"),
+        format!("/api/v1/reports/csv?from={monday}&to={monday}"),
+        format!("/api/v1/reports/categories?user_id={pure_admin_id}&from={monday}&to={monday}"),
+        format!("/api/v1/reports/overtime?year={year}"),
+        format!("/api/v1/reports/flextime?from={monday}&to={monday}"),
+    ];
+    for path in self_paths {
+        assert_get_forbidden(
+            &pure_admin,
+            &path,
+            "pure-admin cannot default or explicitly report on themselves",
+        )
+        .await;
     }
 
     app.cleanup().await;

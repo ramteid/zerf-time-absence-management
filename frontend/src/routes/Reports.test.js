@@ -57,6 +57,18 @@ async function waitForElement(target, selector, timeout = 15000) {
   throw new Error(`Element not found within ${timeout}ms: ${selector}`);
 }
 
+async function waitForSelectOptions(target, selector, count, timeout = 15000) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    const el = target.querySelector(selector);
+    if (el && el.options.length >= count) return el;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(
+    `Select did not reach ${count} options within ${timeout}ms: ${selector}`,
+  );
+}
+
 describe("Reports", () => {
   let target;
   let component;
@@ -137,7 +149,9 @@ describe("Reports", () => {
       weeks_all_submitted: true,
     };
     mockState.leaveBalance = null;
-    mockState.overtimeRows = [{ month: "2026-05", cumulative_min: 120, diff_min: 120 }];
+    mockState.overtimeRows = [
+      { month: "2026-05", cumulative_min: 120, diff_min: 120 },
+    ];
     mockState.flextimeRows = [];
     mockState.users = [];
     mockState.teamAbsences = [];
@@ -217,17 +231,21 @@ describe("Reports", () => {
     showButton.click();
 
     await waitForElement(target, ".stat-cards", 20000);
-    const loggedLabel = Array.from(target.querySelectorAll(".stat-card-label span")).find(
-      (el) => el.textContent?.trim() === "Logged",
-    );
+    const loggedLabel = Array.from(
+      target.querySelectorAll(".stat-card-label span"),
+    ).find((el) => el.textContent?.trim() === "Logged");
     expect(loggedLabel).toBeTruthy();
     const loggedCard = loggedLabel.closest(".stat-card");
     expect(loggedCard).toBeTruthy();
     expect(loggedCard.querySelector(".stat-card-sub")).toBeNull();
 
     const calledPaths = api.mock.calls.map(([path]) => path);
-    expect(calledPaths.some((path) => path.startsWith("/reports/overtime?"))).toBe(false);
-    expect(calledPaths.some((path) => path.startsWith("/reports/flextime?"))).toBe(false);
+    expect(
+      calledPaths.some((path) => path.startsWith("/reports/overtime?")),
+    ).toBe(false);
+    expect(
+      calledPaths.some((path) => path.startsWith("/reports/flextime?")),
+    ).toBe(false);
   }, 60000);
 
   // Bug 1: "My Balance" label is contextual
@@ -243,8 +261,20 @@ describe("Reports", () => {
       permissions: { can_view_team_reports: true },
     });
     mockState.users = [
-      { id: 7, first_name: "Ada", last_name: "Lead", workdays_per_week: 5, role: "team_lead" },
-      { id: 8, first_name: "Ben", last_name: "Employee", workdays_per_week: 5, role: "employee" },
+      {
+        id: 7,
+        first_name: "Ada",
+        last_name: "Lead",
+        workdays_per_week: 5,
+        role: "team_lead",
+      },
+      {
+        id: 8,
+        first_name: "Ben",
+        last_name: "Employee",
+        workdays_per_week: 5,
+        role: "employee",
+      },
     ];
 
     component = mount(Reports, { target });
@@ -282,8 +312,8 @@ describe("Reports", () => {
     await waitForElement(target, ".stat-cards", 20000);
 
     // The flextime balance stat-card value should not be green (success-text) when null
-    const flexCard = Array.from(target.querySelectorAll(".stat-card")).find((card) =>
-      card.textContent?.includes("Flextime balance"),
+    const flexCard = Array.from(target.querySelectorAll(".stat-card")).find(
+      (card) => card.textContent?.includes("Flextime balance"),
     );
     expect(flexCard).toBeTruthy();
     const valueEl = flexCard.querySelector(".stat-card-value");
@@ -415,9 +445,9 @@ describe("Reports", () => {
 
     // The absence table should appear (there are absences), but stat cards with
     // "Total days" must NOT appear since all days are 0.
-    const totalDaysCard = Array.from(absenceCard.querySelectorAll(".stat-card")).find((c) =>
-      c.textContent?.includes("Total days"),
-    );
+    const totalDaysCard = Array.from(
+      absenceCard.querySelectorAll(".stat-card"),
+    ).find((c) => c.textContent?.includes("Total days"));
     expect(totalDaysCard).toBeUndefined();
   }, 60000);
 
@@ -486,7 +516,9 @@ describe("Reports", () => {
 
     const calledPaths = api.mock.calls.map(([path]) => path);
     expect(calledPaths).toContain("/absences?year=2026");
-    expect(calledPaths.some((path) => path.startsWith("/absences/all?"))).toBe(true);
+    expect(calledPaths.some((path) => path.startsWith("/absences/all?"))).toBe(
+      true,
+    );
     expect(absenceCard.textContent).toContain("Ada Lead");
     expect(absenceCard.textContent).toContain("Ben Report");
     expect(absenceCard.textContent).toContain("Sick");
@@ -518,8 +550,8 @@ describe("Reports", () => {
     await waitForElement(target, ".stat-cards", 20000);
 
     // The absence summary must not show a "Sick" stat card with 0 days.
-    const sickCard = Array.from(target.querySelectorAll(".stat-card")).find((c) =>
-      c.textContent?.includes("Sick"),
+    const sickCard = Array.from(target.querySelectorAll(".stat-card")).find(
+      (c) => c.textContent?.includes("Sick"),
     );
     expect(sickCard).toBeUndefined();
   }, 60000);
@@ -557,7 +589,10 @@ describe("Reports", () => {
       return fields
         .map((v) => {
           const s = v == null ? "" : String(v);
-          return s.includes(",") || s.includes('"') || s.includes("\n") || s.includes("\r")
+          return s.includes(",") ||
+            s.includes('"') ||
+            s.includes("\n") ||
+            s.includes("\r")
             ? '"' + s.replace(/"/g, '""') + '"'
             : s;
         })
@@ -596,7 +631,9 @@ describe("Reports", () => {
     // We can verify by checking that no /reports/flextime? path was called
     // during the initial settle (the component should not speculatively fetch).
     const calledPaths = api.mock.calls.map(([path]) => path);
-    expect(calledPaths.some((path) => path.startsWith("/reports/flextime?"))).toBe(false);
+    expect(
+      calledPaths.some((path) => path.startsWith("/reports/flextime?")),
+    ).toBe(false);
   }, 60000);
 
   // Bug: pure-admin (tracks_time=false) gets "Kein Zugriff" when clicking
@@ -696,7 +733,9 @@ describe("Reports", () => {
     await settle();
 
     const calledPaths = api.mock.calls.map(([path]) => path);
-    expect(calledPaths.some((p) => p.startsWith("/reports/month?"))).toBe(false);
+    expect(calledPaths.some((p) => p.startsWith("/reports/month?"))).toBe(
+      false,
+    );
   }, 60000);
 
   // Bug: pure-admin (tracks_time=false) can view employee month report for
@@ -742,9 +781,10 @@ describe("Reports", () => {
     expect(select).not.toBeNull();
 
     // Click Show — Alice (id=1) is auto-selected as the first user.
-    const showButton = Array.from(target.querySelectorAll("button.zf-btn.zf-btn-primary")).find(
-      (b) => b.closest(".zf-card")?.querySelector("#report-user-id") != null,
-    ) || target.querySelector("button.zf-btn.zf-btn-primary");
+    const showButton =
+      Array.from(target.querySelectorAll("button.zf-btn.zf-btn-primary")).find(
+        (b) => b.closest(".zf-card")?.querySelector("#report-user-id") != null,
+      ) || target.querySelector("button.zf-btn.zf-btn-primary");
     expect(showButton).not.toBeNull();
     showButton.click();
 
@@ -757,12 +797,57 @@ describe("Reports", () => {
     // not without — no user_id would mean the backend uses the admin's own ID,
     // which is blocked and returns 403 in production.
     const calledPaths = api.mock.calls.map(([path]) => path);
-    const monthCalls = calledPaths.filter((p) => p.startsWith("/reports/month?"));
+    const monthCalls = calledPaths.filter((p) =>
+      p.startsWith("/reports/month?"),
+    );
     expect(monthCalls.length).toBeGreaterThan(0);
     expect(
-      monthCalls.some((p) => p.includes("user_id=1") || p.includes("user_id=2")),
+      monthCalls.some(
+        (p) => p.includes("user_id=1") || p.includes("user_id=2"),
+      ),
       "month report must be requested with a concrete employee user_id, not the admin's own",
     ).toBe(true);
+  }, 60000);
+
+  it("loads report users after current user state arrives", async () => {
+    currentUser.set(null);
+    mockState.users = [
+      {
+        id: 8,
+        first_name: "Ben",
+        last_name: "Report",
+        workdays_per_week: 5,
+        role: "employee",
+        tracks_time: true,
+        start_date: "2023-01-01",
+      },
+    ];
+
+    component = mount(Reports, { target });
+    await settle();
+    expect(api.mock.calls.some(([path]) => path === "/users")).toBe(false);
+
+    currentUser.set({
+      id: 7,
+      role: "team_lead",
+      first_name: "Ada",
+      last_name: "Lead",
+      weekly_hours: 40,
+      workdays_per_week: 5,
+      start_date: "2020-01-01",
+      permissions: { can_view_team_reports: true },
+      tracks_time: true,
+    });
+    const select = await waitForSelectOptions(
+      target,
+      "#report-user-id",
+      1,
+      20000,
+    );
+
+    expect(api.mock.calls.some(([path]) => path === "/users")).toBe(true);
+    expect(select?.options.length).toBe(1);
+    expect(select?.options[0].textContent).toContain("Ben Report");
   }, 60000);
 
   // Bug: admin with tracks_time=true (re-enabled) can view reports for other
@@ -830,7 +915,9 @@ describe("Reports", () => {
     // user_id=5 (admin). Without this, the "Show" would display the admin's own
     // data (or nothing, if the admin's own report is blocked).
     const calledPaths = api.mock.calls.map(([path]) => path);
-    const monthCalls = calledPaths.filter((p) => p.startsWith("/reports/month?"));
+    const monthCalls = calledPaths.filter((p) =>
+      p.startsWith("/reports/month?"),
+    );
     expect(monthCalls.length).toBeGreaterThan(0);
     expect(
       monthCalls.every((p) => p.includes("user_id=1")),

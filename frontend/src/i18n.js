@@ -125,6 +125,7 @@ const TRANSLATIONS = {
     Year: "Year",
     "Invalid date": "Invalid date.",
     "Invalid date.": "Invalid date.",
+    "Select an employee.": "Select an employee.",
     "end_date must be >= start_date.": "From cannot be after To.",
     "Absence range exceeds one year.": "Absence range exceeds one year.",
     "Absence must include at least one workday.":
@@ -534,8 +535,7 @@ const TRANSLATIONS = {
     "Reject this cancellation request? The absence will remain approved.":
       "Diese Stornierungsanfrage ablehnen? Die Abwesenheit bleibt genehmigt.",
     Cancellation: "Stornierung",
-    "Approve weeks & manage requests":
-      "Wochen genehmigen & Anträge verwalten",
+    "Approve weeks & manage requests": "Wochen genehmigen & Anträge verwalten",
     "Your overview": "Deine Übersicht",
     "Your hours overview": "Deine Stundenübersicht",
     "Pending Weeks": "Ausstehende Wochen",
@@ -683,13 +683,13 @@ const TRANSLATIONS = {
       "Diese Woche wird sofort wieder zur Bearbeitung freigegeben.",
     "Edit request sent.": "Bearbeitungsanfrage gesendet.",
     "Week editing enabled.": "Woche zur Bearbeitung freigegeben.",
-    "Edit request pending approval.": "Bearbeitungsanfrage wartet auf Genehmigung.",
+    "Edit request pending approval.":
+      "Bearbeitungsanfrage wartet auf Genehmigung.",
     "Edit request approved.": "Bearbeitungsanfrage genehmigt.",
     "Edit request rejected.": "Bearbeitungsanfrage abgelehnt.",
     "Week edit requests": "Bearbeitungsanfragen",
     "Edit request": "Bearbeitungsanfrage",
-    "wants to edit {week_label}":
-      "möchte {week_label} wieder bearbeiten",
+    "wants to edit {week_label}": "möchte {week_label} wieder bearbeiten",
     TeamSettings: "Team-Einstellungen",
     "Team Settings": "Team-Einstellungen",
     "Allow employees to submit edit requests without approval":
@@ -836,6 +836,7 @@ const TRANSLATIONS = {
     "Custom range": "Benutzerdefinierter Zeitraum",
     Range: "Bereich",
     "From cannot be after To.": "Von kann nicht nach Bis liegen.",
+    "Select an employee.": "Mitarbeiter auswählen.",
     "Category required.": "Kategorie erforderlich.",
     // Hours unit
     hours_unit: "Std.",
@@ -958,12 +959,14 @@ const TRANSLATIONS = {
     Incomplete: "Unvollständig",
     "All submitted": "Alles eingereicht",
     "All submitted and approved": "Alles eingereicht und genehmigt",
-    "All submitted (approvals pending)": "Alles eingereicht (Genehmigungen ausstehend)",
+    "All submitted (approvals pending)":
+      "Alles eingereicht (Genehmigungen ausstehend)",
     "Approved: {value}": "Genehmigt: {value}",
     "Weeks missing": "Wochen fehlen",
     "Current week: still open": "Aktuelle Woche: noch offen",
     "Current week: draft": "Aktuelle Woche: Entwurf",
-    "Current week: partially submitted": "Aktuelle Woche: teilweise eingereicht",
+    "Current week: partially submitted":
+      "Aktuelle Woche: teilweise eingereicht",
     "Current week: needs revision": "Aktuelle Woche: zur Überarbeitung",
     "Who is absent": "Wer ist abwesend",
     "No absences this week.": "Keine Abwesenheiten diese Woche.",
@@ -1423,10 +1426,7 @@ export function hoursUnit() {
 export function formatHours(value) {
   // When a raw number is passed, apply locale-aware decimal formatting.
   // Strings (e.g. pre-formatted HH:MM values like "+5:30") are passed through as-is.
-  const formatted =
-    typeof value === "number"
-      ? formatDayCount(value)
-      : value;
+  const formatted = typeof value === "number" ? formatDayCount(value) : value;
   return translate(get(language), "{value}{unit}", {
     value: formatted,
     unit: hoursUnit(),

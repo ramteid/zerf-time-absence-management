@@ -246,12 +246,12 @@ impl ReportDb {
              allow_reopen_without_approval, dark_mode, overtime_start_balance_min, tracks_time \
              FROM users";
         if is_admin {
-            Ok(
-                QueryBuilder::<Postgres>::new(format!("{SEL} WHERE active=TRUE ORDER BY last_name"))
-                    .build_query_as::<User>()
-                    .fetch_all(&self.pool)
-                    .await?,
-            )
+            Ok(QueryBuilder::<Postgres>::new(format!(
+                "{SEL} WHERE active=TRUE ORDER BY last_name, first_name, id"
+            ))
+            .build_query_as::<User>()
+            .fetch_all(&self.pool)
+            .await?)
         } else {
             // Non-admin leads see themselves plus direct reports, but admin
             // subjects are excluded from lead-scoped team views (user-guide).
@@ -260,9 +260,9 @@ impl ReportDb {
                  AND (id=$1 OR id IN (\
                      SELECT ua.user_id FROM user_approvers ua \
                      JOIN users u ON u.id = ua.user_id \
-                     WHERE ua.approver_id=$1 AND u.role != 'admin'\
+                     WHERE ua.approver_id=$1 AND u.active=TRUE AND u.role != 'admin'\
                  )) \
-                 ORDER BY last_name"
+                 ORDER BY last_name, first_name, id"
             ))
             .build_query_as::<User>()
             .bind(requester_id)
@@ -348,7 +348,7 @@ impl ReportDb {
         if is_admin {
             Ok(sqlx::query_as(
                 "SELECT id, first_name, last_name FROM users \
-                 WHERE active=TRUE AND tracks_time=TRUE ORDER BY last_name",
+                 WHERE active=TRUE AND tracks_time=TRUE ORDER BY last_name, first_name, id",
             )
             .fetch_all(&self.pool)
             .await?)
@@ -360,9 +360,9 @@ impl ReportDb {
                  AND (id=$1 OR id IN (\
                      SELECT ua.user_id FROM user_approvers ua \
                      JOIN users u ON u.id = ua.user_id \
-                     WHERE ua.approver_id=$1 AND u.role != 'admin'\
+                     WHERE ua.approver_id=$1 AND u.active=TRUE AND u.role != 'admin'\
                  )) \
-                 ORDER BY last_name",
+                 ORDER BY last_name, first_name, id",
             )
             .bind(requester_id)
             .fetch_all(&self.pool)
@@ -402,7 +402,8 @@ impl ReportDb {
                  FROM time_entries z \
                  JOIN users u ON u.id=z.user_id \
                  JOIN categories c ON c.id=z.category_id \
-                 WHERE z.status != 'rejected' AND z.entry_date >= u.start_date \
+                 WHERE z.status != 'rejected' AND u.active=TRUE AND u.tracks_time=TRUE \
+                 AND z.entry_date >= u.start_date \
                  AND z.entry_date BETWEEN $1 AND $2",
             )
             .bind(from)
@@ -415,12 +416,13 @@ impl ReportDb {
                  FROM time_entries z \
                  JOIN users u ON u.id=z.user_id \
                  JOIN categories c ON c.id=z.category_id \
-                 WHERE z.status != 'rejected' AND z.entry_date >= u.start_date \
+                 WHERE z.status != 'rejected' AND u.active=TRUE AND u.tracks_time=TRUE \
+                 AND z.entry_date >= u.start_date \
                  AND z.entry_date BETWEEN $1 AND $2 \
                  AND z.user_id IN (SELECT id FROM users WHERE id = $3 \
                      OR id IN (SELECT ua.user_id FROM user_approvers ua \
                                JOIN users u2 ON u2.id = ua.user_id \
-                               WHERE ua.approver_id = $3 AND u2.role != 'admin'))",
+                               WHERE ua.approver_id = $3 AND u2.active=TRUE AND u2.role != 'admin'))",
             )
             .bind(from)
             .bind(to)
@@ -444,7 +446,8 @@ impl ReportDb {
                  FROM time_entries z \
                  JOIN users u ON u.id=z.user_id \
                  JOIN categories c ON c.id=z.category_id \
-                 WHERE z.status != 'rejected' AND z.entry_date >= u.start_date \
+                 WHERE z.status != 'rejected' AND u.active=TRUE AND u.tracks_time=TRUE \
+                 AND z.entry_date >= u.start_date \
                  AND z.entry_date BETWEEN $1 AND $2",
             )
             .bind(from)
@@ -457,12 +460,13 @@ impl ReportDb {
                  FROM time_entries z \
                  JOIN users u ON u.id=z.user_id \
                  JOIN categories c ON c.id=z.category_id \
-                 WHERE z.status != 'rejected' AND z.entry_date >= u.start_date \
+                 WHERE z.status != 'rejected' AND u.active=TRUE AND u.tracks_time=TRUE \
+                 AND z.entry_date >= u.start_date \
                  AND z.entry_date BETWEEN $1 AND $2 \
                  AND z.user_id IN (SELECT id FROM users WHERE id = $3 \
                      OR id IN (SELECT ua.user_id FROM user_approvers ua \
                                JOIN users u2 ON u2.id = ua.user_id \
-                               WHERE ua.approver_id = $3 AND u2.role != 'admin'))",
+                               WHERE ua.approver_id = $3 AND u2.active=TRUE AND u2.role != 'admin'))",
             )
             .bind(from)
             .bind(to)
