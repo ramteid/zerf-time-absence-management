@@ -847,13 +847,10 @@ async fn reports_full_workflow() {
             "employee cannot read another user's range report"
         );
 
-        let previous_reference_date = std::env::var("TEST_REFERENCE_DATE").ok();
-        std::env::set_var("TEST_REFERENCE_DATE", monday.clone());
-        let (st, overtime_body) = emp.get("/api/v1/reports/overtime").await;
-        match previous_reference_date {
-            Some(value) => std::env::set_var("TEST_REFERENCE_DATE", value),
-            None => std::env::remove_var("TEST_REFERENCE_DATE"),
-        }
+        let monday_year = &monday[..4];
+        let (st, overtime_body) = emp
+            .get(&format!("/api/v1/reports/overtime?year={monday_year}"))
+            .await;
         assert_eq!(st, StatusCode::OK, "own overtime report");
         assert!(
             overtime_body
@@ -935,13 +932,10 @@ async fn reports_full_workflow() {
         assert_eq!(st, StatusCode::OK, "create admin subject");
         let admin_subject_id = id(&body);
 
-        let previous_reference_date = std::env::var("TEST_REFERENCE_DATE").ok();
-        std::env::set_var("TEST_REFERENCE_DATE", monday.clone());
-        let (st, assistant_overtime) = assistant.get("/api/v1/reports/overtime").await;
-        match previous_reference_date {
-            Some(value) => std::env::set_var("TEST_REFERENCE_DATE", value),
-            None => std::env::remove_var("TEST_REFERENCE_DATE"),
-        }
+        let monday_year = &monday[..4];
+        let (st, assistant_overtime) = assistant
+            .get(&format!("/api/v1/reports/overtime?year={monday_year}"))
+            .await;
         assert_eq!(st, StatusCode::OK, "assistant overtime request succeeds");
         assert_eq!(
             assistant_overtime.as_array().unwrap().len(),
