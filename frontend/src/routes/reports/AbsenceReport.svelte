@@ -1,5 +1,10 @@
 <script>
-  import { currentUser, earliestStartDate, settings, toast } from "../../stores.js";
+  import {
+    currentUser,
+    earliestStartDate,
+    settings,
+    toast,
+  } from "../../stores.js";
   import {
     t,
     absenceKindLabel,
@@ -18,7 +23,11 @@
     getHolidaysByYear,
     getUserAbsencesByYear,
   } from "../../lib/api/reportsApi.js";
-  import { isoMonthStart, yearsBetweenDates } from "../../lib/domain/dates.js";
+  import {
+    isoMonthStart,
+    isReportRangeTooLong,
+    yearsBetweenDates,
+  } from "../../lib/domain/dates.js";
   import {
     absenceKindTotals,
     dedupeAbsences,
@@ -101,13 +110,17 @@
     const absenceLists = await Promise.all(
       years.map((yearValue) => getUserAbsencesByYear(yearValue)),
     );
-    return absenceLists.flat().filter(
-      (a) => a.end_date >= absenceFrom && a.start_date <= absenceTo,
-    );
+    return absenceLists
+      .flat()
+      .filter((a) => a.end_date >= absenceFrom && a.start_date <= absenceTo);
   }
 
   async function showAbsences() {
     if (absenceFrom > absenceTo) return;
+    if (isReportRangeTooLong(absenceFrom, absenceTo)) {
+      toast($t("Date range must not exceed 366 days."), "error");
+      return;
+    }
     absenceReport = null;
     try {
       let raw;
@@ -119,7 +132,9 @@
         // own absences when the current user actually tracks their own time.
         const [teamAbsences, ownAbsences] = await Promise.all([
           getAbsenceReport({ from: absenceFrom, to: absenceTo }),
-          tracksOwnTime($currentUser) ? loadOwnAbsencesForRange() : Promise.resolve([]),
+          tracksOwnTime($currentUser)
+            ? loadOwnAbsencesForRange()
+            : Promise.resolve([]),
         ]);
         raw = dedupeAbsences([...teamAbsences, ...ownAbsences]);
       }
@@ -145,7 +160,6 @@
       toast($t(e?.message || "Error"), "error");
     }
   }
-
 </script>
 
 <SectionCard
@@ -169,7 +183,9 @@
       <DatePicker id="absence-to" bind:value={absenceTo} min={absenceFrom} />
     </div>
   </div>
-  <button class="zf-btn zf-btn-primary" on:click={showAbsences}>{$t("Show")}</button>
+  <button class="zf-btn zf-btn-primary" on:click={showAbsences}
+    >{$t("Show")}</button
+  >
 
   {#if absenceReport}
     {#if absenceReport.length === 0}
@@ -218,11 +234,19 @@
                   </td>
                 {/if}
                 <td>{absenceKindLabel(a.kind)}</td>
-                <td class="tab-num" style="text-align:right">{fmtDate(a.start_date)}</td>
-                <td class="tab-num" style="text-align:right">{fmtDate(a.end_date)}</td>
-                <td class="tab-num" style="text-align:right">{formatDayCount(a.days)}</td>
+                <td class="tab-num" style="text-align:right"
+                  >{fmtDate(a.start_date)}</td
+                >
+                <td class="tab-num" style="text-align:right"
+                  >{fmtDate(a.end_date)}</td
+                >
+                <td class="tab-num" style="text-align:right"
+                  >{formatDayCount(a.days)}</td
+                >
                 <td>
-                  <span class="zf-chip zf-chip-{a.status}">{statusLabel(a.status)}</span>
+                  <span class="zf-chip zf-chip-{a.status}"
+                    >{statusLabel(a.status)}</span
+                  >
                 </td>
               </tr>
             {/each}

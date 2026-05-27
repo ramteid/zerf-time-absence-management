@@ -1,5 +1,10 @@
 <script>
-  import { currentUser, earliestStartDate, settings, toast } from "../../stores.js";
+  import {
+    currentUser,
+    earliestStartDate,
+    settings,
+    toast,
+  } from "../../stores.js";
   import { t, fmtDecimal } from "../../i18n.js";
   import { isoDate, appTodayDate, minToHM } from "../../format.js";
   import DatePicker from "../../DatePicker.svelte";
@@ -18,6 +23,7 @@
     teamCategoryRowTotal,
     totalCategoryMinutes,
   } from "../../lib/domain/reports.js";
+  import { isReportRangeTooLong } from "../../lib/domain/dates.js";
 
   export let isSelfOnlyReportsView = false;
 
@@ -52,7 +58,8 @@
       // eslint-disable-next-line no-useless-assignment
       previousTodayIso = todayIso;
     } else {
-      if (catFrom === `${previousCurrentYear}-01-01`) catFrom = `${currentYear}-01-01`;
+      if (catFrom === `${previousCurrentYear}-01-01`)
+        catFrom = `${currentYear}-01-01`;
       if (catTo === previousTodayIso) catTo = todayIso;
       // eslint-disable-next-line no-useless-assignment
       previousCurrentYear = currentYear;
@@ -67,6 +74,10 @@
 
   async function showCat() {
     if (catFrom > catTo) return;
+    if (isReportRangeTooLong(catFrom, catTo)) {
+      toast($t("Date range must not exceed 366 days."), "error");
+      return;
+    }
     catReport = null;
     teamCatReport = null;
     try {
@@ -132,21 +143,23 @@
   <div class="field-row" style="margin-bottom:12px">
     <div>
       <label class="zf-label" for="cat-from">{$t("From")}</label>
-      <DatePicker id="cat-from" bind:value={catFrom} min={$earliestStartDate} max={catTo} />
+      <DatePicker
+        id="cat-from"
+        bind:value={catFrom}
+        min={$earliestStartDate}
+        max={catTo}
+      />
     </div>
     <div>
       <label class="zf-label" for="cat-to">{$t("To")}</label>
-      <DatePicker
-        id="cat-to"
-        bind:value={catTo}
-        min={catFrom}
-        max={todayIso}
-      />
+      <DatePicker id="cat-to" bind:value={catTo} min={catFrom} max={todayIso} />
     </div>
   </div>
 
   <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
-    <button class="zf-btn zf-btn-primary" on:click={showCat}>{$t("Show")}</button>
+    <button class="zf-btn zf-btn-primary" on:click={showCat}
+      >{$t("Show")}</button
+    >
     {#if (catReport && catReport.length > 0) || allTeamCatColumns.length > 0}
       <button class="zf-btn" on:click={() => (catShowFilter = !catShowFilter)}>
         {$t("Filter")}
@@ -169,7 +182,8 @@
               checked={catFilteredCategories.includes(col.category)}
               on:change={() => toggleCategoryFilter(col.category)}
             />
-            <span class="cat-dot" style="background:{col.color || '#999'}"></span>
+            <span class="cat-dot" style="background:{col.color || '#999'}"
+            ></span>
             <span style="font-size:13px">{$t(col.category)}</span>
           </label>
         {/each}
@@ -189,7 +203,8 @@
               checked={catFilteredCategories.includes(cat.category)}
               on:change={() => toggleCategoryFilter(cat.category)}
             />
-            <span class="cat-dot" style="background:{cat.color || '#999'}"></span>
+            <span class="cat-dot" style="background:{cat.color || '#999'}"
+            ></span>
             <span style="font-size:13px">{$t(cat.category)}</span>
           </label>
         {/each}
@@ -213,7 +228,10 @@
                   <span
                     style="display:inline-flex;align-items:center;gap:4px;justify-content:flex-end"
                   >
-                    <span class="cat-dot" style="background:{col.color || '#999'}"></span>
+                    <span
+                      class="cat-dot"
+                      style="background:{col.color || '#999'}"
+                    ></span>
                     {$t(col.category)}
                   </span>
                 </th>
@@ -228,7 +246,10 @@
                 <td style="font-weight:500">{row.name}</td>
                 {#each visibleTeamCatColumns as col (col.category)}
                   {@const cellMin = teamCatMinutes(row, col.category)}
-                  <td class="tab-num" style="text-align:right;color:var(--text-tertiary)">
+                  <td
+                    class="tab-num"
+                    style="text-align:right;color:var(--text-tertiary)"
+                  >
                     {#if cellMin > 0}
                       {minToHM(cellMin)}
                     {:else}
@@ -271,11 +292,14 @@
               <tr>
                 <td style="font-weight:500">
                   <span style="display:inline-flex;align-items:center;gap:6px">
-                    <span class="cat-dot" style="background:{c.color || '#999'}"></span>
+                    <span class="cat-dot" style="background:{c.color || '#999'}"
+                    ></span>
                     {$t(c.category)}
                   </span>
                 </td>
-                <td class="tab-num" style="text-align:right">{minToHM(c.minutes)}</td>
+                <td class="tab-num" style="text-align:right"
+                  >{minToHM(c.minutes)}</td
+                >
                 <td class="tab-num" style="text-align:right">
                   {filteredCatTotal > 0
                     ? fmtDecimal((c.minutes / filteredCatTotal) * 100, 1)

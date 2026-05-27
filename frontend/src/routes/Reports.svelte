@@ -14,17 +14,31 @@
   // Leads and admins load all users for the dropdowns. Non-lead roles only see
   // their own data.
   let users = [];
+  let lastUsersLoadKey = "";
   async function initUsers() {
     try {
       const canTeam = !!$currentUser?.permissions?.can_view_team_reports;
+      if (!$currentUser?.id) {
+        users = [];
+        return;
+      }
       users = await getUsersForReports(canTeam, $currentUser);
     } catch (e) {
       toast($t(e?.message || "Error"), "error");
     }
   }
-  initUsers();
 
   $: canViewTeamReports = !!$currentUser?.permissions?.can_view_team_reports;
+  $: {
+    const loadKey = $currentUser?.id
+      ? `${$currentUser.id}:${canViewTeamReports}:${$currentUser.tracks_time !== false}`
+      : "";
+    if (loadKey !== lastUsersLoadKey) {
+      // eslint-disable-next-line no-useless-assignment
+      lastUsersLoadKey = loadKey;
+      initUsers();
+    }
+  }
   // Pure-admin users (admins with tracks_time=false) have no personal data, so
   // the self-only sections (Category, Absence, Timesheet self-views) collapse
   // into team-style views as well. Also covers any other future case where the
