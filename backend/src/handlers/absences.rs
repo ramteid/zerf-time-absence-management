@@ -73,6 +73,23 @@ pub async fn list_all(
     if !requester.is_lead() {
         return Err(crate::error::AppError::Forbidden);
     }
+    // Enforce a maximum date range to prevent unbounded queries (DoS).
+    if let (Some(from), Some(to)) = (query.from, query.to) {
+        if from > to {
+            return Err(crate::error::AppError::BadRequest("from must not be after to.".into()));
+        }
+        if (to - from).num_days() > 366 {
+            return Err(crate::error::AppError::BadRequest("Date range must not exceed 366 days.".into()));
+        }
+    } else if query.from.is_none() && query.to.is_none() {
+        return Err(crate::error::AppError::BadRequest("At least one of from/to is required.".into()));
+    }
+    // Validate status filter against the known set of absence statuses.
+    if let Some(ref s) = query.status {
+        if !["requested", "approved", "rejected", "cancelled", "cancellation_requested", "pending_review"].contains(&s.as_str()) {
+            return Err(crate::error::AppError::BadRequest("Invalid status filter.".into()));
+        }
+    }
     let absences = app_state
         .db
         .absences
@@ -289,7 +306,12 @@ pub async fn balance(
         require_tracks_time(&requester)?;
     }
     let year = match query.year {
-        Some(value) => value,
+        Some(value) => {
+            if !(1970..=2100).contains(&value) {
+                return Err(crate::error::AppError::BadRequest("Year out of valid range.".into()));
+            }
+            value
+        }
         None => crate::services::settings::app_current_year(&app_state.pool).await,
     };
     let balance = compute_balance(&app_state, &requester, target_user_id, year).await?;

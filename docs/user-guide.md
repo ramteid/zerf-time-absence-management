@@ -1255,3 +1255,101 @@ approved  ──[revoke by admin]───────> cancelled
   reopen auto-approval enabled --> auto_approved (week immediately reopened)
   otherwise                    --> pending
 ```
+
+## Security and access control
+
+### Authentication
+
+- Sessions use SHA-256 hashed tokens stored server-side with absolute (168 h)
+  and idle (8 h) timeouts enforced at the middleware level.
+- Session cookies are `HttpOnly`, `SameSite=Strict`, and `Secure` (when
+  configured) to prevent XSS and CSRF token theft.
+- CSRF protection uses a double-submit pattern: every state-changing request
+  must include an `X-CSRF-Token` header that matches the server-stored session
+  token. Origin/Referer headers are additionally validated.
+- Login is rate-limited: after 5 failed attempts within 15 minutes the account
+  is temporarily locked. Generic error messages prevent email enumeration.
+- Password reset tokens are single-use, SHA-256 hashed, and expire after 4 h.
+  Inactive accounts cannot request password resets.
+
+### Temporary passwords and forced password change
+
+- When an admin resets a user's password, the system issues a one-time
+  temporary credential and marks the account with `must_change_password`.
+- Until the password is changed, the backend middleware blocks **all** API
+  endpoints except `/auth/me`, `/auth/password`, `/auth/logout`,
+  `/auth/preferences`, and `/settings/public`. This prevents temporary
+  credentials from being used to access or modify any sensitive data.
+- The frontend enforces the same restriction via route-level redirects.
+
+### Role-based access control
+
+- **Admin** – full access to all users, settings, and data.
+- **Team lead** – can view/approve only for users explicitly assigned to them
+  via the approver chain. Cannot view or act on admin-subject data.
+- **Employee** – can only access their own time entries, absences, and reports.
+- **Assistant** – same as employee but excluded from flextime/overtime and
+  dashboard.
+
+Non-admin team leads are prevented from:
+
+- Viewing or approving time entries / absences for admin-role users.
+- Accessing users not in their direct report list.
+- Approving their own submissions (self-approval prevention).
+
+### Pure-admin mode (tracks_time=false)
+
+- Admins with `tracks_time=false` cannot create, view, or export their own
+  time entries, absences, or reports.
+- They retain full access to team management, approval workflows, the calendar,
+  and admin settings.
+- The navigation bar automatically hides Time and Absences links for these
+  accounts.
+- The Calendar remains accessible since pure-admins need team schedule
+  visibility for coordination.
+- Report endpoints return Forbidden for targets with `tracks_time=false` or
+  inactive status.
+
+### Session invalidation
+
+Sessions are automatically destroyed when:
+
+- A user's role is changed.
+- A user is deactivated or deleted (cascade on delete).
+- A user changes their password (all other sessions are killed).
+- An admin resets a user's password.
+- A user logs out (all sessions for that user are killed).
+
+### Audit trail
+
+All significant administrative and approval actions are logged to the audit
+table, including:
+
+- User creation, update, deactivation, and deletion.
+- Password resets.
+- Time entry status transitions (submit, approve, reject, reopen).
+- Absence creation, approval, rejection, revocation, and cancellation.
+- Admin settings changes (language, timezone, country, region).
+- SMTP configuration changes.
+- Team settings modifications (allow_reopen_without_approval).
+
+### Input validation and DoS prevention
+
+- Date range queries are limited to a maximum of 366 days.
+- Year parameters are bounded to 1970–2100.
+- Batch operations (submit, approve, reject) are limited to 500 entries.
+- Status filter parameters are validated against known values.
+- Comments are limited to 2 000 characters.
+- CSV exports include formula-injection guards (leading `=`, `+`, `-`, `@`,
+  tab, or CR are prefixed with a single-quote).
+
+### Information disclosure prevention
+
+- Password hashes are never serialized in API responses.
+- The `must_change_password` flag is excluded from user list responses; it is
+  only returned via `/auth/me` (own session) and admin-only single-user
+  endpoints.
+- SMTP passwords are never returned; only a boolean `smtp_password_set`
+  indicates whether one is configured.
+- Non-lead employees cannot see other users' absence details (kind is shown as
+  "absent" unless it is vacation or the viewer is a lead/admin).

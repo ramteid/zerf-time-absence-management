@@ -42,6 +42,7 @@ pub struct User {
     pub workdays_per_week: i16,
     pub start_date: chrono::NaiveDate,
     pub active: bool,
+    #[serde(skip_serializing)]
     pub must_change_password: bool,
     pub created_at: DateTime<Utc>,
     /// When TRUE, this user's reopen requests are auto-approved without waiting

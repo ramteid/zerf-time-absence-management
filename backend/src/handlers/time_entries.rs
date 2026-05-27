@@ -74,6 +74,37 @@ pub async fn list_all(
     if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
+    // Enforce a maximum date range to prevent unbounded queries that could
+    // cause excessive memory/CPU usage (DoS). Require at least one bound.
+    if let (Some(from), Some(to)) = (query.from, query.to) {
+        if from > to {
+            return Err(AppError::BadRequest("from must not be after to.".into()));
+        }
+        if (to - from).num_days() > 366 {
+            return Err(AppError::BadRequest("Date range must not exceed 366 days.".into()));
+        }
+    } else if query.from.is_none() && query.to.is_none() {
+        return Err(AppError::BadRequest("At least one of from/to is required.".into()));
+    }
+    // Validate status filter against the known set of time entry statuses.
+    if let Some(ref s) = query.status {
+        if !["draft", "submitted", "approved", "rejected"].contains(&s.as_str()) {
+            return Err(AppError::BadRequest("Invalid status filter.".into()));
+        }
+    }
+    // If a specific user_id is requested, verify the target has tracks_time=true.
+    // Users with tracks_time=false (pure-admin) have no time entries.
+    if let Some(target_uid) = query.user_id {
+        let target_user = app_state
+            .db
+            .users
+            .find_by_id(target_uid)
+            .await?
+            .ok_or(AppError::NotFound)?;
+        if !target_user.tracks_time || !target_user.active {
+            return Err(AppError::Forbidden);
+        }
+    }
     let entries = app_state
         .db
         .time_entries
