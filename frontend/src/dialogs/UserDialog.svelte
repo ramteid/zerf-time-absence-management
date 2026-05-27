@@ -7,6 +7,7 @@
   import { appTodayDate, appTodayIsoDate } from "../format.js";
   import Dialog from "../Dialog.svelte";
   import DatePicker from "../DatePicker.svelte";
+  import TempPasswordDialog from "./TempPasswordDialog.svelte";
 
   export let template;
   export let onClose;
@@ -215,15 +216,6 @@
     }
   }
 
-  let copied = false;
-  async function copyPassword() {
-    try {
-      await navigator.clipboard.writeText(showTempPassword);
-      copied = true;
-      setTimeout(() => (copied = false), 2000);
-    } catch {}
-  }
-
   function dismissTempPassword() {
     showTempPassword = null;
     dialog.close(true);
@@ -231,32 +223,24 @@
   }
 </script>
 
+{#if showTempPassword}
+  <TempPasswordDialog
+    password={showTempPassword}
+    {smtpEnabled}
+    title={$t("User created.")}
+    onDismiss={dismissTempPassword}
+  />
+{/if}
+
 <Dialog
   bind:this={dialog}
-  title={showTempPassword ? $t("User created.") : $t(isNew ? "Add Member" : "Edit Member")}
-  onClose={() => showTempPassword ? dismissTempPassword() : onClose(false)}
+  title={$t(isNew ? "Add Member" : "Edit Member")}
+  onClose={() => onClose(false)}
   style="max-width:520px"
   let:dlg
 >
-  {#if showTempPassword}
-    <div
-      style="padding:12px;background:var(--bg-muted);border-radius:var(--radius-sm);font-family:monospace;font-size:14px;word-break:break-all"
-    >
-      {$t("Temporary password:")} <strong>{showTempPassword}</strong>
-    </div>
-    {#if smtpEnabled}
-      <div style="font-size:12px;color:var(--text-tertiary);margin-top:8px">
-        {$t("Registration email will be sent.")}
-      </div>
-    {:else}
-      <div style="margin-top:10px;padding:10px 14px;background:var(--danger-bg, #fef2f2);border:2px solid var(--danger, #dc2626);border-radius:var(--radius-sm)">
-        <strong style="color:var(--danger, #dc2626);font-size:14px">{$t("No email was sent! Email / SMTP is not configured.")}</strong>
-        <div style="color:var(--danger, #dc2626);font-size:13px;margin-top:4px;font-weight:400">
-          {$t("You must deliver this password to the user in person!")}
-        </div>
-      </div>
-    {/if}
-  {:else}
+  {#if !showTempPassword}
+
     <div>
       <div class="field-row">
         <div>
@@ -500,14 +484,7 @@
     </div>
   {/if}
   <svelte:fragment slot="footer">
-    {#if showTempPassword}
-      <button class="zf-btn" on:click={copyPassword}>
-        {copied ? $t("Copied!") : $t("Copy")}
-      </button>
-      <button class="zf-btn zf-btn-primary" on:click={dismissTempPassword}
-        >{$t("OK")}</button
-      >
-    {:else}
+    {#if !showTempPassword}
       <button class="zf-btn" on:click={() => dialog.close()}>{$t("Cancel")}</button>
       <button class="zf-btn zf-btn-primary" on:click={save}>
         {$t(isNew ? "Add Member" : "Save")}

@@ -4,10 +4,12 @@
   import { t, roleLabel } from "../i18n.js";
   import Icon from "../Icons.svelte";
   import UserDialog from "../dialogs/UserDialog.svelte";
+  import TempPasswordDialog from "../dialogs/TempPasswordDialog.svelte";
   import { confirmDialog } from "../confirm.js";
 
   let users = [];
   let showDialog = null;
+  let resetPwData = null;
 
   async function load() {
     users = await api("/users");
@@ -30,13 +32,14 @@
     )
       return;
     try {
-      const resetResponse = await api(`/users/${userId}/reset-password`, { method: "POST" });
-      toast(
-        $t("Temporary password: {password}", {
-          password: resetResponse.temporary_password,
-        }),
-        "info",
-      );
+      const [resetResponse, settingsResponse] = await Promise.all([
+        api(`/users/${userId}/reset-password`, { method: "POST" }),
+        api("/settings"),
+      ]);
+      resetPwData = {
+        password: resetResponse.temporary_password,
+        smtpEnabled: !!settingsResponse.smtp_enabled,
+      };
     } catch (e) {
       toast($t(e?.message || "Error"), "error");
     }
@@ -163,6 +166,15 @@
     {/each}
   </div>
 </div>
+
+{#if resetPwData}
+  <TempPasswordDialog
+    password={resetPwData.password}
+    smtpEnabled={resetPwData.smtpEnabled}
+    title={$t("Password reset.")}
+    onDismiss={() => (resetPwData = null)}
+  />
+{/if}
 
 {#if showDialog}
   <UserDialog
