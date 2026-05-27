@@ -204,6 +204,7 @@
       body.tracks_time = normalizedRole === "admin" ? tracks_time : true;
       if (isNew) {
         const createdUser = await api("/users", { method: "POST", body });
+        dialog.close(true);
         showTempPassword = createdUser.temporary_password;
       } else {
         await api("/users/" + template.id, { method: "PUT", body });

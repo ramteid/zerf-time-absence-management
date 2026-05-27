@@ -32,14 +32,13 @@
     )
       return;
     try {
-      const [resetResponse, settingsResponse] = await Promise.all([
-        api(`/users/${userId}/reset-password`, { method: "POST" }),
-        api("/settings"),
-      ]);
-      resetPwData = {
-        password: resetResponse.temporary_password,
-        smtpEnabled: !!settingsResponse.smtp_enabled,
-      };
+      const resetResponse = await api(`/users/${userId}/reset-password`, { method: "POST" });
+      let smtpEnabled = false;
+      try {
+        const settingsResponse = await api("/settings");
+        smtpEnabled = !!settingsResponse.smtp_enabled;
+      } catch {}
+      resetPwData = { password: resetResponse.temporary_password, smtpEnabled };
     } catch (e) {
       toast($t(e?.message || "Error"), "error");
     }
