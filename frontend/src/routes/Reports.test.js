@@ -11,6 +11,7 @@ const mockState = vi.hoisted(() => ({
   flextimeRows: [],
   leaveBalance: null,
   users: [],
+  usersQueue: [],
   teamAbsences: [],
   ownAbsencesByYear: {},
   holidaysByYear: {},
@@ -26,7 +27,12 @@ vi.mock("../api.js", () => ({
     if (path.startsWith("/leave-balance/")) return mockState.leaveBalance;
     if (path.startsWith("/reports/overtime?")) return mockState.overtimeRows;
     if (path.startsWith("/reports/flextime?")) return mockState.flextimeRows;
-    if (path === "/users") return mockState.users;
+    if (path === "/users") {
+      if (mockState.usersQueue.length > 0) {
+        return await mockState.usersQueue.shift();
+      }
+      return mockState.users;
+    }
     if (path.startsWith("/absences/all?")) return mockState.teamAbsences;
     if (path.startsWith("/absences?year=")) {
       const year = path.split("year=")[1];
@@ -44,6 +50,16 @@ async function settle() {
   await Promise.resolve();
   await new Promise((resolve) => setTimeout(resolve, 0));
   await Promise.resolve();
+}
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
 }
 
 // Poll until a matching element appears in `target`, or throw after `timeout` ms.
@@ -154,6 +170,7 @@ describe("Reports", () => {
     ];
     mockState.flextimeRows = [];
     mockState.users = [];
+    mockState.usersQueue = [];
     mockState.teamAbsences = [];
     mockState.ownAbsencesByYear = {};
     mockState.holidaysByYear = {};
@@ -848,6 +865,75 @@ describe("Reports", () => {
     expect(api.mock.calls.some(([path]) => path === "/users")).toBe(true);
     expect(select?.options.length).toBe(1);
     expect(select?.options[0].textContent).toContain("Ben Report");
+  }, 60000);
+
+  it("ignores stale report-user loads after current user changes", async () => {
+    currentUser.set({
+      id: 7,
+      role: "team_lead",
+      first_name: "Ada",
+      last_name: "Lead",
+      weekly_hours: 40,
+      workdays_per_week: 5,
+      start_date: "2020-01-01",
+      permissions: { can_view_team_reports: true },
+      tracks_time: true,
+    });
+    const staleUsers = deferred();
+    const currentUsers = deferred();
+    mockState.usersQueue = [staleUsers.promise, currentUsers.promise];
+
+    component = mount(Reports, { target });
+    await settle();
+
+    currentUser.set({
+      id: 9,
+      role: "team_lead",
+      first_name: "Cara",
+      last_name: "Lead",
+      weekly_hours: 40,
+      workdays_per_week: 5,
+      start_date: "2020-01-01",
+      permissions: { can_view_team_reports: true },
+      tracks_time: true,
+    });
+    await settle();
+
+    currentUsers.resolve([
+      {
+        id: 9,
+        first_name: "Cara",
+        last_name: "Lead",
+        workdays_per_week: 5,
+        role: "team_lead",
+        tracks_time: true,
+        start_date: "2020-01-01",
+      },
+    ]);
+    const select = await waitForSelectOptions(
+      target,
+      "#report-user-id",
+      1,
+      20000,
+    );
+    expect(select.options[0].textContent).toContain("Cara Lead");
+
+    staleUsers.resolve([
+      {
+        id: 8,
+        first_name: "Stale",
+        last_name: "Employee",
+        workdays_per_week: 5,
+        role: "employee",
+        tracks_time: true,
+        start_date: "2020-01-01",
+      },
+    ]);
+    await settle();
+
+    expect(select.options.length).toBe(1);
+    expect(select.options[0].textContent).toContain("Cara Lead");
+    expect(select.textContent).not.toContain("Stale Employee");
   }, 60000);
 
   // Bug: admin with tracks_time=true (re-enabled) can view reports for other
