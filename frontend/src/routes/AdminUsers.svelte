@@ -33,12 +33,7 @@
       return;
     try {
       const resetResponse = await api(`/users/${userId}/reset-password`, { method: "POST" });
-      let smtpEnabled = false;
-      try {
-        const settingsResponse = await api("/settings");
-        smtpEnabled = !!settingsResponse.smtp_enabled;
-      } catch {}
-      resetPwData = { password: resetResponse.temporary_password, smtpEnabled };
+      resetPwData = { password: resetResponse.temporary_password };
     } catch (e) {
       toast($t(e?.message || "Error"), "error");
     }
@@ -169,7 +164,6 @@
 {#if resetPwData}
   <TempPasswordDialog
     password={resetPwData.password}
-    smtpEnabled={resetPwData.smtpEnabled}
     title={$t("Password reset.")}
     onDismiss={() => (resetPwData = null)}
   />
