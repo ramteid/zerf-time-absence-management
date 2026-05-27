@@ -243,7 +243,8 @@
   const routeAccess = {
     "/time": (user) => user?.tracks_time !== false,
     "/absences": (user) => user?.tracks_time !== false,
-    "/calendar": (user) => user?.tracks_time !== false,
+    "/calendar": (user) =>
+      user?.tracks_time !== false || !!user?.permissions?.can_view_team_reports,
     "/dashboard": (user) => !!user?.permissions?.can_view_dashboard,
     "/reports": (user) => !!user?.permissions?.can_view_reports,
     "/team-settings": (user) => !!user?.permissions?.can_manage_team_settings,
