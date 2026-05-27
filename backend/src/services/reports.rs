@@ -4,10 +4,7 @@ use crate::middleware::auth::User;
 use crate::roles::is_assistant_role;
 use crate::time_calc;
 use crate::AppState;
-use axum::{
-    http::header,
-    response::Response,
-};
+use axum::{http::header, response::Response};
 use chrono::{Datelike, Duration, NaiveDate, NaiveTime};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -31,12 +28,21 @@ pub async fn assert_can_access_user(
     requester: &User,
     target_uid: i64,
 ) -> AppResult<()> {
-    // Pure-admin users (tracks_time=false) may not view their own report data.
-    // This check is report-specific and runs before the shared base logic.
-    if !requester.tracks_time && requester.id == target_uid {
+    crate::services::users::assert_can_access_user(app_state, requester, target_uid).await?;
+    let target_user = app_state
+        .db
+        .users
+        .find_by_id(target_uid)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    // Reports describe a user's own tracked working time. Pure-admin accounts
+    // and inactive users do not have an active reportable dataset, even when the
+    // requester is an admin who can otherwise read the account.
+    if !target_user.active || !target_user.tracks_time {
         return Err(AppError::Forbidden);
     }
-    crate::services::users::assert_can_access_user(app_state, requester, target_uid).await
+    Ok(())
 }
 
 pub fn month_bounds(month_str: &str) -> AppResult<(NaiveDate, NaiveDate)> {
@@ -309,7 +315,11 @@ pub async fn build_range(
 }
 
 /// Collects the Monday of every fully elapsed week (Sunday < today) that overlaps the given month.
-pub fn complete_weeks_in_month(month_start: NaiveDate, month_end: NaiveDate, today: NaiveDate) -> Vec<NaiveDate> {
+pub fn complete_weeks_in_month(
+    month_start: NaiveDate,
+    month_end: NaiveDate,
+    today: NaiveDate,
+) -> Vec<NaiveDate> {
     let first_monday = crate::time_calc::week_monday(month_start);
     let last_monday = crate::time_calc::week_monday(month_end);
     let mut mondays = Vec::new();
@@ -365,21 +375,20 @@ pub fn check_weeks_all_submitted(
     today: NaiveDate,
 ) -> bool {
     for &week_monday in complete_week_mondays {
-        let has_incomplete = (0..7i64)
-            .any(|d| incomplete_dates.contains(&(week_monday + Duration::days(d))));
+        let has_incomplete =
+            (0..7i64).any(|d| incomplete_dates.contains(&(week_monday + Duration::days(d))));
         if has_incomplete {
             return false;
         }
-        let has_submitted = (0..7i64)
-            .any(|d| submitted_dates.contains(&(week_monday + Duration::days(d))));
-        if has_submitted {
-            continue;
-        }
-        let all_excused = (0..i64::from(workdays_per_week)).all(|d| {
+        let all_required_days_covered = (0..i64::from(workdays_per_week)).all(|d| {
             let day = week_monday + Duration::days(d);
-            day < user_start_date || holiday_set.contains(&day) || absent_days.contains(&day) || day >= today
+            day < user_start_date
+                || holiday_set.contains(&day)
+                || absent_days.contains(&day)
+                || day >= today
+                || submitted_dates.contains(&day)
         });
-        if !all_excused {
+        if !all_required_days_covered {
             return false;
         }
     }
@@ -508,8 +517,7 @@ pub async fn build_month(
     .await?;
     report.weeks_all_submitted = Some(all_submitted);
     report.weeks_all_approved = Some(all_approved);
-    report.current_week_status =
-        current_week_status(pool, user_id, from, to, is_assistant).await?;
+    report.current_week_status = current_week_status(pool, user_id, from, to, is_assistant).await?;
     Ok(report)
 }
 
@@ -816,8 +824,7 @@ pub async fn build_overtime_rows_for_year(
             let month_report =
                 build_month_without_submission_status(pool, target_user_id, &month_label).await?;
             cumulative_min += month_report.diff_min;
-            submitted_cumulative_min +=
-                month_report.submitted_min - month_report.target_min;
+            submitted_cumulative_min += month_report.submitted_min - month_report.target_min;
         }
     }
 
@@ -1086,7 +1093,9 @@ mod tests {
         let monday = NaiveDate::from_ymd_opt(2026, 5, 4).unwrap();
         let complete_week_mondays = vec![monday];
         let mut submitted_dates = HashSet::new();
-        submitted_dates.insert(monday + Duration::days(1));
+        for offset in 0..5 {
+            submitted_dates.insert(monday + Duration::days(offset));
+        }
 
         assert!(check_weeks_all_submitted(
             &complete_week_mondays,
@@ -1099,9 +1108,19 @@ mod tests {
             NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
         ));
 
-        let holiday_set: HashSet<NaiveDate> = (0..5)
-            .map(|d| monday + Duration::days(d))
-            .collect();
+        submitted_dates.remove(&(monday + Duration::days(4)));
+        assert!(!check_weeks_all_submitted(
+            &complete_week_mondays,
+            &HashSet::new(),
+            &HashSet::new(),
+            &submitted_dates,
+            &HashSet::new(),
+            NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
+            5,
+            NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
+        ));
+
+        let holiday_set: HashSet<NaiveDate> = (0..5).map(|d| monday + Duration::days(d)).collect();
         assert!(check_weeks_all_submitted(
             &complete_week_mondays,
             &holiday_set,
@@ -1223,11 +1242,14 @@ mod tests {
         // April 27 (Monday); its Sunday is May 3. With today = May 1, even
         // that partial week is not yet complete (May 3 >= May 1).
         let month_start = NaiveDate::from_ymd_opt(2026, 5, 1).unwrap();
-        let month_end   = NaiveDate::from_ymd_opt(2026, 5, 31).unwrap();
-        let today       = NaiveDate::from_ymd_opt(2026, 5, 1).unwrap(); // first of month
+        let month_end = NaiveDate::from_ymd_opt(2026, 5, 31).unwrap();
+        let today = NaiveDate::from_ymd_opt(2026, 5, 1).unwrap(); // first of month
 
         let mondays = complete_weeks_in_month(month_start, month_end, today);
-        assert!(mondays.is_empty(), "expected no complete weeks, got {mondays:?}");
+        assert!(
+            mondays.is_empty(),
+            "expected no complete weeks, got {mondays:?}"
+        );
     }
 
     /// `check_weeks_all_submitted` considers a week fully excused when every
@@ -1238,7 +1260,7 @@ mod tests {
         let complete_weeks = vec![monday];
         // User starts on the Monday of the NEXT week.
         let user_start = NaiveDate::from_ymd_opt(2026, 5, 11).unwrap();
-        let today      = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
+        let today = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
 
         // No submitted entries, no holidays, no absences, but all workdays are
         // before user_start — the week must be considered excused.
@@ -1261,14 +1283,14 @@ mod tests {
         let monday = NaiveDate::from_ymd_opt(2026, 5, 4).unwrap();
         let complete_weeks = vec![monday];
         let user_start = NaiveDate::from_ymd_opt(2020, 1, 1).unwrap();
-        let today      = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
+        let today = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
 
         assert!(!check_weeks_all_submitted(
             &complete_weeks,
-            &HashSet::new(),   // no holidays
-            &HashSet::new(),   // no absences
-            &HashSet::new(),   // no submitted dates
-            &HashSet::new(),   // no incomplete dates
+            &HashSet::new(), // no holidays
+            &HashSet::new(), // no absences
+            &HashSet::new(), // no submitted dates
+            &HashSet::new(), // no incomplete dates
             user_start,
             5,
             today,
@@ -1286,7 +1308,7 @@ mod tests {
     #[test]
     fn validate_range_accepts_exactly_366_days() {
         let from = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
-        let to   = NaiveDate::from_ymd_opt(2027, 1, 2).unwrap(); // 366 days
+        let to = NaiveDate::from_ymd_opt(2027, 1, 2).unwrap(); // 366 days
         assert_eq!((to - from).num_days(), 366);
         assert!(validate_range(from, to).is_ok());
     }
@@ -1296,14 +1318,14 @@ mod tests {
     fn month_bounds_december_wraps_to_january_next_year() {
         let (from, to) = month_bounds("2026-12").unwrap();
         assert_eq!(from, NaiveDate::from_ymd_opt(2026, 12, 1).unwrap());
-        assert_eq!(to,   NaiveDate::from_ymd_opt(2026, 12, 31).unwrap());
+        assert_eq!(to, NaiveDate::from_ymd_opt(2026, 12, 31).unwrap());
     }
 
     /// `expand_absence_date_set` returns an empty set for empty input.
     #[test]
     fn expand_absence_date_set_returns_empty_for_no_ranges() {
         let from = NaiveDate::from_ymd_opt(2026, 5, 1).unwrap();
-        let to   = NaiveDate::from_ymd_opt(2026, 5, 31).unwrap();
+        let to = NaiveDate::from_ymd_opt(2026, 5, 31).unwrap();
         let set = expand_absence_date_set(&[], from, to);
         assert!(set.is_empty());
     }
@@ -1313,9 +1335,21 @@ mod tests {
     #[test]
     fn sort_categories_desc_with_all_equal_minutes_sorts_by_name() {
         let mut cats = vec![
-            CategoryTotal { category: "Zebra".to_string(), color: "#3".to_string(), minutes: 60 },
-            CategoryTotal { category: "Alpha".to_string(), color: "#1".to_string(), minutes: 60 },
-            CategoryTotal { category: "Mango".to_string(), color: "#2".to_string(), minutes: 60 },
+            CategoryTotal {
+                category: "Zebra".to_string(),
+                color: "#3".to_string(),
+                minutes: 60,
+            },
+            CategoryTotal {
+                category: "Alpha".to_string(),
+                color: "#1".to_string(),
+                minutes: 60,
+            },
+            CategoryTotal {
+                category: "Mango".to_string(),
+                color: "#2".to_string(),
+                minutes: 60,
+            },
         ];
         sort_categories_desc(&mut cats);
         assert_eq!(cats[0].category, "Alpha");
@@ -1398,7 +1432,7 @@ mod tests {
     #[test]
     fn validate_range_rejects_inverted_and_too_long_ranges() {
         let from = NaiveDate::from_ymd_opt(2026, 5, 1).unwrap();
-        let to   = NaiveDate::from_ymd_opt(2026, 4, 1).unwrap(); // inverted
+        let to = NaiveDate::from_ymd_opt(2026, 4, 1).unwrap(); // inverted
         assert!(validate_range(from, to).is_err());
 
         let long_to = NaiveDate::from_ymd_opt(2027, 5, 3).unwrap(); // > 366 days
@@ -1410,7 +1444,7 @@ mod tests {
     #[test]
     fn validate_range_accepts_366_day_flextime_window() {
         let from = NaiveDate::from_ymd_opt(2025, 5, 1).unwrap();
-        let to   = NaiveDate::from_ymd_opt(2026, 5, 2).unwrap(); // 366 days
+        let to = NaiveDate::from_ymd_opt(2026, 5, 2).unwrap(); // 366 days
         assert_eq!((to - from).num_days(), 366);
         assert!(validate_range(from, to).is_ok());
     }

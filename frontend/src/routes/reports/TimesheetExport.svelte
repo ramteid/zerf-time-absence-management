@@ -1,10 +1,6 @@
 <script>
   import { currentUser, settings, toast } from "../../stores.js";
-  import {
-    t,
-    absenceKindLabel,
-    statusLabel,
-  } from "../../i18n.js";
+  import { t, absenceKindLabel, statusLabel } from "../../i18n.js";
   import { isoDate, appTodayDate, minToHM } from "../../format.js";
   import Icon from "../../Icons.svelte";
   import DatePicker from "../../DatePicker.svelte";
@@ -14,7 +10,10 @@
     getFlextimeReport,
     getRangeReport,
   } from "../../lib/api/reportsApi.js";
-  import { isoMonthStart } from "../../lib/domain/dates.js";
+  import {
+    isReportRangeTooLong,
+    isoMonthStart,
+  } from "../../lib/domain/dates.js";
   import { findUserById, hasUserId } from "../../lib/domain/users.js";
   import { buildReportPdf } from "../../lib/exports/reportPdf.js";
 
@@ -56,7 +55,8 @@
   }
 
   // Lower bound: the selected export user's own start date.
-  $: csvUserMinDate = findUserById(users, csvUserId, $currentUser)?.start_date || null;
+  $: csvUserMinDate =
+    findUserById(users, csvUserId, $currentUser)?.start_date || null;
 
   // Keep defaults aligned with app-timezone date changes if untouched.
   let previousCurrentMonthStr = "";
@@ -120,6 +120,14 @@
     setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 
+  function safeFileNamePart(value, fallback = "report") {
+    const cleaned = String(value || "")
+      .trim()
+      .replace(/[^A-Za-z0-9._-]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    return cleaned || fallback;
+  }
+
   async function fetchExportData() {
     const exportUserHasFlextime = userHasFlextime(csvUserId);
     return Promise.all([
@@ -146,6 +154,10 @@
 
   function validateRange() {
     csvError = "";
+    if (csvUserId == null) {
+      csvError = $t("Select an employee.");
+      return false;
+    }
     if (!csvFrom || !csvTo) {
       csvError = $t("Invalid date.");
       return false;
@@ -154,12 +166,14 @@
       csvError = $t("From cannot be after To.");
       return false;
     }
+    if (isReportRangeTooLong(csvFrom, csvTo)) {
+      csvError = $t("Date range must not exceed 366 days.");
+      return false;
+    }
     return true;
   }
 
   async function exportCsv() {
-    // Guard: no user selected yet (pure-admin before users have loaded).
-    if (csvUserId == null) return;
     if (exportInProgress) return;
     if (!validateRange()) return;
     exportInProgress = true;
@@ -279,7 +293,10 @@
       const blob = new Blob(["\uFEFF" + rows.join("\r\n")], {
         type: "text/csv;charset=utf-8",
       });
-      downloadBlob(blob, `stundennachweis-${csvUserId}-${csvFrom}_${csvTo}.csv`);
+      downloadBlob(
+        blob,
+        `stundennachweis-${safeFileNamePart(csvUserId)}-${csvFrom}_${csvTo}.csv`,
+      );
       toast($t("CSV download started."), "ok");
     } catch (e) {
       csvError = $t(e?.message || "Export failed.");
@@ -308,7 +325,7 @@
       });
       downloadBlob(
         blob,
-        `stundennachweis-${fullName.replace(/\s+/g, "-")}-${csvFrom}_${csvTo}.pdf`,
+        `stundennachweis-${safeFileNamePart(fullName)}-${csvFrom}_${csvTo}.pdf`,
       );
       toast($t("PDF download started."), "ok");
     } catch (e) {
@@ -338,16 +355,16 @@
   <div class="field-row" style="margin-bottom:12px">
     <div>
       <label class="zf-label" for="csv-from">{$t("From")}</label>
-      <DatePicker id="csv-from" bind:value={csvFrom} min={csvUserMinDate} max={csvTo} />
+      <DatePicker
+        id="csv-from"
+        bind:value={csvFrom}
+        min={csvUserMinDate}
+        max={csvTo}
+      />
     </div>
     <div>
       <label class="zf-label" for="csv-to">{$t("To")}</label>
-      <DatePicker
-        id="csv-to"
-        bind:value={csvTo}
-        min={csvFrom}
-        max={todayIso}
-      />
+      <DatePicker id="csv-to" bind:value={csvTo} min={csvFrom} max={todayIso} />
     </div>
   </div>
 
@@ -356,14 +373,14 @@
     <button
       class="zf-btn zf-btn-primary"
       on:click={exportCsv}
-      disabled={exportInProgress}
+      disabled={exportInProgress || csvUserId == null}
     >
       <Icon name="Download" size={14} />{$t("Export CSV")}
     </button>
     <button
       class="zf-btn zf-btn-primary"
       on:click={exportPdf}
-      disabled={exportInProgress}
+      disabled={exportInProgress || csvUserId == null}
     >
       <Icon name="FileText" size={14} />{$t("Export PDF")}
     </button>
