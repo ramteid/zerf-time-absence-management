@@ -291,6 +291,19 @@ pub async fn auth_middleware(
         overtime_start_balance_min: repo_user.overtime_start_balance_min,
         tracks_time: repo_user.tracks_time,
     };
+
+    // Enforce must_change_password: users with a temporary password are only
+    // allowed to access identity and password-change endpoints. All other API
+    // calls are blocked until the password is changed. This prevents temporary
+    // credentials from being used to access sensitive data.
+    if user.must_change_password {
+        let request_path = parts.uri.path();
+        let allowed_paths = ["/api/v1/auth/me", "/api/v1/auth/password", "/api/v1/auth/logout", "/api/v1/auth/preferences", "/api/v1/settings/public"];
+        if !allowed_paths.iter().any(|p| request_path == *p) {
+            return Err(AppError::Forbidden);
+        }
+    }
+
     parts.extensions.insert(user);
     Ok(next.run(Request::from_parts(parts, body)).await)
 }

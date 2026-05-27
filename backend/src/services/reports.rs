@@ -26,6 +26,9 @@ pub fn absence_removes_target(kind: &str) -> bool {
 /// Additionally, pure-admin users (tracks_time=false) are blocked from
 /// accessing their own reports since they have no time-tracking data.
 /// They may still access other users' reports as admins.
+///
+/// The target user must also have tracks_time=true to have report data.
+/// Requesting reports for a user with tracks_time=false returns Forbidden.
 pub async fn assert_can_access_user(
     app_state: &AppState,
     requester: &User,
@@ -36,7 +39,22 @@ pub async fn assert_can_access_user(
     if !requester.tracks_time && requester.id == target_uid {
         return Err(AppError::Forbidden);
     }
-    crate::services::users::assert_can_access_user(app_state, requester, target_uid).await
+    crate::services::users::assert_can_access_user(app_state, requester, target_uid).await?;
+    // The target user must have time tracking enabled to have any report data.
+    // Reject requests for users with tracks_time=false to prevent information
+    // leakage and avoid returning meaningless empty reports.
+    if requester.id != target_uid {
+        let target_user = app_state
+            .db
+            .users
+            .find_by_id(target_uid)
+            .await?
+            .ok_or(AppError::NotFound)?;
+        if !target_user.tracks_time {
+            return Err(AppError::Forbidden);
+        }
+    }
+    Ok(())
 }
 
 pub fn month_bounds(month_str: &str) -> AppResult<(NaiveDate, NaiveDate)> {

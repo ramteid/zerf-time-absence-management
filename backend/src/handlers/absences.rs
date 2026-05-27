@@ -166,9 +166,34 @@ pub async fn get_one(
     Path(absence_id): Path<i64>,
 ) -> AppResult<Json<Absence>> {
     let absence = app_state.db.absences.find_by_id(absence_id).await?;
-    // Only the owner or a lead/admin may fetch a single absence.
-    if absence.user_id != requester.id && !requester.is_lead() {
-        return Err(crate::error::AppError::Forbidden);
+    // Only the owner or an authorized lead/admin may fetch a single absence.
+    if absence.user_id != requester.id {
+        // Non-leads cannot view other users' absences at all.
+        if !requester.is_lead() {
+            return Err(crate::error::AppError::Forbidden);
+        }
+        // Non-admin leads can only view absences of their direct reports,
+        // and cannot view admin-subject absences.
+        if !requester.is_admin() {
+            let is_report = app_state
+                .db
+                .users
+                .is_direct_report(absence.user_id, requester.id)
+                .await?;
+            if !is_report {
+                return Err(crate::error::AppError::Forbidden);
+            }
+            // Non-admin leads cannot view admin users' absences (admin-subject rule).
+            let target_user = app_state
+                .db
+                .users
+                .find_by_id(absence.user_id)
+                .await?
+                .ok_or(crate::error::AppError::NotFound)?;
+            if crate::roles::is_admin_role(&target_user.role) {
+                return Err(crate::error::AppError::Forbidden);
+            }
+        }
     }
     let mut mapped = repo_absence_to_service(absence);
     let before_data_map =
@@ -249,6 +274,20 @@ pub async fn balance(
     Query(query): Query<BalanceQuery>,
 ) -> AppResult<Json<LeaveBalance>> {
     assert_can_access_user(&app_state, &requester, target_user_id).await?;
+    // Pure-admin users (tracks_time=false) have no absences or leave balance.
+    if target_user_id != requester.id {
+        let target_user = app_state
+            .db
+            .users
+            .find_by_id(target_user_id)
+            .await?
+            .ok_or(crate::error::AppError::NotFound)?;
+        if !target_user.tracks_time {
+            return Err(crate::error::AppError::Forbidden);
+        }
+    } else {
+        require_tracks_time(&requester)?;
+    }
     let year = match query.year {
         Some(value) => value,
         None => crate::services::settings::app_current_year(&app_state.pool).await,
