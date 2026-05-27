@@ -20,9 +20,10 @@ pub fn absence_removes_target(kind: &str) -> bool {
 /// reports (users whose `approver_id` matches the lead's id). Every user may
 /// always access their own data.
 ///
-/// Additionally, pure-admin users (tracks_time=false) are blocked from
-/// accessing their own reports since they have no time-tracking data.
-/// They may still access other users' reports as admins.
+/// Additionally, targets must be active users with time tracking enabled.
+/// Pure-admin accounts (tracks_time=false) and inactive users have no
+/// reportable personal dataset. Pure-admin requesters may still access active
+/// time-tracking users' reports as admins.
 pub async fn assert_can_access_user(
     app_state: &AppState,
     requester: &User,

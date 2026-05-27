@@ -15,28 +15,46 @@
   // their own data.
   let users = [];
   let lastUsersLoadKey = "";
-  async function initUsers() {
+  let latestUsersLoadRequest = 0;
+
+  function usersLoadKey(user) {
+    return user?.id
+      ? `${user.id}:${!!user?.permissions?.can_view_team_reports}:${user.tracks_time !== false}`
+      : "";
+  }
+
+  function isCurrentUsersLoad(loadKey, requestId) {
+    return loadKey === lastUsersLoadKey && requestId === latestUsersLoadRequest;
+  }
+
+  async function initUsers(loadKey, requestId, user) {
     try {
-      const canTeam = !!$currentUser?.permissions?.can_view_team_reports;
-      if (!$currentUser?.id) {
-        users = [];
+      const canTeam = !!user?.permissions?.can_view_team_reports;
+      if (!user?.id) {
+        if (isCurrentUsersLoad(loadKey, requestId)) {
+          users = [];
+        }
         return;
       }
-      users = await getUsersForReports(canTeam, $currentUser);
+      const loadedUsers = await getUsersForReports(canTeam, user);
+      if (isCurrentUsersLoad(loadKey, requestId)) {
+        users = loadedUsers;
+      }
     } catch (e) {
-      toast($t(e?.message || "Error"), "error");
+      if (isCurrentUsersLoad(loadKey, requestId)) {
+        toast($t(e?.message || "Error"), "error");
+      }
     }
   }
 
   $: canViewTeamReports = !!$currentUser?.permissions?.can_view_team_reports;
   $: {
-    const loadKey = $currentUser?.id
-      ? `${$currentUser.id}:${canViewTeamReports}:${$currentUser.tracks_time !== false}`
-      : "";
+    const user = $currentUser;
+    const loadKey = usersLoadKey(user);
     if (loadKey !== lastUsersLoadKey) {
-      // eslint-disable-next-line no-useless-assignment
       lastUsersLoadKey = loadKey;
-      initUsers();
+      latestUsersLoadRequest += 1;
+      initUsers(loadKey, latestUsersLoadRequest, user);
     }
   }
   // Pure-admin users (admins with tracks_time=false) have no personal data, so
