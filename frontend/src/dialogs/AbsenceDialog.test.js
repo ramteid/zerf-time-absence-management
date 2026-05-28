@@ -96,8 +96,9 @@ describe("AbsenceDialog", () => {
   });
 
   it("shows all absence type options in the dropdown", async () => {
-    // Employees may request vacation, sick leave, training, special leave,
-    // unpaid, general absence, or flextime reduction. All must be available.
+    // The user-guide lists exactly seven allowed absence kinds. All must
+    // appear in the dropdown so employees are never blocked from submitting
+    // a valid request type.
     const onClose = vi.fn();
     component = mount(AbsenceDialog, {
       target,
@@ -110,6 +111,9 @@ describe("AbsenceDialog", () => {
     expect(options).toContain("vacation");
     expect(options).toContain("sick");
     expect(options).toContain("training");
+    expect(options).toContain("special_leave");
+    expect(options).toContain("unpaid");
+    expect(options).toContain("general_absence");
     expect(options).toContain("flextime_reduction");
   });
 
