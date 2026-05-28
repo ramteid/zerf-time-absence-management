@@ -174,3 +174,48 @@ pip install --break-system-packages psycopg2-binary argon2-cffi python-dotenv
 ```
 
 The script writes one transaction; either every row lands or nothing does. Login passwords for the generated personas are printed to stderr on success.
+
+## Updating to a new version
+
+Released versions are published as Docker images on the GitHub Container Registry. To update a running deployment:
+
+```bash
+# Pin to a specific release (recommended for production)
+# Set ZERF_VERSION=1.2.0 in your .env file, then:
+docker compose -f docker/docker-compose-local.yml pull
+docker compose -f docker/docker-compose-local.yml up -d
+
+# Or always follow the latest release
+# ZERF_VERSION=latest (the default) in .env
+docker compose -f docker/docker-compose-local.yml pull
+docker compose -f docker/docker-compose-local.yml up -d
+```
+
+On restart the app automatically applies any pending database migrations.
+
+Available images (all tagged with the version and `latest`):
+
+| Image | Purpose |
+|-------|---------|
+| `ghcr.io/ramteid/zerf-work-time-tracking` | Application (backend + frontend) |
+| `ghcr.io/ramteid/zerf-work-time-tracking-postgres` | PostgreSQL with pg_tde encryption |
+| `ghcr.io/ramteid/zerf-work-time-tracking-caddy` | Caddy reverse proxy (public deployment) |
+
+## Cutting a release
+
+Commits follow [Conventional Commits](https://www.conventionalcommits.org/) format — the changelog is generated automatically by [git-cliff](https://git-cliff.org):
+
+```
+feat: add CSV export for time entries
+fix: session timeout after long idle periods
+chore: update dependencies
+```
+
+Tag and push — the CI release workflow handles everything else:
+
+```bash
+git tag -a vX.Y.Z -m "Release vX.Y.Z"
+git push origin vX.Y.Z
+```
+
+The release workflow injects the version into `Cargo.toml` and `package.json` (without committing), builds and pushes all three Docker images tagged with the version and `latest`, generates the changelog from commit history via git-cliff, and creates a GitHub Release with it as release notes.
