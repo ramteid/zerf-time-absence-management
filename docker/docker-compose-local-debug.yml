@@ -1,8 +1,0 @@
-services:
-  app:
-    build:
-      args:
-        ZERF_BUILD_PROFILE: debug
-        ZERF_FRONTEND_DEBUG_BUILD: "true"
-    environment:
-      - RUST_BACKTRACE=1

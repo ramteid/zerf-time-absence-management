@@ -144,7 +144,6 @@ docker exec zerf-postgres rm /tmp/pre-enc.dump
 | Mode | Command | Use case |
 | --- | --- | --- |
 | Local | `./start_local.sh` | Run the app locally at `http://localhost:3333` without the public reverse proxy. |
-| Local debug | `./start_local_debug.sh` | Run a debug-oriented local stack for backend and frontend debugging. |
 | Public | `./start_public.sh` | Run the public deployment stack with Caddy and HTTPS. |
 
 ### 3. Initial setup

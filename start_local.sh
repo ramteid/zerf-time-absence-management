@@ -21,6 +21,14 @@ else
   build_flag="--no-build"
 fi
 
+# DEBUG=true → debug build profile, unminified frontend, RUST_BACKTRACE=1.
+debug="$(grep -E '^DEBUG=' .env 2>/dev/null | cut -d= -f2 || true)"
+if [ "${debug:-false}" = "true" ]; then
+  export ZERF_BUILD_PROFILE=debug
+  export ZERF_FRONTEND_DEBUG_BUILD=true
+  export RUST_BACKTRACE=1
+fi
+
 docker compose -f docker/docker-compose-local.yml --env-file .env up -d "$build_flag"
 
 echo "App is running at http://localhost:3333 (also reachable from the LAN on port 3333)"
