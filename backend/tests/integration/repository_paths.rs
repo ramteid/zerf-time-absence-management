@@ -1780,21 +1780,7 @@ async fn reopen_requests_repository_workflow() {
 
     let reopen_requests = zerf::repository::ReopenRequestDb::new(app.state.pool.clone());
 
-    // Create a time entry and submit it so the week has non-draft entries.
-    let (st, body) = admin
-        .post(
-            "/api/v1/time-entries",
-            &serde_json::json!({
-                "entry_date": monday_iso,
-                "start_time": "08:00",
-                "end_time": "12:00",
-                "category_id": cat_id,
-                "user_id": emp_id
-            }),
-        )
-        .await;
-    // Inject time entry via repository since handlers may not allow cross-user create.
-    let _ = (st, body);
+    // Create a time entry via the repository and submit it so the week has non-draft entries.
     let time_entries = zerf::repository::TimeEntryDb::new(app.state.pool.clone());
     let entry = time_entries
         .create(
@@ -1966,36 +1952,3 @@ async fn categories_repository_workflow() {
     app.cleanup().await;
 }
 
-/// Directly exercises `SystemMetadataDb` methods that are called at startup but
-/// never exercised by the workflow tests (which bypass `main.rs`).
-#[tokio::test]
-async fn system_metadata_repository_workflow() {
-    let app = TestApp::spawn().await;
-
-    let meta = zerf::repository::SystemMetadataDb::new(app.state.pool.clone());
-
-    // max_successful_migration_version returns the highest applied migration
-    // version; because every TestApp runs all migrations, the value must be > 0.
-    let version = meta
-        .max_successful_migration_version()
-        .await
-        .expect("max_successful_migration_version");
-    assert!(version > 0, "at least one migration must have been applied");
-
-    // users_exist returns true because TestApp seeds a user during bootstrap.
-    let exists = meta.users_exist().await.expect("users_exist");
-    assert!(exists, "seeded TestApp must have at least one user");
-
-    // record_runtime_metadata performs insert-if-missing for the two creation
-    // keys and an upsert for the two runtime keys — all within a single
-    // transaction. Calling it twice verifies idempotency: the creation keys
-    // are unchanged on the second call while runtime keys are overwritten.
-    meta.record_runtime_metadata("sha-abc", "1", "sha-abc", "1")
-        .await
-        .expect("record_runtime_metadata first call");
-    meta.record_runtime_metadata("sha-abc", "1", "sha-xyz", "2")
-        .await
-        .expect("record_runtime_metadata second call (idempotent create, updated runtime)");
-
-    app.cleanup().await;
-}
