@@ -43,6 +43,7 @@ jobs:
           push: true
           build-args: |
             ZERF_GIT_COMMIT=${{ github.sha }}
+            ZERF_VERSION=${{ env.VERSION }}
           tags: |
             ${{ env.IMAGE_BASE }}:${{ env.VERSION }}
             ${{ env.IMAGE_BASE }}:latest
