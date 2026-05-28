@@ -152,8 +152,10 @@ describe("AbsenceDetailDialog", () => {
   });
 
   it("hides Cancel button when the absence is not cancellable", async () => {
-    // A requested (not yet approved) absence cannot be cancelled — it must
-    // be withdrawn directly. Showing a Cancel button here would confuse users.
+    // Rejected, already-cancelled, and cancellation-pending absences cannot
+    // be cancelled again. The backend sets cancellable=false for these states
+    // and the Cancel button must be absent so employees cannot trigger an
+    // invalid state transition.
     component = mount(AbsenceDetailDialog, {
       target,
       props: {
