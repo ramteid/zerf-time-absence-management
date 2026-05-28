@@ -394,3 +394,19 @@ grep -rn "axum::extract\|axum::response\|axum::routing\|axum::Json" backend/src/
 - Translate all texts that are displayed to the user (UI, errors, E-Mail, etc.)
 - Translations must be handled centrally in i18n.rs for the backend and i18n.js for the frontend.
 - Update docs/user-guide.md to reflect the correct app behavior.
+
+## Release Process
+
+Commits follow [Conventional Commits](https://www.conventionalcommits.org/) format — git-cliff reads them to generate the changelog automatically.
+
+Tag and push — the CI release workflow takes it from there:
+
+```bash
+git tag -a vX.Y.Z -m "Release vX.Y.Z"
+git push origin vX.Y.Z
+```
+
+The CI release workflow (`release.yml`) then:
+1. Injects the tag version into `Cargo.toml` and `package.json` (no commit)
+2. Builds and pushes all three Docker images tagged with the version and `latest`
+3. Generates the changelog via git-cliff and creates a GitHub Release with it as release notes
