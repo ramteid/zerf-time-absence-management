@@ -53,8 +53,10 @@ FROM debian:trixie-slim
 ARG APP_UID=10001
 ARG APP_GID=10001
 ARG ZERF_GIT_COMMIT=unknown
+ARG ZERF_VERSION=unknown
 
-LABEL org.opencontainers.image.revision="${ZERF_GIT_COMMIT}"
+LABEL org.opencontainers.image.revision="${ZERF_GIT_COMMIT}" \
+      org.opencontainers.image.version="${ZERF_VERSION}"
 
 # Minimal runtime deps: `tini` for signal handling and `wget` for health checks.
 RUN apt-get update && \

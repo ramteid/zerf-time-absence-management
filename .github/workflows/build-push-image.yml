@@ -58,6 +58,9 @@ jobs:
           context: .
           file: docker/app.Dockerfile
           push: true
+          build-args: |
+            ZERF_GIT_COMMIT=${{ github.sha }}
+            ZERF_VERSION=sha-${{ github.sha }}
           tags: |
             ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
             ${{ env.IMAGE_NAME }}:latest
