@@ -14,9 +14,7 @@ async fn auth_full_workflow() {
 
     // -- Me payload provides role-shaped view data --
     {
-        let admin = app.client();
-        let (st, _) = admin.login("admin@example.com", &app.admin_password).await;
-        assert_eq!(st, StatusCode::OK, "admin login");
+        let admin = admin_login(&app).await;
 
         let (st, me) = admin.get("/api/v1/auth/me").await;
         assert_eq!(st, StatusCode::OK);
@@ -354,7 +352,10 @@ async fn auth_full_workflow() {
 
     // -- Preferences persist and logout revokes all sessions for the same user --
     {
-        let admin = admin_login(&app).await;
+        // Password was already changed to "AdminPass!234" by the first block.
+        let admin = app.client();
+        let (st, _) = admin.login("admin@example.com", "AdminPass!234").await;
+        assert_eq!(st, StatusCode::OK, "admin login for preferences test");
         let second_session = app.client();
         let (st, _) = second_session.login("admin@example.com", "AdminPass!234").await;
         assert_eq!(st, StatusCode::OK, "second admin session login");

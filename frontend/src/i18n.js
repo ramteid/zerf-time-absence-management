@@ -1021,6 +1021,7 @@ const TRANSLATIONS = {
     "Default (all years without override)":
       "Standard (alle Jahre ohne Ausnahme)",
     "User created.": "Benutzer erstellt.",
+    "Password reset.": "Passwort zurückgesetzt.",
     "Temporary password:": "Temporäres Passwort:",
     Team: "Team",
     // Team Settings

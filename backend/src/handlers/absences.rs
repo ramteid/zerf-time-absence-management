@@ -73,6 +73,21 @@ pub async fn list_all(
     if !requester.is_lead() {
         return Err(crate::error::AppError::Forbidden);
     }
+    // Enforce a maximum date range to prevent unbounded queries (DoS).
+    if let (Some(from), Some(to)) = (query.from, query.to) {
+        if from > to {
+            return Err(crate::error::AppError::BadRequest("from must not be after to.".into()));
+        }
+        if (to - from).num_days() > 366 {
+            return Err(crate::error::AppError::BadRequest("Date range must not exceed 366 days.".into()));
+        }
+    }
+    // Validate status filter against the known set of absence statuses.
+    if let Some(ref s) = query.status {
+        if !["requested", "approved", "rejected", "cancelled", "cancellation_requested", "pending_review"].contains(&s.as_str()) {
+            return Err(crate::error::AppError::BadRequest("Invalid status filter.".into()));
+        }
+    }
     let absences = app_state
         .db
         .absences
@@ -166,9 +181,34 @@ pub async fn get_one(
     Path(absence_id): Path<i64>,
 ) -> AppResult<Json<Absence>> {
     let absence = app_state.db.absences.find_by_id(absence_id).await?;
-    // Only the owner or a lead/admin may fetch a single absence.
-    if absence.user_id != requester.id && !requester.is_lead() {
-        return Err(crate::error::AppError::Forbidden);
+    // Only the owner or an authorized lead/admin may fetch a single absence.
+    if absence.user_id != requester.id {
+        // Non-leads cannot view other users' absences at all.
+        if !requester.is_lead() {
+            return Err(crate::error::AppError::Forbidden);
+        }
+        // Non-admin leads can only view absences of their direct reports,
+        // and cannot view admin-subject absences.
+        if !requester.is_admin() {
+            let is_report = app_state
+                .db
+                .users
+                .is_direct_report(absence.user_id, requester.id)
+                .await?;
+            if !is_report {
+                return Err(crate::error::AppError::Forbidden);
+            }
+            // Non-admin leads cannot view admin users' absences (admin-subject rule).
+            let target_user = app_state
+                .db
+                .users
+                .find_by_id(absence.user_id)
+                .await?
+                .ok_or(crate::error::AppError::NotFound)?;
+            if crate::roles::is_admin_role(&target_user.role) {
+                return Err(crate::error::AppError::Forbidden);
+            }
+        }
     }
     let mut mapped = repo_absence_to_service(absence);
     let before_data_map =
@@ -249,8 +289,27 @@ pub async fn balance(
     Query(query): Query<BalanceQuery>,
 ) -> AppResult<Json<LeaveBalance>> {
     assert_can_access_user(&app_state, &requester, target_user_id).await?;
+    // Pure-admin users (tracks_time=false) have no absences or leave balance.
+    if target_user_id != requester.id {
+        let target_user = app_state
+            .db
+            .users
+            .find_by_id(target_user_id)
+            .await?
+            .ok_or(crate::error::AppError::NotFound)?;
+        if !target_user.tracks_time {
+            return Err(crate::error::AppError::Forbidden);
+        }
+    } else {
+        require_tracks_time(&requester)?;
+    }
     let year = match query.year {
-        Some(value) => value,
+        Some(value) => {
+            if !(1970..=2100).contains(&value) {
+                return Err(crate::error::AppError::BadRequest("Invalid year: out of valid range.".into()));
+            }
+            value
+        }
         None => crate::services::settings::app_current_year(&app_state.pool).await,
     };
     let balance = compute_balance(&app_state, &requester, target_user_id, year).await?;

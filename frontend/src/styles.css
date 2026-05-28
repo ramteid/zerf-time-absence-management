@@ -2,7 +2,7 @@
 /* Inter via system or fallback to system-ui stack */
 
 :root {
-  color-scheme: light;
+  color-scheme: light dark;
 
   --bg-canvas: #f3f2ee;
   --bg-surface: #faf9f7;

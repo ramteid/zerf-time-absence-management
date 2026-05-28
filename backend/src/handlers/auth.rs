@@ -204,6 +204,10 @@ pub async fn me(
         navigation_items.push(serde_json::json!({"href":"/time","key":"Time","icon":"⏱"}));
         navigation_items.push(serde_json::json!({"href":"/absences","key":"Absences","icon":"📅"}));
         navigation_items.push(serde_json::json!({"href":"/calendar","key":"Calendar","icon":"🗓"}));
+    } else if user.is_lead() {
+        // Pure-admin users (tracks_time=false) still need the Calendar to
+        // coordinate team absences even though they have no own time/absence data.
+        navigation_items.push(serde_json::json!({"href":"/calendar","key":"Calendar","icon":"🗓"}));
     }
     if !is_assistant {
         navigation_items

@@ -394,7 +394,13 @@ pub async fn overtime(
     let target_user_id = query.user_id.unwrap_or(requester.id);
     assert_can_access_user(&app_state, &requester, target_user_id).await?;
     let year = match query.year {
-        Some(y) => y,
+        Some(y) => {
+            // Sanity-check the year to prevent unreasonable computation ranges.
+            if !(1970..=2100).contains(&y) {
+                return Err(AppError::BadRequest("Year out of valid range.".into()));
+            }
+            y
+        }
         None => crate::services::settings::app_current_year(&app_state.pool).await,
     };
     Ok(Json(
