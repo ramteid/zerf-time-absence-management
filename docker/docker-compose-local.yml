@@ -69,6 +69,8 @@ services:
       dockerfile: docker/app.Dockerfile
       args:
         ZERF_GIT_COMMIT: ${ZERF_GIT_COMMIT:-unknown}
+        ZERF_BUILD_PROFILE: ${ZERF_BUILD_PROFILE:-release}
+        ZERF_FRONTEND_DEBUG_BUILD: ${ZERF_FRONTEND_DEBUG_BUILD:-false}
     container_name: zerf-app
     restart: unless-stopped
     user: "10001:10001"
@@ -92,6 +94,7 @@ services:
       # so origin enforcement is disabled here. The public compose overlay
       # re-enables it together with HTTPS and a fixed domain.
       - ZERF_ENFORCE_ORIGIN=false
+      - RUST_BACKTRACE=${RUST_BACKTRACE:-0}
     ports:
       - "0.0.0.0:3333:3333"
     expose:

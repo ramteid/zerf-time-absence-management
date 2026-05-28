@@ -257,8 +257,7 @@ Three Docker Compose configurations in `docker/`:
 
 | File | Purpose |
 |------|---------|
-| `docker-compose-local.yml` | Local production-like stack |
-| `docker-compose-local-debug.yml` | Local debug stack |
+| `docker-compose-local.yml` | Local stack (supports `DEBUG=true` via `.env`) |
 | `docker-compose-public.yml` | Public deployment with Caddy reverse proxy |
 
 Caddy handles HTTPS termination and serves the frontend static assets. Backend listens on port 3333.
@@ -269,8 +268,7 @@ The PostgreSQL container is built from `docker/postgres.Dockerfile` (based on `p
 
 | Script | Purpose |
 |--------|---------|
-| `start_local.sh` | Start local stack |
-| `start_local_debug.sh` | Start local debug stack |
+| `start_local.sh` | Start local stack (set `DEBUG=true` in `.env` for debug build) |
 | `start_public.sh` | Start public stack |
 | `scripts/backup.sh` | Dump and AES-encrypt the database to the backup volume |
 | `scripts/restore.sh` | Interactive: decrypt a backup and restore it into the live instance |
