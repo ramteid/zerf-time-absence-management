@@ -61,7 +61,7 @@ describe("navigation", () => {
     // When a modal dialog is open, pressing Back should dismiss the dialog
     // rather than leaving the page. This matches native mobile app behavior
     // and prevents loss of in-progress form data.
-    const { path } = await import("./navigation.js");
+    await import("./navigation.js");
     const dialog = document.createElement("dialog");
     dialog.setAttribute("open", "");
     // jsdom doesn't implement HTMLDialogElement.close(); add it so spyOn

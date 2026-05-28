@@ -184,9 +184,12 @@
           autocomplete="new-password"
         />
       </div>
-      <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:14px;cursor:pointer">
-        <input type="checkbox" bind:checked={tracksTime} />
-        {$t("Enable time tracking")}
+      <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:14px;cursor:pointer">
+        <input type="checkbox" bind:checked={tracksTime} style="margin-top:2px" />
+        <div>
+          <div style="font-size:13px;font-weight:500;color:var(--text-primary)">{$t("Enable time tracking for this account")}</div>
+          <div style="font-size:11px;color:var(--text-tertiary);margin-top:2px">{$t("When disabled, this admin works in management-only mode (no time entries or absences).")}</div>
+        </div>
       </label>
       <div class="error-text" style="margin-bottom:8px">{error}</div>
       <button
