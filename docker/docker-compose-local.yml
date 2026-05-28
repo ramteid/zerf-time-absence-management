@@ -2,6 +2,7 @@ name: zerf
 
 services:
   postgres:
+    image: ghcr.io/ramteid/zerf-work-time-tracking-postgres:${ZERF_VERSION:-latest}
     build:
       context: .
       dockerfile: postgres.Dockerfile
@@ -62,6 +63,7 @@ services:
       - private
 
   app:
+    image: ghcr.io/ramteid/zerf-work-time-tracking:${ZERF_VERSION:-latest}
     build:
       context: ..
       dockerfile: docker/app.Dockerfile
@@ -147,8 +149,10 @@ services:
 volumes:
   postgres_data:
     name: zerf_postgres_data
+    external: true
   backup_data:
     name: zerf_backup_data
+    external: true
 
 networks:
   public:
