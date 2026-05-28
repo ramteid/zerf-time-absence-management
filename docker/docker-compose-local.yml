@@ -1,8 +1,10 @@
+name: zerf
+
 services:
   postgres:
     build:
       context: .
-      dockerfile: Dockerfile.postgres
+      dockerfile: postgres.Dockerfile
     container_name: zerf-postgres
     restart: unless-stopped
     security_opt:
@@ -62,7 +64,7 @@ services:
   app:
     build:
       context: ..
-      dockerfile: docker/Dockerfile
+      dockerfile: docker/app.Dockerfile
       args:
         ZERF_GIT_COMMIT: ${ZERF_GIT_COMMIT:-unknown}
     container_name: zerf-app
