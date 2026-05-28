@@ -152,3 +152,78 @@ pub fn assert_monday(d: NaiveDate) -> AppResult<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{NaiveDate, Utc};
+
+    fn sample_repo_rr(id: i64, status: &str) -> crate::repository::ReopenRequest {
+        crate::repository::ReopenRequest {
+            id,
+            user_id: 5,
+            week_start: NaiveDate::from_ymd_opt(2026, 5, 18).unwrap(),
+            reviewed_by: Some(2),
+            status: status.to_string(),
+            reviewed_at: Some(Utc::now()),
+            rejection_reason: None,
+            reason: Some("missed deadline".to_string()),
+            created_at: Utc::now(),
+        }
+    }
+
+    /// Reopen requests are keyed by ISO week start (Monday); confirm the happy path.
+    #[test]
+    fn assert_monday_accepts_monday() {
+        let monday = NaiveDate::from_ymd_opt(2026, 5, 18).unwrap();
+        assert!(assert_monday(monday).is_ok());
+    }
+
+    /// Every non-Monday must return `BadRequest` so callers cannot create
+    /// reopen requests for arbitrary mid-week dates.
+    #[test]
+    fn assert_monday_rejects_every_non_monday_weekday() {
+        let tuesday  = NaiveDate::from_ymd_opt(2026, 5, 19).unwrap();
+        let wednesday = NaiveDate::from_ymd_opt(2026, 5, 20).unwrap();
+        let thursday = NaiveDate::from_ymd_opt(2026, 5, 21).unwrap();
+        let friday   = NaiveDate::from_ymd_opt(2026, 5, 22).unwrap();
+        let saturday = NaiveDate::from_ymd_opt(2026, 5, 23).unwrap();
+        let sunday   = NaiveDate::from_ymd_opt(2026, 5, 24).unwrap();
+        for day in [tuesday, wednesday, thursday, friday, saturday, sunday] {
+            assert!(
+                matches!(assert_monday(day), Err(crate::error::AppError::BadRequest(_))),
+                "{day} should not be accepted as a Monday"
+            );
+        }
+    }
+
+    /// Verify that every field from the repository row reaches the service DTO
+    /// unchanged; a missed field would silently break the API response shape.
+    #[test]
+    fn repo_rr_to_service_maps_all_fields() {
+        let repo = sample_repo_rr(10, "approved");
+        let svc = repo_rr_to_service(repo);
+        assert_eq!(svc.id, 10);
+        assert_eq!(svc.user_id, 5);
+        assert_eq!(svc.week_start, NaiveDate::from_ymd_opt(2026, 5, 18).unwrap());
+        assert_eq!(svc.reviewed_by, Some(2));
+        assert_eq!(svc.status, "approved");
+        assert!(svc.rejection_reason.is_none());
+        assert_eq!(svc.reason.as_deref(), Some("missed deadline"));
+    }
+
+    /// A pending request has no reviewer yet; confirm that nullable review
+    /// fields are preserved as `None` and not defaulted.
+    #[test]
+    fn repo_rr_to_service_handles_pending_with_no_review() {
+        let mut repo = sample_repo_rr(99, "pending");
+        repo.reviewed_by = None;
+        repo.reviewed_at = None;
+        repo.reason = None;
+        let svc = repo_rr_to_service(repo);
+        assert_eq!(svc.status, "pending");
+        assert!(svc.reviewed_by.is_none());
+        assert!(svc.reviewed_at.is_none());
+        assert!(svc.reason.is_none());
+    }
+}

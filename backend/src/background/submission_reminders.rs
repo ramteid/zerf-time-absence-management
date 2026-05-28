@@ -440,4 +440,21 @@ mod tests {
         assert!(secs > 4 * 86400, "should be more than 4 days, got {secs}");
         assert!(secs < 6 * 86400, "should be less than 6 days, got {secs}");
     }
+
+    /// In Europe/Berlin, DST springs forward at 02:00 on the last Sunday of March.
+    /// Hour 2 on that day does not exist locally (`LocalResult::None`), so
+    /// `resolve_local_datetime` must fall through to the fallback hour.
+    #[test]
+    fn resolve_local_datetime_handles_dst_spring_forward_gap() {
+        use chrono::Timelike;
+        // 2026-03-29: clocks jump 02:00 → 03:00 in Europe/Berlin.
+        let gap_date = NaiveDate::from_ymd_opt(2026, 3, 29).unwrap();
+        // Hour 2 falls in the DST gap — the function must not panic and must
+        // return Some (falling back to 03:00 which does exist).
+        let result = resolve_local_datetime(gap_date, 2, Berlin);
+        assert!(result.is_some(), "DST gap must fall through to fallback hour");
+        // The returned time must be in hour 3 (the first valid local hour).
+        assert_eq!(result.unwrap().hour(), 3);
+    }
+
 }

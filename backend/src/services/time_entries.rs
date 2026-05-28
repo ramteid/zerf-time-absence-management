@@ -198,6 +198,84 @@ pub async fn create(
     Ok(created_entry)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{NaiveDate, Utc};
+
+    fn sample_repo_entry(id: i64, status: &str) -> crate::repository::TimeEntry {
+        let now = Utc::now();
+        crate::repository::TimeEntry {
+            id,
+            user_id: 3,
+            entry_date: NaiveDate::from_ymd_opt(2026, 5, 18).unwrap(),
+            start_time: "09:00".to_string(),
+            end_time: "17:00".to_string(),
+            category_id: 2,
+            comment: Some("deep work".to_string()),
+            status: status.to_string(),
+            submitted_at: Some(now),
+            reviewed_by: None,
+            reviewed_at: None,
+            rejection_reason: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    /// Every field from the repository row must reach the service DTO unchanged;
+    /// `counts_as_work` is left as `None` because it is filled later by
+    /// `attach_counts_as_work` (separate DB call per distinct category).
+    #[test]
+    fn repo_entry_to_service_maps_all_fields() {
+        let repo = sample_repo_entry(7, "submitted");
+        let svc = repo_entry_to_service(repo);
+        assert_eq!(svc.id, 7);
+        assert_eq!(svc.user_id, 3);
+        assert_eq!(svc.entry_date, NaiveDate::from_ymd_opt(2026, 5, 18).unwrap());
+        assert_eq!(svc.start_time, "09:00");
+        assert_eq!(svc.end_time, "17:00");
+        assert_eq!(svc.category_id, 2);
+        assert_eq!(svc.comment.as_deref(), Some("deep work"));
+        assert_eq!(svc.status, "submitted");
+        assert!(svc.counts_as_work.is_none(), "counts_as_work is filled later by attach_counts_as_work");
+    }
+
+    /// A rejected entry carries a reviewer id and a free-text reason; both
+    /// must survive the repo → service mapping without mutation.
+    #[test]
+    fn repo_entry_to_service_preserves_rejection_reason() {
+        let mut repo = sample_repo_entry(12, "rejected");
+        repo.rejection_reason = Some("incorrect category".to_string());
+        repo.reviewed_by = Some(1);
+        let svc = repo_entry_to_service(repo);
+        assert_eq!(svc.status, "rejected");
+        assert_eq!(svc.rejection_reason.as_deref(), Some("incorrect category"));
+        assert_eq!(svc.reviewed_by, Some(1));
+    }
+
+    /// `require_tracks_time` is a thin delegation guard; verify that
+    /// `tracks_time = true` passes and `tracks_time = false` returns Forbidden.
+    #[test]
+    fn require_tracks_time_delegates_to_users_service() {
+        use crate::middleware::auth::User;
+        use chrono::Utc;
+        let tracking_user = User {
+            id: 1, email: "a@b.com".to_string(), password_hash: "h".to_string(),
+            first_name: "A".to_string(), last_name: "B".to_string(),
+            role: "employee".to_string(), weekly_hours: 40.0, workdays_per_week: 5,
+            start_date: chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
+            active: true, must_change_password: false, created_at: Utc::now(),
+            allow_reopen_without_approval: false, dark_mode: false,
+            overtime_start_balance_min: 0, tracks_time: true,
+        };
+        assert!(require_tracks_time(&tracking_user).is_ok());
+        let mut non_tracking = tracking_user.clone();
+        non_tracking.tracks_time = false;
+        assert!(require_tracks_time(&non_tracking).is_err());
+    }
+}
+
 pub struct TimeEntryInput {
     pub entry_date: NaiveDate,
     pub start_time: String,

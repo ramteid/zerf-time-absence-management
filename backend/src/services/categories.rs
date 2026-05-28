@@ -73,6 +73,33 @@ pub struct UpdateCategory {
     pub active: Option<bool>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_valid_hex_color_accepts_six_digit_hex_with_hash() {
+        assert!(is_valid_hex_color("#1a2b3c"));
+        assert!(is_valid_hex_color("#FFFFFF"));
+        assert!(is_valid_hex_color("#000000"));
+        assert!(is_valid_hex_color("#aAbBcC"));
+        assert!(is_valid_hex_color("#012345"));
+        assert!(is_valid_hex_color("#6789ab"));
+    }
+
+    #[test]
+    fn is_valid_hex_color_rejects_invalid_inputs() {
+        assert!(!is_valid_hex_color(""));
+        assert!(!is_valid_hex_color("1a2b3c"));   // missing #
+        assert!(!is_valid_hex_color("#1a2b3"));    // 5 hex digits (too short)
+        assert!(!is_valid_hex_color("#1a2b3cd"));  // 7 hex digits (too long)
+        assert!(!is_valid_hex_color("#1g2b3c"));   // 'g' is not hex
+        assert!(!is_valid_hex_color("#"));          // just hash
+        assert!(!is_valid_hex_color("##aabbcc"));  // double hash
+        assert!(!is_valid_hex_color("#rgb(0,0,0)")); // not hex
+    }
+}
+
 pub async fn update(
     app_state: &AppState,
     requester: &User,

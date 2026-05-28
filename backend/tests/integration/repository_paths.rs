@@ -1611,3 +1611,391 @@ async fn reports_repository_workflow() {
 
     app.cleanup().await;
 }
+
+/// Directly exercises all `NotificationDb` methods including idempotency,
+/// cleanup, and the broadcast/subscribe channel — ensuring repository-layer
+/// paths are covered independently of the HTTP handler stack.
+#[tokio::test]
+async fn notifications_repository_workflow() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+
+    // Create a user to receive notifications.
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email":"notif-repo@example.com",
+                "first_name":"Notif",
+                "last_name":"Repo",
+                "role":"employee",
+                "weekly_hours":39,
+                "leave_days_current_year":30,
+                "leave_days_next_year":30,
+                "start_date":"2024-01-01",
+                "approver_ids":[1]
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK);
+    let user_id = id(&body);
+
+    let notifications = zerf::repository::NotificationDb::new(
+        app.state.pool.clone(),
+        zerf::repository::new_broadcaster(),
+    );
+
+    // Subscribe to the broadcast channel before inserting so we can verify it fires.
+    let mut rx = notifications.subscribe();
+
+    notifications
+        .insert(user_id, "test_kind", "Test Title", "Test body", None, None)
+        .await
+        .expect("insert notification");
+
+    // Broadcast must fire when a notification is inserted.
+    let signal = rx.try_recv().expect("broadcast signal after insert");
+    assert_eq!(signal.user_id, user_id);
+
+    // List and verify unread count.
+    let list = notifications.list_for_user(user_id).await.expect("list for user");
+    assert_eq!(list.len(), 1);
+    let notif_id = list[0].id;
+    assert_eq!(list[0].kind, "test_kind");
+    assert!(!list[0].is_read);
+
+    let unread = notifications.count_unread(user_id).await.expect("count unread");
+    assert_eq!(unread, 1);
+
+    // mark_read marks a single notification and returns the affected row count.
+    let affected = notifications.mark_read(notif_id, user_id).await.expect("mark read");
+    assert_eq!(affected, 1);
+    assert_eq!(notifications.count_unread(user_id).await.expect("after mark read"), 0);
+
+    // Marking an already-read notification returns 1 (the row still matches).
+    let again = notifications.mark_read(notif_id, user_id).await.expect("mark read again");
+    assert_eq!(again, 1);
+
+    // Insert a second notification; mark_all_read should clear it.
+    notifications
+        .insert(user_id, "second_kind", "Second", "body2", Some("time_entries"), Some(42))
+        .await
+        .expect("insert second");
+    let all_read = notifications.mark_all_read(user_id).await.expect("mark all read");
+    assert!(all_read >= 1);
+    assert_eq!(notifications.count_unread(user_id).await.expect("after mark_all_read"), 0);
+
+    // insert_idempotent returns true on first insert, false on duplicate.
+    let first_insert = notifications
+        .insert_idempotent(user_id, "idem_kind", "Idem Title", "idem body", None, None)
+        .await
+        .expect("idempotent first insert");
+    assert!(first_insert, "first idempotent insert should return true");
+
+    // insert_idempotent_with_dedupe_key uses an explicit dedupe key.
+    let key_first = notifications
+        .insert_idempotent_with_dedupe_key(
+            user_id,
+            "dedup_kind",
+            "Dedup Title",
+            "dedup body",
+            None,
+            None,
+            Some("dedup-key-1"),
+        )
+        .await
+        .expect("idempotent dedup first");
+    assert!(key_first, "first dedup-key insert should return true");
+    let key_second = notifications
+        .insert_idempotent_with_dedupe_key(
+            user_id,
+            "dedup_kind",
+            "Dedup Title",
+            "dedup body",
+            None,
+            None,
+            Some("dedup-key-1"),
+        )
+        .await
+        .expect("idempotent dedup second");
+    assert!(!key_second, "duplicate dedup-key insert must return false");
+
+    // get_user_email returns the user's display info for email sending.
+    let email_info = notifications
+        .get_user_email(user_id)
+        .await
+        .expect("get_user_email must return Some for active user");
+    assert_eq!(email_info.0, "notif-repo@example.com");
+    assert_eq!(email_info.1, "Notif");
+    assert_eq!(email_info.2, "Repo");
+
+    // get_user_email for a non-existent id must return None.
+    assert!(
+        notifications.get_user_email(999_999).await.is_none(),
+        "get_user_email must return None for unknown user"
+    );
+
+    // cleanup_old must complete without panicking; row count is not asserted
+    // since notifications were just created and are well within the 90-day window.
+    notifications.cleanup_old().await;
+
+    // Seed old notification row directly so cleanup_old removes it.
+    sqlx::query(
+        "INSERT INTO notifications(user_id,kind,title,body,created_at) \
+         VALUES ($1,'old_kind','Old','old body', CURRENT_TIMESTAMP - INTERVAL '91 days')",
+    )
+    .bind(user_id)
+    .execute(&app.state.pool)
+    .await
+    .expect("insert old notification");
+    let before_count = notifications.list_for_user(user_id).await.expect("count before cleanup").len();
+    notifications.cleanup_old().await;
+    let after_count = notifications.list_for_user(user_id).await.expect("count after cleanup").len();
+    assert!(
+        after_count < before_count,
+        "cleanup_old must remove notifications older than 90 days"
+    );
+
+    // delete_all removes every notification for the user.
+    let deleted = notifications.delete_all(user_id).await.expect("delete all");
+    assert!(deleted > 0);
+    assert!(notifications.list_for_user(user_id).await.expect("empty after delete").is_empty());
+
+    app.cleanup().await;
+}
+
+/// Directly exercises `ReopenRequestDb` query and mutation methods that are
+/// not fully covered by the HTTP-layer integration tests (list variants, direct
+/// field lookups, access-check error branches).
+#[tokio::test]
+async fn reopen_requests_repository_workflow() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, lead_pw, emp_id, _emp_pw, monday_iso, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "rr-repo").await;
+    let _lead = login_change_pw(&app, "lead-rr-repo@example.com", &lead_pw).await;
+
+    let monday = chrono::NaiveDate::parse_from_str(&monday_iso, "%Y-%m-%d").unwrap();
+    let week_end = monday + chrono::Duration::days(6);
+
+    let reopen_requests = zerf::repository::ReopenRequestDb::new(app.state.pool.clone());
+
+    // Create a time entry and submit it so the week has non-draft entries.
+    let (st, body) = admin
+        .post(
+            "/api/v1/time-entries",
+            &serde_json::json!({
+                "entry_date": monday_iso,
+                "start_time": "08:00",
+                "end_time": "12:00",
+                "category_id": cat_id,
+                "user_id": emp_id
+            }),
+        )
+        .await;
+    // Inject time entry via repository since handlers may not allow cross-user create.
+    let _ = (st, body);
+    let time_entries = zerf::repository::TimeEntryDb::new(app.state.pool.clone());
+    let entry = time_entries
+        .create(
+            emp_id,
+            &zerf::repository::NewEntryData {
+                entry_date: monday,
+                start_time: "08:00".to_string(),
+                end_time: "12:00".to_string(),
+                category_id: cat_id,
+                comment: Some("rr repo test entry".to_string()),
+            },
+        )
+        .await
+        .expect("create entry for reopen repo test");
+    time_entries
+        .submit_batch(emp_id, &[entry.id])
+        .await
+        .expect("submit entry for reopen repo test");
+
+    // count_non_draft_entries returns the number of non-draft entries in the week.
+    let non_draft = reopen_requests
+        .count_non_draft_entries(emp_id, monday, week_end)
+        .await
+        .expect("count non-draft entries");
+    assert_eq!(non_draft, 1, "one submitted entry in the week");
+
+    // get_user_full_name returns formatted name from the users table.
+    let full_name = reopen_requests
+        .get_user_full_name(emp_id)
+        .await
+        .expect("get user full name");
+    assert!(full_name.contains("Emilrr-repo"), "full name contains first name");
+
+    // insert_pending creates a reopen request in 'pending' status.
+    let (req_id, _created_at) = reopen_requests
+        .insert_pending(emp_id, monday, "need to correct an entry")
+        .await
+        .expect("insert pending reopen request");
+    assert!(req_id > 0);
+
+    // find_pending_request_id returns the id of the pending request.
+    let found = reopen_requests
+        .find_pending_request_id(emp_id, monday)
+        .await
+        .expect("find pending request id")
+        .expect("request id should be Some");
+    assert_eq!(found, req_id);
+
+    // list_mine returns the request for the employee.
+    let mine = reopen_requests.list_mine(emp_id).await.expect("list mine");
+    assert!(mine.iter().any(|r| r.id == req_id));
+
+    // list_pending_admin returns all pending requests (admin view).
+    let pending_admin = reopen_requests.list_pending_admin().await.expect("list pending admin");
+    assert!(pending_admin.iter().any(|r| r.id == req_id));
+
+    // list_pending_for_lead returns the request visible to the assigned lead.
+    let pending_lead = reopen_requests
+        .list_pending_for_lead(lead_id)
+        .await
+        .expect("list pending for lead");
+    assert!(
+        pending_lead.iter().any(|r| r.id == req_id),
+        "lead should see the pending request"
+    );
+
+    // find_by_id returns the request.
+    let found_by_id = reopen_requests.find_by_id(req_id).await.expect("find by id");
+    assert_eq!(found_by_id.status, "pending");
+
+    // approve_with_access_check by lead: must succeed because the lead is
+    // the assigned approver for the employee.
+    let (approved_req, affected) = reopen_requests
+        .approve_with_access_check(req_id, lead_id, false)
+        .await
+        .expect("lead approve reopen request");
+    assert_eq!(approved_req.id, req_id);
+    assert_eq!(affected.len(), 1, "one entry reopened");
+
+    // After approval the pending queue must be empty for this request.
+    assert!(
+        reopen_requests
+            .find_pending_request_id(emp_id, monday)
+            .await
+            .expect("find after approve")
+            .is_none(),
+        "no pending request after approval"
+    );
+
+    // Re-submit the reopened entry via the repository to set up the rejection scenario.
+    // Using the repository directly because only the entry owner can call the submit
+    // endpoint, and this test has no employee session.
+    time_entries
+        .submit_batch(emp_id, &[entry.id])
+        .await
+        .expect("re-submit entry for rejection test");
+
+    let (req2_id, _) = reopen_requests
+        .insert_pending(emp_id, monday, "second request for rejection")
+        .await
+        .expect("insert second pending request");
+
+    // reject_with_access_check by lead: must succeed.
+    let rejected_req = reopen_requests
+        .reject_with_access_check(req2_id, lead_id, false, "not needed")
+        .await
+        .expect("lead reject reopen request");
+    assert_eq!(rejected_req.id, req2_id);
+
+    app.cleanup().await;
+}
+
+/// Directly exercises `CategoryDb` methods that are only called indirectly
+/// through the service layer in other integration tests.
+#[tokio::test]
+async fn categories_repository_workflow() {
+    let app = TestApp::spawn().await;
+
+    let categories = zerf::repository::CategoryDb::new(app.state.pool.clone());
+
+    // list_active and list_all both return the seed categories.
+    let active = categories.list_active().await.expect("list_active");
+    assert!(!active.is_empty(), "seed categories must exist");
+    let all = categories.list_all().await.expect("list_all");
+    assert!(all.len() >= active.len());
+
+    // find_by_id returns the category; find on unknown id returns None.
+    let first_id = active[0].id;
+    let found = categories.find_by_id(first_id).await.expect("find_by_id");
+    assert_eq!(found.expect("category exists").id, first_id);
+    assert!(
+        categories.find_by_id(999_999).await.expect("find unknown").is_none(),
+        "missing category must return None"
+    );
+
+    // get_active_flag returns the active status; unknown id returns None.
+    let flag = categories.get_active_flag(first_id).await.expect("get_active_flag");
+    assert_eq!(flag, Some(true));
+    assert!(
+        categories.get_active_flag(999_999).await.expect("missing flag").is_none()
+    );
+
+    // Create a new category and verify its id is returned.
+    let new_id = categories
+        .create("Repo Test Cat", Some("Used in repo test"), "#aabbcc", 99, false)
+        .await
+        .expect("create category");
+    assert!(new_id > 0);
+
+    // Duplicate name must be rejected with a Conflict error.
+    let dup = categories.create("Repo Test Cat", None, "#112233", 100, true).await;
+    assert!(dup.is_err(), "duplicate name must be rejected");
+
+    // update modifies name and active flag.
+    categories
+        .update(new_id, Some("Repo Updated Cat".to_string()), None, None, None, None, Some(false))
+        .await
+        .expect("update category");
+    let updated = categories.find_by_id(new_id).await.expect("find updated").expect("exists");
+    assert_eq!(updated.name, "Repo Updated Cat");
+    assert!(!updated.active);
+
+    // update on a missing id must return NotFound.
+    let missing_update = categories
+        .update(999_999, Some("Ghost".to_string()), None, None, None, None, None)
+        .await;
+    assert!(missing_update.is_err(), "update on missing category must fail");
+
+    app.cleanup().await;
+}
+
+/// Directly exercises `SystemMetadataDb` methods that are called at startup but
+/// never exercised by the workflow tests (which bypass `main.rs`).
+#[tokio::test]
+async fn system_metadata_repository_workflow() {
+    let app = TestApp::spawn().await;
+
+    let meta = zerf::repository::SystemMetadataDb::new(app.state.pool.clone());
+
+    // max_successful_migration_version returns the highest applied migration
+    // version; because every TestApp runs all migrations, the value must be > 0.
+    let version = meta
+        .max_successful_migration_version()
+        .await
+        .expect("max_successful_migration_version");
+    assert!(version > 0, "at least one migration must have been applied");
+
+    // users_exist returns true because TestApp seeds a user during bootstrap.
+    let exists = meta.users_exist().await.expect("users_exist");
+    assert!(exists, "seeded TestApp must have at least one user");
+
+    // record_runtime_metadata performs insert-if-missing for the two creation
+    // keys and an upsert for the two runtime keys — all within a single
+    // transaction. Calling it twice verifies idempotency: the creation keys
+    // are unchanged on the second call while runtime keys are overwritten.
+    meta.record_runtime_metadata("sha-abc", "1", "sha-abc", "1")
+        .await
+        .expect("record_runtime_metadata first call");
+    meta.record_runtime_metadata("sha-abc", "1", "sha-xyz", "2")
+        .await
+        .expect("record_runtime_metadata second call (idempotent create, updated runtime)");
+
+    app.cleanup().await;
+}

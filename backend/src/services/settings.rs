@@ -351,4 +351,43 @@ mod tests {
             assert_eq!(pinned_test_date().unwrap().day(), 29);
         });
     }
+
+    /// When an explicit non-empty password is provided it must be used as-is,
+    /// without touching the database.
+    #[tokio::test]
+    async fn smtp_config_from_update_uses_provided_password() {
+        // Build a fake pool — it will not be queried because password=Some("pw")
+        // short-circuits the DB lookup.
+        let pool = sqlx::Pool::connect_lazy("postgres://localhost/unused").unwrap();
+        let config = smtp_config_from_update(
+            &pool,
+            "smtp.example.com",
+            587,
+            "user@example.com",
+            Some("secretpw"),
+            "noreply@example.com",
+            "starttls",
+        )
+        .await
+        .unwrap();
+        assert_eq!(config.host, "smtp.example.com");
+        assert_eq!(config.port, 587);
+        assert_eq!(config.username.as_deref(), Some("user@example.com"));
+        assert_eq!(config.password.as_deref(), Some("secretpw"));
+        assert_eq!(config.from, "noreply@example.com");
+        assert_eq!(config.encryption, "starttls");
+    }
+
+    /// An empty string password clears the stored password (no DB lookup).
+    #[tokio::test]
+    async fn smtp_config_from_update_clears_password_when_empty_string_provided() {
+        let pool = sqlx::Pool::connect_lazy("postgres://localhost/unused").unwrap();
+        let config = smtp_config_from_update(
+            &pool, "host", 25, "", Some(""), "from@x.com", "none",
+        )
+        .await
+        .unwrap();
+        assert!(config.password.is_none());
+        assert!(config.username.is_none()); // empty username becomes None
+    }
 }
