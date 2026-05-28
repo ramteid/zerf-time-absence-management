@@ -10,6 +10,14 @@ if [ -z "${ZERF_GIT_COMMIT:-}" ] && git_commit="$(git rev-parse --verify HEAD 2>
   export ZERF_GIT_COMMIT="$git_commit"
 fi
 
-docker compose -f docker/docker-compose-local.yml -f docker/docker-compose-local-debug.yml --env-file .env up -d --build
+# ZERF_VERSION=dev → build from local Dockerfiles; anything else → use registry image.
+zerf_version="$(grep -E '^ZERF_VERSION=' .env 2>/dev/null | cut -d= -f2 || true)"
+if [ "${zerf_version:-latest}" = "dev" ]; then
+  build_flag="--build"
+else
+  build_flag="--no-build"
+fi
+
+docker compose -f docker/docker-compose-local.yml -f docker/docker-compose-local-debug.yml --env-file .env up -d "$build_flag"
 
 echo "Debug app is running at http://localhost:3333 (also reachable from the LAN on port 3333)"
