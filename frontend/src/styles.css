@@ -298,6 +298,11 @@ input[type="checkbox"] {
   background-size: 10px 10px;
   transition: border-color 0.12s;
   outline: none;
+  -webkit-tap-highlight-color: transparent;
+}
+label:has(input[type="checkbox"]) {
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
 }
 input[type="checkbox"]:checked {
   border-color: var(--text-secondary);
