@@ -13,9 +13,16 @@ if [ -z "${ZERF_GIT_COMMIT:-}" ] && git_commit="$(git rev-parse --verify HEAD 2>
   export ZERF_GIT_COMMIT="$git_commit"
 fi
 
-# ZERF_VERSION=dev → build from local Dockerfiles; anything else → use registry image.
-zerf_version="$(grep -E '^ZERF_VERSION=' .env 2>/dev/null | cut -d= -f2 || true)"
-if [ "${zerf_version:-latest}" = "dev" ]; then
+# Version precedence: argument > .env > default (latest).
+# dev → build from local Dockerfiles; anything else → use registry image.
+if [ -n "${1:-}" ]; then
+  export ZERF_VERSION="$1"
+else
+  ZERF_VERSION="$(grep -E '^ZERF_VERSION=' .env 2>/dev/null | cut -d= -f2 || true)"
+  export ZERF_VERSION="${ZERF_VERSION:-latest}"
+fi
+
+if [ "$ZERF_VERSION" = "dev" ]; then
   build_flag="--build"
 else
   build_flag="--no-build"
