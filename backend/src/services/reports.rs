@@ -43,6 +43,7 @@ pub async fn assert_can_access_user(
     if !target_user.active || !target_user.tracks_time {
         return Err(AppError::Forbidden);
     }
+
     Ok(())
 }
 

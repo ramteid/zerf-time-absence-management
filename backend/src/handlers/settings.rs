@@ -1,5 +1,6 @@
 //! HTTP handlers for application settings (public, admin, SMTP).
 
+use crate::audit;
 use crate::error::{AppError, AppResult};
 use crate::middleware::auth::User;
 use crate::services::settings::{
@@ -209,6 +210,23 @@ pub async fn update_admin_settings(
 
     transaction.commit().await?;
 
+    audit::log(
+        &app_state.pool,
+        user.id,
+        "updated",
+        "settings",
+        0,
+        None,
+        Some(serde_json::json!({
+            "ui_language": language,
+            "time_format": time_format,
+            "timezone": timezone,
+            "country": country,
+            "region": region,
+        })),
+    )
+    .await;
+
     Ok(Json(load_admin_settings(&app_state.pool).await?))
 }
 
@@ -323,6 +341,21 @@ pub async fn update_smtp_settings(
     .await?;
 
     transaction.commit().await?;
+
+    audit::log(
+        &app_state.pool,
+        user.id,
+        "updated",
+        "smtp_settings",
+        0,
+        None,
+        Some(serde_json::json!({
+            "smtp_enabled": body.smtp_enabled,
+            "smtp_host": smtp_config.host,
+            "smtp_encryption": smtp_config.encryption,
+        })),
+    )
+    .await;
 
     Ok(Json(load_admin_settings(&app_state.pool).await?))
 }

@@ -117,8 +117,8 @@ async fn tracks_time_full_workflow() {
             "pure-admin nav lacks /absences"
         );
         assert!(
-            !nav_hrefs.contains(&"/calendar"),
-            "pure-admin nav lacks /calendar"
+            nav_hrefs.contains(&"/calendar"),
+            "pure-admin nav has /calendar (team absence coordination)"
         );
         assert!(
             nav_hrefs.contains(&"/dashboard"),
