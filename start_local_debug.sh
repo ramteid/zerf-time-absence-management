@@ -10,6 +10,9 @@ if [ -z "${ZERF_GIT_COMMIT:-}" ] && git_commit="$(git rev-parse --verify HEAD 2>
   export ZERF_GIT_COMMIT="$git_commit"
 fi
 
+docker volume create zerf_postgres_data
+docker volume create zerf_backup_data
+
 docker compose -f docker/docker-compose-local.yml -f docker/docker-compose-local-debug.yml --env-file .env up -d --build
 
 echo "Debug app is running at http://localhost:3333 (also reachable from the LAN on port 3333)"

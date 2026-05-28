@@ -12,6 +12,7 @@ services:
     # per-IP edge rate limits in the Caddyfile work. The base image still
     # comes from the official caddy builder/runtime, so TLS, HTTP/3, etc.
     # behave exactly like upstream.
+    image: ghcr.io/ramteid/zerf-work-time-tracking-caddy:${ZERF_VERSION:-latest}
     build:
       context: .
       dockerfile: Caddyfile.Dockerfile
@@ -47,5 +48,7 @@ services:
 volumes:
   caddy_data:
     name: zerf_caddy_data
+    external: true
   caddy_config:
     name: zerf_caddy_config
+    external: true
