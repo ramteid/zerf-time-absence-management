@@ -245,16 +245,23 @@ pub async fn team(
         })
         .collect();
 
-    let mut team_rows = Vec::with_capacity(handles.len());
-    for handle in handles {
-        team_rows.push(
-            handle
-                .await
-                .map_err(|_| AppError::Internal("team report task panicked".into()))??,
-        );
+    // Await handles in spawn order (preserves team_members ordering).
+    // On error, abort any not-yet-awaited handles so they release their DB
+    // connections instead of running detached until the pool times out.
+    let mut result: AppResult<Vec<TeamRow>> = Ok(Vec::with_capacity(handles.len()));
+    for (i, handle) in handles.into_iter().enumerate() {
+        if result.is_err() {
+            handle.abort();
+            continue;
+        }
+        match handle.await {
+            Ok(Ok(row)) => result.as_mut().unwrap().push(row),
+            Ok(Err(e)) => result = Err(e),
+            Err(_) => result = Err(AppError::Internal(format!("team report task {i} panicked"))),
+        }
     }
 
-    Ok(Json(team_rows))
+    Ok(Json(result?))
 }
 
 #[derive(Deserialize)]

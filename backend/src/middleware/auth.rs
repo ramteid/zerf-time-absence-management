@@ -386,18 +386,24 @@ mod tests {
         assert!(!insecure.contains("; Secure"));
     }
 
+    // Cookie extraction is FIFO: the first matching cookie in the string wins.
+    // In secure_only=false mode BOTH names are accepted; in secure_only=true
+    // only __Host- is accepted regardless of string position.
     #[test]
-    fn extract_token_prefers_host_cookie_and_respects_secure_mode() {
+    fn extract_token_returns_first_matching_cookie_and_respects_secure_mode() {
+        // plain cookie comes first → plain is returned in non-secure mode
         let mixed = "foo=bar; zerf_session=plain; __Host-zerf_session=secure";
         assert_eq!(
             extract_token_from_cookie_str_secure(mixed, false),
             Some("plain".to_string())
         );
+        // secure_only=true ignores plain cookie even when it comes first
         assert_eq!(
             extract_token_from_cookie_str_secure(mixed, true),
             Some("secure".to_string())
         );
 
+        // __Host- cookie comes first → it is returned (FIFO, not preference)
         let host_first = "foo=bar; __Host-zerf_session=secure; zerf_session=plain";
         assert_eq!(
             extract_token_from_cookie_str_secure(host_first, false),
