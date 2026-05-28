@@ -74,8 +74,7 @@ pub async fn list_all(
     if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
-    // Enforce a maximum date range to prevent unbounded queries that could
-    // cause excessive memory/CPU usage (DoS). Require at least one bound.
+    // Enforce a maximum date range to prevent unbounded queries (DoS).
     if let (Some(from), Some(to)) = (query.from, query.to) {
         if from > to {
             return Err(AppError::BadRequest("from must not be after to.".into()));
@@ -83,8 +82,6 @@ pub async fn list_all(
         if (to - from).num_days() > 366 {
             return Err(AppError::BadRequest("Date range must not exceed 366 days.".into()));
         }
-    } else if query.from.is_none() && query.to.is_none() {
-        return Err(AppError::BadRequest("At least one of from/to is required.".into()));
     }
     // Validate status filter against the known set of time entry statuses.
     if let Some(ref s) = query.status {

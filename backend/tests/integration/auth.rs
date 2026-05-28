@@ -14,9 +14,7 @@ async fn auth_full_workflow() {
 
     // -- Me payload provides role-shaped view data --
     {
-        let admin = app.client();
-        let (st, _) = admin.login("admin@example.com", &app.admin_password).await;
-        assert_eq!(st, StatusCode::OK, "admin login");
+        let admin = admin_login(&app).await;
 
         let (st, me) = admin.get("/api/v1/auth/me").await;
         assert_eq!(st, StatusCode::OK);

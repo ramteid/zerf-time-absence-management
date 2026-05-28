@@ -81,8 +81,6 @@ pub async fn list_all(
         if (to - from).num_days() > 366 {
             return Err(crate::error::AppError::BadRequest("Date range must not exceed 366 days.".into()));
         }
-    } else if query.from.is_none() && query.to.is_none() {
-        return Err(crate::error::AppError::BadRequest("At least one of from/to is required.".into()));
     }
     // Validate status filter against the known set of absence statuses.
     if let Some(ref s) = query.status {
@@ -308,7 +306,7 @@ pub async fn balance(
     let year = match query.year {
         Some(value) => {
             if !(1970..=2100).contains(&value) {
-                return Err(crate::error::AppError::BadRequest("Year out of valid range.".into()));
+                return Err(crate::error::AppError::BadRequest("Invalid year: out of valid range.".into()));
             }
             value
         }
