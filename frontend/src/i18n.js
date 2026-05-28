@@ -776,6 +776,7 @@ const TRANSLATIONS = {
     "User not found or inactive.": "Benutzer nicht gefunden oder inaktiv.",
     // tracks_time
     "Enable time tracking": "Zeiterfassung aktivieren",
+    "Enable time tracking for this account": "Zeiterfassung für dieses Konto aktivieren",
     "Disable time tracking": "Zeiterfassung deaktivieren",
     "Disable time tracking?": "Zeiterfassung deaktivieren?",
     "When disabled, this admin works in management-only mode (no time entries or absences).":
