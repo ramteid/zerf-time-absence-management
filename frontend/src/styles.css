@@ -290,6 +290,9 @@ input[type="checkbox"] {
   cursor: pointer;
   flex-shrink: 0;
 }
+input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+}
 
 .zf-input,
 .zf-select,
