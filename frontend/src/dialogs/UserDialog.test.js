@@ -1,0 +1,188 @@
+// Tests for UserDialog — the admin form for creating and editing team members.
+// Key business rules:
+//   - New users require a password; existing users do not (password is separate)
+//   - Employees and team leads require at least one approver (non-admin users
+//     must always have someone to review their time/absence requests)
+//   - The admin role can optionally disable time tracking (tracks_time=false),
+//     which permanently deletes all their time data — hence the double confirm
+//   - Approver list only shows active team leads and admins
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { mount, unmount } from "svelte";
+import UserDialog from "./UserDialog.svelte";
+import { settings } from "../stores.js";
+import { setLanguage } from "../i18n.js";
+
+const apiMock = vi.hoisted(() => vi.fn());
+
+vi.mock("svelte", async () => {
+  return await import("../../node_modules/svelte/src/index-client.js");
+});
+
+vi.mock("../api.js", () => ({
+  api: apiMock,
+}));
+
+vi.mock("../confirm.js", () => ({
+  confirmDialog: vi.fn().mockResolvedValue(true),
+}));
+
+async function settle() {
+  await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await Promise.resolve();
+}
+
+async function waitForText(target, text, timeout = 5000) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    if (target.textContent?.includes(text)) return;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  throw new Error(`Text not found: "${text}"`);
+}
+
+describe("UserDialog", () => {
+  let target;
+  let component;
+  let originalShowModal;
+
+  beforeEach(() => {
+    target = document.createElement("div");
+    document.body.appendChild(target);
+    setLanguage("en");
+    settings.set({ ui_language: "en", time_format: "24h", timezone: "UTC" });
+
+    // Default API: return an empty approver list and no settings overrides
+    apiMock.mockImplementation(async (path) => {
+      if (path === "/users") return [];
+      if (path === "/settings")
+        return { default_weekly_hours: 39, default_annual_leave_days: 30, smtp_enabled: false };
+      return [];
+    });
+
+    originalShowModal = HTMLDialogElement.prototype.showModal;
+    HTMLDialogElement.prototype.showModal = function () {
+      this.setAttribute("open", "");
+    };
+  });
+
+  afterEach(() => {
+    if (component) { unmount(component); component = null; }
+    target.remove();
+    HTMLDialogElement.prototype.showModal = originalShowModal;
+  });
+
+  it("renders 'Add Member' title for a new user", async () => {
+    const onClose = vi.fn();
+    component = mount(UserDialog, {
+      target,
+      props: { template: {}, onClose },
+    });
+    await waitForText(target, "Add Member");
+  });
+
+  it("shows 'Edit Member' in the dialog title for an existing user", async () => {
+    // The title switches from 'Add Member' to 'Edit Member' so admins
+    // immediately know they are modifying, not creating, an account.
+    apiMock.mockImplementation(async (path) => {
+      if (path === "/users") return [];
+      if (path.endsWith("/leave-days")) return [];
+      return {};
+    });
+    const onClose = vi.fn();
+    component = mount(UserDialog, {
+      target,
+      props: {
+        template: {
+          id: 7,
+          first_name: "Grace",
+          last_name: "Green",
+          role: "employee",
+          email: "grace@example.com",
+          weekly_hours: 40,
+          workdays_per_week: 5,
+          start_date: "2023-01-01",
+          approver_ids: [],
+          active: true,
+          tracks_time: true,
+        },
+        onClose,
+      },
+    });
+    await waitForText(target, "Edit Member");
+  });
+
+  it("shows a validation error when employee has no approver selected", async () => {
+    // Backend enforces that every non-admin user has at least one approver.
+    // The frontend must validate this before submitting to give the admin
+    // an immediate error instead of waiting for a network roundtrip.
+    const onClose = vi.fn();
+    component = mount(UserDialog, {
+      target,
+      props: { template: { role: "employee" }, onClose },
+    });
+    await waitForText(target, "Add Member");
+
+    const saveBtn = [...target.querySelectorAll("button")].find((b) =>
+      b.textContent.includes("Save") || b.textContent.includes("Add")
+    );
+    saveBtn?.click();
+    await settle();
+    await settle();
+
+    expect(target.textContent).toContain("approver");
+  });
+
+  it("renders password fields for a new user", async () => {
+    // New users get a password set by the admin. The dialog must show the
+    // password and confirm fields so the admin can set an initial credential.
+    const onClose = vi.fn();
+    component = mount(UserDialog, {
+      target,
+      props: { template: {}, onClose },
+    });
+    await waitForText(target, "Add Member");
+
+    const passwordFields = target.querySelectorAll('input[type="password"]');
+    expect(passwordFields.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("fetches leave days when editing an existing user", async () => {
+    // Leave days are stored separately from the user record. The form must
+    // load them so the admin can see and update this year's and next year's entitlement.
+    apiMock.mockImplementation(async (path) => {
+      if (path === "/users") return [];
+      if (path === "/users/7/leave-days")
+        return [{ year: new Date().getFullYear(), days: 25 }];
+      return {};
+    });
+    const onClose = vi.fn();
+    component = mount(UserDialog, {
+      target,
+      props: {
+        template: {
+          id: 7,
+          first_name: "Grace",
+          last_name: "Green",
+          role: "employee",
+          email: "grace@example.com",
+          weekly_hours: 40,
+          workdays_per_week: 5,
+          start_date: "2023-01-01",
+          approver_ids: [],
+          active: true,
+          tracks_time: true,
+        },
+        onClose,
+      },
+    });
+    await waitForText(target, "Edit Member");
+    await settle();
+
+    const leaveDaysCall = apiMock.mock.calls.find(
+      ([path]) => typeof path === "string" && path.includes("/leave-days")
+    );
+    expect(leaveDaysCall).toBeTruthy();
+  });
+});
