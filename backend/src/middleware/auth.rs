@@ -299,7 +299,7 @@ pub async fn auth_middleware(
     if user.must_change_password {
         let request_path = parts.uri.path();
         let allowed_paths = ["/auth/me", "/auth/password", "/auth/logout", "/auth/preferences", "/settings/public"];
-        if !allowed_paths.iter().any(|p| request_path == *p) {
+        if !allowed_paths.contains(&request_path) {
             return Err(AppError::Forbidden);
         }
     }
