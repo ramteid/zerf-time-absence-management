@@ -31,5 +31,11 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     include: ["src/**/*.test.{js,svelte}"],
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "json-summary"],
+      include: ["src/**/*.{js,svelte}"],
+      exclude: ["src/**/*.test.{js,svelte}", "src/main.js"],
+    },
   },
 });
