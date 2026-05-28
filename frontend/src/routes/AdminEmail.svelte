@@ -118,7 +118,6 @@
             <input
               type="checkbox"
               bind:checked={smtpSettings.smtp_enabled}
-              style="width:auto"
             />
             {$t("Enable SMTP")}
           </label>
@@ -139,7 +138,6 @@
             <input
               type="checkbox"
               bind:checked={smtpSettings.submission_reminders_enabled}
-              style="width:auto"
               disabled={!smtpSettings.smtp_enabled}
             />
             {$t("Enable reminders")}
@@ -161,7 +159,6 @@
             <input
               type="checkbox"
               bind:checked={smtpSettings.approval_reminders_enabled}
-              style="width:auto"
               disabled={!smtpSettings.smtp_enabled}
             />
             {$t("Enable approval reminders")}
@@ -234,7 +231,6 @@
                 type="checkbox"
                 bind:checked={clearStoredPassword}
                 disabled={!!smtpPassword}
-                style="width:auto"
               />
               {$t("Clear stored password")}
             </label>
