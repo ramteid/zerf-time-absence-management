@@ -7,7 +7,7 @@ Zerf (Zeiterfassung) is a self-hosted time tracking and absence management platf
 ```
 backend/      Rust/Axum HTTP API + PostgreSQL integration
 frontend/     Svelte 5 single-page app
-docker/       Docker Compose configurations and Caddy Dockerfile
+docker/       Docker Compose configurations and Dockerfiles
 migrations/   SQL migrations (backend/migrations/)
 scripts/      Backup utility
 ```
@@ -263,7 +263,7 @@ Three Docker Compose configurations in `docker/`:
 
 Caddy handles HTTPS termination and serves the frontend static assets. Backend listens on port 3333.
 
-The PostgreSQL container is built from `docker/Dockerfile.postgres` (based on `percona/percona-distribution-postgresql:18`, which bundles pg_tde). A custom entrypoint (`docker/entrypoint-postgres.sh`) decrypts the pg_tde keyring from the data volume into an in-memory tmpfs before handing off to the official postgres entrypoint. No elevated container capabilities are required.
+The PostgreSQL container is built from `docker/postgres.Dockerfile` (based on `percona/percona-distribution-postgresql:18`, which bundles pg_tde). A custom entrypoint (`docker/entrypoint-postgres.sh`) decrypts the pg_tde keyring from the data volume into an in-memory tmpfs before handing off to the official postgres entrypoint. No elevated container capabilities are required.
 
 ### Start scripts
 
@@ -339,6 +339,32 @@ The full suite runs in ~2 minutes.
   > **Important:** Always set `TEST_REFERENCE_DATE=2030-01-07` (a Monday with no nearby public holidays)
   > when running locally. Without it the helpers fall back to wall-clock time and date-relative tests
   > will fail whenever today's date lands on or near a public holiday.
+
+**Cleaning up between runs:**
+
+Each test creates an isolated database (`zerf_test_{pid}_{counter}`) and drops it in `cleanup()`.
+If a test run is killed mid-flight (e.g. Ctrl-C, OOM, crash), those databases are left behind and
+accumulate over time. They do not affect correctness but they consume disk space and connections.
+Drop them before the next run to start with a clean slate:
+
+```bash
+# List leftover test databases
+psql -U vscode -h 127.0.0.1 postgres -c \
+  "SELECT datname FROM pg_database WHERE datname LIKE 'zerf_test_%';"
+
+# Drop all leftover test databases in one shot
+psql -U vscode -h 127.0.0.1 postgres -t -c \
+  "SELECT 'DROP DATABASE IF EXISTS \"' || datname || '\";' FROM pg_database WHERE datname LIKE 'zerf_test_%';" \
+  | psql -U vscode -h 127.0.0.1 postgres
+```
+
+> **Note:** PostgreSQL must be restarted if it crashed mid-run (WAL recovery after an unclean
+> shutdown can take up to 60 s before accepting connections):
+> ```bash
+> pg_ctlcluster 14 main stop -m immediate && pg_ctlcluster 14 main start
+> # then wait:
+> until pg_isready; do sleep 2; done
+> ```
 
 **Verification after changes:**
 
