@@ -343,4 +343,16 @@ mod tests {
         let salt = SaltString::generate(&mut OsRng);
         assert!(instance.hash_password(b"test", &salt).is_ok());
     }
+
+    /// `hash_password_async` / `verify_password_async` are async wrappers that
+    /// offload Argon2 to a blocking thread. Verify the round-trip works correctly
+    /// and that verifying against a wrong password returns false.
+    #[tokio::test]
+    async fn async_password_helpers_roundtrip() {
+        let password = "AsyncPass123!".to_string();
+        let hash = hash_password_async(password.clone()).await.unwrap();
+        assert!(verify_password_async(password.clone(), hash.clone()).await);
+        assert!(!verify_password_async("WrongAsyncPass1!".to_string(), hash).await);
+        assert!(!verify_password_async(password, "not-a-valid-hash".to_string()).await);
+    }
 }

@@ -127,4 +127,30 @@ mod tests {
             "Internal server error"
         );
     }
+
+    /// The static constructor methods are shortcuts used throughout the codebase;
+    /// verify they produce the correct enum variant and preserve the message.
+    #[test]
+    fn static_constructors_build_correct_variants() {
+        let br = AppError::bad_request("too large");
+        assert!(matches!(&br, AppError::BadRequest(m) if m == "too large"));
+
+        let co = AppError::conflict("already exists");
+        assert!(matches!(&co, AppError::Conflict(m) if m == "already exists"));
+
+        assert!(matches!(AppError::forbidden(), AppError::Forbidden));
+    }
+
+    /// `anyhow::Error` is converted to `Internal` so that unexpected
+    /// third-party errors don't leak stack traces or internal state to clients.
+    #[tokio::test]
+    async fn from_anyhow_error_produces_hidden_internal_response() {
+        let app_err = AppError::from(anyhow::anyhow!("db exploded"));
+        let response = app_err.into_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            response_error_message(response).await,
+            "Internal server error"
+        );
+    }
 }

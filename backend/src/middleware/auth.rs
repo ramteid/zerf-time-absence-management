@@ -547,4 +547,40 @@ mod tests {
         assert!(!csrf_token_matches("", "secret-token-123"));
         assert!(!csrf_token_matches("", ""));
     }
+
+    /// `extract_token` must read the session token from a real axum Request's
+    /// Cookie header, and return None when no matching cookie is present.
+    #[test]
+    fn extract_token_reads_cookie_header_from_request() {
+        use axum::body::Body;
+
+        let req_with_cookie = Request::builder()
+            .header(header::COOKIE, "zerf_session=mytoken123")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(extract_token(&req_with_cookie), Some("mytoken123".to_string()));
+
+        let req_no_cookie = Request::builder()
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(extract_token(&req_no_cookie), None);
+
+        let req_wrong_cookie = Request::builder()
+            .header(header::COOKIE, "other=value")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(extract_token(&req_wrong_cookie), None);
+    }
+
+    /// When the authority contains a colon but the right-hand side is not a
+    /// valid port number, `parse_origin_parts` must fall back to the scheme's
+    /// default port and treat the whole authority as the host.
+    #[test]
+    fn parse_origin_parts_falls_back_on_non_numeric_port() {
+        let result = parse_origin_parts("https://host:notaport");
+        assert_eq!(
+            result,
+            Some(("https".to_string(), "host:notaport".to_string(), 443))
+        );
+    }
 }

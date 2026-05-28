@@ -143,106 +143,115 @@ pub async fn team(
     let tomorrow = today + Duration::days(1);
     let vacation_planned_start = tomorrow.max(month_start);
 
-    let mut team_rows = vec![];
+    // Spawn one Tokio task per team member so all per-user DB round-trips
+    // run concurrently.  This avoids O(N×k) sequential latency when the pool is
+    // under load (e.g. during integration tests running in parallel).
+    let handles: Vec<_> = team_members
+        .into_iter()
+        .map(|team_member| {
+            let pool = app_state.pool.clone();
+            let query_month = query.month.clone();
+            tokio::spawn(async move {
+                let team_member_is_assistant = is_assistant_role(&team_member.role);
+                let month_report =
+                    build_month_without_submission_status(&pool, team_member.id, &query_month)
+                        .await?;
 
-    for team_member in team_members {
-        let team_member_is_assistant = is_assistant_role(&team_member.role);
-        // Reuse the month report so target, actual, and diff stay consistent.
-        let month_report =
-            build_month_without_submission_status(&app_state.pool, team_member.id, &query.month)
+                let absence_count_start = month_start.max(team_member.start_date);
+
+                let vacation_taken = if absence_count_start <= vacation_taken_end {
+                    crate::services::absence_balance::workdays_total(
+                        &pool,
+                        team_member.id,
+                        "vacation",
+                        absence_count_start,
+                        vacation_taken_end,
+                    )
+                    .await?
+                } else {
+                    0.0
+                };
+
+                let vacation_planned_start_user =
+                    vacation_planned_start.max(team_member.start_date);
+                let vacation_planned = if vacation_planned_start_user <= month_end {
+                    crate::services::absence_balance::workdays_total(
+                        &pool,
+                        team_member.id,
+                        "vacation",
+                        vacation_planned_start_user,
+                        month_end,
+                    )
+                    .await?
+                } else {
+                    0.0
+                };
+
+                let sick_end = today.min(month_end);
+                let sick_workdays = if absence_count_start <= sick_end {
+                    crate::services::absence_balance::workdays_total(
+                        &pool,
+                        team_member.id,
+                        "sick",
+                        absence_count_start,
+                        sick_end,
+                    )
+                    .await?
+                } else {
+                    0.0
+                };
+
+                let flextime_balance_min = if team_member_is_assistant {
+                    None
+                } else {
+                    let overtime_rows =
+                        build_overtime_rows_for_year(&pool, team_member.id, today.year()).await?;
+                    Some(
+                        overtime_rows
+                            .last()
+                            .map(|r| r.cumulative_min)
+                            .unwrap_or(team_member.overtime_start_balance_min),
+                    )
+                };
+
+                let weeks_all_submitted = all_weeks_submitted_for_month(
+                    &pool,
+                    team_member.id,
+                    month_start,
+                    month_end,
+                    team_member.start_date,
+                    team_member_is_assistant,
+                    team_member.workdays_per_week,
+                )
                 .await?;
 
-        // Vacation days taken are capped at today so current-day absences count.
-        let absence_count_start = month_start.max(team_member.start_date);
+                Ok::<TeamRow, AppError>(TeamRow {
+                    user_id: team_member.id,
+                    name: format!("{} {}", team_member.first_name, team_member.last_name),
+                    target_min: month_report.target_min,
+                    actual_min: month_report.actual_min,
+                    diff_min: if team_member_is_assistant {
+                        None
+                    } else {
+                        Some(month_report.diff_min)
+                    },
+                    vacation_days: vacation_taken,
+                    vacation_planned_days: vacation_planned,
+                    sick_days: sick_workdays,
+                    flextime_balance_min,
+                    weeks_all_submitted,
+                })
+            })
+        })
+        .collect();
 
-        let vacation_taken = if absence_count_start <= vacation_taken_end {
-            crate::services::absence_balance::workdays_total(
-                &app_state.pool,
-                team_member.id,
-                "vacation",
-                absence_count_start,
-                vacation_taken_end,
-            )
-            .await?
-        } else {
-            0.0
-        };
-
-        // Planned vacation starts from tomorrow inside the selected month.
-        let vacation_planned_start = vacation_planned_start.max(team_member.start_date);
-        let vacation_planned = if vacation_planned_start <= month_end {
-            crate::services::absence_balance::workdays_total(
-                &app_state.pool,
-                team_member.id,
-                "vacation",
-                vacation_planned_start,
-                month_end,
-            )
-            .await?
-        } else {
-            0.0
-        };
-
-        // Sick days are capped at today so current-day sick leave counts.
-        // Future absences are excluded to keep month-to-date semantics.
-        let sick_end = today.min(month_end);
-        let sick_workdays = if absence_count_start <= sick_end {
-            crate::services::absence_balance::workdays_total(
-                &app_state.pool,
-                team_member.id,
-                "sick",
-                absence_count_start,
-                sick_end,
-            )
-            .await?
-        } else {
-            0.0
-        };
-
-        // Current flextime balance is independent of the selected month.
-        // The latest row of the current year is the balance as of today.
-        let flextime_balance_min = if team_member_is_assistant {
-            None
-        } else {
-            let current_year = today.year();
-            let overtime_rows =
-                build_overtime_rows_for_year(&app_state.pool, team_member.id, current_year).await?;
-            Some(
-                overtime_rows
-                    .last()
-                    .map(|r| r.cumulative_min)
-                    .unwrap_or(team_member.overtime_start_balance_min),
-            )
-        };
-
-        // Submission status uses full past weeks, including boundary weeks.
-        let weeks_all_submitted = all_weeks_submitted_for_month(
-            &app_state.pool,
-            team_member.id,
-            month_start,
-            month_end,
-            team_member.start_date,
-            team_member_is_assistant,
-            team_member.workdays_per_week,
-        )
-        .await?;
-
-        team_rows.push(TeamRow {
-            user_id: team_member.id,
-            name: format!("{} {}", team_member.first_name, team_member.last_name),
-            target_min: month_report.target_min,
-            actual_min: month_report.actual_min,
-            diff_min: if team_member_is_assistant {
-                None
-            } else {
-                Some(month_report.diff_min)
-            },
-            vacation_days: vacation_taken,
-            vacation_planned_days: vacation_planned,
-            sick_days: sick_workdays,
-            flextime_balance_min,
-            weeks_all_submitted,
-        });
+    let mut team_rows = Vec::with_capacity(handles.len());
+    for handle in handles {
+        team_rows.push(
+            handle
+                .await
+                .map_err(|_| AppError::Internal("team report task panicked".into()))??,
+        );
     }
 
     Ok(Json(team_rows))
