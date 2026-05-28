@@ -48,7 +48,5 @@ services:
 volumes:
   caddy_data:
     name: zerf_caddy_data
-    external: true
   caddy_config:
     name: zerf_caddy_config
-    external: true
