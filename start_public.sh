@@ -7,9 +7,4 @@ if [ -z "${ZERF_GIT_COMMIT:-}" ] && git_commit="$(git rev-parse --verify HEAD 2>
   export ZERF_GIT_COMMIT="$git_commit"
 fi
 
-docker volume create zerf_postgres_data
-docker volume create zerf_backup_data
-docker volume create zerf_caddy_data
-docker volume create zerf_caddy_config
-
 docker compose -f docker/docker-compose-local.yml -f docker/docker-compose-public.yml --env-file .env up -d --build

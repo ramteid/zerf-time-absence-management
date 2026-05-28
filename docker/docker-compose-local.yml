@@ -149,10 +149,8 @@ services:
 volumes:
   postgres_data:
     name: zerf_postgres_data
-    external: true
   backup_data:
     name: zerf_backup_data
-    external: true
 
 networks:
   public:
