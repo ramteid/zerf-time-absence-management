@@ -44,7 +44,7 @@ Everything is designed for speed: quick to set up, quick to use on desktop or mo
 
 ## 🏆 Why Zerf?
 
-Most open-source time trackers are either too simple (just a timer, no team features) or too complex (full HR suites with payroll, recruiting, and multi-tenant overhead nobody asked for). Zerf covers exactly what a small team needs — time, absences, approvals, and reports — without the rest.
+Most open-source time trackers are either too simple (just a timer, no team features) or too complex (full HR suites with payroll, recruiting, and multi-tenant overhead). Zerf covers time, absences, approvals, and reports — nothing more.
 
 ## 🔒 Security
 
