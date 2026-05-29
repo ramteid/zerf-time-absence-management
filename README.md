@@ -38,14 +38,13 @@ Works on desktop and mobile.
 
 ## 🔒 Security
 
-- 🦀 **Rust backend** — memory-safe by design
-- 🔑 **Argon2id** password hashing; accounts lock after 5 failed attempts per 15 minutes
-- 🍪 **Sessions** — 256-bit random tokens, HttpOnly + Secure + SameSite=Strict cookies, 8 h idle / 7 day absolute timeout
-- 🛡️ **CSRF** — SameSite cookies + Origin/Referer check + X-CSRF-Token double-submit
-- 🗄️ **Database encryption** — all tables and WAL segments encrypted at the storage layer via pg_tde; key never written to disk in plaintext
-- 💾 **Backup encryption** — AES-256-CBC, same key as the database
-- 📋 **Audit log** — before/after JSON snapshots for every mutation; passwords and secrets excluded
-- 🌐 **Network isolation** — database container not reachable from outside the Docker network
+- Passwords are hashed with Argon2id; accounts lock after repeated failed attempts
+- Sessions use cryptographically random tokens with idle and absolute timeouts
+- The database and all backups are encrypted at rest with a single key you control
+- Every change is recorded in an audit log
+- The database is not reachable from outside the Docker network
+
+See [docs/security.md](docs/security.md) for technical details.
 
 ## User documentation
 
