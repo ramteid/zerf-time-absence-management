@@ -25,6 +25,8 @@ jobs:
       - name: Inject version into source files
         run: |
           sed -i "s/^version = \"0\.0\.0\"/version = \"${VERSION}\"/" backend/Cargo.toml
+          # Cargo.lock also records the zerf package version; update it so --locked passes.
+          sed -i '/^name = "zerf"$/{n; s/version = "0\.0\.0"/version = "'"${VERSION}"'"/}' backend/Cargo.lock
           npm pkg set version="${VERSION}" --prefix frontend
 
       - name: Log in to GitHub Container Registry
