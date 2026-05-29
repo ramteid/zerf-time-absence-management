@@ -1584,6 +1584,7 @@ dialog footer {
   z-index: 150;
   display: flex;
   align-items: flex-end;
+  overflow: hidden;
 }
 
 .mobile-more-sheet {
