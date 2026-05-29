@@ -15,9 +15,9 @@ and absences:
                                    no time entries, no absences.
   Tabea Teamlead    (team_lead)  — works as senior educator, runs the team,
                                    sole approver for Tabea is Arnold (admin).
-  Eva Erzieherin    (employee)   — main educator; default approver Tabea,
+  Eva Employee      (employee)   — main educator; default approver Tabea,
                                    occasionally approved by Arnold.
-  Alina Aushilfe    (assistant)  — on-call springer; max 40h/month, mostly
+  Alina Assistant   (assistant)  — on-call springer; max 40h/month, mostly
                                    less, called in when Eva or Tabea is out.
 
 Each non-admin user gets entries for every contract workday since their hire
@@ -262,9 +262,9 @@ PERSONAS: list[Persona] = [
     ),
     Persona(
         key="employee",
-        email="eva.erzieherin@waldkindergarten-gundelfingen.de",
+        email="eva.employee@waldkindergarten-gundelfingen.de",
         first_name="Eva",
-        last_name="Erzieherin",
+        last_name="Employee",
         role="employee",
         weekly_hours=39.0,
         workdays_per_week=5,
@@ -273,14 +273,14 @@ PERSONAS: list[Persona] = [
         tracks_time=True,
         allow_reopen_without_approval=False,
         must_change_password=False,
-        password="Erzieher!2026",
+        password="Employee!2026",
         annual_leave_days={2026: 30, 2027: 30},
     ),
     Persona(
         key="assistant",
-        email="alina.aushilfe@waldkindergarten-gundelfingen.de",
+        email="alina.assistant@waldkindergarten-gundelfingen.de",
         first_name="Alina",
-        last_name="Aushilfe",
+        last_name="Assistant",
         role="assistant",
         # Assistants have weekly_hours=0 — no fixed schedule.  Their daily
         # target is 0 by definition; the submission-status logic exempts them
@@ -293,7 +293,7 @@ PERSONAS: list[Persona] = [
         tracks_time=True,
         allow_reopen_without_approval=False,
         must_change_password=False,
-        password="Aushilfe!2026",
+        password="Assistant!2026",
         # Assistants typically have no annual-leave entitlement.  Recording
         # zero days explicitly keeps the dashboards consistent.
         annual_leave_days={2026: 0, 2027: 0},
@@ -346,7 +346,7 @@ ABSENCE_SCRIPT: list[tuple[str, str, date, date, str, str | None]] = [
 
     # ── Alina (assistant) ────────────────────────────────────────────────
     # Sick on a day she was actually scheduled — she was filling in for Eva's
-    # spring break (2026-04-13..04-17), got sick on day 2 of that cover shift.
+    # spring leave (2026-04-13..04-17), got sick on day 2 of that cover shift.
     ("assistant", "sick",      date(2026, 4, 14), date(2026, 4, 14),  "approved",  "Erkältung"),
     # Future general_absence — exam day.
     ("assistant", "general_absence", date(2026, 6, 22), date(2026, 6, 22), "requested", "Klausur an der Hochschule"),
