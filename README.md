@@ -88,9 +88,9 @@ cp .env.example .env && chmod 600 .env
 The three secret keys can be generated and written in one step:
 
 ```bash
-sed -i "s|ZERF_SESSION_SECRET=.*|ZERF_SESSION_SECRET=$(openssl rand -hex 32)|" .env
-sed -i "s|ZERF_POSTGRES_PASSWORD=.*|ZERF_POSTGRES_PASSWORD=$(openssl rand -hex 32)|" .env
-sed -i "s|ZERF_DB_ENCRYPTION_KEY=.*|ZERF_DB_ENCRYPTION_KEY=$(openssl rand -hex 32)|" .env
+sed -i "s|^ZERF_SESSION_SECRET=.*$|ZERF_SESSION_SECRET=$(openssl rand -hex 32)|" .env
+sed -i "s|^ZERF_POSTGRES_PASSWORD=.*$|ZERF_POSTGRES_PASSWORD=$(openssl rand -hex 32)|" .env
+sed -i "s|^ZERF_DB_ENCRYPTION_KEY=.*$|ZERF_DB_ENCRYPTION_KEY=$(openssl rand -hex 32)|" .env
 ```
 
 #### Data encryption
