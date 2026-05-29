@@ -1,4 +1,4 @@
-# Zerf Work Time Tracking
+# Zerf Time & Absence Management
 
 [![CI](https://github.com/ramteid/zerf-work-time-tracking/actions/workflows/ci.yml/badge.svg)](https://github.com/ramteid/zerf-work-time-tracking/actions/workflows/ci.yml)
 [![Security Audit](https://github.com/ramteid/zerf-work-time-tracking/actions/workflows/audit.yml/badge.svg)](https://github.com/ramteid/zerf-work-time-tracking/actions/workflows/audit.yml)
