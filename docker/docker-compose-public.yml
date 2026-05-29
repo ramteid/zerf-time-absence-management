@@ -1,5 +1,12 @@
 services:
   app:
+    # Public deployment: the backend must be reachable ONLY through Caddy.
+    # The base compose (docker-compose-local.yml) publishes 3333 on the host
+    # for direct LAN access in local mode where no reverse proxy exists. Here
+    # we drop that host port publication entirely so the only ingress path is
+    # Caddy (80/443) -> app over the internal Docker network. `!reset` clears
+    # the list inherited from the base file (requires Docker Compose >= 2.24).
+    ports: !reset []
     environment:
       - ZERF_PUBLIC_URL=https://${ZERF_DOMAIN:?ZERF_DOMAIN must be set in .env}
       - ZERF_ALLOWED_ORIGINS=https://${ZERF_DOMAIN:?ZERF_DOMAIN must be set in .env}

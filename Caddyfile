@@ -2,6 +2,14 @@
 	# Global options.
 	# Uncomment and set if you want notification e-mails for cert issues:
 	# email ops@example.com
+
+	# Disable the local admin API (default 127.0.0.1:2019). We deploy by
+	# restarting the container, never via `caddy reload`, so the admin API is
+	# unused. Turning it off means a foothold inside the Caddy container cannot
+	# read TLS private keys, dump the running config, or live-rewrite the proxy
+	# through that endpoint. Pure attack-surface reduction.
+	admin off
+
 	servers {
 		protocols h1 h2 h3
 
@@ -30,6 +38,13 @@
 
 {$ZERF_DOMAIN:localhost} {
 	encode zstd gzip
+
+	# Pin the TLS floor explicitly. Caddy already negotiates secure suites by
+	# default; stating tls1.2/tls1.3 makes the policy auditable and refuses
+	# any future-default that would re-admit a deprecated protocol version.
+	tls {
+		protocols tls1.2 tls1.3
+	}
 
 	# Strict transport security: 2 years, all subdomains, preload-eligible.
 	header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"

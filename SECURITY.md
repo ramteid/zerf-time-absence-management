@@ -166,6 +166,13 @@ The reverse proxy is built with the
   workers.
 * **Body cap** — 1 MB at the edge, 1 MiB inside the app (edge is the
   stricter of the two on purpose).
+* **TLS floor** — `tls1.2`/`tls1.3` only; older protocol versions are
+  refused at the handshake.
+* **Admin API disabled** — `admin off` removes Caddy's local
+  configuration API (default `127.0.0.1:2019`). Deployments restart the
+  container rather than `caddy reload`, so the endpoint is unused; turning
+  it off means a foothold inside the Caddy container cannot read TLS
+  private keys, dump the running config, or live-rewrite the proxy.
 
 ## Secrets & configuration
 
@@ -187,6 +194,11 @@ The reverse proxy is built with the
 * Caddy runs with only `NET_BIND_SERVICE` capability.
 * PostgreSQL is reachable only on an **internal Docker network**; no database
   port is published on the host.
+* In the **public** deployment the application's HTTP port is **not** published
+  on the host: Caddy (ports 80/443) is the only ingress, and it reaches the app
+  over the internal Docker network. The base/local compose intentionally
+  publishes 3333 for direct LAN access where no reverse proxy is present; the
+  public overlay clears that host port mapping (`ports: !reset []`).
 * PostgreSQL initializes with `scram-sha-256` auth for local and host
   connections, `password_encryption=scram-sha-256`, data checksums, and 30 s
   statement / idle-in-transaction timeouts.
