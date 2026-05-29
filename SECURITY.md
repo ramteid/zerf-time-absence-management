@@ -16,7 +16,7 @@ private GitHub Security Advisory. Do **not** open a public issue.
 |------------------------------|-----------------------------------------------|-------------------------------------------------------------------------|
 | Login credentials            | Credential stuffing, brute force              | Argon2id hashing, 5/15 min lockout, generic error messages              |
 | Session cookies              | XSS theft, MITM, fixation, replay             | HttpOnly, Secure, SameSite=Strict, rotated on login, 8 h idle / 7 d absolute, idle enforced in middleware |
-| Personal data in DB          | Data theft, lateral movement, tampering       | Internal-only PostgreSQL network, SCRAM auth, checksums, app least privilege |
+| Personal data in DB          | Data theft, lateral movement, tampering       | Internal-only PostgreSQL network, SCRAM auth, checksums, app least privilege, backup isolated on separate network |
 | State-changing endpoints     | CSRF                                          | SameSite=Strict cookie + Origin/Referer check + X-CSRF-Token header     |
 | HTTP traffic                 | MITM, downgrade, sniffing                     | Caddy + Let's Encrypt + HSTS preload + CSP + COOP/CORP                  |
 | Account takeover via reset   | Token replay, reuse of leaked temp pw         | One-time 1 h reset tokens, forced password change on first login, sessions cleared on reset/change |
@@ -192,11 +192,16 @@ The reverse proxy is built with the
 * **`read_only: true`** root filesystem; `tmpfs:/tmp`.
 * `cap_drop: [ALL]`; `security_opt: no-new-privileges:true`.
 * Caddy runs with only `NET_BIND_SERVICE` capability.
-* PostgreSQL is reachable only on an **internal Docker network**; no database
-  port is published on the host.
+* **Three isolated Docker networks** enforce least-privilege connectivity:
+  * `public` (bridge) — Caddy + app; the only ingress network.
+  * `private` (internal) — app + postgres; no external connectivity.
+  * `backup_net` (internal) — postgres + backup only. The backup service holds
+    `ZERF_DB_ENCRYPTION_KEY` and is deliberately absent from `private`, so a
+    compromised app container cannot reach it.
+* No database or backup service port is published on the host.
 * In the **public** deployment the application's HTTP port is **not** published
   on the host: Caddy (ports 80/443) is the only ingress, and it reaches the app
-  over the internal Docker network. The base/local compose intentionally
+  over the `public` Docker network. The base/local compose intentionally
   publishes 3333 for direct LAN access where no reverse proxy is present; the
   public overlay clears that host port mapping (`ports: !reset []`).
 * PostgreSQL initializes with `scram-sha-256` auth for local and host
