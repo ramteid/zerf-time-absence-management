@@ -42,20 +42,22 @@ Everything is designed for speed: quick to set up, quick to use on desktop or mo
 - 🔐 **Encryption at rest** — database and backups encrypted with a single key you control
 - 🌍 **English & German** — full UI and email translations out of the box
 
-## 🏆 Why Zerf instead of the alternatives?
+## 🏆 Why Zerf?
 
-Most open-source time trackers are either too simple (just a timer, no team features) or too complex (full HR suites with payroll, recruiting, and multi-tenant overhead nobody asked for). Zerf hits the sweet spot:
+Most open-source time trackers are either too simple (just a timer, no team features) or too complex (full HR suites with payroll, recruiting, and multi-tenant overhead nobody asked for). Zerf covers exactly what a small team needs — time, absences, approvals, and reports — without the rest.
 
-| | Zerf | Typical SaaS | Generic HR suite |
-|---|---|---|---|
-| Self-hosted, data on your infra | ✅ | ❌ | sometimes |
-| Absence + approval workflows | ✅ | limited | ✅ |
-| Lightweight & fast to deploy | ✅ | n/a | ❌ |
-| No subscription fee | ✅ | ❌ | ❌ |
-| Encrypted database & backups | ✅ | trust vendor | varies |
-| Focused scope — no bloat | ✅ | varies | ❌ |
+## 🔒 Security
 
-One `docker compose up` and you're running. No external dependencies, no accounts to create, no data leaving your network.
+Security was a first-class concern throughout, not an afterthought:
+
+- 🦀 **Rust backend** — memory safety by default eliminates whole classes of vulnerabilities
+- 🔑 **Argon2id password hashing** — with brute-force lockout after 5 failed attempts per 15 minutes
+- 🍪 **Hardened sessions** — 256-bit random tokens in HttpOnly, Secure, SameSite=Strict cookies with both idle and absolute timeouts
+- 🛡️ **CSRF protection** — SameSite cookies combined with Origin/Referer checking and X-CSRF-Token double-submit
+- 🗄️ **Encrypted database** — all tables and WAL segments encrypted at the storage layer (pg_tde); the key never touches disk in plaintext
+- 💾 **Encrypted backups** — every backup file is AES-256 encrypted before hitting disk; one key covers both layers
+- 📋 **Full audit log** — every mutation is recorded with before/after snapshots; passwords and secrets are never logged
+- 🌐 **Isolated network** — the database container is not exposed to the host or internet
 
 ## User documentation
 
