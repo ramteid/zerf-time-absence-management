@@ -366,17 +366,17 @@
             </div>
           </a>
           <button
+            class="zf-btn-icon-sm"
+            on:click={() => (mobileMoreOpen = false)}
+          >
+            <Icon name="X" size={18} />
+          </button>
+          <button
             class="zf-btn zf-btn-sm zf-btn-ghost zf-btn-danger"
             on:click={logout}
           >
             <Icon name="LogOut" size={15} />
             {$t("Sign out")}
-          </button>
-          <button
-            class="zf-btn-icon-sm"
-            on:click={() => (mobileMoreOpen = false)}
-          >
-            <Icon name="X" size={18} />
           </button>
         </div>
         {#each mobileNavItems.overflow as link (link.href)}
