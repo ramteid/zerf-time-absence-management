@@ -11,9 +11,7 @@
 [![Deploy: Docker](https://img.shields.io/badge/deploy-Docker-2496ED.svg)](https://www.docker.com)
 [![Self-hosted](https://img.shields.io/badge/self--hosted-yes-success.svg)](#quick-setup)
 
-**Self-hosted time tracking and absence management for teams — fast, focused, and fully under your control.**
-
-Track working hours, manage leave requests, run approvals, and generate reports — all in one lightweight tool your whole team will actually enjoy using. No SaaS subscription. No bloat. Your data stays where you put it.
+Self-hosted time tracking and absence management for small teams. Covers working hours, leave requests, approvals, and monthly reports. Data stays on your own infrastructure.
 
 `Zerf` is derived from the German word *Zeiterfassung* — time tracking.
 
@@ -23,41 +21,31 @@ Track working hours, manage leave requests, run approvals, and generate reports 
 
 ## 🗂️ Overview
 
-Zerf covers the full daily workflow between employees, team leads, and admins:
+Three roles: employees log hours and request leave, team leads approve time sheets and absences, admins manage users, categories, holidays, and settings. Every change is recorded in an audit log.
 
-- **Employees** log hours, request leave, and submit weeks for approval.
-- **Team leads** review time sheets, approve or reject absence requests, and keep an eye on the team calendar.
-- **Admins** manage users, categories, holidays, and settings — and get a full audit trail of every change.
-
-Everything is designed for speed: quick to set up, quick to use on desktop or mobile, and easy to keep running.
+Works on desktop and mobile.
 
 ## ✨ Key features
 
-- ⏱️ **Time tracking** — category-based daily entries, weekly submission flow, overtime visibility, and week-reopen requests for after-the-fact corrections
-- 🏖️ **Absence management** — vacation, sick leave, training, special leave, unpaid leave, and more, with a full approval workflow
-- ✅ **Approval dashboard** — one place for team leads to act on submitted weeks, absence requests, and reopen requests
-- 📅 **Team calendar** — shared view of who is absent, with public holiday context
-- 📊 **Reports & CSV export** — monthly per-employee breakdowns, team-level summaries, and raw CSV for downstream processing
-- 🔔 **Notifications** — in-app alerts and optional email reminders; automated submission nudges when monthly deadlines approach
-- 🔐 **Encryption at rest** — database and backups encrypted with a single key you control
-- 🌍 **English & German** — full UI and email translations out of the box
-
-## 🏆 Why Zerf?
-
-Most open-source time trackers are either too simple (just a timer, no team features) or too complex (full HR suites with payroll, recruiting, and multi-tenant overhead). Zerf covers time, absences, approvals, and reports — nothing more.
+- ⏱️ **Time tracking** — category-based daily entries, weekly submission, overtime visibility, and week-reopen requests for corrections after submission
+- 🏖️ **Absence management** — vacation, sick leave, training, special leave, unpaid leave, and more, each with a request/approve/reject workflow
+- ✅ **Approval dashboard** — submitted weeks, absence requests, and reopen requests in one view
+- 📅 **Team calendar** — absence overview with public holiday context
+- 📊 **Reports & CSV export** — monthly per-employee breakdowns, team-level summaries, CSV for downstream processing
+- 🔔 **Notifications** — in-app and optional email; automated reminders when employees have unsubmitted months past a configured deadline
+- 🔐 **Encryption** — database and backups encrypted at rest; one key covers both
+- 🌍 **English & German**
 
 ## 🔒 Security
 
-Security was a first-class concern throughout, not an afterthought:
-
-- 🦀 **Rust backend** — memory safety by default eliminates whole classes of vulnerabilities
-- 🔑 **Argon2id password hashing** — with brute-force lockout after 5 failed attempts per 15 minutes
-- 🍪 **Hardened sessions** — 256-bit random tokens in HttpOnly, Secure, SameSite=Strict cookies with both idle and absolute timeouts
-- 🛡️ **CSRF protection** — SameSite cookies combined with Origin/Referer checking and X-CSRF-Token double-submit
-- 🗄️ **Encrypted database** — all tables and WAL segments encrypted at the storage layer (pg_tde); the key never touches disk in plaintext
-- 💾 **Encrypted backups** — every backup file is AES-256 encrypted before hitting disk; one key covers both layers
-- 📋 **Full audit log** — every mutation is recorded with before/after snapshots; passwords and secrets are never logged
-- 🌐 **Isolated network** — the database container is not exposed to the host or internet
+- 🦀 **Rust backend** — memory-safe by design
+- 🔑 **Argon2id** password hashing; accounts lock after 5 failed attempts per 15 minutes
+- 🍪 **Sessions** — 256-bit random tokens, HttpOnly + Secure + SameSite=Strict cookies, 8 h idle / 7 day absolute timeout
+- 🛡️ **CSRF** — SameSite cookies + Origin/Referer check + X-CSRF-Token double-submit
+- 🗄️ **Database encryption** — all tables and WAL segments encrypted at the storage layer via pg_tde; key never written to disk in plaintext
+- 💾 **Backup encryption** — AES-256-CBC, same key as the database
+- 📋 **Audit log** — before/after JSON snapshots for every mutation; passwords and secrets excluded
+- 🌐 **Network isolation** — database container not reachable from outside the Docker network
 
 ## User documentation
 
