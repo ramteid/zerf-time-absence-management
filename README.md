@@ -1,9 +1,9 @@
 # Zerf Time & Absence Management
 
-[![CI](https://github.com/ramteid/zerf-work-time-tracking/actions/workflows/ci.yml/badge.svg)](https://github.com/ramteid/zerf-work-time-tracking/actions/workflows/ci.yml)
-[![Security Audit](https://github.com/ramteid/zerf-work-time-tracking/actions/workflows/audit.yml/badge.svg)](https://github.com/ramteid/zerf-work-time-tracking/actions/workflows/audit.yml)
-[![Build & Push Image](https://github.com/ramteid/zerf-work-time-tracking/actions/workflows/build-push-image.yml/badge.svg)](https://github.com/ramteid/zerf-work-time-tracking/actions/workflows/build-push-image.yml)
-[![Nager.Date Contract](https://github.com/ramteid/zerf-work-time-tracking/actions/workflows/nager-contract.yml/badge.svg)](https://github.com/ramteid/zerf-work-time-tracking/actions/workflows/nager-contract.yml)
+[![CI](https://github.com/ramteid/zerf-time-absence-management/actions/workflows/ci.yml/badge.svg)](https://github.com/ramteid/zerf-time-absence-management/actions/workflows/ci.yml)
+[![Security Audit](https://github.com/ramteid/zerf-time-absence-management/actions/workflows/audit.yml/badge.svg)](https://github.com/ramteid/zerf-time-absence-management/actions/workflows/audit.yml)
+[![Build & Push Image](https://github.com/ramteid/zerf-time-absence-management/actions/workflows/build-push-image.yml/badge.svg)](https://github.com/ramteid/zerf-time-absence-management/actions/workflows/build-push-image.yml)
+[![Nager.Date Contract](https://github.com/ramteid/zerf-time-absence-management/actions/workflows/nager-contract.yml/badge.svg)](https://github.com/ramteid/zerf-time-absence-management/actions/workflows/nager-contract.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Backend: Rust](https://img.shields.io/badge/backend-Rust-orange.svg)](https://www.rust-lang.org)
 [![Frontend: Svelte](https://img.shields.io/badge/frontend-Svelte-FF3E00.svg)](https://svelte.dev)
@@ -136,7 +136,7 @@ python3 scripts/seed_test_data.py --yes
 
 ## Updating to a new version
 
-Releases are published on the [GitHub Releases page](https://github.com/ramteid/zerf-work-time-tracking/releases). Set `ZERF_VERSION` in your `.env` file to control which version runs:
+Releases are published on the [GitHub Releases page](https://github.com/ramteid/zerf-time-absence-management/releases). Set `ZERF_VERSION` in your `.env` file to control which version runs:
 
 | Value | Behaviour |
 |-------|-----------|
