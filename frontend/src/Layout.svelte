@@ -366,12 +366,11 @@
             </div>
           </a>
           <button
-            class="zf-btn-icon-sm"
-            style="color:var(--danger-text)"
+            class="zf-btn zf-btn-sm zf-btn-ghost zf-btn-danger"
             on:click={logout}
-            title={$t("Sign out")}
           >
-            <Icon name="LogOut" size={18} />
+            <Icon name="LogOut" size={15} />
+            {$t("Sign out")}
           </button>
           <button
             class="zf-btn-icon-sm"
