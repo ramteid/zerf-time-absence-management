@@ -25,7 +25,9 @@ fi
 if [ "$ZERF_VERSION" = "dev" ]; then
   build_flag="--build"
 else
-  build_flag="--no-build"
+  # --pull always: refresh the registry image even when a local copy is cached.
+  # --no-build: do not fall back to building from local Dockerfiles.
+  build_flag="--no-build --pull always"
 fi
 
 # DEBUG=true → debug build profile, unminified frontend, RUST_BACKTRACE=1.
