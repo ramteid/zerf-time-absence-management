@@ -61,6 +61,11 @@ services:
         max-file: "5"
     networks:
       - private
+      # backup_net is a separate internal network shared only with the backup
+      # container. This isolates the backup service (which holds
+      # ZERF_DB_ENCRYPTION_KEY) from the app container: a compromised app
+      # cannot reach the backup container even though both are on internal nets.
+      - backup_net
 
   app:
     image: ghcr.io/ramteid/zerf-work-time-tracking:${ZERF_VERSION:-latest}
@@ -147,7 +152,9 @@ services:
         max-size: "10m"
         max-file: "5"
     networks:
-      - private
+      # backup_net only — deliberately not on `private` so a compromised app
+      # container cannot reach this service or its ZERF_DB_ENCRYPTION_KEY.
+      - backup_net
 
 volumes:
   postgres_data:
@@ -158,4 +165,8 @@ volumes:
 networks:
   public:
   private:
+    internal: true
+  backup_net:
+    # Isolated internal network for postgres ↔ backup only.
+    # The app container is intentionally absent from this network.
     internal: true
