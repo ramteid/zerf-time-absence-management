@@ -367,6 +367,14 @@
           </a>
           <button
             class="zf-btn-icon-sm"
+            style="color:var(--danger-text)"
+            on:click={logout}
+            title={$t("Sign out")}
+          >
+            <Icon name="LogOut" size={18} />
+          </button>
+          <button
+            class="zf-btn-icon-sm"
             on:click={() => (mobileMoreOpen = false)}
           >
             <Icon name="X" size={18} />
@@ -386,18 +394,6 @@
             <span>{$t(link.key)}</span>
           </a>
         {/each}
-        <div
-          style="border-top:1px solid var(--border);margin-top:8px;padding-top:8px"
-        >
-          <button
-            class="mobile-more-item"
-            style="color:var(--danger-text);width:fit-content"
-            on:click={logout}
-          >
-            <Icon name="LogOut" size={18} />
-            <span>{$t("Sign out")}</span>
-          </button>
-        </div>
       </div>
     </div>
   {/if}
