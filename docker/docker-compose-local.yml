@@ -2,7 +2,7 @@ name: zerf
 
 services:
   postgres:
-    image: ghcr.io/ramteid/zerf-work-time-tracking-postgres:${ZERF_VERSION:-latest}
+    image: ghcr.io/ramteid/zerf-time-absence-management-postgres:${ZERF_VERSION:-latest}
     build:
       context: .
       dockerfile: postgres.Dockerfile
@@ -68,7 +68,7 @@ services:
       - backup_net
 
   app:
-    image: ghcr.io/ramteid/zerf-work-time-tracking:${ZERF_VERSION:-latest}
+    image: ghcr.io/ramteid/zerf-time-absence-management:${ZERF_VERSION:-latest}
     build:
       context: ..
       dockerfile: docker/app.Dockerfile
