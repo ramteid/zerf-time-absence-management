@@ -21,6 +21,19 @@ vi.mock("svelte", async () => {
   return await import("../../node_modules/svelte/src/index-client.js");
 });
 
+// Freeze the app's concept of "today" so components that default date-range
+// inputs to the current month/year produce the same defaults regardless of
+// when the test suite is run.  2030-01-01 (Monday) was chosen to be far enough
+// in the future that no hardcoded test fixture dates will accidentally coincide
+// with "today" and trigger edge-case branches.
+vi.mock("../format.js", async () => {
+  const actual = await vi.importActual("../format.js");
+  return {
+    ...actual,
+    appTodayDate: vi.fn(() => new Date(2030, 0, 1)),
+  };
+});
+
 vi.mock("../api.js", () => ({
   api: vi.fn(async (path) => {
     if (path.startsWith("/reports/month?")) return mockState.monthReport;
@@ -500,19 +513,19 @@ describe("Reports", () => {
         id: 101,
         user_id: 8,
         kind: "vacation",
-        start_date: "2026-05-04",
-        end_date: "2026-05-04",
+        start_date: "2030-06-03",
+        end_date: "2030-06-03",
         status: "approved",
       },
     ];
     mockState.ownAbsencesByYear = {
-      2026: [
+      2030: [
         {
           id: 202,
           user_id: 7,
           kind: "sick",
-          start_date: "2026-05-05",
-          end_date: "2026-05-05",
+          start_date: "2030-06-02",
+          end_date: "2030-06-02",
           status: "approved",
         },
       ],
@@ -532,7 +545,7 @@ describe("Reports", () => {
     await waitForElement(absenceCard, "table.zf-table", 20000);
 
     const calledPaths = api.mock.calls.map(([path]) => path);
-    expect(calledPaths).toContain("/absences?year=2026");
+    expect(calledPaths).toContain("/absences?year=2030");
     expect(calledPaths.some((path) => path.startsWith("/absences/all?"))).toBe(
       true,
     );
