@@ -220,6 +220,10 @@ body {
   background: var(--bg-surface);
   border-color: var(--border);
 }
+.zf-btn-ghost.zf-btn-danger:active {
+  background: transparent;
+  border-color: transparent;
+}
 .zf-btn-sm {
   height: 28px;
   padding: 0 10px;
