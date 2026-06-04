@@ -66,12 +66,19 @@
       {$t("help_flextime_chart")}
     </div>
   {/if}
-  {#if chartLoading}
+  {#if chartLoading && chartData.length === 0}
     <div class="flextime-loading">
       {$t("Loading...")}
     </div>
   {:else}
-    <FlextimeChart data={chartData} />
+    <div class:flextime-chart-busy={chartLoading} class="flextime-chart-wrap">
+      <FlextimeChart data={chartData} />
+      {#if chartLoading}
+        <div class="flextime-loading-inline">
+          {$t("Loading...")}
+        </div>
+      {/if}
+    </div>
   {/if}
 </div>
 
@@ -125,5 +132,28 @@
     padding: 40px 0;
     font-size: 13px;
     color: var(--text-tertiary);
+  }
+
+  .flextime-chart-wrap {
+    position: relative;
+    min-height: 230px;
+  }
+
+  .flextime-chart-busy {
+    cursor: progress;
+  }
+
+  .flextime-loading-inline {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-surface);
+    color: var(--text-tertiary);
+    font-size: 12px;
+    box-shadow: var(--shadow-sm);
+    pointer-events: none;
   }
 </style>
