@@ -126,6 +126,16 @@ body,
   overflow: hidden;
 }
 
+button,
+a,
+[role="button"],
+input,
+select,
+textarea,
+label {
+  -webkit-tap-highlight-color: transparent;
+}
+
 body {
   font-family: var(--font-sans);
   color: var(--text-primary);
@@ -166,6 +176,9 @@ body {
 .zf-btn:hover {
   background: var(--bg-muted);
 }
+.zf-btn:active {
+  background: var(--bg-surface);
+}
 .zf-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
@@ -180,6 +193,10 @@ body {
   background: var(--accent-hover);
   border-color: var(--accent-hover);
 }
+.zf-btn-primary:active {
+  background: var(--accent);
+  border-color: var(--accent);
+}
 .zf-btn-ghost {
   border-color: transparent;
   background: transparent;
@@ -189,12 +206,19 @@ body {
   background: var(--bg-muted);
   color: var(--text-primary);
 }
+.zf-btn-ghost:active {
+  background: transparent;
+}
 .zf-btn-danger {
   color: var(--danger-text);
 }
 .zf-btn-danger:hover {
   background: var(--danger-soft);
   border-color: var(--danger-soft);
+}
+.zf-btn-danger:active {
+  background: var(--bg-surface);
+  border-color: var(--border);
 }
 .zf-btn-sm {
   height: 28px;
