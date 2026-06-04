@@ -184,4 +184,25 @@ describe("ApprovalQueues", () => {
     expect(target.textContent).toContain("Carol Dev");
     expect(target.textContent).toContain("Vacation");
   });
+
+  it("renders the comment for a pending absence when present", async () => {
+    // The dashboard queue should surface the requester note immediately so
+    // approvers do not need to open the detail dialog for basic context.
+    component = mount(ApprovalQueues, {
+      target,
+      props: {
+        pendingWeeks: [],
+        pendingReopens: [],
+        pendingAbsences: [
+          {
+            ...pendingAbsence,
+            comment: "Family appointment in the morning.",
+          },
+        ],
+        users,
+      },
+    });
+    await settle();
+    expect(target.textContent).toContain("Family appointment in the morning.");
+  });
 });

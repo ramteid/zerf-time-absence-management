@@ -202,6 +202,11 @@
             {absenceKindLabel(absence.kind)} · {fmtDateShort(absence.start_date)} -
             {fmtDateShort(absence.end_date)}
           </div>
+          {#if absence.comment}
+            <div class="absence-comment" title={absence.comment}>
+              {absence.comment}
+            </div>
+          {/if}
         </div>
         <div style="display:flex;gap:4px">
           <button
@@ -259,7 +264,8 @@
     box-shadow: 0 0 0 2px var(--accent);
   }
 
-  .reopen-reason {
+  .reopen-reason,
+  .absence-comment {
     font-size: 11px;
     color: var(--text-tertiary);
     margin-top: 2px;
