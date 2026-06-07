@@ -140,7 +140,7 @@ Releases are published on the [GitHub Releases page](https://github.com/ramteid/
 
 | Value | Behaviour |
 |-------|-----------|
-| `1.2.0` (pinned) | Runs that exact release — recommended for production |
+| `v1.2.0` (pinned) | Runs that exact release — recommended for production |
 | `latest` | Always follows the latest release |
 | `dev` | Tracks the latest development build from `main` |
 
