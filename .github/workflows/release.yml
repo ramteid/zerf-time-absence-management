@@ -47,7 +47,7 @@ jobs:
             ZERF_GIT_COMMIT=${{ github.sha }}
             ZERF_VERSION=${{ env.VERSION }}
           tags: |
-            ${{ env.IMAGE_BASE }}:${{ env.VERSION }}
+            ${{ env.IMAGE_BASE }}:${{ github.ref_name }}
             ${{ env.IMAGE_BASE }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -59,7 +59,7 @@ jobs:
           file: docker/postgres.Dockerfile
           push: true
           tags: |
-            ${{ env.IMAGE_BASE }}-postgres:${{ env.VERSION }}
+            ${{ env.IMAGE_BASE }}-postgres:${{ github.ref_name }}
             ${{ env.IMAGE_BASE }}-postgres:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -73,7 +73,7 @@ jobs:
           build-args: |
             ZERF_GIT_COMMIT=${{ github.sha }}
           tags: |
-            ${{ env.IMAGE_BASE }}-caddy:${{ env.VERSION }}
+            ${{ env.IMAGE_BASE }}-caddy:${{ github.ref_name }}
             ${{ env.IMAGE_BASE }}-caddy:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
