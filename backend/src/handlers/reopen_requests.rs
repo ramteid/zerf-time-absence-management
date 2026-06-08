@@ -4,11 +4,10 @@ use crate::audit;
 use crate::error::{AppError, AppResult};
 use crate::i18n;
 use crate::middleware::auth::User;
-use crate::services::notifications as notifications;
+use crate::services::notifications;
 use crate::services::reopen_requests::{
-    assert_monday, audit_reopened_entries, approver_ids_to_notify,
-    notification_language, notify_assigned_approvers_if_admin_acted, repo_rr_to_service,
-    ReopenRequest,
+    approver_ids_to_notify, assert_monday, audit_reopened_entries, notification_language,
+    notify_assigned_approvers_if_admin_acted, repo_rr_to_service, ReopenRequest,
 };
 use crate::AppState;
 use axum::{
@@ -50,7 +49,8 @@ pub async fn create(
         .await?;
     if reopenable_entry_count == 0 {
         return Err(AppError::BadRequest(
-            "Cannot request edit - this week has no submitted, approved, or rejected entries.".into(),
+            "Cannot request edit - this week has no submitted, approved, or rejected entries."
+                .into(),
         ));
     }
 
@@ -102,22 +102,22 @@ pub async fn create(
     let week_label = i18n::format_week_label(&language, body.week_start);
     let week_iso = body.week_start.format("%Y-%m-%d").to_string();
 
-    let (new_request_id, reopened_entries): (i64, Option<Vec<(i64, String)>>) = if should_auto_approve
-    {
-        let (new_id, affected) = app_state
-            .db
-            .reopen_requests
-            .insert_auto_approved(requester.id, body.week_start, requester.id, request_reason)
-            .await?;
-        (new_id, Some(affected))
-    } else {
-        let (new_id, _created_at) = app_state
-            .db
-            .reopen_requests
-            .insert_pending(requester.id, body.week_start, request_reason)
-            .await?;
-        (new_id, None)
-    };
+    let (new_request_id, reopened_entries): (i64, Option<Vec<(i64, String)>>) =
+        if should_auto_approve {
+            let (new_id, affected) = app_state
+                .db
+                .reopen_requests
+                .insert_auto_approved(requester.id, body.week_start, requester.id, request_reason)
+                .await?;
+            (new_id, Some(affected))
+        } else {
+            let (new_id, _created_at) = app_state
+                .db
+                .reopen_requests
+                .insert_pending(requester.id, body.week_start, request_reason)
+                .await?;
+            (new_id, None)
+        };
 
     let entries_reopened = reopened_entries
         .as_ref()
@@ -363,7 +363,12 @@ pub async fn reject(
     let before = app_state
         .db
         .reopen_requests
-        .reject_with_access_check(request_id, requester.id, requester.is_admin(), rejection_reason)
+        .reject_with_access_check(
+            request_id,
+            requester.id,
+            requester.is_admin(),
+            rejection_reason,
+        )
         .await?;
     let before = repo_rr_to_service(before);
     audit::log(

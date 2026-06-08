@@ -39,7 +39,10 @@ async fn auth_and_rbac_workflow() {
         assert_eq!(st, StatusCode::OK, "login admin");
         let (st, body) = admin.get("/api/v1/auth/me").await;
         assert_eq!(st, StatusCode::OK);
-        assert_eq!(body["must_change_password"], true, "must_change_password set");
+        assert_eq!(
+            body["must_change_password"], true,
+            "must_change_password set"
+        );
         let (st, _) = admin
             .change_password(&app.admin_password, "AdminPass!234")
             .await;
@@ -123,11 +126,16 @@ async fn auth_and_rbac_workflow() {
     // -- Role-elevation hardening ---------------------------------------------
     {
         let (st, _) = emp
-            .put(&format!("/api/v1/users/{}", emp_id), &json!({"role":"admin"}))
+            .put(
+                &format!("/api/v1/users/{}", emp_id),
+                &json!({"role":"admin"}),
+            )
             .await;
         assert_eq!(st, StatusCode::FORBIDDEN, "emp self-promote 403");
 
-        let (st, _) = admin.put("/api/v1/users/1", &json!({"role":"employee"})).await;
+        let (st, _) = admin
+            .put("/api/v1/users/1", &json!({"role":"employee"}))
+            .await;
         assert!(
             st == StatusCode::BAD_REQUEST || st == StatusCode::CONFLICT,
             "admin self-demote rejected (got {})",
@@ -142,7 +150,10 @@ async fn auth_and_rbac_workflow() {
         );
 
         let (st, _) = admin
-            .put(&format!("/api/v1/users/{}", emp_id), &json!({"role":"superuser"}))
+            .put(
+                &format!("/api/v1/users/{}", emp_id),
+                &json!({"role":"superuser"}),
+            )
             .await;
         assert_eq!(st, StatusCode::BAD_REQUEST, "bogus role rejected");
     }
@@ -172,7 +183,10 @@ async fn auth_and_rbac_workflow() {
     // -- Password reset + deactivation ----------------------------------------
     {
         let (st, body) = admin
-            .post(&format!("/api/v1/users/{}/reset-password", emp_id), &json!({}))
+            .post(
+                &format!("/api/v1/users/{}/reset-password", emp_id),
+                &json!({}),
+            )
             .await;
         assert_eq!(st, StatusCode::OK, "reset password");
         let new_pw = temp_pw(&body);
@@ -276,7 +290,10 @@ async fn time_entry_and_cr_workflow() {
         assert_eq!(st, StatusCode::BAD_REQUEST, ">14h day rejected");
 
         let (st, body) = emp
-            .get(&format!("/api/v1/time-entries?from={}&to={}", entry_day, entry_day))
+            .get(&format!(
+                "/api/v1/time-entries?from={}&to={}",
+                entry_day, entry_day
+            ))
             .await;
         assert_eq!(st, StatusCode::OK, "list own entries");
         assert!(has_id(&body, te1), "TE1 in list");
@@ -532,7 +549,11 @@ async fn absence_and_report_workflow() {
             .unwrap()
             .matches(&format!("\"record_id\":{}", gabs))
             .count();
-        assert!(ga_audit >= 3, "audit has {} entries for absence (need ≥3)", ga_audit);
+        assert!(
+            ga_audit >= 3,
+            "audit has {} entries for absence (need ≥3)",
+            ga_audit
+        );
     }
 
     // -- General absence: overlap and validation edge cases -------------------
@@ -590,7 +611,9 @@ async fn absence_and_report_workflow() {
         assert_eq!(st, StatusCode::OK, "edit pending kind");
         assert_eq!(body["kind"], "vacation");
 
-        let (st, _) = emp.delete(&format!("/api/v1/absences/{}", editable_id)).await;
+        let (st, _) = emp
+            .delete(&format!("/api/v1/absences/{}", editable_id))
+            .await;
         assert_eq!(st, StatusCode::OK, "cancel edited pending");
 
         // Approved sick cannot change type. Use offset 55 to avoid holidays.
@@ -610,7 +633,11 @@ async fn absence_and_report_workflow() {
                 &json!({"kind":"vacation","start_date": &sick_edit_day,"end_date": &sick_edit_day}),
             )
             .await;
-        assert_eq!(st, StatusCode::BAD_REQUEST, "approved sick kind change rejected");
+        assert_eq!(
+            st,
+            StatusCode::BAD_REQUEST,
+            "approved sick kind change rejected"
+        );
 
         // Unauthenticated caller rejected.
         let anon = app.client();
@@ -647,7 +674,9 @@ async fn absence_and_report_workflow() {
         // pending sick-edit scenario above while still avoiding common holidays.
         let ga4_monday = next_monday(120);
         let ga4_from = ga4_monday.format("%Y-%m-%d").to_string();
-        let ga4_to = (ga4_monday + chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
+        let ga4_to = (ga4_monday + chrono::Duration::days(1))
+            .format("%Y-%m-%d")
+            .to_string();
 
         let (st, body) = emp
             .post(
@@ -672,7 +701,9 @@ async fn absence_and_report_workflow() {
         // Reject journey.
         let ga5_monday = next_monday(200);
         let ga5_from = ga5_monday.format("%Y-%m-%d").to_string();
-        let ga5_to = (ga5_monday + chrono::Duration::days(2)).format("%Y-%m-%d").to_string();
+        let ga5_to = (ga5_monday + chrono::Duration::days(2))
+            .format("%Y-%m-%d")
+            .to_string();
 
         let (_, body) = emp
             .post(
@@ -725,7 +756,12 @@ async fn absence_and_report_workflow() {
         let (st, _) = lead
             .post("/api/v1/absences/9999999/approve", &json!({}))
             .await;
-        assert_ne!(st, StatusCode::OK, "approve unknown id not 200 (got {})", st);
+        assert_ne!(
+            st,
+            StatusCode::OK,
+            "approve unknown id not 200 (got {})",
+            st
+        );
     }
 
     // -- Vacation balance matches captured value ------------------------------
@@ -735,7 +771,10 @@ async fn absence_and_report_workflow() {
             .await;
         assert_eq!(st, StatusCode::OK, "leave balance");
         assert_eq!(body["annual_entitlement"], 30);
-        assert_eq!(body["approved_upcoming"], balance_after_vacation["approved_upcoming"]);
+        assert_eq!(
+            body["approved_upcoming"],
+            balance_after_vacation["approved_upcoming"]
+        );
         assert_eq!(body["available"], balance_after_vacation["available"]);
     }
 
@@ -750,28 +789,46 @@ async fn absence_and_report_workflow() {
         assert_eq!(st, StatusCode::OK, "calendar");
 
         let (st, _) = lead
-            .get(&format!("/api/v1/reports/month?user_id={}&month={}", emp_id, month))
+            .get(&format!(
+                "/api/v1/reports/month?user_id={}&month={}",
+                emp_id, month
+            ))
             .await;
         assert_eq!(st, StatusCode::OK, "monthly report");
 
-        let (st, _) = lead.get(&format!("/api/v1/reports/team?month={}", month)).await;
+        let (st, _) = lead
+            .get(&format!("/api/v1/reports/team?month={}", month))
+            .await;
         assert_eq!(st, StatusCode::OK, "team report");
 
         let (st, _) = lead
-            .get(&format!("/api/v1/reports/categories?from={}-01-01&to={}-12-31", yr, yr))
+            .get(&format!(
+                "/api/v1/reports/categories?from={}-01-01&to={}-12-31",
+                yr, yr
+            ))
             .await;
         assert_eq!(st, StatusCode::OK, "category report");
 
         let (st, _) = lead
-            .get(&format!("/api/v1/reports/overtime?user_id={}&year={}", emp_id, yr))
+            .get(&format!(
+                "/api/v1/reports/overtime?user_id={}&year={}",
+                emp_id, yr
+            ))
             .await;
         assert_eq!(st, StatusCode::OK, "overtime report");
 
         let (st, csv_body) = lead
-            .get_raw(&format!("/api/v1/reports/month/csv?user_id={}&month={}", emp_id, month))
+            .get_raw(&format!(
+                "/api/v1/reports/month/csv?user_id={}&month={}",
+                emp_id, month
+            ))
             .await;
         assert_eq!(st, StatusCode::OK, "CSV export");
-        assert!(csv_body.len() > 100, "CSV has content (len={})", csv_body.len());
+        assert!(
+            csv_body.len() > 100,
+            "CSV has content (len={})",
+            csv_body.len()
+        );
     }
 
     app.cleanup().await;
@@ -1028,7 +1085,10 @@ async fn tina_time_tracking_journey() {
         assert!(count_ids(&body) >= 6, "yesterday list has ≥6");
 
         let (_, body) = tina
-            .get(&format!("/api/v1/time-entries?from={}&to={}", day7, today_s))
+            .get(&format!(
+                "/api/v1/time-entries?from={}&to={}",
+                day7, today_s
+            ))
             .await;
         assert!(has_id(&body, id_y1), "wide range includes Y1");
         assert!(has_id(&body, id_c1), "wide range includes 14h block");
@@ -1068,7 +1128,10 @@ async fn tina_time_tracking_journey() {
         id_y2b = id(&body);
 
         let (st, _) = tina
-            .post("/api/v1/time-entries/submit", &json!({"ids": [id_y1, id_y3, id_y4, id_y5, id_y6, id_y2b]}))
+            .post(
+                "/api/v1/time-entries/submit",
+                &json!({"ids": [id_y1, id_y3, id_y4, id_y5, id_y6, id_y2b]}),
+            )
             .await;
         assert_eq!(st, StatusCode::OK, "submit batch");
 
@@ -1077,7 +1140,9 @@ async fn tina_time_tracking_journey() {
             .await;
         assert_eq!(st, StatusCode::BAD_REQUEST, "edit submitted rejected");
 
-        let (st, _) = tina.delete(&format!("/api/v1/time-entries/{}", id_y1)).await;
+        let (st, _) = tina
+            .delete(&format!("/api/v1/time-entries/{}", id_y1))
+            .await;
         assert_eq!(st, StatusCode::BAD_REQUEST, "delete submitted rejected");
 
         let (st, _) = tina
@@ -1089,24 +1154,36 @@ async fn tina_time_tracking_journey() {
     // -- 7. Lead reviews ------------------------------------------------------
     {
         let (st, _) = lead
-            .post("/api/v1/time-entries/batch-reject", &json!({"ids": [id_y1], "reason":"   "}))
+            .post(
+                "/api/v1/time-entries/batch-reject",
+                &json!({"ids": [id_y1], "reason":"   "}),
+            )
             .await;
         assert_eq!(st, StatusCode::BAD_REQUEST, "empty reject reason rejected");
 
         let (st, body) = lead
-            .post("/api/v1/time-entries/batch-reject", &json!({"ids": [id_y1], "reason":"please add a comment"}))
+            .post(
+                "/api/v1/time-entries/batch-reject",
+                &json!({"ids": [id_y1], "reason":"please add a comment"}),
+            )
             .await;
         assert_eq!(st, StatusCode::OK, "lead rejects Y1");
         assert_eq!(body["count"], 1);
 
         let (st, body) = lead
-            .post("/api/v1/time-entries/batch-approve", &json!({"ids": [id_y3, id_y4, id_y5, id_y6, id_y2b]}))
+            .post(
+                "/api/v1/time-entries/batch-approve",
+                &json!({"ids": [id_y3, id_y4, id_y5, id_y6, id_y2b]}),
+            )
             .await;
         assert_eq!(st, StatusCode::OK, "batch approve");
         assert_eq!(body["count"], 5, "exactly 5 approved");
 
         let (_, body) = lead
-            .post("/api/v1/time-entries/batch-approve", &json!({"ids": [id_y1]}))
+            .post(
+                "/api/v1/time-entries/batch-approve",
+                &json!({"ids": [id_y1]}),
+            )
             .await;
         assert_eq!(body["count"], 0, "rejected entry not re-approved");
 
@@ -1116,7 +1193,12 @@ async fn tina_time_tracking_journey() {
         let y3_obj = find_by_id(&body, id_y3).expect("Y3 not in list");
         assert_eq!(y3_obj["status"], "approved");
 
-        let approved = body.as_array().unwrap().iter().filter(|e| e["status"] == "approved").count();
+        let approved = body
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|e| e["status"] == "approved")
+            .count();
         assert!(approved >= 5, "≥5 approved on {} (got {})", yday, approved);
     }
 
@@ -1134,13 +1216,19 @@ async fn tina_time_tracking_journey() {
         assert_eq!(st, StatusCode::OK, "lea submit own");
 
         let (st, body) = lead
-            .post("/api/v1/time-entries/batch-approve", &json!({"ids": [lea_te_id]}))
+            .post(
+                "/api/v1/time-entries/batch-approve",
+                &json!({"ids": [lea_te_id]}),
+            )
             .await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(body["count"], 0, "lea self-approve skipped");
 
         let (st, body) = admin
-            .post("/api/v1/time-entries/batch-approve", &json!({"ids": [lea_te_id]}))
+            .post(
+                "/api/v1/time-entries/batch-approve",
+                &json!({"ids": [lea_te_id]}),
+            )
             .await;
         assert_eq!(st, StatusCode::OK, "admin approves lead entry");
         assert_eq!(body["count"], 1);
@@ -1180,7 +1268,10 @@ async fn tina_time_tracking_journey() {
     // -- 10. Reports reflect Tina's data --------------------------------------
     {
         let (st, body) = lead
-            .get(&format!("/api/v1/reports/month?user_id={}&month={}", tina_id, tina_month))
+            .get(&format!(
+                "/api/v1/reports/month?user_id={}&month={}",
+                tina_id, tina_month
+            ))
             .await;
         assert_eq!(st, StatusCode::OK, "tina monthly report");
         assert!(
@@ -1190,7 +1281,10 @@ async fn tina_time_tracking_journey() {
         );
 
         let (st, body) = lead
-            .get(&format!("/api/v1/reports/categories?from={}&to={}", day7, today_s))
+            .get(&format!(
+                "/api/v1/reports/categories?from={}&to={}",
+                day7, today_s
+            ))
             .await;
         assert_eq!(st, StatusCode::OK, "category report");
         let body_str = serde_json::to_string(&body).unwrap();
@@ -1220,13 +1314,20 @@ async fn tina_time_tracking_journey() {
         let (_, body) = admin
             .get(&format!("/api/v1/audit-log?user_id={}", tina_id))
             .await;
-        assert!(count_ids(&body) > 15, "tina has >15 audit entries (got {})", count_ids(&body));
+        assert!(
+            count_ids(&body) > 15,
+            "tina has >15 audit entries (got {})",
+            count_ids(&body)
+        );
     }
 
     // -- 13. Admin ops: password reset and deactivation -----------------------
     {
         let (st, body) = admin
-            .post(&format!("/api/v1/users/{}/reset-password", emp_id), &json!({}))
+            .post(
+                &format!("/api/v1/users/{}/reset-password", emp_id),
+                &json!({}),
+            )
             .await;
         assert_eq!(st, StatusCode::OK, "reset password");
         let new_pw = temp_pw(&body);

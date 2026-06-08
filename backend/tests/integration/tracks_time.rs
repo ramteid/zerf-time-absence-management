@@ -42,7 +42,10 @@ async fn tracks_time_full_workflow() {
 
         let (st, user_body) = admin.get(&format!("/api/v1/users/{uid}")).await;
         assert_eq!(st, StatusCode::OK);
-        assert_eq!(user_body["tracks_time"], false, "GET user shows tracks_time=false");
+        assert_eq!(
+            user_body["tracks_time"], false,
+            "GET user shows tracks_time=false"
+        );
 
         let (st, _) = admin
             .post(
@@ -100,8 +103,7 @@ async fn tracks_time_full_workflow() {
         assert_eq!(st, StatusCode::OK);
         assert_eq!(me["tracks_time"], false, "me tracks_time=false");
         assert_eq!(
-            me["home"],
-            "/dashboard",
+            me["home"], "/dashboard",
             "pure-admin home is /dashboard so they land on approvals first"
         );
 
@@ -340,12 +342,18 @@ async fn tracks_time_full_workflow() {
         );
 
         let (st, _) = admin
-            .put(&format!("/api/v1/users/{admin2_id}"), &json!({ "tracks_time": false }))
+            .put(
+                &format!("/api/v1/users/{admin2_id}"),
+                &json!({ "tracks_time": false }),
+            )
             .await;
         assert_eq!(st, StatusCode::OK, "admin disables admin2 tracks_time");
 
         let (st, _) = admin
-            .put(&format!("/api/v1/users/{admin2_id}"), &json!({ "tracks_time": true }))
+            .put(
+                &format!("/api/v1/users/{admin2_id}"),
+                &json!({ "tracks_time": true }),
+            )
             .await;
         assert_eq!(st, StatusCode::OK, "admin re-enables admin2 tracks_time");
 
@@ -378,7 +386,10 @@ async fn tracks_time_full_workflow() {
         );
 
         let (st, _) = admin
-            .put(&format!("/api/v1/users/{admin2_id}"), &json!({ "tracks_time": false }))
+            .put(
+                &format!("/api/v1/users/{admin2_id}"),
+                &json!({ "tracks_time": false }),
+            )
             .await;
         assert_eq!(
             st,
@@ -411,8 +422,7 @@ async fn tracks_time_full_workflow() {
         let (st, user_body) = admin.get(&format!("/api/v1/users/{admin3_id}")).await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(
-            user_body["tracks_time"],
-            false,
+            user_body["tracks_time"], false,
             "admin3 starts with tracks_time=false"
         );
 
@@ -430,8 +440,7 @@ async fn tracks_time_full_workflow() {
         let (st, user_body) = admin.get(&format!("/api/v1/users/{admin3_id}")).await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(
-            user_body["tracks_time"],
-            true,
+            user_body["tracks_time"], true,
             "tracks_time auto-restored on demotion"
         );
         assert_eq!(user_body["role"], "employee", "role demoted to employee");
@@ -443,7 +452,10 @@ async fn tracks_time_full_workflow() {
             bootstrap_team_with_suffix(&app, &admin, false, "rt2").await;
 
         let (st, _) = admin
-            .put(&format!("/api/v1/users/{emp_id}"), &json!({ "tracks_time": false }))
+            .put(
+                &format!("/api/v1/users/{emp_id}"),
+                &json!({ "tracks_time": false }),
+            )
             .await;
         assert_eq!(
             st,
@@ -497,7 +509,8 @@ async fn pure_admin_team_report_accessible_and_excludes_pure_admin_rows() {
 
     let rows = body.as_array().expect("team report response array");
     assert!(
-        rows.iter().any(|row| row["user_id"].as_i64() == Some(emp_id)),
+        rows.iter()
+            .any(|row| row["user_id"].as_i64() == Some(emp_id)),
         "team report contains tracked non-admin users"
     );
     assert!(
@@ -549,7 +562,8 @@ async fn pure_admin_excluded_from_team_category_report() {
     let rows = body.as_array().expect("team-categories response array");
 
     assert!(
-        rows.iter().any(|row| row["user_id"].as_i64() == Some(emp_id)),
+        rows.iter()
+            .any(|row| row["user_id"].as_i64() == Some(emp_id)),
         "time-tracking employee is included in team category report"
     );
     assert!(

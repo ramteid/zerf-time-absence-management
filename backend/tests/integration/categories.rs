@@ -21,7 +21,11 @@ async fn categories_full_workflow() {
             &json!({"name": "Blocked", "color": "#112233"}),
         )
         .await;
-    assert_eq!(st, StatusCode::FORBIDDEN, "only admins can create categories");
+    assert_eq!(
+        st,
+        StatusCode::FORBIDDEN,
+        "only admins can create categories"
+    );
 
     let (st, _) = admin
         .post(
@@ -60,7 +64,11 @@ async fn categories_full_workflow() {
             &json!({"name": "Domain Focus", "color": "#445566"}),
         )
         .await;
-    assert_eq!(st, StatusCode::CONFLICT, "duplicate category names are rejected");
+    assert_eq!(
+        st,
+        StatusCode::CONFLICT,
+        "duplicate category names are rejected"
+    );
     assert!(body.to_string().contains("Name already exists"));
 
     let (st, body) = admin

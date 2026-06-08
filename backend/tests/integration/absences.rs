@@ -7,7 +7,9 @@ use reqwest::StatusCode;
 use serde_json::json;
 
 use crate::common::TestApp;
-use crate::helpers::{admin_login, bootstrap_team, id, login_change_pw, next_monday, reference_date, temp_pw};
+use crate::helpers::{
+    admin_login, bootstrap_team, id, login_change_pw, next_monday, reference_date, temp_pw,
+};
 
 #[tokio::test]
 async fn absences_full_workflow() {
@@ -440,8 +442,14 @@ async fn absences_full_workflow() {
             .filter_map(|row| row["user_id"].as_i64())
             .collect();
         assert!(lead_visible.contains(&lead_id), "lead sees own entries");
-        assert!(lead_visible.contains(&peer_id), "lead sees peer (direct report)");
-        assert!(lead_visible.contains(&emp_id), "lead sees emp (direct report)");
+        assert!(
+            lead_visible.contains(&peer_id),
+            "lead sees peer (direct report)"
+        );
+        assert!(
+            lead_visible.contains(&emp_id),
+            "lead sees emp (direct report)"
+        );
         assert!(
             !lead_visible.contains(&outsider_id),
             "lead does not see users outside their reports"
@@ -591,7 +599,9 @@ async fn absences_full_workflow() {
             .await;
         assert_eq!(st, StatusCode::OK, "approve vacation before cancellation");
 
-        let (st, _) = emp.delete(&format!("/api/v1/absences/{approval_absence_id}")).await;
+        let (st, _) = emp
+            .delete(&format!("/api/v1/absences/{approval_absence_id}"))
+            .await;
         assert_eq!(st, StatusCode::OK, "request cancellation");
 
         let (st, body) = lead
@@ -630,7 +640,9 @@ async fn absences_full_workflow() {
             .await;
         assert_eq!(st, StatusCode::OK, "approve second vacation");
 
-        let (st, _) = emp.delete(&format!("/api/v1/absences/{rejection_absence_id}")).await;
+        let (st, _) = emp
+            .delete(&format!("/api/v1/absences/{rejection_absence_id}"))
+            .await;
         assert_eq!(st, StatusCode::OK, "request second cancellation");
 
         let (st, body) = lead
@@ -655,7 +667,11 @@ async fn absences_full_workflow() {
         let (st, body) = emp
             .get(&format!("/api/v1/leave-balance/{emp_id}?year={year}"))
             .await;
-        assert_eq!(st, StatusCode::OK, "load balance after cancellation decisions");
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "load balance after cancellation decisions"
+        );
         assert!(
             body["approved_upcoming"].as_f64().unwrap_or(0.0) >= 1.0,
             "rejected cancellation keeps approved future vacation reserved"
@@ -734,7 +750,10 @@ async fn absence_request_fails_when_approver_is_deactivated() {
     // Deactivate the lead (the employee's only approver).
     // First, reassign the employee's time entries lead by removing direct reports.
     let (st, body) = admin
-        .put(&format!("/api/v1/users/{emp_id}"), &json!({"approver_ids": [1]}))
+        .put(
+            &format!("/api/v1/users/{emp_id}"),
+            &json!({"approver_ids": [1]}),
+        )
         .await;
     assert_eq!(st, StatusCode::OK, "reassign emp to admin approver: {body}");
 
@@ -752,14 +771,12 @@ async fn absence_request_fails_when_approver_is_deactivated() {
         .execute(&app.state.pool)
         .await
         .expect("remove current approvers");
-    sqlx::query(
-        "INSERT INTO user_approvers(user_id, approver_id) VALUES ($1, $2)",
-    )
-    .bind(emp_id)
-    .bind(lead_id)
-    .execute(&app.state.pool)
-    .await
-    .expect("force stale approver row");
+    sqlx::query("INSERT INTO user_approvers(user_id, approver_id) VALUES ($1, $2)")
+        .bind(emp_id)
+        .bind(lead_id)
+        .execute(&app.state.pool)
+        .await
+        .expect("force stale approver row");
 
     // Employee tries to create a vacation absence — must fail because the
     // deactivated lead is filtered out and no valid approver remains.
@@ -830,7 +847,10 @@ async fn absences_admin_self_approval_uses_inapp_only_notifications() {
     // Admin requests cancellation of the just-approved absence.
     let (st, body) = admin.delete(&format!("/api/v1/absences/{abs_id}")).await;
     assert_eq!(st, StatusCode::OK, "admin requests cancellation: {body}");
-    assert_eq!(body["pending"], true, "cancellation enters pending workflow");
+    assert_eq!(
+        body["pending"], true,
+        "cancellation enters pending workflow"
+    );
 
     // Admin approves the cancellation of their own absence →
     // notify_absence_inapp_only (absence_cancellation_approved path).

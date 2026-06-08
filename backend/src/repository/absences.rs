@@ -486,12 +486,11 @@ impl AbsenceDb {
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
-        let after: Absence =
-            QueryBuilder::<Postgres>::new(format!("{ABS_SELECT} WHERE id=$1"))
-                .build_query_as::<Absence>()
-                .bind(absence_id)
-                .fetch_one(&self.pool)
-                .await?;
+        let after: Absence = QueryBuilder::<Postgres>::new(format!("{ABS_SELECT} WHERE id=$1"))
+            .build_query_as::<Absence>()
+            .bind(absence_id)
+            .fetch_one(&self.pool)
+            .await?;
         Ok((before, after))
     }
 

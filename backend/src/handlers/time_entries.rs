@@ -80,7 +80,9 @@ pub async fn list_all(
             return Err(AppError::BadRequest("from must not be after to.".into()));
         }
         if (to - from).num_days() > 366 {
-            return Err(AppError::BadRequest("Date range must not exceed 366 days.".into()));
+            return Err(AppError::BadRequest(
+                "Date range must not exceed 366 days.".into(),
+            ));
         }
     }
     // Validate status filter against the known set of time entry statuses.
@@ -255,7 +257,8 @@ pub async fn submit(
     }
     if !submitted_weeks.is_empty() {
         let approver_ids =
-            crate::services::auth::required_approval_recipient_ids(&app_state.pool, &requester).await?;
+            crate::services::auth::required_approval_recipient_ids(&app_state.pool, &requester)
+                .await?;
         let language = notification_language(&app_state.pool).await;
         let mut sorted_weeks: Vec<NaiveDate> = submitted_weeks.into_iter().collect();
         sorted_weeks.sort();

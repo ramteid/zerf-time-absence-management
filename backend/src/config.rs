@@ -197,7 +197,11 @@ mod tests {
                 let cfg = Config::from_env();
                 assert_eq!(
                     cfg.allowed_origins,
-                    vec!["https://a.example", "https://b.example", "https://c.example"]
+                    vec![
+                        "https://a.example",
+                        "https://b.example",
+                        "https://c.example"
+                    ]
                 );
                 assert!(!cfg.secure_cookies);
                 assert!(!cfg.enforce_csrf);

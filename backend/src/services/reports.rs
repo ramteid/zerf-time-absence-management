@@ -411,7 +411,10 @@ pub async fn build_flextime_for_user(
         .await?
         .into_iter()
         .map(|(date, name, local_name)| {
-            (date, i18n::holiday_display_name(&language, name, local_name))
+            (
+                date,
+                i18n::holiday_display_name(&language, name, local_name),
+            )
         })
         .collect();
 
@@ -819,9 +822,10 @@ pub fn csv_response(r: MonthReport, uid: i64, file_label: &str) -> AppResult<Res
 /// way `csv_response` sanitises its label so the header stays well-formed.
 pub fn pdf_response(bytes: Vec<u8>, file_label: &str) -> AppResult<Response> {
     let mut response = Response::new(axum::body::Body::from(bytes));
-    response
-        .headers_mut()
-        .insert(header::CONTENT_TYPE, axum::http::HeaderValue::from_static("application/pdf"));
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        axum::http::HeaderValue::from_static("application/pdf"),
+    );
     let safe_label: String = file_label
         .chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')

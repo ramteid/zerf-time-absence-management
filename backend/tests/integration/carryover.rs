@@ -704,7 +704,11 @@ async fn hire_date_does_not_inflate_carryover_with_phantom_pre_start_date_years(
     let (st, balance) = admin
         .get(&format!("/api/v1/leave-balance/{user_id}?year={next_year}"))
         .await;
-    assert_eq!(st, StatusCode::OK, "load next-year leave balance: {balance}");
+    assert_eq!(
+        st,
+        StatusCode::OK,
+        "load next-year leave balance: {balance}"
+    );
 
     // Correct: only the start_date year is iterated -- entitlement 12 minus the
     // 4 approved usage days = 8.

@@ -168,7 +168,8 @@ async fn submission_reminders_full_workflow() {
             .await
             .unwrap();
 
-        let assistant = login_change_pw(&app, "assistant-reminder@example.com", &assistant_pw).await;
+        let assistant =
+            login_change_pw(&app, "assistant-reminder@example.com", &assistant_pw).await;
 
         let (st, _) = assistant.delete("/api/v1/notifications").await;
         assert_eq!(st, StatusCode::OK);
@@ -458,7 +459,11 @@ async fn submission_reminders_respects_enabled_toggle() {
         .iter()
         .filter(|n| n["kind"] == "submission_reminder")
         .collect();
-    assert_eq!(reminders_disabled.len(), 0, "disabled toggle suppresses reminders");
+    assert_eq!(
+        reminders_disabled.len(),
+        0,
+        "disabled toggle suppresses reminders"
+    );
 
     let (st, _) = admin
         .put(
@@ -540,7 +545,10 @@ async fn submission_reminders_treat_approved_absence_as_covered_week() {
     let absence_id = id(&body);
 
     let (st, _) = admin
-        .post(&format!("/api/v1/absences/{absence_id}/approve"), &json!({}))
+        .post(
+            &format!("/api/v1/absences/{absence_id}/approve"),
+            &json!({}),
+        )
         .await;
     assert_eq!(st, StatusCode::OK, "approve absence");
 
@@ -610,7 +618,10 @@ async fn submission_reminders_treat_cancellation_pending_absence_as_covered_week
     let absence_id = id(&body);
 
     let (st, _) = admin
-        .post(&format!("/api/v1/absences/{absence_id}/approve"), &json!({}))
+        .post(
+            &format!("/api/v1/absences/{absence_id}/approve"),
+            &json!({}),
+        )
         .await;
     assert_eq!(st, StatusCode::OK, "approve absence");
 

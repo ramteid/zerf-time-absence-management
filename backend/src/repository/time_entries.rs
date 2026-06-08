@@ -11,7 +11,8 @@ async fn app_now(conn: &mut sqlx::PgConnection) -> AppResult<chrono::DateTime<ch
         sqlx::query_scalar("SELECT value FROM app_settings WHERE key = 'timezone'")
             .fetch_optional(&mut *conn)
             .await?;
-    let tz_name = timezone.unwrap_or_else(|| crate::services::settings::DEFAULT_TIMEZONE.to_string());
+    let tz_name =
+        timezone.unwrap_or_else(|| crate::services::settings::DEFAULT_TIMEZONE.to_string());
     let tz = tz_name
         .parse::<chrono_tz::Tz>()
         .unwrap_or(chrono_tz::Europe::Berlin);
@@ -64,9 +65,7 @@ fn duration_min(start: &str, end: &str) -> AppResult<i64> {
     let s = parse_time(start)?;
     let e = parse_time(end)?;
     if e <= s {
-        return Err(AppError::bad_request(
-            "End time must be after start time.",
-        ));
+        return Err(AppError::bad_request("End time must be after start time."));
     }
     Ok((e - s).num_minutes())
 }
@@ -122,9 +121,7 @@ pub(crate) async fn validate_entry(
     let start_n = parse_time(&te.start_time)?;
     let end_n = parse_time(&te.end_time)?;
     if te.entry_date == today && end_n > app_now.time() {
-        return Err(AppError::bad_request(
-            "End time cannot be in the future.",
-        ));
+        return Err(AppError::bad_request("End time cannot be in the future."));
     }
 
     let existing: Vec<(i64, String, String, String, bool)> = sqlx::query_as(
@@ -149,9 +146,7 @@ pub(crate) async fn validate_entry(
 
     for (_, es, ee) in &parsed_existing {
         if start_n < *ee && *es < end_n {
-            return Err(AppError::bad_request(
-                "Overlap with an existing entry.",
-            ));
+            return Err(AppError::bad_request("Overlap with an existing entry."));
         }
     }
 
@@ -283,14 +278,11 @@ pub(crate) async fn validate_entries_after_reopen(
         if entry.status == "rejected" && !affected_id_set.contains(&entry.id) {
             continue;
         }
-        entries_by_date
-            .entry(entry.entry_date)
-            .or_default()
-            .push((
-                entry.counts_as_work,
-                parse_time(&entry.start_time)?,
-                parse_time(&entry.end_time)?,
-            ));
+        entries_by_date.entry(entry.entry_date).or_default().push((
+            entry.counts_as_work,
+            parse_time(&entry.start_time)?,
+            parse_time(&entry.end_time)?,
+        ));
     }
 
     for entries in entries_by_date.values_mut() {
@@ -307,9 +299,7 @@ pub(crate) async fn validate_entries_after_reopen(
 
         let mut credited_intervals: Vec<(NaiveTime, NaiveTime)> = entries
             .iter()
-            .filter_map(|(counts_as_work, start, end)| {
-                counts_as_work.then_some((*start, *end))
-            })
+            .filter_map(|(counts_as_work, start, end)| counts_as_work.then_some((*start, *end)))
             .collect();
         credited_intervals.sort_by_key(|(start, _)| *start);
 
@@ -509,12 +499,12 @@ impl TimeEntryDb {
         if ids.is_empty() {
             return Ok(vec![]);
         }
-        Ok(sqlx::query_scalar(
-            "SELECT DISTINCT entry_date FROM time_entries WHERE id = ANY($1)",
+        Ok(
+            sqlx::query_scalar("SELECT DISTINCT entry_date FROM time_entries WHERE id = ANY($1)")
+                .bind(ids)
+                .fetch_all(&self.pool)
+                .await?,
         )
-        .bind(ids)
-        .fetch_all(&self.pool)
-        .await?)
     }
 
     pub async fn get_credited_submitted_dates_for_entries(
@@ -639,12 +629,11 @@ impl TimeEntryDb {
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
-        let updated: TimeEntry =
-            QueryBuilder::<Postgres>::new(format!("{TE_SELECT} WHERE id=$1"))
-                .build_query_as::<TimeEntry>()
-                .bind(entry_id)
-                .fetch_one(&self.pool)
-                .await?;
+        let updated: TimeEntry = QueryBuilder::<Postgres>::new(format!("{TE_SELECT} WHERE id=$1"))
+            .build_query_as::<TimeEntry>()
+            .bind(entry_id)
+            .fetch_one(&self.pool)
+            .await?;
         Ok((prev, updated))
     }
 
@@ -673,9 +662,7 @@ impl TimeEntryDb {
             .await?
             .rows_affected();
         if rows == 0 {
-            return Err(AppError::conflict(
-                "Entry was modified concurrently.",
-            ));
+            return Err(AppError::conflict("Entry was modified concurrently."));
         }
         tx.commit().await?;
         Ok(entry)

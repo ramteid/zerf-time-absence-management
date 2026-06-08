@@ -169,11 +169,11 @@ impl UserDb {
     }
 
     pub async fn count_active_admins(&self) -> AppResult<i64> {
-        Ok(
-            sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE active=TRUE AND lower(trim(role))='admin'")
-                .fetch_one(&self.pool)
-                .await?,
+        Ok(sqlx::query_scalar(
+            "SELECT COUNT(*) FROM users WHERE active=TRUE AND lower(trim(role))='admin'",
         )
+        .fetch_one(&self.pool)
+        .await?)
     }
 
     pub async fn count_admin_direct_reports(&self, user_id: i64) -> AppResult<i64> {
@@ -188,12 +188,12 @@ impl UserDb {
     }
 
     pub async fn count_direct_reports(&self, user_id: i64) -> AppResult<i64> {
-        Ok(sqlx::query_scalar(
-            "SELECT COUNT(*) FROM user_approvers WHERE approver_id=$1",
+        Ok(
+            sqlx::query_scalar("SELECT COUNT(*) FROM user_approvers WHERE approver_id=$1")
+                .bind(user_id)
+                .fetch_one(&self.pool)
+                .await?,
         )
-        .bind(user_id)
-        .fetch_one(&self.pool)
-        .await?)
     }
 
     pub async fn count_active_direct_reports(&self, user_id: i64) -> AppResult<i64> {
@@ -633,13 +633,12 @@ impl UserDb {
         user_id: i64,
         approver_id: i64,
     ) -> AppResult<()> {
-        let (subject_role, _) = sqlx::query_as::<_, (String, bool)>(
-            "SELECT role, active FROM users WHERE id = $1",
-        )
-        .bind(user_id)
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or(AppError::NotFound)?;
+        let (subject_role, _) =
+            sqlx::query_as::<_, (String, bool)>("SELECT role, active FROM users WHERE id = $1")
+                .bind(user_id)
+                .fetch_optional(&mut *tx)
+                .await?
+                .ok_or(AppError::NotFound)?;
         let requires_admin_approver = is_admin_role(&subject_role);
         let rows = sqlx::query(
             "INSERT INTO user_approvers(user_id, approver_id) \
@@ -797,11 +796,11 @@ impl UserDb {
     }
 
     pub async fn count_active_admins_tx(tx: &mut sqlx::PgConnection) -> AppResult<i64> {
-        Ok(
-            sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE active=TRUE AND lower(trim(role))='admin'")
-                .fetch_one(tx)
-                .await?,
+        Ok(sqlx::query_scalar(
+            "SELECT COUNT(*) FROM users WHERE active=TRUE AND lower(trim(role))='admin'",
         )
+        .fetch_one(tx)
+        .await?)
     }
 
     // ── Annual leave ───────────────────────────────────────────────────────
@@ -876,16 +875,14 @@ impl UserDb {
         year: i32,
         default_days: i64,
     ) -> AppResult<i64> {
-        Ok(
-            sqlx::query_scalar::<_, i64>(
-                "SELECT days FROM user_annual_leave WHERE user_id=$1 AND year=$2",
-            )
-            .bind(user_id)
-            .bind(year)
-            .fetch_optional(&self.pool)
-            .await?
-            .unwrap_or(default_days),
+        Ok(sqlx::query_scalar::<_, i64>(
+            "SELECT days FROM user_annual_leave WHERE user_id=$1 AND year=$2",
         )
+        .bind(user_id)
+        .bind(year)
+        .fetch_optional(&self.pool)
+        .await?
+        .unwrap_or(default_days))
     }
 
     pub async fn get_default_leave_days_tx(tx: &mut sqlx::PgConnection) -> AppResult<i64> {
@@ -900,9 +897,7 @@ impl UserDb {
 
     // ── Submission reminder helper ─────────────────────────────────────────
 
-    pub async fn get_active_non_assistant_users(
-        &self,
-    ) -> AppResult<Vec<ActiveUserRow>> {
+    pub async fn get_active_non_assistant_users(&self) -> AppResult<Vec<ActiveUserRow>> {
         let rows = sqlx::query_as::<_, (i64, String, String, String, NaiveDate, i16)>(
             "SELECT id, email, first_name, last_name, start_date, workdays_per_week FROM users \
              WHERE active = TRUE AND lower(trim(role)) != $1 AND weekly_hours > 0 \
@@ -918,9 +913,16 @@ impl UserDb {
         );
         Ok(rows
             .into_iter()
-            .map(|(id, email, first_name, last_name, start_date, workdays_per_week)| {
-                ActiveUserRow { id, email, first_name, last_name, start_date, workdays_per_week }
-            })
+            .map(
+                |(id, email, first_name, last_name, start_date, workdays_per_week)| ActiveUserRow {
+                    id,
+                    email,
+                    first_name,
+                    last_name,
+                    start_date,
+                    workdays_per_week,
+                },
+            )
             .collect())
     }
 

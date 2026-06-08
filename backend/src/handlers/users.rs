@@ -1,15 +1,15 @@
 use crate::audit;
-use crate::services::auth::lock_user_graph;
-use crate::middleware::auth::User;
 use crate::error::{AppError, AppResult};
+use crate::middleware::auth::User;
 use crate::roles::{
-    can_approve_admin_subjects, can_approve_non_admin_subjects, is_admin_role,
-    is_assistant_role, normalize_role, ROLE_ASSISTANT,
+    can_approve_admin_subjects, can_approve_non_admin_subjects, is_admin_role, is_assistant_role,
+    normalize_role, ROLE_ASSISTANT,
 };
+use crate::services::auth::lock_user_graph;
 use crate::services::users::{
-    assert_can_access_user, ensure_email_available, ensure_user_name_available,
-    generate_password, get_leave_days, normalize_optional_user_name,
-    repo_user_to_auth_user, user_unique_conflict, validate_approver_ids,
+    assert_can_access_user, ensure_email_available, ensure_user_name_available, generate_password,
+    get_leave_days, normalize_optional_user_name, repo_user_to_auth_user, user_unique_conflict,
+    validate_approver_ids,
 };
 use crate::AppState;
 use axum::{
@@ -59,14 +59,16 @@ pub async fn team_settings_list(
     };
     let settings_list: Vec<TeamSettings> = rows
         .into_iter()
-        .map(|(id, email, first_name, last_name, role, allow_reopen)| TeamSettings {
-            user_id: id,
-            email,
-            first_name,
-            last_name,
-            role,
-            allow_reopen_without_approval: allow_reopen,
-        })
+        .map(
+            |(id, email, first_name, last_name, role, allow_reopen)| TeamSettings {
+                user_id: id,
+                email,
+                first_name,
+                last_name,
+                role,
+                allow_reopen_without_approval: allow_reopen,
+            },
+        )
         .collect();
     Ok(Json(settings_list))
 }
@@ -282,7 +284,10 @@ pub async fn update(
         return Err(AppError::Forbidden);
     }
     // Role allow-list — never trust the client.
-    let normalized_role = body.role.as_ref().map(|role_value| normalize_role(role_value));
+    let normalized_role = body
+        .role
+        .as_ref()
+        .map(|role_value| normalize_role(role_value));
     if let Some(role_value) = &normalized_role {
         if !["employee", "team_lead", "admin", ROLE_ASSISTANT].contains(&role_value.as_str()) {
             return Err(AppError::BadRequest("Invalid role".into()));
@@ -343,7 +348,8 @@ pub async fn update(
     let last_name = normalize_optional_user_name(body.last_name.as_ref())?;
     let mut transaction = app_state.db.users.begin().await?;
     lock_user_graph(&mut transaction).await?;
-    let previous_user: User = crate::services::users::fetch_for_update(&mut transaction, user_id).await?;
+    let previous_user: User =
+        crate::services::users::fetch_for_update(&mut transaction, user_id).await?;
     if let Some(email) = &normalized_email {
         ensure_email_available(&app_state, email, Some(user_id)).await?;
     }
@@ -368,7 +374,8 @@ pub async fn update(
             .is_some_and(|role_value| role_value != "admin")
             || matches!(body.active, Some(false)));
     // Pre-validate the post-update invariant (non-admin → has approver).
-    let new_role = normalized_role.unwrap_or_else(|| previous_user.role.trim().to_ascii_lowercase());
+    let new_role =
+        normalized_role.unwrap_or_else(|| previous_user.role.trim().to_ascii_lowercase());
     let effective_weekly_hours = body.weekly_hours.unwrap_or(previous_user.weekly_hours);
     let effective_overtime_start_balance = body
         .overtime_start_balance_min
@@ -449,7 +456,8 @@ pub async fn update(
     }
     // Last-admin protection: checked while the user graph lock is held.
     if removing_admin_rights && previous_user.active {
-        let active_admins = crate::services::users::count_active_admins_tx(&mut transaction).await?;
+        let active_admins =
+            crate::services::users::count_active_admins_tx(&mut transaction).await?;
         if active_admins <= 1 {
             return Err(AppError::BadRequest(
                 "Cannot remove the last active admin.".into(),
@@ -469,11 +477,12 @@ pub async fn update(
     // When the role changes away from admin and the user currently has
     // tracks_time=false, silently restore tracking. No data to delete since
     // they never had tracking enabled as a non-admin.
-    let effective_tracks_time: Option<bool> = if !is_admin_role(&new_role) && !previous_user.tracks_time {
-        Some(true)
-    } else {
-        body.tracks_time
-    };
+    let effective_tracks_time: Option<bool> =
+        if !is_admin_role(&new_role) && !previous_user.tracks_time {
+            Some(true)
+        } else {
+            body.tracks_time
+        };
     // When disabling time tracking for an admin who previously had it enabled,
     // delete all their time entries, absences, and reopen requests atomically.
     let disabling_time_tracking = effective_tracks_time == Some(false) && previous_user.tracks_time;
@@ -516,21 +525,25 @@ pub async fn update(
         effective_tracks_time,
     )
     .await
-        .map_err(|e| {
-            tracing::warn!(target:"zerf::users", "update user failed: {e}");
-            user_unique_conflict(&e).unwrap_or_else(|| AppError::Conflict("Could not update user.".into()))
-        })?;
+    .map_err(|e| {
+        tracing::warn!(target:"zerf::users", "update user failed: {e}");
+        user_unique_conflict(&e)
+            .unwrap_or_else(|| AppError::Conflict("Could not update user.".into()))
+    })?;
     // Update leave days if provided
     let current_year = crate::services::settings::app_current_year(&app_state.pool).await;
     if let Some(d) = body.leave_days_current_year {
-        crate::services::users::set_leave_days_tx(&mut transaction, user_id, current_year, d).await?;
+        crate::services::users::set_leave_days_tx(&mut transaction, user_id, current_year, d)
+            .await?;
     }
     if let Some(d) = body.leave_days_next_year {
-        crate::services::users::set_leave_days_tx(&mut transaction, user_id, current_year + 1, d).await?;
+        crate::services::users::set_leave_days_tx(&mut transaction, user_id, current_year + 1, d)
+            .await?;
     }
     // Handle approver_ids update if provided
     if let Some(new_approver_ids) = &body.approver_ids {
-        crate::services::users::set_approvers_tx(&mut transaction, user_id, new_approver_ids).await?;
+        crate::services::users::set_approvers_tx(&mut transaction, user_id, new_approver_ids)
+            .await?;
     }
     // If role changed or user was deactivated, kill all sessions of that user
     // so cached role/state cannot be (ab)used.
@@ -542,7 +555,8 @@ pub async fn update(
         .unwrap_or(false);
     let just_deactivated = matches!(body.active, Some(false)) && previous_user.active;
     if role_changed || just_deactivated {
-        let _ = crate::services::users::delete_sessions_for_user_tx(&mut transaction, user_id).await;
+        let _ =
+            crate::services::users::delete_sessions_for_user_tx(&mut transaction, user_id).await;
     }
     transaction.commit().await?;
     let updated_user = app_state
@@ -580,9 +594,11 @@ pub async fn deactivate(
     }
     let mut transaction = app_state.db.users.begin().await?;
     lock_user_graph(&mut transaction).await?;
-    let previous_user: User = crate::services::users::fetch_for_update(&mut transaction, user_id).await?;
+    let previous_user: User =
+        crate::services::users::fetch_for_update(&mut transaction, user_id).await?;
     if previous_user.active && is_admin_role(&previous_user.role) {
-        let active_admins = crate::services::users::count_active_admins_tx(&mut transaction).await?;
+        let active_admins =
+            crate::services::users::count_active_admins_tx(&mut transaction).await?;
         if active_admins <= 1 {
             return Err(AppError::BadRequest(
                 "Cannot remove the last active admin.".into(),
@@ -591,7 +607,8 @@ pub async fn deactivate(
     }
     // Block deactivation if this person is an assigned approver for active users.
     // Run inside the transaction (under the user-graph lock) to avoid TOCTOU.
-    let direct_reports_count = crate::services::users::count_active_direct_reports_tx(&mut transaction, user_id).await?;
+    let direct_reports_count =
+        crate::services::users::count_active_direct_reports_tx(&mut transaction, user_id).await?;
     if direct_reports_count > 0 {
         return Err(AppError::BadRequest(format!(
             "Cannot deactivate: {} active user(s) still have this person as their approver. Reassign them first.",
@@ -627,9 +644,11 @@ pub async fn delete_user(
     }
     let mut transaction = app_state.db.users.begin().await?;
     lock_user_graph(&mut transaction).await?;
-    let target_user: User = crate::services::users::fetch_for_update(&mut transaction, user_id).await?;
+    let target_user: User =
+        crate::services::users::fetch_for_update(&mut transaction, user_id).await?;
     if target_user.active && is_admin_role(&target_user.role) {
-        let active_admins = crate::services::users::count_active_admins_tx(&mut transaction).await?;
+        let active_admins =
+            crate::services::users::count_active_admins_tx(&mut transaction).await?;
         if active_admins <= 1 {
             return Err(AppError::BadRequest(
                 "Cannot delete the last active admin.".into(),
@@ -637,7 +656,8 @@ pub async fn delete_user(
         }
     }
     // Run inside the transaction (under the user-graph lock) to avoid TOCTOU.
-    let direct_reports_count = crate::services::users::count_active_direct_reports_tx(&mut transaction, user_id).await?;
+    let direct_reports_count =
+        crate::services::users::count_active_direct_reports_tx(&mut transaction, user_id).await?;
     if direct_reports_count > 0 {
         return Err(AppError::BadRequest(format!(
             "Cannot delete: {} active user(s) still have this person as their approver. Reassign them first.",
@@ -668,13 +688,20 @@ pub async fn reset_password(
         return Err(AppError::Forbidden);
     }
     let temporary_password = generate_password();
-    let new_password_hash = crate::services::auth::hash_password_async(temporary_password.clone()).await?;
+    let new_password_hash =
+        crate::services::auth::hash_password_async(temporary_password.clone()).await?;
     let mut transaction = app_state.db.users.begin().await?;
     let target_user = crate::services::users::fetch_for_update(&mut transaction, target_id).await?;
     if !target_user.active {
         return Err(AppError::BadRequest("User is inactive.".into()));
     }
-    crate::services::users::update_password_tx(&mut transaction, target_id, &new_password_hash, true).await?;
+    crate::services::users::update_password_tx(
+        &mut transaction,
+        target_id,
+        &new_password_hash,
+        true,
+    )
+    .await?;
     // Force re-authentication: kill any existing sessions for this user.
     crate::services::users::delete_sessions_for_user_tx(&mut transaction, target_id).await?;
     transaction.commit().await?;

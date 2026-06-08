@@ -158,13 +158,21 @@ pub async fn smtp_config_from_update(
         Some(pw) => Some(pw.to_string()),
         None => {
             let stored = load_setting(pool, SMTP_PASSWORD_KEY, "").await?;
-            if stored.is_empty() { None } else { Some(stored) }
+            if stored.is_empty() {
+                None
+            } else {
+                Some(stored)
+            }
         }
     };
     Ok(SmtpConfig {
         host: host.to_string(),
         port,
-        username: if username.is_empty() { None } else { Some(username.to_string()) },
+        username: if username.is_empty() {
+            None
+        } else {
+            Some(username.to_string())
+        },
         password: resolved_password,
         from: from.to_string(),
         encryption: encryption.to_string(),
@@ -201,14 +209,18 @@ pub fn normalize_time_format(value: &str) -> AppResult<&'static str> {
     match value.trim() {
         "24h" => Ok("24h"),
         "12h" => Ok("12h"),
-        _ => Err(crate::error::AppError::BadRequest("Invalid time format.".into())),
+        _ => Err(crate::error::AppError::BadRequest(
+            "Invalid time format.".into(),
+        )),
     }
 }
 
 pub fn normalize_timezone(value: &str) -> AppResult<String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
-        return Err(crate::error::AppError::BadRequest("Timezone is required.".into()));
+        return Err(crate::error::AppError::BadRequest(
+            "Timezone is required.".into(),
+        ));
     }
     let parsed = trimmed.parse::<chrono_tz::Tz>().map_err(|_| {
         crate::error::AppError::BadRequest(
@@ -307,7 +319,10 @@ mod tests {
 
     #[test]
     fn normalize_timezone_validates_iana_identifiers() {
-        assert_eq!(normalize_timezone("Europe/Berlin").unwrap(), "Europe/Berlin");
+        assert_eq!(
+            normalize_timezone("Europe/Berlin").unwrap(),
+            "Europe/Berlin"
+        );
         assert!(normalize_timezone(" ").is_err());
         assert!(normalize_timezone("Mars/Olympus").is_err());
     }
@@ -382,11 +397,9 @@ mod tests {
     #[tokio::test]
     async fn smtp_config_from_update_clears_password_when_empty_string_provided() {
         let pool = sqlx::Pool::connect_lazy("postgres://localhost/unused").unwrap();
-        let config = smtp_config_from_update(
-            &pool, "host", 25, "", Some(""), "from@x.com", "none",
-        )
-        .await
-        .unwrap();
+        let config = smtp_config_from_update(&pool, "host", 25, "", Some(""), "from@x.com", "none")
+            .await
+            .unwrap();
         assert!(config.password.is_none());
         assert!(config.username.is_none()); // empty username becomes None
     }

@@ -2,7 +2,7 @@
 //! session cleanup loop.
 
 use crate::error::{AppError, AppResult};
-use crate::middleware::auth::{ABSOLUTE_TIMEOUT_HOURS, IDLE_TIMEOUT_HOURS, User};
+use crate::middleware::auth::{User, ABSOLUTE_TIMEOUT_HOURS, IDLE_TIMEOUT_HOURS};
 use crate::repository::{SessionDb, UserDb};
 use crate::AppState;
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};

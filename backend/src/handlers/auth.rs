@@ -3,8 +3,8 @@
 
 use crate::error::{AppError, AppResult};
 use crate::middleware::auth::{
-    build_session_cookie, enforce_same_origin_headers, extract_token, hash_token,
-    ABSOLUTE_TIMEOUT_HOURS, User,
+    build_session_cookie, enforce_same_origin_headers, extract_token, hash_token, User,
+    ABSOLUTE_TIMEOUT_HOURS,
 };
 use crate::services::auth::{
     hash_password_async, new_token, validate_password_strength, verify_password,
@@ -221,7 +221,8 @@ pub async fn me(
             .push(serde_json::json!({"href":"/team-settings","key":"TeamSettings","icon":"🛡"}));
     }
     if user.is_admin() {
-        navigation_items.push(serde_json::json!({"href":"/admin/settings","key":"Admin","icon":"⚙"}));
+        navigation_items
+            .push(serde_json::json!({"href":"/admin/settings","key":"Admin","icon":"⚙"}));
     }
     // Assistants go to /time (no dashboard); everyone else lands on /dashboard.
     let home = if is_assistant { "/time" } else { "/dashboard" };
@@ -477,7 +478,13 @@ pub async fn forgot_password(
     );
 
     let smtp = crate::services::settings::load_smtp_config(&app_state.pool).await;
-    crate::email::send_async(smtp.map(Arc::new), user_email, format!("{} {}", first_name, last_name), subject, body_text);
+    crate::email::send_async(
+        smtp.map(Arc::new),
+        user_email,
+        format!("{} {}", first_name, last_name),
+        subject,
+        body_text,
+    );
 
     Ok(Json(serde_json::json!({ "ok": true })))
 }

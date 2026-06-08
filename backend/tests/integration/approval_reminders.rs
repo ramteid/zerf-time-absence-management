@@ -1,7 +1,9 @@
 use reqwest::StatusCode;
 
 use crate::common::TestApp;
-use crate::helpers::{admin_login, bootstrap_team_with_suffix, create_and_submit_entry, login_change_pw};
+use crate::helpers::{
+    admin_login, bootstrap_team_with_suffix, create_and_submit_entry, login_change_pw,
+};
 
 #[tokio::test]
 async fn approval_reminders_full_workflow() {

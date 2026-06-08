@@ -4,7 +4,7 @@
 
 use crate::db::DatabasePool;
 use crate::services::settings::{
-    load_setting, load_smtp_config, app_today, DEFAULT_TIMEZONE, SUBMISSION_REMINDERS_ENABLED_KEY,
+    app_today, load_setting, load_smtp_config, DEFAULT_TIMEZONE, SUBMISSION_REMINDERS_ENABLED_KEY,
     TIMEZONE_KEY,
 };
 use chrono::{Datelike, NaiveDate, TimeZone, Utc};
@@ -21,7 +21,10 @@ pub fn duration_until_next_deadline(
     let today = now.date_naive();
 
     // Try this month's deadline day
-    let candidate_day = day.min(crate::time_calc::last_day_of_month(today.year(), today.month()));
+    let candidate_day = day.min(crate::time_calc::last_day_of_month(
+        today.year(),
+        today.month(),
+    ));
     let Some(candidate) = NaiveDate::from_ymd_opt(today.year(), today.month(), candidate_day)
     else {
         return Duration::from_secs(60);
@@ -69,7 +72,6 @@ fn advance_one_month(date: NaiveDate, desired_day: u32) -> NaiveDate {
     let actual_day = desired_day.min(crate::time_calc::last_day_of_month(year, month));
     NaiveDate::from_ymd_opt(year, month, actual_day).unwrap_or(date)
 }
-
 
 /// Collect ISO week labels (e.g. "2026-W03") where the user has unsubmitted
 /// workdays, from their start_date up to (but not including) the current week.
@@ -145,15 +147,13 @@ async fn find_unsubmitted_weeks(
     while week_monday <= last_checked_monday {
         // Step 1: any incomplete (draft/rejected) entry anywhere in the
         // Mon–Sun window means the week is not fully submitted.
-        let has_incomplete = (0..7i64).any(|d| {
-            incomplete_dates.contains(&(week_monday + chrono::Duration::days(d)))
-        });
+        let has_incomplete = (0..7i64)
+            .any(|d| incomplete_dates.contains(&(week_monday + chrono::Duration::days(d))));
 
         // Step 2: if at least one day has a submitted/approved entry (and no
         // incomplete entries per step 1), treat the whole week as submitted.
-        let has_submitted = (0..7i64).any(|d| {
-            submitted_dates.contains(&(week_monday + chrono::Duration::days(d)))
-        });
+        let has_submitted =
+            (0..7i64).any(|d| submitted_dates.contains(&(week_monday + chrono::Duration::days(d))));
 
         // Step 3: if nothing was submitted, the week is only "excused" when
         // every contract workday is either before the contract start, a
@@ -452,9 +452,11 @@ mod tests {
         // Hour 2 falls in the DST gap — the function must not panic and must
         // return Some (falling back to 03:00 which does exist).
         let result = resolve_local_datetime(gap_date, 2, Berlin);
-        assert!(result.is_some(), "DST gap must fall through to fallback hour");
+        assert!(
+            result.is_some(),
+            "DST gap must fall through to fallback hour"
+        );
         // The returned time must be in hour 3 (the first valid local hour).
         assert_eq!(result.unwrap().hour(), 3);
     }
-
 }

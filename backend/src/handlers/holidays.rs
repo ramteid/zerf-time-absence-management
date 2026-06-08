@@ -101,8 +101,12 @@ pub async fn delete(
 }
 
 /// Proxy: returns all countries supported by Nager.Date.
-pub async fn available_countries(_requester: User) -> AppResult<Json<Vec<crate::services::holidays::NagerCountry>>> {
-    Ok(Json(crate::services::holidays::fetch_available_countries().await?))
+pub async fn available_countries(
+    _requester: User,
+) -> AppResult<Json<Vec<crate::services::holidays::NagerCountry>>> {
+    Ok(Json(
+        crate::services::holidays::fetch_available_countries().await?,
+    ))
 }
 
 /// Proxy: returns the ISO 3166-2 subdivision codes used by Nager for a given country,

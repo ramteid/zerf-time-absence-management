@@ -1,10 +1,10 @@
 use crate::error::AppResult;
 use crate::middleware::auth::User;
 use crate::services::absences::{
-    Absence, NewAbsence, LeaveBalance, approve_absence, approve_cancellation_absence,
-    cancel_absence, compute_balance, create_absence, enrich_absence_with_metadata,
-    reject_absence, reject_cancellation_absence, repo_absence_to_service, require_tracks_time,
-    revoke_absence, update_absence, assert_can_access_user,
+    approve_absence, approve_cancellation_absence, assert_can_access_user, cancel_absence,
+    compute_balance, create_absence, enrich_absence_with_metadata, reject_absence,
+    reject_cancellation_absence, repo_absence_to_service, require_tracks_time, revoke_absence,
+    update_absence, Absence, LeaveBalance, NewAbsence,
 };
 use crate::AppState;
 use axum::{
@@ -76,16 +76,31 @@ pub async fn list_all(
     // Enforce a maximum date range to prevent unbounded queries (DoS).
     if let (Some(from), Some(to)) = (query.from, query.to) {
         if from > to {
-            return Err(crate::error::AppError::BadRequest("from must not be after to.".into()));
+            return Err(crate::error::AppError::BadRequest(
+                "from must not be after to.".into(),
+            ));
         }
         if (to - from).num_days() > 366 {
-            return Err(crate::error::AppError::BadRequest("Date range must not exceed 366 days.".into()));
+            return Err(crate::error::AppError::BadRequest(
+                "Date range must not exceed 366 days.".into(),
+            ));
         }
     }
     // Validate status filter against the known set of absence statuses.
     if let Some(ref s) = query.status {
-        if !["requested", "approved", "rejected", "cancelled", "cancellation_requested", "pending_review"].contains(&s.as_str()) {
-            return Err(crate::error::AppError::BadRequest("Invalid status filter.".into()));
+        if ![
+            "requested",
+            "approved",
+            "rejected",
+            "cancelled",
+            "cancellation_requested",
+            "pending_review",
+        ]
+        .contains(&s.as_str())
+        {
+            return Err(crate::error::AppError::BadRequest(
+                "Invalid status filter.".into(),
+            ));
         }
     }
     let absences = app_state
@@ -212,7 +227,8 @@ pub async fn get_one(
     }
     let mut mapped = repo_absence_to_service(absence);
     let before_data_map =
-        crate::services::absences::latest_update_before_data_batch(&app_state, &[mapped.id]).await?;
+        crate::services::absences::latest_update_before_data_batch(&app_state, &[mapped.id])
+            .await?;
     enrich_absence_with_metadata(&mut mapped, &before_data_map);
     Ok(Json(mapped))
 }
@@ -306,7 +322,9 @@ pub async fn balance(
     let year = match query.year {
         Some(value) => {
             if !(1970..=2100).contains(&value) {
-                return Err(crate::error::AppError::BadRequest("Invalid year: out of valid range.".into()));
+                return Err(crate::error::AppError::BadRequest(
+                    "Invalid year: out of valid range.".into(),
+                ));
             }
             value
         }

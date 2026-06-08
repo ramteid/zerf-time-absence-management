@@ -177,7 +177,8 @@ pub async fn range_pdf(
         // flow and avoids opening many concurrent report queries at once.
         let mut sections = Vec::with_capacity(team_members.len());
         for team_member in &team_members {
-            sections.push(build_timesheet_section(&app_state, team_member, from, to, &label).await?);
+            sections
+                .push(build_timesheet_section(&app_state, team_member, from, to, &label).await?);
         }
         (sections, format!("team-{}", label))
     };

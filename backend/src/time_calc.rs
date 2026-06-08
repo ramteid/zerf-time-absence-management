@@ -88,8 +88,8 @@ mod tests {
     #[test]
     fn parse_hhmm_or_hhmmss_rejects_invalid_strings() {
         assert!(parse_hhmm_or_hhmmss("").is_none());
-        assert!(parse_hhmm_or_hhmmss("25:00").is_none());  // out-of-range hour
-        assert!(parse_hhmm_or_hhmmss("08-30").is_none());  // wrong separator
+        assert!(parse_hhmm_or_hhmmss("25:00").is_none()); // out-of-range hour
+        assert!(parse_hhmm_or_hhmmss("08-30").is_none()); // wrong separator
         assert!(parse_hhmm_or_hhmmss("not-a-time").is_none());
         assert!(parse_hhmm_or_hhmmss("99:99:99").is_none()); // all fields out of range
     }

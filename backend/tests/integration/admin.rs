@@ -137,7 +137,11 @@ async fn admin_full_workflow() {
         let lead = login_change_pw(&app, "lead-settings@example.com", &temp_pw(&body)).await;
 
         let (st, _) = lead.get("/api/v1/settings").await;
-        assert_eq!(st, StatusCode::FORBIDDEN, "non-admin cannot read admin settings");
+        assert_eq!(
+            st,
+            StatusCode::FORBIDDEN,
+            "non-admin cannot read admin settings"
+        );
         let (st, _) = lead
             .put(
                 "/api/v1/settings",
@@ -154,7 +158,11 @@ async fn admin_full_workflow() {
                 }),
             )
             .await;
-        assert_eq!(st, StatusCode::FORBIDDEN, "non-admin cannot update admin settings");
+        assert_eq!(
+            st,
+            StatusCode::FORBIDDEN,
+            "non-admin cannot update admin settings"
+        );
         let (st, _) = lead
             .put(
                 "/api/v1/settings/smtp",
@@ -165,7 +173,11 @@ async fn admin_full_workflow() {
                 }),
             )
             .await;
-        assert_eq!(st, StatusCode::FORBIDDEN, "non-admin cannot update smtp settings");
+        assert_eq!(
+            st,
+            StatusCode::FORBIDDEN,
+            "non-admin cannot update smtp settings"
+        );
         let (st, _) = lead
             .post(
                 "/api/v1/settings/smtp/test",
@@ -176,7 +188,11 @@ async fn admin_full_workflow() {
                 }),
             )
             .await;
-        assert_eq!(st, StatusCode::FORBIDDEN, "non-admin cannot test smtp settings");
+        assert_eq!(
+            st,
+            StatusCode::FORBIDDEN,
+            "non-admin cannot test smtp settings"
+        );
 
         let (st, settings) = admin.get("/api/v1/settings").await;
         assert_eq!(st, StatusCode::OK, "admin reads full settings");
@@ -248,7 +264,11 @@ async fn admin_full_workflow() {
                 }),
             )
             .await;
-        assert_eq!(st, StatusCode::BAD_REQUEST, "invalid carryover date rejected");
+        assert_eq!(
+            st,
+            StatusCode::BAD_REQUEST,
+            "invalid carryover date rejected"
+        );
 
         let (st, _) = admin
             .put(
@@ -266,75 +286,87 @@ async fn admin_full_workflow() {
                 }),
             )
             .await;
-        assert_eq!(st, StatusCode::BAD_REQUEST, "organization name length guard");
+        assert_eq!(
+            st,
+            StatusCode::BAD_REQUEST,
+            "organization name length guard"
+        );
 
-            let (st, _) = admin
-                .put(
-                    "/api/v1/settings",
-                    &json!({
-                        "ui_language": "en",
-                        "time_format": "24h",
-                        "timezone": "Europe/Berlin",
-                        "country": "DE",
-                        "region": "",
-                        "default_weekly_hours": 39,
-                        "default_annual_leave_days": 367,
-                        "carryover_expiry_date": "03-31"
-                    }),
-                )
-                .await;
-            assert_eq!(st, StatusCode::BAD_REQUEST, "default annual leave days upper bound guard");
+        let (st, _) = admin
+            .put(
+                "/api/v1/settings",
+                &json!({
+                    "ui_language": "en",
+                    "time_format": "24h",
+                    "timezone": "Europe/Berlin",
+                    "country": "DE",
+                    "region": "",
+                    "default_weekly_hours": 39,
+                    "default_annual_leave_days": 367,
+                    "carryover_expiry_date": "03-31"
+                }),
+            )
+            .await;
+        assert_eq!(
+            st,
+            StatusCode::BAD_REQUEST,
+            "default annual leave days upper bound guard"
+        );
 
-            let (st, _) = admin
-                .put(
-                    "/api/v1/settings",
-                    &json!({
-                        "ui_language": "en",
-                        "time_format": "24h",
-                        "timezone": "Europe/Berlin",
-                        "country": "DE",
-                        "region": "",
-                        "default_weekly_hours": 39,
-                        "default_annual_leave_days": 30,
-                        "carryover_expiry_date": "03"
-                    }),
-                )
-                .await;
-            assert_eq!(st, StatusCode::BAD_REQUEST, "carryover expiry format guard");
+        let (st, _) = admin
+            .put(
+                "/api/v1/settings",
+                &json!({
+                    "ui_language": "en",
+                    "time_format": "24h",
+                    "timezone": "Europe/Berlin",
+                    "country": "DE",
+                    "region": "",
+                    "default_weekly_hours": 39,
+                    "default_annual_leave_days": 30,
+                    "carryover_expiry_date": "03"
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "carryover expiry format guard");
 
-            let (st, _) = admin
-                .put(
-                    "/api/v1/settings",
-                    &json!({
-                        "ui_language": "en",
-                        "time_format": "24h",
-                        "timezone": "Europe/Berlin",
-                        "country": "DE",
-                        "region": "",
-                        "default_weekly_hours": 39,
-                        "default_annual_leave_days": 30,
-                        "carryover_expiry_date": "13-40"
-                    }),
-                )
-                .await;
-            assert_eq!(st, StatusCode::BAD_REQUEST, "carryover expiry range guard");
+        let (st, _) = admin
+            .put(
+                "/api/v1/settings",
+                &json!({
+                    "ui_language": "en",
+                    "time_format": "24h",
+                    "timezone": "Europe/Berlin",
+                    "country": "DE",
+                    "region": "",
+                    "default_weekly_hours": 39,
+                    "default_annual_leave_days": 30,
+                    "carryover_expiry_date": "13-40"
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "carryover expiry range guard");
 
-            let (st, _) = admin
-                .put(
-                    "/api/v1/settings",
-                    &json!({
-                        "ui_language": "en",
-                        "time_format": "24h",
-                        "timezone": "Europe/Berlin",
-                        "country": "AT",
-                        "region": "",
-                        "default_weekly_hours": 39,
-                        "default_annual_leave_days": 30,
-                        "carryover_expiry_date": "03-31"
-                    }),
-                )
-                .await;
-            assert_eq!(st, StatusCode::OK, "settings refresh holidays when country changes");
+        let (st, _) = admin
+            .put(
+                "/api/v1/settings",
+                &json!({
+                    "ui_language": "en",
+                    "time_format": "24h",
+                    "timezone": "Europe/Berlin",
+                    "country": "AT",
+                    "region": "",
+                    "default_weekly_hours": 39,
+                    "default_annual_leave_days": 30,
+                    "carryover_expiry_date": "03-31"
+                }),
+            )
+            .await;
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "settings refresh holidays when country changes"
+        );
 
         let (st, body) = admin
             .put(
@@ -347,8 +379,15 @@ async fn admin_full_workflow() {
                 }),
             )
             .await;
-        assert_eq!(st, StatusCode::BAD_REQUEST, "invalid smtp encryption rejected");
-        assert!(body["error"].as_str().unwrap_or_default().contains("smtp_encryption"));
+        assert_eq!(
+            st,
+            StatusCode::BAD_REQUEST,
+            "invalid smtp encryption rejected"
+        );
+        assert!(body["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("smtp_encryption"));
 
         let (st, _) = admin
             .put(
@@ -361,7 +400,11 @@ async fn admin_full_workflow() {
                 }),
             )
             .await;
-        assert_eq!(st, StatusCode::BAD_REQUEST, "smtp host required when enabling");
+        assert_eq!(
+            st,
+            StatusCode::BAD_REQUEST,
+            "smtp host required when enabling"
+        );
 
         let (st, _) = admin
             .put(
@@ -374,7 +417,11 @@ async fn admin_full_workflow() {
                 }),
             )
             .await;
-        assert_eq!(st, StatusCode::BAD_REQUEST, "smtp from required when enabling");
+        assert_eq!(
+            st,
+            StatusCode::BAD_REQUEST,
+            "smtp from required when enabling"
+        );
 
         let (st, _) = admin
             .post(
@@ -387,7 +434,11 @@ async fn admin_full_workflow() {
                 }),
             )
             .await;
-        assert_eq!(st, StatusCode::BAD_REQUEST, "test endpoint requires smtp host");
+        assert_eq!(
+            st,
+            StatusCode::BAD_REQUEST,
+            "test endpoint requires smtp host"
+        );
 
         let (st, _) = admin
             .post(
@@ -400,7 +451,11 @@ async fn admin_full_workflow() {
                 }),
             )
             .await;
-        assert_eq!(st, StatusCode::BAD_REQUEST, "test endpoint requires smtp from");
+        assert_eq!(
+            st,
+            StatusCode::BAD_REQUEST,
+            "test endpoint requires smtp from"
+        );
 
         let (st, _) = admin
             .post(
@@ -413,7 +468,11 @@ async fn admin_full_workflow() {
                 }),
             )
             .await;
-        assert_eq!(st, StatusCode::BAD_REQUEST, "invalid smtp from rejected by test endpoint");
+        assert_eq!(
+            st,
+            StatusCode::BAD_REQUEST,
+            "invalid smtp from rejected by test endpoint"
+        );
 
         let (st, body) = admin
             .post(
@@ -427,8 +486,15 @@ async fn admin_full_workflow() {
                 }),
             )
             .await;
-        assert_eq!(st, StatusCode::BAD_REQUEST, "test endpoint surfaces connection failures");
-        assert!(body["error"].as_str().unwrap_or_default().contains("SMTP_CONNECTION_FAILED"));
+        assert_eq!(
+            st,
+            StatusCode::BAD_REQUEST,
+            "test endpoint surfaces connection failures"
+        );
+        assert!(body["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("SMTP_CONNECTION_FAILED"));
 
         let (st, _) = admin
             .put(
@@ -446,7 +512,11 @@ async fn admin_full_workflow() {
                 }),
             )
             .await;
-        assert_eq!(st, StatusCode::OK, "smtp settings can store password and toggles when disabled");
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "smtp settings can store password and toggles when disabled"
+        );
 
         let (st, settings) = admin.get("/api/v1/settings").await;
         assert_eq!(st, StatusCode::OK, "admin settings after smtp save");
@@ -468,10 +538,18 @@ async fn admin_full_workflow() {
                 }),
             )
             .await;
-        assert_eq!(st, StatusCode::OK, "smtp password can be explicitly cleared");
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "smtp password can be explicitly cleared"
+        );
 
         let (st, settings) = admin.get("/api/v1/settings").await;
-        assert_eq!(st, StatusCode::OK, "admin settings after smtp password clear");
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "admin settings after smtp password clear"
+        );
         assert_eq!(settings["smtp_password_set"], false);
 
         let (st, _) = admin
@@ -489,7 +567,11 @@ async fn admin_full_workflow() {
                 }),
             )
             .await;
-        assert_eq!(st, StatusCode::OK, "smtp update falls back to stored password when omitted");
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "smtp update falls back to stored password when omitted"
+        );
 
         let (st, body) = admin
             .put(
@@ -503,8 +585,15 @@ async fn admin_full_workflow() {
                 }),
             )
             .await;
-        assert_eq!(st, StatusCode::BAD_REQUEST, "smtp connection failure is surfaced when enabling");
-        assert!(body["error"].as_str().unwrap_or_default().contains("SMTP_CONNECTION_FAILED"));
+        assert_eq!(
+            st,
+            StatusCode::BAD_REQUEST,
+            "smtp connection failure is surfaced when enabling"
+        );
+        assert!(body["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("SMTP_CONNECTION_FAILED"));
     }
 
     app.cleanup().await;

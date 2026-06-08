@@ -96,7 +96,11 @@ mod tests {
     #[tokio::test]
     async fn maps_public_error_variants_to_expected_status_and_message() {
         let cases = vec![
-            (AppError::Unauthorized, StatusCode::UNAUTHORIZED, "Not authenticated"),
+            (
+                AppError::Unauthorized,
+                StatusCode::UNAUTHORIZED,
+                "Not authenticated",
+            ),
             (AppError::Forbidden, StatusCode::FORBIDDEN, "Forbidden"),
             (AppError::NotFound, StatusCode::NOT_FOUND, "Not found"),
             (
