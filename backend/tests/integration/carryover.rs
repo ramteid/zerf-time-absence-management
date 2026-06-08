@@ -3,7 +3,7 @@ use reqwest::StatusCode;
 use serde_json::{json, Value};
 
 use crate::common::TestApp;
-use crate::helpers::{admin_login, bootstrap_team, id, login_change_pw, reference_date};
+use crate::helpers::{admin_login, bootstrap_team, id, login_change_pw, reference_date, temp_pw};
 
 fn json_f64(value: &Value, key: &str) -> f64 {
     value[key]
@@ -554,6 +554,172 @@ async fn carryover_expiry_allows_leap_day_and_normalizes_non_leap_years() {
     assert_eq!(
         balance["carryover_expiry"], expected_expiry,
         "carryover expiry should be year-aware"
+    );
+
+    app.cleanup().await;
+}
+
+/// Covers the scenario `hire_date` exists for: onboarding an employee who
+/// already worked the full year before adopting Zerf mid-year. Their Zerf
+/// `start_date` is necessarily mid-year (that's when they started using the
+/// system), which would normally pro-rate their entitlement — but their real
+/// employment started long before, so they are owed the full entitlement.
+/// Setting `hire_date` to their real employment start must yield the full
+/// entitlement; clearing it again must fall back to `start_date`-based
+/// proration (the pre-existing, still-correct behavior for everyone else).
+#[tokio::test]
+async fn hire_date_anchors_proration_independent_of_start_date() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+
+    let current_year = reference_date().year();
+    // Mid-year Zerf start date: by itself this would halve the entitlement
+    // (6 of 12 months remaining from July onward).
+    let start_date = format!("{current_year}-07-01");
+    // Real employment start, years before the queried year — well outside it,
+    // so it must produce the FULL entitlement rather than one pro-rated from
+    // the (later) Zerf start_date.
+    let hire_date = format!("{}-01-01", current_year - 5);
+
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "midyear-hire@example.com", "first_name": "Mira", "last_name": "Midyear",
+                "role": "employee", "weekly_hours": 39,
+                "leave_days_current_year": 30, "leave_days_next_year": 30,
+                "start_date": start_date, "hire_date": hire_date,
+                "approver_ids": [1],
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create user with hire_date: {body}");
+    let user_id = id(&body);
+
+    // -- hire_date predates the queried year entirely: full entitlement, no proration --
+    let (st, balance) = admin
+        .get(&format!(
+            "/api/v1/leave-balance/{user_id}?year={current_year}"
+        ))
+        .await;
+    assert_eq!(st, StatusCode::OK, "load leave balance: {balance}");
+    assert_eq!(
+        json_i64(&balance, "annual_entitlement"),
+        30,
+        "hire_date predating the year should yield the full entitlement, not one pro-rated from start_date: {balance}"
+    );
+
+    // -- Clearing hire_date (explicit null, double-Option PATCH semantics) reverts to start_date-based proration --
+    let (st, body) = admin
+        .put(
+            &format!("/api/v1/users/{user_id}"),
+            &json!({"hire_date": null}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "clear hire_date: {body}");
+    assert!(
+        body["hire_date"].is_null(),
+        "cleared hire_date should be null in the response: {body}"
+    );
+
+    let (st, balance) = admin
+        .get(&format!(
+            "/api/v1/leave-balance/{user_id}?year={current_year}"
+        ))
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::OK,
+        "load leave balance after clearing: {balance}"
+    );
+    // start_date = July 1st → 6 of 12 months remaining → ceil(30 * 6 / 12) = 15
+    assert_eq!(
+        json_i64(&balance, "annual_entitlement"),
+        15,
+        "clearing hire_date should resume proration anchored on start_date: {balance}"
+    );
+
+    app.cleanup().await;
+}
+
+/// Regression test: `carryover_days_into_year` must iterate source years from
+/// `start_date` onward, never from `leave_entitlement_anchor` (which may
+/// resolve to `hire_date`, years before `start_date`). Zerf has no usage data
+/// for the "phantom" years between `hire_date` and `start_date` — looping over
+/// them would fabricate a full default entitlement with zero recorded usage for
+/// each one, wildly inflating `incoming_carryover` and then swallowing the
+/// user's *real* usage in their start_date year (`max(0, real_usage -
+/// inflated_carryover) == 0`). `hire_date` must still anchor the entitlement
+/// *within* the iterated years (so the start_date year correctly receives its
+/// full, non-prorated entitlement) — only the loop's *range* must stay bounded
+/// to years Zerf actually has data for.
+#[tokio::test]
+async fn hire_date_does_not_inflate_carryover_with_phantom_pre_start_date_years() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+
+    let current_year = reference_date().year();
+    let next_year = current_year + 1;
+    // Mid-year Zerf go-live: carryover into `next_year` must be derived starting
+    // from this year (the only one Zerf has usage data for)...
+    let start_date = format!("{current_year}-07-01");
+    // ...not from here. Five "phantom" years with no recorded usage at all sit
+    // between `hire_date` and `start_date` -- exactly what must NOT be iterated.
+    let hire_date = format!("{}-01-01", current_year - 5);
+
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "phantom-years@example.com", "first_name": "Penny", "last_name": "Phantom",
+                "role": "employee", "weekly_hours": 39,
+                "leave_days_current_year": 12, "leave_days_next_year": 12,
+                "start_date": start_date, "hire_date": hire_date,
+                "approver_ids": [1],
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create user with hire_date: {body}");
+    let user_id = id(&body);
+    let user = login_change_pw(&app, "phantom-years@example.com", &temp_pw(&body)).await;
+
+    // A plain year-end cutoff keeps the carryover formula easy to hand-verify:
+    // the whole approved-usage window falls before the expiry date.
+    update_carryover_expiry(&admin, "12-31").await;
+
+    // 4 approved vacation days, safely within the start_date year and after
+    // start_date itself (August, vs. a July 1st start).
+    let usage_days = pick_workdays(&user, current_year, 8, 4).await;
+    for day in &usage_days {
+        let absence_id = create_vacation(&user, *day).await;
+        let (st, _) = admin
+            .post(
+                &format!("/api/v1/absences/{absence_id}/approve"),
+                &json!({}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "approve vacation on {day}");
+    }
+
+    let (st, balance) = admin
+        .get(&format!("/api/v1/leave-balance/{user_id}?year={next_year}"))
+        .await;
+    assert_eq!(st, StatusCode::OK, "load next-year leave balance: {balance}");
+
+    // Correct: only the start_date year is iterated -- entitlement 12 minus the
+    // 4 approved usage days = 8.
+    //
+    // Under the bug, the loop would also walk the 5 phantom years between
+    // hire_date and start_date. Each one fabricates a full default entitlement
+    // (e.g. 30) against zero recorded usage, so `incoming_carryover` reaches 30
+    // before the start_date year is even considered. There, `base_usage` becomes
+    // `max(0, real_usage(4) - incoming_carryover(30)) == 0` -- the real usage is
+    // swallowed completely -- yielding an inflated `max(0, 12 - 0) == 12`.
+    assert_eq!(
+        json_i64(&balance, "carryover_days"),
+        8,
+        "carryover must derive only from the start_date year (entitlement 12 - 4 used = 8), \
+         not be inflated by phantom pre-start_date years anchored on hire_date: {balance}"
     );
 
     app.cleanup().await;

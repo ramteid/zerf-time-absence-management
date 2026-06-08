@@ -119,6 +119,19 @@ pub async fn workdays_for_ranges_in_window(
     Ok(total)
 }
 
+/// The date that anchors annual-leave proration and carryover-source-year
+/// iteration: the configured `hire_date` when present, otherwise `start_date`.
+///
+/// `start_date` doubles as the boundary for time entries/absences and the
+/// flextime starting-balance anchor, so it cannot always serve as the
+/// employment-start reference too — e.g. when Zerf is introduced to an
+/// existing team, an employee's Zerf `start_date` (this year) would otherwise
+/// wrongly pro-rate their full-year entitlement. `hire_date` lets admins record
+/// the real employment start separately; `None` preserves prior behavior.
+pub fn leave_entitlement_anchor(user: &crate::middleware::auth::User) -> NaiveDate {
+    user.hire_date.unwrap_or(user.start_date)
+}
+
 /// Pro-rate annual leave entitlement for a user who started mid-year.
 pub fn pro_rate_entitlement(user_start_date: NaiveDate, year: i32, entitled: i64) -> i64 {
     let year_start = NaiveDate::from_ymd_opt(year, 1, 1).unwrap();
@@ -178,10 +191,20 @@ pub async fn carryover_days_into_year(
     year: i32,
     expiry_setting: &str,
 ) -> AppResult<i64> {
+    // Carryover can only be derived from years Zerf actually recorded usage
+    // for, i.e. from `start_date` onward — NOT from `leave_entitlement_anchor`.
+    // `hire_date` may anchor entitlement many years before `start_date`; looping
+    // from there would "carry over" full entitlements for years with zero
+    // recorded usage (Zerf has no data before `start_date`), wildly inflating
+    // the result. The entitlement *within* each iterated year still must respect
+    // `hire_date` (via `pro_rate_entitlement(anchor, ...)` below) — that is what
+    // correctly gives a long-tenured new Zerf user their full (non-prorated)
+    // entitlement for their start-date year.
     if year <= Datelike::year(&user.start_date) {
         return Ok(0);
     }
 
+    let anchor = leave_entitlement_anchor(user);
     let absence_db = crate::repository::AbsenceDb::new(pool.clone());
     let default_days = crate::repository::UserDb::new(pool.clone())
         .get_default_leave_days()
@@ -190,7 +213,7 @@ pub async fn carryover_days_into_year(
 
     for source_year in user.start_date.year()..year {
         let entitled = annual_days_or_default(pool, user.id, source_year, default_days).await?;
-        let effective_entitlement = pro_rate_entitlement(user.start_date, source_year, entitled);
+        let effective_entitlement = pro_rate_entitlement(anchor, source_year, entitled);
         let year_from = NaiveDate::from_ymd_opt(source_year, 1, 1).unwrap();
         let year_to = NaiveDate::from_ymd_opt(source_year, 12, 31).unwrap();
         let expiry_date = parse_expiry_date(expiry_setting, source_year);
@@ -247,7 +270,7 @@ pub async fn vacation_year_context(
     expiry_setting: &str,
 ) -> AppResult<(i64, i64, bool)> {
     let entitled = effective_annual_days(pool, user, year).await?;
-    let effective_entitlement = pro_rate_entitlement(user.start_date, year, entitled);
+    let effective_entitlement = pro_rate_entitlement(leave_entitlement_anchor(user), year, entitled);
     let carryover_days = carryover_days_into_year(pool, user, year, expiry_setting).await?;
 
     let expiry_date = parse_expiry_date(expiry_setting, year);
@@ -552,7 +575,8 @@ pub async fn validate_vacation_balance(
         let end_year_to = NaiveDate::from_ymd_opt(end_year, 12, 31).unwrap();
 
         let end_year_entitled = effective_annual_days(pool, user, end_year).await?;
-        let end_year_effective = pro_rate_entitlement(user.start_date, end_year, end_year_entitled);
+        let end_year_effective =
+            pro_rate_entitlement(leave_entitlement_anchor(user), end_year, end_year_entitled);
 
         let end_year_expiry_date = parse_expiry_date(&expiry_setting, end_year);
         let current_year_carryover = carryover_from_year_into_next_year(
@@ -871,6 +895,58 @@ mod tests {
         let start = NaiveDate::from_ymd_opt(2026, 12, 1).unwrap();
         // months_remaining = 13 - 12 = 1; ceil(30 * 1 / 12) = ceil(2.5) = 3
         assert_eq!(pro_rate_entitlement(start, 2026, 30), 3);
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // leave_entitlement_anchor
+    // ──────────────────────────────────────────────────────────────────────
+
+    /// Build a minimal auth user with the given `start_date`/`hire_date`
+    /// combination — the only two fields these tests vary.
+    fn user_with_dates(start_date: NaiveDate, hire_date: Option<NaiveDate>) -> crate::middleware::auth::User {
+        crate::middleware::auth::User {
+            id: 1,
+            email: "user@example.com".to_string(),
+            password_hash: "hash".to_string(),
+            first_name: "Alice".to_string(),
+            last_name: "Smith".to_string(),
+            role: "employee".to_string(),
+            weekly_hours: 40.0,
+            workdays_per_week: 5,
+            start_date,
+            hire_date,
+            active: true,
+            must_change_password: false,
+            created_at: chrono::Utc::now(),
+            allow_reopen_without_approval: false,
+            dark_mode: false,
+            overtime_start_balance_min: 0,
+            tracks_time: true,
+        }
+    }
+
+    /// When `hire_date` is unset, the anchor falls back to `start_date` —
+    /// preserving pre-existing proration behavior for the normal case where
+    /// employment and Zerf usage begin on the same day.
+    #[test]
+    fn leave_entitlement_anchor_falls_back_to_start_date_when_hire_date_unset() {
+        let start_date = NaiveDate::from_ymd_opt(2026, 7, 1).unwrap();
+        let user = user_with_dates(start_date, None);
+        assert_eq!(leave_entitlement_anchor(&user), start_date);
+    }
+
+    /// When `hire_date` is set, it takes precedence over `start_date` — this is
+    /// the mid-tenure-onboarding case: the employee's Zerf `start_date` is this
+    /// year, but their real employment began earlier, so the full (non-prorated)
+    /// entitlement should apply.
+    #[test]
+    fn leave_entitlement_anchor_prefers_hire_date_when_set() {
+        let start_date = NaiveDate::from_ymd_opt(2026, 7, 1).unwrap();
+        let hire_date = NaiveDate::from_ymd_opt(2020, 1, 1).unwrap();
+        let user = user_with_dates(start_date, Some(hire_date));
+        assert_eq!(leave_entitlement_anchor(&user), hire_date);
+        // And the resulting entitlement is the full amount, not pro-rated:
+        assert_eq!(pro_rate_entitlement(leave_entitlement_anchor(&user), 2026, 30), 30);
     }
 
     // ──────────────────────────────────────────────────────────────────────

@@ -22,6 +22,9 @@ pub struct User {
     pub weekly_hours: f64,
     pub workdays_per_week: i16,
     pub start_date: NaiveDate,
+    /// Optional employment start date that anchors annual-leave proration.
+    /// Falls back to `start_date` when `None`.
+    pub hire_date: Option<NaiveDate>,
     pub active: bool,
     pub must_change_password: bool,
     pub created_at: DateTime<Utc>,
@@ -44,7 +47,7 @@ impl User {
 
 const USER_SELECT: &str =
     "SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, workdays_per_week, \
-     start_date, active, must_change_password, created_at, \
+     start_date, hire_date, active, must_change_password, created_at, \
      allow_reopen_without_approval, dark_mode, overtime_start_balance_min, tracks_time \
      FROM users";
 
@@ -464,9 +467,9 @@ impl UserDb {
     ) -> AppResult<i64> {
         sqlx::query(
             "INSERT INTO users(email, password_hash, first_name, last_name, role, \
-               weekly_hours, workdays_per_week, start_date, must_change_password, \
+               weekly_hours, workdays_per_week, start_date, hire_date, must_change_password, \
                overtime_start_balance_min, tracks_time) \
-               VALUES ($1, $2, $3, $4, 'admin', 39.0, 5, $5, FALSE, 0, $6)",
+               VALUES ($1, $2, $3, $4, 'admin', 39.0, 5, $5, NULL, FALSE, 0, $6)",
         )
         .bind(email)
         .bind(password_hash)
@@ -502,15 +505,16 @@ impl UserDb {
         weekly_hours: f64,
         workdays_per_week: i16,
         start_date: NaiveDate,
+        hire_date: Option<NaiveDate>,
         must_change_password: bool,
         overtime_start_balance_min: i64,
         tracks_time: bool,
     ) -> Result<i64, sqlx::Error> {
         sqlx::query_scalar(
             "INSERT INTO users(email, password_hash, first_name, last_name, role, \
-             weekly_hours, workdays_per_week, start_date, must_change_password, \
+             weekly_hours, workdays_per_week, start_date, hire_date, must_change_password, \
              overtime_start_balance_min, tracks_time) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id",
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id",
         )
         .bind(email)
         .bind(password_hash)
@@ -520,6 +524,7 @@ impl UserDb {
         .bind(weekly_hours)
         .bind(workdays_per_week)
         .bind(start_date)
+        .bind(hire_date)
         .bind(must_change_password)
         .bind(overtime_start_balance_min)
         .bind(tracks_time)
@@ -538,11 +543,17 @@ impl UserDb {
         weekly_hours: Option<f64>,
         workdays_per_week: Option<i16>,
         start_date: Option<NaiveDate>,
+        hire_date: Option<Option<NaiveDate>>,
         active: Option<bool>,
         allow_reopen_without_approval: Option<bool>,
         overtime_start_balance_min: Option<i64>,
         tracks_time: Option<bool>,
     ) -> Result<(), sqlx::Error> {
+        // hire_date is nullable, so a plain COALESCE cannot express "clear it
+        // back to NULL". Use an explicit flag + CASE, mirroring
+        // CategoryDb::update's handling of the nullable `description` column.
+        let update_hire_date = hire_date.is_some();
+        let hire_date = hire_date.flatten();
         sqlx::query(
             "UPDATE users \
              SET email=COALESCE($1,email), \
@@ -552,11 +563,12 @@ impl UserDb {
                  weekly_hours=COALESCE($5,weekly_hours), \
                  workdays_per_week=COALESCE($6,workdays_per_week), \
                  start_date=COALESCE($7,start_date), \
-                 active=COALESCE($8,active), \
-                 allow_reopen_without_approval=COALESCE($9,allow_reopen_without_approval), \
-                 overtime_start_balance_min=COALESCE($10,overtime_start_balance_min), \
-                 tracks_time=COALESCE($11,tracks_time) \
-             WHERE id=$12",
+                 hire_date=CASE WHEN $8 THEN $9 ELSE hire_date END, \
+                 active=COALESCE($10,active), \
+                 allow_reopen_without_approval=COALESCE($11,allow_reopen_without_approval), \
+                 overtime_start_balance_min=COALESCE($12,overtime_start_balance_min), \
+                 tracks_time=COALESCE($13,tracks_time) \
+             WHERE id=$14",
         )
         .bind(email)
         .bind(first_name)
@@ -565,6 +577,8 @@ impl UserDb {
         .bind(weekly_hours)
         .bind(workdays_per_week)
         .bind(start_date)
+        .bind(update_hire_date)
+        .bind(hire_date)
         .bind(active)
         .bind(allow_reopen_without_approval)
         .bind(overtime_start_balance_min)

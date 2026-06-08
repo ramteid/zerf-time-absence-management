@@ -500,7 +500,9 @@ For selected year Y:
 
 1. Annual entitlement Y:
 - Uses the leave-day value configured for user and year Y.
-- If user started during Y, entitlement is pro-rated.
+- Proration is anchored on the user's hire date if one is set, otherwise on
+  their start date (see "Creating a user"). If that anchor date falls within
+  Y, entitlement is pro-rated from it.
 
 2. Carryover days into Y:
 - Start with previous year entitlement after pro-rating.
@@ -1151,6 +1153,15 @@ Role-specific rules:
 Optional: an initial flextime balance to carry in from before the user was
 created in the system.
 
+Optional: a hire date — the date the person actually joined the company, if it
+differs from their start date in Zerf. This matters when introducing Zerf to an
+existing team: someone who already worked the full year before adopting Zerf
+should see their full annual leave entitlement, not one pro-rated from the day
+they started using Zerf. Set the hire date to their real employment start, and
+their leave entitlement is pro-rated from that date instead. Leave it empty to
+pro-rate from the start date, which is correct when employment and Zerf usage
+begin on the same day.
+
 Optional: one or more approvers to assign to the new user.
 
 A temporary password is generated automatically. The user must change it on
@@ -1260,6 +1271,11 @@ Annual leave entitlements can be set per user per year.
 - Changes take effect immediately for balance calculations. If you reduce a
   user's entitlement after they have already used vacation, their available
   balance may go negative.
+- When onboarding someone who already worked for the company before adopting
+  Zerf, set their hire date (in the user's edit dialog) to their real
+  employment start. This anchors leave proration on that date instead of their
+  (later) Zerf start date, so they see their full entitlement rather than one
+  wrongly pro-rated from when they started using Zerf.
 
 ### Revoking an approved absence
 

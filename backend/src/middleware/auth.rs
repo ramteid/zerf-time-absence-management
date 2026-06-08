@@ -41,6 +41,9 @@ pub struct User {
     /// ISO weekday semantics: contract days = first N days of week (0=Mon, 1=Tue, ...)
     pub workdays_per_week: i16,
     pub start_date: chrono::NaiveDate,
+    /// Optional employment start date that anchors annual-leave proration.
+    /// Falls back to `start_date` when `None` — see `absence_balance::leave_entitlement_anchor`.
+    pub hire_date: Option<chrono::NaiveDate>,
     pub active: bool,
     pub must_change_password: bool,
     pub created_at: DateTime<Utc>,
@@ -283,6 +286,7 @@ pub async fn auth_middleware(
         weekly_hours: repo_user.weekly_hours,
         workdays_per_week: repo_user.workdays_per_week,
         start_date: repo_user.start_date,
+        hire_date: repo_user.hire_date,
         active: repo_user.active,
         must_change_password: repo_user.must_change_password,
         created_at: repo_user.created_at,
@@ -340,6 +344,7 @@ mod tests {
             weekly_hours: 40.0,
             workdays_per_week: 5,
             start_date: chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
+            hire_date: None,
             active: true,
             must_change_password: false,
             created_at: Utc::now(),

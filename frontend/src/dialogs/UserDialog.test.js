@@ -187,4 +187,69 @@ describe("UserDialog", () => {
     );
     expect(leaveDaysCall).toBeTruthy();
   });
+
+  it("shows the optional hire date field with its explanatory helper text", async () => {
+    // hire_date lets admins anchor leave proration on a real employment start
+    // that predates the user's Zerf start_date — e.g. when onboarding someone
+    // who already worked the full year before the team adopted Zerf. The field
+    // must be visible (and explained) for both new and existing users.
+    const onClose = vi.fn();
+    component = mount(UserDialog, {
+      target,
+      props: { template: {}, onClose },
+    });
+    await waitForText(target, "Add Member");
+
+    expect(target.textContent).toContain("Hire date");
+    expect(target.textContent).toContain(
+      "Used to calculate the prorated annual leave entitlement"
+    );
+  });
+
+  it("shows a clear button for the hire date only while it has a value", async () => {
+    // The DatePicker itself has no built-in way to clear back to empty (which
+    // is what reverts proration to the start_date fallback on the backend), so
+    // the dialog adds a small icon button — visible only when there is
+    // something to clear.
+    apiMock.mockImplementation(async (path) => {
+      if (path === "/users") return [];
+      if (path.endsWith("/leave-days")) return [];
+      return {};
+    });
+    const onClose = vi.fn();
+    component = mount(UserDialog, {
+      target,
+      props: {
+        template: {
+          id: 7,
+          first_name: "Grace",
+          last_name: "Green",
+          role: "employee",
+          email: "grace@example.com",
+          weekly_hours: 40,
+          workdays_per_week: 5,
+          start_date: "2023-01-01",
+          hire_date: "2018-03-01",
+          approver_ids: [],
+          active: true,
+          tracks_time: true,
+        },
+        onClose,
+      },
+    });
+    await waitForText(target, "Edit Member");
+    await settle();
+
+    const findClearBtn = () =>
+      [...target.querySelectorAll("button")].find(
+        (b) => b.getAttribute("title") === "Clear"
+      );
+
+    expect(findClearBtn()).toBeTruthy();
+
+    findClearBtn().click();
+    await settle();
+
+    expect(findClearBtn()).toBeFalsy();
+  });
 });

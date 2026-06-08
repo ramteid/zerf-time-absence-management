@@ -7,6 +7,7 @@
   import { appTodayDate, appTodayIsoDate } from "../format.js";
   import Dialog from "../Dialog.svelte";
   import DatePicker from "../DatePicker.svelte";
+  import Icon from "../Icons.svelte";
   import TempPasswordDialog from "./TempPasswordDialog.svelte";
 
   export let template;
@@ -27,6 +28,11 @@
   let todayIso = appTodayIsoDate($settings?.timezone);
   let lastTodayIso = todayIso;
   let start_date = template.start_date || todayIso;
+  // Optional employment-start anchor for leave proration; "" = unset (falls
+  // back to start_date on the backend). Lets admins onboard an employee who
+  // already worked the full year before adopting Zerf mid-year without their
+  // entitlement being wrongly pro-rated from the (later) Zerf start date.
+  let hire_date = template.hire_date || "";
   let overtime_start_balance_hours =
     (template.overtime_start_balance_min || 0) / 60;
   let approver_ids = Array.isArray(template.approver_ids) ? template.approver_ids.map(Number) : [];
@@ -186,6 +192,9 @@
         leave_days_current_year: Number(leave_days_current_year),
         leave_days_next_year: Number(leave_days_next_year),
         start_date,
+        // Always send explicitly: `null` clears it back to the start_date
+        // fallback on update, and is simply stored as unset on create.
+        hire_date: hire_date || null,
         overtime_start_balance_min: normalizedOvertimeStartBalanceMin,
       };
       if (requiresApprover) {
@@ -294,6 +303,29 @@
             bind:value={start_date}
             container={dlg}
           />
+        </div>
+      </div>
+      <div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <label class="zf-label" for="user-hire-date" style="margin-bottom:0"
+            >{$t("Hire date")}</label
+          >
+          {#if hire_date}
+            <button
+              type="button"
+              class="zf-btn-icon-sm zf-btn-ghost"
+              title={$t("Clear")}
+              on:click={() => (hire_date = "")}
+            >
+              <Icon name="X" size={14} />
+            </button>
+          {/if}
+        </div>
+        <DatePicker id="user-hire-date" bind:value={hire_date} container={dlg} />
+        <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
+          {$t(
+            "Used to calculate the prorated annual leave entitlement for employees who already worked before they started using Zerf. Leave empty to use the start date.",
+          )}
         </div>
       </div>
       <div class="field-row">
