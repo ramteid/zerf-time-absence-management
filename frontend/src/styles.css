@@ -910,6 +910,67 @@ dialog footer {
   gap: 12px;
 }
 
+/* Small helper text below a form field */
+.field-hint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+/* Grouping label above a set of related fields */
+.field-section-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  letter-spacing: 0.01em;
+  margin-bottom: 8px;
+}
+
+/* Card / section heading (e.g. "Change password") */
+.field-card-title {
+  font-size: 14px;
+  font-weight: 400;
+  margin-bottom: 14px;
+}
+
+/* Toggle/switch row: label on left, control on right */
+.field-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* When a toggle row sits inside a field-group it needs a top separator */
+.field-group .field-toggle-row {
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+
+.field-toggle-row-title {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.field-toggle-row-hint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+
+/* Label row with an inline action button (e.g. clear) */
+.field-label-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.field-label-row .zf-label {
+  margin-bottom: 0;
+}
+
 /* ── Calendar ── */
 .cal-grid {
   display: grid;

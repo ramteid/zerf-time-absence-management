@@ -219,9 +219,7 @@
     </div>
   {/if}
   <div class="zf-card" style="padding:20px;margin-bottom:16px">
-    <div style="font-size:14px;font-weight:400;margin-bottom:14px">
-      {$t("Organization")}
-    </div>
+    <div class="field-card-title">{$t("Organization")}</div>
     <div class="field-group">
       <div class="field-row">
         <div>
@@ -236,7 +234,7 @@
             bind:value={settingsForm.organization_name}
             placeholder={$t("e.g. My Company")}
           />
-          <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
+          <div class="field-hint">
             {$t("Shown on the login screen and in the navigation.")}
           </div>
         </div>
@@ -244,9 +242,7 @@
     </div>
   </div>
   <div class="zf-card" style="padding:20px;margin-bottom:16px">
-    <div style="font-size:14px;font-weight:400;margin-bottom:14px">
-      {$t("General")}
-    </div>
+    <div class="field-card-title">{$t("General")}</div>
     <div class="field-group">
       <div class="field-row">
         <div>
@@ -346,7 +342,7 @@
             placeholder="03-31"
             maxlength="5"
           />
-          <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
+          <div class="field-hint">
             {$t("Unused vacation from the previous year expires on this date.")}
           </div>
         </div>
@@ -372,7 +368,7 @@
             bind:value={settingsForm.submission_deadline_day}
             placeholder={$t("e.g. 5")}
           />
-          <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
+          <div class="field-hint">
             {$t(
               "Users will be notified on this day of each month if they have unsubmitted time entries for previous months. Leave empty to disable. (1–28)",
             )}

@@ -121,7 +121,7 @@
             />
             {$t("Enable SMTP")}
           </label>
-          <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
+          <div class="field-hint">
             {$t(
               "When enabled, notification emails are sent for approvals, rejections, and edit requests.",
             )}
@@ -129,7 +129,7 @@
         </div>
       </div>
 
-      <div class="field-row" style="margin-top:8px">
+      <div class="field-row">
         <div>
           <label
             class="zf-label"
@@ -142,7 +142,7 @@
             />
             {$t("Enable reminders")}
           </label>
-          <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
+          <div class="field-hint">
             {$t(
               "When enabled, users who have not submitted all time entries are reminded by email on the configured deadline day.",
             )}
@@ -150,7 +150,7 @@
         </div>
       </div>
 
-      <div class="field-row" style="margin-top:8px">
+      <div class="field-row">
         <div>
           <label
             class="zf-label"
@@ -163,7 +163,7 @@
             />
             {$t("Enable approval reminders")}
           </label>
-          <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
+          <div class="field-hint">
             {$t(
               "When enabled, approvers are reminded by email about pending approvals every Monday.",
             )}
@@ -171,7 +171,7 @@
         </div>
       </div>
 
-      <div class="field-row" style="margin-top:12px">
+      <div class="field-row">
         <div>
           <label class="zf-label" for="smtp-host">{$t("SMTP Host")}</label>
           <input
@@ -193,7 +193,7 @@
         </div>
       </div>
 
-      <div class="field-row" style="margin-top:12px">
+      <div class="field-row">
         <div>
           <label class="zf-label" for="smtp-username">{$t("Username")}</label>
           <input
@@ -238,7 +238,7 @@
         </div>
       </div>
 
-      <div class="field-row" style="margin-top:12px">
+      <div class="field-row">
         <div>
           <label class="zf-label" for="smtp-from">{$t("From address")}</label>
           <input
