@@ -111,6 +111,7 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                 .route("/reports/month", get(handlers::reports::month))
                 .route("/reports/range", get(handlers::reports::range))
                 .route("/reports/csv", get(handlers::reports::range_csv))
+                .route("/reports/pdf", get(handlers::reports::range_pdf))
                 .route("/reports/month/csv", get(handlers::reports::month_csv))
                 .route("/reports/team", get(handlers::reports::team))
                 .route("/reports/categories", get(handlers::reports::categories))

@@ -9,16 +9,22 @@
   import {
     getFlextimeReport,
     getRangeReport,
+    getTimesheetPdf,
   } from "../../lib/api/reportsApi.js";
   import {
     isReportRangeTooLong,
     isoMonthStart,
   } from "../../lib/domain/dates.js";
   import { findUserById, hasUserId } from "../../lib/domain/users.js";
-  import { buildReportPdf } from "../../lib/exports/reportPdf.js";
 
   export let users = [];
   export let isSelfOnlyReportsView = false;
+  export let canViewTeamReports = false;
+
+  // Sentinel selection value for "export all assigned employees into one PDF".
+  // Only offered to leads/admins (see `canViewTeamReports`); CSV export does not
+  // support it, so the CSV button is disabled while it is selected.
+  const ALL_USERS_VALUE = "all";
 
   let today = appTodayDate();
   // eslint-disable-next-line no-useless-assignment
@@ -48,6 +54,7 @@
   // is missing (e.g. pure-admin login who has no own row in `users`).
   $: if (
     !isSelfOnlyReportsView &&
+    csvUserId !== ALL_USERS_VALUE &&
     (csvUserId == null || !hasUserId(users, csvUserId)) &&
     users.length > 0
   ) {
@@ -128,13 +135,13 @@
     return cleaned || fallback;
   }
 
-  async function fetchExportData() {
-    const exportUserHasFlextime = userHasFlextime(csvUserId);
+  async function fetchExportDataForUser(userId) {
+    const exportUserHasFlextime = userHasFlextime(userId);
     return Promise.all([
-      getRangeReport({ userId: csvUserId, from: csvFrom, to: csvTo }),
+      getRangeReport({ userId, from: csvFrom, to: csvTo }),
       exportUserHasFlextime
         ? getFlextimeReport({
-            userId: csvUserId,
+            userId,
             from: csvFrom,
             to: csvTo,
           }).catch(() => [])
@@ -154,7 +161,10 @@
 
   function validateRange() {
     csvError = "";
-    if (csvUserId == null) {
+    if (
+      csvUserId == null ||
+      (csvUserId === ALL_USERS_VALUE && users.length === 0)
+    ) {
       csvError = $t("Select an employee.");
       return false;
     }
@@ -178,7 +188,7 @@
     if (!validateRange()) return;
     exportInProgress = true;
     try {
-      const [report, flextimeData] = await fetchExportData();
+      const [report, flextimeData] = await fetchExportDataForUser(csvUserId);
       const { opening, closing } = flextimeBounds(flextimeData);
       const header = csvEncode([
         $t("Date"),
@@ -305,27 +315,30 @@
     }
   }
 
+  // PDF generation happens entirely in the backend: it builds either a
+  // single-employee timesheet or — when "All" is selected — one combined PDF
+  // covering every employee the requester leads. We just download the blob.
   async function exportPdf() {
     if (exportInProgress) return;
     if (!validateRange()) return;
     exportInProgress = true;
     try {
-      const [report, flextimeData] = await fetchExportData();
-      const selectedUser = findUserById(users, csvUserId);
-      const fullName = selectedUser
-        ? `${selectedUser.first_name} ${selectedUser.last_name}`
-        : String(csvUserId);
-      const blob = buildReportPdf({
-        report,
-        flextimeData,
-        userName: fullName,
+      const isAllUsers = csvUserId === ALL_USERS_VALUE;
+      const selectedUser = isAllUsers ? null : findUserById(users, csvUserId);
+      const fileNamePart = isAllUsers
+        ? $t("All")
+        : selectedUser
+          ? `${selectedUser.first_name} ${selectedUser.last_name}`
+          : String(csvUserId);
+      const response = await getTimesheetPdf({
+        userId: isAllUsers ? undefined : csvUserId,
         from: csvFrom,
         to: csvTo,
-        t: $t,
       });
+      const blob = await response.blob();
       downloadBlob(
         blob,
-        `stundennachweis-${safeFileNamePart(fullName)}-${csvFrom}_${csvTo}.pdf`,
+        `stundennachweis-${safeFileNamePart(fileNamePart)}-${csvFrom}_${csvTo}.pdf`,
       );
       toast($t("PDF download started."), "ok");
     } catch (e) {
@@ -346,6 +359,9 @@
     <div style="margin-bottom:12px">
       <label class="zf-label" for="csv-user-id">{$t("Employee")}</label>
       <select id="csv-user-id" class="zf-select" bind:value={csvUserId}>
+        {#if canViewTeamReports}
+          <option value={ALL_USERS_VALUE}>{$t("All")}</option>
+        {/if}
         {#each users as u (u.id)}
           <option value={u.id}>{u.first_name} {u.last_name}</option>
         {/each}
@@ -373,7 +389,10 @@
     <button
       class="zf-btn zf-btn-primary"
       on:click={exportCsv}
-      disabled={exportInProgress || csvUserId == null}
+      disabled={exportInProgress || csvUserId == null || csvUserId === ALL_USERS_VALUE}
+      title={csvUserId === ALL_USERS_VALUE
+        ? $t("CSV export is only available for a single employee.")
+        : null}
     >
       <Icon name="Download" size={14} />{$t("Export CSV")}
     </button>

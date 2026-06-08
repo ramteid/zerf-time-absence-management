@@ -1,12 +1,13 @@
 use crate::error::{AppError, AppResult};
 use crate::middleware::auth::User;
+use crate::report_pdf::{render_timesheet_pdf, TimesheetSection};
 use crate::roles::is_assistant_role;
 use crate::services::reports::{
-    all_weeks_submitted_for_month, assert_can_access_user, build_month,
+    all_weeks_submitted_for_month, assert_can_access_user, build_flextime_for_user, build_month,
     build_month_without_submission_status, build_overtime_rows_for_year, build_range,
-    build_range_with_user, csv_response, cumulative_at_month_end, month_bounds,
-    parse_report_time, sort_categories_desc, validate_range, CategoryTotal, FlextimeDay,
-    MonthReport, MonthRow, TeamRow, UserCategoryRow,
+    build_range_with_user, csv_response, month_bounds, parse_report_time, pdf_response,
+    sort_categories_desc, validate_range, CategoryTotal, FlextimeDay, MonthReport, MonthRow,
+    TeamRow, UserCategoryRow,
 };
 use crate::AppState;
 use axum::{
@@ -104,6 +105,85 @@ pub async fn range_csv(
     let label = format!("{}_to_{}", from, to);
     let report = build_range(&app_state.pool, target_user_id, from, to, &label).await?;
     csv_response(report, target_user_id, &label)
+}
+
+/// Build the [`TimesheetSection`] (range report + flextime ledger) for one
+/// already-resolved user — the unit of work both the single-employee and
+/// "All" combined PDF exports assemble from.
+async fn build_timesheet_section(
+    app_state: &AppState,
+    user: &User,
+    from: NaiveDate,
+    to: NaiveDate,
+    label: &str,
+) -> AppResult<TimesheetSection> {
+    let report = build_range_with_user(&app_state.pool, user, from, to, label).await?;
+    let flextime_data = build_flextime_for_user(&app_state.pool, user, from, to).await?;
+    Ok(TimesheetSection {
+        user_name: format!("{} {}", user.first_name, user.last_name),
+        report,
+        flextime_data,
+    })
+}
+
+pub async fn range_pdf(
+    State(app_state): State<AppState>,
+    requester: User,
+    Query(query): Query<CsvQuery>,
+) -> AppResult<Response> {
+    let from = query
+        .from
+        .ok_or_else(|| AppError::BadRequest("from is required.".into()))?;
+    let to = query
+        .to
+        .ok_or_else(|| AppError::BadRequest("to is required.".into()))?;
+    validate_range(from, to)?;
+    let label = format!("{}_to_{}", from, to);
+    let language = crate::i18n::load_ui_language(&app_state.pool).await?;
+
+    let (sections, file_label) = if let Some(target_user_id) = query.user_id {
+        assert_can_access_user(&app_state, &requester, target_user_id).await?;
+        let user = crate::services::users::repo_user_to_auth_user(
+            app_state
+                .db
+                .users
+                .find_by_id(target_user_id)
+                .await?
+                .ok_or(AppError::NotFound)?,
+        );
+        let section = build_timesheet_section(&app_state, &user, from, to, &label).await?;
+        (vec![section], format!("user-{}-{}", target_user_id, label))
+    } else {
+        // Omitting user_id requests the combined "All" export — leads/admins
+        // only, scoped to their active team (mirrors the `categories` handler's
+        // "omit user_id => team scope for leads" auth pattern).
+        if !requester.is_lead() {
+            return Err(AppError::Forbidden);
+        }
+        let team_members: Vec<User> = app_state
+            .db
+            .reports
+            .active_team_members(requester.id, requester.is_admin())
+            .await?
+            .into_iter()
+            // Pure-admin users (tracks_time=false) have no own tracking dataset
+            // and are excluded, same as the team report.
+            .filter(|team_member| team_member.tracks_time)
+            .map(crate::services::users::repo_user_to_auth_user)
+            .collect();
+
+        // Fetch each member's data sequentially and merge into one combined PDF
+        // — keeps backend load comparable to the original per-employee export
+        // flow and avoids opening many concurrent report queries at once.
+        let mut sections = Vec::with_capacity(team_members.len());
+        for team_member in &team_members {
+            sections.push(build_timesheet_section(&app_state, team_member, from, to, &label).await?);
+        }
+        (sections, format!("team-{}", label))
+    };
+
+    let bytes = render_timesheet_pdf(&sections, from, to, &language);
+    pdf_response(bytes, &file_label)
 }
 
 #[derive(Deserialize)]
@@ -448,165 +528,7 @@ pub async fn flextime(
             .await?
             .ok_or(AppError::NotFound)?,
     );
-    // Assistant role is the canonical source for "no flextime account" behavior.
-    if is_assistant_role(&user.role) {
-        return Ok(Json(vec![]));
-    }
-    let target_per_day_min = {
-        let weekly_hours = user.weekly_hours;
-        let workdays_per_week = user.workdays_per_week;
-        (weekly_hours / f64::from(workdays_per_week) * 60.0).round() as i64
-    };
-
-    // Seed cumulative at query.from-1 via month-level overtime plus a small
-    // partial-month report, so per-day flextime processing stays within the
-    // requested output range.
-    // Fetch today early so the seed clamp below can use it. The flextime balance
-    // is defined as "balance at end of yesterday", so seed and main loop alike
-    // must never include today's contribution.
-    let today = crate::services::settings::app_today(&app_state.pool).await;
-    let last_balance_day = today - Duration::days(1);
-
-    let mut cumulative_min = if query.from < user.start_date {
-        0
-    } else {
-        user.overtime_start_balance_min
-    };
-    if query.from > user.start_date {
-        // Cap the seed end at yesterday so today's diff cannot leak into the
-        // seeded cumulative when the requested range starts at or after today.
-        let day_before_from = (query.from - Duration::days(1)).min(last_balance_day);
-        let month_start =
-            NaiveDate::from_ymd_opt(day_before_from.year(), day_before_from.month(), 1)
-                .ok_or_else(|| AppError::BadRequest("date".into()))?;
-
-        let cumulative_before_month = if month_start <= user.start_date {
-            user.overtime_start_balance_min
-        } else {
-            let previous_month_end = month_start - Duration::days(1);
-            cumulative_at_month_end(
-                &app_state.pool,
-                target_user_id,
-                previous_month_end.year(),
-                previous_month_end.month(),
-                user.start_date,
-                user.overtime_start_balance_min,
-            )
-            .await?
-        };
-
-        let seed_from = std::cmp::max(month_start, user.start_date);
-        if seed_from <= day_before_from {
-            let month_seed_report =
-                build_range_with_user(&app_state.pool, &user, seed_from, day_before_from, "seed")
-                    .await?;
-            cumulative_min = cumulative_before_month + month_seed_report.diff_min;
-        } else {
-            cumulative_min = cumulative_before_month;
-        }
-    }
-
-    let time_entries_raw = app_state
-        .db
-        .reports
-        .flextime_entries(target_user_id, query.from, query.to)
-        .await?;
-
-    let mut approved_crediting_minutes_by_day: HashMap<NaiveDate, i64> = HashMap::new();
-    for (entry_date, start_time, end_time, status, counts_as_work) in time_entries_raw {
-        if !counts_as_work || status != "approved" {
-            continue;
-        }
-        let minutes =
-            (parse_report_time(&end_time)? - parse_report_time(&start_time)?).num_minutes();
-        *approved_crediting_minutes_by_day
-            .entry(entry_date)
-            .or_insert(0) += minutes;
-    }
-
-    let approved_absences = app_state
-        .db
-        .reports
-        .approved_absence_rows(target_user_id, query.from, query.to)
-        .await?;
-
-    // Expand absence ranges into a per-day map so each day can look up its kind in O(1).
-    let mut absence_by_day: HashMap<NaiveDate, String> = HashMap::new();
-    for (absence_start, absence_end, absence_kind) in approved_absences {
-        let mut day = absence_start.max(query.from);
-        while day <= absence_end.min(query.to) {
-            absence_by_day
-                .entry(day)
-                .or_insert_with(|| absence_kind.clone());
-            day += Duration::days(1);
-        }
-    }
-
-    let language = crate::i18n::load_ui_language(&app_state.pool).await?;
-
-    let holiday_map: HashMap<NaiveDate, String> = app_state
-        .db
-        .reports
-        .holiday_rows(query.from, query.to)
-        .await?
-        .into_iter()
-        .map(|(date, name, local_name)| {
-            (
-                date,
-                crate::i18n::holiday_display_name(&language, name, local_name),
-            )
-        })
-        .collect();
-
-    let absence_removes_target = crate::services::reports::absence_removes_target;
-    let is_contract_workday = |date: NaiveDate, wpw: i16| {
-        date.weekday().num_days_from_monday() < wpw as u32
-    };
-
-    let mut flextime_days = vec![];
-    let mut current_date = query.from;
-    while current_date <= query.to {
-        // Inject the configured overtime start balance on the user's first day
-        // when the requested range begins before that date.
-        if current_date == user.start_date && query.from < user.start_date {
-            cumulative_min += user.overtime_start_balance_min;
-        }
-        let holiday = holiday_map.get(&current_date).cloned();
-        let absence = absence_by_day.get(&current_date).cloned();
-        let before_start = current_date < user.start_date;
-        // The flextime balance is defined as "up to and including yesterday";
-        // today and any future day contribute zero to the cumulative balance.
-        let after_today = current_date >= today;
-        let absence_blocks_target = absence
-            .as_deref()
-            .map(absence_removes_target)
-            .unwrap_or(false);
-        let is_workday = is_contract_workday(current_date, user.workdays_per_week)
-            && holiday.is_none()
-            && !absence_blocks_target
-            && !before_start
-            && !after_today;
-        let target = if is_workday { target_per_day_min } else { 0 };
-        let actual = if before_start || after_today {
-            0
-        } else {
-            approved_crediting_minutes_by_day
-                .get(&current_date)
-                .copied()
-                .unwrap_or(0)
-        };
-        let day_diff_min = actual - target;
-        cumulative_min += day_diff_min;
-        flextime_days.push(FlextimeDay {
-            date: current_date,
-            actual_min: actual,
-            target_min: target,
-            diff_min: day_diff_min,
-            cumulative_min,
-            absence,
-            holiday,
-        });
-        current_date += Duration::days(1);
-    }
+    let flextime_days =
+        build_flextime_for_user(&app_state.pool, &user, query.from, query.to).await?;
     Ok(Json(flextime_days))
 }

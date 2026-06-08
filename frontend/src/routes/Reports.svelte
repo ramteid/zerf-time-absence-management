@@ -85,5 +85,5 @@
   {/if}
   <CategoryReport {isSelfOnlyReportsView} />
   <AbsenceReport {users} {isSelfOnlyReportsView} />
-  <TimesheetExport {users} {isSelfOnlyReportsView} />
+  <TimesheetExport {users} {isSelfOnlyReportsView} {canViewTeamReports} />
 </div>
