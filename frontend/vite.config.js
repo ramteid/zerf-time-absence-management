@@ -31,6 +31,10 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     include: ["src/**/*.test.{js,svelte}"],
+    // Limit concurrent fork workers to avoid worker-startup timeouts in
+    // resource-constrained environments (each fork spawns a full Node process
+    // that must transform and initialise jsdom independently).
+    maxForks: 4,
     coverage: {
       provider: "v8",
       reporter: ["text", "json-summary"],
