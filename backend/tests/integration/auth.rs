@@ -5,8 +5,8 @@ use serde_json::json;
 
 use crate::common::TestApp;
 use crate::helpers::{admin_login, temp_pw, today};
-use zerf::services::auth::hash_password;
 use zerf::middleware::auth::hash_token;
+use zerf::services::auth::hash_password;
 
 #[tokio::test]
 async fn auth_full_workflow() {
@@ -357,7 +357,9 @@ async fn auth_full_workflow() {
         let (st, _) = admin.login("admin@example.com", "AdminPass!234").await;
         assert_eq!(st, StatusCode::OK, "admin login for preferences test");
         let second_session = app.client();
-        let (st, _) = second_session.login("admin@example.com", "AdminPass!234").await;
+        let (st, _) = second_session
+            .login("admin@example.com", "AdminPass!234")
+            .await;
         assert_eq!(st, StatusCode::OK, "second admin session login");
 
         let (st, body) = admin
@@ -496,10 +498,7 @@ async fn setup_success_creates_admin_on_empty_database() {
     {
         let (st, body) = anon.get("/api/v1/auth/setup-status").await;
         assert_eq!(st, StatusCode::OK, "setup-status on fresh db");
-        assert_eq!(
-            body["needs_setup"], true,
-            "fresh DB needs setup: {body}"
-        );
+        assert_eq!(body["needs_setup"], true, "fresh DB needs setup: {body}");
     }
 
     // -- Valid setup call creates the first admin --
@@ -524,17 +523,12 @@ async fn setup_success_creates_admin_on_empty_database() {
     {
         let (st, body) = anon.get("/api/v1/auth/setup-status").await;
         assert_eq!(st, StatusCode::OK, "setup-status after setup");
-        assert_eq!(
-            body["needs_setup"], false,
-            "setup is done: {body}"
-        );
+        assert_eq!(body["needs_setup"], false, "setup is done: {body}");
     }
 
     // -- The created admin can log in --
     {
-        let (st, _) = anon
-            .login("root@example.com", "SecureAdmin!234")
-            .await;
+        let (st, _) = anon.login("root@example.com", "SecureAdmin!234").await;
         assert_eq!(st, StatusCode::OK, "initial admin can log in");
     }
 

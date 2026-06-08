@@ -25,7 +25,10 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
         .route("/auth/logout", post(handlers::auth::logout))
         .route("/auth/setup-status", get(handlers::auth::setup_status))
         .route("/auth/setup", post(handlers::auth::setup))
-        .route("/auth/forgot-password", post(handlers::auth::forgot_password))
+        .route(
+            "/auth/forgot-password",
+            post(handlers::auth::forgot_password),
+        )
         .route(
             "/auth/reset-password",
             post(handlers::auth::reset_password_with_token),
@@ -38,10 +41,17 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                 .route("/auth/preferences", put(handlers::auth::update_preferences))
                 .route(
                     "/settings",
-                    get(handlers::settings::admin_settings).put(handlers::settings::update_admin_settings),
+                    get(handlers::settings::admin_settings)
+                        .put(handlers::settings::update_admin_settings),
                 )
-                .route("/settings/smtp", put(handlers::settings::update_smtp_settings))
-                .route("/settings/smtp/test", post(handlers::settings::test_smtp_connection))
+                .route(
+                    "/settings/smtp",
+                    put(handlers::settings::update_smtp_settings),
+                )
+                .route(
+                    "/settings/smtp/test",
+                    post(handlers::settings::test_smtp_connection),
+                )
                 .route(
                     "/time-entries",
                     get(handlers::time_entries::list).post(handlers::time_entries::create),
@@ -60,7 +70,10 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                     "/time-entries/{id}",
                     put(handlers::time_entries::update).delete(handlers::time_entries::delete),
                 )
-                .route("/absences", get(handlers::absences::list).post(handlers::absences::create))
+                .route(
+                    "/absences",
+                    get(handlers::absences::list).post(handlers::absences::create),
+                )
                 .route("/absences/all", get(handlers::absences::list_all))
                 .route("/absences/calendar", get(handlers::absences::calendar))
                 .route(
@@ -81,8 +94,14 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                     post(handlers::absences::reject_cancellation),
                 )
                 .route("/leave-balance/{uid}", get(handlers::absences::balance))
-                .route("/users/earliest-start-date", get(handlers::users::earliest_start_date))
-                .route("/users", get(handlers::users::list).post(handlers::users::create))
+                .route(
+                    "/users/earliest-start-date",
+                    get(handlers::users::earliest_start_date),
+                )
+                .route(
+                    "/users",
+                    get(handlers::users::list).post(handlers::users::create),
+                )
                 .route(
                     "/users/{id}",
                     get(handlers::users::get_one)
@@ -90,10 +109,14 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                         .delete(handlers::users::delete_user),
                 )
                 .route("/users/{id}/deactivate", post(handlers::users::deactivate))
-                .route("/users/{id}/reset-password", post(handlers::users::reset_password))
+                .route(
+                    "/users/{id}/reset-password",
+                    post(handlers::users::reset_password),
+                )
                 .route(
                     "/users/{id}/leave-days",
-                    get(handlers::users::get_leave_days_handler).put(handlers::users::set_leave_days_handler),
+                    get(handlers::users::get_leave_days_handler)
+                        .put(handlers::users::set_leave_days_handler),
                 )
                 .route(
                     "/categories",
@@ -101,8 +124,14 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                 )
                 .route("/categories/all", get(handlers::categories::list_all))
                 .route("/categories/{id}", put(handlers::categories::update))
-                .route("/holidays", get(handlers::holidays::list).post(handlers::holidays::create))
-                .route("/holidays/countries", get(handlers::holidays::available_countries))
+                .route(
+                    "/holidays",
+                    get(handlers::holidays::list).post(handlers::holidays::create),
+                )
+                .route(
+                    "/holidays/countries",
+                    get(handlers::holidays::available_countries),
+                )
                 .route(
                     "/holidays/regions/{country}",
                     get(handlers::holidays::available_regions),
@@ -115,13 +144,17 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                 .route("/reports/month/csv", get(handlers::reports::month_csv))
                 .route("/reports/team", get(handlers::reports::team))
                 .route("/reports/categories", get(handlers::reports::categories))
-                .route("/reports/team-categories", get(handlers::reports::team_categories))
+                .route(
+                    "/reports/team-categories",
+                    get(handlers::reports::team_categories),
+                )
                 .route("/reports/overtime", get(handlers::reports::overtime))
                 .route("/reports/flextime", get(handlers::reports::flextime))
                 .route("/audit-log", get(crate::audit::list))
                 .route(
                     "/reopen-requests",
-                    get(handlers::reopen_requests::list_mine).post(handlers::reopen_requests::create),
+                    get(handlers::reopen_requests::list_mine)
+                        .post(handlers::reopen_requests::create),
                 )
                 .route(
                     "/reopen-requests/pending",
@@ -143,14 +176,23 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                     "/notifications/unread-count",
                     get(handlers::notifications::unread_count),
                 )
-                .route("/notifications/stream", get(handlers::notifications::stream))
-                .route("/notifications/{id}/read", post(handlers::notifications::mark_read))
+                .route(
+                    "/notifications/stream",
+                    get(handlers::notifications::stream),
+                )
+                .route(
+                    "/notifications/{id}/read",
+                    post(handlers::notifications::mark_read),
+                )
                 .route(
                     "/notifications/read-all",
                     post(handlers::notifications::mark_all_read),
                 )
                 .route("/team-settings", get(handlers::users::team_settings_list))
-                .route("/team-settings/{id}", put(handlers::users::team_settings_update))
+                .route(
+                    "/team-settings/{id}",
+                    put(handlers::users::team_settings_update),
+                )
                 .layer(middleware::from_fn_with_state(
                     state.clone(),
                     auth_middleware,

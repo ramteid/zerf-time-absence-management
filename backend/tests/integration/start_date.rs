@@ -24,14 +24,22 @@ async fn start_date_full_workflow() {
     let sick_end_str = {
         let start = ref_date + chrono::Duration::days(7);
         let wd = start.weekday().num_days_from_monday();
-        let monday = if wd == 0 { start } else { start + chrono::Duration::days((7 - wd) as i64) };
+        let monday = if wd == 0 {
+            start
+        } else {
+            start + chrono::Duration::days((7 - wd) as i64)
+        };
         monday.format("%Y-%m-%d").to_string()
     };
     // Next Monday ≥8 days out as a NaiveDate — used as the flex-carry user's start_date.
     let flex_start_day = {
         let start = ref_date + chrono::Duration::days(7);
         let wd = start.weekday().num_days_from_monday();
-        if wd == 0 { start } else { start + chrono::Duration::days((7 - wd) as i64) }
+        if wd == 0 {
+            start
+        } else {
+            start + chrono::Duration::days((7 - wd) as i64)
+        }
     };
 
     let app = TestApp::spawn().await;
@@ -323,7 +331,11 @@ async fn start_date_full_workflow() {
                 }),
             )
             .await;
-        assert_eq!(st, StatusCode::OK, "entry on start_date for new user: {body}");
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "entry on start_date for new user: {body}"
+        );
     }
 
     app.cleanup().await;

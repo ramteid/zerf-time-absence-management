@@ -1,9 +1,11 @@
-use crate::error::{AppError, AppResult};
 use crate::audit;
+use crate::error::{AppError, AppResult};
 use crate::i18n;
 use crate::middleware::auth::User;
-use crate::roles::{is_admin_role, is_assistant_role, is_team_lead_role, normalize_role, ROLE_ASSISTANT};
 use crate::repository::{SessionDb, UserDb};
+use crate::roles::{
+    is_admin_role, is_assistant_role, is_team_lead_role, normalize_role, ROLE_ASSISTANT,
+};
 use crate::AppState;
 use std::collections::HashSet;
 
@@ -523,7 +525,8 @@ pub async fn create(
         }
         _ => generate_password(),
     };
-    let password_hash = crate::services::auth::hash_password_async(temporary_password.clone()).await?;
+    let password_hash =
+        crate::services::auth::hash_password_async(temporary_password.clone()).await?;
     let overtime_balance = body.overtime_start_balance_min.unwrap_or(0);
     if !(-525_600..=525_600).contains(&overtime_balance) {
         return Err(AppError::BadRequest(
@@ -551,7 +554,8 @@ pub async fn create(
     .await
     .map_err(|e| {
         tracing::warn!(target:"zerf::users", "create user insert failed: {e}");
-        user_unique_conflict(&e).unwrap_or_else(|| AppError::Conflict("Could not create user.".into()))
+        user_unique_conflict(&e)
+            .unwrap_or_else(|| AppError::Conflict("Could not create user.".into()))
     })?;
     for approver_id in &body.approver_ids {
         UserDb::insert_approver_tx(&mut transaction, new_user_id, *approver_id).await?;
@@ -599,15 +603,20 @@ pub async fn create(
     let language = i18n::load_ui_language(&app_state.pool)
         .await
         .unwrap_or_default();
-    let org_name_raw = crate::services::settings::load_setting(&app_state.pool, "organization_name", "")
-        .await
-        .unwrap_or_default();
+    let org_name_raw =
+        crate::services::settings::load_setting(&app_state.pool, "organization_name", "")
+            .await
+            .unwrap_or_default();
     let org_name = if org_name_raw.trim().is_empty() {
         "Zerf".to_string()
     } else {
         org_name_raw
     };
-    let subject = i18n::translate(&language, "account_created_subject", &[("org_name", org_name)]);
+    let subject = i18n::translate(
+        &language,
+        "account_created_subject",
+        &[("org_name", org_name)],
+    );
     let body_text = i18n::translate(
         &language,
         "account_created_body",
@@ -619,7 +628,13 @@ pub async fn create(
             ("login_line", login_line),
         ],
     );
-    crate::email::send_async(smtp, normalized_email, format!("{} {}", first_name, last_name), subject, body_text);
+    crate::email::send_async(
+        smtp,
+        normalized_email,
+        format!("{} {}", first_name, last_name),
+        subject,
+        body_text,
+    );
     Ok(CreateResponse {
         id: new_user_id,
         user: created_auth_user,

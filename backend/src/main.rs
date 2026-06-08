@@ -1,9 +1,9 @@
 use anyhow::Result;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use zerf::{build_app, config, db, AppState};
-use zerf::services::{categories, holidays, notifications, settings, auth as auth_service};
 use zerf::background;
+use zerf::services::{auth as auth_service, categories, holidays, notifications, settings};
+use zerf::{build_app, config, db, AppState};
 
 #[tokio::main]
 async fn main() -> Result<()> {

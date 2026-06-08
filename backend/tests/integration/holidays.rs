@@ -49,7 +49,11 @@ async fn holidays_full_workflow() {
             &json!({"holiday_date": new_holiday_date, "name": ""}),
         )
         .await;
-    assert_eq!(st, StatusCode::BAD_REQUEST, "holiday name must be non-empty");
+    assert_eq!(
+        st,
+        StatusCode::BAD_REQUEST,
+        "holiday name must be non-empty"
+    );
 
     let (st, body) = admin
         .post(
@@ -86,9 +90,15 @@ async fn holidays_full_workflow() {
     assert_eq!(st, StatusCode::FORBIDDEN, "only admins can delete holidays");
 
     let (st, _body) = admin.delete("/api/v1/holidays/99999999").await;
-    assert_eq!(st, StatusCode::NOT_FOUND, "deleting missing holiday returns 404");
+    assert_eq!(
+        st,
+        StatusCode::NOT_FOUND,
+        "deleting missing holiday returns 404"
+    );
 
-    let (st, body) = admin.delete(&format!("/api/v1/holidays/{inserted_id}")).await;
+    let (st, body) = admin
+        .delete(&format!("/api/v1/holidays/{inserted_id}"))
+        .await;
     assert_eq!(st, StatusCode::OK);
     assert_eq!(body["ok"], true);
 

@@ -30,7 +30,9 @@ async fn notifications_full_workflow() {
         let (st, body) = emp.get("/api/v1/notifications/unread-count").await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(
-            body["count"].as_i64().expect("unread-count must be integer"),
+            body["count"]
+                .as_i64()
+                .expect("unread-count must be integer"),
             1,
             "employee should have exactly 1 notification after auto-approved reopen"
         );
@@ -38,7 +40,10 @@ async fn notifications_full_workflow() {
         let (st, list) = emp.get("/api/v1/notifications").await;
         assert_eq!(st, StatusCode::OK);
         let notifications = list.as_array().expect("notifications must be an array");
-        assert!(!notifications.is_empty(), "notifications list must not be empty");
+        assert!(
+            !notifications.is_empty(),
+            "notifications list must not be empty"
+        );
         let nid = notifications[0]["id"]
             .as_i64()
             .expect("notification id must be integer");

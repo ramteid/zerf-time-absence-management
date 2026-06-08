@@ -29,7 +29,11 @@ pub async fn workdays_total(
         .await
 }
 
-pub fn validate_sick_start_date(kind: &str, start_date: NaiveDate, today: NaiveDate) -> AppResult<()> {
+pub fn validate_sick_start_date(
+    kind: &str,
+    start_date: NaiveDate,
+    today: NaiveDate,
+) -> AppResult<()> {
     if kind != "sick" {
         return Ok(());
     }
@@ -55,7 +59,8 @@ pub fn has_effective_workday(
 ) -> bool {
     let mut day = start_date;
     while day <= end_date {
-        let is_contract_day = Datelike::weekday(&day).num_days_from_monday() < workdays_per_week as u32;
+        let is_contract_day =
+            Datelike::weekday(&day).num_days_from_monday() < workdays_per_week as u32;
         if is_contract_day && !holidays.contains(&day) {
             return true;
         }
@@ -270,7 +275,8 @@ pub async fn vacation_year_context(
     expiry_setting: &str,
 ) -> AppResult<(i64, i64, bool)> {
     let entitled = effective_annual_days(pool, user, year).await?;
-    let effective_entitlement = pro_rate_entitlement(leave_entitlement_anchor(user), year, entitled);
+    let effective_entitlement =
+        pro_rate_entitlement(leave_entitlement_anchor(user), year, entitled);
     let carryover_days = carryover_days_into_year(pool, user, year, expiry_setting).await?;
 
     let expiry_date = parse_expiry_date(expiry_setting, year);
@@ -801,7 +807,12 @@ mod tests {
         assert!(!has_effective_workday(friday, friday, 4, &HashSet::new()));
         // Thursday is the last contract workday for a 4-day week.
         let thursday = NaiveDate::from_ymd_opt(2026, 5, 21).unwrap();
-        assert!(has_effective_workday(thursday, thursday, 4, &HashSet::new()));
+        assert!(has_effective_workday(
+            thursday,
+            thursday,
+            4,
+            &HashSet::new()
+        ));
     }
 
     // ──────────────────────────────────────────────────────────────────────
@@ -812,10 +823,13 @@ mod tests {
     #[test]
     fn clamp_range_to_window_returns_unchanged_when_inside_window() {
         let start = NaiveDate::from_ymd_opt(2026, 3, 10).unwrap();
-        let end   = NaiveDate::from_ymd_opt(2026, 3, 20).unwrap();
-        let ws    = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
-        let we    = NaiveDate::from_ymd_opt(2026, 12, 31).unwrap();
-        assert_eq!(clamp_range_to_window(start, end, ws, we), Some((start, end)));
+        let end = NaiveDate::from_ymd_opt(2026, 3, 20).unwrap();
+        let ws = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        let we = NaiveDate::from_ymd_opt(2026, 12, 31).unwrap();
+        assert_eq!(
+            clamp_range_to_window(start, end, ws, we),
+            Some((start, end))
+        );
     }
 
     /// A range that starts before the window and ends inside it must be
@@ -823,9 +837,9 @@ mod tests {
     #[test]
     fn clamp_range_to_window_clamps_left_overhang() {
         let start = NaiveDate::from_ymd_opt(2025, 12, 20).unwrap();
-        let end   = NaiveDate::from_ymd_opt(2026, 1, 10).unwrap();
-        let ws    = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
-        let we    = NaiveDate::from_ymd_opt(2026, 12, 31).unwrap();
+        let end = NaiveDate::from_ymd_opt(2026, 1, 10).unwrap();
+        let ws = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        let we = NaiveDate::from_ymd_opt(2026, 12, 31).unwrap();
         let result = clamp_range_to_window(start, end, ws, we).unwrap();
         assert_eq!(result.0, ws);
         assert_eq!(result.1, end);
@@ -836,9 +850,9 @@ mod tests {
     #[test]
     fn clamp_range_to_window_clamps_right_overhang() {
         let start = NaiveDate::from_ymd_opt(2026, 12, 20).unwrap();
-        let end   = NaiveDate::from_ymd_opt(2027, 1, 5).unwrap();
-        let ws    = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
-        let we    = NaiveDate::from_ymd_opt(2026, 12, 31).unwrap();
+        let end = NaiveDate::from_ymd_opt(2027, 1, 5).unwrap();
+        let ws = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        let we = NaiveDate::from_ymd_opt(2026, 12, 31).unwrap();
         let result = clamp_range_to_window(start, end, ws, we).unwrap();
         assert_eq!(result.0, start);
         assert_eq!(result.1, we);
@@ -848,9 +862,9 @@ mod tests {
     #[test]
     fn clamp_range_to_window_returns_none_when_no_overlap() {
         let start = NaiveDate::from_ymd_opt(2025, 1, 1).unwrap();
-        let end   = NaiveDate::from_ymd_opt(2025, 12, 31).unwrap();
-        let ws    = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
-        let we    = NaiveDate::from_ymd_opt(2026, 12, 31).unwrap();
+        let end = NaiveDate::from_ymd_opt(2025, 12, 31).unwrap();
+        let ws = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        let we = NaiveDate::from_ymd_opt(2026, 12, 31).unwrap();
         assert!(clamp_range_to_window(start, end, ws, we).is_none());
     }
 
@@ -903,7 +917,10 @@ mod tests {
 
     /// Build a minimal auth user with the given `start_date`/`hire_date`
     /// combination — the only two fields these tests vary.
-    fn user_with_dates(start_date: NaiveDate, hire_date: Option<NaiveDate>) -> crate::middleware::auth::User {
+    fn user_with_dates(
+        start_date: NaiveDate,
+        hire_date: Option<NaiveDate>,
+    ) -> crate::middleware::auth::User {
         crate::middleware::auth::User {
             id: 1,
             email: "user@example.com".to_string(),
@@ -946,7 +963,10 @@ mod tests {
         let user = user_with_dates(start_date, Some(hire_date));
         assert_eq!(leave_entitlement_anchor(&user), hire_date);
         // And the resulting entitlement is the full amount, not pro-rated:
-        assert_eq!(pro_rate_entitlement(leave_entitlement_anchor(&user), 2026, 30), 30);
+        assert_eq!(
+            pro_rate_entitlement(leave_entitlement_anchor(&user), 2026, 30),
+            30
+        );
     }
 
     // ──────────────────────────────────────────────────────────────────────
@@ -982,8 +1002,8 @@ mod tests {
     #[test]
     fn parse_expiry_date_returns_none_for_invalid_input() {
         assert!(parse_expiry_date("", 2026).is_none());
-        assert!(parse_expiry_date("13-01", 2026).is_none());  // month 13 invalid
-        assert!(parse_expiry_date("03/31", 2026).is_none());  // wrong separator
+        assert!(parse_expiry_date("13-01", 2026).is_none()); // month 13 invalid
+        assert!(parse_expiry_date("03/31", 2026).is_none()); // wrong separator
         assert!(parse_expiry_date("abc-def", 2026).is_none());
     }
 
@@ -994,19 +1014,13 @@ mod tests {
     /// When carryover has not expired the total includes the carryover days.
     #[test]
     fn total_entitlement_with_carryover_adds_days_when_not_expired() {
-        assert_eq!(
-            total_entitlement_with_carryover(20, 5, false),
-            25.0
-        );
+        assert_eq!(total_entitlement_with_carryover(20, 5, false), 25.0);
     }
 
     /// When carryover has expired only the base entitlement is returned.
     #[test]
     fn total_entitlement_with_carryover_ignores_days_when_expired() {
-        assert_eq!(
-            total_entitlement_with_carryover(20, 5, true),
-            20.0
-        );
+        assert_eq!(total_entitlement_with_carryover(20, 5, true), 20.0);
     }
 
     // ──────────────────────────────────────────────────────────────────────
@@ -1054,7 +1068,10 @@ mod tests {
     fn exceeds_vacation_budget_returns_true_when_over_budget() {
         assert!(exceeds_vacation_budget(10.0, 9.0));
         // Just one epsilon over the limit.
-        assert!(exceeds_vacation_budget(10.0 + VACATION_DAY_EPSILON * 2.0, 10.0));
+        assert!(exceeds_vacation_budget(
+            10.0 + VACATION_DAY_EPSILON * 2.0,
+            10.0
+        ));
     }
 
     /// Using exactly the budget or less must return false.
@@ -1063,6 +1080,9 @@ mod tests {
         assert!(!exceeds_vacation_budget(10.0, 10.0));
         assert!(!exceeds_vacation_budget(9.0, 10.0));
         // Sub-epsilon surplus must be treated as within budget (floating-point guard).
-        assert!(!exceeds_vacation_budget(10.0 + VACATION_DAY_EPSILON / 2.0, 10.0));
+        assert!(!exceeds_vacation_budget(
+            10.0 + VACATION_DAY_EPSILON / 2.0,
+            10.0
+        ));
     }
 }

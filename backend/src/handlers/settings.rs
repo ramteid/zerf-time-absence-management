@@ -6,8 +6,8 @@ use crate::middleware::auth::User;
 use crate::services::settings::{
     self, load_admin_settings, load_all_public_settings, load_setting, normalize_language,
     normalize_time_format, normalize_timezone, save_setting_tx, setting_value_changed,
-    smtp_config_from_update, AdminSettingsData, PublicSettingsData,
-    APPROVAL_REMINDERS_ENABLED_KEY, SUBMISSION_REMINDERS_ENABLED_KEY, TIMEZONE_KEY,
+    smtp_config_from_update, AdminSettingsData, PublicSettingsData, APPROVAL_REMINDERS_ENABLED_KEY,
+    SUBMISSION_REMINDERS_ENABLED_KEY, TIMEZONE_KEY,
 };
 use crate::AppState;
 use axum::extract::State;
@@ -172,7 +172,8 @@ pub async fn update_admin_settings(
         || setting_value_changed(previous_region.as_deref(), &region)
     {
         Some(
-            crate::services::holidays::prepare_holiday_refresh(&app_state.pool, &country, &region).await?,
+            crate::services::holidays::prepare_holiday_refresh(&app_state.pool, &country, &region)
+                .await?,
         )
     } else {
         None
@@ -182,10 +183,20 @@ pub async fn update_admin_settings(
     let mut transaction = app_state.db.settings.begin().await?;
 
     let carryover_date_to_store = validated_carryover_date.as_deref().unwrap_or("");
-    save_setting_tx(&mut transaction, "carryover_expiry_date", carryover_date_to_store).await?;
+    save_setting_tx(
+        &mut transaction,
+        "carryover_expiry_date",
+        carryover_date_to_store,
+    )
+    .await?;
 
     if let Some(day) = body.submission_deadline_day {
-        save_setting_tx(&mut transaction, "submission_deadline_day", &day.to_string()).await?;
+        save_setting_tx(
+            &mut transaction,
+            "submission_deadline_day",
+            &day.to_string(),
+        )
+        .await?;
     } else {
         save_setting_tx(&mut transaction, "submission_deadline_day", "").await?;
     }
@@ -195,7 +206,12 @@ pub async fn update_admin_settings(
     save_setting_tx(&mut transaction, "timezone", &timezone).await?;
     save_setting_tx(&mut transaction, "country", &country).await?;
     save_setting_tx(&mut transaction, "region", &region).await?;
-    save_setting_tx(&mut transaction, "default_weekly_hours", &default_weekly_hours_str).await?;
+    save_setting_tx(
+        &mut transaction,
+        "default_weekly_hours",
+        &default_weekly_hours_str,
+    )
+    .await?;
     save_setting_tx(
         &mut transaction,
         "default_annual_leave_days",
@@ -318,9 +334,8 @@ pub async fn update_smtp_settings(
     )
     .await?;
 
-    let current_sub = load_setting(&app_state.pool, SUBMISSION_REMINDERS_ENABLED_KEY, "true")
-        .await?
-        != "false";
+    let current_sub =
+        load_setting(&app_state.pool, SUBMISSION_REMINDERS_ENABLED_KEY, "true").await? != "false";
     let sub_enabled = body.submission_reminders_enabled.unwrap_or(current_sub);
     save_setting_tx(
         &mut transaction,
@@ -329,9 +344,8 @@ pub async fn update_smtp_settings(
     )
     .await?;
 
-    let current_appr = load_setting(&app_state.pool, APPROVAL_REMINDERS_ENABLED_KEY, "true")
-        .await?
-        != "false";
+    let current_appr =
+        load_setting(&app_state.pool, APPROVAL_REMINDERS_ENABLED_KEY, "true").await? != "false";
     let appr_enabled = body.approval_reminders_enabled.unwrap_or(current_appr);
     save_setting_tx(
         &mut transaction,

@@ -1,8 +1,8 @@
-use crate::db::DatabasePool;
 use super::{
     AbsenceDb, AuditDb, CategoryDb, HolidayDb, NotificationBroadcaster, NotificationDb,
     ReopenRequestDb, ReportDb, SessionDb, SettingsDb, TimeEntryDb, UserDb,
 };
+use crate::db::DatabasePool;
 
 /// Central façade: the only type that holds `DatabasePool` references across
 /// the whole application.  All SQL is executed through the sub-repositories

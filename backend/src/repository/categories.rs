@@ -50,13 +50,11 @@ impl CategoryDb {
         // Maximise hue distance among the six highest-frequency categories.
         // Target hues (°): sick=0, holiday=38, LT=80, PrepTime=142, vacation=217, TM=262, CoreDuties=312.
         // Only patches rows that still carry the original seed color so manual edits are preserved.
-        sqlx::query(
-            "UPDATE categories SET color = $1 WHERE name = 'Core Duties' AND color = $2",
-        )
-        .bind("#de35bd")
-        .bind("#4CAF50")
-        .execute(&self.pool)
-        .await?;
+        sqlx::query("UPDATE categories SET color = $1 WHERE name = 'Core Duties' AND color = $2")
+            .bind("#de35bd")
+            .bind("#4CAF50")
+            .execute(&self.pool)
+            .await?;
 
         sqlx::query(
             "UPDATE categories SET color = $1 WHERE name = 'Preparation Time' AND color = $2",
@@ -66,13 +64,11 @@ impl CategoryDb {
         .execute(&self.pool)
         .await?;
 
-        sqlx::query(
-            "UPDATE categories SET color = $1 WHERE name = 'Team Meeting' AND color = $2",
-        )
-        .bind("#7c3aed")
-        .bind("#9C27B0")
-        .execute(&self.pool)
-        .await?;
+        sqlx::query("UPDATE categories SET color = $1 WHERE name = 'Team Meeting' AND color = $2")
+            .bind("#7c3aed")
+            .bind("#9C27B0")
+            .execute(&self.pool)
+            .await?;
 
         let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM categories")
             .fetch_one(&self.pool)

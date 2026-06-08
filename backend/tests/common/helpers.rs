@@ -2,8 +2,8 @@ use chrono::Datelike;
 use sqlx::{migrate::Migrator, postgres::PgPoolOptions};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
-use zerf::{db, repository::UserDb};
 use zerf::services::{auth, users};
+use zerf::{db, repository::UserDb};
 
 static TEST_DB_COUNTER: AtomicU64 = AtomicU64::new(0);
 pub static TEST_MIGRATOR: Migrator = sqlx::migrate!("./migrations");
@@ -15,9 +15,11 @@ pub async fn create_isolated_database(admin_database_url: &str) -> anyhow::Resul
         TEST_DB_COUNTER.fetch_add(1, Ordering::Relaxed),
     );
     let admin_pool = sqlx::PgPool::connect(admin_database_url).await?;
-    sqlx::query(sqlx::AssertSqlSafe(format!("CREATE DATABASE \"{db_name}\"")))
-        .execute(&admin_pool)
-        .await?;
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "CREATE DATABASE \"{db_name}\""
+    )))
+    .execute(&admin_pool)
+    .await?;
     Ok(db_name)
 }
 
@@ -58,7 +60,10 @@ pub async fn init_test_database(database_url: &str) -> anyhow::Result<db::Databa
 
 /// Seed a test admin user with a CSPRNG-generated password.
 /// Only used in test code — never compiled into the production binary.
-pub async fn seed_admin(pool: &db::DatabasePool, admin_email: &str) -> anyhow::Result<Option<String>> {
+pub async fn seed_admin(
+    pool: &db::DatabasePool,
+    admin_email: &str,
+) -> anyhow::Result<Option<String>> {
     let admin_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE role='admin'")
         .fetch_one(pool)
         .await?;

@@ -270,9 +270,7 @@ impl SessionDb {
         .fetch_optional(&self.pool)
         .await?;
         if expired.is_some() {
-            return Err(crate::error::AppError::bad_request(
-                "reset_token_expired",
-            ));
+            return Err(crate::error::AppError::bad_request("reset_token_expired"));
         }
         Ok(())
     }
@@ -300,9 +298,7 @@ impl SessionDb {
         .await?;
         if expired.is_some() {
             tx.commit().await?;
-            return Err(crate::error::AppError::bad_request(
-                "reset_token_expired",
-            ));
+            return Err(crate::error::AppError::bad_request("reset_token_expired"));
         }
 
         let user_id: Option<i64> = sqlx::query_scalar(
@@ -315,11 +311,7 @@ impl SessionDb {
         .await?;
         let user_id = match user_id {
             Some(id) => id,
-            None => {
-                return Err(crate::error::AppError::bad_request(
-                    "reset_token_invalid",
-                ))
-            }
+            None => return Err(crate::error::AppError::bad_request("reset_token_invalid")),
         };
 
         // Lock the user row and fetch current hash for reuse check.
@@ -331,9 +323,7 @@ impl SessionDb {
         .await?;
         let Some(current_hash) = current_hash else {
             tx.commit().await?;
-            return Err(crate::error::AppError::bad_request(
-                "reset_token_invalid",
-            ));
+            return Err(crate::error::AppError::bad_request("reset_token_invalid"));
         };
 
         // Check password reuse if a verifier is provided.
@@ -357,9 +347,7 @@ impl SessionDb {
         .rows_affected();
         if rows != 1 {
             tx.commit().await?;
-            return Err(crate::error::AppError::bad_request(
-                "reset_token_invalid",
-            ));
+            return Err(crate::error::AppError::bad_request("reset_token_invalid"));
         }
 
         sqlx::query("DELETE FROM sessions WHERE user_id=$1")

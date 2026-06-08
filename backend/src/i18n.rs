@@ -432,9 +432,16 @@ mod tests {
         let date = chrono::NaiveDate::from_ymd_opt(2026, 4, 27).unwrap();
         let week_label = format_week_label(&language, date);
 
-        let plain = translate(&language, "reopen_approved_body", &[("week_label", week_label.clone())]);
+        let plain = translate(
+            &language,
+            "reopen_approved_body",
+            &[("week_label", week_label.clone())],
+        );
         assert!(plain.contains(&week_label));
-        assert!(!plain.contains("{week_label}"), "all placeholders must be substituted");
+        assert!(
+            !plain.contains("{week_label}"),
+            "all placeholders must be substituted"
+        );
     }
 
     #[test]
@@ -562,7 +569,10 @@ mod tests {
         assert_eq!(work_category_label(&de, "Core Duties"), "Kernaufgaben");
         assert_eq!(work_category_label(&de, "Training"), "Fortbildung");
         assert_eq!(work_category_label(&de, "Other"), "Sonstiges");
-        assert_eq!(work_category_label(&de, "Flextime Reduction"), "Gleitzeitabbau");
+        assert_eq!(
+            work_category_label(&de, "Flextime Reduction"),
+            "Gleitzeitabbau"
+        );
         // Unknown category must pass through unchanged.
         assert_eq!(work_category_label(&de, "Custom Project"), "Custom Project");
     }
@@ -582,7 +592,10 @@ mod tests {
         let en = Language::from_setting("en");
         assert_eq!(absence_kind_label(&en, "vacation"), "Vacation");
         assert_eq!(absence_kind_label(&en, "sick"), "Sick");
-        assert_eq!(absence_kind_label(&en, "flextime_reduction"), "Flextime Reduction");
+        assert_eq!(
+            absence_kind_label(&en, "flextime_reduction"),
+            "Flextime Reduction"
+        );
 
         let de = Language::from_setting("de");
         assert_eq!(absence_kind_label(&de, "vacation"), "Urlaub");
@@ -619,7 +632,10 @@ mod tests {
         // An invalid timezone should fall back to UTC.
         let formatted = format_datetime_in_timezone(&en, utc_time, "Mars/Olympus");
         // UTC time is 10:30, so the formatted string should contain 10:30.
-        assert!(formatted.contains("10:30"), "expected UTC time in output, got: {formatted}");
+        assert!(
+            formatted.contains("10:30"),
+            "expected UTC time in output, got: {formatted}"
+        );
     }
 
     /// `week_count` must use the singular form for exactly 1 and the plural
@@ -644,12 +660,24 @@ mod tests {
 
         let en = Language::from_setting("en");
         let label_en = format_week_label(&en, monday);
-        assert!(label_en.starts_with("CW 18"), "expected CW prefix, got: {label_en}");
-        assert!(label_en.contains("to"), "expected 'to' separator, got: {label_en}");
+        assert!(
+            label_en.starts_with("CW 18"),
+            "expected CW prefix, got: {label_en}"
+        );
+        assert!(
+            label_en.contains("to"),
+            "expected 'to' separator, got: {label_en}"
+        );
 
         let de = Language::from_setting("de");
         let label_de = format_week_label(&de, monday);
-        assert!(label_de.starts_with("KW 18"), "expected KW prefix, got: {label_de}");
-        assert!(label_de.contains("bis"), "expected 'bis' separator, got: {label_de}");
+        assert!(
+            label_de.starts_with("KW 18"),
+            "expected KW prefix, got: {label_de}"
+        );
+        assert!(
+            label_de.contains("bis"),
+            "expected 'bis' separator, got: {label_de}"
+        );
     }
 }

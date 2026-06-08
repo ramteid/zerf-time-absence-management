@@ -68,14 +68,46 @@ struct Column {
 
 /// Column layout for the timesheet table. Widths sum to [`CONTENT_WIDTH_MM`].
 const COLUMNS: &[Column] = &[
-    Column { header_key: "pdf_column_date", width_mm: 22.0, align: Align::Left },
-    Column { header_key: "pdf_column_weekday", width_mm: 20.0, align: Align::Left },
-    Column { header_key: "pdf_column_start", width_mm: 12.0, align: Align::Center },
-    Column { header_key: "pdf_column_end", width_mm: 12.0, align: Align::Center },
-    Column { header_key: "pdf_column_category", width_mm: 40.0, align: Align::Left },
-    Column { header_key: "pdf_column_duration", width_mm: 16.0, align: Align::Right },
-    Column { header_key: "pdf_column_absence", width_mm: 25.0, align: Align::Left },
-    Column { header_key: "pdf_column_holiday", width_mm: 33.0, align: Align::Left },
+    Column {
+        header_key: "pdf_column_date",
+        width_mm: 22.0,
+        align: Align::Left,
+    },
+    Column {
+        header_key: "pdf_column_weekday",
+        width_mm: 20.0,
+        align: Align::Left,
+    },
+    Column {
+        header_key: "pdf_column_start",
+        width_mm: 12.0,
+        align: Align::Center,
+    },
+    Column {
+        header_key: "pdf_column_end",
+        width_mm: 12.0,
+        align: Align::Center,
+    },
+    Column {
+        header_key: "pdf_column_category",
+        width_mm: 40.0,
+        align: Align::Left,
+    },
+    Column {
+        header_key: "pdf_column_duration",
+        width_mm: 16.0,
+        align: Align::Right,
+    },
+    Column {
+        header_key: "pdf_column_absence",
+        width_mm: 25.0,
+        align: Align::Left,
+    },
+    Column {
+        header_key: "pdf_column_holiday",
+        width_mm: 33.0,
+        align: Align::Left,
+    },
 ];
 
 /// Index of the `Duration` column — the total/summary rows place their value
@@ -208,7 +240,14 @@ impl<'a> Renderer<'a> {
 
     /// Filled rectangle whose top-left corner sits at
     /// `(x_mm, top_offset_from_top_mm)`.
-    fn fill_rect(&mut self, x_mm: f32, top_offset_from_top_mm: f32, width_mm: f32, height_mm: f32, color: (u8, u8, u8)) {
+    fn fill_rect(
+        &mut self,
+        x_mm: f32,
+        top_offset_from_top_mm: f32,
+        width_mm: f32,
+        height_mm: f32,
+        color: (u8, u8, u8),
+    ) {
         self.set_fill(color);
         self.ops.push(Op::DrawRectangle {
             rectangle: Rect {
@@ -231,7 +270,10 @@ impl<'a> Renderer<'a> {
         self.ops.push(Op::DrawLine {
             line: Line {
                 points: vec![
-                    LinePoint { p: Point::new(Mm(MARGIN_LEFT_MM), y), bezier: false },
+                    LinePoint {
+                        p: Point::new(Mm(MARGIN_LEFT_MM), y),
+                        bezier: false,
+                    },
                     LinePoint {
                         p: Point::new(Mm(MARGIN_LEFT_MM + CONTENT_WIDTH_MM), y),
                         bezier: false,
@@ -267,14 +309,27 @@ impl<'a> Renderer<'a> {
 
     /// Draw the shaded column-header row and advance `y` past it.
     fn draw_table_header(&mut self) {
-        self.fill_rect(MARGIN_LEFT_MM, self.y, CONTENT_WIDTH_MM, HEADER_HEIGHT_MM, HEADER_FILL);
+        self.fill_rect(
+            MARGIN_LEFT_MM,
+            self.y,
+            CONTENT_WIDTH_MM,
+            HEADER_HEIGHT_MM,
+            HEADER_FILL,
+        );
         let baseline = self.y + 4.8;
         for (index, column) in COLUMNS.iter().enumerate() {
             let label = i18n::translate(self.language, column.header_key, &[]);
             // Headers are always left-aligned (see module docs) regardless of
             // the column's data alignment.
             let x = self.column_x(index) + 1.0;
-            self.draw_text(&label, x, baseline, BuiltinFont::HelveticaBold, 8.0, HEADER_TEXT);
+            self.draw_text(
+                &label,
+                x,
+                baseline,
+                BuiltinFont::HelveticaBold,
+                8.0,
+                HEADER_TEXT,
+            );
         }
         self.y += HEADER_HEIGHT_MM;
     }
@@ -296,7 +351,13 @@ impl<'a> Renderer<'a> {
     fn draw_row(&mut self, cells: &[(usize, String)], shaded: bool) {
         self.ensure_space(ROW_HEIGHT_MM, true);
         if shaded {
-            self.fill_rect(MARGIN_LEFT_MM, self.y, CONTENT_WIDTH_MM, ROW_HEIGHT_MM, ROW_SHADE_FILL);
+            self.fill_rect(
+                MARGIN_LEFT_MM,
+                self.y,
+                CONTENT_WIDTH_MM,
+                ROW_HEIGHT_MM,
+                ROW_SHADE_FILL,
+            );
         }
         let baseline = self.y + 3.8;
         for (column_index, text) in cells {
@@ -313,9 +374,23 @@ impl<'a> Renderer<'a> {
     fn draw_summary_row(&mut self, label: &str, value: &str) {
         self.ensure_space(ROW_HEIGHT_MM, false);
         let baseline = self.y + 3.8;
-        self.draw_text(label, MARGIN_LEFT_MM + 1.0, baseline, BuiltinFont::Helvetica, 7.5, SUMMARY_TEXT);
+        self.draw_text(
+            label,
+            MARGIN_LEFT_MM + 1.0,
+            baseline,
+            BuiltinFont::Helvetica,
+            7.5,
+            SUMMARY_TEXT,
+        );
         let value_x = self.aligned_x(DURATION_COLUMN, value, 7.5);
-        self.draw_text(value, value_x, baseline, BuiltinFont::Helvetica, 7.5, SUMMARY_TEXT);
+        self.draw_text(
+            value,
+            value_x,
+            baseline,
+            BuiltinFont::Helvetica,
+            7.5,
+            SUMMARY_TEXT,
+        );
         self.y += ROW_HEIGHT_MM;
     }
 
@@ -328,9 +403,23 @@ impl<'a> Renderer<'a> {
         // immediately visible rather than receding behind the title as a
         // small gray subtitle would.
         let title = i18n::translate(self.language, "pdf_timesheet_title", &[]);
-        self.draw_text(&title, MARGIN_LEFT_MM, self.y + 6.0, BuiltinFont::HelveticaBold, 13.0, TITLE_COLOR);
+        self.draw_text(
+            &title,
+            MARGIN_LEFT_MM,
+            self.y + 6.0,
+            BuiltinFont::HelveticaBold,
+            13.0,
+            TITLE_COLOR,
+        );
         let subtitle = format!("{} - {} - {}", section.user_name, from, to);
-        self.draw_text(&subtitle, MARGIN_LEFT_MM, self.y + 13.0, BuiltinFont::Helvetica, 11.0, TITLE_COLOR);
+        self.draw_text(
+            &subtitle,
+            MARGIN_LEFT_MM,
+            self.y + 13.0,
+            BuiltinFont::Helvetica,
+            11.0,
+            TITLE_COLOR,
+        );
         self.y += 21.0;
         self.draw_table_header();
 
@@ -384,13 +473,33 @@ impl<'a> Renderer<'a> {
 
         // Total row.
         self.ensure_space(ROW_HEIGHT_MM, true);
-        self.fill_rect(MARGIN_LEFT_MM, self.y, CONTENT_WIDTH_MM, ROW_HEIGHT_MM, TOTAL_FILL);
+        self.fill_rect(
+            MARGIN_LEFT_MM,
+            self.y,
+            CONTENT_WIDTH_MM,
+            ROW_HEIGHT_MM,
+            TOTAL_FILL,
+        );
         let baseline = self.y + 3.8;
         let total_label = i18n::translate(self.language, "pdf_total", &[]);
-        self.draw_text(&total_label, MARGIN_LEFT_MM + 1.0, baseline, BuiltinFont::HelveticaBold, 7.5, TITLE_COLOR);
+        self.draw_text(
+            &total_label,
+            MARGIN_LEFT_MM + 1.0,
+            baseline,
+            BuiltinFont::HelveticaBold,
+            7.5,
+            TITLE_COLOR,
+        );
         let total_value = format_minutes(range_total_minutes(&section.report));
         let total_x = self.aligned_x(DURATION_COLUMN, &total_value, 7.5);
-        self.draw_text(&total_value, total_x, baseline, BuiltinFont::HelveticaBold, 7.5, TITLE_COLOR);
+        self.draw_text(
+            &total_value,
+            total_x,
+            baseline,
+            BuiltinFont::HelveticaBold,
+            7.5,
+            TITLE_COLOR,
+        );
         self.y += ROW_HEIGHT_MM;
 
         let (opening, closing) = flextime_bounds(&section.flextime_data);
@@ -444,7 +553,11 @@ fn flextime_bounds(flextime_data: &[FlextimeDay]) -> (Option<i64>, Option<i64>) 
 fn format_minutes(total_minutes: i64) -> String {
     let sign = if total_minutes < 0 { "-" } else { "" };
     let absolute_minutes = total_minutes.abs();
-    format!("{sign}{}:{:02}", absolute_minutes / 60, absolute_minutes % 60)
+    format!(
+        "{sign}{}:{:02}",
+        absolute_minutes / 60,
+        absolute_minutes % 60
+    )
 }
 
 /// Format minutes as a signed `H:MM` balance, e.g. `+8:00` / `-0:15` — mirrors
@@ -549,9 +662,11 @@ mod tests {
             weeks_all_approved: None,
             current_week_status: None,
         };
-        let sections = vec![
-            TimesheetSection { user_name: "Alice Lead".into(), report, flextime_data: vec![] },
-        ];
+        let sections = vec![TimesheetSection {
+            user_name: "Alice Lead".into(),
+            report,
+            flextime_data: vec![],
+        }];
         let from = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
         let to = NaiveDate::from_ymd_opt(2026, 6, 30).unwrap();
         let bytes = render_timesheet_pdf(&sections, from, to, &language);

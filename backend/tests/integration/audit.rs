@@ -31,7 +31,11 @@ async fn audit_log_is_forbidden_for_non_admin_users() {
 
     let employee = login_change_pw(&app, "audit-employee@example.com", &employee_pw).await;
     let (st, _) = employee.get("/api/v1/audit-log").await;
-    assert_eq!(st, StatusCode::FORBIDDEN, "employee must not read audit log");
+    assert_eq!(
+        st,
+        StatusCode::FORBIDDEN,
+        "employee must not read audit log"
+    );
 
     app.cleanup().await;
 }
@@ -221,7 +225,11 @@ async fn audit_log_combines_all_filters_with_and_semantics() {
     assert_eq!(st, StatusCode::OK, "audit query with all filters");
 
     let rows = body.as_array().expect("audit response must be an array");
-    assert_eq!(rows.len(), 1, "combined filters should match exactly one row");
+    assert_eq!(
+        rows.len(),
+        1,
+        "combined filters should match exactly one row"
+    );
     assert_eq!(rows[0]["table_name"].as_str(), Some("time_entries"));
     assert_eq!(rows[0]["record_id"].as_i64(), Some(entry_id));
     assert_eq!(rows[0]["user_id"].as_i64(), Some(employee_id));
@@ -237,10 +245,17 @@ async fn audit_log_returns_empty_array_for_non_matching_filters() {
     let (st, body) = admin
         .get("/api/v1/audit-log?table_name=does_not_exist&record_id=999999999")
         .await;
-    assert_eq!(st, StatusCode::OK, "non-matching filters should still be OK");
+    assert_eq!(
+        st,
+        StatusCode::OK,
+        "non-matching filters should still be OK"
+    );
 
     let rows = body.as_array().expect("audit response must be an array");
-    assert!(rows.is_empty(), "expected empty result for non-matching filters");
+    assert!(
+        rows.is_empty(),
+        "expected empty result for non-matching filters"
+    );
 
     app.cleanup().await;
 }
@@ -294,12 +309,8 @@ async fn audit_log_is_sorted_desc_and_capped_to_500_rows() {
     assert_eq!(rows[499]["record_id"].as_i64(), Some(20));
 
     for pair in rows.windows(2) {
-        let current = pair[0]["occurred_at"]
-            .as_str()
-            .expect("occurred_at string");
-        let next = pair[1]["occurred_at"]
-            .as_str()
-            .expect("occurred_at string");
+        let current = pair[0]["occurred_at"].as_str().expect("occurred_at string");
+        let next = pair[1]["occurred_at"].as_str().expect("occurred_at string");
         assert!(
             current >= next,
             "rows must be sorted descending by occurred_at"

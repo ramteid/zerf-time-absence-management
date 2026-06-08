@@ -3,8 +3,8 @@
 
 use crate::db::DatabasePool;
 use crate::services::settings::{
-    load_setting, load_smtp_config, app_today, APPROVAL_REMINDERS_ENABLED_KEY,
-    DEFAULT_TIMEZONE, TIMEZONE_KEY,
+    app_today, load_setting, load_smtp_config, APPROVAL_REMINDERS_ENABLED_KEY, DEFAULT_TIMEZONE,
+    TIMEZONE_KEY,
 };
 use chrono::{Datelike, Duration, TimeZone, Timelike, Utc};
 use std::time::Duration as StdDuration;
@@ -128,11 +128,12 @@ pub async fn run_check(state: &crate::AppState) {
             .await
         {
             Ok(true) => {
-                let _ = state
-                    .notifications
-                    .send(crate::services::notifications::NotificationSignal {
-                        user_id: approver_id,
-                    });
+                let _ =
+                    state
+                        .notifications
+                        .send(crate::services::notifications::NotificationSignal {
+                            user_id: approver_id,
+                        });
                 crate::email::send_async(
                     smtp.clone(),
                     approver_email,

@@ -328,10 +328,15 @@ async fn reopen_full_workflow() {
             .await;
         assert_eq!(st, StatusCode::OK, "create pure admin");
         let pure_admin_pw = temp_pw(&body);
-        let pure_admin = login_change_pw(&app, "pure-admin-reopen@example.com", &pure_admin_pw).await;
+        let pure_admin =
+            login_change_pw(&app, "pure-admin-reopen@example.com", &pure_admin_pw).await;
 
         let (st, _) = pure_admin.get("/api/v1/reopen-requests").await;
-        assert_eq!(st, StatusCode::FORBIDDEN, "pure-admin cannot list own reopen requests");
+        assert_eq!(
+            st,
+            StatusCode::FORBIDDEN,
+            "pure-admin cannot list own reopen requests"
+        );
 
         let (st, _) = pure_admin
             .post(
@@ -342,7 +347,11 @@ async fn reopen_full_workflow() {
                 }),
             )
             .await;
-        assert_eq!(st, StatusCode::FORBIDDEN, "pure-admin cannot create reopen request");
+        assert_eq!(
+            st,
+            StatusCode::FORBIDDEN,
+            "pure-admin cannot create reopen request"
+        );
     }
 
     // -- Admin action on a pending request notifies other explicit approvers --

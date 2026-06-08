@@ -1,5 +1,5 @@
-use crate::middleware::auth::User;
 use crate::error::{AppError, AppResult};
+use crate::middleware::auth::User;
 use crate::repository::audit::LogEntry;
 use crate::AppState;
 use axum::{

@@ -69,7 +69,10 @@ pub fn week_start(date: NaiveDate) -> NaiveDate {
 
 /// Enrich entries with the `counts_as_work` flag from their category.
 /// Fetches each distinct category only once to minimise DB round-trips.
-pub async fn attach_counts_as_work(app_state: &AppState, entries: &mut [TimeEntry]) -> AppResult<()> {
+pub async fn attach_counts_as_work(
+    app_state: &AppState,
+    entries: &mut [TimeEntry],
+) -> AppResult<()> {
     let category_ids: HashSet<i64> = entries.iter().map(|e| e.category_id).collect();
     let mut map: HashMap<i64, bool> = HashMap::new();
     for cat_id in category_ids {
@@ -137,20 +140,37 @@ pub async fn notify_week_status_change(
         let frontend_body = if let Some(r) = reason {
             format!(
                 "{{\"weeks\":[{}],\"reason\":{}}}",
-                week_iso_strings.iter().map(|w| format!("\"{}\"", w)).collect::<Vec<_>>().join(","),
+                week_iso_strings
+                    .iter()
+                    .map(|w| format!("\"{}\"", w))
+                    .collect::<Vec<_>>()
+                    .join(","),
                 serde_json::json!(r),
             )
         } else {
             format!(
                 "{{\"weeks\":[{}]}}",
-                week_iso_strings.iter().map(|w| format!("\"{}\"", w)).collect::<Vec<_>>().join(","),
+                week_iso_strings
+                    .iter()
+                    .map(|w| format!("\"{}\"", w))
+                    .collect::<Vec<_>>()
+                    .join(","),
             )
         };
 
         let send_email = user_id != requester_id;
         crate::services::notifications::create_with_frontend_body(
-            app_state, &language, user_id, category, title_key, body_key, params,
-            &frontend_body, send_email, Some("time_entries"), None,
+            app_state,
+            &language,
+            user_id,
+            category,
+            title_key,
+            body_key,
+            params,
+            &frontend_body,
+            send_email,
+            Some("time_entries"),
+            None,
         )
         .await;
     }
@@ -277,13 +297,19 @@ mod tests {
         let svc = repo_entry_to_service(repo);
         assert_eq!(svc.id, 7);
         assert_eq!(svc.user_id, 3);
-        assert_eq!(svc.entry_date, NaiveDate::from_ymd_opt(2026, 5, 18).unwrap());
+        assert_eq!(
+            svc.entry_date,
+            NaiveDate::from_ymd_opt(2026, 5, 18).unwrap()
+        );
         assert_eq!(svc.start_time, "09:00");
         assert_eq!(svc.end_time, "17:00");
         assert_eq!(svc.category_id, 2);
         assert_eq!(svc.comment.as_deref(), Some("deep work"));
         assert_eq!(svc.status, "submitted");
-        assert!(svc.counts_as_work.is_none(), "counts_as_work is filled later by attach_counts_as_work");
+        assert!(
+            svc.counts_as_work.is_none(),
+            "counts_as_work is filled later by attach_counts_as_work"
+        );
     }
 
     /// A rejected entry carries a reviewer id and a free-text reason; both
@@ -306,14 +332,23 @@ mod tests {
         use crate::middleware::auth::User;
         use chrono::Utc;
         let tracking_user = User {
-            id: 1, email: "a@b.com".to_string(), password_hash: "h".to_string(),
-            first_name: "A".to_string(), last_name: "B".to_string(),
-            role: "employee".to_string(), weekly_hours: 40.0, workdays_per_week: 5,
+            id: 1,
+            email: "a@b.com".to_string(),
+            password_hash: "h".to_string(),
+            first_name: "A".to_string(),
+            last_name: "B".to_string(),
+            role: "employee".to_string(),
+            weekly_hours: 40.0,
+            workdays_per_week: 5,
             start_date: chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
             hire_date: None,
-            active: true, must_change_password: false, created_at: Utc::now(),
-            allow_reopen_without_approval: false, dark_mode: false,
-            overtime_start_balance_min: 0, tracks_time: true,
+            active: true,
+            must_change_password: false,
+            created_at: Utc::now(),
+            allow_reopen_without_approval: false,
+            dark_mode: false,
+            overtime_start_balance_min: 0,
+            tracks_time: true,
         };
         assert!(require_tracks_time(&tracking_user).is_ok());
         let mut non_tracking = tracking_user.clone();

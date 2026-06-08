@@ -122,7 +122,8 @@ async fn sessions_repository_workflow() {
         "expired branch should return reset_token_expired"
     );
 
-    let old_hash = zerf::services::auth::hash_password("RepoCurrent!234").expect("hash old password");
+    let old_hash =
+        zerf::services::auth::hash_password("RepoCurrent!234").expect("hash old password");
     sqlx::query("UPDATE users SET password_hash=$1, must_change_password=TRUE WHERE id=$2")
         .bind(old_hash)
         .bind(user_id)
@@ -147,11 +148,12 @@ async fn sessions_repository_workflow() {
         .await
         .expect("consume valid token and update password");
 
-    let must_change: bool = sqlx::query_scalar("SELECT must_change_password FROM users WHERE id=$1")
-        .bind(user_id)
-        .fetch_one(&app.state.pool)
-        .await
-        .expect("load must_change_password");
+    let must_change: bool =
+        sqlx::query_scalar("SELECT must_change_password FROM users WHERE id=$1")
+            .bind(user_id)
+            .fetch_one(&app.state.pool)
+            .await
+            .expect("load must_change_password");
     assert!(!must_change, "reset flow clears must_change_password");
     assert!(
         sessions
@@ -162,9 +164,7 @@ async fn sessions_repository_workflow() {
         "password reset must revoke existing sessions"
     );
 
-    sessions
-        .record_reset_attempt("repo-reset-key")
-        .await;
+    sessions.record_reset_attempt("repo-reset-key").await;
     assert_eq!(
         sessions
             .count_reset_attempts("repo-reset-key", Utc::now() - Duration::hours(1))
@@ -173,13 +173,11 @@ async fn sessions_repository_workflow() {
     );
 
     sessions.delete("token-a").await.expect("delete token-a");
-    assert!(
-        sessions
-            .get_user_id("token-a")
-            .await
-            .expect("token-a lookup after delete")
-            .is_none()
-    );
+    assert!(sessions
+        .get_user_id("token-a")
+        .await
+        .expect("token-a lookup after delete")
+        .is_none());
 
     sessions
         .create("token-d", user_id, "csrf-d")
@@ -189,17 +187,20 @@ async fn sessions_repository_workflow() {
         .create("token-e", user_id, "csrf-e")
         .await
         .expect("create session e");
-    let mut tx_conn = app.state.pool.acquire().await.expect("acquire tx conn for sessions");
+    let mut tx_conn = app
+        .state
+        .pool
+        .acquire()
+        .await
+        .expect("acquire tx conn for sessions");
     zerf::repository::SessionDb::delete_except_tx(&mut tx_conn, user_id, "token-d")
         .await
         .expect("delete except tx");
-    assert!(
-        sessions
-            .get_user_id("token-e")
-            .await
-            .expect("token-e lookup after delete_except_tx")
-            .is_none()
-    );
+    assert!(sessions
+        .get_user_id("token-e")
+        .await
+        .expect("token-e lookup after delete_except_tx")
+        .is_none());
 
     let reset_hash_two = zerf::middleware::auth::hash_token("repo-valid-token-two");
     sessions
@@ -211,9 +212,7 @@ async fn sessions_repository_workflow() {
         .await
         .expect("consume token with public wrapper");
 
-    sessions
-        .cleanup_expired_sessions(0, 0)
-        .await;
+    sessions.cleanup_expired_sessions(0, 0).await;
 
     sqlx::query(
         "INSERT INTO login_attempts(email, success, attempted_at) VALUES ($1, FALSE, CURRENT_TIMESTAMP - INTERVAL '2 days')",
@@ -234,13 +233,11 @@ async fn sessions_repository_workflow() {
     .expect("insert expired reset token for cleanup");
     sessions.cleanup_reset_tokens().await;
 
-    assert!(
-        sessions
-            .get_active_user_by_email("repo-sessions@example.com")
-            .await
-            .expect("active user lookup by email")
-            .is_some()
-    );
+    assert!(sessions
+        .get_active_user_by_email("repo-sessions@example.com")
+        .await
+        .expect("active user lookup by email")
+        .is_some());
 
     app.cleanup().await;
 }
@@ -339,11 +336,12 @@ async fn settings_and_metadata_repository_workflow() {
         .await
         .expect("record runtime metadata second time");
 
-    let created_git: String =
-        sqlx::query_scalar("SELECT value FROM system_metadata WHERE key='database_created_git_commit'")
-            .fetch_one(&app.state.pool)
-            .await
-            .expect("created git key");
+    let created_git: String = sqlx::query_scalar(
+        "SELECT value FROM system_metadata WHERE key='database_created_git_commit'",
+    )
+    .fetch_one(&app.state.pool)
+    .await
+    .expect("created git key");
     let runtime_git: String =
         sqlx::query_scalar("SELECT value FROM system_metadata WHERE key='runtime_git_commit'")
             .fetch_one(&app.state.pool)
@@ -390,12 +388,30 @@ async fn users_repository_workflow() {
     assert_eq!(lead.id, lead_id);
     assert!(lead.is_lead());
     assert!(!lead.is_admin());
-    assert!(users.find_by_email("missing@example.com").await.expect("find missing by email").is_none());
-    assert!(users.find_by_id_active(emp_id).await.expect("find active").is_some());
+    assert!(users
+        .find_by_email("missing@example.com")
+        .await
+        .expect("find missing by email")
+        .is_none());
+    assert!(users
+        .find_by_id_active(emp_id)
+        .await
+        .expect("find active")
+        .is_some());
     assert!(users.find_all_ordered().await.expect("all ordered").len() >= 3);
-    assert!(users.find_all_active_ordered().await.expect("all active ordered").len() >= 3);
+    assert!(
+        users
+            .find_all_active_ordered()
+            .await
+            .expect("all active ordered")
+            .len()
+            >= 3
+    );
 
-    let lead_scope = users.find_for_approver(lead_id).await.expect("find for approver");
+    let lead_scope = users
+        .find_for_approver(lead_id)
+        .await
+        .expect("find for approver");
     assert!(lead_scope.iter().any(|user| user.id == emp_id));
     assert!(lead_scope.iter().any(|user| user.id == lead_id));
 
@@ -404,7 +420,13 @@ async fn users_repository_workflow() {
         .await
         .expect("find team for lead");
     assert!(lead_team.iter().any(|user| user.id == emp_id));
-    assert_eq!(users.count_direct_reports(lead_id).await.expect("count reports"), 1);
+    assert_eq!(
+        users
+            .count_direct_reports(lead_id)
+            .await
+            .expect("count reports"),
+        1
+    );
     assert_eq!(
         users
             .count_active_direct_reports(lead_id)
@@ -412,9 +434,15 @@ async fn users_repository_workflow() {
             .expect("count active reports"),
         1
     );
-    assert_eq!(users.get_active_flag(emp_id).await.expect("active flag"), Some(true));
     assert_eq!(
-        users.get_approver_info(lead_id).await.expect("approver info"),
+        users.get_active_flag(emp_id).await.expect("active flag"),
+        Some(true)
+    );
+    assert_eq!(
+        users
+            .get_approver_info(lead_id)
+            .await
+            .expect("approver info"),
         Some(("team_lead".to_string(), true))
     );
     assert_eq!(
@@ -424,8 +452,14 @@ async fn users_repository_workflow() {
             .expect("role active tuple"),
         Some((emp_id, "employee".to_string(), true))
     );
-    assert!(users.is_direct_report(emp_id, lead_id).await.expect("is direct report"));
-    assert!(!users.is_direct_report(1, lead_id).await.expect("admin not direct report"));
+    assert!(users
+        .is_direct_report(emp_id, lead_id)
+        .await
+        .expect("is direct report"));
+    assert!(!users
+        .is_direct_report(1, lead_id)
+        .await
+        .expect("admin not direct report"));
     assert_eq!(
         users.get_start_date(emp_id).await.expect("start date"),
         NaiveDate::from_ymd_opt(2024, 1, 1).unwrap()
@@ -437,8 +471,14 @@ async fn users_repository_workflow() {
             .expect("start date + balance"),
         (NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(), 0)
     );
-    assert!(users.check_email_available("lead-repo-users@example.com", None).await.is_err());
-    assert!(users.check_name_available("Lararepo-users", "Leadrepo-users", None).await.is_err());
+    assert!(users
+        .check_email_available("lead-repo-users@example.com", None)
+        .await
+        .is_err());
+    assert!(users
+        .check_name_available("Lararepo-users", "Leadrepo-users", None)
+        .await
+        .is_err());
 
     let all_team_settings = users.team_settings_all().await.expect("all team settings");
     assert!(all_team_settings.iter().any(|row| row.0 == emp_id));
@@ -446,7 +486,11 @@ async fn users_repository_workflow() {
         .team_settings_for_lead(lead_id)
         .await
         .expect("lead team settings");
-    assert_eq!(lead_team_settings.len(), 2, "lead sees self and one direct report");
+    assert_eq!(
+        lead_team_settings.len(),
+        2,
+        "lead sees self and one direct report"
+    );
 
     let emp_client = login_change_pw(&app, "emp-repo-users@example.com", &emp_pw).await;
     let _ = create_and_submit_entry(&emp_client, &monday_iso, cat_id).await;
@@ -461,23 +505,32 @@ async fn users_repository_workflow() {
         .update_allow_reopen(emp_id, true)
         .await
         .expect("update reopen policy");
-    assert!(
-        users
-            .team_settings_for_lead(lead_id)
-            .await
-            .expect("team settings after update")
-            .iter()
-            .any(|row| row.0 == emp_id && row.5)
-    );
-    assert!(users.is_active_direct_report(emp_id, lead_id).await.expect("active direct report"));
+    assert!(users
+        .team_settings_for_lead(lead_id)
+        .await
+        .expect("team settings after update")
+        .iter()
+        .any(|row| row.0 == emp_id && row.5));
+    assert!(users
+        .is_active_direct_report(emp_id, lead_id)
+        .await
+        .expect("active direct report"));
 
     users
         .update_dark_mode(emp_id, true)
         .await
         .expect("update dark mode");
-    assert!(users.find_by_id(emp_id).await.expect("find emp").unwrap().dark_mode);
+    assert!(
+        users
+            .find_by_id(emp_id)
+            .await
+            .expect("find emp")
+            .unwrap()
+            .dark_mode
+    );
 
-    let new_hash = zerf::services::auth::hash_password("RepoUserPass!234").expect("hash repo user password");
+    let new_hash =
+        zerf::services::auth::hash_password("RepoUserPass!234").expect("hash repo user password");
     users
         .update_password_self(emp_id, &new_hash)
         .await
@@ -489,10 +542,31 @@ async fn users_repository_workflow() {
         .expect("hash exists");
     assert_eq!(stored_hash, new_hash);
 
-    assert_eq!(users.get_default_leave_days().await.expect("default leave days"), 30);
-    assert_eq!(users.get_leave_days(emp_id, 2030).await.expect("lazy leave days"), 30);
-    users.set_leave_days(emp_id, 2030, 27).await.expect("set leave days");
-    assert_eq!(users.get_leave_days(emp_id, 2030).await.expect("stored leave days"), 27);
+    assert_eq!(
+        users
+            .get_default_leave_days()
+            .await
+            .expect("default leave days"),
+        30
+    );
+    assert_eq!(
+        users
+            .get_leave_days(emp_id, 2030)
+            .await
+            .expect("lazy leave days"),
+        30
+    );
+    users
+        .set_leave_days(emp_id, 2030, 27)
+        .await
+        .expect("set leave days");
+    assert_eq!(
+        users
+            .get_leave_days(emp_id, 2030)
+            .await
+            .expect("stored leave days"),
+        27
+    );
     // Use a year far enough in the future that no row is auto-created during user seeding
     let far_future_year = reference_date().year() + 5;
     assert_eq!(
@@ -503,7 +577,12 @@ async fn users_repository_workflow() {
         33
     );
 
-    let mut tx_conn = app.state.pool.acquire().await.expect("acquire user tx conn");
+    let mut tx_conn = app
+        .state
+        .pool
+        .acquire()
+        .await
+        .expect("acquire user tx conn");
     zerf::repository::UserDb::lock_user_graph_tx(&mut tx_conn)
         .await
         .expect("lock user graph tx");
@@ -520,7 +599,8 @@ async fn users_repository_workflow() {
         30
     );
 
-    let seeded_hash = zerf::services::auth::hash_password("RepoSeedAdmin!234").expect("hash seeded admin");
+    let seeded_hash =
+        zerf::services::auth::hash_password("RepoSeedAdmin!234").expect("hash seeded admin");
     let seeded_admin_id = zerf::repository::UserDb::create_initial_admin(
         &mut tx_conn,
         "repo-seeded-admin@example.com",
@@ -535,16 +615,18 @@ async fn users_repository_workflow() {
     assert!(seeded_admin_id > 0);
 
     let update_missing = users.update_reopen_policy(9_999_999, true).await;
-    assert!(update_missing.is_err(), "missing user update_reopen_policy should fail");
+    assert!(
+        update_missing.is_err(),
+        "missing user update_reopen_policy should fail"
+    );
 
-    let missing_update_password = zerf::repository::UserDb::update_password(
-        &mut tx_conn,
-        9_999_999,
-        &seeded_hash,
-        false,
-    )
-    .await;
-    assert!(missing_update_password.is_err(), "missing user update_password should fail");
+    let missing_update_password =
+        zerf::repository::UserDb::update_password(&mut tx_conn, 9_999_999, &seeded_hash, false)
+            .await;
+    assert!(
+        missing_update_password.is_err(),
+        "missing user update_password should fail"
+    );
 
     let (st, body) = admin
         .post(
@@ -562,7 +644,11 @@ async fn users_repository_workflow() {
             }),
         )
         .await;
-    assert_eq!(st, StatusCode::OK, "create assistant for repository workflow");
+    assert_eq!(
+        st,
+        StatusCode::OK,
+        "create assistant for repository workflow"
+    );
     let assistant_id = id(&body);
 
     let active_non_assistants = users
@@ -570,10 +656,16 @@ async fn users_repository_workflow() {
         .await
         .expect("active non-assistant users");
     assert!(active_non_assistants.iter().any(|row| row.id == emp_id));
-    assert!(!active_non_assistants.iter().any(|row| row.id == assistant_id));
+    assert!(!active_non_assistants
+        .iter()
+        .any(|row| row.id == assistant_id));
 
-    let invalid_insert = zerf::repository::UserDb::insert_approver_tx(&mut tx_conn, emp_id, assistant_id).await;
-    assert!(invalid_insert.is_err(), "assistant cannot be inserted as approver");
+    let invalid_insert =
+        zerf::repository::UserDb::insert_approver_tx(&mut tx_conn, emp_id, assistant_id).await;
+    assert!(
+        invalid_insert.is_err(),
+        "assistant cannot be inserted as approver"
+    );
 
     app.cleanup().await;
 }
@@ -633,33 +725,70 @@ async fn time_entries_repository_workflow() {
     );
     assert_eq!(
         time_entries
-            .list_all(false, lead_id, Some(monday), Some(tuesday), Some(emp_id), Some("draft".to_string()))
+            .list_all(
+                false,
+                lead_id,
+                Some(monday),
+                Some(tuesday),
+                Some(emp_id),
+                Some("draft".to_string())
+            )
             .await
             .expect("list all for lead")
             .len(),
         2
     );
 
-    assert_eq!(time_entries.find_by_id(monday_entry.id).await.expect("find by id").id, monday_entry.id);
-    assert!(time_entries.find_by_id_opt(999999).await.expect("find by id opt").is_none());
-    assert_eq!(time_entries.get_user_id(monday_entry.id).await.expect("get user id"), emp_id);
-    assert_eq!(time_entries.get_date_for_entry(monday_entry.id).await.expect("get date"), Some(monday));
-    assert!(time_entries.all_entries_owned_by_user(&[monday_entry.id, tuesday_entry.id], emp_id).await.expect("owned by user"));
-    assert!(!time_entries.all_entries_owned_by_user(&[monday_entry.id], lead_id).await.expect("not owned by lead"));
-    assert!(time_entries.all_entries_owned_by_user(&[], lead_id).await.expect("empty owned list"));
+    assert_eq!(
+        time_entries
+            .find_by_id(monday_entry.id)
+            .await
+            .expect("find by id")
+            .id,
+        monday_entry.id
+    );
+    assert!(time_entries
+        .find_by_id_opt(999999)
+        .await
+        .expect("find by id opt")
+        .is_none());
+    assert_eq!(
+        time_entries
+            .get_user_id(monday_entry.id)
+            .await
+            .expect("get user id"),
+        emp_id
+    );
+    assert_eq!(
+        time_entries
+            .get_date_for_entry(monday_entry.id)
+            .await
+            .expect("get date"),
+        Some(monday)
+    );
+    assert!(time_entries
+        .all_entries_owned_by_user(&[monday_entry.id, tuesday_entry.id], emp_id)
+        .await
+        .expect("owned by user"));
+    assert!(!time_entries
+        .all_entries_owned_by_user(&[monday_entry.id], lead_id)
+        .await
+        .expect("not owned by lead"));
+    assert!(time_entries
+        .all_entries_owned_by_user(&[], lead_id)
+        .await
+        .expect("empty owned list"));
 
     let distinct_dates = time_entries
         .entry_dates_for_ids(&[monday_entry.id, tuesday_entry.id])
         .await
         .expect("entry dates for ids");
     assert_eq!(distinct_dates.len(), 2);
-    assert!(
-        time_entries
-            .entry_dates_for_ids(&[])
-            .await
-            .expect("entry dates for empty ids")
-            .is_empty()
-    );
+    assert!(time_entries
+        .entry_dates_for_ids(&[])
+        .await
+        .expect("entry dates for empty ids")
+        .is_empty());
 
     let updated = time_entries
         .update(
@@ -691,13 +820,11 @@ async fn time_entries_repository_workflow() {
             .len(),
         2
     );
-    assert!(
-        time_entries
-            .get_credited_submitted_dates_for_entries(emp_id, &[])
-            .await
-            .expect("credited submitted empty ids")
-            .is_empty()
-    );
+    assert!(time_entries
+        .get_credited_submitted_dates_for_entries(emp_id, &[])
+        .await
+        .expect("credited submitted empty ids")
+        .is_empty());
     assert_eq!(
         time_entries
             .count_non_draft_in_week(emp_id, monday, monday + Duration::days(6))
@@ -775,7 +902,10 @@ async fn time_entries_repository_workflow() {
             },
         )
         .await;
-    assert!(wrong_user_update.is_err(), "non-owner non-admin update should fail");
+    assert!(
+        wrong_user_update.is_err(),
+        "non-owner non-admin update should fail"
+    );
 
     let draft_to_delete = time_entries
         .create(
@@ -791,7 +921,11 @@ async fn time_entries_repository_workflow() {
         .await
         .expect("create draft to delete");
     assert_eq!(
-        time_entries.delete(draft_to_delete.id).await.expect("delete draft").id,
+        time_entries
+            .delete(draft_to_delete.id)
+            .await
+            .expect("delete draft")
+            .id,
         draft_to_delete.id
     );
 
@@ -838,15 +972,42 @@ async fn holidays_repository_workflow() {
 
     let holidays = zerf::repository::HolidayDb::new(app.state.pool.clone());
     let current_year = reference_date().year();
-    assert_eq!(holidays.get_country_setting().await.expect("country setting"), "DE");
-    assert_eq!(holidays.get_region_setting().await.expect("region setting"), "DE-BW");
-    assert!(holidays.count_auto_for_year(current_year).await.expect("auto holiday count") > 0);
-    assert!(!holidays.list_for_year(current_year).await.expect("list holidays").is_empty());
+    assert_eq!(
+        holidays
+            .get_country_setting()
+            .await
+            .expect("country setting"),
+        "DE"
+    );
+    assert_eq!(
+        holidays.get_region_setting().await.expect("region setting"),
+        "DE-BW"
+    );
+    assert!(
+        holidays
+            .count_auto_for_year(current_year)
+            .await
+            .expect("auto holiday count")
+            > 0
+    );
+    assert!(!holidays
+        .list_for_year(current_year)
+        .await
+        .expect("list holidays")
+        .is_empty());
 
     let from = NaiveDate::from_ymd_opt(current_year, 1, 1).unwrap();
     let to = NaiveDate::from_ymd_opt(current_year, 12, 31).unwrap();
-    assert!(!holidays.get_dates_in_range(from, to).await.expect("holiday dates").is_empty());
-    assert!(!holidays.get_rows_in_range(from, to).await.expect("holiday rows").is_empty());
+    assert!(!holidays
+        .get_dates_in_range(from, to)
+        .await
+        .expect("holiday dates")
+        .is_empty());
+    assert!(!holidays
+        .get_rows_in_range(from, to)
+        .await
+        .expect("holiday rows")
+        .is_empty());
 
     let manual_date = NaiveDate::from_ymd_opt(current_year + 2, 12, 30).unwrap();
     holidays
@@ -862,7 +1023,10 @@ async fn holidays_repository_workflow() {
         .find(|row| row.holiday_date == manual_date)
         .expect("manual holiday exists")
         .id;
-    holidays.delete(manual_id).await.expect("delete manual holiday");
+    holidays
+        .delete(manual_id)
+        .await
+        .expect("delete manual holiday");
 
     let auto_year = current_year + 3;
     holidays
@@ -874,7 +1038,13 @@ async fn holidays_repository_workflow() {
         }])
         .await
         .expect("insert auto holidays");
-    assert_eq!(holidays.count_auto_for_year(auto_year).await.expect("count repo auto"), 1);
+    assert_eq!(
+        holidays
+            .count_auto_for_year(auto_year)
+            .await
+            .expect("count repo auto"),
+        1
+    );
 
     holidays
         .replace_auto_holidays(&[zerf::repository::PreparedHoliday {
@@ -908,11 +1078,23 @@ async fn absences_repository_workflow() {
     let wednesday = monday + Duration::days(2);
     let friday = monday + Duration::days(4);
 
-    assert_eq!(absences.user_workdays_per_week(emp_id).await.expect("user workdays"), 5);
-    let holidays = absences.holidays_set(monday, friday).await.expect("holiday set");
+    assert_eq!(
+        absences
+            .user_workdays_per_week(emp_id)
+            .await
+            .expect("user workdays"),
+        5
+    );
+    let holidays = absences
+        .holidays_set(monday, friday)
+        .await
+        .expect("holiday set");
     let expected_workdays = (5 - holidays.len() as i32).max(0) as f64;
     assert_eq!(
-        absences.workdays(monday, friday).await.expect("default workdays"),
+        absences
+            .workdays(monday, friday)
+            .await
+            .expect("default workdays"),
         expected_workdays
     );
     assert_eq!(
@@ -934,8 +1116,21 @@ async fn absences_repository_workflow() {
         )
         .await
         .expect("create requested absence");
-    assert_eq!(absences.get_user_id(requested.id).await.expect("absence user id"), emp_id);
-    assert_eq!(absences.find_by_id(requested.id).await.expect("find absence").kind, "vacation");
+    assert_eq!(
+        absences
+            .get_user_id(requested.id)
+            .await
+            .expect("absence user id"),
+        emp_id
+    );
+    assert_eq!(
+        absences
+            .find_by_id(requested.id)
+            .await
+            .expect("find absence")
+            .kind,
+        "vacation"
+    );
     assert_eq!(
         absences
             .list_for_user(emp_id, monday, friday)
@@ -946,7 +1141,13 @@ async fn absences_repository_workflow() {
     );
     assert_eq!(
         absences
-            .list_all(false, lead_id, Some(monday), Some(friday), Some("pending_review"))
+            .list_all(
+                false,
+                lead_id,
+                Some(monday),
+                Some(friday),
+                Some("pending_review")
+            )
             .await
             .expect("lead pending review list")
             .len(),
@@ -961,7 +1162,13 @@ async fn absences_repository_workflow() {
         1
     );
 
-    assert_eq!(absences.calendar_scope_user_ids(lead_id, true, true).await.expect("admin calendar scope"), None);
+    assert_eq!(
+        absences
+            .calendar_scope_user_ids(lead_id, true, true)
+            .await
+            .expect("admin calendar scope"),
+        None
+    );
     let lead_scope = absences
         .calendar_scope_user_ids(lead_id, false, true)
         .await
@@ -1000,7 +1207,12 @@ async fn absences_repository_workflow() {
     assert_eq!(updated.0.kind, "vacation");
     assert_eq!(updated.1.kind, "training");
 
-    let mut conn = app.state.pool.acquire().await.expect("acquire absence conn");
+    let mut conn = app
+        .state
+        .pool
+        .acquire()
+        .await
+        .expect("acquire absence conn");
     assert!(
         zerf::repository::AbsenceDb::is_direct_report_for_update(&mut conn, emp_id, lead_id)
             .await
@@ -1088,21 +1300,38 @@ async fn absences_repository_workflow() {
         .await
         .expect("create sick absence");
     assert_eq!(
-        absences.cancel(draft_sick.id, emp_id).await.expect("cancel draft sick").id,
+        absences
+            .cancel(draft_sick.id, emp_id)
+            .await
+            .expect("cancel draft sick")
+            .id,
         draft_sick.id
     );
 
     let requested_cancel = absences
-        .create(emp_id, "general_absence", friday + Duration::days(3), friday + Duration::days(3), Some("cancel requested"), "requested")
+        .create(
+            emp_id,
+            "general_absence",
+            friday + Duration::days(3),
+            friday + Duration::days(3),
+            Some("cancel requested"),
+            "requested",
+        )
         .await
         .expect("create requested absence to cancel");
     let mut tx = absences.begin().await.expect("begin absence tx");
     zerf::repository::AbsenceDb::lock_user_scope_tx(&mut tx, emp_id)
         .await
         .expect("lock absence scope");
-    zerf::repository::AbsenceDb::assert_no_overlap_tx(&mut tx, emp_id, friday + Duration::days(4), friday + Duration::days(4), None)
-        .await
-        .expect("no overlap helper");
+    zerf::repository::AbsenceDb::assert_no_overlap_tx(
+        &mut tx,
+        emp_id,
+        friday + Duration::days(4),
+        friday + Duration::days(4),
+        None,
+    )
+    .await
+    .expect("no overlap helper");
     let inserted_id = zerf::repository::AbsenceDb::insert_tx(
         &mut tx,
         emp_id,
@@ -1190,13 +1419,14 @@ async fn absences_repository_workflow() {
     .execute(&app.state.pool)
     .await
     .expect("insert absence audit log");
-    assert!(
-        zerf::repository::AbsenceDb::latest_update_before_data(&app.state.pool, approved_vacation.id)
-            .await
-            .expect("latest update before data")
-            .expect("before data exists")
-            .contains("requested")
-    );
+    assert!(zerf::repository::AbsenceDb::latest_update_before_data(
+        &app.state.pool,
+        approved_vacation.id
+    )
+    .await
+    .expect("latest update before data")
+    .expect("before data exists")
+    .contains("requested"));
     let batch_before = zerf::repository::AbsenceDb::latest_update_before_data_batch(
         &app.state.pool,
         &[approved_vacation.id, requested.id],
@@ -1205,8 +1435,20 @@ async fn absences_repository_workflow() {
     .expect("latest update before batch");
     assert!(batch_before.contains_key(&approved_vacation.id));
 
-    assert_eq!(absences.carryover_expiry_setting().await.expect("carryover expiry"), "03-31");
-    assert_eq!(absences.effective_annual_days(emp_id, 2032).await.expect("default annual days"), 30);
+    assert_eq!(
+        absences
+            .carryover_expiry_setting()
+            .await
+            .expect("carryover expiry"),
+        "03-31"
+    );
+    assert_eq!(
+        absences
+            .effective_annual_days(emp_id, 2032)
+            .await
+            .expect("default annual days"),
+        30
+    );
     sqlx::query(
         "INSERT INTO user_annual_leave(user_id, year, days) VALUES ($1,$2,$3) \
          ON CONFLICT (user_id, year) DO UPDATE SET days=EXCLUDED.days",
@@ -1217,7 +1459,13 @@ async fn absences_repository_workflow() {
     .execute(&app.state.pool)
     .await
     .expect("seed annual leave override");
-    assert_eq!(absences.effective_annual_days(emp_id, 2032).await.expect("overridden annual days"), 26);
+    assert_eq!(
+        absences
+            .effective_annual_days(emp_id, 2032)
+            .await
+            .expect("overridden annual days"),
+        26
+    );
 
     app.cleanup().await;
 }
@@ -1247,7 +1495,11 @@ async fn time_entries_repository_validation_guards() {
         )
         .await;
     assert!(end_before_start.is_err());
-    assert!(end_before_start.err().unwrap().to_string().contains("after start"));
+    assert!(end_before_start
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("after start"));
 
     let long_comment = time_entries
         .create(
@@ -1262,7 +1514,11 @@ async fn time_entries_repository_validation_guards() {
         )
         .await;
     assert!(long_comment.is_err());
-    assert!(long_comment.err().unwrap().to_string().contains("Comment too long"));
+    assert!(long_comment
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("Comment too long"));
 
     let unknown_category = time_entries
         .create(
@@ -1277,7 +1533,11 @@ async fn time_entries_repository_validation_guards() {
         )
         .await;
     assert!(unknown_category.is_err());
-    assert!(unknown_category.err().unwrap().to_string().contains("Category not found"));
+    assert!(unknown_category
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("Category not found"));
 
     let (status, created_category) = admin
         .post(
@@ -1308,7 +1568,11 @@ async fn time_entries_repository_validation_guards() {
         )
         .await;
     assert!(inactive_category.is_err());
-    assert!(inactive_category.err().unwrap().to_string().contains("Category is inactive"));
+    assert!(inactive_category
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("Category is inactive"));
 
     let future_date = reference_date() + Duration::days(2);
     let future_entry = time_entries
@@ -1394,7 +1658,11 @@ async fn time_entries_repository_validation_guards() {
         )
         .await;
     assert!(absence_conflict.is_err());
-    assert!(absence_conflict.err().unwrap().to_string().contains("approved absence"));
+    assert!(absence_conflict
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("approved absence"));
 
     assert_eq!(
         time_entries
@@ -1448,21 +1716,21 @@ async fn reports_repository_workflow() {
             }),
         )
         .await;
-    assert_eq!(st, StatusCode::OK, "create draft entry for report repository");
+    assert_eq!(
+        st,
+        StatusCode::OK,
+        "create draft entry for report repository"
+    );
     let draft_id = id(&body);
 
-    assert!(
-        report_db
-            .is_direct_report(emp_id, lead_id)
-            .await
-            .expect("is direct report")
-    );
-    assert!(
-        !report_db
-            .is_direct_report(1, lead_id)
-            .await
-            .expect("admin subject is not lead direct report")
-    );
+    assert!(report_db
+        .is_direct_report(emp_id, lead_id)
+        .await
+        .expect("is direct report"));
+    assert!(!report_db
+        .is_direct_report(1, lead_id)
+        .await
+        .expect("admin subject is not lead direct report"));
 
     assert!(!report_db
         .time_entry_rows(emp_id, monday, tuesday)
@@ -1513,12 +1781,10 @@ async fn reports_repository_workflow() {
         .expect("incomplete dates");
     assert!(incomplete_dates.contains(&tuesday));
 
-    assert!(
-        report_db
-            .has_pending_submitted_entries_in_range(emp_id, monday, monday)
-            .await
-            .expect("pending submitted entries")
-    );
+    assert!(report_db
+        .has_pending_submitted_entries_in_range(emp_id, monday, monday)
+        .await
+        .expect("pending submitted entries"));
 
     assert_eq!(
         report_db
@@ -1537,14 +1803,12 @@ async fn reports_repository_workflow() {
             .len()
             >= 2
     );
-    assert!(
-        report_db
-            .active_team_members(lead_id, false)
-            .await
-            .expect("active team members lead")
-            .iter()
-            .any(|u| u.id == emp_id)
-    );
+    assert!(report_db
+        .active_team_members(lead_id, false)
+        .await
+        .expect("active team members lead")
+        .iter()
+        .any(|u| u.id == emp_id));
 
     let _ = report_db
         .user_start_and_overtime(emp_id)
@@ -1567,14 +1831,12 @@ async fn reports_repository_workflow() {
             .len()
             >= 2
     );
-    assert!(
-        report_db
-            .team_category_members(lead_id, false)
-            .await
-            .expect("team category members lead")
-            .iter()
-            .any(|(uid, _, _)| *uid == emp_id)
-    );
+    assert!(report_db
+        .team_category_members(lead_id, false)
+        .await
+        .expect("team category members lead")
+        .iter()
+        .any(|(uid, _, _)| *uid == emp_id));
 
     let target_scope = report_db
         .category_rows_for_scope(lead_id, false, Some(emp_id), monday, tuesday)
@@ -1658,32 +1920,66 @@ async fn notifications_repository_workflow() {
     assert_eq!(signal.user_id, user_id);
 
     // List and verify unread count.
-    let list = notifications.list_for_user(user_id).await.expect("list for user");
+    let list = notifications
+        .list_for_user(user_id)
+        .await
+        .expect("list for user");
     assert_eq!(list.len(), 1);
     let notif_id = list[0].id;
     assert_eq!(list[0].kind, "test_kind");
     assert!(!list[0].is_read);
 
-    let unread = notifications.count_unread(user_id).await.expect("count unread");
+    let unread = notifications
+        .count_unread(user_id)
+        .await
+        .expect("count unread");
     assert_eq!(unread, 1);
 
     // mark_read marks a single notification and returns the affected row count.
-    let affected = notifications.mark_read(notif_id, user_id).await.expect("mark read");
+    let affected = notifications
+        .mark_read(notif_id, user_id)
+        .await
+        .expect("mark read");
     assert_eq!(affected, 1);
-    assert_eq!(notifications.count_unread(user_id).await.expect("after mark read"), 0);
+    assert_eq!(
+        notifications
+            .count_unread(user_id)
+            .await
+            .expect("after mark read"),
+        0
+    );
 
     // Marking an already-read notification returns 1 (the row still matches).
-    let again = notifications.mark_read(notif_id, user_id).await.expect("mark read again");
+    let again = notifications
+        .mark_read(notif_id, user_id)
+        .await
+        .expect("mark read again");
     assert_eq!(again, 1);
 
     // Insert a second notification; mark_all_read should clear it.
     notifications
-        .insert(user_id, "second_kind", "Second", "body2", Some("time_entries"), Some(42))
+        .insert(
+            user_id,
+            "second_kind",
+            "Second",
+            "body2",
+            Some("time_entries"),
+            Some(42),
+        )
         .await
         .expect("insert second");
-    let all_read = notifications.mark_all_read(user_id).await.expect("mark all read");
+    let all_read = notifications
+        .mark_all_read(user_id)
+        .await
+        .expect("mark all read");
     assert!(all_read >= 1);
-    assert_eq!(notifications.count_unread(user_id).await.expect("after mark_all_read"), 0);
+    assert_eq!(
+        notifications
+            .count_unread(user_id)
+            .await
+            .expect("after mark_all_read"),
+        0
+    );
 
     // insert_idempotent returns true on first insert, false on duplicate.
     let first_insert = notifications
@@ -1748,9 +2044,17 @@ async fn notifications_repository_workflow() {
     .execute(&app.state.pool)
     .await
     .expect("insert old notification");
-    let before_count = notifications.list_for_user(user_id).await.expect("count before cleanup").len();
+    let before_count = notifications
+        .list_for_user(user_id)
+        .await
+        .expect("count before cleanup")
+        .len();
     notifications.cleanup_old().await;
-    let after_count = notifications.list_for_user(user_id).await.expect("count after cleanup").len();
+    let after_count = notifications
+        .list_for_user(user_id)
+        .await
+        .expect("count after cleanup")
+        .len();
     assert!(
         after_count < before_count,
         "cleanup_old must remove notifications older than 90 days"
@@ -1759,7 +2063,11 @@ async fn notifications_repository_workflow() {
     // delete_all removes every notification for the user.
     let deleted = notifications.delete_all(user_id).await.expect("delete all");
     assert!(deleted > 0);
-    assert!(notifications.list_for_user(user_id).await.expect("empty after delete").is_empty());
+    assert!(notifications
+        .list_for_user(user_id)
+        .await
+        .expect("empty after delete")
+        .is_empty());
 
     app.cleanup().await;
 }
@@ -1812,7 +2120,10 @@ async fn reopen_requests_repository_workflow() {
         .get_user_full_name(emp_id)
         .await
         .expect("get user full name");
-    assert!(full_name.contains("Emilrr-repo"), "full name contains first name");
+    assert!(
+        full_name.contains("Emilrr-repo"),
+        "full name contains first name"
+    );
 
     // insert_pending creates a reopen request in 'pending' status.
     let (req_id, _created_at) = reopen_requests
@@ -1834,7 +2145,10 @@ async fn reopen_requests_repository_workflow() {
     assert!(mine.iter().any(|r| r.id == req_id));
 
     // list_pending_admin returns all pending requests (admin view).
-    let pending_admin = reopen_requests.list_pending_admin().await.expect("list pending admin");
+    let pending_admin = reopen_requests
+        .list_pending_admin()
+        .await
+        .expect("list pending admin");
     assert!(pending_admin.iter().any(|r| r.id == req_id));
 
     // list_pending_for_lead returns the request visible to the assigned lead.
@@ -1848,7 +2162,10 @@ async fn reopen_requests_repository_workflow() {
     );
 
     // find_by_id returns the request.
-    let found_by_id = reopen_requests.find_by_id(req_id).await.expect("find by id");
+    let found_by_id = reopen_requests
+        .find_by_id(req_id)
+        .await
+        .expect("find by id");
     assert_eq!(found_by_id.status, "pending");
 
     // approve_with_access_check by lead: must succeed because the lead is
@@ -1912,43 +2229,82 @@ async fn categories_repository_workflow() {
     let found = categories.find_by_id(first_id).await.expect("find_by_id");
     assert_eq!(found.expect("category exists").id, first_id);
     assert!(
-        categories.find_by_id(999_999).await.expect("find unknown").is_none(),
+        categories
+            .find_by_id(999_999)
+            .await
+            .expect("find unknown")
+            .is_none(),
         "missing category must return None"
     );
 
     // get_active_flag returns the active status; unknown id returns None.
-    let flag = categories.get_active_flag(first_id).await.expect("get_active_flag");
+    let flag = categories
+        .get_active_flag(first_id)
+        .await
+        .expect("get_active_flag");
     assert_eq!(flag, Some(true));
-    assert!(
-        categories.get_active_flag(999_999).await.expect("missing flag").is_none()
-    );
+    assert!(categories
+        .get_active_flag(999_999)
+        .await
+        .expect("missing flag")
+        .is_none());
 
     // Create a new category and verify its id is returned.
     let new_id = categories
-        .create("Repo Test Cat", Some("Used in repo test"), "#aabbcc", 99, false)
+        .create(
+            "Repo Test Cat",
+            Some("Used in repo test"),
+            "#aabbcc",
+            99,
+            false,
+        )
         .await
         .expect("create category");
     assert!(new_id > 0);
 
     // Duplicate name must be rejected with a Conflict error.
-    let dup = categories.create("Repo Test Cat", None, "#112233", 100, true).await;
+    let dup = categories
+        .create("Repo Test Cat", None, "#112233", 100, true)
+        .await;
     assert!(dup.is_err(), "duplicate name must be rejected");
 
     // update modifies name and active flag.
     categories
-        .update(new_id, Some("Repo Updated Cat".to_string()), None, None, None, None, Some(false))
+        .update(
+            new_id,
+            Some("Repo Updated Cat".to_string()),
+            None,
+            None,
+            None,
+            None,
+            Some(false),
+        )
         .await
         .expect("update category");
-    let updated = categories.find_by_id(new_id).await.expect("find updated").expect("exists");
+    let updated = categories
+        .find_by_id(new_id)
+        .await
+        .expect("find updated")
+        .expect("exists");
     assert_eq!(updated.name, "Repo Updated Cat");
     assert!(!updated.active);
 
     // update on a missing id must return NotFound.
     let missing_update = categories
-        .update(999_999, Some("Ghost".to_string()), None, None, None, None, None)
+        .update(
+            999_999,
+            Some("Ghost".to_string()),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
         .await;
-    assert!(missing_update.is_err(), "update on missing category must fail");
+    assert!(
+        missing_update.is_err(),
+        "update on missing category must fail"
+    );
 
     app.cleanup().await;
 }
-

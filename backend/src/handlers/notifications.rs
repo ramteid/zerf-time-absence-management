@@ -16,7 +16,9 @@ pub async fn list(
     State(app_state): State<AppState>,
     requester: User,
 ) -> AppResult<Json<Vec<Notification>>> {
-    Ok(Json(notifications::list_for_user(&app_state, requester.id).await?))
+    Ok(Json(
+        notifications::list_for_user(&app_state, requester.id).await?,
+    ))
 }
 
 pub async fn unread_count(

@@ -195,14 +195,13 @@ impl ReopenRequestDb {
         reviewer_is_admin: bool,
     ) -> AppResult<(ReopenRequest, Vec<(i64, String)>)> {
         let mut tx = self.pool.begin().await?;
-        let req: ReopenRequest = QueryBuilder::<Postgres>::new(format!(
-            "{RR_SELECT} WHERE id=$1 FOR UPDATE"
-        ))
-        .build_query_as::<ReopenRequest>()
-        .bind(request_id)
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or(AppError::NotFound)?;
+        let req: ReopenRequest =
+            QueryBuilder::<Postgres>::new(format!("{RR_SELECT} WHERE id=$1 FOR UPDATE"))
+                .build_query_as::<ReopenRequest>()
+                .bind(request_id)
+                .fetch_optional(&mut *tx)
+                .await?
+                .ok_or(AppError::NotFound)?;
         if req.status != "pending" {
             return Err(AppError::bad_request("Request is not pending."));
         }
@@ -251,14 +250,13 @@ impl ReopenRequestDb {
         reason: &str,
     ) -> AppResult<ReopenRequest> {
         let mut tx = self.pool.begin().await?;
-        let before: ReopenRequest = QueryBuilder::<Postgres>::new(format!(
-            "{RR_SELECT} WHERE id=$1 FOR UPDATE"
-        ))
-        .build_query_as::<ReopenRequest>()
-        .bind(request_id)
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or(AppError::NotFound)?;
+        let before: ReopenRequest =
+            QueryBuilder::<Postgres>::new(format!("{RR_SELECT} WHERE id=$1 FOR UPDATE"))
+                .build_query_as::<ReopenRequest>()
+                .bind(request_id)
+                .fetch_optional(&mut *tx)
+                .await?
+                .ok_or(AppError::NotFound)?;
         if before.status != "pending" {
             return Err(AppError::bad_request("Request is not pending."));
         }

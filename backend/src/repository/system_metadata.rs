@@ -33,12 +33,7 @@ impl SystemMetadataDb {
         runtime_migration_version: &str,
     ) -> AppResult<()> {
         let mut tx = self.pool.begin().await?;
-        Self::insert_if_missing(
-            &mut tx,
-            "database_created_git_commit",
-            created_git_commit,
-        )
-        .await?;
+        Self::insert_if_missing(&mut tx, "database_created_git_commit", created_git_commit).await?;
         Self::insert_if_missing(
             &mut tx,
             "database_created_migration_version",

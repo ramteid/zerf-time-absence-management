@@ -4,7 +4,7 @@ use crate::audit;
 use crate::error::AppResult;
 use crate::i18n;
 use crate::middleware::auth::User;
-use crate::services::notifications as notifications;
+use crate::services::notifications;
 use crate::AppState;
 use chrono::{Datelike, NaiveDate};
 use serde::Serialize;
@@ -113,7 +113,10 @@ pub async fn notify_assigned_approvers_if_admin_acted(
         .unwrap_or_else(|_| format!("User {request_user_id}"));
 
     // Build frontend JSON with the employee's name (not the admin's).
-    let reason = extra_params.iter().find(|(k, _)| *k == "reason").map(|(_, v)| v.as_str());
+    let reason = extra_params
+        .iter()
+        .find(|(k, _)| *k == "reason")
+        .map(|(_, v)| v.as_str());
     let frontend_body = if let Some(r) = reason {
         serde_json::json!({"week": week_iso, "requester_name": employee_full_name, "reason": r})
     } else {
@@ -183,15 +186,18 @@ mod tests {
     /// reopen requests for arbitrary mid-week dates.
     #[test]
     fn assert_monday_rejects_every_non_monday_weekday() {
-        let tuesday  = NaiveDate::from_ymd_opt(2026, 5, 19).unwrap();
+        let tuesday = NaiveDate::from_ymd_opt(2026, 5, 19).unwrap();
         let wednesday = NaiveDate::from_ymd_opt(2026, 5, 20).unwrap();
         let thursday = NaiveDate::from_ymd_opt(2026, 5, 21).unwrap();
-        let friday   = NaiveDate::from_ymd_opt(2026, 5, 22).unwrap();
+        let friday = NaiveDate::from_ymd_opt(2026, 5, 22).unwrap();
         let saturday = NaiveDate::from_ymd_opt(2026, 5, 23).unwrap();
-        let sunday   = NaiveDate::from_ymd_opt(2026, 5, 24).unwrap();
+        let sunday = NaiveDate::from_ymd_opt(2026, 5, 24).unwrap();
         for day in [tuesday, wednesday, thursday, friday, saturday, sunday] {
             assert!(
-                matches!(assert_monday(day), Err(crate::error::AppError::BadRequest(_))),
+                matches!(
+                    assert_monday(day),
+                    Err(crate::error::AppError::BadRequest(_))
+                ),
                 "{day} should not be accepted as a Monday"
             );
         }
@@ -205,7 +211,10 @@ mod tests {
         let svc = repo_rr_to_service(repo);
         assert_eq!(svc.id, 10);
         assert_eq!(svc.user_id, 5);
-        assert_eq!(svc.week_start, NaiveDate::from_ymd_opt(2026, 5, 18).unwrap());
+        assert_eq!(
+            svc.week_start,
+            NaiveDate::from_ymd_opt(2026, 5, 18).unwrap()
+        );
         assert_eq!(svc.reviewed_by, Some(2));
         assert_eq!(svc.status, "approved");
         assert!(svc.rejection_reason.is_none());

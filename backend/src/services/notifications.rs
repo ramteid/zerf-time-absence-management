@@ -10,7 +10,9 @@ use crate::AppState;
 
 // Re-export canonical types from the repository layer so callers only need
 // to import from this module.
-pub use crate::repository::notifications::{Notification, NotificationBroadcaster, NotificationSignal};
+pub use crate::repository::notifications::{
+    Notification, NotificationBroadcaster, NotificationSignal,
+};
 
 pub fn broadcaster() -> NotificationBroadcaster {
     crate::repository::notifications::new_broadcaster()
@@ -117,7 +119,16 @@ pub async fn create_translated_inapp_only(
 ) {
     let title = crate::i18n::translate(language, title_key, &params);
     let body = crate::i18n::translate(language, body_key, &params);
-    create_inapp_only(state, user_id, kind, &title, &body, reference_type, reference_id).await;
+    create_inapp_only(
+        state,
+        user_id,
+        kind,
+        &title,
+        &body,
+        reference_type,
+        reference_id,
+    )
+    .await;
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -168,7 +179,14 @@ pub async fn create_with_frontend_body(
     if let Err(e) = state
         .db
         .notifications
-        .insert(user_id, kind, &title, frontend_body, reference_type, reference_id)
+        .insert(
+            user_id,
+            kind,
+            &title,
+            frontend_body,
+            reference_type,
+            reference_id,
+        )
         .await
     {
         tracing::warn!(target:"zerf::notifications", "insert failed: {e}");

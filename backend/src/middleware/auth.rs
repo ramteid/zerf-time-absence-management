@@ -302,7 +302,13 @@ pub async fn auth_middleware(
     // credentials from being used to access sensitive data.
     if user.must_change_password {
         let request_path = parts.uri.path();
-        let allowed_paths = ["/auth/me", "/auth/password", "/auth/logout", "/auth/preferences", "/settings/public"];
+        let allowed_paths = [
+            "/auth/me",
+            "/auth/password",
+            "/auth/logout",
+            "/auth/preferences",
+            "/settings/public",
+        ];
         if !allowed_paths.contains(&request_path) {
             return Err(AppError::Forbidden);
         }
@@ -569,11 +575,12 @@ mod tests {
             .header(header::COOKIE, "zerf_session=mytoken123")
             .body(Body::empty())
             .unwrap();
-        assert_eq!(extract_token(&req_with_cookie), Some("mytoken123".to_string()));
+        assert_eq!(
+            extract_token(&req_with_cookie),
+            Some("mytoken123".to_string())
+        );
 
-        let req_no_cookie = Request::builder()
-            .body(Body::empty())
-            .unwrap();
+        let req_no_cookie = Request::builder().body(Body::empty()).unwrap();
         assert_eq!(extract_token(&req_no_cookie), None);
 
         let req_wrong_cookie = Request::builder()
