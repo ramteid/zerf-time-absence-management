@@ -356,7 +356,7 @@
 </div>
 
 {#if showDialog}
-  <AbsenceDialog template={showDialog} onClose={handleDialogClose} />
+  <AbsenceDialog template={showDialog} onClose={handleDialogClose} holidays={holidayDates} />
 {/if}
 
 {#if detailAbsence}

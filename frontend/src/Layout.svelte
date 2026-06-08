@@ -2,6 +2,7 @@
   import { api } from "./api.js";
   import {
     currentUser,
+    categories,
     path,
     go,
     notifications,
@@ -45,6 +46,7 @@
     try {
       await api("/auth/logout", { method: "POST" });
     } catch {}
+    categories.set([]);
     currentUser.set(false);
     go("/", false);
     // Tell every other open tab to also return to login.
