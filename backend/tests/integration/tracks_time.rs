@@ -328,14 +328,14 @@ async fn tracks_time_full_workflow() {
         let (st, entries) = admin2.get("/api/v1/time-entries").await;
         assert_eq!(st, StatusCode::OK);
         assert!(
-            entries.as_array().unwrap().len() > 0,
+            !entries.as_array().unwrap().is_empty(),
             "admin2 has time entries before disable"
         );
 
         let (st, absences) = admin2.get("/api/v1/absences").await;
         assert_eq!(st, StatusCode::OK);
         assert!(
-            absences.as_array().unwrap().len() > 0,
+            !absences.as_array().unwrap().is_empty(),
             "admin2 has absences before disable"
         );
 

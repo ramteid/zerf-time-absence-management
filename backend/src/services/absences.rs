@@ -502,6 +502,89 @@ pub struct LeaveBalance {
     pub carryover_expired: bool,
 }
 
+pub async fn compute_balance(
+    app_state: &AppState,
+    requester: &User,
+    target_user_id: i64,
+    year: i32,
+) -> AppResult<LeaveBalance> {
+    use crate::services::absence_balance::{
+        CarryoverRemainingInput, carryover_remaining_days, parse_expiry_date,
+        total_entitlement_with_carryover, vacation_year_context,
+        workdays_for_ranges_in_window,
+    };
+
+    assert_can_access_user(app_state, requester, target_user_id).await?;
+    let repo_user = app_state.db.users.find_by_id(target_user_id).await?.ok_or(AppError::NotFound)?;
+    let target_user = crate::services::users::repo_user_to_auth_user(repo_user);
+    let year_from = NaiveDate::from_ymd_opt(year, 1, 1).ok_or_else(|| AppError::BadRequest("Invalid year.".into()))?;
+    let year_to = NaiveDate::from_ymd_opt(year, 12, 31).ok_or_else(|| AppError::BadRequest("Invalid year.".into()))?;
+    let today = crate::services::settings::app_today(&app_state.pool).await;
+    let vacation_absences: Vec<Absence> = app_state.db.absences.vacation_absences_in_year(target_user_id, year_from, year_to).await?.into_iter().map(repo_absence_to_service).collect();
+    let mut taken_days = 0.0;
+    let mut upcoming_days = 0.0;
+    let mut requested_days = 0.0;
+    for absence in &vacation_absences {
+        let clamped_start = std::cmp::max(absence.start_date, year_from);
+        let clamped_end = std::cmp::min(absence.end_date, year_to);
+        if absence.status == "approved" {
+            if clamped_end <= today {
+                taken_days += workdays(&app_state.pool, target_user.id, clamped_start, clamped_end).await?;
+            } else if clamped_start > today {
+                upcoming_days += workdays(&app_state.pool, target_user.id, clamped_start, clamped_end).await?;
+            } else {
+                taken_days += workdays(&app_state.pool, target_user.id, clamped_start, today).await?;
+                let tomorrow = today + Duration::days(1);
+                if tomorrow <= clamped_end {
+                    upcoming_days += workdays(&app_state.pool, target_user.id, tomorrow, clamped_end).await?;
+                }
+            }
+        } else if absence.status == "requested" || absence.status == "cancellation_pending" {
+            requested_days += workdays(&app_state.pool, target_user.id, clamped_start, clamped_end).await?;
+        }
+    }
+    let expiry_setting = crate::services::settings::load_setting(&app_state.pool, "carryover_expiry_date", "03-31").await?;
+    let expiry_date = parse_expiry_date(&expiry_setting, year);
+    let (effective_entitlement, carryover_days, carryover_expired) = vacation_year_context(&app_state.pool, &target_user, year, today, &expiry_setting).await?;
+    let carryover_remaining = carryover_remaining_days(CarryoverRemainingInput {
+        pool: &app_state.pool,
+        user_id: target_user.id,
+        vacation_absences: &vacation_absences,
+        year_start: year_from,
+        today,
+        expiry_date,
+        carryover_days,
+        carryover_expired,
+    }).await?;
+    let total_entitlement = total_entitlement_with_carryover(effective_entitlement, carryover_days, carryover_expired);
+    let available = if carryover_expired {
+        if let Some(expiry) = expiry_date {
+            let reserved_ranges: Vec<(NaiveDate, NaiveDate)> = vacation_absences.iter().map(|a| (a.start_date, a.end_date)).collect();
+            let pre_window_end = std::cmp::min(expiry, year_to);
+            let post_window_start = expiry + Duration::days(1);
+            let pre_reserved = if year_from <= pre_window_end { workdays_for_ranges_in_window(&app_state.pool, target_user.id, &reserved_ranges, year_from, pre_window_end).await? } else { 0.0 };
+            let post_reserved = if post_window_start <= year_to { workdays_for_ranges_in_window(&app_state.pool, target_user.id, &reserved_ranges, post_window_start, year_to).await? } else { 0.0 };
+            let base_consumed_before_or_on_expiry = (pre_reserved - carryover_days as f64).max(0.0);
+            effective_entitlement as f64 - base_consumed_before_or_on_expiry - post_reserved
+        } else {
+            total_entitlement - taken_days - upcoming_days - requested_days
+        }
+    } else {
+        total_entitlement - taken_days - upcoming_days - requested_days
+    };
+    Ok(LeaveBalance {
+        annual_entitlement: effective_entitlement,
+        already_taken: taken_days,
+        approved_upcoming: upcoming_days,
+        requested: requested_days,
+        available,
+        carryover_days,
+        carryover_remaining,
+        carryover_expiry: expiry_date.map(|d| d.to_string()),
+        carryover_expired,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -522,6 +605,7 @@ mod tests {
             weekly_hours: 40.0,
             workdays_per_week: 5,
             start_date: NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
+            hire_date: None,
             active: true,
             must_change_password: false,
             created_at: Utc::now(),
@@ -828,87 +912,4 @@ mod tests {
         assert_eq!(json["approved_upcoming"], serde_json::json!(2.5));
         assert_eq!(json["available"], serde_json::json!(19.5));
     }
-}
-
-pub async fn compute_balance(
-    app_state: &AppState,
-    requester: &User,
-    target_user_id: i64,
-    year: i32,
-) -> AppResult<LeaveBalance> {
-    use crate::services::absence_balance::{
-        CarryoverRemainingInput, carryover_remaining_days, parse_expiry_date,
-        total_entitlement_with_carryover, vacation_year_context,
-        workdays_for_ranges_in_window,
-    };
-
-    assert_can_access_user(app_state, requester, target_user_id).await?;
-    let repo_user = app_state.db.users.find_by_id(target_user_id).await?.ok_or(AppError::NotFound)?;
-    let target_user = crate::services::users::repo_user_to_auth_user(repo_user);
-    let year_from = NaiveDate::from_ymd_opt(year, 1, 1).ok_or_else(|| AppError::BadRequest("Invalid year.".into()))?;
-    let year_to = NaiveDate::from_ymd_opt(year, 12, 31).ok_or_else(|| AppError::BadRequest("Invalid year.".into()))?;
-    let today = crate::services::settings::app_today(&app_state.pool).await;
-    let vacation_absences: Vec<Absence> = app_state.db.absences.vacation_absences_in_year(target_user_id, year_from, year_to).await?.into_iter().map(repo_absence_to_service).collect();
-    let mut taken_days = 0.0;
-    let mut upcoming_days = 0.0;
-    let mut requested_days = 0.0;
-    for absence in &vacation_absences {
-        let clamped_start = std::cmp::max(absence.start_date, year_from);
-        let clamped_end = std::cmp::min(absence.end_date, year_to);
-        if absence.status == "approved" {
-            if clamped_end <= today {
-                taken_days += workdays(&app_state.pool, target_user.id, clamped_start, clamped_end).await?;
-            } else if clamped_start > today {
-                upcoming_days += workdays(&app_state.pool, target_user.id, clamped_start, clamped_end).await?;
-            } else {
-                taken_days += workdays(&app_state.pool, target_user.id, clamped_start, today).await?;
-                let tomorrow = today + Duration::days(1);
-                if tomorrow <= clamped_end {
-                    upcoming_days += workdays(&app_state.pool, target_user.id, tomorrow, clamped_end).await?;
-                }
-            }
-        } else if absence.status == "requested" || absence.status == "cancellation_pending" {
-            requested_days += workdays(&app_state.pool, target_user.id, clamped_start, clamped_end).await?;
-        }
-    }
-    let expiry_setting = crate::services::settings::load_setting(&app_state.pool, "carryover_expiry_date", "03-31").await?;
-    let expiry_date = parse_expiry_date(&expiry_setting, year);
-    let (effective_entitlement, carryover_days, carryover_expired) = vacation_year_context(&app_state.pool, &target_user, year, today, &expiry_setting).await?;
-    let carryover_remaining = carryover_remaining_days(CarryoverRemainingInput {
-        pool: &app_state.pool,
-        user_id: target_user.id,
-        vacation_absences: &vacation_absences,
-        year_start: year_from,
-        today,
-        expiry_date,
-        carryover_days,
-        carryover_expired,
-    }).await?;
-    let total_entitlement = total_entitlement_with_carryover(effective_entitlement, carryover_days, carryover_expired);
-    let available = if carryover_expired {
-        if let Some(expiry) = expiry_date {
-            let reserved_ranges: Vec<(NaiveDate, NaiveDate)> = vacation_absences.iter().map(|a| (a.start_date, a.end_date)).collect();
-            let pre_window_end = std::cmp::min(expiry, year_to);
-            let post_window_start = expiry + Duration::days(1);
-            let pre_reserved = if year_from <= pre_window_end { workdays_for_ranges_in_window(&app_state.pool, target_user.id, &reserved_ranges, year_from, pre_window_end).await? } else { 0.0 };
-            let post_reserved = if post_window_start <= year_to { workdays_for_ranges_in_window(&app_state.pool, target_user.id, &reserved_ranges, post_window_start, year_to).await? } else { 0.0 };
-            let base_consumed_before_or_on_expiry = (pre_reserved - carryover_days as f64).max(0.0);
-            effective_entitlement as f64 - base_consumed_before_or_on_expiry - post_reserved
-        } else {
-            total_entitlement - taken_days - upcoming_days - requested_days
-        }
-    } else {
-        total_entitlement - taken_days - upcoming_days - requested_days
-    };
-    Ok(LeaveBalance {
-        annual_entitlement: effective_entitlement,
-        already_taken: taken_days,
-        approved_upcoming: upcoming_days,
-        requested: requested_days,
-        available,
-        carryover_days,
-        carryover_remaining,
-        carryover_expiry: expiry_date.map(|d| d.to_string()),
-        carryover_expired,
-    })
 }

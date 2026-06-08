@@ -29,7 +29,7 @@ async fn holidays_full_workflow() {
     let (st, regions) = admin.get("/api/v1/holidays/regions/DE").await;
     assert_eq!(st, StatusCode::OK, "regions endpoint should be reachable");
     assert!(
-        regions.as_array().expect("regions array").len() > 0,
+        !regions.as_array().expect("regions array").is_empty(),
         "DE should provide at least one region code"
     );
 
