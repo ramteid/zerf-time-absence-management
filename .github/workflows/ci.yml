@@ -31,6 +31,8 @@ jobs:
           workspaces: backend
       - name: Build (release)
         run: cargo build --release --locked
+      - name: Unit tests
+        run: cargo test --lib
       - name: Integration tests (testcontainers)
         env:
           TEST_REFERENCE_DATE: "2030-01-07"
