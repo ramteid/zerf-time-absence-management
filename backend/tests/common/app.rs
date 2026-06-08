@@ -48,7 +48,11 @@ impl TestApp {
     async fn spawn_unseeded_inner() -> (Self, String) {
         let (admin_database_url, database_url_base, cleanup_admin_url, _container) =
             if let Ok(url) = std::env::var("TEST_DATABASE_URL") {
-                let base = url.rsplitn(2, '/').nth(1).unwrap_or(&url).to_string();
+                let base = url
+                    .rsplit_once('/')
+                    .map(|(before, _)| before)
+                    .unwrap_or(&url)
+                    .to_string();
                 let cleanup_url = Some(url.clone());
                 (url, base, cleanup_url, None)
             } else {
@@ -165,7 +169,11 @@ impl TestApp {
         let (admin_database_url, database_url_base, cleanup_admin_url, _container) =
             if let Ok(url) = std::env::var("TEST_DATABASE_URL") {
                 // No container runtime — use a pre-existing local Postgres instance.
-                let base = url.rsplitn(2, '/').nth(1).unwrap_or(&url).to_string();
+                let base = url
+                    .rsplit_once('/')
+                    .map(|(before, _)| before)
+                    .unwrap_or(&url)
+                    .to_string();
                 let cleanup_url = Some(url.clone());
                 (url, base, cleanup_url, None)
             } else {

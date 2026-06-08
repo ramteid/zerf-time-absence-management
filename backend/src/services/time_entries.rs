@@ -198,6 +198,51 @@ pub async fn create(
     Ok(created_entry)
 }
 
+pub struct TimeEntryInput {
+    pub entry_date: NaiveDate,
+    pub start_time: String,
+    pub end_time: String,
+    pub category_id: i64,
+    pub comment: Option<String>,
+}
+
+pub async fn update(
+    app_state: &AppState,
+    requester: &User,
+    entry_id: i64,
+    input: TimeEntryInput,
+) -> AppResult<TimeEntry> {
+    let owner_id = app_state.db.time_entries.get_user_id(entry_id).await?;
+    if owner_id == requester.id {
+        require_tracks_time(requester)?;
+    }
+    let entry_data = crate::repository::NewEntryData {
+        entry_date: input.entry_date,
+        start_time: input.start_time,
+        end_time: input.end_time,
+        category_id: input.category_id,
+        comment: input.comment,
+    };
+    let (prev, updated) = app_state
+        .db
+        .time_entries
+        .update(entry_id, requester.id, requester.is_admin(), &entry_data)
+        .await?;
+    let previous_entry = repo_entry_to_service(prev);
+    let updated_entry = repo_entry_to_service(updated);
+    audit::log(
+        &app_state.pool,
+        requester.id,
+        "updated",
+        "time_entries",
+        entry_id,
+        serde_json::to_value(&previous_entry).ok(),
+        serde_json::to_value(&updated_entry).ok(),
+    )
+    .await;
+    Ok(updated_entry)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -265,6 +310,7 @@ mod tests {
             first_name: "A".to_string(), last_name: "B".to_string(),
             role: "employee".to_string(), weekly_hours: 40.0, workdays_per_week: 5,
             start_date: chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
+            hire_date: None,
             active: true, must_change_password: false, created_at: Utc::now(),
             allow_reopen_without_approval: false, dark_mode: false,
             overtime_start_balance_min: 0, tracks_time: true,
@@ -274,49 +320,4 @@ mod tests {
         non_tracking.tracks_time = false;
         assert!(require_tracks_time(&non_tracking).is_err());
     }
-}
-
-pub struct TimeEntryInput {
-    pub entry_date: NaiveDate,
-    pub start_time: String,
-    pub end_time: String,
-    pub category_id: i64,
-    pub comment: Option<String>,
-}
-
-pub async fn update(
-    app_state: &AppState,
-    requester: &User,
-    entry_id: i64,
-    input: TimeEntryInput,
-) -> AppResult<TimeEntry> {
-    let owner_id = app_state.db.time_entries.get_user_id(entry_id).await?;
-    if owner_id == requester.id {
-        require_tracks_time(requester)?;
-    }
-    let entry_data = crate::repository::NewEntryData {
-        entry_date: input.entry_date,
-        start_time: input.start_time,
-        end_time: input.end_time,
-        category_id: input.category_id,
-        comment: input.comment,
-    };
-    let (prev, updated) = app_state
-        .db
-        .time_entries
-        .update(entry_id, requester.id, requester.is_admin(), &entry_data)
-        .await?;
-    let previous_entry = repo_entry_to_service(prev);
-    let updated_entry = repo_entry_to_service(updated);
-    audit::log(
-        &app_state.pool,
-        requester.id,
-        "updated",
-        "time_entries",
-        entry_id,
-        serde_json::to_value(&previous_entry).ok(),
-        serde_json::to_value(&updated_entry).ok(),
-    )
-    .await;
-    Ok(updated_entry)
 }
