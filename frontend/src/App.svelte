@@ -69,20 +69,25 @@
       csrfToken.set(currentUserResponse.csrf_token || null);
       theme.set(currentUserResponse.dark_mode ? "dark" : "light");
       bootNetworkError = false;
-      try {
-        const { earliest_start_date } = await api("/users/earliest-start-date");
-        earliestStartDate.set(earliest_start_date ?? null);
-      } catch {}
-      if (!$categories.length) {
+      // Skip data endpoints while the user must still change their password —
+      // the middleware blocks them with 403, which would trigger a spurious
+      // error toast before the password-change screen even appears.
+      if (!currentUserResponse.must_change_password) {
         try {
-          categories.set(await api("/categories"));
-          debugLog("loadMe:categories-loaded");
-        } catch (error) {
-          debugLog("loadMe:categories-failed", { message: error?.message ?? null });
-          toast(
-            $t("Failed to load categories. Some features may be unavailable."),
-            "error",
-          );
+          const { earliest_start_date } = await api("/users/earliest-start-date");
+          earliestStartDate.set(earliest_start_date ?? null);
+        } catch {}
+        if (!$categories.length) {
+          try {
+            categories.set(await api("/categories"));
+            debugLog("loadMe:categories-loaded");
+          } catch (error) {
+            debugLog("loadMe:categories-failed", { message: error?.message ?? null });
+            toast(
+              $t("Failed to load categories. Some features may be unavailable."),
+              "error",
+            );
+          }
         }
       }
     } catch (err) {

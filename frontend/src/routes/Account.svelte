@@ -1,6 +1,6 @@
 <script>
   import { api } from "../api.js";
-  import { currentUser, settings, theme, toast } from "../stores.js";
+  import { categories, currentUser, settings, theme, toast } from "../stores.js";
   import { t, roleLabel, formatHours } from "../i18n.js";
   import { fmtDate, appTodayDate } from "../format.js";
   import { isAssistantUser } from "../rolePolicy.js";
@@ -83,6 +83,13 @@
         // Storing credentials is best-effort; ignore failures.
       }
       currentUser.update((u) => ({ ...u, must_change_password: false }));
+      // Now that the password restriction is lifted, load categories if they
+      // weren't loaded yet (they were skipped during boot due to must_change_password).
+      if (!$categories.length) {
+        api("/categories")
+          .then((cats) => categories.set(cats))
+          .catch(() => {});
+      }
       toast($t("Password changed."), "ok");
       cur = "";
       nw = "";
@@ -219,9 +226,7 @@
 
   <!-- Password -->
   <div class="zf-card" style="padding:20px;margin-bottom:16px">
-    <div style="font-size:14px;font-weight:400;margin-bottom:14px">
-      {$t("Change password")}
-    </div>
+    <div class="field-card-title">{$t("Change password")}</div>
     <div class="field-group">
       {#if !$currentUser.must_change_password}
         <div>
@@ -276,15 +281,11 @@
 
   <!-- Appearance -->
   <div class="zf-card" style="padding:20px;margin-bottom:16px">
-    <div style="font-size:14px;font-weight:400;margin-bottom:14px">
-      {$t("Appearance")}
-    </div>
-    <div style="display:flex;align-items:center;justify-content:space-between">
+    <div class="field-card-title">{$t("Appearance")}</div>
+    <div class="field-toggle-row">
       <div>
-        <div style="font-size:14px">{$t("Dark mode")}</div>
-        <div style="font-size:12px;color:var(--text-tertiary);margin-top:2px">
-          {$t("Use dark colour scheme")}
-        </div>
+        <div class="field-toggle-row-title">{$t("Dark mode")}</div>
+        <div class="field-toggle-row-hint">{$t("Use dark colour scheme")}</div>
       </div>
       <button
         class="zf-btn"
