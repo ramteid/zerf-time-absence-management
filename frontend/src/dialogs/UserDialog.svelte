@@ -251,12 +251,10 @@
 >
   {#if !showTempPassword}
 
-    <div>
+    <div class="field-group">
       <div class="field-row">
         <div>
-          <label class="zf-label" for="user-first-name"
-            >{$t("First name")}</label
-          >
+          <label class="zf-label" for="user-first-name">{$t("First name")}</label>
           <input
             id="user-first-name"
             class="zf-input"
@@ -295,9 +293,7 @@
           </select>
         </div>
         <div>
-          <label class="zf-label" for="user-start-date"
-            >{$t("Start date")}</label
-          >
+          <label class="zf-label" for="user-start-date">{$t("Start date")}</label>
           <DatePicker
             id="user-start-date"
             bind:value={start_date}
@@ -306,10 +302,8 @@
         </div>
       </div>
       <div>
-        <div style="display:flex;align-items:center;gap:6px">
-          <label class="zf-label" for="user-hire-date" style="margin-bottom:0"
-            >{$t("Hire date")}</label
-          >
+        <div class="field-label-row">
+          <label class="zf-label" for="user-hire-date">{$t("Hire date")}</label>
           {#if hire_date}
             <button
               type="button"
@@ -322,7 +316,7 @@
           {/if}
         </div>
         <DatePicker id="user-hire-date" bind:value={hire_date} container={dlg} />
-        <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
+        <div class="field-hint">
           {$t(
             "Used to calculate the prorated annual leave entitlement for employees who already worked before they started using Zerf. Leave empty to use the start date.",
           )}
@@ -330,9 +324,7 @@
       </div>
       <div class="field-row">
         <div>
-          <label class="zf-label" for="user-weekly-hours"
-            >{$t("Weekly hours")}</label
-          >
+          <label class="zf-label" for="user-weekly-hours">{$t("Weekly hours")}</label>
           <input
             id="user-weekly-hours"
             class="zf-input"
@@ -345,9 +337,7 @@
           />
         </div>
         <div>
-          <label class="zf-label" for="user-workdays-per-week"
-            >{$t("Workdays per week")}</label
-          >
+          <label class="zf-label" for="user-workdays-per-week">{$t("Workdays per week")}</label>
           <input
             id="user-workdays-per-week"
             class="zf-input"
@@ -372,21 +362,19 @@
           bind:value={overtime_start_balance_hours}
           disabled={isAssistantRole}
         />
-        <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
+        <div class="field-hint">
           {$t(
             "Initial overtime balance in hours when the user starts. Negative = deficit.",
           )}
         </div>
       </div>
       <div>
-        <div
-          style="font-size:13px;font-weight:400;margin-bottom:8px;margin-top:4px"
-        >
-          {$t("Vacation days per year")}
-        </div>
-        <div style="margin-bottom:10px;display:flex;gap:12px;flex-wrap:wrap">
+        <div class="field-section-label">{$t("Vacation days per year")}</div>
+        <div class="field-row">
           <div>
-            <label class="zf-label" for="leave-cur">{$t("Annual leave days")} {_thisYear}</label>
+            <label class="zf-label" for="leave-cur"
+              >{$t("Annual leave days")} {_thisYear}</label
+            >
             <input
               id="leave-cur"
               class="zf-input"
@@ -394,11 +382,12 @@
               min="0"
               max="366"
               bind:value={leave_days_current_year}
-              style="max-width:120px"
             />
           </div>
           <div>
-            <label class="zf-label" for="leave-nxt">{$t("Annual leave days")} {_nextYear}</label>
+            <label class="zf-label" for="leave-nxt"
+              >{$t("Annual leave days")} {_nextYear}</label
+            >
             <input
               id="leave-nxt"
               class="zf-input"
@@ -406,16 +395,15 @@
               min="0"
               max="366"
               bind:value={leave_days_next_year}
-              style="max-width:120px"
             />
           </div>
         </div>
       </div>
       {#if !isNew}
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--border)">
+        <div class="field-toggle-row">
           <div>
-            <div style="font-size:13px;font-weight:500">{$t("Account active")}</div>
-            <div style="font-size:11px;color:var(--text-tertiary);margin-top:2px">
+            <div class="field-toggle-row-title">{$t("Account active")}</div>
+            <div class="field-toggle-row-hint">
               {$t("Inactive users cannot log in.")}
             </div>
           </div>
@@ -430,10 +418,10 @@
         </div>
       {/if}
       {#if normalizedRole === "admin"}
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--border)">
+        <div class="field-toggle-row">
           <div>
-            <div style="font-size:13px;font-weight:500">{$t("Enable time tracking")}</div>
-            <div style="font-size:11px;color:var(--text-tertiary);margin-top:2px">
+            <div class="field-toggle-row-title">{$t("Enable time tracking")}</div>
+            <div class="field-toggle-row-hint">
               {$t("When disabled, this admin works in management-only mode (no time entries or absences).")}
             </div>
           </div>
@@ -508,7 +496,7 @@
               {/each}
             </div>
           {/if}
-          <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
+          <div class="field-hint">
             {$t("At least one approver is required for employees and team leads.")}
           </div>
         </div>
