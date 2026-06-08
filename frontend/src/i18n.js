@@ -366,6 +366,10 @@ const TRANSLATIONS = {
     "Initial overtime balance in hours when the user starts. Negative = deficit.":
       "Anfangssaldo der Überstunden in Stunden zum Startdatum. Negativ = Defizit.",
     "Start date": "Startdatum",
+    "Hire date": "Eintrittsdatum",
+    "Used to calculate the prorated annual leave entitlement for employees who already worked before they started using Zerf. Leave empty to use the start date.":
+      "Wird verwendet, um den anteiligen Urlaubsanspruch für Mitarbeitende zu berechnen, die bereits vor der Nutzung von Zerf gearbeitet haben. Leer lassen, um das Startdatum zu verwenden.",
+    Clear: "Löschen",
     Settings: "Einstellungen",
     "Language settings": "Spracheinstellungen",
     "Interface language": "Oberflächensprache",

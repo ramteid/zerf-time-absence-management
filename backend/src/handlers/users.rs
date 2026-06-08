@@ -17,7 +17,17 @@ use axum::{
     Json,
 };
 use chrono::NaiveDate;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+
+/// Distinguishes "field omitted" (`None`, leave unchanged) from "field present"
+/// (`Some(value)`, including `Some(None)` for explicit `null` — clear back to the
+/// `start_date` fallback). Mirrors `deserialize_nullable_string` in `handlers::categories`.
+fn deserialize_nullable_date<'de, D>(deserializer: D) -> Result<Option<Option<NaiveDate>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<NaiveDate>::deserialize(deserializer).map(Some)
+}
 
 /// Per-user reopen policy. Returned by `GET /team-settings` for every active
 /// user; visible and editable by any lead/admin.
@@ -139,6 +149,7 @@ pub async fn get_one(
         "weekly_hours": user.weekly_hours,
         "workdays_per_week": user.workdays_per_week,
         "start_date": user.start_date,
+        "hire_date": user.hire_date,
         "active": user.active,
         "must_change_password": user.must_change_password,
         "created_at": user.created_at,
@@ -165,6 +176,11 @@ pub struct NewUser {
     /// Leave days for next year (required on creation).
     pub leave_days_next_year: i64,
     pub start_date: NaiveDate,
+    /// Optional employment start date used to anchor annual-leave proration
+    /// instead of `start_date`. Useful when onboarding an employee who already
+    /// worked the full year before adopting Zerf mid-year.
+    #[serde(default)]
+    pub hire_date: Option<NaiveDate>,
     pub overtime_start_balance_min: Option<i64>,
     pub password: Option<String>,
     /// Mandatory for non-admin users: list of team leads/admins who can approve this user's submissions.
@@ -202,6 +218,7 @@ pub async fn create(
         leave_days_current_year: body.leave_days_current_year,
         leave_days_next_year: body.leave_days_next_year,
         start_date: body.start_date,
+        hire_date: body.hire_date,
         overtime_start_balance_min: body.overtime_start_balance_min,
         password: body.password,
         approver_ids: body.approver_ids,
@@ -228,6 +245,10 @@ pub struct UpdateUser {
     /// If provided, sets leave days for next year.
     pub leave_days_next_year: Option<i64>,
     pub start_date: Option<NaiveDate>,
+    /// Triple state via double-Option: omitted = leave unchanged, `null` =
+    /// clear back to the `start_date` fallback, value = set explicitly.
+    #[serde(default, deserialize_with = "deserialize_nullable_date")]
+    pub hire_date: Option<Option<NaiveDate>>,
     pub active: Option<bool>,
     /// List of approvers (team leads/admins) for this user.
     /// If provided (even as empty list), replaces all existing approvers.
@@ -488,6 +509,7 @@ pub async fn update(
         body.weekly_hours,
         effective_workdays_update,
         effective_start_date,
+        body.hire_date,
         body.active,
         body.allow_reopen_without_approval,
         body.overtime_start_balance_min,

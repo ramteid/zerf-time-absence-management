@@ -17,6 +17,7 @@ pub struct NewUser {
     pub leave_days_current_year: i64,
     pub leave_days_next_year: i64,
     pub start_date: chrono::NaiveDate,
+    pub hire_date: Option<chrono::NaiveDate>,
     pub overtime_start_balance_min: Option<i64>,
     pub password: Option<String>,
     pub approver_ids: Vec<i64>,
@@ -40,6 +41,7 @@ pub fn repo_user_to_auth_user(u: crate::repository::User) -> User {
         weekly_hours: u.weekly_hours,
         workdays_per_week: u.workdays_per_week,
         start_date: u.start_date,
+        hire_date: u.hire_date,
         active: u.active,
         must_change_password: u.must_change_password,
         created_at: u.created_at,
@@ -217,6 +219,7 @@ pub async fn create_repo_user(
     weekly_hours: f64,
     workdays_per_week: i16,
     start_date: chrono::NaiveDate,
+    hire_date: Option<chrono::NaiveDate>,
     overtime_start_balance_min: i64,
     tracks_time: bool,
 ) -> Result<i64, crate::db::SqlxError> {
@@ -230,6 +233,7 @@ pub async fn create_repo_user(
         weekly_hours,
         workdays_per_week,
         start_date,
+        hire_date,
         true,
         overtime_start_balance_min,
         tracks_time,
@@ -290,6 +294,7 @@ pub async fn update_basic_tx(
     weekly_hours: Option<f64>,
     workdays_per_week: Option<i16>,
     start_date: Option<chrono::NaiveDate>,
+    hire_date: Option<Option<chrono::NaiveDate>>,
     active: Option<bool>,
     allow_reopen_without_approval: Option<bool>,
     overtime_start_balance_min: Option<i64>,
@@ -305,6 +310,7 @@ pub async fn update_basic_tx(
         weekly_hours,
         workdays_per_week,
         start_date,
+        hire_date,
         active,
         allow_reopen_without_approval,
         overtime_start_balance_min,
@@ -429,6 +435,7 @@ pub async fn team_settings_update(
         None,
         None,
         None,
+        None,
         Some(allow_reopen_without_approval),
         None,
         None,
@@ -536,6 +543,7 @@ pub async fn create(
         body.weekly_hours,
         effective_workdays,
         body.start_date,
+        body.hire_date,
         true,
         overtime_balance,
         body.tracks_time,
@@ -636,6 +644,7 @@ mod tests {
             weekly_hours: 39.0,
             workdays_per_week: 5,
             start_date: chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
+            hire_date: None,
             active: true,
             must_change_password: false,
             created_at: Utc::now(),
@@ -657,6 +666,7 @@ mod tests {
         assert_eq!(auth.role, "admin");
         assert_eq!(auth.weekly_hours, 39.0);
         assert_eq!(auth.workdays_per_week, 5);
+        assert_eq!(auth.hire_date, None);
         assert!(auth.active);
         assert!(!auth.must_change_password);
         assert_eq!(auth.overtime_start_balance_min, 0);
@@ -667,12 +677,14 @@ mod tests {
     #[test]
     fn repo_user_to_auth_user_respects_flag_fields() {
         let mut src = repo_user(7, "bob@example.com", "employee");
+        src.hire_date = chrono::NaiveDate::from_ymd_opt(2020, 3, 1);
         src.must_change_password = true;
         src.allow_reopen_without_approval = true;
         src.dark_mode = true;
         src.tracks_time = false;
         src.overtime_start_balance_min = 480;
         let auth = repo_user_to_auth_user(src);
+        assert_eq!(auth.hire_date, chrono::NaiveDate::from_ymd_opt(2020, 3, 1));
         assert!(auth.must_change_password);
         assert!(auth.allow_reopen_without_approval);
         assert!(auth.dark_mode);
