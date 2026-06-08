@@ -334,7 +334,12 @@ impl<'a> Renderer<'a> {
         self.y += 21.0;
         self.draw_table_header();
 
-        for (row_index, day) in section.report.days.iter().enumerate() {
+        // Alternating shading is keyed to the rendered row count (one increment
+        // per drawn row, including each individual entry within a day) — not the
+        // day index — so it matches the original browser-side renderer exactly
+        // even on days with multiple time entries.
+        let mut row_count: usize = 0;
+        for day in &section.report.days {
             let weekday = i18n::weekday_label(self.language, &day.weekday);
             let absence = day
                 .absence
@@ -342,7 +347,6 @@ impl<'a> Renderer<'a> {
                 .map(|kind| i18n::absence_kind_label(self.language, kind))
                 .unwrap_or_default();
             let holiday = day.holiday.clone().unwrap_or_default();
-            let shaded = row_index % 2 == 1;
             if day.entries.is_empty() {
                 self.draw_row(
                     &[
@@ -355,8 +359,9 @@ impl<'a> Renderer<'a> {
                         (6, absence.clone()),
                         (7, holiday.clone()),
                     ],
-                    shaded,
+                    row_count % 2 == 1,
                 );
+                row_count += 1;
             } else {
                 for entry in &day.entries {
                     self.draw_row(
@@ -370,8 +375,9 @@ impl<'a> Renderer<'a> {
                             (6, absence.clone()),
                             (7, holiday.clone()),
                         ],
-                        shaded,
+                        row_count % 2 == 1,
                     );
+                    row_count += 1;
                 }
             }
         }
