@@ -301,6 +301,168 @@ pub async fn build_range_with_user(
     })
 }
 
+/// Build the per-day flextime ledger for an already-resolved user across
+/// `from..=to`. This is the data behind the `/reports/flextime` endpoint,
+/// factored out so the timesheet PDF can reuse the exact same seeding and
+/// accumulation logic for potentially many users within a single request
+/// without going through the HTTP layer.
+pub async fn build_flextime_for_user(
+    pool: &crate::db::DatabasePool,
+    user: &crate::middleware::auth::User,
+    from: NaiveDate,
+    to: NaiveDate,
+) -> AppResult<Vec<FlextimeDay>> {
+    // Assistant role is the canonical source for "no flextime account" behavior.
+    if is_assistant_role(&user.role) {
+        return Ok(vec![]);
+    }
+    let target_user_id = user.id;
+    let target_per_day_min = {
+        let weekly_hours = user.weekly_hours;
+        let workdays_per_week = user.workdays_per_week;
+        (weekly_hours / f64::from(workdays_per_week) * 60.0).round() as i64
+    };
+
+    let reports_db = crate::repository::ReportDb::new(pool.clone());
+
+    // Seed cumulative at `from - 1` via month-level overtime plus a small
+    // partial-month report, so per-day flextime processing stays within the
+    // requested output range.
+    // Fetch today early so the seed clamp below can use it. The flextime balance
+    // is defined as "balance at end of yesterday", so seed and main loop alike
+    // must never include today's contribution.
+    let today = crate::services::settings::app_today(pool).await;
+    let last_balance_day = today - Duration::days(1);
+
+    let mut cumulative_min = if from < user.start_date {
+        0
+    } else {
+        user.overtime_start_balance_min
+    };
+    if from > user.start_date {
+        // Cap the seed end at yesterday so today's diff cannot leak into the
+        // seeded cumulative when the requested range starts at or after today.
+        let day_before_from = (from - Duration::days(1)).min(last_balance_day);
+        let month_start =
+            NaiveDate::from_ymd_opt(day_before_from.year(), day_before_from.month(), 1)
+                .ok_or_else(|| AppError::BadRequest("date".into()))?;
+
+        let cumulative_before_month = if month_start <= user.start_date {
+            user.overtime_start_balance_min
+        } else {
+            let previous_month_end = month_start - Duration::days(1);
+            cumulative_at_month_end(
+                pool,
+                target_user_id,
+                previous_month_end.year(),
+                previous_month_end.month(),
+                user.start_date,
+                user.overtime_start_balance_min,
+            )
+            .await?
+        };
+
+        let seed_from = std::cmp::max(month_start, user.start_date);
+        if seed_from <= day_before_from {
+            let month_seed_report =
+                build_range_with_user(pool, user, seed_from, day_before_from, "seed").await?;
+            cumulative_min = cumulative_before_month + month_seed_report.diff_min;
+        } else {
+            cumulative_min = cumulative_before_month;
+        }
+    }
+
+    let time_entries_raw = reports_db
+        .flextime_entries(target_user_id, from, to)
+        .await?;
+
+    let mut approved_crediting_minutes_by_day: HashMap<NaiveDate, i64> = HashMap::new();
+    for (entry_date, start_time, end_time, status, counts_as_work) in time_entries_raw {
+        if !counts_as_work || status != "approved" {
+            continue;
+        }
+        let minutes =
+            (parse_report_time(&end_time)? - parse_report_time(&start_time)?).num_minutes();
+        *approved_crediting_minutes_by_day
+            .entry(entry_date)
+            .or_insert(0) += minutes;
+    }
+
+    let approved_absences = reports_db
+        .approved_absence_rows(target_user_id, from, to)
+        .await?;
+
+    // Expand absence ranges into a per-day map so each day can look up its kind in O(1).
+    let mut absence_by_day: HashMap<NaiveDate, String> = HashMap::new();
+    for (absence_start, absence_end, absence_kind) in approved_absences {
+        let mut day = absence_start.max(from);
+        while day <= absence_end.min(to) {
+            absence_by_day
+                .entry(day)
+                .or_insert_with(|| absence_kind.clone());
+            day += Duration::days(1);
+        }
+    }
+
+    let language = i18n::load_ui_language(pool).await.unwrap_or_default();
+
+    let holiday_map: HashMap<NaiveDate, String> = reports_db
+        .holiday_rows(from, to)
+        .await?
+        .into_iter()
+        .map(|(date, name, local_name)| {
+            (date, i18n::holiday_display_name(&language, name, local_name))
+        })
+        .collect();
+
+    let mut flextime_days = vec![];
+    let mut current_date = from;
+    while current_date <= to {
+        // Inject the configured overtime start balance on the user's first day
+        // when the requested range begins before that date.
+        if current_date == user.start_date && from < user.start_date {
+            cumulative_min += user.overtime_start_balance_min;
+        }
+        let holiday = holiday_map.get(&current_date).cloned();
+        let absence = absence_by_day.get(&current_date).cloned();
+        let before_start = current_date < user.start_date;
+        // The flextime balance is defined as "up to and including yesterday";
+        // today and any future day contribute zero to the cumulative balance.
+        let after_today = current_date >= today;
+        let absence_blocks_target = absence
+            .as_deref()
+            .map(absence_removes_target)
+            .unwrap_or(false);
+        let is_workday = is_contract_workday(current_date, user.workdays_per_week)
+            && holiday.is_none()
+            && !absence_blocks_target
+            && !before_start
+            && !after_today;
+        let target = if is_workday { target_per_day_min } else { 0 };
+        let actual = if before_start || after_today {
+            0
+        } else {
+            approved_crediting_minutes_by_day
+                .get(&current_date)
+                .copied()
+                .unwrap_or(0)
+        };
+        let day_diff_min = actual - target;
+        cumulative_min += day_diff_min;
+        flextime_days.push(FlextimeDay {
+            date: current_date,
+            actual_min: actual,
+            target_min: target,
+            diff_min: day_diff_min,
+            cumulative_min,
+            absence,
+            holiday,
+        });
+        current_date += Duration::days(1);
+    }
+    Ok(flextime_days)
+}
+
 pub async fn build_range(
     pool: &crate::db::DatabasePool,
     user_id: i64,
@@ -646,6 +808,30 @@ pub fn csv_response(r: MonthReport, uid: i64, file_label: &str) -> AppResult<Res
         header::CONTENT_DISPOSITION,
         axum::http::HeaderValue::from_str(&content_disposition).unwrap_or_else(|_| {
             axum::http::HeaderValue::from_static("attachment; filename=\"report.csv\"")
+        }),
+    );
+    Ok(response)
+}
+
+/// Build an HTTP file-download response for a generated timesheet PDF.
+/// `file_label` becomes the download filename verbatim (the caller assembles
+/// it, e.g. `user-{id}-{range}` or `team-{range}`); it is sanitised the same
+/// way `csv_response` sanitises its label so the header stays well-formed.
+pub fn pdf_response(bytes: Vec<u8>, file_label: &str) -> AppResult<Response> {
+    let mut response = Response::new(axum::body::Body::from(bytes));
+    response
+        .headers_mut()
+        .insert(header::CONTENT_TYPE, axum::http::HeaderValue::from_static("application/pdf"));
+    let safe_label: String = file_label
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .take(60)
+        .collect();
+    let content_disposition = format!("attachment; filename=\"report-{}.pdf\"", safe_label);
+    response.headers_mut().insert(
+        header::CONTENT_DISPOSITION,
+        axum::http::HeaderValue::from_str(&content_disposition).unwrap_or_else(|_| {
+            axum::http::HeaderValue::from_static("attachment; filename=\"report.pdf\"")
         }),
     );
     Ok(response)

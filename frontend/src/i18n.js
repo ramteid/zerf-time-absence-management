@@ -126,6 +126,9 @@ const TRANSLATIONS = {
     "Invalid date": "Invalid date.",
     "Invalid date.": "Invalid date.",
     "Select an employee.": "Select an employee.",
+    All: "All",
+    "CSV export is only available for a single employee.":
+      "CSV export is only available for a single employee.",
     "end_date must be >= start_date.": "From cannot be after To.",
     "Absence range exceeds one year.": "Absence range exceeds one year.",
     "Absence must include at least one workday.":
@@ -838,6 +841,9 @@ const TRANSLATIONS = {
     Range: "Bereich",
     "From cannot be after To.": "Von kann nicht nach Bis liegen.",
     "Select an employee.": "Mitarbeiter auswählen.",
+    All: "Alle",
+    "CSV export is only available for a single employee.":
+      "CSV-Export ist nur für einzelne Mitarbeitende möglich.",
     "Category required.": "Kategorie erforderlich.",
     // Hours unit
     hours_unit: "Std.",

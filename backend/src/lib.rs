@@ -7,6 +7,7 @@ pub mod error;
 pub mod handlers;
 pub mod i18n;
 pub mod middleware;
+pub mod report_pdf;
 pub mod repository;
 pub mod roles;
 pub mod router;

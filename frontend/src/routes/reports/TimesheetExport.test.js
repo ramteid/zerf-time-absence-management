@@ -17,10 +17,7 @@ vi.mock("svelte", async () => {
 vi.mock("../../lib/api/reportsApi.js", () => ({
   getRangeReport: vi.fn(),
   getFlextimeReport: vi.fn(),
-}));
-
-vi.mock("../../lib/exports/reportPdf.js", () => ({
-  buildReportPdf: vi.fn(),
+  getTimesheetPdf: vi.fn(),
 }));
 
 import { getRangeReport } from "../../lib/api/reportsApi.js";
@@ -109,5 +106,54 @@ describe("TimesheetExport", () => {
     component = mount(TimesheetExport, { target, props: { users: [] } });
     await settle();
     expect(getRangeReport).not.toHaveBeenCalled();
+  });
+
+  it("offers an 'All' option to leads/admins for the combined PDF export", async () => {
+    const users = [
+      { id: 1, first_name: "Alice", last_name: "Lead", role: "lead", tracks_time: true },
+      { id: 2, first_name: "Bob", last_name: "Emp", role: "employee", tracks_time: true },
+    ];
+    component = mount(TimesheetExport, {
+      target,
+      props: { users, isSelfOnlyReportsView: false, canViewTeamReports: true },
+    });
+    await settle();
+    const allOption = target.querySelector('select option[value="all"]');
+    expect(allOption).not.toBeNull();
+    expect(allOption.textContent).toContain("All");
+  });
+
+  it("does not offer the 'All' option to regular employees", async () => {
+    const users = [
+      { id: 1, first_name: "Carl", last_name: "Worker", role: "employee", tracks_time: true },
+    ];
+    component = mount(TimesheetExport, {
+      target,
+      props: { users, isSelfOnlyReportsView: false, canViewTeamReports: false },
+    });
+    await settle();
+    expect(target.querySelector('select option[value="all"]')).toBeNull();
+  });
+
+  it("disables CSV export (but not PDF export) once 'All' is selected", async () => {
+    const users = [
+      { id: 1, first_name: "Alice", last_name: "Lead", role: "lead", tracks_time: true },
+      { id: 2, first_name: "Bob", last_name: "Emp", role: "employee", tracks_time: true },
+    ];
+    component = mount(TimesheetExport, {
+      target,
+      props: { users, isSelfOnlyReportsView: false, canViewTeamReports: true },
+    });
+    await settle();
+    const select = target.querySelector("select");
+    select.value = "all";
+    select.dispatchEvent(new Event("change"));
+    await settle();
+
+    const buttons = [...target.querySelectorAll("button")];
+    const csvButton = buttons.find((b) => b.textContent.includes("Export CSV"));
+    const pdfButton = buttons.find((b) => b.textContent.includes("Export PDF"));
+    expect(csvButton.disabled).toBe(true);
+    expect(pdfButton.disabled).toBe(false);
   });
 });

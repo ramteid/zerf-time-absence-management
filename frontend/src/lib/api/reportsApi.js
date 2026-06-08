@@ -62,6 +62,13 @@ export function getRangeReport({ userId, from, to }) {
   return api(`/reports/range?${paramsFrom({ user_id: userId, from, to })}`);
 }
 
+// Returns the raw fetch Response (PDF content-type) so callers can read it as
+// a blob. Pass userId === undefined/null to request the combined "All" PDF
+// (leads/admins only — backend scopes it to the requester's active team).
+export function getTimesheetPdf({ userId, from, to }) {
+  return api(`/reports/pdf?${paramsFrom({ user_id: userId, from, to })}`);
+}
+
 export function getUserAbsencesByYear(year) {
   return api(`/absences?year=${year}`);
 }

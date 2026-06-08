@@ -91,6 +91,25 @@ static LANGUAGES: &[LangDef] = &[
             ("password_reset_body", "Hello,\n\nYou requested a password reset.\n\nPlease click the link below (valid for 1 hour):\n\n{reset_link}\n\nIf you did not request this, you can safely ignore this email."),
             ("account_created_subject", "Welcome to the time tracking of {org_name}"),
             ("account_created_body", "Hello {first_name} {last_name},\n\nYour account has been created.\n\nEmail:    {email}\nPassword: {password}{login_line}\nPlease log in and change your password immediately."),
+            ("weekday_monday", "Monday"),
+            ("weekday_tuesday", "Tuesday"),
+            ("weekday_wednesday", "Wednesday"),
+            ("weekday_thursday", "Thursday"),
+            ("weekday_friday", "Friday"),
+            ("weekday_saturday", "Saturday"),
+            ("weekday_sunday", "Sunday"),
+            ("pdf_timesheet_title", "Timesheet"),
+            ("pdf_column_date", "Date"),
+            ("pdf_column_weekday", "Weekday"),
+            ("pdf_column_start", "Start"),
+            ("pdf_column_end", "End"),
+            ("pdf_column_category", "Category"),
+            ("pdf_column_duration", "Duration"),
+            ("pdf_column_absence", "Absence"),
+            ("pdf_column_holiday", "Holiday"),
+            ("pdf_total", "Total"),
+            ("pdf_flextime_opening_balance", "Flextime opening balance"),
+            ("pdf_flextime_closing_balance", "Flextime closing balance"),
         ],
     },
     LangDef {
@@ -160,6 +179,25 @@ static LANGUAGES: &[LangDef] = &[
             ("password_reset_body", "Hallo,\n\nSie haben eine Anfrage zum Zur\u{00fc}cksetzen Ihres Passworts gestellt.\n\nBitte klicken Sie auf den folgenden Link (g\u{00fc}ltig f\u{00fc}r 1 Stunde):\n\n{reset_link}\n\nFalls Sie diese Anfrage nicht gestellt haben, k\u{00f6}nnen Sie diese E-Mail ignorieren."),
             ("account_created_subject", "Willkommen bei der Zeiterfassung von {org_name}"),
             ("account_created_body", "Hallo {first_name} {last_name},\n\nIhr Konto wurde erstellt.\n\nE-Mail:   {email}\nPasswort: {password}{login_line}\nBitte melden Sie sich an und \u{00e4}ndern Sie Ihr Passwort umgehend."),
+            ("weekday_monday", "Montag"),
+            ("weekday_tuesday", "Dienstag"),
+            ("weekday_wednesday", "Mittwoch"),
+            ("weekday_thursday", "Donnerstag"),
+            ("weekday_friday", "Freitag"),
+            ("weekday_saturday", "Samstag"),
+            ("weekday_sunday", "Sonntag"),
+            ("pdf_timesheet_title", "Stundennachweis"),
+            ("pdf_column_date", "Datum"),
+            ("pdf_column_weekday", "Wochentag"),
+            ("pdf_column_start", "Start"),
+            ("pdf_column_end", "Ende"),
+            ("pdf_column_category", "Kategorie"),
+            ("pdf_column_duration", "Dauer"),
+            ("pdf_column_absence", "Abwesenheit"),
+            ("pdf_column_holiday", "Feiertag"),
+            ("pdf_total", "Gesamt"),
+            ("pdf_flextime_opening_balance", "Gleitzeitkontostand Anfang"),
+            ("pdf_flextime_closing_balance", "Gleitzeitkontostand Ende"),
         ],
     },
 ];
@@ -322,6 +360,15 @@ pub fn work_category_label(language: &Language, category_name: &str) -> String {
 /// Falls back to the raw kind string when no translation is available.
 pub fn absence_kind_label(language: &Language, kind: &str) -> String {
     let key = format!("absence_kind_{kind}");
+    translate(language, &key, &[])
+}
+
+/// Returns the localised weekday name for an English weekday identifier as
+/// produced by `services::reports::weekday_en` (e.g. `"Monday"`). Used by the
+/// timesheet PDF, which renders day rows directly from `MonthReport` rather
+/// than from pre-translated JSON sent to the frontend.
+pub fn weekday_label(language: &Language, weekday_en: &str) -> String {
+    let key = format!("weekday_{}", weekday_en.to_ascii_lowercase());
     translate(language, &key, &[])
 }
 
