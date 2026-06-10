@@ -136,13 +136,15 @@ fn target_minutes_per_day(weekly_hours: f64, workdays_per_week: i16) -> i64 {
 }
 
 /// Loads the auto-break configuration from the database.
-/// Returns `Some((threshold_min, deduction_min))` when the feature is enabled
-/// and both values are valid, or `None` when the feature is off.
+/// Returns `Some(rules)` when the feature is enabled and at least tier-1 is valid,
+/// or `None` when the feature is off. Rules are sorted ascending by threshold so the
+/// highest applicable rule can be found by scanning from the end.
 async fn load_auto_break_config(
     pool: &crate::db::DatabasePool,
-) -> AppResult<Option<(i64, i64)>> {
+) -> AppResult<Option<Vec<(i64, i64)>>> {
     use crate::services::settings::{
-        AUTO_BREAK_DEDUCTION_MINUTES_KEY, AUTO_BREAK_ENABLED_KEY, AUTO_BREAK_THRESHOLD_HOURS_KEY,
+        AUTO_BREAK_DEDUCTION_MINUTES_2_KEY, AUTO_BREAK_DEDUCTION_MINUTES_KEY,
+        AUTO_BREAK_ENABLED_KEY, AUTO_BREAK_THRESHOLD_HOURS_2_KEY, AUTO_BREAK_THRESHOLD_HOURS_KEY,
     };
     let enabled = crate::services::settings::load_setting(pool, AUTO_BREAK_ENABLED_KEY, "false")
         .await?
@@ -150,17 +152,35 @@ async fn load_auto_break_config(
     if !enabled {
         return Ok(None);
     }
-    let threshold_str =
+    let threshold1_str =
         crate::services::settings::load_setting(pool, AUTO_BREAK_THRESHOLD_HOURS_KEY, "").await?;
-    let deduction_str =
+    let deduction1_str =
         crate::services::settings::load_setting(pool, AUTO_BREAK_DEDUCTION_MINUTES_KEY, "").await?;
-    match (
-        threshold_str.parse::<f64>().ok(),
-        deduction_str.parse::<i64>().ok(),
+    let (Some(t1), Some(d1)) = (
+        threshold1_str.parse::<f64>().ok().filter(|&t| t > 0.0),
+        deduction1_str.parse::<i64>().ok().filter(|&d| d > 0),
+    ) else {
+        return Ok(None);
+    };
+    let mut rules: Vec<(i64, i64)> = vec![((t1 * 60.0) as i64, d1)];
+
+    // Optional tier-2: only added when both fields are valid.
+    let threshold2_str =
+        crate::services::settings::load_setting(pool, AUTO_BREAK_THRESHOLD_HOURS_2_KEY, "")
+            .await?;
+    let deduction2_str =
+        crate::services::settings::load_setting(pool, AUTO_BREAK_DEDUCTION_MINUTES_2_KEY, "")
+            .await?;
+    if let (Some(t2), Some(d2)) = (
+        threshold2_str.parse::<f64>().ok().filter(|&t| t > 0.0),
+        deduction2_str.parse::<i64>().ok().filter(|&d| d > 0),
     ) {
-        (Some(t), Some(d)) if t > 0.0 && d > 0 => Ok(Some(((t * 60.0) as i64, d))),
-        _ => Ok(None),
+        rules.push(((t2 * 60.0) as i64, d2));
+        // Ensure ascending threshold order for correct highest-rule selection.
+        rules.sort_by_key(|(threshold, _)| *threshold);
     }
+
+    Ok(Some(rules))
 }
 
 pub async fn build_range_with_user(
@@ -308,18 +328,15 @@ pub async fn build_range_with_user(
         }
 
         // Apply automatic break deduction: merge adjacent crediting entries into
-        // continuous blocks and deduct a break for each block >= the threshold.
-        let break_deduction = if let Some((threshold_min, deduction_min)) = auto_break_cfg {
-            time_calc::compute_day_auto_break(&approved_times, threshold_min, deduction_min)
-        } else {
-            0
-        };
-        let submitted_break_deduction =
-            if let Some((threshold_min, deduction_min)) = auto_break_cfg {
-                time_calc::compute_day_auto_break(&submitted_times, threshold_min, deduction_min)
-            } else {
-                0
-            };
+        // continuous blocks and apply the highest applicable tier's deduction.
+        let break_deduction = auto_break_cfg
+            .as_deref()
+            .map(|rules| time_calc::compute_day_auto_break(&approved_times, rules))
+            .unwrap_or(0);
+        let submitted_break_deduction = auto_break_cfg
+            .as_deref()
+            .map(|rules| time_calc::compute_day_auto_break(&submitted_times, rules))
+            .unwrap_or(0);
         actual = (actual - break_deduction).max(0);
         submitted = (submitted - submitted_break_deduction).max(0);
 
@@ -450,11 +467,10 @@ pub async fn build_flextime_for_user(
     let approved_crediting_minutes_by_day: HashMap<NaiveDate, i64> = approved_by_day
         .into_iter()
         .map(|(date, (raw_minutes, times))| {
-            let deduction = if let Some((threshold_min, deduction_min)) = auto_break_cfg {
-                time_calc::compute_day_auto_break(&times, threshold_min, deduction_min)
-            } else {
-                0
-            };
+            let deduction = auto_break_cfg
+                .as_deref()
+                .map(|rules| time_calc::compute_day_auto_break(&times, rules))
+                .unwrap_or(0);
             (date, (raw_minutes - deduction).max(0))
         })
         .collect();

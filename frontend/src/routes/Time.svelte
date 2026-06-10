@@ -31,6 +31,7 @@
     yearsInWeek,
   } from "../lib/domain/dates.js";
   import {
+    buildBreakRules,
     buildWeekDays,
     computeDayBreakDeduction,
     creditedEntryMinutes,
@@ -165,16 +166,14 @@
   $: isAssistantCurrentUser = isAssistantUser($currentUser);
   $: contractHours = formatHours($currentUser?.weekly_hours || 0);
 
+  $: breakRules = buildBreakRules($settings);
+
   // Total logged minutes this week, excluding rejected entries, with per-day
   // automatic break deductions applied when the feature is enabled.
   // Break deductions are computed per calendar day (never spanning midnight),
   // then summed to produce the weekly total.
   $: weekLoggedMinutes = (() => {
-    if (
-      !$settings?.auto_break_enabled ||
-      !$settings?.auto_break_threshold_hours ||
-      !$settings?.auto_break_deduction_minutes
-    ) {
+    if (!breakRules.length) {
       // Fast path: no break feature — plain sum of credited entry minutes.
       return entries.reduce(
         (totalMinutes, entry) =>
@@ -196,12 +195,7 @@
         (sum, e) => sum + creditedEntryMinutes(e, $categories),
         0,
       );
-      const deduction = computeDayBreakDeduction(
-        dayEntries,
-        $categories,
-        $settings.auto_break_threshold_hours,
-        $settings.auto_break_deduction_minutes,
-      );
+      const deduction = computeDayBreakDeduction(dayEntries, $categories, breakRules);
       total += Math.max(0, credited - deduction);
     }
     return total;

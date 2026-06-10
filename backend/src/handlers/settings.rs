@@ -7,6 +7,7 @@ use crate::services::settings::{
     self, load_admin_settings, load_all_public_settings, load_setting, normalize_language,
     normalize_time_format, normalize_timezone, save_setting_tx, setting_value_changed,
     smtp_config_from_update, AdminSettingsData, PublicSettingsData, APPROVAL_REMINDERS_ENABLED_KEY,
+    AUTO_BREAK_DEDUCTION_MINUTES_2_KEY, AUTO_BREAK_THRESHOLD_HOURS_2_KEY,
     SUBMISSION_REMINDERS_ENABLED_KEY, TIMEZONE_KEY,
 };
 use crate::AppState;
@@ -32,6 +33,8 @@ pub struct UpdateSettings {
     pub auto_break_enabled: Option<bool>,
     pub auto_break_threshold_hours: Option<f64>,
     pub auto_break_deduction_minutes: Option<i32>,
+    pub auto_break_threshold_hours_2: Option<f64>,
+    pub auto_break_deduction_minutes_2: Option<i32>,
 }
 
 #[derive(Deserialize)]
@@ -164,25 +167,54 @@ pub async fn update_admin_settings(
     // Validate automatic break deduction settings.
     let auto_break_enabled = body.auto_break_enabled.unwrap_or(false);
     if auto_break_enabled {
-        let threshold = body.auto_break_threshold_hours.ok_or_else(|| {
+        // Tier 1 is always required when the feature is enabled.
+        let threshold1 = body.auto_break_threshold_hours.ok_or_else(|| {
             AppError::BadRequest(
                 "auto_break_threshold_hours is required when auto_break_enabled.".into(),
             )
         })?;
-        let deduction = body.auto_break_deduction_minutes.ok_or_else(|| {
+        let deduction1 = body.auto_break_deduction_minutes.ok_or_else(|| {
             AppError::BadRequest(
                 "auto_break_deduction_minutes is required when auto_break_enabled.".into(),
             )
         })?;
-        if threshold <= 0.0 || threshold > 24.0 {
+        if threshold1 <= 0.0 || threshold1 > 24.0 {
             return Err(AppError::BadRequest(
                 "auto_break_threshold_hours must be between 0 and 24.".into(),
             ));
         }
-        if deduction <= 0 || deduction > 480 {
+        if deduction1 <= 0 || deduction1 > 480 {
             return Err(AppError::BadRequest(
                 "auto_break_deduction_minutes must be between 1 and 480.".into(),
             ));
+        }
+
+        // Tier 2 is optional, but when provided both fields must be present and valid.
+        let has_tier2_threshold = body.auto_break_threshold_hours_2.is_some();
+        let has_tier2_deduction = body.auto_break_deduction_minutes_2.is_some();
+        if has_tier2_threshold != has_tier2_deduction {
+            return Err(AppError::BadRequest(
+                "Both auto_break_threshold_hours_2 and auto_break_deduction_minutes_2 must be provided together.".into(),
+            ));
+        }
+        if has_tier2_threshold {
+            let threshold2 = body.auto_break_threshold_hours_2.unwrap();
+            let deduction2 = body.auto_break_deduction_minutes_2.unwrap();
+            if threshold2 <= threshold1 {
+                return Err(AppError::BadRequest(
+                    "auto_break_threshold_hours_2 must be greater than auto_break_threshold_hours.".into(),
+                ));
+            }
+            if threshold2 > 24.0 {
+                return Err(AppError::BadRequest(
+                    "auto_break_threshold_hours_2 must be between 0 and 24.".into(),
+                ));
+            }
+            if deduction2 <= 0 || deduction2 > 480 {
+                return Err(AppError::BadRequest(
+                    "auto_break_deduction_minutes_2 must be between 1 and 480.".into(),
+                ));
+            }
         }
     }
 
@@ -248,7 +280,7 @@ pub async fn update_admin_settings(
     .await?;
     save_setting_tx(&mut transaction, "organization_name", &org_name).await?;
 
-    // Save auto break settings; clear threshold/deduction when the feature is disabled.
+    // Save auto break settings; clear all tier values when the feature is disabled.
     save_setting_tx(
         &mut transaction,
         "auto_break_enabled",
@@ -259,24 +291,39 @@ pub async fn update_admin_settings(
         save_setting_tx(
             &mut transaction,
             "auto_break_threshold_hours",
-            &body
-                .auto_break_threshold_hours
-                .unwrap()
-                .to_string(),
+            &body.auto_break_threshold_hours.unwrap().to_string(),
         )
         .await?;
         save_setting_tx(
             &mut transaction,
             "auto_break_deduction_minutes",
+            &body.auto_break_deduction_minutes.unwrap().to_string(),
+        )
+        .await?;
+        // Tier 2: save when provided, clear when omitted.
+        save_setting_tx(
+            &mut transaction,
+            AUTO_BREAK_THRESHOLD_HOURS_2_KEY,
             &body
-                .auto_break_deduction_minutes
-                .unwrap()
-                .to_string(),
+                .auto_break_threshold_hours_2
+                .map(|v| v.to_string())
+                .unwrap_or_default(),
+        )
+        .await?;
+        save_setting_tx(
+            &mut transaction,
+            AUTO_BREAK_DEDUCTION_MINUTES_2_KEY,
+            &body
+                .auto_break_deduction_minutes_2
+                .map(|v| v.to_string())
+                .unwrap_or_default(),
         )
         .await?;
     } else {
         save_setting_tx(&mut transaction, "auto_break_threshold_hours", "").await?;
         save_setting_tx(&mut transaction, "auto_break_deduction_minutes", "").await?;
+        save_setting_tx(&mut transaction, AUTO_BREAK_THRESHOLD_HOURS_2_KEY, "").await?;
+        save_setting_tx(&mut transaction, AUTO_BREAK_DEDUCTION_MINUTES_2_KEY, "").await?;
     }
 
     if let Some(ref holidays) = prepared_holidays {

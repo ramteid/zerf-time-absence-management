@@ -3,19 +3,22 @@ use chrono::{Datelike, Duration, NaiveDate, NaiveTime};
 
 /// Computes the total break deduction in minutes for a set of work entries within one day.
 ///
-/// Entries that are directly adjacent (one ends exactly when the next begins) are merged
-/// into a single continuous work block for the threshold comparison. A gap of even one
-/// minute between two entries breaks the continuity. Overlapping entries are merged as
-/// well (shouldn't occur in practice, handled defensively).
+/// `rules` is a slice of `(threshold_min, deduction_min)` pairs representing break tiers.
+/// For each merged continuous work block the **highest applicable rule** — the one with the
+/// greatest threshold that the block still meets or exceeds — is selected and its deduction
+/// is applied exactly once. Rules are **not** cumulative: only one rule fires per block.
 ///
-/// Each merged block whose duration meets or exceeds `threshold_min` triggers exactly one
-/// `deduction_min` deduction.
+/// Example (German law): rules = [(360, 30), (540, 45)]. A 10-hour block triggers the
+/// 9-hour rule (45 min), not both rules (75 min would be wrong).
+///
+/// Entries that are directly adjacent (one ends exactly when the next begins) are merged
+/// into a single continuous work block. A gap of even one minute breaks continuity.
+/// Overlapping entries are merged as well (handled defensively).
 pub fn compute_day_auto_break(
     entries: &[(NaiveTime, NaiveTime)],
-    threshold_min: i64,
-    deduction_min: i64,
+    rules: &[(i64, i64)],
 ) -> i64 {
-    if entries.is_empty() {
+    if entries.is_empty() || rules.is_empty() {
         return 0;
     }
     let mut sorted = entries.to_vec();
@@ -38,9 +41,17 @@ pub fn compute_day_auto_break(
 
     blocks
         .into_iter()
-        .filter(|(s, e)| ((*e - *s).num_minutes()) >= threshold_min)
-        .count() as i64
-        * deduction_min
+        .map(|(s, e)| {
+            let duration = (e - s).num_minutes();
+            // Highest applicable rule wins; 0 when no rule threshold is met.
+            rules
+                .iter()
+                .filter(|(threshold, _)| duration >= *threshold)
+                .map(|(_, deduction)| *deduction)
+                .max()
+                .unwrap_or(0)
+        })
+        .sum()
 }
 
 /// Compute the Monday of the ISO week that contains `date`.
@@ -164,14 +175,19 @@ mod tests {
 
     #[test]
     fn compute_day_auto_break_no_entries_returns_zero() {
-        assert_eq!(compute_day_auto_break(&[], 360, 30), 0);
+        assert_eq!(compute_day_auto_break(&[], &[(360, 30)]), 0);
+    }
+
+    #[test]
+    fn compute_day_auto_break_empty_rules_returns_zero() {
+        assert_eq!(compute_day_auto_break(&[(t(8, 0), t(18, 0))], &[]), 0);
     }
 
     #[test]
     fn compute_day_auto_break_single_entry_below_threshold_no_deduction() {
         // 5 h 59 min, threshold 6 h → no deduction
         assert_eq!(
-            compute_day_auto_break(&[(t(8, 0), t(13, 59))], 360, 30),
+            compute_day_auto_break(&[(t(8, 0), t(13, 59))], &[(360, 30)]),
             0
         );
     }
@@ -180,7 +196,7 @@ mod tests {
     fn compute_day_auto_break_single_entry_exactly_at_threshold_deducts() {
         // exactly 6 h → deduct 30 min
         assert_eq!(
-            compute_day_auto_break(&[(t(8, 0), t(14, 0))], 360, 30),
+            compute_day_auto_break(&[(t(8, 0), t(14, 0))], &[(360, 30)]),
             30
         );
     }
@@ -189,7 +205,7 @@ mod tests {
     fn compute_day_auto_break_adjacent_entries_merged_into_one_block() {
         // 8:00–12:00 immediately followed by 12:00–16:00 → 8 h continuous
         assert_eq!(
-            compute_day_auto_break(&[(t(8, 0), t(12, 0)), (t(12, 0), t(16, 0))], 360, 30),
+            compute_day_auto_break(&[(t(8, 0), t(12, 0)), (t(12, 0), t(16, 0))], &[(360, 30)]),
             30 // single block of 8 h ≥ 6 h → one deduction
         );
     }
@@ -198,7 +214,7 @@ mod tests {
     fn compute_day_auto_break_one_minute_gap_breaks_continuity() {
         // 8:00–12:00, then 12:01–16:00 → two separate blocks (4 h each, both < 6 h)
         assert_eq!(
-            compute_day_auto_break(&[(t(8, 0), t(12, 0)), (t(12, 1), t(16, 0))], 360, 30),
+            compute_day_auto_break(&[(t(8, 0), t(12, 0)), (t(12, 1), t(16, 0))], &[(360, 30)]),
             0
         );
     }
@@ -207,7 +223,7 @@ mod tests {
     fn compute_day_auto_break_two_independent_long_blocks_deducts_twice() {
         // morning 7:00–13:00 (6 h), afternoon 14:00–20:00 (6 h) → two deductions
         assert_eq!(
-            compute_day_auto_break(&[(t(7, 0), t(13, 0)), (t(14, 0), t(20, 0))], 360, 30),
+            compute_day_auto_break(&[(t(7, 0), t(13, 0)), (t(14, 0), t(20, 0))], &[(360, 30)]),
             60
         );
     }
@@ -218,8 +234,7 @@ mod tests {
         assert_eq!(
             compute_day_auto_break(
                 &[(t(8, 0), t(10, 0)), (t(10, 0), t(13, 0)), (t(13, 0), t(16, 0))],
-                360,
-                30
+                &[(360, 30)]
             ),
             30
         );
@@ -229,8 +244,37 @@ mod tests {
     fn compute_day_auto_break_unsorted_entries_handled_correctly() {
         // Entries provided out of order; 12:00–16:00 listed before 8:00–12:00
         assert_eq!(
-            compute_day_auto_break(&[(t(12, 0), t(16, 0)), (t(8, 0), t(12, 0))], 360, 30),
+            compute_day_auto_break(&[(t(12, 0), t(16, 0)), (t(8, 0), t(12, 0))], &[(360, 30)]),
             30
+        );
+    }
+
+    #[test]
+    fn compute_day_auto_break_two_tier_highest_rule_wins() {
+        // German law: tier 1 = 6 h / 30 min, tier 2 = 9 h / 45 min.
+        let rules: &[(i64, i64)] = &[(360, 30), (540, 45)];
+
+        // 10 h block → tier 2 applies → 45 min (NOT 30 + 45 = 75)
+        assert_eq!(compute_day_auto_break(&[(t(8, 0), t(18, 0))], rules), 45);
+
+        // 7 h block → only tier 1 applies → 30 min
+        assert_eq!(compute_day_auto_break(&[(t(8, 0), t(15, 0))], rules), 30);
+
+        // 5 h block → no tier applies → 0
+        assert_eq!(compute_day_auto_break(&[(t(8, 0), t(13, 0))], rules), 0);
+    }
+
+    #[test]
+    fn compute_day_auto_break_two_tier_each_block_independent() {
+        // Two separate long blocks: first is 10 h (tier 2), second is 7 h (tier 1).
+        // Total deduction: 45 + 30 = 75.
+        let rules: &[(i64, i64)] = &[(360, 30), (540, 45)];
+        assert_eq!(
+            compute_day_auto_break(
+                &[(t(0, 0), t(10, 0)), (t(11, 0), t(18, 0))],
+                rules
+            ),
+            75
         );
     }
 }

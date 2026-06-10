@@ -12,6 +12,8 @@ pub const DEFAULT_TIMEZONE: &str = "Europe/Berlin";
 pub const AUTO_BREAK_ENABLED_KEY: &str = "auto_break_enabled";
 pub const AUTO_BREAK_THRESHOLD_HOURS_KEY: &str = "auto_break_threshold_hours";
 pub const AUTO_BREAK_DEDUCTION_MINUTES_KEY: &str = "auto_break_deduction_minutes";
+pub const AUTO_BREAK_THRESHOLD_HOURS_2_KEY: &str = "auto_break_threshold_hours_2";
+pub const AUTO_BREAK_DEDUCTION_MINUTES_2_KEY: &str = "auto_break_deduction_minutes_2";
 
 pub const UI_LANGUAGE_KEY: &str = "ui_language";
 pub const TIME_FORMAT_KEY: &str = "time_format";
@@ -99,6 +101,10 @@ pub async fn load_all_public_settings(
         load_setting(pool, AUTO_BREAK_THRESHOLD_HOURS_KEY, "").await?;
     let auto_break_deduction_str =
         load_setting(pool, AUTO_BREAK_DEDUCTION_MINUTES_KEY, "").await?;
+    let auto_break_threshold_2_str =
+        load_setting(pool, AUTO_BREAK_THRESHOLD_HOURS_2_KEY, "").await?;
+    let auto_break_deduction_2_str =
+        load_setting(pool, AUTO_BREAK_DEDUCTION_MINUTES_2_KEY, "").await?;
     Ok(PublicSettingsData {
         ui_language: load_setting(pool, UI_LANGUAGE_KEY, DEFAULT_UI_LANGUAGE).await?,
         time_format: load_setting(pool, TIME_FORMAT_KEY, DEFAULT_TIME_FORMAT).await?,
@@ -118,6 +124,8 @@ pub async fn load_all_public_settings(
         auto_break_enabled: load_setting(pool, AUTO_BREAK_ENABLED_KEY, "false").await? == "true",
         auto_break_threshold_hours: auto_break_threshold_str.parse().ok(),
         auto_break_deduction_minutes: auto_break_deduction_str.parse().ok(),
+        auto_break_threshold_hours_2: auto_break_threshold_2_str.parse().ok(),
+        auto_break_deduction_minutes_2: auto_break_deduction_2_str.parse().ok(),
     })
 }
 
@@ -255,10 +263,14 @@ pub struct PublicSettingsData {
     pub submission_deadline_day: Option<u8>,
     pub organization_name: String,
     pub auto_break_enabled: bool,
-    /// Minimum consecutive hours worked before a break is automatically deducted.
+    /// Tier-1: minimum consecutive hours worked before a break is deducted.
     pub auto_break_threshold_hours: Option<f64>,
-    /// Minutes deducted per work block that meets or exceeds the threshold.
+    /// Tier-1: minutes deducted when the tier-1 threshold is the highest one reached.
     pub auto_break_deduction_minutes: Option<i32>,
+    /// Tier-2 (optional): higher threshold that supersedes tier-1 when reached.
+    pub auto_break_threshold_hours_2: Option<f64>,
+    /// Tier-2 (optional): total minutes deducted when the tier-2 threshold is reached.
+    pub auto_break_deduction_minutes_2: Option<i32>,
 }
 
 /// Full admin settings (public settings + SMTP config + reminder flags).

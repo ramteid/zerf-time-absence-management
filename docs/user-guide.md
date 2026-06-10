@@ -438,8 +438,9 @@ When the feature is enabled in admin settings, Zerf silently deducts a configure
 
 **Deduction logic:**
 
-- For each continuous block whose duration meets or exceeds the threshold, exactly one deduction is applied.
-- If a day has two separate long blocks (for example, morning and afternoon sessions each exceeding the threshold), each block triggers its own deduction independently.
+- Up to two break tiers can be configured. For each continuous block, only the **highest applicable tier** fires — the tiers are **not cumulative**.
+  - Example (German law, §4 ArbZG): tier 1 = 6 h → 30 min; tier 2 = 9 h → 45 min. A 10-hour block deducts 45 min total, not 75 min.
+- If a day has two separate long blocks (morning and afternoon each exceeding the threshold), each block is evaluated independently and triggers its own deduction.
 - The deduction is applied to approved crediting time. It reduces credited hours in month reports, overtime, and the flextime balance.
 
 **What is not affected:**
@@ -460,9 +461,11 @@ Example: threshold 6 hours, deduction 30 minutes. An employee books 3 hours of c
 
 | Setting | Description |
 | --- | --- |
-| Enable automatic break deduction | Enables or disables the feature. When disabled, stored threshold and deduction values are cleared. |
-| Break threshold (hours) | Minimum consecutive crediting work duration that triggers a break (0.5–24 h). |
-| Break deduction (minutes) | Minutes deducted per qualifying work block (1–480 min). |
+| Enable automatic break deduction | Enables or disables the feature. When disabled, all stored values are cleared. |
+| Break threshold (hours) | Tier-1 minimum consecutive crediting work duration that triggers a break (0.5–24 h). |
+| Break deduction (minutes) | Tier-1 total minutes deducted when the threshold is reached (1–480 min). |
+| Second threshold (hours) | Optional tier-2 threshold. Must be greater than tier-1. When a block reaches this duration, the tier-2 deduction replaces tier-1. |
+| Second deduction (minutes) | Tier-2 total minutes deducted (1–480 min). This is the total, not additional — e.g. configure 45 min here, not 15 min, to achieve a 45-minute break at the tier-2 threshold. |
 
 ## Submission status indicator
 
