@@ -1069,6 +1069,16 @@ const TRANSLATIONS = {
     "e.g. 30": "z.B. 30",
     "Please enter the break threshold.": "Bitte Pausenschwelle eingeben.",
     "Please enter the break deduction minutes.": "Bitte Pausenabzug eingeben.",
+    "Second threshold (hours)": "Zweite Schwelle (Stunden)",
+    "Optional. If the work block reaches this duration, the second deduction applies instead of the first.":
+      "Optional. Wird diese Dauer erreicht, gilt der zweite Abzug anstelle des ersten.",
+    "Second deduction (minutes)": "Zweiter Abzug (Minuten)",
+    "Total minutes deducted when the second threshold is reached.":
+      "Gesamte Minuten, die beim Erreichen der zweiten Schwelle abgezogen werden.",
+    "e.g. 9 (optional)": "z. B. 9 (optional)",
+    "e.g. 45 (optional)": "z. B. 45 (optional)",
+    "Please enter both second threshold and second deduction, or leave both empty.":
+      "Bitte beide Felder der zweiten Stufe ausfüllen oder beide leer lassen.",
     Break: "Pause",
     "Vacation days per year": "Urlaubstage pro Jahr",
     days: "Tage",

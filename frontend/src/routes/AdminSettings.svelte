@@ -134,6 +134,16 @@
         toast($t("Please enter the break deduction minutes."), "error");
         return;
       }
+      const hasTier2Threshold =
+        settingsForm.auto_break_threshold_hours_2 != null &&
+        settingsForm.auto_break_threshold_hours_2 !== "";
+      const hasTier2Deduction =
+        settingsForm.auto_break_deduction_minutes_2 != null &&
+        settingsForm.auto_break_deduction_minutes_2 !== "";
+      if (hasTier2Threshold !== hasTier2Deduction) {
+        toast($t("Please enter both second threshold and second deduction, or leave both empty."), "error");
+        return;
+      }
     }
     saving = true;
     try {
@@ -142,12 +152,18 @@
       const body = {
         ...settingsForm,
         carryover_expiry_date: settingsForm.carryover_expiry_date?.trim() || null,
-        // Clear threshold/deduction values when the feature is disabled.
+        // Clear all break values when the feature is disabled.
         auto_break_threshold_hours: settingsForm.auto_break_enabled
           ? settingsForm.auto_break_threshold_hours
           : null,
         auto_break_deduction_minutes: settingsForm.auto_break_enabled
           ? settingsForm.auto_break_deduction_minutes
+          : null,
+        auto_break_threshold_hours_2: settingsForm.auto_break_enabled
+          ? (settingsForm.auto_break_threshold_hours_2 || null)
+          : null,
+        auto_break_deduction_minutes_2: settingsForm.auto_break_enabled
+          ? (settingsForm.auto_break_deduction_minutes_2 || null)
           : null,
       };
       const saved = await api("/settings", { method: "PUT", body });
@@ -417,6 +433,8 @@
                     ...settingsForm,
                     auto_break_threshold_hours: null,
                     auto_break_deduction_minutes: null,
+                    auto_break_threshold_hours_2: null,
+                    auto_break_deduction_minutes_2: null,
                   };
                 }
               }}
@@ -466,6 +484,44 @@
             />
             <div class="field-hint">
               {$t("How many minutes are deducted per qualifying work block.")}
+            </div>
+          </div>
+        </div>
+        <div class="field-row" style="margin-top:10px">
+          <div>
+            <label class="zf-label" for="settings-break-threshold-2"
+              >{$t("Second threshold (hours)")}</label
+            >
+            <input
+              id="settings-break-threshold-2"
+              class="zf-input"
+              type="number"
+              step="0.5"
+              min="0.5"
+              max="24"
+              bind:value={settingsForm.auto_break_threshold_hours_2}
+              placeholder={$t("e.g. 9 (optional)")}
+            />
+            <div class="field-hint">
+              {$t("Optional. If the work block reaches this duration, the second deduction applies instead of the first.")}
+            </div>
+          </div>
+          <div>
+            <label class="zf-label" for="settings-break-deduction-2"
+              >{$t("Second deduction (minutes)")}</label
+            >
+            <input
+              id="settings-break-deduction-2"
+              class="zf-input"
+              type="number"
+              step="1"
+              min="1"
+              max="480"
+              bind:value={settingsForm.auto_break_deduction_minutes_2}
+              placeholder={$t("e.g. 45 (optional)")}
+            />
+            <div class="field-hint">
+              {$t("Total minutes deducted when the second threshold is reached.")}
             </div>
           </div>
         </div>

@@ -73,35 +73,57 @@ function parseHHMM(s) {
 }
 
 /**
+ * Builds an ordered list of break rules from the app settings object.
+ * Returns an empty array when the feature is disabled or no tier-1 rule is configured.
+ * Rules are sorted ascending by threshold so callers can find the highest applicable
+ * rule by scanning from the end.
+ *
+ * @param {Object} settings - The app settings from the /settings endpoint.
+ * @returns {{thresholdHours: number, deductionMinutes: number}[]}
+ */
+export function buildBreakRules(settings) {
+  if (!settings?.auto_break_enabled) return [];
+  const rules = [];
+  if (settings.auto_break_threshold_hours && settings.auto_break_deduction_minutes) {
+    rules.push({
+      thresholdHours: Number(settings.auto_break_threshold_hours),
+      deductionMinutes: Number(settings.auto_break_deduction_minutes),
+    });
+  }
+  if (settings.auto_break_threshold_hours_2 && settings.auto_break_deduction_minutes_2) {
+    rules.push({
+      thresholdHours: Number(settings.auto_break_threshold_hours_2),
+      deductionMinutes: Number(settings.auto_break_deduction_minutes_2),
+    });
+  }
+  rules.sort((a, b) => a.thresholdHours - b.thresholdHours);
+  return rules;
+}
+
+/**
  * Computes the total automatic break deduction in minutes for all entries on a
  * single day. Mirrors the backend `compute_day_auto_break` Rust function exactly.
  *
- * Adjacent entries (end time == start time of next) are treated as one
- * continuous work block. Even a one-minute gap breaks continuity. Overlapping
- * entries are merged. Each block whose duration meets or exceeds
- * `thresholdHours * 60` minutes triggers exactly one `deductionMinutes`
- * deduction. Only non-rejected, counts-as-work entries are considered.
+ * Adjacent entries (end time == start time of next) are treated as one continuous
+ * work block. Even a one-minute gap breaks continuity. Overlapping entries are merged.
  *
- * This function applies to all non-rejected entries (including drafts) so that
- * the daily-total display on the time tracking page reflects the expected
- * deduction before entries are approved.
+ * For each block, the **highest applicable rule** is selected and its deduction applied
+ * exactly once — rules are not cumulative. A 10-hour block with rules [(6h→30min),
+ * (9h→45min)] deducts 45 min, not 75 min.
  *
- * @param {Array}  items            - All time entries for the day.
- * @param {Array}  categories       - Full category list for counts-as-work lookup.
- * @param {number} thresholdHours   - Minimum consecutive crediting hours before deduction.
- * @param {number} deductionMinutes - Minutes deducted per qualifying work block.
+ * Applies to all non-rejected entries (including drafts) so the time tracking page
+ * shows the expected deduction before entries are approved.
+ *
+ * @param {Array}  items       - All time entries for the day.
+ * @param {Array}  categories  - Full category list for counts-as-work lookup.
+ * @param {{thresholdHours: number, deductionMinutes: number}[]} rules
+ *   Break rules sorted ascending by thresholdHours.
  * @returns {number} Total break deduction in minutes (>= 0).
  */
-export function computeDayBreakDeduction(
-  items,
-  categories,
-  thresholdHours,
-  deductionMinutes,
-) {
-  if (!items?.length || !thresholdHours || !deductionMinutes) return 0;
-  const thresholdMin = thresholdHours * 60;
+export function computeDayBreakDeduction(items, categories, rules) {
+  if (!items?.length || !rules?.length) return 0;
 
-  // Only non-rejected entries whose category counts as work, sorted by start time.
+  // Only non-rejected entries that count as work, sorted by start time.
   const eligible = items
     .filter((e) => e.status !== "rejected" && entryCountsAsWork(e, categories))
     .map((e) => ({
@@ -112,24 +134,25 @@ export function computeDayBreakDeduction(
 
   if (!eligible.length) return 0;
 
-  // Merge adjacent (start == last.end) and overlapping intervals into
-  // continuous work blocks, matching the backend merge rule precisely.
+  // Merge adjacent (start == last.end) and overlapping intervals into continuous blocks.
   const blocks = [];
   for (const { start, end } of eligible) {
     const last = blocks[blocks.length - 1];
     if (last && start <= last.end) {
-      // Adjacent or overlapping: extend the current block's end if needed.
       if (end > last.end) last.end = end;
     } else {
       blocks.push({ start, end });
     }
   }
 
-  // One deduction per block that meets or exceeds the threshold.
-  return (
-    blocks.filter((b) => b.end - b.start >= thresholdMin).length *
-    deductionMinutes
-  );
+  // For each block: highest applicable rule wins (not cumulative).
+  return blocks.reduce((total, block) => {
+    const duration = block.end - block.start;
+    const deduction = rules
+      .filter((r) => duration >= r.thresholdHours * 60)
+      .reduce((max, r) => Math.max(max, r.deductionMinutes), 0);
+    return total + deduction;
+  }, 0);
 }
 
 export function absenceRemovesTarget(absence) {

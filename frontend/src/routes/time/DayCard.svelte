@@ -6,6 +6,7 @@
   import EntryBlock from "./EntryBlock.svelte";
   import {
     absenceColor,
+    buildBreakRules,
     canAddEntryForDay,
     categoryById,
     computeDayBreakDeduction,
@@ -31,18 +32,11 @@
     dayIndex < (currentUser?.workdays_per_week || 5)
       ? (currentUser?.weekly_hours || 0) / (currentUser?.workdays_per_week || 5)
       : 0;
+  $: breakRules = buildBreakRules($settings);
   // Automatic break deduction for this day (0 when the feature is off).
-  $: dailyBreakMinutes =
-    $settings?.auto_break_enabled &&
-    $settings?.auto_break_threshold_hours &&
-    $settings?.auto_break_deduction_minutes
-      ? computeDayBreakDeduction(
-          day?.items,
-          categories,
-          $settings.auto_break_threshold_hours,
-          $settings.auto_break_deduction_minutes,
-        )
-      : 0;
+  $: dailyBreakMinutes = breakRules.length
+    ? computeDayBreakDeduction(day?.items, categories, breakRules)
+    : 0;
   // Daily total: sum of credited entry minutes minus the automatic break deduction,
   // matching the value the backend uses in the flextime account.
   $: dailyTotalMinutes = Math.max(
@@ -64,11 +58,11 @@
 
   /** Computes break marker positions for all entries in a day.
    *  Adjacent entries (end == start of next) count as one continuous block.
-   *  Returns a map from entry.id to { positionFraction, deductionFraction }
-   *  for the entry in which the break threshold is crossed. */
-  function computeBreakMarkers(items, cats, thresholdHours, deductionMinutes) {
-    if (!items?.length || !thresholdHours || !deductionMinutes) return {};
-    const thresholdMin = thresholdHours * 60;
+   *  For each block the highest applicable rule is used (not cumulative), placing
+   *  exactly one marker per qualifying block at the rule's threshold time point.
+   *  Returns a map from entry.id to { positionFraction, deductionFraction }. */
+  function computeBreakMarkers(items, cats, rules) {
+    if (!items?.length || !rules?.length) return {};
 
     // Only non-rejected entries that count as work — mirrors computeDayBreakDeduction exactly.
     const eligible = items
@@ -88,28 +82,35 @@
       const blockEntries = [eligible[i]];
       i++;
 
-      // Extend the block while entries are directly adjacent or overlapping
+      // Extend the block while entries are directly adjacent or overlapping.
       while (i < eligible.length && eligible[i]._start <= blockEnd) {
         blockEnd = Math.max(blockEnd, eligible[i]._end);
         blockEntries.push(eligible[i]);
         i++;
       }
 
-      if (blockEnd - blockStart < thresholdMin) continue;
+      const blockDuration = blockEnd - blockStart;
 
-      // Wall-clock time at which the break starts
-      const breakTime = blockStart + thresholdMin;
+      // Find the highest applicable rule for this block.
+      let applicableRule = null;
+      for (const rule of rules) {
+        if (blockDuration >= rule.thresholdHours * 60) {
+          applicableRule = rule; // last (highest threshold met) wins
+        }
+      }
+      if (!applicableRule) continue;
+
+      // Wall-clock time at which the break marker is placed.
+      const breakTime = blockStart + applicableRule.thresholdHours * 60;
 
       for (const entry of blockEntries) {
-        // Use <= so that when breakTime lands exactly on blockEnd (block duration
-        // equals the threshold exactly), the marker is placed at the bottom of
-        // the last entry (positionFraction=1) rather than being silently omitted
-        // while the backend still applies the deduction.
+        // Use <= so that when breakTime lands exactly on an entry boundary the
+        // marker still appears rather than being silently omitted.
         if (breakTime >= entry._start && breakTime <= entry._end) {
           const entryDuration = entry._end - entry._start;
           markers[entry.id] = {
             positionFraction: Math.min((breakTime - entry._start) / entryDuration, 1),
-            deductionFraction: deductionMinutes / entryDuration,
+            deductionFraction: applicableRule.deductionMinutes / entryDuration,
           };
           break;
         }
@@ -118,17 +119,9 @@
     return markers;
   }
 
-  $: breakMarkers =
-    $settings?.auto_break_enabled &&
-    $settings?.auto_break_threshold_hours &&
-    $settings?.auto_break_deduction_minutes
-      ? computeBreakMarkers(
-          day?.items,
-          categories,
-          $settings.auto_break_threshold_hours,
-          $settings.auto_break_deduction_minutes,
-        )
-      : {};
+  $: breakMarkers = breakRules.length
+    ? computeBreakMarkers(day?.items, categories, breakRules)
+    : {};
 </script>
 
 <div
