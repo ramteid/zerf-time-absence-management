@@ -163,7 +163,7 @@ describe("computeDayBreakDeduction", () => {
   const nonWorkCat = [{ id: 1, counts_as_work: false }];
   // Convenience single-tier rule set.
   const rules1 = [{ thresholdHours: 6, deductionMinutes: 30 }];
-  // Two-tier rules (German law: 6 h → 30 min, 9 h → 45 min total).
+  // Two-tier rules: tier 1 = 6 h → 30 min, tier 2 = 9 h → 45 min total.
   const rules2 = [
     { thresholdHours: 6, deductionMinutes: 30 },
     { thresholdHours: 9, deductionMinutes: 45 },
