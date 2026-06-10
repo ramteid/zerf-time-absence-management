@@ -32,6 +32,7 @@
   } from "../lib/domain/dates.js";
   import {
     buildWeekDays,
+    computeDayBreakDeduction,
     creditedEntryMinutes,
     filterWeekAbsences,
     weekStatus as calculateWeekStatus,
@@ -164,12 +165,47 @@
   $: isAssistantCurrentUser = isAssistantUser($currentUser);
   $: contractHours = formatHours($currentUser?.weekly_hours || 0);
 
-  // Total logged minutes this week, excluding rejected entries.
-  $: weekLoggedMinutes = entries.reduce(
-    (totalMinutes, entry) =>
-      totalMinutes + creditedEntryMinutes(entry, $categories),
-    0,
-  );
+  // Total logged minutes this week, excluding rejected entries, with per-day
+  // automatic break deductions applied when the feature is enabled.
+  // Break deductions are computed per calendar day (never spanning midnight),
+  // then summed to produce the weekly total.
+  $: weekLoggedMinutes = (() => {
+    if (
+      !$settings?.auto_break_enabled ||
+      !$settings?.auto_break_threshold_hours ||
+      !$settings?.auto_break_deduction_minutes
+    ) {
+      // Fast path: no break feature — plain sum of credited entry minutes.
+      return entries.reduce(
+        (totalMinutes, entry) =>
+          totalMinutes + creditedEntryMinutes(entry, $categories),
+        0,
+      );
+    }
+    // Group entries by their calendar date so each day's deduction is
+    // calculated independently (break never spans midnight).
+    const byDay = new Map();
+    for (const entry of entries) {
+      const dk = dateKey(entry.entry_date);
+      if (!byDay.has(dk)) byDay.set(dk, []);
+      byDay.get(dk).push(entry);
+    }
+    let total = 0;
+    for (const dayEntries of byDay.values()) {
+      const credited = dayEntries.reduce(
+        (sum, e) => sum + creditedEntryMinutes(e, $categories),
+        0,
+      );
+      const deduction = computeDayBreakDeduction(
+        dayEntries,
+        $categories,
+        $settings.auto_break_threshold_hours,
+        $settings.auto_break_deduction_minutes,
+      );
+      total += Math.max(0, credited - deduction);
+    }
+    return total;
+  })();
 
   // Weekly target is the sum of target-eligible weekdays in this week:
   // excludes holidays, absences, future days, and days before contract start.

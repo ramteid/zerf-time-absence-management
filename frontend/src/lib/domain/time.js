@@ -62,6 +62,76 @@ export function creditedEntryMinutes(entry, categoryRows) {
   return Math.max(0, durMin(entry.start_time.slice(0, 5), entry.end_time.slice(0, 5)));
 }
 
+/**
+ * Parses an "HH:MM" or "HH:MM:SS" time string into total minutes since midnight.
+ * Returns 0 for null/undefined/empty input.
+ */
+function parseHHMM(s) {
+  if (!s) return 0;
+  const parts = s.split(":");
+  return parseInt(parts[0], 10) * 60 + parseInt(parts[1] || "0", 10);
+}
+
+/**
+ * Computes the total automatic break deduction in minutes for all entries on a
+ * single day. Mirrors the backend `compute_day_auto_break` Rust function exactly.
+ *
+ * Adjacent entries (end time == start time of next) are treated as one
+ * continuous work block. Even a one-minute gap breaks continuity. Overlapping
+ * entries are merged. Each block whose duration meets or exceeds
+ * `thresholdHours * 60` minutes triggers exactly one `deductionMinutes`
+ * deduction. Only non-rejected, counts-as-work entries are considered.
+ *
+ * This function applies to all non-rejected entries (including drafts) so that
+ * the daily-total display on the time tracking page reflects the expected
+ * deduction before entries are approved.
+ *
+ * @param {Array}  items            - All time entries for the day.
+ * @param {Array}  categories       - Full category list for counts-as-work lookup.
+ * @param {number} thresholdHours   - Minimum consecutive crediting hours before deduction.
+ * @param {number} deductionMinutes - Minutes deducted per qualifying work block.
+ * @returns {number} Total break deduction in minutes (>= 0).
+ */
+export function computeDayBreakDeduction(
+  items,
+  categories,
+  thresholdHours,
+  deductionMinutes,
+) {
+  if (!items?.length || !thresholdHours || !deductionMinutes) return 0;
+  const thresholdMin = thresholdHours * 60;
+
+  // Only non-rejected entries whose category counts as work, sorted by start time.
+  const eligible = items
+    .filter((e) => e.status !== "rejected" && entryCountsAsWork(e, categories))
+    .map((e) => ({
+      start: parseHHMM(e.start_time),
+      end: parseHHMM(e.end_time),
+    }))
+    .sort((a, b) => a.start - b.start);
+
+  if (!eligible.length) return 0;
+
+  // Merge adjacent (start == last.end) and overlapping intervals into
+  // continuous work blocks, matching the backend merge rule precisely.
+  const blocks = [];
+  for (const { start, end } of eligible) {
+    const last = blocks[blocks.length - 1];
+    if (last && start <= last.end) {
+      // Adjacent or overlapping: extend the current block's end if needed.
+      if (end > last.end) last.end = end;
+    } else {
+      blocks.push({ start, end });
+    }
+  }
+
+  // One deduction per block that meets or exceeds the threshold.
+  return (
+    blocks.filter((b) => b.end - b.start >= thresholdMin).length *
+    deductionMinutes
+  );
+}
+
 export function absenceRemovesTarget(absence) {
   return absence
     ? TARGET_REMOVING_ABSENCE_STATUSES.includes(absence.status) &&

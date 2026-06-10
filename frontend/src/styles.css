@@ -848,12 +848,41 @@ dialog footer {
 }
 
 .time-block {
+  position: relative;
+  overflow: hidden;
   padding: 8px 10px;
   border-radius: var(--radius-md);
   background: var(--bg-subtle);
   border: 1px solid var(--border);
   cursor: pointer;
   transition: background 0.1s;
+}
+
+.time-block-break {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1.5px dashed var(--text-tertiary);
+  background: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent 4px,
+    color-mix(in srgb, var(--text-tertiary) 10%, transparent) 4px,
+    color-mix(in srgb, var(--text-tertiary) 10%, transparent) 8px
+  );
+  color: var(--text-tertiary);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 2px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  overflow: hidden;
+  pointer-events: none;
+  box-sizing: border-box;
+  min-height: 14px;
 }
 
 .time-block:hover {

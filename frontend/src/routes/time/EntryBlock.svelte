@@ -10,6 +10,10 @@
   export let timeFormat = "24h";
   export let editable = false;
   export let showDuration = true;
+  /** When set, renders a horizontal break marker within the block.
+   *  positionFraction: 0–1 from top where the break starts.
+   *  deductionFraction: 0–1 relative to entry height representing break duration. */
+  export let breakMarker = null;
 
   const dispatch = createEventDispatcher();
 </script>
@@ -39,6 +43,14 @@
         </span>
       {/if}
     </div>
+    {#if breakMarker}
+      {@const top = Math.max(0, Math.min(1, breakMarker.positionFraction))}
+      {@const height = Math.max(0, Math.min(1 - top, breakMarker.deductionFraction))}
+      <div
+        class="time-block-break"
+        style="top: {top * 100}%; height: {height * 100}%"
+      >{$t("Break")}</div>
+    {/if}
   </div>
 {:else}
   <div
@@ -67,6 +79,14 @@
         </span>
       {/if}
     </div>
+    {#if breakMarker}
+      {@const top = Math.max(0, Math.min(1, breakMarker.positionFraction))}
+      {@const height = Math.max(0, Math.min(1 - top, breakMarker.deductionFraction))}
+      <div
+        class="time-block-break"
+        style="top: {top * 100}%; height: {height * 100}%"
+      >{$t("Break")}</div>
+    {/if}
   </div>
 {/if}
 

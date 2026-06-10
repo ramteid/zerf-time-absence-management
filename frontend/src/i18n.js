@@ -1054,6 +1054,22 @@ const TRANSLATIONS = {
     "e.g. 5": "z.B. 5",
     "Users will be notified on this day of each month if they have unsubmitted time entries for previous months. Leave empty to disable. (1\u201328)":
       "Benutzer werden an diesem Tag jedes Monats benachrichtigt, wenn sie noch nicht eingereichte Wochen aus Vormonaten haben. Leer lassen zum Deaktivieren. (1\u201328)",
+    // Auto break deduction settings
+    "Automatic break deduction": "Automatischer Pausenabzug",
+    "Enable automatic break deduction": "Automatischen Pausenabzug aktivieren",
+    "When enabled, a break is automatically deducted from time entries that form a continuous work block meeting or exceeding the configured threshold.":
+      "Wenn aktiviert, wird automatisch eine Pause von Zeiteintr\u00e4gen abgezogen, die einen zusammenh\u00e4ngenden Arbeitsblock bilden, der die konfigurierte Schwelle erreicht oder \u00fcberschreitet.",
+    "Break threshold (hours)": "Pausenschwelle (Stunden)",
+    "After how many consecutive hours a break is deducted.":
+      "Nach wie vielen zusammenh\u00e4ngenden Arbeitsstunden eine Pause abgezogen wird.",
+    "Break deduction (minutes)": "Pausenabzug (Minuten)",
+    "How many minutes are deducted per qualifying work block.":
+      "Wie viele Minuten pro qualifizierendem Arbeitsblock abgezogen werden.",
+    "e.g. 6": "z.B. 6",
+    "e.g. 30": "z.B. 30",
+    "Please enter the break threshold.": "Bitte Pausenschwelle eingeben.",
+    "Please enter the break deduction minutes.": "Bitte Pausenabzug eingeben.",
+    Break: "Pause",
     "Vacation days per year": "Urlaubstage pro Jahr",
     days: "Tage",
     Set: "Setzen",

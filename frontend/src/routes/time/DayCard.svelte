@@ -8,8 +8,11 @@
     absenceColor,
     canAddEntryForDay,
     categoryById,
+    computeDayBreakDeduction,
     creditedEntryMinutes,
+    entryCountsAsWork,
   } from "../../lib/domain/time.js";
+  import { settings } from "../../stores.js";
 
   export let day;
   export let dayIndex = 0;
@@ -28,13 +31,104 @@
     dayIndex < (currentUser?.workdays_per_week || 5)
       ? (currentUser?.weekly_hours || 0) / (currentUser?.workdays_per_week || 5)
       : 0;
-  $: dailyTotalMinutes = (day?.items || []).reduce(
-    (totalMinutes, entry) =>
-      totalMinutes + creditedEntryMinutes(entry, categories),
+  // Automatic break deduction for this day (0 when the feature is off).
+  $: dailyBreakMinutes =
+    $settings?.auto_break_enabled &&
+    $settings?.auto_break_threshold_hours &&
+    $settings?.auto_break_deduction_minutes
+      ? computeDayBreakDeduction(
+          day?.items,
+          categories,
+          $settings.auto_break_threshold_hours,
+          $settings.auto_break_deduction_minutes,
+        )
+      : 0;
+  // Daily total: sum of credited entry minutes minus the automatic break deduction,
+  // matching the value the backend uses in the flextime account.
+  $: dailyTotalMinutes = Math.max(
     0,
+    (day?.items || []).reduce(
+      (totalMinutes, entry) =>
+        totalMinutes + creditedEntryMinutes(entry, categories),
+      0,
+    ) - dailyBreakMinutes,
   );
   $: dailyTotalHours = dailyTotalMinutes / 60;
   $: canAdd = canAddEntryForDay(day, currentUser, today);
+
+  function parseHHMM(s) {
+    if (!s) return 0;
+    const parts = s.split(":");
+    return parseInt(parts[0], 10) * 60 + parseInt(parts[1] || "0", 10);
+  }
+
+  /** Computes break marker positions for all entries in a day.
+   *  Adjacent entries (end == start of next) count as one continuous block.
+   *  Returns a map from entry.id to { positionFraction, deductionFraction }
+   *  for the entry in which the break threshold is crossed. */
+  function computeBreakMarkers(items, cats, thresholdHours, deductionMinutes) {
+    if (!items?.length || !thresholdHours || !deductionMinutes) return {};
+    const thresholdMin = thresholdHours * 60;
+
+    // Only non-rejected entries that count as work — mirrors computeDayBreakDeduction exactly.
+    const eligible = items
+      .filter((e) => e.status !== "rejected" && entryCountsAsWork(e, cats))
+      .map((e) => ({
+        id: e.id,
+        _start: parseHHMM(e.start_time),
+        _end: parseHHMM(e.end_time),
+      }))
+      .sort((a, b) => a._start - b._start);
+
+    const markers = {};
+    let i = 0;
+    while (i < eligible.length) {
+      let blockStart = eligible[i]._start;
+      let blockEnd = eligible[i]._end;
+      const blockEntries = [eligible[i]];
+      i++;
+
+      // Extend the block while entries are directly adjacent or overlapping
+      while (i < eligible.length && eligible[i]._start <= blockEnd) {
+        blockEnd = Math.max(blockEnd, eligible[i]._end);
+        blockEntries.push(eligible[i]);
+        i++;
+      }
+
+      if (blockEnd - blockStart < thresholdMin) continue;
+
+      // Wall-clock time at which the break starts
+      const breakTime = blockStart + thresholdMin;
+
+      for (const entry of blockEntries) {
+        // Use <= so that when breakTime lands exactly on blockEnd (block duration
+        // equals the threshold exactly), the marker is placed at the bottom of
+        // the last entry (positionFraction=1) rather than being silently omitted
+        // while the backend still applies the deduction.
+        if (breakTime >= entry._start && breakTime <= entry._end) {
+          const entryDuration = entry._end - entry._start;
+          markers[entry.id] = {
+            positionFraction: Math.min((breakTime - entry._start) / entryDuration, 1),
+            deductionFraction: deductionMinutes / entryDuration,
+          };
+          break;
+        }
+      }
+    }
+    return markers;
+  }
+
+  $: breakMarkers =
+    $settings?.auto_break_enabled &&
+    $settings?.auto_break_threshold_hours &&
+    $settings?.auto_break_deduction_minutes
+      ? computeBreakMarkers(
+          day?.items,
+          categories,
+          $settings.auto_break_threshold_hours,
+          $settings.auto_break_deduction_minutes,
+        )
+      : {};
 </script>
 
 <div
@@ -86,6 +180,7 @@
         {timeFormat}
         editable={entry.status === "draft"}
         showDuration={!weekend}
+        breakMarker={breakMarkers[entry.id] ?? null}
         on:edit={() => dispatch("edit", entry)}
       />
     {/each}

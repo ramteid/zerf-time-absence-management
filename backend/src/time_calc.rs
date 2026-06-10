@@ -1,6 +1,48 @@
 use crate::error::{AppError, AppResult};
 use chrono::{Datelike, Duration, NaiveDate, NaiveTime};
 
+/// Computes the total break deduction in minutes for a set of work entries within one day.
+///
+/// Entries that are directly adjacent (one ends exactly when the next begins) are merged
+/// into a single continuous work block for the threshold comparison. A gap of even one
+/// minute between two entries breaks the continuity. Overlapping entries are merged as
+/// well (shouldn't occur in practice, handled defensively).
+///
+/// Each merged block whose duration meets or exceeds `threshold_min` triggers exactly one
+/// `deduction_min` deduction.
+pub fn compute_day_auto_break(
+    entries: &[(NaiveTime, NaiveTime)],
+    threshold_min: i64,
+    deduction_min: i64,
+) -> i64 {
+    if entries.is_empty() {
+        return 0;
+    }
+    let mut sorted = entries.to_vec();
+    sorted.sort_by_key(|(s, _)| *s);
+
+    // Merge adjacent/overlapping entries into continuous work blocks.
+    let mut blocks: Vec<(NaiveTime, NaiveTime)> = Vec::new();
+    for (start, end) in sorted {
+        if let Some(last) = blocks.last_mut() {
+            if start <= last.1 {
+                // Adjacent (start == last.1) or overlapping: extend current block.
+                if end > last.1 {
+                    last.1 = end;
+                }
+                continue;
+            }
+        }
+        blocks.push((start, end));
+    }
+
+    blocks
+        .into_iter()
+        .filter(|(s, e)| ((*e - *s).num_minutes()) >= threshold_min)
+        .count() as i64
+        * deduction_min
+}
+
 /// Compute the Monday of the ISO week that contains `date`.
 /// This is the canonical implementation used across services and background tasks.
 pub fn week_monday(date: NaiveDate) -> NaiveDate {
@@ -114,5 +156,81 @@ mod tests {
 
         let err = parse_stored_time("corrupted").unwrap_err();
         assert!(matches!(err, AppError::Internal(_)));
+    }
+
+    fn t(h: u32, m: u32) -> NaiveTime {
+        NaiveTime::from_hms_opt(h, m, 0).unwrap()
+    }
+
+    #[test]
+    fn compute_day_auto_break_no_entries_returns_zero() {
+        assert_eq!(compute_day_auto_break(&[], 360, 30), 0);
+    }
+
+    #[test]
+    fn compute_day_auto_break_single_entry_below_threshold_no_deduction() {
+        // 5 h 59 min, threshold 6 h → no deduction
+        assert_eq!(
+            compute_day_auto_break(&[(t(8, 0), t(13, 59))], 360, 30),
+            0
+        );
+    }
+
+    #[test]
+    fn compute_day_auto_break_single_entry_exactly_at_threshold_deducts() {
+        // exactly 6 h → deduct 30 min
+        assert_eq!(
+            compute_day_auto_break(&[(t(8, 0), t(14, 0))], 360, 30),
+            30
+        );
+    }
+
+    #[test]
+    fn compute_day_auto_break_adjacent_entries_merged_into_one_block() {
+        // 8:00–12:00 immediately followed by 12:00–16:00 → 8 h continuous
+        assert_eq!(
+            compute_day_auto_break(&[(t(8, 0), t(12, 0)), (t(12, 0), t(16, 0))], 360, 30),
+            30 // single block of 8 h ≥ 6 h → one deduction
+        );
+    }
+
+    #[test]
+    fn compute_day_auto_break_one_minute_gap_breaks_continuity() {
+        // 8:00–12:00, then 12:01–16:00 → two separate blocks (4 h each, both < 6 h)
+        assert_eq!(
+            compute_day_auto_break(&[(t(8, 0), t(12, 0)), (t(12, 1), t(16, 0))], 360, 30),
+            0
+        );
+    }
+
+    #[test]
+    fn compute_day_auto_break_two_independent_long_blocks_deducts_twice() {
+        // morning 7:00–13:00 (6 h), afternoon 14:00–20:00 (6 h) → two deductions
+        assert_eq!(
+            compute_day_auto_break(&[(t(7, 0), t(13, 0)), (t(14, 0), t(20, 0))], 360, 30),
+            60
+        );
+    }
+
+    #[test]
+    fn compute_day_auto_break_adjacent_three_entries_count_as_one_block() {
+        // 8:00–10:00, 10:00–13:00, 13:00–16:00 → one 8 h block
+        assert_eq!(
+            compute_day_auto_break(
+                &[(t(8, 0), t(10, 0)), (t(10, 0), t(13, 0)), (t(13, 0), t(16, 0))],
+                360,
+                30
+            ),
+            30
+        );
+    }
+
+    #[test]
+    fn compute_day_auto_break_unsorted_entries_handled_correctly() {
+        // Entries provided out of order; 12:00–16:00 listed before 8:00–12:00
+        assert_eq!(
+            compute_day_auto_break(&[(t(12, 0), t(16, 0)), (t(8, 0), t(12, 0))], 360, 30),
+            30
+        );
     }
 }

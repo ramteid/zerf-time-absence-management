@@ -119,6 +119,22 @@
       toast($t("Please enter default annual leave days."), "error");
       return;
     }
+    if (settingsForm.auto_break_enabled) {
+      if (
+        settingsForm.auto_break_threshold_hours == null ||
+        settingsForm.auto_break_threshold_hours === ""
+      ) {
+        toast($t("Please enter the break threshold."), "error");
+        return;
+      }
+      if (
+        settingsForm.auto_break_deduction_minutes == null ||
+        settingsForm.auto_break_deduction_minutes === ""
+      ) {
+        toast($t("Please enter the break deduction minutes."), "error");
+        return;
+      }
+    }
     saving = true;
     try {
       // Normalize the carryover expiry date: send null when the field is empty so the
@@ -126,6 +142,13 @@
       const body = {
         ...settingsForm,
         carryover_expiry_date: settingsForm.carryover_expiry_date?.trim() || null,
+        // Clear threshold/deduction values when the feature is disabled.
+        auto_break_threshold_hours: settingsForm.auto_break_enabled
+          ? settingsForm.auto_break_threshold_hours
+          : null,
+        auto_break_deduction_minutes: settingsForm.auto_break_enabled
+          ? settingsForm.auto_break_deduction_minutes
+          : null,
       };
       const saved = await api("/settings", { method: "PUT", body });
       settingsForm = saved;
@@ -375,6 +398,78 @@
           </div>
         </div>
       </div>
+
+      <!-- Automatic break deduction -->
+      <div
+        style="font-size:14px;font-weight:400;margin-top:20px;margin-bottom:14px"
+      >
+        {$t("Automatic break deduction")}
+      </div>
+      <div class="field-row">
+        <div style="flex:0 0 auto">
+          <label class="zf-label" style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input
+              type="checkbox"
+              bind:checked={settingsForm.auto_break_enabled}
+              on:change={() => {
+                if (!settingsForm.auto_break_enabled) {
+                  settingsForm = {
+                    ...settingsForm,
+                    auto_break_threshold_hours: null,
+                    auto_break_deduction_minutes: null,
+                  };
+                }
+              }}
+            />
+            {$t("Enable automatic break deduction")}
+          </label>
+          <div class="field-hint">
+            {$t(
+              "When enabled, a break is automatically deducted from time entries that form a continuous work block meeting or exceeding the configured threshold.",
+            )}
+          </div>
+        </div>
+      </div>
+      {#if settingsForm.auto_break_enabled}
+        <div class="field-row" style="margin-top:10px">
+          <div>
+            <label class="zf-label" for="settings-break-threshold"
+              >{$t("Break threshold (hours)")}</label
+            >
+            <input
+              id="settings-break-threshold"
+              class="zf-input"
+              type="number"
+              step="0.5"
+              min="0.5"
+              max="24"
+              bind:value={settingsForm.auto_break_threshold_hours}
+              placeholder={$t("e.g. 6")}
+            />
+            <div class="field-hint">
+              {$t("After how many consecutive hours a break is deducted.")}
+            </div>
+          </div>
+          <div>
+            <label class="zf-label" for="settings-break-deduction"
+              >{$t("Break deduction (minutes)")}</label
+            >
+            <input
+              id="settings-break-deduction"
+              class="zf-input"
+              type="number"
+              step="1"
+              min="1"
+              max="480"
+              bind:value={settingsForm.auto_break_deduction_minutes}
+              placeholder={$t("e.g. 30")}
+            />
+            <div class="field-hint">
+              {$t("How many minutes are deducted per qualifying work block.")}
+            </div>
+          </div>
+        </div>
+      {/if}
 
       <div
         style="font-size:14px;font-weight:400;margin-top:20px;margin-bottom:14px"
