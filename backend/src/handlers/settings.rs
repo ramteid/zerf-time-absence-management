@@ -29,6 +29,9 @@ pub struct UpdateSettings {
     pub carryover_expiry_date: Option<String>,
     pub submission_deadline_day: Option<u8>,
     pub organization_name: Option<String>,
+    pub auto_break_enabled: Option<bool>,
+    pub auto_break_threshold_hours: Option<f64>,
+    pub auto_break_deduction_minutes: Option<i32>,
 }
 
 #[derive(Deserialize)]
@@ -158,6 +161,31 @@ pub async fn update_admin_settings(
         ));
     }
 
+    // Validate automatic break deduction settings.
+    let auto_break_enabled = body.auto_break_enabled.unwrap_or(false);
+    if auto_break_enabled {
+        let threshold = body.auto_break_threshold_hours.ok_or_else(|| {
+            AppError::BadRequest(
+                "auto_break_threshold_hours is required when auto_break_enabled.".into(),
+            )
+        })?;
+        let deduction = body.auto_break_deduction_minutes.ok_or_else(|| {
+            AppError::BadRequest(
+                "auto_break_deduction_minutes is required when auto_break_enabled.".into(),
+            )
+        })?;
+        if threshold <= 0.0 || threshold > 24.0 {
+            return Err(AppError::BadRequest(
+                "auto_break_threshold_hours must be between 0 and 24.".into(),
+            ));
+        }
+        if deduction <= 0 || deduction > 480 {
+            return Err(AppError::BadRequest(
+                "auto_break_deduction_minutes must be between 1 and 480.".into(),
+            ));
+        }
+    }
+
     let default_weekly_hours_str = body
         .default_weekly_hours
         .map(|v| v.to_string())
@@ -219,6 +247,37 @@ pub async fn update_admin_settings(
     )
     .await?;
     save_setting_tx(&mut transaction, "organization_name", &org_name).await?;
+
+    // Save auto break settings; clear threshold/deduction when the feature is disabled.
+    save_setting_tx(
+        &mut transaction,
+        "auto_break_enabled",
+        if auto_break_enabled { "true" } else { "false" },
+    )
+    .await?;
+    if auto_break_enabled {
+        save_setting_tx(
+            &mut transaction,
+            "auto_break_threshold_hours",
+            &body
+                .auto_break_threshold_hours
+                .unwrap()
+                .to_string(),
+        )
+        .await?;
+        save_setting_tx(
+            &mut transaction,
+            "auto_break_deduction_minutes",
+            &body
+                .auto_break_deduction_minutes
+                .unwrap()
+                .to_string(),
+        )
+        .await?;
+    } else {
+        save_setting_tx(&mut transaction, "auto_break_threshold_hours", "").await?;
+        save_setting_tx(&mut transaction, "auto_break_deduction_minutes", "").await?;
+    }
 
     if let Some(ref holidays) = prepared_holidays {
         crate::services::holidays::replace_auto_holidays_exec(&mut transaction, holidays).await?;

@@ -36,6 +36,7 @@ Use this document if you are:
 - [Flextime logic](#flextime-logic)
   - [How daily targets are calculated](#how-daily-targets-are-calculated)
   - [What counts toward flextime actuals](#what-counts-toward-flextime-actuals)
+  - [Automatic break deduction](#automatic-break-deduction)
 - [Submission status indicator](#submission-status-indicator)
   - [How completeness is determined](#how-completeness-is-determined)
   - [Important: non-crediting entries affect completeness](#important-non-crediting-entries-affect-completeness)
@@ -424,6 +425,44 @@ Example flextime scenario:
 - Your Monday flextime result: 7 − 8 = −1 hour
 
 If your team meeting were crediting instead, the result would be: (7+1) − 8 = 0 hours flextime.
+
+### Automatic break deduction
+
+When the feature is enabled in admin settings, Zerf silently deducts a configured number of break minutes from each day's credited work when consecutive work reaches or exceeds a configured threshold.
+
+**How continuity is determined:**
+
+- Crediting time entries are examined per day only. Work time does not carry over across midnight.
+- Two entries are treated as one continuous block when one ends at the exact minute the next begins (zero gap). Even a one-minute gap between entries breaks continuity into separate blocks.
+- Overlapping entries are merged into one block.
+
+**Deduction logic:**
+
+- For each continuous block whose duration meets or exceeds the threshold, exactly one deduction is applied.
+- If a day has two separate long blocks (for example, morning and afternoon sessions each exceeding the threshold), each block triggers its own deduction independently.
+- The deduction is applied to approved crediting time. It reduces credited hours in month reports, overtime, and the flextime balance.
+
+**What is not affected:**
+
+- The deduction is not labeled or shown in reports, team overviews, or CSV exports. It reduces the total silently.
+- For the official flextime balance and reports, only approved entries are used in the deduction calculation. Draft and submitted entries do not affect the flextime account.
+- Non-crediting entries are not considered when computing consecutive blocks.
+
+**Visual indicator on the time tracking page:**
+
+The time tracking page applies the break deduction as a preview for all non-rejected entries (including drafts and submitted entries) so you can see the impact before approval. The daily total shown next to each day already includes this preview deduction. This preview matches the deduction that will be applied to the flextime balance once entries are approved.
+
+When a break is triggered, the entry block where the threshold is crossed displays a horizontal marker. Its vertical position reflects the exact moment within that entry when the threshold is reached, and its height is proportional to the deduction duration relative to the entry's length.
+
+Example: threshold 6 hours, deduction 30 minutes. An employee books 3 hours of core work followed immediately by 4 hours of training (7 hours total, one continuous block). The threshold is crossed during the training block, 3 hours into it (6 total hours reached). The marker appears at three-quarters from the top of the training entry block, and its height corresponds to 30 minutes of the 4-hour entry (about 12.5 % of the block height).
+
+**Configuration (Admin → General Settings):**
+
+| Setting | Description |
+| --- | --- |
+| Enable automatic break deduction | Enables or disables the feature. When disabled, stored threshold and deduction values are cleared. |
+| Break threshold (hours) | Minimum consecutive crediting work duration that triggers a break (0.5–24 h). |
+| Break deduction (minutes) | Minutes deducted per qualifying work block (1–480 min). |
 
 ## Submission status indicator
 
@@ -1302,6 +1341,7 @@ Admins configure system-wide behavior in the settings panel:
 | Submission deadline day | Day of the month (1–28) when the monthly submission reminder is sent. |
 | Submission reminders enabled | Enable or disable the monthly submission reminder. |
 | Approval reminders enabled | Enable or disable the weekly approval reminder. |
+| Automatic break deduction | When enabled, deducts a configured break from each day where consecutive crediting work meets or exceeds a threshold. See [Automatic break deduction](#automatic-break-deduction). |
 | SMTP configuration | Server, port, and credentials for outgoing email. Required for registration emails and email reminders. |
 | Public URL | Used to construct login links in registration emails. |
 

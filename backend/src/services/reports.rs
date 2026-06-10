@@ -135,6 +135,34 @@ fn target_minutes_per_day(weekly_hours: f64, workdays_per_week: i16) -> i64 {
     (weekly_hours / f64::from(workdays_per_week) * 60.0).round() as i64
 }
 
+/// Loads the auto-break configuration from the database.
+/// Returns `Some((threshold_min, deduction_min))` when the feature is enabled
+/// and both values are valid, or `None` when the feature is off.
+async fn load_auto_break_config(
+    pool: &crate::db::DatabasePool,
+) -> AppResult<Option<(i64, i64)>> {
+    use crate::services::settings::{
+        AUTO_BREAK_DEDUCTION_MINUTES_KEY, AUTO_BREAK_ENABLED_KEY, AUTO_BREAK_THRESHOLD_HOURS_KEY,
+    };
+    let enabled = crate::services::settings::load_setting(pool, AUTO_BREAK_ENABLED_KEY, "false")
+        .await?
+        == "true";
+    if !enabled {
+        return Ok(None);
+    }
+    let threshold_str =
+        crate::services::settings::load_setting(pool, AUTO_BREAK_THRESHOLD_HOURS_KEY, "").await?;
+    let deduction_str =
+        crate::services::settings::load_setting(pool, AUTO_BREAK_DEDUCTION_MINUTES_KEY, "").await?;
+    match (
+        threshold_str.parse::<f64>().ok(),
+        deduction_str.parse::<i64>().ok(),
+    ) {
+        (Some(t), Some(d)) if t > 0.0 && d > 0 => Ok(Some(((t * 60.0) as i64, d))),
+        _ => Ok(None),
+    }
+}
+
 pub async fn build_range_with_user(
     pool: &crate::db::DatabasePool,
     user: &crate::middleware::auth::User,
@@ -151,6 +179,9 @@ pub async fn build_range_with_user(
         target_minutes_per_day(user.weekly_hours, user.workdays_per_week)
     };
     let today = crate::services::settings::app_today(pool).await;
+
+    // Load auto-break config once for this report; None means feature is off.
+    let auto_break_cfg = load_auto_break_config(pool).await?;
 
     let reports_db = crate::repository::ReportDb::new(pool.clone());
 
@@ -222,6 +253,9 @@ pub async fn build_range_with_user(
         let mut entries: Vec<EntryDetail> = vec![];
         let mut actual = 0i64;
         let mut submitted = 0i64;
+        // Times for approved and submitted crediting entries, used for block-aware break deduction.
+        let mut approved_times: Vec<(NaiveTime, NaiveTime)> = vec![];
+        let mut submitted_times: Vec<(NaiveTime, NaiveTime)> = vec![];
         // Skip entry processing entirely for inactive/future days.
         if !before_start && !after_today {
             for (
@@ -240,15 +274,18 @@ pub async fn build_range_with_user(
                 }
                 // Defensive: surface a 500 on malformed time strings rather than panicking.
                 // The DB schema does not constrain the text format.
-                let entry_minutes =
-                    (parse_report_time(end_time)? - parse_report_time(start_time)?).num_minutes();
+                let t_start = parse_report_time(start_time)?;
+                let t_end = parse_report_time(end_time)?;
+                let entry_minutes = (t_end - t_start).num_minutes();
                 // Actual work uses approved, crediting entries only.
                 if *counts_as_work && status == "approved" {
                     actual += entry_minutes;
+                    approved_times.push((t_start, t_end));
                 }
                 // submitted_min includes submitted + approved (everything the employee filed).
                 if *counts_as_work && (status == "approved" || status == "submitted") {
                     submitted += entry_minutes;
+                    submitted_times.push((t_start, t_end));
                 }
                 // Category totals include every non-rejected entry regardless of
                 // whether the category is crediting (user-guide: "Category
@@ -269,6 +306,22 @@ pub async fn build_range_with_user(
                 });
             }
         }
+
+        // Apply automatic break deduction: merge adjacent crediting entries into
+        // continuous blocks and deduct a break for each block >= the threshold.
+        let break_deduction = if let Some((threshold_min, deduction_min)) = auto_break_cfg {
+            time_calc::compute_day_auto_break(&approved_times, threshold_min, deduction_min)
+        } else {
+            0
+        };
+        let submitted_break_deduction =
+            if let Some((threshold_min, deduction_min)) = auto_break_cfg {
+                time_calc::compute_day_auto_break(&submitted_times, threshold_min, deduction_min)
+            } else {
+                0
+            };
+        actual = (actual - break_deduction).max(0);
+        submitted = (submitted - submitted_break_deduction).max(0);
 
         target_total += target;
         actual_total += actual;
@@ -372,21 +425,39 @@ pub async fn build_flextime_for_user(
         }
     }
 
+    let auto_break_cfg = load_auto_break_config(pool).await?;
+
     let time_entries_raw = reports_db
         .flextime_entries(target_user_id, from, to)
         .await?;
 
-    let mut approved_crediting_minutes_by_day: HashMap<NaiveDate, i64> = HashMap::new();
+    // Accumulate per-day minutes and entry times (for block-aware break deduction).
+    let mut approved_by_day: HashMap<NaiveDate, (i64, Vec<(NaiveTime, NaiveTime)>)> =
+        HashMap::new();
     for (entry_date, start_time, end_time, status, counts_as_work) in time_entries_raw {
         if !counts_as_work || status != "approved" {
             continue;
         }
-        let minutes =
-            (parse_report_time(&end_time)? - parse_report_time(&start_time)?).num_minutes();
-        *approved_crediting_minutes_by_day
-            .entry(entry_date)
-            .or_insert(0) += minutes;
+        let t_start = parse_report_time(&start_time)?;
+        let t_end = parse_report_time(&end_time)?;
+        let minutes = (t_end - t_start).num_minutes();
+        let entry = approved_by_day.entry(entry_date).or_insert((0, vec![]));
+        entry.0 += minutes;
+        entry.1.push((t_start, t_end));
     }
+
+    // Apply automatic break deduction per day.
+    let approved_crediting_minutes_by_day: HashMap<NaiveDate, i64> = approved_by_day
+        .into_iter()
+        .map(|(date, (raw_minutes, times))| {
+            let deduction = if let Some((threshold_min, deduction_min)) = auto_break_cfg {
+                time_calc::compute_day_auto_break(&times, threshold_min, deduction_min)
+            } else {
+                0
+            };
+            (date, (raw_minutes - deduction).max(0))
+        })
+        .collect();
 
     let approved_absences = reports_db
         .approved_absence_rows(target_user_id, from, to)
