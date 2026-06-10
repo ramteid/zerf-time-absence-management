@@ -439,7 +439,7 @@ When the feature is enabled in admin settings, Zerf silently deducts a configure
 **Deduction logic:**
 
 - Up to two break tiers can be configured. For each continuous block, only the **highest applicable tier** fires — the tiers are **not cumulative**.
-  - Example (German law, §4 ArbZG): tier 1 = 6 h → 30 min; tier 2 = 9 h → 45 min. A 10-hour block deducts 45 min total, not 75 min.
+  - Example: tier 1 = 6 h → 30 min; tier 2 = 9 h → 45 min. A 10-hour block deducts 45 min total, not 75 min.
 - If a day has two separate long blocks (morning and afternoon each exceeding the threshold), each block is evaluated independently and triggers its own deduction.
 - The deduction is applied to approved crediting time. It reduces credited hours in month reports, overtime, and the flextime balance.
 

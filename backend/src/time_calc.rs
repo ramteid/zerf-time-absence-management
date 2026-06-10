@@ -8,7 +8,7 @@ use chrono::{Datelike, Duration, NaiveDate, NaiveTime};
 /// greatest threshold that the block still meets or exceeds — is selected and its deduction
 /// is applied exactly once. Rules are **not** cumulative: only one rule fires per block.
 ///
-/// Example (German law): rules = [(360, 30), (540, 45)]. A 10-hour block triggers the
+/// Example: rules = [(360, 30), (540, 45)]. A 10-hour block triggers the
 /// 9-hour rule (45 min), not both rules (75 min would be wrong).
 ///
 /// Entries that are directly adjacent (one ends exactly when the next begins) are merged
@@ -251,7 +251,7 @@ mod tests {
 
     #[test]
     fn compute_day_auto_break_two_tier_highest_rule_wins() {
-        // German law: tier 1 = 6 h / 30 min, tier 2 = 9 h / 45 min.
+        // Two-tier example: tier 1 = 6 h / 30 min, tier 2 = 9 h / 45 min.
         let rules: &[(i64, i64)] = &[(360, 30), (540, 45)];
 
         // 10 h block → tier 2 applies → 45 min (NOT 30 + 45 = 75)
