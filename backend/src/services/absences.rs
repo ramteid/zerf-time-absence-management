@@ -410,14 +410,8 @@ pub async fn update_absence(
         Some(absence_id),
     )
     .await?;
-    crate::repository::AbsenceDb::ensure_no_time_conflict_tx(
-        &mut transaction,
-        requester.id,
-        category.auto_approve_past,
-        body.start_date,
-        body.end_date,
-    )
-    .await?;
+    // Time-entry conflict is checked at approval, not at edit time —
+    // consistent with create_absence behavior.
     if category.counts_as_vacation {
         validate_vacation_balance(
             &app_state.pool,
