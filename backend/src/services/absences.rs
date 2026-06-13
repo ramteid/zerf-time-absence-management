@@ -3,13 +3,11 @@ use crate::error::{AppError, AppResult};
 use crate::i18n;
 use crate::middleware::auth::User;
 use crate::services::absence_balance::{
-    validate_absence_has_workday, validate_sick_start_date, validate_vacation_balance, workdays,
+    validate_absence_has_workday, validate_backdating_window, validate_vacation_balance, workdays,
 };
 use crate::AppState;
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 use serde::{Deserialize, Serialize, Serializer};
-
-use crate::repository::absences::ALLOWED_KINDS as ALLOWED_ABSENCE_KINDS;
 
 async fn notification_language(pool: &crate::db::DatabasePool) -> i18n::Language {
     crate::services::notifications::load_language(pool).await
@@ -92,7 +90,11 @@ pub fn repo_absence_to_service(a: crate::repository::Absence) -> Absence {
     Absence {
         id: a.id,
         user_id: a.user_id,
+        category_id: a.category_id,
         kind: a.kind,
+        counts_as_vacation: a.counts_as_vacation,
+        keeps_work_target: a.keeps_work_target,
+        auto_approve_past: a.auto_approve_past,
         start_date: a.start_date,
         end_date: a.end_date,
         comment: a.comment,
@@ -156,7 +158,14 @@ pub async fn absence_owner_id(pool: &crate::db::DatabasePool, absence_id: i64) -
 pub struct Absence {
     pub id: i64,
     pub user_id: i64,
+    pub category_id: i64,
+    /// Slug of the absence category, kept for backward-compatible API consumers
+    /// and i18n key lookup (e.g. `absence_kind_vacation`). The canonical
+    /// reference is `category_id`.
     pub kind: String,
+    pub counts_as_vacation: bool,
+    pub keeps_work_target: bool,
+    pub auto_approve_past: bool,
     pub start_date: NaiveDate,
     pub end_date: NaiveDate,
     pub comment: Option<String>,
@@ -172,10 +181,10 @@ pub struct Absence {
     pub previous_comment: Option<String>,
 }
 
-pub fn validate_absence(input: &NewAbsence) -> AppResult<&str> {
-    if !ALLOWED_ABSENCE_KINDS.contains(&input.kind.as_str()) {
-        return Err(AppError::BadRequest("Invalid kind".into()));
-    }
+/// Validate the incoming request shape (comment length, date order/range).
+/// Category-flag-aware checks (vacation balance, sick backdating) are applied
+/// later once the category has been resolved.
+pub fn validate_new_absence_shape(input: &NewAbsence) -> AppResult<()> {
     if let Some(comment) = &input.comment {
         if comment.len() > 2000 {
             return Err(AppError::BadRequest("Comment too long (max 2000).".into()));
@@ -191,12 +200,45 @@ pub fn validate_absence(input: &NewAbsence) -> AppResult<&str> {
             "Absence range exceeds one year.".into(),
         ));
     }
-    Ok(&input.kind)
+    Ok(())
+}
+
+/// Resolve the requested category — by id (preferred) or by slug
+/// (back-compat) — and confirm it is active. Inactive categories cannot accept
+/// new requests but existing absences referencing them keep working.
+pub async fn resolve_requested_category(
+    app_state: &AppState,
+    body: &NewAbsence,
+) -> AppResult<crate::repository::AbsenceCategory> {
+    let category = if let Some(category_id) = body.category_id {
+        app_state
+            .db
+            .absence_categories
+            .find_by_id(category_id)
+            .await?
+    } else if let Some(slug) = body.kind.as_deref().filter(|s| !s.is_empty()) {
+        app_state.db.absence_categories.find_by_slug(slug).await?
+    } else {
+        return Err(AppError::BadRequest(
+            "Absence category required (category_id or kind).".into(),
+        ));
+    };
+    let category = category.ok_or_else(|| AppError::BadRequest("Unknown absence category.".into()))?;
+    if !category.active {
+        return Err(AppError::BadRequest(
+            "Absence category is no longer active.".into(),
+        ));
+    }
+    Ok(category)
 }
 
 #[derive(Deserialize)]
 pub struct NewAbsence {
-    pub kind: String,
+    /// Preferred reference. Falls back to `kind` (slug) for legacy callers.
+    #[serde(default)]
+    pub category_id: Option<i64>,
+    #[serde(default)]
+    pub kind: Option<String>,
     pub start_date: NaiveDate,
     pub end_date: NaiveDate,
     pub comment: Option<String>,
@@ -225,8 +267,9 @@ pub async fn create_absence(
 ) -> AppResult<Absence> {
     require_tracks_time(requester)?;
     let today_date = crate::services::settings::app_today(&app_state.pool).await;
-    let kind = validate_absence(&body)?;
-    validate_sick_start_date(kind, body.start_date, today_date)?;
+    validate_new_absence_shape(&body)?;
+    let category = resolve_requested_category(app_state, &body).await?;
+    validate_backdating_window(&category, body.start_date, today_date)?;
     if body.start_date < requester.start_date {
         return Err(AppError::BadRequest(
             "Absence start date is before user start date.".into(),
@@ -249,15 +292,10 @@ pub async fn create_absence(
         None,
     )
     .await?;
-    crate::repository::AbsenceDb::ensure_no_time_conflict_tx(
-        &mut transaction,
-        requester.id,
-        kind,
-        body.start_date,
-        body.end_date,
-    )
-    .await?;
-    if kind == "vacation" {
+    // Time-entry conflict is checked at approval, not at request creation.
+    // This lets employees request an absence even if they have forgotten to remove
+    // existing time entries; the approver then sees and handles the conflict.
+    if category.counts_as_vacation {
         validate_vacation_balance(
             &app_state.pool,
             &mut transaction,
@@ -269,7 +307,7 @@ pub async fn create_absence(
         )
         .await?;
     }
-    let initial_status = if kind == "sick" && body.start_date <= today_date {
+    let initial_status = if category.auto_approve_past && body.start_date <= today_date {
         "approved"
     } else {
         "requested"
@@ -277,7 +315,7 @@ pub async fn create_absence(
     let new_absence_id = crate::repository::AbsenceDb::insert_tx(
         &mut transaction,
         requester.id,
-        kind,
+        category.id,
         body.start_date,
         body.end_date,
         body.comment.as_deref(),
@@ -311,7 +349,7 @@ pub async fn create_absence(
             new_absence_id,
         )
         .await;
-    } else if created_absence.kind == "sick" && created_absence.status == "approved" {
+    } else if created_absence.auto_approve_past && created_absence.status == "approved" {
         notify_sick_auto_approved(app_state, requester, &created_absence, new_absence_id).await;
     }
     Ok(created_absence)
@@ -325,8 +363,9 @@ pub async fn update_absence(
 ) -> AppResult<Absence> {
     require_tracks_time(requester)?;
     let today_date = crate::services::settings::app_today(&app_state.pool).await;
-    let kind = validate_absence(&body)?;
-    validate_sick_start_date(kind, body.start_date, today_date)?;
+    validate_new_absence_shape(&body)?;
+    let category = resolve_requested_category(app_state, &body).await?;
+    validate_backdating_window(&category, body.start_date, today_date)?;
     if body.start_date < requester.start_date {
         return Err(AppError::BadRequest(
             "Absence start date is before user start date.".into(),
@@ -353,15 +392,14 @@ pub async fn update_absence(
             "Only requested absences can be edited.".into(),
         ));
     }
-    if absence_before_update.kind == "sick" && body.kind != "sick" {
+    // Auto-approve categories (sick-like) have an entirely different workflow:
+    // they bypass approval and tolerate same-day time entries. Allowing a
+    // requested-status absence to switch INTO or OUT of an auto-approve
+    // category mid-edit would either skip required approval or reopen one for
+    // a record that the user expected to be confidential. Keep this guard.
+    if absence_before_update.auto_approve_past != category.auto_approve_past {
         return Err(AppError::BadRequest(
-            "Sick absences cannot change type.".into(),
-        ));
-    }
-    if absence_before_update.kind != "sick" && body.kind == "sick" {
-        return Err(AppError::BadRequest(
-            "Create a separate sick leave request instead of converting another absence type."
-                .into(),
+            "Cannot change between auto-approve (e.g. sick) and review categories.".into(),
         ));
     }
     crate::repository::AbsenceDb::assert_no_overlap_tx(
@@ -375,12 +413,12 @@ pub async fn update_absence(
     crate::repository::AbsenceDb::ensure_no_time_conflict_tx(
         &mut transaction,
         requester.id,
-        kind,
+        category.auto_approve_past,
         body.start_date,
         body.end_date,
     )
     .await?;
-    if kind == "vacation" {
+    if category.counts_as_vacation {
         validate_vacation_balance(
             &app_state.pool,
             &mut transaction,
@@ -392,7 +430,7 @@ pub async fn update_absence(
         )
         .await?;
     }
-    let updated_status = if kind == "sick" && body.start_date <= today_date {
+    let updated_status = if category.auto_approve_past && body.start_date <= today_date {
         "approved"
     } else {
         "requested"
@@ -400,7 +438,7 @@ pub async fn update_absence(
     crate::repository::AbsenceDb::update_fields_tx(
         &mut transaction,
         absence_id,
-        kind,
+        category.id,
         body.start_date,
         body.end_date,
         body.comment.as_deref(),
@@ -434,7 +472,9 @@ pub async fn update_absence(
             absence_id,
         )
         .await;
-    } else if absence_after_update.kind == "sick" && absence_after_update.status == "approved" {
+    } else if absence_after_update.auto_approve_past
+        && absence_after_update.status == "approved"
+    {
         notify_sick_auto_approved(app_state, requester, &absence_after_update, absence_id).await;
     }
     Ok(absence_after_update)
@@ -588,12 +628,12 @@ pub async fn approve_absence(
     crate::repository::AbsenceDb::ensure_no_time_conflict_tx(
         &mut transaction,
         absence.user_id,
-        &absence.kind,
+        absence.auto_approve_past,
         absence.start_date,
         absence.end_date,
     )
     .await?;
-    if absence.kind == "vacation" {
+    if absence.counts_as_vacation {
         let repo_user = app_state
             .db
             .users
@@ -1184,10 +1224,20 @@ mod tests {
     }
 
     fn sample_absence(id: i64, status: &str, kind: &str) -> Absence {
+        let (counts_as_vacation, keeps_work_target, auto_approve_past) = match kind {
+            "vacation" => (true, false, false),
+            "sick" => (false, false, true),
+            "flextime_reduction" => (false, true, false),
+            _ => (false, false, false),
+        };
         Absence {
             id,
             user_id: 1,
+            category_id: 1,
             kind: kind.to_string(),
+            counts_as_vacation,
+            keeps_work_target,
+            auto_approve_past,
             start_date: NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
             end_date: NaiveDate::from_ymd_opt(2026, 6, 5).unwrap(),
             comment: None,
@@ -1208,93 +1258,65 @@ mod tests {
     // validate_absence
     // ──────────────────────────────────────────────────────────────────────
 
-    /// A well-formed absence must pass validation and return the kind.
+    /// A well-formed payload must pass the shape validation.
     #[test]
-    fn validate_absence_accepts_valid_input() {
+    fn validate_new_absence_shape_accepts_valid_input() {
         let input = NewAbsence {
-            kind: "vacation".to_string(),
+            category_id: Some(1),
+            kind: None,
             start_date: NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
             end_date: NaiveDate::from_ymd_opt(2026, 6, 5).unwrap(),
             comment: None,
         };
-        assert_eq!(validate_absence(&input).unwrap(), "vacation");
-    }
-
-    /// An unrecognised kind must be rejected.
-    #[test]
-    fn validate_absence_rejects_unknown_kind() {
-        let input = NewAbsence {
-            kind: "funday".to_string(),
-            start_date: NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
-            end_date: NaiveDate::from_ymd_opt(2026, 6, 5).unwrap(),
-            comment: None,
-        };
-        assert!(matches!(
-            validate_absence(&input).unwrap_err(),
-            AppError::BadRequest(_)
-        ));
+        assert!(validate_new_absence_shape(&input).is_ok());
     }
 
     /// A comment exceeding 2000 characters must be rejected.
     #[test]
-    fn validate_absence_rejects_oversized_comment() {
+    fn validate_new_absence_shape_rejects_oversized_comment() {
         let input = NewAbsence {
-            kind: "sick".to_string(),
+            category_id: Some(1),
+            kind: None,
             start_date: NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
             end_date: NaiveDate::from_ymd_opt(2026, 6, 5).unwrap(),
             comment: Some("x".repeat(2001)),
         };
         assert!(matches!(
-            validate_absence(&input).unwrap_err(),
+            validate_new_absence_shape(&input).unwrap_err(),
             AppError::BadRequest(_)
         ));
     }
 
     /// end_date < start_date must be rejected.
     #[test]
-    fn validate_absence_rejects_inverted_date_range() {
+    fn validate_new_absence_shape_rejects_inverted_date_range() {
         let input = NewAbsence {
-            kind: "vacation".to_string(),
+            category_id: Some(1),
+            kind: None,
             start_date: NaiveDate::from_ymd_opt(2026, 6, 10).unwrap(),
             end_date: NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
             comment: None,
         };
         assert!(matches!(
-            validate_absence(&input).unwrap_err(),
+            validate_new_absence_shape(&input).unwrap_err(),
             AppError::BadRequest(_)
         ));
     }
 
     /// A range spanning more than 365 days must be rejected.
     #[test]
-    fn validate_absence_rejects_range_exceeding_one_year() {
+    fn validate_new_absence_shape_rejects_range_exceeding_one_year() {
         let input = NewAbsence {
-            kind: "general_absence".to_string(),
+            category_id: Some(1),
+            kind: None,
             start_date: NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
             end_date: NaiveDate::from_ymd_opt(2027, 1, 3).unwrap(), // 367 days
             comment: None,
         };
         assert!(matches!(
-            validate_absence(&input).unwrap_err(),
+            validate_new_absence_shape(&input).unwrap_err(),
             AppError::BadRequest(_)
         ));
-    }
-
-    /// All documented allowed kinds must pass `validate_absence`.
-    #[test]
-    fn validate_absence_accepts_all_allowed_kinds() {
-        for kind in crate::repository::absences::ALLOWED_KINDS {
-            let input = NewAbsence {
-                kind: kind.to_string(),
-                start_date: NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
-                end_date: NaiveDate::from_ymd_opt(2026, 6, 3).unwrap(),
-                comment: None,
-            };
-            assert!(
-                validate_absence(&input).is_ok(),
-                "kind '{kind}' should be allowed"
-            );
-        }
     }
 
     // ──────────────────────────────────────────────────────────────────────
@@ -1427,7 +1449,11 @@ mod tests {
         let repo = crate::repository::Absence {
             id: 99,
             user_id: 7,
+            category_id: 2,
             kind: "sick".to_string(),
+            counts_as_vacation: false,
+            keeps_work_target: false,
+            auto_approve_past: true,
             start_date: NaiveDate::from_ymd_opt(2026, 3, 1).unwrap(),
             end_date: NaiveDate::from_ymd_opt(2026, 3, 5).unwrap(),
             comment: Some("flu".to_string()),
@@ -1440,7 +1466,9 @@ mod tests {
         let svc = repo_absence_to_service(repo.clone());
         assert_eq!(svc.id, 99);
         assert_eq!(svc.user_id, 7);
+        assert_eq!(svc.category_id, 2);
         assert_eq!(svc.kind, "sick");
+        assert!(svc.auto_approve_past);
         assert_eq!(svc.status, "approved");
         assert_eq!(svc.comment.as_deref(), Some("flu"));
         assert_eq!(svc.reviewed_by, Some(2));

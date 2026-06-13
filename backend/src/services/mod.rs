@@ -1,4 +1,5 @@
 pub mod absence_balance;
+pub mod absence_categories;
 pub mod absences;
 pub mod auth;
 pub mod categories;

@@ -10,6 +10,7 @@
     currentUser,
     earliestStartDate,
     categories,
+    absenceCategories,
     settings,
     theme,
     path,
@@ -89,6 +90,11 @@
             );
           }
         }
+        if (!$absenceCategories.length) {
+          try {
+            absenceCategories.set(await api("/absence-categories"));
+          } catch {}
+        }
       }
     } catch (err) {
       debugLog("loadMe:error", {
@@ -118,6 +124,7 @@
     stopNotifications();
     csrfToken.set(null);
     categories.set([]);
+    absenceCategories.set([]);
     currentUser.set(false);
     go("/", false);
     toast($t("Your session has expired. Please sign in again."), "error");

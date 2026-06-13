@@ -16,35 +16,41 @@ pub async fn workdays(
         .await
 }
 
-pub async fn workdays_total(
+/// Sum of approved (and cancellation_pending) absence workdays for a specific
+/// category. Used by the team report for per-kind columns (vacation taken,
+/// sick taken). Callers pass the category id resolved up front so the
+/// repository query is a tight indexed lookup.
+pub async fn workdays_total_for_category(
     pool: &crate::db::DatabasePool,
     user_id: i64,
-    kind: &str,
+    category_id: i64,
     from: NaiveDate,
     to: NaiveDate,
 ) -> AppResult<f64> {
     use crate::repository::AbsenceDb;
     AbsenceDb::new(pool.clone())
-        .workdays_total(user_id, kind, from, to)
+        .workdays_total_for_category(user_id, category_id, from, to)
         .await
 }
 
-pub fn validate_sick_start_date(
-    kind: &str,
+/// Enforce the backdating window for auto-approve (sick-like) categories.
+/// Other categories already have their start date bounded by the user's Zerf
+/// start_date and pass through approval; this guard exists specifically to
+/// prevent fraudulent retroactive sick leave from skipping review.
+pub fn validate_backdating_window(
+    category: &crate::repository::AbsenceCategory,
     start_date: NaiveDate,
     today: NaiveDate,
 ) -> AppResult<()> {
-    if kind != "sick" {
+    if !category.auto_approve_past {
         return Ok(());
     }
-
     let earliest = today - Duration::days(30);
     if start_date < earliest {
         return Err(AppError::BadRequest(
-            "Sick leave cannot be backdated more than 30 days.".into(),
+            "Auto-approved absences cannot be backdated more than 30 days.".into(),
         ));
     }
-
     Ok(())
 }
 
@@ -223,14 +229,16 @@ pub async fn carryover_days_into_year(
         let year_to = NaiveDate::from_ymd_opt(source_year, 12, 31).unwrap();
         let expiry_date = parse_expiry_date(expiry_setting, source_year);
 
+        // Carryover source is approved vacation usage. Since absence categories
+        // are configurable, "vacation" is no longer a fixed slug — we sum
+        // workdays across every category whose counts_as_vacation flag is set.
         let base_usage = if let Some(expiry) = expiry_date {
             let pre_window_end = std::cmp::min(expiry, year_to);
             let post_window_start = expiry + Duration::days(1);
             let pre_usage = if year_from <= pre_window_end {
                 absence_db
-                    .workdays_total_filtered(
+                    .vacation_workdays_total_filtered(
                         user.id,
-                        "vacation",
                         year_from,
                         pre_window_end,
                         &["approved"],
@@ -241,9 +249,8 @@ pub async fn carryover_days_into_year(
             };
             let post_usage = if post_window_start <= year_to {
                 absence_db
-                    .workdays_total_filtered(
+                    .vacation_workdays_total_filtered(
                         user.id,
-                        "vacation",
                         post_window_start,
                         year_to,
                         &["approved"],
@@ -255,7 +262,7 @@ pub async fn carryover_days_into_year(
             post_usage + (pre_usage - incoming_carryover as f64).max(0.0)
         } else {
             let total_usage = absence_db
-                .workdays_total_filtered(user.id, "vacation", year_from, year_to, &["approved"])
+                .vacation_workdays_total_filtered(user.id, year_from, year_to, &["approved"])
                 .await?;
             (total_usage - incoming_carryover as f64).max(0.0)
         };
@@ -711,15 +718,43 @@ pub async fn validate_vacation_balance(
     Ok(())
 }
 
-/// Compute workdays per kind (used by team report and balance).
-pub async fn workdays_per_kind(
+/// Compute workdays per category (used by team report). Replaces the legacy
+/// `workdays_per_kind` helper that hardcoded slug-based filtering.
+pub async fn workdays_per_category(
     pool: &crate::db::DatabasePool,
     user_id: i64,
-    kind: &str,
+    category_id: i64,
     from: NaiveDate,
     to: NaiveDate,
 ) -> AppResult<f64> {
-    workdays_total(pool, user_id, kind, from, to).await
+    workdays_total_for_category(pool, user_id, category_id, from, to).await
+}
+
+/// Total workdays across all categories whose `counts_as_vacation` flag is
+/// set. Used by the team report's vacation columns; previously this was
+/// `workdays_total(pool, id, "vacation", ...)`.
+pub async fn vacation_workdays(
+    pool: &crate::db::DatabasePool,
+    user_id: i64,
+    from: NaiveDate,
+    to: NaiveDate,
+) -> AppResult<f64> {
+    crate::repository::AbsenceDb::new(pool.clone())
+        .vacation_workdays_total(user_id, from, to)
+        .await
+}
+
+/// Total workdays across all categories whose `auto_approve_past` flag is set
+/// (sick-like). Used by the team report's "sick days" column.
+pub async fn auto_approve_workdays(
+    pool: &crate::db::DatabasePool,
+    user_id: i64,
+    from: NaiveDate,
+    to: NaiveDate,
+) -> AppResult<f64> {
+    crate::repository::AbsenceDb::new(pool.clone())
+        .auto_approve_workdays_total(user_id, from, to)
+        .await
 }
 
 #[cfg(test)]
@@ -731,35 +766,46 @@ mod tests {
     // validate_sick_start_date
     // ──────────────────────────────────────────────────────────────────────
 
-    /// Non-sick absence kinds must always pass regardless of start date.
+    fn sample_category(slug: &str, auto_approve_past: bool) -> crate::repository::AbsenceCategory {
+        crate::repository::AbsenceCategory {
+            id: 1,
+            slug: slug.to_string(),
+            name: slug.to_string(),
+            color: "#000000".to_string(),
+            sort_order: 0,
+            active: true,
+            counts_as_vacation: false,
+            keeps_work_target: false,
+            auto_approve_past,
+        }
+    }
+
+    /// Categories without auto_approve_past skip the 30-day window entirely.
     #[test]
-    fn validate_sick_start_date_skips_non_sick_kinds() {
+    fn validate_backdating_window_skips_review_categories() {
         let today = NaiveDate::from_ymd_opt(2026, 5, 22).unwrap();
-        // A date far in the past must be fine for non-sick kinds.
+        let category = sample_category("vacation", false);
         let old_start = NaiveDate::from_ymd_opt(2020, 1, 1).unwrap();
-        assert!(validate_sick_start_date("vacation", old_start, today).is_ok());
-        assert!(validate_sick_start_date("training", old_start, today).is_ok());
-        assert!(validate_sick_start_date("general_absence", old_start, today).is_ok());
+        assert!(validate_backdating_window(&category, old_start, today).is_ok());
     }
 
-    /// Sick leave is accepted when the start date is within 30 days.
+    /// An auto-approve category accepts today and the 30-day boundary.
     #[test]
-    fn validate_sick_start_date_accepts_recent_sick_start() {
+    fn validate_backdating_window_accepts_recent_auto_approve_start() {
         let today = NaiveDate::from_ymd_opt(2026, 5, 22).unwrap();
-        // Exactly 30 days ago is the boundary (allowed).
+        let category = sample_category("sick", true);
         let boundary = today - Duration::days(30);
-        assert!(validate_sick_start_date("sick", boundary, today).is_ok());
-        // Even today is fine.
-        assert!(validate_sick_start_date("sick", today, today).is_ok());
+        assert!(validate_backdating_window(&category, boundary, today).is_ok());
+        assert!(validate_backdating_window(&category, today, today).is_ok());
     }
 
-    /// Sick leave must be rejected when the start date is older than 30 days.
+    /// An auto-approve category rejects start dates older than 30 days.
     #[test]
-    fn validate_sick_start_date_rejects_old_sick_start() {
+    fn validate_backdating_window_rejects_old_auto_approve_start() {
         let today = NaiveDate::from_ymd_opt(2026, 5, 22).unwrap();
-        // 31 days ago — one day past the allowed window.
+        let category = sample_category("sick", true);
         let too_old = today - Duration::days(31);
-        let err = validate_sick_start_date("sick", too_old, today).unwrap_err();
+        let err = validate_backdating_window(&category, too_old, today).unwrap_err();
         assert!(matches!(err, crate::error::AppError::BadRequest(_)));
     }
 

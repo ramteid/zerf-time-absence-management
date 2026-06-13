@@ -76,9 +76,10 @@ impl ReportDb {
         to: NaiveDate,
     ) -> AppResult<Vec<(NaiveDate, NaiveDate, String)>> {
         Ok(sqlx::query_as(
-            "SELECT start_date, end_date, kind FROM absences \
-             WHERE user_id=$1 AND status IN ('approved','cancellation_pending') \
-             AND end_date >= $2 AND start_date <= $3",
+            "SELECT a.start_date, a.end_date, c.slug \
+             FROM absences a JOIN absence_categories c ON c.id = a.category_id \
+             WHERE a.user_id=$1 AND a.status IN ('approved','cancellation_pending') \
+             AND a.end_date >= $2 AND a.start_date <= $3",
         )
         .bind(user_id)
         .bind(from)
@@ -223,9 +224,10 @@ impl ReportDb {
         to: NaiveDate,
     ) -> AppResult<Vec<(NaiveDate, NaiveDate, String)>> {
         Ok(sqlx::query_as(
-            "SELECT start_date, end_date, kind FROM absences \
-             WHERE user_id=$1 AND status IN ('approved','cancellation_pending') \
-             AND end_date >= $2 AND start_date <= $3",
+            "SELECT a.start_date, a.end_date, c.slug \
+             FROM absences a JOIN absence_categories c ON c.id = a.category_id \
+             WHERE a.user_id=$1 AND a.status IN ('approved','cancellation_pending') \
+             AND a.end_date >= $2 AND a.start_date <= $3",
         )
         .bind(user_id)
         .bind(from)

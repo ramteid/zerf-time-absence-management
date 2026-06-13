@@ -9,10 +9,47 @@ use chrono::{Datelike, Duration, NaiveDate, NaiveTime};
 use serde::Serialize;
 use std::collections::HashMap;
 
-const FLEXTIME_REDUCTION_KIND: &str = "flextime_reduction";
+/// True when an absence of this kind removes the day's work target (i.e. the
+/// day "costs nothing" toward the flextime balance because the user was off).
+/// The lookup is performed against the absence_categories table, with a small
+/// cache built once per report build to avoid round-tripping for every day.
+pub fn absence_removes_target(category_lookup: &AbsenceCategoryFlags, kind: &str) -> bool {
+    category_lookup
+        .by_slug
+        .get(kind)
+        .map(|flags| !flags.keeps_work_target)
+        // Unknown slug (rare: category was deleted under live data) → default
+        // to "removes target" so we err on the side of giving the user the day
+        // off rather than penalising flextime for missing metadata.
+        .unwrap_or(true)
+}
 
-pub fn absence_removes_target(kind: &str) -> bool {
-    kind != FLEXTIME_REDUCTION_KIND
+/// Per-category behavior flags indexed by both id and slug for the rare case
+/// where a report's data only carries one of the two.
+pub struct AbsenceCategoryFlags {
+    pub by_slug: std::collections::HashMap<String, CategoryFlagSet>,
+}
+
+pub struct CategoryFlagSet {
+    pub keeps_work_target: bool,
+}
+
+impl AbsenceCategoryFlags {
+    pub async fn load(pool: &crate::db::DatabasePool) -> AppResult<Self> {
+        let categories = crate::repository::AbsenceCategoryDb::new(pool.clone())
+            .behavior_map()
+            .await?;
+        let mut by_slug = std::collections::HashMap::with_capacity(categories.len());
+        for category in categories {
+            by_slug.insert(
+                category.slug,
+                CategoryFlagSet {
+                    keeps_work_target: category.keeps_work_target,
+                },
+            );
+        }
+        Ok(Self { by_slug })
+    }
 }
 
 /// Verify that `requester` is allowed to read data for `target_uid`.
@@ -223,6 +260,11 @@ pub async fn build_range_with_user(
     let approved_absence_rows: Vec<(NaiveDate, NaiveDate, String)> =
         reports_db.approved_absence_rows(user_id, from, to).await?;
 
+    // Per-build category flag lookup — used once per day to decide whether an
+    // approved absence removes that day's work target (vacation, sick, ...) or
+    // keeps it (flextime reduction).
+    let category_flags = AbsenceCategoryFlags::load(pool).await?;
+
     let language = i18n::load_ui_language(pool).await.unwrap_or_default();
 
     let holiday_raw = reports_db.holiday_rows(from, to).await?;
@@ -256,7 +298,7 @@ pub async fn build_range_with_user(
         // not covered by a holiday or absence, and not in the future.
         let absence_blocks_target = absence
             .as_deref()
-            .map(absence_removes_target)
+            .map(|kind| absence_removes_target(&category_flags, kind))
             .unwrap_or(false);
         let is_workday = is_contract_workday(current_date, user.workdays_per_week)
             && holiday.is_none()
@@ -491,6 +533,10 @@ pub async fn build_flextime_for_user(
         }
     }
 
+    // Category flag lookup so each day can decide whether an approved absence
+    // removes that day's work target.
+    let category_flags = AbsenceCategoryFlags::load(pool).await?;
+
     let language = i18n::load_ui_language(pool).await.unwrap_or_default();
 
     let holiday_map: HashMap<NaiveDate, String> = reports_db
@@ -521,7 +567,7 @@ pub async fn build_flextime_for_user(
         let after_today = current_date >= today;
         let absence_blocks_target = absence
             .as_deref()
-            .map(absence_removes_target)
+            .map(|kind| absence_removes_target(&category_flags, kind))
             .unwrap_or(false);
         let is_workday = is_contract_workday(current_date, user.workdays_per_week)
             && holiday.is_none()
@@ -1253,9 +1299,32 @@ mod tests {
 
     #[test]
     fn absence_removes_target_keeps_flextime_reduction_as_exception() {
-        assert!(absence_removes_target("vacation"));
-        assert!(absence_removes_target("sick"));
-        assert!(!absence_removes_target("flextime_reduction"));
+        let mut by_slug = std::collections::HashMap::new();
+        by_slug.insert(
+            "vacation".to_string(),
+            CategoryFlagSet {
+                keeps_work_target: false,
+            },
+        );
+        by_slug.insert(
+            "sick".to_string(),
+            CategoryFlagSet {
+                keeps_work_target: false,
+            },
+        );
+        by_slug.insert(
+            "flextime_reduction".to_string(),
+            CategoryFlagSet {
+                keeps_work_target: true,
+            },
+        );
+        let flags = AbsenceCategoryFlags { by_slug };
+        assert!(absence_removes_target(&flags, "vacation"));
+        assert!(absence_removes_target(&flags, "sick"));
+        assert!(!absence_removes_target(&flags, "flextime_reduction"));
+        // Unknown slug — defensive fallback returns "removes target" so users
+        // don't lose flextime to a missing-metadata bug.
+        assert!(absence_removes_target(&flags, "mystery"));
     }
 
     #[test]

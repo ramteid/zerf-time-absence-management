@@ -4,8 +4,8 @@ use serde_json::json;
 
 use crate::common::TestApp;
 use crate::helpers::{
-    admin_login, bootstrap_team_with_suffix, create_and_submit_entry, id, login_change_pw,
-    reference_date, temp_pw,
+    absence_cat, admin_login, bootstrap_team_with_suffix, create_and_submit_entry, id,
+    login_change_pw, reference_date, temp_pw,
 };
 
 #[tokio::test]
@@ -1078,6 +1078,13 @@ async fn absences_repository_workflow() {
     let wednesday = monday + Duration::days(2);
     let friday = monday + Duration::days(4);
 
+    // Pre-load category IDs used throughout this test.
+    let vacation_cat = absence_cat(&app.state.pool, "vacation").await;
+    let training_cat = absence_cat(&app.state.pool, "training").await;
+    let sick_cat = absence_cat(&app.state.pool, "sick").await;
+    let general_cat = absence_cat(&app.state.pool, "general_absence").await;
+    let special_cat = absence_cat(&app.state.pool, "special_leave").await;
+
     assert_eq!(
         absences
             .user_workdays_per_week(emp_id)
@@ -1108,7 +1115,8 @@ async fn absences_repository_workflow() {
     let requested = absences
         .create(
             emp_id,
-            "vacation",
+            vacation_cat.id,
+            vacation_cat.auto_approve_past,
             monday,
             tuesday,
             Some("repo requested absence"),
@@ -1192,20 +1200,36 @@ async fn absences_repository_workflow() {
         1
     );
 
-    let updated = absences
-        .update(
-            requested.id,
-            "training",
-            monday,
-            wednesday,
-            Some("repo updated absence"),
-            "requested",
-            emp_id,
-        )
+    // Update via transaction (the old high-level `update` method was removed;
+    // service layer owns the update flow).
+    let before_kind = absences
+        .find_by_id(requested.id)
         .await
-        .expect("update requested absence");
-    assert_eq!(updated.0.kind, "vacation");
-    assert_eq!(updated.1.kind, "training");
+        .expect("find absence before update")
+        .kind
+        .clone();
+    let mut tx = absences.begin().await.expect("begin update tx");
+    zerf::repository::AbsenceDb::update_fields_tx(
+        &mut tx,
+        requested.id,
+        training_cat.id,
+        monday,
+        wednesday,
+        Some("repo updated absence"),
+        "requested",
+    )
+    .await
+    .expect("update_fields_tx");
+    tx.commit().await.expect("commit update tx");
+    assert_eq!(before_kind, "vacation");
+    assert_eq!(
+        absences
+            .find_by_id(requested.id)
+            .await
+            .expect("find absence after update")
+            .kind,
+        "training"
+    );
 
     let mut conn = app
         .state
@@ -1247,7 +1271,8 @@ async fn absences_repository_workflow() {
     let approved_vacation = absences
         .create(
             emp_id,
-            "vacation",
+            vacation_cat.id,
+            vacation_cat.auto_approve_past,
             friday,
             friday,
             Some("approved vacation"),
@@ -1274,14 +1299,14 @@ async fn absences_repository_workflow() {
     );
     assert_eq!(
         absences
-            .workdays_total(emp_id, "vacation", monday, friday)
+            .workdays_total_for_category(emp_id, vacation_cat.id, monday, friday)
             .await
             .expect("workdays total for vacation"),
         1.0
     );
     assert_eq!(
         absences
-            .workdays_total_filtered(emp_id, "training", monday, friday, &["approved"])
+            .workdays_total_for_category_filtered(emp_id, training_cat.id, monday, friday, &["approved"])
             .await
             .expect("filtered workdays total"),
         3.0
@@ -1291,7 +1316,8 @@ async fn absences_repository_workflow() {
     let draft_sick = absences
         .create(
             emp_id,
-            "sick",
+            sick_cat.id,
+            sick_cat.auto_approve_past,
             sick_day,
             sick_day,
             Some("sick day"),
@@ -1311,7 +1337,8 @@ async fn absences_repository_workflow() {
     let requested_cancel = absences
         .create(
             emp_id,
-            "general_absence",
+            general_cat.id,
+            general_cat.auto_approve_past,
             friday + Duration::days(3),
             friday + Duration::days(3),
             Some("cancel requested"),
@@ -1335,7 +1362,7 @@ async fn absences_repository_workflow() {
     let inserted_id = zerf::repository::AbsenceDb::insert_tx(
         &mut tx,
         emp_id,
-        "vacation",
+        vacation_cat.id,
         friday + Duration::days(4),
         friday + Duration::days(4),
         Some("insert tx absence"),
@@ -1346,7 +1373,7 @@ async fn absences_repository_workflow() {
     zerf::repository::AbsenceDb::update_fields_tx(
         &mut tx,
         inserted_id,
-        "special_leave",
+        special_cat.id,
         friday + Duration::days(4),
         friday + Duration::days(5),
         Some("updated in tx"),
@@ -1379,6 +1406,9 @@ async fn absences_repository_workflow() {
     assert_eq!(approved_ranges.len(), 1);
     tx.commit().await.expect("commit absence tx");
 
+    // Time-conflict is checked at approval, not at creation — requesting an absence
+    // while logged time exists is now allowed. The approval path calls
+    // ensure_no_time_conflict_tx and will reject.
     let non_sick_time_conflict_date = monday - Duration::days(7);
     time_entries
         .create(
@@ -1393,22 +1423,18 @@ async fn absences_repository_workflow() {
         )
         .await
         .expect("create time entry for absence conflict");
-    let time_conflict = absences
+    let _time_conflict_absence = absences
         .create(
             emp_id,
-            "vacation",
+            vacation_cat.id,
+            vacation_cat.auto_approve_past,
             non_sick_time_conflict_date,
             non_sick_time_conflict_date,
             Some("conflicting absence"),
             "requested",
         )
-        .await;
-    assert!(
-        time_conflict.is_err(),
-        "non-sick absence over logged time must fail"
-    );
-    let time_conflict = time_conflict.err().unwrap();
-    assert!(time_conflict.to_string().contains("logged time"));
+        .await
+        .expect("absence creation allowed even with pre-existing time entry");
 
     sqlx::query(
         "INSERT INTO audit_log(user_id, action, table_name, record_id, before_data, after_data) \
@@ -1634,10 +1660,17 @@ async fn time_entries_repository_validation_guards() {
     assert!(second_long.is_err());
     assert!(second_long.err().unwrap().to_string().contains("14 hours"));
 
+    let abs_cat = zerf::repository::AbsenceCategoryDb::new(app.state.pool.clone());
+    let vacation_cat = abs_cat
+        .find_by_slug("vacation")
+        .await
+        .expect("find vacation category")
+        .expect("vacation category exists");
     absences
         .create(
             emp_id,
-            "vacation",
+            vacation_cat.id,
+            vacation_cat.auto_approve_past,
             next_day,
             next_day,
             Some("approved absence"),
@@ -1738,11 +1771,13 @@ async fn reports_repository_workflow() {
         .expect("time entry rows")
         .is_empty());
 
+    let vacation_cat_r = absence_cat(&app.state.pool, "vacation").await;
     let absences = zerf::repository::AbsenceDb::new(app.state.pool.clone());
     absences
         .create(
             emp_id,
-            "vacation",
+            vacation_cat_r.id,
+            vacation_cat_r.auto_approve_past,
             wednesday,
             wednesday,
             Some("repo report absence"),

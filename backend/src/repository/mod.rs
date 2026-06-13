@@ -1,3 +1,4 @@
+pub mod absence_categories;
 pub mod absences;
 pub mod audit;
 pub mod categories;
@@ -12,6 +13,7 @@ pub mod system_metadata;
 pub mod time_entries;
 pub mod users;
 
+pub use absence_categories::{AbsenceCategory, AbsenceCategoryDb};
 pub use absences::{Absence, AbsenceDb, CalendarEntry};
 pub use audit::{AuditDb, LogEntry};
 pub use categories::{Category, CategoryDb};

@@ -1,7 +1,8 @@
 <script>
   import { api } from "../api.js";
-  import { currentUser, settings } from "../stores.js";
+  import { currentUser, settings, absenceCategories } from "../stores.js";
   import { t } from "../i18n.js";
+  import { absenceKindLabel } from "../i18n.js";
   import { appTodayIsoDate } from "../format.js";
   import { countWorkdays } from "../apiMappers.js";
   import Dialog from "../Dialog.svelte";
@@ -12,7 +13,20 @@
   export let holidays = new Set();
   let dialog;
   $: isNew = !template.id;
-  let kind = template.kind || "vacation";
+  // category_id is the primary field; fall back to slug lookup for editing
+  // existing absences that were created before dynamic categories.
+  $: defaultCategoryId = (() => {
+    if (template.category_id) return template.category_id;
+    if (template.kind && $absenceCategories.length) {
+      const match = $absenceCategories.find((c) => c.slug === template.kind);
+      if (match) return match.id;
+    }
+    return $absenceCategories[0]?.id ?? null;
+  })();
+  let category_id = defaultCategoryId;
+  $: if (!category_id && $absenceCategories.length) {
+    category_id = $absenceCategories[0]?.id ?? null;
+  }
   let todayIso = appTodayIsoDate($settings?.timezone);
   let lastTodayIso = todayIso;
   let start_date = template.start_date || todayIso;
@@ -89,7 +103,7 @@
     }
     try {
       const body = {
-        kind,
+        category_id,
         start_date,
         end_date,
         comment: comment || null,
@@ -116,14 +130,10 @@
 >
   <div>
     <label class="zf-label" for="absence-kind">{$t("Type")}</label>
-    <select id="absence-kind" class="zf-select" bind:value={kind}>
-      <option value="vacation">{$t("Vacation")}</option>
-      <option value="sick">{$t("Sick")}</option>
-      <option value="training">{$t("Training")}</option>
-      <option value="special_leave">{$t("Special leave")}</option>
-      <option value="unpaid">{$t("Unpaid")}</option>
-      <option value="general_absence">{$t("General absence")}</option>
-      <option value="flextime_reduction">{$t("Flextime Reduction")}</option>
+    <select id="absence-kind" class="zf-select" bind:value={category_id}>
+      {#each $absenceCategories as cat (cat.id)}
+        <option value={cat.id}>{absenceKindLabel(cat.slug) !== cat.slug ? absenceKindLabel(cat.slug) : cat.name}</option>
+      {/each}
     </select>
   </div>
   <div class="field-row">
