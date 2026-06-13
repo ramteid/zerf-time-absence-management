@@ -8,8 +8,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mount, unmount } from "svelte";
 import AbsenceDialog from "./AbsenceDialog.svelte";
-import { currentUser, settings } from "../stores.js";
+import { currentUser, settings, absenceCategories } from "../stores.js";
 import { setLanguage } from "../i18n.js";
+
+// Seed data matching the default absence_categories seeded by the backend migration.
+const MOCK_CATEGORIES = [
+  { id: 1, slug: "vacation", name: "Vacation", counts_as_vacation: true, keeps_work_target: false, auto_approve_past: false, active: true, color: "#4CAF50", sort_order: 10 },
+  { id: 2, slug: "sick", name: "Sick Leave", counts_as_vacation: false, keeps_work_target: false, auto_approve_past: true, active: true, color: "#F44336", sort_order: 20 },
+  { id: 3, slug: "training", name: "Training", counts_as_vacation: false, keeps_work_target: false, auto_approve_past: false, active: true, color: "#2196F3", sort_order: 30 },
+  { id: 4, slug: "special_leave", name: "Special Leave", counts_as_vacation: false, keeps_work_target: false, auto_approve_past: false, active: true, color: "#9C27B0", sort_order: 40 },
+  { id: 5, slug: "unpaid", name: "Unpaid Leave", counts_as_vacation: false, keeps_work_target: false, auto_approve_past: false, active: true, color: "#FF9800", sort_order: 50 },
+  { id: 6, slug: "general_absence", name: "General Absence", counts_as_vacation: false, keeps_work_target: false, auto_approve_past: false, active: true, color: "#607D8B", sort_order: 60 },
+  { id: 7, slug: "flextime_reduction", name: "Flextime Reduction", counts_as_vacation: false, keeps_work_target: true, auto_approve_past: false, active: true, color: "#795548", sort_order: 70 },
+];
 
 const apiMock = vi.hoisted(() => vi.fn());
 
@@ -43,6 +54,7 @@ describe("AbsenceDialog", () => {
       workdays_per_week: 5,
       start_date: "2020-01-01",
     });
+    absenceCategories.set(MOCK_CATEGORIES);
     apiMock.mockReset();
     originalShowModal = HTMLDialogElement.prototype.showModal;
     HTMLDialogElement.prototype.showModal = function () {
@@ -62,6 +74,7 @@ describe("AbsenceDialog", () => {
     target.remove();
     HTMLDialogElement.prototype.showModal = originalShowModal;
     delete HTMLDialogElement.prototype.close;
+    absenceCategories.set([]);
   });
 
   it("renders 'Request Absence' title for a new absence", async () => {
@@ -96,9 +109,8 @@ describe("AbsenceDialog", () => {
   });
 
   it("shows all absence type options in the dropdown", async () => {
-    // The user-guide lists exactly seven allowed absence kinds. All must
-    // appear in the dropdown so employees are never blocked from submitting
-    // a valid request type.
+    // All seeded absence categories must appear in the dropdown so employees
+    // are never blocked from submitting a valid request type.
     const onClose = vi.fn();
     component = mount(AbsenceDialog, {
       target,
@@ -107,14 +119,13 @@ describe("AbsenceDialog", () => {
     await settle();
     const select = target.querySelector("select");
     expect(select).not.toBeNull();
-    const options = [...select.querySelectorAll("option")].map((o) => o.value);
-    expect(options).toContain("vacation");
-    expect(options).toContain("sick");
-    expect(options).toContain("training");
-    expect(options).toContain("special_leave");
-    expect(options).toContain("unpaid");
-    expect(options).toContain("general_absence");
-    expect(options).toContain("flextime_reduction");
+    // Option values are category IDs; verify one option exists per mock category.
+    const optionValues = [...select.querySelectorAll("option")].map((o) =>
+      Number(o.value)
+    );
+    for (const cat of MOCK_CATEGORIES) {
+      expect(optionValues).toContain(cat.id);
+    }
   });
 
   it("POSTs to /absences when submitting a new request", async () => {
