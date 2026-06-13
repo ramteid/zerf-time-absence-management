@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mount, unmount } from "svelte";
 import Reports from "./Reports.svelte";
 import { api } from "../api.js";
-import { currentUser } from "../stores.js";
+import { currentUser, absenceCategories } from "../stores.js";
 import { setLanguage } from "../i18n.js";
 
 const mockState = vi.hoisted(() => ({
@@ -116,6 +116,11 @@ describe("Reports", () => {
       },
     });
     setLanguage("en");
+    absenceCategories.set([
+      { id: 1, slug: "vacation", name: "Vacation", keeps_work_target: false },
+      { id: 2, slug: "sick", name: "Sick", keeps_work_target: false, auto_approve_past: true },
+      { id: 7, slug: "flextime_reduction", name: "Flextime Reduction", keeps_work_target: true },
+    ]);
 
     mockState.monthReport = {
       user_id: 1,

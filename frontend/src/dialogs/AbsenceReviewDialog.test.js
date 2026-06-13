@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mount, unmount } from "svelte";
 import AbsenceReviewDialog from "./AbsenceReviewDialog.svelte";
 import { setLanguage } from "../i18n.js";
+import { absenceCategories } from "../stores.js";
 
 vi.mock("svelte", async () => {
   return await import("../../node_modules/svelte/src/index-client.js");
@@ -44,6 +45,10 @@ describe("AbsenceReviewDialog", () => {
     target = document.createElement("div");
     document.body.appendChild(target);
     setLanguage("en");
+    absenceCategories.set([
+      { id: 1, slug: "vacation", name: "Vacation", keeps_work_target: false },
+      { id: 2, slug: "sick", name: "Sick", keeps_work_target: false },
+    ]);
     originalShowModal = HTMLDialogElement.prototype.showModal;
     HTMLDialogElement.prototype.showModal = function () {
       this.setAttribute("open", "");
