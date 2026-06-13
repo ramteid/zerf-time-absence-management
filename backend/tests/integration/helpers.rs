@@ -4,17 +4,6 @@ use serde_json::{json, Value};
 
 use crate::common::{TestApp, TestClient};
 
-/// Look up an absence category by slug. Panics if not found.
-/// Used in repository-layer tests that need a category_id directly.
-pub async fn absence_cat_id(pool: &zerf::db::DatabasePool, slug: &str) -> i64 {
-    zerf::repository::AbsenceCategoryDb::new(pool.clone())
-        .find_by_slug(slug)
-        .await
-        .expect("absence_cat_id: db error")
-        .unwrap_or_else(|| panic!("absence category '{slug}' not found"))
-        .id
-}
-
 /// Look up an absence category by slug and return the full record.
 pub async fn absence_cat(
     pool: &zerf::db::DatabasePool,
