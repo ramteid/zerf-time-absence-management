@@ -1,10 +1,6 @@
+// Delegates to absenceKindTotals for consistent exclusion of flextime_reduction.
 export function summarizeAbsences(absences) {
-  const summary = {};
-  for (const absence of absences || []) {
-    summary[absence.kind] = (summary[absence.kind] || 0) + (absence.days || 0);
-  }
-  // Exclude kinds whose total is zero so stat cards don't display "Sick: 0 days".
-  return Object.fromEntries(Object.entries(summary).filter(([, days]) => days > 0));
+  return absenceKindTotals(absences);
 }
 
 export function categoryNamesFromTeamReport(rows) {
@@ -83,6 +79,9 @@ export function dedupeAbsences(absences) {
 export function absenceKindTotals(absences) {
   const totals = {};
   for (const absence of absences || []) {
+    // flextime_reduction is not traditional leave: it doesn't remove the work
+    // target, so it must not inflate leave-day statistics.
+    if (absence.kind === "flextime_reduction") continue;
     const kind = absence.kind || "unknown";
     totals[kind] = (totals[kind] || 0) + (absence.days || 0);
   }
@@ -91,8 +90,9 @@ export function absenceKindTotals(absences) {
 }
 
 export function totalAbsenceDays(absences) {
-  return (absences || []).reduce(
-    (total, absence) => total + (absence.days || 0),
-    0,
-  );
+  // Exclude flextime_reduction: these days keep their work target, so counting
+  // them as "absence days" would overstate the user's true leave consumption.
+  return (absences || [])
+    .filter((absence) => absence.kind !== "flextime_reduction")
+    .reduce((total, absence) => total + (absence.days || 0), 0);
 }

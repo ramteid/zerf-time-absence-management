@@ -135,6 +135,36 @@ describe("reports domain helpers", () => {
     ).toBe(0);
   });
 
+  // flextime_reduction must not inflate leave statistics
+  it("totalAbsenceDays excludes flextime_reduction absences", () => {
+    expect(
+      totalAbsenceDays([
+        { kind: "vacation", days: 3 },
+        { kind: "flextime_reduction", days: 2 },
+        { kind: "sick", days: 1 },
+      ]),
+    ).toBe(4); // vacation + sick only
+  });
+
+  it("absenceKindTotals excludes flextime_reduction absences", () => {
+    expect(
+      absenceKindTotals([
+        { kind: "vacation", days: 3 },
+        { kind: "flextime_reduction", days: 2 },
+        { kind: "sick", days: 1 },
+      ]),
+    ).toEqual({ vacation: 3, sick: 1 });
+  });
+
+  it("summarizeAbsences excludes flextime_reduction absences", () => {
+    expect(
+      summarizeAbsences([
+        { kind: "vacation", days: 5 },
+        { kind: "flextime_reduction", days: 2 },
+      ]),
+    ).toEqual({ vacation: 5 });
+  });
+
   // Bug B1: summarizeAbsences excludes zero-day kinds
   it("summarizeAbsences excludes absence kinds whose total is zero", () => {
     expect(

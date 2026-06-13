@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  absenceBlocksEntry,
+  absenceRemovesTarget,
   buildBreakRules,
   buildWeekDays,
   computeDayBreakDeduction,
@@ -111,6 +113,36 @@ describe("time domain helpers", () => {
         entries.filter((entry) => entry.status === "draft"),
       ),
     ).toBe("partial");
+  });
+
+  // absenceBlocksEntry and absenceRemovesTarget behaviour
+  it("absenceBlocksEntry blocks entries for requested non-sick absences", () => {
+    expect(absenceBlocksEntry({ kind: "vacation", status: "requested" })).toBe(true);
+    expect(absenceBlocksEntry({ kind: "flextime_reduction", status: "requested" })).toBe(true);
+  });
+
+  it("absenceBlocksEntry does not block entries for requested sick absences", () => {
+    // Sick leave auto-approves and allows time entries alongside it.
+    expect(absenceBlocksEntry({ kind: "sick", status: "requested" })).toBe(false);
+  });
+
+  it("absenceBlocksEntry blocks entries for approved non-sick absences", () => {
+    expect(absenceBlocksEntry({ kind: "vacation", status: "approved" })).toBe(true);
+    expect(absenceBlocksEntry({ kind: "flextime_reduction", status: "approved" })).toBe(true);
+  });
+
+  it("absenceBlocksEntry does not block entries for approved sick absences", () => {
+    expect(absenceBlocksEntry({ kind: "sick", status: "approved" })).toBe(false);
+  });
+
+  it("absenceRemovesTarget only removes target for approved/cancellation_pending non-flextime_reduction", () => {
+    // Target IS removed for these:
+    expect(absenceRemovesTarget({ kind: "vacation", status: "approved" })).toBe(true);
+    expect(absenceRemovesTarget({ kind: "sick", status: "cancellation_pending" })).toBe(true);
+    // Target is NOT removed for requested (not yet confirmed):
+    expect(absenceRemovesTarget({ kind: "vacation", status: "requested" })).toBe(false);
+    // Target is NEVER removed for flextime_reduction (it keeps the work target):
+    expect(absenceRemovesTarget({ kind: "flextime_reduction", status: "approved" })).toBe(false);
   });
 });
 

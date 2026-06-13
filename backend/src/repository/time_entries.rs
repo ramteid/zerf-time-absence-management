@@ -180,19 +180,24 @@ pub(crate) async fn validate_entry(
     if day_total > 14 * 60 {
         return Err(AppError::bad_request("Day total exceeds 14 hours."));
     }
-    let absence_on_day: Option<String> = sqlx::query_scalar(
-        "SELECT kind FROM absences WHERE user_id=$1 AND status IN ('approved','cancellation_pending') \
-         AND start_date <= $2 AND end_date >= $2 AND kind <> 'sick' LIMIT 1",
+    // Block entry creation on any day covered by a non-sick absence that is
+    // requested, approved, or pending cancellation. Including 'requested' prevents
+    // a deadlock where entries added after requesting an absence make the absence
+    // impossible to approve (ensure_no_time_conflict_tx blocks approval when entries exist).
+    let has_absence: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM absences WHERE user_id=$1 \
+         AND status IN ('approved','cancellation_pending','requested') \
+         AND start_date <= $2 AND end_date >= $2 AND kind <> 'sick')",
     )
     .bind(user_id)
     .bind(te.entry_date)
-    .fetch_optional(&mut *conn)
+    .fetch_one(&mut *conn)
     .await?;
-    if let Some(kind) = absence_on_day {
-        return Err(AppError::bad_request(format!(
-            "Cannot log time on a day with an approved absence ({kind}). \
-             Please cancel or adjust the absence first."
-        )));
+    if has_absence {
+        return Err(AppError::bad_request(
+            "Cannot log time on a day covered by an absence. \
+             Please cancel or adjust the absence first.",
+        ));
     }
     Ok(())
 }

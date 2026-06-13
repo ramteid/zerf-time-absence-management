@@ -19,6 +19,14 @@ export const WEEKDAY_NAMES = Object.freeze([
 
 const TARGET_REMOVING_ABSENCE_STATUSES = ["approved", "cancellation_pending"];
 
+// A requested (pending) non-sick absence also blocks entry creation: once a user
+// has submitted an absence request, logging time on that day would make approval
+// impossible (ensure_no_time_conflict_tx rejects it on the backend).
+const ENTRY_BLOCKING_ABSENCE_STATUSES = [
+  ...TARGET_REMOVING_ABSENCE_STATUSES,
+  "requested",
+];
+
 export function categoryById(categoryId, categoryRows) {
   return (
     (categoryRows || []).find((category) => category.id === categoryId) || {
@@ -164,7 +172,7 @@ export function absenceRemovesTarget(absence) {
 
 export function absenceBlocksEntry(absence) {
   return absence
-    ? TARGET_REMOVING_ABSENCE_STATUSES.includes(absence.status) &&
+    ? ENTRY_BLOCKING_ABSENCE_STATUSES.includes(absence.status) &&
         absence.kind !== "sick"
     : false;
 }
