@@ -822,6 +822,7 @@ mod tests {
             counts_as_vacation: false,
             keeps_work_target: false,
             auto_approve_past,
+            team_visible: false,
         }
     }
 
