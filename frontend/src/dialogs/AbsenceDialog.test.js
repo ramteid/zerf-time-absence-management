@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mount, unmount } from "svelte";
 import AbsenceDialog from "./AbsenceDialog.svelte";
 import { currentUser, settings, absenceCategories } from "../stores.js";
-import { setLanguage } from "../i18n.js";
+import { setLanguage, setAbsenceCategoryCache } from "../i18n.js";
 
 // Seed data matching the default absence_categories seeded by the backend migration.
 const MOCK_CATEGORIES = [
@@ -55,6 +55,7 @@ describe("AbsenceDialog", () => {
       start_date: "2020-01-01",
     });
     absenceCategories.set(MOCK_CATEGORIES);
+    setAbsenceCategoryCache(MOCK_CATEGORIES);
     apiMock.mockReset();
     originalShowModal = HTMLDialogElement.prototype.showModal;
     HTMLDialogElement.prototype.showModal = function () {
@@ -75,6 +76,7 @@ describe("AbsenceDialog", () => {
     HTMLDialogElement.prototype.showModal = originalShowModal;
     delete HTMLDialogElement.prototype.close;
     absenceCategories.set([]);
+    setAbsenceCategoryCache([]);
   });
 
   it("renders 'Request Absence' title for a new absence", async () => {

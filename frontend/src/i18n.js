@@ -1,5 +1,4 @@
 import { writable, derived, get } from "svelte/store";
-import { absenceCategories } from "./stores.js";
 
 // --- Configuration ---
 
@@ -1513,7 +1512,16 @@ export function auditActionLabel(action) {
     : result;
 }
 
+// Module-level cache populated by setAbsenceCategoryCache (called from App.svelte).
+// Avoids importing the Svelte store directly, which causes module-isolation
+// issues in tests that vi.mock("svelte").
+let _absenceCategoryCache = [];
+
+export function setAbsenceCategoryCache(categories) {
+  _absenceCategoryCache = categories || [];
+}
+
 export function absenceKindLabel(kind) {
-  const cat = get(absenceCategories).find((c) => c.slug === kind);
+  const cat = _absenceCategoryCache.find((c) => c.slug === kind);
   return translate(get(language), cat?.name || kind);
 }

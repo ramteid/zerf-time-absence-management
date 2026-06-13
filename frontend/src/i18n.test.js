@@ -18,14 +18,14 @@ import {
   formatDayCount,
   localizeErrorMessage,
   t,
+  setAbsenceCategoryCache,
 } from "./i18n.js";
-import { absenceCategories } from "./stores.js";
 
 beforeEach(() => {
   setLanguage("en");
-  // Populate the absenceCategories store with the seeded categories so
+  // Populate the absenceKindLabel cache with the seeded categories so
   // absenceKindLabel can look up the display name by slug.
-  absenceCategories.set([
+  setAbsenceCategoryCache([
     { id: 1, slug: "vacation", name: "Vacation", color: "#3b82f6", active: true },
     { id: 2, slug: "sick", name: "Sick", color: "#b91c1c", active: true },
     { id: 3, slug: "training", name: "Training", color: "#0d9488", active: true },

@@ -236,6 +236,16 @@ async fn reports_full_workflow() {
             category_id_by_name(&categories_body, "Flextime Reduction")
                 .expect("flextime reduction category exists");
 
+        // Give the employee a large opening flextime balance so B8
+        // (validate_flextime_balance) passes. The integration test user is
+        // created with start_date=2024-01-01 but has no approved hours, so
+        // without a positive seed the balance would be deeply negative.
+        sqlx::query("UPDATE users SET overtime_start_balance_min = 9999999 WHERE id = $1")
+            .bind(emp_id)
+            .execute(&app.state.pool)
+            .await
+            .expect("seed flextime balance");
+
         let (st, body) = emp
             .post(
                 "/api/v1/absences",

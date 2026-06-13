@@ -24,7 +24,7 @@
     startNotifications,
     stopNotifications,
   } from "./notificationService.js";
-  import { setLanguage, t } from "./i18n.js";
+  import { setLanguage, t, setAbsenceCategoryCache } from "./i18n.js";
   import Layout from "./Layout.svelte";
   import Login from "./routes/Login.svelte";
   import Setup from "./routes/Setup.svelte";
@@ -139,6 +139,12 @@
     // resetUnauthorizedGate() (called by Login.svelte after successful re-login)
     // also resets this flag via the onGateReset hook registered below.
   }
+
+  // Keep the i18n label cache in sync with the store so absenceKindLabel
+  // always has the latest DB-configured category names without importing
+  // the store directly in i18n.js (which causes module isolation issues
+  // in Vitest when svelte is mocked).
+  $: setAbsenceCategoryCache($absenceCategories);
 
   $: if (!booting) {
     if ($currentUser) startNotifications();

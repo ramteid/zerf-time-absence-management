@@ -3,7 +3,7 @@ import { mount, unmount } from "svelte";
 import Reports from "./Reports.svelte";
 import { api } from "../api.js";
 import { currentUser, absenceCategories } from "../stores.js";
-import { setLanguage } from "../i18n.js";
+import { setLanguage, setAbsenceCategoryCache } from "../i18n.js";
 
 const mockState = vi.hoisted(() => ({
   monthReport: null,
@@ -116,11 +116,13 @@ describe("Reports", () => {
       },
     });
     setLanguage("en");
-    absenceCategories.set([
+    const cats = [
       { id: 1, slug: "vacation", name: "Vacation", keeps_work_target: false },
       { id: 2, slug: "sick", name: "Sick", keeps_work_target: false, auto_approve_past: true },
       { id: 7, slug: "flextime_reduction", name: "Flextime Reduction", keeps_work_target: true },
-    ]);
+    ];
+    absenceCategories.set(cats);
+    setAbsenceCategoryCache(cats);
 
     mockState.monthReport = {
       user_id: 1,
