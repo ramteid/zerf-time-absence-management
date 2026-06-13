@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mount, unmount } from "svelte";
 import AbsenceReport from "./AbsenceReport.svelte";
-import { currentUser, earliestStartDate, settings } from "../../stores.js";
+import { currentUser, earliestStartDate, settings, absenceCategories } from "../../stores.js";
 import { setLanguage } from "../../i18n.js";
 
 vi.mock("svelte", async () => {
@@ -51,6 +51,11 @@ describe("AbsenceReport", () => {
     settings.set({ ui_language: "en", time_format: "24h", timezone: "UTC" });
     earliestStartDate.set(null);
     currentUser.set({ id: 1, role: "employee", tracks_time: true });
+    absenceCategories.set([
+      { id: 1, slug: "vacation", name: "Vacation", keeps_work_target: false },
+      { id: 2, slug: "sick", name: "Sick", keeps_work_target: false },
+      { id: 7, slug: "flextime_reduction", name: "Flextime Reduction", keeps_work_target: true },
+    ]);
     vi.clearAllMocks();
     // Default: no absences or holidays
     getAbsenceReport.mockResolvedValue([]);

@@ -360,6 +360,12 @@ Review and privacy behavior:
 		excluding admin subjects). For direct reports' time entries, the
 		person's name is shown in the event detail.
 	- Admins see all users' data regardless of approver assignments.
+- **Calendar privacy per absence category**: whether teammates can see the
+	category name of someone else's absence is controlled by the **Visible to
+	teammates** flag on each absence category. When disabled (default for sick
+	leave), non-leads see the absence as a generic "Absent" event. Team leads
+	and admins always see the real category. Admins can configure this per
+	category in *Admin → Categories*.
 - Team leads and admins see full kind and comment details for the absences
 	they are allowed to view, so they can coordinate cover.
 
@@ -400,7 +406,7 @@ Daily target hours are `0` when:
 - Day is before your start date,
 - Day is in the future.
 
-Flextime reduction is the exception: it follows the absence workflow and blocks normal time entry creation on that day, but it does not remove the daily target. This lets the day reduce your flextime balance intentionally.
+Absences from categories with **Keeps work target** (e.g. flextime reduction) are the exception: they follow the absence workflow and block normal time entry creation on those days, but the daily work target is not removed. This lets the days reduce your flextime balance intentionally. To prevent the balance from going below the configured minimum, requests for these category types are checked against your current flextime balance at submission time.
 
 Otherwise, target is calculated as:
 
@@ -1364,18 +1370,20 @@ Categories define what employees can book time against.
 
 #### Absence categories
 
-Absence categories define what types of absences employees can request. Each category has three behavior flags:
+Absence categories define what types of absences employees can request. Each category has four behavior flags:
 
 | Flag | Effect when enabled |
 | --- | --- |
 | **Counts as vacation** | Days deducted from the employee's annual vacation balance. |
-| **Keeps work target (flextime)** | Approved days do **not** zero out the daily work target; the employee still needs to compensate through flextime. Use this for categories like *flextime reduction* where the absence itself is the compensation mechanism. |
+| **Keeps work target (flextime)** | Approved days do **not** zero out the daily work target; the employee still needs to compensate through flextime. Use this for categories like *flextime reduction* where the absence itself is the compensation mechanism. Requests for this category type are checked against the employee's current flextime balance at submission time. |
 | **Auto-approve past dates (sick-like)** | Absences with a start date on or before today are approved automatically. Approvers receive an informational notice. This flag also disables the time-entry conflict check at creation, so partial-day overlaps are allowed (e.g. employee worked the morning and then called in sick). |
+| **Visible to teammates in team calendar** | Non-leads and non-admins can see the category name for absences of this type in the team calendar. When unchecked, those absences appear as generic "Absent" entries — suitable for private categories such as sick leave (GDPR Art. 9). Team leads and admins always see all absences regardless of this flag. |
 
 Constraints:
 - **Counts as vacation** and **Keeps work target** are mutually exclusive (a category cannot both deduct vacation and preserve the target).
 - A category slug is auto-generated from the name and must be unique. Existing absences are not affected when a category is deactivated or renamed.
 - Inactive categories are hidden from the absence request dialog but remain attached to existing absence records.
+- Changing the cost type of an absence (e.g. from a vacation category to a flextime category) after submission is not allowed. Cancel the existing request and re-submit with the correct category.
 
 ### Managing holidays
 
