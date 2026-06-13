@@ -573,6 +573,14 @@ const TRANSLATIONS = {
     "Add Category": "Kategorie hinzufügen",
     "Edit Category": "Kategorie bearbeiten",
     "Counts as work": "Zählt als Arbeitszeit",
+    "Absence Categories": "Abwesenheitskategorien",
+    "Add Absence Category": "Abwesenheitskategorie hinzufügen",
+    "Edit Absence Category": "Abwesenheitskategorie bearbeiten",
+    "Counts as vacation": "Zählt als Urlaub",
+    "Keeps work target (flextime)": "Arbeitssoll bleibt (Gleitzeit)",
+    "Auto-approve past dates (sick-like)": "Vergangene Daten automatisch genehmigen (Krankmeldung)",
+    "Absence category slug already exists.": "Abwesenheitskategorie-Slug existiert bereits.",
+    "A category cannot both deduct vacation and reduce flextime.": "Eine Kategorie kann nicht gleichzeitig Urlaub abziehen und Gleitzeit reduzieren.",
     "General Settings": "Allgemeine Einstellungen",
     General: "Allgemein",
     Organization: "Organisation",
@@ -1424,6 +1432,25 @@ export function fmtDecimal(value, fractionDigits = 1) {
     minimumFractionDigits: fractionDigits,
     maximumFractionDigits: fractionDigits,
   }).format(value);
+}
+
+// Parse a locale-formatted decimal string back to a JS number.
+// Detects the decimal separator by position: the separator that appears last is
+// treated as the decimal point (e.g. "1.234,56" → comma is decimal, "1,234.56"
+// → period is decimal). This makes the function accept both "2,5" and "2.5"
+// regardless of the current locale, so users who accidentally type the wrong
+// separator are still handled correctly.
+export function parseDecimal(value) {
+  if (value === "" || value == null) return NaN;
+  const str = String(value).trim();
+  const lastComma = str.lastIndexOf(",");
+  const lastPeriod = str.lastIndexOf(".");
+  if (lastComma > lastPeriod) {
+    // Comma is the decimal separator (e.g. "1.234,56" or "2,57")
+    return parseFloat(str.replace(/\./g, "").replace(",", "."));
+  }
+  // Period is the decimal separator (e.g. "1,234.56" or "2.57")
+  return parseFloat(str.replace(/,/g, ""));
 }
 
 export function formatDayCount(value) {

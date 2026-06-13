@@ -9,6 +9,7 @@ export {
 
 export const currentUser = writable(null);
 export const categories = writable([]);
+export const absenceCategories = writable([]);
 export const settings = writable({ ui_language: "en", time_format: "24h", timezone: "Europe/Berlin" });
 // Earliest start_date across all active users; used as global lower bound for date pickers.
 export const earliestStartDate = writable(null);

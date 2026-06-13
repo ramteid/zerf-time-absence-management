@@ -5,20 +5,16 @@ use serde::Serialize;
 use sqlx::{Postgres, QueryBuilder};
 use std::collections::HashSet;
 
-pub const ALLOWED_KINDS: &[&str] = &[
-    "vacation",
-    "sick",
-    "training",
-    "special_leave",
-    "unpaid",
-    "general_absence",
-    "flextime_reduction",
-];
-
+/// `Absence` rows expose both `category_id` (the canonical reference) and
+/// `kind` (the slug, populated by joining absence_categories). Frontend code
+/// and business logic that previously branched on `kind == "vacation"` is
+/// gradually migrating to the explicit behavior flags also returned here, but
+/// the slug remains useful as a stable i18n key and for legacy callers.
 #[derive(sqlx::FromRow, Serialize, Clone)]
 pub struct Absence {
     pub id: i64,
     pub user_id: i64,
+    pub category_id: i64,
     pub kind: String,
     pub start_date: NaiveDate,
     pub end_date: NaiveDate,
@@ -28,6 +24,9 @@ pub struct Absence {
     pub reviewed_at: Option<DateTime<Utc>>,
     pub rejection_reason: Option<String>,
     pub created_at: DateTime<Utc>,
+    pub counts_as_vacation: bool,
+    pub keeps_work_target: bool,
+    pub auto_approve_past: bool,
 }
 
 #[derive(sqlx::FromRow, Serialize)]
@@ -37,14 +36,26 @@ pub struct CalendarEntry {
     pub first_name: String,
     pub last_name: String,
     pub kind: String,
+    pub category_id: i64,
+    /// Carried alongside the slug so non-lead viewers can decide whether the
+    /// category is "non-private enough" to surface (vacation: yes; sick and
+    /// other sensitive categories: no).
+    pub counts_as_vacation: bool,
     pub start_date: NaiveDate,
     pub end_date: NaiveDate,
     pub comment: Option<String>,
     pub status: String,
 }
 
-const ABS_SELECT: &str = "SELECT id, user_id, kind, start_date, end_date, comment, status, \
-     reviewed_by, reviewed_at, rejection_reason, created_at FROM absences";
+/// SELECT prefix that joins absence_categories to expose the slug (`kind`) and
+/// the three behavior booleans on every absence row. Use this everywhere
+/// absences are fetched as `Absence` structs — keeping the projection in one
+/// place ensures the row shape stays consistent across queries.
+const ABS_SELECT: &str =
+    "SELECT a.id, a.user_id, a.category_id, c.slug AS kind, a.start_date, a.end_date, \
+     a.comment, a.status, a.reviewed_by, a.reviewed_at, a.rejection_reason, a.created_at, \
+     c.counts_as_vacation, c.keeps_work_target, c.auto_approve_past \
+     FROM absences a JOIN absence_categories c ON c.id = a.category_id";
 
 #[derive(Clone)]
 pub struct AbsenceDb {
@@ -157,16 +168,20 @@ impl AbsenceDb {
         ))
     }
 
-    pub async fn workdays_total(
+    /// Sum of workdays for approved (and cancellation_pending) absences whose
+    /// category matches `category_id`, clamped to the [from, to] window. Used
+    /// by team reports for kind-specific totals (e.g. "vacation taken" =
+    /// total workdays in approved absences from the vacation category).
+    pub async fn workdays_total_for_category(
         &self,
         user_id: i64,
-        kind: &str,
+        category_id: i64,
         from: NaiveDate,
         to: NaiveDate,
     ) -> AppResult<f64> {
-        self.workdays_total_filtered(
+        self.workdays_total_for_category_filtered(
             user_id,
-            kind,
+            category_id,
             from,
             to,
             &["approved", "cancellation_pending"],
@@ -174,25 +189,104 @@ impl AbsenceDb {
         .await
     }
 
-    /// Sum of workdays for absences of `kind` whose status is in `statuses`,
-    /// clamped to the [from, to] window. Used by carryover source calculation
-    /// (which needs `approved`-only) and by general usage queries (which need
-    /// both `approved` and `cancellation_pending`).
-    pub async fn workdays_total_filtered(
+    pub async fn workdays_total_for_category_filtered(
         &self,
         user_id: i64,
-        kind: &str,
+        category_id: i64,
         from: NaiveDate,
         to: NaiveDate,
         statuses: &[&str],
     ) -> AppResult<f64> {
         let ranges: Vec<(NaiveDate, NaiveDate)> = sqlx::query_as(
             "SELECT start_date, end_date FROM absences \
-             WHERE user_id=$1 AND kind=$2 AND status = ANY($3) \
+             WHERE user_id=$1 AND category_id=$2 AND status = ANY($3) \
              AND end_date >= $4 AND start_date <= $5",
         )
         .bind(user_id)
-        .bind(kind)
+        .bind(category_id)
+        .bind(statuses)
+        .bind(from)
+        .bind(to)
+        .fetch_all(&self.pool)
+        .await?;
+        let workdays_per_week = self.user_workdays_per_week(user_id).await?;
+        let holidays = self.holidays_set(from, to).await?;
+        let mut total = 0.0;
+        for (s, e) in ranges {
+            let cs = std::cmp::max(s, from);
+            let ce = std::cmp::min(e, to);
+            total += Self::workdays_in_window(cs, ce, &holidays, workdays_per_week);
+        }
+        Ok(total)
+    }
+
+    /// Sum of workdays for absences whose category has `auto_approve_past=TRUE`
+    /// (sick-like behaviour) regardless of how many such categories exist.
+    /// Used by the team report's "sick days" column.
+    pub async fn auto_approve_workdays_total(
+        &self,
+        user_id: i64,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> AppResult<f64> {
+        let ranges: Vec<(NaiveDate, NaiveDate)> = sqlx::query_as(
+            "SELECT a.start_date, a.end_date FROM absences a \
+             JOIN absence_categories c ON c.id = a.category_id \
+             WHERE a.user_id=$1 AND c.auto_approve_past=TRUE \
+             AND a.status IN ('approved','cancellation_pending') \
+             AND a.end_date >= $2 AND a.start_date <= $3",
+        )
+        .bind(user_id)
+        .bind(from)
+        .bind(to)
+        .fetch_all(&self.pool)
+        .await?;
+        let workdays_per_week = self.user_workdays_per_week(user_id).await?;
+        let holidays = self.holidays_set(from, to).await?;
+        let mut total = 0.0;
+        for (s, e) in ranges {
+            let cs = std::cmp::max(s, from);
+            let ce = std::cmp::min(e, to);
+            total += Self::workdays_in_window(cs, ce, &holidays, workdays_per_week);
+        }
+        Ok(total)
+    }
+
+    /// Sum of workdays for absences whose category has `counts_as_vacation=TRUE`
+    /// (regardless of slug) in the requested statuses, clamped to [from, to].
+    /// Used by the team report's vacation columns.
+    pub async fn vacation_workdays_total(
+        &self,
+        user_id: i64,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> AppResult<f64> {
+        self.vacation_workdays_total_filtered(
+            user_id,
+            from,
+            to,
+            &["approved", "cancellation_pending"],
+        )
+        .await
+    }
+
+    /// Sum of workdays for absences whose category has `counts_as_vacation=TRUE`
+    /// and whose status is in `statuses`, clamped to [from, to]. Used by
+    /// carryover/balance calculations that previously filtered on `kind='vacation'`.
+    pub async fn vacation_workdays_total_filtered(
+        &self,
+        user_id: i64,
+        from: NaiveDate,
+        to: NaiveDate,
+        statuses: &[&str],
+    ) -> AppResult<f64> {
+        let ranges: Vec<(NaiveDate, NaiveDate)> = sqlx::query_as(
+            "SELECT a.start_date, a.end_date FROM absences a \
+             JOIN absence_categories c ON c.id = a.category_id \
+             WHERE a.user_id=$1 AND c.counts_as_vacation=TRUE AND a.status = ANY($2) \
+             AND a.end_date >= $3 AND a.start_date <= $4",
+        )
+        .bind(user_id)
         .bind(statuses)
         .bind(from)
         .bind(to)
@@ -213,7 +307,7 @@ impl AbsenceDb {
 
     pub async fn find_by_id(&self, id: i64) -> AppResult<Absence> {
         Ok(
-            QueryBuilder::<Postgres>::new(format!("{ABS_SELECT} WHERE id=$1"))
+            QueryBuilder::<Postgres>::new(format!("{ABS_SELECT} WHERE a.id=$1"))
                 .build_query_as::<Absence>()
                 .bind(id)
                 .fetch_one(&self.pool)
@@ -237,8 +331,8 @@ impl AbsenceDb {
         to: NaiveDate,
     ) -> AppResult<Vec<Absence>> {
         Ok(QueryBuilder::<Postgres>::new(format!(
-            "{ABS_SELECT} WHERE user_id=$1 AND end_date >= $2 AND start_date <= $3 \
-             ORDER BY start_date DESC"
+            "{ABS_SELECT} WHERE a.user_id=$1 AND a.end_date >= $2 AND a.start_date <= $3 \
+             ORDER BY a.start_date DESC"
         ))
         .build_query_as::<Absence>()
         .bind(user_id)
@@ -261,24 +355,24 @@ impl AbsenceDb {
             // Non-admin leads: only show absences from active, non-admin direct
             // reports. Admin-subject absences are excluded from lead scope.
             builder
-                .push(" AND user_id IN (SELECT ua.user_id FROM user_approvers ua JOIN users u ON u.id=ua.user_id WHERE ua.approver_id = ")
+                .push(" AND a.user_id IN (SELECT ua.user_id FROM user_approvers ua JOIN users u ON u.id=ua.user_id WHERE ua.approver_id = ")
                 .push_bind(requester_id)
                 .push(" AND u.active=TRUE AND u.role != 'admin')");
         }
         if let Some(f) = from {
-            builder.push(" AND end_date >= ").push_bind(f);
+            builder.push(" AND a.end_date >= ").push_bind(f);
         }
         if let Some(t) = to {
-            builder.push(" AND start_date <= ").push_bind(t);
+            builder.push(" AND a.start_date <= ").push_bind(t);
         }
         if let Some(s) = status_filter {
             if s == "pending_review" {
-                builder.push(" AND status IN ('requested','cancellation_pending')");
+                builder.push(" AND a.status IN ('requested','cancellation_pending')");
             } else {
-                builder.push(" AND status = ").push_bind(s.to_owned());
+                builder.push(" AND a.status = ").push_bind(s.to_owned());
             }
         }
-        builder.push(" ORDER BY start_date DESC");
+        builder.push(" ORDER BY a.start_date DESC");
         Ok(builder
             .build_query_as::<Absence>()
             .fetch_all(&self.pool)
@@ -324,9 +418,11 @@ impl AbsenceDb {
         scope_ids: Option<&[i64]>,
     ) -> AppResult<Vec<CalendarEntry>> {
         let mut builder = QueryBuilder::<Postgres>::new(
-            "SELECT a.id, a.user_id, u.first_name, u.last_name, a.kind, \
-             a.start_date, a.end_date, a.comment, a.status \
-             FROM absences a JOIN users u ON u.id=a.user_id \
+            "SELECT a.id, a.user_id, u.first_name, u.last_name, c.slug AS kind, a.category_id, \
+             c.counts_as_vacation, a.start_date, a.end_date, a.comment, a.status \
+             FROM absences a \
+             JOIN users u ON u.id=a.user_id \
+             JOIN absence_categories c ON c.id = a.category_id \
              WHERE a.status IN ('requested','approved','cancellation_pending') \
              AND a.end_date >=",
         );
@@ -347,7 +443,8 @@ impl AbsenceDb {
             .await?)
     }
 
-    /// Load vacation absences for balance calculation.
+    /// Load vacation absences (categories with counts_as_vacation=TRUE) for
+    /// balance calculation. Includes requested/approved/cancellation_pending.
     pub async fn vacation_absences_in_year(
         &self,
         user_id: i64,
@@ -355,9 +452,9 @@ impl AbsenceDb {
         to: NaiveDate,
     ) -> AppResult<Vec<Absence>> {
         Ok(QueryBuilder::<Postgres>::new(format!(
-            "{ABS_SELECT} WHERE user_id=$1 AND kind='vacation' \
-             AND status IN ('requested','approved','cancellation_pending') \
-             AND end_date >= $2 AND start_date <= $3"
+            "{ABS_SELECT} WHERE a.user_id=$1 AND c.counts_as_vacation=TRUE \
+             AND a.status IN ('requested','approved','cancellation_pending') \
+             AND a.end_date >= $2 AND a.start_date <= $3"
         ))
         .build_query_as::<Absence>()
         .bind(user_id)
@@ -367,6 +464,8 @@ impl AbsenceDb {
         .await?)
     }
 
+    /// Approved/cancellation_pending absences in the requested window, with the
+    /// category slug as `kind`. Consumers iterate the slug for labelling.
     pub async fn approved_ranges_in_period(
         &self,
         user_id: i64,
@@ -374,9 +473,10 @@ impl AbsenceDb {
         to: NaiveDate,
     ) -> AppResult<Vec<(NaiveDate, NaiveDate, String)>> {
         Ok(sqlx::query_as::<_, (NaiveDate, NaiveDate, String)>(
-            "SELECT start_date, end_date, kind FROM absences \
-             WHERE user_id=$1 AND status IN ('approved','cancellation_pending') \
-             AND end_date >= $2 AND start_date <= $3",
+            "SELECT a.start_date, a.end_date, c.slug FROM absences a \
+             JOIN absence_categories c ON c.id = a.category_id \
+             WHERE a.user_id=$1 AND a.status IN ('approved','cancellation_pending') \
+             AND a.end_date >= $2 AND a.start_date <= $3",
         )
         .bind(user_id)
         .bind(from)
@@ -387,10 +487,13 @@ impl AbsenceDb {
 
     // ── Mutations ──────────────────────────────────────────────────────────
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create(
         &self,
         user_id: i64,
-        kind: &str,
+        category_id: i64,
+        // Kept for call-site compatibility; time-conflict is checked at approval, not creation.
+        _category_auto_approve_past: bool,
         start_date: NaiveDate,
         end_date: NaiveDate,
         comment: Option<&str>,
@@ -412,14 +515,13 @@ impl AbsenceDb {
         if overlap > 0 {
             return Err(AppError::conflict("Overlap with existing absence."));
         }
-        Self::ensure_no_time_conflict_tx(&mut tx, user_id, kind, start_date, end_date).await?;
 
         let new_id: i64 = sqlx::query_scalar(
-            "INSERT INTO absences(user_id, kind, start_date, end_date, comment, status) \
+            "INSERT INTO absences(user_id, category_id, start_date, end_date, comment, status) \
              VALUES ($1,$2,$3,$4,$5,$6) RETURNING id",
         )
         .bind(user_id)
-        .bind(kind)
+        .bind(category_id)
         .bind(start_date)
         .bind(end_date)
         .bind(comment)
@@ -427,82 +529,19 @@ impl AbsenceDb {
         .fetch_one(&mut *tx)
         .await?;
         tx.commit().await?;
-        Ok(
-            QueryBuilder::<Postgres>::new(format!("{ABS_SELECT} WHERE id=$1"))
-                .build_query_as::<Absence>()
-                .bind(new_id)
-                .fetch_one(&self.pool)
-                .await?,
-        )
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub async fn update(
-        &self,
-        absence_id: i64,
-        kind: &str,
-        start_date: NaiveDate,
-        end_date: NaiveDate,
-        comment: Option<&str>,
-        updated_status: &str,
-        owner_id: i64,
-    ) -> AppResult<(Absence, Absence)> {
-        let mut tx = self.pool.begin().await?;
-        Self::lock_user_scope_tx(&mut tx, owner_id).await?;
-        let before: Absence =
-            QueryBuilder::<Postgres>::new(format!("{ABS_SELECT} WHERE id=$1 FOR UPDATE"))
-                .build_query_as::<Absence>()
-                .bind(absence_id)
-                .fetch_one(&mut *tx)
-                .await?;
-
-        let overlap: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM absences WHERE id != $1 AND user_id=$2 \
-             AND status IN ('requested','approved','cancellation_pending') \
-             AND end_date >= $3 AND start_date <= $4",
-        )
-        .bind(absence_id)
-        .bind(owner_id)
-        .bind(start_date)
-        .bind(end_date)
-        .fetch_one(&mut *tx)
-        .await?;
-        if overlap > 0 {
-            return Err(AppError::conflict("Overlap with existing absence."));
-        }
-        Self::ensure_no_time_conflict_tx(&mut tx, owner_id, kind, start_date, end_date).await?;
-
-        sqlx::query(
-            "UPDATE absences SET kind=$1, start_date=$2, end_date=$3, comment=$4, \
-             status=$5, reviewed_by=NULL, reviewed_at=NULL, rejection_reason=NULL \
-             WHERE id=$6",
-        )
-        .bind(kind)
-        .bind(start_date)
-        .bind(end_date)
-        .bind(comment)
-        .bind(updated_status)
-        .bind(absence_id)
-        .execute(&mut *tx)
-        .await?;
-        tx.commit().await?;
-        let after: Absence = QueryBuilder::<Postgres>::new(format!("{ABS_SELECT} WHERE id=$1"))
-            .build_query_as::<Absence>()
-            .bind(absence_id)
-            .fetch_one(&self.pool)
-            .await?;
-        Ok((before, after))
+        self.find_by_id(new_id).await
     }
 
     pub async fn cancel(&self, absence_id: i64, owner_id: i64) -> AppResult<Absence> {
         let mut tx = self.pool.begin().await?;
         Self::lock_user_scope_tx(&mut tx, owner_id).await?;
-        let before: Absence =
-            QueryBuilder::<Postgres>::new(format!("{ABS_SELECT} WHERE id=$1 FOR UPDATE"))
-                .build_query_as::<Absence>()
-                .bind(absence_id)
-                .fetch_one(&mut *tx)
-                .await?;
+        let before: Absence = QueryBuilder::<Postgres>::new(format!(
+            "{ABS_SELECT} WHERE a.id=$1 FOR UPDATE OF a"
+        ))
+        .build_query_as::<Absence>()
+        .bind(absence_id)
+        .fetch_one(&mut *tx)
+        .await?;
         sqlx::query("UPDATE absences SET status='cancelled' WHERE id=$1")
             .bind(absence_id)
             .execute(&mut *tx)
@@ -612,13 +651,13 @@ impl AbsenceDb {
         tx: &mut sqlx::PgConnection,
         absence_id: i64,
     ) -> AppResult<Absence> {
-        Ok(
-            QueryBuilder::<Postgres>::new(format!("{ABS_SELECT} WHERE id=$1 FOR UPDATE"))
-                .build_query_as::<Absence>()
-                .bind(absence_id)
-                .fetch_one(tx)
-                .await?,
-        )
+        Ok(QueryBuilder::<Postgres>::new(format!(
+            "{ABS_SELECT} WHERE a.id=$1 FOR UPDATE OF a"
+        ))
+        .build_query_as::<Absence>()
+        .bind(absence_id)
+        .fetch_one(tx)
+        .await?)
     }
 
     pub async fn is_direct_report_for_update(
@@ -642,8 +681,9 @@ impl AbsenceDb {
 
     // ── Vacation balance helpers ───────────────────────────────────────────
 
-    /// Load vacation ranges that reserve vacation budget for a year
-    /// (requested, approved, cancellation_pending), optionally excluding one absence.
+    /// Load ranges of absences whose category has counts_as_vacation=TRUE in
+    /// statuses that reserve vacation budget (requested/approved/
+    /// cancellation_pending), optionally excluding one absence id.
     pub async fn vacation_ranges_in_year_tx(
         tx: &mut sqlx::PgConnection,
         user_id: i64,
@@ -653,10 +693,11 @@ impl AbsenceDb {
     ) -> AppResult<Vec<(NaiveDate, NaiveDate)>> {
         if let Some(excl) = exclude_id {
             Ok(sqlx::query_as::<_, (NaiveDate, NaiveDate)>(
-                "SELECT start_date, end_date FROM absences \
-                 WHERE id != $1 AND user_id=$2 AND kind='vacation' \
-                 AND status IN ('requested','approved','cancellation_pending') \
-                 AND end_date >= $3 AND start_date <= $4",
+                "SELECT a.start_date, a.end_date FROM absences a \
+                 JOIN absence_categories c ON c.id = a.category_id \
+                 WHERE a.id != $1 AND a.user_id=$2 AND c.counts_as_vacation=TRUE \
+                 AND a.status IN ('requested','approved','cancellation_pending') \
+                 AND a.end_date >= $3 AND a.start_date <= $4",
             )
             .bind(excl)
             .bind(user_id)
@@ -666,10 +707,11 @@ impl AbsenceDb {
             .await?)
         } else {
             Ok(sqlx::query_as::<_, (NaiveDate, NaiveDate)>(
-                "SELECT start_date, end_date FROM absences \
-                 WHERE user_id=$1 AND kind='vacation' \
-                 AND status IN ('requested','approved','cancellation_pending') \
-                 AND end_date >= $2 AND start_date <= $3",
+                "SELECT a.start_date, a.end_date FROM absences a \
+                 JOIN absence_categories c ON c.id = a.category_id \
+                 WHERE a.user_id=$1 AND c.counts_as_vacation=TRUE \
+                 AND a.status IN ('requested','approved','cancellation_pending') \
+                 AND a.end_date >= $2 AND a.start_date <= $3",
             )
             .bind(user_id)
             .bind(from)
@@ -679,7 +721,7 @@ impl AbsenceDb {
         }
     }
 
-    /// Load approved vacation ranges only, optionally excluding one absence id.
+    /// Approved-only vacation ranges, optionally excluding one absence id.
     pub async fn approved_vacation_ranges_in_year_tx(
         tx: &mut sqlx::PgConnection,
         user_id: i64,
@@ -689,10 +731,11 @@ impl AbsenceDb {
     ) -> AppResult<Vec<(NaiveDate, NaiveDate)>> {
         if let Some(excl) = exclude_id {
             Ok(sqlx::query_as::<_, (NaiveDate, NaiveDate)>(
-                "SELECT start_date, end_date FROM absences \
-                 WHERE id != $1 AND user_id=$2 AND kind='vacation' \
-                 AND status='approved' \
-                 AND end_date >= $3 AND start_date <= $4",
+                "SELECT a.start_date, a.end_date FROM absences a \
+                 JOIN absence_categories c ON c.id = a.category_id \
+                 WHERE a.id != $1 AND a.user_id=$2 AND c.counts_as_vacation=TRUE \
+                 AND a.status='approved' \
+                 AND a.end_date >= $3 AND a.start_date <= $4",
             )
             .bind(excl)
             .bind(user_id)
@@ -702,10 +745,11 @@ impl AbsenceDb {
             .await?)
         } else {
             Ok(sqlx::query_as::<_, (NaiveDate, NaiveDate)>(
-                "SELECT start_date, end_date FROM absences \
-                 WHERE user_id=$1 AND kind='vacation' \
-                 AND status='approved' \
-                 AND end_date >= $2 AND start_date <= $3",
+                "SELECT a.start_date, a.end_date FROM absences a \
+                 JOIN absence_categories c ON c.id = a.category_id \
+                 WHERE a.user_id=$1 AND c.counts_as_vacation=TRUE \
+                 AND a.status='approved' \
+                 AND a.end_date >= $2 AND a.start_date <= $3",
             )
             .bind(user_id)
             .bind(from)
@@ -728,15 +772,19 @@ impl AbsenceDb {
         Ok(())
     }
 
+    /// Block creating an absence on days that already carry logged time entries,
+    /// except for "auto-approve past" categories (sick-like behavior) where
+    /// partial-day overlap is intentional — someone may have worked the morning
+    /// then called in sick at lunch.
     pub async fn ensure_no_time_conflict_tx(
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         user_id: i64,
-        kind: &str,
+        auto_approve_past: bool,
         start_date: NaiveDate,
         end_date: NaiveDate,
     ) -> AppResult<()> {
-        if kind == "sick" {
-            return Ok(()); // sick leave doesn't block logged time
+        if auto_approve_past {
+            return Ok(());
         }
         let conflict: Option<NaiveDate> = sqlx::query_scalar(
             "SELECT te.entry_date FROM time_entries te \
@@ -805,18 +853,18 @@ impl AbsenceDb {
     pub async fn insert_tx(
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         user_id: i64,
-        kind: &str,
+        category_id: i64,
         start_date: NaiveDate,
         end_date: NaiveDate,
         comment: Option<&str>,
         initial_status: &str,
     ) -> AppResult<i64> {
         Ok(sqlx::query_scalar(
-            "INSERT INTO absences(user_id, kind, start_date, end_date, comment, status) \
+            "INSERT INTO absences(user_id, category_id, start_date, end_date, comment, status) \
              VALUES ($1,$2,$3,$4,$5,$6) RETURNING id",
         )
         .bind(user_id)
-        .bind(kind)
+        .bind(category_id)
         .bind(start_date)
         .bind(end_date)
         .bind(comment)
@@ -829,18 +877,18 @@ impl AbsenceDb {
     pub async fn update_fields_tx(
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         absence_id: i64,
-        kind: &str,
+        category_id: i64,
         start_date: NaiveDate,
         end_date: NaiveDate,
         comment: Option<&str>,
         new_status: &str,
     ) -> AppResult<()> {
         sqlx::query(
-            "UPDATE absences SET kind=$1, start_date=$2, end_date=$3, comment=$4, \
+            "UPDATE absences SET category_id=$1, start_date=$2, end_date=$3, comment=$4, \
              status=$5, reviewed_by=NULL, reviewed_at=NULL, rejection_reason=NULL \
              WHERE id=$6",
         )
-        .bind(kind)
+        .bind(category_id)
         .bind(start_date)
         .bind(end_date)
         .bind(comment)

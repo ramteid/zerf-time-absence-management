@@ -180,24 +180,28 @@ pub(crate) async fn validate_entry(
     if day_total > 14 * 60 {
         return Err(AppError::bad_request("Day total exceeds 14 hours."));
     }
-    // Block entry creation on any day covered by a non-sick absence that is
-    // requested, approved, or pending cancellation. Including 'requested' prevents
-    // a deadlock where entries added after requesting an absence make the absence
-    // impossible to approve (ensure_no_time_conflict_tx blocks approval when entries exist).
-    let has_absence: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM absences WHERE user_id=$1 \
-         AND status IN ('approved','cancellation_pending','requested') \
-         AND start_date <= $2 AND end_date >= $2 AND kind <> 'sick')",
+    // Block entry creation on any day covered by a non-auto-approve-past absence
+    // that is requested, approved, or pending cancellation. Including 'requested'
+    // prevents a deadlock where entries added after requesting an absence make the
+    // absence impossible to approve (ensure_no_time_conflict_tx blocks approval
+    // when entries exist). Auto-approve-past (sick-like) categories are excluded
+    // so partial-day overlaps remain possible.
+    let absence_on_day: Option<String> = sqlx::query_scalar(
+        "SELECT c.slug FROM absences a \
+         JOIN absence_categories c ON c.id = a.category_id \
+         WHERE a.user_id=$1 AND a.status IN ('approved','cancellation_pending','requested') \
+         AND a.start_date <= $2 AND a.end_date >= $2 \
+         AND c.auto_approve_past = FALSE LIMIT 1",
     )
     .bind(user_id)
     .bind(te.entry_date)
-    .fetch_one(&mut *conn)
+    .fetch_optional(&mut *conn)
     .await?;
-    if has_absence {
-        return Err(AppError::bad_request(
-            "Cannot log time on a day covered by an absence. \
-             Please cancel or adjust the absence first.",
-        ));
+    if let Some(kind) = absence_on_day {
+        return Err(AppError::bad_request(format!(
+            "Cannot log time on a day with an approved absence ({kind}). \
+             Please cancel or adjust the absence first."
+        )));
     }
     Ok(())
 }

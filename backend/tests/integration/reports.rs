@@ -554,8 +554,9 @@ async fn reports_full_workflow() {
         // Time-entry validation treats this status as blocking, so reports/flextime must
         // also remove target minutes for the covered day.
         sqlx::query(
-            "INSERT INTO absences(user_id, kind, start_date, end_date, status, created_at) \
-             VALUES ($1,'vacation',$2,$2,'cancellation_pending',CURRENT_TIMESTAMP)",
+            "INSERT INTO absences(user_id, category_id, start_date, end_date, status, created_at) \
+             SELECT $1, id, $2, $2, 'cancellation_pending', CURRENT_TIMESTAMP \
+             FROM absence_categories WHERE slug='vacation'",
         )
         .bind(emp_id)
         .bind(chrono::NaiveDate::parse_from_str(&monday, "%Y-%m-%d").unwrap())
@@ -599,8 +600,9 @@ async fn reports_full_workflow() {
         // Requested absences are not yet approved and therefore must NOT remove
         // target minutes in month/flextime views.
         sqlx::query(
-            "INSERT INTO absences(user_id, kind, start_date, end_date, status, created_at) \
-             VALUES ($1,'vacation',$2,$2,'requested',CURRENT_TIMESTAMP)",
+            "INSERT INTO absences(user_id, category_id, start_date, end_date, status, created_at) \
+             SELECT $1, id, $2, $2, 'requested', CURRENT_TIMESTAMP \
+             FROM absence_categories WHERE slug='vacation'",
         )
         .bind(emp_id)
         .bind(chrono::NaiveDate::parse_from_str(&monday, "%Y-%m-%d").unwrap())

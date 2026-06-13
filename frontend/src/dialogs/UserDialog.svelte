@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { api } from "../api.js";
   import { settings, toast } from "../stores.js";
-  import { t } from "../i18n.js";
+  import { t, fmtDecimal, parseDecimal } from "../i18n.js";
   import { confirmDialog } from "../confirm.js";
   import { appTodayDate, appTodayIsoDate } from "../format.js";
   import Dialog from "../Dialog.svelte";
@@ -33,8 +33,10 @@
   // already worked the full year before adopting Zerf mid-year without their
   // entitlement being wrongly pro-rated from the (later) Zerf start date.
   let hire_date = template.hire_date || "";
-  let overtime_start_balance_hours =
-    (template.overtime_start_balance_min || 0) / 60;
+  let overtime_start_balance_hours = fmtDecimal(
+    Math.round((template.overtime_start_balance_min || 0) / 60 * 100) / 100,
+    2,
+  );
   let approver_ids = Array.isArray(template.approver_ids) ? template.approver_ids.map(Number) : [];
   let active = template.active ?? true;
   let tracks_time = template.tracks_time ?? true;
@@ -45,7 +47,7 @@
   $: isAssistantRole = normalizedRole === "assistant";
   $: if (isAssistantRole) {
     weekly_hours = 0;
-    overtime_start_balance_hours = 0;
+    overtime_start_balance_hours = fmtDecimal(0, 2);
   }
   // Non-admin users always have tracks_time=true (backend enforces this too).
   $: if (normalizedRole !== "admin") tracks_time = true;
@@ -181,7 +183,7 @@
       const normalizedWeeklyHours = isAssistantRole ? 0 : Number(weekly_hours);
       const normalizedOvertimeStartBalanceMin = isAssistantRole
         ? 0
-        : Math.round(Number(overtime_start_balance_hours) * 60);
+        : Math.round(Math.round((parseDecimal(overtime_start_balance_hours) || 0) * 100) / 100 * 60);
       const body = {
         email,
         first_name,
@@ -282,16 +284,16 @@
           required
         />
       </div>
+      <div>
+        <label class="zf-label" for="user-role">{$t("Role")}</label>
+        <select id="user-role" class="zf-select" bind:value={role}>
+          <option value="employee">{$t("Employee")}</option>
+          <option value="assistant">{$t("Assistant")}</option>
+          <option value="team_lead">{$t("Team lead")}</option>
+          <option value="admin">{$t("Admin")}</option>
+        </select>
+      </div>
       <div class="field-row">
-        <div>
-          <label class="zf-label" for="user-role">{$t("Role")}</label>
-          <select id="user-role" class="zf-select" bind:value={role}>
-            <option value="employee">{$t("Employee")}</option>
-            <option value="assistant">{$t("Assistant")}</option>
-            <option value="team_lead">{$t("Team lead")}</option>
-            <option value="admin">{$t("Admin")}</option>
-          </select>
-        </div>
         <div>
           <label class="zf-label" for="user-start-date">{$t("Start date")}</label>
           <DatePicker
@@ -300,26 +302,26 @@
             container={dlg}
           />
         </div>
-      </div>
-      <div>
-        <div class="field-label-row">
-          <label class="zf-label" for="user-hire-date">{$t("Hire date")}</label>
-          {#if hire_date}
-            <button
-              type="button"
-              class="zf-btn-icon-sm zf-btn-ghost"
-              title={$t("Clear")}
-              on:click={() => (hire_date = "")}
-            >
-              <Icon name="X" size={14} />
-            </button>
-          {/if}
-        </div>
-        <DatePicker id="user-hire-date" bind:value={hire_date} container={dlg} />
-        <div class="field-hint">
-          {$t(
-            "Used to calculate the prorated annual leave entitlement for employees who already worked before they started using Zerf. Leave empty to use the start date.",
-          )}
+        <div>
+          <div class="field-label-row">
+            <label class="zf-label" for="user-hire-date">{$t("Hire date")}</label>
+            {#if hire_date}
+              <button
+                type="button"
+                class="zf-btn-icon-sm zf-btn-ghost"
+                title={$t("Clear")}
+                on:click={() => (hire_date = "")}
+              >
+                <Icon name="X" size={14} />
+              </button>
+            {/if}
+          </div>
+          <DatePicker id="user-hire-date" bind:value={hire_date} container={dlg} />
+          <div class="field-hint">
+            {$t(
+              "Used to calculate the prorated annual leave entitlement for employees who already worked before they started using Zerf. Leave empty to use the start date.",
+            )}
+          </div>
         </div>
       </div>
       <div class="field-row">
@@ -357,8 +359,8 @@
         <input
           id="user-overtime-balance"
           class="zf-input"
-          type="number"
-          step="0.5"
+          type="text"
+          inputmode="decimal"
           bind:value={overtime_start_balance_hours}
           disabled={isAssistantRole}
         />

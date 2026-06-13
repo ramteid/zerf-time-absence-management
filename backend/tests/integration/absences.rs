@@ -19,7 +19,10 @@ async fn absences_full_workflow() {
     let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
     let lead = login_change_pw(&app, "lead-r@example.com", &lead_pw).await;
 
-    // -- Non-sick absence rejects logged time --
+    // -- Non-sick absence can be requested even with logged time; approval is blocked --
+    // Time-entry conflicts are checked at approval, not at request creation.
+    // This allows employees to request an absence they forgot to log time for;
+    // the approver then handles the conflict.
     {
         let work_day = next_monday(-7).format("%Y-%m-%d").to_string();
         let (st, _) = emp
@@ -43,13 +46,33 @@ async fn absences_full_workflow() {
             .await;
         assert_eq!(
             st,
+            StatusCode::OK,
+            "absence can be requested even with logged time"
+        );
+        let pre_existing_conflict_id = id(&body);
+
+        // Approval must fail because the time entry still exists.
+        let (st, body) = lead
+            .post(
+                &format!("/api/v1/absences/{pre_existing_conflict_id}/approve"),
+                &json!({}),
+            )
+            .await;
+        assert_eq!(
+            st,
             StatusCode::BAD_REQUEST,
-            "absence over logged time rejected"
+            "approval blocked by pre-existing time entry"
         );
         assert!(
             body.to_string().contains("logged time"),
             "error mentions logged time: {body}"
         );
+
+        // Clean up: cancel the requested absence so it does not interfere with later sections.
+        let (st, _) = emp
+            .delete(&format!("/api/v1/absences/{pre_existing_conflict_id}"))
+            .await;
+        assert_eq!(st, StatusCode::OK, "cancel conflicting absence");
     }
     // -- Absence requires at least one effective workday --
     {
@@ -137,15 +160,9 @@ async fn absences_full_workflow() {
         let conflict_day = (next_monday(-14) + chrono::Duration::days(1))
             .format("%Y-%m-%d")
             .to_string();
-        let (st, body) = emp
-            .post(
-                "/api/v1/absences",
-                &json!({"kind":"vacation","start_date": conflict_day,"end_date": conflict_day}),
-            )
-            .await;
-        assert_eq!(st, StatusCode::OK, "create requested absence");
-        let absence_id = id(&body);
 
+        // Create the time entry FIRST — once a requested absence covers this day,
+        // new time entries are blocked to prevent the approval deadlock.
         let (st, _) = emp
             .post(
                 "/api/v1/time-entries",
@@ -160,7 +177,35 @@ async fn absences_full_workflow() {
         assert_eq!(
             st,
             StatusCode::OK,
-            "time entry still allowed while absence is pending"
+            "time entry allowed before absence is requested"
+        );
+
+        let (st, body) = emp
+            .post(
+                "/api/v1/absences",
+                &json!({"kind":"vacation","start_date": conflict_day,"end_date": conflict_day}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "create requested absence after time entry");
+        let absence_id = id(&body);
+
+        // New time entries on the same day must now be blocked (prevents deadlock
+        // where entries added after requesting make the absence impossible to approve).
+        let (st, _) = emp
+            .post(
+                "/api/v1/time-entries",
+                &json!({
+                    "entry_date": conflict_day,
+                    "start_time": "13:00",
+                    "end_time": "14:00",
+                    "category_id": cat_id,
+                }),
+            )
+            .await;
+        assert_eq!(
+            st,
+            StatusCode::BAD_REQUEST,
+            "time entry blocked while absence is pending"
         );
 
         let (st, body) = lead

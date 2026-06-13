@@ -1,6 +1,6 @@
 use super::{
-    AbsenceDb, AuditDb, CategoryDb, HolidayDb, NotificationBroadcaster, NotificationDb,
-    ReopenRequestDb, ReportDb, SessionDb, SettingsDb, TimeEntryDb, UserDb,
+    AbsenceCategoryDb, AbsenceDb, AuditDb, CategoryDb, HolidayDb, NotificationBroadcaster,
+    NotificationDb, ReopenRequestDb, ReportDb, SessionDb, SettingsDb, TimeEntryDb, UserDb,
 };
 use crate::db::DatabasePool;
 
@@ -13,6 +13,7 @@ pub struct Db {
     pub users: UserDb,
     pub time_entries: TimeEntryDb,
     pub absences: AbsenceDb,
+    pub absence_categories: AbsenceCategoryDb,
     pub reopen_requests: ReopenRequestDb,
     pub categories: CategoryDb,
     pub holidays: HolidayDb,
@@ -29,6 +30,7 @@ impl Db {
             users: UserDb::new(pool.clone()),
             time_entries: TimeEntryDb::new(pool.clone()),
             absences: AbsenceDb::new(pool.clone()),
+            absence_categories: AbsenceCategoryDb::new(pool.clone()),
             reopen_requests: ReopenRequestDb::new(pool.clone()),
             categories: CategoryDb::new(pool.clone()),
             holidays: HolidayDb::new(pool.clone()),

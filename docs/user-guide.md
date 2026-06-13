@@ -336,7 +336,7 @@ does nothing. The only way to make corrections is to reopen the whole week.
 
 ### Auto-approval
 
-- Sick leave with start date on or before today is auto-approved.
+- Absence categories marked **Auto-approve past dates** (e.g. sick leave) with a start date on or before today are auto-approved.
   Your approvers receive an informational notice (not an action request).
 - Other absence types require explicit approval.
 
@@ -344,7 +344,8 @@ does nothing. The only way to make corrections is to reopen the whole week.
 
 - A request must include at least one effective workday (not weekend-only, not holiday-only).
 - An absence request can span at most 365 days (i.e., end_date - start_date ≤ 365).
-- Non-sick absence overlapping existing time entries is rejected.
+- Requesting an absence that overlaps days with existing time entries is allowed; however, the approver will see the conflict and the approval will be blocked until the time entries are removed or rejected.
+- Once an absence is in *requested* status, new time entries on the covered days are blocked (to prevent the conflict from worsening while approval is pending).
 - If an approved absence covers a day that already has time entries, those entries remain and still count as worked time.
 
 Review and privacy behavior:
@@ -1350,6 +1351,8 @@ Admins configure system-wide behavior in the settings panel:
 
 ### Managing categories
 
+#### Time categories
+
 Categories define what employees can book time against.
 
 - Each category has a name and a crediting flag.
@@ -1358,6 +1361,21 @@ Categories define what employees can book time against.
 - A category must be active to be used in a new time entry.
 - Deleting a category with existing time entries is not possible; deactivate
   instead.
+
+#### Absence categories
+
+Absence categories define what types of absences employees can request. Each category has three behavior flags:
+
+| Flag | Effect when enabled |
+| --- | --- |
+| **Counts as vacation** | Days deducted from the employee's annual vacation balance. |
+| **Keeps work target (flextime)** | Approved days do **not** zero out the daily work target; the employee still needs to compensate through flextime. Use this for categories like *flextime reduction* where the absence itself is the compensation mechanism. |
+| **Auto-approve past dates (sick-like)** | Absences with a start date on or before today are approved automatically. Approvers receive an informational notice. This flag also disables the time-entry conflict check at creation, so partial-day overlaps are allowed (e.g. employee worked the morning and then called in sick). |
+
+Constraints:
+- **Counts as vacation** and **Keeps work target** are mutually exclusive (a category cannot both deduct vacation and preserve the target).
+- A category slug is auto-generated from the name and must be unique. Existing absences are not affected when a category is deactivated or renamed.
+- Inactive categories are hidden from the absence request dialog but remain attached to existing absence records.
 
 ### Managing holidays
 

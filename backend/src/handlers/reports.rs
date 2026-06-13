@@ -241,10 +241,9 @@ pub async fn team(
                 let absence_count_start = month_start.max(team_member.start_date);
 
                 let vacation_taken = if absence_count_start <= vacation_taken_end {
-                    crate::services::absence_balance::workdays_total(
+                    crate::services::absence_balance::vacation_workdays(
                         &pool,
                         team_member.id,
-                        "vacation",
                         absence_count_start,
                         vacation_taken_end,
                     )
@@ -256,10 +255,9 @@ pub async fn team(
                 let vacation_planned_start_user =
                     vacation_planned_start.max(team_member.start_date);
                 let vacation_planned = if vacation_planned_start_user <= month_end {
-                    crate::services::absence_balance::workdays_total(
+                    crate::services::absence_balance::vacation_workdays(
                         &pool,
                         team_member.id,
-                        "vacation",
                         vacation_planned_start_user,
                         month_end,
                     )
@@ -270,10 +268,9 @@ pub async fn team(
 
                 let sick_end = today.min(month_end);
                 let sick_workdays = if absence_count_start <= sick_end {
-                    crate::services::absence_balance::workdays_total(
+                    crate::services::absence_balance::auto_approve_workdays(
                         &pool,
                         team_member.id,
-                        "sick",
                         absence_count_start,
                         sick_end,
                     )
