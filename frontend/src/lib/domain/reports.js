@@ -1,4 +1,17 @@
-// Delegates to absenceKindTotals for consistent exclusion of flextime_reduction.
+import { get } from "svelte/store";
+import { absenceCategories } from "../../stores.js";
+
+// Build a Set of slugs whose `keeps_work_target` flag is true (flextime-
+// reduction categories). These must be excluded from leave-day statistics.
+function keepsWorkTargetSlugs() {
+  return new Set(
+    get(absenceCategories)
+      .filter((c) => c.keeps_work_target)
+      .map((c) => c.slug),
+  );
+}
+
+// Delegates to absenceKindTotals for consistent exclusion of flextime categories.
 export function summarizeAbsences(absences) {
   return absenceKindTotals(absences);
 }
@@ -77,11 +90,13 @@ export function dedupeAbsences(absences) {
 }
 
 export function absenceKindTotals(absences) {
+  const exclude = keepsWorkTargetSlugs();
   const totals = {};
   for (const absence of absences || []) {
-    // flextime_reduction is not traditional leave: it doesn't remove the work
-    // target, so it must not inflate leave-day statistics.
-    if (absence.kind === "flextime_reduction") continue;
+    // Categories with keeps_work_target=true (e.g. flextime_reduction) are not
+    // traditional leave: the day still counts toward the work requirement, so
+    // these must not inflate leave-day statistics.
+    if (exclude.has(absence.kind)) continue;
     const kind = absence.kind || "unknown";
     totals[kind] = (totals[kind] || 0) + (absence.days || 0);
   }
@@ -90,9 +105,10 @@ export function absenceKindTotals(absences) {
 }
 
 export function totalAbsenceDays(absences) {
-  // Exclude flextime_reduction: these days keep their work target, so counting
-  // them as "absence days" would overstate the user's true leave consumption.
+  // Exclude keeps_work_target categories: those days still require hours, so
+  // counting them as "absence days" would overstate the user's true leave.
+  const exclude = keepsWorkTargetSlugs();
   return (absences || [])
-    .filter((absence) => absence.kind !== "flextime_reduction")
+    .filter((absence) => !exclude.has(absence.kind))
     .reduce((total, absence) => total + (absence.days || 0), 0);
 }

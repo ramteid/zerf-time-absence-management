@@ -36,6 +36,8 @@ pub struct NewAbsenceCategoryRequest {
     pub keeps_work_target: bool,
     #[serde(default)]
     pub auto_approve_past: bool,
+    #[serde(default)]
+    pub team_visible: bool,
 }
 
 pub async fn create(
@@ -55,6 +57,7 @@ pub async fn create(
                 counts_as_vacation: body.counts_as_vacation,
                 keeps_work_target: body.keeps_work_target,
                 auto_approve_past: body.auto_approve_past,
+                team_visible: body.team_visible,
             },
         )
         .await?,
@@ -70,6 +73,7 @@ pub struct UpdateAbsenceCategoryRequest {
     pub counts_as_vacation: Option<bool>,
     pub keeps_work_target: Option<bool>,
     pub auto_approve_past: Option<bool>,
+    pub team_visible: Option<bool>,
 }
 
 pub async fn update(
@@ -91,6 +95,7 @@ pub async fn update(
                 counts_as_vacation: body.counts_as_vacation,
                 keeps_work_target: body.keeps_work_target,
                 auto_approve_past: body.auto_approve_past,
+                team_visible: body.team_visible,
             },
         )
         .await?,

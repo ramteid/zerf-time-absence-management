@@ -6,7 +6,7 @@ use sqlx::FromRow;
 /// Configurable absence category. The legacy hardcoded kinds
 /// (vacation/sick/training/special_leave/unpaid/general_absence/flextime_reduction)
 /// are seeded as rows; admins can add/rename/recolor/deactivate freely. The
-/// three behavior flags drive the application logic that used to be wired to
+/// behavior flags drive the application logic that used to be wired to
 /// magic slug constants.
 #[derive(FromRow, Serialize, Deserialize, Clone, Debug)]
 pub struct AbsenceCategory {
@@ -24,10 +24,15 @@ pub struct AbsenceCategory {
     /// Sick-like behavior: auto-approve when start_date <= today, allow
     /// backdating up to 30 days, and coexist with logged time on the same day.
     pub auto_approve_past: bool,
+    /// When true, non-lead teammates can see the real absence kind in the team
+    /// calendar. Sick leave (GDPR Art. 9) stays false; benign categories like
+    /// vacation, training, and flextime reduction default to true.
+    pub team_visible: bool,
 }
 
 const ABS_CAT_COLUMNS: &str =
-    "id, slug, name, color, sort_order, active, counts_as_vacation, keeps_work_target, auto_approve_past";
+    "id, slug, name, color, sort_order, active, counts_as_vacation, keeps_work_target, \
+     auto_approve_past, team_visible";
 
 #[derive(Clone)]
 pub struct AbsenceCategoryDb {
@@ -97,8 +102,9 @@ impl AbsenceCategoryDb {
     pub async fn create(&self, input: NewAbsenceCategory<'_>) -> AppResult<i64> {
         sqlx::query_scalar(
             "INSERT INTO absence_categories \
-             (slug, name, color, sort_order, active, counts_as_vacation, keeps_work_target, auto_approve_past) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id",
+             (slug, name, color, sort_order, active, counts_as_vacation, keeps_work_target, \
+              auto_approve_past, team_visible) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id",
         )
         .bind(input.slug)
         .bind(input.name)
@@ -108,6 +114,7 @@ impl AbsenceCategoryDb {
         .bind(input.counts_as_vacation)
         .bind(input.keeps_work_target)
         .bind(input.auto_approve_past)
+        .bind(input.team_visible)
         .fetch_one(&self.pool)
         .await
         .map_err(map_constraint_error)
@@ -123,8 +130,9 @@ impl AbsenceCategoryDb {
                 active=COALESCE($4,active), \
                 counts_as_vacation=COALESCE($5,counts_as_vacation), \
                 keeps_work_target=COALESCE($6,keeps_work_target), \
-                auto_approve_past=COALESCE($7,auto_approve_past) \
-             WHERE id=$8",
+                auto_approve_past=COALESCE($7,auto_approve_past), \
+                team_visible=COALESCE($8,team_visible) \
+             WHERE id=$9",
         )
         .bind(input.name)
         .bind(input.color)
@@ -133,6 +141,7 @@ impl AbsenceCategoryDb {
         .bind(input.counts_as_vacation)
         .bind(input.keeps_work_target)
         .bind(input.auto_approve_past)
+        .bind(input.team_visible)
         .bind(id)
         .execute(&self.pool)
         .await
@@ -165,6 +174,7 @@ pub struct NewAbsenceCategory<'a> {
     pub counts_as_vacation: bool,
     pub keeps_work_target: bool,
     pub auto_approve_past: bool,
+    pub team_visible: bool,
 }
 
 pub struct UpdateAbsenceCategory<'a> {
@@ -175,6 +185,7 @@ pub struct UpdateAbsenceCategory<'a> {
     pub counts_as_vacation: Option<bool>,
     pub keeps_work_target: Option<bool>,
     pub auto_approve_past: Option<bool>,
+    pub team_visible: Option<bool>,
 }
 
 /// Translate the database constraints we care about into client-facing errors.

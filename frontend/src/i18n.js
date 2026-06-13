@@ -1,4 +1,5 @@
 import { writable, derived, get } from "svelte/store";
+import { absenceCategories } from "./stores.js";
 
 // --- Configuration ---
 
@@ -181,6 +182,10 @@ const TRANSLATIONS = {
       "Overrides the default annual leave days for this user in the selected year.",
     "Not enough remaining vacation days.":
       "Not enough remaining vacation days.",
+    "Not enough flextime balance for this absence.":
+      "Not enough flextime balance for this absence.",
+    "Cannot change absence category cost type (vacation ↔ flextime). Cancel and re-request with the new category.":
+      "Cannot change absence category cost type (vacation ↔ flextime). Cancel and re-request with the new category.",
     "Please enter vacation days.": "Please enter vacation days.",
     "Absence Request Details": "Absence Request Details",
     "Show details": "Show details",
@@ -579,6 +584,12 @@ const TRANSLATIONS = {
     "Counts as vacation": "Zählt als Urlaub",
     "Keeps work target (flextime)": "Arbeitssoll bleibt (Gleitzeit)",
     "Auto-approve past dates (sick-like)": "Vergangene Daten automatisch genehmigen (Krankmeldung)",
+    "Visible to teammates in team calendar": "Im Teamkalender für Kollegen sichtbar",
+    "Visible to teammates": "Für Kollegen sichtbar",
+    "Type is required.": "Typ ist erforderlich.",
+    "Not enough flextime balance for this absence.": "Nicht genug Gleitzeitguthaben für diese Abwesenheit.",
+    "Cannot change absence category cost type (vacation ↔ flextime). Cancel and re-request with the new category.":
+      "Der Kostentyp der Abwesenheitskategorie (Urlaub ↔ Gleitzeit) kann nicht geändert werden. Bitte Abwesenheit stornieren und neu beantragen.",
     "Absence category slug already exists.": "Abwesenheitskategorie-Slug existiert bereits.",
     "A category cannot both deduct vacation and reduce flextime.": "Eine Kategorie kann nicht gleichzeitig Urlaub abziehen und Gleitzeit reduzieren.",
     "General Settings": "Allgemeine Einstellungen",
@@ -1095,6 +1106,10 @@ const TRANSLATIONS = {
       "Überschreibt die Standard-Urlaubstage für diesen Benutzer im gewählten Jahr.",
     "Not enough remaining vacation days.":
       "Nicht genügend verbleibende Urlaubstage.",
+    "Not enough flextime balance for this absence.":
+      "Nicht genügend Gleitzeitguthaben für diese Abwesenheit.",
+    "Cannot change absence category cost type (vacation ↔ flextime). Cancel and re-request with the new category.":
+      "Der Abwesenheitstyp (Urlaub ↔ Gleitzeit) kann nicht geändert werden. Bitte stornieren und mit dem neuen Typ neu beantragen.",
     "Please enter vacation days.": "Bitte Urlaubstage eingeben.",
     "Absence Request Details": "Details des Abwesenheitsantrags",
     "Show details": "Details anzeigen",
@@ -1299,23 +1314,6 @@ export function renderNotification(notification, lang) {
   return { title: notification.title, body: notification.body };
 }
 
-// --- Absence kind labels ---
-
-// Maps absence kind identifiers to their canonical English translation keys.
-const ABSENCE_KIND_LABELS = Object.freeze({
-  vacation: "Vacation",
-  sick: "Sick",
-  training: "Training",
-  special_leave: "Special leave",
-  unpaid: "Unpaid",
-  general_absence: "General absence",
-  flextime_reduction: "Flextime Reduction",
-});
-
-function translatedAbsenceKind(lang, kind) {
-  return translate(lang, ABSENCE_KIND_LABELS[kind] || kind);
-}
-
 // --- Error message localization ---
 
 // Regex patterns for backend error messages that carry dynamic values.
@@ -1340,8 +1338,8 @@ const ERROR_PATTERNS = Object.freeze([
     pattern:
       /^Cannot log time on a day with an approved absence \((?<kind>[^)]+)\)\. Please cancel or adjust the absence first\.$/,
     key: "Cannot log time on a day with an approved absence ({kind}). Please cancel or adjust the absence first.",
-    params(match, lang) {
-      return { kind: translatedAbsenceKind(lang, match.groups.kind) };
+    params(match) {
+      return { kind: absenceKindLabel(match.groups.kind) };
     },
   },
   {
@@ -1516,5 +1514,6 @@ export function auditActionLabel(action) {
 }
 
 export function absenceKindLabel(kind) {
-  return translatedAbsenceKind(get(language), kind);
+  const cat = get(absenceCategories).find((c) => c.slug === kind);
+  return translate(get(language), cat?.name || kind);
 }

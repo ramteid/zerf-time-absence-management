@@ -463,6 +463,51 @@ pub async fn carryover_remaining_days(input: CarryoverRemainingInput<'_>) -> App
     Ok((carryover_days as f64 - consumed).max(0.0))
 }
 
+/// Validate that a flextime-reduction absence does not push the user's flextime
+/// balance below the configured floor (default 0 minutes).
+/// Only called for categories where `keeps_work_target=true`.
+pub async fn validate_flextime_balance(
+    pool: &crate::db::DatabasePool,
+    user: &crate::middleware::auth::User,
+    start_date: NaiveDate,
+    end_date: NaiveDate,
+) -> AppResult<()> {
+    // Assistants have no flextime account; irregular schedules have no fixed target.
+    if crate::roles::is_assistant_role(&user.role) || user.workdays_per_week == 0 {
+        return Ok(());
+    }
+    let target_per_day_min =
+        (user.weekly_hours / f64::from(user.workdays_per_week) * 60.0).round() as i64;
+
+    let floor_min: i64 = crate::services::settings::load_setting(
+        pool,
+        "flextime_min_balance_min",
+        "0",
+    )
+    .await?
+    .parse::<i64>()
+    .unwrap_or(0);
+
+    // Current flextime balance = cumulative balance at end of yesterday.
+    // build_flextime_for_user(today, today) seeds with yesterday's balance;
+    // today's diff is 0 (future), so cumulative_min on the first element equals
+    // the seeded value — i.e., the balance "as of yesterday".
+    let today = crate::services::settings::app_today(pool).await;
+    let flextime_days =
+        crate::services::reports::build_flextime_for_user(pool, user, today, today).await?;
+    let current_balance_min = flextime_days.first().map(|d| d.cumulative_min).unwrap_or(0);
+
+    let proposed_days = workdays(pool, user.id, start_date, end_date).await?;
+    let proposed_cost_min = (proposed_days * target_per_day_min as f64).round() as i64;
+
+    if current_balance_min - proposed_cost_min < floor_min {
+        return Err(AppError::BadRequest(
+            "Not enough flextime balance for this absence.".into(),
+        ));
+    }
+    Ok(())
+}
+
 /// Validate that a vacation absence does not exceed the user's remaining entitlement
 /// for the affected year(s). `exclude_id` allows excluding the current absence when
 /// editing (pass `None` when creating).

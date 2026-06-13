@@ -1,13 +1,15 @@
 import { durMin, minToHM } from "../../format.js";
 import { absenceKindLabel } from "../../i18n.js";
 import {
-  ABSENCE_COLORS,
   FALLBACK_COLORS,
   HOLIDAY_COLOR,
+  MASKED_ABSENCE_COLOR,
 } from "../../colors.js";
 
-export function absColor(kind) {
-  return ABSENCE_COLORS[kind] || ABSENCE_COLORS.absent;
+// Return the DB-stored color for a given absence slug from the category lookup,
+// falling back to the masked-absence color for unknown/private kinds.
+export function absColor(kind, absenceCategoryMap) {
+  return absenceCategoryMap.get(kind)?.color || MASKED_ABSENCE_COLOR;
 }
 
 export function normalizeColor(color) {
@@ -46,6 +48,7 @@ export function rawCellEvents(
   cell,
   entryMap,
   categoryMap,
+  absenceCategoryMap,
   translate,
   userMap = new Map(),
   currentUserId = null,
@@ -63,7 +66,7 @@ export function rawCellEvents(
     const label = absenceKindLabel(absence.kind);
     events.push({
       key: `absence:${absence.kind}`,
-      color: absColor(absence.kind),
+      color: absColor(absence.kind, absenceCategoryMap),
       label,
       title: label,
       detail: absenceDetail(absence),
@@ -92,16 +95,21 @@ export function rawCellEvents(
   return events;
 }
 
-export function buildColorMap(baseCells, entryMap, categoryMap, translate) {
+export function buildColorMap(baseCells, entryMap, categoryMap, absenceCategoryMap, translate) {
+  // Reserve the holiday color and all DB-stored absence colors so work-category
+  // colors are never assigned a value that would clash with absence bands.
   const reservedColors = new Set([
     HOLIDAY_COLOR.toLowerCase(),
-    ...Object.values(ABSENCE_COLORS).map((color) => color.toLowerCase()),
+    MASKED_ABSENCE_COLOR.toLowerCase(),
+    ...Array.from(absenceCategoryMap.values())
+      .map((c) => c.color?.toLowerCase())
+      .filter(Boolean),
   ]);
   const assigned = new Map();
   const used = new Set();
   for (const cell of baseCells) {
     if (cell.other) continue;
-    for (const event of rawCellEvents(cell, entryMap, categoryMap, translate)) {
+    for (const event of rawCellEvents(cell, entryMap, categoryMap, absenceCategoryMap, translate)) {
       if (assigned.has(event.key)) continue;
       const isWorkEvent = event.key.startsWith("work:");
       const blocked = new Set([...used, ...reservedColors]);
@@ -126,6 +134,7 @@ export function cellEvents(
   entryMap,
   categoryMap,
   colorMap,
+  absenceCategoryMap,
   translate,
   userMap,
   currentUserId,
@@ -134,6 +143,7 @@ export function cellEvents(
     cell,
     entryMap,
     categoryMap,
+    absenceCategoryMap,
     translate,
     userMap,
     currentUserId,

@@ -93,7 +93,7 @@ pub async fn list_all(
             "approved",
             "rejected",
             "cancelled",
-            "cancellation_requested",
+            "cancellation_pending",
             "pending_review",
         ]
         .contains(&s.as_str())
@@ -169,11 +169,10 @@ pub async fn calendar(
     let requester_is_lead = requester.is_lead();
     Ok(Json(calendar_entries.into_iter().map(|entry| {
         let is_own_entry = entry.user_id == requester.id;
-        // Vacation-style categories (configurable via the `counts_as_vacation`
-        // flag) are the only ones surfaced to non-lead viewers — sensitive
-        // categories like sick leave fall under GDPR Art. 9 and must not leak
-        // across the team.
-        let kind_visible = requester_is_lead || is_own_entry || entry.counts_as_vacation;
+        // The `team_visible` flag on each category controls calendar privacy:
+        // sick leave (GDPR Art. 9) is false; vacation, training, etc. are true.
+        // Non-leads only see the real kind when the category opts in.
+        let kind_visible = requester_is_lead || is_own_entry || entry.team_visible;
         let displayed_kind = if kind_visible { entry.kind.clone() } else { "absent".to_string() };
         serde_json::json!({
             "id": entry.id, "user_id": entry.user_id, "name": format!("{} {}", entry.first_name, entry.last_name),

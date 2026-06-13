@@ -90,6 +90,9 @@
         {#if cat.auto_approve_past}
           <span class="zf-chip">{$t("Auto-approve past dates (sick-like)")}</span>
         {/if}
+        {#if cat.team_visible}
+          <span class="zf-chip">{$t("Visible to teammates")}</span>
+        {/if}
         {#if !cat.active}
           <span class="zf-chip">{$t("Inactive")}</span>
         {/if}

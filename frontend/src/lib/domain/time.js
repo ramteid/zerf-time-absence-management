@@ -5,7 +5,9 @@ import {
   formatTimeValue,
   isoDate,
 } from "../../format.js";
-import { ABSENCE_COLORS } from "../../colors.js";
+import { get } from "svelte/store";
+import { absenceCategories } from "../../stores.js";
+import { MASKED_ABSENCE_COLOR } from "../../colors.js";
 
 export const WEEKDAY_NAMES = Object.freeze([
   "Monday",
@@ -312,7 +314,7 @@ export function weekStatusColor(status) {
 }
 
 export function absenceColor(kind) {
-  return ABSENCE_COLORS[kind] || "var(--text-tertiary)";
+  return get(absenceCategories).find((c) => c.slug === kind)?.color || MASKED_ABSENCE_COLOR;
 }
 
 export function canAddEntryForDay(day, currentUser, todayIso) {

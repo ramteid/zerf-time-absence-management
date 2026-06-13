@@ -136,8 +136,17 @@ async fn find_unsubmitted_weeks(
         .await
         .unwrap_or_default();
 
-    let absent_days =
-        crate::services::reports::expand_absence_date_set(&absence_rows, first_monday, check_to);
+    let category_flags = crate::services::reports::AbsenceCategoryFlags::load(pool)
+        .await
+        .unwrap_or_else(|_| crate::services::reports::AbsenceCategoryFlags {
+            by_slug: Default::default(),
+        });
+    let absent_days = crate::services::reports::expand_absence_date_set(
+        &absence_rows,
+        first_monday,
+        check_to,
+        &category_flags,
+    );
 
     // Check each fully elapsed week using the same three-step logic as
     // `check_weeks_all_submitted` in services/reports.rs so that reminders

@@ -1,8 +1,8 @@
 <script>
   import { t, absenceKindLabel, formatHours, fmtDecimal } from "./i18n.js";
-  import { settings } from "./stores.js";
+  import { settings, absenceCategories } from "./stores.js";
   import { appTodayIsoDate, fmtDateShort, fmtDateWeekday } from "./format.js";
-  import { HOLIDAY_COLOR, WEEKEND_COLOR, ABSENCE_COLORS } from "./colors.js";
+  import { HOLIDAY_COLOR, WEEKEND_COLOR, MASKED_ABSENCE_COLOR } from "./colors.js";
 
   /**
    * @typedef {{date: string, actual_min: number, target_min: number,
@@ -219,11 +219,10 @@
     );
   }
 
-  // Use the same color constants as the calendar so chart bands match the
-  // calendar's category colors exactly (and stay identical in dark mode).
-  function absColor(kind) {
-    return ABSENCE_COLORS[kind] || ABSENCE_COLORS.absent;
-  }
+  $: absCatBySlug = new Map($absenceCategories.map((c) => [c.slug, c]));
+
+  // Use DB-stored category colors so chart bands match the calendar exactly.
+  $: absColor = (kind) => absCatBySlug.get(kind)?.color || MASKED_ABSENCE_COLOR;
 
   function isWeekend(dateString) {
     const dayOfWeek = new Date(`${dateString}T00:00:00Z`).getUTCDay();
