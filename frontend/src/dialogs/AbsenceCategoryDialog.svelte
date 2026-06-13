@@ -14,6 +14,7 @@
   let counts_as_vacation = template.counts_as_vacation ?? false;
   let keeps_work_target = template.keeps_work_target ?? false;
   let auto_approve_past = template.auto_approve_past ?? false;
+  let team_visible = template.team_visible ?? false;
   let error = "";
 
   async function save() {
@@ -26,6 +27,7 @@
         counts_as_vacation,
         keeps_work_target,
         auto_approve_past,
+        team_visible,
       };
       if (!isNew) {
         body.active = active;
@@ -82,6 +84,10 @@
     <label style="display:flex;align-items:center;gap:8px;font-size:13px">
       <input type="checkbox" bind:checked={auto_approve_past} />
       <span>{$t("Auto-approve past dates (sick-like)")}</span>
+    </label>
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px">
+      <input type="checkbox" bind:checked={team_visible} />
+      <span>{$t("Visible to teammates in team calendar")}</span>
     </label>
   </div>
   {#if !isNew}

@@ -3,7 +3,8 @@ use crate::error::{AppError, AppResult};
 use crate::i18n;
 use crate::middleware::auth::User;
 use crate::services::absence_balance::{
-    validate_absence_has_workday, validate_backdating_window, validate_vacation_balance, workdays,
+    validate_absence_has_workday, validate_backdating_window, validate_flextime_balance,
+    validate_vacation_balance, workdays,
 };
 use crate::AppState;
 use chrono::{DateTime, Duration, NaiveDate, Utc};
@@ -92,6 +93,8 @@ pub fn repo_absence_to_service(a: crate::repository::Absence) -> Absence {
         user_id: a.user_id,
         category_id: a.category_id,
         kind: a.kind,
+        category_name: a.category_name,
+        category_color: a.category_color,
         counts_as_vacation: a.counts_as_vacation,
         keeps_work_target: a.keeps_work_target,
         auto_approve_past: a.auto_approve_past,
@@ -163,6 +166,10 @@ pub struct Absence {
     /// and i18n key lookup (e.g. `absence_kind_vacation`). The canonical
     /// reference is `category_id`.
     pub kind: String,
+    /// Display name and color from the joined category row; present even when the
+    /// category is inactive so the UI can render the absence correctly on edit.
+    pub category_name: String,
+    pub category_color: String,
     pub counts_as_vacation: bool,
     pub keeps_work_target: bool,
     pub auto_approve_past: bool,
@@ -307,6 +314,15 @@ pub async fn create_absence(
         )
         .await?;
     }
+    if category.keeps_work_target {
+        validate_flextime_balance(
+            &app_state.pool,
+            requester,
+            body.start_date,
+            body.end_date,
+        )
+        .await?;
+    }
     let initial_status = if category.auto_approve_past && body.start_date <= today_date {
         "approved"
     } else {
@@ -402,6 +418,18 @@ pub async fn update_absence(
             "Cannot change between auto-approve (e.g. sick) and review categories.".into(),
         ));
     }
+    // Changing the cost type (vacation budget vs. flextime balance) would silently
+    // alter the financial meaning of the absence without re-triggering approver
+    // review. The user must cancel and re-request with the correct category.
+    let changes_cost_type = absence_before_update.counts_as_vacation != category.counts_as_vacation
+        || absence_before_update.keeps_work_target != category.keeps_work_target;
+    if changes_cost_type {
+        return Err(AppError::BadRequest(
+            "Cannot change absence category cost type (vacation \u{2194} flextime). \
+             Cancel and re-request with the new category."
+                .into(),
+        ));
+    }
     crate::repository::AbsenceDb::assert_no_overlap_tx(
         &mut transaction,
         requester.id,
@@ -421,6 +449,15 @@ pub async fn update_absence(
             body.end_date,
             Some(absence_id),
             false,
+        )
+        .await?;
+    }
+    if category.keeps_work_target {
+        validate_flextime_balance(
+            &app_state.pool,
+            requester,
+            body.start_date,
+            body.end_date,
         )
         .await?;
     }
@@ -1229,6 +1266,8 @@ mod tests {
             user_id: 1,
             category_id: 1,
             kind: kind.to_string(),
+            category_name: kind.to_string(),
+            category_color: "#000000".to_string(),
             counts_as_vacation,
             keeps_work_target,
             auto_approve_past,
@@ -1445,6 +1484,8 @@ mod tests {
             user_id: 7,
             category_id: 2,
             kind: "sick".to_string(),
+            category_name: "Sick".to_string(),
+            category_color: "#ef4444".to_string(),
             counts_as_vacation: false,
             keeps_work_target: false,
             auto_approve_past: true,

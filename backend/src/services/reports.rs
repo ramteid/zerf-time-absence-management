@@ -652,7 +652,8 @@ pub async fn load_week_check_data(
     let absence_rows = reports_db
         .absence_ranges_in_period(user_id, check_from, check_to)
         .await?;
-    let absent_days = expand_absence_date_set(&absence_rows, check_from, check_to);
+    let category_flags = AbsenceCategoryFlags::load(pool).await?;
+    let absent_days = expand_absence_date_set(&absence_rows, check_from, check_to, &category_flags);
     let submitted_dates = reports_db
         .submitted_dates_in_range(user_id, check_from, check_to)
         .await?;
@@ -1052,18 +1053,28 @@ pub fn group_entries_by_date(rows: Vec<RawEntryRow>) -> HashMap<NaiveDate, Vec<R
     map
 }
 
-/// Expands a list of (start, end) date ranges into a flat set of individual dates,
-/// clamped to the given [from, to] window.
+/// Expands a list of (start, end, slug) date ranges into a flat set of individual
+/// dates clamped to `[from, to]`. Ranges whose category has `keeps_work_target=true`
+/// (flextime reduction) are skipped: those days still require the user to log hours,
+/// so they must NOT be treated as submission-covered.
 pub fn expand_absence_date_set(
     ranges: &[(NaiveDate, NaiveDate, String)],
     from: NaiveDate,
     to: NaiveDate,
+    category_flags: &AbsenceCategoryFlags,
 ) -> std::collections::HashSet<NaiveDate> {
     let mut set = std::collections::HashSet::new();
-    for (range_start, range_end, _kind) in ranges {
-        // All approved absences cover the day for submission purposes: target-removing absences
-        // (vacation, sick, training, etc.) replace the work requirement entirely; flextime_reduction
-        // blocks entry creation so there is nothing for the user to submit on that day either.
+    for (range_start, range_end, kind) in ranges {
+        // keeps_work_target absences (e.g. flextime_reduction) do not remove the
+        // daily submission requirement; skip them so the week stays "not submitted".
+        if category_flags
+            .by_slug
+            .get(kind.as_str())
+            .map(|f| f.keeps_work_target)
+            .unwrap_or(false)
+        {
+            continue;
+        }
         let mut day = (*range_start).max(from);
         while day <= (*range_end).min(to) {
             set.insert(day);
@@ -1551,10 +1562,46 @@ mod tests {
             NaiveDate::from_ymd_opt(2026, 5, 11).unwrap(),
             "vacation".to_string(),
         )];
-        let set = expand_absence_date_set(&ranges, from, to);
+        let flags = AbsenceCategoryFlags { by_slug: Default::default() };
+        let set = expand_absence_date_set(&ranges, from, to, &flags);
         assert_eq!(set.len(), 2);
         assert!(set.contains(&NaiveDate::from_ymd_opt(2026, 5, 10).unwrap()));
         assert!(set.contains(&NaiveDate::from_ymd_opt(2026, 5, 11).unwrap()));
+    }
+
+    /// `expand_absence_date_set` skips ranges whose category has `keeps_work_target=true`,
+    /// because those days still require logged hours and must not be treated as submission-exempt.
+    #[test]
+    fn expand_absence_date_set_skips_keeps_work_target_ranges() {
+        let from = NaiveDate::from_ymd_opt(2026, 5, 1).unwrap();
+        let to = NaiveDate::from_ymd_opt(2026, 5, 31).unwrap();
+        let ranges = vec![
+            (
+                NaiveDate::from_ymd_opt(2026, 5, 5).unwrap(),
+                NaiveDate::from_ymd_opt(2026, 5, 5).unwrap(),
+                "flextime_reduction".to_string(),
+            ),
+            (
+                NaiveDate::from_ymd_opt(2026, 5, 6).unwrap(),
+                NaiveDate::from_ymd_opt(2026, 5, 6).unwrap(),
+                "vacation".to_string(),
+            ),
+        ];
+        let mut by_slug = std::collections::HashMap::new();
+        by_slug.insert(
+            "flextime_reduction".to_string(),
+            CategoryFlagSet { keeps_work_target: true },
+        );
+        by_slug.insert(
+            "vacation".to_string(),
+            CategoryFlagSet { keeps_work_target: false },
+        );
+        let flags = AbsenceCategoryFlags { by_slug };
+        let set = expand_absence_date_set(&ranges, from, to, &flags);
+        // flextime_reduction day is skipped; vacation day is included
+        assert_eq!(set.len(), 1);
+        assert!(set.contains(&NaiveDate::from_ymd_opt(2026, 5, 6).unwrap()));
+        assert!(!set.contains(&NaiveDate::from_ymd_opt(2026, 5, 5).unwrap()));
     }
 
     #[test]
@@ -1674,7 +1721,8 @@ mod tests {
     fn expand_absence_date_set_returns_empty_for_no_ranges() {
         let from = NaiveDate::from_ymd_opt(2026, 5, 1).unwrap();
         let to = NaiveDate::from_ymd_opt(2026, 5, 31).unwrap();
-        let set = expand_absence_date_set(&[], from, to);
+        let flags = AbsenceCategoryFlags { by_slug: Default::default() };
+        let set = expand_absence_date_set(&[], from, to, &flags);
         assert!(set.is_empty());
     }
 

@@ -2,7 +2,6 @@
   import { api } from "../api.js";
   import { currentUser, settings, absenceCategories } from "../stores.js";
   import { t } from "../i18n.js";
-  import { absenceKindLabel } from "../i18n.js";
   import { appTodayIsoDate } from "../format.js";
   import { countWorkdays } from "../apiMappers.js";
   import Dialog from "../Dialog.svelte";
@@ -13,17 +12,10 @@
   export let holidays = new Set();
   let dialog;
   $: isNew = !template.id;
-  // category_id is the primary field; fall back to slug lookup for editing
-  // existing absences that were created before dynamic categories.
-  $: defaultCategoryId = (() => {
-    if (template.category_id) return template.category_id;
-    if (template.kind && $absenceCategories.length) {
-      const match = $absenceCategories.find((c) => c.slug === template.kind);
-      if (match) return match.id;
-    }
-    return $absenceCategories[0]?.id ?? null;
-  })();
+  // category_id is always set for existing absences (guaranteed by migration 017).
+  $: defaultCategoryId = template.category_id ?? $absenceCategories[0]?.id ?? null;
   let category_id = defaultCategoryId;
+  // Assign once the store finishes loading when opening a new request.
   $: if (!category_id && $absenceCategories.length) {
     category_id = $absenceCategories[0]?.id ?? null;
   }
@@ -93,6 +85,10 @@
 
   async function save() {
     error = "";
+    if (!category_id) {
+      error = $t("Type is required.");
+      return;
+    }
     if (!start_date || !end_date) {
       error = $t("Invalid date.");
       return;
@@ -131,8 +127,11 @@
   <div>
     <label class="zf-label" for="absence-kind">{$t("Type")}</label>
     <select id="absence-kind" class="zf-select" bind:value={category_id}>
+      {#if !isNew && template.category_id && !$absenceCategories.find((c) => c.id === template.category_id)}
+        <option value={template.category_id}>{template.category_name || $t("Unknown type")}</option>
+      {/if}
       {#each $absenceCategories as cat (cat.id)}
-        <option value={cat.id}>{absenceKindLabel(cat.slug) !== cat.slug ? absenceKindLabel(cat.slug) : cat.name}</option>
+        <option value={cat.id}>{$t(cat.name)}</option>
       {/each}
     </select>
   </div>
@@ -175,7 +174,7 @@
   <div class="error-text">{error}</div>
   <svelte:fragment slot="footer">
     <button class="zf-btn" on:click={cancel}>{$t("Cancel")}</button>
-    <button class="zf-btn zf-btn-primary" on:click={save}>
+    <button class="zf-btn zf-btn-primary" on:click={save} disabled={!category_id}>
       {$t(isNew ? "Submit Request" : "Save")}
     </button>
   </svelte:fragment>

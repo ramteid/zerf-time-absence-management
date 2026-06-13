@@ -73,6 +73,7 @@ pub struct NewCategoryInput {
     pub counts_as_vacation: bool,
     pub keeps_work_target: bool,
     pub auto_approve_past: bool,
+    pub team_visible: bool,
 }
 
 pub async fn create(
@@ -122,6 +123,7 @@ pub async fn create(
             counts_as_vacation: input.counts_as_vacation,
             keeps_work_target: input.keeps_work_target,
             auto_approve_past: input.auto_approve_past,
+            team_visible: input.team_visible,
         })
         .await?;
     app_state
@@ -140,6 +142,7 @@ pub struct UpdateCategoryInput {
     pub counts_as_vacation: Option<bool>,
     pub keeps_work_target: Option<bool>,
     pub auto_approve_past: Option<bool>,
+    pub team_visible: Option<bool>,
 }
 
 pub async fn update(
@@ -193,6 +196,7 @@ pub async fn update(
                 counts_as_vacation: input.counts_as_vacation,
                 keeps_work_target: input.keeps_work_target,
                 auto_approve_past: input.auto_approve_past,
+                team_visible: input.team_visible,
             },
         )
         .await?;

@@ -10,12 +10,17 @@ use std::collections::HashSet;
 /// and business logic that previously branched on `kind == "vacation"` is
 /// gradually migrating to the explicit behavior flags also returned here, but
 /// the slug remains useful as a stable i18n key and for legacy callers.
+/// `category_name` and `category_color` are projected directly from the joined
+/// category row so that dialogs can display the correct label and color even
+/// when the category has since been deactivated.
 #[derive(sqlx::FromRow, Serialize, Clone)]
 pub struct Absence {
     pub id: i64,
     pub user_id: i64,
     pub category_id: i64,
     pub kind: String,
+    pub category_name: String,
+    pub category_color: String,
     pub start_date: NaiveDate,
     pub end_date: NaiveDate,
     pub comment: Option<String>,
@@ -37,10 +42,10 @@ pub struct CalendarEntry {
     pub last_name: String,
     pub kind: String,
     pub category_id: i64,
-    /// Carried alongside the slug so non-lead viewers can decide whether the
-    /// category is "non-private enough" to surface (vacation: yes; sick and
-    /// other sensitive categories: no).
-    pub counts_as_vacation: bool,
+    /// When true, non-lead teammates can see the real absence kind in the team
+    /// calendar. Replaces the old `counts_as_vacation` privacy gate so each
+    /// category can independently control its calendar visibility.
+    pub team_visible: bool,
     pub start_date: NaiveDate,
     pub end_date: NaiveDate,
     pub comment: Option<String>,
@@ -52,7 +57,8 @@ pub struct CalendarEntry {
 /// absences are fetched as `Absence` structs — keeping the projection in one
 /// place ensures the row shape stays consistent across queries.
 const ABS_SELECT: &str =
-    "SELECT a.id, a.user_id, a.category_id, c.slug AS kind, a.start_date, a.end_date, \
+    "SELECT a.id, a.user_id, a.category_id, c.slug AS kind, c.name AS category_name, \
+     c.color AS category_color, a.start_date, a.end_date, \
      a.comment, a.status, a.reviewed_by, a.reviewed_at, a.rejection_reason, a.created_at, \
      c.counts_as_vacation, c.keeps_work_target, c.auto_approve_past \
      FROM absences a JOIN absence_categories c ON c.id = a.category_id";
@@ -419,7 +425,7 @@ impl AbsenceDb {
     ) -> AppResult<Vec<CalendarEntry>> {
         let mut builder = QueryBuilder::<Postgres>::new(
             "SELECT a.id, a.user_id, u.first_name, u.last_name, c.slug AS kind, a.category_id, \
-             c.counts_as_vacation, a.start_date, a.end_date, a.comment, a.status \
+             c.team_visible, a.start_date, a.end_date, a.comment, a.status \
              FROM absences a \
              JOIN users u ON u.id=a.user_id \
              JOIN absence_categories c ON c.id = a.category_id \

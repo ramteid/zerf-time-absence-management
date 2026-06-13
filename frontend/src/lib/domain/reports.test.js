@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
   categoryColumnsFromTeamReport,
   dedupeAbsences,
@@ -11,8 +11,20 @@ import {
   totalAbsenceDays,
   totalCategoryMinutes,
 } from "./reports.js";
+import { absenceCategories } from "../../stores.js";
+
+// Seed the store so keepsWorkTargetSlugs() picks up flextime_reduction and
+// any custom keeps_work_target=true category. Tests reset it as needed.
+const BASE_CATEGORIES = [
+  { id: 1, slug: "vacation", name: "Vacation", keeps_work_target: false },
+  { id: 2, slug: "sick", name: "Sick Leave", keeps_work_target: false },
+  { id: 7, slug: "flextime_reduction", name: "Flextime Reduction", keeps_work_target: true },
+];
 
 describe("reports domain helpers", () => {
+  beforeEach(() => {
+    absenceCategories.set(BASE_CATEGORIES);
+  });
   it("summarizes absence days by kind", () => {
     expect(
       summarizeAbsences([
@@ -192,5 +204,32 @@ describe("reports domain helpers", () => {
         { kind: "sick", days: 0 },
       ]),
     ).toEqual({ vacation: 1 });
+  });
+
+  // B3: exclusion is flag-based, not slug-based — custom keeps_work_target categories are excluded too
+  it("totalAbsenceDays excludes any custom keeps_work_target=true category", () => {
+    absenceCategories.set([
+      { id: 1, slug: "vacation", name: "Vacation", keeps_work_target: false },
+      { id: 8, slug: "comp_time", name: "Comp Time", keeps_work_target: true },
+    ]);
+    expect(
+      totalAbsenceDays([
+        { kind: "vacation", days: 3 },
+        { kind: "comp_time", days: 2 },
+      ]),
+    ).toBe(3); // comp_time excluded because keeps_work_target=true
+  });
+
+  it("absenceKindTotals excludes any custom keeps_work_target=true category", () => {
+    absenceCategories.set([
+      { id: 1, slug: "vacation", name: "Vacation", keeps_work_target: false },
+      { id: 8, slug: "comp_time", name: "Comp Time", keeps_work_target: true },
+    ]);
+    expect(
+      absenceKindTotals([
+        { kind: "vacation", days: 3 },
+        { kind: "comp_time", days: 2 },
+      ]),
+    ).toEqual({ vacation: 3 });
   });
 });

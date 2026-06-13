@@ -1,6 +1,6 @@
 <script>
   import { api } from "../api.js";
-  import { path, go, currentUser, categories, settings, earliestStartDate } from "../stores.js";
+  import { path, go, currentUser, categories, settings, earliestStartDate, absenceCategories } from "../stores.js";
   import { t } from "../i18n.js";
   import {
     fmtMonthYear,
@@ -190,10 +190,11 @@
     return nextCells;
   })();
 
-  $: colorByKey = buildColorMap(cells, teMap, categoryById, $t);
+  $: absCatBySlug = new Map($absenceCategories.map((c) => [c.slug, c]));
+  $: colorByKey = buildColorMap(cells, teMap, categoryById, absCatBySlug, $t);
   $: eventCells = cells.map((cell) => ({
     ...cell,
-    events: cellEvents(cell, teMap, categoryById, colorByKey, $t, userById, $currentUser?.id),
+    events: cellEvents(cell, teMap, categoryById, colorByKey, absCatBySlug, $t, userById, $currentUser?.id),
   }));
 
   // ── Heading: "Team Calendar" for team leads and admins (they can always see

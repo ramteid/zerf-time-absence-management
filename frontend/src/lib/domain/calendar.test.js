@@ -3,7 +3,7 @@
 // rendering concerns are:
 //   - Each event gets a distinct colour so employees can tell entries apart
 //   - Holidays always get the fixed holiday colour regardless of assignment order
-//   - Absence colours are also fixed per kind (vacation = blue, sick = red, …)
+//   - Absence colours come from the DB-stored category color (absenceCategoryMap)
 //   - Work-entry colours are drawn from a fallback palette, cycling and avoiding
 //     any colour already used by holidays or absences
 //   - absColor, normalizeColor, and fallbackColor have clear boundary behaviour
@@ -22,6 +22,7 @@ import {
   workLabel,
 } from "./calendar.js";
 import { setLanguage } from "../../i18n.js";
+import { MASKED_ABSENCE_COLOR } from "../../colors.js";
 
 setLanguage("en");
 
@@ -41,17 +42,18 @@ describe("normalizeColor", () => {
 });
 
 describe("absColor", () => {
-  it("returns the colour mapped to the absence kind", () => {
-    // Each absence kind has a fixed colour defined in colors.js so the
-    // calendar is visually consistent across all users and months.
-    const vacation = absColor("vacation");
-    const sick = absColor("sick");
-    expect(typeof vacation).toBe("string");
-    expect(vacation).not.toBe(sick);
+  it("returns the DB-stored colour for a known absence kind", () => {
+    const catMap = new Map([
+      ["vacation", { color: "#1a73e8" }],
+      ["sick", { color: "#d93025" }],
+    ]);
+    expect(absColor("vacation", catMap)).toBe("#1a73e8");
+    expect(absColor("sick", catMap)).toBe("#d93025");
+    expect(absColor("vacation", catMap)).not.toBe(absColor("sick", catMap));
   });
 
-  it("falls back to the 'absent' colour for unknown kinds", () => {
-    expect(absColor("unknown_kind")).toBe(absColor("absent"));
+  it("falls back to MASKED_ABSENCE_COLOR for unknown kinds", () => {
+    expect(absColor("unknown_kind", new Map())).toBe(MASKED_ABSENCE_COLOR);
   });
 });
 
@@ -140,7 +142,7 @@ describe("rawCellEvents", () => {
     // Holidays must always appear with the fixed holiday colour so they are
     // visually distinct from absence and work events.
     const cell = { ds: "2026-01-01", hol: "New Year", absences: [] };
-    const events = rawCellEvents(cell, new Map(), new Map(), translate);
+    const events = rawCellEvents(cell, new Map(), new Map(), new Map(), translate);
     expect(events.some((e) => e.key === "holiday")).toBe(true);
     expect(events.find((e) => e.key === "holiday").detail).toBe("New Year");
   });
@@ -151,9 +153,21 @@ describe("rawCellEvents", () => {
       hol: null,
       absences: [{ kind: "vacation", name: "Summer", comment: "" }],
     };
-    const events = rawCellEvents(cell, new Map(), new Map(), translate);
+    const events = rawCellEvents(cell, new Map(), new Map(), new Map(), translate);
     const absEvent = events.find((e) => e.key === "absence:vacation");
     expect(absEvent).not.toBeUndefined();
+  });
+
+  it("uses DB-stored category color for absence events", () => {
+    const cell = {
+      ds: "2026-07-15",
+      hol: null,
+      absences: [{ kind: "vacation", name: "Summer", comment: "" }],
+    };
+    const absCatMap = new Map([["vacation", { color: "#1a73e8" }]]);
+    const events = rawCellEvents(cell, new Map(), new Map(), absCatMap, translate);
+    const absEvent = events.find((e) => e.key === "absence:vacation");
+    expect(absEvent.color).toBe("#1a73e8");
   });
 
   it("includes a work event for each time entry on the date", () => {
@@ -172,7 +186,7 @@ describe("rawCellEvents", () => {
       ],
     ]);
     const cell = { ds, hol: null, absences: [] };
-    const events = rawCellEvents(cell, entryMap, new Map(), translate);
+    const events = rawCellEvents(cell, entryMap, new Map(), new Map(), translate);
     expect(events.some((e) => e.key.startsWith("work:"))).toBe(true);
   });
 
@@ -189,7 +203,7 @@ describe("rawCellEvents", () => {
     const entryMap = new Map([[ds, [entry]]]);
     const userMap = new Map([[5, { first_name: "Eve", last_name: "Emp" }]]);
     const cell = { ds, hol: null, absences: [] };
-    const events = rawCellEvents(cell, entryMap, new Map(), translate, userMap, 1);
+    const events = rawCellEvents(cell, entryMap, new Map(), new Map(), translate, userMap, 1);
     const workEvent = events.find((e) => e.key.startsWith("work:"));
     expect(workEvent.detail).toContain("Eve Emp");
   });
@@ -224,7 +238,7 @@ describe("buildColorMap", () => {
       [1, { name: "Cat A", color: null }],
       [2, { name: "Cat B", color: null }],
     ]);
-    const colorMap = buildColorMap(cells, entryMap, categoryMap, translate);
+    const colorMap = buildColorMap(cells, entryMap, categoryMap, new Map(), translate);
     const colors = [...colorMap.values()];
     const uniqueColors = new Set(colors);
     expect(uniqueColors.size).toBe(colors.length);
@@ -234,7 +248,7 @@ describe("buildColorMap", () => {
     // Cells from adjacent months are greyed out; they must not influence the
     // colour assignment for the current month's events.
     const cells = [{ ds: "2025-12-31", other: true, hol: null, absences: [] }];
-    const colorMap = buildColorMap(cells, new Map(), new Map(), translate);
+    const colorMap = buildColorMap(cells, new Map(), new Map(), new Map(), translate);
     expect(colorMap.size).toBe(0);
   });
 });

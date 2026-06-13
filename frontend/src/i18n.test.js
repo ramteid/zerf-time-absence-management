@@ -19,9 +19,21 @@ import {
   localizeErrorMessage,
   t,
 } from "./i18n.js";
+import { absenceCategories } from "./stores.js";
 
 beforeEach(() => {
   setLanguage("en");
+  // Populate the absenceCategories store with the seeded categories so
+  // absenceKindLabel can look up the display name by slug.
+  absenceCategories.set([
+    { id: 1, slug: "vacation", name: "Vacation", color: "#3b82f6", active: true },
+    { id: 2, slug: "sick", name: "Sick", color: "#b91c1c", active: true },
+    { id: 3, slug: "training", name: "Training", color: "#0d9488", active: true },
+    { id: 4, slug: "special_leave", name: "Special leave", color: "#a855f7", active: true },
+    { id: 5, slug: "unpaid", name: "Unpaid", color: "#64748b", active: true },
+    { id: 6, slug: "general_absence", name: "General absence", color: "#6b7280", active: true },
+    { id: 7, slug: "flextime_reduction", name: "Flextime Reduction", color: "#6D4C41", active: true },
+  ]);
 });
 
 describe("translate", () => {

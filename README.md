@@ -21,7 +21,7 @@ Self-hosted time tracking and absence management for small teams. Covers working
 
 ## 🗂️ Overview
 
-Three roles: employees log hours and request leave, team leads approve time sheets and absences, admins manage users, categories, holidays, and settings. Every change is recorded in an audit log.
+Four roles: employees log hours and request leave, assistants record time without a fixed weekly target or flextime account, team leads approve time sheets and absences, admins manage users, categories, holidays, and settings. Every change is recorded in an audit log.
 
 Works on desktop and mobile.
 
