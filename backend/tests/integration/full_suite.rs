@@ -602,14 +602,16 @@ async fn absence_and_report_workflow() {
         assert_eq!(st, StatusCode::OK, "create editable pending absence");
         let editable_id = id(&body);
 
+        // B7: editing within the same cost type (both general_absence and training have
+        // counts_as_vacation=false, keeps_work_target=false) must still be allowed.
         let (st, body) = emp
             .put(
                 &format!("/api/v1/absences/{}", editable_id),
-                &json!({"kind":"vacation","start_date": &editable_day,"end_date": &editable_day,"comment":"converted"}),
+                &json!({"kind":"training","start_date": &editable_day,"end_date": &editable_day,"comment":"converted"}),
             )
             .await;
-        assert_eq!(st, StatusCode::OK, "edit pending kind");
-        assert_eq!(body["kind"], "vacation");
+        assert_eq!(st, StatusCode::OK, "edit pending kind within same cost type");
+        assert_eq!(body["kind"], "training");
 
         let (st, _) = emp
             .delete(&format!("/api/v1/absences/{}", editable_id))
