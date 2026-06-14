@@ -165,18 +165,26 @@ export function computeDayBreakDeduction(items, categories, rules) {
   }, 0);
 }
 
+// Look up the absence category by slug from the store. Any caller that already
+// has access to the categories array should pass it in to avoid the store read.
+function categoryFor(kind) {
+  return get(absenceCategories).find((c) => c.slug === kind);
+}
+
 export function absenceRemovesTarget(absence) {
-  return absence
-    ? TARGET_REMOVING_ABSENCE_STATUSES.includes(absence.status) &&
-        absence.kind !== "flextime_reduction"
-    : false;
+  if (!absence) return false;
+  if (!TARGET_REMOVING_ABSENCE_STATUSES.includes(absence.status)) return false;
+  // keeps_work_target categories (e.g. flextime reduction) preserve the day's
+  // work target — the absence "costs" flextime rather than removing the target.
+  return categoryFor(absence.kind)?.keeps_work_target !== true;
 }
 
 export function absenceBlocksEntry(absence) {
-  return absence
-    ? ENTRY_BLOCKING_ABSENCE_STATUSES.includes(absence.status) &&
-        absence.kind !== "sick"
-    : false;
+  if (!absence) return false;
+  if (!ENTRY_BLOCKING_ABSENCE_STATUSES.includes(absence.status)) return false;
+  // auto_approve_past categories (sick-like) coexist with logged time on the
+  // same day, so they must NOT block entry creation.
+  return categoryFor(absence.kind)?.auto_approve_past !== true;
 }
 
 export function filterWeekAbsences(absenceRowsByYear, from, to) {

@@ -434,13 +434,24 @@ impl AbsenceDb {
         );
         builder.push_bind(from);
         builder.push(" AND a.start_date <= ").push_bind(to);
+        // Calendar scope rule:
+        //   - admins: see every user's absences (scope_ids = None).
+        //   - leads:  see their own + direct reports (scope_ids = [...]).
+        //   - employees/assistants: see their own (scope_ids = [self]).
+        // For ALL viewers we additionally expose absences from out-of-scope
+        // users when the category has team_visible=TRUE — that is the whole
+        // point of the flag and the user-guide promises non-leads can see
+        // teammates' vacation, training, etc. in the team calendar. Sensitive
+        // categories (team_visible=FALSE, e.g. sick leave) stay restricted to
+        // the requester's normal scope. Handler then masks the displayed kind
+        // for cross-user entries when needed.
         if let Some(ids) = scope_ids {
-            builder.push(" AND a.user_id IN (");
+            builder.push(" AND (c.team_visible=TRUE OR a.user_id IN (");
             let mut sep = builder.separated(", ");
             for id in ids {
                 sep.push_bind(*id);
             }
-            sep.push_unseparated(")");
+            sep.push_unseparated("))");
         }
         builder.push(" ORDER BY a.start_date");
         Ok(builder
@@ -722,6 +733,45 @@ impl AbsenceDb {
             .bind(user_id)
             .bind(from)
             .bind(to)
+            .fetch_all(tx)
+            .await?)
+        }
+    }
+
+    /// Pending/approved/cancellation_pending ranges for categories with
+    /// `keeps_work_target=TRUE` (flextime-cost categories) whose end_date is
+    /// on or after `from`. Used by `validate_flextime_balance` to subtract
+    /// committed-but-not-yet-realised flextime usage so multiple overlapping
+    /// requests cannot each individually fit yet collectively breach the floor.
+    pub async fn keeps_work_target_ranges_after_tx(
+        tx: &mut sqlx::PgConnection,
+        user_id: i64,
+        from: NaiveDate,
+        exclude_id: Option<i64>,
+    ) -> AppResult<Vec<(NaiveDate, NaiveDate)>> {
+        if let Some(excl) = exclude_id {
+            Ok(sqlx::query_as::<_, (NaiveDate, NaiveDate)>(
+                "SELECT a.start_date, a.end_date FROM absences a \
+                 JOIN absence_categories c ON c.id = a.category_id \
+                 WHERE a.id != $1 AND a.user_id=$2 AND c.keeps_work_target=TRUE \
+                 AND a.status IN ('requested','approved','cancellation_pending') \
+                 AND a.end_date >= $3",
+            )
+            .bind(excl)
+            .bind(user_id)
+            .bind(from)
+            .fetch_all(tx)
+            .await?)
+        } else {
+            Ok(sqlx::query_as::<_, (NaiveDate, NaiveDate)>(
+                "SELECT a.start_date, a.end_date FROM absences a \
+                 JOIN absence_categories c ON c.id = a.category_id \
+                 WHERE a.user_id=$1 AND c.keeps_work_target=TRUE \
+                 AND a.status IN ('requested','approved','cancellation_pending') \
+                 AND a.end_date >= $2",
+            )
+            .bind(user_id)
+            .bind(from)
             .fetch_all(tx)
             .await?)
         }

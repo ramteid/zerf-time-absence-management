@@ -78,7 +78,7 @@ pub fn absence_period_params(
 ) -> Vec<(&'static str, String)> {
     vec![
         ("requester_name", requester.full_name()),
-        ("kind", i18n::absence_kind_label(language, &absence.kind)),
+        ("kind", i18n::absence_kind_label(language, &absence.kind, &absence.category_name)),
         (
             "start_date",
             i18n::format_date(language, absence.start_date),
@@ -210,10 +210,10 @@ pub fn validate_new_absence_shape(input: &NewAbsence) -> AppResult<()> {
     Ok(())
 }
 
-/// Resolve the requested category — by id (preferred) or by slug
-/// (back-compat) — and confirm it is active. Inactive categories cannot accept
-/// new requests but existing absences referencing them keep working.
-pub async fn resolve_requested_category(
+/// Look up the requested category by id (preferred) or by slug (back-compat),
+/// without checking `active`. Used internally by both create and update paths;
+/// callers apply the active-check appropriate to their scenario.
+async fn lookup_requested_category(
     app_state: &AppState,
     body: &NewAbsence,
 ) -> AppResult<crate::repository::AbsenceCategory> {
@@ -230,8 +230,37 @@ pub async fn resolve_requested_category(
             "Absence category required (category_id or kind).".into(),
         ));
     };
-    let category = category.ok_or_else(|| AppError::BadRequest("Unknown absence category.".into()))?;
+    category.ok_or_else(|| AppError::BadRequest("Unknown absence category.".into()))
+}
+
+/// Resolve the requested category and reject inactive ones. Used by the
+/// create path, where only active categories may accept new requests.
+pub async fn resolve_requested_category(
+    app_state: &AppState,
+    body: &NewAbsence,
+) -> AppResult<crate::repository::AbsenceCategory> {
+    let category = lookup_requested_category(app_state, body).await?;
     if !category.active {
+        return Err(AppError::BadRequest(
+            "Absence category is no longer active.".into(),
+        ));
+    }
+    Ok(category)
+}
+
+/// Resolve the requested category for an edit. Inactive categories are
+/// allowed ONLY when the user is not changing the category (i.e. the same
+/// category_id as the existing absence). This preserves the ability to edit
+/// other fields (dates, comment) on a requested absence even after an admin
+/// has deactivated the category — without letting the user switch INTO an
+/// inactive category from outside.
+pub async fn resolve_requested_category_for_edit(
+    app_state: &AppState,
+    body: &NewAbsence,
+    current_category_id: i64,
+) -> AppResult<crate::repository::AbsenceCategory> {
+    let category = lookup_requested_category(app_state, body).await?;
+    if !category.active && category.id != current_category_id {
         return Err(AppError::BadRequest(
             "Absence category is no longer active.".into(),
         ));
@@ -317,9 +346,11 @@ pub async fn create_absence(
     if category.keeps_work_target {
         validate_flextime_balance(
             &app_state.pool,
+            &mut transaction,
             requester,
             body.start_date,
             body.end_date,
+            None,
         )
         .await?;
     }
@@ -380,8 +411,6 @@ pub async fn update_absence(
     require_tracks_time(requester)?;
     let today_date = crate::services::settings::app_today(&app_state.pool).await;
     validate_new_absence_shape(&body)?;
-    let category = resolve_requested_category(app_state, &body).await?;
-    validate_backdating_window(&category, body.start_date, today_date)?;
     if body.start_date < requester.start_date {
         return Err(AppError::BadRequest(
             "Absence start date is before user start date.".into(),
@@ -408,6 +437,14 @@ pub async fn update_absence(
             "Only requested absences can be edited.".into(),
         ));
     }
+    // Resolve the requested category. An inactive category is allowed ONLY
+    // when the user is not changing category (i.e. they're editing dates or
+    // comment on a request whose category was deactivated by an admin in the
+    // meantime). Switching INTO an inactive category from outside is rejected.
+    let category =
+        resolve_requested_category_for_edit(app_state, &body, absence_before_update.category_id)
+            .await?;
+    validate_backdating_window(&category, body.start_date, today_date)?;
     // Auto-approve categories (sick-like) have an entirely different workflow:
     // they bypass approval and tolerate same-day time entries. Allowing a
     // requested-status absence to switch INTO or OUT of an auto-approve
@@ -455,9 +492,11 @@ pub async fn update_absence(
     if category.keeps_work_target {
         validate_flextime_balance(
             &app_state.pool,
+            &mut transaction,
             requester,
             body.start_date,
             body.end_date,
+            Some(absence_id),
         )
         .await?;
     }
@@ -550,7 +589,7 @@ pub async fn cancel_absence(
     let language = notification_language(&app_state.pool).await;
     let approver_params = vec![
         ("requester_name", requester.full_name()),
-        ("kind", i18n::absence_kind_label(&language, &absence.kind)),
+        ("kind", i18n::absence_kind_label(&language, &absence.kind, &absence.category_name)),
         (
             "start_date",
             i18n::format_date(&language, absence.start_date),
@@ -664,7 +703,11 @@ pub async fn approve_absence(
         absence.end_date,
     )
     .await?;
-    if absence.counts_as_vacation {
+    // Re-validate at approval time: the user's balance may have changed since
+    // the request was filed, and other balance-affecting absences may have
+    // landed in between. Without this, a request that passed validation at
+    // creation could be approved into a balance breach.
+    if absence.counts_as_vacation || absence.keeps_work_target {
         let repo_user = app_state
             .db
             .users
@@ -672,16 +715,29 @@ pub async fn approve_absence(
             .await?
             .ok_or(AppError::NotFound)?;
         let absence_owner = crate::services::users::repo_user_to_auth_user(repo_user);
-        validate_vacation_balance(
-            &app_state.pool,
-            &mut transaction,
-            &absence_owner,
-            absence.start_date,
-            absence.end_date,
-            Some(absence_id),
-            true,
-        )
-        .await?;
+        if absence.counts_as_vacation {
+            validate_vacation_balance(
+                &app_state.pool,
+                &mut transaction,
+                &absence_owner,
+                absence.start_date,
+                absence.end_date,
+                Some(absence_id),
+                true,
+            )
+            .await?;
+        }
+        if absence.keeps_work_target {
+            validate_flextime_balance(
+                &app_state.pool,
+                &mut transaction,
+                &absence_owner,
+                absence.start_date,
+                absence.end_date,
+                Some(absence_id),
+            )
+            .await?;
+        }
     }
     let rows_updated =
         crate::repository::AbsenceDb::approve_tx(&mut transaction, absence_id, requester.id)
@@ -704,7 +760,7 @@ pub async fn approve_absence(
     .await;
     let language = notification_language(&app_state.pool).await;
     let notify_params = vec![
-        ("kind", i18n::absence_kind_label(&language, &absence.kind)),
+        ("kind", i18n::absence_kind_label(&language, &absence.kind, &absence.category_name)),
         (
             "start_date",
             i18n::format_date(&language, absence.start_date),
@@ -795,7 +851,7 @@ pub async fn reject_absence(
     .await;
     let language = notification_language(&app_state.pool).await;
     let notify_params = vec![
-        ("kind", i18n::absence_kind_label(&language, &absence.kind)),
+        ("kind", i18n::absence_kind_label(&language, &absence.kind, &absence.category_name)),
         (
             "start_date",
             i18n::format_date(&language, absence.start_date),
@@ -882,7 +938,7 @@ pub async fn approve_cancellation_absence(
     .await;
     let language = notification_language(&app_state.pool).await;
     let notify_params = vec![
-        ("kind", i18n::absence_kind_label(&language, &absence.kind)),
+        ("kind", i18n::absence_kind_label(&language, &absence.kind, &absence.category_name)),
         (
             "start_date",
             i18n::format_date(&language, absence.start_date),
@@ -968,7 +1024,7 @@ pub async fn reject_cancellation_absence(
     .await;
     let language = notification_language(&app_state.pool).await;
     let notify_params = vec![
-        ("kind", i18n::absence_kind_label(&language, &absence.kind)),
+        ("kind", i18n::absence_kind_label(&language, &absence.kind, &absence.category_name)),
         (
             "start_date",
             i18n::format_date(&language, absence.start_date),
@@ -1032,7 +1088,7 @@ pub async fn revoke_absence(
     .await;
     let language = notification_language(&app_state.pool).await;
     let notify_params = vec![
-        ("kind", i18n::absence_kind_label(&language, &absence.kind)),
+        ("kind", i18n::absence_kind_label(&language, &absence.kind, &absence.category_name)),
         (
             "start_date",
             i18n::format_date(&language, absence.start_date),

@@ -25,8 +25,10 @@ date, mixed with absences (vacation, sick, training, special leave, flextime
 reduction, cancellations).  Reopen-requests are generated for all workflow
 paths (pending, approved, rejected).
 
-The script targets migration version 14 (see backend/migrations/) and respects
-all CHECK constraints (role, status, kind, time format, workdays_per_week).
+The script targets the latest migration (see backend/migrations/) and respects
+all live CHECK constraints (role, status, absence_categories cost flags, time
+format, workdays_per_week). Absence kind/category is resolved through
+`absence_categories.slug` since migration 017 removed `absences.kind`.
 At-rest encryption (pg_tde) is fully transparent on the SQL layer; the script
 only loads ZERF_DB_ENCRYPTION_KEY to verify it is present.
 
@@ -306,11 +308,14 @@ PERSONAS: list[Persona] = [
 # ---------------------------------------------------------------------------
 
 # Absences anchor the schedule: time entries are NEVER created on absence days.
-# Each tuple: (persona_key, kind, start, end, status, cancellation?)
+# Each tuple: (persona_key, kind, start, end, status, comment).
+# `kind` is the absence category slug — resolved to category_id at insert time
+# via `absence_categories` (populated by migration 017). Custom admin-added
+# slugs work too; only the seven seeded slugs are used here.
 #
 # Status values match backend/migrations/001 & 003:
 #   requested, approved, rejected, cancelled, cancellation_pending
-# Kind values match backend/migrations/008:
+# Seeded category slugs (backend/migrations/017_absence_categories.sql):
 #   vacation, sick, training, special_leave, unpaid,
 #   general_absence, flextime_reduction
 ABSENCE_SCRIPT: list[tuple[str, str, date, date, str, str | None]] = [
@@ -834,7 +839,19 @@ def absence_timestamps(
 
 def insert_absences(cur) -> None:
     """Insert all absences from ABSENCE_SCRIPT with kind-aware timestamps and
-    role-aware reviewer attribution."""
+    role-aware reviewer attribution.
+
+    Migration 017 replaced the `absences.kind` CHECK-constrained column with a
+    `category_id` foreign key into `absence_categories`. We resolve the slug to
+    its category id at insert time rather than hardcoding ids so the script
+    keeps working if seeding order changes.
+    """
+    # Build a slug → category_id map from the live table. Seeded slugs are
+    # populated by migration 017; admin-added categories are not used by the
+    # seed script but would also be resolvable.
+    cur.execute("SELECT slug, id FROM absence_categories")
+    category_id_by_slug: dict[str, int] = {slug: cid for slug, cid in cur.fetchall()}
+
     for persona_key, kind, start, end, status, comment in ABSENCE_SCRIPT:
         persona = persona_by_key(persona_key)
         reviewed_by: int | None = None
@@ -853,15 +870,21 @@ def insert_absences(cur) -> None:
                 rejection_reason = "Im aktuellen Quartal leider kein Budget."
 
         created_at, reviewed_at = absence_timestamps(kind, start, status)
+        category_id = category_id_by_slug.get(kind)
+        if category_id is None:
+            raise ValueError(
+                f"Unknown absence category slug {kind!r} — seed script ran before "
+                "migration 017 populated absence_categories, or slug was renamed."
+            )
         cur.execute(
             """
-            INSERT INTO absences(user_id, kind, start_date, end_date, comment,
+            INSERT INTO absences(user_id, category_id, start_date, end_date, comment,
                                  status, reviewed_by, reviewed_at, rejection_reason,
                                  created_at)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
-                persona.user_id, kind, start, end, comment,
+                persona.user_id, category_id, start, end, comment,
                 status, reviewed_by, reviewed_at, rejection_reason,
                 created_at,
             ),
