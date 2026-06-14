@@ -196,6 +196,17 @@ pub async fn calendar(
         // fallback (see MASKED_ABSENCE_COLOR / absenceKindLabel).
         let kind_visible = (requester_is_lead && owner_in_scope) || is_own_entry || entry.team_visible;
         let displayed_kind = if kind_visible { entry.kind.clone() } else { "absent".to_string() };
+        // We also pass through the stored category display name so the
+        // frontend can render the real label even for INACTIVE categories
+        // (which are missing from the active-only `/absence-categories`
+        // list that powers the frontend `absenceCategories` store). The
+        // name is gated on `kind_visible` so privacy-masked entries don't
+        // leak the real category through this side channel.
+        let displayed_category_name = if kind_visible {
+            Some(entry.category_name.clone())
+        } else {
+            None
+        };
         // Comments may contain personal context ("doctor's appointment",
         // "funeral", ...) that is more sensitive than the category itself.
         // We show comments only to the owner OR to a lead viewing one of
@@ -206,6 +217,7 @@ pub async fn calendar(
         serde_json::json!({
             "id": entry.id, "user_id": entry.user_id, "name": format!("{} {}", entry.first_name, entry.last_name),
             "kind": displayed_kind,
+            "category_name": displayed_category_name,
             "start_date": entry.start_date, "end_date": entry.end_date,
             "status": entry.status,
             "comment": if comment_visible { entry.comment.clone() } else { None }

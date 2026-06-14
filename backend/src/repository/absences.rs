@@ -42,6 +42,12 @@ pub struct CalendarEntry {
     pub last_name: String,
     pub kind: String,
     pub category_id: i64,
+    /// Display name from the joined category row. Present even when the
+    /// category has been deactivated, so the calendar tooltip can render the
+    /// real name instead of falling back to the raw slug — the active-only
+    /// `/absence-categories` list that powers the frontend store cannot
+    /// resolve inactive slugs on its own.
+    pub category_name: String,
     /// When true, non-lead teammates can see the real absence kind in the team
     /// calendar. Replaces the old `counts_as_vacation` privacy gate so each
     /// category can independently control its calendar visibility.
@@ -425,7 +431,8 @@ impl AbsenceDb {
     ) -> AppResult<Vec<CalendarEntry>> {
         let mut builder = QueryBuilder::<Postgres>::new(
             "SELECT a.id, a.user_id, u.first_name, u.last_name, c.slug AS kind, a.category_id, \
-             c.team_visible, a.start_date, a.end_date, a.comment, a.status \
+             c.name AS category_name, c.team_visible, \
+             a.start_date, a.end_date, a.comment, a.status \
              FROM absences a \
              JOIN users u ON u.id=a.user_id \
              JOIN absence_categories c ON c.id = a.category_id \

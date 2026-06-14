@@ -63,7 +63,13 @@ export function rawCellEvents(
     });
   }
   for (const absence of cell.absences) {
-    const label = absenceKindLabel(absence.kind);
+    // `category_name` is sent by the backend's calendar endpoint for entries
+    // whose kind is visible to this requester. It allows `absenceKindLabel`
+    // to translate the real name even when the category has been deactivated
+    // and dropped from the active-only frontend store. For privacy-masked
+    // entries the backend nulls it out; the label still falls through to the
+    // generic placeholder.
+    const label = absenceKindLabel(absence.kind, absence.category_name);
     events.push({
       key: `absence:${absence.kind}`,
       color: absColor(absence.kind, absenceCategoryMap),

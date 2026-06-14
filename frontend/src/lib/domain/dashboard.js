@@ -115,10 +115,14 @@ export function absenceDiffRows(absence, translate) {
   if (absence.review_type !== "change") return [];
   const rows = [];
   if (absence.previous_kind && absence.previous_kind !== absence.kind) {
+    // Pass the stored display names as fallbacks so deactivated categories
+    // (missing from the active-only frontend store) still render with their
+    // real name instead of the raw slug. `category_name` / `previous_category_name`
+    // are projected from the `absence_categories` join on the backend.
     rows.push({
       field: translate("Type"),
-      before: absenceKindLabel(absence.previous_kind),
-      after: absenceKindLabel(absence.kind),
+      before: absenceKindLabel(absence.previous_kind, absence.previous_category_name),
+      after: absenceKindLabel(absence.kind, absence.category_name),
     });
   }
   if (

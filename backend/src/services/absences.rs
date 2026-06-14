@@ -108,6 +108,7 @@ pub fn repo_absence_to_service(a: crate::repository::Absence) -> Absence {
         created_at: a.created_at,
         review_type: None,
         previous_kind: None,
+        previous_category_name: None,
         previous_start_date: None,
         previous_end_date: None,
         previous_comment: None,
@@ -140,6 +141,12 @@ pub fn enrich_absence_with_metadata(
     };
     absence.review_type = Some("change".to_string());
     absence.previous_kind = json_opt_string(&before_json, "kind");
+    // `category_name` is present on audit-log payloads written after the
+    // configurable-categories rollout (the Absence struct serializes it
+    // alongside `kind`). Older rows pre-rollout won't have it and the
+    // frontend's `absenceKindLabel` will fall through to translating the
+    // raw slug — acceptable for legacy data.
+    absence.previous_category_name = json_opt_string(&before_json, "category_name");
     absence.previous_start_date = json_opt_date(&before_json, "start_date");
     absence.previous_end_date = json_opt_date(&before_json, "end_date");
     absence.previous_comment = json_opt_string(&before_json, "comment");
@@ -183,6 +190,12 @@ pub struct Absence {
     pub created_at: DateTime<Utc>,
     pub review_type: Option<String>,
     pub previous_kind: Option<String>,
+    /// Stored display name for `previous_kind`. Pulled from the audit-log
+    /// `before_data` JSON alongside `previous_kind` so the review dialog can
+    /// localize a "Type changed from X to Y" diff even when the previous
+    /// category has since been deactivated (and thus dropped from the
+    /// active-only frontend store cache).
+    pub previous_category_name: Option<String>,
     pub previous_start_date: Option<NaiveDate>,
     pub previous_end_date: Option<NaiveDate>,
     pub previous_comment: Option<String>,
@@ -1337,6 +1350,7 @@ mod tests {
             created_at: Utc::now(),
             review_type: None,
             previous_kind: None,
+            previous_category_name: None,
             previous_start_date: None,
             previous_end_date: None,
             previous_comment: None,

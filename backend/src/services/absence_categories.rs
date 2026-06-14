@@ -176,10 +176,41 @@ pub async fn update(
         .ok_or(AppError::NotFound)?;
     let final_counts = input.counts_as_vacation.unwrap_or(current.counts_as_vacation);
     let final_keeps = input.keeps_work_target.unwrap_or(current.keeps_work_target);
+    let final_auto = input.auto_approve_past.unwrap_or(current.auto_approve_past);
     if final_counts && final_keeps {
         return Err(AppError::BadRequest(
             "A category cannot both deduct vacation and reduce flextime.".into(),
         ));
+    }
+    // Toggling any of the three behavior flags would silently change the
+    // financial / approval meaning of EXISTING absences referencing this
+    // category — past balance recomputations would suddenly debit/credit
+    // vacation or flextime balances that were never affected before, and
+    // approval-flow guards would relax or tighten without the affected
+    // employees seeing it. We refuse such changes whenever there is at
+    // least one absence row in this category. Admins who need a different
+    // policy must deactivate the existing category and create a new one.
+    //
+    // Renames, color, sort_order, active and team_visible toggles are safe
+    // and pass through; team_visible affects who can SEE existing absences
+    // going forward but doesn't alter their cost or status.
+    let counts_changed = final_counts != current.counts_as_vacation;
+    let keeps_changed = final_keeps != current.keeps_work_target;
+    let auto_changed = final_auto != current.auto_approve_past;
+    if counts_changed || keeps_changed || auto_changed {
+        let usage = app_state
+            .db
+            .absence_categories
+            .usage_count(category_id)
+            .await?;
+        if usage > 0 {
+            return Err(AppError::BadRequest(
+                "Cannot change the cost or approval behavior of a category that \
+                 already has absences. Deactivate this category and create a new one \
+                 with the desired flags instead."
+                    .into(),
+            ));
+        }
     }
     let normalized_name = input.name.map(|n| n.trim().to_string());
     let normalized_color = input.color.map(|c| c.trim().to_string());

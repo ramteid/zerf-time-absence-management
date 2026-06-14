@@ -890,7 +890,13 @@ pub fn csv_response(r: MonthReport, uid: i64, file_label: &str) -> AppResult<Res
                     "0".into(),
                     "".into(),
                     "".into(),
-                    safe(&day.absence.clone().unwrap_or_default()),
+                    // Use the stored category display name rather than the raw slug so admin-
+                    // created categories (whose slugs are normalized identifiers like
+                    // "comp_time_q3") render with their real name in the export. Seeded
+                    // categories already store their canonical English name ("Vacation",
+                    // "Sick Leave", ...) — consistent with how the day's weekday is
+                    // exported in English regardless of UI language.
+                    safe(&day.absence_name.clone().unwrap_or_default()),
                     safe(&day.holiday.clone().unwrap_or_default()),
                 ])
                 .map_err(csv_err)?;
@@ -909,7 +915,13 @@ pub fn csv_response(r: MonthReport, uid: i64, file_label: &str) -> AppResult<Res
                         entry.minutes.to_string(),
                         entry.status.clone(),
                         safe(&entry.comment.clone().unwrap_or_default()),
-                        safe(&day.absence.clone().unwrap_or_default()),
+                        // Use the stored category display name rather than the raw slug so admin-
+                    // created categories (whose slugs are normalized identifiers like
+                    // "comp_time_q3") render with their real name in the export. Seeded
+                    // categories already store their canonical English name ("Vacation",
+                    // "Sick Leave", ...) — consistent with how the day's weekday is
+                    // exported in English regardless of UI language.
+                    safe(&day.absence_name.clone().unwrap_or_default()),
                         safe(&day.holiday.clone().unwrap_or_default()),
                     ])
                     .map_err(csv_err)?;
