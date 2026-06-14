@@ -38,6 +38,15 @@ const TRANSLATIONS = {
       "Overview of your current flextime balance and submission status. The balance is calculated up to and including yesterday; today's hours are not yet counted. The overtime overview also factors in submitted hours pending approval.",
     help_flextime_chart:
       "Your cumulative flextime balance over the selected period. The balance is calculated up to and including yesterday; today's hours are not yet counted.",
+    "Show explanation": "Show explanation",
+    help_counts_as_vacation:
+      "Approved days are deducted from the employee's annual vacation balance (with carryover and expiry rules applied). Mutually exclusive with \"Keeps work target\".",
+    help_keeps_work_target:
+      "Approved days keep their normal work target instead of removing it, so the absence costs the employee's flextime balance — typically used for \"flextime reduction\" categories. The flextime balance is checked at request and at approval to prevent breaching the configured minimum. Mutually exclusive with \"Counts as vacation\".",
+    help_auto_approve_past:
+      "Requests with a start date on or before today are approved automatically (no approver review). Time entries can coexist with the absence on the same day (allows partial-day overlap like \"worked the morning, called in sick at noon\"). Backdating is limited to 30 days. Typical use: sick leave.",
+    help_team_visible:
+      "When checked, teammates see the category name on absences of this type in the team calendar (e.g. vacation, training). When unchecked, the entry is hidden from other users' calendars entirely — appropriate for sensitive categories such as sick leave (GDPR Art. 9 health data). The absence owner and leads in scope always see the real category and comment.",
     "Counts as work": "Counts as work",
     help_submission_status:
       "Whether all required weeks in the selected month have been submitted.",
@@ -984,6 +993,15 @@ const TRANSLATIONS = {
       "Überblick über deinen aktuellen Gleitzeitstand und den Einreichungen. Der Gleitzeitstand wird bis einschließlich gestern berechnet; die heute geleisteten Stunden werden noch nicht mitgezählt. Die Überstundenübersicht berücksichtigt zusätzlich eingereichte, noch ausstehende Stunden.",
     help_flextime_chart:
       "Verlauf deines kumulierten Gleitzeitkontostands über den gewählten Zeitraum. Der Gleitzeitstand wird bis einschließlich gestern berechnet; die heute geleisteten Stunden werden noch nicht mitgezählt.",
+    "Show explanation": "Erklärung anzeigen",
+    help_counts_as_vacation:
+      "Genehmigte Tage werden vom Jahresurlaubsanspruch des Mitarbeitenden abgezogen (inkl. Übertrag- und Verfallsregeln). Schließt sich gegenseitig mit „Arbeitssoll bleibt“ aus.",
+    help_keeps_work_target:
+      "Genehmigte Tage behalten ihr normales Arbeitssoll, statt es zu entfernen — die Abwesenheit „kostet“ also das Gleitzeitguthaben. Typisch für Gleitzeitabbau-Kategorien. Das Gleitzeitguthaben wird bei der Beantragung UND bei der Genehmigung geprüft, damit der konfigurierte Mindeststand nicht unterschritten wird. Schließt sich gegenseitig mit „Zählt als Urlaub“ aus.",
+    help_auto_approve_past:
+      "Anträge mit Startdatum heute oder in der Vergangenheit werden automatisch genehmigt (ohne Freigabe durch eine vorgesetzte Person). Zeitbuchungen am selben Tag bleiben erlaubt (z. B. „vormittags gearbeitet, mittags krankgemeldet“). Rückdatieren ist auf 30 Tage begrenzt. Typische Verwendung: Krankmeldung.",
+    help_team_visible:
+      "Wenn aktiviert, sehen Kolleginnen und Kollegen den Kategorienamen bei Abwesenheiten dieses Typs im Teamkalender (z. B. Urlaub, Fortbildung). Wenn deaktiviert, ist der Eintrag im Kalender anderer Nutzer komplett unsichtbar — sinnvoll für sensible Kategorien wie Krankmeldung (DSGVO Art. 9). Die abwesende Person und die zuständige Vorgesetzte sehen die echte Kategorie und den Kommentar immer.",
     help_submission_status:
       "Zeigt an, ob alle erforderlichen Wochen im gewählten Monat eingereicht wurden.",
     Approvals: "Genehmigungen",
