@@ -1097,14 +1097,17 @@ async fn flextime_balance_revalidated_at_approval() {
     let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
     let lead = login_change_pw(&app, "lead-r@example.com", &lead_pw).await;
 
-    // Seed the employee with EXACTLY enough flextime balance for a one-day
-    // flextime_reduction absence. Daily target = (39/5)*60 ≈ 468 min; use a
-    // generous seed to keep the maths obvious in case the formula changes.
-    sqlx::query("UPDATE users SET overtime_start_balance_min = 480 WHERE id = $1")
+    // bootstrap_team gives the employee start_date=2024-01-01. With the test
+    // reference date in 2030 and no logged time, the cumulative flextime deficit
+    // is multi-million minutes — overwhelming any small seed. We use a giant
+    // positive seed for the request, then flip it negative to drain the balance
+    // below the floor for the approval re-check. The exact numbers don't
+    // matter; the assertion is "pass at request, fail at approval after drain."
+    sqlx::query("UPDATE users SET overtime_start_balance_min = 99000000 WHERE id = $1")
         .bind(emp_id)
         .execute(&app.state.pool)
         .await
-        .expect("seed flextime balance");
+        .expect("seed flextime balance positive");
 
     let monday = next_monday(7).format("%Y-%m-%d").to_string();
     let (st, body) = emp
@@ -1116,9 +1119,9 @@ async fn flextime_balance_revalidated_at_approval() {
     assert_eq!(st, StatusCode::OK, "flextime request must pass while balance is sufficient: {body}");
     let absence_id = id(&body);
 
-    // Now drain the employee's balance below the floor (default 0).
-    // At approval the re-validation must reject the request rather than
-    // silently approving it into a balance breach.
+    // Drain the balance: zeroing the seed leaves only the multi-million-minute
+    // historical deficit (years of workdays with no logged time), which is far
+    // below the default floor (0). The re-validation at approval must reject.
     sqlx::query("UPDATE users SET overtime_start_balance_min = 0 WHERE id = $1")
         .bind(emp_id)
         .execute(&app.state.pool)
