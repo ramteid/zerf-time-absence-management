@@ -610,7 +610,11 @@ async fn absence_and_report_workflow() {
                 &json!({"kind":"training","start_date": &editable_day,"end_date": &editable_day,"comment":"converted"}),
             )
             .await;
-        assert_eq!(st, StatusCode::OK, "edit pending kind within same cost type");
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "edit pending kind within same cost type"
+        );
         assert_eq!(body["kind"], "training");
 
         let (st, _) = emp

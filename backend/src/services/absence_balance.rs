@@ -493,14 +493,11 @@ pub async fn validate_flextime_balance(
     let target_per_day_min =
         (user.weekly_hours / f64::from(user.workdays_per_week) * 60.0).round() as i64;
 
-    let floor_min: i64 = crate::services::settings::load_setting(
-        pool,
-        "flextime_min_balance_min",
-        "0",
-    )
-    .await?
-    .parse::<i64>()
-    .unwrap_or(0);
+    let floor_min: i64 =
+        crate::services::settings::load_setting(pool, "flextime_min_balance_min", "0")
+            .await?
+            .parse::<i64>()
+            .unwrap_or(0);
 
     // (1) Current flextime balance = cumulative balance through end-of-yesterday.
     // `build_flextime_for_user(today, today)` seeds cumulative_min with the

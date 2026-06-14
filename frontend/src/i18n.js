@@ -586,7 +586,8 @@ const TRANSLATIONS = {
     "Visible to teammates in team calendar": "Im Teamkalender für Kollegen sichtbar",
     "Visible to teammates": "Für Kollegen sichtbar",
     "Type is required.": "Typ ist erforderlich.",
-    "Not enough flextime balance for this absence.": "Nicht genug Gleitzeitguthaben für diese Abwesenheit.",
+    "Not enough flextime balance for this absence.":
+      "Nicht genügend Gleitzeitguthaben für diese Abwesenheit.",
     "Cannot change absence category cost type (vacation ↔ flextime). Cancel and re-request with the new category.":
       "Der Kostentyp der Abwesenheitskategorie (Urlaub ↔ Gleitzeit) kann nicht geändert werden. Bitte Abwesenheit stornieren und neu beantragen.",
     "Absence category slug already exists.": "Abwesenheitskategorie-Slug existiert bereits.",
@@ -1107,10 +1108,9 @@ const TRANSLATIONS = {
       "Überschreibt die Standard-Urlaubstage für diesen Benutzer im gewählten Jahr.",
     "Not enough remaining vacation days.":
       "Nicht genügend verbleibende Urlaubstage.",
-    "Not enough flextime balance for this absence.":
-      "Nicht genügend Gleitzeitguthaben für diese Abwesenheit.",
-    "Cannot change absence category cost type (vacation ↔ flextime). Cancel and re-request with the new category.":
-      "Der Abwesenheitstyp (Urlaub ↔ Gleitzeit) kann nicht geändert werden. Bitte stornieren und mit dem neuen Typ neu beantragen.",
+    // "Not enough flextime balance..." and "Cannot change absence category
+    // cost type..." are translated earlier in this block (near the absence
+    // category dialog strings). Don't re-declare them — eslint no-dupe-keys.
     "Please enter vacation days.": "Bitte Urlaubstage eingeben.",
     "Absence Request Details": "Details des Abwesenheitsantrags",
     "Show details": "Details anzeigen",

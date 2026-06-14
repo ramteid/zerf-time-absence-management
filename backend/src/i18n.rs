@@ -622,8 +622,14 @@ mod tests {
         assert_eq!(absence_kind_label(&de, "sick", "anything"), "Krankmeldung");
 
         // Custom admin slug: falls back to the stored category name in both languages.
-        assert_eq!(absence_kind_label(&en, "comp_time", "Comp Time"), "Comp Time");
-        assert_eq!(absence_kind_label(&de, "comp_time", "Comp Time"), "Comp Time");
+        assert_eq!(
+            absence_kind_label(&en, "comp_time", "Comp Time"),
+            "Comp Time"
+        );
+        assert_eq!(
+            absence_kind_label(&de, "comp_time", "Comp Time"),
+            "Comp Time"
+        );
     }
 
     /// `format_datetime_in_timezone` must apply the given timezone offset and

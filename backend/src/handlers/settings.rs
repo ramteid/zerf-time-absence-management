@@ -202,7 +202,8 @@ pub async fn update_admin_settings(
             let deduction2 = body.auto_break_deduction_minutes_2.unwrap();
             if threshold2 <= threshold1 {
                 return Err(AppError::BadRequest(
-                    "auto_break_threshold_hours_2 must be greater than auto_break_threshold_hours.".into(),
+                    "auto_break_threshold_hours_2 must be greater than auto_break_threshold_hours."
+                        .into(),
                 ));
             }
             if threshold2 > 24.0 {

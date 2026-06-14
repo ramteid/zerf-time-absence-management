@@ -55,10 +55,7 @@ pub async fn list_active(app_state: &AppState) -> AppResult<Vec<AbsenceCategory>
     app_state.db.absence_categories.list_active().await
 }
 
-pub async fn list_all(
-    app_state: &AppState,
-    requester: &User,
-) -> AppResult<Vec<AbsenceCategory>> {
+pub async fn list_all(app_state: &AppState, requester: &User) -> AppResult<Vec<AbsenceCategory>> {
     if !requester.is_admin() {
         return Err(AppError::Forbidden);
     }
@@ -105,9 +102,7 @@ pub async fn create(
             )
         })?,
         None => normalize_slug(&name).ok_or_else(|| {
-            AppError::BadRequest(
-                "Name must contain at least one letter to derive a slug.".into(),
-            )
+            AppError::BadRequest("Name must contain at least one letter to derive a slug.".into())
         })?,
     };
     let color = input.color.trim().to_string();
@@ -174,7 +169,9 @@ pub async fn update(
         .find_by_id(category_id)
         .await?
         .ok_or(AppError::NotFound)?;
-    let final_counts = input.counts_as_vacation.unwrap_or(current.counts_as_vacation);
+    let final_counts = input
+        .counts_as_vacation
+        .unwrap_or(current.counts_as_vacation);
     let final_keeps = input.keeps_work_target.unwrap_or(current.keeps_work_target);
     let final_auto = input.auto_approve_past.unwrap_or(current.auto_approve_past);
     if final_counts && final_keeps {

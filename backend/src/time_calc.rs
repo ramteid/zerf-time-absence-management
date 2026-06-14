@@ -14,10 +14,7 @@ use chrono::{Datelike, Duration, NaiveDate, NaiveTime};
 /// Entries that are directly adjacent (one ends exactly when the next begins) are merged
 /// into a single continuous work block. A gap of even one minute breaks continuity.
 /// Overlapping entries are merged as well (handled defensively).
-pub fn compute_day_auto_break(
-    entries: &[(NaiveTime, NaiveTime)],
-    rules: &[(i64, i64)],
-) -> i64 {
+pub fn compute_day_auto_break(entries: &[(NaiveTime, NaiveTime)], rules: &[(i64, i64)]) -> i64 {
     if entries.is_empty() || rules.is_empty() {
         return 0;
     }
@@ -233,7 +230,11 @@ mod tests {
         // 8:00–10:00, 10:00–13:00, 13:00–16:00 → one 8 h block
         assert_eq!(
             compute_day_auto_break(
-                &[(t(8, 0), t(10, 0)), (t(10, 0), t(13, 0)), (t(13, 0), t(16, 0))],
+                &[
+                    (t(8, 0), t(10, 0)),
+                    (t(10, 0), t(13, 0)),
+                    (t(13, 0), t(16, 0))
+                ],
                 &[(360, 30)]
             ),
             30
@@ -270,10 +271,7 @@ mod tests {
         // Total deduction: 45 + 30 = 75.
         let rules: &[(i64, i64)] = &[(360, 30), (540, 45)];
         assert_eq!(
-            compute_day_auto_break(
-                &[(t(0, 0), t(10, 0)), (t(11, 0), t(18, 0))],
-                rules
-            ),
+            compute_day_auto_break(&[(t(0, 0), t(10, 0)), (t(11, 0), t(18, 0))], rules),
             75
         );
     }

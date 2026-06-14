@@ -97,10 +97,8 @@ pub async fn load_all_public_settings(
     let default_annual_leave_days_str =
         load_setting(pool, DEFAULT_ANNUAL_LEAVE_DAYS_KEY, "").await?;
     let submission_deadline_day_str = load_setting(pool, SUBMISSION_DEADLINE_DAY_KEY, "").await?;
-    let auto_break_threshold_str =
-        load_setting(pool, AUTO_BREAK_THRESHOLD_HOURS_KEY, "").await?;
-    let auto_break_deduction_str =
-        load_setting(pool, AUTO_BREAK_DEDUCTION_MINUTES_KEY, "").await?;
+    let auto_break_threshold_str = load_setting(pool, AUTO_BREAK_THRESHOLD_HOURS_KEY, "").await?;
+    let auto_break_deduction_str = load_setting(pool, AUTO_BREAK_DEDUCTION_MINUTES_KEY, "").await?;
     let auto_break_threshold_2_str =
         load_setting(pool, AUTO_BREAK_THRESHOLD_HOURS_2_KEY, "").await?;
     let auto_break_deduction_2_str =
