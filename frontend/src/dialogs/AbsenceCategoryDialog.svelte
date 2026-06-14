@@ -181,15 +181,21 @@
         <div class="abscat-help">{$t("help_auto_approve_past")}</div>
       {/if}
     </div>
+    <!--
+      "Active" is kept inside the same flex column as the cost_type radios
+      and auto_approve_past so the vertical gap between every option is the
+      shared `gap:6px` rather than the row-specific `margin-top` that used to
+      add an extra ~2px above "Active".
+    -->
+    {#if !isNew}
+      <div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px">
+          <input type="checkbox" bind:checked={active} />
+          <span>{$t("Active")}</span>
+        </label>
+      </div>
+    {/if}
   </div>
-  {#if !isNew}
-    <label
-      style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:8px"
-    >
-      <input type="checkbox" bind:checked={active} />
-      <span>{$t("Active")}</span>
-    </label>
-  {/if}
   <div class="error-text">{error}</div>
   <svelte:fragment slot="footer">
     <button class="zf-btn" on:click={() => dialog.close()}>{$t("Cancel")}</button>
