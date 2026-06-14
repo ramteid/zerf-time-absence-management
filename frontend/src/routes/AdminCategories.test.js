@@ -75,13 +75,16 @@ describe("AdminCategories", () => {
     await waitForText(target, "Inactive");
   });
 
-  it("opens dialog when Add Category button is clicked", async () => {
+  it("opens dialog when the Add button is clicked", async () => {
+    // The button label was shortened to just "Add" to keep the row short
+    // on mobile; the dialog title still reads "Add Category".
     apiMock.mockResolvedValue([]);
     component = mount(AdminCategories, { target });
     await waitForText(target, "Time Categories");
 
+    // First "Add" button in the page is the Time Categories add button.
     const addBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Add Category")
+      b.textContent.trim().includes("Add")
     );
     expect(addBtn).not.toBeNull();
     addBtn.click();
