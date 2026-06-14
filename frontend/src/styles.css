@@ -311,7 +311,16 @@ body {
 }
 
 /* ── Inputs ── */
-input[type="checkbox"] {
+/* Radio buttons share the same square-checkbox look on purpose: the
+   AbsenceCategoryDialog uses a radio group for cost_type alongside real
+   checkboxes for the other options, and users complained that the
+   browser-default round radios with the system accent color looked
+   inconsistent next to the themed checkboxes. The mutex semantics are
+   still enforced by the underlying `type="radio"` + shared `name=`
+   group, so a checkmark visual on a radio still behaves as a single-
+   select. */
+input[type="checkbox"],
+input[type="radio"] {
   appearance: none;
   -webkit-appearance: none;
   width: 15px;
@@ -328,20 +337,24 @@ input[type="checkbox"] {
   outline: none;
   -webkit-tap-highlight-color: transparent;
 }
-label:has(input[type="checkbox"]) {
+label:has(input[type="checkbox"]),
+label:has(input[type="radio"]) {
   -webkit-tap-highlight-color: transparent;
   user-select: none;
 }
-input[type="checkbox"]:checked {
+input[type="checkbox"]:checked,
+input[type="radio"]:checked {
   border-color: var(--text-secondary);
   /* checkmark in --text-primary light (#1c1d1a) */
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpolyline points='1.5,5 4,7.5 8.5,2' fill='none' stroke='%231c1d1a' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
-[data-theme="dark"] input[type="checkbox"]:checked {
+[data-theme="dark"] input[type="checkbox"]:checked,
+[data-theme="dark"] input[type="radio"]:checked {
   /* checkmark in --text-primary dark (#e8eaed) */
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpolyline points='1.5,5 4,7.5 8.5,2' fill='none' stroke='%23e8eaed' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
-input[type="checkbox"]:disabled {
+input[type="checkbox"]:disabled,
+input[type="radio"]:disabled {
   cursor: not-allowed;
   opacity: 0.45;
 }
