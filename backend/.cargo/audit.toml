@@ -13,4 +13,15 @@
 # There is currently no patched release of `rsa` (the fix requires a
 # constant-time bigint implementation that is still in development).
 # Re-evaluate once a patched version ships.
-ignore = ["RUSTSEC-2023-0071"]
+#
+# RUSTSEC-2024-0370: `proc-macro-error` v1.0.4 is unmaintained.
+#
+# This is an "unmaintained" advisory (not a vulnerability) for a proc-macro
+# crate that runs only at compile time. It is pulled in transitively via:
+#   zerf → printpdf → allsorts → ouroboros → proc-macro-error
+# `printpdf` (our PDF report renderer) still depends on a version of
+# `allsorts` that uses the old `ouroboros` 0.17 line. There is nothing we
+# can do at this level without forking `printpdf`. Re-evaluate when
+# `printpdf` upgrades its `allsorts` dependency, or when we replace the
+# PDF backend. Compile-time-only crate; no runtime attack surface.
+ignore = ["RUSTSEC-2023-0071", "RUSTSEC-2024-0370"]
