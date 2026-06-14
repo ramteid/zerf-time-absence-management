@@ -1083,3 +1083,160 @@ async fn assistant_absence_any_weekday() {
 
     app.cleanup().await;
 }
+
+/// Covers Bug 5: `validate_flextime_balance` must run at approval time, not
+/// only at request time. A request that passed validation when the balance
+/// was sufficient must be rejected at approval if the balance has fallen
+/// below the floor in the meantime.
+#[tokio::test]
+async fn flextime_balance_revalidated_at_approval() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (_lead_id, lead_pw, emp_id, emp_pw, _, _cat_id) =
+        bootstrap_team(&app, &admin, false).await;
+    let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
+    let lead = login_change_pw(&app, "lead-r@example.com", &lead_pw).await;
+
+    // Seed the employee with EXACTLY enough flextime balance for a one-day
+    // flextime_reduction absence. Daily target = (39/5)*60 ≈ 468 min; use a
+    // generous seed to keep the maths obvious in case the formula changes.
+    sqlx::query("UPDATE users SET overtime_start_balance_min = 480 WHERE id = $1")
+        .bind(emp_id)
+        .execute(&app.state.pool)
+        .await
+        .expect("seed flextime balance");
+
+    let monday = next_monday(7).format("%Y-%m-%d").to_string();
+    let (st, body) = emp
+        .post(
+            "/api/v1/absences",
+            &json!({"kind":"flextime_reduction","start_date":monday,"end_date":monday}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "flextime request must pass while balance is sufficient: {body}");
+    let absence_id = id(&body);
+
+    // Now drain the employee's balance below the floor (default 0).
+    // At approval the re-validation must reject the request rather than
+    // silently approving it into a balance breach.
+    sqlx::query("UPDATE users SET overtime_start_balance_min = 0 WHERE id = $1")
+        .bind(emp_id)
+        .execute(&app.state.pool)
+        .await
+        .expect("drain flextime balance");
+
+    let (st, body) = lead
+        .post(
+            &format!("/api/v1/absences/{absence_id}/approve"),
+            &json!({}),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::BAD_REQUEST,
+        "approval must be rejected once balance falls below floor: {body}"
+    );
+    assert!(
+        body.to_string().contains("flextime balance"),
+        "rejection should mention flextime balance: {body}"
+    );
+
+    app.cleanup().await;
+}
+
+/// Covers Bug 6: editing a requested absence whose category was deactivated
+/// by an admin in the meantime must succeed when the user is NOT changing the
+/// category — otherwise users can never adjust dates or comment on an
+/// in-flight request once their category is retired. Switching INTO a
+/// different inactive category must still be rejected.
+#[tokio::test]
+async fn edit_requested_absence_allowed_when_inactive_category_unchanged() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (_lead_id, _lead_pw, _emp_id, emp_pw, _, _cat_id) =
+        bootstrap_team(&app, &admin, false).await;
+    let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
+
+    let day_a = next_monday(30).format("%Y-%m-%d").to_string();
+    let day_b = next_monday(31).format("%Y-%m-%d").to_string();
+
+    // Request a training absence (review-required, no balance impact).
+    let (st, body) = emp
+        .post(
+            "/api/v1/absences",
+            &json!({"kind":"training","start_date":day_a,"end_date":day_a}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create training request: {body}");
+    let absence_id = id(&body);
+    let training_cat_id = body["category_id"]
+        .as_i64()
+        .expect("category_id present on response");
+
+    // Admin deactivates the training category. (No DELETE endpoint — the
+    // service-level update accepts {"active": false}.)
+    let (st, _) = admin
+        .put(
+            &format!("/api/v1/absence-categories/{training_cat_id}"),
+            &json!({"active": false}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "deactivate training category");
+
+    // The user edits the absence (same category, different end date).
+    // Without the Bug 6 fix this fails with 400 "Absence category is no
+    // longer active." even though the user is not changing category.
+    let (st, body) = emp
+        .put(
+            &format!("/api/v1/absences/{absence_id}"),
+            &json!({
+                "category_id": training_cat_id,
+                "start_date": day_a,
+                "end_date": day_b,
+            }),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::OK,
+        "edit must succeed when inactive category is unchanged: {body}"
+    );
+    assert_eq!(body["end_date"].as_str(), Some(day_b.as_str()));
+
+    // Switching INTO another inactive category must still be rejected.
+    // First deactivate a second category to use as the switch target.
+    let (_, cats_body) = admin.get("/api/v1/absence-categories/all").await;
+    let general_cat_id = cats_body
+        .as_array()
+        .expect("categories array")
+        .iter()
+        .find(|c| c["slug"].as_str() == Some("general_absence"))
+        .expect("general_absence seeded category exists")["id"]
+        .as_i64()
+        .expect("id is number");
+    let (st, _) = admin
+        .put(
+            &format!("/api/v1/absence-categories/{general_cat_id}"),
+            &json!({"active": false}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "deactivate general_absence category");
+
+    let (st, body) = emp
+        .put(
+            &format!("/api/v1/absences/{absence_id}"),
+            &json!({
+                "category_id": general_cat_id,
+                "start_date": day_a,
+                "end_date": day_a,
+            }),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::BAD_REQUEST,
+        "switching INTO a different inactive category must be rejected: {body}"
+    );
+
+    app.cleanup().await;
+}
