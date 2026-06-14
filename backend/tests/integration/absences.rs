@@ -424,10 +424,13 @@ async fn absences_full_workflow() {
             .await;
         assert_eq!(st, StatusCode::OK, "create peer absence");
 
+        // Outsider includes a comment so we can verify the lead-vs-non-lead
+        // privacy split below: leads must NOT see comments from users outside
+        // their report scope, even when the category is team_visible=TRUE.
         let (st, _) = outsider
             .post(
                 "/api/v1/absences",
-                &json!({"kind":"vacation","start_date": calendar_day,"end_date": calendar_day}),
+                &json!({"kind":"vacation","start_date": calendar_day,"end_date": calendar_day,"comment":"family trip"}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "create outsider absence");
@@ -493,9 +496,8 @@ async fn absences_full_workflow() {
             .get(&format!("/api/v1/absences/calendar?month={month}"))
             .await;
         assert_eq!(st, StatusCode::OK, "lead calendar request");
-        let lead_visible: HashSet<i64> = body
-            .as_array()
-            .expect("calendar rows should be an array")
+        let lead_rows = body.as_array().expect("calendar rows should be an array");
+        let lead_visible: HashSet<i64> = lead_rows
             .iter()
             .filter_map(|row| row["user_id"].as_i64())
             .collect();
@@ -512,6 +514,20 @@ async fn absences_full_workflow() {
             lead_visible.contains(&outsider_id),
             "lead also sees out-of-scope users' team_visible=TRUE entries"
         );
+        // Comment privacy: a lead may read comments for absences in their
+        // report scope (self/peer/emp here) but NOT for cross-team
+        // team_visible entries (outsider). team_visible governs the KIND
+        // visibility; comments may still carry personal context and stay
+        // restricted to the normal scope.
+        for row in lead_rows {
+            match row["user_id"].as_i64() {
+                Some(id) if id == outsider_id => assert!(
+                    row["comment"].is_null(),
+                    "lead must NOT see cross-team comment even when team_visible: {row}"
+                ),
+                _ => {}
+            }
+        }
     }
 
     // -- Privacy: a team_visible=FALSE category from a non-scope user must NOT
