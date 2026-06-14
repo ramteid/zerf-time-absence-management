@@ -67,10 +67,8 @@ pub struct NewCategoryInput {
     pub name: String,
     pub color: String,
     pub sort_order: Option<i64>,
-    pub counts_as_vacation: bool,
-    pub keeps_work_target: bool,
+    pub cost_type: String,
     pub auto_approve_past: bool,
-    pub team_visible: bool,
 }
 
 pub async fn create(
@@ -88,13 +86,9 @@ pub async fn create(
     if !is_valid_hex_color(input.color.trim()) {
         return Err(AppError::BadRequest("Invalid color.".into()));
     }
-    // Mutual-exclusion is enforced at the DB level too, but checking here lets
-    // us return a clear 400 instead of relying on the constraint error mapping.
-    if input.counts_as_vacation && input.keeps_work_target {
-        return Err(AppError::BadRequest(
-            "A category cannot both deduct vacation and reduce flextime.".into(),
-        ));
-    }
+    // Reject unknown cost_type strings up front so the DB CHECK is a backup
+    // for direct-SQL bypass, not the user-facing validation.
+    crate::repository::absence_categories::validate_cost_type(&input.cost_type)?;
     let slug = match input.slug.as_deref().filter(|s| !s.trim().is_empty()) {
         Some(raw) => normalize_slug(raw).ok_or_else(|| {
             AppError::BadRequest(
@@ -115,10 +109,8 @@ pub async fn create(
             color: &color,
             sort_order: input.sort_order.unwrap_or(0),
             active: true,
-            counts_as_vacation: input.counts_as_vacation,
-            keeps_work_target: input.keeps_work_target,
+            cost_type: &input.cost_type,
             auto_approve_past: input.auto_approve_past,
-            team_visible: input.team_visible,
         })
         .await?;
     app_state
@@ -134,10 +126,8 @@ pub struct UpdateCategoryInput {
     pub color: Option<String>,
     pub sort_order: Option<i64>,
     pub active: Option<bool>,
-    pub counts_as_vacation: Option<bool>,
-    pub keeps_work_target: Option<bool>,
+    pub cost_type: Option<String>,
     pub auto_approve_past: Option<bool>,
-    pub team_visible: Option<bool>,
 }
 
 pub async fn update(
@@ -162,39 +152,36 @@ pub async fn update(
     }
     // We need to know whether the resulting row would violate the
     // vacation-XOR-flextime invariant; load the current values and merge in
-    // whichever flag is being changed so we can return a clean 400.
+    // whichever flag is being changed so we can decide whether the
+    // Bug-9 in-use lock applies.
     let current = app_state
         .db
         .absence_categories
         .find_by_id(category_id)
         .await?
         .ok_or(AppError::NotFound)?;
-    let final_counts = input
-        .counts_as_vacation
-        .unwrap_or(current.counts_as_vacation);
-    let final_keeps = input.keeps_work_target.unwrap_or(current.keeps_work_target);
-    let final_auto = input.auto_approve_past.unwrap_or(current.auto_approve_past);
-    if final_counts && final_keeps {
-        return Err(AppError::BadRequest(
-            "A category cannot both deduct vacation and reduce flextime.".into(),
-        ));
+    if let Some(ref new_cost_type) = input.cost_type {
+        crate::repository::absence_categories::validate_cost_type(new_cost_type)?;
     }
-    // Toggling any of the three behavior flags would silently change the
-    // financial / approval meaning of EXISTING absences referencing this
-    // category — past balance recomputations would suddenly debit/credit
-    // vacation or flextime balances that were never affected before, and
-    // approval-flow guards would relax or tighten without the affected
-    // employees seeing it. We refuse such changes whenever there is at
-    // least one absence row in this category. Admins who need a different
-    // policy must deactivate the existing category and create a new one.
+    let final_cost_type = input
+        .cost_type
+        .clone()
+        .unwrap_or_else(|| current.cost_type.clone());
+    let final_auto = input.auto_approve_past.unwrap_or(current.auto_approve_past);
+    // Toggling the cost type or the auto-approve behavior would silently
+    // change the financial / approval meaning of EXISTING absences
+    // referencing this category — past balance recomputations would
+    // suddenly debit/credit different ledgers, and approval-flow guards
+    // would relax or tighten without the affected employees seeing it.
+    // We refuse such changes whenever there is at least one absence row
+    // in this category. Admins who need a different policy must
+    // deactivate the existing category and create a new one.
     //
-    // Renames, color, sort_order, active and team_visible toggles are safe
-    // and pass through; team_visible affects who can SEE existing absences
-    // going forward but doesn't alter their cost or status.
-    let counts_changed = final_counts != current.counts_as_vacation;
-    let keeps_changed = final_keeps != current.keeps_work_target;
+    // Renames, color, sort_order, and active toggles are safe and pass
+    // through.
+    let cost_type_changed = final_cost_type != current.cost_type;
     let auto_changed = final_auto != current.auto_approve_past;
-    if counts_changed || keeps_changed || auto_changed {
+    if cost_type_changed || auto_changed {
         let usage = app_state
             .db
             .absence_categories
@@ -221,10 +208,8 @@ pub async fn update(
                 color: normalized_color.as_deref(),
                 sort_order: input.sort_order,
                 active: input.active,
-                counts_as_vacation: input.counts_as_vacation,
-                keeps_work_target: input.keeps_work_target,
+                cost_type: input.cost_type.as_deref(),
                 auto_approve_past: input.auto_approve_past,
-                team_visible: input.team_visible,
             },
         )
         .await?;

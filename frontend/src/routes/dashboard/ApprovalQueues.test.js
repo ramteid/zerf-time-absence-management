@@ -56,8 +56,8 @@ describe("ApprovalQueues", () => {
     document.body.appendChild(target);
     setLanguage("en");
     const cats = [
-      { id: 1, slug: "vacation", name: "Vacation", keeps_work_target: false },
-      { id: 2, slug: "sick", name: "Sick", keeps_work_target: false },
+      { id: 1, slug: "vacation", name: "Vacation", cost_type: "vacation", auto_approve_past: false },
+      { id: 2, slug: "sick", name: "Sick", cost_type: "none", auto_approve_past: true },
     ];
     absenceCategories.set(cats);
     setAbsenceCategoryCache(cats);

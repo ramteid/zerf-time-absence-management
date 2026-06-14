@@ -98,8 +98,7 @@ pub fn repo_absence_to_service(a: crate::repository::Absence) -> Absence {
         kind: a.kind,
         category_name: a.category_name,
         category_color: a.category_color,
-        counts_as_vacation: a.counts_as_vacation,
-        keeps_work_target: a.keeps_work_target,
+        cost_type: a.cost_type,
         auto_approve_past: a.auto_approve_past,
         start_date: a.start_date,
         end_date: a.end_date,
@@ -180,8 +179,9 @@ pub struct Absence {
     /// category is inactive so the UI can render the absence correctly on edit.
     pub category_name: String,
     pub category_color: String,
-    pub counts_as_vacation: bool,
-    pub keeps_work_target: bool,
+    /// Joined from the category row: `'none'` | `'vacation'` | `'flextime'`.
+    /// Replaces the pre-019 boolean pair.
+    pub cost_type: String,
     pub auto_approve_past: bool,
     pub start_date: NaiveDate,
     pub end_date: NaiveDate,
@@ -202,6 +202,19 @@ pub struct Absence {
     pub previous_start_date: Option<NaiveDate>,
     pub previous_end_date: Option<NaiveDate>,
     pub previous_comment: Option<String>,
+}
+
+impl Absence {
+    /// True when the absence's category has `cost_type='vacation'` (deducts
+    /// from the annual leave balance).
+    pub fn is_vacation_cost(&self) -> bool {
+        self.cost_type == crate::repository::absence_categories::COST_TYPE_VACATION
+    }
+    /// True when the absence's category has `cost_type='flextime'` (debits the
+    /// flextime balance via the kept work target).
+    pub fn is_flextime_cost(&self) -> bool {
+        self.cost_type == crate::repository::absence_categories::COST_TYPE_FLEXTIME
+    }
 }
 
 /// Validate the incoming request shape (comment length, date order/range).
@@ -347,7 +360,7 @@ pub async fn create_absence(
     // Time-entry conflict is checked at approval, not at request creation.
     // This lets employees request an absence even if they have forgotten to remove
     // existing time entries; the approver then sees and handles the conflict.
-    if category.counts_as_vacation {
+    if category.is_vacation_cost() {
         validate_vacation_balance(
             &app_state.pool,
             &mut transaction,
@@ -359,7 +372,7 @@ pub async fn create_absence(
         )
         .await?;
     }
-    if category.keeps_work_target {
+    if category.is_flextime_cost() {
         validate_flextime_balance(
             &app_state.pool,
             &mut transaction,
@@ -471,12 +484,12 @@ pub async fn update_absence(
             "Cannot change between auto-approve (e.g. sick) and review categories.".into(),
         ));
     }
-    // Changing the cost type (vacation budget vs. flextime balance) would silently
-    // alter the financial meaning of the absence without re-triggering approver
-    // review. The user must cancel and re-request with the correct category.
-    let changes_cost_type = absence_before_update.counts_as_vacation != category.counts_as_vacation
-        || absence_before_update.keeps_work_target != category.keeps_work_target;
-    if changes_cost_type {
+    // Changing the cost type (none ↔ vacation ↔ flextime) would silently
+    // alter the financial meaning of the absence without re-triggering
+    // approver review. The user must cancel and re-request with the
+    // correct category. With cost_type collapsed into one field the check
+    // is a single comparison instead of two ORed bool diffs.
+    if absence_before_update.cost_type != category.cost_type {
         return Err(AppError::BadRequest(
             "Cannot change absence category cost type (vacation \u{2194} flextime). \
              Cancel and re-request with the new category."
@@ -493,7 +506,7 @@ pub async fn update_absence(
     .await?;
     // Time-entry conflict is checked at approval, not at edit time —
     // consistent with create_absence behavior.
-    if category.counts_as_vacation {
+    if category.is_vacation_cost() {
         validate_vacation_balance(
             &app_state.pool,
             &mut transaction,
@@ -505,7 +518,7 @@ pub async fn update_absence(
         )
         .await?;
     }
-    if category.keeps_work_target {
+    if category.is_flextime_cost() {
         validate_flextime_balance(
             &app_state.pool,
             &mut transaction,
@@ -724,7 +737,7 @@ pub async fn approve_absence(
     // the request was filed, and other balance-affecting absences may have
     // landed in between. Without this, a request that passed validation at
     // creation could be approved into a balance breach.
-    if absence.counts_as_vacation || absence.keeps_work_target {
+    if absence.is_vacation_cost() || absence.is_flextime_cost() {
         let repo_user = app_state
             .db
             .users
@@ -732,7 +745,7 @@ pub async fn approve_absence(
             .await?
             .ok_or(AppError::NotFound)?;
         let absence_owner = crate::services::users::repo_user_to_auth_user(repo_user);
-        if absence.counts_as_vacation {
+        if absence.is_vacation_cost() {
             validate_vacation_balance(
                 &app_state.pool,
                 &mut transaction,
@@ -744,7 +757,7 @@ pub async fn approve_absence(
             )
             .await?;
         }
-        if absence.keeps_work_target {
+        if absence.is_flextime_cost() {
             validate_flextime_balance(
                 &app_state.pool,
                 &mut transaction,
@@ -1343,11 +1356,11 @@ mod tests {
     }
 
     fn sample_absence(id: i64, status: &str, kind: &str) -> Absence {
-        let (counts_as_vacation, keeps_work_target, auto_approve_past) = match kind {
-            "vacation" => (true, false, false),
-            "sick" => (false, false, true),
-            "flextime_reduction" => (false, true, false),
-            _ => (false, false, false),
+        let (cost_type, auto_approve_past) = match kind {
+            "vacation" => ("vacation", false),
+            "sick" => ("none", true),
+            "flextime_reduction" => ("flextime", false),
+            _ => ("none", false),
         };
         Absence {
             id,
@@ -1356,8 +1369,7 @@ mod tests {
             kind: kind.to_string(),
             category_name: kind.to_string(),
             category_color: "#000000".to_string(),
-            counts_as_vacation,
-            keeps_work_target,
+            cost_type: cost_type.to_string(),
             auto_approve_past,
             start_date: NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
             end_date: NaiveDate::from_ymd_opt(2026, 6, 5).unwrap(),
@@ -1575,8 +1587,7 @@ mod tests {
             kind: "sick".to_string(),
             category_name: "Sick".to_string(),
             category_color: "#ef4444".to_string(),
-            counts_as_vacation: false,
-            keeps_work_target: false,
+            cost_type: "none".to_string(),
             auto_approve_past: true,
             start_date: NaiveDate::from_ymd_opt(2026, 3, 1).unwrap(),
             end_date: NaiveDate::from_ymd_opt(2026, 3, 5).unwrap(),

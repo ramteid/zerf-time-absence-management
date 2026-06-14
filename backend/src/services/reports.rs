@@ -17,21 +17,24 @@ pub fn absence_removes_target(category_lookup: &AbsenceCategoryFlags, kind: &str
     category_lookup
         .by_slug
         .get(kind)
-        .map(|flags| !flags.keeps_work_target)
+        .map(|flags| !flags.is_flextime_cost)
         // Unknown slug (rare: category was deleted under live data) → default
         // to "removes target" so we err on the side of giving the user the day
         // off rather than penalising flextime for missing metadata.
         .unwrap_or(true)
 }
 
-/// Per-category behavior flags indexed by both id and slug for the rare case
-/// where a report's data only carries one of the two.
+/// Per-category behavior fields indexed by slug. Currently only the
+/// flextime-cost flag is needed by the reports pipeline — the vacation-cost
+/// case is handled SQL-side by `vacation_workdays_total_filtered`.
 pub struct AbsenceCategoryFlags {
     pub by_slug: std::collections::HashMap<String, CategoryFlagSet>,
 }
 
 pub struct CategoryFlagSet {
-    pub keeps_work_target: bool,
+    /// True when the category's cost_type is `'flextime'` (i.e. an approved
+    /// absence keeps the day's work target rather than removing it).
+    pub is_flextime_cost: bool,
 }
 
 impl AbsenceCategoryFlags {
@@ -41,12 +44,8 @@ impl AbsenceCategoryFlags {
             .await?;
         let mut by_slug = std::collections::HashMap::with_capacity(categories.len());
         for category in categories {
-            by_slug.insert(
-                category.slug,
-                CategoryFlagSet {
-                    keeps_work_target: category.keeps_work_target,
-                },
-            );
+            let is_flextime_cost = category.is_flextime_cost();
+            by_slug.insert(category.slug, CategoryFlagSet { is_flextime_cost });
         }
         Ok(Self { by_slug })
     }
@@ -1078,7 +1077,7 @@ pub fn group_entries_by_date(rows: Vec<RawEntryRow>) -> HashMap<NaiveDate, Vec<R
 }
 
 /// Expands a list of (start, end, slug) date ranges into a flat set of individual
-/// dates clamped to `[from, to]`. Ranges whose category has `keeps_work_target=true`
+/// dates clamped to `[from, to]`. Ranges whose category has `cost_type='flextime'`
 /// (flextime reduction) are skipped: those days still require the user to log hours,
 /// so they must NOT be treated as submission-covered.
 pub fn expand_absence_date_set(
@@ -1089,12 +1088,12 @@ pub fn expand_absence_date_set(
 ) -> std::collections::HashSet<NaiveDate> {
     let mut set = std::collections::HashSet::new();
     for (range_start, range_end, kind) in ranges {
-        // keeps_work_target absences (e.g. flextime_reduction) do not remove the
+        // flextime-cost absences (e.g. flextime_reduction) do not remove the
         // daily submission requirement; skip them so the week stays "not submitted".
         if category_flags
             .by_slug
             .get(kind.as_str())
-            .map(|f| f.keeps_work_target)
+            .map(|f| f.is_flextime_cost)
             .unwrap_or(false)
         {
             continue;
@@ -1338,19 +1337,19 @@ mod tests {
         by_slug.insert(
             "vacation".to_string(),
             CategoryFlagSet {
-                keeps_work_target: false,
+                is_flextime_cost: false,
             },
         );
         by_slug.insert(
             "sick".to_string(),
             CategoryFlagSet {
-                keeps_work_target: false,
+                is_flextime_cost: false,
             },
         );
         by_slug.insert(
             "flextime_reduction".to_string(),
             CategoryFlagSet {
-                keeps_work_target: true,
+                is_flextime_cost: true,
             },
         );
         let flags = AbsenceCategoryFlags { by_slug };
@@ -1595,10 +1594,10 @@ mod tests {
         assert!(set.contains(&NaiveDate::from_ymd_opt(2026, 5, 11).unwrap()));
     }
 
-    /// `expand_absence_date_set` skips ranges whose category has `keeps_work_target=true`,
+    /// `expand_absence_date_set` skips ranges whose category has `cost_type='flextime'`,
     /// because those days still require logged hours and must not be treated as submission-exempt.
     #[test]
-    fn expand_absence_date_set_skips_keeps_work_target_ranges() {
+    fn expand_absence_date_set_skips_flextime_cost_ranges() {
         let from = NaiveDate::from_ymd_opt(2026, 5, 1).unwrap();
         let to = NaiveDate::from_ymd_opt(2026, 5, 31).unwrap();
         let ranges = vec![
@@ -1617,13 +1616,13 @@ mod tests {
         by_slug.insert(
             "flextime_reduction".to_string(),
             CategoryFlagSet {
-                keeps_work_target: true,
+                is_flextime_cost: true,
             },
         );
         by_slug.insert(
             "vacation".to_string(),
             CategoryFlagSet {
-                keeps_work_target: false,
+                is_flextime_cost: false,
             },
         );
         let flags = AbsenceCategoryFlags { by_slug };

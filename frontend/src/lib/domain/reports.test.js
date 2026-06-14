@@ -13,12 +13,12 @@ import {
 } from "./reports.js";
 import { absenceCategories } from "../../stores.js";
 
-// Seed the store so keepsWorkTargetSlugs() picks up flextime_reduction and
-// any custom keeps_work_target=true category. Tests reset it as needed.
+// Seed the store so slugToCostType() picks up flextime_reduction and any
+// custom cost_type="flextime" category. Tests reset it as needed.
 const BASE_CATEGORIES = [
-  { id: 1, slug: "vacation", name: "Vacation", keeps_work_target: false },
-  { id: 2, slug: "sick", name: "Sick Leave", keeps_work_target: false },
-  { id: 7, slug: "flextime_reduction", name: "Flextime Reduction", keeps_work_target: true },
+  { id: 1, slug: "vacation", name: "Vacation", cost_type: "vacation" },
+  { id: 2, slug: "sick", name: "Sick Leave", cost_type: "none" },
+  { id: 7, slug: "flextime_reduction", name: "Flextime Reduction", cost_type: "flextime" },
 ];
 
 describe("reports domain helpers", () => {
@@ -206,24 +206,24 @@ describe("reports domain helpers", () => {
     ).toEqual({ vacation: 1 });
   });
 
-  // B3: exclusion is flag-based, not slug-based — custom keeps_work_target categories are excluded too
-  it("totalAbsenceDays excludes any custom keeps_work_target=true category", () => {
+  // B3: exclusion is cost_type-based, not slug-based — custom cost_type="flextime" categories are excluded too
+  it("totalAbsenceDays excludes any custom cost_type=\"flextime\" category", () => {
     absenceCategories.set([
-      { id: 1, slug: "vacation", name: "Vacation", keeps_work_target: false },
-      { id: 8, slug: "comp_time", name: "Comp Time", keeps_work_target: true },
+      { id: 1, slug: "vacation", name: "Vacation", cost_type: "vacation" },
+      { id: 8, slug: "comp_time", name: "Comp Time", cost_type: "flextime" },
     ]);
     expect(
       totalAbsenceDays([
         { kind: "vacation", days: 3 },
         { kind: "comp_time", days: 2 },
       ]),
-    ).toBe(3); // comp_time excluded because keeps_work_target=true
+    ).toBe(3); // comp_time excluded because cost_type="flextime"
   });
 
-  it("absenceKindTotals excludes any custom keeps_work_target=true category", () => {
+  it("absenceKindTotals excludes any custom cost_type=\"flextime\" category", () => {
     absenceCategories.set([
-      { id: 1, slug: "vacation", name: "Vacation", keeps_work_target: false },
-      { id: 8, slug: "comp_time", name: "Comp Time", keeps_work_target: true },
+      { id: 1, slug: "vacation", name: "Vacation", cost_type: "vacation" },
+      { id: 8, slug: "comp_time", name: "Comp Time", cost_type: "flextime" },
     ]);
     expect(
       absenceKindTotals([

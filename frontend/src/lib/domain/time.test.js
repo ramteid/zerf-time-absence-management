@@ -16,11 +16,11 @@ import { absenceCategories } from "../../stores.js";
 // the absenceCategories store. Seed it with the configurable categories so the
 // helpers can resolve slugs to flags.
 const CATEGORIES = [
-  { id: 1, slug: "vacation", name: "Vacation", keeps_work_target: false, auto_approve_past: false },
-  { id: 2, slug: "sick", name: "Sick", keeps_work_target: false, auto_approve_past: true },
-  { id: 3, slug: "flextime_reduction", name: "Flextime Reduction", keeps_work_target: true, auto_approve_past: false },
-  { id: 4, slug: "custom_flex", name: "Comp Time", keeps_work_target: true, auto_approve_past: false },
-  { id: 5, slug: "custom_sick", name: "Bereavement", keeps_work_target: false, auto_approve_past: true },
+  { id: 1, slug: "vacation", name: "Vacation", cost_type: "none", auto_approve_past: false },
+  { id: 2, slug: "sick", name: "Sick", cost_type: "none", auto_approve_past: true },
+  { id: 3, slug: "flextime_reduction", name: "Flextime Reduction", cost_type: "flextime", auto_approve_past: false },
+  { id: 4, slug: "custom_flex", name: "Comp Time", cost_type: "flextime", auto_approve_past: false },
+  { id: 5, slug: "custom_sick", name: "Bereavement", cost_type: "none", auto_approve_past: true },
 ];
 
 describe("time domain helpers", () => {
@@ -161,8 +161,8 @@ describe("time domain helpers", () => {
     expect(absenceRemovesTarget({ kind: "flextime_reduction", status: "approved" })).toBe(false);
   });
 
-  it("absenceRemovesTarget honours keeps_work_target for admin-created custom slugs", () => {
-    // A custom category with keeps_work_target=true must behave like
+  it("absenceRemovesTarget honours cost_type=\"flextime\" for admin-created custom slugs", () => {
+    // A custom category with cost_type="flextime" must behave like
     // flextime_reduction: the day still requires hours, so removeTarget=false.
     expect(absenceRemovesTarget({ kind: "custom_flex", status: "approved" })).toBe(false);
   });

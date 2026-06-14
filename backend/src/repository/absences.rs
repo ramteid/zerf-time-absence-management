@@ -29,9 +29,19 @@ pub struct Absence {
     pub reviewed_at: Option<DateTime<Utc>>,
     pub rejection_reason: Option<String>,
     pub created_at: DateTime<Utc>,
-    pub counts_as_vacation: bool,
-    pub keeps_work_target: bool,
+    /// Joined from the category row: `'none'` | `'vacation'` | `'flextime'`.
+    /// Replaces the pre-019 (counts_as_vacation, keeps_work_target) pair.
+    pub cost_type: String,
     pub auto_approve_past: bool,
+}
+
+impl Absence {
+    pub fn is_vacation_cost(&self) -> bool {
+        self.cost_type == crate::repository::absence_categories::COST_TYPE_VACATION
+    }
+    pub fn is_flextime_cost(&self) -> bool {
+        self.cost_type == crate::repository::absence_categories::COST_TYPE_FLEXTIME
+    }
 }
 
 #[derive(sqlx::FromRow, Serialize)]
@@ -48,10 +58,6 @@ pub struct CalendarEntry {
     /// `/absence-categories` list that powers the frontend store cannot
     /// resolve inactive slugs on its own.
     pub category_name: String,
-    /// When true, non-lead teammates can see the real absence kind in the team
-    /// calendar. Replaces the old `counts_as_vacation` privacy gate so each
-    /// category can independently control its calendar visibility.
-    pub team_visible: bool,
     pub start_date: NaiveDate,
     pub end_date: NaiveDate,
     pub comment: Option<String>,
@@ -66,7 +72,7 @@ const ABS_SELECT: &str =
     "SELECT a.id, a.user_id, a.category_id, c.slug AS kind, c.name AS category_name, \
      c.color AS category_color, a.start_date, a.end_date, \
      a.comment, a.status, a.reviewed_by, a.reviewed_at, a.rejection_reason, a.created_at, \
-     c.counts_as_vacation, c.keeps_work_target, c.auto_approve_past \
+     c.cost_type, c.auto_approve_past \
      FROM absences a JOIN absence_categories c ON c.id = a.category_id";
 
 #[derive(Clone)]
@@ -264,7 +270,7 @@ impl AbsenceDb {
         Ok(total)
     }
 
-    /// Sum of workdays for absences whose category has `counts_as_vacation=TRUE`
+    /// Sum of workdays for absences whose category has `cost_type='vacation'`
     /// (regardless of slug) in the requested statuses, clamped to [from, to].
     /// Used by the team report's vacation columns.
     pub async fn vacation_workdays_total(
@@ -282,7 +288,7 @@ impl AbsenceDb {
         .await
     }
 
-    /// Sum of workdays for absences whose category has `counts_as_vacation=TRUE`
+    /// Sum of workdays for absences whose category has `cost_type='vacation'`
     /// and whose status is in `statuses`, clamped to [from, to]. Used by
     /// carryover/balance calculations that previously filtered on `kind='vacation'`.
     pub async fn vacation_workdays_total_filtered(
@@ -295,7 +301,7 @@ impl AbsenceDb {
         let ranges: Vec<(NaiveDate, NaiveDate)> = sqlx::query_as(
             "SELECT a.start_date, a.end_date FROM absences a \
              JOIN absence_categories c ON c.id = a.category_id \
-             WHERE a.user_id=$1 AND c.counts_as_vacation=TRUE AND a.status = ANY($2) \
+             WHERE a.user_id=$1 AND c.cost_type='vacation' AND a.status = ANY($2) \
              AND a.end_date >= $3 AND a.start_date <= $4",
         )
         .bind(user_id)
@@ -431,7 +437,7 @@ impl AbsenceDb {
     ) -> AppResult<Vec<CalendarEntry>> {
         let mut builder = QueryBuilder::<Postgres>::new(
             "SELECT a.id, a.user_id, u.first_name, u.last_name, c.slug AS kind, a.category_id, \
-             c.name AS category_name, c.team_visible, \
+             c.name AS category_name, \
              a.start_date, a.end_date, a.comment, a.status \
              FROM absences a \
              JOIN users u ON u.id=a.user_id \
@@ -441,24 +447,22 @@ impl AbsenceDb {
         );
         builder.push_bind(from);
         builder.push(" AND a.start_date <= ").push_bind(to);
-        // Calendar scope rule:
-        //   - admins: see every user's absences (scope_ids = None).
-        //   - leads:  see their own + direct reports (scope_ids = [...]).
-        //   - employees/assistants: see their own (scope_ids = [self]).
-        // For ALL viewers we additionally expose absences from out-of-scope
-        // users when the category has team_visible=TRUE — that is the whole
-        // point of the flag and the user-guide promises non-leads can see
-        // teammates' vacation, training, etc. in the team calendar. Sensitive
-        // categories (team_visible=FALSE, e.g. sick leave) stay restricted to
-        // the requester's normal scope. Handler then masks the displayed kind
-        // for cross-user entries when needed.
+        // Calendar scope rule — the only visibility filter we apply:
+        //   - admins: scope_ids = None → see every user's absences.
+        //   - leads:  scope_ids = [self, …reports] → see self + direct reports.
+        //   - employees/assistants: scope_ids = [self] → see only their own.
+        // There is intentionally no per-category visibility carve-out. A
+        // previous iteration added `OR c.team_visible=TRUE` here so that
+        // benign categories could be exposed to teammates, but that broke
+        // the principle "regular employees never see colleagues' calendar
+        // entries". The strict scope is the single source of truth.
         if let Some(ids) = scope_ids {
-            builder.push(" AND (c.team_visible=TRUE OR a.user_id IN (");
+            builder.push(" AND a.user_id IN (");
             let mut sep = builder.separated(", ");
             for id in ids {
                 sep.push_bind(*id);
             }
-            sep.push_unseparated("))");
+            sep.push_unseparated(")");
         }
         builder.push(" ORDER BY a.start_date");
         Ok(builder
@@ -467,7 +471,7 @@ impl AbsenceDb {
             .await?)
     }
 
-    /// Load vacation absences (categories with counts_as_vacation=TRUE) for
+    /// Load vacation absences (categories with cost_type='vacation') for
     /// balance calculation. Includes requested/approved/cancellation_pending.
     pub async fn vacation_absences_in_year(
         &self,
@@ -476,7 +480,7 @@ impl AbsenceDb {
         to: NaiveDate,
     ) -> AppResult<Vec<Absence>> {
         Ok(QueryBuilder::<Postgres>::new(format!(
-            "{ABS_SELECT} WHERE a.user_id=$1 AND c.counts_as_vacation=TRUE \
+            "{ABS_SELECT} WHERE a.user_id=$1 AND c.cost_type='vacation' \
              AND a.status IN ('requested','approved','cancellation_pending') \
              AND a.end_date >= $2 AND a.start_date <= $3"
         ))
@@ -704,7 +708,7 @@ impl AbsenceDb {
 
     // ── Vacation balance helpers ───────────────────────────────────────────
 
-    /// Load ranges of absences whose category has counts_as_vacation=TRUE in
+    /// Load ranges of absences whose category has cost_type='vacation' in
     /// statuses that reserve vacation budget (requested/approved/
     /// cancellation_pending), optionally excluding one absence id.
     pub async fn vacation_ranges_in_year_tx(
@@ -718,7 +722,7 @@ impl AbsenceDb {
             Ok(sqlx::query_as::<_, (NaiveDate, NaiveDate)>(
                 "SELECT a.start_date, a.end_date FROM absences a \
                  JOIN absence_categories c ON c.id = a.category_id \
-                 WHERE a.id != $1 AND a.user_id=$2 AND c.counts_as_vacation=TRUE \
+                 WHERE a.id != $1 AND a.user_id=$2 AND c.cost_type='vacation' \
                  AND a.status IN ('requested','approved','cancellation_pending') \
                  AND a.end_date >= $3 AND a.start_date <= $4",
             )
@@ -732,7 +736,7 @@ impl AbsenceDb {
             Ok(sqlx::query_as::<_, (NaiveDate, NaiveDate)>(
                 "SELECT a.start_date, a.end_date FROM absences a \
                  JOIN absence_categories c ON c.id = a.category_id \
-                 WHERE a.user_id=$1 AND c.counts_as_vacation=TRUE \
+                 WHERE a.user_id=$1 AND c.cost_type='vacation' \
                  AND a.status IN ('requested','approved','cancellation_pending') \
                  AND a.end_date >= $2 AND a.start_date <= $3",
             )
@@ -745,11 +749,11 @@ impl AbsenceDb {
     }
 
     /// Pending/approved/cancellation_pending ranges for categories with
-    /// `keeps_work_target=TRUE` (flextime-cost categories) whose end_date is
+    /// `cost_type='flextime'` (i.e. flextime-cost categories) whose end_date is
     /// on or after `from`. Used by `validate_flextime_balance` to subtract
     /// committed-but-not-yet-realised flextime usage so multiple overlapping
     /// requests cannot each individually fit yet collectively breach the floor.
-    pub async fn keeps_work_target_ranges_after_tx(
+    pub async fn flextime_cost_ranges_after_tx(
         tx: &mut sqlx::PgConnection,
         user_id: i64,
         from: NaiveDate,
@@ -759,7 +763,7 @@ impl AbsenceDb {
             Ok(sqlx::query_as::<_, (NaiveDate, NaiveDate)>(
                 "SELECT a.start_date, a.end_date FROM absences a \
                  JOIN absence_categories c ON c.id = a.category_id \
-                 WHERE a.id != $1 AND a.user_id=$2 AND c.keeps_work_target=TRUE \
+                 WHERE a.id != $1 AND a.user_id=$2 AND c.cost_type='flextime' \
                  AND a.status IN ('requested','approved','cancellation_pending') \
                  AND a.end_date >= $3",
             )
@@ -772,7 +776,7 @@ impl AbsenceDb {
             Ok(sqlx::query_as::<_, (NaiveDate, NaiveDate)>(
                 "SELECT a.start_date, a.end_date FROM absences a \
                  JOIN absence_categories c ON c.id = a.category_id \
-                 WHERE a.user_id=$1 AND c.keeps_work_target=TRUE \
+                 WHERE a.user_id=$1 AND c.cost_type='flextime' \
                  AND a.status IN ('requested','approved','cancellation_pending') \
                  AND a.end_date >= $2",
             )
@@ -795,7 +799,7 @@ impl AbsenceDb {
             Ok(sqlx::query_as::<_, (NaiveDate, NaiveDate)>(
                 "SELECT a.start_date, a.end_date FROM absences a \
                  JOIN absence_categories c ON c.id = a.category_id \
-                 WHERE a.id != $1 AND a.user_id=$2 AND c.counts_as_vacation=TRUE \
+                 WHERE a.id != $1 AND a.user_id=$2 AND c.cost_type='vacation' \
                  AND a.status='approved' \
                  AND a.end_date >= $3 AND a.start_date <= $4",
             )
@@ -809,7 +813,7 @@ impl AbsenceDb {
             Ok(sqlx::query_as::<_, (NaiveDate, NaiveDate)>(
                 "SELECT a.start_date, a.end_date FROM absences a \
                  JOIN absence_categories c ON c.id = a.category_id \
-                 WHERE a.user_id=$1 AND c.counts_as_vacation=TRUE \
+                 WHERE a.user_id=$1 AND c.cost_type='vacation' \
                  AND a.status='approved' \
                  AND a.end_date >= $2 AND a.start_date <= $3",
             )

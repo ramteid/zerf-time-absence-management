@@ -1,14 +1,16 @@
 import { get } from "svelte/store";
 import { absenceCategories } from "../../stores.js";
 
-// Build a Set of slugs whose `keeps_work_target` flag is true (flextime-
-// reduction categories). These must be excluded from leave-day statistics.
-function keepsWorkTargetSlugs() {
-  return new Set(
-    get(absenceCategories)
-      .filter((c) => c.keeps_work_target)
-      .map((c) => c.slug),
-  );
+// Build a slug→cost_type lookup map from the absenceCategories store.
+// Used to identify flextime-cost categories that must be excluded from
+// leave-day statistics (their days still require hours, so they are not
+// "absences" in the leave-balance sense).
+function slugToCostType() {
+  const costTypeBySlug = new Map();
+  for (const category of get(absenceCategories)) {
+    costTypeBySlug.set(category.slug, category.cost_type);
+  }
+  return costTypeBySlug;
 }
 
 // Delegates to absenceKindTotals for consistent exclusion of flextime categories.
@@ -90,13 +92,13 @@ export function dedupeAbsences(absences) {
 }
 
 export function absenceKindTotals(absences) {
-  const exclude = keepsWorkTargetSlugs();
+  const costTypeBySlug = slugToCostType();
   const totals = {};
   for (const absence of absences || []) {
-    // Categories with keeps_work_target=true (e.g. flextime_reduction) are not
+    // Categories with cost_type="flextime" (e.g. flextime_reduction) are not
     // traditional leave: the day still counts toward the work requirement, so
     // these must not inflate leave-day statistics.
-    if (exclude.has(absence.kind)) continue;
+    if (costTypeBySlug.get(absence.kind) === "flextime") continue;
     const kind = absence.kind || "unknown";
     totals[kind] = (totals[kind] || 0) + (absence.days || 0);
   }
@@ -105,10 +107,10 @@ export function absenceKindTotals(absences) {
 }
 
 export function totalAbsenceDays(absences) {
-  // Exclude keeps_work_target categories: those days still require hours, so
+  // Exclude cost_type="flextime" categories: those days still require hours, so
   // counting them as "absence days" would overstate the user's true leave.
-  const exclude = keepsWorkTargetSlugs();
+  const costTypeBySlug = slugToCostType();
   return (absences || [])
-    .filter((absence) => !exclude.has(absence.kind))
+    .filter((absence) => costTypeBySlug.get(absence.kind) !== "flextime")
     .reduce((total, absence) => total + (absence.days || 0), 0);
 }

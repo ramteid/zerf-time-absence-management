@@ -63,13 +63,13 @@ describe("Time", () => {
     settings.set({ time_format: "24h" });
     setLanguage("en");
     // Seed the absenceCategories store so absenceRemovesTarget / absenceBlocksEntry
-    // (which read keeps_work_target / auto_approve_past from the store) behave
+    // (which read cost_type / auto_approve_past from the store) behave
     // correctly. Without this they fall back to "removes target" / "blocks entry"
     // for every kind, which breaks every flextime-reduction-related assertion.
     const cats = [
-      { id: 1, slug: "vacation", name: "Vacation", keeps_work_target: false, auto_approve_past: false },
-      { id: 2, slug: "sick", name: "Sick", keeps_work_target: false, auto_approve_past: true },
-      { id: 3, slug: "flextime_reduction", name: "Flextime Reduction", keeps_work_target: true, auto_approve_past: false },
+      { id: 1, slug: "vacation", name: "Vacation", cost_type: "vacation", auto_approve_past: false },
+      { id: 2, slug: "sick", name: "Sick", cost_type: "none", auto_approve_past: true },
+      { id: 3, slug: "flextime_reduction", name: "Flextime Reduction", cost_type: "flextime", auto_approve_past: false },
     ];
     absenceCategories.set(cats);
     setAbsenceCategoryCache(cats);

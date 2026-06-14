@@ -3,10 +3,39 @@ use crate::error::{AppError, AppResult};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
+/// Where the cost of an approved absence is charged. Replaces the pre-019
+/// boolean pair (`counts_as_vacation`, `keeps_work_target`) — those were
+/// always mutex (enforced by the dropped `abs_cat_only_one_cost` CHECK), so
+/// they expressed one logical concept with three states, not two
+/// independent flags. The single field makes the invariant impossible to
+/// violate by construction.
+///
+/// Stored as TEXT with a CHECK constraint at the DB level (see migration
+/// 019). We keep the Rust side as a `String` for two reasons:
+/// (1) `sqlx::FromRow` derive plays cleanly with `String` and no enum
+///     `Type`/`Encode`/`Decode` boilerplate is needed.
+/// (2) The constants and helpers below give the same exhaustiveness in
+///     practice — every consumer goes through `is_vacation_cost` /
+///     `is_flextime_cost` rather than matching raw strings.
+pub const COST_TYPE_NONE: &str = "none";
+pub const COST_TYPE_VACATION: &str = "vacation";
+pub const COST_TYPE_FLEXTIME: &str = "flextime";
+
+/// Validate a user-supplied cost_type string against the DB CHECK whitelist.
+/// Centralizes the membership test so callers don't compare raw strings.
+pub fn validate_cost_type(value: &str) -> AppResult<()> {
+    match value {
+        COST_TYPE_NONE | COST_TYPE_VACATION | COST_TYPE_FLEXTIME => Ok(()),
+        other => Err(AppError::BadRequest(format!(
+            "Invalid cost_type {other:?}; expected 'none', 'vacation', or 'flextime'."
+        ))),
+    }
+}
+
 /// Configurable absence category. The legacy hardcoded kinds
 /// (vacation/sick/training/special_leave/unpaid/general_absence/flextime_reduction)
 /// are seeded as rows; admins can add/rename/recolor/deactivate freely. The
-/// behavior flags drive the application logic that used to be wired to
+/// behavior fields drive the application logic that used to be wired to
 /// magic slug constants.
 #[derive(FromRow, Serialize, Deserialize, Clone, Debug)]
 pub struct AbsenceCategory {
@@ -16,23 +45,31 @@ pub struct AbsenceCategory {
     pub color: String,
     pub sort_order: i64,
     pub active: bool,
-    /// Deducts from the user's annual vacation balance (carryover/expiry).
-    pub counts_as_vacation: bool,
-    /// Keeps the daily work target — the absence "costs" flextime instead of
-    /// being a free day off. Cannot be combined with `counts_as_vacation`.
-    pub keeps_work_target: bool,
+    /// Where the cost of an approved absence is charged. One of
+    /// `'none'` (no deduction), `'vacation'` (annual leave balance), or
+    /// `'flextime'` (keeps work target; debits flextime balance).
+    /// See `COST_TYPE_*` constants and the helpers below.
+    pub cost_type: String,
     /// Sick-like behavior: auto-approve when start_date <= today, allow
     /// backdating up to 30 days, and coexist with logged time on the same day.
     pub auto_approve_past: bool,
-    /// When true, non-lead teammates can see the real absence kind in the team
-    /// calendar. Sick leave (GDPR Art. 9) stays false; benign categories like
-    /// vacation, training, and flextime reduction default to true.
-    pub team_visible: bool,
+}
+
+impl AbsenceCategory {
+    /// True when an approved absence in this category deducts from the
+    /// employee's annual vacation balance (carryover + expiry rules apply).
+    pub fn is_vacation_cost(&self) -> bool {
+        self.cost_type == COST_TYPE_VACATION
+    }
+    /// True when an approved absence in this category keeps the day's work
+    /// target — the absence "costs" the employee's flextime balance.
+    pub fn is_flextime_cost(&self) -> bool {
+        self.cost_type == COST_TYPE_FLEXTIME
+    }
 }
 
 const ABS_CAT_COLUMNS: &str =
-    "id, slug, name, color, sort_order, active, counts_as_vacation, keeps_work_target, \
-     auto_approve_past, team_visible";
+    "id, slug, name, color, sort_order, active, cost_type, auto_approve_past";
 
 #[derive(Clone)]
 pub struct AbsenceCategoryDb {
@@ -90,9 +127,10 @@ impl AbsenceCategoryDb {
         )
     }
 
-    /// Mapping from id to (slug, counts_as_vacation, keeps_work_target,
-    /// auto_approve_past). Used by callers that need to evaluate behavior flags
-    /// for a small set of category ids without re-querying each one.
+    /// Loads every category (including inactive ones) so callers can resolve
+    /// behavior fields by slug or id without re-querying per category. Used
+    /// by the reports/flextime pipelines that look up `cost_type` for each
+    /// absence row in a hot loop.
     pub async fn behavior_map(&self) -> AppResult<Vec<AbsenceCategory>> {
         // Behavior decisions ignore the active flag: an existing absence row
         // whose category was deactivated must still be processed correctly.
@@ -108,25 +146,21 @@ impl AbsenceCategoryDb {
     pub async fn create(&self, input: NewAbsenceCategory<'_>) -> AppResult<i64> {
         sqlx::query_scalar(
             "INSERT INTO absence_categories \
-             (slug, name, color, sort_order, active, counts_as_vacation, keeps_work_target, \
-              auto_approve_past, team_visible) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id",
+             (slug, name, color, sort_order, active, cost_type, auto_approve_past) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id",
         )
         .bind(input.slug)
         .bind(input.name)
         .bind(input.color)
         .bind(input.sort_order)
         .bind(input.active)
-        .bind(input.counts_as_vacation)
-        .bind(input.keeps_work_target)
+        .bind(input.cost_type)
         .bind(input.auto_approve_past)
-        .bind(input.team_visible)
         .fetch_one(&self.pool)
         .await
         .map_err(map_constraint_error)
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub async fn update(&self, id: i64, input: UpdateAbsenceCategory<'_>) -> AppResult<()> {
         let result = sqlx::query(
             "UPDATE absence_categories SET \
@@ -134,20 +168,16 @@ impl AbsenceCategoryDb {
                 color=COALESCE($2,color), \
                 sort_order=COALESCE($3,sort_order), \
                 active=COALESCE($4,active), \
-                counts_as_vacation=COALESCE($5,counts_as_vacation), \
-                keeps_work_target=COALESCE($6,keeps_work_target), \
-                auto_approve_past=COALESCE($7,auto_approve_past), \
-                team_visible=COALESCE($8,team_visible) \
-             WHERE id=$9",
+                cost_type=COALESCE($5,cost_type), \
+                auto_approve_past=COALESCE($6,auto_approve_past) \
+             WHERE id=$7",
         )
         .bind(input.name)
         .bind(input.color)
         .bind(input.sort_order)
         .bind(input.active)
-        .bind(input.counts_as_vacation)
-        .bind(input.keeps_work_target)
+        .bind(input.cost_type)
         .bind(input.auto_approve_past)
-        .bind(input.team_visible)
         .bind(id)
         .execute(&self.pool)
         .await
@@ -177,10 +207,10 @@ pub struct NewAbsenceCategory<'a> {
     pub color: &'a str,
     pub sort_order: i64,
     pub active: bool,
-    pub counts_as_vacation: bool,
-    pub keeps_work_target: bool,
+    /// One of `'none'` | `'vacation'` | `'flextime'`. Service-layer code
+    /// validates via `validate_cost_type` before passing it through.
+    pub cost_type: &'a str,
     pub auto_approve_past: bool,
-    pub team_visible: bool,
 }
 
 pub struct UpdateAbsenceCategory<'a> {
@@ -188,10 +218,8 @@ pub struct UpdateAbsenceCategory<'a> {
     pub color: Option<&'a str>,
     pub sort_order: Option<i64>,
     pub active: Option<bool>,
-    pub counts_as_vacation: Option<bool>,
-    pub keeps_work_target: Option<bool>,
+    pub cost_type: Option<&'a str>,
     pub auto_approve_past: Option<bool>,
-    pub team_visible: Option<bool>,
 }
 
 /// Translate the database constraints we care about into client-facing errors.
@@ -207,10 +235,15 @@ fn map_constraint_error(e: sqlx::Error) -> AppError {
         if code == "23505" {
             return AppError::conflict("Absence category slug already exists.");
         }
-        // 23514 = check_violation
-        if code == "23514" && constraint == "abs_cat_only_one_cost" {
+        // 23514 = check_violation. After migration 019 the only
+        // category-level CHECK that user input can violate is the
+        // cost_type whitelist — and the service layer validates it up
+        // front via `validate_cost_type`, so this branch only fires if a
+        // future direct-SQL caller bypasses the service. Keep the mapping
+        // anyway so the error stays user-facing instead of a 500.
+        if code == "23514" && constraint == "abs_cat_cost_type" {
             return AppError::bad_request(
-                "A category cannot both deduct vacation and reduce flextime.",
+                "Invalid cost_type; expected 'none', 'vacation', or 'flextime'.",
             );
         }
     }

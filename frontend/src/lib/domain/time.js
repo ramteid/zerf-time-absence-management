@@ -174,9 +174,9 @@ function categoryFor(kind) {
 export function absenceRemovesTarget(absence) {
   if (!absence) return false;
   if (!TARGET_REMOVING_ABSENCE_STATUSES.includes(absence.status)) return false;
-  // keeps_work_target categories (e.g. flextime reduction) preserve the day's
+  // cost_type="flextime" categories (e.g. flextime reduction) preserve the day's
   // work target — the absence "costs" flextime rather than removing the target.
-  return categoryFor(absence.kind)?.keeps_work_target !== true;
+  return categoryFor(absence.kind)?.cost_type !== "flextime";
 }
 
 export function absenceBlocksEntry(absence) {

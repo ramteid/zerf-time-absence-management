@@ -24,20 +24,22 @@ pub async fn list_all(
     ))
 }
 
+fn default_cost_type() -> String {
+    crate::repository::absence_categories::COST_TYPE_NONE.to_string()
+}
+
 #[derive(Deserialize)]
 pub struct NewAbsenceCategoryRequest {
     pub slug: Option<String>,
     pub name: String,
     pub color: String,
     pub sort_order: Option<i64>,
-    #[serde(default)]
-    pub counts_as_vacation: bool,
-    #[serde(default)]
-    pub keeps_work_target: bool,
+    /// `'none'` | `'vacation'` | `'flextime'`. Replaces the pre-019
+    /// `counts_as_vacation` / `keeps_work_target` boolean pair.
+    #[serde(default = "default_cost_type")]
+    pub cost_type: String,
     #[serde(default)]
     pub auto_approve_past: bool,
-    #[serde(default)]
-    pub team_visible: bool,
 }
 
 pub async fn create(
@@ -54,10 +56,8 @@ pub async fn create(
                 name: body.name,
                 color: body.color,
                 sort_order: body.sort_order,
-                counts_as_vacation: body.counts_as_vacation,
-                keeps_work_target: body.keeps_work_target,
+                cost_type: body.cost_type,
                 auto_approve_past: body.auto_approve_past,
-                team_visible: body.team_visible,
             },
         )
         .await?,
@@ -70,10 +70,8 @@ pub struct UpdateAbsenceCategoryRequest {
     pub color: Option<String>,
     pub sort_order: Option<i64>,
     pub active: Option<bool>,
-    pub counts_as_vacation: Option<bool>,
-    pub keeps_work_target: Option<bool>,
+    pub cost_type: Option<String>,
     pub auto_approve_past: Option<bool>,
-    pub team_visible: Option<bool>,
 }
 
 pub async fn update(
@@ -92,10 +90,8 @@ pub async fn update(
                 color: body.color,
                 sort_order: body.sort_order,
                 active: body.active,
-                counts_as_vacation: body.counts_as_vacation,
-                keeps_work_target: body.keeps_work_target,
+                cost_type: body.cost_type,
                 auto_approve_past: body.auto_approve_past,
-                team_visible: body.team_visible,
             },
         )
         .await?,

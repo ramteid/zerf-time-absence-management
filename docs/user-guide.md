@@ -360,23 +360,15 @@ Review and privacy behavior:
 		excluding admin subjects). For direct reports' time entries, the
 		person's name is shown in the event detail.
 	- Admins see all users' data regardless of approver assignments.
-- **Calendar privacy per absence category**: whether teammates can see
-	someone else's absence in the team calendar is controlled by the
-	**Visible to teammates** flag on each absence category. When the flag is
-	enabled (default for vacation, training, etc.), the absence appears for
-	all teammates with the real category name. When the flag is disabled
-	(default for sick leave), the absence does NOT appear in other users'
-	calendars at all — not even as a generic "Absent" placeholder — except
-	for the absence owner and for leads whose scope covers the owner. This
-	protects GDPR Art. 9 health data while still letting benign absences
-	coordinate team coverage. Admins configure the flag per category in
-	*Admin → Categories*.
+- **Calendar visibility is governed solely by the requester's scope**:
+	admins see all absences, leads see their own plus their direct reports',
+	and employees see only their own. There is no per-category carve-out —
+	a category is either visible because the viewer's scope covers the
+	owner, or it is not visible at all.
 - Comments are always restricted to (a) the absence owner and (b) leads
-	whose scope covers the owner. A team-visible category name is shown
-	to wider audiences, but the comment never is — even when team leads can
-	see another team's `team_visible=TRUE` vacation in the calendar, the
-	comment for that entry stays hidden because it may contain personal
-	context unrelated to the category itself.
+	whose scope covers the owner, even though admins can see the
+	underlying absence entry. This keeps personal context in the comment
+	from leaking beyond the people who already handle the request.
 
 Vacations and sick leave are checked against the employee's own work schedule.
 A one-day request on a public holiday or on a non-working weekday does not
@@ -415,7 +407,7 @@ Daily target hours are `0` when:
 - Day is before your start date,
 - Day is in the future.
 
-Absences from categories with **Keeps work target** (e.g. flextime reduction) are the exception: they follow the absence workflow and block normal time entry creation on those days, but the daily work target is not removed. This lets the days reduce your flextime balance intentionally. To prevent the balance from going below the configured minimum (default 0 minutes; admin can override via the `flextime_min_balance_min` setting), the balance is checked TWICE: when you submit the request AND when the approver approves it. The check accounts for any other already-pending/approved flextime-cost absences you have so multiple requests that each individually fit cannot together breach the floor, and the approver's re-check catches the case where you spent balance between request and approval.
+Absences from categories with cost type `flextime` (e.g. flextime reduction) are the exception: they follow the absence workflow and block normal time entry creation on those days, but the daily work target is not removed. This lets the days reduce your flextime balance intentionally. To prevent the balance from going below the configured minimum (default 0 minutes; admin can override via the `flextime_min_balance_min` setting), the balance is checked TWICE: when you submit the request AND when the approver approves it. The check accounts for any other already-pending/approved flextime-cost absences you have so multiple requests that each individually fit cannot together breach the floor, and the approver's re-check catches the case where you spent balance between request and approval.
 
 Otherwise, target is calculated as:
 
@@ -1379,21 +1371,18 @@ Categories define what employees can book time against.
 
 #### Absence categories
 
-Absence categories define what types of absences employees can request. Each category has four behavior flags:
+Absence categories define what types of absences employees can request. Each category has two behavior fields:
 
-| Flag | Effect when enabled |
+| Field | Effect |
 | --- | --- |
-| **Counts as vacation** | Days deducted from the employee's annual vacation balance. |
-| **Keeps work target (flextime)** | Approved days do **not** zero out the daily work target; the employee still needs to compensate through flextime. Use this for categories like *flextime reduction* where the absence itself is the compensation mechanism. Requests for this category type are checked against the employee's current flextime balance at both submission AND approval time — the approver cannot accidentally drain the balance below the configured floor if the user spent flextime between request and approval. The check also accounts for other already-pending/approved flextime requests so multiple requests that each individually fit cannot together breach the floor. |
+| **Cost type** | A single 3-state field that determines the balance impact of approved days. `none` — no balance impact (e.g. unpaid leave, general absence): the day is removed from the daily work target but neither annual leave nor flextime is debited. `vacation` — deducts from the employee's annual leave balance, honouring per-year carryover and expiry rules. `flextime` — keeps the daily work target intact so the absence costs flextime balance. The flextime balance is checked at BOTH request and approval time against the configured floor (default 0 minutes; admin can override via the `flextime_min_balance_min` setting); the check accounts for other already-pending/approved flextime-cost absences so multiple requests that each individually fit cannot together breach the floor, and the approver's re-check catches the case where the user spent balance between request and approval. |
 | **Auto-approve past dates (sick-like)** | Absences with a start date on or before today are approved automatically. Approvers receive an informational notice. This flag also disables the time-entry conflict check at creation, so partial-day overlaps are allowed (e.g. employee worked the morning and then called in sick). |
-| **Visible to teammates in team calendar** | Categories with this flag set surface to teammates as named entries (e.g. "Vacation", "Training") in the team calendar. Categories without it stay restricted to the absence owner and to leads whose scope covers the owner — they do not appear at all in other users' calendars, not even as a generic "Absent" placeholder. Use this flag to opt benign categories (vacation, training, conferences) into team-wide visibility while keeping sensitive categories (sick leave under GDPR Art. 9, bereavement, etc.) confined to the normal lead-scope visibility. |
 
 Constraints:
-- **Counts as vacation** and **Keeps work target** are mutually exclusive (a category cannot both deduct vacation and preserve the target).
 - A category slug is auto-generated from the name and must be unique. Existing absences are not affected when a category is deactivated or renamed.
 - Inactive categories are hidden from the absence request dialog but remain attached to existing absence records.
 - Changing the cost type of an absence (e.g. from a vacation category to a flextime category) after submission is not allowed. Cancel the existing request and re-submit with the correct category.
-- Once a category has at least one referencing absence (any status), the three behavior flags (**Counts as vacation**, **Keeps work target**, **Auto-approve past dates**) are locked. Toggling them would retroactively change the financial or approval meaning of existing rows — past balance recomputations would suddenly debit or credit different ledgers and approval workflow guards would relax or tighten without the affected employees seeing it. To change a flag, deactivate the existing category and create a new one with the desired flags. Cosmetic changes (name, color, sort order, active flag, team_visible) are always allowed.
+- Once a category has at least one referencing absence (any status), the behavior fields (**Cost type** and **Auto-approve past dates**) are locked. Toggling them would retroactively change the financial or approval meaning of existing rows — past balance recomputations would suddenly debit or credit different ledgers and approval workflow guards would relax or tighten without the affected employees seeing it. To change a field, deactivate the existing category and create a new one with the desired settings. Cosmetic changes (name, color, sort order, active flag) are always allowed.
 
 ### Managing holidays
 

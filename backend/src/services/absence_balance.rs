@@ -231,7 +231,7 @@ pub async fn carryover_days_into_year(
 
         // Carryover source is approved vacation usage. Since absence categories
         // are configurable, "vacation" is no longer a fixed slug — we sum
-        // workdays across every category whose counts_as_vacation flag is set.
+        // workdays across every category whose cost_type='vacation'.
         let base_usage = if let Some(expiry) = expiry_date {
             let pre_window_end = std::cmp::min(expiry, year_to);
             let post_window_start = expiry + Duration::days(1);
@@ -463,13 +463,13 @@ pub async fn carryover_remaining_days(input: CarryoverRemainingInput<'_>) -> App
     Ok((carryover_days as f64 - consumed).max(0.0))
 }
 
-/// Validate that a flextime-cost absence (keeps_work_target=true) does not
+/// Validate that a flextime-cost absence (cost_type='flextime') does not
 /// push the user's flextime balance below the configured floor.
 ///
 /// The check accounts for:
 /// 1. The current balance as of end-of-yesterday (from `build_flextime_for_user`).
 /// 2. The future-portion cost of OTHER pending/approved/cancellation_pending
-///    keeps_work_target absences — these are committed deductions that haven't
+///    flextime-cost absences — these are committed deductions that haven't
 ///    yet been realised in the balance. Without this, multiple requests that
 ///    each individually fit could be approved together and breach the floor.
 /// 3. The future-portion cost of the proposed range itself (past days are
@@ -512,7 +512,7 @@ pub async fn validate_flextime_balance(
 
     // (2) Committed-but-not-yet-realised flextime usage from OTHER absences.
     //
-    // `keeps_work_target=true` absences cost `target_per_day_min` per workday
+    // cost_type='flextime' absences cost `target_per_day_min` per workday
     // because the day keeps its target while the user logs zero hours. Past
     // portions of these absences are ALREADY reflected in current_balance
     // (build_flextime_for_user processed those days with target = target_per_day_min
@@ -526,7 +526,7 @@ pub async fn validate_flextime_balance(
     // validating right now (it would otherwise count itself in step 2 AND in
     // step 3 below).
     let committed_ranges =
-        AbsenceDb::keeps_work_target_ranges_after_tx(tx, user.id, today, exclude_id).await?;
+        AbsenceDb::flextime_cost_ranges_after_tx(tx, user.id, today, exclude_id).await?;
     let mut committed_cost_min: i64 = 0;
     for (range_start, range_end) in &committed_ranges {
         let effective_start = std::cmp::max(*range_start, today);
@@ -540,7 +540,7 @@ pub async fn validate_flextime_balance(
 
     // (3) Future portion of the proposed range. Same reasoning as (2): days
     // before today were already counted in current_balance with the target
-    // preserved (because keeps_work_target=true never removes the target),
+    // preserved (because cost_type='flextime' never removes the target),
     // so approving/creating the absence doesn't add NEW cost for those days.
     // Only the future portion of the new range is a fresh deduction.
     let proposed_start = std::cmp::max(start_date, today);
@@ -829,7 +829,7 @@ pub async fn workdays_per_category(
     workdays_total_for_category(pool, user_id, category_id, from, to).await
 }
 
-/// Total workdays across all categories whose `counts_as_vacation` flag is
+/// Total workdays across all categories whose `cost_type='vacation'` is
 /// set. Used by the team report's vacation columns; previously this was
 /// `workdays_total(pool, id, "vacation", ...)`.
 pub async fn vacation_workdays(
@@ -873,10 +873,8 @@ mod tests {
             color: "#000000".to_string(),
             sort_order: 0,
             active: true,
-            counts_as_vacation: false,
-            keeps_work_target: false,
+            cost_type: "none".to_string(),
             auto_approve_past,
-            team_visible: false,
         }
     }
 

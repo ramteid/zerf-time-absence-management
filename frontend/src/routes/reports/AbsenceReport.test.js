@@ -52,9 +52,9 @@ describe("AbsenceReport", () => {
     earliestStartDate.set(null);
     currentUser.set({ id: 1, role: "employee", tracks_time: true });
     const cats = [
-      { id: 1, slug: "vacation", name: "Vacation", keeps_work_target: false },
-      { id: 2, slug: "sick", name: "Sick", keeps_work_target: false },
-      { id: 7, slug: "flextime_reduction", name: "Flextime Reduction", keeps_work_target: true },
+      { id: 1, slug: "vacation", name: "Vacation", cost_type: "vacation", auto_approve_past: false },
+      { id: 2, slug: "sick", name: "Sick", cost_type: "none", auto_approve_past: true },
+      { id: 7, slug: "flextime_reduction", name: "Flextime Reduction", cost_type: "flextime", auto_approve_past: false },
     ];
     absenceCategories.set(cats);
     setAbsenceCategoryCache(cats);
