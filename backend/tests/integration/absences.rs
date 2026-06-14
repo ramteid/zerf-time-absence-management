@@ -1259,3 +1259,122 @@ async fn edit_requested_absence_allowed_when_inactive_category_unchanged() {
 
     app.cleanup().await;
 }
+
+/// Covers Bug 9: an admin must not be able to toggle a category's cost or
+/// approval flags (`counts_as_vacation`, `keeps_work_target`,
+/// `auto_approve_past`) while it still has at least one referencing absence.
+/// Doing so would silently mutate the financial / approval meaning of those
+/// existing rows — past balance recomputations would suddenly debit or
+/// credit different ledgers, and the approval workflow would relax or
+/// tighten without affected employees seeing it. The right escape hatch is
+/// to deactivate the category and create a new one with the desired flags.
+#[tokio::test]
+async fn absence_category_cost_flag_change_blocked_when_in_use() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (_lead_id, _lead_pw, _emp_id, emp_pw, _, _cat_id) =
+        bootstrap_team(&app, &admin, false).await;
+    let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
+
+    // Look up the seeded `training` category id (counts_as_vacation=false,
+    // keeps_work_target=false, auto_approve_past=false).
+    let (_, cats_body) = admin.get("/api/v1/absence-categories/all").await;
+    let training_cat_id = cats_body
+        .as_array()
+        .expect("categories array")
+        .iter()
+        .find(|c| c["slug"].as_str() == Some("training"))
+        .expect("training seeded category exists")["id"]
+        .as_i64()
+        .expect("id is int");
+
+    // Without any referencing absences, the admin can freely toggle the flag.
+    let (st, _) = admin
+        .put(
+            &format!("/api/v1/absence-categories/{training_cat_id}"),
+            &json!({"auto_approve_past": true}),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::OK,
+        "toggling flag must work while category is unused"
+    );
+    // Revert so the rest of the test starts from a clean state.
+    let (st, _) = admin
+        .put(
+            &format!("/api/v1/absence-categories/{training_cat_id}"),
+            &json!({"auto_approve_past": false}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "revert flag");
+
+    // Once an employee submits a request in this category, the flag is locked.
+    let training_day = next_monday(20).format("%Y-%m-%d").to_string();
+    let (st, _) = emp
+        .post(
+            "/api/v1/absences",
+            &json!({"kind":"training","start_date": training_day,"end_date": training_day}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create training absence");
+
+    // Attempting to toggle counts_as_vacation now must be rejected — flipping
+    // it on would retroactively debit the employee's annual leave for an
+    // already-approved-or-pending range they never agreed to.
+    let (st, body) = admin
+        .put(
+            &format!("/api/v1/absence-categories/{training_cat_id}"),
+            &json!({"counts_as_vacation": true}),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::BAD_REQUEST,
+        "counts_as_vacation flip must be blocked while category is in use: {body}"
+    );
+
+    // Same protection for keeps_work_target.
+    let (st, body) = admin
+        .put(
+            &format!("/api/v1/absence-categories/{training_cat_id}"),
+            &json!({"keeps_work_target": true}),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::BAD_REQUEST,
+        "keeps_work_target flip must be blocked while category is in use: {body}"
+    );
+
+    // Same protection for auto_approve_past.
+    let (st, body) = admin
+        .put(
+            &format!("/api/v1/absence-categories/{training_cat_id}"),
+            &json!({"auto_approve_past": true}),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::BAD_REQUEST,
+        "auto_approve_past flip must be blocked while category is in use: {body}"
+    );
+
+    // Cosmetic changes (name, color, sort_order, active, team_visible) MUST
+    // still be allowed — they don't change the financial meaning of existing
+    // rows. The Bug 6 fix relies on `active=false` being permitted even when
+    // the category has referencing absences.
+    let (st, _) = admin
+        .put(
+            &format!("/api/v1/absence-categories/{training_cat_id}"),
+            &json!({"name": "Training (renamed)", "color": "#aabbcc", "team_visible": false, "active": false}),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::OK,
+        "cosmetic + active + team_visible changes must still be allowed"
+    );
+
+    app.cleanup().await;
+}

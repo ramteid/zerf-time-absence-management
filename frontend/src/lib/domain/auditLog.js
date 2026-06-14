@@ -95,7 +95,13 @@ export function summarize(entry, translate) {
   }
 
   if (entry.table_name === "absences") {
-    const kind = payload.kind ? absenceKindLabel(payload.kind) : null;
+    // The audit log preserves the absence row as it was at action time,
+    // including `category_name` from the joined category. Pass it through
+    // as the fallback so labels still localize even when the category was
+    // later deactivated and dropped from the active-only store cache.
+    const kind = payload.kind
+      ? absenceKindLabel(payload.kind, payload.category_name)
+      : null;
     if (payload.start_date && payload.end_date) {
       const range = `${fmtDateShort(payload.start_date)} - ${fmtDateShort(payload.end_date)}`;
       return kind ? `${kind}, ${range}` : range;
@@ -156,7 +162,11 @@ export function subjectUserLabel(entry, userMap) {
   return userMap.get(subjectId) || `#${subjectId}`;
 }
 
-export function fmtFieldVal(key, val, userMap, translate) {
+// `rowPayload` is the parent JSON object (before/after_data) that `val`
+// came from. We pass it through so kind formatting can pick up the
+// sibling `category_name` field as a fallback for inactive categories
+// that are missing from the active-only frontend store cache.
+export function fmtFieldVal(key, val, userMap, translate, rowPayload) {
   if (val == null) return null;
   if (key === "user_id") return userMap.get(val) || `#${val}`;
   if (DATE_FIELDS.has(key)) {
@@ -166,7 +176,7 @@ export function fmtFieldVal(key, val, userMap, translate) {
       return String(val);
     }
   }
-  if (key === "kind") return absenceKindLabel(val);
+  if (key === "kind") return absenceKindLabel(val, rowPayload?.category_name);
   if (typeof val === "boolean") return val ? translate("Yes") : translate("No");
   return String(val);
 }
@@ -181,8 +191,8 @@ export function extractDetailRows(entry, userMap, translate) {
   const result = [];
 
   for (const key of fields) {
-    const bFmt = fmtFieldVal(key, before?.[key] ?? null, userMap, translate);
-    const aFmt = fmtFieldVal(key, after?.[key] ?? null, userMap, translate);
+    const bFmt = fmtFieldVal(key, before?.[key] ?? null, userMap, translate, before);
+    const aFmt = fmtFieldVal(key, after?.[key] ?? null, userMap, translate, after);
     if (bFmt == null && aFmt == null) continue;
     if (hasBoth && bFmt === aFmt) continue;
     result.push({

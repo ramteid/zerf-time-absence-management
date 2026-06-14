@@ -591,6 +591,8 @@ const TRANSLATIONS = {
       "Der Kostentyp der Abwesenheitskategorie (Urlaub ↔ Gleitzeit) kann nicht geändert werden. Bitte Abwesenheit stornieren und neu beantragen.",
     "Absence category slug already exists.": "Abwesenheitskategorie-Slug existiert bereits.",
     "A category cannot both deduct vacation and reduce flextime.": "Eine Kategorie kann nicht gleichzeitig Urlaub abziehen und Gleitzeit reduzieren.",
+    "Cannot change the cost or approval behavior of a category that already has absences. Deactivate this category and create a new one with the desired flags instead.":
+      "Die Kosten- oder Genehmigungs-Logik einer Kategorie mit bereits vorhandenen Abwesenheiten kann nicht geändert werden. Bitte diese Kategorie deaktivieren und eine neue mit den gewünschten Eigenschaften anlegen.",
     "General Settings": "Allgemeine Einstellungen",
     General: "Allgemein",
     Organization: "Organisation",
@@ -1521,7 +1523,19 @@ export function setAbsenceCategoryCache(categories) {
   _absenceCategoryCache = categories || [];
 }
 
-export function absenceKindLabel(kind) {
+// Render an absence category's display label for a given slug.
+//
+// The store-backed cache only carries ACTIVE categories (the
+// `/absence-categories` endpoint that populates it intentionally hides
+// inactive ones from the request dialog), so a slug from an absence whose
+// category has since been deactivated would otherwise resolve to the raw
+// slug. Callers that have access to the absence's stored category name
+// (e.g. via audit-log payloads, calendar entry responses, etc.) should
+// pass it as `fallbackName` — we then translate it via the regular table
+// so seeded categories like "Vacation" still localize to "Urlaub" in German.
+export function absenceKindLabel(kind, fallbackName) {
   const cat = _absenceCategoryCache.find((c) => c.slug === kind);
-  return translate(get(language), cat?.name || kind);
+  if (cat) return translate(get(language), cat.name);
+  if (fallbackName) return translate(get(language), fallbackName);
+  return translate(get(language), kind);
 }
