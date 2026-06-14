@@ -210,8 +210,7 @@ async fn load_auto_break_config(
 
     // Optional tier-2: only added when both fields are valid.
     let threshold2_str =
-        crate::services::settings::load_setting(pool, AUTO_BREAK_THRESHOLD_HOURS_2_KEY, "")
-            .await?;
+        crate::services::settings::load_setting(pool, AUTO_BREAK_THRESHOLD_HOURS_2_KEY, "").await?;
     let deduction2_str =
         crate::services::settings::load_setting(pool, AUTO_BREAK_DEDUCTION_MINUTES_2_KEY, "")
             .await?;
@@ -916,12 +915,12 @@ pub fn csv_response(r: MonthReport, uid: i64, file_label: &str) -> AppResult<Res
                         entry.status.clone(),
                         safe(&entry.comment.clone().unwrap_or_default()),
                         // Use the stored category display name rather than the raw slug so admin-
-                    // created categories (whose slugs are normalized identifiers like
-                    // "comp_time_q3") render with their real name in the export. Seeded
-                    // categories already store their canonical English name ("Vacation",
-                    // "Sick Leave", ...) — consistent with how the day's weekday is
-                    // exported in English regardless of UI language.
-                    safe(&day.absence_name.clone().unwrap_or_default()),
+                        // created categories (whose slugs are normalized identifiers like
+                        // "comp_time_q3") render with their real name in the export. Seeded
+                        // categories already store their canonical English name ("Vacation",
+                        // "Sick Leave", ...) — consistent with how the day's weekday is
+                        // exported in English regardless of UI language.
+                        safe(&day.absence_name.clone().unwrap_or_default()),
                         safe(&day.holiday.clone().unwrap_or_default()),
                     ])
                     .map_err(csv_err)?;
@@ -1587,7 +1586,9 @@ mod tests {
             NaiveDate::from_ymd_opt(2026, 5, 11).unwrap(),
             "vacation".to_string(),
         )];
-        let flags = AbsenceCategoryFlags { by_slug: Default::default() };
+        let flags = AbsenceCategoryFlags {
+            by_slug: Default::default(),
+        };
         let set = expand_absence_date_set(&ranges, from, to, &flags);
         assert_eq!(set.len(), 2);
         assert!(set.contains(&NaiveDate::from_ymd_opt(2026, 5, 10).unwrap()));
@@ -1615,11 +1616,15 @@ mod tests {
         let mut by_slug = std::collections::HashMap::new();
         by_slug.insert(
             "flextime_reduction".to_string(),
-            CategoryFlagSet { keeps_work_target: true },
+            CategoryFlagSet {
+                keeps_work_target: true,
+            },
         );
         by_slug.insert(
             "vacation".to_string(),
-            CategoryFlagSet { keeps_work_target: false },
+            CategoryFlagSet {
+                keeps_work_target: false,
+            },
         );
         let flags = AbsenceCategoryFlags { by_slug };
         let set = expand_absence_date_set(&ranges, from, to, &flags);
@@ -1746,7 +1751,9 @@ mod tests {
     fn expand_absence_date_set_returns_empty_for_no_ranges() {
         let from = NaiveDate::from_ymd_opt(2026, 5, 1).unwrap();
         let to = NaiveDate::from_ymd_opt(2026, 5, 31).unwrap();
-        let flags = AbsenceCategoryFlags { by_slug: Default::default() };
+        let flags = AbsenceCategoryFlags {
+            by_slug: Default::default(),
+        };
         let set = expand_absence_date_set(&[], from, to, &flags);
         assert!(set.is_empty());
     }

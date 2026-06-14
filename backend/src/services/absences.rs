@@ -78,7 +78,10 @@ pub fn absence_period_params(
 ) -> Vec<(&'static str, String)> {
     vec![
         ("requester_name", requester.full_name()),
-        ("kind", i18n::absence_kind_label(language, &absence.kind, &absence.category_name)),
+        (
+            "kind",
+            i18n::absence_kind_label(language, &absence.kind, &absence.category_name),
+        ),
         (
             "start_date",
             i18n::format_date(language, absence.start_date),
@@ -555,9 +558,7 @@ pub async fn update_absence(
             absence_id,
         )
         .await;
-    } else if absence_after_update.auto_approve_past
-        && absence_after_update.status == "approved"
-    {
+    } else if absence_after_update.auto_approve_past && absence_after_update.status == "approved" {
         notify_sick_auto_approved(app_state, requester, &absence_after_update, absence_id).await;
     }
     Ok(absence_after_update)
@@ -602,7 +603,10 @@ pub async fn cancel_absence(
     let language = notification_language(&app_state.pool).await;
     let approver_params = vec![
         ("requester_name", requester.full_name()),
-        ("kind", i18n::absence_kind_label(&language, &absence.kind, &absence.category_name)),
+        (
+            "kind",
+            i18n::absence_kind_label(&language, &absence.kind, &absence.category_name),
+        ),
         (
             "start_date",
             i18n::format_date(&language, absence.start_date),
@@ -773,7 +777,10 @@ pub async fn approve_absence(
     .await;
     let language = notification_language(&app_state.pool).await;
     let notify_params = vec![
-        ("kind", i18n::absence_kind_label(&language, &absence.kind, &absence.category_name)),
+        (
+            "kind",
+            i18n::absence_kind_label(&language, &absence.kind, &absence.category_name),
+        ),
         (
             "start_date",
             i18n::format_date(&language, absence.start_date),
@@ -864,7 +871,10 @@ pub async fn reject_absence(
     .await;
     let language = notification_language(&app_state.pool).await;
     let notify_params = vec![
-        ("kind", i18n::absence_kind_label(&language, &absence.kind, &absence.category_name)),
+        (
+            "kind",
+            i18n::absence_kind_label(&language, &absence.kind, &absence.category_name),
+        ),
         (
             "start_date",
             i18n::format_date(&language, absence.start_date),
@@ -951,7 +961,10 @@ pub async fn approve_cancellation_absence(
     .await;
     let language = notification_language(&app_state.pool).await;
     let notify_params = vec![
-        ("kind", i18n::absence_kind_label(&language, &absence.kind, &absence.category_name)),
+        (
+            "kind",
+            i18n::absence_kind_label(&language, &absence.kind, &absence.category_name),
+        ),
         (
             "start_date",
             i18n::format_date(&language, absence.start_date),
@@ -1037,7 +1050,10 @@ pub async fn reject_cancellation_absence(
     .await;
     let language = notification_language(&app_state.pool).await;
     let notify_params = vec![
-        ("kind", i18n::absence_kind_label(&language, &absence.kind, &absence.category_name)),
+        (
+            "kind",
+            i18n::absence_kind_label(&language, &absence.kind, &absence.category_name),
+        ),
         (
             "start_date",
             i18n::format_date(&language, absence.start_date),
@@ -1101,7 +1117,10 @@ pub async fn revoke_absence(
     .await;
     let language = notification_language(&app_state.pool).await;
     let notify_params = vec![
-        ("kind", i18n::absence_kind_label(&language, &absence.kind, &absence.category_name)),
+        (
+            "kind",
+            i18n::absence_kind_label(&language, &absence.kind, &absence.category_name),
+        ),
         (
             "start_date",
             i18n::format_date(&language, absence.start_date),

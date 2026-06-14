@@ -47,21 +47,25 @@ impl AbsenceCategoryDb {
     pub async fn list_active(&self) -> AppResult<Vec<AbsenceCategory>> {
         // AssertSqlSafe: the format interpolates only ABS_CAT_COLUMNS (a compile-time
         // constant), never user input.
-        Ok(sqlx::query_as::<_, AbsenceCategory>(sqlx::AssertSqlSafe(format!(
-            "SELECT {ABS_CAT_COLUMNS} FROM absence_categories \
+        Ok(
+            sqlx::query_as::<_, AbsenceCategory>(sqlx::AssertSqlSafe(format!(
+                "SELECT {ABS_CAT_COLUMNS} FROM absence_categories \
              WHERE active=TRUE ORDER BY sort_order, name"
-        )))
-        .fetch_all(&self.pool)
-        .await?)
+            )))
+            .fetch_all(&self.pool)
+            .await?,
+        )
     }
 
     pub async fn list_all(&self) -> AppResult<Vec<AbsenceCategory>> {
-        Ok(sqlx::query_as::<_, AbsenceCategory>(sqlx::AssertSqlSafe(format!(
-            "SELECT {ABS_CAT_COLUMNS} FROM absence_categories \
+        Ok(
+            sqlx::query_as::<_, AbsenceCategory>(sqlx::AssertSqlSafe(format!(
+                "SELECT {ABS_CAT_COLUMNS} FROM absence_categories \
              ORDER BY active DESC, sort_order, name"
-        )))
-        .fetch_all(&self.pool)
-        .await?)
+            )))
+            .fetch_all(&self.pool)
+            .await?,
+        )
     }
 
     pub async fn find_by_id(&self, id: i64) -> AppResult<Option<AbsenceCategory>> {
@@ -92,11 +96,13 @@ impl AbsenceCategoryDb {
     pub async fn behavior_map(&self) -> AppResult<Vec<AbsenceCategory>> {
         // Behavior decisions ignore the active flag: an existing absence row
         // whose category was deactivated must still be processed correctly.
-        Ok(sqlx::query_as::<_, AbsenceCategory>(sqlx::AssertSqlSafe(format!(
-            "SELECT {ABS_CAT_COLUMNS} FROM absence_categories"
-        )))
-        .fetch_all(&self.pool)
-        .await?)
+        Ok(
+            sqlx::query_as::<_, AbsenceCategory>(sqlx::AssertSqlSafe(format!(
+                "SELECT {ABS_CAT_COLUMNS} FROM absence_categories"
+            )))
+            .fetch_all(&self.pool)
+            .await?,
+        )
     }
 
     pub async fn create(&self, input: NewAbsenceCategory<'_>) -> AppResult<i64> {

@@ -186,7 +186,11 @@ async fn absences_full_workflow() {
                 &json!({"kind":"vacation","start_date": conflict_day,"end_date": conflict_day}),
             )
             .await;
-        assert_eq!(st, StatusCode::OK, "create requested absence after time entry");
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "create requested absence after time entry"
+        );
         let absence_id = id(&body);
 
         // New time entries on the same day must now be blocked (prevents deadlock
@@ -450,8 +454,10 @@ async fn absences_full_workflow() {
             .await;
         assert_eq!(st, StatusCode::OK, "calendar request");
         let rows = body.as_array().expect("calendar rows should be an array");
-        let visible_ids: HashSet<i64> =
-            rows.iter().filter_map(|row| row["user_id"].as_i64()).collect();
+        let visible_ids: HashSet<i64> = rows
+            .iter()
+            .filter_map(|row| row["user_id"].as_i64())
+            .collect();
 
         // After B9 (team_visible flag), the seeded `vacation` category is
         // team_visible=TRUE, so non-leads see other users' vacation entries
@@ -556,9 +562,7 @@ async fn absences_full_workflow() {
             if row["user_id"].as_i64() == Some(lead_id)
                 && row["start_date"].as_str() == Some(sick_day.as_str())
             {
-                panic!(
-                    "non-lead must not see team_visible=FALSE sick absence from lead: {row}"
-                );
+                panic!("non-lead must not see team_visible=FALSE sick absence from lead: {row}");
             }
         }
     }
@@ -1108,8 +1112,7 @@ async fn assistant_absence_any_weekday() {
 async fn flextime_balance_revalidated_at_approval() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
-    let (_lead_id, lead_pw, emp_id, emp_pw, _, _cat_id) =
-        bootstrap_team(&app, &admin, false).await;
+    let (_lead_id, lead_pw, emp_id, emp_pw, _, _cat_id) = bootstrap_team(&app, &admin, false).await;
     let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
     let lead = login_change_pw(&app, "lead-r@example.com", &lead_pw).await;
 
@@ -1132,7 +1135,11 @@ async fn flextime_balance_revalidated_at_approval() {
             &json!({"kind":"flextime_reduction","start_date":monday,"end_date":monday}),
         )
         .await;
-    assert_eq!(st, StatusCode::OK, "flextime request must pass while balance is sufficient: {body}");
+    assert_eq!(
+        st,
+        StatusCode::OK,
+        "flextime request must pass while balance is sufficient: {body}"
+    );
     let absence_id = id(&body);
 
     // Drain the balance: zeroing the seed leaves only the multi-million-minute

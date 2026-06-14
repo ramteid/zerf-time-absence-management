@@ -1306,7 +1306,13 @@ async fn absences_repository_workflow() {
     );
     assert_eq!(
         absences
-            .workdays_total_for_category_filtered(emp_id, training_cat.id, monday, friday, &["approved"])
+            .workdays_total_for_category_filtered(
+                emp_id,
+                training_cat.id,
+                monday,
+                friday,
+                &["approved"]
+            )
             .await
             .expect("filtered workdays total"),
         3.0

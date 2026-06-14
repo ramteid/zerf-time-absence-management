@@ -559,13 +559,12 @@ impl AbsenceDb {
     pub async fn cancel(&self, absence_id: i64, owner_id: i64) -> AppResult<Absence> {
         let mut tx = self.pool.begin().await?;
         Self::lock_user_scope_tx(&mut tx, owner_id).await?;
-        let before: Absence = QueryBuilder::<Postgres>::new(format!(
-            "{ABS_SELECT} WHERE a.id=$1 FOR UPDATE OF a"
-        ))
-        .build_query_as::<Absence>()
-        .bind(absence_id)
-        .fetch_one(&mut *tx)
-        .await?;
+        let before: Absence =
+            QueryBuilder::<Postgres>::new(format!("{ABS_SELECT} WHERE a.id=$1 FOR UPDATE OF a"))
+                .build_query_as::<Absence>()
+                .bind(absence_id)
+                .fetch_one(&mut *tx)
+                .await?;
         sqlx::query("UPDATE absences SET status='cancelled' WHERE id=$1")
             .bind(absence_id)
             .execute(&mut *tx)
@@ -675,13 +674,13 @@ impl AbsenceDb {
         tx: &mut sqlx::PgConnection,
         absence_id: i64,
     ) -> AppResult<Absence> {
-        Ok(QueryBuilder::<Postgres>::new(format!(
-            "{ABS_SELECT} WHERE a.id=$1 FOR UPDATE OF a"
-        ))
-        .build_query_as::<Absence>()
-        .bind(absence_id)
-        .fetch_one(tx)
-        .await?)
+        Ok(
+            QueryBuilder::<Postgres>::new(format!("{ABS_SELECT} WHERE a.id=$1 FOR UPDATE OF a"))
+                .build_query_as::<Absence>()
+                .bind(absence_id)
+                .fetch_one(tx)
+                .await?,
+        )
     }
 
     pub async fn is_direct_report_for_update(
