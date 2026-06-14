@@ -161,6 +161,12 @@ pub async fn calendar(
         .absences
         .calendar_scope_user_ids(requester.id, requester.is_admin(), requester.is_lead())
         .await?;
+    // HashSet for O(1) "is this entry in the lead's report scope?" lookup
+    // in the per-entry comment-visibility decision below. `None` means the
+    // requester is an admin (no scope restriction → in-scope for everything).
+    let in_scope_ids: Option<std::collections::HashSet<i64>> = scope_user_ids
+        .as_ref()
+        .map(|ids| ids.iter().copied().collect());
     let calendar_entries = app_state
         .db
         .absences
@@ -169,17 +175,40 @@ pub async fn calendar(
     let requester_is_lead = requester.is_lead();
     Ok(Json(calendar_entries.into_iter().map(|entry| {
         let is_own_entry = entry.user_id == requester.id;
-        // The `team_visible` flag on each category controls calendar privacy:
-        // sick leave (GDPR Art. 9) is false; vacation, training, etc. are true.
-        // Non-leads only see the real kind when the category opts in.
-        let kind_visible = requester_is_lead || is_own_entry || entry.team_visible;
+        // "Owner is in the requester's normal scope" — admins see everyone,
+        // leads see their direct reports, non-leads see only themselves.
+        // The SQL widens the result set to ALSO include team_visible=TRUE
+        // entries from OUT-of-scope users, but we need to remember the
+        // distinction here so a lead viewing a non-report's team-visible
+        // vacation does NOT also get to read the comment.
+        let owner_in_scope = match &in_scope_ids {
+            None => true,
+            Some(ids) => ids.contains(&entry.user_id),
+        };
+        // Privacy gate for the displayed kind. Note: the SQL in
+        // `calendar_entries` already filters non-lead viewers to
+        //   (own entries) OR (team_visible = TRUE)
+        // so this check is currently always true. We keep it as a defensive
+        // belt-and-suspenders so that any future change to the SQL scope
+        // (e.g. allowing admins to peek at cross-team sick leave) can't
+        // accidentally leak a kind that should stay masked. The "absent"
+        // placeholder is what the frontend treats as the privacy-masked
+        // fallback (see MASKED_ABSENCE_COLOR / absenceKindLabel).
+        let kind_visible = (requester_is_lead && owner_in_scope) || is_own_entry || entry.team_visible;
         let displayed_kind = if kind_visible { entry.kind.clone() } else { "absent".to_string() };
+        // Comments may contain personal context ("doctor's appointment",
+        // "funeral", ...) that is more sensitive than the category itself.
+        // We show comments only to the owner OR to a lead viewing one of
+        // their own direct reports — NOT to a lead viewing some other
+        // team's team_visible entry, even though they see the kind there.
+        // This preserves the pre-B9 comment privacy model exactly.
+        let comment_visible = is_own_entry || (requester_is_lead && owner_in_scope);
         serde_json::json!({
             "id": entry.id, "user_id": entry.user_id, "name": format!("{} {}", entry.first_name, entry.last_name),
             "kind": displayed_kind,
             "start_date": entry.start_date, "end_date": entry.end_date,
             "status": entry.status,
-            "comment": if requester_is_lead || is_own_entry { entry.comment.clone() } else { None }
+            "comment": if comment_visible { entry.comment.clone() } else { None }
         })
     }).collect()))
 }

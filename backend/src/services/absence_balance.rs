@@ -502,31 +502,55 @@ pub async fn validate_flextime_balance(
     .parse::<i64>()
     .unwrap_or(0);
 
-    // Current flextime balance = cumulative balance at end of yesterday.
-    // build_flextime_for_user(today, today) seeds with yesterday's balance;
-    // today's diff is 0 (future), so cumulative_min on the first element equals
-    // the seeded value — i.e., the balance "as of yesterday".
+    // (1) Current flextime balance = cumulative balance through end-of-yesterday.
+    // `build_flextime_for_user(today, today)` seeds cumulative_min with the
+    // balance as it stood yesterday, then iterates one day (today). Today's
+    // contribution is zero because `after_today` zeroes both `target` and
+    // `actual` for today and beyond, so the first row's `cumulative_min`
+    // equals the seeded yesterday-balance unchanged.
     let today = crate::services::settings::app_today(pool).await;
     let flextime_days =
         crate::services::reports::build_flextime_for_user(pool, user, today, today).await?;
     let current_balance_min = flextime_days.first().map(|d| d.cumulative_min).unwrap_or(0);
 
-    // (2) Committed-but-not-yet-realised flextime usage from other absences.
+    // (2) Committed-but-not-yet-realised flextime usage from OTHER absences.
+    //
+    // `keeps_work_target=true` absences cost `target_per_day_min` per workday
+    // because the day keeps its target while the user logs zero hours. Past
+    // portions of these absences are ALREADY reflected in current_balance
+    // (build_flextime_for_user processed those days with target = target_per_day_min
+    // and actual = 0), so we count only the future portion (`max(start, today)`
+    // through `end`) to avoid double-charging.
+    //
+    // Including `requested` and `cancellation_pending` is conservative: a
+    // pending request will probably be approved; a cancellation request might
+    // not be honoured. Both COULD reduce the future balance, so we treat them
+    // as committed for safety. The `exclude_id` skips the absence we're
+    // validating right now (it would otherwise count itself in step 2 AND in
+    // step 3 below).
     let committed_ranges =
         AbsenceDb::keeps_work_target_ranges_after_tx(tx, user.id, today, exclude_id).await?;
     let mut committed_cost_min: i64 = 0;
     for (range_start, range_end) in &committed_ranges {
         let effective_start = std::cmp::max(*range_start, today);
         if effective_start > *range_end {
+            // Range was entirely in the past — already in current_balance, skip.
             continue;
         }
         let days = workdays(pool, user.id, effective_start, *range_end).await?;
         committed_cost_min += (days * target_per_day_min as f64).round() as i64;
     }
 
-    // (3) Future portion of the proposed range — past days are already in current_balance.
+    // (3) Future portion of the proposed range. Same reasoning as (2): days
+    // before today were already counted in current_balance with the target
+    // preserved (because keeps_work_target=true never removes the target),
+    // so approving/creating the absence doesn't add NEW cost for those days.
+    // Only the future portion of the new range is a fresh deduction.
     let proposed_start = std::cmp::max(start_date, today);
     let proposed_cost_min = if proposed_start > end_date {
+        // Entirely backdated — no new future cost. The check below then
+        // reduces to "current_balance - committed_cost >= floor", verifying
+        // that already-pending commitments don't already breach the floor.
         0
     } else {
         let days = workdays(pool, user.id, proposed_start, end_date).await?;
