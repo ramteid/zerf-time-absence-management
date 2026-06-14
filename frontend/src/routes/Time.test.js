@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mount, unmount } from "svelte";
 import Time from "./Time.svelte";
-import { currentUser, path, settings } from "../stores.js";
-import { setLanguage } from "../i18n.js";
+import { currentUser, path, settings, absenceCategories } from "../stores.js";
+import { setLanguage, setAbsenceCategoryCache } from "../i18n.js";
 
 const mockState = vi.hoisted(() => ({
   entries: [],
@@ -62,6 +62,17 @@ describe("Time", () => {
     });
     settings.set({ time_format: "24h" });
     setLanguage("en");
+    // Seed the absenceCategories store so absenceRemovesTarget / absenceBlocksEntry
+    // (which read keeps_work_target / auto_approve_past from the store) behave
+    // correctly. Without this they fall back to "removes target" / "blocks entry"
+    // for every kind, which breaks every flextime-reduction-related assertion.
+    const cats = [
+      { id: 1, slug: "vacation", name: "Vacation", keeps_work_target: false, auto_approve_past: false },
+      { id: 2, slug: "sick", name: "Sick", keeps_work_target: false, auto_approve_past: true },
+      { id: 3, slug: "flextime_reduction", name: "Flextime Reduction", keeps_work_target: true, auto_approve_past: false },
+    ];
+    absenceCategories.set(cats);
+    setAbsenceCategoryCache(cats);
     mockState.entries = [];
     mockState.absences = [];
     mockState.holidays = [];
