@@ -446,36 +446,49 @@ async fn absences_full_workflow() {
             .get(&format!("/api/v1/absences/calendar?month={month}"))
             .await;
         assert_eq!(st, StatusCode::OK, "calendar request");
-        let visible_ids: HashSet<i64> = body
-            .as_array()
-            .expect("calendar rows should be an array")
-            .iter()
-            .filter_map(|row| row["user_id"].as_i64())
-            .collect();
+        let rows = body.as_array().expect("calendar rows should be an array");
+        let visible_ids: HashSet<i64> =
+            rows.iter().filter_map(|row| row["user_id"].as_i64()).collect();
 
-        // Employee must see their own absence.
+        // After B9 (team_visible flag), the seeded `vacation` category is
+        // team_visible=TRUE, so non-leads see other users' vacation entries
+        // in the team calendar — that is the whole point of the flag.
         assert!(
             visible_ids.contains(&emp_id),
             "employee must see their own absence"
         );
-        // Employees and assistants must not see anyone else.
         assert!(
-            !visible_ids.contains(&lead_id),
-            "approver must not be visible in employee calendar"
+            visible_ids.contains(&lead_id),
+            "non-lead must see team_visible=TRUE vacation from approver"
         );
         assert!(
-            !visible_ids.contains(&peer_id),
-            "peer must not be visible in employee calendar"
+            visible_ids.contains(&peer_id),
+            "non-lead must see team_visible=TRUE vacation from peers"
         );
         assert!(
-            !visible_ids.contains(&outsider_id),
-            "outsider must not be visible in employee calendar"
+            visible_ids.contains(&outsider_id),
+            "non-lead must see team_visible=TRUE vacation across teams"
         );
-        for id in &visible_ids {
-            assert_eq!(*id, emp_id, "only the requester's own entries may appear");
+        // Real kind is visible because team_visible=TRUE for vacation; comment
+        // remains hidden for non-own non-lead entries.
+        for row in rows {
+            let user_id = row["user_id"].as_i64().unwrap();
+            if user_id != emp_id {
+                assert_eq!(
+                    row["kind"].as_str(),
+                    Some("vacation"),
+                    "team_visible vacation must show real kind, not masked 'absent'"
+                );
+                assert!(
+                    row["comment"].is_null(),
+                    "non-own absence comment must remain hidden"
+                );
+            }
         }
 
-        // Leads still see their direct reports in the calendar view.
+        // Leads see their direct reports (full info) AND all team_visible=TRUE
+        // entries from out-of-scope users (with kind shown). They never lose
+        // visibility compared to non-leads.
         let (st, body) = lead
             .get(&format!("/api/v1/absences/calendar?month={month}"))
             .await;
@@ -496,9 +509,42 @@ async fn absences_full_workflow() {
             "lead sees emp (direct report)"
         );
         assert!(
-            !lead_visible.contains(&outsider_id),
-            "lead does not see users outside their reports"
+            lead_visible.contains(&outsider_id),
+            "lead also sees out-of-scope users' team_visible=TRUE entries"
         );
+    }
+
+    // -- Privacy: a team_visible=FALSE category from a non-scope user must NOT
+    // -- appear at all in a non-lead's calendar, regardless of date. This
+    // -- protects GDPR Art. 9 health data (sick leave) and any admin category
+    // -- explicitly marked as private.
+    {
+        // The lead has team_visible=TRUE vacation already. Add a team_visible=FALSE
+        // sick absence for the lead and verify it is not exposed to the employee.
+        let sick_day = next_monday(36).format("%Y-%m-%d").to_string();
+        let sick_month = sick_day[..7].to_string();
+        let (st, _) = lead
+            .post(
+                "/api/v1/absences",
+                &json!({"kind":"sick","start_date": sick_day,"end_date": sick_day}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "create lead sick absence");
+
+        let (st, body) = emp
+            .get(&format!("/api/v1/absences/calendar?month={sick_month}"))
+            .await;
+        assert_eq!(st, StatusCode::OK, "emp sick-month calendar request");
+        let rows = body.as_array().expect("calendar rows should be an array");
+        for row in rows {
+            if row["user_id"].as_i64() == Some(lead_id)
+                && row["start_date"].as_str() == Some(sick_day.as_str())
+            {
+                panic!(
+                    "non-lead must not see team_visible=FALSE sick absence from lead: {row}"
+                );
+            }
+        }
     }
 
     // -- Absences list rejects invalid year query --

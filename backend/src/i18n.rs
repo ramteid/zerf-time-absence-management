@@ -356,11 +356,29 @@ pub fn work_category_label(language: &Language, category_name: &str) -> String {
     }
 }
 
-/// Returns the localised label for an absence kind identifier (e.g. `"sick"`).
-/// Falls back to the raw kind string when no translation is available.
-pub fn absence_kind_label(language: &Language, kind: &str) -> String {
-    let key = format!("absence_kind_{kind}");
-    translate(language, &key, &[])
+/// Returns the localised label for an absence category. For seeded slugs
+/// (vacation, sick, training, …) the `absence_kind_<slug>` translation key is
+/// honoured so existing translations still apply. For admin-created custom
+/// categories no per-slug translation exists, so the function falls back to
+/// the category's stored `name`, which the admin chose when creating it.
+///
+/// This is the canonical way to format an absence category's display name in
+/// backend output (notifications, emails, PDF). Callers should pass the slug
+/// and the stored category name together — both are present on `Absence` rows
+/// via the join in `ABS_SELECT`.
+pub fn absence_kind_label(language: &Language, slug: &str, name: &str) -> String {
+    let key = format!("absence_kind_{slug}");
+    let translated = translate(language, &key, &[]);
+    if translated != key {
+        // Seeded slug: a translation existed.
+        return translated;
+    }
+    // Custom admin category: fall back to the stored name. We deliberately
+    // avoid translating the name itself — there's no guarantee an admin's
+    // name happens to match a key in the static translation table, and
+    // routing every absence label through `translate` would produce
+    // misleading "translations" for incidental key collisions.
+    name.to_string()
 }
 
 /// Returns the localised weekday name for an English weekday identifier as
@@ -585,23 +603,27 @@ mod tests {
         assert_eq!(work_category_label(&en, "Training"), "Training");
     }
 
-    /// `absence_kind_label` must produce localised strings for known kinds and
-    /// fall back to the raw key for unknown kinds.
+    /// `absence_kind_label` must produce localised strings for seeded slugs
+    /// (using `absence_kind_<slug>` keys) and fall back to the stored category
+    /// name for admin-created custom categories.
     #[test]
     fn absence_kind_label_localises_known_kinds() {
         let en = Language::from_setting("en");
-        assert_eq!(absence_kind_label(&en, "vacation"), "Vacation");
-        assert_eq!(absence_kind_label(&en, "sick"), "Sick");
+        // Seeded slugs honour their translation key regardless of the supplied name.
+        assert_eq!(absence_kind_label(&en, "vacation", "anything"), "Vacation");
+        assert_eq!(absence_kind_label(&en, "sick", "anything"), "Sick");
         assert_eq!(
-            absence_kind_label(&en, "flextime_reduction"),
+            absence_kind_label(&en, "flextime_reduction", "anything"),
             "Flextime Reduction"
         );
 
         let de = Language::from_setting("de");
-        assert_eq!(absence_kind_label(&de, "vacation"), "Urlaub");
-        assert_eq!(absence_kind_label(&de, "sick"), "Krankmeldung");
-        // Unknown kind falls back to the key itself.
-        assert_eq!(absence_kind_label(&de, "mystery"), "absence_kind_mystery");
+        assert_eq!(absence_kind_label(&de, "vacation", "anything"), "Urlaub");
+        assert_eq!(absence_kind_label(&de, "sick", "anything"), "Krankmeldung");
+
+        // Custom admin slug: falls back to the stored category name in both languages.
+        assert_eq!(absence_kind_label(&en, "comp_time", "Comp Time"), "Comp Time");
+        assert_eq!(absence_kind_label(&de, "comp_time", "Comp Time"), "Comp Time");
     }
 
     /// `format_datetime_in_timezone` must apply the given timezone offset and

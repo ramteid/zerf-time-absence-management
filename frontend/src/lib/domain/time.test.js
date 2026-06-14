@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
   absenceBlocksEntry,
   absenceRemovesTarget,
@@ -10,8 +10,24 @@ import {
   weekStatus,
   weekTargetMinutes,
 } from "./time.js";
+import { absenceCategories } from "../../stores.js";
+
+// absenceBlocksEntry / absenceRemovesTarget read category behavior flags from
+// the absenceCategories store. Seed it with the configurable categories so the
+// helpers can resolve slugs to flags.
+const CATEGORIES = [
+  { id: 1, slug: "vacation", name: "Vacation", keeps_work_target: false, auto_approve_past: false },
+  { id: 2, slug: "sick", name: "Sick", keeps_work_target: false, auto_approve_past: true },
+  { id: 3, slug: "flextime_reduction", name: "Flextime Reduction", keeps_work_target: true, auto_approve_past: false },
+  { id: 4, slug: "custom_flex", name: "Comp Time", keeps_work_target: true, auto_approve_past: false },
+  { id: 5, slug: "custom_sick", name: "Bereavement", keeps_work_target: false, auto_approve_past: true },
+];
 
 describe("time domain helpers", () => {
+  beforeEach(() => {
+    absenceCategories.set(CATEGORIES);
+  });
+
   it("filters invalid week absences and deduplicates cross-year loads", () => {
     const rows = filterWeekAbsences(
       [
@@ -143,6 +159,19 @@ describe("time domain helpers", () => {
     expect(absenceRemovesTarget({ kind: "vacation", status: "requested" })).toBe(false);
     // Target is NEVER removed for flextime_reduction (it keeps the work target):
     expect(absenceRemovesTarget({ kind: "flextime_reduction", status: "approved" })).toBe(false);
+  });
+
+  it("absenceRemovesTarget honours keeps_work_target for admin-created custom slugs", () => {
+    // A custom category with keeps_work_target=true must behave like
+    // flextime_reduction: the day still requires hours, so removeTarget=false.
+    expect(absenceRemovesTarget({ kind: "custom_flex", status: "approved" })).toBe(false);
+  });
+
+  it("absenceBlocksEntry honours auto_approve_past for admin-created custom sick-like slugs", () => {
+    // A custom category with auto_approve_past=true must behave like sick:
+    // time entries on the same day are allowed (block=false).
+    expect(absenceBlocksEntry({ kind: "custom_sick", status: "approved" })).toBe(false);
+    expect(absenceBlocksEntry({ kind: "custom_sick", status: "requested" })).toBe(false);
   });
 });
 

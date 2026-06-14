@@ -430,11 +430,13 @@ impl<'a> Renderer<'a> {
         let mut row_count: usize = 0;
         for day in &section.report.days {
             let weekday = i18n::weekday_label(self.language, &day.weekday);
-            let absence = day
-                .absence
-                .as_deref()
-                .map(|kind| i18n::absence_kind_label(self.language, kind))
-                .unwrap_or_default();
+            // Pass both slug and stored category name so admin-created custom
+            // categories (which have no static `absence_kind_<slug>` translation
+            // key) print with their real display name instead of the raw slug.
+            let absence = match (day.absence.as_deref(), day.absence_name.as_deref()) {
+                (Some(slug), Some(name)) => i18n::absence_kind_label(self.language, slug, name),
+                _ => String::new(),
+            };
             let holiday = day.holiday.clone().unwrap_or_default();
             if day.entries.is_empty() {
                 self.draw_row(

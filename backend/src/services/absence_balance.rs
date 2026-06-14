@@ -463,15 +463,29 @@ pub async fn carryover_remaining_days(input: CarryoverRemainingInput<'_>) -> App
     Ok((carryover_days as f64 - consumed).max(0.0))
 }
 
-/// Validate that a flextime-reduction absence does not push the user's flextime
-/// balance below the configured floor (default 0 minutes).
-/// Only called for categories where `keeps_work_target=true`.
+/// Validate that a flextime-cost absence (keeps_work_target=true) does not
+/// push the user's flextime balance below the configured floor.
+///
+/// The check accounts for:
+/// 1. The current balance as of end-of-yesterday (from `build_flextime_for_user`).
+/// 2. The future-portion cost of OTHER pending/approved/cancellation_pending
+///    keeps_work_target absences — these are committed deductions that haven't
+///    yet been realised in the balance. Without this, multiple requests that
+///    each individually fit could be approved together and breach the floor.
+/// 3. The future-portion cost of the proposed range itself (past days are
+///    already reflected in current_balance).
+///
+/// `exclude_id` excludes the absence being edited/approved from (2) so it is
+/// not double-counted with (3).
 pub async fn validate_flextime_balance(
     pool: &crate::db::DatabasePool,
+    tx: &mut crate::db::PgConnection,
     user: &crate::middleware::auth::User,
     start_date: NaiveDate,
     end_date: NaiveDate,
+    exclude_id: Option<i64>,
 ) -> AppResult<()> {
+    use crate::repository::AbsenceDb;
     // Assistants have no flextime account; irregular schedules have no fixed target.
     if crate::roles::is_assistant_role(&user.role) || user.workdays_per_week == 0 {
         return Ok(());
@@ -497,10 +511,29 @@ pub async fn validate_flextime_balance(
         crate::services::reports::build_flextime_for_user(pool, user, today, today).await?;
     let current_balance_min = flextime_days.first().map(|d| d.cumulative_min).unwrap_or(0);
 
-    let proposed_days = workdays(pool, user.id, start_date, end_date).await?;
-    let proposed_cost_min = (proposed_days * target_per_day_min as f64).round() as i64;
+    // (2) Committed-but-not-yet-realised flextime usage from other absences.
+    let committed_ranges =
+        AbsenceDb::keeps_work_target_ranges_after_tx(tx, user.id, today, exclude_id).await?;
+    let mut committed_cost_min: i64 = 0;
+    for (range_start, range_end) in &committed_ranges {
+        let effective_start = std::cmp::max(*range_start, today);
+        if effective_start > *range_end {
+            continue;
+        }
+        let days = workdays(pool, user.id, effective_start, *range_end).await?;
+        committed_cost_min += (days * target_per_day_min as f64).round() as i64;
+    }
 
-    if current_balance_min - proposed_cost_min < floor_min {
+    // (3) Future portion of the proposed range — past days are already in current_balance.
+    let proposed_start = std::cmp::max(start_date, today);
+    let proposed_cost_min = if proposed_start > end_date {
+        0
+    } else {
+        let days = workdays(pool, user.id, proposed_start, end_date).await?;
+        (days * target_per_day_min as f64).round() as i64
+    };
+
+    if current_balance_min - committed_cost_min - proposed_cost_min < floor_min {
         return Err(AppError::BadRequest(
             "Not enough flextime balance for this absence.".into(),
         ));

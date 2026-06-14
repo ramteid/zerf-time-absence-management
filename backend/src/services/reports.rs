@@ -109,7 +109,14 @@ pub struct DayDetail {
     pub entries: Vec<EntryDetail>,
     pub actual_min: i64,
     pub target_min: i64,
+    /// Absence category slug (`vacation`, `sick`, or an admin-created slug).
+    /// The frontend resolves this against the `absenceCategories` store to
+    /// look up the display name and color.
     pub absence: Option<String>,
+    /// Absence category stored display name. Required by the backend PDF
+    /// renderer (which has no access to the frontend store) so that custom
+    /// admin categories print with their real name rather than the raw slug.
+    pub absence_name: Option<String>,
     pub holiday: Option<String>,
 }
 
@@ -257,7 +264,7 @@ pub async fn build_range_with_user(
     // Pre-group by date so per-day lookups are O(1) instead of scanning all rows.
     let entries_by_date = group_entries_by_date(time_entry_rows);
 
-    let approved_absence_rows: Vec<(NaiveDate, NaiveDate, String)> =
+    let approved_absence_rows: Vec<(NaiveDate, NaiveDate, String, String)> =
         reports_db.approved_absence_rows(user_id, from, to).await?;
 
     // Per-build category flag lookup — used once per day to decide whether an
@@ -287,10 +294,13 @@ pub async fn build_range_with_user(
     let mut current_date = from;
     while current_date <= to {
         let holiday = holiday_map.get(&current_date).cloned();
-        let absence = approved_absence_rows
+        let active_absence = approved_absence_rows
             .iter()
-            .find(|(abs_start, abs_end, _)| current_date >= *abs_start && current_date <= *abs_end)
-            .map(|(_, _, kind)| kind.clone());
+            .find(|(abs_start, abs_end, _, _)| {
+                current_date >= *abs_start && current_date <= *abs_end
+            });
+        let absence = active_absence.map(|(_, _, kind, _)| kind.clone());
+        let absence_name = active_absence.map(|(_, _, _, name)| name.clone());
         let before_start = current_date < user.start_date;
         let after_today = current_date > today;
 
@@ -393,6 +403,7 @@ pub async fn build_range_with_user(
             actual_min: actual,
             target_min: target,
             absence,
+            absence_name,
             holiday,
         });
         current_date += Duration::days(1);
@@ -522,8 +533,10 @@ pub async fn build_flextime_for_user(
         .await?;
 
     // Expand absence ranges into a per-day map so each day can look up its kind in O(1).
+    // The category `name` is also tracked, but FlextimeDay only carries the slug
+    // (frontend resolves the display name from its store) so the name is ignored here.
     let mut absence_by_day: HashMap<NaiveDate, String> = HashMap::new();
-    for (absence_start, absence_end, absence_kind) in approved_absences {
+    for (absence_start, absence_end, absence_kind, _absence_name) in approved_absences {
         let mut day = absence_start.max(from);
         while day <= absence_end.min(to) {
             absence_by_day
@@ -1771,6 +1784,7 @@ mod tests {
             actual_min: 120,
             target_min: 480,
             absence: Some("+absence".to_string()),
+            absence_name: Some("+absence".to_string()),
             holiday: Some("\tholiday".to_string()),
         };
         let report = MonthReport {
