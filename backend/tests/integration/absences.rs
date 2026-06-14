@@ -428,9 +428,9 @@ async fn absences_full_workflow() {
             .await;
         assert_eq!(st, StatusCode::OK, "create peer absence");
 
-        // Outsider includes a comment so we can verify the lead-vs-non-lead
-        // privacy split below: leads must NOT see comments from users outside
-        // their report scope, even when the category is team_visible=TRUE.
+        // Outsider's absence has a comment so we can also verify that even
+        // the comment privacy doesn't have a backdoor: an employee must not
+        // see ANY data from a non-scope user, full stop.
         let (st, _) = outsider
             .post(
                 "/api/v1/absences",
@@ -459,51 +459,39 @@ async fn absences_full_workflow() {
             .filter_map(|row| row["user_id"].as_i64())
             .collect();
 
-        // After B9 (team_visible flag), the seeded `vacation` category is
-        // team_visible=TRUE, so non-leads see other users' vacation entries
-        // in the team calendar — that is the whole point of the flag.
+        // Strict scope rule: a regular employee sees ONLY their own absences
+        // in the calendar. No per-category carve-out exists — `team_visible`
+        // was removed in migration 019 because the scope rule is the single
+        // source of truth and the flag was redundant under it.
         assert!(
             visible_ids.contains(&emp_id),
             "employee must see their own absence"
         );
         assert!(
-            visible_ids.contains(&lead_id),
-            "non-lead must see team_visible=TRUE vacation from approver"
+            !visible_ids.contains(&lead_id),
+            "approver must NOT be visible in employee calendar"
         );
         assert!(
-            visible_ids.contains(&peer_id),
-            "non-lead must see team_visible=TRUE vacation from peers"
+            !visible_ids.contains(&peer_id),
+            "peer must NOT be visible in employee calendar"
         );
         assert!(
-            visible_ids.contains(&outsider_id),
-            "non-lead must see team_visible=TRUE vacation across teams"
+            !visible_ids.contains(&outsider_id),
+            "outsider must NOT be visible in employee calendar"
         );
-        // Real kind is visible because team_visible=TRUE for vacation; comment
-        // remains hidden for non-own non-lead entries.
-        for row in rows {
-            let user_id = row["user_id"].as_i64().unwrap();
-            if user_id != emp_id {
-                assert_eq!(
-                    row["kind"].as_str(),
-                    Some("vacation"),
-                    "team_visible vacation must show real kind, not masked 'absent'"
-                );
-                assert!(
-                    row["comment"].is_null(),
-                    "non-own absence comment must remain hidden"
-                );
-            }
+        for id in &visible_ids {
+            assert_eq!(*id, emp_id, "only the requester's own entries may appear");
         }
 
-        // Leads see their direct reports (full info) AND all team_visible=TRUE
-        // entries from out-of-scope users (with kind shown). They never lose
-        // visibility compared to non-leads.
+        // Leads see their direct reports and themselves; they do NOT see
+        // users outside their report scope, regardless of category.
         let (st, body) = lead
             .get(&format!("/api/v1/absences/calendar?month={month}"))
             .await;
         assert_eq!(st, StatusCode::OK, "lead calendar request");
-        let lead_rows = body.as_array().expect("calendar rows should be an array");
-        let lead_visible: HashSet<i64> = lead_rows
+        let lead_visible: HashSet<i64> = body
+            .as_array()
+            .expect("calendar rows should be an array")
             .iter()
             .filter_map(|row| row["user_id"].as_i64())
             .collect();
@@ -517,32 +505,16 @@ async fn absences_full_workflow() {
             "lead sees emp (direct report)"
         );
         assert!(
-            lead_visible.contains(&outsider_id),
-            "lead also sees out-of-scope users' team_visible=TRUE entries"
+            !lead_visible.contains(&outsider_id),
+            "lead must NOT see users outside their report scope"
         );
-        // Comment privacy: a lead may read comments for absences in their
-        // report scope (self/peer/emp here) but NOT for cross-team
-        // team_visible entries (outsider). team_visible governs the KIND
-        // visibility; comments may still carry personal context and stay
-        // restricted to the normal scope.
-        for row in lead_rows {
-            match row["user_id"].as_i64() {
-                Some(id) if id == outsider_id => assert!(
-                    row["comment"].is_null(),
-                    "lead must NOT see cross-team comment even when team_visible: {row}"
-                ),
-                _ => {}
-            }
-        }
     }
 
-    // -- Privacy: a team_visible=FALSE category from a non-scope user must NOT
-    // -- appear at all in a non-lead's calendar, regardless of date. This
-    // -- protects GDPR Art. 9 health data (sick leave) and any admin category
-    // -- explicitly marked as private.
+    // -- Privacy regression: a sick absence from a non-scope user (lead) must
+    // -- not appear at all in a regular employee's calendar. The same strict
+    // -- scope rule applies regardless of category — sick is just a clear
+    // -- example (GDPR Art. 9 health data).
     {
-        // The lead has team_visible=TRUE vacation already. Add a team_visible=FALSE
-        // sick absence for the lead and verify it is not exposed to the employee.
         let sick_day = next_monday(36).format("%Y-%m-%d").to_string();
         let sick_month = sick_day[..7].to_string();
         let (st, _) = lead
@@ -562,7 +534,7 @@ async fn absences_full_workflow() {
             if row["user_id"].as_i64() == Some(lead_id)
                 && row["start_date"].as_str() == Some(sick_day.as_str())
             {
-                panic!("non-lead must not see team_visible=FALSE sick absence from lead: {row}");
+                panic!("non-lead must not see lead's sick absence — scope rule: {row}");
             }
         }
     }
@@ -1267,9 +1239,8 @@ async fn edit_requested_absence_allowed_when_inactive_category_unchanged() {
     app.cleanup().await;
 }
 
-/// Covers Bug 9: an admin must not be able to toggle a category's cost or
-/// approval flags (`counts_as_vacation`, `keeps_work_target`,
-/// `auto_approve_past`) while it still has at least one referencing absence.
+/// Covers Bug 9: an admin must not be able to change a category's `cost_type`
+/// or `auto_approve_past` while it still has at least one referencing absence.
 /// Doing so would silently mutate the financial / approval meaning of those
 /// existing rows — past balance recomputations would suddenly debit or
 /// credit different ledgers, and the approval workflow would relax or
@@ -1283,8 +1254,8 @@ async fn absence_category_cost_flag_change_blocked_when_in_use() {
         bootstrap_team(&app, &admin, false).await;
     let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
 
-    // Look up the seeded `training` category id (counts_as_vacation=false,
-    // keeps_work_target=false, auto_approve_past=false).
+    // Look up the seeded `training` category id (cost_type='none',
+    // auto_approve_past=false).
     let (_, cats_body) = admin.get("/api/v1/absence-categories/all").await;
     let training_cat_id = cats_body
         .as_array()
@@ -1326,32 +1297,32 @@ async fn absence_category_cost_flag_change_blocked_when_in_use() {
         .await;
     assert_eq!(st, StatusCode::OK, "create training absence");
 
-    // Attempting to toggle counts_as_vacation now must be rejected — flipping
-    // it on would retroactively debit the employee's annual leave for an
-    // already-approved-or-pending range they never agreed to.
+    // Attempting to switch cost_type to 'vacation' must be rejected —
+    // flipping it would retroactively debit the employee's annual leave
+    // for an already-approved-or-pending range they never agreed to.
     let (st, body) = admin
         .put(
             &format!("/api/v1/absence-categories/{training_cat_id}"),
-            &json!({"counts_as_vacation": true}),
+            &json!({"cost_type": "vacation"}),
         )
         .await;
     assert_eq!(
         st,
         StatusCode::BAD_REQUEST,
-        "counts_as_vacation flip must be blocked while category is in use: {body}"
+        "cost_type change to 'vacation' must be blocked while category is in use: {body}"
     );
 
-    // Same protection for keeps_work_target.
+    // Same protection for switching to 'flextime'.
     let (st, body) = admin
         .put(
             &format!("/api/v1/absence-categories/{training_cat_id}"),
-            &json!({"keeps_work_target": true}),
+            &json!({"cost_type": "flextime"}),
         )
         .await;
     assert_eq!(
         st,
         StatusCode::BAD_REQUEST,
-        "keeps_work_target flip must be blocked while category is in use: {body}"
+        "cost_type change to 'flextime' must be blocked while category is in use: {body}"
     );
 
     // Same protection for auto_approve_past.
@@ -1367,20 +1338,20 @@ async fn absence_category_cost_flag_change_blocked_when_in_use() {
         "auto_approve_past flip must be blocked while category is in use: {body}"
     );
 
-    // Cosmetic changes (name, color, sort_order, active, team_visible) MUST
-    // still be allowed — they don't change the financial meaning of existing
-    // rows. The Bug 6 fix relies on `active=false` being permitted even when
-    // the category has referencing absences.
+    // Cosmetic + active changes MUST still be allowed — they don't change
+    // the financial meaning of existing rows. The Bug 6 fix relies on
+    // `active=false` being permitted even when the category has referencing
+    // absences.
     let (st, _) = admin
         .put(
             &format!("/api/v1/absence-categories/{training_cat_id}"),
-            &json!({"name": "Training (renamed)", "color": "#aabbcc", "team_visible": false, "active": false}),
+            &json!({"name": "Training (renamed)", "color": "#aabbcc", "active": false}),
         )
         .await;
     assert_eq!(
         st,
         StatusCode::OK,
-        "cosmetic + active + team_visible changes must still be allowed"
+        "cosmetic + active changes must still be allowed"
     );
 
     app.cleanup().await;

@@ -7,8 +7,13 @@ export const HOLIDAY_COLOR = "#f59e0b";
 // Neutral gray for weekend background bands.
 export const WEEKEND_COLOR = "#9ca3af";
 
-// Color used when an absence is privacy-masked ("absent" placeholder in the
-// team calendar for categories with team_visible=false such as sick leave).
+// Color used when an absence slug can't be resolved to a category in the
+// store — e.g. an absence whose category was deactivated and dropped from
+// the active-only frontend cache, or an entry returned by an API path
+// that doesn't carry the joined category color. The calendar's visibility
+// scope (admin sees all, lead sees self+reports, employee sees only own)
+// is enforced server-side, so this is no longer a privacy-mask color in
+// practice — just a "category unknown" fallback.
 export const MASKED_ABSENCE_COLOR = "#78716c"; // stone
 
 // Fallback palette for work categories that have no color stored in the DB.

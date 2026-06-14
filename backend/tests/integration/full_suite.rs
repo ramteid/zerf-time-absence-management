@@ -602,8 +602,8 @@ async fn absence_and_report_workflow() {
         assert_eq!(st, StatusCode::OK, "create editable pending absence");
         let editable_id = id(&body);
 
-        // B7: editing within the same cost type (both general_absence and training have
-        // counts_as_vacation=false, keeps_work_target=false) must still be allowed.
+        // B7: editing within the same cost type (both general_absence and training
+        // have cost_type='none') must still be allowed.
         let (st, body) = emp
             .put(
                 &format!("/api/v1/absences/{}", editable_id),

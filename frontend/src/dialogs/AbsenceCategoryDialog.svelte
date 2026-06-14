@@ -12,16 +12,18 @@
   let color = template.color || "#5b8def";
   let sort_order = template.sort_order ?? 0;
   let active = template.active ?? true;
-  let counts_as_vacation = template.counts_as_vacation ?? false;
-  let keeps_work_target = template.keeps_work_target ?? false;
+  // cost_type collapses the former counts_as_vacation/keeps_work_target
+  // booleans into a single 3-state enum ("none" | "vacation" | "flextime").
+  // The two booleans were always mutually exclusive; the enum makes that
+  // impossible to violate in either direction.
+  let cost_type = template.cost_type ?? "none";
   let auto_approve_past = template.auto_approve_past ?? false;
-  let team_visible = template.team_visible ?? false;
   let error = "";
 
-  // Which of the four behavior options currently has its help text expanded.
+  // Which of the behavior options currently has its help text expanded.
   // Following the same toggle-on-click info-icon pattern used in the dashboard
-  // and report cards, but applied per-option since each flag has its own
-  // independent explanation.
+  // and report cards, but applied per-option since each flag/choice has its
+  // own independent explanation.
   let openHelp = null;
   function toggleHelp(key) {
     openHelp = openHelp === key ? null : key;
@@ -34,10 +36,8 @@
         name,
         color,
         sort_order: Number(sort_order),
-        counts_as_vacation,
-        keeps_work_target,
+        cost_type,
         auto_approve_past,
-        team_visible,
       };
       if (!isNew) {
         body.active = active;
@@ -84,46 +84,81 @@
   </div>
   <div style="margin-top:10px;display:flex;flex-direction:column;gap:6px">
     <!--
-      Each behavior option pairs the checkbox with a small info button that
-      toggles a help paragraph below the row. Mirrors the click-to-expand
-      pattern in EmployeeReport/StatCards so users have one consistent
-      mental model: click the (i) for context, click again to hide.
+      Each behavior option pairs its control (radio for cost_type, checkbox
+      for auto_approve_past) with a small info button that toggles a help
+      paragraph below the row. Mirrors the click-to-expand pattern in
+      EmployeeReport/StatCards so users have one consistent mental model:
+      click the (i) for context, click again to hide.
     -->
     <div>
       <label style="display:flex;align-items:center;gap:8px;font-size:13px">
-        <input type="checkbox" bind:checked={counts_as_vacation} />
-        <span>{$t("Counts as vacation")}</span>
+        <input
+          type="radio"
+          name="cost_type"
+          value="none"
+          bind:group={cost_type}
+        />
+        <span>{$t("No cost (free day)")}</span>
         <button
           type="button"
           class="zf-btn-icon-sm zf-btn-ghost"
-          aria-expanded={openHelp === "counts_as_vacation"}
+          aria-expanded={openHelp === "cost_type_none"}
           aria-label={$t("Show explanation")}
-          on:click={() => toggleHelp("counts_as_vacation")}
+          on:click={() => toggleHelp("cost_type_none")}
           style="color:var(--text-tertiary);cursor:help;margin-left:auto"
         >
           <Icon name="Info" size={14} />
         </button>
       </label>
-      {#if openHelp === "counts_as_vacation"}
+      {#if openHelp === "cost_type_none"}
+        <div class="abscat-help">{$t("help_cost_type_none")}</div>
+      {/if}
+    </div>
+    <div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px">
+        <input
+          type="radio"
+          name="cost_type"
+          value="vacation"
+          bind:group={cost_type}
+        />
+        <span>{$t("Counts as vacation")}</span>
+        <button
+          type="button"
+          class="zf-btn-icon-sm zf-btn-ghost"
+          aria-expanded={openHelp === "cost_type_vacation"}
+          aria-label={$t("Show explanation")}
+          on:click={() => toggleHelp("cost_type_vacation")}
+          style="color:var(--text-tertiary);cursor:help;margin-left:auto"
+        >
+          <Icon name="Info" size={14} />
+        </button>
+      </label>
+      {#if openHelp === "cost_type_vacation"}
         <div class="abscat-help">{$t("help_counts_as_vacation")}</div>
       {/if}
     </div>
     <div>
       <label style="display:flex;align-items:center;gap:8px;font-size:13px">
-        <input type="checkbox" bind:checked={keeps_work_target} />
+        <input
+          type="radio"
+          name="cost_type"
+          value="flextime"
+          bind:group={cost_type}
+        />
         <span>{$t("Keeps work target (flextime)")}</span>
         <button
           type="button"
           class="zf-btn-icon-sm zf-btn-ghost"
-          aria-expanded={openHelp === "keeps_work_target"}
+          aria-expanded={openHelp === "cost_type_flextime"}
           aria-label={$t("Show explanation")}
-          on:click={() => toggleHelp("keeps_work_target")}
+          on:click={() => toggleHelp("cost_type_flextime")}
           style="color:var(--text-tertiary);cursor:help;margin-left:auto"
         >
           <Icon name="Info" size={14} />
         </button>
       </label>
-      {#if openHelp === "keeps_work_target"}
+      {#if openHelp === "cost_type_flextime"}
         <div class="abscat-help">{$t("help_keeps_work_target")}</div>
       {/if}
     </div>
@@ -144,25 +179,6 @@
       </label>
       {#if openHelp === "auto_approve_past"}
         <div class="abscat-help">{$t("help_auto_approve_past")}</div>
-      {/if}
-    </div>
-    <div>
-      <label style="display:flex;align-items:center;gap:8px;font-size:13px">
-        <input type="checkbox" bind:checked={team_visible} />
-        <span>{$t("Visible to teammates in team calendar")}</span>
-        <button
-          type="button"
-          class="zf-btn-icon-sm zf-btn-ghost"
-          aria-expanded={openHelp === "team_visible"}
-          aria-label={$t("Show explanation")}
-          on:click={() => toggleHelp("team_visible")}
-          style="color:var(--text-tertiary);cursor:help;margin-left:auto"
-        >
-          <Icon name="Info" size={14} />
-        </button>
-      </label>
-      {#if openHelp === "team_visible"}
-        <div class="abscat-help">{$t("help_team_visible")}</div>
       {/if}
     </div>
   </div>
