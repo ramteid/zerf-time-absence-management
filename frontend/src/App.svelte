@@ -36,6 +36,10 @@
   let setupEmail = "";
 
   function debugLog(event, data = {}) {
+    // Gated behind the debug-build flag so production bundles emit no console
+    // output (and never disclose user ids / paths). The whole body is removed
+    // by dead-code elimination when __ZERF_DEBUG__ is false.
+    if (!__ZERF_DEBUG__) return;
     console.debug("[app-debug]", event, {
       path: $path,
       pathname,

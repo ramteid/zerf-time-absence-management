@@ -13,7 +13,10 @@ export function go(href, push = true) {
   if (push) history.pushState({}, "", href);
   else history.replaceState({}, "", href);
   const after = location.pathname + location.search;
-  console.debug("[nav-debug]", "go", { href, push, before, after });
+  // Only log navigation in debug builds; stripped from production bundles.
+  if (__ZERF_DEBUG__) {
+    console.debug("[nav-debug]", "go", { href, push, before, after });
+  }
   path.set(after);
 }
 

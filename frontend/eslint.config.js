@@ -18,14 +18,16 @@ export default [
     languageOptions: {
       ecmaVersion: "latest",
       sourceType: "module",
-      globals: { ...globals.browser, ...globals.node },
+      // __ZERF_DEBUG__ is injected at build time via Vite's `define`.
+      globals: { ...globals.browser, ...globals.node, __ZERF_DEBUG__: "readonly" },
     },
     rules: commonRules,
   },
   {
     files: ["**/*.svelte"],
     languageOptions: {
-      globals: { ...globals.browser },
+      // __ZERF_DEBUG__ is injected at build time via Vite's `define`.
+      globals: { ...globals.browser, __ZERF_DEBUG__: "readonly" },
     },
     rules: {
       ...commonRules,

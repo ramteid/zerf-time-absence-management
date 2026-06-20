@@ -5,6 +5,14 @@ const frontendDebugBuild = process.env.ZERF_FRONTEND_DEBUG_BUILD === "true";
 
 export default defineConfig({
   plugins: [svelte()],
+  // Expose the debug-build flag to client code as a compile-time constant.
+  // In a normal production build this is `false`, so any `if (__ZERF_DEBUG__)`
+  // branch (e.g. the [app-debug]/[nav-debug] console logging) is stripped out
+  // entirely by the minifier's dead-code elimination — no debug output and no
+  // incidental disclosure of user ids / navigation paths in the browser console.
+  define: {
+    __ZERF_DEBUG__: JSON.stringify(frontendDebugBuild),
+  },
   build: {
     outDir: "dist",
     emptyOutDir: true,
