@@ -11,8 +11,8 @@
 //!      in the queue for the next daily check (catch-up for late submitters).
 //!
 //! Folder layout in the Nextcloud share:
-//!   <period>/                       e.g. 2026-05/
-//!     <period>_<Last>_<First>.pdf   e.g. 2026-05_Smith_John.pdf
+//!   <period>/                                       e.g. 2026-05/
+//!     <period>_Stundenzettel_<First>_<Last>.pdf     e.g. 2026-05_Stundenzettel_John_Smith.pdf
 //!
 //! The handler `run_now` (triggered by the admin "Upload now" button) bypasses
 //! the day-of-month threshold: it populates the queue for the previous month
@@ -221,11 +221,11 @@ async fn process_one_entry(
         )));
     }
 
-    // Build path: <period>/<period>_<Last>_<First>.pdf  (spaces → underscores)
-    let last = user.last_name.replace(' ', "_");
+    // Build path: <period>/<period>_Stundenzettel_<First>_<Last>.pdf  (spaces → underscores)
     let first = user.first_name.replace(' ', "_");
+    let last = user.last_name.replace(' ', "_");
     let folder = entry.period.clone();
-    let filename = format!("{}_{}_{}.pdf", entry.period, last, first);
+    let filename = format!("{}_Stundenzettel_{}_{}.pdf", entry.period, first, last);
     let path = format!("{folder}/{filename}");
 
     // Create the per-month subfolder (MKCOL; 405 = already exists is fine for
