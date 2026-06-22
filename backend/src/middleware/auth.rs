@@ -48,9 +48,13 @@ pub struct User {
     pub must_change_password: bool,
     pub created_at: DateTime<Utc>,
     /// When TRUE, this user's reopen requests are auto-approved without waiting
-    /// for manual review. Explicitly assigned approvers still receive the
-    /// corresponding in-app and email notifications.
+    /// for manual review. Silent: no notifications or emails are sent to
+    /// anyone (requester or approvers).
     pub allow_reopen_without_approval: bool,
+    /// When TRUE, this user's submitted weeks are auto-approved (draft ->
+    /// approved directly) without requiring approver action. Silent: no
+    /// notifications or emails are sent to anyone (requester or approvers).
+    pub allow_submission_without_approval: bool,
     pub dark_mode: bool,
     pub overtime_start_balance_min: i64,
     /// When FALSE (admin only), this user operates in pure-admin mode: no time
@@ -291,6 +295,7 @@ pub async fn auth_middleware(
         must_change_password: repo_user.must_change_password,
         created_at: repo_user.created_at,
         allow_reopen_without_approval: repo_user.allow_reopen_without_approval,
+        allow_submission_without_approval: repo_user.allow_submission_without_approval,
         dark_mode: repo_user.dark_mode,
         overtime_start_balance_min: repo_user.overtime_start_balance_min,
         tracks_time: repo_user.tracks_time,
@@ -355,6 +360,7 @@ mod tests {
             must_change_password: false,
             created_at: Utc::now(),
             allow_reopen_without_approval: false,
+            allow_submission_without_approval: false,
             dark_mode: false,
             overtime_start_balance_min: 0,
             tracks_time: true,

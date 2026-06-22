@@ -88,6 +88,7 @@ Use this document if you are:
   - [Reviewing an absence cancellation](#reviewing-an-absence-cancellation)
   - [Reviewing a reopen request](#reviewing-a-reopen-request)
   - [Team settings: reopen policy](#team-settings-reopen-policy)
+  - [Team settings: submission policy](#team-settings-submission-policy)
   - [Viewing team reports](#viewing-team-reports)
 - [Admin workflow reference](#admin-workflow-reference)
   - [Reading the audit log](#reading-the-audit-log)
@@ -244,6 +245,10 @@ changes when users and server run in different timezones.
 | Submitted | Week was submitted. Approvers can review. |
 | Approved | Entry accepted. Included in reports and flextime logic. |
 | Rejected | Entry rejected. Employee must resolve and resubmit when needed. |
+
+Users with submission auto-approval enabled skip `Submitted` entirely: their
+entries go directly from `Draft` to `Approved` on submit (see [Team settings:
+submission policy](#team-settings-submission-policy)).
 
 ### Weekly process
 
@@ -668,6 +673,16 @@ and sends an in-app-only notification (no email) back to the same user.
 - a reopen request is submitted,
 - a weekly approval reminder is triggered (pending items awaiting review).
 
+### Exception: auto-approved submissions and reopen requests are silent
+
+When a user has submission or reopen auto-approval enabled (see Team settings
+below), the corresponding action is recorded in the audit log as usual, but
+**no in-app notification and no email are sent to anyone** — neither the
+requester nor their approvers. This is different from every other
+auto-approval in Zerf (e.g. past-dated sick leave), which still notifies the
+approver informationally; submission and reopen auto-approval are
+intentionally silent end-to-end.
+
 ### Who gets notified
 
 - Only explicitly assigned approvers receive approval notifications and reminders.
@@ -941,6 +956,12 @@ Rules:
 After submission, all your explicitly assigned approvers receive a notification
 identifying the submitted weeks by their week labels.
 
+**Auto-approval:** If your team lead or admin has enabled auto-approval of
+submissions for you (Team Settings → "Auto-approve submissions"), submitted
+weeks skip the approval queue entirely and go straight to `approved`. This is
+silent by design: neither you nor your approvers receive any notification or
+email about it.
+
 ### Requesting a week reopen
 
 `Request edit` (a "reopen request") is the only way to amend a week after
@@ -956,8 +977,8 @@ Rules:
 
 **Auto-approval:** If your team lead or admin has enabled auto-approval for your
 reopen requests, the reopen takes effect immediately without requiring approval.
-You receive a confirmation notification; your approvers receive an informational
-notice.
+This is silent by design: neither you nor your approvers receive any
+notification or email about it.
 
 **Manual approval path:** The request enters `pending` status and all your
 assigned approvers are notified.
@@ -1091,6 +1112,9 @@ within a week are handled in the background.
 - Employees receive one notification per approval or rejection, identifying
   the affected weeks. Admins who review their own entries receive an in-app
   notification only (no email).
+- Entries from users with submission auto-approval enabled never reach this
+  queue — they are approved at submission time, silently (see [Team settings:
+  submission policy](#team-settings-submission-policy)).
 
 ### Reviewing an absence
 
@@ -1143,6 +1167,9 @@ notification.
 On rejection: the week remains unchanged. The employee receives a rejection
 notification with the reason.
 
+Auto-approved reopen requests (see below) never reach this review queue — the
+reopen already happened at request time, silently.
+
 ### Team settings: reopen policy
 
 Team leads can enable or disable auto-approval of reopen requests for their
@@ -1155,6 +1182,25 @@ a lead from bypassing their own approval chain.
 - When enabled: that user's future reopen requests are auto-approved immediately.
 - When disabled: reopen requests require manual approval.
 - Changes are recorded in the audit log.
+- Auto-approval is silent: no notification or email is sent to the requester
+  or to their approvers (see [Notifications](#notifications)).
+
+### Team settings: submission policy
+
+Team leads can enable or disable auto-approval of timesheet submissions for
+their direct reports. Admins can set it for any user (including themselves).
+This is an independent setting from the reopen policy above — a user can have
+either, both, or neither enabled.
+
+The same self-service restriction applies: non-admin team leads cannot modify
+their own submission policy.
+
+- When enabled: that user's submitted weeks skip the `submitted` status and go
+  straight to `approved`. The system records the user themselves as reviewer.
+- When disabled (default): submissions require manual approval as usual.
+- Changes are recorded in the audit log.
+- Auto-approval is silent: no notification or email is sent to the requester
+  or to their approvers (see [Notifications](#notifications)).
 
 ### Viewing team reports
 
@@ -1519,11 +1565,13 @@ table, including:
 
 - User creation, update, deactivation, and deletion.
 - Password resets.
-- Time entry status transitions (submit, approve, reject, reopen).
+- Time entry status transitions (submit, approve, reject, reopen, and silent
+  auto-approval on submit).
 - Absence creation, approval, rejection, revocation, and cancellation.
 - Admin settings changes (language, timezone, country, region).
 - SMTP configuration changes.
-- Team settings modifications (allow_reopen_without_approval).
+- Team settings modifications (allow_reopen_without_approval,
+  allow_submission_without_approval).
 
 ### Input validation and DoS prevention
 

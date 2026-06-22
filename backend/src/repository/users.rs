@@ -29,6 +29,10 @@ pub struct User {
     pub must_change_password: bool,
     pub created_at: DateTime<Utc>,
     pub allow_reopen_without_approval: bool,
+    /// When TRUE, this user's submitted weeks are auto-approved (draft ->
+    /// approved directly, skipping the 'submitted' stop). No one is notified
+    /// and no emails are sent for the auto-approval.
+    pub allow_submission_without_approval: bool,
     pub dark_mode: bool,
     pub overtime_start_balance_min: i64,
     /// When FALSE (admin only), this user has no time/absence tracking.
@@ -48,11 +52,13 @@ impl User {
 const USER_SELECT: &str =
     "SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, workdays_per_week, \
      start_date, hire_date, active, must_change_password, created_at, \
-     allow_reopen_without_approval, dark_mode, overtime_start_balance_min, tracks_time \
+     allow_reopen_without_approval, allow_submission_without_approval, dark_mode, \
+     overtime_start_balance_min, tracks_time \
      FROM users";
 
-/// Team settings row (id, email, first_name, last_name, role, allow_reopen_without_approval).
-pub type TeamSettingsRow = (i64, String, String, String, String, bool);
+/// Team settings row (id, email, first_name, last_name, role,
+/// allow_reopen_without_approval, allow_submission_without_approval).
+pub type TeamSettingsRow = (i64, String, String, String, String, bool, bool);
 
 /// Lightweight user record returned by the submission-reminder query.
 pub struct ActiveUserRow {
@@ -343,7 +349,7 @@ impl UserDb {
         // the team settings page doesn't show meaningless rows.
         Ok(sqlx::query_as::<_, TeamSettingsRow>(
             "SELECT id, email, first_name, last_name, role, \
-             allow_reopen_without_approval FROM users \
+             allow_reopen_without_approval, allow_submission_without_approval FROM users \
              WHERE active=TRUE AND tracks_time=TRUE ORDER BY last_name, first_name",
         )
         .fetch_all(&self.pool)
@@ -353,7 +359,7 @@ impl UserDb {
     pub async fn team_settings_for_lead(&self, lead_id: i64) -> AppResult<Vec<TeamSettingsRow>> {
         Ok(sqlx::query_as::<_, TeamSettingsRow>(
             "SELECT id, email, first_name, last_name, role, \
-             allow_reopen_without_approval FROM users \
+             allow_reopen_without_approval, allow_submission_without_approval FROM users \
              WHERE active=TRUE AND tracks_time=TRUE \
              AND (id=$1 OR id IN (SELECT ua.user_id FROM user_approvers ua \
                                   JOIN users u ON u.id=ua.user_id \
@@ -546,6 +552,7 @@ impl UserDb {
         hire_date: Option<Option<NaiveDate>>,
         active: Option<bool>,
         allow_reopen_without_approval: Option<bool>,
+        allow_submission_without_approval: Option<bool>,
         overtime_start_balance_min: Option<i64>,
         tracks_time: Option<bool>,
     ) -> Result<(), sqlx::Error> {
@@ -567,7 +574,8 @@ impl UserDb {
                  active=COALESCE($10,active), \
                  allow_reopen_without_approval=COALESCE($11,allow_reopen_without_approval), \
                  overtime_start_balance_min=COALESCE($12,overtime_start_balance_min), \
-                 tracks_time=COALESCE($13,tracks_time) \
+                 tracks_time=COALESCE($13,tracks_time), \
+                 allow_submission_without_approval=COALESCE($15,allow_submission_without_approval) \
              WHERE id=$14",
         )
         .bind(email)
@@ -584,6 +592,7 @@ impl UserDb {
         .bind(overtime_start_balance_min)
         .bind(tracks_time)
         .bind(id)
+        .bind(allow_submission_without_approval)
         .execute(tx)
         .await?;
         Ok(())

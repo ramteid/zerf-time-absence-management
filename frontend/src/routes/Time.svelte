@@ -131,8 +131,12 @@
     );
     if (!confirmed) return;
     try {
-      await submitWeekEntries(ids);
-      toast($t("Week submitted."), "ok");
+      const response = await submitWeekEntries(ids);
+      if (response.auto_approved) {
+        toast($t("Week approved."), "ok");
+      } else {
+        toast($t("Week submitted."), "ok");
+      }
       await loadWeek(weekFrom || appTodayDate($settings?.timezone));
     } catch (error) {
       toast($t(error?.message || "Error"), "error");

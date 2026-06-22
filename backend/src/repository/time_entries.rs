@@ -701,6 +701,34 @@ impl TimeEntryDb {
         Ok(submitted)
     }
 
+    /// Atomically mark a batch of draft entries as approved for a specific user,
+    /// bypassing the 'submitted' stop entirely (draft -> approved directly).
+    /// Used when the user has `allow_submission_without_approval=TRUE`: the
+    /// system is the implicit reviewer, so `reviewed_by` is set to the user's
+    /// own id. Returns the IDs that were actually transitioned.
+    pub async fn submit_batch_auto_approved(&self, user_id: i64, ids: &[i64]) -> AppResult<Vec<i64>> {
+        let mut tx = self.pool.begin().await?;
+        let mut approved = Vec::new();
+        for &id in ids {
+            let rows = sqlx::query(
+                "UPDATE time_entries \
+                 SET status='approved', submitted_at=CURRENT_TIMESTAMP, \
+                     reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP \
+                 WHERE id=$2 AND status='draft' AND user_id=$1",
+            )
+            .bind(user_id)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
+            if rows > 0 {
+                approved.push(id);
+            }
+        }
+        tx.commit().await?;
+        Ok(approved)
+    }
+
     /// Batch approve submitted entries.
     /// Skips entries whose owner cannot be reviewed by `reviewer_id`.
     /// Returns all entries that were actually approved.

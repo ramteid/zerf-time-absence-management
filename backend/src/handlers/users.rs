@@ -29,8 +29,8 @@ where
     Option::<NaiveDate>::deserialize(deserializer).map(Some)
 }
 
-/// Per-user reopen policy. Returned by `GET /team-settings` for every active
-/// user; visible and editable by any lead/admin.
+/// Per-user reopen/submission approval policy. Returned by `GET /team-settings`
+/// for every active user; visible and editable by any lead/admin.
 #[derive(Serialize)]
 pub struct TeamSettings {
     pub user_id: i64,
@@ -39,6 +39,7 @@ pub struct TeamSettings {
     pub last_name: String,
     pub role: String,
     pub allow_reopen_without_approval: bool,
+    pub allow_submission_without_approval: bool,
 }
 
 pub async fn team_settings_list(
@@ -60,13 +61,16 @@ pub async fn team_settings_list(
     let settings_list: Vec<TeamSettings> = rows
         .into_iter()
         .map(
-            |(id, email, first_name, last_name, role, allow_reopen)| TeamSettings {
-                user_id: id,
-                email,
-                first_name,
-                last_name,
-                role,
-                allow_reopen_without_approval: allow_reopen,
+            |(id, email, first_name, last_name, role, allow_reopen, allow_submission)| {
+                TeamSettings {
+                    user_id: id,
+                    email,
+                    first_name,
+                    last_name,
+                    role,
+                    allow_reopen_without_approval: allow_reopen,
+                    allow_submission_without_approval: allow_submission,
+                }
             },
         )
         .collect();
@@ -76,6 +80,7 @@ pub async fn team_settings_list(
 #[derive(Deserialize)]
 pub struct UpdateTeamSettings {
     pub allow_reopen_without_approval: bool,
+    pub allow_submission_without_approval: bool,
 }
 
 pub async fn team_settings_update(
@@ -89,6 +94,7 @@ pub async fn team_settings_update(
         &requester,
         target_id,
         body.allow_reopen_without_approval,
+        body.allow_submission_without_approval,
     )
     .await?;
     Ok(Json(serde_json::json!({"ok": true})))
@@ -156,6 +162,7 @@ pub async fn get_one(
         "must_change_password": user.must_change_password,
         "created_at": user.created_at,
         "allow_reopen_without_approval": user.allow_reopen_without_approval,
+        "allow_submission_without_approval": user.allow_submission_without_approval,
         "dark_mode": user.dark_mode,
         "overtime_start_balance_min": user.overtime_start_balance_min,
         "tracks_time": user.tracks_time,
@@ -257,6 +264,7 @@ pub struct UpdateUser {
     #[serde(default, deserialize_with = "deserialize_optional_vec")]
     pub approver_ids: Option<Vec<i64>>,
     pub allow_reopen_without_approval: Option<bool>,
+    pub allow_submission_without_approval: Option<bool>,
     pub overtime_start_balance_min: Option<i64>,
     /// For admin users only: when FALSE the user is in pure-admin mode with no
     /// time or absence tracking. Setting to FALSE deletes all existing time and
@@ -521,6 +529,7 @@ pub async fn update(
         body.hire_date,
         body.active,
         body.allow_reopen_without_approval,
+        body.allow_submission_without_approval,
         body.overtime_start_balance_min,
         effective_tracks_time,
     )

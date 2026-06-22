@@ -81,9 +81,10 @@ async fn reopen_full_workflow() {
             .await;
         assert_eq!(st, StatusCode::OK, "set German UI language");
 
-        let (_lead_id, _lead_pw, _emp_id, emp_pw, monday_iso, cat_id) =
+        let (_lead_id, lead_pw, _emp_id, emp_pw, monday_iso, cat_id) =
             bootstrap_team_with_suffix(&app, &admin, true, "1").await;
         let emp = login_change_pw(&app, "emp-1@example.com", &emp_pw).await;
+        let lead = login_change_pw(&app, "lead-1@example.com", &lead_pw).await;
         let _eid = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
 
         let (st, body) = emp
@@ -100,26 +101,24 @@ async fn reopen_full_workflow() {
         assert_eq!(st, StatusCode::OK);
         assert_eq!(body[0]["status"], "draft");
 
-        let (_, body) = emp.get("/api/v1/notifications").await;
-        let notification = body
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|n| n["kind"] == "reopen_auto_approved")
-            .expect("notification created");
-        assert_eq!(
-            notification["title"].as_str(),
-            Some("Bearbeitungsanfrage genehmigt")
-        );
-        let body = notification["body"].as_str().unwrap_or("");
-        // Body is now structured JSON for frontend rendering.
-        let parsed: serde_json::Value =
-            serde_json::from_str(body).expect("notification body must be valid JSON");
+        // Auto-approval is silent by design: the requester receives no
+        // notification at all about it.
+        let (_, emp_notifications) = emp.get("/api/v1/notifications").await;
         assert!(
-            parsed["week"].as_str().is_some(),
-            "JSON body should include 'week' field: {body}"
+            emp_notifications.as_array().unwrap().is_empty(),
+            "requester must not be notified about their own auto-approved reopen"
         );
-        assert!(!notification["title"].as_str().unwrap().contains(" / "));
+        // The approver also gets nothing about the auto-approval specifically
+        // (they may still have the earlier, unrelated submission notification).
+        let (_, lead_notifications) = lead.get("/api/v1/notifications").await;
+        assert!(
+            !lead_notifications
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|n| n["kind"] == "reopen_auto_approved_notice"),
+            "approver must not be notified about an auto-approved reopen"
+        );
     }
 
     // -- Pending then approve --
@@ -279,7 +278,7 @@ async fn reopen_full_workflow() {
         let (st, _) = admin
             .put(
                 &format!("/api/v1/team-settings/{}", lead_id),
-                &json!({"allow_reopen_without_approval": true}),
+                &json!({"allow_reopen_without_approval": true, "allow_submission_without_approval": false}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "set lead policy auto");
