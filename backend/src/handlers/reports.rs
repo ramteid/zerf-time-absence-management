@@ -1,6 +1,6 @@
 use crate::error::{AppError, AppResult};
 use crate::middleware::auth::User;
-use crate::report_pdf::{render_timesheet_pdf, TimesheetSection};
+use crate::report_pdf::render_timesheet_pdf;
 use crate::roles::is_assistant_role;
 use crate::services::reports::{
     all_weeks_submitted_for_month, assert_can_access_user, build_flextime_for_user, build_month,

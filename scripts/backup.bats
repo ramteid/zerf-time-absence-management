@@ -45,15 +45,14 @@ make_shim() {
 # ── parse_share_url ──────────────────────────────────────────────────────────
 
 @test "parse_share_url: valid URL extracts base and token" {
-  run parse_share_url "https://cloud.example.com/s/AbCdEfGhIj"
-  [ "$status" -eq 0 ]
+  # Call without `run` so variable assignments are visible in the current shell.
+  parse_share_url "https://cloud.example.com/s/AbCdEfGhIj"
   [ "$UPLOAD_BASE" = "https://cloud.example.com" ]
   [ "$UPLOAD_TOKEN" = "AbCdEfGhIj" ]
 }
 
 @test "parse_share_url: sub-path Nextcloud preserves base subpath" {
-  run parse_share_url "https://example.com/nextcloud/s/MyToken"
-  [ "$status" -eq 0 ]
+  parse_share_url "https://example.com/nextcloud/s/MyToken"
   [ "$UPLOAD_BASE" = "https://example.com/nextcloud" ]
   [ "$UPLOAD_TOKEN" = "MyToken" ]
 }
