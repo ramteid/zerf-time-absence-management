@@ -74,7 +74,7 @@
 
 <div class="top-bar">
   <div class="top-bar-title">
-    <h1>{$t("Nextcloud Upload")}</h1>
+    <h1>{$t("Nextcloud Backups")}</h1>
   </div>
 </div>
 
