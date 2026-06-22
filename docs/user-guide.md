@@ -342,7 +342,7 @@ does nothing. The only way to make corrections is to reopen the whole week.
 ### Auto-approval
 
 - Absence categories marked **Auto-approve past dates** (e.g. sick leave) with a start date on or before today are auto-approved.
-  Your approvers receive an informational notice (not an action request).
+  Your approvers receive an informational notice, in-app and by email (not an action request).
 - Other absence types require explicit approval.
 
 ### Overlap rules
@@ -1011,7 +1011,7 @@ Vacation, sick leave, training, special leave, unpaid leave, general absence, an
 
 - Start date cannot be more than 30 days before today.
 - If the start date is today or earlier: sick leave is **auto-approved** immediately.
-  Your approvers receive an informational notice (not an action request).
+  Your approvers receive an informational notice, in-app and by email (not an action request).
 - If the start date is in the future: sick leave requires approval like any other absence.
 
 **Overlap and time-entry conflict:**
@@ -1394,7 +1394,7 @@ Admins configure system-wide behavior in the settings panel:
 | Setting | Description |
 | --- | --- |
 | App timezone | Timezone name (e.g. `Europe/Berlin`). All date logic uses this timezone. |
-| Carryover expiry | Vacation carryover from the previous year expires on this date each year (enter as month-day, e.g. 03-31). Empty = no expiry. |
+| Carryover expiry | Vacation carryover from the previous year expires on this date each year (enter as month-day, e.g. 03-31). Defaults to 03-31 until explicitly changed; the field cannot be cleared to disable expiry entirely. |
 | Submission deadline day | Day of the month (1–28) when the monthly submission reminder is sent. |
 | Submission reminders enabled | Enable or disable the monthly submission reminder. |
 | Approval reminders enabled | Enable or disable the weekly approval reminder. |
@@ -1422,7 +1422,7 @@ Absence categories define what types of absences employees can request. Each cat
 | Field | Effect |
 | --- | --- |
 | **Cost type** | A single 3-state field that determines the balance impact of approved days. `none` — no balance impact (e.g. unpaid leave, general absence): the day is removed from the daily work target but neither annual leave nor flextime is debited. `vacation` — deducts from the employee's annual leave balance, honouring per-year carryover and expiry rules. `flextime` — keeps the daily work target intact so the absence costs flextime balance. The flextime balance is checked at BOTH request and approval time against the configured floor (default 0 minutes; admin can override via the `flextime_min_balance_min` setting); the check accounts for other already-pending/approved flextime-cost absences so multiple requests that each individually fit cannot together breach the floor, and the approver's re-check catches the case where the user spent balance between request and approval. |
-| **Auto-approve past dates (sick-like)** | Absences with a start date on or before today are approved automatically. Approvers receive an informational notice. This flag also disables the time-entry conflict check at creation, so partial-day overlaps are allowed (e.g. employee worked the morning and then called in sick). |
+| **Auto-approve past dates (sick-like)** | Absences with a start date on or before today are approved automatically. Approvers receive an informational notice, in-app and by email. This flag also disables the time-entry conflict check at creation, so partial-day overlaps are allowed (e.g. employee worked the morning and then called in sick). |
 
 Constraints:
 - A category slug is auto-generated from the name and must be unique. Existing absences are not affected when a category is deactivated or renamed.
@@ -1488,11 +1488,16 @@ approved  ──[revoke by admin]───────> cancelled
 
 ```
 (creation)
-  sick (start <= today)        --> approved (auto)
-  other / future sick          --> requested
-  reopen auto-approval enabled --> auto_approved (week immediately reopened)
+  reopen auto-approval enabled --> auto_approved (week immediately reopened, silent)
   otherwise                    --> pending
+
+pending ──[approve]──> approved
+pending ──[reject]───> rejected
 ```
+
+`approved`, `auto_approved`, and `rejected` are terminal for the request itself
+(the week's *entries* are what move back to `draft` when the reopen executes —
+see [Time entry statuses](#time-entry-statuses) above).
 
 ## Security and access control
 
@@ -1507,7 +1512,7 @@ approved  ──[revoke by admin]───────> cancelled
   token. Origin/Referer headers are additionally validated.
 - Login is rate-limited: after 5 failed attempts within 15 minutes the account
   is temporarily locked. Generic error messages prevent email enumeration.
-- Password reset tokens are single-use, SHA-256 hashed, and expire after 4 h.
+- Password reset tokens are single-use, SHA-256 hashed, and expire after 1 h.
   Inactive accounts cannot request password resets.
 
 ### Temporary passwords and forced password change
@@ -1586,10 +1591,10 @@ table, including:
 ### Information disclosure prevention
 
 - Password hashes are never serialized in API responses.
-- The `must_change_password` flag is excluded from user list responses; it is
-  only returned via `/auth/me` (own session) and admin-only single-user
-  endpoints.
 - SMTP passwords are never returned; only a boolean `smtp_password_set`
   indicates whether one is configured.
-- Non-lead employees cannot see other users' absence details (kind is shown as
-  "absent" unless it is vacation or the viewer is a lead/admin).
+- Absence and calendar visibility has no per-category masking (see
+  [Overlap rules](#overlap-rules) above): if your scope doesn't cover a user
+  at all, you see nothing about them; if it does (your own data, your direct
+  report's, or any user's as an admin), you see the real kind, comment, and
+  category — never a redacted placeholder.
