@@ -19,7 +19,7 @@
 #
 # Frequency, retention, and Nextcloud upload settings are read from the
 # app_settings table at the start of each backup cycle (not from env).
-# Hard-coded last-resort defaults (86400 / 30) apply only when the database
+# Hard-coded last-resort defaults (1 day / 30 days) apply only when the database
 # is not yet available (bootstrap race on first start).
 #
 # Sourcing:  set BACKUP_LIB_ONLY=1 before sourcing to load helper functions
@@ -377,15 +377,19 @@ main() {
   run_backup_once || printf 'Initial backup attempt failed; will retry.\n' >&2
 
   while :; do
-    # Sleep until the next 4:00 AM UTC, then wait any additional days so that
-    # the configured interval (in days) is respected.
+    # Sleep until the next 4:00 AM UTC.
     WAIT="$(seconds_until_next_4am_utc)"
     sleep "$WAIT"
-    run_backup_once || printf 'Backup attempt failed; will retry at next scheduled time.\n' >&2
-    INTERVAL_DAYS="$(resolve_interval_days)"
-    EXTRA_DAYS="$(( INTERVAL_DAYS - 1 ))"
-    if [ "$EXTRA_DAYS" -gt 0 ]; then
-      sleep "$(( EXTRA_DAYS * 86400 ))"
+    if run_backup_once; then
+      # On success, skip additional days so the configured interval is respected.
+      # On failure, skip the extra wait and retry tomorrow at 4am instead.
+      INTERVAL_DAYS="$(resolve_interval_days)"
+      EXTRA_DAYS="$(( INTERVAL_DAYS - 1 ))"
+      if [ "$EXTRA_DAYS" -gt 0 ]; then
+        sleep "$(( EXTRA_DAYS * 86400 ))"
+      fi
+    else
+      printf 'Backup attempt failed; will retry tomorrow at 4am UTC.\n' >&2
     fi
   done
 }

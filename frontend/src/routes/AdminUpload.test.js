@@ -8,7 +8,7 @@ const mockState = vi.hoisted(() => ({
     backup_upload_enabled: false,
     backup_upload_url: "",
     backup_upload_password_set: false,
-    backup_interval_seconds: 86400,
+    backup_interval_days: 1,
     backup_retention_days: 30,
     report_upload_enabled: true,
     report_upload_url: "https://cloud.example.com/s/tok123",
@@ -114,7 +114,7 @@ describe("AdminUpload", () => {
     const body = saveCall[1].body;
     expect(body).toHaveProperty("backup_upload_enabled");
     expect(body).toHaveProperty("report_upload_enabled");
-    expect(body).toHaveProperty("backup_interval_seconds");
+    expect(body).toHaveProperty("backup_interval_days");
     expect(body).toHaveProperty("backup_retention_days");
     expect(body).toHaveProperty("report_upload_day_of_month");
   });
