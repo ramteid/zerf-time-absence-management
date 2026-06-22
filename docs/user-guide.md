@@ -1427,16 +1427,16 @@ The backup file is AES-256-CBC encrypted before upload, so a compromised share l
 
 #### Report PDF Upload
 
-When enabled, Zerf automatically generates a combined timesheet PDF for all employees and uploads it to a second Nextcloud share on a configurable day each month. The PDF covers the **previous calendar month** and includes all employees who tracked time or had approved absences during that period (including employees who were deactivated after the period ended, for archive correctness).
+When enabled, Zerf queues an individual timesheet PDF for each employee on a configurable day each month. Each PDF covers the **previous calendar month**. Employees who have not yet submitted all their weeks are uploaded automatically on the next daily check — late submitters are caught up without manual intervention. Employees who were deactivated after the period ended are included for archive correctness.
 
 | Setting | Description |
 | --- | --- |
 | Enable report PDF upload | Activates the monthly automatic upload. |
 | Share link | A Nextcloud public share URL. Only `https` links are accepted. |
 | Share password | Optional password protecting the share. |
-| Upload day of month (1–28) | The day of the month on which the previous month's PDF is uploaded. Default: 5. Set this after your team's submission deadline to ensure all entries are included. |
+| Upload day of month (1–28) | The day of the month on which the previous month's PDFs are queued. Default: 5. Set this after your team's submission deadline to maximise how many employees are already submitted when the queue is first processed. |
 
-**Upload now** triggers an immediate upload of the previous month's PDF for verification. This does not affect the scheduled monthly upload.
+**Upload now** queues the previous month's PDFs for all employees immediately and uploads those who are already fully submitted. Employees who are not yet submitted are uploaded on subsequent daily checks. This does not prevent the scheduled monthly run from processing remaining entries.
 
 If an upload fails, all active admins receive an in-app notification. The scheduled upload retries the next day.
 

@@ -150,9 +150,9 @@
             id="backup-interval"
             class="zf-input"
             type="number"
-            min="60"
+            min="1"
             bind:value={uploadSettings.backup_interval_days}
-            placeholder="86400"
+            placeholder="1"
           />
           <div class="field-hint">
             {$t(
