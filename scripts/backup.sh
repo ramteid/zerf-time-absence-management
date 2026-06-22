@@ -74,23 +74,39 @@ read_app_setting() {
       2>/dev/null || true
 }
 
-# Resolve backup interval from app_settings; fall back to hard-coded default
-# when the setting is unavailable (bootstrap race / DB not migrated yet).
-resolve_interval() {
-  _raw="$(read_app_setting "backup_interval_seconds")"
+# Resolve backup interval in days from app_settings; fall back to 1 day when the
+# setting is unavailable (bootstrap race / DB not migrated yet).
+resolve_interval_days() {
+  _raw="$(read_app_setting "backup_interval_days")"
   _raw="$(printf '%s' "$_raw" | tr -d '[:space:]')"
   case "$_raw" in
     ''|*[!0-9]*)
-      printf '86400'
+      printf '1'
       ;;
     *)
       if [ "$_raw" -le 0 ] 2>/dev/null; then
-        printf '86400'
+        printf '1'
       else
         printf '%s' "$_raw"
       fi
       ;;
   esac
+}
+
+# Return the number of seconds from now until the next 4:00 AM UTC.
+# Uses printf '%d' to strip leading zeros so shell arithmetic never interprets
+# 08/09 as invalid octal literals.
+seconds_until_next_4am_utc() {
+  _h="$(printf '%d' "$(date -u +%H)")"
+  _m="$(printf '%d' "$(date -u +%M)")"
+  _s="$(printf '%d' "$(date -u +%S)")"
+  _elapsed="$(( _h * 3600 + _m * 60 + _s ))"
+  _target=14400   # 04:00:00 UTC = 4 * 3600 seconds
+  if [ "$_elapsed" -lt "$_target" ]; then
+    printf '%d' "$(( _target - _elapsed ))"
+  else
+    printf '%d' "$(( 86400 - _elapsed + _target ))"
+  fi
 }
 
 # Resolve backup retention from app_settings; fall back to hard-coded default.
@@ -361,11 +377,16 @@ main() {
   run_backup_once || printf 'Initial backup attempt failed; will retry.\n' >&2
 
   while :; do
-    # Re-read interval from app_settings before each sleep so Admin UI changes
-    # to backup_interval_seconds take effect without restarting the container.
-    INTERVAL="$(resolve_interval)"
-    sleep "$INTERVAL"
-    run_backup_once || printf 'Backup attempt failed; will retry in %ss.\n' "$INTERVAL" >&2
+    # Sleep until the next 4:00 AM UTC, then wait any additional days so that
+    # the configured interval (in days) is respected.
+    WAIT="$(seconds_until_next_4am_utc)"
+    sleep "$WAIT"
+    run_backup_once || printf 'Backup attempt failed; will retry at next scheduled time.\n' >&2
+    INTERVAL_DAYS="$(resolve_interval_days)"
+    EXTRA_DAYS="$(( INTERVAL_DAYS - 1 ))"
+    if [ "$EXTRA_DAYS" -gt 0 ]; then
+      sleep "$(( EXTRA_DAYS * 86400 ))"
+    fi
   done
 }
 

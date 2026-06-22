@@ -35,8 +35,8 @@
         backup_upload_enabled: !!uploadSettings.backup_upload_enabled,
         backup_upload_url: uploadSettings.backup_upload_url || "",
         backup_upload_password: backupPasswordPayload(),
-        backup_interval_seconds:
-          parseInt(uploadSettings.backup_interval_seconds) || 86400,
+        backup_interval_days:
+          parseInt(uploadSettings.backup_interval_days) || 1,
         backup_retention_days:
           parseInt(uploadSettings.backup_retention_days) || 30,
         report_upload_enabled: !!uploadSettings.report_upload_enabled,
@@ -144,14 +144,14 @@
       <div class="field-row">
         <div>
           <label class="zf-label" for="backup-interval"
-            >{$t("Backup interval (seconds)")}</label
+            >{$t("Backup interval (days)")}</label
           >
           <input
             id="backup-interval"
             class="zf-input"
             type="number"
             min="60"
-            bind:value={uploadSettings.backup_interval_seconds}
+            bind:value={uploadSettings.backup_interval_days}
             placeholder="86400"
           />
           <div class="field-hint">

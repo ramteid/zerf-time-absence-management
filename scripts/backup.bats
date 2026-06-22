@@ -72,42 +72,51 @@ make_shim() {
   [ "$status" -ne 0 ]
 }
 
-# ── resolve_interval ─────────────────────────────────────────────────────────
+# ── resolve_interval_days ────────────────────────────────────────────────────
 
-@test "resolve_interval: returns value from app_settings when valid" {
-  # Shim psql to return a known interval.
-  make_shim psql 'printf "3600\n"'
-  run resolve_interval
+@test "resolve_interval_days: returns value from app_settings when valid" {
+  make_shim psql 'printf "7\n"'
+  run resolve_interval_days
   [ "$status" -eq 0 ]
-  [ "$output" = "3600" ]
+  [ "$output" = "7" ]
 }
 
-@test "resolve_interval: falls back to 86400 when psql returns empty" {
+@test "resolve_interval_days: falls back to 1 when psql returns empty" {
   make_shim psql 'printf ""'
-  run resolve_interval
+  run resolve_interval_days
   [ "$status" -eq 0 ]
-  [ "$output" = "86400" ]
+  [ "$output" = "1" ]
 }
 
-@test "resolve_interval: falls back to 86400 when psql fails" {
+@test "resolve_interval_days: falls back to 1 when psql fails" {
   make_shim psql 'exit 1'
-  run resolve_interval
+  run resolve_interval_days
   [ "$status" -eq 0 ]
-  [ "$output" = "86400" ]
+  [ "$output" = "1" ]
 }
 
-@test "resolve_interval: falls back to 86400 when value is zero" {
+@test "resolve_interval_days: falls back to 1 when value is zero" {
   make_shim psql 'printf "0\n"'
-  run resolve_interval
+  run resolve_interval_days
   [ "$status" -eq 0 ]
-  [ "$output" = "86400" ]
+  [ "$output" = "1" ]
 }
 
-@test "resolve_interval: falls back to 86400 when value is non-integer" {
+@test "resolve_interval_days: falls back to 1 when value is non-integer" {
   make_shim psql 'printf "abc\n"'
-  run resolve_interval
+  run resolve_interval_days
   [ "$status" -eq 0 ]
-  [ "$output" = "86400" ]
+  [ "$output" = "1" ]
+}
+
+# ── seconds_until_next_4am_utc ────────────────────────────────────────────────
+
+@test "seconds_until_next_4am_utc: returns positive value" {
+  # Can't control wall time, so just verify the function returns a positive integer
+  # between 1 and 86400.
+  result="$(seconds_until_next_4am_utc)"
+  [ "$result" -ge 1 ]
+  [ "$result" -le 86400 ]
 }
 
 # ── resolve_retention ────────────────────────────────────────────────────────
