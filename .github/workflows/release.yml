@@ -78,6 +78,18 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Build and push backup image
+        uses: docker/build-push-action@v7
+        with:
+          context: docker
+          file: docker/backup.Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_BASE }}-backup:${{ github.ref_name }}
+            ${{ env.IMAGE_BASE }}-backup:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
       - name: Generate changelog
         uses: orhun/git-cliff-action@v4
         id: cliff

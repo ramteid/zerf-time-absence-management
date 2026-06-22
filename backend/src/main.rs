@@ -67,6 +67,9 @@ async fn main() -> Result<()> {
     // Approval reminder scheduler: wakes every Monday at 07:00.
     tokio::spawn(background::approval_reminders::run_loop(state.clone()));
 
+    // Monthly timesheet PDF upload to Nextcloud: checks daily at midnight.
+    tokio::spawn(background::report_upload::run_loop(state.clone()));
+
     let app = build_app(state);
 
     let addr: SocketAddr = config.bind.parse().expect("invalid ZERF_BIND");

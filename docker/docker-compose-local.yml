@@ -119,7 +119,10 @@ services:
       - private
 
   backup:
-    image: postgres:18
+    image: ghcr.io/ramteid/zerf-time-absence-management-backup:${ZERF_VERSION:-latest}
+    build:
+      context: .
+      dockerfile: backup.Dockerfile
     container_name: zerf-backup
     restart: unless-stopped
     read_only: true
@@ -137,9 +140,9 @@ services:
       - PGDATABASE=${ZERF_POSTGRES_DB:?ZERF_POSTGRES_DB must be set in .env}
       - PGUSER=${ZERF_POSTGRES_USER:?ZERF_POSTGRES_USER must be set in .env}
       - PGPASSWORD=${ZERF_POSTGRES_PASSWORD:?ZERF_POSTGRES_PASSWORD must be set in .env}
-      - BACKUP_INTERVAL_SECONDS=${BACKUP_INTERVAL_SECONDS:-86400}
-      - BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-30}
       - ZERF_GIT_COMMIT=${ZERF_GIT_COMMIT:-unknown}
+      # Backup interval/retention settings are now stored in app_settings (Admin UI).
+      # BACKUP_INTERVAL_SECONDS and BACKUP_RETENTION_DAYS env vars have been removed.
       # Same key used to encrypt backup files with AES-256-CBC via openssl.
       - ZERF_DB_ENCRYPTION_KEY=${ZERF_DB_ENCRYPTION_KEY:?ZERF_DB_ENCRYPTION_KEY must be set in .env (openssl rand -hex 32)}
     volumes:
@@ -155,7 +158,9 @@ services:
       # backup_net only — deliberately not on `private` so a compromised app
       # container cannot reach this service or its ZERF_DB_ENCRYPTION_KEY.
       - backup_net
-
+      # backup_egress allows outgoing HTTPS to Nextcloud without giving the
+      # backup container access to the private app network.
+      - backup_egress
 volumes:
   postgres_data:
     name: zerf_postgres_data
@@ -170,3 +175,6 @@ networks:
     # Isolated internal network for postgres ↔ backup only.
     # The app container is intentionally absent from this network.
     internal: true
+  backup_egress:
+    # Non-internal network for the backup container's outgoing HTTPS uploads.
+    # Only the backup service is attached; the app is not on this network.

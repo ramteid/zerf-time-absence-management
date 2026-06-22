@@ -258,6 +258,7 @@
     "/admin/audit-log": () => import("./routes/AdminAuditLog.svelte"),
     "/admin/settings": () => import("./routes/AdminSettings.svelte"),
     "/admin/email": () => import("./routes/AdminEmail.svelte"),
+    "/admin/upload": () => import("./routes/AdminUpload.svelte"),
     "/team-settings": () => import("./routes/TeamSettings.svelte"),
   };
   const notFoundLoader = () => import("./routes/NotFound.svelte");
@@ -277,6 +278,7 @@
     "/admin/audit-log": (user) => !!user?.permissions?.can_view_audit_log,
     "/admin/settings": (user) => !!user?.permissions?.can_manage_settings,
     "/admin/email": (user) => !!user?.permissions?.can_manage_settings,
+    "/admin/upload": (user) => !!user?.permissions?.can_manage_settings,
   };
 
   $: routePromise = resolveRoute(pathname, $currentUser);

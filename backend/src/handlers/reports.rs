@@ -5,7 +5,7 @@ use crate::roles::is_assistant_role;
 use crate::services::reports::{
     all_weeks_submitted_for_month, assert_can_access_user, build_flextime_for_user, build_month,
     build_month_without_submission_status, build_overtime_rows_for_year, build_range,
-    build_range_with_user, csv_response, month_bounds, parse_report_time, pdf_response,
+    build_timesheet_section, csv_response, month_bounds, parse_report_time, pdf_response,
     sort_categories_desc, validate_range, CategoryTotal, FlextimeDay, MonthReport, MonthRow,
     TeamRow, UserCategoryRow,
 };
@@ -107,25 +107,6 @@ pub async fn range_csv(
     csv_response(report, target_user_id, &label)
 }
 
-/// Build the [`TimesheetSection`] (range report + flextime ledger) for one
-/// already-resolved user — the unit of work both the single-employee and
-/// "All" combined PDF exports assemble from.
-async fn build_timesheet_section(
-    app_state: &AppState,
-    user: &User,
-    from: NaiveDate,
-    to: NaiveDate,
-    label: &str,
-) -> AppResult<TimesheetSection> {
-    let report = build_range_with_user(&app_state.pool, user, from, to, label).await?;
-    let flextime_data = build_flextime_for_user(&app_state.pool, user, from, to).await?;
-    Ok(TimesheetSection {
-        user_name: format!("{} {}", user.first_name, user.last_name),
-        report,
-        flextime_data,
-    })
-}
-
 pub async fn range_pdf(
     State(app_state): State<AppState>,
     requester: User,
@@ -151,7 +132,7 @@ pub async fn range_pdf(
                 .await?
                 .ok_or(AppError::NotFound)?,
         );
-        let section = build_timesheet_section(&app_state, &user, from, to, &label).await?;
+        let section = build_timesheet_section(&app_state.pool, &user, from, to, &label).await?;
         (vec![section], format!("user-{}-{}", target_user_id, label))
     } else {
         // Omitting user_id requests the combined "All" export — leads/admins
@@ -177,8 +158,9 @@ pub async fn range_pdf(
         // flow and avoids opening many concurrent report queries at once.
         let mut sections = Vec::with_capacity(team_members.len());
         for team_member in &team_members {
-            sections
-                .push(build_timesheet_section(&app_state, team_member, from, to, &label).await?);
+            sections.push(
+                build_timesheet_section(&app_state.pool, team_member, from, to, &label).await?,
+            );
         }
         (sections, format!("team-{}", label))
     };

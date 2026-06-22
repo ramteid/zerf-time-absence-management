@@ -1401,6 +1401,44 @@ Admins configure system-wide behavior in the settings panel:
 | Automatic break deduction | When enabled, deducts a configured break from each day where consecutive crediting work meets or exceeds a threshold. See [Automatic break deduction](#automatic-break-deduction). |
 | SMTP configuration | Server, port, and credentials for outgoing email. Required for registration emails and email reminders. |
 | Public URL | Used to construct login links in registration emails. |
+| Nextcloud Upload | Configure automatic upload of encrypted DB backups and monthly timesheet PDFs to a Nextcloud public share. See [Nextcloud Upload](#nextcloud-upload). |
+
+| Nextcloud Upload | Configure automatic upload of encrypted DB backups and monthly timesheet PDFs to a Nextcloud public share. See [Nextcloud Upload](#nextcloud-upload). |
+
+### Nextcloud Upload
+
+Zerf can automatically upload two types of files to Nextcloud shared folders using public share links.
+
+#### DB Backup Upload
+
+When enabled, the backup container uploads each encrypted `.dump.enc` file to a Nextcloud public share immediately after it is created.
+
+| Setting | Description |
+| --- | --- |
+| Enable DB backup upload | Activates the upload step in the backup container. |
+| Share link | A Nextcloud public share URL in the form `https://cloud.example.com/s/<token>`. Only `https` links are accepted. |
+| Share password | Optional password protecting the share. Stored securely; never returned by the API. |
+| Backup interval (seconds) | How often the backup container runs a backup cycle. Default: 86400 (daily). Changes take effect on the next cycle. |
+| Retention (days) | How many days of local backup files to keep in the backup volume. Default: 30. |
+
+> **Note:** Uploaded files are **not** automatically deleted from Nextcloud. Manage the shared folder manually to avoid unlimited growth.
+
+The backup file is AES-256-CBC encrypted before upload, so a compromised share link does not expose plaintext data.
+
+#### Report PDF Upload
+
+When enabled, Zerf automatically generates a combined timesheet PDF for all employees and uploads it to a second Nextcloud share on a configurable day each month. The PDF covers the **previous calendar month** and includes all employees who tracked time or had approved absences during that period (including employees who were deactivated after the period ended, for archive correctness).
+
+| Setting | Description |
+| --- | --- |
+| Enable report PDF upload | Activates the monthly automatic upload. |
+| Share link | A Nextcloud public share URL. Only `https` links are accepted. |
+| Share password | Optional password protecting the share. |
+| Upload day of month (1–28) | The day of the month on which the previous month's PDF is uploaded. Default: 5. Set this after your team's submission deadline to ensure all entries are included. |
+
+**Upload now** triggers an immediate upload of the previous month's PDF for verification. This does not affect the scheduled monthly upload.
+
+If an upload fails, all active admins receive an in-app notification. The scheduled upload retries the next day.
 
 ### Managing categories
 

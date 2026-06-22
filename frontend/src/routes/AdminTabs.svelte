@@ -13,6 +13,7 @@
     { href: "/admin/categories", key: "Categories" },
     { href: "/admin/holidays", key: "Holidays" },
     { href: "/admin/email", key: "Email" },
+    { href: "/admin/upload", key: "Nextcloud Upload" },
     { href: "/admin/audit-log", key: "Audit Log" },
   ];
 </script>

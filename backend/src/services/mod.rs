@@ -4,6 +4,7 @@ pub mod absences;
 pub mod auth;
 pub mod categories;
 pub mod holidays;
+pub mod nextcloud;
 pub mod notifications;
 pub mod reopen_requests;
 pub mod reports;

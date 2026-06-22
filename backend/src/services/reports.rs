@@ -1325,6 +1325,47 @@ pub struct FlextimeDay {
     pub holiday: Option<String>,
 }
 
+/// Build a single [`TimesheetSection`] (range report + flextime ledger) for one user.
+/// Used by both the on-demand PDF handler and the scheduled monthly export.
+pub async fn build_timesheet_section(
+    pool: &crate::db::DatabasePool,
+    user: &crate::middleware::auth::User,
+    from: NaiveDate,
+    to: NaiveDate,
+    label: &str,
+) -> AppResult<crate::report_pdf::TimesheetSection> {
+    let report = build_range_with_user(pool, user, from, to, label).await?;
+    let flextime_data = build_flextime_for_user(pool, user, from, to).await?;
+    Ok(crate::report_pdf::TimesheetSection {
+        user_name: format!("{} {}", user.first_name, user.last_name),
+        report,
+        flextime_data,
+    })
+}
+
+/// Build a combined PDF for all users with time-tracking activity in [from, to].
+/// Includes deactivated users who had entries/absences in the period (archive
+/// correctness — see `ReportDb::timesheet_members_for_period`).
+pub async fn build_all_users_timesheet_pdf(
+    app_state: &crate::AppState,
+    from: NaiveDate,
+    to: NaiveDate,
+) -> AppResult<Vec<u8>> {
+    let label = format!("{}_to_{}", from, to);
+    let language = crate::i18n::load_ui_language(&app_state.pool).await?;
+    let members = app_state
+        .db
+        .reports
+        .timesheet_members_for_period(from, to)
+        .await?;
+    let mut sections = Vec::with_capacity(members.len());
+    for member in &members {
+        let user = crate::services::users::repo_user_to_auth_user(member.clone());
+        sections.push(build_timesheet_section(&app_state.pool, &user, from, to, &label).await?);
+    }
+    Ok(crate::report_pdf::render_timesheet_pdf(&sections, from, to, &language))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

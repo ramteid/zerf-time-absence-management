@@ -3,6 +3,7 @@
 use crate::audit;
 use crate::error::{AppError, AppResult};
 use crate::middleware::auth::User;
+use chrono::Datelike;
 use crate::services::settings::{
     self, load_admin_settings, load_all_public_settings, load_setting, normalize_language,
     normalize_time_format, normalize_timezone, save_setting_tx, setting_value_changed,
@@ -479,6 +480,173 @@ pub async fn update_smtp_settings(
     .await;
 
     Ok(Json(load_admin_settings(&app_state.pool).await?))
+}
+
+/// Request body for updating Nextcloud upload settings.
+#[derive(Deserialize)]
+pub struct UpdateUploadSettings {
+    // Report PDF upload
+    pub report_upload_enabled: Option<bool>,
+    pub report_upload_url: Option<String>,
+    /// `None` = keep stored password; `Some("")` = clear password; `Some("...")` = update.
+    pub report_upload_password: Option<String>,
+    pub report_upload_day_of_month: Option<u8>,
+    // DB backup upload
+    pub backup_upload_enabled: Option<bool>,
+    pub backup_upload_url: Option<String>,
+    pub backup_upload_password: Option<String>,
+    pub backup_interval_seconds: Option<u64>,
+    pub backup_retention_days: Option<u64>,
+}
+
+pub async fn update_upload_settings(
+    State(app_state): State<AppState>,
+    user: User,
+    Json(body): Json<UpdateUploadSettings>,
+) -> AppResult<Json<AdminSettingsData>> {
+    if !user.is_admin() {
+        return Err(AppError::Forbidden);
+    }
+
+    // Validate share URLs when provided and non-empty.
+    if let Some(ref url) = body.report_upload_url {
+        if !url.is_empty() {
+            crate::services::nextcloud::parse_share_url(url)?;
+        }
+    }
+    if let Some(ref url) = body.backup_upload_url {
+        if !url.is_empty() {
+            crate::services::nextcloud::parse_share_url(url)?;
+        }
+    }
+    if let Some(day) = body.report_upload_day_of_month {
+        if !(1..=28).contains(&day) {
+            return Err(AppError::BadRequest(
+                "report_upload_day_of_month must be between 1 and 28.".into(),
+            ));
+        }
+    }
+    if let Some(secs) = body.backup_interval_seconds {
+        if secs == 0 {
+            return Err(AppError::BadRequest(
+                "backup_interval_seconds must be greater than zero.".into(),
+            ));
+        }
+    }
+    if let Some(days) = body.backup_retention_days {
+        if days == 0 {
+            return Err(AppError::BadRequest(
+                "backup_retention_days must be greater than zero.".into(),
+            ));
+        }
+    }
+
+    let mut transaction = app_state.db.settings.begin().await?;
+
+    macro_rules! save_if_some {
+        ($key:expr, $val:expr) => {
+            if let Some(ref v) = $val {
+                save_setting_tx(&mut transaction, $key, v).await?;
+            }
+        };
+        ($key:expr, $val:expr, bool) => {
+            if let Some(v) = $val {
+                save_setting_tx(&mut transaction, $key, if v { "true" } else { "false" }).await?;
+            }
+        };
+        ($key:expr, $val:expr, num) => {
+            if let Some(v) = $val {
+                save_setting_tx(&mut transaction, $key, &v.to_string()).await?;
+            }
+        };
+    }
+
+    save_if_some!(settings::REPORT_UPLOAD_ENABLED_KEY, body.report_upload_enabled, bool);
+    save_if_some!(settings::REPORT_UPLOAD_URL_KEY, body.report_upload_url);
+    // Password: None = keep, Some("") = clear, Some("...") = update.
+    if let Some(ref pw) = body.report_upload_password {
+        save_setting_tx(&mut transaction, settings::REPORT_UPLOAD_PASSWORD_KEY, pw).await?;
+    }
+    save_if_some!(settings::REPORT_UPLOAD_DAY_OF_MONTH_KEY, body.report_upload_day_of_month, num);
+    save_if_some!(settings::BACKUP_UPLOAD_ENABLED_KEY, body.backup_upload_enabled, bool);
+    save_if_some!(settings::BACKUP_UPLOAD_URL_KEY, body.backup_upload_url);
+    if let Some(ref pw) = body.backup_upload_password {
+        save_setting_tx(&mut transaction, settings::BACKUP_UPLOAD_PASSWORD_KEY, pw).await?;
+    }
+    save_if_some!(settings::BACKUP_INTERVAL_SECONDS_KEY, body.backup_interval_seconds, num);
+    save_if_some!(settings::BACKUP_RETENTION_DAYS_KEY, body.backup_retention_days, num);
+
+    transaction.commit().await?;
+
+    audit::log(
+        &app_state.pool,
+        user.id,
+        "updated",
+        "upload_settings",
+        0,
+        None,
+        Some(serde_json::json!({
+            "report_upload_enabled": body.report_upload_enabled,
+            "backup_upload_enabled": body.backup_upload_enabled,
+        })),
+    )
+    .await;
+
+    Ok(Json(load_admin_settings(&app_state.pool).await?))
+}
+
+/// Trigger an immediate report upload (for the previous month) without
+/// marking it as the scheduled monthly run. Does NOT update `report_upload_last_period`
+/// so the automatic monthly upload is not skipped.
+pub async fn run_report_upload_now(
+    State(app_state): State<AppState>,
+    user: User,
+) -> AppResult<Json<serde_json::Value>> {
+    if !user.is_admin() {
+        return Err(AppError::Forbidden);
+    }
+
+    let url =
+        load_setting(&app_state.pool, settings::REPORT_UPLOAD_URL_KEY, "").await?;
+    if url.is_empty() {
+        return Err(AppError::BadRequest(
+            "No Nextcloud share URL configured for report upload.".into(),
+        ));
+    }
+
+    // Build the previous-month date range.
+    let today = settings::app_today(&app_state.pool).await;
+    use chrono::Datelike;
+    let (year, month) = if today.month() == 1 {
+        (today.year() - 1, 12u32)
+    } else {
+        (today.year(), today.month() - 1)
+    };
+    let from = chrono::NaiveDate::from_ymd_opt(year, month, 1)
+        .ok_or_else(|| AppError::Internal("Failed to compute start of previous month.".into()))?;
+    let last_day = crate::time_calc::last_day_of_month(year, month);
+    let to = chrono::NaiveDate::from_ymd_opt(year, month, last_day)
+        .ok_or_else(|| AppError::Internal("Failed to compute end of previous month.".into()))?;
+
+    let bytes =
+        crate::services::reports::build_all_users_timesheet_pdf(&app_state, from, to).await?;
+    if bytes.is_empty() {
+        return Err(AppError::Internal(
+            "Generated PDF is empty.".into(),
+        ));
+    }
+
+    let (base, token) = crate::services::nextcloud::parse_share_url(&url)?;
+    let password = load_setting(&app_state.pool, settings::REPORT_UPLOAD_PASSWORD_KEY, "").await?;
+    let pw = if password.is_empty() { None } else { Some(password.as_str()) };
+    let period = format!("{:04}-{:02}", year, month);
+    let filename = format!("zerf-timesheets-{period}.pdf");
+    crate::services::nextcloud::upload_file(&base, &token, pw, &filename, bytes).await?;
+
+    // Intentionally NOT updating report_upload_last_period so the scheduled
+    // monthly run is not skipped after a manual trigger.
+
+    Ok(Json(serde_json::json!({ "ok": true, "period": period, "filename": filename })))
 }
 
 /// Test SMTP connection without saving. Builds a temporary SmtpConfig from

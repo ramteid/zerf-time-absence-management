@@ -37,6 +37,23 @@ const DEFAULT_CARRYOVER_EXPIRY_DATE: &str = "03-31";
 pub const SUBMISSION_DEADLINE_DAY_KEY: &str = "submission_deadline_day";
 pub const ORGANIZATION_NAME_KEY: &str = "organization_name";
 
+// Nextcloud upload — report PDF export (app reads/writes these).
+pub const REPORT_UPLOAD_ENABLED_KEY: &str = "report_upload_enabled";
+pub const REPORT_UPLOAD_URL_KEY: &str = "report_upload_url";
+pub const REPORT_UPLOAD_PASSWORD_KEY: &str = "report_upload_password";
+pub const REPORT_UPLOAD_DAY_OF_MONTH_KEY: &str = "report_upload_day_of_month";
+/// Last period successfully uploaded, stored as "YYYY-MM". Prevents re-upload after restart.
+pub const REPORT_UPLOAD_LAST_PERIOD_KEY: &str = "report_upload_last_period";
+
+// Nextcloud upload — DB backup (backup container reads these via psql; app writes them).
+pub const BACKUP_UPLOAD_ENABLED_KEY: &str = "backup_upload_enabled";
+pub const BACKUP_UPLOAD_URL_KEY: &str = "backup_upload_url";
+pub const BACKUP_UPLOAD_PASSWORD_KEY: &str = "backup_upload_password";
+
+// Backup scheduling/retention — migrated from env vars into app_settings.
+pub const BACKUP_INTERVAL_SECONDS_KEY: &str = "backup_interval_seconds";
+pub const BACKUP_RETENTION_DAYS_KEY: &str = "backup_retention_days";
+
 pub async fn load_setting(
     pool: &crate::db::DatabasePool,
     key: &str,
@@ -127,7 +144,7 @@ pub async fn load_all_public_settings(
     })
 }
 
-/// Load the full admin settings response (public settings + SMTP + reminders).
+/// Load the full admin settings response (public settings + SMTP + reminders + upload).
 pub async fn load_admin_settings(pool: &crate::db::DatabasePool) -> AppResult<AdminSettingsData> {
     let base = load_all_public_settings(pool).await?;
     let enabled = load_setting(pool, SMTP_ENABLED_KEY, "false").await? == "true";
@@ -144,6 +161,33 @@ pub async fn load_admin_settings(pool: &crate::db::DatabasePool) -> AppResult<Ad
         load_setting(pool, SUBMISSION_REMINDERS_ENABLED_KEY, "true").await? != "false";
     let approval_reminders_enabled =
         load_setting(pool, APPROVAL_REMINDERS_ENABLED_KEY, "true").await? != "false";
+
+    let report_upload_enabled =
+        load_setting(pool, REPORT_UPLOAD_ENABLED_KEY, "false").await? == "true";
+    let report_upload_url = load_setting(pool, REPORT_UPLOAD_URL_KEY, "").await?;
+    let report_upload_password_set =
+        !load_setting(pool, REPORT_UPLOAD_PASSWORD_KEY, "").await?.is_empty();
+    let report_upload_day_of_month: u8 = load_setting(pool, REPORT_UPLOAD_DAY_OF_MONTH_KEY, "5")
+        .await?
+        .parse()
+        .unwrap_or(5);
+
+    let backup_upload_enabled =
+        load_setting(pool, BACKUP_UPLOAD_ENABLED_KEY, "false").await? == "true";
+    let backup_upload_url = load_setting(pool, BACKUP_UPLOAD_URL_KEY, "").await?;
+    let backup_upload_password_set =
+        !load_setting(pool, BACKUP_UPLOAD_PASSWORD_KEY, "").await?.is_empty();
+    let backup_interval_seconds: u64 =
+        load_setting(pool, BACKUP_INTERVAL_SECONDS_KEY, "86400")
+            .await?
+            .parse()
+            .unwrap_or(86400);
+    let backup_retention_days: u64 =
+        load_setting(pool, BACKUP_RETENTION_DAYS_KEY, "30")
+            .await?
+            .parse()
+            .unwrap_or(30);
+
     Ok(AdminSettingsData {
         base,
         smtp_enabled: enabled,
@@ -155,6 +199,15 @@ pub async fn load_admin_settings(pool: &crate::db::DatabasePool) -> AppResult<Ad
         smtp_password_set: password_set,
         submission_reminders_enabled,
         approval_reminders_enabled,
+        report_upload_enabled,
+        report_upload_url,
+        report_upload_password_set,
+        report_upload_day_of_month,
+        backup_upload_enabled,
+        backup_upload_url,
+        backup_upload_password_set,
+        backup_interval_seconds,
+        backup_retention_days,
     })
 }
 
@@ -271,7 +324,7 @@ pub struct PublicSettingsData {
     pub auto_break_deduction_minutes_2: Option<i32>,
 }
 
-/// Full admin settings (public settings + SMTP config + reminder flags).
+/// Full admin settings (public settings + SMTP config + reminder flags + upload settings).
 #[derive(serde::Serialize)]
 pub struct AdminSettingsData {
     #[serde(flatten)]
@@ -286,6 +339,19 @@ pub struct AdminSettingsData {
     pub smtp_password_set: bool,
     pub submission_reminders_enabled: bool,
     pub approval_reminders_enabled: bool,
+    // --- Nextcloud upload: monthly timesheet PDF ---
+    pub report_upload_enabled: bool,
+    pub report_upload_url: String,
+    /// True when a share password is stored (never returned in cleartext).
+    pub report_upload_password_set: bool,
+    pub report_upload_day_of_month: u8,
+    // --- Nextcloud upload: DB backup ---
+    pub backup_upload_enabled: bool,
+    pub backup_upload_url: String,
+    /// True when a share password is stored (never returned in cleartext).
+    pub backup_upload_password_set: bool,
+    pub backup_interval_seconds: u64,
+    pub backup_retention_days: u64,
 }
 
 #[cfg(test)]
