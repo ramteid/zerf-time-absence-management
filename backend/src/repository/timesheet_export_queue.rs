@@ -20,17 +20,20 @@ impl TimesheetExportQueueDb {
 
     /// Insert one queue entry per user ID for the given period.
     /// Idempotent: duplicate (user_id, period) pairs are silently ignored.
+    /// Uses a single UNNEST bulk INSERT to avoid N+1 round-trips.
     pub async fn populate(&self, period: &str, user_ids: &[i64]) -> AppResult<()> {
-        for &uid in user_ids {
-            sqlx::query(
-                "INSERT INTO timesheet_export_queue (user_id, period) \
-                 VALUES ($1, $2) ON CONFLICT DO NOTHING",
-            )
-            .bind(uid)
-            .bind(period)
-            .execute(&self.pool)
-            .await?;
+        if user_ids.is_empty() {
+            return Ok(());
         }
+        sqlx::query(
+            "INSERT INTO timesheet_export_queue (user_id, period) \
+             SELECT uid, $1 FROM UNNEST($2::BIGINT[]) AS t(uid) \
+             ON CONFLICT DO NOTHING",
+        )
+        .bind(period)
+        .bind(user_ids)
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 
