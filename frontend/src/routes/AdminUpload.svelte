@@ -265,23 +265,25 @@
           />
         </div>
       </div>
+      <div class="field-row" style="justify-content:flex-end">
+        <button
+          class="zf-btn"
+          on:click={runNow}
+          disabled={uploading || saving || !uploadSettings.report_upload_enabled}
+        >
+          {#if uploading}
+            {$t("Uploading...")}
+          {:else}
+            {$t("Upload now")}
+          {/if}
+        </button>
+      </div>
     </div>
   </div>
 
   <!-- Actions -->
   <div class="zf-card" style="padding:20px">
     <div style="display:flex;justify-content:flex-end;gap:8px">
-      <button
-        class="zf-btn"
-        on:click={runNow}
-        disabled={uploading || saving || !uploadSettings.report_upload_enabled}
-      >
-        {#if uploading}
-          {$t("Uploading...")}
-        {:else}
-          {$t("Upload now")}
-        {/if}
-      </button>
       <button
         class="zf-btn zf-btn-primary"
         on:click={save}
