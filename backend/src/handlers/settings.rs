@@ -594,9 +594,9 @@ pub async fn update_upload_settings(
     Ok(Json(load_admin_settings(&app_state.pool).await?))
 }
 
-/// Trigger an immediate report upload (for the previous month) without
-/// marking it as the scheduled monthly run. Does NOT update `report_upload_last_period`
-/// so the automatic monthly upload is not skipped.
+/// Trigger an immediate report upload: populate the queue for the previous
+/// month (idempotent) and process all pending entries.
+/// Does not affect the scheduled monthly run.
 pub async fn run_report_upload_now(
     State(app_state): State<AppState>,
     user: User,
@@ -604,48 +604,8 @@ pub async fn run_report_upload_now(
     if !user.is_admin() {
         return Err(AppError::Forbidden);
     }
-
-    let url =
-        load_setting(&app_state.pool, settings::REPORT_UPLOAD_URL_KEY, "").await?;
-    if url.is_empty() {
-        return Err(AppError::BadRequest(
-            "No Nextcloud share URL configured for report upload.".into(),
-        ));
-    }
-
-    // Build the previous-month date range.
-    let today = settings::app_today(&app_state.pool).await;
-    use chrono::Datelike;
-    let (year, month) = if today.month() == 1 {
-        (today.year() - 1, 12u32)
-    } else {
-        (today.year(), today.month() - 1)
-    };
-    let from = chrono::NaiveDate::from_ymd_opt(year, month, 1)
-        .ok_or_else(|| AppError::Internal("Failed to compute start of previous month.".into()))?;
-    let last_day = crate::time_calc::last_day_of_month(year, month);
-    let to = chrono::NaiveDate::from_ymd_opt(year, month, last_day)
-        .ok_or_else(|| AppError::Internal("Failed to compute end of previous month.".into()))?;
-
-    let bytes =
-        crate::services::reports::build_all_users_timesheet_pdf(&app_state, from, to).await?;
-    if bytes.is_empty() {
-        return Err(AppError::Internal(
-            "Generated PDF is empty.".into(),
-        ));
-    }
-
-    let (base, token) = crate::services::nextcloud::parse_share_url(&url)?;
-    let password = load_setting(&app_state.pool, settings::REPORT_UPLOAD_PASSWORD_KEY, "").await?;
-    let pw = if password.is_empty() { None } else { Some(password.as_str()) };
-    let period = format!("{:04}-{:02}", year, month);
-    let filename = format!("zerf-timesheets-{period}.pdf");
-    crate::services::nextcloud::upload_file(&base, &token, pw, &filename, bytes).await?;
-
-    // Intentionally NOT updating report_upload_last_period so the scheduled
-    // monthly run is not skipped after a manual trigger.
-
-    Ok(Json(serde_json::json!({ "ok": true, "period": period, "filename": filename })))
+    crate::background::report_upload::run_now(&app_state).await?;
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 /// Test SMTP connection without saving. Builds a temporary SmtpConfig from

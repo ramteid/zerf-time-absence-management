@@ -44,21 +44,63 @@ pub fn parse_share_url(url: &str) -> AppResult<(String, String)> {
     Ok((base, token))
 }
 
-/// Upload bytes to a Nextcloud public share folder via WebDAV PUT.
+/// Create a folder in a Nextcloud public share via WebDAV MKCOL.
+///
+/// `folder` is a relative path inside the shared folder (no leading slash).
+/// HTTP 405 (Method Not Allowed) is treated as success — it means the folder
+/// already exists, which is fine since write-only shares cannot use PROPFIND.
+pub async fn create_folder(
+    base: &str,
+    token: &str,
+    password: Option<&str>,
+    folder: &str,
+) -> AppResult<()> {
+    // Trailing slash is required by the WebDAV spec for MKCOL.
+    let url = format!("{}/public.php/webdav/{}/", base, folder);
+    let pw = password.filter(|p| !p.is_empty());
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| AppError::Internal(format!("failed to build HTTP client: {e}")))?;
+
+    let response = client
+        // reqwest does not expose MKCOL as a named method, so use from_bytes.
+        .request(
+            reqwest::Method::from_bytes(b"MKCOL").expect("MKCOL is a valid HTTP method"),
+            &url,
+        )
+        .basic_auth(token, pw)
+        .send()
+        .await
+        .map_err(|e| AppError::Internal(format!("Nextcloud MKCOL request failed: {e}")))?;
+
+    let status = response.status();
+    if status.is_success() || status.as_u16() == 405 {
+        return Ok(());
+    }
+    let body = response.text().await.unwrap_or_default();
+    Err(AppError::Internal(format!(
+        "Nextcloud MKCOL failed (HTTP {status}): {body}"
+    )))
+}
+
+/// Upload bytes to a Nextcloud public share via WebDAV PUT.
 ///
 /// `base`     – everything before `/s/` in the share URL
 /// `token`    – share token (segment after `/s/`)
 /// `password` – optional share password (`None` or `""` = no password)
-/// `filename` – filename to create inside the shared folder
+/// `path`     – relative path inside the shared folder, may include subfolders
+///               (e.g. `"2026-05/2026-05_Smith_John.pdf"`)
 /// `bytes`    – file contents
 pub async fn upload_file(
     base: &str,
     token: &str,
     password: Option<&str>,
-    filename: &str,
+    path: &str,
     bytes: Vec<u8>,
 ) -> AppResult<()> {
-    let url = format!("{}/public.php/webdav/{}", base, filename);
+    let url = format!("{}/public.php/webdav/{}", base, path);
     let pw = password.filter(|p| !p.is_empty());
 
     let client = reqwest::Client::builder()

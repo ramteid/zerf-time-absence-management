@@ -42,8 +42,9 @@ pub const REPORT_UPLOAD_ENABLED_KEY: &str = "report_upload_enabled";
 pub const REPORT_UPLOAD_URL_KEY: &str = "report_upload_url";
 pub const REPORT_UPLOAD_PASSWORD_KEY: &str = "report_upload_password";
 pub const REPORT_UPLOAD_DAY_OF_MONTH_KEY: &str = "report_upload_day_of_month";
-/// Last period successfully uploaded, stored as "YYYY-MM". Prevents re-upload after restart.
-pub const REPORT_UPLOAD_LAST_PERIOD_KEY: &str = "report_upload_last_period";
+/// Period for which the export queue was last populated, stored as "YYYY-MM".
+/// Prevents re-populating the queue after all entries have been processed.
+pub const REPORT_UPLOAD_QUEUE_PERIOD_KEY: &str = "report_upload_queue_period";
 
 // Nextcloud upload — DB backup (backup container reads these via psql; app writes them).
 pub const BACKUP_UPLOAD_ENABLED_KEY: &str = "backup_upload_enabled";

@@ -194,7 +194,7 @@
           </label>
           <div class="field-hint">
             {$t(
-              "The previous month's combined timesheet PDF is uploaded automatically on the configured day of each month.",
+              "On the configured day of each month, an individual timesheet PDF is queued for every employee. Each PDF is uploaded as soon as the employee has fully submitted all their weeks — late submitters are automatically caught up on the next daily check.",
             )}
           </div>
         </div>
