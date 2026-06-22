@@ -264,20 +264,52 @@ Caddy handles HTTPS termination and serves the frontend static assets. Backend l
 
 The PostgreSQL container is built from `docker/postgres.Dockerfile` (based on `percona/percona-distribution-postgresql:18`, which bundles pg_tde). A custom entrypoint (`docker/entrypoint-postgres.sh`) decrypts the pg_tde keyring from the data volume into an in-memory tmpfs before handing off to the official postgres entrypoint. No elevated container capabilities are required.
 
+### Docker images
+
+| Image | Dockerfile | Purpose |
+|-------|-----------|---------|
+| `zerf-time-absence-management` | `docker/app.Dockerfile` | Rust/Axum backend + frontend assets |
+| `zerf-time-absence-management-postgres` | `docker/postgres.Dockerfile` | Percona PostgreSQL 18 with pg_tde |
+| `zerf-time-absence-management-caddy` | `docker/caddy.Dockerfile` | Caddy reverse proxy |
+| `zerf-time-absence-management-backup` | `docker/backup.Dockerfile` | PostgreSQL 18 client + curl for backup + Nextcloud upload |
+
+The `backup` service in `docker-compose-local.yml` is connected to two networks:
+- `backup_net` — internal network shared with `db`, required for `pg_dump`.
+- `backup_egress` — non-internal network for outbound HTTPS to Nextcloud. The app container is **not** in this network.
+
 ### Start scripts
 
 | Script | Purpose |
 |--------|---------|
 | `start_local.sh` | Start local stack (set `DEBUG=true` in `.env` for debug build) |
 | `start_public.sh` | Start public stack |
-| `scripts/backup.sh` | Dump and AES-encrypt the database to the backup volume |
+| `scripts/backup.sh` | Dump, AES-encrypt, and optionally upload the database to a Nextcloud share. Backup interval and retention are read from `app_settings` at runtime via `psql`. Refactored into sourceable functions (guarded by `BACKUP_LIB_ONLY=1`) for bats unit tests. |
 | `scripts/restore.sh` | Interactive: decrypt a backup and restore it into the live instance |
+| `scripts/backup.bats` | bats unit tests for `backup.sh` helper functions (parse_share_url, interval/retention resolution, upload credential handling, 0-byte rejection, retention pruning) |
 
 ### Key environment variables (encryption)
 
 | Variable | Purpose |
 |----------|---------|
 | `ZERF_DB_ENCRYPTION_KEY` | Single passphrase for gocryptfs (DB at rest) and openssl (backups). Generate: `openssl rand -hex 32`. **Losing this key makes both the database and all backups unreadable.** |
+
+### Backup and upload settings (app_settings)
+
+Backup frequency and retention are stored in `app_settings` (not in `.env`) and are editable in the Admin UI under **Nextcloud Upload**. The backup container reads them via `psql` at the start of each cycle.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `backup_interval_seconds` | 86400 | Seconds between backup cycles |
+| `backup_retention_days` | 30 | Days of local backup files to retain |
+| `backup_upload_enabled` | false | Enable upload to Nextcloud |
+| `backup_upload_url` | — | Nextcloud public share URL (`https://…/s/<token>`) |
+| `backup_upload_password` | — | Optional share password (write-only) |
+| `report_upload_enabled` | false | Enable monthly timesheet PDF upload |
+| `report_upload_url` | — | Nextcloud public share URL for timesheets |
+| `report_upload_password` | — | Optional share password (write-only) |
+| `report_upload_day_of_month` | 5 | Day of month to upload previous month's PDF |
+
+`BACKUP_INTERVAL_SECONDS` and `BACKUP_RETENTION_DAYS` are **no longer set as environment variables** in `.env` or docker-compose — they are managed entirely via `app_settings`.
 
 ### Integration tests
 

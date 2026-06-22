@@ -53,6 +53,14 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                     post(handlers::settings::test_smtp_connection),
                 )
                 .route(
+                    "/settings/uploads",
+                    put(handlers::settings::update_upload_settings),
+                )
+                .route(
+                    "/settings/uploads/report/run-now",
+                    post(handlers::settings::run_report_upload_now),
+                )
+                .route(
                     "/time-entries",
                     get(handlers::time_entries::list).post(handlers::time_entries::create),
                 )

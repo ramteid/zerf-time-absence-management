@@ -278,6 +278,28 @@ const TRANSLATIONS = {
     "notif:reopen_approved_by_admin": "Week edit request approved by admin",
     "notif:reopen_rejected": "Week edit request rejected",
     "notif:reopen_rejected_by_admin": "Week edit request rejected by admin",
+    // --- Nextcloud upload settings ---
+    "Nextcloud Upload": "Nextcloud Upload",
+    "DB Backup Upload": "DB Backup Upload",
+    "Report PDF Upload": "Report PDF Upload",
+    "Enable DB backup upload": "Enable DB backup upload",
+    "Enable report PDF upload": "Enable report PDF upload",
+    "Share link (https://…/s/…)": "Share link (https://…/s/…)",
+    "Share password (optional)": "Share password (optional)",
+    "Upload day of month (1–28)": "Upload day of month (1–28)",
+    "Backup interval (seconds)": "Backup interval (seconds)",
+    "Retention (days)": "Retention (days)",
+    "Upload now": "Upload now",
+    "Uploading...": "Uploading...",
+    "Upload settings saved.": "Upload settings saved.",
+    "Report uploaded successfully.": "Report uploaded successfully.",
+    "Upload failed.": "Upload failed.",
+    "Uploaded files are not automatically deleted from Nextcloud. Manage the shared folder manually to avoid unlimited growth.":
+      "Uploaded files are not automatically deleted from Nextcloud. Manage the shared folder manually to avoid unlimited growth.",
+    "Backup interval and retention are read by the backup container from the database at the start of each cycle. Changes take effect on the next backup run.":
+      "Backup interval and retention are read by the backup container from the database at the start of each cycle. Changes take effect on the next backup run.",
+    "The previous month's combined timesheet PDF is uploaded automatically on the configured day of each month.":
+      "The previous month's combined timesheet PDF is uploaded automatically on the configured day of each month.",
   },
   de: {
     "Loading...": "Wird geladen...",
@@ -1214,6 +1236,28 @@ const TRANSLATIONS = {
     "notif:reopen_rejected": "Bearbeitungsanfrage abgelehnt",
     "notif:reopen_rejected_by_admin":
       "Bearbeitungsanfrage durch Admin abgelehnt",
+    // --- Nextcloud upload settings ---
+    "Nextcloud Upload": "Nextcloud-Upload",
+    "DB Backup Upload": "DB-Backup-Upload",
+    "Report PDF Upload": "Stundenzettel-Export",
+    "Enable DB backup upload": "DB-Backup-Upload aktivieren",
+    "Enable report PDF upload": "Stundenzettel-Export aktivieren",
+    "Share link (https://…/s/…)": "Share-Link (https://…/s/…)",
+    "Share password (optional)": "Share-Passwort (optional)",
+    "Upload day of month (1–28)": "Upload-Tag im Monat (1–28)",
+    "Backup interval (seconds)": "Backup-Intervall (Sekunden)",
+    "Retention (days)": "Aufbewahrungsdauer (Tage)",
+    "Upload now": "Jetzt hochladen",
+    "Uploading...": "Wird hochgeladen...",
+    "Upload settings saved.": "Upload-Einstellungen gespeichert.",
+    "Report uploaded successfully.": "Bericht erfolgreich hochgeladen.",
+    "Upload failed.": "Upload fehlgeschlagen.",
+    "Uploaded files are not automatically deleted from Nextcloud. Manage the shared folder manually to avoid unlimited growth.":
+      "Hochgeladene Dateien werden in Nextcloud nicht automatisch gelöscht. Den geteilten Ordner manuell verwalten, um unbegrenztes Wachstum zu vermeiden.",
+    "Backup interval and retention are read by the backup container from the database at the start of each cycle. Changes take effect on the next backup run.":
+      "Backup-Intervall und Aufbewahrungsdauer werden vom Backup-Container zu Beginn jedes Zyklus aus der Datenbank gelesen. Änderungen werden beim nächsten Backup-Lauf wirksam.",
+    "The previous month's combined timesheet PDF is uploaded automatically on the configured day of each month.":
+      "Das kombinierte Stundenzettel-PDF des Vormonats wird automatisch am konfigurierten Tag des Monats hochgeladen.",
   },
 };
 

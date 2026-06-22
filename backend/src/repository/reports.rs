@@ -276,6 +276,41 @@ impl ReportDb {
         }
     }
 
+    /// All users who should appear in a monthly timesheet export for a given period.
+    ///
+    /// Includes every user with `tracks_time=TRUE` who was either still active OR had
+    /// at least one time entry or approved absence that overlaps the period. This ensures
+    /// that employees deactivated after the period still appear in the archive export —
+    /// using `active=TRUE` alone would silently omit them.
+    pub async fn timesheet_members_for_period(
+        &self,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> AppResult<Vec<User>> {
+        const SEL: &str =
+            "SELECT id, email, password_hash, first_name, last_name, role, \
+             weekly_hours, workdays_per_week, start_date, hire_date, active, must_change_password, created_at, \
+             allow_reopen_without_approval, dark_mode, overtime_start_balance_min, tracks_time \
+             FROM users";
+        Ok(sqlx::query_as(&format!(
+            "{SEL} WHERE tracks_time=TRUE \
+             AND (active=TRUE \
+                  OR EXISTS (SELECT 1 FROM time_entries te \
+                             WHERE te.user_id = users.id \
+                             AND te.entry_date BETWEEN $1 AND $2) \
+                  OR EXISTS (SELECT 1 FROM absences ab \
+                             WHERE ab.user_id = users.id \
+                             AND ab.status IN ('approved','cancellation_pending') \
+                             AND ab.start_date <= $2 AND ab.end_date >= $1) \
+             ) \
+             ORDER BY last_name, first_name, id"
+        ))
+        .bind(from)
+        .bind(to)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
     /// User start date and overtime start balance (minutes).
     pub async fn user_start_and_overtime(&self, user_id: i64) -> AppResult<(NaiveDate, i64)> {
         Ok(
