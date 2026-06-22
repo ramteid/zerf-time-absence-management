@@ -279,7 +279,7 @@ const TRANSLATIONS = {
     "notif:reopen_rejected": "Week edit request rejected",
     "notif:reopen_rejected_by_admin": "Week edit request rejected by admin",
     // --- Nextcloud upload settings ---
-    "Nextcloud Upload": "Nextcloud Upload",
+    "Nextcloud Backups": "Nextcloud Backups",
     "DB Backup Upload": "DB Backup Upload",
     "Report PDF Upload": "Report PDF Upload",
     "Enable DB backup upload": "Enable DB backup upload",
@@ -1237,7 +1237,7 @@ const TRANSLATIONS = {
     "notif:reopen_rejected_by_admin":
       "Bearbeitungsanfrage durch Admin abgelehnt",
     // --- Nextcloud upload settings ---
-    "Nextcloud Upload": "Nextcloud-Upload",
+    "Nextcloud Backups": "Nextcloud-Backup",
     "DB Backup Upload": "DB-Backup-Upload",
     "Report PDF Upload": "Stundenzettel-Export",
     "Enable DB backup upload": "DB-Backup-Upload aktivieren",
