@@ -212,7 +212,11 @@ pub async fn submit(
 ) -> AppResult<Json<serde_json::Value>> {
     require_tracks_time(&requester)?;
     if body.ids.is_empty() {
-        return Ok(Json(serde_json::json!({"ok": true, "count": 0})));
+        return Ok(Json(serde_json::json!({
+            "ok": true,
+            "count": 0,
+            "auto_approved": requester.allow_submission_without_approval,
+        })));
     }
     if body.ids.len() > 500 {
         return Err(AppError::BadRequest("Too many entries (max 500).".into()));
