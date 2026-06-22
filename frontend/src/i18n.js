@@ -298,8 +298,8 @@ const TRANSLATIONS = {
       "Uploaded files are not automatically deleted from Nextcloud. Manage the shared folder manually to avoid unlimited growth.",
     "Backup interval and retention are read by the backup container from the database at the start of each cycle. Changes take effect on the next backup run.":
       "Backup interval and retention are read by the backup container from the database at the start of each cycle. Changes take effect on the next backup run.",
-    "The previous month's combined timesheet PDF is uploaded automatically on the configured day of each month.":
-      "The previous month's combined timesheet PDF is uploaded automatically on the configured day of each month.",
+    "On the configured day of each month, an individual timesheet PDF is queued for every employee. Each PDF is uploaded as soon as the employee has fully submitted all their weeks — late submitters are automatically caught up on the next daily check.":
+      "On the configured day of each month, an individual timesheet PDF is queued for every employee. Each PDF is uploaded as soon as the employee has fully submitted all their weeks — late submitters are automatically caught up on the next daily check.",
   },
   de: {
     "Loading...": "Wird geladen...",
@@ -1256,8 +1256,8 @@ const TRANSLATIONS = {
       "Hochgeladene Dateien werden in Nextcloud nicht automatisch gelöscht. Den geteilten Ordner manuell verwalten, um unbegrenztes Wachstum zu vermeiden.",
     "Backup interval and retention are read by the backup container from the database at the start of each cycle. Changes take effect on the next backup run.":
       "Backup-Intervall und Aufbewahrungsdauer werden vom Backup-Container zu Beginn jedes Zyklus aus der Datenbank gelesen. Änderungen werden beim nächsten Backup-Lauf wirksam.",
-    "The previous month's combined timesheet PDF is uploaded automatically on the configured day of each month.":
-      "Das kombinierte Stundenzettel-PDF des Vormonats wird automatisch am konfigurierten Tag des Monats hochgeladen.",
+    "On the configured day of each month, an individual timesheet PDF is queued for every employee. Each PDF is uploaded as soon as the employee has fully submitted all their weeks — late submitters are automatically caught up on the next daily check.":
+      "Am konfigurierten Tag des Monats wird für jeden Mitarbeiter ein individueller Stundenzettel in die Warteschlange eingereiht. Jedes PDF wird hochgeladen, sobald der Mitarbeiter alle Wochen vollständig eingereicht hat — spät Einreichende werden beim nächsten täglichen Lauf automatisch nachgeholt.",
   },
 };
 

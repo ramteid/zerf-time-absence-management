@@ -11,6 +11,7 @@ pub mod sessions;
 pub mod settings;
 pub mod system_metadata;
 pub mod time_entries;
+pub mod timesheet_export_queue;
 pub mod users;
 
 pub use absence_categories::{AbsenceCategory, AbsenceCategoryDb};
@@ -28,4 +29,5 @@ pub use sessions::SessionDb;
 pub use settings::SettingsDb;
 pub use system_metadata::SystemMetadataDb;
 pub use time_entries::{NewEntryData, TimeEntry, TimeEntryDb};
+pub use timesheet_export_queue::{ExportQueueEntry, TimesheetExportQueueDb};
 pub use users::{ActiveUserRow, User, UserDb};
