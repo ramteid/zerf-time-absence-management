@@ -77,12 +77,15 @@ pub async fn create_folder(
 
     let status = response.status();
     if status.is_success() || status.as_u16() == 405 {
+        // 201 Created or 405 Method Not Allowed (folder already exists).
         return Ok(());
     }
+    // Any other status (e.g. 403 on strict file-drop shares) is logged as a
+    // warning, not an error.  The subsequent PUT is the authoritative signal:
+    // if the folder was missing, the PUT will fail with its own clear error.
     let body = response.text().await.unwrap_or_default();
-    Err(AppError::Internal(format!(
-        "Nextcloud MKCOL failed (HTTP {status}): {body}"
-    )))
+    tracing::warn!("Nextcloud MKCOL returned {status} for {url} — attempting PUT anyway: {body}");
+    Ok(())
 }
 
 /// Upload bytes to a Nextcloud public share via WebDAV PUT.
