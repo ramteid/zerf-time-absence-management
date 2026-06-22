@@ -202,7 +202,9 @@ pub async fn delete(
 
 /// Submit draft entries for approval. The employee selects entries by ID;
 /// the backend transitions them from draft → submitted in a single transaction
-/// and notifies all assigned approvers.
+/// and notifies all assigned approvers. Users with
+/// `allow_submission_without_approval=TRUE` instead go draft → approved
+/// directly, silently (see the branch below).
 pub async fn submit(
     State(app_state): State<AppState>,
     requester: User,
@@ -225,6 +227,36 @@ pub async fn submit(
     {
         return Err(AppError::Forbidden);
     }
+
+    // Users with allow_submission_without_approval=TRUE skip the approval
+    // workflow entirely: entries go draft -> approved directly. This is
+    // silent by design (mirrors reopen auto-approval) — no one is notified
+    // and no emails are sent, to either the requester or the approvers.
+    if requester.allow_submission_without_approval {
+        let approved_ids = app_state
+            .db
+            .time_entries
+            .submit_batch_auto_approved(requester.id, &body.ids)
+            .await?;
+        for entry_id in &approved_ids {
+            audit::log(
+                &app_state.pool,
+                requester.id,
+                "auto_approved",
+                "time_entries",
+                *entry_id,
+                Some(serde_json::json!({"status": "draft"})),
+                Some(serde_json::json!({"status": "approved", "reviewed_by": requester.id})),
+            )
+            .await;
+        }
+        return Ok(Json(serde_json::json!({
+            "ok": true,
+            "count": approved_ids.len(),
+            "auto_approved": true,
+        })));
+    }
+
     // Phase 2: atomically submit all draft entries in a single transaction.
     let submitted_ids = app_state
         .db
@@ -303,7 +335,7 @@ pub async fn submit(
         }
     }
     Ok(Json(
-        serde_json::json!({"ok": true, "count": submitted_count}),
+        serde_json::json!({"ok": true, "count": submitted_count, "auto_approved": false}),
     ))
 }
 

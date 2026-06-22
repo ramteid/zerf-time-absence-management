@@ -247,7 +247,8 @@ impl ReportDb {
         const SEL: &str =
             "SELECT id, email, password_hash, first_name, last_name, role, \
              weekly_hours, workdays_per_week, start_date, hire_date, active, must_change_password, created_at, \
-             allow_reopen_without_approval, dark_mode, overtime_start_balance_min, tracks_time \
+             allow_reopen_without_approval, allow_submission_without_approval, dark_mode, \
+             overtime_start_balance_min, tracks_time \
              FROM users";
         if is_admin {
             Ok(QueryBuilder::<Postgres>::new(format!(

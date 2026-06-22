@@ -15,29 +15,26 @@ async fn notifications_full_workflow() {
 
     // -- Notifications CRUD --
     {
-        let (_lead_id, _lead_pw, _emp_id, emp_pw, monday_iso, cat_id) =
-            bootstrap_team_with_suffix(&app, &admin, true, "1").await;
+        // A normal (non-auto-approved) timesheet submission notifies the lead
+        // exactly once; auto-approval flows are silent by design (see the
+        // reopen and time-entries test suites) and so cannot be used here.
+        let (_lead_id, lead_pw, _emp_id, emp_pw, monday_iso, cat_id) =
+            bootstrap_team_with_suffix(&app, &admin, false, "1").await;
         let emp = login_change_pw(&app, "emp-1@example.com", &emp_pw).await;
+        let lead = login_change_pw(&app, "lead-1@example.com", &lead_pw).await;
         let _ = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
-        let (st, _) = emp
-            .post(
-                "/api/v1/reopen-requests",
-                &json!({"week_start": monday_iso, "reason": "Test reason"}),
-            )
-            .await;
-        assert_eq!(st, StatusCode::OK, "create reopen request");
 
-        let (st, body) = emp.get("/api/v1/notifications/unread-count").await;
+        let (st, body) = lead.get("/api/v1/notifications/unread-count").await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(
             body["count"]
                 .as_i64()
                 .expect("unread-count must be integer"),
             1,
-            "employee should have exactly 1 notification after auto-approved reopen"
+            "lead should have exactly 1 notification after a timesheet submission"
         );
 
-        let (st, list) = emp.get("/api/v1/notifications").await;
+        let (st, list) = lead.get("/api/v1/notifications").await;
         assert_eq!(st, StatusCode::OK);
         let notifications = list.as_array().expect("notifications must be an array");
         assert!(
@@ -48,28 +45,28 @@ async fn notifications_full_workflow() {
             .as_i64()
             .expect("notification id must be integer");
 
-        let (st, _) = emp
+        let (st, _) = lead
             .post(&format!("/api/v1/notifications/{}/read", nid), &json!({}))
             .await;
         assert_eq!(st, StatusCode::OK, "mark single notification read");
 
-        let (st, body) = emp.get("/api/v1/notifications/unread-count").await;
+        let (st, body) = lead.get("/api/v1/notifications/unread-count").await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(
             body["count"], 0,
             "unread count must be 0 after marking the only notification as read"
         );
 
-        let (st, _) = emp.post("/api/v1/notifications/read-all", &json!({})).await;
+        let (st, _) = lead.post("/api/v1/notifications/read-all", &json!({})).await;
         assert_eq!(st, StatusCode::OK);
 
-        let (st, body) = emp.get("/api/v1/notifications/unread-count").await;
+        let (st, body) = lead.get("/api/v1/notifications/unread-count").await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(body["count"], 0);
 
-        let (st, _) = emp.delete("/api/v1/notifications").await;
+        let (st, _) = lead.delete("/api/v1/notifications").await;
         assert_eq!(st, StatusCode::OK);
-        let (st, list) = emp.get("/api/v1/notifications").await;
+        let (st, list) = lead.get("/api/v1/notifications").await;
         assert_eq!(st, StatusCode::OK, "fetch notifications after delete");
         assert_eq!(list.as_array().unwrap().len(), 0);
     }

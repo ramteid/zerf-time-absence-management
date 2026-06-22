@@ -48,6 +48,7 @@ pub fn repo_user_to_auth_user(u: crate::repository::User) -> User {
         must_change_password: u.must_change_password,
         created_at: u.created_at,
         allow_reopen_without_approval: u.allow_reopen_without_approval,
+        allow_submission_without_approval: u.allow_submission_without_approval,
         dark_mode: u.dark_mode,
         overtime_start_balance_min: u.overtime_start_balance_min,
         tracks_time: u.tracks_time,
@@ -299,6 +300,7 @@ pub async fn update_basic_tx(
     hire_date: Option<Option<chrono::NaiveDate>>,
     active: Option<bool>,
     allow_reopen_without_approval: Option<bool>,
+    allow_submission_without_approval: Option<bool>,
     overtime_start_balance_min: Option<i64>,
     tracks_time: Option<bool>,
 ) -> Result<(), crate::db::SqlxError> {
@@ -315,6 +317,7 @@ pub async fn update_basic_tx(
         hire_date,
         active,
         allow_reopen_without_approval,
+        allow_submission_without_approval,
         overtime_start_balance_min,
         tracks_time,
     )
@@ -404,6 +407,7 @@ pub async fn team_settings_update(
     requester: &User,
     target_id: i64,
     allow_reopen_without_approval: bool,
+    allow_submission_without_approval: bool,
 ) -> AppResult<()> {
     if !requester.is_lead() {
         return Err(AppError::Forbidden);
@@ -439,6 +443,7 @@ pub async fn team_settings_update(
         None,
         None,
         Some(allow_reopen_without_approval),
+        Some(allow_submission_without_approval),
         None,
         None,
     )
@@ -450,10 +455,14 @@ pub async fn team_settings_update(
         "team_settings_updated",
         "users",
         target_id,
-        Some(
-            serde_json::json!({"allow_reopen_without_approval": previous_user.allow_reopen_without_approval}),
-        ),
-        Some(serde_json::json!({"allow_reopen_without_approval": allow_reopen_without_approval})),
+        Some(serde_json::json!({
+            "allow_reopen_without_approval": previous_user.allow_reopen_without_approval,
+            "allow_submission_without_approval": previous_user.allow_submission_without_approval,
+        })),
+        Some(serde_json::json!({
+            "allow_reopen_without_approval": allow_reopen_without_approval,
+            "allow_submission_without_approval": allow_submission_without_approval,
+        })),
     )
     .await;
     Ok(())
@@ -664,6 +673,7 @@ mod tests {
             must_change_password: false,
             created_at: Utc::now(),
             allow_reopen_without_approval: false,
+            allow_submission_without_approval: false,
             dark_mode: false,
             overtime_start_balance_min: 0,
             tracks_time: true,
@@ -695,6 +705,7 @@ mod tests {
         src.hire_date = chrono::NaiveDate::from_ymd_opt(2020, 3, 1);
         src.must_change_password = true;
         src.allow_reopen_without_approval = true;
+        src.allow_submission_without_approval = true;
         src.dark_mode = true;
         src.tracks_time = false;
         src.overtime_start_balance_min = 480;
@@ -702,6 +713,7 @@ mod tests {
         assert_eq!(auth.hire_date, chrono::NaiveDate::from_ymd_opt(2020, 3, 1));
         assert!(auth.must_change_password);
         assert!(auth.allow_reopen_without_approval);
+        assert!(auth.allow_submission_without_approval);
         assert!(auth.dark_mode);
         assert!(!auth.tracks_time);
         assert_eq!(auth.overtime_start_balance_min, 480);

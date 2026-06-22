@@ -1,9 +1,11 @@
 // Tests for the TeamSettings page. Team leads / admins use this page to
-// enable or disable "auto-approve edit requests" per employee. When enabled,
-// an employee's reopen request is approved automatically without requiring
-// the approver to take action manually. Tests verify:
+// enable or disable "auto-approve submissions" and "auto-approve edit
+// requests" per employee. When enabled, an employee's timesheet submission
+// or reopen request is approved automatically without requiring the
+// approver to take action manually (and silently: no notifications or
+// emails are sent). Tests verify:
 //   - The roster loads and renders with the correct labels
-//   - Toggling the checkbox calls the correct API endpoint
+//   - Toggling a checkbox calls the correct API endpoint
 //   - The current user's own row is labelled with "(you)"
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -45,6 +47,7 @@ const sampleRows = [
     role: "team_lead",
     email: "alice@example.com",
     allow_reopen_without_approval: false,
+    allow_submission_without_approval: false,
   },
   {
     user_id: 2,
@@ -53,6 +56,7 @@ const sampleRows = [
     role: "employee",
     email: "bob@example.com",
     allow_reopen_without_approval: true,
+    allow_submission_without_approval: true,
   },
 ];
 
@@ -125,8 +129,10 @@ describe("TeamSettings", () => {
     component = mount(TeamSettings, { target });
     await waitForText(target, "Bob");
 
+    // The page renders two cards (Submissions, then Edit Requests), each with
+    // one row per team member; checkbox 1 is Bob's "auto-approve
+    // submissions" toggle in the first card.
     const checkboxes = target.querySelectorAll('input[type="checkbox"]');
-    // Bob's row is the second; his checkbox starts checked (true)
     const bobCheckbox = checkboxes[1];
     expect(bobCheckbox).not.toBeNull();
     bobCheckbox.click();

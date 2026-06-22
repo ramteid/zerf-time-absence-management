@@ -289,5 +289,68 @@ async fn time_entries_full_workflow() {
         assert_eq!(entry["rejection_reason"], serde_json::Value::Null);
     }
 
+    // -- Submission auto-approval: silent draft -> approved, no notifications --
+    {
+        let (_lead_id, lead_pw, emp_id, emp_pw, monday_iso, cat_id) =
+            bootstrap_team_with_suffix(&app, &admin, false, "subauto").await;
+        let lead = login_change_pw(&app, "lead-subauto@example.com", &lead_pw).await;
+        let emp = login_change_pw(&app, "emp-subauto@example.com", &emp_pw).await;
+
+        let (st, _) = admin
+            .put(
+                &format!("/api/v1/team-settings/{}", emp_id),
+                &json!({"allow_reopen_without_approval": false, "allow_submission_without_approval": true}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "enable submission auto-approval");
+
+        let (st, body) = emp
+            .post(
+                "/api/v1/time-entries",
+                &json!({
+                    "entry_date": monday_iso,
+                    "start_time": "08:00",
+                    "end_time": "12:00",
+                    "category_id": cat_id,
+                    "comment": "auto-approved work"
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "create draft entry");
+        let entry_id = id(&body);
+
+        let (st, body) = emp
+            .post("/api/v1/time-entries/submit", &json!({"ids": [entry_id]}))
+            .await;
+        assert_eq!(st, StatusCode::OK, "submit auto-approved entry");
+        assert_eq!(body["count"], 1);
+        assert_eq!(body["auto_approved"], true);
+
+        let (_, entries) = emp.get("/api/v1/time-entries").await;
+        let entry = find_by_id(&entries, entry_id).expect("entry exists");
+        assert_eq!(
+            entry["status"], "approved",
+            "entry skips 'submitted' and goes straight to 'approved'"
+        );
+        assert_eq!(
+            entry["reviewed_by"], emp_id,
+            "the system records the user themselves as reviewer"
+        );
+
+        // Silent by design: neither the requester nor the approver is
+        // notified, and (by extension, since no notification is created) no
+        // email is sent either.
+        let (_, emp_notifications) = emp.get("/api/v1/notifications").await;
+        assert!(
+            emp_notifications.as_array().unwrap().is_empty(),
+            "requester must not be notified about their own auto-approved submission"
+        );
+        let (_, lead_notifications) = lead.get("/api/v1/notifications").await;
+        assert!(
+            lead_notifications.as_array().unwrap().is_empty(),
+            "approver must not be notified about an auto-approved submission"
+        );
+    }
+
     app.cleanup().await;
 }

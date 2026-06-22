@@ -418,6 +418,7 @@ const TRANSLATIONS = {
     "All draft entries of this week will be submitted for approval.":
       "Alle Entwürfe dieser Woche werden zur Genehmigung eingereicht.",
     "Week submitted.": "Woche eingereicht.",
+    "Week approved.": "Woche genehmigt.",
     "Submit request": "Anfrage senden",
     "Annual entitlement": "Jahresanspruch",
     "Already taken": "Bereits genommen",
@@ -1076,8 +1077,12 @@ const TRANSLATIONS = {
     Team: "Team",
     // Team Settings
     "Edit Requests": "Bearbeitungsanfragen",
-    "When enabled for a user, their edit requests are automatically approved. Assigned approvers still receive a notification.":
-      "Wenn aktiviert, werden die Bearbeitungsanfragen des Benutzers automatisch genehmigt. Zugewiesene Genehmiger erhalten weiterhin eine Benachrichtigung.",
+    "When enabled for a user, their edit requests are automatically approved. No one is notified and no emails are sent.":
+      "Wenn aktiviert, werden die Bearbeitungsanfragen des Benutzers automatisch genehmigt. Niemand wird benachrichtigt und es werden keine E-Mails versendet.",
+    "Time Submissions": "Zeiteinreichungen",
+    "When enabled for a user, their submitted weeks are automatically approved. No one is notified and no emails are sent.":
+      "Wenn aktiviert, werden die eingereichten Wochen des Benutzers automatisch genehmigt. Niemand wird benachrichtigt und es werden keine E-Mails versendet.",
+    "Auto-approve submissions": "Einreichungen automatisch genehmigen",
     // Notification polling
     // (no new keys needed)
     // Vacation carryover

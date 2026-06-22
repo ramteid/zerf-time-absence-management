@@ -95,13 +95,6 @@ pub async fn create(
         "pending"
     };
 
-    // Collect all users that should be notified as approvers (before the DB
-    // insert, so we can reuse the result for both auto and pending paths).
-    let approver_ids_for_notification = approver_ids_to_notify(&app_state.pool, &requester).await;
-    let language = notification_language(&app_state.pool).await;
-    let week_label = i18n::format_week_label(&language, body.week_start);
-    let week_iso = body.week_start.format("%Y-%m-%d").to_string();
-
     let (new_request_id, reopened_entries): (i64, Option<Vec<(i64, String)>>) =
         if should_auto_approve {
             let (new_id, affected) = app_state
@@ -143,90 +136,55 @@ pub async fn create(
     )
     .await;
 
-    let requester_full_name = requester.full_name();
-
     if should_auto_approve {
-        // In-app only: the requester triggered the auto-approve themselves.
-        let frontend_body_self = serde_json::json!({"week": week_iso}).to_string();
-        notifications::create_with_frontend_body(
-            &app_state,
-            &language,
-            requester.id,
-            "reopen_auto_approved",
-            "reopen_approved_title",
-            "reopen_approved_body",
-            vec![("week_label", week_label.clone())],
-            &frontend_body_self,
-            false,
-            Some("reopen_request"),
-            Some(new_request_id),
-        )
-        .await;
-        // Notify each approver that the reopen was auto-approved (informational).
-        let frontend_body_approver = serde_json::json!({
-            "week": week_iso,
-            "requester_name": requester_full_name,
-        })
-        .to_string();
-        for approver_id in &approver_ids_for_notification {
-            notifications::create_with_frontend_body(
-                &app_state,
-                &language,
-                *approver_id,
-                "reopen_auto_approved_notice",
-                "reopen_auto_approved_notice_title",
-                "reopen_auto_approved_notice_body",
-                vec![
-                    ("requester_name", requester_full_name.clone()),
-                    ("week_label", week_label.clone()),
-                ],
-                &frontend_body_approver,
-                true,
-                Some("reopen_request"),
-                Some(new_request_id),
-            )
-            .await;
-        }
-        Ok(Json(serde_json::json!({
+        // Silent by design (mirrors submission auto-approval): no one is
+        // notified and no emails are sent, to either the requester or the
+        // approvers.
+        return Ok(Json(serde_json::json!({
             "ok": true,
             "id": new_request_id,
             "status": initial_status,
             "auto_approved": true,
             "entries_reopened": entries_reopened,
-        })))
-    } else {
-        // Notify all approvers that a manual reopen request is pending.
-        let frontend_body_created = serde_json::json!({
-            "week": week_iso,
-            "requester_name": requester_full_name,
-        })
-        .to_string();
-        for approver_id in &approver_ids_for_notification {
-            notifications::create_with_frontend_body(
-                &app_state,
-                &language,
-                *approver_id,
-                "reopen_request_created",
-                "reopen_request_created_title",
-                "reopen_request_created_body",
-                vec![
-                    ("requester_name", requester_full_name.clone()),
-                    ("week_label", week_label.clone()),
-                ],
-                &frontend_body_created,
-                true,
-                Some("reopen_request"),
-                Some(new_request_id),
-            )
-            .await;
-        }
-        Ok(Json(serde_json::json!({
-            "ok": true,
-            "id": new_request_id,
-            "status": initial_status,
-            "auto_approved": false,
-        })))
+        })));
     }
+
+    // Notify all approvers that a manual reopen request is pending.
+    let approver_ids_for_notification = approver_ids_to_notify(&app_state.pool, &requester).await;
+    let language = notification_language(&app_state.pool).await;
+    let week_label = i18n::format_week_label(&language, body.week_start);
+    let week_iso = body.week_start.format("%Y-%m-%d").to_string();
+    let requester_full_name = requester.full_name();
+    let frontend_body_created = serde_json::json!({
+        "week": week_iso,
+        "requester_name": requester_full_name,
+    })
+    .to_string();
+    for approver_id in &approver_ids_for_notification {
+        notifications::create_with_frontend_body(
+            &app_state,
+            &language,
+            *approver_id,
+            "reopen_request_created",
+            "reopen_request_created_title",
+            "reopen_request_created_body",
+            vec![
+                ("requester_name", requester_full_name.clone()),
+                ("week_label", week_label.clone()),
+            ],
+            &frontend_body_created,
+            true,
+            Some("reopen_request"),
+            Some(new_request_id),
+        )
+        .await;
+    }
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "id": new_request_id,
+        "status": initial_status,
+        "auto_approved": false,
+    })))
 }
 
 pub async fn list_mine(

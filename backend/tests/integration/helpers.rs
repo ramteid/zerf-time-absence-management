@@ -135,7 +135,7 @@ pub async fn bootstrap_team(
         let (st, _) = admin
             .put(
                 &format!("/api/v1/team-settings/{}", emp_id),
-                &json!({"allow_reopen_without_approval": true}),
+                &json!({"allow_reopen_without_approval": true, "allow_submission_without_approval": false}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "set emp policy auto");
@@ -193,7 +193,7 @@ pub async fn bootstrap_team_with_suffix(
         let (st, _) = admin
             .put(
                 &format!("/api/v1/team-settings/{}", emp_id),
-                &json!({"allow_reopen_without_approval": true}),
+                &json!({"allow_reopen_without_approval": true, "allow_submission_without_approval": false}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "set emp policy auto");
