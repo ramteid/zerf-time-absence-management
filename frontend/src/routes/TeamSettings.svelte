@@ -10,7 +10,8 @@
   async function load() {
     loading = true;
     try {
-      rows = await api("/team-settings");
+      const loaded = await api("/team-settings");
+      rows = (loaded || []).sort((a, b) => a.last_name.localeCompare(b.last_name) || a.first_name.localeCompare(b.first_name));
     } catch (e) {
       rows = [];
       toast($t(e?.message || "Error"), "error");

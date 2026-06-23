@@ -12,7 +12,8 @@
   let resetPwData = null;
 
   async function load() {
-    users = await api("/users");
+    const loaded = await api("/users");
+    users = (loaded || []).sort((a, b) => a.last_name.localeCompare(b.last_name) || a.first_name.localeCompare(b.first_name));
   }
   load();
 

@@ -27,10 +27,12 @@
   onMount(async () => {
     if (isNew) return;
     try {
-      [allUsers, enabledUserIds] = await Promise.all([
+      const [loadedUsers, loadedEnabled] = await Promise.all([
         api("/users"),
         api("/absence-categories/" + template.id + "/users"),
       ]);
+      allUsers = (loadedUsers || []).sort((a, b) => a.last_name.localeCompare(b.last_name) || a.first_name.localeCompare(b.first_name));
+      enabledUserIds = loadedEnabled;
     } catch {
       allUsers = [];
       enabledUserIds = [];
