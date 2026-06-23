@@ -79,6 +79,20 @@ pub async fn seed_admin(
             .bind(admin_email.to_lowercase())
             .fetch_one(pool)
             .await?;
+        // Mirrors the default-enable grant that `UserDb::create_initial_admin`
+        // applies in production — this test seeder bypasses that path with raw SQL.
+        sqlx::query(
+            "INSERT INTO user_category_access (user_id, category_id) SELECT $1, id FROM categories",
+        )
+        .bind(admin_id)
+        .execute(pool)
+        .await?;
+        sqlx::query(
+            "INSERT INTO user_absence_category_access (user_id, category_id) SELECT $1, id FROM absence_categories",
+        )
+        .bind(admin_id)
+        .execute(pool)
+        .await?;
         let current_year = ref_date.year();
         let user_db = UserDb::new(pool.clone());
         user_db.set_leave_days(admin_id, current_year, 30).await?;

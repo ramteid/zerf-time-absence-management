@@ -133,6 +133,10 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                 .route("/categories/all", get(handlers::categories::list_all))
                 .route("/categories/{id}", put(handlers::categories::update))
                 .route(
+                    "/categories/{id}/users",
+                    get(handlers::categories::list_users).put(handlers::categories::set_users),
+                )
+                .route(
                     "/absence-categories",
                     get(handlers::absence_categories::list)
                         .post(handlers::absence_categories::create),
@@ -144,6 +148,11 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                 .route(
                     "/absence-categories/{id}",
                     put(handlers::absence_categories::update),
+                )
+                .route(
+                    "/absence-categories/{id}/users",
+                    get(handlers::absence_categories::list_users)
+                        .put(handlers::absence_categories::set_users),
                 )
                 .route(
                     "/holidays",

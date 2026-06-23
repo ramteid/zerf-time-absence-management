@@ -1,5 +1,5 @@
 use crate::audit;
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::i18n;
 use crate::middleware::auth::User;
 use crate::AppState;
@@ -192,6 +192,14 @@ pub async fn create(
     comment: Option<String>,
 ) -> AppResult<TimeEntry> {
     require_tracks_time(requester)?;
+    if !app_state
+        .db
+        .categories
+        .is_enabled_for_user(category_id, requester.id)
+        .await?
+    {
+        return Err(AppError::BadRequest("Category not available for you.".into()));
+    }
     let entry_data = crate::repository::NewEntryData {
         entry_date,
         start_time,
@@ -235,6 +243,14 @@ pub async fn update(
     let owner_id = app_state.db.time_entries.get_user_id(entry_id).await?;
     if owner_id == requester.id {
         require_tracks_time(requester)?;
+        if !app_state
+            .db
+            .categories
+            .is_enabled_for_user(input.category_id, requester.id)
+            .await?
+        {
+            return Err(AppError::BadRequest("Category not available for you.".into()));
+        }
     }
     let entry_data = crate::repository::NewEntryData {
         entry_date: input.entry_date,

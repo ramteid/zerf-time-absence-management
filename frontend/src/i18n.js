@@ -297,6 +297,9 @@ const TRANSLATIONS = {
       "The backup interval is read by the backup container from the database at the start of each cycle. Changes take effect on the next backup run. The 10 most recent local backup files are kept automatically; older ones are deleted. Uploaded files in Nextcloud are not deleted automatically.",
     "On the configured day of each month, an individual timesheet PDF is queued for every employee. Each PDF is uploaded as soon as the employee has fully submitted all their weeks — late submitters are automatically caught up on the next daily check.":
       "On the configured day of each month, an individual timesheet PDF is queued for every employee. Each PDF is uploaded as soon as the employee has fully submitted all their weeks — late submitters are automatically caught up on the next daily check.",
+    "Category not available for you.": "Category not available for you.",
+    "Absence category not available for you.": "Absence category not available for you.",
+    "Available to employees": "Available to employees",
   },
   de: {
     "Loading...": "Wird geladen...",
@@ -1252,6 +1255,10 @@ const TRANSLATIONS = {
       "Das Backup-Intervall wird vom Backup-Container zu Beginn jedes Zyklus aus der Datenbank gelesen. Änderungen werden beim nächsten Backup-Lauf wirksam. Die 10 neuesten lokalen Backup-Dateien werden automatisch aufbewahrt; ältere werden gelöscht. Hochgeladene Dateien in Nextcloud werden nicht automatisch gelöscht.",
     "On the configured day of each month, an individual timesheet PDF is queued for every employee. Each PDF is uploaded as soon as the employee has fully submitted all their weeks — late submitters are automatically caught up on the next daily check.":
       "Am konfigurierten Tag des Monats wird für jeden Mitarbeiter ein individueller Stundenzettel in die Warteschlange eingereiht. Jedes PDF wird hochgeladen, sobald der Mitarbeiter alle Wochen vollständig eingereicht hat — spät Einreichende werden beim nächsten täglichen Lauf automatisch nachgeholt.",
+    "Category not available for you.": "Diese Kategorie ist für Sie nicht verfügbar.",
+    "Absence category not available for you.":
+      "Diese Abwesenheitskategorie ist für Sie nicht verfügbar.",
+    "Available to employees": "Verfügbar für Mitarbeiter",
   },
 };
 
