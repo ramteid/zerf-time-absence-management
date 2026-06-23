@@ -366,6 +366,7 @@ mod tests {
             dark_mode: false,
             overtime_start_balance_min: 0,
             tracks_time: true,
+            annual_leave_days: 30,
         };
         assert!(require_tracks_time(&tracking_user).is_ok());
         let mut non_tracking = tracking_user.clone();

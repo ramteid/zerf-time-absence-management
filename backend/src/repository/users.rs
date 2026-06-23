@@ -38,6 +38,9 @@ pub struct User {
     /// When FALSE (admin only), this user has no time/absence tracking.
     /// All related endpoints are blocked; navigation items are hidden.
     pub tracks_time: bool,
+    /// Base annual leave entitlement (days/year), used whenever no explicit
+    /// `user_annual_leave` override exists for a given year.
+    pub annual_leave_days: i64,
 }
 
 impl User {
@@ -53,7 +56,7 @@ const USER_SELECT: &str =
     "SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, workdays_per_week, \
      start_date, hire_date, active, must_change_password, created_at, \
      allow_reopen_without_approval, allow_submission_without_approval, dark_mode, \
-     overtime_start_balance_min, tracks_time \
+     overtime_start_balance_min, tracks_time, annual_leave_days \
      FROM users";
 
 /// Team settings row (id, email, first_name, last_name, role,
@@ -516,6 +519,12 @@ impl UserDb {
 
     /// Insert a new non-admin user row. Approver relationships must be inserted
     /// separately via `insert_approver_tx`.
+    ///
+    /// `category_ids`/`absence_category_ids` of `None` default to every
+    /// existing category (mirroring how a newly created category defaults to
+    /// enabled for every employee); `Some(ids)` grants exactly that list
+    /// (which may be empty) instead. Callers are expected to have already
+    /// validated that every id refers to a real category.
     #[allow(clippy::too_many_arguments)]
     pub async fn create(
         tx: &mut sqlx::PgConnection,
@@ -531,12 +540,15 @@ impl UserDb {
         must_change_password: bool,
         overtime_start_balance_min: i64,
         tracks_time: bool,
+        category_ids: Option<&[i64]>,
+        absence_category_ids: Option<&[i64]>,
+        annual_leave_days: i64,
     ) -> Result<i64, sqlx::Error> {
         let new_user_id: i64 = sqlx::query_scalar(
             "INSERT INTO users(email, password_hash, first_name, last_name, role, \
              weekly_hours, workdays_per_week, start_date, hire_date, must_change_password, \
-             overtime_start_balance_min, tracks_time) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id",
+             overtime_start_balance_min, tracks_time, annual_leave_days) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id",
         )
         .bind(email)
         .bind(password_hash)
@@ -550,22 +562,53 @@ impl UserDb {
         .bind(must_change_password)
         .bind(overtime_start_balance_min)
         .bind(tracks_time)
+        .bind(annual_leave_days)
         .fetch_one(&mut *tx)
         .await?;
-        // New employees default to every existing category enabled, mirroring
-        // how a newly created category defaults to enabled for every employee.
-        sqlx::query(
-            "INSERT INTO user_category_access (user_id, category_id) SELECT $1, id FROM categories",
-        )
-        .bind(new_user_id)
-        .execute(&mut *tx)
-        .await?;
-        sqlx::query(
-            "INSERT INTO user_absence_category_access (user_id, category_id) SELECT $1, id FROM absence_categories",
-        )
-        .bind(new_user_id)
-        .execute(&mut *tx)
-        .await?;
+        match category_ids {
+            None => {
+                sqlx::query(
+                    "INSERT INTO user_category_access (user_id, category_id) SELECT $1, id FROM categories",
+                )
+                .bind(new_user_id)
+                .execute(&mut *tx)
+                .await?;
+            }
+            Some(ids) => {
+                let unique_ids: std::collections::HashSet<&i64> = ids.iter().collect();
+                for category_id in unique_ids {
+                    sqlx::query(
+                        "INSERT INTO user_category_access (user_id, category_id) VALUES ($1, $2)",
+                    )
+                    .bind(new_user_id)
+                    .bind(category_id)
+                    .execute(&mut *tx)
+                    .await?;
+                }
+            }
+        }
+        match absence_category_ids {
+            None => {
+                sqlx::query(
+                    "INSERT INTO user_absence_category_access (user_id, category_id) SELECT $1, id FROM absence_categories",
+                )
+                .bind(new_user_id)
+                .execute(&mut *tx)
+                .await?;
+            }
+            Some(ids) => {
+                let unique_ids: std::collections::HashSet<&i64> = ids.iter().collect();
+                for category_id in unique_ids {
+                    sqlx::query(
+                        "INSERT INTO user_absence_category_access (user_id, category_id) VALUES ($1, $2)",
+                    )
+                    .bind(new_user_id)
+                    .bind(category_id)
+                    .execute(&mut *tx)
+                    .await?;
+                }
+            }
+        }
         Ok(new_user_id)
     }
 
@@ -586,6 +629,7 @@ impl UserDb {
         allow_submission_without_approval: Option<bool>,
         overtime_start_balance_min: Option<i64>,
         tracks_time: Option<bool>,
+        annual_leave_days: Option<i64>,
     ) -> Result<(), sqlx::Error> {
         // hire_date is nullable, so a plain COALESCE cannot express "clear it
         // back to NULL". Use an explicit flag + CASE, mirroring
@@ -606,7 +650,8 @@ impl UserDb {
                  allow_reopen_without_approval=COALESCE($11,allow_reopen_without_approval), \
                  overtime_start_balance_min=COALESCE($12,overtime_start_balance_min), \
                  tracks_time=COALESCE($13,tracks_time), \
-                 allow_submission_without_approval=COALESCE($15,allow_submission_without_approval) \
+                 allow_submission_without_approval=COALESCE($15,allow_submission_without_approval), \
+                 annual_leave_days=COALESCE($16,annual_leave_days) \
              WHERE id=$14",
         )
         .bind(email)
@@ -624,6 +669,7 @@ impl UserDb {
         .bind(tracks_time)
         .bind(id)
         .bind(allow_submission_without_approval)
+        .bind(annual_leave_days)
         .execute(tx)
         .await?;
         Ok(())
@@ -845,6 +891,9 @@ impl UserDb {
 
     // ── Annual leave ───────────────────────────────────────────────────────
 
+    /// Annual leave entitlement for `user_id` in `year`: an explicit
+    /// `user_annual_leave` override for that year takes precedence; otherwise
+    /// the user's own base `annual_leave_days` is used.
     pub async fn get_leave_days(&self, user_id: i64, year: i32) -> AppResult<i64> {
         let existing: Option<i64> =
             sqlx::query_scalar("SELECT days FROM user_annual_leave WHERE user_id=$1 AND year=$2")
@@ -855,17 +904,12 @@ impl UserDb {
         if let Some(days) = existing {
             return Ok(days);
         }
-        let default_days: i64 = self.get_default_leave_days().await?;
-        sqlx::query(
-            "INSERT INTO user_annual_leave(user_id, year, days) \
-             VALUES ($1,$2,$3) ON CONFLICT DO NOTHING",
+        Ok(
+            sqlx::query_scalar("SELECT annual_leave_days FROM users WHERE id=$1")
+                .bind(user_id)
+                .fetch_one(&self.pool)
+                .await?,
         )
-        .bind(user_id)
-        .bind(year)
-        .bind(default_days)
-        .execute(&self.pool)
-        .await?;
-        Ok(default_days)
     }
 
     pub async fn set_leave_days(&self, user_id: i64, year: i32, days: i64) -> AppResult<()> {

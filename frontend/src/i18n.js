@@ -300,6 +300,9 @@ const TRANSLATIONS = {
     "Category not available for you.": "Category not available for you.",
     "Absence category not available for you.": "Absence category not available for you.",
     "Available to employees": "Available to employees",
+    "Unknown employee id.": "Unknown employee id.",
+    "Unknown category id.": "Unknown category id.",
+    "Unknown absence category id.": "Unknown absence category id.",
   },
   de: {
     "Loading...": "Wird geladen...",
@@ -1259,6 +1262,9 @@ const TRANSLATIONS = {
     "Absence category not available for you.":
       "Diese Abwesenheitskategorie ist für Sie nicht verfügbar.",
     "Available to employees": "Verfügbar für Mitarbeiter",
+    "Unknown employee id.": "Unbekannte Mitarbeiter-ID.",
+    "Unknown category id.": "Unbekannte Kategorie-ID.",
+    "Unknown absence category id.": "Unbekannte Abwesenheitskategorie-ID.",
   },
 };
 
