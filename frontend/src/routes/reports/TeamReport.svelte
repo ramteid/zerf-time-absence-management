@@ -45,7 +45,8 @@
   async function showTeam() {
     teamReport = null;
     try {
-      teamReport = await getTeamReport({ month: teamMonth });
+      const loaded = await getTeamReport({ month: teamMonth });
+      teamReport = (loaded || []).sort((a, b) => a.name.localeCompare(b.name));
     } catch (e) {
       teamReport = null;
       toast($t(e?.message || "Error"), "error");

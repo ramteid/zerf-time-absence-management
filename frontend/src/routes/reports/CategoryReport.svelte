@@ -90,10 +90,11 @@
         teamCatReport = null;
         catFilteredCategories = catReport.map((c) => c.category);
       } else {
-        teamCatReport = await getTeamCategoryReport({
+        const loadedTeamCat = await getTeamCategoryReport({
           from: catFrom,
           to: catTo,
         });
+        teamCatReport = (loadedTeamCat || []).sort((a, b) => a.name.localeCompare(b.name));
         catReport = null;
         catFilteredCategories = categoryNamesFromTeamReport(teamCatReport);
       }
