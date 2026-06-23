@@ -162,43 +162,47 @@ async fn team_users_scoped_assistant_management() {
         assert_eq!(st, StatusCode::FORBIDDEN, "unassigned assistant is inaccessible");
     }
 
-    // -- Deactivate, then reactivate, the assistant — the lead retains full
-    //    control across the toggle, and there is no delete route at all. --
+    // -- Archive, then restore, the assistant — the lead retains full
+    //    control, and there is no delete route at all. --
     {
         let (st, body) = lead
-            .put(
-                &format!("/api/v1/team-users/{}", assistant_id),
-                &json!({"active": false}),
+            .post(
+                &format!("/api/v1/team-users/{}/archive", assistant_id),
+                &json!({}),
             )
             .await;
-        assert_eq!(st, StatusCode::OK, "lead deactivates own assistant");
-        assert_eq!(body["active"], false);
+        assert_eq!(st, StatusCode::OK, "lead archives own assistant: {body}");
+        assert_eq!(body["ok"], true);
 
-        // The assistant stays visible (and manageable) in the list while inactive —
+        // The archived assistant stays visible (and manageable) in the list —
         // unlike every other lead-facing list, which only shows active members.
         let (st, body) = lead.get("/api/v1/team-users").await;
         assert_eq!(st, StatusCode::OK);
         let asst_row = find_by_id(&body, assistant_id)
-            .expect("deactivated assistant remains visible for reactivation");
+            .expect("archived assistant remains visible for restore");
         assert_eq!(asst_row["can_manage"], true);
-        assert_eq!(asst_row["active"], false);
+        assert!(
+            asst_row["archived_at"].is_string(),
+            "archived_at must be set in list row"
+        );
 
-        // The lead can still fetch and reactivate it.
-        let (st, _) = lead
+        // The lead can still fetch the archived assistant.
+        let (st, body) = lead
             .get(&format!("/api/v1/team-users/{}", assistant_id))
             .await;
-        assert_eq!(st, StatusCode::OK, "deactivated assistant still reachable");
+        assert_eq!(st, StatusCode::OK, "archived assistant still reachable: {body}");
 
         let (st, body) = lead
-            .put(
-                &format!("/api/v1/team-users/{}", assistant_id),
-                &json!({"active": true}),
+            .post(
+                &format!("/api/v1/team-users/{}/restore", assistant_id),
+                &json!({}),
             )
             .await;
-        assert_eq!(st, StatusCode::OK, "lead reactivates own assistant");
+        assert_eq!(st, StatusCode::OK, "lead restores own assistant: {body}");
         assert_eq!(body["active"], true);
+        assert!(body["archived_at"].is_null(), "archived_at cleared after restore");
 
-        // No delete route exists for team leads, active or not.
+        // No delete route exists for team leads.
         let (st, _) = lead
             .delete(&format!("/api/v1/team-users/{}", assistant_id))
             .await;

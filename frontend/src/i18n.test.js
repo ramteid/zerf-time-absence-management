@@ -74,10 +74,10 @@ describe("translate", () => {
     setLanguage("de");
     expect(
       localizeErrorMessage(
-        "Cannot deactivate: 2 active user(s) still have this person as their approver. Reassign them first.",
+        "Cannot delete: 2 active user(s) still have this person as their approver. Reassign them first.",
       ),
     ).toBe(
-      "Deaktivierung nicht möglich: 2 aktive Benutzer haben diese Person noch als verantwortliche Person. Weisen Sie sie zuerst neu zu.",
+      "Löschen nicht möglich: 2 aktive Benutzer haben diese Person noch als verantwortliche Person. Weisen Sie sie zuerst neu zu.",
     );
   });
 

@@ -838,69 +838,39 @@ async fn users_full_workflow() {
         assert_eq!(st, StatusCode::BAD_REQUEST, "cannot delete yourself");
     }
 
-    // -- Cannot deactivate user who is approver for active users --
+    // -- Cannot archive user who is approver for active users without replacement --
     {
         let lead_id = create_lead(&admin, "lead-guard@example.com", "Guard").await;
         let emp_id = create_emp(&admin, "emp-guard@example.com", "GuardEmp", lead_id).await;
 
-        // Deactivating the lead while emp still reports to them must be rejected.
+        // Archiving the lead without providing a replacement approver must fail.
         let (st, body) = admin
             .post(
-                &format!("/api/v1/users/{lead_id}/deactivate"),
+                &format!("/api/v1/users/{lead_id}/archive"),
                 &serde_json::json!({}),
             )
             .await;
         assert_eq!(
             st,
             StatusCode::BAD_REQUEST,
-            "deactivate with active reports must fail"
+            "archive with active reports and no replacement must fail"
         );
         let error_msg = body["error"].as_str().unwrap_or("").to_lowercase();
         assert!(
-            error_msg.contains("approver") || error_msg.contains("reassign"),
-            "error must mention approver/reassign, got: {error_msg}"
+            error_msg.contains("approver") || error_msg.contains("replacement"),
+            "error must mention approver/replacement, got: {error_msg}"
         );
 
-        // Reassign emp to admin (id=1), then deactivation must succeed.
-        let (st, _) = admin
-            .put(
-                &format!("/api/v1/users/{emp_id}"),
-                &serde_json::json!({"approver_ids": [1]}),
-            )
-            .await;
-        assert_eq!(st, StatusCode::OK, "reassign emp to admin");
-
+        // Provide replacement approver — archive must succeed.
         let (st, _) = admin
             .post(
-                &format!("/api/v1/users/{lead_id}/deactivate"),
-                &serde_json::json!({}),
+                &format!("/api/v1/users/{lead_id}/archive"),
+                &serde_json::json!({
+                    "approver_replacements": { emp_id.to_string(): 1 }
+                }),
             )
             .await;
-        assert_eq!(st, StatusCode::OK, "deactivate after reassign must succeed");
-    }
-
-    // -- Cannot update active=false for user who is approver for active users --
-    {
-        let lead_id = create_lead(&admin, "lead-put-guard@example.com", "PutGuard").await;
-        create_emp(&admin, "emp-put-guard@example.com", "PutGuardEmp", lead_id).await;
-
-        // PUT with active=false while lead has active direct reports must be rejected.
-        let (st, body) = admin
-            .put(
-                &format!("/api/v1/users/{lead_id}"),
-                &serde_json::json!({"active": false}),
-            )
-            .await;
-        assert_eq!(
-            st,
-            StatusCode::BAD_REQUEST,
-            "PUT active=false with active reports must fail"
-        );
-        let error_msg = body["error"].as_str().unwrap_or("").to_lowercase();
-        assert!(
-            error_msg.contains("approver") || error_msg.contains("reassign"),
-            "error must mention approver/reassign, got: {error_msg}"
-        );
+        assert_eq!(st, StatusCode::OK, "archive with replacement must succeed");
     }
 
     // -- Leave-days endpoint scope and validation --
@@ -1046,9 +1016,9 @@ async fn users_full_workflow() {
         );
 
         let (st, _) = admin
-            .post(&format!("/api/v1/users/{emp_id}/deactivate"), &json!({}))
+            .post(&format!("/api/v1/users/{emp_id}/archive"), &json!({}))
             .await;
-        assert_eq!(st, StatusCode::OK, "deactivate employee");
+        assert_eq!(st, StatusCode::OK, "archive employee");
         let (st, _) = admin
             .put(
                 &format!("/api/v1/users/{emp_id}/leave-days"),
@@ -1058,11 +1028,11 @@ async fn users_full_workflow() {
         assert_eq!(
             st,
             StatusCode::BAD_REQUEST,
-            "cannot set leave days for inactive user"
+            "cannot set leave days for archived user"
         );
 
-        let (st, _) = admin.post("/api/v1/users/1/deactivate", &json!({})).await;
-        assert_eq!(st, StatusCode::BAD_REQUEST, "admin cannot deactivate self");
+        let (st, _) = admin.post("/api/v1/users/1/archive", &json!({})).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "admin cannot archive self");
 
         let (st, _) = admin.delete("/api/v1/users/1").await;
         assert_eq!(st, StatusCode::BAD_REQUEST, "admin cannot delete self");
@@ -1089,18 +1059,6 @@ async fn users_full_workflow() {
             st,
             StatusCode::BAD_REQUEST,
             "update rejects invalid leave_days_next_year"
-        );
-
-        let (st, _) = admin
-            .put(
-                &format!("/api/v1/users/{lead_id}"),
-                &json!({"active": false}),
-            )
-            .await;
-        assert_eq!(
-            st,
-            StatusCode::BAD_REQUEST,
-            "cannot deactivate a lead with active direct reports"
         );
 
         let (st, _) = admin
@@ -1152,12 +1110,12 @@ async fn users_full_workflow() {
         let lead = login_change_pw(&app, "lead-guards-extra@example.com", &lead_pw).await;
 
         let (st, _) = lead
-            .post(&format!("/api/v1/users/{emp_id}/deactivate"), &json!({}))
+            .post(&format!("/api/v1/users/{emp_id}/archive"), &json!({}))
             .await;
         assert_eq!(
             st,
             StatusCode::FORBIDDEN,
-            "non-admin cannot deactivate users"
+            "non-admin cannot archive users"
         );
 
         let (st, _) = lead.delete(&format!("/api/v1/users/{emp_id}")).await;

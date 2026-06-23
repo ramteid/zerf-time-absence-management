@@ -6,10 +6,9 @@
 //! `assert_team_lead_can_manage_assistant` — admins use the regular
 //! `/users*` endpoints instead.
 //!
-//! Team leads may deactivate and reactivate an assistant (via `PUT` with
-//! `active: true|false`, mirroring the admin toggle), but there is
-//! deliberately no delete capability here — only an admin can permanently
-//! delete a user.
+//! Team leads may archive and restore an assistant via the dedicated
+//! `/team-users/{id}/archive` and `/team-users/{id}/restore` endpoints.
+//! Delete capability is intentionally absent — only an admin can hard-delete.
 
 use crate::audit;
 use crate::error::{AppError, AppResult};
@@ -18,9 +17,8 @@ use crate::middleware::auth::User;
 use crate::roles::{is_assistant_role, ROLE_ASSISTANT};
 use crate::services::users::{
     assert_team_lead_assistant_list_access, assert_team_lead_can_manage_assistant,
-    delete_sessions_for_user_tx, ensure_email_available, ensure_user_name_available,
-    normalize_optional_user_name, repo_user_to_auth_user, set_leave_days_tx, update_basic_tx,
-    user_unique_conflict,
+    ensure_email_available, ensure_user_name_available, normalize_optional_user_name,
+    repo_user_to_auth_user, set_leave_days_tx, update_basic_tx, user_unique_conflict,
 };
 use crate::AppState;
 use axum::{
@@ -34,9 +32,7 @@ use serde::{Deserialize, Serialize};
 /// isn't an assistant, including the requester's own row) carry only
 /// `id`/`first_name`/`last_name` — no other field is ever serialized for
 /// them, so confidentiality doesn't depend on the frontend hiding anything.
-/// Unlike every other lead-facing list, this one includes inactive direct
-/// reports too, so a lead can see and reactivate an assistant they
-/// previously deactivated.
+/// The list includes archived assistants so a lead can see and restore them.
 #[derive(Serialize)]
 pub struct TeamUserRow {
     pub id: i64,
@@ -48,7 +44,7 @@ pub struct TeamUserRow {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub active: Option<bool>,
+    pub archived_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 pub async fn list(
@@ -72,7 +68,7 @@ pub async fn list(
                 can_manage,
                 email: can_manage.then_some(u.email),
                 role: can_manage.then_some(u.role),
-                active: can_manage.then_some(u.active),
+                archived_at: can_manage.then(|| u.archived_at).flatten(),
             }
         })
         .collect();
@@ -93,7 +89,7 @@ pub async fn get_one(
         "role": target.role,
         "start_date": target.start_date,
         "hire_date": target.hire_date,
-        "active": target.active,
+        "archived_at": target.archived_at,
         "annual_leave_days": target.annual_leave_days,
     })))
 }
@@ -166,7 +162,6 @@ pub struct UpdateTeamAssistant {
     /// — out of scope for the deliberately small assistant-management surface.
     #[serde(default)]
     pub hire_date: Option<NaiveDate>,
-    pub active: Option<bool>,
 }
 
 pub async fn update(
@@ -227,7 +222,6 @@ pub async fn update(
         None, // workdays_per_week: locked (no fixed days for assistants)
         body.start_date,
         body.hire_date.map(Some),
-        body.active,
         None,
         None,
         None, // overtime_start_balance_min: locked to 0 for assistants
@@ -245,10 +239,6 @@ pub async fn update(
     }
     if let Some(d) = body.leave_days_next_year {
         set_leave_days_tx(&mut transaction, user_id, current_year + 1, d).await?;
-    }
-    let just_deactivated = matches!(body.active, Some(false)) && previous_user.active;
-    if just_deactivated {
-        delete_sessions_for_user_tx(&mut transaction, user_id).await?;
     }
     transaction.commit().await?;
     let updated_user = app_state
@@ -269,4 +259,41 @@ pub async fn update(
     )
     .await;
     Ok(Json(updated_auth_user))
+}
+
+/// POST /team-users/{id}/archive — team lead only.
+/// Archives the assistant if the requester is their approver and the
+/// `allow_team_lead_manage_assistants` setting is enabled.
+pub async fn archive_assistant(
+    State(app_state): State<AppState>,
+    requester: User,
+    Path(user_id): Path<i64>,
+) -> AppResult<Json<serde_json::Value>> {
+    crate::services::users::archive_assistant(&app_state, &requester, user_id).await?;
+    Ok(Json(serde_json::json!({"ok": true})))
+}
+
+/// Request body for POST /team-users/{id}/restore.
+#[derive(serde::Deserialize)]
+pub struct RestoreAssistantBody {
+    /// Optional new start date to avoid negative flextime accumulation.
+    pub start_date: Option<chrono::NaiveDate>,
+}
+
+/// POST /team-users/{id}/restore — team lead only.
+/// Restores the archived assistant if the requester is their approver.
+pub async fn restore_assistant(
+    State(app_state): State<AppState>,
+    requester: User,
+    Path(user_id): Path<i64>,
+    Json(body): Json<RestoreAssistantBody>,
+) -> AppResult<Json<User>> {
+    let updated = crate::services::users::restore_assistant(
+        &app_state,
+        &requester,
+        user_id,
+        body.start_date,
+    )
+    .await?;
+    Ok(Json(updated))
 }

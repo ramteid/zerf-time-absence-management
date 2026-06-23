@@ -97,7 +97,6 @@ Use this document if you are:
   - [Reading the audit log](#reading-the-audit-log)
   - [Creating a user](#creating-a-user)
   - [Updating a user](#updating-a-user)
-  - [Deactivating a user](#deactivating-a-user)
   - [Archiving a user](#archiving-a-user)
   - [Restoring an archived user](#restoring-an-archived-user)
   - [Deleting a user](#deleting-a-user)
@@ -1244,14 +1243,14 @@ When enabled, every non-admin team lead gets an additional **Users** tab under
 Settings, scoped strictly to their own assigned users:
 
 - The list shows everyone assigned to the lead as approver, plus the lead
-  themselves — including inactive direct reports (unlike every other
+  themselves — including archived direct reports (unlike every other
   lead-facing list, which only shows active team members; this is needed so a
-  lead can find and reactivate an assistant they previously deactivated). For
+  lead can find and restore an assistant they previously archived). For
   anyone who is **not** an "Assistant" (including the lead's own row), only
   the name is shown; no other field is sent by the server, and no action is
   available.
 - Only users with role "Assistant" who are assigned to the lead can be viewed
-  in detail, edited, deactivated, or reactivated.
+  in detail, edited, archived, or restored.
 - There is no delete action here. A team lead can never delete a user — only
   an admin can, via the regular Users tab.
 - The **Add Member** button only lets the lead create a new "Assistant" user.
@@ -1335,7 +1334,6 @@ creation apply to each field.
 **Guards to prevent accidental lockout:**
 
 - An admin cannot set their own role to a non-admin value.
-- An admin cannot deactivate their own account.
 - Removing admin rights from a user requires at least 2 active admins
   remaining after the change.
 - A user who still has direct reports assigned cannot have their role changed
@@ -1343,21 +1341,7 @@ creation apply to each field.
 - A user who is the sole approver for admin users cannot be downgraded to a
   role that cannot approve admin-subject requests.
 
-When a user's role is changed or they are deactivated, they are signed out immediately.
-
-### Deactivating a user
-
-Deactivation prevents the user from logging in without deleting their data.
-
-Guards:
-
-- Cannot deactivate yourself.
-- Cannot deactivate the last active admin.
-- Cannot deactivate a user who is still listed as an approver for active users.
-  The error message includes the count of affected users. Reassign those users
-  to a different approver first.
-
-On success: the user can no longer log in and any active sessions end immediately.
+When a user's role is changed, they are signed out immediately.
 
 ### Archiving a user
 
@@ -1417,7 +1401,7 @@ records).
 If the user has any historical time data, deletion is blocked and the error
 message instructs you to use archiving instead.
 
-Guards are identical to deactivation:
+Guards:
 
 - Cannot delete yourself.
 - Cannot delete the last active admin.
@@ -1551,7 +1535,7 @@ If a backup fails, all active admins receive a pinned in-app notification and a 
 
 #### Report PDF Upload
 
-When enabled, Zerf queues an individual timesheet PDF for each employee on a configurable day each month. Each PDF covers the **previous calendar month**. Employees who have not yet submitted all their weeks are uploaded automatically on the next daily check — late submitters are caught up without manual intervention. Employees who were deactivated after the period ended are included for archive correctness.
+When enabled, Zerf queues an individual timesheet PDF for each employee on a configurable day each month. Each PDF covers the **previous calendar month**. Employees who have not yet submitted all their weeks are uploaded automatically on the next daily check — late submitters are caught up without manual intervention. Employees who were archived after the period ended are included for archive correctness.
 
 | Setting | Description |
 | --- | --- |
@@ -1731,7 +1715,8 @@ re-validated server-side, independent of what the client sends:
   different lead's assistant, or the requester's own account) is rejected
   with `403 Forbidden`.
 - There is no delete route under `/team-users*` at all — a non-admin lead
-  can deactivate/reactivate an assigned assistant via the update endpoint,
+  can archive and restore an assigned assistant via the dedicated
+  `/team-users/{id}/archive` and `/team-users/{id}/restore` endpoints,
   but can never delete one.
 - Admins are unaffected and always use the regular `/users*` endpoints.
 
@@ -1753,7 +1738,7 @@ re-validated server-side, independent of what the client sends:
 Sessions are automatically destroyed when:
 
 - A user's role is changed.
-- A user is deactivated or deleted (cascade on delete).
+- A user is archived or deleted (cascade on delete).
 - A user changes their password (all other sessions are killed).
 - An admin resets a user's password.
 - A user logs out (all sessions for that user are killed).
@@ -1763,7 +1748,7 @@ Sessions are automatically destroyed when:
 All significant administrative and approval actions are logged to the audit
 table, including:
 
-- User creation, update, deactivation, and deletion.
+- User creation, update, archive, restore, and deletion.
 - Password resets.
 - Time entry status transitions (submit, approve, reject, reopen, and silent
   auto-approval on submit).

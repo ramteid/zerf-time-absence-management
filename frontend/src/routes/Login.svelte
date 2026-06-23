@@ -75,8 +75,8 @@
       await storePasswordCredential(form);
       window.location.assign(dest);
     } catch (err) {
-      if (err?.apiMessage === "account_deactivated") {
-        loginError = $t("account_deactivated");
+      if (err?.apiMessage === "account_archived") {
+        loginError = $t("account_archived");
       } else {
         loginError = $t(err?.message || "Error");
       }

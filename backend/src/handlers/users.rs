@@ -278,7 +278,6 @@ pub struct UpdateUser {
     /// clear back to the `start_date` fallback, value = set explicitly.
     #[serde(default, deserialize_with = "deserialize_nullable_date")]
     pub hire_date: Option<Option<NaiveDate>>,
-    pub active: Option<bool>,
     /// List of approvers (team leads/admins) for this user.
     /// If provided (even as empty list), replaces all existing approvers.
     #[serde(default, deserialize_with = "deserialize_optional_vec")]
@@ -321,8 +320,8 @@ pub async fn update(
             return Err(AppError::BadRequest("Invalid role".into()));
         }
     }
-    // Anti-lockout: an admin cannot demote themselves out of admin or deactivate
-    // their own account; otherwise the only path back is fresh DB bootstrap.
+    // Anti-lockout: an admin cannot demote themselves out of admin;
+    // otherwise the only path back is fresh DB bootstrap.
     if user_id == requester.id {
         if let Some(role_value) = &body.role {
             if !is_admin_role(role_value) {
@@ -330,11 +329,6 @@ pub async fn update(
                     "You cannot remove your own admin role.".into(),
                 ));
             }
-        }
-        if let Some(false) = body.active {
-            return Err(AppError::BadRequest(
-                "You cannot deactivate yourself.".into(),
-            ));
         }
     }
     // Numeric bounds validation (same constraints as create).
@@ -397,10 +391,9 @@ pub async fn update(
         .await?;
     }
     let removing_admin_rights = is_admin_role(&previous_user.role)
-        && (normalized_role
+        && normalized_role
             .as_deref()
-            .is_some_and(|role_value| role_value != "admin")
-            || matches!(body.active, Some(false)));
+            .is_some_and(|role_value| role_value != "admin");
     // Pre-validate the post-update invariant (non-admin → has approver).
     let new_role =
         normalized_role.unwrap_or_else(|| previous_user.role.trim().to_ascii_lowercase());
@@ -458,8 +451,7 @@ pub async fn update(
     )
     .await?;
 
-    let resulting_active = body.active.unwrap_or(previous_user.active);
-    if !can_approve_admin_subjects(&new_role, resulting_active) {
+    if !can_approve_admin_subjects(&new_role, previous_user.active) {
         let admin_direct_reports_count = app_state
             .db
             .users
@@ -472,7 +464,7 @@ pub async fn update(
             )));
         }
     }
-    if !can_approve_non_admin_subjects(&new_role, resulting_active) {
+    if !can_approve_non_admin_subjects(&new_role, previous_user.active) {
         let non_admin_direct_reports_count =
             app_state.db.users.count_direct_reports(user_id).await?;
         if non_admin_direct_reports_count > 0 {
@@ -547,7 +539,6 @@ pub async fn update(
         effective_workdays_update,
         effective_start_date,
         body.hire_date,
-        body.active,
         body.allow_reopen_without_approval,
         body.allow_submission_without_approval,
         body.overtime_start_balance_min,
@@ -575,16 +566,14 @@ pub async fn update(
         crate::services::users::set_approvers_tx(&mut transaction, user_id, new_approver_ids)
             .await?;
     }
-    // If role changed or user was deactivated, kill all sessions of that user
-    // so cached role/state cannot be (ab)used.
+    // Kill sessions on role change so cached role cannot be (ab)used.
     let previous_role_normalized = normalize_role(&previous_user.role);
     let role_changed = body
         .role
         .as_ref()
         .map(|role_value| normalize_role(role_value) != previous_role_normalized)
         .unwrap_or(false);
-    let just_deactivated = matches!(body.active, Some(false)) && previous_user.active;
-    if role_changed || just_deactivated {
+    if role_changed {
         let _ =
             crate::services::users::delete_sessions_for_user_tx(&mut transaction, user_id).await;
     }
@@ -607,58 +596,6 @@ pub async fn update(
     )
     .await;
     Ok(Json(updated_auth_user))
-}
-
-pub async fn deactivate(
-    State(app_state): State<AppState>,
-    requester: User,
-    Path(user_id): Path<i64>,
-) -> AppResult<Json<serde_json::Value>> {
-    if !requester.is_admin() {
-        return Err(AppError::Forbidden);
-    }
-    if user_id == requester.id {
-        return Err(AppError::BadRequest(
-            "You cannot deactivate yourself.".into(),
-        ));
-    }
-    let mut transaction = app_state.db.users.begin().await?;
-    lock_user_graph(&mut transaction).await?;
-    let previous_user: User =
-        crate::services::users::fetch_for_update(&mut transaction, user_id).await?;
-    if previous_user.active && is_admin_role(&previous_user.role) {
-        let active_admins =
-            crate::services::users::count_active_admins_tx(&mut transaction).await?;
-        if active_admins <= 1 {
-            return Err(AppError::BadRequest(
-                "Cannot remove the last active admin.".into(),
-            ));
-        }
-    }
-    // Block deactivation if this person is an assigned approver for active users.
-    // Run inside the transaction (under the user-graph lock) to avoid TOCTOU.
-    let direct_reports_count =
-        crate::services::users::count_active_direct_reports_tx(&mut transaction, user_id).await?;
-    if direct_reports_count > 0 {
-        return Err(AppError::BadRequest(format!(
-            "Cannot deactivate: {} active user(s) still have this person as their approver. Reassign them first.",
-            direct_reports_count
-        )));
-    }
-    crate::services::users::deactivate_tx(&mut transaction, user_id).await?;
-    crate::services::users::delete_sessions_for_user_tx(&mut transaction, user_id).await?;
-    transaction.commit().await?;
-    audit::log(
-        &app_state.pool,
-        requester.id,
-        "deactivated",
-        "users",
-        user_id,
-        serde_json::to_value(&previous_user).ok(),
-        Some(serde_json::json!({"active": false})),
-    )
-    .await;
-    Ok(Json(serde_json::json!({"ok":true})))
 }
 
 pub async fn delete_user(
