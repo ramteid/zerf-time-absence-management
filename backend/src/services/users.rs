@@ -18,6 +18,9 @@ pub struct NewUser {
     pub workdays_per_week: Option<i16>,
     pub leave_days_current_year: i64,
     pub leave_days_next_year: i64,
+    /// Base annual leave entitlement (days/year), used whenever no explicit
+    /// per-year override exists for this user.
+    pub annual_leave_days: i64,
     pub start_date: chrono::NaiveDate,
     pub hire_date: Option<chrono::NaiveDate>,
     pub overtime_start_balance_min: Option<i64>,
@@ -354,6 +357,7 @@ pub async fn update_basic_tx(
     allow_submission_without_approval: Option<bool>,
     overtime_start_balance_min: Option<i64>,
     tracks_time: Option<bool>,
+    annual_leave_days: Option<i64>,
 ) -> Result<(), crate::db::SqlxError> {
     UserDb::update_basic(
         tx,
@@ -371,7 +375,7 @@ pub async fn update_basic_tx(
         allow_submission_without_approval,
         overtime_start_balance_min,
         tracks_time,
-        None,
+        annual_leave_days,
     )
     .await
 }
@@ -546,6 +550,7 @@ pub async fn create(
     }
     if !(0..=366).contains(&body.leave_days_current_year)
         || !(0..=366).contains(&body.leave_days_next_year)
+        || !(0..=366).contains(&body.annual_leave_days)
     {
         return Err(AppError::BadRequest("Invalid leave_days.".into()));
     }
@@ -604,7 +609,6 @@ pub async fn create(
     let mut transaction = app_state.db.users.begin().await?;
     crate::services::auth::lock_user_graph(&mut transaction).await?;
     validate_approver_ids(app_state, &body.role, None, &body.approver_ids).await?;
-    let default_leave_days = UserDb::get_default_leave_days_tx(&mut transaction).await?;
     let new_user_id = UserDb::create(
         &mut transaction,
         &normalized_email,
@@ -621,7 +625,7 @@ pub async fn create(
         body.tracks_time,
         body.category_ids.as_deref(),
         body.absence_category_ids.as_deref(),
-        default_leave_days,
+        body.annual_leave_days,
     )
     .await
     .map_err(|e| {
