@@ -51,9 +51,12 @@ pub const BACKUP_UPLOAD_ENABLED_KEY: &str = "backup_upload_enabled";
 pub const BACKUP_UPLOAD_URL_KEY: &str = "backup_upload_url";
 pub const BACKUP_UPLOAD_PASSWORD_KEY: &str = "backup_upload_password";
 
-// Backup scheduling/retention — migrated from env vars into app_settings.
+// Backup scheduling — migrated from env vars into app_settings.
 pub const BACKUP_INTERVAL_DAYS_KEY: &str = "backup_interval_days";
-pub const BACKUP_RETENTION_DAYS_KEY: &str = "backup_retention_days";
+/// UTC timestamp written by backup.sh after every successful backup.
+/// Persists across container restarts so the interval is measured from the
+/// last actual backup, not from when the container started.
+pub const BACKUP_LAST_SUCCESS_AT_KEY: &str = "backup_last_success_at";
 
 pub async fn load_setting(
     pool: &crate::db::DatabasePool,
@@ -183,11 +186,6 @@ pub async fn load_admin_settings(pool: &crate::db::DatabasePool) -> AppResult<Ad
             .await?
             .parse()
             .unwrap_or(1);
-    let backup_retention_days: u64 =
-        load_setting(pool, BACKUP_RETENTION_DAYS_KEY, "30")
-            .await?
-            .parse()
-            .unwrap_or(30);
 
     Ok(AdminSettingsData {
         base,
@@ -208,7 +206,6 @@ pub async fn load_admin_settings(pool: &crate::db::DatabasePool) -> AppResult<Ad
         backup_upload_url,
         backup_upload_password_set,
         backup_interval_days,
-        backup_retention_days,
     })
 }
 
@@ -351,8 +348,8 @@ pub struct AdminSettingsData {
     pub backup_upload_url: String,
     /// True when a share password is stored (never returned in cleartext).
     pub backup_upload_password_set: bool,
+    /// Interval between backups in days (read by backup.sh from app_settings).
     pub backup_interval_days: u32,
-    pub backup_retention_days: u64,
 }
 
 #[cfg(test)]

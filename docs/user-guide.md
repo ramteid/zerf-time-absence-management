@@ -743,6 +743,14 @@ Admins can manage reminder behavior in settings:
 These toggles control whether the corresponding reminder background task sends
 notifications/emails.
 
+### System error notifications (admin)
+
+When a technical failure occurs — such as a database backup failure or a Nextcloud upload error — all active admins receive a **pinned** notification at the top of their notification panel. Pinned unread notifications are visually highlighted and float above regular notifications.
+
+- Each failure class produces **at most one active notification** per admin. If the notification is dismissed and the failure recurs, it is raised again.
+- A throttled **alert email** is sent alongside the in-app notification, at most once per failure class per calendar day.
+- The notification is created both by the Rust application (for report PDF upload failures) and detected hourly from the database (for backup failures written directly by the backup container).
+
 ### Notification timestamp display
 
 Notification and email timestamps shown to users are rendered in the configured
@@ -1418,12 +1426,15 @@ When enabled, the backup container uploads each encrypted `.dump.enc` file to a 
 | Enable DB backup upload | Activates the upload step in the backup container. |
 | Share link | A Nextcloud public share URL in the form `https://cloud.example.com/s/<token>`. Only `https` links are accepted. |
 | Share password | Optional password protecting the share. Stored securely; never returned by the API. |
-| Backup interval (seconds) | How often the backup container runs a backup cycle. Default: 86400 (daily). Changes take effect on the next cycle. |
-| Retention (days) | How many days of local backup files to keep in the backup volume. Default: 30. |
+| Backup interval (days) | How often the backup container runs a backup cycle. Default: 1 (daily). Changes take effect on the next cycle. |
 
-> **Note:** Uploaded files are **not** automatically deleted from Nextcloud. Manage the shared folder manually to avoid unlimited growth.
+The backup container tracks the last successful backup time in the database. This timestamp survives container restarts, so the interval is always measured from the last actual backup rather than from container start time.
+
+The **10 most recent** local backup files are kept in the backup volume; older ones are deleted automatically after each successful backup. Uploaded files in Nextcloud are **not** deleted automatically — manage the shared folder manually to avoid unlimited growth.
 
 The backup file is AES-256-CBC encrypted before upload, so a compromised share link does not expose plaintext data.
+
+If a backup fails, all active admins receive a pinned in-app notification and a throttled alert email (at most one email per day per failure class). The notification is automatically re-raised if it was previously dismissed and the failure recurs.
 
 #### Report PDF Upload
 
@@ -1438,7 +1449,7 @@ When enabled, Zerf queues an individual timesheet PDF for each employee on a con
 
 **Upload now** queues the previous month's PDFs for all employees immediately and uploads those who are already fully submitted. Employees who are not yet submitted are uploaded on subsequent daily checks. This does not prevent the scheduled monthly run from processing remaining entries.
 
-If an upload fails, all active admins receive an in-app notification. The scheduled upload retries the next day.
+If an upload fails, all active admins receive a pinned in-app notification and a throttled alert email (at most one email per day). The scheduled upload retries automatically on the next daily check.
 
 ### Managing categories
 

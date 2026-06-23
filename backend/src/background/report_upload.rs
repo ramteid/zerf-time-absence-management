@@ -288,23 +288,13 @@ fn parse_year_month(period: &str) -> AppResult<(i32, u32)> {
 }
 
 async fn notify_admins_upload_failed(state: &AppState, message: &str) {
-    let all_users = match state.db.users.find_all_ordered().await {
-        Ok(u) => u,
-        Err(_) => return,
-    };
-    let title = format!("Nextcloud report upload failed: {message}");
-    for user in all_users.into_iter().filter(|u| u.active && u.is_admin()) {
-        crate::services::notifications::create(
-            state,
-            user.id,
-            "report_upload_failed",
-            &title,
-            "",
-            None,
-            None,
-        )
-        .await;
-    }
+    let title = format!("Report PDF upload failed: {message}");
+    crate::services::notifications::notify_admins_system_error(
+        state,
+        crate::services::notifications::SYSTEM_ERROR_REPORT_UPLOAD_FAILED,
+        &title,
+    )
+    .await;
 }
 
 #[cfg(test)]

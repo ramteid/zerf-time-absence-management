@@ -109,44 +109,53 @@ make_shim() {
   [ "$output" = "1" ]
 }
 
-# ── seconds_until_next_4am_utc ────────────────────────────────────────────────
+# ── is_backup_due ────────────────────────────────────────────────────────────
 
-@test "seconds_until_next_4am_utc: returns positive value" {
-  # Can't control wall time, so just verify the function returns a positive integer
-  # between 1 and 86400.
-  result="$(seconds_until_next_4am_utc)"
-  [ "$result" -ge 1 ]
-  [ "$result" -le 86400 ]
+@test "is_backup_due: returns true when last_ts is empty" {
+  # Empty timestamp -> treat as overdue; exit 0 means true in shell.
+  run is_backup_due "" 1
+  [ "$status" -eq 0 ]
 }
 
-# ── resolve_retention ────────────────────────────────────────────────────────
-
-@test "resolve_retention: returns value from app_settings when valid" {
-  make_shim psql 'printf "14\n"'
-  run resolve_retention
+@test "is_backup_due: returns true when interval has fully elapsed" {
+  # Use epoch 0 (1970-01-01) as last timestamp; far more than 1 day has passed.
+  run is_backup_due "1970-01-01T00:00:00Z" 1
   [ "$status" -eq 0 ]
-  [ "$output" = "14" ]
 }
 
-@test "resolve_retention: falls back to 30 when psql returns empty" {
-  make_shim psql 'printf ""'
-  run resolve_retention
-  [ "$status" -eq 0 ]
-  [ "$output" = "30" ]
+@test "is_backup_due: returns false when interval has not yet elapsed" {
+  # Use the current time as last timestamp; with a 1-day interval it is not due.
+  _now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  run is_backup_due "$_now" 1
+  [ "$status" -ne 0 ]
 }
 
-@test "resolve_retention: falls back to 30 when psql fails" {
-  make_shim psql 'exit 1'
-  run resolve_retention
+@test "is_backup_due: returns true when unparseable timestamp is given" {
+  # An invalid timestamp falls back to epoch 0, making it appear overdue.
+  run is_backup_due "not-a-date" 1
   [ "$status" -eq 0 ]
-  [ "$output" = "30" ]
 }
 
-@test "resolve_retention: falls back to 30 when value is zero" {
-  make_shim psql 'printf "0\n"'
-  run resolve_retention
+# ── seconds_until_next_backup ────────────────────────────────────────────────
+
+@test "seconds_until_next_backup: returns 0 when last_ts is empty" {
+  run seconds_until_next_backup "" 1
   [ "$status" -eq 0 ]
-  [ "$output" = "30" ]
+  [ "$output" = "0" ]
+}
+
+@test "seconds_until_next_backup: returns 0 for an overdue timestamp" {
+  run seconds_until_next_backup "1970-01-01T00:00:00Z" 1
+  [ "$status" -eq 0 ]
+  [ "$output" = "0" ]
+}
+
+@test "seconds_until_next_backup: returns positive value for a recent timestamp" {
+  _now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  run seconds_until_next_backup "$_now" 1
+  [ "$status" -eq 0 ]
+  [ "$output" -gt 0 ]
+  [ "$output" -le 86400 ]
 }
 
 # ── build_upload_target ──────────────────────────────────────────────────────
@@ -201,32 +210,62 @@ exit 0
   [[ "$output" =~ "zero-byte" ]]
 }
 
-# ── apply_retention ──────────────────────────────────────────────────────────
+# ── apply_retention (count-based: keep last 10) ──────────────────────────────
 
-@test "apply_retention: removes files older than the retention period" {
+@test "apply_retention: deletes oldest files when more than 10 exist" {
   export OUT_DIR="$BATS_TMPDIR/out"
   mkdir -p "$OUT_DIR"
 
-  # Create an old .dump.enc file.
-  old_file="$OUT_DIR/zerf-old.dump.enc"
-  printf "old backup" > "$old_file"
-  # Force the file timestamp to be 31 days old.
-  touch -d "31 days ago" "$old_file" 2>/dev/null || \
-    touch -t "$(date -d '31 days ago' +%Y%m%d%H%M 2>/dev/null || date -v-31d +%Y%m%d%H%M)" \
-      "$old_file" 2>/dev/null || true
+  # Create 12 backup files with staggered mtimes so ls -t sorts them reliably.
+  for i in $(seq 1 12); do
+    f="$OUT_DIR/zerf-$(printf '%012d' "$i").dump.enc"
+    printf 'backup' > "$f"
+    touch -d "$i seconds ago" "$f"
+  done
 
-  apply_retention "30"
-  [ ! -f "$old_file" ]
+  apply_retention
+
+  count="$(ls "$OUT_DIR"/*.dump.enc 2>/dev/null | wc -l | tr -d '[:space:]')"
+  [ "$count" -eq 10 ]
 }
 
-@test "apply_retention: keeps files newer than the retention period" {
+@test "apply_retention: keeps fewer than 10 files untouched" {
   export OUT_DIR="$BATS_TMPDIR/out"
   mkdir -p "$OUT_DIR"
 
-  new_file="$OUT_DIR/zerf-new.dump.enc"
-  printf "new backup" > "$new_file"
-  # File was just created -- definitely newer than 30 days.
+  for i in $(seq 1 3); do
+    printf 'backup' > "$OUT_DIR/zerf-$(printf '%012d' "$i").dump.enc"
+  done
 
-  apply_retention "30"
-  [ -f "$new_file" ]
+  apply_retention
+
+  count="$(ls "$OUT_DIR"/*.dump.enc 2>/dev/null | wc -l | tr -d '[:space:]')"
+  [ "$count" -eq 3 ]
+}
+
+@test "apply_retention: also removes associated metadata files for deleted backups" {
+  export OUT_DIR="$BATS_TMPDIR/out"
+  mkdir -p "$OUT_DIR"
+
+  for i in $(seq 1 12); do
+    f="$OUT_DIR/zerf-$(printf '%012d' "$i").dump.enc"
+    m="${f%.dump.enc}.metadata"
+    printf 'backup' > "$f"
+    printf 'meta'   > "$m"
+    touch -d "$i seconds ago" "$f"
+  done
+
+  apply_retention
+
+  meta_count="$(ls "$OUT_DIR"/*.metadata 2>/dev/null | wc -l | tr -d '[:space:]')"
+  [ "$meta_count" -eq 10 ]
+}
+
+@test "apply_retention: no-ops when backup directory is empty" {
+  export OUT_DIR="$BATS_TMPDIR/out"
+  mkdir -p "$OUT_DIR"
+
+  # Should not fail on empty directory.
+  run apply_retention
+  [ "$status" -eq 0 ]
 }

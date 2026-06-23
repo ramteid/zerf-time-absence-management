@@ -70,6 +70,10 @@ async fn main() -> Result<()> {
     // Monthly timesheet PDF upload to Nextcloud: checks daily at midnight.
     tokio::spawn(background::report_upload::run_loop(state.clone()));
 
+    // System-alert emails: hourly catch-all for backup.sh failures written to
+    // the notifications table via psql (those bypass Rust notification paths).
+    tokio::spawn(background::system_alerts::run_loop(state.clone()));
+
     let app = build_app(state);
 
     let addr: SocketAddr = config.bind.parse().expect("invalid ZERF_BIND");

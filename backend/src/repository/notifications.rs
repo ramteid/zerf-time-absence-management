@@ -27,6 +27,7 @@ pub struct Notification {
     pub reference_type: Option<String>,
     pub reference_id: Option<i64>,
     pub is_read: bool,
+    pub pinned: bool,
     pub created_at: DateTime<Utc>,
 }
 
@@ -129,10 +130,71 @@ impl NotificationDb {
     pub async fn list_for_user(&self, user_id: i64) -> AppResult<Vec<Notification>> {
         Ok(sqlx::query_as::<_, Notification>(
             "SELECT id, user_id, kind, title, body, reference_type, reference_id, is_read, \
-             created_at FROM notifications WHERE user_id=$1 \
-             ORDER BY created_at DESC LIMIT 100",
+             pinned, created_at FROM notifications WHERE user_id=$1 \
+             ORDER BY (pinned AND NOT is_read) DESC, created_at DESC LIMIT 100",
         )
         .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// Upsert a pinned system-error notification for one user, deduplicated by
+    /// (user_id, kind, dedupe_key).
+    ///
+    /// Behaviour:
+    ///  - Not exists → INSERT (unread, pinned).
+    ///  - Exists and is_read=FALSE (already unread) → DO NOTHING (no re-alert).
+    ///  - Exists and is_read=TRUE (admin had dismissed it) → UPDATE: mark unread
+    ///    again and refresh created_at so it floats back to the top.
+    ///
+    /// Returns `true` when a row was inserted or re-alerted (caller may want to
+    /// send an email); `false` when the notification was already unread.
+    pub async fn upsert_system_error(
+        &self,
+        user_id: i64,
+        kind: &str,
+        dedupe_key: &str,
+        title: &str,
+    ) -> AppResult<bool> {
+        let result = sqlx::query(
+            "INSERT INTO notifications \
+               (user_id, kind, title, body, dedupe_key, pinned, is_read) \
+             VALUES ($1, $2, $3, NULL, $4, TRUE, FALSE) \
+             ON CONFLICT (user_id, kind, dedupe_key) \
+             WHERE dedupe_key IS NOT NULL \
+             DO UPDATE SET \
+               title      = EXCLUDED.title, \
+               pinned     = TRUE, \
+               is_read    = FALSE, \
+               created_at = NOW() \
+             WHERE notifications.is_read = TRUE",
+        )
+        .bind(user_id)
+        .bind(kind)
+        .bind(title)
+        .bind(dedupe_key)
+        .execute(&self.pool)
+        .await?;
+
+        let changed = result.rows_affected() > 0;
+        if changed {
+            self.broadcast(user_id);
+        }
+        Ok(changed)
+    }
+
+    /// Return all distinct (kind, dedupe_key, representative title) for unread
+    /// pinned notifications.  Used by the system-alerts background task to
+    /// decide whether to send a throttled alert email.
+    pub async fn list_unread_system_error_classes(
+        &self,
+    ) -> AppResult<Vec<(String, String, String)>> {
+        Ok(sqlx::query_as::<_, (String, String, String)>(
+            "SELECT kind, dedupe_key, MAX(title) \
+             FROM notifications \
+             WHERE pinned = TRUE AND is_read = FALSE AND dedupe_key IS NOT NULL \
+             GROUP BY kind, dedupe_key",
+        )
         .fetch_all(&self.pool)
         .await?)
     }

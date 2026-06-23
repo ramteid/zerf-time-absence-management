@@ -1,5 +1,5 @@
-//! Contract test: verifies that every `backup_*` and `backup_upload_*` key constant
-//! defined in `services::settings` also appears as a literal string in `scripts/backup.sh`.
+//! Contract test: verifies that every `backup_*` key constant defined in
+//! `services::settings` also appears as a literal string in `scripts/backup.sh`.
 //!
 //! This test runs without a database and catches key-name drift between the Rust
 //! constants (which the Admin UI reads/writes) and the shell script (which reads
@@ -10,7 +10,7 @@ use zerf::services::settings;
 /// All setting key constants that `backup.sh` must reference as literal strings.
 const BACKUP_KEYS: &[(&str, &str)] = &[
     ("BACKUP_INTERVAL_DAYS_KEY", settings::BACKUP_INTERVAL_DAYS_KEY),
-    ("BACKUP_RETENTION_DAYS_KEY", settings::BACKUP_RETENTION_DAYS_KEY),
+    ("BACKUP_LAST_SUCCESS_AT_KEY", settings::BACKUP_LAST_SUCCESS_AT_KEY),
     ("BACKUP_UPLOAD_ENABLED_KEY", settings::BACKUP_UPLOAD_ENABLED_KEY),
     ("BACKUP_UPLOAD_URL_KEY", settings::BACKUP_UPLOAD_URL_KEY),
     ("BACKUP_UPLOAD_PASSWORD_KEY", settings::BACKUP_UPLOAD_PASSWORD_KEY),
@@ -47,7 +47,7 @@ fn backup_sh_contains_all_backup_setting_keys() {
 #[test]
 fn backup_key_constant_values_are_correct() {
     assert_eq!(settings::BACKUP_INTERVAL_DAYS_KEY, "backup_interval_days");
-    assert_eq!(settings::BACKUP_RETENTION_DAYS_KEY, "backup_retention_days");
+    assert_eq!(settings::BACKUP_LAST_SUCCESS_AT_KEY, "backup_last_success_at");
     assert_eq!(settings::BACKUP_UPLOAD_ENABLED_KEY, "backup_upload_enabled");
     assert_eq!(settings::BACKUP_UPLOAD_URL_KEY, "backup_upload_url");
     assert_eq!(settings::BACKUP_UPLOAD_PASSWORD_KEY, "backup_upload_password");
