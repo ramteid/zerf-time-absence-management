@@ -1,9 +1,27 @@
 <script>
   import { api } from "../api.js";
   import { currentUser, settings as appSettings, toast } from "../stores.js";
-  import { LANGUAGES, setLanguage, t } from "../i18n.js";
+  import { LANGUAGES, setLanguage, t, fmtDecimal, parseDecimal } from "../i18n.js";
 
   let settingsForm = {};
+  // Locale-formatted string variables for float fields so the decimal separator
+  // matches the current UI language (comma for German, period for English).
+  let defaultWeeklyHoursStr = "";
+  let breakThresholdStr = "";
+  let breakThresholdStr2 = "";
+
+  // Sync float string vars from a plain settings object (after load or save).
+  function syncFloatStrings(s) {
+    defaultWeeklyHoursStr = s.default_weekly_hours != null
+      ? fmtDecimal(Number(s.default_weekly_hours), 2)
+      : "";
+    breakThresholdStr = s.auto_break_threshold_hours != null
+      ? fmtDecimal(Number(s.auto_break_threshold_hours), 2)
+      : "";
+    breakThresholdStr2 = s.auto_break_threshold_hours_2 != null
+      ? fmtDecimal(Number(s.auto_break_threshold_hours_2), 2)
+      : "";
+  }
   let saving = false;
   let adminFirstName = "";
   let adminLastName = "";
@@ -84,7 +102,10 @@
     }
     settingsForm = loadedSettings;
     appSettings.set(loadedSettings);
+    // Apply the stored language before formatting floats so the decimal separator
+    // matches the saved UI language from the first render.
     if (settingsForm.ui_language) setLanguage(settingsForm.ui_language);
+    syncFloatStrings(settingsForm);
     countries = sortCountriesByName(allCountries);
   }
   load();
@@ -108,7 +129,7 @@
       toast($t("Please wait for regions to load."), "error");
       return;
     }
-    if (settingsForm.default_weekly_hours == null || settingsForm.default_weekly_hours === "") {
+    if (defaultWeeklyHoursStr == null || defaultWeeklyHoursStr === "") {
       toast($t("Please enter default weekly hours."), "error");
       return;
     }
@@ -120,10 +141,7 @@
       return;
     }
     if (settingsForm.auto_break_enabled) {
-      if (
-        settingsForm.auto_break_threshold_hours == null ||
-        settingsForm.auto_break_threshold_hours === ""
-      ) {
+      if (breakThresholdStr == null || breakThresholdStr === "") {
         toast($t("Please enter the break threshold."), "error");
         return;
       }
@@ -134,9 +152,7 @@
         toast($t("Please enter the break deduction minutes."), "error");
         return;
       }
-      const hasTier2Threshold =
-        settingsForm.auto_break_threshold_hours_2 != null &&
-        settingsForm.auto_break_threshold_hours_2 !== "";
+      const hasTier2Threshold = breakThresholdStr2 != null && breakThresholdStr2 !== "";
       const hasTier2Deduction =
         settingsForm.auto_break_deduction_minutes_2 != null &&
         settingsForm.auto_break_deduction_minutes_2 !== "";
@@ -151,16 +167,18 @@
       // backend treats it as "no date" rather than trying to parse an empty string.
       const body = {
         ...settingsForm,
+        // Parse locale-formatted float strings back to numbers before sending.
+        default_weekly_hours: parseDecimal(defaultWeeklyHoursStr),
         carryover_expiry_date: settingsForm.carryover_expiry_date?.trim() || null,
         // Clear all break values when the feature is disabled.
         auto_break_threshold_hours: settingsForm.auto_break_enabled
-          ? settingsForm.auto_break_threshold_hours
+          ? parseDecimal(breakThresholdStr)
           : null,
         auto_break_deduction_minutes: settingsForm.auto_break_enabled
           ? settingsForm.auto_break_deduction_minutes
           : null,
         auto_break_threshold_hours_2: settingsForm.auto_break_enabled
-          ? (settingsForm.auto_break_threshold_hours_2 || null)
+          ? (parseDecimal(breakThresholdStr2) || null)
           : null,
         auto_break_deduction_minutes_2: settingsForm.auto_break_enabled
           ? (settingsForm.auto_break_deduction_minutes_2 || null)
@@ -168,8 +186,11 @@
       };
       const saved = await api("/settings", { method: "PUT", body });
       settingsForm = saved;
-      appSettings.set(saved);
+      // Apply the new language before re-formatting floats so the decimal separator
+      // reflects the freshly saved language setting.
       if (saved.ui_language) setLanguage(saved.ui_language);
+      syncFloatStrings(saved);
+      appSettings.set(saved);
       if (needsName) {
         await api(`/users/${$currentUser.id}`, {
           method: "PUT",
@@ -341,11 +362,9 @@
           <input
             id="settings-default-hours"
             class="zf-input"
-            type="number"
-            step="0.5"
-            min="0"
-            max="168"
-            bind:value={settingsForm.default_weekly_hours}
+            type="text"
+            inputmode="decimal"
+            bind:value={defaultWeeklyHoursStr}
           />
         </div>
         <div>
@@ -436,6 +455,8 @@
                     auto_break_threshold_hours_2: null,
                     auto_break_deduction_minutes_2: null,
                   };
+                  breakThresholdStr = "";
+                  breakThresholdStr2 = "";
                 }
               }}
             />
@@ -457,11 +478,9 @@
             <input
               id="settings-break-threshold"
               class="zf-input"
-              type="number"
-              step="0.5"
-              min="0.5"
-              max="24"
-              bind:value={settingsForm.auto_break_threshold_hours}
+              type="text"
+              inputmode="decimal"
+              bind:value={breakThresholdStr}
               placeholder={$t("e.g. 6")}
             />
             <div class="field-hint">
@@ -495,11 +514,9 @@
             <input
               id="settings-break-threshold-2"
               class="zf-input"
-              type="number"
-              step="0.5"
-              min="0.5"
-              max="24"
-              bind:value={settingsForm.auto_break_threshold_hours_2}
+              type="text"
+              inputmode="decimal"
+              bind:value={breakThresholdStr2}
               placeholder={$t("e.g. 9 (optional)")}
             />
             <div class="field-hint">

@@ -18,7 +18,7 @@
   let first_name = template.first_name || "";
   let last_name = template.last_name || "";
   let role = template.role || "employee";
-  let weekly_hours = template.weekly_hours ?? 39;
+  let weekly_hours = fmtDecimal(template.weekly_hours ?? 39, 2);
   let workdays_per_week = Math.min(template.workdays_per_week ?? 5, 5);
   $: _thisYear = appTodayDate($settings?.timezone).getFullYear();
   $: _nextYear = _thisYear + 1;
@@ -54,7 +54,7 @@
   $: requiresApprover = normalizedRole !== "admin";
   $: isAssistantRole = normalizedRole === "assistant";
   $: if (isAssistantRole) {
-    weekly_hours = 0;
+    weekly_hours = fmtDecimal(0, 2);
     overtime_start_balance_hours = fmtDecimal(0, 2);
   }
   // Non-admin users always have tracks_time=true (backend enforces this too).
@@ -143,7 +143,7 @@
       try {
         const settings = await api("/settings");
         if (settings.default_weekly_hours != null) {
-          weekly_hours = Number(settings.default_weekly_hours);
+          weekly_hours = fmtDecimal(Number(settings.default_weekly_hours), 2);
         }
         if (settings.default_annual_leave_days != null) {
           annual_leave_days = Number(settings.default_annual_leave_days);
@@ -206,7 +206,7 @@
       if (!secondConfirmed) return;
     }
     try {
-      const normalizedWeeklyHours = isAssistantRole ? 0 : Number(weekly_hours);
+      const normalizedWeeklyHours = isAssistantRole ? 0 : (parseDecimal(weekly_hours) || 0);
       const normalizedOvertimeStartBalanceMin = isAssistantRole
         ? 0
         : Math.round(Math.round((parseDecimal(overtime_start_balance_hours) || 0) * 100) / 100 * 60);
@@ -363,10 +363,8 @@
           <input
             id="user-weekly-hours"
             class="zf-input"
-            type="number"
-            step="0.5"
-            min="0"
-            max="168"
+            type="text"
+            inputmode="decimal"
             bind:value={weekly_hours}
             disabled={isAssistantRole}
           />
