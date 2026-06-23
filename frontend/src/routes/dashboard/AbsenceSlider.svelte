@@ -58,6 +58,13 @@
   }
 
   loadWeek(week);
+
+  $: sortedData = [...data].sort((a, b) => {
+    const ua = users.find((u) => u.id === a.user_id);
+    const ub = users.find((u) => u.id === b.user_id);
+    return (ua?.last_name || "").localeCompare(ub?.last_name || "") ||
+      (ua?.first_name || "").localeCompare(ub?.first_name || "");
+  });
 </script>
 
 <div class="zf-card" style="margin-top:16px;overflow:hidden">
@@ -99,7 +106,7 @@
           {$t("No absences this week.")}
         </div>
       {:else}
-        {#each data as absence (absence.user_id)}
+        {#each sortedData as absence (absence.user_id)}
           {@const absentUser = users.find((u) => u.id === absence.user_id)}
           <div class="dropdown-slider-item">
             <div>
