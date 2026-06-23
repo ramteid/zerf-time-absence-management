@@ -461,9 +461,11 @@
             }}
             role="button"
             tabindex="0"
-            style="padding:10px 12px;border-bottom:1px solid var(--border);cursor:pointer;background:{n.is_read
-              ? 'transparent'
-              : 'var(--accent-soft)'}"
+            style="padding:10px 12px;border-bottom:1px solid var(--border);cursor:pointer;background:{n.pinned && !n.is_read
+              ? 'var(--warning-soft)'
+              : n.is_read
+                ? 'transparent'
+                : 'var(--accent-soft)'}"
           >
             <div style="font-size:12.5px;font-weight:500">{rendered.title}</div>
             {#if rendered.body}

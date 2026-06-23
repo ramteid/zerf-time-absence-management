@@ -37,8 +37,6 @@
         backup_upload_password: backupPasswordPayload(),
         backup_interval_days:
           parseInt(uploadSettings.backup_interval_days) || 1,
-        backup_retention_days:
-          parseInt(uploadSettings.backup_retention_days) || 30,
         report_upload_enabled: !!uploadSettings.report_upload_enabled,
         report_upload_url: uploadSettings.report_upload_url || "",
         report_upload_password: reportPasswordPayload(),
@@ -156,25 +154,7 @@
           />
           <div class="field-hint">
             {$t(
-              "Backup interval and retention are read by the backup container from the database at the start of each cycle. Changes take effect on the next backup run.",
-            )}
-          </div>
-        </div>
-        <div>
-          <label class="zf-label" for="backup-retention"
-            >{$t("Retention (days)")}</label
-          >
-          <input
-            id="backup-retention"
-            class="zf-input"
-            type="number"
-            min="1"
-            bind:value={uploadSettings.backup_retention_days}
-            placeholder="30"
-          />
-          <div class="field-hint">
-            {$t(
-              "Uploaded files are not automatically deleted from Nextcloud. Manage the shared folder manually to avoid unlimited growth.",
+              "The backup interval is read by the backup container from the database at the start of each cycle. Changes take effect on the next backup run. The 10 most recent local backup files are kept automatically; older ones are deleted. Uploaded files in Nextcloud are not deleted automatically.",
             )}
           </div>
         </div>

@@ -495,7 +495,6 @@ pub struct UpdateUploadSettings {
     pub backup_upload_url: Option<String>,
     pub backup_upload_password: Option<String>,
     pub backup_interval_days: Option<u32>,
-    pub backup_retention_days: Option<u64>,
 }
 
 pub async fn update_upload_settings(
@@ -529,13 +528,6 @@ pub async fn update_upload_settings(
         if days == 0 {
             return Err(AppError::BadRequest(
                 "backup_interval_days must be at least 1.".into(),
-            ));
-        }
-    }
-    if let Some(days) = body.backup_retention_days {
-        if days == 0 {
-            return Err(AppError::BadRequest(
-                "backup_retention_days must be greater than zero.".into(),
             ));
         }
     }
@@ -573,7 +565,6 @@ pub async fn update_upload_settings(
         save_setting_tx(&mut transaction, settings::BACKUP_UPLOAD_PASSWORD_KEY, pw).await?;
     }
     save_if_some!(settings::BACKUP_INTERVAL_DAYS_KEY, body.backup_interval_days, num);
-    save_if_some!(settings::BACKUP_RETENTION_DAYS_KEY, body.backup_retention_days, num);
 
     transaction.commit().await?;
 
