@@ -295,7 +295,9 @@
       </div>
       <div class="field-row">
         <div>
-          <label class="zf-label" for="user-start-date">{$t("Start date")}</label>
+          <div class="field-label-row">
+            <label class="zf-label" for="user-start-date">{$t("Start date")}</label>
+          </div>
           <DatePicker
             id="user-start-date"
             bind:value={start_date}
