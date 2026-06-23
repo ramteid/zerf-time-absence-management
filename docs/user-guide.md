@@ -1249,7 +1249,8 @@ Required information:
 - Email address (must be unique)
 - First and last name (the combination must be unique)
 - Weekly hours and workdays per week
-- Annual leave days for the current and next year
+- Base annual leave days, plus leave days for the current and next year
+  (overrides; see [Managing annual leave](#managing-annual-leave))
 - Employment start date
 
 Role-specific rules:
@@ -1377,10 +1378,19 @@ users' entries.
 
 ### Managing annual leave
 
-Annual leave entitlements can be set per user per year.
+Every user has a base annual leave entitlement (days/year), plus optional
+per-year overrides:
 
-- Entitlements can be set when creating or updating a user, or adjusted directly in the leave settings.
-- Valid range: 0 to 366 days per year.
+- **Base annual leave days**: the user's standing entitlement, used for any
+  year that has no explicit override. Required when creating a user — the
+  field is pre-filled with the org-wide default (configured in
+  [System settings](#system-settings)) but can be changed, for example when a
+  special agreement was made with the employee.
+- **Per-year overrides**: explicit leave days for a specific year (currently
+  the user dialog exposes the current and next year). When set, the override
+  takes precedence over the base value for that year only.
+- For any other year, the base annual leave days value applies.
+- Valid range: 0 to 366 days, for both the base value and overrides.
 - Changes take effect immediately for balance calculations. If you reduce a
   user's entitlement after they have already used vacation, their available
   balance may go negative.
