@@ -263,6 +263,7 @@ notify_admins_backup_error() {
           WHERE dedupe_key IS NOT NULL
           DO UPDATE SET
             title      = EXCLUDED.title,
+            pinned     = TRUE,
             is_read    = FALSE,
             created_at = NOW()
           WHERE notifications.is_read = TRUE" \
