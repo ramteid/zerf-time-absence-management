@@ -206,9 +206,9 @@ export function extractDetailRows(entry, userMap, translate) {
 }
 
 export function actionClass(action) {
-  if (action === "created" || action === "approved" || action === "reopened")
+  if (action === "created" || action === "approved" || action === "reopened" || action === "restored")
     return "action-success";
-  if (action === "deleted" || action === "rejected" || action === "deactivated")
+  if (action === "deleted" || action === "rejected" || action === "deactivated" || action === "archived")
     return "action-danger";
   if (action === "updated" || action === "status_changed") return "action-info";
   return "action-muted";

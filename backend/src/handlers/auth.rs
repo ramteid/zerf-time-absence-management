@@ -112,7 +112,7 @@ pub async fn login(
         return Err(AppError::BadRequest("Invalid email or password.".into()));
     }
     if !user.active {
-        return Err(AppError::BadRequest("account_deactivated".into()));
+        return Err(AppError::BadRequest("account_archived".into()));
     }
 
     // Session fixation defence: any pre-existing session token sent in the request

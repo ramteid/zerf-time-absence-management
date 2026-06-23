@@ -107,8 +107,8 @@ describe("Login", () => {
     expect(errorDiv).not.toBeNull();
   });
 
-  it("shows deactivated account error for account_deactivated", async () => {
-    apiMock.mockRejectedValueOnce({ apiMessage: "account_deactivated" });
+  it("shows archived account error for account_archived", async () => {
+    apiMock.mockRejectedValueOnce({ apiMessage: "account_archived" });
     component = mount(Login, { target });
     await settle();
 

@@ -105,6 +105,8 @@ const TRANSLATIONS = {
     audit_action_team_settings_updated: "Team Setting Updated",
     audit_action_password_reset: "Password Reset",
     audit_action_deactivated: "Deactivated",
+    audit_action_archived: "Archived",
+    audit_action_restored: "Restored",
     audit_action_reopened: "Editing Enabled",
     audit_system_user: "System",
     audit_time_entries_week_summary:
@@ -226,10 +228,10 @@ const TRANSLATIONS = {
     reset_token_invalid: "This reset link is invalid or has already been used.",
     account_deactivated:
       "Your account has been deactivated. Please contact your administrator.",
+    account_archived:
+      "Your account has been archived. Please contact your administrator.",
     "Account active": "Account active",
-    "Inactive users cannot log in.": "Inactive users cannot log in.",
     "User activated.": "User activated.",
-    Activate: "Activate",
     Active: "Active",
     // Reports - new section labels and team report columns
     "Employee report": "Employee report",
@@ -567,8 +569,6 @@ const TRANSLATIONS = {
     "User created. Temporary password: {password}":
       "Benutzer erstellt. Temporäres Passwort: {password}",
     "Reset PW": "PW zurücksetzen",
-    "Deactivate?": "Deaktivieren?",
-    Deactivate: "Deaktivieren",
     User: "Benutzer",
     Table: "Tabelle",
     Record: "Eintrag",
@@ -640,9 +640,6 @@ const TRANSLATIONS = {
     "Manage your team": "Team verwalten",
     "Add Member": "Mitglied hinzufügen",
     "Edit Member": "Mitglied bearbeiten",
-    Inactive: "Inaktiv",
-    "Deactivate this user?": "Diesen Benutzer deaktivieren?",
-    "User deactivated.": "Benutzer deaktiviert.",
     "Delete user?": "Benutzer löschen?",
     "Delete user permanently? All data of this user will be deleted. This cannot be undone.":
       "Benutzer dauerhaft löschen? Alle Daten dieses Benutzers werden gelöscht. Dies kann nicht rückgängig gemacht werden.",
@@ -865,10 +862,6 @@ const TRANSLATIONS = {
       "Verantwortliche Person konnte nicht aktualisiert werden.",
     "You cannot remove your own admin role.":
       "Sie können Ihre eigene Admin-Rolle nicht entfernen.",
-    "You cannot deactivate yourself.":
-      "Sie können sich nicht selbst deaktivieren.",
-    "Cannot deactivate: {count} active user(s) still have this person as their approver. Reassign them first.":
-      "Deaktivierung nicht möglich: {count} aktive Benutzer haben diese Person noch als verantwortliche Person. Weisen Sie sie zuerst neu zu.",
     "You cannot delete yourself.": "Sie können sich nicht selbst löschen.",
     "Cannot delete: {count} active user(s) still have this person as their approver. Reassign them first.":
       "Löschen nicht möglich: {count} aktive Benutzer haben diese Person noch als verantwortliche Person. Weisen Sie sie zuerst neu zu.",
@@ -1111,6 +1104,8 @@ const TRANSLATIONS = {
     audit_action_team_settings_updated: "Team-Einstellung geändert",
     audit_action_password_reset: "Passwort zurückgesetzt",
     audit_action_deactivated: "Deaktiviert",
+    audit_action_archived: "Archiviert",
+    audit_action_restored: "Wiederhergestellt",
     audit_action_reopened: "Bearbeitung freigegeben",
     Before: "Vorher",
     After: "Nachher",
@@ -1226,11 +1221,10 @@ const TRANSLATIONS = {
       "Dieser Reset-Link ist ungültig oder wurde bereits verwendet.",
     account_deactivated:
       "Ihr Konto wurde deaktiviert. Bitte wenden Sie sich an Ihren Administrator.",
+    account_archived:
+      "Ihr Konto wurde archiviert. Bitte wenden Sie sich an Ihren Administrator.",
     "Account active": "Konto aktiv",
-    "Inactive users cannot log in.":
-      "Inaktive Nutzer können sich nicht anmelden.",
     "User activated.": "Benutzer aktiviert.",
-    Activate: "Aktivieren",
     // Reports - labels and team report columns
     "Employee report": "Mitarbeiterbericht",
     "Export timesheet": "Export Stundennachweis",
@@ -1476,11 +1470,6 @@ const ERROR_PATTERNS = Object.freeze([
   {
     pattern: /^Password must be at least (?<min>\d+) characters\.$/,
     key: "Password must be at least {min} characters.",
-  },
-  {
-    pattern:
-      /^Cannot deactivate: (?<count>\d+) active user\(s\) still have this person as their approver\. Reassign them first\.$/,
-    key: "Cannot deactivate: {count} active user(s) still have this person as their approver. Reassign them first.",
   },
   {
     pattern:

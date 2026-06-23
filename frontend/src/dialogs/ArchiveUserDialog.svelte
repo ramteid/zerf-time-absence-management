@@ -11,6 +11,9 @@
 
   export let user;
   export let onClose;
+  /** Optional custom API path for archive (e.g. /team-users/{id}/archive).
+   *  When omitted the standard /users/{id}/archive path is used. */
+  export let archiveApiPath = null;
 
   let dialog;
   let saving = false;
@@ -66,7 +69,14 @@
       const approverReplacements = Object.fromEntries(
         Object.entries(replacements).map(([k, v]) => [String(k), v]),
       );
-      await archiveUser(user.id, approverReplacements);
+      if (archiveApiPath) {
+        await api(archiveApiPath, {
+          method: "POST",
+          body: { approver_replacements: approverReplacements },
+        });
+      } else {
+        await archiveUser(user.id, approverReplacements);
+      }
       toast($t("User archived."), "ok");
       dialog.close(true);
       onClose(true);

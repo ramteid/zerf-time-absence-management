@@ -93,13 +93,12 @@ async fn reports_full_workflow() {
             .await;
         assert_eq!(st, StatusCode::OK, "create inactive scope fixture");
         let inactive_id = id(&body);
-        let (st, _) = admin
-            .put(
-                &format!("/api/v1/users/{inactive_id}"),
-                &json!({"active": false}),
-            )
-            .await;
-        assert_eq!(st, StatusCode::OK, "deactivate scope fixture");
+        // Set user inactive via direct DB mutation (deactivation feature removed).
+        sqlx::query("UPDATE users SET active=FALSE WHERE id=$1")
+            .bind(inactive_id)
+            .execute(&app.state.pool)
+            .await
+            .expect("set scope fixture inactive");
 
         for excluded_user_id in [pure_admin_id, inactive_id] {
             sqlx::query(
@@ -1039,13 +1038,15 @@ async fn report_permission_guards_reject_non_reportable_users_on_every_personal_
         .await;
     assert_eq!(status, StatusCode::OK, "create inactive report target");
     let inactive_id = id(&inactive_body);
+    // Archive the report target (archive sets active=FALSE; archived users are
+    // still included in historical reports since they had time data).
     let (status, _) = admin
         .post(
-            &format!("/api/v1/users/{inactive_id}/deactivate"),
+            &format!("/api/v1/users/{inactive_id}/archive"),
             &json!({}),
         )
         .await;
-    assert_eq!(status, StatusCode::OK, "deactivate report target");
+    assert_eq!(status, StatusCode::OK, "archive report target");
 
     let personal_paths = |target_id: i64| {
         vec![

@@ -422,11 +422,16 @@ async fn delete_user_blocked_when_has_time_data() {
         .await;
     assert_eq!(st, StatusCode::OK, "create time entry for emp");
 
-    // Deactivate the employee first so delete doesn't fail on active status.
-    let (st, body) = admin
-        .post(&format!("/api/v1/users/{emp_id}/deactivate"), &json!({}))
-        .await;
-    assert_eq!(st, StatusCode::OK, "deactivate: {body}");
+    // Archive the employee first — archive sets active=FALSE, which satisfies
+    // the delete-guard (but delete itself will still fail because the user has
+    // time data; we test that below). Actually, since archive already sets
+    // active=FALSE and we need a non-archived inactive user for the delete test,
+    // we use a direct DB update here to simulate the legacy case.
+    sqlx::query("UPDATE users SET active=FALSE WHERE id=$1")
+        .bind(emp_id)
+        .execute(&app.state.pool)
+        .await
+        .expect("deactivate emp directly in db");
 
     // Try to delete — must fail because user has time data.
     let (st, body) = admin.delete(&format!("/api/v1/users/{emp_id}")).await;
@@ -473,10 +478,14 @@ async fn archived_user_excluded_from_user_list() {
 
     let emp_id = make_emp(&admin, "excl@arch.com", "Excl", 1).await;
 
-    // Deactivate one user so we can confirm deactivated-but-not-archived still shows.
+    // Set one user as inactive via direct DB mutation to confirm that inactive-but-not-archived
+    // users still appear in GET /users (only archived users are excluded).
     let emp2_id = make_emp(&admin, "deact@arch.com", "Deact", 1).await;
-    let (st, _) = admin.post(&format!("/api/v1/users/{emp2_id}/deactivate"), &json!({})).await;
-    assert_eq!(st, StatusCode::OK, "deactivate emp2");
+    sqlx::query("UPDATE users SET active=FALSE WHERE id=$1")
+        .bind(emp2_id)
+        .execute(&app.state.pool)
+        .await
+        .expect("set emp2 inactive");
 
     // Archive emp1.
     let (st, _) = admin.post(&format!("/api/v1/users/{emp_id}/archive"), &json!({})).await;

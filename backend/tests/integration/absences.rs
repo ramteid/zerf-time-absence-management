@@ -818,9 +818,9 @@ async fn absences_full_workflow() {
 /// `services::auth::required_approval_recipient_ids`.
 ///
 /// This path triggers when a non-admin employee submits an absence but their
-/// only approver has been deactivated, leaving the approver list empty.
+/// only approver has been archived, leaving the approver list empty.
 #[tokio::test]
-async fn absence_request_fails_when_approver_is_deactivated() {
+async fn absence_request_fails_when_approver_is_archived() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
 
@@ -830,8 +830,8 @@ async fn absence_request_fails_when_approver_is_deactivated() {
     // The lead must first change their password too.
     let _lead = login_change_pw(&app, "lead-r@example.com", &lead_pw).await;
 
-    // Deactivate the lead (the employee's only approver).
-    // First, reassign the employee's time entries lead by removing direct reports.
+    // Archive the lead (the employee's only approver).
+    // First, reassign the employee so the lead has no active dependents.
     let (st, body) = admin
         .put(
             &format!("/api/v1/users/{emp_id}"),
@@ -841,12 +841,12 @@ async fn absence_request_fails_when_approver_is_deactivated() {
     assert_eq!(st, StatusCode::OK, "reassign emp to admin approver: {body}");
 
     let (st, _) = admin
-        .post(&format!("/api/v1/users/{lead_id}/deactivate"), &json!({}))
+        .post(&format!("/api/v1/users/{lead_id}/archive"), &json!({}))
         .await;
-    assert_eq!(st, StatusCode::OK, "deactivate lead");
+    assert_eq!(st, StatusCode::OK, "archive lead");
 
-    // Reassign back to the now-deactivated lead at DB level to simulate the
-    // scenario where the lead was deactivated after the approver relationship
+    // Reassign back to the now-archived lead at DB level to simulate the
+    // scenario where the lead was archived after the approver relationship
     // was set up.  The application service filters inactive approvers, so the
     // list will come back empty.
     sqlx::query("DELETE FROM user_approvers WHERE user_id=$1")

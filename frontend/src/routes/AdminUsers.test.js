@@ -1,9 +1,8 @@
 // Tests for the AdminUsers page. Admins manage the team roster here —
-// creating new accounts, editing existing ones, deactivating members, and
-// resetting passwords. The archive button opens ArchiveUserDialog instead of
-// hard-deleting so all historical data is preserved. Tests verify that the
-// list renders correctly, that the add/edit dialogs open, and that the
-// deactivate and archive flows work as expected.
+// creating new accounts, editing existing ones, and resetting passwords.
+// The archive button opens ArchiveUserDialog so all historical data is
+// preserved. Tests verify that the list renders correctly, that the
+// add/edit dialogs open, and that the archive flow works as expected.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mount, unmount } from "svelte";
@@ -105,21 +104,13 @@ describe("AdminUsers", () => {
   });
 
   it("renders a row for each user in the list", async () => {
-    // Every active and inactive team member must appear in the list so
+    // Every team member (active or inactive) must appear in the list so
     // admins can see and manage the complete roster.
     apiMock.mockResolvedValue(sampleUsers);
     component = mount(AdminUsers, { target });
     await waitForText(target, "Alice");
     await waitForText(target, "Bob");
     await waitForText(target, "Carol");
-  });
-
-  it("shows an 'Inactive' label next to deactivated users", async () => {
-    // Admins need to distinguish active from inactive accounts at a glance
-    // so they can reactivate members who return from a leave of absence.
-    apiMock.mockResolvedValue(sampleUsers);
-    component = mount(AdminUsers, { target });
-    await waitForText(target, "Inactive");
   });
 
   it("opens the UserDialog when Add Member is clicked", async () => {

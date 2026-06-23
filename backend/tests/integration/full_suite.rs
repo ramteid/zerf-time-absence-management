@@ -142,13 +142,6 @@ async fn auth_and_rbac_workflow() {
             st
         );
 
-        let (st, _) = admin.put("/api/v1/users/1", &json!({"active":false})).await;
-        assert!(
-            st == StatusCode::BAD_REQUEST || st == StatusCode::CONFLICT,
-            "admin self-deactivate rejected (got {})",
-            st
-        );
-
         let (st, _) = admin
             .put(
                 &format!("/api/v1/users/{}", emp_id),
@@ -180,7 +173,7 @@ async fn auth_and_rbac_workflow() {
         assert_eq!(st, StatusCode::FORBIDDEN, "lead create category 403");
     }
 
-    // -- Password reset + deactivation ----------------------------------------
+    // -- Password reset + archive (login rejected for archived user) -----------
     {
         let (st, body) = admin
             .post(
@@ -197,13 +190,13 @@ async fn auth_and_rbac_workflow() {
         assert_eq!(st, StatusCode::OK, "login with reset pw");
 
         let (st, _) = admin
-            .post(&format!("/api/v1/users/{}/deactivate", emp_id), &json!({}))
+            .post(&format!("/api/v1/users/{}/archive", emp_id), &json!({}))
             .await;
-        assert_eq!(st, StatusCode::OK, "deactivate user");
+        assert_eq!(st, StatusCode::OK, "archive user");
 
         let emp3 = app.client();
         let (st, _) = emp3.login("erin@example.com", "EmployeePass!234").await;
-        assert_eq!(st, StatusCode::BAD_REQUEST, "deactivated login rejected");
+        assert_eq!(st, StatusCode::BAD_REQUEST, "archived login rejected");
     }
 
     // -- Logout invalidates session --------------------------------------------
@@ -1327,7 +1320,7 @@ async fn tina_time_tracking_journey() {
         );
     }
 
-    // -- 13. Admin ops: password reset and deactivation -----------------------
+    // -- 13. Admin ops: password reset and archive ----------------------------
     {
         let (st, body) = admin
             .post(
@@ -1344,13 +1337,13 @@ async fn tina_time_tracking_journey() {
         assert_eq!(st, StatusCode::OK, "login with reset pw");
 
         let (st, _) = admin
-            .post(&format!("/api/v1/users/{}/deactivate", emp_id), &json!({}))
+            .post(&format!("/api/v1/users/{}/archive", emp_id), &json!({}))
             .await;
-        assert_eq!(st, StatusCode::OK, "deactivate user");
+        assert_eq!(st, StatusCode::OK, "archive user");
 
         let emp3 = app.client();
         let (st, _) = emp3.login("emp-r@example.com", "GoodPass!234").await;
-        assert_eq!(st, StatusCode::BAD_REQUEST, "deactivated login rejected");
+        assert_eq!(st, StatusCode::BAD_REQUEST, "archived login rejected");
     }
 
     // suppress unused-variable warnings for variables not re-used after their section

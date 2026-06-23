@@ -113,14 +113,12 @@ pub async fn assert_team_lead_assistant_list_access(
     Ok(())
 }
 
-/// Guard for the `/team-users/{id}` get/update endpoints: the requester must
-/// pass [`assert_team_lead_assistant_list_access`], the target must be one of
-/// their direct reports (active or not — unlike most lead-facing checks, this
-/// one intentionally does not require the target to be active, so a lead can
-/// still view and reactivate an assistant they previously deactivated), and
-/// the target's role must be "assistant". Returns the fetched target user on
-/// success. There is deliberately no delete capability here: team leads may
-/// never delete a user, only deactivate/reactivate one.
+/// Guard for the `/team-users/{id}` get/update/archive/restore endpoints: the
+/// requester must pass [`assert_team_lead_assistant_list_access`], the target
+/// must be one of their direct reports (including archived ones — so a lead
+/// can view and restore an assistant they previously archived), and the
+/// target's role must be "assistant". Returns the fetched target user on
+/// success. Delete capability is intentionally absent.
 pub async fn assert_team_lead_can_manage_assistant(
     app_state: &AppState,
     requester: &User,
@@ -399,7 +397,6 @@ pub async fn update_basic_tx(
     workdays_per_week: Option<i16>,
     start_date: Option<chrono::NaiveDate>,
     hire_date: Option<Option<chrono::NaiveDate>>,
-    active: Option<bool>,
     allow_reopen_without_approval: Option<bool>,
     allow_submission_without_approval: Option<bool>,
     overtime_start_balance_min: Option<i64>,
@@ -417,7 +414,6 @@ pub async fn update_basic_tx(
         workdays_per_week,
         start_date,
         hire_date,
-        active,
         allow_reopen_without_approval,
         allow_submission_without_approval,
         overtime_start_balance_min,
@@ -450,10 +446,6 @@ pub async fn has_time_data_tx(
     user_id: i64,
 ) -> AppResult<bool> {
     UserDb::has_time_data_tx(tx, user_id).await
-}
-
-pub async fn deactivate_tx(tx: &mut crate::db::PgConnection, user_id: i64) -> AppResult<()> {
-    UserDb::deactivate_tx(tx, user_id).await
 }
 
 pub async fn delete_tx(tx: &mut crate::db::PgConnection, user_id: i64) -> AppResult<()> {
@@ -546,20 +538,19 @@ pub async fn team_settings_update(
     UserDb::update_basic(
         &mut tx,
         target_id,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
+        None, // email
+        None, // first_name
+        None, // last_name
+        None, // role
+        None, // weekly_hours
+        None, // workdays_per_week
+        None, // start_date
+        None, // hire_date
         Some(allow_reopen_without_approval),
         Some(allow_submission_without_approval),
-        None,
-        None,
-        None,
+        None, // overtime_start_balance_min
+        None, // tracks_time
+        None, // annual_leave_days
     )
     .await?;
     tx.commit().await?;
@@ -950,6 +941,123 @@ pub async fn restore(
     tx.commit().await?;
 
     // Fetch the updated user to return.
+    let updated = app_state
+        .db
+        .users
+        .find_by_id(target_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let updated_auth = repo_user_to_auth_user(updated);
+
+    audit::log(
+        &app_state.pool,
+        requester.id,
+        "restored",
+        "users",
+        target_id,
+        None,
+        serde_json::to_value(&updated_auth).ok(),
+    )
+    .await;
+
+    Ok(updated_auth)
+}
+
+/// Archive an assistant user on behalf of a team lead.
+///
+/// Enforces the same assistant-management guard as `assert_team_lead_can_manage_assistant`.
+/// Assistants cannot themselves be approvers of other users, so no
+/// `approver_replacements` map is needed — the archive service validates this.
+/// The requester must be an active team lead with `allow_team_lead_manage_assistants` enabled.
+pub async fn archive_assistant(
+    app_state: &AppState,
+    requester: &User,
+    target_id: i64,
+) -> AppResult<()> {
+    // Validate the requester-target relationship (same guard as the update endpoint).
+    assert_team_lead_can_manage_assistant(app_state, requester, target_id).await?;
+
+    // Reuse the core archive logic, passing the requester as the acting admin.
+    // archive() checks requester.is_admin() — for team leads we bypass by calling
+    // the lower-level transaction logic directly, matching what archive() does but
+    // without the admin-role check, since team leads have explicit permission via
+    // the assistant-management feature flag.
+    if target_id == requester.id {
+        return Err(AppError::BadRequest(
+            "You cannot archive yourself.".into(),
+        ));
+    }
+
+    let mut tx = app_state.db.users.begin().await?;
+    UserDb::lock_user_graph_tx(&mut tx).await?;
+
+    let target = UserDb::fetch_for_update(&mut tx, target_id).await?;
+    if target.archived_at.is_some() {
+        return Err(AppError::BadRequest("User is already archived.".into()));
+    }
+
+    // Auto-reject pending absences and reopen requests.
+    AbsenceDb::reject_pending_for_user_tx(
+        &mut tx,
+        target_id,
+        requester.id,
+        "User account archived.",
+    )
+    .await?;
+    ReopenRequestDb::reject_pending_for_user_tx(
+        &mut tx,
+        target_id,
+        requester.id,
+        "User account archived.",
+    )
+    .await?;
+
+    UserDb::archive_tx(&mut tx, target_id).await?;
+    SessionDb::delete_for_user_tx(&mut tx, target_id).await?;
+    tx.commit().await?;
+
+    audit::log(
+        &app_state.pool,
+        requester.id,
+        "archived",
+        "users",
+        target_id,
+        serde_json::to_value(repo_user_to_auth_user(target)).ok(),
+        Some(serde_json::json!({"archived": true})),
+    )
+    .await;
+
+    Ok(())
+}
+
+/// Restore an archived assistant user on behalf of a team lead.
+///
+/// The requester must pass the assistant-management guard; the target must be
+/// archived. After restore the user gets `must_change_password=TRUE` and the
+/// team lead's own id is set as approver (preserving the original relationship).
+pub async fn restore_assistant(
+    app_state: &AppState,
+    requester: &User,
+    target_id: i64,
+    new_start_date: Option<chrono::NaiveDate>,
+) -> AppResult<User> {
+    // Use assert_team_lead_can_manage_assistant — it also fetches by id without an
+    // active filter so archived assistants are reachable.
+    assert_team_lead_can_manage_assistant(app_state, requester, target_id).await?;
+
+    let mut tx = app_state.db.users.begin().await?;
+    UserDb::lock_user_graph_tx(&mut tx).await?;
+
+    let target = UserDb::fetch_for_update(&mut tx, target_id).await?;
+    if target.archived_at.is_none() {
+        return Err(AppError::BadRequest("User is not archived.".into()));
+    }
+
+    // Restore the user; keep the existing approver relationship (the lead is still their approver).
+    UserDb::restore_tx(&mut tx, target_id, new_start_date).await?;
+
+    tx.commit().await?;
+
     let updated = app_state
         .db
         .users

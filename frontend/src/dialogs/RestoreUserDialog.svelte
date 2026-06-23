@@ -13,6 +13,9 @@
 
   export let user;
   export let onClose;
+  /** Optional custom API path for restore (e.g. /team-users/{id}/restore).
+   *  When omitted the standard /users/{id}/restore path is used. */
+  export let restoreApiPath = null;
 
   let dialog;
   let saving = false;
@@ -49,7 +52,7 @@
 
   async function submit() {
     error = "";
-    if (requiresApprover && approverIds.length === 0) {
+    if (requiresApprover && !restoreApiPath && approverIds.length === 0) {
       error = $t("Approver required for non-admin users.");
       return;
     }
@@ -59,11 +62,20 @@
     }
     saving = true;
     try {
-      await restoreUser(
-        user.id,
-        resetStartDate ? newStartDate : null,
-        approverIds,
-      );
+      if (restoreApiPath) {
+        await api(restoreApiPath, {
+          method: "POST",
+          body: {
+            start_date: resetStartDate ? newStartDate : null,
+          },
+        });
+      } else {
+        await restoreUser(
+          user.id,
+          resetStartDate ? newStartDate : null,
+          approverIds,
+        );
+      }
       toast($t("User restored."), "ok");
       dialog.close(true);
       onClose(true);
@@ -132,8 +144,10 @@
     {/if}
   </div>
 
-  <!-- Approver assignment (required for non-admin users) -->
-  {#if requiresApprover}
+  <!-- Approver assignment (required for non-admin users when using the admin path).
+       Hidden when using a custom path (e.g. team-lead restore) since the lead
+       is already the approver and no reassignment is needed. -->
+  {#if requiresApprover && !restoreApiPath}
     <div style="margin-top:14px">
       <span class="zf-label">
         {$t("Approver")}

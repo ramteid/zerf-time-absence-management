@@ -139,7 +139,7 @@ impl UserDb {
         )
     }
 
-    /// Returns all non-archived users (active or deactivated) ordered by name.
+    /// Returns all non-archived users (including active and inactive) ordered by name.
     /// This is the default admin user list view. Archived users are excluded —
     /// use `find_all_including_archived` or `find_archived_ordered` for those.
     pub async fn find_all_ordered(&self) -> AppResult<Vec<User>> {
@@ -190,21 +190,21 @@ impl UserDb {
         .await?)
     }
 
-    /// Like [`find_for_approver`], but includes inactive direct reports too.
-    /// Used by the scoped team-lead "assistant management" feature, where a
-    /// lead must be able to see (and reactivate) an assistant they previously
-    /// deactivated — unlike every other lead-facing view, which intentionally
-    /// only shows active team members. Archived users are always excluded
-    /// because archived assistants are no longer manageable by a team lead.
+    /// Like [`find_for_approver`], but includes inactive (and archived) direct
+    /// reports too. Used by the scoped team-lead "assistant management" feature
+    /// so a lead can see all their assistants — including archived ones — and
+    /// restore them via the archive/restore endpoints. The lead's own row is
+    /// also included (unarchived, since an archived user cannot log in and would
+    /// never reach this endpoint).
     pub async fn find_for_approver_including_inactive(
         &self,
         approver_id: i64,
     ) -> AppResult<Vec<User>> {
         Ok(QueryBuilder::<Postgres>::new(format!(
-            "{USER_SELECT} WHERE archived_at IS NULL AND (id=$1 \
+            "{USER_SELECT} WHERE (id=$1 AND archived_at IS NULL) \
              OR id IN (SELECT ua.user_id FROM user_approvers ua \
-                       JOIN users u ON u.id=ua.user_id \
-                       WHERE ua.approver_id=$1 AND u.role != 'admin' AND u.archived_at IS NULL)) \
+                       WHERE ua.approver_id=$1 AND \
+                             (SELECT role FROM users WHERE id=ua.user_id) != 'admin') \
              ORDER BY last_name, first_name"
         ))
         .build_query_as::<User>()
@@ -689,7 +689,6 @@ impl UserDb {
         workdays_per_week: Option<i16>,
         start_date: Option<NaiveDate>,
         hire_date: Option<Option<NaiveDate>>,
-        active: Option<bool>,
         allow_reopen_without_approval: Option<bool>,
         allow_submission_without_approval: Option<bool>,
         overtime_start_balance_min: Option<i64>,
@@ -711,13 +710,12 @@ impl UserDb {
                  workdays_per_week=COALESCE($6,workdays_per_week), \
                  start_date=COALESCE($7,start_date), \
                  hire_date=CASE WHEN $8 THEN $9 ELSE hire_date END, \
-                 active=COALESCE($10,active), \
-                 allow_reopen_without_approval=COALESCE($11,allow_reopen_without_approval), \
-                 overtime_start_balance_min=COALESCE($12,overtime_start_balance_min), \
-                 tracks_time=COALESCE($13,tracks_time), \
-                 allow_submission_without_approval=COALESCE($15,allow_submission_without_approval), \
-                 annual_leave_days=COALESCE($16,annual_leave_days) \
-             WHERE id=$14",
+                 allow_reopen_without_approval=COALESCE($10,allow_reopen_without_approval), \
+                 overtime_start_balance_min=COALESCE($11,overtime_start_balance_min), \
+                 tracks_time=COALESCE($12,tracks_time), \
+                 allow_submission_without_approval=COALESCE($14,allow_submission_without_approval), \
+                 annual_leave_days=COALESCE($15,annual_leave_days) \
+             WHERE id=$13",
         )
         .bind(email)
         .bind(first_name)
@@ -728,7 +726,6 @@ impl UserDb {
         .bind(start_date)
         .bind(update_hire_date)
         .bind(hire_date)
-        .bind(active)
         .bind(allow_reopen_without_approval)
         .bind(overtime_start_balance_min)
         .bind(tracks_time)
@@ -866,14 +863,6 @@ impl UserDb {
         .bind(user_id)
         .fetch_all(&self.pool)
         .await?)
-    }
-
-    pub async fn deactivate_tx(tx: &mut sqlx::PgConnection, id: i64) -> AppResult<()> {
-        sqlx::query("UPDATE users SET active=FALSE WHERE id=$1")
-            .bind(id)
-            .execute(tx)
-            .await?;
-        Ok(())
     }
 
     /// Find active dependents (users for whom `approver_id` is an approver)

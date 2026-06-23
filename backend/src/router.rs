@@ -120,7 +120,6 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                         .put(handlers::users::update)
                         .delete(handlers::users::delete_user),
                 )
-                .route("/users/{id}/deactivate", post(handlers::users::deactivate))
                 .route(
                     "/users/{id}/archive",
                     post(handlers::users::archive_user),
@@ -145,6 +144,14 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                 .route(
                     "/team-users/{id}",
                     get(handlers::team_users::get_one).put(handlers::team_users::update),
+                )
+                .route(
+                    "/team-users/{id}/archive",
+                    post(handlers::team_users::archive_assistant),
+                )
+                .route(
+                    "/team-users/{id}/restore",
+                    post(handlers::team_users::restore_assistant),
                 )
                 .route(
                     "/categories",
