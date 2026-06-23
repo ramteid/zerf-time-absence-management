@@ -127,6 +127,20 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                         .put(handlers::users::set_leave_days_handler),
                 )
                 .route(
+                    "/team-users",
+                    get(handlers::team_users::list).post(handlers::team_users::create),
+                )
+                .route(
+                    "/team-users/{id}",
+                    get(handlers::team_users::get_one)
+                        .put(handlers::team_users::update)
+                        .delete(handlers::team_users::delete_user),
+                )
+                .route(
+                    "/team-users/{id}/deactivate",
+                    post(handlers::team_users::deactivate),
+                )
+                .route(
                     "/categories",
                     get(handlers::categories::list).post(handlers::categories::create),
                 )

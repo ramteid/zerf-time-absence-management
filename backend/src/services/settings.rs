@@ -15,6 +15,11 @@ pub const AUTO_BREAK_DEDUCTION_MINUTES_KEY: &str = "auto_break_deduction_minutes
 pub const AUTO_BREAK_THRESHOLD_HOURS_2_KEY: &str = "auto_break_threshold_hours_2";
 pub const AUTO_BREAK_DEDUCTION_MINUTES_2_KEY: &str = "auto_break_deduction_minutes_2";
 
+/// When TRUE, non-admin team leads may create and manage "assistant" (Aushilfe)
+/// users that are assigned to them as approver. Off by default; only an admin
+/// can change this (the setting lives in the admin-only settings endpoint).
+pub const ALLOW_TEAM_LEAD_MANAGE_ASSISTANTS_KEY: &str = "allow_team_lead_manage_assistants";
+
 pub const UI_LANGUAGE_KEY: &str = "ui_language";
 pub const TIME_FORMAT_KEY: &str = "time_format";
 pub const COUNTRY_KEY: &str = "country";
@@ -90,6 +95,14 @@ pub async fn app_today(pool: &crate::db::DatabasePool) -> chrono::NaiveDate {
     chrono::Utc::now()
         .with_timezone(&load_app_timezone(pool).await)
         .date_naive()
+}
+
+/// Whether team leads (non-admin) are allowed to create/manage assistant users
+/// assigned to them. See [`ALLOW_TEAM_LEAD_MANAGE_ASSISTANTS_KEY`].
+pub async fn team_lead_assistant_management_enabled(
+    pool: &crate::db::DatabasePool,
+) -> AppResult<bool> {
+    Ok(load_setting(pool, ALLOW_TEAM_LEAD_MANAGE_ASSISTANTS_KEY, "false").await? == "true")
 }
 
 pub async fn app_current_year(pool: &crate::db::DatabasePool) -> i32 {
@@ -187,6 +200,8 @@ pub async fn load_admin_settings(pool: &crate::db::DatabasePool) -> AppResult<Ad
             .parse()
             .unwrap_or(1);
 
+    let allow_team_lead_manage_assistants = team_lead_assistant_management_enabled(pool).await?;
+
     Ok(AdminSettingsData {
         base,
         smtp_enabled: enabled,
@@ -206,6 +221,7 @@ pub async fn load_admin_settings(pool: &crate::db::DatabasePool) -> AppResult<Ad
         backup_upload_url,
         backup_upload_password_set,
         backup_interval_days,
+        allow_team_lead_manage_assistants,
     })
 }
 
@@ -350,6 +366,9 @@ pub struct AdminSettingsData {
     pub backup_upload_password_set: bool,
     /// Interval between backups in days (read by backup.sh from app_settings).
     pub backup_interval_days: u32,
+    /// When TRUE, non-admin team leads may create/manage "assistant" users
+    /// assigned to them (see `/team-users*`). Off by default.
+    pub allow_team_lead_manage_assistants: bool,
 }
 
 #[cfg(test)]

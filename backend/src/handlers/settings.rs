@@ -35,6 +35,7 @@ pub struct UpdateSettings {
     pub auto_break_deduction_minutes: Option<i32>,
     pub auto_break_threshold_hours_2: Option<f64>,
     pub auto_break_deduction_minutes_2: Option<i32>,
+    pub allow_team_lead_manage_assistants: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -330,6 +331,17 @@ pub async fn update_admin_settings(
     if let Some(ref holidays) = prepared_holidays {
         crate::services::holidays::replace_auto_holidays_exec(&mut transaction, holidays).await?;
     }
+
+    save_setting_tx(
+        &mut transaction,
+        settings::ALLOW_TEAM_LEAD_MANAGE_ASSISTANTS_KEY,
+        if body.allow_team_lead_manage_assistants.unwrap_or(false) {
+            "true"
+        } else {
+            "false"
+        },
+    )
+    .await?;
 
     transaction.commit().await?;
 

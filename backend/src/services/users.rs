@@ -96,6 +96,52 @@ pub async fn assert_can_access_user(
     Ok(())
 }
 
+/// Guard for the `/team-users` list/create endpoints: only active, non-admin
+/// team leads may use them, and only while the admin setting is enabled.
+pub async fn assert_team_lead_assistant_list_access(
+    app_state: &AppState,
+    requester: &User,
+) -> AppResult<()> {
+    if requester.is_admin() || !requester.is_lead() {
+        return Err(AppError::Forbidden);
+    }
+    if !crate::services::settings::team_lead_assistant_management_enabled(&app_state.pool).await?
+    {
+        return Err(AppError::Forbidden);
+    }
+    Ok(())
+}
+
+/// Guard for the `/team-users/{id}` get/update/deactivate/delete endpoints:
+/// the requester must pass [`assert_team_lead_assistant_list_access`], the
+/// target must be one of their active direct reports, and the target's role
+/// must be "assistant". Returns the fetched target user on success.
+pub async fn assert_team_lead_can_manage_assistant(
+    app_state: &AppState,
+    requester: &User,
+    target_id: i64,
+) -> AppResult<User> {
+    assert_team_lead_assistant_list_access(app_state, requester).await?;
+    let is_report = app_state
+        .db
+        .users
+        .is_direct_report(target_id, requester.id)
+        .await?;
+    if !is_report {
+        return Err(AppError::Forbidden);
+    }
+    let target = app_state
+        .db
+        .users
+        .find_by_id(target_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    if !is_assistant_role(&target.role) {
+        return Err(AppError::Forbidden);
+    }
+    Ok(repo_user_to_auth_user(target))
+}
+
 /// Validate that each id refers to an existing time category, so a typo or a
 /// stale id from a slow admin UI surfaces as a clear 400 rather than a
 /// foreign-key error during the insert.
@@ -530,10 +576,23 @@ pub async fn create(
     requester: &User,
     mut body: NewUser,
 ) -> AppResult<CreateResponse> {
-    if !requester.is_admin() {
-        return Err(AppError::Forbidden);
-    }
     body.role = normalize_role(&body.role);
+    if !requester.is_admin() {
+        // The only non-admin path allowed: an active team lead creating an
+        // "assistant" (Aushilfe) user, and only when an admin has enabled it.
+        // The approver is always forced to the requester, never client-supplied.
+        let allowed = is_team_lead_role(&requester.role)
+            && requester.active
+            && is_assistant_role(&body.role)
+            && crate::services::settings::team_lead_assistant_management_enabled(
+                &app_state.pool,
+            )
+            .await?;
+        if !allowed {
+            return Err(AppError::Forbidden);
+        }
+        body.approver_ids = vec![requester.id];
+    }
     if !["employee", "team_lead", "admin", ROLE_ASSISTANT].contains(&body.role.as_str()) {
         return Err(AppError::BadRequest("Invalid role".into()));
     }

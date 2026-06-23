@@ -9,6 +9,9 @@
 
   $: isAdmin = !!$currentUser?.permissions?.can_manage_settings;
   $: isLead = !!$currentUser?.permissions?.can_manage_team_settings;
+  // Scoped "assistant" user management, granted to non-admin team leads only
+  // (admins already have the full Users tab above).
+  $: canManageTeamUsers = !!$currentUser?.permissions?.can_manage_team_users;
 
   // Admin-only tabs — visible only to admins.
   const adminTabs = [
@@ -23,11 +26,14 @@
 
   // The team-settings tab is shown to all leads (including admin leads).
   const teamTab = { href: "/settings/team", key: "Team Settings" };
+  const teamUsersTab = { href: "/settings/team-users", key: "Users" };
 
   $: tabs = isAdmin
     ? [...adminTabs, teamTab]
     : isLead
-      ? [teamTab]
+      ? canManageTeamUsers
+        ? [teamUsersTab, teamTab]
+        : [teamTab]
       : [];
 </script>
 

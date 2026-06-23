@@ -34,6 +34,17 @@ const leadUser = {
   },
 };
 
+const leadUserWithAssistantManagement = {
+  id: 3,
+  role: "team_lead",
+  permissions: {
+    is_admin: false,
+    can_manage_settings: false,
+    can_manage_team_settings: true,
+    can_manage_team_users: true,
+  },
+};
+
 describe("SettingsTabs", () => {
   let target;
   let component;
@@ -74,6 +85,19 @@ describe("SettingsTabs", () => {
     expect(links.length).toBe(1);
     expect(target.textContent).toContain("Team Settings");
     expect(target.textContent).not.toContain("Categories");
+  });
+
+  it("adds a scoped Users tab for a lead granted assistant management", async () => {
+    currentUser.set(leadUserWithAssistantManagement);
+    component = mount(SettingsTabs, { target });
+    await settle();
+    const links = target.querySelectorAll("a[data-link]");
+    expect(links.length).toBe(2);
+    const teamUsersLink = [...links].find(
+      (a) => a.getAttribute("href") === "/settings/team-users",
+    );
+    expect(teamUsersLink).not.toBeNull();
+    expect(target.textContent).toContain("Team Settings");
   });
 
   it("highlights the active tab based on path", async () => {

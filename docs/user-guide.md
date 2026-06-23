@@ -92,6 +92,7 @@ Use this document if you are:
   - [Team settings: reopen policy](#team-settings-reopen-policy)
   - [Team settings: submission policy](#team-settings-submission-policy)
   - [Viewing team reports](#viewing-team-reports)
+  - [Scoped assistant user management (optional)](#scoped-assistant-user-management-optional)
 - [Admin workflow reference](#admin-workflow-reference)
   - [Reading the audit log](#reading-the-audit-log)
   - [Creating a user](#creating-a-user)
@@ -219,6 +220,12 @@ Important rules:
 
 This means the assignment list is the single source of truth for who gets asked
 to review a request.
+
+An admin can optionally grant non-admin team leads a narrow, additional
+capability: creating and managing "Assistant" users assigned to them. This is
+off by default and controlled by a single setting; see [Scoped assistant user
+management (optional)](#scoped-assistant-user-management-optional) and [System
+settings](#system-settings).
 
 ## Timezone and date behavior
 
@@ -1226,6 +1233,32 @@ themselves.
   Admin users are not visible in non-admin lead team reports.
 - Admins see all active users who track time.
 
+### Scoped assistant user management (optional)
+
+An admin can enable **Allow team leads to create assistant users** in Settings
+→ General (see [System settings](#system-settings)). This is off by default.
+
+When enabled, every non-admin team lead gets an additional **Users** tab under
+Settings, scoped strictly to their own assigned users:
+
+- The list shows everyone assigned to the lead as approver, plus the lead
+  themselves — the same set used elsewhere for team scoping. For anyone who is
+  **not** an active "Assistant" (including the lead's own row), only the name
+  is shown; no other field is sent by the server, and no action is available.
+- Only users with role "Assistant" who are assigned to the lead can be viewed
+  in detail, edited, deactivated, or deleted.
+- The **Add Member** button only lets the lead create a new "Assistant" user.
+  The role field is fixed and cannot be changed, and the new user's approver is
+  always the creating lead — no other role or approver can be chosen.
+- Admins are unaffected: they continue to use the full Users tab and can
+  create or manage users with any role, as described under [Admin workflow
+  reference](#admin-workflow-reference).
+
+This is enforced by the backend, not just hidden in the UI: every action a
+non-admin lead can perform here is re-validated against the assigned-assistant
+scope on the server, regardless of what the client sends (see [Security and
+access control](#security-and-access-control)).
+
 ---
 
 ## Admin workflow reference
@@ -1431,6 +1464,7 @@ Admins configure system-wide behavior in the Settings panel (Settings → Genera
 | SMTP configuration | Server, port, and credentials for outgoing email. Required for registration emails and email reminders. |
 | Public URL | Used to construct login links in registration emails. |
 | Nextcloud Upload | Configure automatic upload of encrypted DB backups and monthly timesheet PDFs to a Nextcloud public share. See [Nextcloud Upload](#nextcloud-upload). |
+| Allow team leads to create assistant users | Off by default. Only an admin can change it. When on, non-admin team leads get a scoped Users tab limited to creating/managing "Assistant" users assigned to them. See [Scoped assistant user management (optional)](#scoped-assistant-user-management-optional). |
 
 ### Nextcloud Upload
 
@@ -1618,6 +1652,24 @@ Non-admin team leads are prevented from:
 - Viewing or approving time entries / absences for admin-role users.
 - Accessing users not in their direct report list.
 - Approving their own submissions (self-approval prevention).
+
+**Scoped assistant management endpoints (`/team-users*`):** when a non-admin
+team lead is granted this capability (see [Scoped assistant user management
+(optional)](#scoped-assistant-user-management-optional)), every request is
+re-validated server-side, independent of what the client sends:
+
+- The admin setting must be enabled, or every `/team-users*` request is
+  rejected.
+- List results only ever include the requester's own assigned users; for
+  anyone who is not an active "Assistant" the server omits every field except
+  the name — there is no payload to leak even if the frontend had a bug.
+- Create always forces role `assistant` and approver = the requesting lead,
+  ignoring any role or approver value sent by the client.
+- Get/update/deactivate/delete all require the target to be both an active
+  direct report of the requester **and** role `assistant`; anyone else
+  (including a different lead's assistant, or the requester's own account)
+  is rejected with `403 Forbidden`.
+- Admins are unaffected and always use the regular `/users*` endpoints.
 
 ### Pure-admin mode (tracks_time=false)
 
