@@ -1006,6 +1006,7 @@ dialog footer {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-height: 28px;
   margin-bottom: 6px;
 }
 
