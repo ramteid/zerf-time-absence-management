@@ -79,6 +79,7 @@ async fn submission_reminders_full_workflow() {
                     "weekly_hours": 20,
                     "leave_days_current_year": 10,
                     "leave_days_next_year": 10,
+                    "annual_leave_days": 10,
                     "start_date": start_date,
                     "approver_ids": [1]
                 }),
@@ -153,6 +154,7 @@ async fn submission_reminders_full_workflow() {
                     "weekly_hours": 0,
                     "leave_days_current_year": 0,
                     "leave_days_next_year": 0,
+                    "annual_leave_days": 0,
                     "start_date": "2024-01-01",
                     "approver_ids": [1]
                 }),
@@ -200,6 +202,7 @@ async fn submission_reminders_full_workflow() {
                     "weekly_hours": 0,
                     "leave_days_current_year": 0,
                     "leave_days_next_year": 0,
+                    "annual_leave_days": 0,
                     "start_date": "2024-01-01",
                     "approver_ids": [1]
                 }),
@@ -248,6 +251,7 @@ async fn submission_reminders_full_workflow() {
                     "weekly_hours": 20,
                     "leave_days_current_year": 10,
                     "leave_days_next_year": 10,
+                    "annual_leave_days": 10,
                     "start_date": start_date
                 }),
             )
@@ -298,6 +302,7 @@ async fn submission_reminders_full_workflow() {
                     "weekly_hours": 20,
                     "leave_days_current_year": 10,
                     "leave_days_next_year": 10,
+                    "annual_leave_days": 10,
                     "start_date": start_date,
                     "approver_ids": [1]
                 }),
@@ -525,6 +530,7 @@ async fn submission_reminders_treat_approved_absence_as_covered_week() {
                 "weekly_hours": 20,
                 "leave_days_current_year": 10,
                 "leave_days_next_year": 10,
+                "annual_leave_days": 10,
                 "start_date": week_start,
                 "approver_ids": [1]
             }),
@@ -598,6 +604,7 @@ async fn submission_reminders_treat_cancellation_pending_absence_as_covered_week
                 "weekly_hours": 20,
                 "leave_days_current_year": 10,
                 "leave_days_next_year": 10,
+                "annual_leave_days": 10,
                 "start_date": week_start,
                 "approver_ids": [1]
             }),

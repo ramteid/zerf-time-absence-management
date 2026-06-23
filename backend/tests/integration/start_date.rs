@@ -184,7 +184,7 @@ async fn start_date_full_workflow() {
                     "last_name": "Balance",
                     "role": "admin",
                     "weekly_hours": 0,
-                    "leave_days_current_year":0,"leave_days_next_year":0,
+                    "leave_days_current_year":0,"leave_days_next_year":0, "annual_leave_days": 0,
                     "start_date": start_date,
                     "overtime_start_balance_min": 120
                 }),
@@ -230,7 +230,7 @@ async fn start_date_full_workflow() {
                     "last_name": "Carry",
                     "role": "admin",
                     "weekly_hours": 0,
-                    "leave_days_current_year":0,"leave_days_next_year":0,
+                    "leave_days_current_year":0,"leave_days_next_year":0, "annual_leave_days": 0,
                     "start_date": start_day_str,
                     "overtime_start_balance_min": 120
                 }),
@@ -283,7 +283,7 @@ async fn start_date_full_workflow() {
                     "last_name": "User",
                     "role": "admin",
                     "weekly_hours": 39,
-                    "leave_days_current_year":30,"leave_days_next_year":30,
+                    "leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,
                     "start_date": start_date_str,
                 }),
             )

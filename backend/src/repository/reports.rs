@@ -248,7 +248,7 @@ impl ReportDb {
             "SELECT id, email, password_hash, first_name, last_name, role, \
              weekly_hours, workdays_per_week, start_date, hire_date, active, must_change_password, created_at, \
              allow_reopen_without_approval, allow_submission_without_approval, dark_mode, \
-             overtime_start_balance_min, tracks_time \
+             overtime_start_balance_min, tracks_time, annual_leave_days \
              FROM users";
         if is_admin {
             Ok(QueryBuilder::<Postgres>::new(format!(
@@ -288,7 +288,22 @@ impl ReportDb {
         to: NaiveDate,
     ) -> AppResult<Vec<User>> {
         const SQL: &str =
-            "SELECT id, email, password_hash, first_name, last_name, role,              weekly_hours, workdays_per_week, start_date, hire_date, active, must_change_password, created_at,              allow_reopen_without_approval, allow_submission_without_approval, dark_mode, overtime_start_balance_min, tracks_time              FROM users              WHERE tracks_time=TRUE              AND (active=TRUE                   OR EXISTS (SELECT 1 FROM time_entries te                              WHERE te.user_id = users.id                              AND te.entry_date BETWEEN $1 AND $2)                   OR EXISTS (SELECT 1 FROM absences ab                              WHERE ab.user_id = users.id                              AND ab.status IN ('approved','cancellation_pending')                              AND ab.start_date <= $2 AND ab.end_date >= $1)              )              ORDER BY last_name, first_name, id";
+            "SELECT id, email, password_hash, first_name, last_name, role, \
+             weekly_hours, workdays_per_week, start_date, hire_date, active, must_change_password, created_at, \
+             allow_reopen_without_approval, allow_submission_without_approval, dark_mode, \
+             overtime_start_balance_min, tracks_time, annual_leave_days \
+             FROM users \
+             WHERE tracks_time=TRUE \
+             AND (active=TRUE \
+                  OR EXISTS (SELECT 1 FROM time_entries te \
+                             WHERE te.user_id = users.id \
+                             AND te.entry_date BETWEEN $1 AND $2) \
+                  OR EXISTS (SELECT 1 FROM absences ab \
+                             WHERE ab.user_id = users.id \
+                             AND ab.status IN ('approved','cancellation_pending') \
+                             AND ab.start_date <= $2 AND ab.end_date >= $1) \
+             ) \
+             ORDER BY last_name, first_name, id";
         Ok(sqlx::query_as(SQL)
         .bind(from)
         .bind(to)

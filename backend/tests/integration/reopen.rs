@@ -266,7 +266,7 @@ async fn reopen_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"solo@example.com","first_name":"Sol","last_name":"O",
-                    "role":"team_lead","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
+                    "role":"team_lead","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,
                     "start_date":"2024-01-01","approver_ids":[1]}),
             )
             .await;
@@ -319,6 +319,7 @@ async fn reopen_full_workflow() {
                     "weekly_hours":39,
                     "leave_days_current_year":30,
                     "leave_days_next_year":30,
+                    "annual_leave_days": 30,
                     "start_date":"2024-01-01",
                     "approver_ids":[],
                     "tracks_time": false
@@ -369,6 +370,7 @@ async fn reopen_full_workflow() {
                     "weekly_hours":39,
                     "leave_days_current_year":30,
                     "leave_days_next_year":30,
+                    "annual_leave_days": 30,
                     "start_date":"2024-01-01",
                     "approver_ids":[1]
                 }),

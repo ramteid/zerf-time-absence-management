@@ -64,6 +64,7 @@ async fn reports_full_workflow() {
                     "weekly_hours": 0,
                     "leave_days_current_year": 0,
                     "leave_days_next_year": 0,
+                    "annual_leave_days": 0,
                     "start_date": "2024-01-01",
                     "approver_ids": [1],
                     "tracks_time": false
@@ -84,6 +85,7 @@ async fn reports_full_workflow() {
                     "weekly_hours": 39,
                     "leave_days_current_year": 30,
                     "leave_days_next_year": 30,
+                    "annual_leave_days": 30,
                     "start_date": "2024-01-01",
                     "approver_ids": [lead_id]
                 }),
@@ -722,6 +724,7 @@ async fn reports_full_workflow() {
                     "weekly_hours":0,
                     "leave_days_current_year":0,
                     "leave_days_next_year":0,
+                    "annual_leave_days": 0,
                     "start_date":"2024-01-01",
                     "approver_ids":[lead_id]
                 }),
@@ -915,6 +918,7 @@ async fn reports_full_workflow() {
                     "weekly_hours":0,
                     "leave_days_current_year":0,
                     "leave_days_next_year":0,
+                    "annual_leave_days": 0,
                     "start_date":"2024-01-01",
                     "approver_ids":[lead_id]
                 }),
@@ -936,6 +940,7 @@ async fn reports_full_workflow() {
                     "weekly_hours":39,
                     "leave_days_current_year":30,
                     "leave_days_next_year":30,
+                    "annual_leave_days": 30,
                     "start_date":"2024-01-01",
                     "approver_ids":[1]
                 }),
@@ -1000,6 +1005,7 @@ async fn report_permission_guards_reject_non_reportable_users_on_every_personal_
                 "weekly_hours": 39,
                 "leave_days_current_year": 30,
                 "leave_days_next_year": 30,
+                "annual_leave_days": 30,
                 "start_date": "2024-01-01"
             }),
         )
@@ -1025,6 +1031,7 @@ async fn report_permission_guards_reject_non_reportable_users_on_every_personal_
                 "weekly_hours": 39,
                 "leave_days_current_year": 30,
                 "leave_days_next_year": 30,
+                "annual_leave_days": 30,
                 "start_date": "2024-01-01",
                 "approver_ids": [lead_id]
             }),

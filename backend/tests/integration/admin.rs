@@ -102,7 +102,7 @@ async fn admin_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"lead-with-admin-approver@example.com","first_name":"Nora","last_name":"Lead",
-                    "role":"team_lead","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
+                    "role":"team_lead","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,
                     "start_date":"2024-01-01","approver_ids":[1]}),
             )
             .await;
@@ -129,7 +129,7 @@ async fn admin_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"lead-settings@example.com","first_name":"Set","last_name":"Lead",
-                    "role":"team_lead","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
+                    "role":"team_lead","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,
                     "start_date":"2024-01-01","approver_ids":[1]}),
             )
             .await;

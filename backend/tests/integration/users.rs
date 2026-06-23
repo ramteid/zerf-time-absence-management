@@ -17,7 +17,7 @@ async fn create_lead(admin: &crate::common::TestClient, email: &str, first: &str
             &json!({
                 "email": email, "first_name": first, "last_name": "Lead",
                 "role": "team_lead", "weekly_hours": 39,
-                "leave_days_current_year": 30, "leave_days_next_year": 30,
+                "leave_days_current_year": 30, "leave_days_next_year": 30, "annual_leave_days": 30,
                 "start_date": "2024-01-01", "approver_ids": [1],
             }),
         )
@@ -39,7 +39,7 @@ async fn create_emp(
             &json!({
                 "email": email, "first_name": first, "last_name": "Emp",
                 "role": "employee", "weekly_hours": 39,
-                "leave_days_current_year": 30, "leave_days_next_year": 30,
+                "leave_days_current_year": 30, "leave_days_next_year": 30, "annual_leave_days": 30,
                 "start_date": "2024-01-01", "approver_ids": [approver_id],
             }),
         )
@@ -66,7 +66,7 @@ async fn users_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"a@example.com","first_name":"A","last_name":"A",
-                    "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
+                    "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,
                     "start_date":"2024-01-01"}),
             )
             .await;
@@ -82,7 +82,7 @@ async fn users_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"lead-missing@example.com","first_name":"Lead","last_name":"Missing",
-                    "role":"team_lead","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
+                    "role":"team_lead","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,
                     "start_date":"2024-01-01"}),
             )
             .await;
@@ -102,7 +102,7 @@ async fn users_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"b@example.com","first_name":"B","last_name":"B",
-                    "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
+                    "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,
                     "start_date":"2024-01-01","approver_ids": [1]}),
             )
             .await;
@@ -113,7 +113,7 @@ async fn users_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"lead-approver@example.com","first_name":"Lead","last_name":"Approver",
-                    "role":"team_lead","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
+                    "role":"team_lead","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,
                     "start_date":"2024-01-01","approver_ids":[1]}),
             )
             .await;
@@ -124,7 +124,7 @@ async fn users_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"lead-report@example.com","first_name":"Lead","last_name":"Report",
-                    "role":"team_lead","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
+                    "role":"team_lead","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,
                     "start_date":"2024-01-01","approver_ids":[lead_approver_id]}),
             )
             .await;
@@ -164,7 +164,7 @@ async fn users_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"c@example.com","first_name":"C","last_name":"C",
-                    "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
+                    "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,
                     "start_date":"2024-01-01","approver_ids": [99999]}),
             )
             .await;
@@ -182,7 +182,7 @@ async fn users_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"employee-report@example.com","first_name":"Employee","last_name":"Report",
-                    "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
+                    "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,
                     "start_date":"2024-01-01","approver_ids": [employee_approver_id]}),
             )
             .await;
@@ -202,7 +202,7 @@ async fn users_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"dup-approver@example.com","first_name":"Dup","last_name":"Approver",
-                    "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
+                    "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,
                     "start_date":"2024-01-01","approver_ids": [1, 1]}),
             )
             .await;
@@ -223,7 +223,7 @@ async fn users_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"self-approver@example.com","first_name":"Self","last_name":"Approver",
-                    "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
+                    "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,
                     "start_date":"2024-01-01","approver_ids": [1]}),
             )
             .await;
@@ -251,7 +251,7 @@ async fn users_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"assistant-invalid-hours@example.com","first_name":"Assist","last_name":"Hours",
-                    "role":"assistant","weekly_hours":10,"leave_days_current_year":0,"leave_days_next_year":0,
+                    "role":"assistant","weekly_hours":10,"leave_days_current_year":0,"leave_days_next_year":0, "annual_leave_days": 0,
                     "start_date":"2024-01-01","approver_ids": [1]}),
             )
             .await;
@@ -270,7 +270,7 @@ async fn users_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"assistant-invalid-overtime@example.com","first_name":"Assist","last_name":"Overtime",
-                    "role":"assistant","weekly_hours":0,"leave_days_current_year":0,"leave_days_next_year":0,
+                    "role":"assistant","weekly_hours":0,"leave_days_current_year":0,"leave_days_next_year":0, "annual_leave_days": 0,
                     "start_date":"2024-01-01","approver_ids": [1],"overtime_start_balance_min":60}),
             )
             .await;
@@ -289,7 +289,7 @@ async fn users_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"assistant-valid@example.com","first_name":"Assist","last_name":"Valid",
-                    "role":"assistant","weekly_hours":0,"leave_days_current_year":0,"leave_days_next_year":0,
+                    "role":"assistant","weekly_hours":0,"leave_days_current_year":0,"leave_days_next_year":0, "annual_leave_days": 0,
                     "start_date":"2024-01-01","approver_ids": [1]}),
             )
             .await;
@@ -336,7 +336,7 @@ async fn users_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"assistant-invalid-workdays@example.com","first_name":"Assist","last_name":"Workdays",
-                    "role":"assistant","weekly_hours":0,"leave_days_current_year":0,"leave_days_next_year":0,
+                    "role":"assistant","weekly_hours":0,"leave_days_current_year":0,"leave_days_next_year":0, "annual_leave_days": 0,
                     "workdays_per_week":5,"start_date":"2024-01-01","approver_ids": [1]}),
             )
             .await;
@@ -406,7 +406,7 @@ async fn users_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"employee-invalid-overtime@example.com","first_name":"Emp","last_name":"Overtime",
-                    "role":"employee","weekly_hours":40,"leave_days_current_year":20,"leave_days_next_year":20,
+                    "role":"employee","weekly_hours":40,"leave_days_current_year":20,"leave_days_next_year":20, "annual_leave_days": 20,
                     "overtime_start_balance_min":600001,"start_date":"2024-01-01","approver_ids":[1]}),
             )
             .await;
@@ -424,7 +424,7 @@ async fn users_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"employee-tracks-off@example.com","first_name":"Emp","last_name":"TracksOff",
-                    "role":"employee","weekly_hours":40,"leave_days_current_year":20,"leave_days_next_year":20,
+                    "role":"employee","weekly_hours":40,"leave_days_current_year":20,"leave_days_next_year":20, "annual_leave_days": 20,
                     "tracks_time": false,"start_date":"2024-01-01","approver_ids":[1]}),
             )
             .await;
@@ -442,7 +442,7 @@ async fn users_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"employee-invalid-workdays@example.com","first_name":"Emp","last_name":"Wdays",
-                    "role":"employee","weekly_hours":40,"leave_days_current_year":20,"leave_days_next_year":20,
+                    "role":"employee","weekly_hours":40,"leave_days_current_year":20,"leave_days_next_year":20, "annual_leave_days": 20,
                     "workdays_per_week":6,"start_date":"2024-01-01","approver_ids": [1]}),
             )
             .await;
@@ -463,7 +463,7 @@ async fn users_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"employee-invalid-workdays7@example.com","first_name":"Emp","last_name":"Wdays7",
-                    "role":"employee","weekly_hours":40,"leave_days_current_year":20,"leave_days_next_year":20,
+                    "role":"employee","weekly_hours":40,"leave_days_current_year":20,"leave_days_next_year":20, "annual_leave_days": 20,
                     "workdays_per_week":7,"start_date":"2024-01-01","approver_ids": [1]}),
             )
             .await;
@@ -492,7 +492,7 @@ async fn users_full_workflow() {
                     "last_name": "Person",
                     "role": "employee",
                     "weekly_hours": 39,
-                    "leave_days_current_year": 30, "leave_days_next_year": 30,
+                    "leave_days_current_year": 30, "leave_days_next_year": 30, "annual_leave_days": 30,
                     "start_date": "2024-01-01",
                     "approver_ids": [1],
                 }),
@@ -510,7 +510,7 @@ async fn users_full_workflow() {
                     "last_name": "Person",
                     "role": "employee",
                     "weekly_hours": 39,
-                    "leave_days_current_year": 30, "leave_days_next_year": 30,
+                    "leave_days_current_year": 30, "leave_days_next_year": 30, "annual_leave_days": 30,
                     "start_date": "2024-01-01",
                     "approver_ids": [1],
                 }),
@@ -531,7 +531,7 @@ async fn users_full_workflow() {
                     "last_name": " Person ",
                     "role": "employee",
                     "weekly_hours": 39,
-                    "leave_days_current_year": 30, "leave_days_next_year": 30,
+                    "leave_days_current_year": 30, "leave_days_next_year": 30, "annual_leave_days": 30,
                     "start_date": "2024-01-01",
                     "approver_ids": [1],
                 }),
@@ -552,7 +552,7 @@ async fn users_full_workflow() {
                     "last_name": "Person",
                     "role": "employee",
                     "weekly_hours": 39,
-                    "leave_days_current_year": 30, "leave_days_next_year": 30,
+                    "leave_days_current_year": 30, "leave_days_next_year": 30, "annual_leave_days": 30,
                     "start_date": "2024-01-01",
                     "approver_ids": [1],
                 }),
@@ -616,7 +616,7 @@ async fn users_full_workflow() {
                     "last_name": "User",
                     "role": "team_lead",
                     "weekly_hours": 39,
-                    "leave_days_current_year": 30, "leave_days_next_year": 30,
+                    "leave_days_current_year": 30, "leave_days_next_year": 30, "annual_leave_days": 30,
                     "start_date": "2024-01-01",
                     "approver_ids": [1],
                     "password": manual_password,
@@ -644,7 +644,7 @@ async fn users_full_workflow() {
                     "last_name": "User",
                     "role": "employee",
                     "weekly_hours": 39,
-                    "leave_days_current_year": 30, "leave_days_next_year": 30,
+                    "leave_days_current_year": 30, "leave_days_next_year": 30, "annual_leave_days": 30,
                     "start_date": "2024-01-01",
                     "approver_ids": [1],
                     "password": generated_password,
@@ -909,7 +909,7 @@ async fn users_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"emp-invalid-leave@example.com","first_name":"Leave","last_name":"Invalid",
-                    "role":"employee","weekly_hours":39,"leave_days_current_year":367,"leave_days_next_year":30,
+                    "role":"employee","weekly_hours":39,"leave_days_current_year":367,"leave_days_next_year":30, "annual_leave_days": 367,
                     "start_date":"2024-01-01","approver_ids":[1]}),
             )
             .await;
@@ -1320,7 +1320,7 @@ async fn user_creation_with_explicit_category_selection() {
         .post(
             "/api/v1/users",
             &json!({"email":"omit-cats@example.com","first_name":"Omit","last_name":"Cats",
-                "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
+                "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,
                 "start_date":"2024-01-01","approver_ids":[1]}),
         )
         .await;
@@ -1344,7 +1344,7 @@ async fn user_creation_with_explicit_category_selection() {
         .post(
             "/api/v1/users",
             &json!({"email":"explicit-cats@example.com","first_name":"Explicit","last_name":"Cats",
-                "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
+                "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,
                 "start_date":"2024-01-01","approver_ids":[1],
                 "category_ids":[first_cat_id],"absence_category_ids":[]}),
         )
@@ -1395,7 +1395,7 @@ async fn user_creation_with_explicit_category_selection() {
         .post(
             "/api/v1/users",
             &json!({"email":"bad-cat@example.com","first_name":"Bad","last_name":"Cat",
-                "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
+                "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,
                 "start_date":"2024-01-01","approver_ids":[1],
                 "category_ids":[9999999]}),
         )
@@ -1412,7 +1412,7 @@ async fn user_creation_with_explicit_category_selection() {
         .post(
             "/api/v1/users",
             &json!({"email":"bad-absence-cat@example.com","first_name":"Bad","last_name":"AbsCat",
-                "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
+                "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,
                 "start_date":"2024-01-01","approver_ids":[1],
                 "absence_category_ids":[9999999]}),
         )

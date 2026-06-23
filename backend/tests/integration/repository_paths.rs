@@ -24,6 +24,7 @@ async fn sessions_repository_workflow() {
                 "weekly_hours":39,
                 "leave_days_current_year":30,
                 "leave_days_next_year":30,
+                "annual_leave_days": 30,
                 "start_date":"2024-01-01",
                 "approver_ids":[1]
             }),
@@ -544,16 +545,9 @@ async fn users_repository_workflow() {
 
     assert_eq!(
         users
-            .get_default_leave_days()
-            .await
-            .expect("default leave days"),
-        30
-    );
-    assert_eq!(
-        users
             .get_leave_days(emp_id, 2030)
             .await
-            .expect("lazy leave days"),
+            .expect("leave days fall back to the user's base annual_leave_days"),
         30
     );
     users
@@ -639,6 +633,7 @@ async fn users_repository_workflow() {
                 "weekly_hours":0,
                 "leave_days_current_year":0,
                 "leave_days_next_year":0,
+                "annual_leave_days": 0,
                 "start_date":"2024-01-01",
                 "approver_ids":[lead_id]
             }),
@@ -1935,6 +1930,7 @@ async fn notifications_repository_workflow() {
                 "weekly_hours":39,
                 "leave_days_current_year":30,
                 "leave_days_next_year":30,
+                "annual_leave_days": 30,
                 "start_date":"2024-01-01",
                 "approver_ids":[1]
             }),

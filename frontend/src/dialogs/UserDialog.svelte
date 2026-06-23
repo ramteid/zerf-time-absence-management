@@ -22,7 +22,11 @@
   let workdays_per_week = Math.min(template.workdays_per_week ?? 5, 5);
   $: _thisYear = appTodayDate($settings?.timezone).getFullYear();
   $: _nextYear = _thisYear + 1;
-  // Leave days — two explicit fields (current year + next year)
+  // Base annual leave entitlement (days/year), used whenever no per-year
+  // override below exists. Defaults to the org-wide setting for new users,
+  // but admins may set a different value (e.g. special agreements).
+  let annual_leave_days = template.annual_leave_days ?? 30;
+  // Leave days — two explicit per-year override fields (current + next year)
   let leave_days_current_year = 30;
   let leave_days_next_year = 30;
   let todayIso = appTodayIsoDate($settings?.timezone);
@@ -142,6 +146,7 @@
           weekly_hours = Number(settings.default_weekly_hours);
         }
         if (settings.default_annual_leave_days != null) {
+          annual_leave_days = Number(settings.default_annual_leave_days);
           leave_days_current_year = Number(settings.default_annual_leave_days);
           leave_days_next_year = Number(settings.default_annual_leave_days);
         }
@@ -212,6 +217,7 @@
         role: normalizedRole,
         weekly_hours: normalizedWeeklyHours,
         ...(isAssistantRole ? {} : { workdays_per_week: Number(workdays_per_week) }),
+        annual_leave_days: Number(annual_leave_days),
         leave_days_current_year: Number(leave_days_current_year),
         leave_days_next_year: Number(leave_days_next_year),
         start_date,
@@ -399,10 +405,26 @@
       </div>
       <div>
         <div class="field-section-label">{$t("Vacation days per year")}</div>
+        <div>
+          <label class="zf-label" for="leave-base">{$t("Annual leave days (base)")}</label>
+          <input
+            id="leave-base"
+            class="zf-input"
+            type="number"
+            min="0"
+            max="366"
+            bind:value={annual_leave_days}
+          />
+          <div class="field-hint">
+            {$t(
+              "Default entitlement used for every year unless overridden below (e.g. for special agreements).",
+            )}
+          </div>
+        </div>
         <div class="field-row">
           <div>
             <label class="zf-label" for="leave-cur"
-              >{$t("Annual leave days")} {_thisYear}</label
+              >{$t("Override")} {_thisYear}</label
             >
             <input
               id="leave-cur"
@@ -415,7 +437,7 @@
           </div>
           <div>
             <label class="zf-label" for="leave-nxt"
-              >{$t("Annual leave days")} {_nextYear}</label
+              >{$t("Override")} {_nextYear}</label
             >
             <input
               id="leave-nxt"

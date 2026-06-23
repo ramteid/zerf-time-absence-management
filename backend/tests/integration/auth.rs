@@ -54,7 +54,7 @@ async fn auth_full_workflow() {
                 "/api/v1/users",
                 &json!({
                     "email":"emp-me@example.com","first_name":"E","last_name":"M",
-                    "role":"employee","weekly_hours":39.0,"leave_days_current_year":30,"leave_days_next_year":30,
+                    "role":"employee","weekly_hours":39.0,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,
                     "start_date": today(), "approver_ids": [1]
                 }),
             )
