@@ -14,8 +14,10 @@ fn is_valid_hex_color(color: &str) -> bool {
     bytes.len() == 7 && bytes[0] == b'#' && bytes[1..].iter().all(|byte| byte.is_ascii_hexdigit())
 }
 
-pub async fn list(app_state: &AppState) -> AppResult<Vec<Category>> {
-    app_state.db.categories.list_active().await
+/// Active categories enabled for the given employee — used to populate the
+/// time-entry dropdown so each employee only sees what they're allowed to use.
+pub async fn list_for_user(app_state: &AppState, user_id: i64) -> AppResult<Vec<Category>> {
+    app_state.db.categories.list_active_for_user(user_id).await
 }
 
 pub async fn list_all(app_state: &AppState, requester: &User) -> AppResult<Vec<Category>> {
@@ -23,6 +25,47 @@ pub async fn list_all(app_state: &AppState, requester: &User) -> AppResult<Vec<C
         return Err(AppError::Forbidden);
     }
     app_state.db.categories.list_all().await
+}
+
+/// Employee ids currently enabled for a category. Admin-only.
+pub async fn category_users(
+    app_state: &AppState,
+    requester: &User,
+    category_id: i64,
+) -> AppResult<Vec<i64>> {
+    if !requester.is_admin() {
+        return Err(AppError::Forbidden);
+    }
+    app_state
+        .db
+        .categories
+        .find_by_id(category_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    app_state.db.categories.enabled_user_ids(category_id).await
+}
+
+/// Replace the full set of employees enabled for a category. Admin-only.
+pub async fn set_category_users(
+    app_state: &AppState,
+    requester: &User,
+    category_id: i64,
+    user_ids: Vec<i64>,
+) -> AppResult<()> {
+    if !requester.is_admin() {
+        return Err(AppError::Forbidden);
+    }
+    app_state
+        .db
+        .categories
+        .find_by_id(category_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    app_state
+        .db
+        .categories
+        .set_enabled_user_ids(category_id, &user_ids)
+        .await
 }
 
 pub async fn create(

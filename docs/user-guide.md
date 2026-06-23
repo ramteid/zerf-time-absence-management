@@ -1464,6 +1464,13 @@ Categories define what employees can book time against.
 - A category must be active to be used in a new time entry.
 - Deleting a category with existing time entries is not possible; deactivate
   instead.
+- Each category can also be enabled or disabled per employee: editing a
+  category shows a table of all employees with a checkbox per row. Only
+  checked employees can see and use the category in the time-entry form. New
+  categories default to enabled for every employee; new employees default to
+  every existing category. Disabling a category for an employee only blocks
+  *new* entries — their existing time entries in that category are
+  unaffected, and reports/exports are unchanged.
 
 #### Absence categories
 
@@ -1479,6 +1486,10 @@ Constraints:
 - Inactive categories are hidden from the absence request dialog but remain attached to existing absence records.
 - Changing the cost type of an absence (e.g. from a vacation category to a flextime category) after submission is not allowed. Cancel the existing request and re-submit with the correct category.
 - Once a category has at least one referencing absence (any status), the behavior fields (**Cost type** and **Auto-approve past dates**) are locked. Toggling them would retroactively change the financial or approval meaning of existing rows — past balance recomputations would suddenly debit or credit different ledgers and approval workflow guards would relax or tighten without the affected employees seeing it. To change a field, deactivate the existing category and create a new one with the desired settings. Cosmetic changes (name, color, sort order, active flag) are always allowed.
+- Like time categories, each absence category can be enabled or disabled per
+  employee from the same edit dialog. Only checked employees can request the
+  category going forward; existing absences already in that category are
+  unaffected.
 
 ### Managing holidays
 

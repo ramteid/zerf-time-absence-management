@@ -146,7 +146,8 @@ impl CategoryDb {
         sort_order: i64,
         counts_as_work: bool,
     ) -> AppResult<i64> {
-        sqlx::query_scalar(
+        let mut tx = self.pool.begin().await?;
+        let new_id: i64 = sqlx::query_scalar(
             "INSERT INTO categories(name, description, color, sort_order, counts_as_work) \
              VALUES ($1,$2,$3,$4,$5) RETURNING id",
         )
@@ -155,9 +156,77 @@ impl CategoryDb {
         .bind(color)
         .bind(sort_order)
         .bind(counts_as_work)
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tx)
         .await
-        .map_err(|_| AppError::conflict("Name already exists"))
+        .map_err(|_| AppError::conflict("Name already exists"))?;
+        // New categories default to enabled for every existing employee. Same
+        // transaction as the insert above so a failure here cannot leave a
+        // category with zero employees able to use it.
+        sqlx::query("INSERT INTO user_category_access (user_id, category_id) SELECT id, $1 FROM users")
+            .bind(new_id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(new_id)
+    }
+
+    /// Enabled employee ids for a category (regardless of category.active).
+    pub async fn enabled_user_ids(&self, category_id: i64) -> AppResult<Vec<i64>> {
+        Ok(sqlx::query_scalar(
+            "SELECT user_id FROM user_category_access WHERE category_id = $1",
+        )
+        .bind(category_id)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// Replace the full set of employees enabled for a category. Duplicate
+    /// ids in `user_ids` are tolerated (deduplicated) rather than raising a
+    /// primary-key conflict; an id that doesn't correspond to a real user
+    /// raises a client-facing `BadRequest` instead of a generic 500.
+    pub async fn set_enabled_user_ids(&self, category_id: i64, user_ids: &[i64]) -> AppResult<()> {
+        let unique_ids: std::collections::HashSet<i64> = user_ids.iter().copied().collect();
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("DELETE FROM user_category_access WHERE category_id = $1")
+            .bind(category_id)
+            .execute(&mut *tx)
+            .await?;
+        for user_id in unique_ids {
+            sqlx::query(
+                "INSERT INTO user_category_access (user_id, category_id) VALUES ($1, $2)",
+            )
+            .bind(user_id)
+            .bind(category_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(map_user_access_error)?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn is_enabled_for_user(&self, category_id: i64, user_id: i64) -> AppResult<bool> {
+        let exists: Option<i32> = sqlx::query_scalar(
+            "SELECT 1 FROM user_category_access WHERE category_id = $1 AND user_id = $2",
+        )
+        .bind(category_id)
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(exists.is_some())
+    }
+
+    /// Active categories enabled for a specific employee, for time-entry dropdowns.
+    pub async fn list_active_for_user(&self, user_id: i64) -> AppResult<Vec<Category>> {
+        Ok(sqlx::query_as::<_, Category>(
+            "SELECT c.id, c.name, c.description, c.color, c.sort_order, c.counts_as_work, c.active \
+             FROM categories c \
+             JOIN user_category_access uca ON uca.category_id = c.id AND uca.user_id = $1 \
+             WHERE c.active = TRUE ORDER BY c.sort_order, c.name",
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -195,4 +264,16 @@ impl CategoryDb {
         }
         Ok(())
     }
+}
+
+/// Translate a foreign-key violation on `user_category_access.user_id` (a
+/// stale/unknown employee id supplied by the caller) into a client-facing
+/// `BadRequest` instead of the generic 500 the default mapping would produce.
+fn map_user_access_error(e: sqlx::Error) -> AppError {
+    if let sqlx::Error::Database(database_error) = &e {
+        if database_error.code().as_deref() == Some("23503") {
+            return AppError::bad_request("Unknown employee id.");
+        }
+    }
+    AppError::from(e)
 }

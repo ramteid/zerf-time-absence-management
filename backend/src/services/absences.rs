@@ -267,11 +267,22 @@ async fn lookup_requested_category(
 pub async fn resolve_requested_category(
     app_state: &AppState,
     body: &NewAbsence,
+    user_id: i64,
 ) -> AppResult<crate::repository::AbsenceCategory> {
     let category = lookup_requested_category(app_state, body).await?;
     if !category.active {
         return Err(AppError::BadRequest(
             "Absence category is no longer active.".into(),
+        ));
+    }
+    if !app_state
+        .db
+        .absence_categories
+        .is_enabled_for_user(category.id, user_id)
+        .await?
+    {
+        return Err(AppError::BadRequest(
+            "Absence category not available for you.".into(),
         ));
     }
     Ok(category)
@@ -282,17 +293,32 @@ pub async fn resolve_requested_category(
 /// category_id as the existing absence). This preserves the ability to edit
 /// other fields (dates, comment) on a requested absence even after an admin
 /// has deactivated the category — without letting the user switch INTO an
-/// inactive category from outside.
+/// inactive category from outside. The same bypass applies to the per-user
+/// enabled check: an employee who keeps their existing category may still
+/// edit other fields even if it was later disabled for them.
 pub async fn resolve_requested_category_for_edit(
     app_state: &AppState,
     body: &NewAbsence,
     current_category_id: i64,
+    user_id: i64,
 ) -> AppResult<crate::repository::AbsenceCategory> {
     let category = lookup_requested_category(app_state, body).await?;
-    if !category.active && category.id != current_category_id {
-        return Err(AppError::BadRequest(
-            "Absence category is no longer active.".into(),
-        ));
+    if category.id != current_category_id {
+        if !category.active {
+            return Err(AppError::BadRequest(
+                "Absence category is no longer active.".into(),
+            ));
+        }
+        if !app_state
+            .db
+            .absence_categories
+            .is_enabled_for_user(category.id, user_id)
+            .await?
+        {
+            return Err(AppError::BadRequest(
+                "Absence category not available for you.".into(),
+            ));
+        }
     }
     Ok(category)
 }
@@ -333,7 +359,7 @@ pub async fn create_absence(
     require_tracks_time(requester)?;
     let today_date = crate::services::settings::app_today(&app_state.pool).await;
     validate_new_absence_shape(&body)?;
-    let category = resolve_requested_category(app_state, &body).await?;
+    let category = resolve_requested_category(app_state, &body, requester.id).await?;
     validate_backdating_window(&category, body.start_date, today_date)?;
     if body.start_date < requester.start_date {
         return Err(AppError::BadRequest(
@@ -470,9 +496,13 @@ pub async fn update_absence(
     // when the user is not changing category (i.e. they're editing dates or
     // comment on a request whose category was deactivated by an admin in the
     // meantime). Switching INTO an inactive category from outside is rejected.
-    let category =
-        resolve_requested_category_for_edit(app_state, &body, absence_before_update.category_id)
-            .await?;
+    let category = resolve_requested_category_for_edit(
+        app_state,
+        &body,
+        absence_before_update.category_id,
+        requester.id,
+    )
+    .await?;
     validate_backdating_window(&category, body.start_date, today_date)?;
     // Auto-approve categories (sick-like) have an entirely different workflow:
     // they bypass approval and tolerate same-day time entries. Allowing a

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mount, unmount } from "svelte";
-import CategoryDialog from "./CategoryDialog.svelte";
+import AbsenceCategoryDialog from "./AbsenceCategoryDialog.svelte";
 import { setLanguage } from "../i18n.js";
 
 const mockState = vi.hoisted(() => ({
@@ -39,7 +39,7 @@ vi.mock("../api.js", () => ({
   }),
 }));
 
-describe("CategoryDialog", () => {
+describe("AbsenceCategoryDialog", () => {
   let target;
   let component;
   let originalShowModal;
@@ -64,49 +64,12 @@ describe("CategoryDialog", () => {
     target.remove();
   });
 
-  it("sends counts_as_work when saving an edited category", async () => {
-    const onClose = vi.fn();
-    component = mount(CategoryDialog, {
-      target,
-      props: {
-        template: {
-          id: 17,
-          name: "Flextime Reduction",
-          counts_as_work: false,
-          color: "#6D4C41",
-          sort_order: 7,
-          description: "",
-        },
-        onClose,
-      },
-    });
-
-    await settle();
-
-    const dialog = target.querySelector("dialog");
-    expect(dialog).not.toBeNull();
-    expect(dialog.hasAttribute("open")).toBe(true);
-
-    target.querySelector("button.zf-btn.zf-btn-primary").click();
-    await settle();
-
-    const updateRequest = requestFor("/categories/17");
-    expect(updateRequest).toBeDefined();
-    expect(updateRequest.options.body).toMatchObject({
-      name: "Flextime Reduction",
-      color: "#6D4C41",
-      sort_order: 7,
-      description: null,
-      counts_as_work: false,
-    });
-  });
-
   it("loads and renders the per-employee access table when editing", async () => {
     const onClose = vi.fn();
-    component = mount(CategoryDialog, {
+    component = mount(AbsenceCategoryDialog, {
       target,
       props: {
-        template: { id: 17, name: "Flextime Reduction", color: "#6D4C41" },
+        template: { id: 9, name: "Vacation", color: "#6D4C41", cost_type: "vacation" },
         onClose,
       },
     });
@@ -114,17 +77,17 @@ describe("CategoryDialog", () => {
     await settle();
 
     expect(requestFor("/users")).toBeDefined();
-    expect(requestFor("/categories/17/users")).toBeDefined();
+    expect(requestFor("/absence-categories/9/users")).toBeDefined();
     const rows = target.querySelectorAll("table tbody tr");
     expect(rows.length).toBe(2);
   });
 
-  it("saves the selected user ids to the category users endpoint", async () => {
+  it("saves the selected user ids to the absence category users endpoint", async () => {
     const onClose = vi.fn();
-    component = mount(CategoryDialog, {
+    component = mount(AbsenceCategoryDialog, {
       target,
       props: {
-        template: { id: 17, name: "Flextime Reduction", color: "#6D4C41" },
+        template: { id: 9, name: "Vacation", color: "#6D4C41", cost_type: "vacation" },
         onClose,
       },
     });
@@ -134,8 +97,21 @@ describe("CategoryDialog", () => {
     target.querySelector("button.zf-btn.zf-btn-primary").click();
     await settle();
 
-    const usersRequest = requestFor("/categories/17/users", "PUT");
+    const usersRequest = requestFor("/absence-categories/9/users", "PUT");
     expect(usersRequest).toBeDefined();
     expect(usersRequest.options.body).toEqual({ user_ids: [1] });
+  });
+
+  it("does not fetch the access table when creating a new category", async () => {
+    const onClose = vi.fn();
+    component = mount(AbsenceCategoryDialog, {
+      target,
+      props: { template: {}, onClose },
+    });
+
+    await settle();
+
+    expect(requestFor("/users")).toBeUndefined();
+    expect(target.querySelector("table")).toBeNull();
   });
 });

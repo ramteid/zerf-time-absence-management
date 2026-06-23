@@ -51,8 +51,14 @@ fn normalize_slug(raw: &str) -> Option<String> {
     Some(out)
 }
 
-pub async fn list_active(app_state: &AppState) -> AppResult<Vec<AbsenceCategory>> {
-    app_state.db.absence_categories.list_active().await
+/// Active absence categories enabled for the given employee — used to
+/// populate the absence-request dropdown.
+pub async fn list_for_user(app_state: &AppState, user_id: i64) -> AppResult<Vec<AbsenceCategory>> {
+    app_state
+        .db
+        .absence_categories
+        .list_active_for_user(user_id)
+        .await
 }
 
 pub async fn list_all(app_state: &AppState, requester: &User) -> AppResult<Vec<AbsenceCategory>> {
@@ -60,6 +66,51 @@ pub async fn list_all(app_state: &AppState, requester: &User) -> AppResult<Vec<A
         return Err(AppError::Forbidden);
     }
     app_state.db.absence_categories.list_all().await
+}
+
+/// Employee ids currently enabled for an absence category. Admin-only.
+pub async fn category_users(
+    app_state: &AppState,
+    requester: &User,
+    category_id: i64,
+) -> AppResult<Vec<i64>> {
+    if !requester.is_admin() {
+        return Err(AppError::Forbidden);
+    }
+    app_state
+        .db
+        .absence_categories
+        .find_by_id(category_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    app_state
+        .db
+        .absence_categories
+        .enabled_user_ids(category_id)
+        .await
+}
+
+/// Replace the full set of employees enabled for an absence category. Admin-only.
+pub async fn set_category_users(
+    app_state: &AppState,
+    requester: &User,
+    category_id: i64,
+    user_ids: Vec<i64>,
+) -> AppResult<()> {
+    if !requester.is_admin() {
+        return Err(AppError::Forbidden);
+    }
+    app_state
+        .db
+        .absence_categories
+        .find_by_id(category_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    app_state
+        .db
+        .absence_categories
+        .set_enabled_user_ids(category_id, &user_ids)
+        .await
 }
 
 pub struct NewCategoryInput {

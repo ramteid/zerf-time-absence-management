@@ -6,7 +6,7 @@ use axum::{
     extract::{Path, State},
     Json,
 };
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 
 fn deserialize_nullable_string<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
 where
@@ -17,9 +17,9 @@ where
 
 pub async fn list(
     State(app_state): State<AppState>,
-    _requester: User,
+    requester: User,
 ) -> AppResult<Json<Vec<Category>>> {
-    Ok(Json(categories::list(&app_state).await?))
+    Ok(Json(categories::list_for_user(&app_state, requester.id).await?))
 }
 
 pub async fn list_all(
@@ -90,4 +90,34 @@ pub async fn update(
         )
         .await?,
     ))
+}
+
+pub async fn list_users(
+    State(app_state): State<AppState>,
+    requester: User,
+    Path(category_id): Path<i64>,
+) -> AppResult<Json<Vec<i64>>> {
+    Ok(Json(
+        categories::category_users(&app_state, &requester, category_id).await?,
+    ))
+}
+
+#[derive(Deserialize)]
+pub struct SetCategoryUsers {
+    pub user_ids: Vec<i64>,
+}
+
+#[derive(Serialize)]
+pub struct Ack {
+    pub ok: bool,
+}
+
+pub async fn set_users(
+    State(app_state): State<AppState>,
+    requester: User,
+    Path(category_id): Path<i64>,
+    Json(body): Json<SetCategoryUsers>,
+) -> AppResult<Json<Ack>> {
+    categories::set_category_users(&app_state, &requester, category_id, body.user_ids).await?;
+    Ok(Json(Ack { ok: true }))
 }

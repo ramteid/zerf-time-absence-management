@@ -144,7 +144,8 @@ impl AbsenceCategoryDb {
     }
 
     pub async fn create(&self, input: NewAbsenceCategory<'_>) -> AppResult<i64> {
-        sqlx::query_scalar(
+        let mut tx = self.pool.begin().await?;
+        let new_id: i64 = sqlx::query_scalar(
             "INSERT INTO absence_categories \
              (slug, name, color, sort_order, active, cost_type, auto_approve_past) \
              VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id",
@@ -156,9 +157,79 @@ impl AbsenceCategoryDb {
         .bind(input.active)
         .bind(input.cost_type)
         .bind(input.auto_approve_past)
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tx)
         .await
-        .map_err(map_constraint_error)
+        .map_err(map_constraint_error)?;
+        // New absence categories default to enabled for every existing
+        // employee. Same transaction as the insert above so a failure here
+        // cannot leave a category with zero employees able to use it.
+        sqlx::query(
+            "INSERT INTO user_absence_category_access (user_id, category_id) SELECT id, $1 FROM users",
+        )
+        .bind(new_id)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(new_id)
+    }
+
+    /// Enabled employee ids for an absence category (regardless of category.active).
+    pub async fn enabled_user_ids(&self, category_id: i64) -> AppResult<Vec<i64>> {
+        Ok(sqlx::query_scalar(
+            "SELECT user_id FROM user_absence_category_access WHERE category_id = $1",
+        )
+        .bind(category_id)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// Replace the full set of employees enabled for an absence category.
+    /// Duplicate ids in `user_ids` are tolerated (deduplicated) rather than
+    /// raising a primary-key conflict; an id that doesn't correspond to a
+    /// real user raises a client-facing `BadRequest` instead of a generic 500.
+    pub async fn set_enabled_user_ids(&self, category_id: i64, user_ids: &[i64]) -> AppResult<()> {
+        let unique_ids: std::collections::HashSet<i64> = user_ids.iter().copied().collect();
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("DELETE FROM user_absence_category_access WHERE category_id = $1")
+            .bind(category_id)
+            .execute(&mut *tx)
+            .await?;
+        for user_id in unique_ids {
+            sqlx::query(
+                "INSERT INTO user_absence_category_access (user_id, category_id) VALUES ($1, $2)",
+            )
+            .bind(user_id)
+            .bind(category_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(map_user_access_error)?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn is_enabled_for_user(&self, category_id: i64, user_id: i64) -> AppResult<bool> {
+        let exists: Option<i32> = sqlx::query_scalar(
+            "SELECT 1 FROM user_absence_category_access WHERE category_id = $1 AND user_id = $2",
+        )
+        .bind(category_id)
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(exists.is_some())
+    }
+
+    /// Active absence categories enabled for a specific employee, for absence-request dropdowns.
+    pub async fn list_active_for_user(&self, user_id: i64) -> AppResult<Vec<AbsenceCategory>> {
+        Ok(sqlx::query_as::<_, AbsenceCategory>(
+            "SELECT c.id, c.slug, c.name, c.color, c.sort_order, c.active, c.cost_type, c.auto_approve_past \
+             FROM absence_categories c \
+             JOIN user_absence_category_access uaca ON uaca.category_id = c.id AND uaca.user_id = $1 \
+             WHERE c.active = TRUE ORDER BY c.sort_order, c.name",
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?)
     }
 
     pub async fn update(&self, id: i64, input: UpdateAbsenceCategory<'_>) -> AppResult<()> {
@@ -245,6 +316,18 @@ fn map_constraint_error(e: sqlx::Error) -> AppError {
             return AppError::bad_request(
                 "Invalid cost_type; expected 'none', 'vacation', or 'flextime'.",
             );
+        }
+    }
+    AppError::from(e)
+}
+
+/// Translate a foreign-key violation on `user_absence_category_access.user_id`
+/// (a stale/unknown employee id supplied by the caller) into a client-facing
+/// `BadRequest` instead of the generic 500 the default mapping would produce.
+fn map_user_access_error(e: sqlx::Error) -> AppError {
+    if let sqlx::Error::Database(database_error) = &e {
+        if database_error.code().as_deref() == Some("23503") {
+            return AppError::bad_request("Unknown employee id.");
         }
     }
     AppError::from(e)

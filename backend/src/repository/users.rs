@@ -489,6 +489,22 @@ impl UserDb {
             .bind(email)
             .fetch_one(&mut *tx)
             .await?;
+        // The initial admin is created outside the regular `create()` path
+        // (it bootstraps the system before any user exists), so it needs the
+        // same default-enable grant for whatever categories were already
+        // seeded at startup.
+        sqlx::query(
+            "INSERT INTO user_category_access (user_id, category_id) SELECT $1, id FROM categories",
+        )
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "INSERT INTO user_absence_category_access (user_id, category_id) SELECT $1, id FROM absence_categories",
+        )
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
         Ok(id)
     }
 
@@ -516,7 +532,7 @@ impl UserDb {
         overtime_start_balance_min: i64,
         tracks_time: bool,
     ) -> Result<i64, sqlx::Error> {
-        sqlx::query_scalar(
+        let new_user_id: i64 = sqlx::query_scalar(
             "INSERT INTO users(email, password_hash, first_name, last_name, role, \
              weekly_hours, workdays_per_week, start_date, hire_date, must_change_password, \
              overtime_start_balance_min, tracks_time) \
@@ -534,8 +550,23 @@ impl UserDb {
         .bind(must_change_password)
         .bind(overtime_start_balance_min)
         .bind(tracks_time)
-        .fetch_one(tx)
-        .await
+        .fetch_one(&mut *tx)
+        .await?;
+        // New employees default to every existing category enabled, mirroring
+        // how a newly created category defaults to enabled for every employee.
+        sqlx::query(
+            "INSERT INTO user_category_access (user_id, category_id) SELECT $1, id FROM categories",
+        )
+        .bind(new_user_id)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "INSERT INTO user_absence_category_access (user_id, category_id) SELECT $1, id FROM absence_categories",
+        )
+        .bind(new_user_id)
+        .execute(&mut *tx)
+        .await?;
+        Ok(new_user_id)
     }
 
     #[allow(clippy::too_many_arguments)]
