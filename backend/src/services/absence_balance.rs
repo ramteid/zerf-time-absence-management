@@ -1083,6 +1083,7 @@ mod tests {
             overtime_start_balance_min: 0,
             tracks_time: true,
             annual_leave_days: 30,
+            archived_at: None,
         }
     }
 

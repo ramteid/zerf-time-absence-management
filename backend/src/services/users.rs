@@ -2,12 +2,12 @@ use crate::audit;
 use crate::error::{AppError, AppResult};
 use crate::i18n;
 use crate::middleware::auth::User;
-use crate::repository::{SessionDb, UserDb};
+use crate::repository::{AbsenceDb, ReopenRequestDb, SessionDb, UserDb};
 use crate::roles::{
     is_admin_role, is_assistant_role, is_team_lead_role, normalize_role, ROLE_ASSISTANT,
 };
 use crate::AppState;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 pub struct NewUser {
     pub email: String,
@@ -62,6 +62,7 @@ pub fn repo_user_to_auth_user(u: crate::repository::User) -> User {
         overtime_start_balance_min: u.overtime_start_balance_min,
         tracks_time: u.tracks_time,
         annual_leave_days: u.annual_leave_days,
+        archived_at: u.archived_at,
     }
 }
 
@@ -441,6 +442,16 @@ pub async fn delete_sessions_for_user_tx(
     SessionDb::delete_for_user_tx(tx, user_id).await
 }
 
+/// Delegate to the repository: check whether `user_id` has any time entries or
+/// absences. Used by the delete handler to guard against hard-deleting users
+/// with historical data.
+pub async fn has_time_data_tx(
+    tx: &mut crate::db::PgConnection,
+    user_id: i64,
+) -> AppResult<bool> {
+    UserDb::has_time_data_tx(tx, user_id).await
+}
+
 pub async fn deactivate_tx(tx: &mut crate::db::PgConnection, user_id: i64) -> AppResult<()> {
     UserDb::deactivate_tx(tx, user_id).await
 }
@@ -777,6 +788,190 @@ pub async fn create(
     })
 }
 
+/// Archive request payload passed from handler to service.
+pub struct ArchiveRequest {
+    /// Map of user_id -> new_approver_id for every active user that currently
+    /// has the archived user as an approver. Required when the target is an
+    /// active approver.
+    pub approver_replacements: HashMap<i64, i64>,
+}
+
+/// Restore request payload passed from handler to service.
+pub struct RestoreRequest {
+    /// Optional new start date for the restored user (avoids flextime gap).
+    pub new_start_date: Option<chrono::NaiveDate>,
+    /// New approver IDs for the restored user (required for non-admin).
+    pub approver_ids: Vec<i64>,
+}
+
+/// Archive a user: auto-reject their pending absences/reopen requests,
+/// reassign active dependent users, kill sessions, set archived_at.
+///
+/// All mutations happen inside a single transaction protected by the
+/// user-graph advisory lock. The audit log entry is written after commit.
+pub async fn archive(
+    app_state: &AppState,
+    requester: &User,
+    target_id: i64,
+    req: ArchiveRequest,
+) -> AppResult<()> {
+    if !requester.is_admin() {
+        return Err(AppError::Forbidden);
+    }
+    if target_id == requester.id {
+        return Err(AppError::BadRequest(
+            "You cannot archive yourself.".into(),
+        ));
+    }
+
+    let mut tx = app_state.db.users.begin().await?;
+    UserDb::lock_user_graph_tx(&mut tx).await?;
+
+    let target = UserDb::fetch_for_update(&mut tx, target_id).await?;
+
+    // Archived users cannot be archived again.
+    if target.archived_at.is_some() {
+        return Err(AppError::BadRequest("User is already archived.".into()));
+    }
+
+    // Protect the last active admin.
+    if target.active && is_admin_role(&target.role) {
+        let active_admins = UserDb::count_active_admins_tx(&mut tx).await?;
+        if active_admins <= 1 {
+            return Err(AppError::BadRequest(
+                "Cannot archive the last active admin.".into(),
+            ));
+        }
+    }
+
+    // Enumerate active dependents (users for whom target is an approver).
+    let dependents = UserDb::find_active_dependents_tx(&mut tx, target_id).await?;
+
+    for (dep_id, dep_first, dep_last, dep_role) in &dependents {
+        let new_approver_id = req
+            .approver_replacements
+            .get(dep_id)
+            .copied()
+            .ok_or_else(|| {
+                AppError::BadRequest(format!(
+                    "No replacement approver provided for user {} {} (id={}).",
+                    dep_first, dep_last, dep_id
+                ))
+            })?;
+        // Validate the replacement approver based on the dependent's role.
+        let requires_admin_approver = is_admin_role(dep_role);
+        let valid = UserDb::is_valid_replacement_approver_tx(
+            &mut tx,
+            new_approver_id,
+            requires_admin_approver,
+        )
+        .await?;
+        if !valid {
+            return Err(AppError::BadRequest(format!(
+                "Replacement approver id={} is not a valid active approver.",
+                new_approver_id
+            )));
+        }
+        // Reassign: remove old approver link, add new one atomically.
+        UserDb::reassign_approver_tx(&mut tx, *dep_id, target_id, new_approver_id).await?;
+    }
+
+    // Auto-reject pending absences owned by the archived user.
+    AbsenceDb::reject_pending_for_user_tx(
+        &mut tx,
+        target_id,
+        requester.id,
+        "User account archived.",
+    )
+    .await?;
+
+    // Auto-reject pending reopen requests owned by the archived user.
+    ReopenRequestDb::reject_pending_for_user_tx(
+        &mut tx,
+        target_id,
+        requester.id,
+        "User account archived.",
+    )
+    .await?;
+
+    // Archive the user: active=FALSE, archived_at=NOW().
+    UserDb::archive_tx(&mut tx, target_id).await?;
+
+    // Kill all sessions — forces immediate logout.
+    SessionDb::delete_for_user_tx(&mut tx, target_id).await?;
+
+    tx.commit().await?;
+
+    audit::log(
+        &app_state.pool,
+        requester.id,
+        "archived",
+        "users",
+        target_id,
+        serde_json::to_value(repo_user_to_auth_user(target)).ok(),
+        Some(serde_json::json!({"archived": true})),
+    )
+    .await;
+
+    Ok(())
+}
+
+/// Restore an archived user: clear archived state, optionally reset start_date,
+/// set must_change_password=TRUE, restore approver assignments.
+pub async fn restore(
+    app_state: &AppState,
+    requester: &User,
+    target_id: i64,
+    req: RestoreRequest,
+) -> AppResult<User> {
+    if !requester.is_admin() {
+        return Err(AppError::Forbidden);
+    }
+
+    let mut tx = app_state.db.users.begin().await?;
+    UserDb::lock_user_graph_tx(&mut tx).await?;
+
+    let target = UserDb::fetch_for_update(&mut tx, target_id).await?;
+
+    // Only archived users can be restored.
+    if target.archived_at.is_none() {
+        return Err(AppError::BadRequest("User is not archived.".into()));
+    }
+
+    // Validate approver IDs for the restored user.
+    validate_approver_ids(app_state, &target.role, Some(target_id), &req.approver_ids).await?;
+
+    // Restore: active=TRUE, archived_at=NULL, must_change_password=TRUE.
+    UserDb::restore_tx(&mut tx, target_id, req.new_start_date).await?;
+
+    // Set approvers for the restored user.
+    UserDb::set_approvers_tx(&mut tx, target_id, &req.approver_ids).await?;
+
+    tx.commit().await?;
+
+    // Fetch the updated user to return.
+    let updated = app_state
+        .db
+        .users
+        .find_by_id(target_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let updated_auth = repo_user_to_auth_user(updated);
+
+    audit::log(
+        &app_state.pool,
+        requester.id,
+        "restored",
+        "users",
+        target_id,
+        None,
+        serde_json::to_value(&updated_auth).ok(),
+    )
+    .await;
+
+    Ok(updated_auth)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -804,6 +999,7 @@ mod tests {
             overtime_start_balance_min: 0,
             tracks_time: true,
             annual_leave_days: 30,
+            archived_at: None,
         }
     }
 

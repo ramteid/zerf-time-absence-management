@@ -88,6 +88,7 @@ pub async fn login(
             overtime_start_balance_min: u.overtime_start_balance_min,
             tracks_time: u.tracks_time,
             annual_leave_days: u.annual_leave_days,
+            archived_at: u.archived_at,
         });
     // Always perform a hash verification to keep timing constant for unknown emails.
     let dummy = "$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHRzYWx0c2FsdA$8ueQukxsrOwHPzjhsRTRppvNN0o3Qx0vg7HHmH64Bmw";

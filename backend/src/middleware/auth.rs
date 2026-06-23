@@ -64,6 +64,9 @@ pub struct User {
     /// Base annual leave entitlement (days/year), used whenever no explicit
     /// `user_annual_leave` override exists for a given year.
     pub annual_leave_days: i64,
+    /// Set when the user has been archived. Archived users cannot log in.
+    /// Cleared on restore.
+    pub archived_at: Option<DateTime<Utc>>,
 }
 
 impl User {
@@ -303,6 +306,7 @@ pub async fn auth_middleware(
         overtime_start_balance_min: repo_user.overtime_start_balance_min,
         tracks_time: repo_user.tracks_time,
         annual_leave_days: repo_user.annual_leave_days,
+        archived_at: repo_user.archived_at,
     };
 
     // Enforce must_change_password: users with a temporary password are only
@@ -369,6 +373,7 @@ mod tests {
             overtime_start_balance_min: 0,
             tracks_time: true,
             annual_leave_days: 30,
+            archived_at: None,
         }
     }
 

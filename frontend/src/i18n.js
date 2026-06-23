@@ -315,6 +315,34 @@ const TRANSLATIONS = {
     "You can only manage assistants assigned to you.":
       "You can only manage assistants assigned to you.",
     "You will be set as their approver.": "You will be set as their approver.",
+    // --- User archive / restore ---
+    "Archive user?": "Archive user?",
+    "Archive": "Archive",
+    "User archived.": "User archived.",
+    "Archived Users": "Archived Users",
+    "archived_users_tab": "Archived",
+    "Archived on {date}": "Archived on {date}",
+    "Restore": "Restore",
+    "Restore user?": "Restore user?",
+    "User restored.": "User restored.",
+    "No archived users.": "No archived users.",
+    "This account will be deactivated and the user will no longer be able to log in. All data is preserved and the account can be restored later.":
+      "This account will be deactivated and the user will no longer be able to log in. All data is preserved and the account can be restored later.",
+    "This user approves {n} active team member(s). Choose a replacement approver for each.":
+      "This user approves {n} active team member(s). Choose a replacement approver for each.",
+    "Replacement approver for {name}": "Replacement approver for {name}",
+    "Select approver": "Select approver",
+    "All team members must have a replacement approver assigned.":
+      "All team members must have a replacement approver assigned.",
+    "Restore this archived account? The user will receive a temporary password and must change it on first login.":
+      "Restore this archived account? The user will receive a temporary password and must change it on first login.",
+    "New start date (optional)": "New start date (optional)",
+    "Reset start date to avoid flextime gap": "Reset start date to avoid flextime gap",
+    "Keep original start date": "Keep original start date",
+    "If the account was archived for an extended period, resetting the start date prevents a large negative flextime balance from accumulating during the absence.":
+      "If the account was archived for an extended period, resetting the start date prevents a large negative flextime balance from accumulating during the absence.",
+    "Approver required for non-admin users.": "Approver required for non-admin users.",
+    "User has historical data. Use archive instead.": "User has historical data. Use archive instead.",
   },
   de: {
     "Loading...": "Wird geladen...",
@@ -1287,6 +1315,34 @@ const TRANSLATIONS = {
       "Sie können nur Ihnen zugewiesene Aushilfen verwalten.",
     "You will be set as their approver.":
       "Sie werden als deren Genehmiger festgelegt.",
+    // --- User archive / restore ---
+    "Archive user?": "Benutzer archivieren?",
+    "Archive": "Archivieren",
+    "User archived.": "Benutzer archiviert.",
+    "Archived Users": "Archivierte Benutzer",
+    "archived_users_tab": "Archiviert",
+    "Archived on {date}": "Archiviert am {date}",
+    "Restore": "Wiederherstellen",
+    "Restore user?": "Benutzer wiederherstellen?",
+    "User restored.": "Benutzer wiederhergestellt.",
+    "No archived users.": "Keine archivierten Benutzer.",
+    "This account will be deactivated and the user will no longer be able to log in. All data is preserved and the account can be restored later.":
+      "Dieses Konto wird deaktiviert und der Benutzer kann sich nicht mehr anmelden. Alle Daten bleiben erhalten und das Konto kann später wiederhergestellt werden.",
+    "This user approves {n} active team member(s). Choose a replacement approver for each.":
+      "Dieser Benutzer genehmigt {n} aktive(s) Teammitglied(er). Wähle für jedes einen Ersatz-Genehmiger.",
+    "Replacement approver for {name}": "Ersatz-Genehmiger für {name}",
+    "Select approver": "Genehmiger auswählen",
+    "All team members must have a replacement approver assigned.":
+      "Alle Teammitglieder müssen einen Ersatz-Genehmiger erhalten.",
+    "Restore this archived account? The user will receive a temporary password and must change it on first login.":
+      "Dieses archivierte Konto wiederherstellen? Der Benutzer erhält ein temporäres Passwort und muss es beim ersten Login ändern.",
+    "New start date (optional)": "Neues Startdatum (optional)",
+    "Reset start date to avoid flextime gap": "Startdatum zurücksetzen, um Gleitzeitlücke zu vermeiden",
+    "Keep original start date": "Ursprüngliches Startdatum beibehalten",
+    "If the account was archived for an extended period, resetting the start date prevents a large negative flextime balance from accumulating during the absence.":
+      "Wenn das Konto längere Zeit archiviert war, verhindert das Zurücksetzen des Startdatums einen großen negativen Gleitzeitkontosaldo.",
+    "Approver required for non-admin users.": "Genehmiger ist für Nicht-Admin-Benutzer erforderlich.",
+    "User has historical data. Use archive instead.": "Benutzer hat historische Daten. Bitte stattdessen archivieren.",
   },
 };
 

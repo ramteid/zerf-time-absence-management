@@ -5,6 +5,17 @@ use chrono::{DateTime, NaiveDate, Utc};
 use serde::Serialize;
 use sqlx::{Postgres, QueryBuilder};
 
+/// Lightweight archived-user row returned by GET /users/archived.
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+pub struct ArchivedUser {
+    pub id: i64,
+    pub email: String,
+    pub first_name: String,
+    pub last_name: String,
+    pub role: String,
+    pub archived_at: DateTime<Utc>,
+}
+
 const USER_GRAPH_LOCK_KEY: i64 = 0x7A_45_52_46_5F_53_54_55_i64;
 
 /// Full user row returned from the database.
@@ -41,6 +52,9 @@ pub struct User {
     /// Base annual leave entitlement (days/year), used whenever no explicit
     /// `user_annual_leave` override exists for a given year.
     pub annual_leave_days: i64,
+    /// Set when the user is archived. Archived users cannot log in and are
+    /// excluded from active user lists. Restore clears this field.
+    pub archived_at: Option<DateTime<Utc>>,
 }
 
 impl User {
@@ -56,7 +70,7 @@ const USER_SELECT: &str =
     "SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, workdays_per_week, \
      start_date, hire_date, active, must_change_password, created_at, \
      allow_reopen_without_approval, allow_submission_without_approval, dark_mode, \
-     overtime_start_balance_min, tracks_time, annual_leave_days \
+     overtime_start_balance_min, tracks_time, annual_leave_days, archived_at \
      FROM users";
 
 /// Team settings row (id, email, first_name, last_name, role,
@@ -125,13 +139,41 @@ impl UserDb {
         )
     }
 
+    /// Returns all non-archived users (active or deactivated) ordered by name.
+    /// This is the default admin user list view. Archived users are excluded —
+    /// use `find_all_including_archived` or `find_archived_ordered` for those.
     pub async fn find_all_ordered(&self) -> AppResult<Vec<User>> {
         Ok(
-            QueryBuilder::<Postgres>::new(format!("{USER_SELECT} ORDER BY last_name, first_name"))
-                .build_query_as::<User>()
-                .fetch_all(&self.pool)
-                .await?,
+            QueryBuilder::<Postgres>::new(format!(
+                "{USER_SELECT} WHERE archived_at IS NULL ORDER BY last_name, first_name"
+            ))
+            .build_query_as::<User>()
+            .fetch_all(&self.pool)
+            .await?,
         )
+    }
+
+    /// Returns all users including archived ones, ordered by name.
+    /// Used only where the admin explicitly requests the full user list.
+    pub async fn find_all_including_archived(&self) -> AppResult<Vec<User>> {
+        Ok(
+            QueryBuilder::<Postgres>::new(format!(
+                "{USER_SELECT} ORDER BY last_name, first_name"
+            ))
+            .build_query_as::<User>()
+            .fetch_all(&self.pool)
+            .await?,
+        )
+    }
+
+    /// Returns archived users ordered by archived_at DESC.
+    pub async fn find_archived_ordered(&self) -> AppResult<Vec<ArchivedUser>> {
+        Ok(sqlx::query_as::<_, ArchivedUser>(
+            "SELECT id, email, first_name, last_name, role, archived_at \
+             FROM users WHERE archived_at IS NOT NULL ORDER BY archived_at DESC",
+        )
+        .fetch_all(&self.pool)
+        .await?)
     }
 
     pub async fn find_for_approver(&self, approver_id: i64) -> AppResult<Vec<User>> {
@@ -152,16 +194,17 @@ impl UserDb {
     /// Used by the scoped team-lead "assistant management" feature, where a
     /// lead must be able to see (and reactivate) an assistant they previously
     /// deactivated — unlike every other lead-facing view, which intentionally
-    /// only shows active team members.
+    /// only shows active team members. Archived users are always excluded
+    /// because archived assistants are no longer manageable by a team lead.
     pub async fn find_for_approver_including_inactive(
         &self,
         approver_id: i64,
     ) -> AppResult<Vec<User>> {
         Ok(QueryBuilder::<Postgres>::new(format!(
-            "{USER_SELECT} WHERE id=$1 \
+            "{USER_SELECT} WHERE archived_at IS NULL AND (id=$1 \
              OR id IN (SELECT ua.user_id FROM user_approvers ua \
                        JOIN users u ON u.id=ua.user_id \
-                       WHERE ua.approver_id=$1 AND u.role != 'admin') \
+                       WHERE ua.approver_id=$1 AND u.role != 'admin' AND u.archived_at IS NULL)) \
              ORDER BY last_name, first_name"
         ))
         .build_query_as::<User>()
@@ -831,6 +874,116 @@ impl UserDb {
             .execute(tx)
             .await?;
         Ok(())
+    }
+
+    /// Find active dependents (users for whom `approver_id` is an approver)
+    /// within a transaction, for use in the archive flow.
+    /// Returns (user_id, first_name, last_name, role) tuples.
+    pub async fn find_active_dependents_tx(
+        tx: &mut sqlx::PgConnection,
+        approver_id: i64,
+    ) -> AppResult<Vec<(i64, String, String, String)>> {
+        Ok(sqlx::query_as::<_, (i64, String, String, String)>(
+            "SELECT u.id, u.first_name, u.last_name, u.role \
+             FROM user_approvers ua \
+             JOIN users u ON u.id = ua.user_id \
+             WHERE ua.approver_id=$1 AND u.active=TRUE AND u.archived_at IS NULL",
+        )
+        .bind(approver_id)
+        .fetch_all(tx)
+        .await?)
+    }
+
+    /// Check if a given user is a valid active approver for a subject whose
+    /// `requires_admin_approver` flag is known. Returns true if valid.
+    pub async fn is_valid_replacement_approver_tx(
+        tx: &mut sqlx::PgConnection,
+        approver_id: i64,
+        requires_admin_approver: bool,
+    ) -> AppResult<bool> {
+        let valid: Option<bool> = sqlx::query_scalar(
+            "SELECT TRUE FROM users WHERE id=$1 AND active=TRUE AND archived_at IS NULL \
+             AND (($2::bool = TRUE AND role='admin') OR \
+                  ($2::bool = FALSE AND role IN ('team_lead','admin')))",
+        )
+        .bind(approver_id)
+        .bind(requires_admin_approver)
+        .fetch_optional(tx)
+        .await?;
+        Ok(valid.is_some())
+    }
+
+    /// Reassign a dependent user from `old_approver_id` to `new_approver_id`
+    /// within a transaction. Removes the old relationship and adds the new one
+    /// (ignoring duplicates via ON CONFLICT DO NOTHING).
+    pub async fn reassign_approver_tx(
+        tx: &mut sqlx::PgConnection,
+        user_id: i64,
+        old_approver_id: i64,
+        new_approver_id: i64,
+    ) -> AppResult<()> {
+        sqlx::query(
+            "DELETE FROM user_approvers WHERE user_id=$1 AND approver_id=$2",
+        )
+        .bind(user_id)
+        .bind(old_approver_id)
+        .execute(&mut *tx)  // explicit deref needed to reborrow before second execute
+        .await?;
+        sqlx::query(
+            "INSERT INTO user_approvers(user_id, approver_id) VALUES ($1,$2) \
+             ON CONFLICT DO NOTHING",
+        )
+        .bind(user_id)
+        .bind(new_approver_id)
+        .execute(tx)
+        .await?;
+        Ok(())
+    }
+
+    /// Archive a user: set active=FALSE and archived_at=NOW().
+    /// Archived users cannot log in and are excluded from active user lists.
+    pub async fn archive_tx(tx: &mut sqlx::PgConnection, id: i64) -> AppResult<()> {
+        sqlx::query("UPDATE users SET active=FALSE, archived_at=NOW() WHERE id=$1")
+            .bind(id)
+            .execute(tx)
+            .await?;
+        Ok(())
+    }
+
+    /// Restore an archived user: set active=TRUE, archived_at=NULL.
+    /// Optionally reset start_date when provided (avoids flextime gap accumulation).
+    pub async fn restore_tx(
+        tx: &mut sqlx::PgConnection,
+        id: i64,
+        new_start_date: Option<NaiveDate>,
+    ) -> AppResult<()> {
+        sqlx::query(
+            "UPDATE users SET active=TRUE, archived_at=NULL, \
+             start_date=COALESCE($2, start_date), must_change_password=TRUE \
+             WHERE id=$1",
+        )
+        .bind(id)
+        .bind(new_start_date)
+        .execute(tx)
+        .await?;
+        Ok(())
+    }
+
+    /// Check whether a user has any time entries or absences.
+    /// Used to guard hard delete: users with historical data must be archived,
+    /// not hard-deleted.
+    pub async fn has_time_data_tx(
+        tx: &mut sqlx::PgConnection,
+        user_id: i64,
+    ) -> AppResult<bool> {
+        let has_entries: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM time_entries WHERE user_id=$1) \
+             OR EXISTS(SELECT 1 FROM absences WHERE user_id=$1)",
+        )
+        .bind(user_id)
+        .fetch_one(tx)
+        .await?;
+        Ok(has_entries)
     }
 
     pub async fn delete_tx(tx: &mut sqlx::PgConnection, id: i64) -> AppResult<()> {

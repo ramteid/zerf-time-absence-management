@@ -9,7 +9,7 @@ use crate::services::auth::lock_user_graph;
 use crate::services::users::{
     assert_can_access_user, ensure_email_available, ensure_user_name_available, generate_password,
     get_leave_days, normalize_optional_user_name, repo_user_to_auth_user, user_unique_conflict,
-    validate_approver_ids,
+    validate_approver_ids, ArchiveRequest, RestoreRequest,
 };
 use crate::AppState;
 use axum::{
@@ -18,6 +18,7 @@ use axum::{
 };
 use chrono::NaiveDate;
 use serde::{Deserialize, Deserializer, Serialize};
+use std::collections::HashMap;
 
 /// Distinguishes "field omitted" (`None`, leave unchanged) from "field present"
 /// (`Some(value)`, including `Some(None)` for explicit `null` — clear back to the
@@ -693,6 +694,15 @@ pub async fn delete_user(
             direct_reports_count
         )));
     }
+    // Guard: users with historical time/absence data must be archived, not hard-deleted.
+    // This preserves audit trails, reports, and absence history.
+    let has_data =
+        crate::services::users::has_time_data_tx(&mut transaction, user_id).await?;
+    if has_data {
+        return Err(AppError::BadRequest(
+            "User has historical data. Use archive instead.".into(),
+        ));
+    }
     crate::services::users::delete_tx(&mut transaction, user_id).await?;
     transaction.commit().await?;
     audit::log(
@@ -840,6 +850,93 @@ pub async fn set_leave_days_handler(
     )
     .await;
     Ok(Json(serde_json::json!({"ok": true})))
+}
+
+// ---------------------------------------------------------------------------
+// Archive / Restore / List Archived
+// ---------------------------------------------------------------------------
+
+/// Request body for POST /users/{id}/archive.
+#[derive(Deserialize)]
+pub struct ArchiveBody {
+    /// Map of user_id -> new_approver_id for every active user currently
+    /// approved by the target. Required only when the target is an approver
+    /// for active users. May be omitted or empty otherwise.
+    #[serde(default)]
+    pub approver_replacements: HashMap<String, i64>,
+}
+
+/// POST /users/{id}/archive — admin only.
+pub async fn archive_user(
+    State(app_state): State<AppState>,
+    requester: User,
+    Path(user_id): Path<i64>,
+    Json(body): Json<ArchiveBody>,
+) -> AppResult<Json<serde_json::Value>> {
+    // Convert string keys from JSON to i64 (JSON object keys are always strings).
+    let replacements: HashMap<i64, i64> = body
+        .approver_replacements
+        .into_iter()
+        .map(|(k, v)| {
+            k.parse::<i64>()
+                .map_err(|_| AppError::BadRequest("Invalid user id key in approver_replacements.".into()))
+                .map(|id| (id, v))
+        })
+        .collect::<AppResult<HashMap<i64, i64>>>()?;
+
+    crate::services::users::archive(
+        &app_state,
+        &requester,
+        user_id,
+        ArchiveRequest {
+            approver_replacements: replacements,
+        },
+    )
+    .await?;
+    Ok(Json(serde_json::json!({"ok": true})))
+}
+
+/// Request body for POST /users/{id}/restore.
+#[derive(Deserialize)]
+pub struct RestoreBody {
+    /// Optional new start date. When provided, resets the user's start date
+    /// to avoid negative flextime accumulation from the archived period.
+    pub start_date: Option<NaiveDate>,
+    /// Approver IDs for the restored user. Required for non-admin users.
+    #[serde(default)]
+    pub approver_ids: Vec<i64>,
+}
+
+/// POST /users/{id}/restore — admin only.
+pub async fn restore_user(
+    State(app_state): State<AppState>,
+    requester: User,
+    Path(user_id): Path<i64>,
+    Json(body): Json<RestoreBody>,
+) -> AppResult<Json<User>> {
+    let updated = crate::services::users::restore(
+        &app_state,
+        &requester,
+        user_id,
+        RestoreRequest {
+            new_start_date: body.start_date,
+            approver_ids: body.approver_ids,
+        },
+    )
+    .await?;
+    Ok(Json(updated))
+}
+
+/// GET /users/archived — admin only. Returns archived users ordered by archived_at DESC.
+pub async fn list_archived(
+    State(app_state): State<AppState>,
+    requester: User,
+) -> AppResult<Json<Vec<crate::repository::users::ArchivedUser>>> {
+    if !requester.is_admin() {
+        return Err(AppError::Forbidden);
+    }
+    let archived = app_state.db.users.find_archived_ordered().await?;
+    Ok(Json(archived))
 }
 
 #[cfg(test)]
