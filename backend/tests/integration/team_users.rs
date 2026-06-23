@@ -140,12 +140,13 @@ async fn team_users_scoped_assistant_management() {
         assert_eq!(st, StatusCode::FORBIDDEN);
 
         let (st, _) = lead
-            .post(&format!("/api/v1/team-users/{}/deactivate", emp_id), &json!({}))
+            .put(&format!("/api/v1/team-users/{}", emp_id), &json!({"active": false}))
             .await;
         assert_eq!(st, StatusCode::FORBIDDEN);
 
+        // There is no delete route at all for team leads.
         let (st, _) = lead.delete(&format!("/api/v1/team-users/{}", emp_id)).await;
-        assert_eq!(st, StatusCode::FORBIDDEN);
+        assert_eq!(st, StatusCode::METHOD_NOT_ALLOWED);
     }
 
     // -- A different team lead cannot manage an assistant assigned to lead 1 --
@@ -161,43 +162,47 @@ async fn team_users_scoped_assistant_management() {
         assert_eq!(st, StatusCode::FORBIDDEN, "unassigned assistant is inaccessible");
     }
 
-    // -- Deactivate removes the assistant from the lead's list --
-    {
-        let (st, _) = lead
-            .post(
-                &format!("/api/v1/team-users/{}/deactivate", assistant_id),
-                &json!({}),
-            )
-            .await;
-        assert_eq!(st, StatusCode::OK);
-
-        let (st, body) = lead.get("/api/v1/team-users").await;
-        assert_eq!(st, StatusCode::OK);
-        assert!(!has_id(&body, assistant_id), "deactivated assistant disappears");
-    }
-
-    // -- Delete a freshly created assistant --
+    // -- Deactivate, then reactivate, the assistant — the lead retains full
+    //    control across the toggle, and there is no delete route at all. --
     {
         let (st, body) = lead
-            .post(
-                "/api/v1/team-users",
-                &json!({"email":"asst-tu1-delete@example.com","first_name":"Del","last_name":"Etable",
-                    "leave_days_current_year":10,"leave_days_next_year":10,"annual_leave_days":10,
-                    "start_date":"2024-01-01"}),
+            .put(
+                &format!("/api/v1/team-users/{}", assistant_id),
+                &json!({"active": false}),
             )
             .await;
-        assert_eq!(st, StatusCode::OK);
-        let to_delete = id(&body);
+        assert_eq!(st, StatusCode::OK, "lead deactivates own assistant");
+        assert_eq!(body["active"], false);
 
-        let (st, _) = lead
-            .delete(&format!("/api/v1/team-users/{}", to_delete))
-            .await;
+        // The assistant stays visible (and manageable) in the list while inactive —
+        // unlike every other lead-facing list, which only shows active members.
+        let (st, body) = lead.get("/api/v1/team-users").await;
         assert_eq!(st, StatusCode::OK);
+        let asst_row = find_by_id(&body, assistant_id)
+            .expect("deactivated assistant remains visible for reactivation");
+        assert_eq!(asst_row["can_manage"], true);
+        assert_eq!(asst_row["active"], false);
 
+        // The lead can still fetch and reactivate it.
         let (st, _) = lead
-            .get(&format!("/api/v1/team-users/{}", to_delete))
+            .get(&format!("/api/v1/team-users/{}", assistant_id))
             .await;
-        assert_eq!(st, StatusCode::FORBIDDEN, "deleted assistant no longer a direct report");
+        assert_eq!(st, StatusCode::OK, "deactivated assistant still reachable");
+
+        let (st, body) = lead
+            .put(
+                &format!("/api/v1/team-users/{}", assistant_id),
+                &json!({"active": true}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "lead reactivates own assistant");
+        assert_eq!(body["active"], true);
+
+        // No delete route exists for team leads, active or not.
+        let (st, _) = lead
+            .delete(&format!("/api/v1/team-users/{}", assistant_id))
+            .await;
+        assert_eq!(st, StatusCode::METHOD_NOT_ALLOWED);
     }
 
     // -- Admin is unaffected and keeps using the regular /users endpoints --

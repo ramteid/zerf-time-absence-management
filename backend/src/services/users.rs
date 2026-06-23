@@ -112,30 +112,30 @@ pub async fn assert_team_lead_assistant_list_access(
     Ok(())
 }
 
-/// Guard for the `/team-users/{id}` get/update/deactivate/delete endpoints:
-/// the requester must pass [`assert_team_lead_assistant_list_access`], the
-/// target must be one of their active direct reports, and the target's role
-/// must be "assistant". Returns the fetched target user on success.
+/// Guard for the `/team-users/{id}` get/update endpoints: the requester must
+/// pass [`assert_team_lead_assistant_list_access`], the target must be one of
+/// their direct reports (active or not — unlike most lead-facing checks, this
+/// one intentionally does not require the target to be active, so a lead can
+/// still view and reactivate an assistant they previously deactivated), and
+/// the target's role must be "assistant". Returns the fetched target user on
+/// success. There is deliberately no delete capability here: team leads may
+/// never delete a user, only deactivate/reactivate one.
 pub async fn assert_team_lead_can_manage_assistant(
     app_state: &AppState,
     requester: &User,
     target_id: i64,
 ) -> AppResult<User> {
     assert_team_lead_assistant_list_access(app_state, requester).await?;
-    let is_report = app_state
-        .db
-        .users
-        .is_direct_report(target_id, requester.id)
-        .await?;
-    if !is_report {
-        return Err(AppError::Forbidden);
-    }
     let target = app_state
         .db
         .users
         .find_by_id(target_id)
         .await?
         .ok_or(AppError::NotFound)?;
+    let approver_ids = app_state.db.users.get_approver_ids(target_id).await?;
+    if !approver_ids.contains(&requester.id) {
+        return Err(AppError::Forbidden);
+    }
     if !is_assistant_role(&target.role) {
         return Err(AppError::Forbidden);
     }

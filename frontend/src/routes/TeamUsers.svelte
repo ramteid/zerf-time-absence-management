@@ -17,19 +17,23 @@
   }
   load();
 
-  // Deactivated assistants drop out of `find_for_approver` server-side, so
-  // there is no in-place reactivate toggle here — only deactivate.
-  async function deactivate(u) {
-    if (
-      !(await confirmDialog($t("Deactivate?"), $t("Deactivate this user?"), {
-        danger: true,
-        confirm: $t("Deactivate"),
-      }))
-    )
-      return;
+  // Mirrors AdminUsers.svelte's toggleActive: a single PUT flips the active
+  // flag both ways. Unlike the admin Users tab, there is no delete action
+  // here at all — team leads may deactivate/reactivate an assistant but
+  // never delete one.
+  async function toggleActive(u) {
+    if (u.active) {
+      if (
+        !(await confirmDialog($t("Deactivate?"), $t("Deactivate this user?"), {
+          danger: true,
+          confirm: $t("Deactivate"),
+        }))
+      )
+        return;
+    }
     try {
-      await api(`/team-users/${u.id}/deactivate`, { method: "POST" });
-      toast($t("User deactivated."), "ok");
+      await api(`/team-users/${u.id}`, { method: "PUT", body: { active: !u.active } });
+      toast($t(u.active ? "User deactivated." : "User activated."), "ok");
       load();
     } catch (e) {
       toast($t(e?.message || "Error"), "error");
@@ -39,24 +43,6 @@
   async function editUser(u) {
     try {
       showDialog = await api(`/team-users/${u.id}`);
-    } catch (e) {
-      toast($t(e?.message || "Error"), "error");
-    }
-  }
-
-  async function deleteUser(u) {
-    if (
-      !(await confirmDialog(
-        $t("Delete user?"),
-        $t("Delete user permanently? All data of this user will be deleted. This cannot be undone."),
-        { danger: true, confirm: $t("Delete permanently") },
-      ))
-    )
-      return;
-    try {
-      await api(`/team-users/${u.id}`, { method: "DELETE" });
-      toast($t("User deleted."), "ok");
-      load();
     } catch (e) {
       toast($t(e?.message || "Error"), "error");
     }
@@ -109,18 +95,12 @@
               <Icon name="Edit" size={13} />
             </button>
             <button
-              class="zf-btn zf-btn-ghost zf-btn-sm zf-btn-danger"
-              title={$t("Deactivate")}
-              on:click={() => deactivate(u)}
+              class="zf-btn zf-btn-ghost zf-btn-sm"
+              class:zf-btn-danger={u.active}
+              title={u.active ? $t("Deactivate") : $t("Activate")}
+              on:click={() => toggleActive(u)}
             >
-              <Icon name="X" size={13} />
-            </button>
-            <button
-              class="zf-btn zf-btn-ghost zf-btn-sm zf-btn-danger"
-              title={$t("Delete permanently")}
-              on:click={() => deleteUser(u)}
-            >
-              <Icon name="Trash" size={13} />
+              <Icon name={u.active ? "X" : "Check"} size={13} />
             </button>
           </div>
         {/if}

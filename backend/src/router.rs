@@ -132,13 +132,7 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                 )
                 .route(
                     "/team-users/{id}",
-                    get(handlers::team_users::get_one)
-                        .put(handlers::team_users::update)
-                        .delete(handlers::team_users::delete_user),
-                )
-                .route(
-                    "/team-users/{id}/deactivate",
-                    post(handlers::team_users::deactivate),
+                    get(handlers::team_users::get_one).put(handlers::team_users::update),
                 )
                 .route(
                     "/categories",

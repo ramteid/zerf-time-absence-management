@@ -148,6 +148,28 @@ impl UserDb {
         .await?)
     }
 
+    /// Like [`find_for_approver`], but includes inactive direct reports too.
+    /// Used by the scoped team-lead "assistant management" feature, where a
+    /// lead must be able to see (and reactivate) an assistant they previously
+    /// deactivated — unlike every other lead-facing view, which intentionally
+    /// only shows active team members.
+    pub async fn find_for_approver_including_inactive(
+        &self,
+        approver_id: i64,
+    ) -> AppResult<Vec<User>> {
+        Ok(QueryBuilder::<Postgres>::new(format!(
+            "{USER_SELECT} WHERE id=$1 \
+             OR id IN (SELECT ua.user_id FROM user_approvers ua \
+                       JOIN users u ON u.id=ua.user_id \
+                       WHERE ua.approver_id=$1 AND u.role != 'admin') \
+             ORDER BY last_name, first_name"
+        ))
+        .build_query_as::<User>()
+        .bind(approver_id)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
     pub async fn find_all_active_ordered(&self) -> AppResult<Vec<User>> {
         Ok(QueryBuilder::<Postgres>::new(format!(
             "{USER_SELECT} WHERE active=TRUE ORDER BY last_name"
