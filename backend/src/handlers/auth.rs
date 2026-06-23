@@ -218,19 +218,21 @@ pub async fn me(
     }
     navigation_items.push(serde_json::json!({"href":"/reports","key":"Reports","icon":"📊"}));
     navigation_items.push(serde_json::json!({"href":"/account","key":"Account","icon":"👤"}));
-    if user.is_lead() {
-        navigation_items
-            .push(serde_json::json!({"href":"/team-settings","key":"TeamSettings","icon":"🛡"}));
-    }
+    // Both admins and team leads get a unified "Settings" entry. Admins land on
+    // the general settings tab; team leads land directly on the team tab (the
+    // only tab they are allowed to see).
     if user.is_admin() {
         navigation_items
-            .push(serde_json::json!({"href":"/admin/settings","key":"Admin","icon":"⚙"}));
+            .push(serde_json::json!({"href":"/settings/general","key":"Settings","icon":"⚙"}));
+    } else if user.is_lead() {
+        navigation_items
+            .push(serde_json::json!({"href":"/settings/team","key":"Settings","icon":"⚙"}));
     }
     // Assistants go to /time (no dashboard); everyone else lands on /dashboard.
     let home = if is_assistant { "/time" } else { "/dashboard" };
     // For admins: flag whether initial setup (country, working-time defaults,
     // and admin profile name) has been completed. Until it is, the SPA
-    // redirects to /admin/settings.
+    // redirects to /settings/general.
     let must_configure_settings = if user.is_admin() {
         let country = app_state.db.settings.get_raw("country").await?;
         let default_weekly_hours = app_state

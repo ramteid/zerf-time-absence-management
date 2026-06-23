@@ -697,7 +697,6 @@ const TRANSLATIONS = {
     "Holiday added.": "Feiertag hinzugefügt.",
     "No holidays for {year}.": "Keine Feiertage für {year}.",
     "Delete this holiday?": "Diesen Feiertag löschen?",
-    Lead: "Leitung",
     "Add Entry": "Eintrag hinzufügen",
     "Edit Entry": "Eintrag bearbeiten",
     "Edit Absence": "Abwesenheit bearbeiten",
@@ -757,7 +756,6 @@ const TRANSLATIONS = {
     "Week edit requests": "Bearbeitungsanfragen",
     "Edit request": "Bearbeitungsanfrage",
     "wants to edit {week_label}": "möchte {week_label} wieder bearbeiten",
-    TeamSettings: "Team-Einstellungen",
     "Team Settings": "Team-Einstellungen",
     "Allow employees to submit edit requests without approval":
       "Mitarbeitende dürfen Bearbeitungsanfragen ohne Genehmigung stellen",
@@ -1103,7 +1101,6 @@ const TRANSLATIONS = {
     "User created.": "Benutzer erstellt.",
     "Password reset.": "Passwort zurückgesetzt.",
     "Temporary password:": "Temporäres Passwort:",
-    Team: "Team",
     // Team Settings
     "Edit Requests": "Bearbeitungsanfragen",
     "When enabled for a user, their edit requests are automatically approved. No one is notified and no emails are sent.":

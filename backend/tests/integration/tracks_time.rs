@@ -134,8 +134,8 @@ async fn tracks_time_full_workflow() {
             "pure-admin nav has /reports (team reports)"
         );
         assert!(
-            nav_hrefs.contains(&"/admin/settings"),
-            "pure-admin nav has /admin/settings"
+            nav_hrefs.contains(&"/settings/general"),
+            "pure-admin nav has /settings/general"
         );
     }
 

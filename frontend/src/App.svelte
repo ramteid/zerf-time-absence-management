@@ -28,7 +28,7 @@
   import Layout from "./Layout.svelte";
   import Login from "./routes/Login.svelte";
   import Setup from "./routes/Setup.svelte";
-  import AdminTabs from "./routes/AdminTabs.svelte";
+  import SettingsTabs from "./routes/SettingsTabs.svelte";
 
   let booting = true;
   let bootNetworkError = false;
@@ -251,15 +251,14 @@
     "/account": () => import("./routes/Account.svelte"),
     "/dashboard": () => import("./routes/Dashboard.svelte"),
     "/reports": () => import("./routes/Reports.svelte"),
-    "/admin": () => import("./routes/AdminSettings.svelte"),
-    "/admin/users": () => import("./routes/AdminUsers.svelte"),
-    "/admin/categories": () => import("./routes/AdminCategories.svelte"),
-    "/admin/holidays": () => import("./routes/AdminHolidays.svelte"),
-    "/admin/audit-log": () => import("./routes/AdminAuditLog.svelte"),
-    "/admin/settings": () => import("./routes/AdminSettings.svelte"),
-    "/admin/email": () => import("./routes/AdminEmail.svelte"),
-    "/admin/upload": () => import("./routes/AdminUpload.svelte"),
-    "/team-settings": () => import("./routes/TeamSettings.svelte"),
+    "/settings/general": () => import("./routes/AdminSettings.svelte"),
+    "/settings/users": () => import("./routes/AdminUsers.svelte"),
+    "/settings/categories": () => import("./routes/AdminCategories.svelte"),
+    "/settings/holidays": () => import("./routes/AdminHolidays.svelte"),
+    "/settings/audit-log": () => import("./routes/AdminAuditLog.svelte"),
+    "/settings/email": () => import("./routes/AdminEmail.svelte"),
+    "/settings/upload": () => import("./routes/AdminUpload.svelte"),
+    "/settings/team": () => import("./routes/TeamSettings.svelte"),
   };
   const notFoundLoader = () => import("./routes/NotFound.svelte");
 
@@ -270,26 +269,27 @@
       user?.tracks_time !== false || !!user?.permissions?.can_view_team_reports,
     "/dashboard": (user) => !!user?.permissions?.can_view_dashboard,
     "/reports": (user) => !!user?.permissions?.can_view_reports,
-    "/team-settings": (user) => !!user?.permissions?.can_manage_team_settings,
-    "/admin": (user) => !!user?.permissions?.can_manage_settings,
-    "/admin/users": (user) => !!user?.permissions?.can_manage_users,
-    "/admin/categories": (user) => !!user?.permissions?.can_manage_categories,
-    "/admin/holidays": (user) => !!user?.permissions?.can_manage_holidays,
-    "/admin/audit-log": (user) => !!user?.permissions?.can_view_audit_log,
-    "/admin/settings": (user) => !!user?.permissions?.can_manage_settings,
-    "/admin/email": (user) => !!user?.permissions?.can_manage_settings,
-    "/admin/upload": (user) => !!user?.permissions?.can_manage_settings,
+    "/settings/general": (user) => !!user?.permissions?.can_manage_settings,
+    "/settings/users": (user) => !!user?.permissions?.can_manage_users,
+    "/settings/categories": (user) => !!user?.permissions?.can_manage_categories,
+    "/settings/holidays": (user) => !!user?.permissions?.can_manage_holidays,
+    "/settings/audit-log": (user) => !!user?.permissions?.can_view_audit_log,
+    "/settings/email": (user) => !!user?.permissions?.can_manage_settings,
+    "/settings/upload": (user) => !!user?.permissions?.can_manage_settings,
+    "/settings/team": (user) => !!user?.permissions?.can_manage_team_settings,
   };
 
   $: routePromise = resolveRoute(pathname, $currentUser);
   $: document.title = $settings?.organization_name
     ? `${$t("Time tracking")} - ${$settings.organization_name}`
     : $t("Time tracking");
-  $: isAdmin =
-    pathname.startsWith("/admin") &&
+  // Show the settings tab bar whenever the user is in the /settings/* area and
+  // has at least the team-settings permission (covers both admins and leads).
+  $: isSettings =
+    pathname.startsWith("/settings") &&
     !!(
-      $currentUser?.permissions?.can_manage_users ||
-      $currentUser?.permissions?.can_manage_settings
+      $currentUser?.permissions?.can_manage_settings ||
+      $currentUser?.permissions?.can_manage_team_settings
     );
 
   function preferredHome(user) {
@@ -327,12 +327,18 @@
 
     // Resolve redirects without side-effects — just return the target component
     // directly so the reactive chain never yields null for a logged-in user.
-    if (p === "/" || p === "") {
+    if (p === "/" || p === "" || p === "/settings") {
+      // "/settings" (no sub-path) redirects to the first accessible settings tab
+      const settingsDest = user?.permissions?.can_manage_settings
+        ? "/settings/general"
+        : "/settings/team";
       const dest = user.must_change_password
         ? "/account"
         : user.must_configure_settings
-          ? "/admin/settings"
-          : preferredHome(user);
+          ? "/settings/general"
+          : p === "/settings"
+            ? settingsDest
+            : preferredHome(user);
       debugLog("route:redirect-home", { dest });
       // Update the URL bar (deferred so we don't mutate stores mid-reactive-cycle)
       setTimeout(() => go(dest, false), 0);
@@ -348,11 +354,11 @@
     if (
       user.must_configure_settings &&
       !user.must_change_password &&
-      p !== "/admin/settings"
+      p !== "/settings/general"
     ) {
       debugLog("route:redirect-configure-settings");
-      setTimeout(() => go("/admin/settings", false), 0);
-      return loadRoute("/admin/settings");
+      setTimeout(() => go("/settings/general", false), 0);
+      return loadRoute("/settings/general");
     }
     if (routeLoaders[p] && !canAccessRoute(p, user)) {
       const dest = preferredHome(user);
@@ -413,8 +419,8 @@
   <Login initialEmail={setupEmail} />
 {:else if routePromise}
   <Layout>
-    {#if isAdmin}
-      <AdminTabs />
+    {#if isSettings}
+      <SettingsTabs />
     {/if}
     {#key pathname}
       {#await routePromise}

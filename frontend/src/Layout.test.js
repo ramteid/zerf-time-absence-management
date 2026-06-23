@@ -125,8 +125,7 @@ describe("Layout navigation for pure-admin", () => {
         { href: "/dashboard", key: "Dashboard", icon: "🔔" },
         { href: "/reports", key: "Reports", icon: "📊" },
         { href: "/account", key: "Account", icon: "👤" },
-        { href: "/team-settings", key: "TeamSettings", icon: "🛡" },
-        { href: "/admin/settings", key: "Admin", icon: "⚙" },
+        { href: "/settings/general", key: "Settings", icon: "⚙" },
       ],
       permissions: { can_approve: true, can_view_dashboard: true },
     });
@@ -150,8 +149,7 @@ describe("Layout navigation for pure-admin", () => {
         { href: "/dashboard", key: "Dashboard", icon: "🔔" },
         { href: "/reports", key: "Reports", icon: "📊" },
         { href: "/account", key: "Account", icon: "👤" },
-        { href: "/team-settings", key: "TeamSettings", icon: "🛡" },
-        { href: "/admin/settings", key: "Admin", icon: "⚙" },
+        { href: "/settings/general", key: "Settings", icon: "⚙" },
       ],
       permissions: { can_approve: true, can_view_dashboard: true },
     });
