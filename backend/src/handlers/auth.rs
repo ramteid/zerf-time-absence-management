@@ -183,6 +183,12 @@ pub async fn me(
         .sessions
         .get_csrf_token(&hash_token(&raw_token))
         .await?;
+    // Non-admin team leads may be granted a scoped ability to create/manage
+    // "assistant" users assigned to them, gated by an admin-only setting.
+    let can_manage_team_users = crate::roles::is_team_lead_role(&user.role)
+        && crate::services::settings::team_lead_assistant_management_enabled(&app_state.pool)
+            .await
+            .unwrap_or(false);
     let permissions = serde_json::json!({
         "is_admin": user.is_admin(),
         "is_lead": user.is_lead(),
@@ -192,6 +198,7 @@ pub async fn me(
         "can_view_audit_log": user.is_admin(),
         "can_manage_settings": user.is_admin(),
         "can_manage_team_settings": user.is_lead(),
+        "can_manage_team_users": can_manage_team_users,
         "can_approve": user.is_lead(),
         "can_view_team_reports": user.is_lead(),
         "can_view_dashboard": !crate::roles::is_assistant_role(&user.role),

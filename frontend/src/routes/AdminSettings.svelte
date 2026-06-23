@@ -592,6 +592,28 @@
         </div>
       </div>
 
+      <div
+        style="font-size:14px;font-weight:400;margin-top:20px;margin-bottom:14px"
+      >
+        {$t("Team leads")}
+      </div>
+      <div class="field-row">
+        <div style="flex:0 0 auto">
+          <label class="zf-label" style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input
+              type="checkbox"
+              bind:checked={settingsForm.allow_team_lead_manage_assistants}
+            />
+            {$t("Allow team leads to create assistant users")}
+          </label>
+          <div class="field-hint">
+            {$t(
+              "When enabled, team leads get a restricted Users tab where they may only create and manage \"Assistant\" users assigned to them. No other role can be created there.",
+            )}
+          </div>
+        </div>
+      </div>
+
       <div style="display:flex;justify-content:flex-end;padding-top:16px">
         <button class="zf-btn zf-btn-primary" on:click={save} disabled={saving || regionLoading}>
           {#if saving}

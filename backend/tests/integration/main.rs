@@ -39,6 +39,7 @@ mod repository_paths;
 mod start_date;
 mod submission_reminders;
 mod team_settings;
+mod team_users;
 mod time_entries;
 mod tracks_time;
 mod users;

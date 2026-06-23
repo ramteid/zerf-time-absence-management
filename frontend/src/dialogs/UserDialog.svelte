@@ -12,12 +12,19 @@
 
   export let template;
   export let onClose;
+  // When set, the role is fixed (no role picker, no approver picker — the
+  // approver is implicitly the requester) and all API calls go through
+  // `apiBase` instead of "/users". Used by the scoped team-lead "assistant
+  // management" page (TeamUsers.svelte), where only the "assistant" role and
+  // only the requester's own assigned users can ever be touched.
+  export let lockedRole = null;
+  export let apiBase = "/users";
   let dialog;
   $: isNew = !template.id;
   let email = template.email || "";
   let first_name = template.first_name || "";
   let last_name = template.last_name || "";
-  let role = template.role || "employee";
+  let role = lockedRole || template.role || "employee";
   let weekly_hours = fmtDecimal(template.weekly_hours ?? 39, 2);
   let workdays_per_week = Math.min(template.workdays_per_week ?? 5, 5);
   $: _thisYear = appTodayDate($settings?.timezone).getFullYear();
@@ -51,8 +58,21 @@
   let selectedCategoryIds = [];
   let selectedAbsenceCategoryIds = [];
   $: normalizedRole = String(role || "").trim().toLowerCase();
-  $: requiresApprover = normalizedRole !== "admin";
+  $: requiresApprover = !lockedRole && normalizedRole !== "admin";
   $: isAssistantRole = normalizedRole === "assistant";
+
+  function roleDisplayLabel(r) {
+    switch (r) {
+      case "admin":
+        return "Admin";
+      case "team_lead":
+        return "Team lead";
+      case "assistant":
+        return "Assistant";
+      default:
+        return "Employee";
+    }
+  }
   $: if (isAssistantRole) {
     weekly_hours = fmtDecimal(0, 2);
     overtime_start_balance_hours = fmtDecimal(0, 2);
@@ -113,18 +133,20 @@
   }
 
   onMount(async () => {
-    try {
-      const allUsers = await api("/users");
-      approvers = allUsers
-        .filter(
-          (candidateUser) =>
-            candidateUser.active &&
-            (candidateUser.role === "team_lead" || candidateUser.role === "admin") &&
-            candidateUser.id !== template.id,
-        )
-        .sort((a, b) => a.last_name.localeCompare(b.last_name) || a.first_name.localeCompare(b.first_name));
-    } catch {
-      approvers = [];
+    if (!lockedRole) {
+      try {
+        const allUsers = await api("/users");
+        approvers = allUsers
+          .filter(
+            (candidateUser) =>
+              candidateUser.active &&
+              (candidateUser.role === "team_lead" || candidateUser.role === "admin") &&
+              candidateUser.id !== template.id,
+          )
+          .sort((a, b) => a.last_name.localeCompare(b.last_name) || a.first_name.localeCompare(b.first_name));
+      } catch {
+        approvers = [];
+      }
     }
     // Load leave days for existing users
     if (!isNew) {
@@ -138,8 +160,10 @@
         // leave defaults
       }
     }
-    // Prefill defaults for new users
-    if (isNew) {
+    // Prefill defaults for new users. Skipped in locked-role mode: `/settings`
+    // is admin-only and weekly_hours/overtime are forced to 0 for assistants
+    // anyway, so there is nothing useful to prefill here.
+    if (isNew && !lockedRole) {
       try {
         const settings = await api("/settings");
         if (settings.default_weekly_hours != null) {
@@ -152,6 +176,8 @@
         }
         smtpEnabled = !!settings.smtp_enabled;
       } catch {}
+    }
+    if (isNew) {
       // Categories/absence categories default to "all enabled" (matching
       // the backend default), but shown as checkboxes so the admin can
       // deselect some before the user is even created.
@@ -245,11 +271,11 @@
       // to be consistent with the backend's auto-restore on demotion.
       body.tracks_time = normalizedRole === "admin" ? tracks_time : true;
       if (isNew) {
-        const createdUser = await api("/users", { method: "POST", body });
+        const createdUser = await api(apiBase, { method: "POST", body });
         dialog.close(true);
         showTempPassword = createdUser.temporary_password;
       } else {
-        await api("/users/" + template.id, { method: "PUT", body });
+        await api(apiBase + "/" + template.id, { method: "PUT", body });
         toast($t("User updated."), "ok");
         dialog.close(true);
         onClose(true);
@@ -317,12 +343,24 @@
       </div>
       <div>
         <label class="zf-label" for="user-role">{$t("Role")}</label>
-        <select id="user-role" class="zf-select" bind:value={role}>
-          <option value="employee">{$t("Employee")}</option>
-          <option value="assistant">{$t("Assistant")}</option>
-          <option value="team_lead">{$t("Team lead")}</option>
-          <option value="admin">{$t("Admin")}</option>
-        </select>
+        {#if lockedRole}
+          <input
+            id="user-role"
+            class="zf-input"
+            value={$t(roleDisplayLabel(lockedRole))}
+            disabled
+          />
+          <div class="field-hint">
+            {$t("You will be set as their approver.")}
+          </div>
+        {:else}
+          <select id="user-role" class="zf-select" bind:value={role}>
+            <option value="employee">{$t("Employee")}</option>
+            <option value="assistant">{$t("Assistant")}</option>
+            <option value="team_lead">{$t("Team lead")}</option>
+            <option value="admin">{$t("Admin")}</option>
+          </select>
+        {/if}
       </div>
       <div class="field-row">
         <div>

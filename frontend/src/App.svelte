@@ -259,6 +259,7 @@
     "/settings/email": () => import("./routes/AdminEmail.svelte"),
     "/settings/upload": () => import("./routes/AdminUpload.svelte"),
     "/settings/team": () => import("./routes/TeamSettings.svelte"),
+    "/settings/team-users": () => import("./routes/TeamUsers.svelte"),
   };
   const notFoundLoader = () => import("./routes/NotFound.svelte");
 
@@ -277,6 +278,7 @@
     "/settings/email": (user) => !!user?.permissions?.can_manage_settings,
     "/settings/upload": (user) => !!user?.permissions?.can_manage_settings,
     "/settings/team": (user) => !!user?.permissions?.can_manage_team_settings,
+    "/settings/team-users": (user) => !!user?.permissions?.can_manage_team_users,
   };
 
   $: routePromise = resolveRoute(pathname, $currentUser);

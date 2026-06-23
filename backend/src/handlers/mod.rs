@@ -7,5 +7,6 @@ pub mod notifications;
 pub mod reopen_requests;
 pub mod reports;
 pub mod settings;
+pub mod team_users;
 pub mod time_entries;
 pub mod users;
