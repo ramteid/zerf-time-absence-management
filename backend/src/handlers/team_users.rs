@@ -5,6 +5,11 @@
 //! to `services::users::assert_team_lead_assistant_list_access` /
 //! `assert_team_lead_can_manage_assistant` — admins use the regular
 //! `/users*` endpoints instead.
+//!
+//! Team leads may deactivate and reactivate an assistant (via `PUT` with
+//! `active: true|false`, mirroring the admin toggle), but there is
+//! deliberately no delete capability here — only an admin can permanently
+//! delete a user.
 
 use crate::audit;
 use crate::error::{AppError, AppResult};
@@ -13,9 +18,9 @@ use crate::middleware::auth::User;
 use crate::roles::{is_assistant_role, ROLE_ASSISTANT};
 use crate::services::users::{
     assert_team_lead_assistant_list_access, assert_team_lead_can_manage_assistant,
-    deactivate_tx, delete_sessions_for_user_tx, delete_tx, ensure_email_available,
-    ensure_user_name_available, normalize_optional_user_name, repo_user_to_auth_user,
-    set_leave_days_tx, update_basic_tx, user_unique_conflict,
+    delete_sessions_for_user_tx, ensure_email_available, ensure_user_name_available,
+    normalize_optional_user_name, repo_user_to_auth_user, set_leave_days_tx, update_basic_tx,
+    user_unique_conflict,
 };
 use crate::AppState;
 use axum::{
@@ -26,9 +31,12 @@ use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 
 /// Row returned by `GET /team-users`. Non-manageable colleagues (anyone who
-/// isn't an active assistant, including the requester's own row) carry only
+/// isn't an assistant, including the requester's own row) carry only
 /// `id`/`first_name`/`last_name` — no other field is ever serialized for
 /// them, so confidentiality doesn't depend on the frontend hiding anything.
+/// Unlike every other lead-facing list, this one includes inactive direct
+/// reports too, so a lead can see and reactivate an assistant they
+/// previously deactivated.
 #[derive(Serialize)]
 pub struct TeamUserRow {
     pub id: i64,
@@ -48,7 +56,11 @@ pub async fn list(
     requester: User,
 ) -> AppResult<Json<Vec<TeamUserRow>>> {
     assert_team_lead_assistant_list_access(&app_state, &requester).await?;
-    let repo_users = app_state.db.users.find_for_approver(requester.id).await?;
+    let repo_users = app_state
+        .db
+        .users
+        .find_for_approver_including_inactive(requester.id)
+        .await?;
     let rows = repo_users
         .into_iter()
         .map(|u| {
@@ -257,51 +269,4 @@ pub async fn update(
     )
     .await;
     Ok(Json(updated_auth_user))
-}
-
-pub async fn deactivate(
-    State(app_state): State<AppState>,
-    requester: User,
-    Path(user_id): Path<i64>,
-) -> AppResult<Json<serde_json::Value>> {
-    let previous_user =
-        assert_team_lead_can_manage_assistant(&app_state, &requester, user_id).await?;
-    let mut transaction = app_state.db.users.begin().await?;
-    deactivate_tx(&mut transaction, user_id).await?;
-    delete_sessions_for_user_tx(&mut transaction, user_id).await?;
-    transaction.commit().await?;
-    audit::log(
-        &app_state.pool,
-        requester.id,
-        "deactivated",
-        "users",
-        user_id,
-        serde_json::to_value(&previous_user).ok(),
-        Some(serde_json::json!({"active": false})),
-    )
-    .await;
-    Ok(Json(serde_json::json!({"ok": true})))
-}
-
-pub async fn delete_user(
-    State(app_state): State<AppState>,
-    requester: User,
-    Path(user_id): Path<i64>,
-) -> AppResult<Json<serde_json::Value>> {
-    let target_user =
-        assert_team_lead_can_manage_assistant(&app_state, &requester, user_id).await?;
-    let mut transaction = app_state.db.users.begin().await?;
-    delete_tx(&mut transaction, user_id).await?;
-    transaction.commit().await?;
-    audit::log(
-        &app_state.pool,
-        requester.id,
-        "deleted",
-        "users",
-        user_id,
-        serde_json::to_value(&target_user).ok(),
-        None,
-    )
-    .await;
-    Ok(Json(serde_json::json!({"ok": true})))
 }

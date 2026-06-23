@@ -1242,17 +1242,22 @@ When enabled, every non-admin team lead gets an additional **Users** tab under
 Settings, scoped strictly to their own assigned users:
 
 - The list shows everyone assigned to the lead as approver, plus the lead
-  themselves — the same set used elsewhere for team scoping. For anyone who is
-  **not** an active "Assistant" (including the lead's own row), only the name
-  is shown; no other field is sent by the server, and no action is available.
+  themselves — including inactive direct reports (unlike every other
+  lead-facing list, which only shows active team members; this is needed so a
+  lead can find and reactivate an assistant they previously deactivated). For
+  anyone who is **not** an "Assistant" (including the lead's own row), only
+  the name is shown; no other field is sent by the server, and no action is
+  available.
 - Only users with role "Assistant" who are assigned to the lead can be viewed
-  in detail, edited, deactivated, or deleted.
+  in detail, edited, deactivated, or reactivated.
+- There is no delete action here. A team lead can never delete a user — only
+  an admin can, via the regular Users tab.
 - The **Add Member** button only lets the lead create a new "Assistant" user.
   The role field is fixed and cannot be changed, and the new user's approver is
   always the creating lead — no other role or approver can be chosen.
 - Admins are unaffected: they continue to use the full Users tab and can
-  create or manage users with any role, as described under [Admin workflow
-  reference](#admin-workflow-reference).
+  create, manage, or delete users with any role, as described under [Admin
+  workflow reference](#admin-workflow-reference).
 
 This is enforced by the backend, not just hidden in the UI: every action a
 non-admin lead can perform here is re-validated against the assigned-assistant
@@ -1660,15 +1665,19 @@ re-validated server-side, independent of what the client sends:
 
 - The admin setting must be enabled, or every `/team-users*` request is
   rejected.
-- List results only ever include the requester's own assigned users; for
-  anyone who is not an active "Assistant" the server omits every field except
-  the name — there is no payload to leak even if the frontend had a bug.
+- List results only ever include the requester's own assigned users
+  (active or not); for anyone who is not an "Assistant" the server omits
+  every field except the name — there is no payload to leak even if the
+  frontend had a bug.
 - Create always forces role `assistant` and approver = the requesting lead,
   ignoring any role or approver value sent by the client.
-- Get/update/deactivate/delete all require the target to be both an active
-  direct report of the requester **and** role `assistant`; anyone else
-  (including a different lead's assistant, or the requester's own account)
-  is rejected with `403 Forbidden`.
+- Get/update require the target to be both a direct report of the requester
+  (active or not) **and** role `assistant`; anyone else (including a
+  different lead's assistant, or the requester's own account) is rejected
+  with `403 Forbidden`.
+- There is no delete route under `/team-users*` at all — a non-admin lead
+  can deactivate/reactivate an assigned assistant via the update endpoint,
+  but can never delete one.
 - Admins are unaffected and always use the regular `/users*` endpoints.
 
 ### Pure-admin mode (tracks_time=false)
