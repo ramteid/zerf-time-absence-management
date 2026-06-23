@@ -68,7 +68,7 @@
       const dest = currentUserResponse.must_change_password
         ? "/account"
         : currentUserResponse.must_configure_settings
-          ? "/admin/settings"
+          ? "/settings/general"
           : dashboardAvailable
             ? "/dashboard"
             : currentUserResponse.home || "/time";

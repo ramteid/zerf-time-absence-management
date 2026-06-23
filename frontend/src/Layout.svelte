@@ -114,28 +114,24 @@
     Calendar: "Calendar",
     Dashboard: "Home",
     Reports: "BarChart",
-    Admin: "Settings",
-    TeamSettings: "Shield",
+    Settings: "Settings",
   };
 
-  // Section grouping
+  // Section grouping — Settings covers both admin and team-lead access.
   function navSections(items) {
     const dashboard = [];
     const employee = [];
-    const lead = [];
     const admin = [];
     for (const link of items) {
       if (link.key === "Dashboard") {
         dashboard.push(link);
-      } else if (link.key === "TeamSettings") {
-        lead.push(link);
-      } else if (link.key === "Admin") {
+      } else if (link.key === "Settings") {
         admin.push(link);
       } else {
         employee.push(link);
       }
     }
-    return { dashboard, employee, lead, admin };
+    return { dashboard, employee, admin };
   }
 
   $: sections = navSections(desktopNav);
@@ -222,22 +218,6 @@
         {/each}
       {/if}
 
-      {#if sections.lead.length}
-        <div class="zf-nav-section" style="margin-top: 8px">{$t("Lead")}</div>
-        {#each sections.lead as link (link.href)}
-          <a
-            href={link.href}
-            data-link="1"
-            class="zf-nav-item"
-            class:active={pathname === link.href ||
-              pathname.startsWith(link.href + "/")}
-          >
-            <Icon name={iconMap[link.key] || "FileText"} size={17} />
-            <span>{$t(link.key)}</span>
-          </a>
-        {/each}
-      {/if}
-
       {#if sections.admin.length}
         <div class="zf-nav-section" style="margin-top: 8px">{$t("Admin")}</div>
         {#each sections.admin as link (link.href)}
@@ -245,8 +225,8 @@
             href={link.href}
             data-link="1"
             class="zf-nav-item"
-            class:active={link.key === "Admin"
-              ? pathname.startsWith("/admin")
+            class:active={link.key === "Settings"
+              ? pathname.startsWith("/settings")
               : pathname === link.href || pathname.startsWith(link.href + "/")}
           >
             <Icon name={iconMap[link.key] || "FileText"} size={17} />
@@ -386,8 +366,8 @@
             href={link.href}
             data-link="1"
             class="mobile-more-item"
-            class:active={link.key === "Admin"
-              ? pathname.startsWith("/admin")
+            class:active={link.key === "Settings"
+              ? pathname.startsWith("/settings")
               : pathname === link.href || pathname.startsWith(link.href + "/")}
             on:click={() => (mobileMoreOpen = false)}
           >

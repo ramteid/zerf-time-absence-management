@@ -187,7 +187,7 @@ This means:
 - You request to reopen the week.
 - Result: all submitted, approved, or rejected entries in the week are reset to draft and can be edited again.
 
-If you are unsure which categories in your organization are crediting, ask your admin or check the category list in the admin settings. Inactive categories remain visible to admins for maintenance, but they are hidden from normal time-entry forms.
+If you are unsure which categories in your organization are crediting, ask your admin or check the category list in the Settings. Inactive categories remain visible to admins for maintenance, but they are hidden from normal time-entry forms.
 
 ## Roles and approval model
 
@@ -226,7 +226,7 @@ Zerf uses one configurable application timezone for all business date logic.
 
 What this means in practice:
 
-- Admins can set the app timezone in admin settings (IANA zone, for example
+- Admins can set the app timezone in settings (Settings → General, IANA zone, for example
 	`Europe/Berlin`).
 - "Today", current year/month boundaries, reminder scheduling dates, and
 	date-based workflow checks are calculated in the configured app timezone.
@@ -328,7 +328,7 @@ does nothing. The only way to make corrections is to reopen the whole week.
   is rejected with a message that the week has no submitted, approved, or
   rejected entries.
 - Reopen requests can be pending review or auto-approved, depending on the
-  requester's configuration (see Team Settings → "Auto-approve edit requests").
+  requester's configuration (see Settings → Team Settings → "Auto-approve edit requests").
 
 ## Absence workflow
 
@@ -444,7 +444,7 @@ If your team meeting were crediting instead, the result would be: (7+1) − 8 = 
 
 ### Automatic break deduction
 
-When the feature is enabled in admin settings, Zerf silently deducts a configured number of break minutes from each day's credited work when consecutive work reaches or exceeds a configured threshold.
+When the feature is enabled in Settings → General, Zerf silently deducts a configured number of break minutes from each day's credited work when consecutive work reaches or exceeds a configured threshold.
 
 **How continuity is determined:**
 
@@ -473,7 +473,7 @@ When a break is triggered, the entry block where the threshold is crossed displa
 
 Example: threshold 6 hours, deduction 30 minutes. An employee books 3 hours of core work followed immediately by 4 hours of training (7 hours total, one continuous block). The threshold is crossed during the training block, 3 hours into it (6 total hours reached). The marker appears at three-quarters from the top of the training entry block, and its height corresponds to 30 minutes of the 4-hour entry (about 12.5 % of the block height).
 
-**Configuration (Admin → General Settings):**
+**Configuration (Settings → General):**
 
 | Setting | Description |
 | --- | --- |
@@ -599,7 +599,7 @@ Important distinction:
 
 ### Carryover expiry behavior
 
-The carryover expiry date is configured in admin settings as a month and day (for example 03-31 for March 31).
+The carryover expiry date is configured in Settings → General as a month and day (for example 03-31 for March 31).
 
 - Carryover for a given year expires on that date within the year.
 - After expiry, transferred carryover is not part of total usable budget.
@@ -738,7 +738,7 @@ for review.
 
 ### Reminder toggles (admin)
 
-Admins can manage reminder behavior in settings:
+Admins can manage reminder behavior in Settings → General:
 
 - submission reminders enabled/disabled,
 - approval reminders enabled/disabled.
@@ -877,7 +877,7 @@ Zerf distinguishes between workflow coverage and work-credit math.
 
 Use this checklist after initial deployment or major configuration changes.
 
-1. Set app timezone in admin settings.
+1. Set app timezone in settings (Settings → General).
 2. Assign explicit active approvers for all non-admin users.
 3. Review reminder toggles (submission and approval reminders).
 4. Confirm holiday data is loaded for current/next year.
@@ -968,7 +968,7 @@ After submission, all your explicitly assigned approvers receive a notification
 identifying the submitted weeks by their week labels.
 
 **Auto-approval:** If your team lead or admin has enabled auto-approval of
-submissions for you (Team Settings → "Auto-approve submissions"), submitted
+submissions for you (Settings → Team Settings → "Auto-approve submissions"), submitted
 weeks skip the approval queue entirely and go straight to `approved`. This is
 silent by design: neither you nor your approvers receive any notification or
 email about it.
@@ -1182,6 +1182,8 @@ Auto-approved reopen requests (see below) never reach this review queue — the
 reopen already happened at request time, silently.
 
 ### Team settings: reopen policy
+
+Team leads and admins access these settings via Settings → Team Settings.
 
 Team leads can enable or disable auto-approval of reopen requests for their
 direct reports. Admins can set it for any user (including themselves).
@@ -1416,7 +1418,7 @@ admins revoke.
 
 ### System settings
 
-Admins configure system-wide behavior in the settings panel:
+Admins configure system-wide behavior in the Settings panel (Settings → General):
 
 | Setting | Description |
 | --- | --- |
@@ -1622,7 +1624,7 @@ Non-admin team leads are prevented from:
 - Admins with `tracks_time=false` cannot create, view, or export their own
   time entries, absences, or reports.
 - They retain full access to team management, approval workflows, the calendar,
-  and admin settings.
+  and the Settings panel.
 - The navigation bar automatically hides Time and Absences links for these
   accounts.
 - The Calendar remains accessible since pure-admins need team schedule
