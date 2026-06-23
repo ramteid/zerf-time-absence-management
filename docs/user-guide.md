@@ -98,6 +98,8 @@ Use this document if you are:
   - [Creating a user](#creating-a-user)
   - [Updating a user](#updating-a-user)
   - [Deactivating a user](#deactivating-a-user)
+  - [Archiving a user](#archiving-a-user)
+  - [Restoring an archived user](#restoring-an-archived-user)
   - [Deleting a user](#deleting-a-user)
   - [Resetting a password](#resetting-a-password)
   - [Managing approver assignments](#managing-approver-assignments)
@@ -1357,10 +1359,63 @@ Guards:
 
 On success: the user can no longer log in and any active sessions end immediately.
 
+### Archiving a user
+
+When a user has historical data (time entries, absences, or requests), the
+system blocks permanent deletion and requires archiving instead. Archiving is
+a soft removal that preserves all history while preventing the user from
+logging in and hiding them from active lists.
+
+**Location:** Settings > Users > select a user > Archive.
+
+What archiving does:
+
+- The user can no longer log in; any active sessions end immediately.
+- The user disappears from the normal user list, approver pickers, team
+  reports, and dashboards.
+- All historical time entries, approved absences, and audit records are kept.
+- All pending absence requests and pending reopen requests owned by the user
+  are auto-rejected with the reason "User account archived."
+- Already-approved absences (including future ones) are preserved.
+
+Guards:
+
+- Cannot archive yourself.
+- Cannot archive the last active admin.
+- If the user is currently listed as an approver for any active users, you
+  must provide a replacement approver for each of those users in the same
+  request. The archive is rejected unless every dependent user has a valid
+  replacement assigned.
+
+**Viewing archived users:** Settings > Users > Archived users tab. The list
+shows the user's name, role, and the date they were archived.
+
+### Restoring an archived user
+
+Restore brings an archived user back as an active account.
+
+**Location:** Settings > Users > Archived users tab > select a user > Restore.
+
+Restore behavior:
+
+- The user becomes active again and can log in.
+- `must_change_password` is set to true, so the user is forced to set a new
+  password on first login.
+- Approver assignments must be provided as part of the restore request; the
+  user will have no approvers until they are set here.
+- Optionally, a new start date can be supplied. This resets the start date
+  used for flextime and balance calculations, which avoids accumulating a
+  flextime gap for the period the user was archived. If no new start date is
+  given, the original start date is kept.
+- Historical data created before archiving is unchanged.
+
 ### Deleting a user
 
 Permanent deletion removes all user data (entries, absences, requests, leave
 records).
+
+If the user has any historical time data, deletion is blocked and the error
+message instructs you to use archiving instead.
 
 Guards are identical to deactivation:
 
@@ -1368,7 +1423,7 @@ Guards are identical to deactivation:
 - Cannot delete the last active admin.
 - Cannot delete a user who is still listed as an approver for active users.
 
-There is no undo. Use deactivation if you want to preserve history.
+There is no undo. Use archiving if you want to preserve history.
 
 ### Resetting a password
 

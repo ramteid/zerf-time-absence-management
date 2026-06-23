@@ -5,11 +5,14 @@
   import Icon from "../Icons.svelte";
   import UserDialog from "../dialogs/UserDialog.svelte";
   import TempPasswordDialog from "../dialogs/TempPasswordDialog.svelte";
+  import ArchiveUserDialog from "../dialogs/ArchiveUserDialog.svelte";
   import { confirmDialog } from "../confirm.js";
 
   let users = [];
   let showDialog = null;
   let resetPwData = null;
+  // The user object selected for archiving — triggers ArchiveUserDialog.
+  let archiveTarget = null;
 
   async function load() {
     const loaded = await api("/users");
@@ -62,24 +65,6 @@
   async function editUser(u) {
     try {
       showDialog = await api(`/users/${u.id}`);
-    } catch (e) {
-      toast($t(e?.message || "Error"), "error");
-    }
-  }
-
-  async function deleteUser(u) {
-    if (
-      !(await confirmDialog(
-        $t("Delete user?"),
-        $t("Delete user permanently? All data of this user will be deleted. This cannot be undone."),
-        { danger: true, confirm: $t("Delete permanently") },
-      ))
-    )
-      return;
-    try {
-      await api(`/users/${u.id}`, { method: "DELETE" });
-      toast($t("User deleted."), "ok");
-      load();
     } catch (e) {
       toast($t(e?.message || "Error"), "error");
     }
@@ -149,12 +134,13 @@
           >
             <Icon name={u.active ? "X" : "Check"} size={13} />
           </button>
+          <!-- Archive replaces hard-delete: data is preserved and restorable. -->
           <button
             class="zf-btn zf-btn-ghost zf-btn-sm zf-btn-danger"
-            title={$t("Delete permanently")}
-            on:click={() => deleteUser(u)}
+            title={$t("Archive")}
+            on:click={() => (archiveTarget = u)}
           >
-            <Icon name="Trash" size={13} />
+            <Icon name="Archive" size={13} />
           </button>
         </div>
       </div>
@@ -186,6 +172,16 @@
         }
         load();
       }
+    }}
+  />
+{/if}
+
+{#if archiveTarget}
+  <ArchiveUserDialog
+    user={archiveTarget}
+    onClose={(changed) => {
+      archiveTarget = null;
+      if (changed) load();
     }}
   />
 {/if}

@@ -1,8 +1,9 @@
 // Tests for the AdminUsers page. Admins manage the team roster here —
 // creating new accounts, editing existing ones, deactivating members, and
-// resetting passwords. Tests verify that the list renders correctly, that
-// the add/edit dialogs open, and that the deactivate/delete flows prompt
-// for confirmation before sending any destructive API call.
+// resetting passwords. The archive button opens ArchiveUserDialog instead of
+// hard-deleting so all historical data is preserved. Tests verify that the
+// list renders correctly, that the add/edit dialogs open, and that the
+// deactivate and archive flows work as expected.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mount, unmount } from "svelte";
@@ -171,7 +172,7 @@ describe("AdminUsers", () => {
     component = mount(AdminUsers, { target });
     await waitForText(target, "Bob");
 
-    // Row button order: Edit | Shield (reset PW) | Toggle active (titled) | Delete (titled).
+    // Row button order: Edit | Shield (reset PW) | Toggle active (titled) | Archive (titled).
     // Filtering out titled buttons leaves: Add Member, Edit-Alice, Shield-Alice, Edit-Bob…
     // Index 2 is the Shield button for the first user (Alice, user id 1).
     const noTitleIconBtns = [...target.querySelectorAll("button")].filter(
@@ -188,5 +189,42 @@ describe("AdminUsers", () => {
         opts?.method === "POST"
     );
     expect(resetCall).toBeTruthy();
+  });
+
+  it("opens the ArchiveUserDialog when the archive button is clicked", async () => {
+    // Archiving replaces permanent deletion: data is preserved so the account
+    // can be restored. Clicking the archive button must open the dialog, NOT
+    // immediately call the API — the admin can still cancel in the dialog.
+    apiMock.mockResolvedValueOnce(sampleUsers);
+    // ArchiveUserDialog fetches /users on mount to build the replacement list.
+    apiMock.mockResolvedValue(sampleUsers);
+    component = mount(AdminUsers, { target });
+    await waitForText(target, "Alice");
+
+    // The archive button has title="Archive".
+    const archiveBtn = [...target.querySelectorAll("button")].find(
+      (b) => b.title === "Archive"
+    );
+    expect(archiveBtn).not.toBeNull();
+    archiveBtn.click();
+    await settle();
+    await settle();
+
+    // A dialog should now be open.
+    const dialog = target.querySelector("dialog");
+    expect(dialog?.hasAttribute("open")).toBe(true);
+  });
+
+  it("does not expose a Delete permanently button", async () => {
+    // Hard-deletion is no longer available through this UI.
+    // Archived users can be restored; permanently deleted users cannot.
+    apiMock.mockResolvedValue(sampleUsers);
+    component = mount(AdminUsers, { target });
+    await waitForText(target, "Alice");
+
+    const deleteBtns = [...target.querySelectorAll("button")].filter(
+      (b) => b.title === "Delete permanently"
+    );
+    expect(deleteBtns).toHaveLength(0);
   });
 });

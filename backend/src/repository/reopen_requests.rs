@@ -342,6 +342,29 @@ impl ReopenRequestDb {
         Ok(affected)
     }
 
+    /// Reject all pending reopen requests owned by `user_id` within an existing
+    /// transaction. Used during archiving to auto-reject the user's open requests.
+    /// Returns the count of rejected requests.
+    pub async fn reject_pending_for_user_tx(
+        tx: &mut sqlx::PgConnection,
+        user_id: i64,
+        reviewer_id: i64,
+        reason: &str,
+    ) -> AppResult<u64> {
+        let rows = sqlx::query(
+            "UPDATE reopen_requests SET status='rejected', reviewed_by=$1, \
+             reviewed_at=CURRENT_TIMESTAMP, rejection_reason=$2 \
+             WHERE user_id=$3 AND status='pending'",
+        )
+        .bind(reviewer_id)
+        .bind(reason)
+        .bind(user_id)
+        .execute(tx)
+        .await?
+        .rows_affected();
+        Ok(rows)
+    }
+
     pub async fn begin(&self) -> AppResult<sqlx::Transaction<'_, sqlx::Postgres>> {
         Ok(self.pool.begin().await?)
     }

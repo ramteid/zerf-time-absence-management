@@ -674,6 +674,30 @@ impl AbsenceDb {
         .rows_affected())
     }
 
+    /// Reject all pending absences (status 'requested' or 'cancellation_pending')
+    /// owned by `user_id` within an existing transaction. Used during archiving.
+    /// The system acts as the reviewer (reviewer_id = None is stored as NULL).
+    /// Returns the count of rejected absences.
+    pub async fn reject_pending_for_user_tx(
+        tx: &mut sqlx::PgConnection,
+        user_id: i64,
+        reviewer_id: i64,
+        reason: &str,
+    ) -> AppResult<u64> {
+        let rows = sqlx::query(
+            "UPDATE absences SET status='rejected', reviewed_by=$1, \
+             reviewed_at=CURRENT_TIMESTAMP, rejection_reason=$2 \
+             WHERE user_id=$3 AND status IN ('requested','cancellation_pending')",
+        )
+        .bind(reviewer_id)
+        .bind(reason)
+        .bind(user_id)
+        .execute(tx)
+        .await?
+        .rows_affected();
+        Ok(rows)
+    }
+
     pub async fn find_for_update(
         tx: &mut sqlx::PgConnection,
         absence_id: i64,

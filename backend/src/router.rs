@@ -107,6 +107,10 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                     get(handlers::users::earliest_start_date),
                 )
                 .route(
+                    "/users/archived",
+                    get(handlers::users::list_archived),
+                )
+                .route(
                     "/users",
                     get(handlers::users::list).post(handlers::users::create),
                 )
@@ -117,6 +121,14 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                         .delete(handlers::users::delete_user),
                 )
                 .route("/users/{id}/deactivate", post(handlers::users::deactivate))
+                .route(
+                    "/users/{id}/archive",
+                    post(handlers::users::archive_user),
+                )
+                .route(
+                    "/users/{id}/restore",
+                    post(handlers::users::restore_user),
+                )
                 .route(
                     "/users/{id}/reset-password",
                     post(handlers::users::reset_password),
