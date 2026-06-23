@@ -42,6 +42,10 @@
   let tracks_time = template.tracks_time ?? true;
   let error = "";
   let approvers = [];
+  let allCategories = [];
+  let allAbsenceCategories = [];
+  let selectedCategoryIds = [];
+  let selectedAbsenceCategoryIds = [];
   $: normalizedRole = String(role || "").trim().toLowerCase();
   $: requiresApprover = normalizedRole !== "admin";
   $: isAssistantRole = normalizedRole === "assistant";
@@ -141,6 +145,21 @@
         }
         smtpEnabled = !!settings.smtp_enabled;
       } catch {}
+      // Categories/absence categories default to "all enabled" (matching
+      // the backend default), but shown as checkboxes so the admin can
+      // deselect some before the user is even created.
+      try {
+        allCategories = await api("/categories/all");
+        selectedCategoryIds = allCategories.map((c) => c.id);
+      } catch {
+        allCategories = [];
+      }
+      try {
+        allAbsenceCategories = await api("/absence-categories/all");
+        selectedAbsenceCategoryIds = allAbsenceCategories.map((c) => c.id);
+      } catch {
+        allAbsenceCategories = [];
+      }
     }
   });
 
@@ -206,6 +225,10 @@
       }
       if (isNew && password) {
         body.password = password;
+      }
+      if (isNew) {
+        body.category_ids = selectedCategoryIds;
+        body.absence_category_ids = selectedAbsenceCategoryIds;
       }
       if (!isNew) {
         body.active = active;
@@ -502,6 +525,40 @@
           {/if}
           <div class="field-hint">
             {$t("At least one approver is required for employees and team leads.")}
+          </div>
+        </div>
+      {/if}
+      {#if isNew && allCategories.length > 0}
+        <div>
+          <div class="zf-label">{$t("Time Categories")}</div>
+          <div style="display:flex;flex-direction:column;gap:6px;max-height:160px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px">
+            {#each allCategories as c (c.id)}
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
+                <input
+                  type="checkbox"
+                  value={c.id}
+                  bind:group={selectedCategoryIds}
+                />
+                {$t(c.name)}
+              </label>
+            {/each}
+          </div>
+        </div>
+      {/if}
+      {#if isNew && allAbsenceCategories.length > 0}
+        <div>
+          <div class="zf-label">{$t("Absence Categories")}</div>
+          <div style="display:flex;flex-direction:column;gap:6px;max-height:160px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px">
+            {#each allAbsenceCategories as c (c.id)}
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
+                <input
+                  type="checkbox"
+                  value={c.id}
+                  bind:group={selectedAbsenceCategoryIds}
+                />
+                {$t(c.name)}
+              </label>
+            {/each}
           </div>
         </div>
       {/if}

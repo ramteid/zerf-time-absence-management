@@ -61,6 +61,9 @@ pub struct User {
     /// entries or absences are tracked, all related endpoints are blocked, and
     /// the corresponding navigation items are hidden in the frontend.
     pub tracks_time: bool,
+    /// Base annual leave entitlement (days/year), used whenever no explicit
+    /// `user_annual_leave` override exists for a given year.
+    pub annual_leave_days: i64,
 }
 
 impl User {
@@ -299,6 +302,7 @@ pub async fn auth_middleware(
         dark_mode: repo_user.dark_mode,
         overtime_start_balance_min: repo_user.overtime_start_balance_min,
         tracks_time: repo_user.tracks_time,
+        annual_leave_days: repo_user.annual_leave_days,
     };
 
     // Enforce must_change_password: users with a temporary password are only
@@ -364,6 +368,7 @@ mod tests {
             dark_mode: false,
             overtime_start_balance_min: 0,
             tracks_time: true,
+            annual_leave_days: 30,
         }
     }
 

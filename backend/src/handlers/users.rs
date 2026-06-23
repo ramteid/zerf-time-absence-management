@@ -199,6 +199,15 @@ pub struct NewUser {
     /// time or absence tracking. Defaults to TRUE (normal tracking enabled).
     #[serde(default = "default_tracks_time")]
     pub tracks_time: bool,
+    /// Time categories enabled for this employee. Omitted/null means "all
+    /// existing categories" (the previous default behavior); an explicit
+    /// list (including an empty one) is used as-is.
+    #[serde(default)]
+    pub category_ids: Option<Vec<i64>>,
+    /// Absence categories enabled for this employee. Same omitted/null
+    /// semantics as `category_ids`.
+    #[serde(default)]
+    pub absence_category_ids: Option<Vec<i64>>,
 }
 
 fn default_tracks_time() -> bool {
@@ -232,6 +241,8 @@ pub async fn create(
         password: body.password,
         approver_ids: body.approver_ids,
         tracks_time: body.tracks_time,
+        category_ids: body.category_ids,
+        absence_category_ids: body.absence_category_ids,
     };
     let created = crate::services::users::create(&app_state, &requester, service_body).await?;
     Ok(Json(CreateResponse {

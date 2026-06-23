@@ -24,6 +24,12 @@ pub struct NewUser {
     pub password: Option<String>,
     pub approver_ids: Vec<i64>,
     pub tracks_time: bool,
+    /// Time categories enabled for this employee. `None` means "all existing
+    /// categories" (the previous default); `Some(ids)` is used verbatim.
+    pub category_ids: Option<Vec<i64>>,
+    /// Absence categories enabled for this employee. Same `None` semantics
+    /// as `category_ids`.
+    pub absence_category_ids: Option<Vec<i64>>,
 }
 
 pub struct CreateResponse {
@@ -52,6 +58,7 @@ pub fn repo_user_to_auth_user(u: crate::repository::User) -> User {
         dark_mode: u.dark_mode,
         overtime_start_balance_min: u.overtime_start_balance_min,
         tracks_time: u.tracks_time,
+        annual_leave_days: u.annual_leave_days,
     }
 }
 
@@ -82,6 +89,44 @@ pub async fn assert_can_access_user(
         .await?;
     if !is_report {
         return Err(AppError::Forbidden);
+    }
+    Ok(())
+}
+
+/// Validate that each id refers to an existing time category, so a typo or a
+/// stale id from a slow admin UI surfaces as a clear 400 rather than a
+/// foreign-key error during the insert.
+async fn validate_category_ids(app_state: &AppState, category_ids: &[i64]) -> AppResult<()> {
+    for category_id in category_ids {
+        if app_state
+            .db
+            .categories
+            .find_by_id(*category_id)
+            .await?
+            .is_none()
+        {
+            return Err(AppError::BadRequest("Unknown category id.".into()));
+        }
+    }
+    Ok(())
+}
+
+/// Validate that each id refers to an existing absence category. See
+/// `validate_category_ids`.
+async fn validate_absence_category_ids(
+    app_state: &AppState,
+    category_ids: &[i64],
+) -> AppResult<()> {
+    for category_id in category_ids {
+        if app_state
+            .db
+            .absence_categories
+            .find_by_id(*category_id)
+            .await?
+            .is_none()
+        {
+            return Err(AppError::BadRequest("Unknown absence category id.".into()));
+        }
     }
     Ok(())
 }
@@ -225,23 +270,29 @@ pub async fn create_repo_user(
     hire_date: Option<chrono::NaiveDate>,
     overtime_start_balance_min: i64,
     tracks_time: bool,
-) -> Result<i64, crate::db::SqlxError> {
-    UserDb::create(
-        tx,
-        email,
-        password_hash,
-        first_name,
-        last_name,
-        role,
-        weekly_hours,
-        workdays_per_week,
-        start_date,
-        hire_date,
-        true,
-        overtime_start_balance_min,
-        tracks_time,
+) -> AppResult<i64> {
+    let default_leave_days = UserDb::get_default_leave_days_tx(&mut *tx).await?;
+    Ok(
+        UserDb::create(
+            tx,
+            email,
+            password_hash,
+            first_name,
+            last_name,
+            role,
+            weekly_hours,
+            workdays_per_week,
+            start_date,
+            hire_date,
+            true,
+            overtime_start_balance_min,
+            tracks_time,
+            None,
+            None,
+            default_leave_days,
+        )
+        .await?,
     )
-    .await
 }
 
 pub async fn insert_approver_tx(
@@ -320,6 +371,7 @@ pub async fn update_basic_tx(
         allow_submission_without_approval,
         overtime_start_balance_min,
         tracks_time,
+        None,
     )
     .await
 }
@@ -446,6 +498,7 @@ pub async fn team_settings_update(
         Some(allow_submission_without_approval),
         None,
         None,
+        None,
     )
     .await?;
     tx.commit().await?;
@@ -542,9 +595,16 @@ pub async fn create(
             "Invalid overtime_start_balance_min.".into(),
         ));
     }
+    if let Some(ref ids) = body.category_ids {
+        validate_category_ids(app_state, ids).await?;
+    }
+    if let Some(ref ids) = body.absence_category_ids {
+        validate_absence_category_ids(app_state, ids).await?;
+    }
     let mut transaction = app_state.db.users.begin().await?;
     crate::services::auth::lock_user_graph(&mut transaction).await?;
     validate_approver_ids(app_state, &body.role, None, &body.approver_ids).await?;
+    let default_leave_days = UserDb::get_default_leave_days_tx(&mut transaction).await?;
     let new_user_id = UserDb::create(
         &mut transaction,
         &normalized_email,
@@ -559,6 +619,9 @@ pub async fn create(
         true,
         overtime_balance,
         body.tracks_time,
+        body.category_ids.as_deref(),
+        body.absence_category_ids.as_deref(),
+        default_leave_days,
     )
     .await
     .map_err(|e| {
@@ -677,6 +740,7 @@ mod tests {
             dark_mode: false,
             overtime_start_balance_min: 0,
             tracks_time: true,
+            annual_leave_days: 30,
         }
     }
 

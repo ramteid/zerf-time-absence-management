@@ -217,13 +217,11 @@ pub async fn carryover_days_into_year(
 
     let anchor = leave_entitlement_anchor(user);
     let absence_db = crate::repository::AbsenceDb::new(pool.clone());
-    let default_days = crate::repository::UserDb::new(pool.clone())
-        .get_default_leave_days()
-        .await?;
     let mut incoming_carryover = 0;
 
     for source_year in user.start_date.year()..year {
-        let entitled = annual_days_or_default(pool, user.id, source_year, default_days).await?;
+        let entitled =
+            annual_days_or_default(pool, user.id, source_year, user.annual_leave_days).await?;
         let effective_entitlement = pro_rate_entitlement(anchor, source_year, entitled);
         let year_from = NaiveDate::from_ymd_opt(source_year, 1, 1).unwrap();
         let year_to = NaiveDate::from_ymd_opt(source_year, 12, 31).unwrap();
@@ -1084,6 +1082,7 @@ mod tests {
             dark_mode: false,
             overtime_start_balance_min: 0,
             tracks_time: true,
+            annual_leave_days: 30,
         }
     }
 

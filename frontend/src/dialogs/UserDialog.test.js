@@ -252,4 +252,109 @@ describe("UserDialog", () => {
 
     expect(findClearBtn()).toBeFalsy();
   });
+
+  it("defaults to every category enabled for a new user and sends them on save", async () => {
+    // Matches the backend default ("all existing categories") so the admin
+    // sees an explicit, pre-checked list rather than an empty one they'd
+    // have to fill in by hand.
+    apiMock.mockImplementation(async (path) => {
+      if (path === "/users")
+        return [{ id: 5, first_name: "Lara", last_name: "Lead", role: "team_lead", active: true }];
+      if (path === "/settings")
+        return { default_weekly_hours: 39, default_annual_leave_days: 30, smtp_enabled: false };
+      if (path === "/categories/all")
+        return [
+          { id: 1, name: "Core Duties" },
+          { id: 2, name: "Training" },
+        ];
+      if (path === "/absence-categories/all")
+        return [{ id: 10, name: "Vacation" }];
+      return { temporary_password: "x" };
+    });
+    const onClose = vi.fn();
+    component = mount(UserDialog, {
+      target,
+      props: { template: { role: "employee" }, onClose },
+    });
+    await waitForText(target, "Add Member");
+    await settle();
+
+    expect(target.textContent).toContain("Core Duties");
+    expect(target.textContent).toContain("Vacation");
+    const checkboxes = target.querySelectorAll(
+      'input[type="checkbox"][value="1"], input[type="checkbox"][value="2"], input[type="checkbox"][value="10"]',
+    );
+    expect(checkboxes.length).toBe(3);
+    checkboxes.forEach((cb) => expect(cb.checked).toBe(true));
+
+    // Select an approver (required for employees) and uncheck "Training".
+    const approverCheckbox = [...target.querySelectorAll('input[type="checkbox"]')].find(
+      (cb) => cb.value === "5",
+    );
+    approverCheckbox.click();
+    const trainingCheckbox = [...target.querySelectorAll('input[type="checkbox"]')].find(
+      (cb) => cb.value === "2",
+    );
+    trainingCheckbox.click();
+    await settle();
+
+    const saveBtn = [...target.querySelectorAll("button")].find((b) =>
+      b.textContent.includes("Add"),
+    );
+    saveBtn?.click();
+    await settle();
+
+    const postCall = apiMock.mock.calls.find(
+      ([path, opts]) => path === "/users" && opts?.method === "POST",
+    );
+    expect(postCall).toBeTruthy();
+    expect(postCall[1].body.category_ids).toEqual([1]);
+    expect(postCall[1].body.absence_category_ids).toEqual([10]);
+  });
+
+  it("only sends category_ids/absence_category_ids on create, never on edit", async () => {
+    apiMock.mockImplementation(async (path) => {
+      if (path === "/users") return [];
+      if (path.endsWith("/leave-days")) return [];
+      return {};
+    });
+    const onClose = vi.fn();
+    component = mount(UserDialog, {
+      target,
+      props: {
+        template: {
+          id: 7,
+          first_name: "Grace",
+          last_name: "Green",
+          role: "employee",
+          email: "grace@example.com",
+          weekly_hours: 40,
+          workdays_per_week: 5,
+          start_date: "2023-01-01",
+          approver_ids: [5],
+          active: true,
+          tracks_time: true,
+        },
+        onClose,
+      },
+    });
+    await waitForText(target, "Edit Member");
+    await settle();
+
+    expect(target.textContent).not.toContain("Time Categories");
+    expect(target.textContent).not.toContain("Absence Categories");
+
+    const saveBtn = [...target.querySelectorAll("button")].find((b) =>
+      b.textContent.includes("Save"),
+    );
+    saveBtn?.click();
+    await settle();
+
+    const putCall = apiMock.mock.calls.find(
+      ([path, opts]) => path === "/users/7" && opts?.method === "PUT",
+    );
+    expect(putCall).toBeTruthy();
+    expect(putCall[1].body).not.toHaveProperty("category_ids");
+    expect(putCall[1].body).not.toHaveProperty("absence_category_ids");
+  });
 });

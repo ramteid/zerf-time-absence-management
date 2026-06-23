@@ -478,7 +478,7 @@ Example: threshold 6 hours, deduction 30 minutes. An employee books 3 hours of c
 | Setting | Description |
 | --- | --- |
 | Enable automatic break deduction | Enables or disables the feature. When disabled, all stored values are cleared. |
-| Break threshold (hours) | Tier-1 minimum consecutive crediting work duration that triggers a break (0.5–24 h). |
+| Break threshold (hours) | Tier-1 minimum consecutive crediting work duration that triggers a break (must be greater than 0, up to 24 h). |
 | Break deduction (minutes) | Tier-1 total minutes deducted when the threshold is reached (1–480 min). |
 | Second threshold (hours) | Optional tier-2 threshold. Must be greater than tier-1. When a block reaches this duration, the tier-2 deduction replaces tier-1. |
 | Second deduction (minutes) | Tier-2 total minutes deducted (1–480 min). This is the total, not additional — e.g. configure 45 min here, not 15 min, to achieve a 45-minute break at the tier-2 threshold. |
@@ -1270,6 +1270,12 @@ pro-rate from the start date, which is correct when employment and Zerf usage
 begin on the same day.
 
 Optional: one or more approvers to assign to the new user.
+
+Optional: which time categories and absence categories the new user can use.
+The creation form shows both lists pre-checked (every existing category
+enabled, the default), so deselecting one is the only action needed to
+restrict it. See [Managing categories](#managing-categories) for how access
+is adjusted later, after the user already exists.
 
 A temporary password is generated automatically. The user must change it on
 first login. A registration email with the temporary password is sent if

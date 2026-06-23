@@ -1285,3 +1285,144 @@ async fn users_full_workflow() {
 
     app.cleanup().await;
 }
+
+/// Admins can choose which categories/absence categories a new employee
+/// starts with: omitting the fields defaults to "all existing categories"
+/// (the previous behavior), an explicit list grants exactly that list
+/// (including an empty one), and an unknown id in the list is rejected.
+#[tokio::test]
+async fn user_creation_with_explicit_category_selection() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+
+    let (_, all_cats) = admin.get("/api/v1/categories/all").await;
+    let cat_ids: Vec<i64> = all_cats
+        .as_array()
+        .expect("categories array")
+        .iter()
+        .map(|c| c["id"].as_i64().unwrap())
+        .collect();
+    assert!(cat_ids.len() >= 2, "fixture seeds multiple categories");
+    let first_cat_id = cat_ids[0];
+
+    let (_, all_abs_cats) = admin.get("/api/v1/absence-categories/all").await;
+    let abs_cat_id = all_abs_cats
+        .as_array()
+        .expect("absence categories array")
+        .iter()
+        .find(|c| c["slug"].as_str() == Some("training"))
+        .expect("training seeded category exists")["id"]
+        .as_i64()
+        .unwrap();
+
+    // Omitting the fields defaults to every existing category enabled.
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({"email":"omit-cats@example.com","first_name":"Omit","last_name":"Cats",
+                "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
+                "start_date":"2024-01-01","approver_ids":[1]}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create without category fields: {body}");
+    let omit_user_id = id(&body);
+    let (st, enabled) = admin
+        .get(&format!("/api/v1/categories/{first_cat_id}/users"))
+        .await;
+    assert_eq!(st, StatusCode::OK);
+    assert!(
+        enabled
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v.as_i64() == Some(omit_user_id)),
+        "omitting category_ids defaults to all categories enabled"
+    );
+
+    // An explicit, partial list grants exactly that list.
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({"email":"explicit-cats@example.com","first_name":"Explicit","last_name":"Cats",
+                "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
+                "start_date":"2024-01-01","approver_ids":[1],
+                "category_ids":[first_cat_id],"absence_category_ids":[]}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create with explicit categories: {body}");
+    let explicit_user_id = id(&body);
+
+    let (st, enabled) = admin
+        .get(&format!("/api/v1/categories/{first_cat_id}/users"))
+        .await;
+    assert_eq!(st, StatusCode::OK);
+    assert!(
+        enabled
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v.as_i64() == Some(explicit_user_id)),
+        "explicitly listed category is enabled"
+    );
+    let second_cat_id = cat_ids[1];
+    let (st, enabled) = admin
+        .get(&format!("/api/v1/categories/{second_cat_id}/users"))
+        .await;
+    assert_eq!(st, StatusCode::OK);
+    assert!(
+        !enabled
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v.as_i64() == Some(explicit_user_id)),
+        "category omitted from the explicit list is not enabled"
+    );
+    let (st, enabled) = admin
+        .get(&format!("/api/v1/absence-categories/{abs_cat_id}/users"))
+        .await;
+    assert_eq!(st, StatusCode::OK);
+    assert!(
+        !enabled
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v.as_i64() == Some(explicit_user_id)),
+        "empty absence_category_ids list enables nothing"
+    );
+
+    // An unknown category id is rejected with a clean 400, not a 500.
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({"email":"bad-cat@example.com","first_name":"Bad","last_name":"Cat",
+                "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
+                "start_date":"2024-01-01","approver_ids":[1],
+                "category_ids":[9999999]}),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::BAD_REQUEST,
+        "unknown category id rejected: {body}"
+    );
+    assert_eq!(body["error"], "Unknown category id.");
+
+    // Unknown absence category ids are validated the same way.
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({"email":"bad-absence-cat@example.com","first_name":"Bad","last_name":"AbsCat",
+                "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
+                "start_date":"2024-01-01","approver_ids":[1],
+                "absence_category_ids":[9999999]}),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::BAD_REQUEST,
+        "unknown absence category id rejected: {body}"
+    );
+    assert_eq!(body["error"], "Unknown absence category id.");
+
+    app.cleanup().await;
+}
