@@ -51,11 +51,13 @@ Use this document if you are:
 - [Notifications](#notifications)
   - [Employee receives notifications when](#employee-receives-notifications-when)
   - [Approver receives notifications when](#approver-receives-notifications-when)
+  - [Exception: auto-approved submissions and reopen requests are silent](#exception-auto-approved-submissions-and-reopen-requests-are-silent)
   - [Who gets notified](#who-gets-notified)
   - [Important: non-crediting entries trigger reminders too](#important-non-crediting-entries-trigger-reminders-too)
   - [Monthly submission reminder](#monthly-submission-reminder)
   - [Weekly approval reminder](#weekly-approval-reminder)
   - [Reminder toggles (admin)](#reminder-toggles-admin)
+  - [System error notifications (admin)](#system-error-notifications-admin)
   - [Notification timestamp display](#notification-timestamp-display)
 - [Important edge case: sick leave with existing time entries](#important-edge-case-sick-leave-with-existing-time-entries)
 - [Approval structure examples](#approval-structure-examples)
@@ -102,6 +104,7 @@ Use this document if you are:
   - [Managing annual leave](#managing-annual-leave)
   - [Revoking an approved absence](#revoking-an-approved-absence)
   - [System settings](#system-settings)
+  - [Nextcloud Upload](#nextcloud-upload)
   - [Managing categories](#managing-categories)
   - [Managing holidays](#managing-holidays)
   - [Backup and restore](#backup-and-restore)
@@ -1409,8 +1412,6 @@ Admins configure system-wide behavior in the settings panel:
 | Automatic break deduction | When enabled, deducts a configured break from each day where consecutive crediting work meets or exceeds a threshold. See [Automatic break deduction](#automatic-break-deduction). |
 | SMTP configuration | Server, port, and credentials for outgoing email. Required for registration emails and email reminders. |
 | Public URL | Used to construct login links in registration emails. |
-| Nextcloud Upload | Configure automatic upload of encrypted DB backups and monthly timesheet PDFs to a Nextcloud public share. See [Nextcloud Upload](#nextcloud-upload). |
-
 | Nextcloud Upload | Configure automatic upload of encrypted DB backups and monthly timesheet PDFs to a Nextcloud public share. See [Nextcloud Upload](#nextcloud-upload). |
 
 ### Nextcloud Upload
