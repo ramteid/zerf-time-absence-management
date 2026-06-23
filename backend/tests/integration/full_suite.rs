@@ -77,7 +77,7 @@ async fn auth_and_rbac_workflow() {
         let (st, body) = admin
             .post(
                 "/api/v1/users",
-                &json!({"email":"lead@example.com","first_name":"Lea","last_name":"Lead","role":"team_lead","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,"start_date":"2024-01-01","approver_ids":[1]}),
+                &json!({"email":"lead@example.com","first_name":"Lea","last_name":"Lead","role":"team_lead","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,"start_date":"2024-01-01","approver_ids":[1]}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "create team_lead");
@@ -87,7 +87,7 @@ async fn auth_and_rbac_workflow() {
         let (st, body) = admin
             .post(
                 "/api/v1/users",
-                &json!({"email":"erin@example.com","first_name":"Erin","last_name":"Worker","role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,"start_date":"2024-01-01","approver_ids": [lead_id]}),
+                &json!({"email":"erin@example.com","first_name":"Erin","last_name":"Worker","role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,"start_date":"2024-01-01","approver_ids": [lead_id]}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "create employee");
@@ -97,7 +97,7 @@ async fn auth_and_rbac_workflow() {
         let (st, _) = admin
             .post(
                 "/api/v1/users",
-                &json!({"email":"erin@example.com","first_name":"Dup","last_name":"Dup","role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,"start_date":"2024-01-01"}),
+                &json!({"email":"erin@example.com","first_name":"Dup","last_name":"Dup","role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,"start_date":"2024-01-01"}),
             )
             .await;
         assert!(
@@ -169,7 +169,7 @@ async fn auth_and_rbac_workflow() {
         let (st, _) = lead
             .post(
                 "/api/v1/users",
-                &json!({"email":"x@example.com","first_name":"X","last_name":"X","role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,"start_date":"2024-01-01"}),
+                &json!({"email":"x@example.com","first_name":"X","last_name":"X","role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,"start_date":"2024-01-01"}),
             )
             .await;
         assert_eq!(st, StatusCode::FORBIDDEN, "lead create user 403");
@@ -870,7 +870,7 @@ async fn tina_time_tracking_journey() {
         let (st, body) = admin
             .post(
                 "/api/v1/users",
-                &json!({"email":"tina@example.com","first_name":"Tina","last_name":"Timekeeper","role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,"start_date":"2024-01-01","approver_ids": [lead_id]}),
+                &json!({"email":"tina@example.com","first_name":"Tina","last_name":"Timekeeper","role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,"start_date":"2024-01-01","approver_ids": [lead_id]}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "create Tina");

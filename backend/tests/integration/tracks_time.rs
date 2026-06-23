@@ -32,6 +32,7 @@ async fn tracks_time_full_workflow() {
                     "weekly_hours": 39,
                     "leave_days_current_year": 30,
                     "leave_days_next_year": 30,
+                    "annual_leave_days": 30,
                     "start_date": "2024-01-01"
                 }),
             )
@@ -59,6 +60,7 @@ async fn tracks_time_full_workflow() {
                     "weekly_hours": 39,
                     "leave_days_current_year": 30,
                     "leave_days_next_year": 30,
+                    "annual_leave_days": 30,
                     "start_date": "2024-01-01",
                     "approver_ids": [1]
                 }),
@@ -82,6 +84,7 @@ async fn tracks_time_full_workflow() {
                     "weekly_hours": 39,
                     "leave_days_current_year": 30,
                     "leave_days_next_year": 30,
+                    "annual_leave_days": 30,
                     "start_date": "2024-01-01",
                     "approver_ids": [1]
                 }),
@@ -292,6 +295,7 @@ async fn tracks_time_full_workflow() {
                     "weekly_hours": 39,
                     "leave_days_current_year": 30,
                     "leave_days_next_year": 30,
+                    "annual_leave_days": 30,
                     "start_date": "2024-01-01"
                 }),
             )
@@ -412,6 +416,7 @@ async fn tracks_time_full_workflow() {
                     "weekly_hours": 39,
                     "leave_days_current_year": 30,
                     "leave_days_next_year": 30,
+                    "annual_leave_days": 30,
                     "start_date": "2024-01-01"
                 }),
             )
@@ -482,6 +487,7 @@ async fn pure_admin_team_report_accessible_and_excludes_pure_admin_rows() {
                 "weekly_hours": 39,
                 "leave_days_current_year": 30,
                 "leave_days_next_year": 30,
+                "annual_leave_days": 30,
                 "start_date": "2024-01-01"
             }),
         )
@@ -542,6 +548,7 @@ async fn pure_admin_excluded_from_team_category_report() {
                 "weekly_hours": 39,
                 "leave_days_current_year": 30,
                 "leave_days_next_year": 30,
+                "annual_leave_days": 30,
                 "start_date": "2024-01-01"
             }),
         )

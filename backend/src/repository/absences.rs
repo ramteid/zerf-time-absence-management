@@ -1028,7 +1028,9 @@ impl AbsenceDb {
         )
     }
 
-    /// Effective annual leave entitlement from the `user_annual_leave` table.
+    /// Effective annual leave entitlement: an explicit `user_annual_leave`
+    /// override for `year` takes precedence; otherwise the user's own base
+    /// `annual_leave_days` is used.
     pub async fn effective_annual_days(&self, user_id: i64, year: i32) -> AppResult<i64> {
         let existing: Option<i64> =
             sqlx::query_scalar("SELECT days FROM user_annual_leave WHERE user_id=$1 AND year=$2")
@@ -1039,13 +1041,11 @@ impl AbsenceDb {
         if let Some(d) = existing {
             return Ok(d);
         }
-        let default: i64 = sqlx::query_scalar(
-            "SELECT COALESCE(value::BIGINT, 30) FROM app_settings \
-             WHERE key='default_annual_leave_days'",
+        Ok(
+            sqlx::query_scalar("SELECT annual_leave_days FROM users WHERE id=$1")
+                .bind(user_id)
+                .fetch_one(&self.pool)
+                .await?,
         )
-        .fetch_optional(&self.pool)
-        .await?
-        .unwrap_or(30);
-        Ok(default)
     }
 }

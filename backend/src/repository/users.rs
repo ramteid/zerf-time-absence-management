@@ -943,16 +943,6 @@ impl UserDb {
         Ok(())
     }
 
-    pub async fn get_default_leave_days(&self) -> AppResult<i64> {
-        Ok(sqlx::query_scalar(
-            "SELECT COALESCE(value::BIGINT, 30) \
-             FROM app_settings WHERE key='default_annual_leave_days'",
-        )
-        .fetch_optional(&self.pool)
-        .await?
-        .unwrap_or(30))
-    }
-
     pub async fn annual_days_or_default(
         &self,
         user_id: i64,

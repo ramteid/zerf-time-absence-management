@@ -182,6 +182,10 @@ const TRANSLATIONS = {
     "All draft entries of this week will be submitted for approval.":
       "All draft days of this week will be submitted for approval.",
     "Vacation days per year": "Vacation days per year",
+    "Annual leave days (base)": "Annual leave days (base)",
+    "Default entitlement used for every year unless overridden below (e.g. for special agreements).":
+      "Default entitlement used for every year unless overridden below (e.g. for special agreements).",
+    Override: "Override",
     "Workdays per week": "Workdays per week",
     "Workdays per week must be between 1 and 7.":
       "Workdays per week must be between 1 and 7.",
@@ -1150,6 +1154,10 @@ const TRANSLATIONS = {
       "Bitte beide Felder der zweiten Stufe ausfüllen oder beide leer lassen.",
     Break: "Pause",
     "Vacation days per year": "Urlaubstage pro Jahr",
+    "Annual leave days (base)": "Urlaubstage allgemein",
+    "Default entitlement used for every year unless overridden below (e.g. for special agreements).":
+      "Grundsätzlicher Anspruch, der für jedes Jahr gilt, sofern unten nicht überschrieben (z. B. bei Sonderregelungen).",
+    Override: "Abweichung",
     days: "Tage",
     Set: "Setzen",
     "Overrides the default annual leave days for this user in the selected year.":

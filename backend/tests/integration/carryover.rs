@@ -587,7 +587,7 @@ async fn hire_date_anchors_proration_independent_of_start_date() {
             &json!({
                 "email": "midyear-hire@example.com", "first_name": "Mira", "last_name": "Midyear",
                 "role": "employee", "weekly_hours": 39,
-                "leave_days_current_year": 30, "leave_days_next_year": 30,
+                "leave_days_current_year": 30, "leave_days_next_year": 30, "annual_leave_days": 30,
                 "start_date": start_date, "hire_date": hire_date,
                 "approver_ids": [1],
             }),
@@ -673,7 +673,7 @@ async fn hire_date_does_not_inflate_carryover_with_phantom_pre_start_date_years(
             &json!({
                 "email": "phantom-years@example.com", "first_name": "Penny", "last_name": "Phantom",
                 "role": "employee", "weekly_hours": 39,
-                "leave_days_current_year": 12, "leave_days_next_year": 12,
+                "leave_days_current_year": 12, "leave_days_next_year": 12, "annual_leave_days": 12,
                 "start_date": start_date, "hire_date": hire_date,
                 "approver_ids": [1],
             }),
