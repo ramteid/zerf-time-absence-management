@@ -166,6 +166,7 @@ pub async fn get_one(
         "dark_mode": user.dark_mode,
         "overtime_start_balance_min": user.overtime_start_balance_min,
         "tracks_time": user.tracks_time,
+        "annual_leave_days": user.annual_leave_days,
         "approver_ids": approver_ids,
     });
     Ok(Json(user_json))
@@ -184,6 +185,10 @@ pub struct NewUser {
     pub leave_days_current_year: i64,
     /// Leave days for next year (required on creation).
     pub leave_days_next_year: i64,
+    /// Base annual leave entitlement (days/year), used whenever no explicit
+    /// per-year override exists. Defaults to the org-wide setting in the UI,
+    /// but admins may set a different value (e.g. special agreements).
+    pub annual_leave_days: i64,
     pub start_date: NaiveDate,
     /// Optional employment start date used to anchor annual-leave proration
     /// instead of `start_date`. Useful when onboarding an employee who already
@@ -235,6 +240,7 @@ pub async fn create(
         workdays_per_week: body.workdays_per_week,
         leave_days_current_year: body.leave_days_current_year,
         leave_days_next_year: body.leave_days_next_year,
+        annual_leave_days: body.annual_leave_days,
         start_date: body.start_date,
         hire_date: body.hire_date,
         overtime_start_balance_min: body.overtime_start_balance_min,
@@ -264,6 +270,8 @@ pub struct UpdateUser {
     pub leave_days_current_year: Option<i64>,
     /// If provided, sets leave days for next year.
     pub leave_days_next_year: Option<i64>,
+    /// If provided, sets the user's base annual leave entitlement (days/year).
+    pub annual_leave_days: Option<i64>,
     pub start_date: Option<NaiveDate>,
     /// Triple state via double-Option: omitted = leave unchanged, `null` =
     /// clear back to the `start_date` fallback, value = set explicitly.
@@ -543,6 +551,7 @@ pub async fn update(
         body.allow_submission_without_approval,
         body.overtime_start_balance_min,
         effective_tracks_time,
+        body.annual_leave_days,
     )
     .await
     .map_err(|e| {
