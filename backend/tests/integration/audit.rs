@@ -294,8 +294,8 @@ async fn audit_log_is_sorted_desc_and_capped_to_500_rows() {
         .bind("updated")
         .bind("audit_limit_test")
         .bind(i)
-        .bind(Option::<String>::None)
-        .bind(Option::<String>::None)
+        .bind(Option::<serde_json::Value>::None)
+        .bind(Option::<serde_json::Value>::None)
         .bind(base + chrono::Duration::milliseconds(i))
         .execute(&app.state.pool)
         .await

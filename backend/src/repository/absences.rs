@@ -1008,7 +1008,7 @@ impl AbsenceDb {
         absence_id: i64,
     ) -> AppResult<Option<String>> {
         Ok(sqlx::query_scalar(
-            "SELECT before_data FROM audit_log \
+            "SELECT before_data::text FROM audit_log \
              WHERE table_name='absences' AND record_id=$1 AND action='updated' \
              ORDER BY occurred_at DESC LIMIT 1",
         )
@@ -1028,7 +1028,7 @@ impl AbsenceDb {
             return Ok(std::collections::HashMap::new());
         }
         let rows: Vec<(i64, Option<String>)> = sqlx::query_as(
-            "SELECT DISTINCT ON (record_id) record_id, before_data \
+            "SELECT DISTINCT ON (record_id) record_id, before_data::text \
              FROM audit_log \
              WHERE table_name='absences' AND record_id = ANY($1) AND action='updated' \
              ORDER BY record_id, occurred_at DESC",
