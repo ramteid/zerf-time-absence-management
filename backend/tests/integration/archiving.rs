@@ -400,7 +400,7 @@ async fn delete_user_blocked_when_has_time_data() {
     let emp = app.client();
     let (st, _) = emp.login("del@arch.com", &emp_tmp_pw).await;
     assert_eq!(st, StatusCode::OK);
-    let (st, _) = emp.change_password(&emp_tmp_pw, "EmpDel!2345").await;
+    let (st, _) = emp.change_password(&emp_tmp_pw, "EmpDel!23456").await;
     assert_eq!(st, StatusCode::OK);
 
     // Get a valid category id.
