@@ -53,6 +53,9 @@ async fn main() -> Result<()> {
                 interval.tick().await;
                 notifications::cleanup_old(&db).await;
 
+                // Prune audit log entries older than 10 years.
+                db.audit.cleanup_old().await;
+
                 // Prune resolved reopen requests older than retention setting (default 365 days).
                 let reopen_days = settings::load_setting(&pool, "reopen_request_retention_days", "365")
                     .await
