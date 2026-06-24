@@ -9,6 +9,26 @@
 use crate::error::{AppError, AppResult};
 use reqwest::header::CONTENT_TYPE;
 
+fn mkcol_client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .expect("failed to build Nextcloud MKCOL HTTP client")
+    })
+}
+
+fn upload_client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(120))
+            .build()
+            .expect("failed to build Nextcloud upload HTTP client")
+    })
+}
+
 /// Parse a Nextcloud public share URL into (base, token).
 ///
 /// Example: `https://cloud.example.com/s/AbCdEf` → `("https://cloud.example.com", "AbCdEf")`
@@ -59,12 +79,7 @@ pub async fn create_folder(
     let url = format!("{}/public.php/webdav/{}/", base, folder);
     let pw = password.filter(|p| !p.is_empty());
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .map_err(|e| AppError::Internal(format!("failed to build HTTP client: {e}")))?;
-
-    let response = client
+    let response = mkcol_client()
         // reqwest does not expose MKCOL as a named method, so use from_bytes.
         .request(
             reqwest::Method::from_bytes(b"MKCOL").expect("MKCOL is a valid HTTP method"),
@@ -106,13 +121,8 @@ pub async fn upload_file(
     let url = format!("{}/public.php/webdav/{}", base, path);
     let pw = password.filter(|p| !p.is_empty());
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(120))
-        .build()
-        .map_err(|e| AppError::Internal(format!("failed to build HTTP client: {e}")))?;
-
     // reqwest::RequestBuilder::basic_auth encodes "token:password" as Basic auth.
-    let response = client
+    let response = upload_client()
         .put(&url)
         .basic_auth(token, pw)
         .header(CONTENT_TYPE, "application/octet-stream")

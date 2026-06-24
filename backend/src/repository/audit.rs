@@ -11,8 +11,8 @@ pub struct LogEntry {
     pub action: String,
     pub table_name: String,
     pub record_id: i64,
-    pub before_data: Option<String>,
-    pub after_data: Option<String>,
+    pub before_data: Option<serde_json::Value>,
+    pub after_data: Option<serde_json::Value>,
     pub occurred_at: DateTime<Utc>,
 }
 
@@ -36,8 +36,6 @@ impl AuditDb {
         before: Option<serde_json::Value>,
         after: Option<serde_json::Value>,
     ) {
-        let before_json = before.map(|v| v.to_string());
-        let after_json = after.map(|v| v.to_string());
         let _ = sqlx::query(
             "INSERT INTO audit_log(user_id, action, table_name, record_id, before_data, after_data) \
              VALUES ($1,$2,$3,$4,$5,$6)",
@@ -46,8 +44,8 @@ impl AuditDb {
         .bind(action)
         .bind(table_name)
         .bind(record_id)
-        .bind(before_json)
-        .bind(after_json)
+        .bind(before)
+        .bind(after)
         .execute(&self.pool)
         .await;
     }

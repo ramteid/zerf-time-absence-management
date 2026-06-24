@@ -365,6 +365,19 @@ impl ReopenRequestDb {
         Ok(rows)
     }
 
+    /// Prune resolved reopen requests older than `retention_days` days.
+    /// Pending requests are never deleted — they are still actionable.
+    pub async fn cleanup_old(&self, retention_days: i64) {
+        let _ = sqlx::query(
+            "DELETE FROM reopen_requests \
+             WHERE status IN ('approved', 'rejected', 'auto_approved') \
+             AND created_at < CURRENT_TIMESTAMP - ($1 * INTERVAL '1 day')",
+        )
+        .bind(retention_days)
+        .execute(&self.pool)
+        .await;
+    }
+
     pub async fn begin(&self) -> AppResult<sqlx::Transaction<'_, sqlx::Postgres>> {
         Ok(self.pool.begin().await?)
     }
