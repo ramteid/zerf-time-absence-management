@@ -50,6 +50,15 @@ impl AuditDb {
         .await;
     }
 
+    /// Delete audit log entries older than 10 years (background cleanup).
+    pub async fn cleanup_old(&self) {
+        let _ = sqlx::query(
+            "DELETE FROM audit_log WHERE occurred_at < CURRENT_TIMESTAMP - INTERVAL '10 years'",
+        )
+        .execute(&self.pool)
+        .await;
+    }
+
     /// Query the audit log with optional filters.
     pub async fn list(
         &self,
