@@ -203,8 +203,8 @@ impl UserDb {
         Ok(QueryBuilder::<Postgres>::new(format!(
             "{USER_SELECT} WHERE (id=$1 AND archived_at IS NULL) \
              OR id IN (SELECT ua.user_id FROM user_approvers ua \
-                       WHERE ua.approver_id=$1 AND \
-                             (SELECT role FROM users WHERE id=ua.user_id) != 'admin') \
+                       JOIN users u ON u.id = ua.user_id \
+                       WHERE ua.approver_id=$1 AND u.role != 'admin') \
              ORDER BY last_name, first_name"
         ))
         .build_query_as::<User>()
@@ -814,6 +814,22 @@ impl UserDb {
     }
 
     /// Fetch all active approver IDs for a user from the junction table.
+    /// Fetch all approver relationships in a single query, returning a map of
+    /// `user_id -> [approver_id, ...]`. Used by the admin user list to avoid N+1
+    /// queries when building the full user list with approver_ids.
+    pub async fn get_all_approver_ids(&self) -> AppResult<std::collections::HashMap<i64, Vec<i64>>> {
+        let rows = sqlx::query_as::<_, (i64, i64)>(
+            "SELECT ua.user_id, ua.approver_id FROM user_approvers ua",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        let mut map: std::collections::HashMap<i64, Vec<i64>> = std::collections::HashMap::new();
+        for (user_id, approver_id) in rows {
+            map.entry(user_id).or_default().push(approver_id);
+        }
+        Ok(map)
+    }
+
     pub async fn get_approver_ids(&self, user_id: i64) -> AppResult<Vec<i64>> {
         Ok(sqlx::query_scalar::<_, i64>(
             "SELECT ua.approver_id FROM user_approvers ua \

@@ -37,9 +37,8 @@
           u.id !== user.id &&
           (u.role === "team_lead" || u.role === "admin"),
       );
-      // The approved-users endpoint returns users whose approver includes the target.
-      // We approximate by checking approver_ids from the full list (each user object
-      // returned by GET /users contains their approver_ids in the admin view).
+      // Find users whose approver_ids list contains the target user's id.
+      // GET /users (admin path) includes approver_ids per user so this works directly.
       approvedUsers = (all || []).filter(
         (u) =>
           u.active &&
