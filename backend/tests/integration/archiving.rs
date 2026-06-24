@@ -296,7 +296,7 @@ async fn archive_rejects_pending_absences() {
     let emp = app.client();
     let (st, _) = emp.login("empabs@arch.com", &emp_tmp_pw).await;
     assert_eq!(st, StatusCode::OK, "employee login");
-    let (st, _) = emp.change_password(&emp_tmp_pw, "EmpPass!234").await;
+    let (st, _) = emp.change_password(&emp_tmp_pw, "EmpPass!2345").await;
     assert_eq!(st, StatusCode::OK, "employee change password");
 
     // Get the absence category list.
@@ -400,7 +400,7 @@ async fn delete_user_blocked_when_has_time_data() {
     let emp = app.client();
     let (st, _) = emp.login("del@arch.com", &emp_tmp_pw).await;
     assert_eq!(st, StatusCode::OK);
-    let (st, _) = emp.change_password(&emp_tmp_pw, "EmpDel!234").await;
+    let (st, _) = emp.change_password(&emp_tmp_pw, "EmpDel!2345").await;
     assert_eq!(st, StatusCode::OK);
 
     // Get a valid category id.
