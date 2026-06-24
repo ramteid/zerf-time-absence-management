@@ -109,6 +109,19 @@ impl SettingsDb {
             .unwrap_or_else(|_| "en".to_string())
     }
 
+    /// Remove `system_alert_email_*` throttle keys that have not been refreshed
+    /// for 30 days. These keys are upserted once per calendar day per failure
+    /// class; stale ones indicate that the failure has resolved.
+    pub async fn cleanup_stale_alert_keys(&self) {
+        let _ = sqlx::query(
+            "DELETE FROM app_settings \
+             WHERE key LIKE 'system_alert_email_%' \
+             AND updated_at < CURRENT_TIMESTAMP - INTERVAL '30 days'",
+        )
+        .execute(&self.pool)
+        .await;
+    }
+
     /// Read the previous value of a setting key (returns `None` if not set).
     pub async fn get_raw(&self, key: &str) -> AppResult<Option<String>> {
         let value: Option<String> =

@@ -239,10 +239,13 @@ impl NotificationDb {
     }
 
     /// Trim notifications older than 90 days (background cleanup).
+    /// Pinned unread notifications are excluded — they represent active system
+    /// alerts that must not disappear silently until an admin acknowledges them.
     pub async fn cleanup_old(&self) {
         let _ = sqlx::query(
             "DELETE FROM notifications \
-             WHERE created_at < CURRENT_TIMESTAMP - INTERVAL '90 days'",
+             WHERE created_at < CURRENT_TIMESTAMP - INTERVAL '90 days' \
+             AND NOT (pinned = TRUE AND is_read = FALSE)",
         )
         .execute(&self.pool)
         .await;

@@ -45,12 +45,24 @@ async fn main() -> Result<()> {
     // old notifications (>90 days).
     tokio::spawn(auth_service::cleanup_loop(pool.clone()));
     {
+        let pool = pool.clone();
         let db = state.db.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(86_400));
             loop {
                 interval.tick().await;
                 notifications::cleanup_old(&db).await;
+
+                // Prune resolved reopen requests older than retention setting (default 365 days).
+                let reopen_days = settings::load_setting(&pool, "reopen_request_retention_days", "365")
+                    .await
+                    .ok()
+                    .and_then(|v| v.parse::<i64>().ok())
+                    .unwrap_or(365);
+                db.reopen_requests.cleanup_old(reopen_days).await;
+
+                // Remove stale system-alert email throttle keys (not touched in 30 days).
+                db.settings.cleanup_stale_alert_keys().await;
             }
         });
     }

@@ -18,6 +18,7 @@ use axum::{
 use chrono::{Datelike, Duration, NaiveDate};
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 #[derive(Deserialize)]
 pub struct MonthQuery {
@@ -207,14 +208,17 @@ pub async fn team(
     let vacation_planned_start = tomorrow.max(month_start);
 
     // Spawn one Tokio task per team member so all per-user DB round-trips
-    // run concurrently.  This avoids O(N×k) sequential latency when the pool is
-    // under load (e.g. during integration tests running in parallel).
+    // run concurrently.  A semaphore caps simultaneous DB-holding tasks at 8
+    // so a large team cannot exhaust the connection pool even under concurrency.
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(8));
     let handles: Vec<_> = team_members
         .into_iter()
         .map(|team_member| {
             let pool = app_state.pool.clone();
             let query_month = query.month.clone();
+            let sem = semaphore.clone();
             tokio::spawn(async move {
+                let _permit = sem.acquire().await.expect("semaphore closed");
                 let team_member_is_assistant = is_assistant_role(&team_member.role);
                 let month_report =
                     build_month_without_submission_status(&pool, team_member.id, &query_month)

@@ -4,6 +4,7 @@ import { notifications, notificationsUnread } from "./stores.js";
 let pollTimer = null;
 let visibilityHandler = null;
 let eventSource = null;
+let reconnectTimer = null;
 let active = false;
 
 export async function refreshNotifications() {
@@ -41,7 +42,8 @@ function startStream() {
     startPolling();
     // Attempt to re-establish the SSE stream after a back-off period so
     // real-time delivery resumes once the connection recovers.
-    setTimeout(() => {
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
       if (active) startStream();
     }, 30_000);
   };
@@ -64,6 +66,10 @@ export function stopNotifications() {
   if (visibilityHandler && typeof document !== "undefined") {
     document.removeEventListener("visibilitychange", visibilityHandler);
     visibilityHandler = null;
+  }
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
   }
   if (eventSource) {
     eventSource.close();

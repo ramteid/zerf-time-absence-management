@@ -14,7 +14,7 @@ const UNKNOWN_GIT_COMMIT: &str = "unknown";
 
 pub async fn init(cfg: &Config) -> Result<DatabasePool> {
     let pool = PgPoolOptions::new()
-        .max_connections(8)
+        .max_connections(20)
         .min_connections(1)
         .acquire_timeout(Duration::from_secs(5))
         .idle_timeout(Duration::from_secs(600))
