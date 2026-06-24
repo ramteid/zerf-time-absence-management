@@ -118,17 +118,35 @@ pub async fn earliest_start_date(
 pub async fn list(
     State(app_state): State<AppState>,
     requester: User,
-) -> AppResult<Json<Vec<User>>> {
+) -> AppResult<Json<serde_json::Value>> {
     if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
-    let repo_users = if requester.is_admin() {
-        app_state.db.users.find_all_ordered().await?
+    if requester.is_admin() {
+        let repo_users = app_state.db.users.find_all_ordered().await?;
+        // Fetch all approver relationships in one query to avoid N+1 per user.
+        let approver_map = app_state.db.users.get_all_approver_ids().await?;
+        let user_list: Vec<serde_json::Value> = repo_users
+            .into_iter()
+            .map(|u| {
+                let approver_ids = approver_map.get(&u.id).cloned().unwrap_or_default();
+                let mut v = serde_json::to_value(repo_user_to_auth_user(u))
+                    .unwrap_or(serde_json::Value::Null);
+                if let serde_json::Value::Object(ref mut map) = v {
+                    map.insert(
+                        "approver_ids".to_string(),
+                        serde_json::json!(approver_ids),
+                    );
+                }
+                v
+            })
+            .collect();
+        Ok(Json(serde_json::json!(user_list)))
     } else {
-        app_state.db.users.find_for_approver(requester.id).await?
-    };
-    let user_list: Vec<User> = repo_users.into_iter().map(repo_user_to_auth_user).collect();
-    Ok(Json(user_list))
+        let repo_users = app_state.db.users.find_for_approver(requester.id).await?;
+        let user_list: Vec<User> = repo_users.into_iter().map(repo_user_to_auth_user).collect();
+        Ok(Json(serde_json::json!(user_list)))
+    }
 }
 
 pub async fn get_one(
