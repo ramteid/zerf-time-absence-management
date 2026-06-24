@@ -368,12 +368,13 @@ impl ReopenRequestDb {
     /// Prune resolved reopen requests older than `retention_days` days.
     /// Pending requests are never deleted — they are still actionable.
     pub async fn cleanup_old(&self, retention_days: i64) {
+        let cutoff = chrono::Utc::now() - chrono::Duration::days(retention_days);
         let _ = sqlx::query(
             "DELETE FROM reopen_requests \
              WHERE status IN ('approved', 'rejected', 'auto_approved') \
-             AND created_at < CURRENT_TIMESTAMP - ($1 * INTERVAL '1 day')",
+             AND created_at < $1",
         )
-        .bind(retention_days)
+        .bind(cutoff)
         .execute(&self.pool)
         .await;
     }
