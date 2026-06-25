@@ -1,7 +1,7 @@
 use chrono::Datelike;
 use std::sync::Arc;
 use testcontainers::runners::AsyncRunner;
-use testcontainers::ContainerAsync;
+use testcontainers::{ContainerAsync, ImageExt};
 use testcontainers_modules::postgres::Postgres;
 use zerf::services::{categories, holidays};
 use zerf::{build_app, config::Config, AppState};
