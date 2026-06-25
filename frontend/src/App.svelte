@@ -163,6 +163,11 @@
     if (!$currentUser) return;
     try {
       const validatedUser = await api("/auth/me");
+      // Refresh the full user object so that permission changes made by an
+      // admin while this tab was in the background (e.g. enabling
+      // allow_team_lead_manage_assistants) are reflected immediately without
+      // requiring a manual page reload.
+      currentUser.set(validatedUser);
       // Refresh CSRF token in case it rotated while the tab was hidden.
       csrfToken.set(validatedUser.csrf_token || null);
       // Sync dark mode preference in case it changed on another device.

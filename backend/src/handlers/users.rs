@@ -513,8 +513,8 @@ pub async fn update(
         }
     }
     // When the role changes away from admin and the user currently has
-    // tracks_time=false, silently restore tracking. No data to delete since
-    // they never had tracking enabled as a non-admin.
+    // tracks_time=false, silently restore tracking so the new non-admin role
+    // has full time-tracking access.
     let effective_tracks_time: Option<bool> =
         if !is_admin_role(&new_role) && !previous_user.tracks_time {
             Some(true)
