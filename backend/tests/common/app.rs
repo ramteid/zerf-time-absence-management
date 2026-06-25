@@ -57,6 +57,7 @@ impl TestApp {
                 (url, base, cleanup_url, None)
             } else {
                 let container = Postgres::default()
+                    .with_tag("17")
                     .start()
                     .await
                     .expect("failed to start Postgres container");
@@ -178,6 +179,7 @@ impl TestApp {
                 (url, base, cleanup_url, None)
             } else {
                 let container = Postgres::default()
+                    .with_tag("17")
                     .start()
                     .await
                     .expect("failed to start Postgres container");

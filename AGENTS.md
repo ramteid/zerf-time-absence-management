@@ -313,7 +313,7 @@ Backup frequency and retention are stored in `app_settings` (not in `.env`) and 
 
 ### Integration tests
 
-Integration tests use `testcontainers_modules::postgres::Postgres` (plain `postgres` image, no gocryptfs). This is intentional: gocryptfs is a deployment concern and has no effect on application logic or SQL correctness.
+Integration tests use `testcontainers_modules::postgres::Postgres` (plain `postgres:17` image, no pg_tde). This is intentional: pg_tde is a deployment concern and has no effect on application logic or SQL correctness. `postgres:17` (Debian) is used rather than the module default (`11-alpine`) because lz4 TOAST compression requires PostgreSQL 14+ compiled with `--with-lz4`, which is included in the official Debian-based `postgres:17` image.
 
 ## Testing
 
