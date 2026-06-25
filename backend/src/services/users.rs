@@ -378,13 +378,6 @@ pub async fn count_active_direct_reports_tx(
     UserDb::count_active_direct_reports_tx(tx, user_id).await
 }
 
-pub async fn delete_time_data_for_user_tx(
-    tx: &mut crate::db::PgConnection,
-    user_id: i64,
-) -> AppResult<()> {
-    UserDb::delete_time_data_for_user_tx(tx, user_id).await
-}
-
 #[allow(clippy::too_many_arguments)]
 pub async fn update_basic_tx(
     tx: &mut crate::db::PgConnection,

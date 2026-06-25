@@ -368,7 +368,12 @@ impl AbsenceDb {
         to: Option<NaiveDate>,
         status_filter: Option<&str>,
     ) -> AppResult<Vec<Absence>> {
-        let mut builder = QueryBuilder::<Postgres>::new(format!("{ABS_SELECT} WHERE TRUE"));
+        // Always exclude absences from users who have time tracking disabled.
+        // Their historical rows are kept immutably but must not surface in any
+        // team or approval view.
+        let mut builder = QueryBuilder::<Postgres>::new(format!(
+            "{ABS_SELECT} WHERE a.user_id IN (SELECT id FROM users WHERE tracks_time=TRUE)"
+        ));
         if !is_admin {
             // Non-admin leads: only show absences from active, non-admin direct
             // reports. Admin-subject absences are excluded from lead scope.
@@ -440,7 +445,7 @@ impl AbsenceDb {
              c.name AS category_name, \
              a.start_date, a.end_date, a.comment, a.status \
              FROM absences a \
-             JOIN users u ON u.id=a.user_id \
+             JOIN users u ON u.id=a.user_id AND u.tracks_time=TRUE \
              JOIN absence_categories c ON c.id = a.category_id \
              WHERE a.status IN ('requested','approved','cancellation_pending') \
              AND a.end_date >=",

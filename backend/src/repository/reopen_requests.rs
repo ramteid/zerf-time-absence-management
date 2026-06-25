@@ -65,8 +65,12 @@ impl ReopenRequestDb {
     }
 
     pub async fn list_pending_admin(&self) -> AppResult<Vec<ReopenRequest>> {
+        // Exclude requests from users who have time tracking disabled — their
+        // historical rows are kept immutably but must not surface in any team view.
         Ok(QueryBuilder::<Postgres>::new(format!(
-            "{RR_SELECT} WHERE status='pending' ORDER BY created_at"
+            "{RR_SELECT} WHERE status='pending' \
+             AND user_id IN (SELECT id FROM users WHERE tracks_time=TRUE) \
+             ORDER BY created_at"
         ))
         .build_query_as::<ReopenRequest>()
         .fetch_all(&self.pool)
@@ -79,7 +83,8 @@ impl ReopenRequestDb {
              AND user_id IN (\
                  SELECT ua.user_id FROM user_approvers ua \
                  JOIN users u ON u.id = ua.user_id \
-                 WHERE ua.approver_id=$1 AND u.active=TRUE AND u.role != 'admin'\
+                 WHERE ua.approver_id=$1 AND u.active=TRUE AND u.role != 'admin' \
+                 AND u.tracks_time=TRUE\
              ) ORDER BY created_at"
         ))
         .build_query_as::<ReopenRequest>()

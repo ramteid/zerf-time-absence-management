@@ -1732,6 +1732,11 @@ re-validated server-side, independent of what the client sends:
   visibility for coordination.
 - Report endpoints return Forbidden for targets with `tracks_time=false` or
   inactive status.
+- **Disabling time tracking preserves all existing data.** Time entries,
+  absences, and reopen requests are never deleted when `tracks_time` is set to
+  `false`. The rows are retained immutably in the database but are silently
+  excluded from all team views, approval queues, reminder notifications, and
+  calculations. This mirrors how archived users are handled.
 
 ### Session invalidation
 
