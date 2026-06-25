@@ -447,12 +447,17 @@ impl UserDb {
             "WITH user_pending AS (
                  SELECT user_id, COUNT(*)::bigint AS pending_count
                  FROM (
-                     SELECT user_id FROM time_entries
-                     WHERE status = 'submitted'
+                     SELECT te.user_id FROM time_entries te
+                     JOIN users u ON u.id = te.user_id AND u.tracks_time = TRUE
+                     WHERE te.status = 'submitted'
                      UNION ALL
-                     SELECT user_id FROM absences           WHERE status IN ('requested','cancellation_pending')
+                     SELECT a.user_id FROM absences a
+                     JOIN users u ON u.id = a.user_id AND u.tracks_time = TRUE
+                     WHERE a.status IN ('requested','cancellation_pending')
                      UNION ALL
-                     SELECT user_id FROM reopen_requests    WHERE status = 'pending'
+                     SELECT rr.user_id FROM reopen_requests rr
+                     JOIN users u ON u.id = rr.user_id AND u.tracks_time = TRUE
+                     WHERE rr.status = 'pending'
                  ) all_pending
                  GROUP BY user_id
              ),
@@ -734,28 +739,6 @@ impl UserDb {
         .bind(annual_leave_days)
         .execute(tx)
         .await?;
-        Ok(())
-    }
-
-    /// Delete all time entries, absences, and reopen requests for a user within
-    /// an existing transaction. Used when an admin disables their own time
-    /// tracking — all historical data is purged atomically.
-    pub async fn delete_time_data_for_user_tx(
-        tx: &mut sqlx::PgConnection,
-        user_id: i64,
-    ) -> AppResult<()> {
-        sqlx::query("DELETE FROM reopen_requests WHERE user_id=$1")
-            .bind(user_id)
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("DELETE FROM absences WHERE user_id=$1")
-            .bind(user_id)
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("DELETE FROM time_entries WHERE user_id=$1")
-            .bind(user_id)
-            .execute(&mut *tx)
-            .await?;
         Ok(())
     }
 

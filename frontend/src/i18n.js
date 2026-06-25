@@ -868,6 +868,7 @@ const TRANSLATIONS = {
     "Cannot delete the last active admin.":
       "Der letzte aktive Administrator kann nicht gelöscht werden.",
     "User not found or inactive.": "Benutzer nicht gefunden oder inaktiv.",
+    "Inactive users cannot log in.": "Inaktive Benutzer können sich nicht anmelden.",
     // tracks_time
     "Enable time tracking": "Zeiterfassung aktivieren",
     "Enable time tracking for this account": "Zeiterfassung für dieses Konto aktivieren",

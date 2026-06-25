@@ -381,7 +381,12 @@ impl TimeEntryDb {
         user_id_filter: Option<i64>,
         status_filter: Option<String>,
     ) -> AppResult<Vec<TimeEntry>> {
-        let mut builder = QueryBuilder::<Postgres>::new(format!("{TE_SELECT} WHERE TRUE"));
+        // Always exclude entries from users who have time tracking disabled.
+        // Their historical rows are kept immutably but must not surface in any
+        // team or approval view.
+        let mut builder = QueryBuilder::<Postgres>::new(format!(
+            "{TE_SELECT} WHERE user_id IN (SELECT id FROM users WHERE tracks_time=TRUE)"
+        ));
         if !is_admin {
             // Non-admin leads: team members only (active, non-admin direct reports).
             // Own entries are unconditionally excluded — leads cannot act on their own

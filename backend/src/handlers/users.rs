@@ -304,8 +304,8 @@ pub struct UpdateUser {
     pub allow_submission_without_approval: Option<bool>,
     pub overtime_start_balance_min: Option<i64>,
     /// For admin users only: when FALSE the user is in pure-admin mode with no
-    /// time or absence tracking. Setting to FALSE deletes all existing time and
-    /// absence data for the user.
+    /// time or absence tracking. Existing time and absence data is retained but
+    /// excluded from all views and calculations.
     pub tracks_time: Option<bool>,
 }
 
@@ -522,11 +522,9 @@ pub async fn update(
             body.tracks_time
         };
     // When disabling time tracking for an admin who previously had it enabled,
-    // delete all their time entries, absences, and reopen requests atomically.
-    let disabling_time_tracking = effective_tracks_time == Some(false) && previous_user.tracks_time;
-    if disabling_time_tracking {
-        crate::services::users::delete_time_data_for_user_tx(&mut transaction, user_id).await?;
-    }
+    // existing time and absence data is kept immutably in the database.
+    // All queries that build team views or reports filter by tracks_time=TRUE,
+    // so the retained rows are silently excluded without any deletions.
     // When (re-)enabling time tracking for an admin who currently has it
     // disabled, reset the start_date to today unless the caller is explicitly
     // setting a different start_date. Without this, the admin's old start_date
