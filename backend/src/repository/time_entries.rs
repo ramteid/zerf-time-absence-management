@@ -359,6 +359,14 @@ impl TimeEntryDb {
     ) -> AppResult<Vec<TimeEntry>> {
         let mut builder = QueryBuilder::<Postgres>::new(format!("{TE_SELECT} WHERE user_id = "));
         builder.push_bind(user_id);
+        // Never show entries before the user's start_date. This is the natural lower
+        // bound for any user, and critically ensures that when a pure-admin re-enables
+        // time tracking (resetting start_date to today), historical entries from the
+        // prior tracking period are silently excluded rather than deleted.
+        builder
+            .push(" AND entry_date >= (SELECT start_date FROM users WHERE id=")
+            .push_bind(user_id)
+            .push(")");
         if let Some(f) = from {
             builder.push(" AND entry_date >= ").push_bind(f);
         }

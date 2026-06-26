@@ -1,5 +1,5 @@
 //! Integration tests for the tracks_time pure-admin mode feature.
-//! Covers: creation guards, endpoint blocking, data deletion on disable,
+//! Covers: creation guards, endpoint blocking, data preservation on disable,
 //! auto-restore on demotion, admin approval functions unaffected, reports guards.
 
 use chrono::Datelike;
@@ -373,20 +373,24 @@ async fn tracks_time_full_workflow() {
             "start_date reset to today when re-enabling tracks_time"
         );
 
+        // Time entries from before the reset start_date are hidden by the
+        // start_date filter in list_for_user — the row is retained but not shown.
         let (st, entries) = admin2.get("/api/v1/time-entries").await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(
             entries.as_array().unwrap().len(),
             0,
-            "time entries deleted after tracks_time=false"
+            "time entries before reset start_date are hidden after tracks_time cycle"
         );
 
+        // Absences are preserved immutably; the future-dated absence remains
+        // visible to admin2 now that tracks_time is re-enabled.
         let (st, absences) = admin2.get("/api/v1/absences").await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(
             absences.as_array().unwrap().len(),
-            0,
-            "absences deleted after tracks_time=false"
+            1,
+            "absence preserved (not deleted) after tracks_time=false"
         );
 
         let (st, _) = admin
