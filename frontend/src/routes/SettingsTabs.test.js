@@ -109,7 +109,7 @@ describe("SettingsTabs", () => {
       (a) => a.getAttribute("href") === "/settings/users"
     );
     expect(usersLink).not.toBeNull();
-    expect(usersLink.style.color).toContain("var(--accent)");
+    expect(usersLink.classList.contains("active")).toBe(true);
   });
 
   it("strips query string when matching active tab", async () => {
@@ -121,6 +121,6 @@ describe("SettingsTabs", () => {
       (a) => a.getAttribute("href") === "/settings/audit-log"
     );
     expect(auditLink).not.toBeNull();
-    expect(auditLink.style.color).toContain("var(--accent)");
+    expect(auditLink.classList.contains("active")).toBe(true);
   });
 });
