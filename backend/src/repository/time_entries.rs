@@ -447,6 +447,22 @@ impl TimeEntryDb {
         )
     }
 
+    /// Revert all submitted entries for a user back to draft. Used when
+    /// time tracking is disabled so they don't linger in the approval queue
+    /// and don't reappear if tracking is later re-enabled.
+    pub async fn revert_submitted_to_draft_tx(
+        tx: &mut sqlx::PgConnection,
+        user_id: i64,
+    ) -> AppResult<()> {
+        sqlx::query(
+            "UPDATE time_entries SET status='draft' WHERE user_id=$1 AND status='submitted'",
+        )
+        .bind(user_id)
+        .execute(tx)
+        .await?;
+        Ok(())
+    }
+
     pub async fn find_by_id_for_update(
         tx: &mut sqlx::PgConnection,
         id: i64,

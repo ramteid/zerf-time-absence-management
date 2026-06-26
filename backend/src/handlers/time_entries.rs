@@ -92,7 +92,8 @@ pub async fn list_all(
         }
     }
     // If a specific user_id is requested, verify the target has tracks_time=true.
-    // Users with tracks_time=false (pure-admin) have no time entries.
+    // Users with tracks_time=false (pure-admin) have historical entries preserved
+    // in the database but they are not accessible via the team endpoint.
     if let Some(target_uid) = query.user_id {
         let target_user = app_state
             .db
