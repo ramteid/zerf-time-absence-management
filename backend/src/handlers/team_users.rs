@@ -68,7 +68,7 @@ pub async fn list(
                 can_manage,
                 email: can_manage.then_some(u.email),
                 role: can_manage.then_some(u.role),
-                archived_at: can_manage.then(|| u.archived_at).flatten(),
+                archived_at: can_manage.then_some(u.archived_at).flatten(),
             }
         })
         .collect();

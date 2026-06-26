@@ -33,7 +33,10 @@ async fn team_users_scoped_assistant_management() {
         bootstrap_team_with_suffix(&app, &admin, false, "tu1").await;
     let lead = login_change_pw(&app, "lead-tu1@example.com", &lead_pw).await;
 
-    // -- Disabled by default: every /team-users endpoint is forbidden --
+    // -- Enabled by default: disable it first to test the forbidden path --
+    set_team_lead_assistant_management(&app, &admin, false).await;
+
+    // -- Disabled: every /team-users endpoint is forbidden --
     {
         let (st, _) = lead.get("/api/v1/team-users").await;
         assert_eq!(st, StatusCode::FORBIDDEN, "list forbidden while disabled");
