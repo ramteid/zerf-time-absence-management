@@ -46,9 +46,14 @@ services:
       - statement_timeout=30000
     volumes:
       # The Percona PostgreSQL 18 image uses PGDATA=/data/db; mount the named
-      # volume at /data so PGDATA and the wrapped keyring at /data/pg_tde_keyring.enc
-      # both persist.
+      # volume at /data so the wrapped keyring at /data/pg_tde_keyring.enc persists.
       - postgres_data:/data
+      # The Percona image declares VOLUME [/data/db] in its Dockerfile, which
+      # causes Docker to create an anonymous volume at /data/db on every container
+      # recreation — shadowing the parent named volume and silently losing all data.
+      # An explicit named volume here prevents that: Docker respects explicit mounts
+      # over image VOLUME declarations, so /data/db always uses zerf_postgres_db_data.
+      - postgres_db_data:/data/db
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\" -h 127.0.0.1 || exit 1"]
       interval: 15s
@@ -164,6 +169,8 @@ services:
 volumes:
   postgres_data:
     name: zerf_postgres_data
+  postgres_db_data:
+    name: zerf_postgres_db_data
   backup_data:
     name: zerf_backup_data
 
