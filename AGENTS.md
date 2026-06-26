@@ -283,24 +283,23 @@ The `backup` service in `docker-compose-local.yml` is connected to two networks:
 |--------|---------|
 | `start_local.sh` | Start local stack (set `DEBUG=true` in `.env` for debug build) |
 | `start_public.sh` | Start public stack |
-| `scripts/backup.sh` | Dump, AES-encrypt, and optionally upload the database to a Nextcloud share. Backup interval and retention are read from `app_settings` at runtime via `psql`. Refactored into sourceable functions (guarded by `BACKUP_LIB_ONLY=1`) for bats unit tests. |
-| `scripts/restore.sh` | Interactive: decrypt a backup and restore it into the live instance |
-| `scripts/backup.bats` | bats unit tests for `backup.sh` helper functions (parse_share_url, interval/retention resolution, upload credential handling, 0-byte rejection, retention pruning) |
+| `scripts/backup.sh` | Dump, AES-encrypt, and optionally upload the database to a Nextcloud share. Each cycle also copies the pg_tde keyring (`zerf-<ts>.keyring.enc`, from the read-only `/keyring-src` mount) next to the dump so an orphaned encrypted PGDATA volume can be recovered. The backup interval is read from `app_settings` at runtime via `psql`; local retention is a fixed count (the 10 most recent). Refactored into sourceable functions (guarded by `BACKUP_LIB_ONLY=1`) for bats unit tests. |
+| `scripts/restore.sh` | Interactive: decrypt a backup and restore it into the live instance. `--keyring [DIR]` extracts a backup's captured pg_tde keyring for physical recovery without touching the database. |
+| `scripts/backup.bats` | bats unit tests for `backup.sh` helper functions (parse_share_url, interval resolution, upload credential handling, 0-byte rejection, keyring sidecar capture, retention pruning) |
 
 ### Key environment variables (encryption)
 
 | Variable | Purpose |
 |----------|---------|
-| `ZERF_DB_ENCRYPTION_KEY` | Single passphrase for gocryptfs (DB at rest) and openssl (backups). Generate: `openssl rand -hex 32`. **Losing this key makes both the database and all backups unreadable.** |
+| `ZERF_DB_ENCRYPTION_KEY` | Single passphrase that wraps the pg_tde keyring (DB at rest) and encrypts backups via openssl. Generate: `openssl rand -hex 32`. **Losing this key makes both the database and all backups unreadable.** |
 
 ### Backup and upload settings (app_settings)
 
-Backup frequency and retention are stored in `app_settings` (not in `.env`) and are editable in the Admin UI under **Nextcloud Upload**. The backup container reads them via `psql` at the start of each cycle.
+Backup frequency and Nextcloud upload settings are stored in `app_settings` (not in `.env`) and are editable in the Admin UI under **Nextcloud Upload**. The backup container reads them via `psql` at the start of each cycle. Local retention is not configurable — the 10 most recent backups are always kept.
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `backup_interval_seconds` | 86400 | Seconds between backup cycles |
-| `backup_retention_days` | 30 | Days of local backup files to retain |
+| `backup_interval_days` | 1 | Days between backup cycles |
 | `backup_upload_enabled` | false | Enable upload to Nextcloud |
 | `backup_upload_url` | — | Nextcloud public share URL (`https://…/s/<token>`) |
 | `backup_upload_password` | — | Optional share password (write-only) |
@@ -309,7 +308,7 @@ Backup frequency and retention are stored in `app_settings` (not in `.env`) and 
 | `report_upload_password` | — | Optional share password (write-only) |
 | `report_upload_day_of_month` | 5 | Day of month to upload previous month's PDF |
 
-`BACKUP_INTERVAL_SECONDS` and `BACKUP_RETENTION_DAYS` are **no longer set as environment variables** in `.env` or docker-compose — they are managed entirely via `app_settings`.
+The earlier `backup_interval_seconds`/`backup_retention_days` keys are gone: migration 023 replaced the interval with `backup_interval_days`, and migration 024 dropped the retention setting in favour of a fixed count (the 10 most recent backups). Neither is set via environment variables.
 
 ### Integration tests
 

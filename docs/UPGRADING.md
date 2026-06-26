@@ -89,6 +89,21 @@ volume, and it is still decryptable because the pg_tde keyring
 
 3. Start the stack again and verify you can log in.
 
+### If you also lost the keyring
+
+If the keyring itself was deleted or overwritten (so the orphaned data directory
+no longer decrypts), recover it from a backup. Since each backup also captures
+the keyring (`zerf-<ts>.keyring.enc`), extract the one matching the orphaned data
+directory's era and place it back as `pg_tde_keyring.enc` in the
+`zerf_postgres_data` volume:
+
+```bash
+./scripts/restore.sh --keyring        # writes the chosen keyring to the cwd
+```
+
+Do **not** overwrite a keyring that still works — if the live database starts and
+decrypts, its current keyring is the correct one.
+
 ### If the data directory is truly gone
 
 Restore the most recent backup instead — backups are independent of the keyring

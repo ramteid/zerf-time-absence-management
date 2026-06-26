@@ -42,6 +42,22 @@ make_shim() {
   chmod +x "$BATS_TMPDIR/bin/$_name"
 }
 
+# Shim openssl so `enc ... -in X -out Y` simply copies X to Y, letting
+# run_backup_once succeed end-to-end without real cryptography.
+make_openssl_copy_shim() {
+  make_shim openssl '
+in=""; out=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -in) in="$2"; shift 2 ;;
+    -out) out="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+[ -n "$out" ] && cp "$in" "$out"
+'
+}
+
 # ── parse_share_url ──────────────────────────────────────────────────────────
 
 @test "parse_share_url: valid URL extracts base and token" {
@@ -210,6 +226,46 @@ exit 0
   [[ "$output" =~ "zero-byte" ]]
 }
 
+# ── run_backup_once: pg_tde keyring sidecar ──────────────────────────────────
+
+@test "run_backup_once: captures the pg_tde keyring sidecar when present" {
+  make_shim pg_dump 'printf "PGDMP-fake-dump-bytes"'
+  make_shim psql 'printf ""'
+  make_openssl_copy_shim
+
+  export OUT_DIR="$BATS_TMPDIR/out"
+  # Provide a fake (already-encrypted) keyring source file.
+  printf 'fake-encrypted-keyring' > "$BATS_TMPDIR/keyring.enc"
+  export KEYRING_SRC="$BATS_TMPDIR/keyring.enc"
+
+  run run_backup_once
+  [ "$status" -eq 0 ]
+
+  # Exactly one keyring sidecar exists and is a verbatim copy of the source.
+  kr="$(ls "$OUT_DIR"/zerf-*.keyring.enc)"
+  [ -f "$kr" ]
+  [ "$(cat "$kr")" = "fake-encrypted-keyring" ]
+  # Metadata records that the keyring was included.
+  grep -q '^pg_tde_keyring_included=true$' "$OUT_DIR"/zerf-*.metadata
+}
+
+@test "run_backup_once: succeeds without a keyring when the source is absent" {
+  make_shim pg_dump 'printf "PGDMP-fake-dump-bytes"'
+  make_shim psql 'printf ""'
+  make_openssl_copy_shim
+
+  export OUT_DIR="$BATS_TMPDIR/out"
+  export KEYRING_SRC="$BATS_TMPDIR/does-not-exist.enc"
+
+  run run_backup_once
+  # A missing keyring is a warning, never a failure.
+  [ "$status" -eq 0 ]
+  # No keyring sidecar is produced...
+  ! ls "$OUT_DIR"/zerf-*.keyring.enc 2>/dev/null
+  # ...and the metadata records its absence.
+  grep -q '^pg_tde_keyring_included=false$' "$OUT_DIR"/zerf-*.metadata
+}
+
 # ── apply_retention (count-based: keep last 10) ──────────────────────────────
 
 @test "apply_retention: deletes oldest files when more than 10 exist" {
@@ -259,6 +315,23 @@ exit 0
 
   meta_count="$(ls "$OUT_DIR"/*.metadata 2>/dev/null | wc -l | tr -d '[:space:]')"
   [ "$meta_count" -eq 10 ]
+}
+
+@test "apply_retention: also removes keyring sidecars for deleted backups" {
+  export OUT_DIR="$BATS_TMPDIR/out"
+  mkdir -p "$OUT_DIR"
+
+  for i in $(seq 1 12); do
+    f="$OUT_DIR/zerf-$(printf '%012d' "$i").dump.enc"
+    printf 'backup' > "$f"
+    printf 'keyr'   > "${f%.dump.enc}.keyring.enc"
+    touch -d "$i seconds ago" "$f"
+  done
+
+  apply_retention
+
+  kr_count="$(ls "$OUT_DIR"/*.keyring.enc 2>/dev/null | wc -l | tr -d '[:space:]')"
+  [ "$kr_count" -eq 10 ]
 }
 
 @test "apply_retention: no-ops when backup directory is empty" {
