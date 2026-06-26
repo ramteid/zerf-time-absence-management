@@ -313,6 +313,8 @@ pub async fn auth_middleware(
     // allowed to access identity and password-change endpoints. All other API
     // calls are blocked until the password is changed. This prevents temporary
     // credentials from being used to access sensitive data.
+    // Exception: admins may reset other users' passwords even before changing
+    // their own, so they can onboard new team members during initial setup.
     if user.must_change_password {
         let request_path = parts.uri.path();
         let allowed_paths = [
@@ -322,7 +324,11 @@ pub async fn auth_middleware(
             "/auth/preferences",
             "/settings/public",
         ];
-        if !allowed_paths.contains(&request_path) {
+        let is_admin_reset_password = user.is_admin()
+            && parts.method == Method::POST
+            && request_path.starts_with("/users/")
+            && request_path.ends_with("/reset-password");
+        if !allowed_paths.contains(&request_path) && !is_admin_reset_password {
             return Err(AppError::Forbidden);
         }
     }
