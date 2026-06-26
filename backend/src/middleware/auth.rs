@@ -253,6 +253,10 @@ async fn enforce_csrf(
             target: "zerf::auth",
             method = %parts.method,
             path = %parts.uri.path(),
+            header_token_len = header_token.len(),
+            session_token_len = csrf_token.len(),
+            header_token_prefix = &header_token[..header_token.len().min(8)],
+            session_token_prefix = &csrf_token[..csrf_token.len().min(8)],
             "CSRF token mismatch"
         );
         return Err(AppError::Forbidden);
