@@ -719,6 +719,49 @@ pub async fn reset_password(
         Some(serde_json::json!({"password_reset": true})),
     )
     .await;
+    // Send password-reset notification email (best-effort, fire-and-forget).
+    let smtp = crate::services::settings::load_smtp_config(&app_state.pool)
+        .await
+        .map(std::sync::Arc::new);
+    let login_line = match app_state.cfg.public_url.as_deref() {
+        Some(url) => format!("\nURL:      {}\n", url.trim_end_matches('/')),
+        None => String::new(),
+    };
+    let language = crate::i18n::load_ui_language(&app_state.pool)
+        .await
+        .unwrap_or_default();
+    let org_name_raw =
+        crate::services::settings::load_setting(&app_state.pool, "organization_name", "")
+            .await
+            .unwrap_or_default();
+    let org_name = if org_name_raw.trim().is_empty() {
+        "Zerf".to_string()
+    } else {
+        org_name_raw
+    };
+    let subject = crate::i18n::translate(
+        &language,
+        "admin_password_reset_subject",
+        &[("org_name", org_name)],
+    );
+    let body_text = crate::i18n::translate(
+        &language,
+        "admin_password_reset_body",
+        &[
+            ("first_name", target_user.first_name.clone()),
+            ("last_name", target_user.last_name.clone()),
+            ("email", target_user.email.clone()),
+            ("password", temporary_password.clone()),
+            ("login_line", login_line),
+        ],
+    );
+    crate::email::send_async(
+        smtp,
+        target_user.email.clone(),
+        format!("{} {}", target_user.first_name, target_user.last_name),
+        subject,
+        body_text,
+    );
     Ok(Json(
         serde_json::json!({"temporary_password": temporary_password}),
     ))

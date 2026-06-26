@@ -4,6 +4,8 @@
 
   export let password;
   export let smtpEnabled = false;
+  /** "create" (default) for new user, "reset" for admin password reset. */
+  export let mode = "create";
   export let title;
   export let onDismiss;
 
@@ -27,7 +29,7 @@
   </div>
   {#if smtpEnabled}
     <div style="font-size:12px;color:var(--text-tertiary);margin-top:8px">
-      {$t("Registration email will be sent.")}
+      {mode === "reset" ? $t("Password reset email will be sent.") : $t("Registration email will be sent.")}
     </div>
   {:else}
     <div
