@@ -1384,3 +1384,102 @@ async fn user_creation_with_explicit_category_selection() {
 
     app.cleanup().await;
 }
+
+/// Admin resets another user's password: both when the admin has already changed
+/// their own password (normal flow) and when the admin still has
+/// `must_change_password = true` (the middleware exception added for onboarding).
+#[tokio::test]
+async fn admin_resets_user_password() {
+    let app = TestApp::spawn().await;
+    let admin = app.client();
+
+    // The seeded admin starts with must_change_password = true.
+    let (st, _) = admin.login("admin@example.com", &app.admin_password).await;
+    assert_eq!(st, StatusCode::OK);
+
+    // Change password so we can create users (create is not in allowed paths).
+    let (st, _) = admin
+        .change_password(&app.admin_password, "AdminPass!234")
+        .await;
+    assert_eq!(st, StatusCode::OK);
+
+    let emp_id = create_emp(&admin, "reset-target@example.com", "Target", 1).await;
+
+    // Reset the employee's password — admin has must_change_password = false.
+    let (st, body) = admin
+        .post(&format!("/api/v1/users/{emp_id}/reset-password"), &json!({}))
+        .await;
+    assert_eq!(st, StatusCode::OK, "admin resets user password: {body}");
+    let new_pw = body["temporary_password"]
+        .as_str()
+        .expect("temporary_password in response");
+    assert!(!new_pw.is_empty(), "temporary password is not empty");
+
+    // Verify the target user can log in with the new password.
+    let target_client = app.client();
+    let (st, _) = target_client.login("reset-target@example.com", new_pw).await;
+    assert_eq!(st, StatusCode::OK, "target logs in with new password");
+
+    // -- Admin with must_change_password = true can also reset passwords --
+    // Create a second admin, don't change their password, then try to reset.
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "admin2@example.com", "first_name": "Admin", "last_name": "Two",
+                "role": "admin", "weekly_hours": 39,
+                "leave_days_current_year": 30, "leave_days_next_year": 30, "annual_leave_days": 30,
+                "start_date": "2024-01-01",
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create second admin");
+    let admin2_pw = temp_pw(&body);
+    let admin2_id = id(&body);
+
+    let admin2_client = app.client();
+    let (st, _) = admin2_client.login("admin2@example.com", &admin2_pw).await;
+    assert_eq!(st, StatusCode::OK);
+
+    // admin2 still has must_change_password = true — verify they can reset
+    // another user's password (the middleware exception).
+    let (st, body) = admin2_client
+        .post(&format!("/api/v1/users/{emp_id}/reset-password"), &json!({}))
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::OK,
+        "admin with must_change_password resets user password: {body}"
+    );
+    let new_pw2 = body["temporary_password"]
+        .as_str()
+        .expect("temporary_password in admin2 reset response");
+
+    // But admin2 cannot access other endpoints (e.g. listing users).
+    let (st, _) = admin2_client.get("/api/v1/users").await;
+    assert_eq!(
+        st,
+        StatusCode::FORBIDDEN,
+        "admin with must_change_password blocked from listing users"
+    );
+
+    // Non-admin cannot reset passwords.
+    let non_admin = app.client();
+    let (st, _) = non_admin.login("reset-target@example.com", new_pw2).await;
+    assert_eq!(st, StatusCode::OK);
+    let (st, _) = non_admin.change_password(new_pw2, "EmpPass!23456").await;
+    assert_eq!(st, StatusCode::OK);
+    let (st, _) = non_admin
+        .post(
+            &format!("/api/v1/users/{admin2_id}/reset-password"),
+            &json!({}),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::FORBIDDEN,
+        "non-admin cannot reset passwords"
+    );
+
+    app.cleanup().await;
+}
