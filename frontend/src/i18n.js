@@ -1124,6 +1124,8 @@ const TRANSLATIONS = {
     "Password (min 12 chars)": "Passwort (mind. 12 Zeichen)",
     "Registration email will be sent.":
       "Es wird eine Registrierungs-E-Mail gesendet.",
+    "Password reset email will be sent.":
+      "Es wird eine E-Mail mit dem neuen Passwort gesendet.",
     "No email was sent! Email / SMTP is not configured.":
       "Es wurde keine E-Mail gesendet! E-Mail / SMTP ist nicht konfiguriert.",
     "You must deliver this password to the user in person!":

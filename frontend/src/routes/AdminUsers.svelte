@@ -129,6 +129,7 @@
   <TempPasswordDialog
     password={resetPwData.password}
     {smtpEnabled}
+    mode="reset"
     title={$t("Password reset.")}
     onDismiss={() => (resetPwData = null)}
   />

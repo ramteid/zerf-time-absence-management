@@ -1417,8 +1417,9 @@ Resets the password for any active user.
 - A new temporary password is generated automatically.
 - The user is required to change it on next login.
 - All existing sessions for that user end immediately.
-
-Show the new temporary password to the user directly or communicate it securely.
+- When SMTP is configured, the user receives an email with the new temporary
+  password. When SMTP is not configured, the admin must deliver the password
+  to the user manually.
 
 ### Managing approver assignments
 
@@ -1675,7 +1676,8 @@ see [Time entry statuses](#time-entry-statuses) above).
 ### Temporary passwords and forced password change
 
 - When an admin resets a user's password, the system issues a one-time
-  temporary credential and marks the account with `must_change_password`.
+  temporary credential, marks the account with `must_change_password`, and
+  sends the new password to the user via email (when SMTP is configured).
 - Until the password is changed, the backend middleware blocks **all** API
   endpoints except `/auth/me`, `/auth/password`, `/auth/logout`,
   `/auth/preferences`, and `/settings/public`. This prevents temporary

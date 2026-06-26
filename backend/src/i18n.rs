@@ -89,6 +89,8 @@ static LANGUAGES: &[LangDef] = &[
             ("approval_reminder_email_body", "Hello,\n\nyou have {count} pending request(s) awaiting your approval.\n\nPlease log in to review them:\n{app_url}\n"),
             ("password_reset_subject", "Reset your password"),
             ("password_reset_body", "Hello,\n\nYou requested a password reset.\n\nPlease click the link below (valid for 1 hour):\n\n{reset_link}\n\nIf you did not request this, you can safely ignore this email."),
+            ("admin_password_reset_subject", "Your password has been reset - {org_name}"),
+            ("admin_password_reset_body", "Hello {first_name} {last_name},\n\nYour password has been reset by an administrator.\n\nEmail:    {email}\nNew password: {password}{login_line}\nPlease log in and change your password immediately."),
             ("account_created_subject", "Welcome to the time tracking of {org_name}"),
             ("account_created_body", "Hello {first_name} {last_name},\n\nYour account has been created.\n\nEmail:    {email}\nPassword: {password}{login_line}\nPlease log in and change your password immediately."),
             ("weekday_monday", "Monday"),
@@ -177,6 +179,8 @@ static LANGUAGES: &[LangDef] = &[
             ("approval_reminder_email_body", "Hallo,\n\nes gibt {count} Anfrage(n), die Ihre Genehmigung erfordern.\n\nBitte melden Sie sich an, um diese zu bearbeiten:\n{app_url}\n"),
             ("password_reset_subject", "Passwort zur\u{00fc}cksetzen"),
             ("password_reset_body", "Hallo,\n\nSie haben eine Anfrage zum Zur\u{00fc}cksetzen Ihres Passworts gestellt.\n\nBitte klicken Sie auf den folgenden Link (g\u{00fc}ltig f\u{00fc}r 1 Stunde):\n\n{reset_link}\n\nFalls Sie diese Anfrage nicht gestellt haben, k\u{00f6}nnen Sie diese E-Mail ignorieren."),
+            ("admin_password_reset_subject", "Ihr Passwort wurde zur\u{00fc}ckgesetzt - {org_name}"),
+            ("admin_password_reset_body", "Hallo {first_name} {last_name},\n\nIhr Passwort wurde von einem Administrator zur\u{00fc}ckgesetzt.\n\nE-Mail:        {email}\nNeues Passwort: {password}{login_line}\nBitte melden Sie sich an und \u{00e4}ndern Sie Ihr Passwort umgehend."),
             ("account_created_subject", "Willkommen bei der Zeiterfassung von {org_name}"),
             ("account_created_body", "Hallo {first_name} {last_name},\n\nIhr Konto wurde erstellt.\n\nE-Mail:   {email}\nPasswort: {password}{login_line}\nBitte melden Sie sich an und \u{00e4}ndern Sie Ihr Passwort umgehend."),
             ("weekday_monday", "Montag"),
@@ -499,6 +503,57 @@ mod tests {
         assert!(body.contains("Email:    ada@example.com"));
         assert!(body.contains("Password: TempPass!234"));
         assert!(body.contains("URL:      https://zerf.example"));
+    }
+
+    #[test]
+    fn admin_password_reset_email_template_uses_parameters() {
+        for lang in ["en", "de"] {
+            let language = Language::from_setting(lang);
+            let subject = translate(
+                &language,
+                "admin_password_reset_subject",
+                &[("org_name", "TestOrg".to_string())],
+            );
+            let body = translate(
+                &language,
+                "admin_password_reset_body",
+                &[
+                    ("first_name", "Max".to_string()),
+                    ("last_name", "Mustermann".to_string()),
+                    ("email", "max@example.com".to_string()),
+                    ("password", "NewTmp!567".to_string()),
+                    (
+                        "login_line",
+                        "\nURL:      https://zerf.example\n".to_string(),
+                    ),
+                ],
+            );
+            assert!(
+                subject.contains("TestOrg"),
+                "{lang}: subject must contain org name"
+            );
+            assert!(
+                body.contains("Max Mustermann"),
+                "{lang}: body must contain full name"
+            );
+            assert!(
+                body.contains("max@example.com"),
+                "{lang}: body must contain email"
+            );
+            assert!(
+                body.contains("NewTmp!567"),
+                "{lang}: body must contain password"
+            );
+            assert!(
+                body.contains("https://zerf.example"),
+                "{lang}: body must contain login URL"
+            );
+            // Must not contain any un-substituted placeholders.
+            assert!(
+                !body.contains('{'),
+                "{lang}: no un-substituted placeholders"
+            );
+        }
     }
 
     #[test]
