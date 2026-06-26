@@ -312,8 +312,8 @@ const TRANSLATIONS = {
     "Team leads": "Team leads",
     "Allow team leads to create assistant users":
       "Allow team leads to create assistant users",
-    'When enabled, team leads get a restricted Users tab where they may only create and manage "Assistant" users assigned to them. No other role can be created there.':
-      'When enabled, team leads get a restricted Users tab where they may only create and manage "Assistant" users assigned to them. No other role can be created there.',
+    'When enabled, team leads get a restricted Users tab where they may only create and manage "Assistant" users assigned to them. No other role can be created there. Enabled by default.':
+      'When enabled, team leads get a restricted Users tab where they may only create and manage "Assistant" users assigned to them. No other role can be created there. Enabled by default.',
     "You can only manage assistants assigned to you.":
       "You can only manage assistants assigned to you.",
     "You will be set as their approver.": "You will be set as their approver.",
@@ -1304,8 +1304,8 @@ const TRANSLATIONS = {
     "Team leads": "Teamleitungen",
     "Allow team leads to create assistant users":
       "Teamleitungen erlauben, Aushilfen anzulegen",
-    'When enabled, team leads get a restricted Users tab where they may only create and manage "Assistant" users assigned to them. No other role can be created there.':
-      'Wenn aktiviert, erhalten Teamleitungen einen eingeschränkten Benutzer-Tab, auf dem sie nur ihnen zugewiesene Benutzer mit Rolle "Aushilfe" anlegen und verwalten können. Andere Rollen können dort nicht angelegt werden.',
+    'When enabled, team leads get a restricted Users tab where they may only create and manage "Assistant" users assigned to them. No other role can be created there. Enabled by default.':
+      'Wenn aktiviert, erhalten Teamleitungen einen eingeschränkten Benutzer-Tab, auf dem sie nur ihnen zugewiesene Benutzer mit Rolle "Aushilfe" anlegen und verwalten können. Andere Rollen können dort nicht angelegt werden. Standardmäßig aktiviert.',
     "You can only manage assistants assigned to you.":
       "Sie können nur Ihnen zugewiesene Aushilfen verwalten.",
     "You will be set as their approver.":

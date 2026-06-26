@@ -608,7 +608,7 @@
           </label>
           <div class="field-hint">
             {$t(
-              "When enabled, team leads get a restricted Users tab where they may only create and manage \"Assistant\" users assigned to them. No other role can be created there.",
+              "When enabled, team leads get a restricted Users tab where they may only create and manage \"Assistant\" users assigned to them. No other role can be created there. Enabled by default.",
             )}
           </div>
         </div>

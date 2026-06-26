@@ -16,7 +16,7 @@ pub const AUTO_BREAK_THRESHOLD_HOURS_2_KEY: &str = "auto_break_threshold_hours_2
 pub const AUTO_BREAK_DEDUCTION_MINUTES_2_KEY: &str = "auto_break_deduction_minutes_2";
 
 /// When TRUE, non-admin team leads may create and manage "assistant" (Aushilfe)
-/// users that are assigned to them as approver. Off by default; only an admin
+/// users that are assigned to them as approver. On by default; only an admin
 /// can change this (the setting lives in the admin-only settings endpoint).
 pub const ALLOW_TEAM_LEAD_MANAGE_ASSISTANTS_KEY: &str = "allow_team_lead_manage_assistants";
 
@@ -102,7 +102,9 @@ pub async fn app_today(pool: &crate::db::DatabasePool) -> chrono::NaiveDate {
 pub async fn team_lead_assistant_management_enabled(
     pool: &crate::db::DatabasePool,
 ) -> AppResult<bool> {
-    Ok(load_setting(pool, ALLOW_TEAM_LEAD_MANAGE_ASSISTANTS_KEY, "false").await? == "true")
+    // Default is "true": team leads can manage assistants out of the box.
+    // An admin can disable this via the general settings page.
+    Ok(load_setting(pool, ALLOW_TEAM_LEAD_MANAGE_ASSISTANTS_KEY, "true").await? != "false")
 }
 
 pub async fn app_current_year(pool: &crate::db::DatabasePool) -> i32 {
@@ -367,7 +369,7 @@ pub struct AdminSettingsData {
     /// Interval between backups in days (read by backup.sh from app_settings).
     pub backup_interval_days: u32,
     /// When TRUE, non-admin team leads may create/manage "assistant" users
-    /// assigned to them (see `/team-users*`). Off by default.
+    /// assigned to them (see `/team-users*`). On by default.
     pub allow_team_lead_manage_assistants: bool,
 }
 
