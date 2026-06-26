@@ -13,10 +13,17 @@
   let resetPwData = null;
   // The user object selected for archiving — triggers ArchiveUserDialog.
   let archiveTarget = null;
+  // Whether SMTP is configured — controls the warning shown in TempPasswordDialog.
+  let smtpEnabled = false;
 
   async function load() {
     const loaded = await api("/users");
     users = (loaded || []).sort((a, b) => a.last_name.localeCompare(b.last_name) || a.first_name.localeCompare(b.first_name));
+    // Load SMTP status once to show correct email hint after password reset.
+    try {
+      const settings = await api("/settings");
+      smtpEnabled = !!settings.smtp_enabled;
+    } catch {}
   }
   load();
 
@@ -121,6 +128,7 @@
 {#if resetPwData}
   <TempPasswordDialog
     password={resetPwData.password}
+    {smtpEnabled}
     title={$t("Password reset.")}
     onDismiss={() => (resetPwData = null)}
   />

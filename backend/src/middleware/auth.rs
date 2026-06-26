@@ -226,20 +226,7 @@ async fn enforce_csrf(
     if matches!(parts.method, Method::GET | Method::HEAD | Method::OPTIONS) {
         return Ok(());
     }
-    if let Err(e) = enforce_same_origin_headers(&parts.headers, app_state) {
-        let origin = parts.headers.get(header::ORIGIN).and_then(|v| v.to_str().ok());
-        let referer = parts.headers.get(header::REFERER).and_then(|v| v.to_str().ok());
-        tracing::warn!(
-            target: "zerf::auth",
-            method = %parts.method,
-            path = %parts.uri.path(),
-            ?origin,
-            ?referer,
-            allowed = ?app_state.cfg.allowed_origins,
-            "CSRF origin check failed"
-        );
-        return Err(e);
-    }
+    enforce_same_origin_headers(&parts.headers, app_state)?;
     if !app_state.cfg.enforce_csrf {
         return Ok(());
     }
@@ -249,16 +236,6 @@ async fn enforce_csrf(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
     if !csrf_token_matches(header_token, csrf_token) {
-        tracing::warn!(
-            target: "zerf::auth",
-            method = %parts.method,
-            path = %parts.uri.path(),
-            header_token_len = header_token.len(),
-            session_token_len = csrf_token.len(),
-            header_token_prefix = &header_token[..header_token.len().min(8)],
-            session_token_prefix = &csrf_token[..csrf_token.len().min(8)],
-            "CSRF token mismatch"
-        );
         return Err(AppError::Forbidden);
     }
     Ok(())
@@ -352,14 +329,6 @@ pub async fn auth_middleware(
             && request_path.starts_with("/users/")
             && request_path.ends_with("/reset-password");
         if !allowed_paths.contains(&request_path) && !is_admin_reset_password {
-            tracing::warn!(
-                target: "zerf::auth",
-                user_id = user.id,
-                path = request_path,
-                method = %parts.method,
-                role = &user.role,
-                "must_change_password gate: blocked"
-            );
             return Err(AppError::Forbidden);
         }
     }
