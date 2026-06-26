@@ -689,6 +689,13 @@ pub async fn reset_password(
     Path(target_id): Path<i64>,
 ) -> AppResult<Json<serde_json::Value>> {
     if !requester.is_admin() {
+        tracing::warn!(
+            target: "zerf::auth",
+            user_id = requester.id,
+            role = &requester.role,
+            target_id,
+            "reset_password: not admin"
+        );
         return Err(AppError::Forbidden);
     }
     let temporary_password = generate_password();
