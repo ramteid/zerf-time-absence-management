@@ -159,9 +159,9 @@ cleanup() {
     [ -n "$TMP_COPY_DIR" ] && rm -rf "$TMP_COPY_DIR"
     [ -n "$META_TMP" ]     && rm -f  "$META_TMP"
     [ -n "$META_TMP_DIR" ] && rm -rf "$META_TMP_DIR"
-    # Best-effort: remove the temp dump from inside the postgres container.
-    # Suppress errors so cleanup never masks the real exit status.
-    docker exec "$POSTGRES_CONTAINER" rm -f /tmp/zerf-restore.dump 2>/dev/null || true
+    # Best-effort: remove the temp dump and restore list from inside the
+    # postgres container.  Suppress errors so cleanup never masks the real exit.
+    docker exec "$POSTGRES_CONTAINER" rm -f /tmp/zerf-restore.dump /tmp/zerf-restore.toc 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -315,17 +315,37 @@ fi
 # ── Restore ───────────────────────────────────────────────────────────────────
 
 echo "Copying dump into postgres container…"
-# Pre-clear any stale dump left by a previous restore that was hard-killed
+# Pre-clear any stale dump/list left by a previous restore that was hard-killed
 # (SIGKILL bypasses the EXIT trap, so the cleanup inside the container may
 # not have run).  Idempotent: a missing file is silently ignored.
-docker exec "$POSTGRES_CONTAINER" rm -f /tmp/zerf-restore.dump 2>/dev/null || true
+docker exec "$POSTGRES_CONTAINER" rm -f /tmp/zerf-restore.dump /tmp/zerf-restore.toc 2>/dev/null || true
 docker cp "$PLAIN_TMP" "$POSTGRES_CONTAINER:/tmp/zerf-restore.dump"
+
+# Build a restore list that EXCLUDES the pg_tde extension (and its COMMENT).
+#
+# Why this is required: --clean drops every object it is about to restore, in
+# reverse order.  With the extension in the list that includes
+# `DROP EXTENSION pg_tde`, which wipes the pg_tde principal-key configuration.
+# The extension is then recreated empty — its key-provider setup lives in the
+# container init scripts, NOT in the dump — so every `CREATE TABLE … USING
+# tde_heap` fails with "principal key not configured" and the restore destroys
+# the database instead of repopulating it.  Filtering the extension out leaves
+# the live pg_tde (and its key) untouched while still dropping and recreating
+# all application objects.  Verified end-to-end against the Percona pg_tde image.
+#
+# Backward-compatible: a dump made without pg_tde simply has nothing to filter,
+# so the list is unchanged and the restore behaves exactly as before.
+echo "Preparing restore list (preserving the pg_tde extension)…"
+docker exec "$POSTGRES_CONTAINER" sh -c \
+    "pg_restore --list /tmp/zerf-restore.dump | grep -vE 'EXTENSION - pg_tde|COMMENT - EXTENSION pg_tde' > /tmp/zerf-restore.toc" \
+    || die "Failed to build the restore list from the dump."
 
 echo "Restoring…"
 # --clean      drop objects before recreating them (replaces existing data)
 # --if-exists  suppress errors for objects that don't exist in the target db
 # --no-owner   do not set ownership (current db role owns everything)
 # --no-privileges  skip GRANT/REVOKE (the app role uses its own fixed grants)
+# --use-list   restore only the filtered TOC, so pg_tde is never dropped (above)
 #
 # PGOPTIONS --statement_timeout=0: the postgres server has statement_timeout=30s
 # to protect the application, but this also applies to sessions opened by
@@ -345,6 +365,7 @@ docker exec \
         --if-exists \
         --no-owner \
         --no-privileges \
+        --use-list=/tmp/zerf-restore.toc \
         /tmp/zerf-restore.dump \
     || die "pg_restore exited with errors — review the output above."
 
