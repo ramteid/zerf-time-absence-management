@@ -73,6 +73,7 @@
     padding: 0 28px;
     border-bottom: 1px solid var(--border);
     background: var(--bg-surface);
+    overflow-x: auto;
   }
 
   .tab-link {
