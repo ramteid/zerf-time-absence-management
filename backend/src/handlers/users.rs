@@ -525,6 +525,18 @@ pub async fn update(
     // existing time and absence data is kept immutably in the database.
     // All queries that build team views or reports filter by tracks_time=TRUE,
     // so the retained rows are silently excluded without any deletions.
+    // Any items still sitting in an approval queue (submitted entries, pending
+    // absences/reopen requests) are closed out atomically so they don't
+    // reappear in queues if tracking is ever re-enabled.
+    let disabling_time_tracking = effective_tracks_time == Some(false) && previous_user.tracks_time;
+    if disabling_time_tracking {
+        crate::services::users::close_pending_for_user_tx(
+            &mut transaction,
+            user_id,
+            requester.id,
+        )
+        .await?;
+    }
     // When (re-)enabling time tracking for an admin who currently has it
     // disabled, reset the start_date to today unless the caller is explicitly
     // setting a different start_date. Without this, the admin's old start_date

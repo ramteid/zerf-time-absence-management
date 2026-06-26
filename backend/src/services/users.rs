@@ -2,7 +2,7 @@ use crate::audit;
 use crate::error::{AppError, AppResult};
 use crate::i18n;
 use crate::middleware::auth::User;
-use crate::repository::{AbsenceDb, ReopenRequestDb, SessionDb, UserDb};
+use crate::repository::{AbsenceDb, ReopenRequestDb, SessionDb, TimeEntryDb, UserDb};
 use crate::roles::{
     is_admin_role, is_assistant_role, is_team_lead_role, normalize_role, ROLE_ASSISTANT,
 };
@@ -376,6 +376,28 @@ pub async fn count_active_direct_reports_tx(
     user_id: i64,
 ) -> AppResult<i64> {
     UserDb::count_active_direct_reports_tx(tx, user_id).await
+}
+
+/// When disabling time tracking for a user, close out any items they have
+/// sitting in an approval queue: submitted time entries revert to draft (so
+/// they don't reappear if tracking is re-enabled), and pending absences /
+/// reopen requests are rejected. All three writes share the caller's transaction.
+pub async fn close_pending_for_user_tx(
+    tx: &mut crate::db::PgConnection,
+    user_id: i64,
+    reviewer_id: i64,
+) -> AppResult<()> {
+    TimeEntryDb::revert_submitted_to_draft_tx(tx, user_id).await?;
+    AbsenceDb::reject_pending_for_user_tx(tx, user_id, reviewer_id, "Time tracking disabled.")
+        .await?;
+    ReopenRequestDb::reject_pending_for_user_tx(
+        tx,
+        user_id,
+        reviewer_id,
+        "Time tracking disabled.",
+    )
+    .await?;
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
