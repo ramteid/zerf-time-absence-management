@@ -25,6 +25,15 @@
 # Local retention: always keeps the 10 most recent encrypted backup files.
 # Uploaded files in Nextcloud are never deleted automatically.
 #
+# Each backup cycle writes up to three sibling files in OUTPUT_DIR:
+#   zerf-<ts>.dump.enc     encrypted pg_dump custom dump (logical restore)
+#   zerf-<ts>.metadata     plaintext metadata sidecar
+#   zerf-<ts>.keyring.enc  copy of the (already AES-encrypted) pg_tde keyring,
+#                          for physical recovery of an orphaned encrypted PGDATA
+#                          volume. Only written when the keyring volume is
+#                          mounted at /keyring-src (see KEYRING_SRC); its absence
+#                          is a warning, never a failure.
+#
 # Sourcing:  set BACKUP_LIB_ONLY=1 before sourcing to load helper functions
 # without starting the daemon loop -- used by automated tests (backup.bats).
 set -eu
@@ -36,6 +45,15 @@ cd "$ROOT"
 OUT_DIR="${1:-$ROOT/backups}"
 
 ENCRYPTION_KEY="${ZERF_DB_ENCRYPTION_KEY:-}"
+
+# Path to the pg_tde keyring as seen from inside the backup container.  The
+# compose file mounts the postgres keyring volume (zerf_postgres_data) read-only
+# at /keyring-src, which contains only the already-AES-encrypted keyring file
+# (and an empty db/ mountpoint) -- not the data directory.  Each backup copies
+# this keyring alongside the dump so that an orphaned, encrypted PGDATA volume
+# can still be recovered (physical recovery) even if the keyring volume itself
+# is later lost or overwritten.  Overridable for tests.
+KEYRING_SRC="${ZERF_KEYRING_SRC:-/keyring-src/pg_tde_keyring.enc}"
 
 # -- Database connection -------------------------------------------------------
 
@@ -317,6 +335,7 @@ metadata_value() {
 write_backup_metadata() {
   _target_file="$1"
   _created_at="$2"
+  _keyring_included="${3:-false}"
 
   resolve_direct_connection || return 1
 
@@ -328,18 +347,22 @@ write_backup_metadata() {
     printf 'PGPORT=%s\n' "$(metadata_value "$DIRECT_PORT")"
     printf 'PGDATABASE=%s\n' "$(metadata_value "$DIRECT_DB")"
     printf 'PGUSER=%s\n' "$(metadata_value "$DIRECT_USER")"
+    # Records whether a sibling zerf-<ts>.keyring.enc was captured for this
+    # backup. The logical dump restores without it; it only matters for
+    # physical recovery of an orphaned, encrypted PGDATA volume.
+    printf 'pg_tde_keyring_included=%s\n' "$(metadata_value "$_keyring_included")"
   } > "$_target_file"
 }
 
 # -- Retention -----------------------------------------------------------------
 
 # Keep only the 10 most recent encrypted backup files; delete all older ones
-# along with their associated .metadata sidecar files.
+# along with their associated .metadata and .keyring.enc sidecar files.
 # Local retention is count-based (not time-based) so the volume stays bounded
 # regardless of backup frequency changes.
 apply_retention() {
   ls -1t "$OUT_DIR"/zerf-*.dump.enc 2>/dev/null | tail -n +11 | while IFS= read -r f; do
-    rm -f "$f" "${f%.dump.enc}.metadata"
+    rm -f "$f" "${f%.dump.enc}.metadata" "${f%.dump.enc}.keyring.enc"
   done
 }
 
@@ -348,12 +371,14 @@ apply_retention() {
 run_backup_once() {
   # Sweep stale temp files from previous runs interrupted by SIGTERM/SIGKILL.
   find "$OUT_DIR" -maxdepth 1 -type f \
-    \( -name 'zerf-*.dump.enc.tmp' -o -name 'zerf-*.dump.plain.tmp' -o -name 'zerf-*.metadata.tmp' \) \
+    \( -name 'zerf-*.dump.enc.tmp' -o -name 'zerf-*.dump.plain.tmp' \
+       -o -name 'zerf-*.metadata.tmp' -o -name 'zerf-*.keyring.enc.tmp' \) \
     -exec rm -f {} +
 
   ts="$(date -u +%Y%m%dT%H%M%SZ)"
   output_file="$OUT_DIR/zerf-$ts.dump.enc"
   metadata_file="$OUT_DIR/zerf-$ts.metadata"
+  keyring_file="$OUT_DIR/zerf-$ts.keyring.enc"
   # Stage the plaintext dump in $TMPDIR (defaults to /tmp), NOT in $OUT_DIR.
   # The backup container mounts /tmp as a RAM-backed tmpfs so the plaintext
   # copy never touches the persistent backup volume.
@@ -364,6 +389,7 @@ run_backup_once() {
   chmod 600 "$plain_temp_file"
   temp_file="$output_file.tmp"
   temp_metadata_file="$metadata_file.tmp"
+  temp_keyring_file="$keyring_file.tmp"
 
   # Step 1: dump to the in-RAM plaintext temp file.
   if ! run_direct_pg_dump > "$plain_temp_file"; then
@@ -394,27 +420,57 @@ run_backup_once() {
 
   rm -f "$plain_temp_file"
 
-  if ! write_backup_metadata "$temp_metadata_file" "$ts"; then
-    rm -f "$temp_file" "$temp_metadata_file"
+  # Stage a copy of the pg_tde keyring next to the dump.  Best-effort: a missing
+  # or unreadable keyring (volume not mounted, older deployment) is a warning,
+  # never a backup failure, because the logical dump restores without it.  The
+  # keyring is already AES-encrypted, so it is copied verbatim.
+  keyring_included=false
+  if [ -f "$KEYRING_SRC" ]; then
+    if cp "$KEYRING_SRC" "$temp_keyring_file" 2>/dev/null; then
+      chmod 600 "$temp_keyring_file"
+      keyring_included=true
+    else
+      rm -f "$temp_keyring_file"
+      printf 'WARNING: failed to copy pg_tde keyring from %s -- backup will not include it.\n' "$KEYRING_SRC" >&2
+    fi
+  else
+    printf 'WARNING: pg_tde keyring not found at %s -- backup will not include it (logical restore is unaffected).\n' "$KEYRING_SRC" >&2
+  fi
+
+  if ! write_backup_metadata "$temp_metadata_file" "$ts" "$keyring_included"; then
+    rm -f "$temp_file" "$temp_metadata_file" "$temp_keyring_file"
     printf 'Failed to write backup metadata.\n' >&2
     return 1
   fi
 
   chmod 600 "$temp_file" "$temp_metadata_file"
   if ! mv "$temp_file" "$output_file"; then
-    rm -f "$temp_file" "$temp_metadata_file"
+    rm -f "$temp_file" "$temp_metadata_file" "$temp_keyring_file"
     printf 'Failed to finalize backup file.\n' >&2
     return 1
   fi
   if ! mv "$temp_metadata_file" "$metadata_file"; then
-    rm -f "$output_file" "$temp_metadata_file"
+    rm -f "$output_file" "$temp_metadata_file" "$temp_keyring_file"
     printf 'Failed to finalize backup metadata.\n' >&2
     return 1
+  fi
+  # Finalize the keyring sidecar last.  A failure here is non-fatal: the dump
+  # and metadata are already valid, so downgrade to a warning rather than
+  # discarding a good backup.
+  if [ "$keyring_included" = "true" ]; then
+    if ! mv "$temp_keyring_file" "$keyring_file"; then
+      rm -f "$temp_keyring_file"
+      printf 'WARNING: failed to finalize keyring sidecar -- backup kept without it.\n' >&2
+      keyring_included=false
+    fi
   fi
 
   apply_retention
   printf 'Backup written: %s\n' "$output_file"
   printf 'Backup metadata written: %s\n' "$metadata_file"
+  if [ "$keyring_included" = "true" ]; then
+    printf 'Backup keyring written: %s\n' "$keyring_file"
+  fi
 
   # Step 3 (optional): upload to Nextcloud via WebDAV.
   _upload_enabled="$(read_app_setting "backup_upload_enabled")"
@@ -434,6 +490,17 @@ run_backup_once() {
             "$(basename "$output_file")" >&2
           notify_admins_backup_error "backup_upload_failed" \
             "Nextcloud backup upload failed. Check backup container logs."
+        fi
+        # Also upload the keyring sidecar so off-site recovery is possible.
+        # Secondary to the dump: a failure here is a warning only and does not
+        # raise the admin alert (the logical dump is what restores the data).
+        if [ "$keyring_included" = "true" ]; then
+          if upload_backup "$keyring_file" "$UPLOAD_BASE" "$UPLOAD_TOKEN" "$_upload_pw"; then
+            printf 'Backup keyring uploaded: %s\n' "$(basename "$keyring_file")"
+          else
+            printf 'WARNING: Nextcloud upload failed for %s -- local copy retained.\n' \
+              "$(basename "$keyring_file")" >&2
+          fi
         fi
       else
         printf 'WARNING: Invalid backup_upload_url in app_settings -- skipping upload.\n' >&2

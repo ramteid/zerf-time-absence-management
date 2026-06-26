@@ -4,6 +4,9 @@
 # Usage:
 #   ./scripts/restore.sh                    — list available backups and choose
 #   ./scripts/restore.sh <file.dump.enc>    — restore a specific file
+#   ./scripts/restore.sh --keyring [DIR]    — extract a backup's pg_tde keyring
+#                                             to DIR (default: cwd) for physical
+#                                             recovery; makes no database changes
 #
 # What this script does:
 #   1. Loads ZERF_DB_ENCRYPTION_KEY and database credentials from .env.
@@ -51,6 +54,80 @@ confirm() {
     echo "Aborted."
     exit 0
 }
+
+# ── Keyring extraction mode (physical recovery) ──────────────────────────────
+#
+# Each backup may carry a sibling zerf-<ts>.keyring.enc — a copy of the pg_tde
+# keyring. The logical restore below does NOT need it, but recovering an
+# orphaned, encrypted PGDATA volume does. This mode copies a chosen keyring out
+# of the backup volume so it can be paired with such a volume. It never touches
+# the database, so it needs no .env / credentials.
+extract_keyring() {
+    local out_dir="${1:-$PWD}"
+    [ -d "$out_dir" ] || die "Output directory does not exist: $out_dir"
+
+    docker volume inspect "$BACKUP_VOLUME" >/dev/null 2>&1 \
+        || die "Docker volume $BACKUP_VOLUME not found. Is the stack running?"
+
+    local keyrings=()
+    mapfile -t keyrings < <(
+        docker run --rm \
+            -v "$BACKUP_VOLUME:/backups:ro" \
+            --entrypoint sh \
+            "$HELPER_IMAGE" \
+            -c 'ls -1t /backups/*.keyring.enc 2>/dev/null' \
+        | sed 's|/backups/||'
+    )
+
+    [ ${#keyrings[@]} -gt 0 ] \
+        || die "No .keyring.enc files in $BACKUP_VOLUME. Backups made before keyring capture was added do not contain one — the postgres keyring volume (zerf_postgres_data) is then the only source."
+
+    echo ""
+    echo "Available keyrings (newest first):"
+    echo ""
+    local i
+    for i in "${!keyrings[@]}"; do
+        printf '  [%d] %s\n' "$((i+1))" "${keyrings[$i]}"
+    done
+    echo ""
+    printf 'Choose a keyring to extract [1-%d]: ' "${#keyrings[@]}"
+    local choice
+    read -r choice
+    [[ "$choice" =~ ^[0-9]+$ ]] || die "Not a number."
+    [ "$choice" -ge 1 ] && [ "$choice" -le "${#keyrings[@]}" ] || die "Choice out of range."
+
+    local selected="${keyrings[$((choice-1))]}"
+    # Pass the filename via -e so shell metacharacters in it stay inert.
+    docker run --rm \
+        -v "$BACKUP_VOLUME:/backups:ro" \
+        -v "$out_dir:/out" \
+        -e "SRC=$selected" \
+        --entrypoint sh \
+        "$HELPER_IMAGE" \
+        -c 'cp "/backups/$SRC" "/out/$SRC"' \
+        || die "Could not copy $selected out of the backup volume."
+
+    chmod 600 "$out_dir/$selected" 2>/dev/null || true
+    echo ""
+    echo "✓ Keyring extracted to: $out_dir/$selected"
+    echo ""
+    echo "This is the pg_tde keyring, encrypted with ZERF_DB_ENCRYPTION_KEY. To"
+    echo "recover an orphaned, encrypted PGDATA volume, place it as"
+    echo "pg_tde_keyring.enc in the postgres keyring volume (zerf_postgres_data)"
+    echo "and start postgres against the recovered data directory."
+    echo "See docs/UPGRADING.md for the full procedure."
+    echo ""
+    echo "⚠  Do NOT overwrite a working keyring: if the live database already"
+    echo "   starts and decrypts its data, its current keyring is the right one."
+}
+
+# Dispatch keyring-extraction mode before loading .env (no DB credentials
+# needed). Any remaining argument is the output directory.
+if [ "${1:-}" = "--keyring" ] || [ "${1:-}" = "--extract-keyring" ]; then
+    shift
+    extract_keyring "$@"
+    exit 0
+fi
 
 # ── Load .env ─────────────────────────────────────────────────────────────────
 

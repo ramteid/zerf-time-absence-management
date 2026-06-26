@@ -153,6 +153,15 @@ services:
     volumes:
       - ../scripts/backup.sh:/usr/local/bin/backup.sh:ro
       - backup_data:/backups
+      # Read-only access to the postgres keyring volume so each backup can
+      # include a copy of the pg_tde keyring (zerf-<ts>.keyring.enc). This makes
+      # physical recovery of an orphaned, encrypted PGDATA volume possible even
+      # if the keyring volume is later lost or overwritten. This volume holds
+      # only the already-AES-encrypted keyring file and an empty db/ mountpoint
+      # — the data directory lives in the separate zerf_postgres_db_data volume
+      # — and the keyring is encrypted with ZERF_DB_ENCRYPTION_KEY, which this
+      # container already holds, so it gains no additional access to table data.
+      - postgres_data:/keyring-src:ro
     entrypoint: ["/bin/sh", "/usr/local/bin/backup.sh", "/backups"]
     logging:
       driver: json-file
