@@ -1550,12 +1550,10 @@ dialog footer {
     grid-template-columns: 1fr !important;
   }
 
-  /* Admin tabs: smaller padding, wrap instead of page scrolling */
+  /* Admin tabs: tighter side padding on narrow viewports */
   .admin-tabs {
     padding-left: 14px !important;
     padding-right: 14px !important;
-    overflow-x: visible;
-    flex-wrap: wrap !important;
   }
 
   /* Login: top-align so the card can be scrolled into view when the keyboard is open */
