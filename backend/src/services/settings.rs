@@ -160,13 +160,13 @@ pub async fn load_all_public_settings(
         auto_break_deduction_minutes: auto_break_deduction_str.parse().ok(),
         auto_break_threshold_hours_2: auto_break_threshold_2_str.parse().ok(),
         auto_break_deduction_minutes_2: auto_break_deduction_2_str.parse().ok(),
+        smtp_enabled: load_setting(pool, SMTP_ENABLED_KEY, "false").await? == "true",
     })
 }
 
 /// Load the full admin settings response (public settings + SMTP + reminders + upload).
 pub async fn load_admin_settings(pool: &crate::db::DatabasePool) -> AppResult<AdminSettingsData> {
     let base = load_all_public_settings(pool).await?;
-    let enabled = load_setting(pool, SMTP_ENABLED_KEY, "false").await? == "true";
     let host = load_setting(pool, SMTP_HOST_KEY, "").await?;
     let port: u16 = load_setting(pool, SMTP_PORT_KEY, "587")
         .await?
@@ -206,7 +206,6 @@ pub async fn load_admin_settings(pool: &crate::db::DatabasePool) -> AppResult<Ad
 
     Ok(AdminSettingsData {
         base,
-        smtp_enabled: enabled,
         smtp_host: host,
         smtp_port: port,
         smtp_username: username,
@@ -338,6 +337,8 @@ pub struct PublicSettingsData {
     pub auto_break_threshold_hours_2: Option<f64>,
     /// Tier-2 (optional): total minutes deducted when the tier-2 threshold is reached.
     pub auto_break_deduction_minutes_2: Option<i32>,
+    /// Whether SMTP email delivery is configured and enabled.
+    pub smtp_enabled: bool,
 }
 
 /// Full admin settings (public settings + SMTP config + reminder flags + upload settings).
@@ -345,7 +346,6 @@ pub struct PublicSettingsData {
 pub struct AdminSettingsData {
     #[serde(flatten)]
     pub base: PublicSettingsData,
-    pub smtp_enabled: bool,
     pub smtp_host: String,
     pub smtp_port: u16,
     pub smtp_username: String,

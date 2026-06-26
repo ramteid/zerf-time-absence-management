@@ -177,6 +177,14 @@
         smtpEnabled = !!settings.smtp_enabled;
       } catch {}
     }
+    // In locked-role mode (team lead creating assistant), fetch SMTP status
+    // from public settings so the TempPasswordDialog shows the correct notice.
+    if (isNew && lockedRole) {
+      try {
+        const pubSettings = await api("/settings/public");
+        smtpEnabled = !!pubSettings.smtp_enabled;
+      } catch {}
+    }
     if (isNew) {
       // Categories/absence categories default to "all enabled" (matching
       // the backend default), but shown as checkboxes so the admin can
