@@ -37,11 +37,13 @@ jobs:
         env:
           TEST_REFERENCE_DATE: "2030-01-07"
         run: cargo test --test integration -- --nocapture
-      - name: cargo-audit (RustSec advisories — advisory; daily 'audit' workflow files an issue on findings)
-        continue-on-error: true
+      - name: cargo-audit (RustSec advisories — blocking)
         run: |
           cargo install --locked cargo-audit
-          cargo audit
+          # RUSTSEC-2023-0071 (Marvin Attack in `rsa`) is pulled in transitively
+          # via the disabled sqlx-mysql feature, so the vulnerable code is never
+          # compiled in. Mirrors the ignore in .github/workflows/audit.yml.
+          cargo audit --ignore RUSTSEC-2023-0071
 
   bats:
     name: Bash unit tests (bats)
@@ -76,8 +78,7 @@ jobs:
         run: npm test
       - name: Build
         run: npm run build
-      - name: npm audit (production)
-        continue-on-error: true
+      - name: npm audit (production — blocking)
         run: npm audit --omit=dev --audit-level=high
 
   docker-smoke:

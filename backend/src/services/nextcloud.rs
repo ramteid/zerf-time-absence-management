@@ -8,25 +8,90 @@
 
 use crate::error::{AppError, AppResult};
 use reqwest::header::CONTENT_TYPE;
+use std::net::{IpAddr, SocketAddr};
+use std::time::Duration;
 
-fn mkcol_client() -> &'static reqwest::Client {
-    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
-    CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
-            .build()
-            .expect("failed to build Nextcloud MKCOL HTTP client")
-    })
+/// SSRF guard: returns `true` when an IP must never be the target of an
+/// outbound upload — loopback, private (RFC1918), link-local (which includes
+/// the 169.254.169.254 cloud-metadata endpoint), CGNAT shared space,
+/// broadcast, documentation, and the unspecified address, plus the IPv6
+/// equivalents (loopback, unspecified, multicast, unique-local `fc00::/7`,
+/// link-local `fe80::/10`, and the IPv4-mapped form of any of the above).
+fn is_blocked_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_broadcast()
+                || v4.is_documentation()
+                || v4.is_unspecified()
+                // 100.64.0.0/10 — carrier-grade NAT shared address space.
+                || (v4.octets()[0] == 100 && (v4.octets()[1] & 0xc0) == 64)
+        }
+        IpAddr::V6(v6) => {
+            if let Some(mapped) = v6.to_ipv4_mapped() {
+                return is_blocked_ip(IpAddr::V4(mapped));
+            }
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || v6.is_multicast()
+                // fc00::/7 — unique local addresses.
+                || (v6.segments()[0] & 0xfe00) == 0xfc00
+                // fe80::/10 — link-local unicast.
+                || (v6.segments()[0] & 0xffc0) == 0xfe80
+        }
+    }
 }
 
-fn upload_client() -> &'static reqwest::Client {
-    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
-    CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(120))
-            .build()
-            .expect("failed to build Nextcloud upload HTTP client")
-    })
+/// Resolve the host of an outbound Nextcloud URL and reject it when any
+/// resolved address is private/reserved (SSRF defence). Returns the host plus
+/// the validated socket addresses, which the caller pins into the HTTP client
+/// so the connection cannot be re-pointed at an internal address between this
+/// check and the request (DNS-rebinding defence).
+async fn resolve_safe_addrs(url: &str) -> AppResult<(String, Vec<SocketAddr>)> {
+    let parsed = reqwest::Url::parse(url)
+        .map_err(|_| AppError::BadRequest("Invalid Nextcloud URL.".into()))?;
+    if parsed.scheme() != "https" {
+        return Err(AppError::BadRequest("Nextcloud URL must use https.".into()));
+    }
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| AppError::BadRequest("Nextcloud URL has no host.".into()))?
+        .to_string();
+    let port = parsed.port_or_known_default().unwrap_or(443);
+    let addrs: Vec<SocketAddr> = tokio::net::lookup_host((host.as_str(), port))
+        .await
+        .map_err(|e| AppError::Internal(format!("Could not resolve Nextcloud host: {e}")))?
+        .collect();
+    if addrs.is_empty() {
+        return Err(AppError::BadRequest(
+            "Nextcloud host did not resolve to any address.".into(),
+        ));
+    }
+    if addrs.iter().any(|addr| is_blocked_ip(addr.ip())) {
+        return Err(AppError::BadRequest(
+            "Nextcloud host resolves to a private or reserved address; refusing to connect."
+                .into(),
+        ));
+    }
+    Ok((host, addrs))
+}
+
+/// Build a one-off HTTP client that connects only to the pre-validated
+/// addresses for `host`, closing the DNS-rebinding window opened by
+/// [`resolve_safe_addrs`]. Uploads run at most daily/monthly, so building a
+/// client per request is negligible.
+fn pinned_client(
+    host: &str,
+    addrs: &[SocketAddr],
+    timeout: Duration,
+) -> AppResult<reqwest::Client> {
+    reqwest::Client::builder()
+        .timeout(timeout)
+        .resolve_to_addrs(host, addrs)
+        .build()
+        .map_err(|e| AppError::Internal(format!("Failed to build Nextcloud HTTP client: {e}")))
 }
 
 /// Parse a Nextcloud public share URL into (base, token).
@@ -78,8 +143,9 @@ pub async fn create_folder(
     // Trailing slash is required by the WebDAV spec for MKCOL.
     let url = format!("{}/public.php/webdav/{}/", base, folder);
     let pw = password.filter(|p| !p.is_empty());
+    let (host, addrs) = resolve_safe_addrs(&url).await?;
 
-    let response = mkcol_client()
+    let response = pinned_client(&host, &addrs, Duration::from_secs(30))?
         // reqwest does not expose MKCOL as a named method, so use from_bytes.
         .request(
             reqwest::Method::from_bytes(b"MKCOL").expect("MKCOL is a valid HTTP method"),
@@ -120,9 +186,10 @@ pub async fn upload_file(
 ) -> AppResult<()> {
     let url = format!("{}/public.php/webdav/{}", base, path);
     let pw = password.filter(|p| !p.is_empty());
+    let (host, addrs) = resolve_safe_addrs(&url).await?;
 
     // reqwest::RequestBuilder::basic_auth encodes "token:password" as Basic auth.
-    let response = upload_client()
+    let response = pinned_client(&host, &addrs, Duration::from_secs(120))?
         .put(&url)
         .basic_auth(token, pw)
         .header(CONTENT_TYPE, "application/octet-stream")
@@ -191,5 +258,41 @@ mod tests {
             parse_share_url("  https://cloud.example.com/s/Tok  ").unwrap();
         assert_eq!(base, "https://cloud.example.com");
         assert_eq!(token, "Tok");
+    }
+
+    #[test]
+    fn is_blocked_ip_rejects_private_and_metadata_addresses() {
+        use std::net::{Ipv4Addr, Ipv6Addr};
+        let blocked = [
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),       // loopback
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5)),        // RFC1918
+            IpAddr::V4(Ipv4Addr::new(192, 168, 1, 10)),    // RFC1918
+            IpAddr::V4(Ipv4Addr::new(172, 16, 0, 1)),      // RFC1918
+            IpAddr::V4(Ipv4Addr::new(169, 254, 169, 254)), // cloud metadata (link-local)
+            IpAddr::V4(Ipv4Addr::new(100, 64, 0, 1)),      // CGNAT shared
+            IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),         // unspecified
+            IpAddr::V6(Ipv6Addr::LOCALHOST),               // ::1
+            IpAddr::V6(Ipv6Addr::UNSPECIFIED),             // ::
+            IpAddr::V6(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1)), // ULA fc00::/7
+            IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1)), // link-local
+            // IPv4-mapped loopback must also be blocked.
+            IpAddr::V6(Ipv4Addr::new(127, 0, 0, 1).to_ipv6_mapped()),
+        ];
+        for ip in blocked {
+            assert!(is_blocked_ip(ip), "{ip} should be blocked");
+        }
+    }
+
+    #[test]
+    fn is_blocked_ip_allows_public_addresses() {
+        use std::net::{Ipv4Addr, Ipv6Addr};
+        let allowed = [
+            IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)),
+            IpAddr::V4(Ipv4Addr::new(93, 184, 216, 34)), // example.com
+            IpAddr::V6(Ipv6Addr::new(0x2606, 0x4700, 0x4700, 0, 0, 0, 0, 0x1111)), // public v6
+        ];
+        for ip in allowed {
+            assert!(!is_blocked_ip(ip), "{ip} should be allowed");
+        }
     }
 }

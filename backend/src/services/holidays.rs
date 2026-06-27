@@ -160,8 +160,19 @@ pub async fn fetch_available_regions(
     pool: &crate::db::DatabasePool,
     country: &str,
 ) -> AppResult<Vec<String>> {
+    // Normalize and validate the country code before it reaches the external
+    // URL, mirroring `update_admin_settings`/`prepare_holiday_refresh`. This
+    // keeps a user-supplied path parameter from being interpolated raw into the
+    // upstream request path.
+    let normalized_country = country.trim().to_uppercase();
+    if normalized_country.len() != 2 || !normalized_country.chars().all(|c| c.is_ascii_alphabetic())
+    {
+        return Err(AppError::BadRequest(
+            "Country must be a 2-letter ISO code.".into(),
+        ));
+    }
     let year = crate::services::settings::app_current_year(pool).await;
-    let holidays = fetch_nager_holidays(country, year).await?;
+    let holidays = fetch_nager_holidays(&normalized_country, year).await?;
     Ok(collect_region_codes(&holidays))
 }
 
