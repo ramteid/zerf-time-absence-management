@@ -253,14 +253,23 @@ Supported languages: `en` (en-US) and `de` (de-DE). Stored in localStorage key `
 
 ## Deployment
 
-Three Docker Compose configurations in `docker/`:
+Two Docker Compose configurations in `docker/` (`docker-compose-public.yml` is an
+overlay applied on top of the local file, not a standalone stack):
 
 | File | Purpose |
 |------|---------|
 | `docker-compose-local.yml` | Local stack (supports `DEBUG=true` via `.env`) |
-| `docker-compose-public.yml` | Public deployment with Caddy reverse proxy |
+| `docker-compose-public.yml` | Public deployment overlay: adds Caddy, drops the host port |
 
 Caddy handles HTTPS termination and serves the frontend static assets. Backend listens on port 3333.
+
+> ⚠ **Local mode is LAN-only.** `start_local.sh` publishes the app on
+> `0.0.0.0:3333` with `ZERF_SECURE_COOKIES=false` and `ZERF_ENFORCE_ORIGIN=false`
+> (plaintext HTTP, no Origin enforcement; CSRF tokens are still enforced). This is
+> intended for a trusted LAN only. **Never expose a local-mode host to the
+> internet** — session cookies would travel in cleartext. For any internet-facing
+> deployment use `start_public.sh`, which terminates TLS at Caddy and re-enables
+> secure cookies and Origin enforcement.
 
 The PostgreSQL container is built from `docker/postgres.Dockerfile` (based on `percona/percona-distribution-postgresql:18`, which bundles pg_tde). A custom entrypoint (`docker/entrypoint-postgres.sh`) decrypts the pg_tde keyring from the data volume into an in-memory tmpfs before handing off to the official postgres entrypoint. No elevated container capabilities are required.
 
@@ -286,6 +295,25 @@ The `backup` service in `docker-compose-local.yml` is connected to two networks:
 | `scripts/backup.sh` | Dump, AES-encrypt, and optionally upload the database to a Nextcloud share. Each cycle also copies the pg_tde keyring (`zerf-<ts>.keyring.enc`, from the read-only `/keyring-src` mount) next to the dump so an orphaned encrypted PGDATA volume can be recovered. The backup interval is read from `app_settings` at runtime via `psql`; local retention is a fixed count (the 10 most recent). Refactored into sourceable functions (guarded by `BACKUP_LIB_ONLY=1`) for bats unit tests. |
 | `scripts/restore.sh` | Interactive: decrypt a backup and restore it into the live instance. `--keyring [DIR]` extracts a backup's captured pg_tde keyring for physical recovery without touching the database. |
 | `scripts/backup.bats` | bats unit tests for `backup.sh` helper functions (parse_share_url, interval resolution, upload credential handling, 0-byte rejection, keyring sidecar capture, retention pruning) |
+
+### Disaster recovery prerequisites
+
+The database is encrypted at rest with pg_tde, and the keyring is wrapped with
+`ZERF_DB_ENCRYPTION_KEY`. **Two distinct artifacts are required to read the data —
+losing either renders the database unrecoverable:**
+
+1. `ZERF_DB_ENCRYPTION_KEY` (from `.env`). `deploy.sh` never overwrites an existing
+   key for exactly this reason.
+2. The pg_tde keyring. It lives in the **`zerf_postgres_data`** volume
+   (`/data/pg_tde_keyring.enc`), which is **separate** from the data directory in
+   **`zerf_postgres_db_data`** (`/data/db`). A filesystem/volume snapshot that
+   captures only the data volume **cannot be decrypted**.
+
+For recovery you therefore need **either** both volumes (`zerf_postgres_db_data`
+*and* `zerf_postgres_data`) **or** a logical backup `zerf-<ts>.dump.enc` plus the
+key. Each backup cycle also captures a `zerf-<ts>.keyring.enc` sidecar so an
+orphaned, encrypted data volume can still be recovered with
+`scripts/restore.sh --keyring`.
 
 ### Key environment variables (encryption)
 
@@ -424,6 +452,18 @@ grep -rn "axum::extract\|axum::response\|axum::routing\|axum::Json" backend/src/
 - Translations must be handled centrally in i18n.rs for the backend and i18n.js for the frontend.
 - Update docs/user-guide.md to reflect the correct app behavior.
 
+### Migrations
+
+- **Every migration must be idempotent.** Use `CREATE TABLE/INDEX … IF NOT EXISTS`,
+  `ALTER TABLE … ADD COLUMN IF NOT EXISTS`, `INSERT … ON CONFLICT DO NOTHING`, and
+  guarded `DO $$ … $$` blocks. A migration must be safe to re-run against a database
+  that already has the change.
+- **Never edit a migration that has already been committed/applied.** The app runs
+  `sqlx::migrate!()` (`backend/src/db.rs`), which **checksums every applied migration
+  on startup**; changing a committed migration's bytes triggers a `VersionMismatch`
+  error and the **live application refuses to boot**. To change schema, always add a
+  new, higher-numbered migration.
+
 ## Release Process
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org/) format — git-cliff reads them to generate the changelog automatically.
@@ -437,5 +477,5 @@ git push origin vX.Y.Z
 
 The CI release workflow (`release.yml`) then:
 1. Injects the tag version into `Cargo.toml` and `package.json` (no commit)
-2. Builds and pushes all three Docker images tagged with the version and `latest`
+2. Builds and pushes all four Docker images (app, postgres, caddy, backup) tagged with the version and `latest`
 3. Generates the changelog via git-cliff and creates a GitHub Release with it as release notes
