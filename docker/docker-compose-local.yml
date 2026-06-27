@@ -10,6 +10,19 @@ services:
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
+    # Drop all Linux capabilities, then re-add only the minimal set the
+    # root→gosu startup needs. The custom entrypoint runs as root to chown the
+    # keyring tmpfs and /data, then the upstream entrypoint drops to the postgres
+    # user via gosu (setuid/setgid syscalls). CHOWN/FOWNER/DAC_OVERRIDE cover the
+    # ownership and permission fixes during setup; SETUID/SETGID cover the gosu
+    # privilege drop. Mirrors the cap_drop already applied to app and backup.
+    cap_drop: [ALL]
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETUID
+      - SETGID
     # The pg_tde principal key lives on an in-memory tmpfs so it is never
     # written to disk.  No elevated capabilities are required — pg_tde is a
     # PostgreSQL storage extension, not a FUSE filesystem.  1 MiB is plenty
