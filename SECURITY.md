@@ -5,6 +5,9 @@ holiday balance) and is therefore deployed with a defence-in-depth posture.
 This document summarises the controls in place and how to operate the system
 safely on a public, internet-facing server.
 
+The backend is written in Rust, which eliminates whole classes of memory-safety
+bugs (buffer overflows, use-after-free, data races) at compile time.
+
 ## Reporting a vulnerability
 
 Please report security issues privately to the maintainer's email or via a
@@ -104,6 +107,17 @@ inserted by the auth middleware:
 All write actions are recorded in `audit_log` with a JSON snapshot of the
 before/after row. Admin-only endpoints additionally check `is_admin()`.
 
+Per-user records (reports, leave balance, time entries, absences) pass through a
+single least-privilege check (`assert_can_access_user`): an employee reaches only
+their own rows, a team lead only their direct reports, an admin everyone. Team
+scoping is enforced **inside the SQL** (direct-report subqueries with row locks),
+so a crafted `user_id` cannot widen access. Ownership is re-verified before every
+mutation, and batch operations confirm that **all** targeted rows are permitted
+before any write. Privilege escalation is blocked: roles come from a fixed
+allow-list, the last active admin cannot be removed or demoted, an admin cannot
+demote themselves, and a non-admin can only create `assistant` users with a
+server-forced approver.
+
 ## Input handling
 
 * All SQL is parameterised (sqlx `bind`). No string interpolation.
@@ -116,6 +130,16 @@ before/after row. Admin-only endpoints additionally check `is_admin()`.
   endpoint, including `forgot-password` (the latter previously had no
   length cap, so an attacker could persist near-1 MiB strings into the
   rate-limit table).
+* **XSS**: the SPA never injects untrusted HTML — the only raw-HTML sink is the
+  trusted static icon set; the CSP (`script-src 'self'`, `object-src 'none'`)
+  blocks injected and inline scripts. The session cookie is HttpOnly and the
+  CSRF token is held in memory, not `localStorage`.
+* **Outbound requests (SSRF)**: holiday lookups go only to a hardcoded upstream
+  host with a validated 2-letter country code; Nextcloud backup/report uploads
+  must be `https` share URLs, and the target host is resolved and **rejected when
+  it maps to a loopback, private, link-local, or cloud-metadata address**
+  (`169.254.169.254`), with the validated IPs pinned for the request as a
+  DNS-rebinding defence.
 
 ## Transport & HTTP hardening
 
@@ -184,6 +208,12 @@ The reverse proxy is built with the
 * `.env` is git-ignored. `.env.example` documents every variable.
 * `docker-compose.yml` references variables with `:?` so the stack refuses to
   start when a critical secret is missing.
+* Stored secrets (SMTP password, Nextcloud share passwords) are **write-only over
+  the API**: the admin UI receives only a "password is set" flag, never the
+  value. Password hashes and session tokens are never serialized into API
+  responses or `audit_log` snapshots.
+* Internal/database errors return a generic message to the client; SQL text and
+  stack details are logged server-side only.
 
 ## Container & runtime
 
@@ -212,13 +242,29 @@ The reverse proxy is built with the
 * `HEALTHCHECK` against `/healthz` for orchestrators.
 * JSON-file logs are size-capped (10 MiB × 5).
 
+## Data encryption at rest
+
+* **Database**: all PostgreSQL tables and WAL segments are transparently
+  encrypted at the storage layer with
+  [pg_tde](https://docs.percona.com/pg-tde/) (Percona Transparent Data
+  Encryption). The pg_tde principal key is wrapped with `ZERF_DB_ENCRYPTION_KEY`
+  and stored encrypted on the data volume; on container start the entrypoint
+  decrypts it into an in-memory tmpfs, so the plaintext key never touches disk.
+* **Backups**: every `.dump.enc` is AES-256-CBC encrypted (PBKDF2, 100 000
+  iterations) under the same `ZERF_DB_ENCRYPTION_KEY`. One key governs both
+  layers — losing it makes the live database **and** all backups permanently
+  unreadable.
+
 ## Backups
 
-The dedicated `backup` compose service runs `scripts/backup.sh` on the
-`BACKUP_INTERVAL_SECONDS` schedule and stores `pg_dump --format=custom`
-snapshots in the `zerf_backup_data` named volume with `umask 077`.
-Each snapshot has a `.metadata` sidecar containing `ZERF_GIT_COMMIT` and
-non-secret connection metadata. Retention defaults to 30 days.
+The dedicated `backup` compose service runs `scripts/backup.sh`, which reads its
+interval from `app_settings` (`backup_interval_days`, admin-configurable in the
+UI) and stores AES-256-encrypted `pg_dump --format=custom` snapshots
+(`.dump.enc`) in the `zerf_backup_data` named volume with `umask 077`. Each cycle
+also captures the wrapped pg_tde keyring (`*.keyring.enc`) next to the dump, so an
+orphaned encrypted data volume can still be recovered. Local retention keeps the
+10 most recent backups; optional upload to a Nextcloud public share is
+configurable (and SSRF-guarded — see "Outbound requests" under Input handling).
 
 ## Supply-chain & CI
 
@@ -230,11 +276,15 @@ non-secret connection metadata. Retention defaults to 30 days.
 
 `.github/workflows/ci.yml` runs on every push/PR and weekly:
 
-* `cargo fmt --check`, `cargo clippy -D warnings`, `cargo build --release --locked`
-* `rustsec/audit-check` (RustSec advisories)
-* Rust integration test suite (`backend/tests/integration.rs`) + Docker smoke test
-* Trivy filesystem **and** image scan (HIGH/CRITICAL ⇒ failure)
+* `cargo build --release --locked`, Rust unit + integration tests (testcontainers)
+* **`cargo audit`** (RustSec advisories) and **`npm audit --omit=dev
+  --audit-level=high`** — both **blocking** (a new advisory fails CI)
+* `bats` Bash unit tests; frontend Vitest + build
+* Docker smoke test, Trivy filesystem **and** image scan (HIGH/CRITICAL ⇒ failure)
 * CodeQL JavaScript analysis on the SPA
+
+`.github/workflows/audit.yml` additionally runs both dependency audits daily (and
+on dependency-file changes), filing an issue on new findings.
 
 `.github/workflows/auto-merge-deps.yml` auto-merges Dependabot patch and minor
 updates after CI is green; major updates require a human review.
@@ -246,5 +296,5 @@ updates after CI is green; major updates require a human review.
 3. Set `ZERF_DOMAIN` in `.env`.
 4. `./start_public.sh` — open the application in your browser to create the initial admin account.
 5. Sign in with the credentials you just created, then add real users.
-6. Configure the `backup` service schedule via `BACKUP_INTERVAL_SECONDS` and copy snapshots off-host.
+6. Set the backup interval in the admin UI (Settings → Nextcloud Upload) and copy snapshots off-host.
 7. Subscribe to release notes; let Dependabot keep dependencies fresh.

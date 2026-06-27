@@ -44,7 +44,7 @@ Works on desktop and mobile.
 - Every change is recorded in an audit log
 - The database is not reachable from outside the Docker network
 
-See [docs/security.md](docs/security.md) for technical details.
+See [SECURITY.md](SECURITY.md) for technical details.
 
 ## User documentation
 
