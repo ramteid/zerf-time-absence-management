@@ -104,9 +104,12 @@ extract_keyring() {
         -e "SRC=$selected" \
         --entrypoint sh \
         "$HELPER_IMAGE" \
-        -c 'cp "/backups/$SRC" "/out/$SRC"' \
+        -c 'cp "/backups/$SRC" "/out/$SRC" && chmod 0644 "/out/$SRC"' \
         || die "Could not copy $selected out of the backup volume."
 
+    # The helper (image uid) already made the copy world-readable; this host-side
+    # chmod tightens it to 0600 when the host user owns it, and is a harmless
+    # no-op (|| true) when the copy is owned by the container's uid instead.
     chmod 600 "$out_dir/$selected" 2>/dev/null || true
     echo ""
     echo "✓ Keyring extracted to: $out_dir/$selected"
@@ -212,6 +215,13 @@ if [ -z "$BACKUP_FILE" ]; then
     # We pass SELECTED via -e so the helper's `sh -c` sees it as an env var,
     # never as part of the command string — shell metacharacters in the
     # filename are therefore inert.
+    #
+    # chmod 0644 the copy: the helper runs as the image's postgres user (uid 999),
+    # so the file it writes is owned by uid 999 mode 600 and the (non-root) host
+    # user that runs this script cannot read it — openssl would then fail with
+    # "Permission denied". The helper owns the freshly-created file, so it can
+    # chmod it world-readable; the enclosing mktemp -d dir is 0700 and host-owned,
+    # so the copy is still only reachable by the host user.
     TMP_COPY_DIR="$(mktemp -d)"
     TMP_COPY="$TMP_COPY_DIR/backup.dump.enc"
     docker run --rm \
@@ -220,7 +230,7 @@ if [ -z "$BACKUP_FILE" ]; then
         -e "SRC=$SELECTED" \
         --entrypoint sh \
         "$HELPER_IMAGE" \
-        -c 'cp "/backups/$SRC" "/out/backup.dump.enc"' \
+        -c 'cp "/backups/$SRC" "/out/backup.dump.enc" && chmod 0644 "/out/backup.dump.enc"' \
         || die "Could not copy $SELECTED out of the backup volume."
 
     BACKUP_FILE="$TMP_COPY"
@@ -243,7 +253,7 @@ if [ ! -f "$METADATA_FILE" ] && [ "$BACKUP_CAME_FROM_VOLUME" = "1" ]; then
         -e "SRC=$META_NAME" \
         --entrypoint sh \
         "$HELPER_IMAGE" \
-        -c 'cp "/backups/$SRC" "/out/metadata" 2>/dev/null' \
+        -c 'cp "/backups/$SRC" "/out/metadata" && chmod 0644 "/out/metadata"' \
         2>/dev/null || true
     [ -s "$META_TMP" ] && METADATA_FILE="$META_TMP" || { rm -rf "$META_TMP_DIR"; META_TMP_DIR=""; META_TMP=""; }
 fi
