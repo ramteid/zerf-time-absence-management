@@ -271,7 +271,7 @@ Caddy handles HTTPS termination and serves the frontend static assets. Backend l
 > deployment use `start_public.sh`, which terminates TLS at Caddy and re-enables
 > secure cookies and Origin enforcement.
 
-The PostgreSQL container is built from `docker/postgres.Dockerfile` (based on `percona/percona-distribution-postgresql:18`, which bundles pg_tde). A custom entrypoint (`docker/entrypoint-postgres.sh`) decrypts the pg_tde keyring from the data volume into an in-memory tmpfs before handing off to the official postgres entrypoint. No elevated container capabilities are required.
+The PostgreSQL container is built from `docker/postgres.Dockerfile` (based on `percona/percona-distribution-postgresql:18`, which bundles pg_tde). A custom entrypoint (`docker/entrypoint-postgres.sh`) decrypts the pg_tde keyring from the data volume into an in-memory tmpfs before handing off to the official postgres entrypoint. The container runs with `cap_drop: [ALL]` and re-adds only the minimal capability set its root→gosu startup needs (`CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETUID`, `SETGID`); `app` and `backup` run with `cap_drop: [ALL]` and no added capabilities. All three set `no-new-privileges`.
 
 ### Docker images
 
@@ -279,8 +279,8 @@ The PostgreSQL container is built from `docker/postgres.Dockerfile` (based on `p
 |-------|-----------|---------|
 | `zerf-time-absence-management` | `docker/app.Dockerfile` | Rust/Axum backend + frontend assets |
 | `zerf-time-absence-management-postgres` | `docker/postgres.Dockerfile` | Percona PostgreSQL 18 with pg_tde |
-| `zerf-time-absence-management-caddy` | `docker/caddy.Dockerfile` | Caddy reverse proxy |
-| `zerf-time-absence-management-backup` | `docker/backup.Dockerfile` | PostgreSQL 18 client + curl for backup + Nextcloud upload |
+| `zerf-time-absence-management-caddy` | `docker/Caddyfile.Dockerfile` | Caddy reverse proxy (built with the caddy-ratelimit module) |
+| `zerf-time-absence-management-backup` | `docker/backup.Dockerfile` | PostgreSQL 18 client + curl, with `scripts/backup.sh` baked in (self-contained — no host bind-mount). Built from the repo root so the script is in the build context. |
 
 The `backup` service in `docker-compose-local.yml` is connected to two networks:
 - `backup_net` — internal network shared with `db`, required for `pg_dump`.
