@@ -303,14 +303,18 @@ run_direct_pg_dump() {
   command -v pg_dump >/dev/null 2>&1 || return 1
   resolve_direct_connection || return 1
 
-  # statement_timeout=30000 is set server-wide in docker-compose to protect the
-  # application, but it also applies to pg_dump's COPY statements.  Override it
-  # to 0 (no timeout) for this session only via PGOPTIONS.
+  # statement_timeout=30000 and idle_in_transaction_session_timeout=30000 are set
+  # server-wide in docker-compose to protect the application, but they also apply
+  # to pg_dump.  statement_timeout would cancel long COPY statements;
+  # idle_in_transaction_session_timeout would kill pg_dump's snapshot transaction
+  # if it ever blocks for >30s while writing its output (e.g. a slow downstream
+  # consumer in the streamed `pg_dump | openssl` pipeline).  Disable both for this
+  # session only via PGOPTIONS.
   #
   # --lock-wait-timeout=30s: fail fast when another session holds an exclusive
   # lock, rather than hanging forever.
   PGPASSWORD="$DIRECT_PASSWORD" \
-  PGOPTIONS='--statement_timeout=0' \
+  PGOPTIONS='--statement_timeout=0 --idle_in_transaction_session_timeout=0' \
     pg_dump \
       --host "$DIRECT_HOST" \
       --port "$DIRECT_PORT" \
@@ -379,46 +383,62 @@ run_backup_once() {
   output_file="$OUT_DIR/zerf-$ts.dump.enc"
   metadata_file="$OUT_DIR/zerf-$ts.metadata"
   keyring_file="$OUT_DIR/zerf-$ts.keyring.enc"
-  # Stage the plaintext dump in $TMPDIR (defaults to /tmp), NOT in $OUT_DIR.
-  # The backup container mounts /tmp as a RAM-backed tmpfs so the plaintext
-  # copy never touches the persistent backup volume.
-  if ! plain_temp_file="$(mktemp "${TMPDIR:-/tmp}/zerf-$ts.dump.plain.XXXXXX")"; then
-    printf 'Failed to create plaintext temp file in %s.\n' "${TMPDIR:-/tmp}" >&2
-    return 1
-  fi
-  chmod 600 "$plain_temp_file"
   temp_file="$output_file.tmp"
   temp_metadata_file="$metadata_file.tmp"
   temp_keyring_file="$keyring_file.tmp"
 
-  # Step 1: dump to the in-RAM plaintext temp file.
-  if ! run_direct_pg_dump > "$plain_temp_file"; then
-    rm -f "$plain_temp_file"
-    printf 'PostgreSQL connection settings are incomplete or pg_dump is unavailable.\n' >&2
+  # Dump and encrypt in a single stream: pg_dump's custom-format output is piped
+  # straight into openssl, which writes the ciphertext to $temp_file on the
+  # (disk-backed) backup volume.  No plaintext dump is ever staged -- not on disk
+  # and not in a RAM tmpfs -- so there is NO size ceiling tied to /tmp; the only
+  # bound is free space on the backups volume.  This removes the previous failure
+  # mode where a growing database eventually exceeded the 64 MiB /tmp tmpfs and
+  # every backup silently failed.
+  #
+  # AES-256-CBC with a PBKDF2-derived key (100000 iterations); passphrase read
+  # from env, never in process args.  These openssl parameters are byte-for-byte
+  # identical to the previous implementation, so existing .dump.enc files (and the
+  # pg_tde keyring sidecars) remain decryptable with the same ZERF_DB_ENCRYPTION_KEY.
+  #
+  # /bin/sh has no `pipefail`, so capture pg_dump's exit status across the pipe
+  # with the POSIX fd trick: fd 4 is the script's real stdout; inside the command
+  # substitution pg_dump's status is echoed to fd 3 (the substitution's stdout,
+  # captured into $dump_status) while openssl's own stdout is routed to fd 4.
+  # `$?` after the assignment is the pipeline's status, i.e. openssl's.
+  exec 4>&1
+  dump_status="$( { { run_direct_pg_dump; echo "$?" >&3; } \
+      | openssl enc -aes-256-cbc -salt -pbkdf2 -iter 100000 \
+          -pass env:ZERF_DB_ENCRYPTION_KEY \
+          -out "$temp_file"; } 3>&1 >&4 )"
+  enc_status=$?
+  exec 4>&-
+
+  # Do NOT rely on `set -e` here: it is suspended throughout run_backup_once
+  # because main() invokes the function in an `if` condition.  Check both statuses
+  # explicitly.  Note: if pg_dump fails or is interrupted, $dump_status is either
+  # its non-zero code or empty (when an early exit skips the `echo`); both are
+  # caught by the `!= 0` test, so a partial/failed dump never becomes a backup.
+  if [ "$dump_status" != 0 ]; then
+    rm -f "$temp_file"
+    printf 'pg_dump failed (status %s) -- connection settings incomplete, pg_dump unavailable, or the dump was interrupted.\n' "${dump_status:-unknown}" >&2
+    return 1
+  fi
+  if [ "$enc_status" != 0 ]; then
+    rm -f "$temp_file"
+    printf 'Failed to encrypt backup (openssl status %s).\n' "$enc_status" >&2
     return 1
   fi
 
-  # pg_dump should never exit 0 with empty output, but reject it explicitly
-  # so monitoring catches a broken state rather than silently advancing the
-  # backup timestamp.
-  if [ ! -s "$plain_temp_file" ]; then
-    rm -f "$plain_temp_file"
+  # Reject a zero-byte encrypted file.  pg_dump in custom format always emits a
+  # header, so it should never exit 0 with empty output; guard against it anyway
+  # so monitoring catches a broken state rather than silently advancing the backup
+  # timestamp.  (The old code checked the plaintext size; with streaming we check
+  # the ciphertext, the only artifact that exists.)
+  if [ ! -s "$temp_file" ]; then
+    rm -f "$temp_file"
     printf 'pg_dump produced empty output -- refusing to encrypt a zero-byte backup.\n' >&2
     return 1
   fi
-
-  # Step 2: encrypt the plaintext dump.  AES-256-CBC with a PBKDF2-derived
-  # key (100000 iterations).  Passphrase read from env -- never in process args.
-  if ! openssl enc -aes-256-cbc -salt -pbkdf2 -iter 100000 \
-      -pass env:ZERF_DB_ENCRYPTION_KEY \
-      -in  "$plain_temp_file" \
-      -out "$temp_file"; then
-    rm -f "$plain_temp_file" "$temp_file"
-    printf 'Failed to encrypt backup.\n' >&2
-    return 1
-  fi
-
-  rm -f "$plain_temp_file"
 
   # Stage a copy of the pg_tde keyring next to the dump.  Best-effort: a missing
   # or unreadable keyring (volume not mounted, older deployment) is a warning,
