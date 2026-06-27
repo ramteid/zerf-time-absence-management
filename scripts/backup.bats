@@ -42,19 +42,20 @@ make_shim() {
   chmod +x "$BATS_TMPDIR/bin/$_name"
 }
 
-# Shim openssl so `enc ... -in X -out Y` simply copies X to Y, letting
-# run_backup_once succeed end-to-end without real cryptography.
+# Shim openssl so `enc ... -out Y` copies its STDIN to Y, letting run_backup_once
+# succeed end-to-end without real cryptography.  backup.sh now streams the dump
+# into openssl via a pipe (`pg_dump | openssl … -out file`), so the shim reads
+# stdin and writes it to the -out path, mirroring real openssl.
 make_openssl_copy_shim() {
   make_shim openssl '
-in=""; out=""
+out=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    -in) in="$2"; shift 2 ;;
     -out) out="$2"; shift 2 ;;
     *) shift ;;
   esac
 done
-[ -n "$out" ] && cp "$in" "$out"
+if [ -n "$out" ]; then cat > "$out"; else cat; fi
 '
 }
 
