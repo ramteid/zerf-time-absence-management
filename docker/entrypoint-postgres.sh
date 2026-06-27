@@ -77,6 +77,16 @@ if [ ! -f "$KEYRING_ENC" ] && [ -f "${KEYRING_ENC}.tmp" ]; then
     mv "${KEYRING_ENC}.tmp" "$KEYRING_ENC"
 fi
 
+# Ensure the persisted encrypted keyring is readable by the backup container.
+# That container mounts this volume read-only under a *different* uid; the file
+# is ciphertext (wrapped with ZERF_DB_ENCRYPTION_KEY), so 0644 is safe and is
+# what lets each backup capture the keyring sidecar for physical recovery.
+# Re-asserted on every start so deployments created before this fix (where the
+# keyring was written 0600) are corrected on the next restart.
+if [ -f "$KEYRING_ENC" ]; then
+    chmod 644 "$KEYRING_ENC"
+fi
+
 # --- Decrypt keyring on subsequent starts -------------------------------
 
 if [ -f "$KEYRING_ENC" ]; then

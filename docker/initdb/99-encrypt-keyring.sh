@@ -47,7 +47,12 @@ openssl enc -aes-256-cbc -salt -pbkdf2 -iter 100000 \
     -pass env:ZERF_DB_ENCRYPTION_KEY \
     -in  "$KEYRING_PLAIN" \
     -out "$TMP"
-chmod 600 "$TMP"
+# 0644, not 0600: this file is ciphertext (the keyring wrapped with
+# ZERF_DB_ENCRYPTION_KEY). The backup container mounts this volume read-only
+# under a different uid and must be able to read the keyring to copy it next to
+# each dump (the sidecar used for physical recovery); 0600 makes that copy
+# silently fail. The plaintext keyring (keyring.per) stays 0600 in tmpfs.
+chmod 644 "$TMP"
 mv "$TMP" "$KEYRING_ENC"
 
 echo "Zerf: pg_tde keyring encrypted and saved to $KEYRING_ENC."
