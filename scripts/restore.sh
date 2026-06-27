@@ -329,7 +329,14 @@ echo "Copying dump into postgres container…"
 # (SIGKILL bypasses the EXIT trap, so the cleanup inside the container may
 # not have run).  Idempotent: a missing file is silently ignored.
 docker exec "$POSTGRES_CONTAINER" rm -f /tmp/zerf-restore.dump /tmp/zerf-restore.toc 2>/dev/null || true
-docker cp "$PLAIN_TMP" "$POSTGRES_CONTAINER:/tmp/zerf-restore.dump"
+# Stream the dump in via `docker exec -i ... cat` rather than `docker cp`.
+# The postgres container mounts /tmp as a tmpfs; `docker cp` writes to the image
+# layer *behind* that mount, so a subsequent `docker exec` (which sees the tmpfs)
+# finds nothing and pg_restore fails with "No such file or directory". Writing
+# through a process inside the container lands the file in the tmpfs itself, and
+# keeps the decrypted plaintext in RAM (the reason /tmp is a tmpfs).
+docker exec -i "$POSTGRES_CONTAINER" sh -c 'cat > /tmp/zerf-restore.dump' < "$PLAIN_TMP" \
+    || die "Failed to copy the decrypted dump into the postgres container."
 
 # Build a restore list that EXCLUDES the pg_tde extension (and its COMMENT).
 #
