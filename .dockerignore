@@ -41,7 +41,10 @@ frontend/**/*.test.js
 frontend/**/*.test.ts
 frontend/**/*.spec.js
 frontend/**/*.spec.ts
-scripts
+# Exclude the scripts/ contents but keep the directory traversable and re-include
+# backup.sh, which backup.Dockerfile COPYs into the self-contained backup image.
+scripts/*
+!scripts/backup.sh
 
-# Shell scripts
+# Shell scripts (root-level only; does not match scripts/backup.sh)
 *.sh

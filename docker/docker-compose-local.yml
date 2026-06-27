@@ -139,8 +139,10 @@ services:
   backup:
     image: ghcr.io/ramteid/zerf-time-absence-management-backup:${ZERF_VERSION:-latest}
     build:
-      context: .
-      dockerfile: backup.Dockerfile
+      # Repo-root context so backup.Dockerfile can COPY scripts/backup.sh into
+      # the image (it is no longer bind-mounted). Matches the app image build.
+      context: ..
+      dockerfile: docker/backup.Dockerfile
     container_name: zerf-backup
     restart: unless-stopped
     read_only: true
@@ -164,7 +166,8 @@ services:
       # Same key used to encrypt backup files with AES-256-CBC via openssl.
       - ZERF_DB_ENCRYPTION_KEY=${ZERF_DB_ENCRYPTION_KEY:?ZERF_DB_ENCRYPTION_KEY must be set in .env (openssl rand -hex 32)}
     volumes:
-      - ../scripts/backup.sh:/usr/local/bin/backup.sh:ro
+      # backup.sh is now baked into the image (see backup.Dockerfile); no host
+      # bind-mount, so the published image is self-contained.
       - backup_data:/backups
       # Read-only access to the postgres keyring volume so each backup can
       # include a copy of the pg_tde keyring (zerf-<ts>.keyring.enc). This makes
