@@ -81,7 +81,9 @@ jobs:
       - name: Build and push backup image
         uses: docker/build-push-action@v7
         with:
-          context: docker
+          # Repo-root context (like the app image) so the Dockerfile can COPY
+          # scripts/backup.sh into the image. .dockerignore keeps the context lean.
+          context: .
           file: docker/backup.Dockerfile
           push: true
           tags: |
