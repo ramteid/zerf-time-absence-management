@@ -118,7 +118,7 @@
   on:keydown={onDialogKeydown}
   let:dlg
 >
-  <div>
+  <div class="field-group">
     <div>
       <label class="zf-label" for="entry-date">{$t("Date")}</label>
       <DatePicker
