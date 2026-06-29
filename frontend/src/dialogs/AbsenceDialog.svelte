@@ -155,9 +155,12 @@
     </div>
   </div>
   {#if selectedDays !== null}
+    <!-- selectedDays is a contract-workday count (countWorkdays already
+         excludes weekends per workdays_per_week and public holidays), so the
+         label must read "workday(s)" rather than the calendar-day "days". -->
     <div class="selected-days-hint">
       {selectedDays}
-      {$t("days")}
+      {selectedDays === 1 ? $t("workday") : $t("workdays")}
     </div>
   {/if}
   <div>

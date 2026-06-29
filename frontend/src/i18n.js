@@ -192,6 +192,8 @@ const TRANSLATIONS = {
     "Workdays per week must be between 1 and 7.":
       "Workdays per week must be between 1 and 7.",
     days: "days",
+    workday: "workday",
+    workdays: "workdays",
     Set: "Set",
     "Overrides the default annual leave days for this user in the selected year.":
       "Overrides the default annual leave days for this user in the selected year.",
@@ -1190,6 +1192,8 @@ const TRANSLATIONS = {
       "Grundsätzlicher Anspruch, der für jedes Jahr gilt, sofern unten nicht überschrieben (z. B. bei Sonderregelungen).",
     Override: "Abweichung",
     days: "Tage",
+    workday: "Arbeitstag",
+    workdays: "Arbeitstage",
     Set: "Setzen",
     "Overrides the default annual leave days for this user in the selected year.":
       "Überschreibt die Standard-Urlaubstage für diesen Benutzer im gewählten Jahr.",
