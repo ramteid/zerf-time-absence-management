@@ -228,4 +228,40 @@ describe("AbsenceDialog", () => {
       "Overlap"
     );
   });
+
+  it("counts only contract workdays, excluding weekends and holidays", async () => {
+    // The duration hint must reflect contract workdays, not calendar days:
+    // weekends (per workdays_per_week) and public holidays are excluded.
+    const onClose = vi.fn();
+    component = mount(AbsenceDialog, {
+      target,
+      props: {
+        // 2026-06-01 (Mon) .. 2026-06-07 (Sun), with a holiday on Wed 06-03.
+        template: { start_date: "2026-06-01", end_date: "2026-06-07" },
+        onClose,
+        holidays: new Set(["2026-06-03"]),
+      },
+    });
+    await settle();
+
+    const hint = target.querySelector(".selected-days-hint");
+    expect(hint).not.toBeNull();
+    // Mon, Tue, Thu, Fri = 4 (Wed is a holiday; Sat/Sun are non-contract days).
+    expect(hint.textContent.replace(/\s+/g, " ").trim()).toBe("4 workdays");
+  });
+
+  it("uses the singular label for a single workday", async () => {
+    const onClose = vi.fn();
+    component = mount(AbsenceDialog, {
+      target,
+      props: {
+        template: { start_date: "2026-06-01", end_date: "2026-06-01" },
+        onClose,
+      },
+    });
+    await settle();
+
+    const hint = target.querySelector(".selected-days-hint");
+    expect(hint.textContent.replace(/\s+/g, " ").trim()).toBe("1 workday");
+  });
 });
