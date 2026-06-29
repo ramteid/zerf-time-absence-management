@@ -1,14 +1,7 @@
 <script>
   import { api } from "../api.js";
-  import {
-    categories,
-    absenceCategories,
-    earliestStartDate,
-    currentUser,
-    settings,
-    theme,
-    toast,
-  } from "../stores.js";
+  import { currentUser, settings, theme, toast } from "../stores.js";
+  import { loadPostAuthData } from "../appData.js";
   import { t, roleLabel, formatHours } from "../i18n.js";
   import { fmtDate, appTodayDate } from "../format.js";
   import { isAssistantUser } from "../rolePolicy.js";
@@ -91,30 +84,12 @@
         // Storing credentials is best-effort; ignore failures.
       }
       currentUser.update((u) => ({ ...u, must_change_password: false }));
-      // Now that the password restriction is lifted, load the data that boot
-      // skipped while must_change_password was true (see App.svelte loadMe,
-      // which gates these same endpoints behind the 403-avoidance guard).
-      // Each is only fetched if still unset so we never clobber data a later
-      // navigation already loaded. Missing any of these leaves a first-login
-      // session in a degraded state for the rest of its lifetime — e.g. an
-      // empty absence-request dropdown despite the user having full access.
-      if (!$categories.length) {
-        api("/categories")
-          .then((cats) => categories.set(cats))
-          .catch(() => {});
-      }
-      if (!$absenceCategories.length) {
-        api("/absence-categories")
-          .then((cats) => absenceCategories.set(cats))
-          .catch(() => {});
-      }
-      if (!$earliestStartDate) {
-        api("/users/earliest-start-date")
-          .then(({ earliest_start_date }) =>
-            earliestStartDate.set(earliest_start_date ?? null),
-          )
-          .catch(() => {});
-      }
+      // A first-login password change lifts the must_change_password gate that
+      // made boot skip the per-user data loads. Run the same shared loader now
+      // so the session is fully populated (notably the absence-request
+      // dropdown) without requiring a manual page reload. Fire-and-forget: the
+      // confirmation toast must not wait on these background fetches.
+      loadPostAuthData();
       toast($t("Password changed."), "ok");
       cur = "";
       nw = "";
