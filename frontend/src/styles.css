@@ -960,12 +960,15 @@ dialog footer {
   line-height: 1.4;
 }
 
-/* Grouping label above a set of related fields */
+/* Grouping label above a set of related fields. The extra top margin (on top of
+   the surrounding field-group's 14px gap) gives the heading room to read as a
+   distinct section break from the preceding field rather than just another row. */
 .field-section-label {
   font-size: 12px;
   font-weight: 500;
   color: var(--text-secondary);
   letter-spacing: 0.01em;
+  margin-top: 8px;
   margin-bottom: 8px;
 }
 
