@@ -57,6 +57,10 @@ describe("AbsenceDialog", () => {
     absenceCategories.set(MOCK_CATEGORIES);
     setAbsenceCategoryCache(MOCK_CATEGORIES);
     apiMock.mockReset();
+    // Default: any unmatched call — including the dialog's own holiday fetch
+    // for the selected range — resolves to an empty list. Tests override the
+    // specific endpoint they exercise via mockImplementation below.
+    apiMock.mockResolvedValue([]);
     originalShowModal = HTMLDialogElement.prototype.showModal;
     HTMLDialogElement.prototype.showModal = function () {
       this.setAttribute("open", "");
@@ -133,7 +137,11 @@ describe("AbsenceDialog", () => {
   it("POSTs to /absences when submitting a new request", async () => {
     // A new absence request must use POST, not PUT, so the backend creates
     // a new record instead of overwriting an existing one.
-    apiMock.mockResolvedValueOnce({ id: 99 });
+    apiMock.mockImplementation((path, opts) =>
+      path === "/absences" && opts?.method === "POST"
+        ? Promise.resolve({ id: 99 })
+        : Promise.resolve([]),
+    );
     const onClose = vi.fn();
     component = mount(AbsenceDialog, {
       target,
@@ -157,7 +165,11 @@ describe("AbsenceDialog", () => {
   it("PUTs to /absences/:id when saving an existing absence", async () => {
     // Editing an existing absence must not create a duplicate record —
     // it must update the existing one via PUT with the correct ID.
-    apiMock.mockResolvedValueOnce({ id: 5 });
+    apiMock.mockImplementation((path, opts) =>
+      path === "/absences/5" && opts?.method === "PUT"
+        ? Promise.resolve({ id: 5 })
+        : Promise.resolve([]),
+    );
     const onClose = vi.fn();
     component = mount(AbsenceDialog, {
       target,
@@ -209,7 +221,11 @@ describe("AbsenceDialog", () => {
   it("shows a user-friendly error for an overlap conflict", async () => {
     // The backend returns "Overlap with existing absence" — the frontend
     // must translate this to a friendly message rather than showing the raw error.
-    apiMock.mockRejectedValueOnce({ message: "Overlap with existing absence" });
+    apiMock.mockImplementation((path, opts) =>
+      path === "/absences" && opts?.method === "POST"
+        ? Promise.reject({ message: "Overlap with existing absence" })
+        : Promise.resolve([]),
+    );
     const onClose = vi.fn();
     component = mount(AbsenceDialog, {
       target,
@@ -263,5 +279,33 @@ describe("AbsenceDialog", () => {
 
     const hint = target.querySelector(".selected-days-hint");
     expect(hint.textContent.replace(/\s+/g, " ").trim()).toBe("1 workday");
+  });
+
+  it("fetches holidays for the selected year when the parent did not preload them", async () => {
+    // The parent only preloads holidays for the year it currently shows. If the
+    // user picks a date in another year, the dialog must fetch that year's
+    // holidays itself so the workday count still excludes them.
+    apiMock.mockImplementation((path) =>
+      path === "/holidays?year=2026"
+        ? Promise.resolve([{ holiday_date: "2026-06-03", name: "Test Holiday" }])
+        : Promise.resolve([]),
+    );
+    const onClose = vi.fn();
+    component = mount(AbsenceDialog, {
+      target,
+      props: {
+        // Mon–Fri with an empty holidays prop → dialog loads 2026 on its own.
+        template: { start_date: "2026-06-01", end_date: "2026-06-05" },
+        onClose,
+        holidays: new Set(),
+      },
+    });
+    await settle();
+    await settle();
+
+    expect(apiMock).toHaveBeenCalledWith("/holidays?year=2026");
+    const hint = target.querySelector(".selected-days-hint");
+    // Wed 06-03 is a holiday → Mon, Tue, Thu, Fri = 4 workdays.
+    expect(hint.textContent.replace(/\s+/g, " ").trim()).toBe("4 workdays");
   });
 });
