@@ -1,6 +1,14 @@
 <script>
   import { api } from "../api.js";
-  import { categories, currentUser, settings, theme, toast } from "../stores.js";
+  import {
+    categories,
+    absenceCategories,
+    earliestStartDate,
+    currentUser,
+    settings,
+    theme,
+    toast,
+  } from "../stores.js";
   import { t, roleLabel, formatHours } from "../i18n.js";
   import { fmtDate, appTodayDate } from "../format.js";
   import { isAssistantUser } from "../rolePolicy.js";
@@ -83,11 +91,28 @@
         // Storing credentials is best-effort; ignore failures.
       }
       currentUser.update((u) => ({ ...u, must_change_password: false }));
-      // Now that the password restriction is lifted, load categories if they
-      // weren't loaded yet (they were skipped during boot due to must_change_password).
+      // Now that the password restriction is lifted, load the data that boot
+      // skipped while must_change_password was true (see App.svelte loadMe,
+      // which gates these same endpoints behind the 403-avoidance guard).
+      // Each is only fetched if still unset so we never clobber data a later
+      // navigation already loaded. Missing any of these leaves a first-login
+      // session in a degraded state for the rest of its lifetime — e.g. an
+      // empty absence-request dropdown despite the user having full access.
       if (!$categories.length) {
         api("/categories")
           .then((cats) => categories.set(cats))
+          .catch(() => {});
+      }
+      if (!$absenceCategories.length) {
+        api("/absence-categories")
+          .then((cats) => absenceCategories.set(cats))
+          .catch(() => {});
+      }
+      if (!$earliestStartDate) {
+        api("/users/earliest-start-date")
+          .then(({ earliest_start_date }) =>
+            earliestStartDate.set(earliest_start_date ?? null),
+          )
           .catch(() => {});
       }
       toast($t("Password changed."), "ok");

@@ -1,7 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mount, unmount } from "svelte";
 import Account from "./Account.svelte";
-import { currentUser, settings } from "../stores.js";
+import {
+  currentUser,
+  settings,
+  categories,
+  absenceCategories,
+  earliestStartDate,
+} from "../stores.js";
 import { setLanguage } from "../i18n.js";
 
 const apiMock = vi.hoisted(() => vi.fn());
@@ -44,6 +50,11 @@ describe("Account", () => {
     setLanguage("en");
     settings.set({ ui_language: "en", time_format: "24h", timezone: "UTC" });
     currentUser.set({ ...baseUser });
+    // The boot-loaded stores start empty/unset so the first-login reload paths
+    // in changePassword() are exercised deterministically.
+    categories.set([]);
+    absenceCategories.set([]);
+    earliestStartDate.set(null);
     apiMock.mockReset();
     apiMock.mockResolvedValue([]);
   });
@@ -141,6 +152,39 @@ describe("Account", () => {
       "/auth/password",
       expect.objectContaining({ method: "PUT" }),
     );
+  });
+
+  it("reloads time and absence categories after a first-login password change", async () => {
+    // First-login user: forced password change, both category stores empty
+    // because boot skipped loading them while must_change_password was true.
+    currentUser.set({ ...baseUser, must_change_password: true });
+    apiMock.mockResolvedValue([]);
+
+    component = mount(Account, { target });
+    await settle();
+
+    // No current-password field in must_change_password mode — only new + confirm.
+    const nw = target.querySelector("#account-new-password");
+    const nw2 = target.querySelector("#account-confirm-password");
+    nw.value = "NewPass456@!!";
+    nw.dispatchEvent(new Event("input"));
+    nw2.value = "NewPass456@!!";
+    nw2.dispatchEvent(new Event("input"));
+
+    const saveBtn = [...target.querySelectorAll("button")].find((b) =>
+      b.textContent.trim() === "Save"
+    );
+    saveBtn.click();
+    await settle();
+    await settle();
+
+    // The fix: every store boot skipped must be repopulated, not just
+    // /categories. Without the absence-categories reload the absence-request
+    // dropdown stays empty for the rest of the session; earliest-start-date
+    // backs report date-picker bounds.
+    expect(apiMock).toHaveBeenCalledWith("/categories");
+    expect(apiMock).toHaveBeenCalledWith("/absence-categories");
+    expect(apiMock).toHaveBeenCalledWith("/users/earliest-start-date");
   });
 
   it("shows API error on password change failure", async () => {
