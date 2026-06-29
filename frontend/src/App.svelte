@@ -8,7 +8,6 @@
   } from "./api.js";
   import {
     currentUser,
-    earliestStartDate,
     categories,
     absenceCategories,
     settings,
@@ -25,6 +24,7 @@
     stopNotifications,
   } from "./notificationService.js";
   import { setLanguage, t, setAbsenceCategoryCache } from "./i18n.js";
+  import { loadPostAuthData } from "./appData.js";
   import Layout from "./Layout.svelte";
   import Login from "./routes/Login.svelte";
   import Setup from "./routes/Setup.svelte";
@@ -78,27 +78,7 @@
       // the middleware blocks them with 403, which would trigger a spurious
       // error toast before the password-change screen even appears.
       if (!currentUserResponse.must_change_password) {
-        try {
-          const { earliest_start_date } = await api("/users/earliest-start-date");
-          earliestStartDate.set(earliest_start_date ?? null);
-        } catch {}
-        if (!$categories.length) {
-          try {
-            categories.set(await api("/categories"));
-            debugLog("loadMe:categories-loaded");
-          } catch (error) {
-            debugLog("loadMe:categories-failed", { message: error?.message ?? null });
-            toast(
-              $t("Failed to load categories. Some features may be unavailable."),
-              "error",
-            );
-          }
-        }
-        if (!$absenceCategories.length) {
-          try {
-            absenceCategories.set(await api("/absence-categories"));
-          } catch {}
-        }
+        await loadPostAuthData();
       }
     } catch (err) {
       debugLog("loadMe:error", {
