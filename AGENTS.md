@@ -293,8 +293,9 @@ The `backup` service in `docker-compose-local.yml` is connected to two networks:
 | `start_local.sh` | Start local stack (set `DEBUG=true` in `.env` for debug build) |
 | `start_public.sh` | Start public stack |
 | `scripts/backup.sh` | Dump, AES-encrypt, and optionally upload the database to a Nextcloud share. Each cycle also copies the pg_tde keyring (`zerf-<ts>.keyring.enc`, from the read-only `/keyring-src` mount) next to the dump so an orphaned encrypted PGDATA volume can be recovered. The backup interval is read from `app_settings` at runtime via `psql`; local retention is a fixed count (the 10 most recent). Refactored into sourceable functions (guarded by `BACKUP_LIB_ONLY=1`) for bats unit tests. |
-| `scripts/restore.sh` | Interactive: decrypt a backup and restore it into the live instance. `--keyring [DIR]` extracts a backup's captured pg_tde keyring for physical recovery without touching the database. |
+| `scripts/restore.sh` | Interactive: decrypt a backup and restore it into the live instance. `--keyring [DIR]` extracts a backup's captured pg_tde keyring for physical recovery without touching the database. Container names, the backup volume, and the `.env` path default to the production values but are overridable (`ZERF_RESTORE_POSTGRES_CONTAINER`, `ZERF_RESTORE_APP_CONTAINER`, `ZERF_RESTORE_BACKUP_VOLUME`, `ZERF_RESTORE_ENV_FILE`) — used by `e2e/backup-restore-check.sh` to run it non-interactively against the isolated e2e stack. |
 | `scripts/backup.bats` | bats unit tests for `backup.sh` helper functions (parse_share_url, interval resolution, upload credential handling, 0-byte rejection, keyring sidecar capture, retention pruning) |
+| `e2e/backup-restore-check.sh` | Final step of `e2e/run.sh`: triggers a real backup cycle, mutates the live e2e database, restores via `scripts/restore.sh`, and verifies the mutation is undone, every table's row count matches the pre-backup snapshot, and (via `e2e/post-restore-ui-check.mjs`, a real browser) the restored data renders in the app's UI. |
 
 ### Disaster recovery prerequisites
 
@@ -355,6 +356,33 @@ npm test -- --run && npm run build
 Tests use Vitest + jsdom. Test files are co-located with source under `src/` and `src/routes/`.
 
 > **Note:** Lint is not part of CI — run it locally before committing.
+
+### End-to-end (browser)
+
+```bash
+./e2e/run.sh
+```
+
+A single realistic [Playwright](https://playwright.dev/) scenario in `e2e/` runs
+against a **freshly provisioned, production-like Docker stack** (postgres with
+pg_tde, the app, and the backup sidecar — the same services `start_local.sh`
+brings up). The bash script `e2e/run.sh` is the entry point: it writes an
+isolated env file with generated secrets, runs `docker compose ... up --build
+--wait` under a dedicated project name (`zerf_e2e`), waits for the API, runs the
+flow in `e2e/tests/full-flow.spec.js`, and always tears the stack down (`down
+-v`) on exit.
+
+The flow exercises the real UI: bootstrap the first admin → admin completes
+first-run settings → admin creates an employee (reads the generated temporary
+password) → employee changes the password, books time entries, submits the week,
+and requests two absences → admin sees every pending request on the dashboard and
+approves them. Admin and employee use separate browser contexts so both sessions
+stay live at once.
+
+Requires Docker + Node 22. First run builds images (several minutes); set
+`ZERF_E2E_KEEP_UP=1` to keep the stack up for iterating with
+`cd e2e && npx playwright test`. CI runs this as the `e2e` job (after the
+`rust` and `frontend` jobs). See `e2e/README.md` for details.
 
 ### Backend
 

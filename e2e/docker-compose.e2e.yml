@@ -1,0 +1,23 @@
+# E2E overlay, applied on top of docker/docker-compose-local.yml.
+#
+# The base local compose pins fixed volume names (zerf_postgres_data, …) and
+# container names (zerf-app, …) that ignore the Compose project prefix. Without
+# this overlay the e2e stack would share those volumes/containers with a
+# developer's real `start_local.sh` deployment — and the e2e teardown (`down -v`)
+# would wipe their database. This overlay gives the e2e stack its own isolated
+# volumes and container names so it can be created and destroyed safely.
+services:
+  postgres:
+    container_name: zerf-e2e-postgres
+  app:
+    container_name: zerf-e2e-app
+  backup:
+    container_name: zerf-e2e-backup
+
+volumes:
+  postgres_data:
+    name: zerf_e2e_postgres_data
+  postgres_db_data:
+    name: zerf_e2e_postgres_db_data
+  backup_data:
+    name: zerf_e2e_backup_data
