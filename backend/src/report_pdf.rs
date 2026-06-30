@@ -254,12 +254,17 @@ impl<'a> Renderer<'a> {
         // Font resources: Helvetica (regular) and Helvetica-Bold.
         // PDF standard 14 fonts are referenced by their PostScript name and must
         // not be embedded — all conforming viewers supply them.
+        // WinAnsiEncoding ensures bytes 0x20-0xFF map to the expected Latin-1/Windows-1252
+        // characters, so accented letters (umlauts, French accents, etc.) in user
+        // names and category names are rendered correctly.
         let mut font = pdf.type1_font(refs.font_regular);
         font.base_font(Name(b"Helvetica"));
+        font.encoding_predefined(Name(b"WinAnsiEncoding"));
         font.finish();
 
         let mut font = pdf.type1_font(refs.font_bold);
         font.base_font(Name(b"Helvetica-Bold"));
+        font.encoding_predefined(Name(b"WinAnsiEncoding"));
         font.finish();
 
         // Write each page and its content stream.
@@ -344,8 +349,21 @@ impl<'a> Renderer<'a> {
         }
         self.set_fill_color(color);
 
-        // Only emit a `Tf` operator when the font or size changes, to keep
-        // the content stream compact.
+        let x_pt = mm_to_pt(x_mm);
+        let y_pt = self.baseline_pt(baseline_offset_from_top_mm);
+
+        // PDF standard 14 fonts use WinAnsiEncoding (Latin-1 supplement matches
+        // Windows-1252 for 0xA0-0xFF). Encode the string lossily: replace any
+        // codepoint above U+00FF with '?' — Latin-1 printable characters pass
+        // through unchanged as their byte value equals the glyph code point.
+        let encoded: Vec<u8> = text
+            .chars()
+            .map(|c| if c as u32 <= 0xFF { c as u8 } else { b'?' })
+            .collect();
+
+        self.current.begin_text();
+        // Emit Tf inside the text block for maximum viewer compatibility.
+        // Only change font/size when it differs from the previous call.
         if self.current_font != Some((font, size_pt)) {
             let font_name = match font {
                 Font::Regular => FONT_REGULAR,
@@ -354,18 +372,6 @@ impl<'a> Renderer<'a> {
             self.current.set_font(font_name, size_pt);
             self.current_font = Some((font, size_pt));
         }
-
-        let x_pt = mm_to_pt(x_mm);
-        let y_pt = self.baseline_pt(baseline_offset_from_top_mm);
-
-        // PDF standard 14 fonts use the Latin-1 / PDFDocEncoding character set.
-        // Encode the string lossily: replace any non-Latin-1 codepoint with '?'.
-        let encoded: Vec<u8> = text
-            .chars()
-            .map(|c| if c as u32 <= 0xFF { c as u8 } else { b'?' })
-            .collect();
-
-        self.current.begin_text();
         self.current.set_text_matrix([1.0, 0.0, 0.0, 1.0, x_pt, y_pt]);
         self.current.show(Str(&encoded));
         self.current.end_text();
