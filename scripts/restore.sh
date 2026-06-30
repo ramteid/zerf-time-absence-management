@@ -31,11 +31,15 @@ umask 077
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-ENV_FILE="$ROOT/.env"
+# Overridable so the e2e suite (e2e/backup-restore-check.sh) can point this at
+# its own isolated stack (different container names, backup volume, and env
+# file) without ever touching a real deployment's .env. Defaults are exactly
+# the production names, so normal interactive use is unaffected.
+ENV_FILE="${ZERF_RESTORE_ENV_FILE:-$ROOT/.env}"
 
-POSTGRES_CONTAINER="zerf-postgres"
-APP_CONTAINER="zerf-app"
-BACKUP_VOLUME="zerf_backup_data"
+POSTGRES_CONTAINER="${ZERF_RESTORE_POSTGRES_CONTAINER:-zerf-postgres}"
+APP_CONTAINER="${ZERF_RESTORE_APP_CONTAINER:-zerf-app}"
+BACKUP_VOLUME="${ZERF_RESTORE_BACKUP_VOLUME:-zerf_backup_data}"
 # postgres:18 has pg_dump / pg_restore and is already used by the backup
 # container, so it should be cached locally — no extra pull.
 HELPER_IMAGE="postgres:18"

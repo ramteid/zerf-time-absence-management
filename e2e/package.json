@@ -1,0 +1,13 @@
+{
+  "name": "zerf-e2e",
+  "version": "0.0.0",
+  "private": true,
+  "description": "End-to-end browser tests for Zerf, driven against a freshly provisioned production-like Docker stack.",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.1"
+  }
+}
