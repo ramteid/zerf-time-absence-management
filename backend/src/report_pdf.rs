@@ -770,29 +770,78 @@ mod tests {
 
     #[test]
     fn renders_a_pdf_with_at_least_one_page_per_section() {
+        use crate::services::reports::{DayDetail, EntryDetail};
         let language = Language::default();
+        // Include an umlaut-heavy name and a real time entry to exercise
+        // the text encoding path for non-ASCII characters.
         let report = MonthReport {
             user_id: 1,
-            month: "seed".into(),
-            days: vec![],
-            target_min: 0,
-            actual_min: 0,
-            diff_min: 0,
-            submitted_min: 0,
-            full_month_target_min: 0,
+            month: "2026-06".into(),
+            days: vec![DayDetail {
+                date: NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
+                weekday: "Monday".into(),
+                entries: vec![EntryDetail {
+                    start_time: "08:00:00".into(),
+                    end_time: "16:30:00".into(),
+                    category: "work".into(),
+                    color: "#000".into(),
+                    minutes: 510,
+                    counts_as_work: true,
+                    status: "approved".into(),
+                    comment: None,
+                }],
+                actual_min: 510,
+                target_min: 480,
+                absence: None,
+                absence_name: None,
+                holiday: None,
+            }],
+            target_min: 480,
+            actual_min: 510,
+            diff_min: 30,
+            submitted_min: 510,
+            full_month_target_min: 480,
             category_totals: Default::default(),
             weeks_all_submitted: None,
             weeks_all_approved: None,
             current_week_status: None,
         };
         let sections = vec![TimesheetSection {
-            user_name: "Alice Lead".into(),
+            // Umlaut-heavy name to verify WinAnsiEncoding path.
+            user_name: "Müller, André".into(),
             report,
-            flextime_data: vec![],
+            flextime_data: vec![FlextimeDay {
+                date: NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
+                actual_min: 510,
+                target_min: 480,
+                diff_min: 30,
+                cumulative_min: 90,
+                absence: None,
+                holiday: None,
+            }],
         }];
         let from = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
         let to = NaiveDate::from_ymd_opt(2026, 6, 30).unwrap();
         let bytes = render_timesheet_pdf(&sections, from, to, &language);
-        assert!(bytes.starts_with(b"%PDF"));
+        // Must start with the PDF magic bytes.
+        assert!(bytes.starts_with(b"%PDF"), "output does not start with %PDF");
+        // Must end with the EOF marker.
+        assert!(
+            bytes.ends_with(b"%%EOF\n") || bytes.ends_with(b"%%EOF"),
+            "output does not end with %%EOF"
+        );
+        // Must contain the font references for both fonts.
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(text.contains("Helvetica"), "Helvetica font not referenced");
+        assert!(text.contains("Helvetica-Bold"), "Helvetica-Bold font not referenced");
+        assert!(text.contains("WinAnsiEncoding"), "WinAnsiEncoding not set");
+        // Must reference both font resource names used in the content streams.
+        assert!(text.contains("/F1"), "/F1 font resource missing");
+        assert!(text.contains("/F2"), "/F2 font resource missing");
+        // Must contain the page content (time entry start/end times are ASCII
+        // and appear as literal strings in the content stream before compression,
+        // but after FlateDecode the raw stream bytes are compressed — so instead
+        // check structural PDF markers).
+        assert!(text.contains("/FlateDecode"), "content stream not compressed");
     }
 }
