@@ -3,31 +3,32 @@
 //! Pure rendering logic with no database access (mirrors `email.rs` in that
 //! respect). Lays out one printable timesheet per [`TimesheetSection`] — title,
 //! a table of days/entries, a total row, and flextime balance rows — using
-//! `printpdf`'s low-level drawing `Op`s with the built-in Helvetica fonts.
-//! Built-in fonts need no font files to bundle, which keeps the binary small
-//! and avoids font-licensing questions entirely.
+//! `pdf-writer`'s low-level PDF primitives with the PDF standard 14 fonts.
+//! Standard 14 fonts (Helvetica and Helvetica-Bold) are referenced by name only;
+//! PDF viewers are required to have them available, so no font data is embedded
+//! in the output, keeping the binary small and avoiding font-licensing questions.
 //!
 //! Coordinates are tracked in millimetres measured from the top-left corner
 //! (matching how the previous browser-side renderer worked, and how the layout
-//! below was designed) and converted to `printpdf`'s bottom-left-origin point
-//! space only at the moment an `Op` is emitted, via [`Renderer::baseline`] /
-//! [`Renderer::top_left`].
+//! below was designed) and converted to PDF's bottom-left-origin point space
+//! only at the moment an operation is emitted, via [`Renderer::baseline_pt`] /
+//! [`Renderer::flip_y_pt`].
 //!
-//! `printpdf` does not expose glyph-width metrics for built-in fonts (only for
-//! fonts loaded from a parsed font file), so right-/center-aligned text cannot
-//! be positioned the way `jsPDF.text(..., { align })` did in the browser.
-//! The only cell values that need such alignment — `Start`, `End` (`HH:MM`)
-//! and `Duration` (`±H:MM`, see [`format_minutes`]) — are composed solely of
-//! digits, `:`, `+`, `-`, `.` and spaces, so [`glyph_width_1000`] hardcodes the
-//! public-domain Adobe AFM Helvetica metrics for just that subset, which is
-//! enough to compute alignment offsets ourselves. Every other string (including
-//! all column headers) is left-aligned, sidestepping the missing-metrics
-//! problem for translated, variable-width text.
+//! PDF standard 14 fonts do not expose glyph-width metrics through `pdf-writer`,
+//! so right-/center-aligned text cannot be positioned the way `jsPDF.text(...,
+//! { align })` did in the browser. The only cell values that need such alignment
+//! — `Start`, `End` (`HH:MM`) and `Duration` (`±H:MM`, see [`format_minutes`])
+//! — are composed solely of digits, `:`, `+`, `-`, `.` and spaces, so
+//! [`glyph_width_1000`] hardcodes the public-domain Adobe AFM Helvetica metrics
+//! for just that subset, which is enough to compute alignment offsets ourselves.
+//! Every other string (including all column headers) is left-aligned,
+//! sidestepping the missing-metrics problem for translated, variable-width text.
 
 use crate::i18n::{self, Language};
 use crate::services::reports::{FlextimeDay, MonthReport};
 use chrono::NaiveDate;
-use printpdf::*;
+use pdf_writer::types::LineCapStyle;
+use pdf_writer::{Content, Filter, Finish, Name, Pdf, Rect, Ref, Str};
 
 // -- Page geometry (millimetres) ----------------------------------------------
 
@@ -50,6 +51,29 @@ const ROW_SHADE_FILL: (u8, u8, u8) = (248, 248, 248);
 const ROW_DIVIDER: (u8, u8, u8) = (220, 220, 220);
 const SUMMARY_TEXT: (u8, u8, u8) = (90, 90, 90);
 const TOTAL_FILL: (u8, u8, u8) = (235, 235, 235);
+
+// -- PDF unit conversion ------------------------------------------------------
+
+// Points per millimetre (72 pt/inch ÷ 25.4 mm/inch).
+const PT_PER_MM: f32 = 72.0 / 25.4;
+
+fn mm_to_pt(mm: f32) -> f32 {
+    mm * PT_PER_MM
+}
+
+// -- Font identifiers ---------------------------------------------------------
+
+// PDF resource names for the two standard 14 fonts used below.
+const FONT_REGULAR: Name = Name(b"F1");
+const FONT_BOLD: Name = Name(b"F2");
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Font {
+    Regular,
+    Bold,
+}
+
+// -- Column layout ------------------------------------------------------------
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Align {
@@ -139,106 +163,215 @@ pub fn render_timesheet_pdf(
         }
         renderer.render_section(section, from, to);
     }
-    let pages = renderer.finish();
-
-    let mut document = PdfDocument::new("Timesheet");
-    let mut warnings = Vec::new();
-    document.with_pages(pages);
-    document.save(&PdfSaveOptions::default(), &mut warnings)
+    renderer.finish()
 }
 
-/// Builds up a sequence of [`PdfPage`]s by tracking drawing operations for the
-/// current page plus a running vertical offset (`y`, in millimetres from the
-/// top edge — the same convention the original browser-side layout used).
-/// Pages are flushed automatically whenever a row would overflow the bottom
-/// margin, repeating the table header on the new page.
+// -- PDF object reference allocation ------------------------------------------
+
+struct Refs {
+    catalog: Ref,
+    page_tree: Ref,
+    // Per-page content stream and page object refs, in order.
+    pages: Vec<(Ref, Ref)>,
+    font_regular: Ref,
+    font_bold: Ref,
+}
+
+impl Refs {
+    fn new(page_count: usize) -> Self {
+        // Allocate refs sequentially starting at 1.
+        let catalog = Ref::new(1);
+        let page_tree = Ref::new(2);
+        let font_regular = Ref::new(3);
+        let font_bold = Ref::new(4);
+        // Each page needs a content-stream ref and a page-object ref.
+        let pages = (0..page_count)
+            .map(|i| {
+                let base = 5 + (i as i32) * 2;
+                (Ref::new(base), Ref::new(base + 1))
+            })
+            .collect();
+        Refs {
+            catalog,
+            page_tree,
+            pages,
+            font_regular,
+            font_bold,
+        }
+    }
+}
+
+// -- Renderer -----------------------------------------------------------------
+
+/// Accumulates per-page [`Content`] streams and then assembles the final PDF
+/// document in [`Renderer::finish`].
 struct Renderer<'a> {
-    pages: Vec<PdfPage>,
-    ops: Vec<Op>,
+    /// Finished content bytes for each completed page.
+    page_contents: Vec<Vec<u8>>,
+    /// Content operations for the page currently being built.
+    current: Content,
+    /// Vertical offset from the top edge of the page, in millimetres.
     y: f32,
     language: &'a Language,
+    /// Tracks the font and size currently set in `current`, to avoid redundant
+    /// `Tf` operators which inflate the stream size.
+    current_font: Option<(Font, f32)>,
 }
 
 impl<'a> Renderer<'a> {
     fn new(language: &'a Language) -> Self {
         Self {
-            pages: Vec::new(),
-            ops: Vec::new(),
+            page_contents: Vec::new(),
+            current: Content::new(),
             y: MARGIN_TOP_MM,
             language,
+            current_font: None,
         }
     }
 
-    fn finish(mut self) -> Vec<PdfPage> {
+    /// Finalise all pages and assemble the complete PDF document bytes.
+    fn finish(mut self) -> Vec<u8> {
+        // Flush the last open page.
         self.flush_page();
-        self.pages
+
+        let page_count = self.page_contents.len();
+        let refs = Refs::new(page_count);
+
+        let mut pdf = Pdf::new();
+
+        // Catalog and page tree.
+        pdf.catalog(refs.catalog).pages(refs.page_tree);
+        let page_width_pt = mm_to_pt(PAGE_WIDTH_MM);
+        let page_height_pt = mm_to_pt(PAGE_HEIGHT_MM);
+        let media_box = Rect::new(0.0, 0.0, page_width_pt, page_height_pt);
+
+        let mut pages = pdf.pages(refs.page_tree);
+        pages.media_box(media_box);
+        pages.kids(refs.pages.iter().map(|(_, page_ref)| *page_ref));
+        pages.count(page_count as i32);
+        pages.finish();
+
+        // Font resources: Helvetica (regular) and Helvetica-Bold.
+        // PDF standard 14 fonts are referenced by their PostScript name and must
+        // not be embedded — all conforming viewers supply them.
+        let mut font = pdf.type1_font(refs.font_regular);
+        font.base_font(Name(b"Helvetica"));
+        font.finish();
+
+        let mut font = pdf.type1_font(refs.font_bold);
+        font.base_font(Name(b"Helvetica-Bold"));
+        font.finish();
+
+        // Write each page and its content stream.
+        for (i, (content_ref, page_ref)) in refs.pages.iter().enumerate() {
+            // Compress the content stream with Deflate.
+            let compressed = miniz_compress(&self.page_contents[i]);
+
+            let mut stream = pdf.stream(*content_ref, &compressed);
+            stream.filter(Filter::FlateDecode);
+            stream.finish();
+
+            let mut page = pdf.page(*page_ref);
+            page.media_box(media_box);
+            page.parent(refs.page_tree);
+            page.contents(*content_ref);
+
+            // Every page uses the same two font resources.
+            let mut resources = page.resources();
+            let mut fonts = resources.fonts();
+            fonts.pair(FONT_REGULAR, refs.font_regular);
+            fonts.pair(FONT_BOLD, refs.font_bold);
+            fonts.finish();
+            resources.finish();
+            page.finish();
+        }
+
+        pdf.finish()
     }
 
     fn flush_page(&mut self) {
-        let ops = std::mem::take(&mut self.ops);
-        self.pages
-            .push(PdfPage::new(Mm(PAGE_WIDTH_MM), Mm(PAGE_HEIGHT_MM), ops));
+        let finished = std::mem::replace(&mut self.current, Content::new())
+            .finish()
+            .into_vec();
+        self.page_contents.push(finished);
+        self.current_font = None;
     }
 
-    /// Finish the current page and start a fresh one at the top margin. The
-    /// caller is responsible for redrawing any repeating content (e.g. the
-    /// table header) afterwards — this mirrors `doc.addPage()` in the old
-    /// browser-side renderer, which never carried over partial layout state.
+    /// Finish the current page and start a fresh one at the top margin.
     fn start_new_page(&mut self) {
         self.flush_page();
         self.y = MARGIN_TOP_MM;
     }
 
-    /// Convert a "distance from the top edge" into `printpdf`'s bottom-left
-    /// origin space — used both for text baselines and shape coordinates.
-    fn flip_y(&self, offset_from_top_mm: f32) -> Mm {
-        Mm(PAGE_HEIGHT_MM - offset_from_top_mm)
+    /// Convert a distance from the top edge (mm) to PDF's bottom-left origin (pt).
+    fn flip_y_pt(&self, offset_from_top_mm: f32) -> f32 {
+        mm_to_pt(PAGE_HEIGHT_MM - offset_from_top_mm)
     }
 
-    /// Position for a text baseline at `(x_mm, baseline_offset_from_top_mm)`.
-    fn baseline(&self, x_mm: f32, baseline_offset_from_top_mm: f32) -> Point {
-        Point::new(Mm(x_mm), self.flip_y(baseline_offset_from_top_mm))
+    /// Y coordinate for a text baseline at `offset_from_top_mm`.
+    fn baseline_pt(&self, offset_from_top_mm: f32) -> f32 {
+        self.flip_y_pt(offset_from_top_mm)
     }
 
-    fn set_fill(&mut self, color: (u8, u8, u8)) {
-        self.ops.push(Op::SetFillColor { col: rgb(color) });
+    /// Set fill colour (RGB, each component 0.0–1.0) only when it changes.
+    fn set_fill_color(&mut self, color: (u8, u8, u8)) {
+        let r = f32::from(color.0) / 255.0;
+        let g = f32::from(color.1) / 255.0;
+        let b = f32::from(color.2) / 255.0;
+        self.current.set_fill_rgb(r, g, b);
     }
 
-    fn set_outline(&mut self, color: (u8, u8, u8)) {
-        self.ops.push(Op::SetOutlineColor { col: rgb(color) });
+    /// Set stroke colour (RGB, each component 0.0–1.0).
+    fn set_stroke_color(&mut self, color: (u8, u8, u8)) {
+        let r = f32::from(color.0) / 255.0;
+        let g = f32::from(color.1) / 255.0;
+        let b = f32::from(color.2) / 255.0;
+        self.current.set_stroke_rgb(r, g, b);
     }
 
-    /// Draw `text` with its baseline at `(x_mm, baseline_offset_from_top_mm)`.
-    /// Alignment (if any) must already be reflected in `x_mm` by the caller —
-    /// see [`Self::aligned_x`].
+    /// Draw `text` at `(x_mm, baseline_offset_from_top_mm)` in the given font.
     fn draw_text(
         &mut self,
         text: &str,
         x_mm: f32,
         baseline_offset_from_top_mm: f32,
-        font: BuiltinFont,
+        font: Font,
         size_pt: f32,
         color: (u8, u8, u8),
     ) {
         if text.is_empty() {
             return;
         }
-        self.set_fill(color);
-        self.ops.push(Op::SetFont {
-            font: PdfFontHandle::Builtin(font),
-            size: Pt(size_pt),
-        });
-        self.ops.push(Op::StartTextSection);
-        self.ops.push(Op::SetTextCursor {
-            pos: self.baseline(x_mm, baseline_offset_from_top_mm),
-        });
-        self.ops.push(Op::ShowText {
-            items: vec![TextItem::Text(text.to_string())],
-        });
-        self.ops.push(Op::EndTextSection);
+        self.set_fill_color(color);
+
+        // Only emit a `Tf` operator when the font or size changes, to keep
+        // the content stream compact.
+        if self.current_font != Some((font, size_pt)) {
+            let font_name = match font {
+                Font::Regular => FONT_REGULAR,
+                Font::Bold => FONT_BOLD,
+            };
+            self.current.set_font(font_name, size_pt);
+            self.current_font = Some((font, size_pt));
+        }
+
+        let x_pt = mm_to_pt(x_mm);
+        let y_pt = self.baseline_pt(baseline_offset_from_top_mm);
+
+        // PDF standard 14 fonts use the Latin-1 / PDFDocEncoding character set.
+        // Encode the string lossily: replace any non-Latin-1 codepoint with '?'.
+        let encoded: Vec<u8> = text
+            .chars()
+            .map(|c| if c as u32 <= 0xFF { c as u8 } else { b'?' })
+            .collect();
+
+        self.current.begin_text();
+        self.current.set_text_matrix([1.0, 0.0, 0.0, 1.0, x_pt, y_pt]);
+        self.current.show(Str(&encoded));
+        self.current.end_text();
     }
 
-    /// Filled rectangle whose top-left corner sits at
+    /// Draw a filled rectangle whose top-left corner is at
     /// `(x_mm, top_offset_from_top_mm)`.
     fn fill_rect(
         &mut self,
@@ -248,40 +381,28 @@ impl<'a> Renderer<'a> {
         height_mm: f32,
         color: (u8, u8, u8),
     ) {
-        self.set_fill(color);
-        self.ops.push(Op::DrawRectangle {
-            rectangle: Rect {
-                x: Mm(x_mm).into(),
-                y: self.flip_y(top_offset_from_top_mm + height_mm).into(),
-                width: Mm(width_mm).into(),
-                height: Mm(height_mm).into(),
-                mode: Some(PaintMode::Fill),
-                winding_order: None,
-            },
-        });
+        self.set_fill_color(color);
+        let x_pt = mm_to_pt(x_mm);
+        // PDF rect origin is bottom-left; convert the top edge and subtract height.
+        let y_pt = self.flip_y_pt(top_offset_from_top_mm + height_mm);
+        let w_pt = mm_to_pt(width_mm);
+        let h_pt = mm_to_pt(height_mm);
+        self.current.rect(x_pt, y_pt, w_pt, h_pt);
+        self.current.fill_nonzero();
     }
 
-    /// Horizontal divider line at `offset_from_top_mm`, spanning the full
-    /// content width starting at the left margin.
+    /// Draw a horizontal divider line at `offset_from_top_mm`, spanning the
+    /// full content width starting at the left margin.
     fn content_divider(&mut self, offset_from_top_mm: f32, color: (u8, u8, u8)) {
-        self.set_outline(color);
-        self.ops.push(Op::SetOutlineThickness { pt: Pt(0.5) });
-        let y = self.flip_y(offset_from_top_mm);
-        self.ops.push(Op::DrawLine {
-            line: Line {
-                points: vec![
-                    LinePoint {
-                        p: Point::new(Mm(MARGIN_LEFT_MM), y),
-                        bezier: false,
-                    },
-                    LinePoint {
-                        p: Point::new(Mm(MARGIN_LEFT_MM + CONTENT_WIDTH_MM), y),
-                        bezier: false,
-                    },
-                ],
-                is_closed: false,
-            },
-        });
+        self.set_stroke_color(color);
+        self.current.set_line_width(0.5);
+        self.current.set_line_cap(LineCapStyle::ButtCap);
+        let y_pt = self.flip_y_pt(offset_from_top_mm);
+        let x0 = mm_to_pt(MARGIN_LEFT_MM);
+        let x1 = mm_to_pt(MARGIN_LEFT_MM + CONTENT_WIDTH_MM);
+        self.current.move_to(x0, y_pt);
+        self.current.line_to(x1, y_pt);
+        self.current.stroke();
     }
 
     /// Left edge (in millimetres from the page's left edge) of `column_index`.
@@ -322,14 +443,7 @@ impl<'a> Renderer<'a> {
             // Headers are always left-aligned (see module docs) regardless of
             // the column's data alignment.
             let x = self.column_x(index) + 1.0;
-            self.draw_text(
-                &label,
-                x,
-                baseline,
-                BuiltinFont::HelveticaBold,
-                8.0,
-                HEADER_TEXT,
-            );
+            self.draw_text(&label, x, baseline, Font::Bold, 8.0, HEADER_TEXT);
         }
         self.y += HEADER_HEIGHT_MM;
     }
@@ -362,7 +476,7 @@ impl<'a> Renderer<'a> {
         let baseline = self.y + 3.8;
         for (column_index, text) in cells {
             let x = self.aligned_x(*column_index, text, 7.5);
-            self.draw_text(text, x, baseline, BuiltinFont::Helvetica, 7.5, ROW_TEXT);
+            self.draw_text(text, x, baseline, Font::Regular, 7.5, ROW_TEXT);
         }
         self.content_divider(self.y + ROW_HEIGHT_MM, ROW_DIVIDER);
         self.y += ROW_HEIGHT_MM;
@@ -378,19 +492,12 @@ impl<'a> Renderer<'a> {
             label,
             MARGIN_LEFT_MM + 1.0,
             baseline,
-            BuiltinFont::Helvetica,
+            Font::Regular,
             7.5,
             SUMMARY_TEXT,
         );
         let value_x = self.aligned_x(DURATION_COLUMN, value, 7.5);
-        self.draw_text(
-            value,
-            value_x,
-            baseline,
-            BuiltinFont::Helvetica,
-            7.5,
-            SUMMARY_TEXT,
-        );
+        self.draw_text(value, value_x, baseline, Font::Regular, 7.5, SUMMARY_TEXT);
         self.y += ROW_HEIGHT_MM;
     }
 
@@ -407,7 +514,7 @@ impl<'a> Renderer<'a> {
             &title,
             MARGIN_LEFT_MM,
             self.y + 6.0,
-            BuiltinFont::HelveticaBold,
+            Font::Bold,
             13.0,
             TITLE_COLOR,
         );
@@ -416,7 +523,7 @@ impl<'a> Renderer<'a> {
             &subtitle,
             MARGIN_LEFT_MM,
             self.y + 13.0,
-            BuiltinFont::Helvetica,
+            Font::Regular,
             11.0,
             TITLE_COLOR,
         );
@@ -488,7 +595,7 @@ impl<'a> Renderer<'a> {
             &total_label,
             MARGIN_LEFT_MM + 1.0,
             baseline,
-            BuiltinFont::HelveticaBold,
+            Font::Bold,
             7.5,
             TITLE_COLOR,
         );
@@ -498,7 +605,7 @@ impl<'a> Renderer<'a> {
             &total_value,
             total_x,
             baseline,
-            BuiltinFont::HelveticaBold,
+            Font::Bold,
             7.5,
             TITLE_COLOR,
         );
@@ -516,14 +623,22 @@ impl<'a> Renderer<'a> {
     }
 }
 
-fn rgb(color: (u8, u8, u8)) -> Color {
-    Color::Rgb(Rgb {
-        r: f32::from(color.0) / 255.0,
-        g: f32::from(color.1) / 255.0,
-        b: f32::from(color.2) / 255.0,
-        icc_profile: None,
-    })
+// -- Deflate compression for content streams ----------------------------------
+
+/// Compress `data` with Deflate (zlib wrapper) using the `flate2` crate, which
+/// is already an indirect transitive dependency. Falls back to uncompressed if
+/// compression somehow fails.
+fn miniz_compress(data: &[u8]) -> Vec<u8> {
+    use std::io::Write;
+    let mut encoder =
+        flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    if encoder.write_all(data).is_err() {
+        return data.to_vec();
+    }
+    encoder.finish().unwrap_or_else(|_| data.to_vec())
 }
+
+// -- Domain helpers -----------------------------------------------------------
 
 /// Sum of approved, crediting entry minutes across the whole report range —
 /// the same definition the CSV/UI "Total" row uses.
