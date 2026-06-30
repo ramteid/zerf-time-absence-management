@@ -808,6 +808,15 @@ pub async fn approve_absence(
         ));
     }
     transaction.commit().await?;
+    // Drop the pending entry from every other approver's queue (and clear
+    // the requester's own dashboard chip). The history row stays in the
+    // notifications table for audit purposes — only `is_read` flips.
+    crate::services::notifications::clear_pending_for_reference(
+        app_state,
+        "absences",
+        absence_id,
+    )
+    .await;
     audit::log(
         &app_state.pool,
         requester.id,
@@ -902,6 +911,14 @@ pub async fn reject_absence(
         ));
     }
     transaction.commit().await?;
+    // See approve_absence: clear the pending entry from every approver's
+    // queue once the decision has been recorded.
+    crate::services::notifications::clear_pending_for_reference(
+        app_state,
+        "absences",
+        absence_id,
+    )
+    .await;
     audit::log(
         &app_state.pool,
         requester.id,
@@ -992,6 +1009,13 @@ pub async fn approve_cancellation_absence(
         ));
     }
     transaction.commit().await?;
+    // Cancellation decided — drop the pending entry from every approver's queue.
+    crate::services::notifications::clear_pending_for_reference(
+        app_state,
+        "absences",
+        absence_id,
+    )
+    .await;
     audit::log(
         &app_state.pool,
         requester.id,
@@ -1081,6 +1105,13 @@ pub async fn reject_cancellation_absence(
         ));
     }
     transaction.commit().await?;
+    // Cancellation decided — drop the pending entry from every approver's queue.
+    crate::services::notifications::clear_pending_for_reference(
+        app_state,
+        "absences",
+        absence_id,
+    )
+    .await;
     audit::log(
         &app_state.pool,
         requester.id,

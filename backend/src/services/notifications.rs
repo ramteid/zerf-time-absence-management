@@ -198,6 +198,29 @@ pub async fn create_with_frontend_body(
     }
 }
 
+/// Clear pending approval notifications for an item once it has been decided
+/// (approved, rejected, revoked, etc.). All recipients keep the row in their
+/// history but the in-app badge and dashboard "open requests" view will no
+/// longer surface it. Failures are non-fatal — the underlying transition has
+/// already committed.
+pub async fn clear_pending_for_reference(
+    state: &AppState,
+    reference_type: &str,
+    reference_id: i64,
+) {
+    if let Err(e) = state
+        .db
+        .notifications
+        .mark_read_by_reference(reference_type, reference_id)
+        .await
+    {
+        tracing::warn!(
+            target: "zerf::notifications",
+            "mark_read_by_reference({reference_type}, {reference_id}) failed: {e}"
+        );
+    }
+}
+
 /// Load the configured UI language, falling back to the default on error.
 /// Used by notification senders across all modules.
 pub async fn load_language(pool: &crate::db::DatabasePool) -> crate::i18n::Language {
