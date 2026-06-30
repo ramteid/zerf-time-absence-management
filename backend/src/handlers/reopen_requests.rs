@@ -232,6 +232,14 @@ pub async fn approve(
         .approve_with_access_check(request_id, requester.id, requester.is_admin())
         .await?;
     let reopen_request = repo_rr_to_service(reopen_request_repo);
+    // Drop the pending entry from every other approver's queue now that the
+    // request has been decided. History rows stay; only `is_read` flips.
+    crate::services::notifications::clear_pending_for_reference(
+        &app_state,
+        "reopen_request",
+        request_id,
+    )
+    .await;
     let language = notification_language(&app_state.pool).await;
     let week_label = i18n::format_week_label(&language, reopen_request.week_start);
     let week_iso = reopen_request.week_start.format("%Y-%m-%d").to_string();
@@ -329,6 +337,14 @@ pub async fn reject(
         )
         .await?;
     let before = repo_rr_to_service(before);
+    // Drop the pending entry from every other approver's queue now that the
+    // request has been decided. History rows stay; only `is_read` flips.
+    crate::services::notifications::clear_pending_for_reference(
+        &app_state,
+        "reopen_request",
+        request_id,
+    )
+    .await;
     audit::log(
         &app_state.pool,
         requester.id,

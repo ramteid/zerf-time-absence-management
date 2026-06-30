@@ -220,6 +220,33 @@ impl NotificationDb {
         )
     }
 
+    /// Mark every unread notification that references the same item as read
+    /// (across all recipients). Used after a request has been approved,
+    /// rejected, revoked, or otherwise resolved so the item drops out of every
+    /// remaining approver's pending queue without deleting the audit trail.
+    /// Recipients are then broadcast a refresh signal so SSE-connected clients
+    /// update their badge counts in real time.
+    pub async fn mark_read_by_reference(
+        &self,
+        reference_type: &str,
+        reference_id: i64,
+    ) -> AppResult<()> {
+        // Capture which users had unread rows so we can broadcast just to them.
+        let affected: Vec<i64> = sqlx::query_scalar(
+            "UPDATE notifications SET is_read=TRUE \
+             WHERE reference_type=$1 AND reference_id=$2 AND is_read=FALSE \
+             RETURNING user_id",
+        )
+        .bind(reference_type)
+        .bind(reference_id)
+        .fetch_all(&self.pool)
+        .await?;
+        for user_id in affected {
+            self.broadcast(user_id);
+        }
+        Ok(())
+    }
+
     pub async fn mark_all_read(&self, user_id: i64) -> AppResult<u64> {
         Ok(
             sqlx::query("UPDATE notifications SET is_read=TRUE WHERE user_id=$1 AND is_read=FALSE")

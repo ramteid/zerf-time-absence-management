@@ -706,6 +706,22 @@ intentionally silent end-to-end.
 This also applies to reminder emails and in-app reminders: Zerf reminds the
 users who are actually assigned, not all users with a privileged role.
 
+### Pending approval notifications clear automatically
+
+As soon as a request has been decided by any one approver (approved, rejected,
+revoked, or the cancellation thereof), the related notification is marked as
+read for every other approver in the same instant. This applies to:
+
+- week submissions for time entries,
+- absence requests and absence cancellation requests,
+- reopen requests.
+
+The notification row stays in each approver's notification history (and the
+audit log keeps the full trail), but the item no longer shows up in the
+unread badge or in the dashboard's "open requests" lists for anyone else. So
+once a colleague has acted, you do not need to refresh or re-check whether
+your action is still required.
+
 ### Important: non-crediting entries trigger reminders too
 
 Because non-crediting entries participate in the full approval workflow:

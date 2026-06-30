@@ -319,6 +319,9 @@ pub async fn submit(
         .to_string();
 
         for approver_id in approver_ids {
+            // reference_type/id encode the submitter so a sibling approver's
+            // pending entry can be cleared in one shot the moment any other
+            // approver acts on the week (see batch_approve / batch_reject).
             crate::services::notifications::create_with_frontend_body(
                 &app_state,
                 &language,
@@ -333,8 +336,8 @@ pub async fn submit(
                 ],
                 &frontend_body,
                 true,
-                Some("time_entries"),
-                None,
+                Some("timesheet_submission"),
+                Some(requester.id),
             )
             .await;
         }
@@ -392,10 +395,33 @@ pub async fn batch_approve(
             None,
         )
         .await;
+        clear_submission_pending_for_submitters(&app_state, &approved_entries).await;
     }
     Ok(Json(
         serde_json::json!({"ok": true, "count": approved_entries.len()}),
     ))
+}
+
+/// Mark the open `timesheet_submission` notifications for every submitter
+/// touched by the batch as read, so all of their other approvers' dashboards
+/// drop the entry the moment one approver acts. Each submission notification
+/// was inserted with `reference_id = submitter.user_id`, which lets us clear
+/// every sibling row in one query per submitter.
+async fn clear_submission_pending_for_submitters(
+    app_state: &AppState,
+    entries: &[crate::repository::TimeEntry],
+) {
+    let mut seen: std::collections::HashSet<i64> = std::collections::HashSet::new();
+    for entry in entries {
+        if seen.insert(entry.user_id) {
+            crate::services::notifications::clear_pending_for_reference(
+                app_state,
+                "timesheet_submission",
+                entry.user_id,
+            )
+            .await;
+        }
+    }
 }
 
 /// Reject submitted entries in batch (week-level rejection).
@@ -456,6 +482,7 @@ pub async fn batch_reject(
             Some(&rejection_reason),
         )
         .await;
+        clear_submission_pending_for_submitters(&app_state, &rejected_entries).await;
     }
     Ok(Json(
         serde_json::json!({"ok": true, "count": rejected_entries.len()}),
