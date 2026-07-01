@@ -97,10 +97,10 @@ describe("AdminUsers", () => {
     HTMLDialogElement.prototype.showModal = originalShowModal;
   });
 
-  it("renders the Team Members heading", async () => {
+  it("renders the Users heading", async () => {
     apiMock.mockResolvedValue(sampleUsers);
     component = mount(AdminUsers, { target });
-    await waitForText(target, "Team Members");
+    await waitForText(target, "Users");
   });
 
   it("renders a row for each user in the list", async () => {
@@ -118,7 +118,7 @@ describe("AdminUsers", () => {
     // empty fields, not pre-filled with another user's data.
     apiMock.mockResolvedValue([]);
     component = mount(AdminUsers, { target });
-    await waitForText(target, "Team Members");
+    await waitForText(target, "Users");
 
     const addBtn = [...target.querySelectorAll("button")].find((b) =>
       b.textContent.includes("Add Member")

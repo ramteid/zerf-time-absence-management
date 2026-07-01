@@ -17,7 +17,6 @@
   const adminTabs = [
     { href: "/settings/general", key: "Settings" },
     { href: "/settings/users", key: "Users" },
-    { href: "/settings/archived-users", key: "archived_users_tab" },
     { href: "/settings/categories", key: "Categories" },
     { href: "/settings/holidays", key: "Holidays" },
     { href: "/settings/email", key: "Email" },
@@ -29,11 +28,12 @@
   const teamTab = { href: "/settings/team", key: "Team Settings" };
   const teamUsersTab = { href: "/settings/team-users", key: "Users" };
 
+  // Team Settings is placed first for all roles.
   $: tabs = isAdmin
-    ? [...adminTabs, teamTab]
+    ? [teamTab, ...adminTabs]
     : isLead
       ? canManageTeamUsers
-        ? [teamUsersTab, teamTab]
+        ? [teamTab, teamUsersTab]
         : [teamTab]
       : [];
 
