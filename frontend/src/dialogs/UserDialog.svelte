@@ -90,8 +90,11 @@
   let lastNormalizedRole = String(role || "").trim().toLowerCase();
   $: if (normalizedRole !== lastNormalizedRole) {
     if (normalizedRole === "assistant") {
+      // eslint-disable-next-line no-useless-assignment
       _preAssistantLeaveDays = annual_leave_days;
+      // eslint-disable-next-line no-useless-assignment
       _preAssistantLeaveCurrent = leave_days_current_year;
+      // eslint-disable-next-line no-useless-assignment
       _preAssistantLeaveNext = leave_days_next_year;
       annual_leave_days = 0;
       leave_days_current_year = 0;
@@ -100,8 +103,11 @@
       annual_leave_days = _preAssistantLeaveDays;
       leave_days_current_year = _preAssistantLeaveCurrent;
       leave_days_next_year = _preAssistantLeaveNext;
+      // eslint-disable-next-line no-useless-assignment
       _preAssistantLeaveDays = null;
+      // eslint-disable-next-line no-useless-assignment
       _preAssistantLeaveCurrent = null;
+      // eslint-disable-next-line no-useless-assignment
       _preAssistantLeaveNext = null;
     }
   }
