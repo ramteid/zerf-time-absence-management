@@ -311,7 +311,7 @@
 
 <Dialog
   bind:this={dialog}
-  title={$t(isNew ? "Add Member" : "Edit Member")}
+  title={$t(isNew ? "Add User" : "Edit User")}
   onClose={() => onClose(false)}
   style="max-width:520px"
   let:dlg
@@ -403,50 +403,49 @@
           </div>
         </div>
       </div>
-      <div class="field-row">
+      {#if !isAssistantRole}
+        <div class="field-row">
+          <div>
+            <label class="zf-label" for="user-weekly-hours">{$t("Weekly hours")}</label>
+            <input
+              id="user-weekly-hours"
+              class="zf-input"
+              type="text"
+              inputmode="decimal"
+              bind:value={weekly_hours}
+            />
+          </div>
+          <div>
+            <label class="zf-label" for="user-workdays-per-week">{$t("Workdays per week")}</label>
+            <input
+              id="user-workdays-per-week"
+              class="zf-input"
+              type="number"
+              step="1"
+              min="1"
+              max="5"
+              bind:value={workdays_per_week}
+            />
+          </div>
+        </div>
         <div>
-          <label class="zf-label" for="user-weekly-hours">{$t("Weekly hours")}</label>
+          <label class="zf-label" for="user-overtime-balance"
+            >{$t("Overtime start balance (hours)")}</label
+          >
           <input
-            id="user-weekly-hours"
+            id="user-overtime-balance"
             class="zf-input"
             type="text"
             inputmode="decimal"
-            bind:value={weekly_hours}
-            disabled={isAssistantRole}
+            bind:value={overtime_start_balance_hours}
           />
+          <div class="field-hint">
+            {$t(
+              "Initial overtime balance in hours when the user starts. Negative = deficit.",
+            )}
+          </div>
         </div>
-        <div>
-          <label class="zf-label" for="user-workdays-per-week">{$t("Workdays per week")}</label>
-          <input
-            id="user-workdays-per-week"
-            class="zf-input"
-            type="number"
-            step="1"
-            min="1"
-            max="5"
-            bind:value={workdays_per_week}
-            disabled={isAssistantRole}
-          />
-        </div>
-      </div>
-      <div>
-        <label class="zf-label" for="user-overtime-balance"
-          >{$t("Overtime start balance (hours)")}</label
-        >
-        <input
-          id="user-overtime-balance"
-          class="zf-input"
-          type="text"
-          inputmode="decimal"
-          bind:value={overtime_start_balance_hours}
-          disabled={isAssistantRole}
-        />
-        <div class="field-hint">
-          {$t(
-            "Initial overtime balance in hours when the user starts. Negative = deficit.",
-          )}
-        </div>
-      </div>
+      {/if}
       <div>
         <div class="field-section-label">{$t("Vacation days per year")}</div>
         <div>
@@ -637,7 +636,7 @@
     {#if !showTempPassword}
       <button class="zf-btn" on:click={() => dialog.close()}>{$t("Cancel")}</button>
       <button class="zf-btn zf-btn-primary" on:click={save}>
-        {$t(isNew ? "Add Member" : "Save")}
+        {$t(isNew ? "Add User" : "Save")}
       </button>
     {/if}
   </svelte:fragment>
