@@ -91,7 +91,7 @@ test("team lead: toggle and revert an auto-approval setting", async () => {
 
 test("team lead: create an assistant", async () => {
   await page.goto("/settings/team-users");
-  await page.getByRole("button", { name: "Add Member" }).click();
+  await page.getByRole("button", { name: "Add User" }).click();
 
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
@@ -106,7 +106,7 @@ test("team lead: create an assistant", async () => {
   // (the team lead is implicitly the sole approver), and the request goes
   // to /team-users instead of /users. Nothing else to fill in before
   // submitting.
-  await dialog.getByRole("button", { name: "Add Member" }).click();
+  await dialog.getByRole("button", { name: "Add User" }).click();
 
   const tempDialog = page.getByRole("dialog");
   await expect(tempDialog.getByText("Temporary password:")).toBeVisible();

@@ -1269,7 +1269,7 @@ Settings, scoped strictly to their own assigned users:
   in detail, edited, archived, or restored.
 - There is no delete action here. A team lead can never delete a user — only
   an admin can, via the regular Users tab.
-- The **Add Member** button only lets the lead create a new "Assistant" user.
+- The **Add User** button only lets the lead create a new "Assistant" user.
   The role field is fixed and cannot be changed, and the new user's approver is
   always the creating lead — no other role or approver can be chosen.
 - Admins are unaffected: they continue to use the full Users tab and can

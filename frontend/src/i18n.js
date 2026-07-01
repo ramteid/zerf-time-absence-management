@@ -21,9 +21,9 @@ const TRANSLATIONS = {
     "{hours} / week": "{hours} / week",
     "As of yesterday": "As of yesterday",
     help_monthly_report:
-      "Shows the monthly report for a team member with target/actual hours and daily details.",
+      "Shows the monthly report for a user with target/actual hours and daily details.",
     help_team_report:
-      "Compares target and actual hours for all active team members in the selected month. For the current month, data is available including today.",
+      "Compares target and actual hours for all active users in the selected month. For the current month, data is available including today.",
     help_category_breakdown:
       "Shows how tracked hours are distributed across the different categories.",
     help_absence_report:
@@ -31,7 +31,7 @@ const TRANSLATIONS = {
     help_logged:
       "Submitted and approved hours including the current day for the current month.",
     help_employee_details:
-      "View detailed information about a team member including balance and statistics.",
+      "View detailed information about a user including balance and statistics.",
     help_csv_export:
       "Exports the selected employee and date range as a CSV file.",
     help_my_balance:
@@ -331,12 +331,12 @@ const TRANSLATIONS = {
     "No archived users.": "No archived users.",
     "This account will be deactivated and the user will no longer be able to log in. All data is preserved and the account can be restored later.":
       "This account will be deactivated and the user will no longer be able to log in. All data is preserved and the account can be restored later.",
-    "This user approves {n} active team member(s). Choose a replacement approver for each.":
-      "This user approves {n} active team member(s). Choose a replacement approver for each.",
+    "This user approves {n} active user(s). Choose a replacement approver for each.":
+      "This user approves {n} active user(s). Choose a replacement approver for each.",
     "Replacement approver for {name}": "Replacement approver for {name}",
     "Select approver": "Select approver",
-    "All team members must have a replacement approver assigned.":
-      "All team members must have a replacement approver assigned.",
+    "All users must have a replacement approver assigned.":
+      "All users must have a replacement approver assigned.",
     "Restore this archived account? The user will receive a temporary password and must change it on first login.":
       "Restore this archived account? The user will receive a temporary password and must change it on first login.",
     "New start date (optional)": "New start date (optional)",
@@ -628,7 +628,6 @@ const TRANSLATIONS = {
     "Your hours overview": "Deine Stundenübersicht",
     "Pending Weeks": "Ausstehende Wochen",
     "Absence Requests": "Abwesenheitsanträge",
-    "Team Members": "Teammitglieder",
     "Week Approvals": "Wochen-Genehmigungen",
     "Approve All": "Alle genehmigen",
     "Approve all?": "Alle genehmigen?",
@@ -639,8 +638,8 @@ const TRANSLATIONS = {
     "Team hours overview": "Teamstunden-Übersicht",
     "Your profile & preferences": "Ihr Profil & Einstellungen",
     "Manage your team": "Team verwalten",
-    "Add Member": "Mitglied hinzufügen",
-    "Edit Member": "Mitglied bearbeiten",
+    "Add User": "Benutzer hinzufügen",
+    "Edit User": "Benutzer bearbeiten",
     "Delete user?": "Benutzer löschen?",
     "Delete user permanently? All data of this user will be deleted. This cannot be undone.":
       "Benutzer dauerhaft löschen? Alle Daten dieses Benutzers werden gelöscht. Dies kann nicht rückgängig gemacht werden.",
@@ -1037,7 +1036,7 @@ const TRANSLATIONS = {
     help_monthly_report:
       "Zeigt den Monatsbericht eines Mitarbeiters mit Soll-/Ist-Stunden und Details pro Tag.",
     help_team_report:
-      "Vergleicht Soll- und Ist-Stunden aller aktiven Teammitglieder für den gewählten Monat. Für den laufenden Monat sind Daten inklusive heute verfügbar.",
+      "Vergleicht Soll- und Ist-Stunden aller aktiven Benutzer für den gewählten Monat. Für den laufenden Monat sind Daten inklusive heute verfügbar.",
     help_category_breakdown:
       "Zeigt die Verteilung der erfassten Stunden auf die verschiedenen Kategorien.",
     help_absence_report:
@@ -1327,12 +1326,12 @@ const TRANSLATIONS = {
     "No archived users.": "Keine archivierten Benutzer.",
     "This account will be deactivated and the user will no longer be able to log in. All data is preserved and the account can be restored later.":
       "Dieses Konto wird deaktiviert und der Benutzer kann sich nicht mehr anmelden. Alle Daten bleiben erhalten und das Konto kann später wiederhergestellt werden.",
-    "This user approves {n} active team member(s). Choose a replacement approver for each.":
-      "Dieser Benutzer genehmigt {n} aktive(s) Teammitglied(er). Wähle für jedes einen Ersatz-Genehmiger.",
+    "This user approves {n} active user(s). Choose a replacement approver for each.":
+      "Dieser Benutzer genehmigt {n} aktive(n) Benutzer. Wähle für jeden einen Ersatz-Genehmiger.",
     "Replacement approver for {name}": "Ersatz-Genehmiger für {name}",
     "Select approver": "Genehmiger auswählen",
-    "All team members must have a replacement approver assigned.":
-      "Alle Teammitglieder müssen einen Ersatz-Genehmiger erhalten.",
+    "All users must have a replacement approver assigned.":
+      "Alle Benutzer müssen einen Ersatz-Genehmiger erhalten.",
     "Restore this archived account? The user will receive a temporary password and must change it on first login.":
       "Dieses archivierte Konto wiederherstellen? Der Benutzer erhält ein temporäres Passwort und muss es beim ersten Login ändern.",
     "New start date (optional)": "Neues Startdatum (optional)",

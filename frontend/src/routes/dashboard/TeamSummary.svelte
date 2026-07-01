@@ -20,6 +20,6 @@
       value={pendingAbsences.length}
       color={pendingAbsences.length > 0 ? "var(--danger-text)" : "var(--success-text)"}
     />
-    <StatCard label={$t("Team Members")} value={users.length} />
+    <StatCard label={$t("Users")} value={users.length} />
   </div>
 </div>

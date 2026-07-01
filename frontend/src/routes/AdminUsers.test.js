@@ -113,15 +113,15 @@ describe("AdminUsers", () => {
     await waitForText(target, "Carol");
   });
 
-  it("opens the UserDialog when Add Member is clicked", async () => {
-    // The Add Member flow creates a new account. The dialog must open with
+  it("opens the UserDialog when Add User is clicked", async () => {
+    // The Add User flow creates a new account. The dialog must open with
     // empty fields, not pre-filled with another user's data.
     apiMock.mockResolvedValue([]);
     component = mount(AdminUsers, { target });
     await waitForText(target, "Users");
 
     const addBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Add Member")
+      b.textContent.includes("Add User")
     );
     expect(addBtn).not.toBeNull();
     addBtn.click();
@@ -139,7 +139,7 @@ describe("AdminUsers", () => {
     component = mount(AdminUsers, { target });
     await waitForText(target, "Bob");
 
-    // Row action buttons use the "ghost" style; the "Add Member" button uses
+    // Row action buttons use the "ghost" style; the "Add User" button uses
     // "primary". The first ghost icon button in the list is Edit-Alice.
     const firstEditBtn = [...target.querySelectorAll("button")].find(
       (b) => b.classList.contains("zf-btn-ghost") && b.querySelector("svg")
@@ -164,7 +164,7 @@ describe("AdminUsers", () => {
     await waitForText(target, "Bob");
 
     // Row button order: Edit | Shield (reset PW) | Toggle active (titled) | Archive (titled).
-    // Filtering out titled buttons leaves: Add Member, Edit-Alice, Shield-Alice, Edit-Bob…
+    // Filtering out titled buttons leaves: Add User, Edit-Alice, Shield-Alice, Edit-Bob…
     // Index 2 is the Shield button for the first user (Alice, user id 1).
     const noTitleIconBtns = [...target.querySelectorAll("button")].filter(
       (b) => b.querySelector("svg") && !b.title

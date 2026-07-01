@@ -22,13 +22,13 @@ import { ADMIN, EMPLOYEE, TEAM_LEAD } from "./users.js";
 // between tests beyond what's already persisted server-side.
 test.use({ storageState: storageStatePath("admin") });
 
-// Shared "create a user via the admin's Add Member dialog" flow, used for
+// Shared "create a user via the admin's Add User dialog" flow, used for
 // both the team lead and the employee below — they differ only in role and
 // who approves them, so this one helper covers both instead of duplicating
 // the whole dialog interaction twice.
 async function createUser(page, { firstName, lastName, email, role, approverEmail }) {
   await page.goto("/settings/users");
-  await page.getByRole("button", { name: "Add Member" }).click();
+  await page.getByRole("button", { name: "Add User" }).click();
 
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
@@ -58,7 +58,7 @@ async function createUser(page, { firstName, lastName, email, role, approverEmai
   // TempPasswordDialog — with a "no SMTP configured, deliver this in person"
   // warning, since 03-admin-config.spec.js's SMTP test runs later and leaves
   // SMTP disabled afterward anyway.
-  await dialog.getByRole("button", { name: "Add Member" }).click();
+  await dialog.getByRole("button", { name: "Add User" }).click();
 
   const tempDialog = page.getByRole("dialog");
   await expect(tempDialog.getByText("Temporary password:")).toBeVisible();
