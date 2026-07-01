@@ -84,31 +84,19 @@
   // year. When the admin selects the assistant role, zero out the leave fields
   // so they are forced to make a conscious choice. Restore the previous values
   // if the admin switches back to a leave-tracking role without saving.
-  let _preAssistantLeaveDays = null;
-  let _preAssistantLeaveCurrent = null;
-  let _preAssistantLeaveNext = null;
+  let _leaveSnapshot = null; // { annual_leave_days, leave_days_current_year, leave_days_next_year }
   let lastNormalizedRole = String(role || "").trim().toLowerCase();
   $: if (normalizedRole !== lastNormalizedRole) {
     if (normalizedRole === "assistant") {
       // eslint-disable-next-line no-useless-assignment
-      _preAssistantLeaveDays = annual_leave_days;
-      // eslint-disable-next-line no-useless-assignment
-      _preAssistantLeaveCurrent = leave_days_current_year;
-      // eslint-disable-next-line no-useless-assignment
-      _preAssistantLeaveNext = leave_days_next_year;
+      _leaveSnapshot = { annual_leave_days, leave_days_current_year, leave_days_next_year };
       annual_leave_days = 0;
       leave_days_current_year = 0;
       leave_days_next_year = 0;
-    } else if (lastNormalizedRole === "assistant" && _preAssistantLeaveDays !== null) {
-      annual_leave_days = _preAssistantLeaveDays;
-      leave_days_current_year = _preAssistantLeaveCurrent;
-      leave_days_next_year = _preAssistantLeaveNext;
+    } else if (lastNormalizedRole === "assistant" && _leaveSnapshot !== null) {
+      ({ annual_leave_days, leave_days_current_year, leave_days_next_year } = _leaveSnapshot);
       // eslint-disable-next-line no-useless-assignment
-      _preAssistantLeaveDays = null;
-      // eslint-disable-next-line no-useless-assignment
-      _preAssistantLeaveCurrent = null;
-      // eslint-disable-next-line no-useless-assignment
-      _preAssistantLeaveNext = null;
+      _leaveSnapshot = null;
     }
   }
   // eslint-disable-next-line no-useless-assignment
@@ -206,7 +194,9 @@
         if (settings.default_weekly_hours != null) {
           weekly_hours = fmtDecimal(Number(settings.default_weekly_hours), 2);
         }
-        if (settings.default_annual_leave_days != null) {
+        // Guard: if the admin already switched to assistant while this async call
+        // was in flight, don't overwrite the zeroed leave fields with the default.
+        if (settings.default_annual_leave_days != null && !isAssistantRole) {
           annual_leave_days = Number(settings.default_annual_leave_days);
           leave_days_current_year = Number(settings.default_annual_leave_days);
           leave_days_next_year = Number(settings.default_annual_leave_days);
