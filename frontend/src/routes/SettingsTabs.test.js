@@ -66,8 +66,8 @@ describe("SettingsTabs", () => {
     component = mount(SettingsTabs, { target });
     await settle();
     const links = target.querySelectorAll("a[data-link]");
-    // 8 admin tabs (including Archived) + 1 team tab = 9
-    expect(links.length).toBe(9);
+    // 7 admin tabs + 1 team tab = 8
+    expect(links.length).toBe(8);
     const text = target.textContent;
     expect(text).toContain("Settings");
     expect(text).toContain("Users");

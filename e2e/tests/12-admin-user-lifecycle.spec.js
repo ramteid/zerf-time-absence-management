@@ -22,9 +22,9 @@ import { EMPLOYEE, TEAM_LEAD } from "./users.js";
 
 test.use({ storageState: storageStatePath("admin") });
 
-// Both AdminUsers.svelte and AdminArchivedUsers.svelte render each user as a
-// direct child <div> of the same `.zf-card` list container, so this one
-// locator works on either page — just filter by the visible name text.
+// AdminUsers.svelte renders both the active and archived rosters as direct
+// child <div> elements of `.zf-card` list containers, so this one locator
+// works for either section — just filter by the visible name text.
 function userRow(page, fullName) {
   return page.locator(".zf-card > div", { hasText: fullName });
 }
@@ -45,17 +45,19 @@ test("admin: archive the employee", async ({ page }) => {
   await dialog.getByRole("button", { name: "Archive" }).click();
   await expect(page.getByText("User archived.")).toBeVisible();
 
-  // Archived users move from the active Team Members list to a dedicated
-  // Archived Users page; they keep all their historical data (time entries,
-  // absences) but can no longer log in until restored.
-  await page.goto("/settings/archived-users");
+  // Archived users move from the active Users list to a dedicated archived
+  // section displayed below the main list on the same page; they keep all
+  // their historical data (time entries, absences) but can no longer log in
+  // until restored.
+  await page.goto("/settings/users");
+  await expect(page.getByRole("heading", { name: "Archived Users" })).toBeVisible();
   await expect(
     page.getByText(`${EMPLOYEE.firstName} ${EMPLOYEE.lastName}`),
   ).toBeVisible();
 });
 
 test("admin: restore the employee with a reset start date", async ({ page }) => {
-  await page.goto("/settings/archived-users");
+  await page.goto("/settings/users");
   const row = userRow(page, `${EMPLOYEE.firstName} ${EMPLOYEE.lastName}`);
   await row.getByRole("button", { name: "Restore" }).click();
 
@@ -83,7 +85,7 @@ test("admin: restore the employee with a reset start date", async ({ page }) => 
   await dialog.getByRole("button", { name: "Restore" }).click();
   await expect(page.getByText("User restored.")).toBeVisible();
 
-  // Restored accounts reappear in the active Team Members list immediately
+  // Restored accounts reappear in the active Users list immediately
   // (no separate "pending restore" state).
   await page.goto("/settings/users");
   await expect(
