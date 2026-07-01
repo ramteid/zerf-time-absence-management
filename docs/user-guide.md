@@ -1312,8 +1312,14 @@ Required information:
 
 Role-specific rules:
 
-- Assistants must have zero weekly hours.
-- Assistants typically have no annual leave configured.
+- Assistants must have zero weekly hours and no overtime start balance. The
+  corresponding fields are hidden in the form.
+- When the assistant role is selected, all three leave-day fields are reset to
+  0. This is intentional: under German law, Minijob (assistant) leave
+  entitlement is derived from the number of days actually worked, which varies
+  per person and per year. A pre-filled org-wide default would be misleading.
+  Enter the correct entitlement for each year manually. If you switch back to
+  a different role without saving, the previous leave values are restored.
 
 Optional: an initial flextime balance to carry in from before the user was
 created in the system.
@@ -1387,14 +1393,15 @@ Guards:
   request. The archive is rejected unless every dependent user has a valid
   replacement assigned.
 
-**Viewing archived users:** Settings > Users > Archived users tab. The list
-shows the user's name, role, and the date they were archived.
+**Viewing archived users:** Settings > Users. The archived accounts are shown
+in a separate "Archived Users" list below the active users on the same page.
+Each row shows the user's name, role, and the date they were archived.
 
 ### Restoring an archived user
 
 Restore brings an archived user back as an active account.
 
-**Location:** Settings > Users > Archived users tab > select a user > Restore.
+**Location:** Settings > Users > Archived Users list > select a user > Restore.
 
 Restore behavior:
 
@@ -1487,6 +1494,11 @@ per-year overrides:
   takes precedence over the base value for that year only.
 - For any other year, the base annual leave days value applies.
 - Valid range: 0 to 366 days, for both the base value and overrides.
+- **Assistants (Minijob)**: leave entitlement must be set manually each year
+  because it is calculated from the actual number of days worked, which
+  changes from year to year. All leave fields default to 0 when the assistant
+  role is selected. Update the current-year and next-year overrides each
+  January once the number of worked days for the previous year is known.
 - Changes take effect immediately for balance calculations. If you reduce a
   user's entitlement after they have already used vacation, their available
   balance may go negative.

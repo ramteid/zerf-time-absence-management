@@ -1227,19 +1227,23 @@ dialog footer {
 }
 
 /* ── Scrollbar ── */
-.content-area::-webkit-scrollbar {
+.content-area::-webkit-scrollbar,
+dialog ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
-.content-area::-webkit-scrollbar-track {
+.content-area::-webkit-scrollbar-track,
+dialog ::-webkit-scrollbar-track {
   background: transparent;
 }
-.content-area::-webkit-scrollbar-thumb {
+.content-area::-webkit-scrollbar-thumb,
+dialog ::-webkit-scrollbar-thumb {
   background: rgba(0, 0, 0, 0.12);
   border-radius: 4px;
 }
 
-[data-theme="dark"] .content-area::-webkit-scrollbar-thumb {
+[data-theme="dark"] .content-area::-webkit-scrollbar-thumb,
+[data-theme="dark"] dialog ::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.12);
 }
 
