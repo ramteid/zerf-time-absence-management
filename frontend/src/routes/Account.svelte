@@ -149,21 +149,21 @@
           style="color:var(--text-secondary)"
         />
       </div>
-      <div>
-        <label class="zf-label" for="account-weekly-hours"
-          >{$t("Weekly hours")}</label
-        >
-        <input
-          id="account-weekly-hours"
-          class="zf-input"
-          value={$t("{hours} / week", {
-            hours: formatHours($currentUser.weekly_hours),
-          })}
-          readonly
-          style="color:var(--text-secondary)"
-        />
-      </div>
       {#if !isAssistantCurrentUser}
+        <div>
+          <label class="zf-label" for="account-weekly-hours"
+            >{$t("Weekly hours")}</label
+          >
+          <input
+            id="account-weekly-hours"
+            class="zf-input"
+            value={$t("{hours} / week", {
+              hours: formatHours($currentUser.weekly_hours),
+            })}
+            readonly
+            style="color:var(--text-secondary)"
+          />
+        </div>
         <div>
           <label class="zf-label" for="account-workdays-per-week"
             >{$t("Workdays per week")}</label

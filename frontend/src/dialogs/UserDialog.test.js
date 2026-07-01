@@ -74,17 +74,17 @@ describe("UserDialog", () => {
     HTMLDialogElement.prototype.showModal = originalShowModal;
   });
 
-  it("renders 'Add Member' title for a new user", async () => {
+  it("renders 'Add User' title for a new user", async () => {
     const onClose = vi.fn();
     component = mount(UserDialog, {
       target,
       props: { template: {}, onClose },
     });
-    await waitForText(target, "Add Member");
+    await waitForText(target, "Add User");
   });
 
-  it("shows 'Edit Member' in the dialog title for an existing user", async () => {
-    // The title switches from 'Add Member' to 'Edit Member' so admins
+  it("shows 'Edit User' in the dialog title for an existing user", async () => {
+    // The title switches from 'Add User' to 'Edit User' so admins
     // immediately know they are modifying, not creating, an account.
     apiMock.mockImplementation(async (path) => {
       if (path === "/users") return [];
@@ -111,7 +111,7 @@ describe("UserDialog", () => {
         onClose,
       },
     });
-    await waitForText(target, "Edit Member");
+    await waitForText(target, "Edit User");
   });
 
   it("shows a validation error when employee has no approver selected", async () => {
@@ -123,7 +123,7 @@ describe("UserDialog", () => {
       target,
       props: { template: { role: "employee" }, onClose },
     });
-    await waitForText(target, "Add Member");
+    await waitForText(target, "Add User");
 
     const saveBtn = [...target.querySelectorAll("button")].find((b) =>
       b.textContent.includes("Save") || b.textContent.includes("Add")
@@ -144,7 +144,7 @@ describe("UserDialog", () => {
       target,
       props: { template: {}, onClose },
     });
-    await waitForText(target, "Add Member");
+    await waitForText(target, "Add User");
 
     const passwordFields = target.querySelectorAll('input[type="password"]');
     expect(passwordFields.length).toBeGreaterThanOrEqual(1);
@@ -179,7 +179,7 @@ describe("UserDialog", () => {
         onClose,
       },
     });
-    await waitForText(target, "Edit Member");
+    await waitForText(target, "Edit User");
     await settle();
 
     const leaveDaysCall = apiMock.mock.calls.find(
@@ -198,7 +198,7 @@ describe("UserDialog", () => {
       target,
       props: { template: {}, onClose },
     });
-    await waitForText(target, "Add Member");
+    await waitForText(target, "Add User");
 
     expect(target.textContent).toContain("Hire date");
     expect(target.textContent).toContain(
@@ -237,7 +237,7 @@ describe("UserDialog", () => {
         onClose,
       },
     });
-    await waitForText(target, "Edit Member");
+    await waitForText(target, "Edit User");
     await settle();
 
     const findClearBtn = () =>
@@ -276,7 +276,7 @@ describe("UserDialog", () => {
       target,
       props: { template: { role: "employee" }, onClose },
     });
-    await waitForText(target, "Add Member");
+    await waitForText(target, "Add User");
     await settle();
 
     expect(target.textContent).toContain("Core Duties");
@@ -312,6 +312,22 @@ describe("UserDialog", () => {
     expect(postCall[1].body.absence_category_ids).toEqual([10]);
   });
 
+  it("hides weekly hours, workdays, and overtime fields when role is assistant", async () => {
+    // Assistants are always set to 0 weekly hours and no overtime balance — these
+    // fields are irrelevant for their role and would only confuse the admin.
+    const onClose = vi.fn();
+    component = mount(UserDialog, {
+      target,
+      props: { template: { role: "assistant" }, onClose },
+    });
+    await waitForText(target, "Add User");
+    await settle();
+
+    expect(target.textContent).not.toContain("Weekly hours");
+    expect(target.textContent).not.toContain("Workdays per week");
+    expect(target.textContent).not.toContain("Overtime start balance");
+  });
+
   it("only sends category_ids/absence_category_ids on create, never on edit", async () => {
     apiMock.mockImplementation(async (path) => {
       if (path === "/users") return [];
@@ -338,7 +354,7 @@ describe("UserDialog", () => {
         onClose,
       },
     });
-    await waitForText(target, "Edit Member");
+    await waitForText(target, "Edit User");
     await settle();
 
     expect(target.textContent).not.toContain("Time Categories");
