@@ -77,6 +77,37 @@
     weekly_hours = fmtDecimal(0, 2);
     overtime_start_balance_hours = fmtDecimal(0, 2);
   }
+
+  // German Minijob (assistant) leave entitlement is calculated based on actual
+  // days worked per year, which varies per person. Pre-filled default leave days
+  // are therefore meaningless for assistants and must be entered manually each
+  // year. When the admin selects the assistant role, zero out the leave fields
+  // so they are forced to make a conscious choice. Restore the previous values
+  // if the admin switches back to a leave-tracking role without saving.
+  let _preAssistantLeaveDays = null;
+  let _preAssistantLeaveCurrent = null;
+  let _preAssistantLeaveNext = null;
+  let lastNormalizedRole = String(role || "").trim().toLowerCase();
+  $: if (normalizedRole !== lastNormalizedRole) {
+    if (normalizedRole === "assistant") {
+      _preAssistantLeaveDays = annual_leave_days;
+      _preAssistantLeaveCurrent = leave_days_current_year;
+      _preAssistantLeaveNext = leave_days_next_year;
+      annual_leave_days = 0;
+      leave_days_current_year = 0;
+      leave_days_next_year = 0;
+    } else if (lastNormalizedRole === "assistant" && _preAssistantLeaveDays !== null) {
+      annual_leave_days = _preAssistantLeaveDays;
+      leave_days_current_year = _preAssistantLeaveCurrent;
+      leave_days_next_year = _preAssistantLeaveNext;
+      _preAssistantLeaveDays = null;
+      _preAssistantLeaveCurrent = null;
+      _preAssistantLeaveNext = null;
+    }
+  }
+  // eslint-disable-next-line no-useless-assignment
+  $: lastNormalizedRole = normalizedRole;
+
   // Non-admin users always have tracks_time=true (backend enforces this too).
   $: if (normalizedRole !== "admin") tracks_time = true;
 
