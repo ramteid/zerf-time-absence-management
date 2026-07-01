@@ -59,7 +59,7 @@
     error = "";
     // Validate that every approved user has a replacement assigned.
     if (approvedUsers.some((u) => !replacements[u.id])) {
-      error = $t("All team members must have a replacement approver assigned.");
+      error = $t("All users must have a replacement approver assigned.");
       return;
     }
     saving = true;
@@ -104,7 +104,7 @@
   {#if approvedUsers.length > 0}
     <div style="margin-top:14px;padding:12px;background:var(--bg-subtle,var(--bg-surface));border:1px solid var(--border);border-radius:6px">
       <p style="font-size:13px;font-weight:500;margin-bottom:10px;color:var(--warning-text,var(--text-primary))">
-        {$t("This user approves {n} active team member(s). Choose a replacement approver for each.", { n: approvedUsers.length })}
+        {$t("This user approves {n} active user(s). Choose a replacement approver for each.", { n: approvedUsers.length })}
       </p>
       {#each approvedUsers as member (member.id)}
         <div style="margin-bottom:10px">

@@ -94,7 +94,7 @@
       class="zf-btn zf-btn-primary zf-btn-sm"
       on:click={() => (showDialog = {})}
     >
-      <Icon name="Plus" size={13} />{$t("Add Member")}
+      <Icon name="Plus" size={13} />{$t("Add User")}
     </button>
   </div>
 </div>
