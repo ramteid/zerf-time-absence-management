@@ -24,6 +24,10 @@ test("team lead: approve the assistant's week and absence", async ({ page }) => 
   await expect(page.getByText("Approved.")).toBeVisible();
   // UI-state confirmation: the approved week leaves the pending queue.
   await expect(weekRow).toHaveCount(0);
+  // Wait for the week-approval toast to clear before the absence approval
+  // triggers its own "Approved." toast — otherwise both are on-screen
+  // simultaneously and the strict-mode locator below throws a multi-match error.
+  await expect(page.getByText("Approved.")).not.toBeVisible();
 
   const absenceRow = page.locator(".absence-row", {
     hasText: "E2E assistant absence",
