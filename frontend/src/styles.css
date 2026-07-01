@@ -1227,23 +1227,32 @@ dialog footer {
 }
 
 /* ── Scrollbar ── */
+/* Targets: main content area, all dialog innards, notification panel, mobile sheet */
 .content-area::-webkit-scrollbar,
-dialog ::-webkit-scrollbar {
+dialog ::-webkit-scrollbar,
+.zf-notif-panel::-webkit-scrollbar,
+.mobile-more-sheet::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 .content-area::-webkit-scrollbar-track,
-dialog ::-webkit-scrollbar-track {
+dialog ::-webkit-scrollbar-track,
+.zf-notif-panel::-webkit-scrollbar-track,
+.mobile-more-sheet::-webkit-scrollbar-track {
   background: transparent;
 }
 .content-area::-webkit-scrollbar-thumb,
-dialog ::-webkit-scrollbar-thumb {
+dialog ::-webkit-scrollbar-thumb,
+.zf-notif-panel::-webkit-scrollbar-thumb,
+.mobile-more-sheet::-webkit-scrollbar-thumb {
   background: rgba(0, 0, 0, 0.12);
   border-radius: 4px;
 }
 
 [data-theme="dark"] .content-area::-webkit-scrollbar-thumb,
-[data-theme="dark"] dialog ::-webkit-scrollbar-thumb {
+[data-theme="dark"] dialog ::-webkit-scrollbar-thumb,
+[data-theme="dark"] .zf-notif-panel::-webkit-scrollbar-thumb,
+[data-theme="dark"] .mobile-more-sheet::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.12);
 }
 
