@@ -128,19 +128,29 @@ impl HolidayDb {
         Ok(())
     }
 
-    pub async fn create_manual(&self, holiday_date: NaiveDate, name: &str) -> AppResult<()> {
+    pub async fn create_manual(&self, holiday_date: NaiveDate, name: &str) -> AppResult<i64> {
         let year = holiday_date.year();
-        sqlx::query(
+        let id: i64 = sqlx::query_scalar(
             "INSERT INTO holidays(holiday_date, name, year, is_auto) \
-             VALUES ($1,$2,$3, FALSE)",
+             VALUES ($1,$2,$3, FALSE) RETURNING id",
         )
         .bind(holiday_date)
         .bind(name)
         .bind(year)
-        .execute(&self.pool)
+        .fetch_one(&self.pool)
         .await
         .map_err(|_| AppError::conflict("Holiday already exists"))?;
-        Ok(())
+        Ok(id)
+    }
+
+    /// Fetch a single holiday by id (used to snapshot state before delete for the audit log).
+    pub async fn find_by_id(&self, id: i64) -> AppResult<Option<Holiday>> {
+        Ok(sqlx::query_as::<_, Holiday>(
+            "SELECT id, holiday_date, name, local_name, year, is_auto FROM holidays WHERE id=$1",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?)
     }
 
     pub async fn delete(&self, id: i64) -> AppResult<()> {

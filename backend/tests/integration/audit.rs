@@ -1,9 +1,10 @@
+use chrono::Datelike;
 use reqwest::StatusCode;
 use serde_json::json;
 use sqlx::query;
 
 use crate::common::TestApp;
-use crate::helpers::{admin_login, id, login_change_pw, next_monday, temp_pw};
+use crate::helpers::{admin_login, id, login_change_pw, next_monday, reference_date, temp_pw};
 
 #[tokio::test]
 async fn audit_log_is_forbidden_for_non_admin_users() {
@@ -275,6 +276,136 @@ async fn audit_log_rejects_invalid_record_id_query_param() {
         StatusCode::BAD_REQUEST,
         "invalid query parameter type should return 400"
     );
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn audit_log_records_category_create_and_update() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+
+    let (st, body) = admin
+        .post(
+            "/api/v1/categories",
+            &json!({
+                "name": "Audit Category",
+                "color": "#112233",
+                "counts_as_work": true
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "admin can create category");
+    let category_id = id(&body);
+
+    let (st, body) = admin
+        .get(&format!(
+            "/api/v1/audit-log?table_name=categories&record_id={category_id}"
+        ))
+        .await;
+    assert_eq!(st, StatusCode::OK, "audit log query");
+    let rows = body.as_array().expect("audit response must be an array");
+    assert_eq!(rows.len(), 1, "category creation must be audited");
+    assert_eq!(rows[0]["action"].as_str(), Some("created"));
+    assert!(rows[0]["before_data"].is_null());
+    assert_eq!(rows[0]["after_data"]["name"].as_str(), Some("Audit Category"));
+
+    let (st, _) = admin
+        .put(
+            &format!("/api/v1/categories/{category_id}"),
+            &json!({"name": "Audit Category Renamed"}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "admin can update category");
+
+    let (st, body) = admin
+        .get(&format!(
+            "/api/v1/audit-log?table_name=categories&record_id={category_id}"
+        ))
+        .await;
+    assert_eq!(st, StatusCode::OK, "audit log query after update");
+    let rows = body.as_array().expect("audit response must be an array");
+    assert_eq!(rows.len(), 2, "category update must also be audited");
+    let updated_row = rows
+        .iter()
+        .find(|row| row["action"] == "updated")
+        .expect("an updated audit row must exist");
+    assert_eq!(
+        updated_row["before_data"]["name"].as_str(),
+        Some("Audit Category")
+    );
+    assert_eq!(
+        updated_row["after_data"]["name"].as_str(),
+        Some("Audit Category Renamed")
+    );
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn audit_log_records_holiday_create_and_delete() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+
+    let holiday_date = format!("{}-12-30", reference_date().year() + 1);
+    let (st, _) = admin
+        .post(
+            "/api/v1/holidays",
+            &json!({"holiday_date": holiday_date, "name": "Audit Holiday"}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "admin can create manual holiday");
+
+    let (st, list) = admin
+        .get(&format!(
+            "/api/v1/holidays?year={}",
+            reference_date().year() + 1
+        ))
+        .await;
+    assert_eq!(st, StatusCode::OK);
+    let holiday_id = list
+        .as_array()
+        .expect("holiday list")
+        .iter()
+        .find(|row| row["holiday_date"] == holiday_date)
+        .expect("inserted holiday should be listed")["id"]
+        .as_i64()
+        .expect("id");
+
+    let (st, body) = admin
+        .get(&format!(
+            "/api/v1/audit-log?table_name=holidays&record_id={holiday_id}"
+        ))
+        .await;
+    assert_eq!(st, StatusCode::OK, "audit log query");
+    let rows = body.as_array().expect("audit response must be an array");
+    assert_eq!(rows.len(), 1, "holiday creation must be audited");
+    assert_eq!(rows[0]["action"].as_str(), Some("created"));
+    assert!(rows[0]["before_data"].is_null());
+    assert_eq!(rows[0]["after_data"]["name"].as_str(), Some("Audit Holiday"));
+
+    let (st, _) = admin
+        .delete(&format!("/api/v1/holidays/{holiday_id}"))
+        .await;
+    assert_eq!(st, StatusCode::OK, "admin can delete holiday");
+
+    let (st, body) = admin
+        .get(&format!(
+            "/api/v1/audit-log?table_name=holidays&record_id={holiday_id}"
+        ))
+        .await;
+    assert_eq!(st, StatusCode::OK, "audit log query after delete");
+    let rows = body.as_array().expect("audit response must be an array");
+    assert_eq!(rows.len(), 2, "holiday deletion must also be audited");
+    let deleted_row = rows
+        .iter()
+        .find(|row| row["action"] == "deleted")
+        .expect("a deleted audit row must exist");
+    assert_eq!(
+        deleted_row["before_data"]["name"].as_str(),
+        Some("Audit Holiday")
+    );
+    assert!(deleted_row["after_data"].is_null());
 
     app.cleanup().await;
 }

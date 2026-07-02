@@ -74,6 +74,23 @@ test("admin: add a manual holiday", async ({ page }) => {
   // time entry or absence dated on top of it).
 });
 
+test("admin: category and holiday creation appear in the audit log", async ({
+  page,
+}) => {
+  // Regression test: categories and holidays used to be created without ever
+  // calling audit::log, so admin settings > Audit Log silently omitted them
+  // (see backend/src/services/categories.rs and
+  // backend/src/services/holidays.rs). The category and holiday added earlier
+  // in this file must show up here.
+  await page.goto("/settings/audit-log");
+  await expect(
+    page.locator(".audit-row", { hasText: "E2E Project Work" }),
+  ).toBeVisible();
+  await expect(
+    page.locator(".audit-row", { hasText: "E2E Company Holiday" }),
+  ).toBeVisible();
+});
+
 test("admin: view an audit log entry's detail", async ({ page }) => {
   await page.goto("/settings/audit-log");
   // By this point in the suite there's already a rich audit trail (settings

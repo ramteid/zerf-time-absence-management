@@ -1,3 +1,4 @@
+use crate::audit;
 use crate::error::{AppError, AppResult};
 use crate::middleware::auth::User;
 use crate::AppState;
@@ -99,12 +100,23 @@ pub async fn create(
             counts_as_work.unwrap_or(true),
         )
         .await?;
-    app_state
+    let created = app_state
         .db
         .categories
         .find_by_id(new_id)
         .await?
-        .ok_or_else(|| AppError::Internal("Created category not found".into()))
+        .ok_or_else(|| AppError::Internal("Created category not found".into()))?;
+    audit::log(
+        &app_state.pool,
+        requester.id,
+        "created",
+        "categories",
+        new_id,
+        None,
+        serde_json::to_value(&created).ok(),
+    )
+    .await;
+    Ok(created)
 }
 
 pub struct UpdateCategory {
@@ -137,6 +149,12 @@ pub async fn update(
             return Err(AppError::BadRequest("Invalid color.".into()));
         }
     }
+    let before_update = app_state
+        .db
+        .categories
+        .find_by_id(category_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
     let normalized_name = body.name.map(|n| n.trim().to_string());
     let normalized_color = body.color.map(|c| c.trim().to_string());
     app_state
@@ -152,12 +170,23 @@ pub async fn update(
             body.active,
         )
         .await?;
-    app_state
+    let after_update = app_state
         .db
         .categories
         .find_by_id(category_id)
         .await?
-        .ok_or(AppError::NotFound)
+        .ok_or(AppError::NotFound)?;
+    audit::log(
+        &app_state.pool,
+        requester.id,
+        "updated",
+        "categories",
+        category_id,
+        serde_json::to_value(&before_update).ok(),
+        serde_json::to_value(&after_update).ok(),
+    )
+    .await;
+    Ok(after_update)
 }
 
 #[cfg(test)]

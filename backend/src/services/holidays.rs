@@ -263,6 +263,60 @@ pub async fn refresh_holidays(
     db.replace_auto_holidays(&repo_prepared).await
 }
 
+/// Create a manually-added holiday (admin-only) and record it in the audit log.
+pub async fn create_manual(
+    pool: &crate::db::DatabasePool,
+    requester: &crate::middleware::auth::User,
+    holiday_date: NaiveDate,
+    name: &str,
+) -> AppResult<i64> {
+    if !requester.is_admin() {
+        return Err(AppError::Forbidden);
+    }
+    let db = crate::repository::HolidayDb::new(pool.clone());
+    let new_id = db.create_manual(holiday_date, name).await?;
+    let created = db
+        .find_by_id(new_id)
+        .await?
+        .ok_or_else(|| AppError::Internal("Created holiday not found".into()))?;
+    crate::audit::log(
+        pool,
+        requester.id,
+        "created",
+        "holidays",
+        new_id,
+        None,
+        serde_json::to_value(&created).ok(),
+    )
+    .await;
+    Ok(new_id)
+}
+
+/// Delete a manually-added holiday (admin-only) and record it in the audit log.
+pub async fn delete_manual(
+    pool: &crate::db::DatabasePool,
+    requester: &crate::middleware::auth::User,
+    holiday_id: i64,
+) -> AppResult<()> {
+    if !requester.is_admin() {
+        return Err(AppError::Forbidden);
+    }
+    let db = crate::repository::HolidayDb::new(pool.clone());
+    let existing = db.find_by_id(holiday_id).await?.ok_or(AppError::NotFound)?;
+    db.delete(holiday_id).await?;
+    crate::audit::log(
+        pool,
+        requester.id,
+        "deleted",
+        "holidays",
+        holiday_id,
+        serde_json::to_value(&existing).ok(),
+        None,
+    )
+    .await;
+    Ok(())
+}
+
 /// Ensure holidays exist for a given year (called on startup).
 pub async fn ensure_holidays(pool: &crate::db::DatabasePool, year: i32) -> AppResult<()> {
     let db = crate::repository::HolidayDb::new(pool.clone());

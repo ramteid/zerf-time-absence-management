@@ -73,18 +73,17 @@ pub async fn create(
     requester: User,
     Json(body): Json<NewHoliday>,
 ) -> AppResult<Json<serde_json::Value>> {
-    if !requester.is_admin() {
-        return Err(AppError::Forbidden);
-    }
     let holiday_name = body.name.trim().to_string();
     if holiday_name.is_empty() || holiday_name.len() > 200 {
         return Err(AppError::BadRequest("Invalid holiday name.".into()));
     }
-    app_state
-        .db
-        .holidays
-        .create_manual(body.holiday_date, &holiday_name)
-        .await?;
+    crate::services::holidays::create_manual(
+        &app_state.pool,
+        &requester,
+        body.holiday_date,
+        &holiday_name,
+    )
+    .await?;
     Ok(Json(serde_json::json!({"ok":true})))
 }
 
@@ -93,10 +92,7 @@ pub async fn delete(
     requester: User,
     Path(holiday_id): Path<i64>,
 ) -> AppResult<Json<serde_json::Value>> {
-    if !requester.is_admin() {
-        return Err(AppError::Forbidden);
-    }
-    app_state.db.holidays.delete(holiday_id).await?;
+    crate::services::holidays::delete_manual(&app_state.pool, &requester, holiday_id).await?;
     Ok(Json(serde_json::json!({"ok":true})))
 }
 
