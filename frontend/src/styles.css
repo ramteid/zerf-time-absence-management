@@ -209,6 +209,21 @@ body {
 .zf-btn-ghost:active {
   background: transparent;
 }
+.zf-btn-accent-soft {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  border-color: var(--accent-text);
+}
+.zf-btn-accent-soft:hover {
+  background: var(--accent-text);
+  color: var(--bg-surface);
+  border-color: var(--accent-text);
+}
+.zf-btn-accent-soft:active {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  border-color: var(--accent-text);
+}
 .zf-btn-danger {
   color: var(--danger-text);
 }

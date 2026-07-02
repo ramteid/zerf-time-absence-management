@@ -245,9 +245,9 @@
           />
         </div>
       </div>
-      <div class="field-row" style="justify-content:flex-end">
+      <div style="display:flex;justify-content:flex-end">
         <button
-          class="zf-btn"
+          class="zf-btn zf-btn-accent-soft"
           on:click={runNow}
           disabled={uploading || saving || !uploadSettings.report_upload_enabled}
         >
