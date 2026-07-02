@@ -273,6 +273,10 @@ pub async fn create_manual(
     if !requester.is_admin() {
         return Err(AppError::Forbidden);
     }
+    let name = name.trim();
+    if name.is_empty() || name.len() > 200 {
+        return Err(AppError::BadRequest("Invalid holiday name.".into()));
+    }
     let db = crate::repository::HolidayDb::new(pool.clone());
     let new_id = db.create_manual(holiday_date, name).await?;
     let created = db

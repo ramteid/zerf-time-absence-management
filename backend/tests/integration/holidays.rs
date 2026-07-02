@@ -43,6 +43,22 @@ async fn holidays_full_workflow() {
         .await;
     assert_eq!(st, StatusCode::FORBIDDEN, "only admins can create holidays");
 
+    // Authorization must be checked before input validation: a non-admin
+    // sending an invalid name still gets 403, not 400 — the admin check runs
+    // first in services::holidays::create_manual, so an unauthorized caller
+    // never learns anything about validation rules.
+    let (st, _) = emp
+        .post(
+            "/api/v1/holidays",
+            &json!({"holiday_date": new_holiday_date, "name": ""}),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::FORBIDDEN,
+        "non-admin with an invalid name is still forbidden, not a validation error"
+    );
+
     let (st, _) = admin
         .post(
             "/api/v1/holidays",

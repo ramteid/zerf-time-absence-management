@@ -1,4 +1,4 @@
-use crate::error::{AppError, AppResult};
+use crate::error::AppResult;
 use crate::i18n;
 use crate::middleware::auth::User;
 use crate::services::settings::app_current_year;
@@ -73,15 +73,11 @@ pub async fn create(
     requester: User,
     Json(body): Json<NewHoliday>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let holiday_name = body.name.trim().to_string();
-    if holiday_name.is_empty() || holiday_name.len() > 200 {
-        return Err(AppError::BadRequest("Invalid holiday name.".into()));
-    }
     crate::services::holidays::create_manual(
         &app_state.pool,
         &requester,
         body.holiday_date,
-        &holiday_name,
+        &body.name,
     )
     .await?;
     Ok(Json(serde_json::json!({"ok":true})))
