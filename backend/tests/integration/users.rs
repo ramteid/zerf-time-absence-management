@@ -1061,6 +1061,12 @@ async fn users_full_workflow() {
             "update rejects invalid leave_days_next_year"
         );
 
+        // `emp_id` (lead_id's original direct report) was archived above, so it
+        // no longer counts against the "still has direct reports" guard. Give
+        // `lead_id` a second, active direct report so the guard has something
+        // legitimate to block on.
+        let emp2_id = create_emp(&admin, "emp-leave-2@example.com", "LeaveEmp2", lead_id).await;
+
         let (st, _) = admin
             .put(
                 &format!("/api/v1/users/{lead_id}"),
@@ -1070,7 +1076,7 @@ async fn users_full_workflow() {
         assert_eq!(
             st,
             StatusCode::BAD_REQUEST,
-            "cannot remove a lead with direct reports from approver role"
+            "cannot remove a lead with an active direct report from approver role"
         );
 
         let (st, _) = admin
@@ -1083,6 +1089,27 @@ async fn users_full_workflow() {
             st,
             StatusCode::BAD_REQUEST,
             "tracks_time cannot be disabled on non-admins"
+        );
+
+        // Archiving the last remaining direct report drops the active count to
+        // zero. The guard must not be blocked by the already-archived `emp_id`
+        // (which still carries a stale user_approvers row kept for restore) —
+        // only active dependents should count.
+        let (st, _) = admin
+            .post(&format!("/api/v1/users/{emp2_id}/archive"), &json!({}))
+            .await;
+        assert_eq!(st, StatusCode::OK, "archive second direct report");
+
+        let (st, _) = admin
+            .put(
+                &format!("/api/v1/users/{lead_id}"),
+                &json!({"role": "employee"}),
+            )
+            .await;
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "role change allowed once no active direct reports remain, even though archived ones keep their approver row"
         );
     }
 

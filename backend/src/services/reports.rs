@@ -714,10 +714,13 @@ pub async fn submission_status_for_month(
     month_start: NaiveDate,
     month_end: NaiveDate,
     user_start_date: NaiveDate,
-    is_assistant: bool,
+    submission_exempt: bool,
     workdays_per_week: i16,
 ) -> AppResult<(bool, bool)> {
-    if is_assistant {
+    // Assistants and zero-weekly-hours users are exempt: they have no fixed
+    // target schedule / no booking obligation, and the monthly submission
+    // reminder never fires for them either (see `roles::has_submission_obligation`).
+    if submission_exempt {
         return Ok((true, true));
     }
     let today = crate::services::settings::app_today(pool).await;
@@ -816,6 +819,8 @@ pub async fn build_month(
         .ok_or(AppError::NotFound)?;
     let user = crate::services::users::repo_user_to_auth_user(repo_user);
     let is_assistant = is_assistant_role(&user.role);
+    let submission_exempt =
+        !crate::roles::has_submission_obligation(&user.role, user.weekly_hours);
     let mut report = build_range_with_user(pool, &user, from, to, month).await?;
     let (all_submitted, all_approved) = submission_status_for_month(
         pool,
@@ -823,7 +828,7 @@ pub async fn build_month(
         from,
         to,
         user.start_date,
-        is_assistant,
+        submission_exempt,
         user.workdays_per_week,
     )
     .await?;
@@ -1281,11 +1286,13 @@ pub async fn all_weeks_submitted_for_month(
     month_start: NaiveDate,
     month_end: NaiveDate,
     user_start_date: NaiveDate,
-    is_assistant: bool,
+    submission_exempt: bool,
     workdays_per_week: i16,
 ) -> AppResult<bool> {
-    // Assistants have no fixed target schedule and no mandatory day-level submission.
-    if is_assistant {
+    // Assistants and zero-weekly-hours users have no fixed target schedule /
+    // no booking obligation and no mandatory day-level submission (see
+    // `roles::has_submission_obligation`).
+    if submission_exempt {
         return Ok(true);
     }
     let today = crate::services::settings::app_today(pool).await;

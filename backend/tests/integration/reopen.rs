@@ -425,5 +425,141 @@ async fn reopen_full_workflow() {
         }
     }
 
+    // -- Regression: reopening a week must not be blocked by a rejected entry
+    // that now sits on a day covered by a later-approved non-sick absence.
+    // Time-entry conflicts are checked at absence-approval time, not at
+    // reopen time; a rejected entry no longer counts as a conflict, so the
+    // approver can already approve the absence over it. The employee must
+    // then still be able to reopen the week and delete the stale rejected
+    // entry — reopening only resets status, it does not re-run
+    // creation-time conflict checks against the entries' unchanged data.
+    {
+        let (_lead_id, lead_pw, _emp_id, emp_pw, monday_iso, cat_id) =
+            bootstrap_team_with_suffix(&app, &admin, true, "8").await;
+        let emp = login_change_pw(&app, "emp-8@example.com", &emp_pw).await;
+        let lead = login_change_pw(&app, "lead-8@example.com", &lead_pw).await;
+
+        let entry_id = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
+        let (st, _) = lead
+            .post(
+                "/api/v1/time-entries/batch-reject",
+                &json!({"ids": [entry_id], "reason": "wrong category"}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "lead rejects the entry");
+
+        let (st, body) = emp
+            .post(
+                "/api/v1/absences",
+                &json!({"kind":"vacation","start_date": monday_iso,"end_date": monday_iso}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "vacation can be requested over a rejected entry's day");
+        let absence_id = id(&body);
+
+        let (st, _) = lead
+            .post(&format!("/api/v1/absences/{absence_id}/approve"), &json!({}))
+            .await;
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "approval succeeds because the conflicting entry is rejected, not active"
+        );
+
+        let (st, body) = emp
+            .post(
+                "/api/v1/reopen-requests",
+                &json!({"week_start": monday_iso, "reason": "Remove the entry rejected due to the vacation conflict"}),
+            )
+            .await;
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "reopen must succeed even though the week's only entry now sits on an approved-absence day"
+        );
+        assert_eq!(body["entries_reopened"], 1);
+
+        let (st, body) = emp.get("/api/v1/time-entries").await;
+        assert_eq!(st, StatusCode::OK, "list own entries after reopen");
+        let reopened_entry =
+            find_by_id(&body, entry_id).expect("previously rejected entry present after reopen");
+        assert_eq!(
+            reopened_entry["status"], "draft",
+            "reopen resets the rejected entry back to draft"
+        );
+
+        let (st, _) = emp
+            .delete(&format!("/api/v1/time-entries/{entry_id}"))
+            .await;
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "the draft entry can now be deleted, resolving the conflict as documented"
+        );
+    }
+
+    // -- Regression: reopening a week must not be blocked by a submitted
+    // entry whose category was deactivated after submission. Deactivating a
+    // category only blocks *new* entries; it must not retroactively lock an
+    // existing week out of the reopen workflow.
+    {
+        let (_lead_id, lead_pw, _emp_id, emp_pw, monday_iso, _cat_id) =
+            bootstrap_team_with_suffix(&app, &admin, true, "9").await;
+        let emp = login_change_pw(&app, "emp-9@example.com", &emp_pw).await;
+        let lead = login_change_pw(&app, "lead-9@example.com", &lead_pw).await;
+
+        let (st, body) = admin
+            .post(
+                "/api/v1/categories",
+                &json!({"name": "Soon Deactivated 9", "color": "#334455"}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "create dedicated category");
+        let dedicated_cat_id = id(&body);
+
+        let entry_id = create_and_submit_entry(&emp, &monday_iso, dedicated_cat_id).await;
+        let (st, _) = lead
+            .post(
+                "/api/v1/time-entries/batch-approve",
+                &json!({"ids": [entry_id]}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "lead approves the entry");
+
+        let (st, _) = admin
+            .put(
+                &format!("/api/v1/categories/{dedicated_cat_id}"),
+                &json!({
+                    "name": "Soon Deactivated 9",
+                    "color": "#334455",
+                    "active": false
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "admin deactivates the category");
+
+        let (st, body) = emp
+            .post(
+                "/api/v1/reopen-requests",
+                &json!({"week_start": monday_iso, "reason": "Category was deactivated after approval"}),
+            )
+            .await;
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "reopen must succeed even though the entry's category is now inactive"
+        );
+        assert_eq!(body["entries_reopened"], 1);
+
+        let (st, body) = emp.get("/api/v1/time-entries").await;
+        assert_eq!(st, StatusCode::OK, "list own entries after reopen");
+        let reopened_entry =
+            find_by_id(&body, entry_id).expect("entry present after reopen despite inactive category");
+        assert_eq!(
+            reopened_entry["status"], "draft",
+            "reopen resets the approved entry back to draft"
+        );
+    }
+
     app.cleanup().await;
 }

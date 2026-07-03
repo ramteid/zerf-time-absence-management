@@ -423,13 +423,6 @@ async fn users_repository_workflow() {
     assert!(lead_team.iter().any(|user| user.id == emp_id));
     assert_eq!(
         users
-            .count_direct_reports(lead_id)
-            .await
-            .expect("count reports"),
-        1
-    );
-    assert_eq!(
-        users
             .count_active_direct_reports(lead_id)
             .await
             .expect("count active reports"),

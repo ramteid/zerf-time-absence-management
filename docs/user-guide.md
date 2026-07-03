@@ -198,8 +198,13 @@ inferred from role alone.
 
 - Employee: records time and absences, submits weeks, requests changes.
 - Assistant: records time and absences like an employee, but has no fixed
-  weekly target hours and no flextime account. An employee with zero weekly
-  hours still follows the normal reminder and approval logic.
+  weekly target hours and no flextime account. This is strictly role-based —
+  it is never inferred from weekly hours being zero.
+- A non-assistant with weekly hours set to `0` is a non-booking user: approval
+  logic still applies to anything they do book, but they are exempt from
+  monthly submission reminders and from week-completeness requirements (the
+  Submissions tile, team report, and monthly PDF upload never flag them for
+  "weeks missing").
 - Approver: a user who has been explicitly assigned to another user and is
 	active.
 - Admin: manages users, categories, holidays, settings, and can also be an
@@ -381,10 +386,11 @@ Review and privacy behavior:
 	and employees see only their own. There is no per-category carve-out —
 	a category is either visible because the viewer's scope covers the
 	owner, or it is not visible at all.
-- Comments are always restricted to (a) the absence owner and (b) leads
-	whose scope covers the owner, even though admins can see the
-	underlying absence entry. This keeps personal context in the comment
-	from leaking beyond the people who already handle the request.
+- Comments carry no separate restriction: whoever's scope covers the
+	absence owner (the owner themselves, their assigned leads, and any
+	admin) sees the comment along with the rest of the entry. There is no
+	redacted or masked view — see [Information disclosure
+	prevention](#information-disclosure-prevention).
 
 Vacations and sick leave are checked against the employee's own work schedule.
 A one-day request on a public holiday or on a non-working weekday does not
@@ -709,11 +715,15 @@ users who are actually assigned, not all users with a privileged role.
 ### Pending approval notifications clear automatically
 
 As soon as a request has been decided by any one approver (approved, rejected,
-revoked, or the cancellation thereof), the related notification is marked as
-read for every other approver in the same instant. This applies to:
+revoked, or the cancellation thereof) — or is otherwise removed from the
+queue by the requester (withdrawn, or edited into auto-approval) — the
+related notification is marked as read for every other approver in the same
+instant. This applies to:
 
 - week submissions for time entries,
-- absence requests and absence cancellation requests,
+- absence requests and absence cancellation requests (including an employee
+  withdrawing a `requested` absence, and an edit that flips a future-dated
+  sick request into auto-approval),
 - reopen requests.
 
 The notification row stays in each approver's notification history (and the
@@ -1358,10 +1368,12 @@ creation apply to each field.
 - An admin cannot set their own role to a non-admin value.
 - Removing admin rights from a user requires at least 2 active admins
   remaining after the change.
-- A user who still has direct reports assigned cannot have their role changed
-  to a non-approver role. Reassign those users first.
-- A user who is the sole approver for admin users cannot be downgraded to a
-  role that cannot approve admin-subject requests.
+- A user who still has *active* direct reports assigned cannot have their role
+  changed to a non-approver role. Reassign those users first. Archived
+  dependents (which keep their approver link for restore purposes) do not
+  count toward this guard.
+- A user who is the sole approver for *active* admin users cannot be
+  downgraded to a role that cannot approve admin-subject requests.
 
 When a user's role is changed, they are signed out immediately.
 
@@ -1473,7 +1485,11 @@ Rules:
 
 - The admin must be a different user from the entry owner (not editing their own entry).
 - Entry status must be submitted or approved.
-- The same validation rules as time entry creation apply.
+- The same validation rules as time entry creation apply, with one exception:
+  the per-user category enablement check is skipped. An admin correction may
+  assign a category that is disabled for that specific employee (only an
+  inactive category is still rejected); it does not, by itself, re-enable the
+  category for the employee's own future entries.
 
 Admins editing their *own* submitted or approved entries must instead go through
 the regular reopen workflow — the admin correction path only applies to other
@@ -1499,6 +1515,10 @@ per-year overrides:
   changes from year to year. All leave fields default to 0 when the assistant
   role is selected. Update the current-year and next-year overrides each
   January once the number of worked days for the previous year is known.
+  Assistants have no fixed contract workdays (they are configured with all 7
+  days as potential working days), so every calendar day in a vacation
+  request — weekends included, public holidays excluded — counts as one leave
+  day against their entitlement.
 - Changes take effect immediately for balance calculations. If you reduce a
   user's entitlement after they have already used vacation, their available
   balance may go negative.

@@ -220,6 +220,14 @@ pub async fn team(
             tokio::spawn(async move {
                 let _permit = sem.acquire().await.expect("semaphore closed");
                 let team_member_is_assistant = is_assistant_role(&team_member.role);
+                // Submission-completeness exemption also covers zero-weekly-hours
+                // non-assistants (matches the monthly reminder's eligibility
+                // filter) — unlike `team_member_is_assistant`, which stays
+                // role-only for the flextime/overtime fields below.
+                let team_member_submission_exempt = !crate::roles::has_submission_obligation(
+                    &team_member.role,
+                    team_member.weekly_hours,
+                );
                 let month_report =
                     build_month_without_submission_status(&pool, team_member.id, &query_month)
                         .await?;
@@ -284,7 +292,7 @@ pub async fn team(
                     month_start,
                     month_end,
                     team_member.start_date,
-                    team_member_is_assistant,
+                    team_member_submission_exempt,
                     team_member.workdays_per_week,
                 )
                 .await?;

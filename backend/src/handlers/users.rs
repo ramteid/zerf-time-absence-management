@@ -483,8 +483,14 @@ pub async fn update(
         }
     }
     if !can_approve_non_admin_subjects(&new_role, previous_user.active) {
+        // Archived dependents still carry a `user_approvers` row (kept so a
+        // future restore can show/replace it), but they impose no real
+        // constraint on this role change — they cannot log in, don't appear
+        // in approver pickers, and restore always requires fresh approver_ids
+        // anyway. Only active dependents should block the change.
         let non_admin_direct_reports_count =
-            app_state.db.users.count_direct_reports(user_id).await?;
+            crate::services::users::count_active_direct_reports_tx(&mut transaction, user_id)
+                .await?;
         if non_admin_direct_reports_count > 0 {
             return Err(AppError::BadRequest(format!(
                 "Cannot change this user to a non-approver: {} user(s) still have them as their approver. Reassign them first.",

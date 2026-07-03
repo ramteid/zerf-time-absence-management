@@ -212,8 +212,6 @@ struct ReopenValidationEntry {
     entry_date: NaiveDate,
     start_time: String,
     end_time: String,
-    category_id: i64,
-    comment: Option<String>,
     status: String,
     counts_as_work: bool,
 }
@@ -229,8 +227,7 @@ pub(crate) async fn validate_entries_after_reopen(
 
     let affected_id_set: HashSet<i64> = affected_entry_ids.iter().copied().collect();
     let affected_entries: Vec<ReopenValidationEntry> = sqlx::query_as(
-        "SELECT te.id, te.entry_date, te.start_time, te.end_time, te.category_id, \
-                te.comment, te.status, c.counts_as_work \
+        "SELECT te.id, te.entry_date, te.start_time, te.end_time, te.status, c.counts_as_work \
          FROM time_entries te \
          JOIN categories c ON c.id = te.category_id \
          WHERE te.user_id=$1 AND te.id = ANY($2) \
@@ -247,17 +244,17 @@ pub(crate) async fn validate_entries_after_reopen(
         ));
     }
 
-    for entry in &affected_entries {
-        let effective_entry = NewEntryData {
-            entry_date: entry.entry_date,
-            start_time: entry.start_time.clone(),
-            end_time: entry.end_time.clone(),
-            category_id: entry.category_id,
-            comment: entry.comment.clone(),
-        };
-        validate_entry(conn, user_id, &effective_entry, Some(entry.id)).await?;
-    }
-
+    // Reopened entries already exist and are only having their status reset to
+    // draft — their date/time/category values are unchanged. Re-running the
+    // full `validate_entry` creation checks here (absence-on-day conflict,
+    // category-active, entry-date >= user start_date, entry-date <= today)
+    // would reject historical rows for conditions that are only meaningful
+    // when *creating* new data: a rejected entry whose category was later
+    // deactivated, or one that now overlaps an approved absence, must still
+    // be reopenable so it can be edited or deleted. Only the two invariants
+    // that are still meaningful for a bulk status change are re-checked below:
+    // same-day overlap and the 14-hour crediting cap, since resurrecting
+    // rejected entries can newly collide with drafts created in the meantime.
     let mut affected_dates: Vec<NaiveDate> = affected_entries
         .iter()
         .map(|entry| entry.entry_date)
@@ -269,8 +266,7 @@ pub(crate) async fn validate_entries_after_reopen(
     }
 
     let date_entries: Vec<ReopenValidationEntry> = sqlx::query_as(
-        "SELECT te.id, te.entry_date, te.start_time, te.end_time, te.category_id, \
-                te.comment, te.status, c.counts_as_work \
+        "SELECT te.id, te.entry_date, te.start_time, te.end_time, te.status, c.counts_as_work \
          FROM time_entries te \
          JOIN categories c ON c.id = te.category_id \
          WHERE te.user_id=$1 AND te.entry_date = ANY($2) \

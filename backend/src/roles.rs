@@ -51,6 +51,19 @@ pub fn can_approve_non_admin_subjects(role: &str, active: bool) -> bool {
     active && is_lead_role(role)
 }
 
+/// Returns true when a user is expected to submit weekly timesheets at all.
+/// Assistants have no fixed target schedule and no mandatory submission
+/// workflow; users with `weekly_hours <= 0` are non-booking users by the same
+/// policy the submission-reminder scheduler already uses (see
+/// `UserDb::get_active_non_assistant_users`). Week-completeness checks
+/// (Submissions tile, team report, monthly PDF upload gating) must use the
+/// same exemption the reminder uses — otherwise a zero-hour user is nagged by
+/// "weeks missing" indicators for a reminder that will never actually fire.
+#[inline]
+pub fn has_submission_obligation(role: &str, weekly_hours: f64) -> bool {
+    !is_assistant_role(role) && weekly_hours > 0.0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -115,5 +128,20 @@ mod tests {
         // Employees and assistants are never eligible.
         assert!(!can_approve_non_admin_subjects("employee", true));
         assert!(!can_approve_non_admin_subjects("assistant", true));
+    }
+
+    /// `has_submission_obligation` requires a non-assistant role AND positive
+    /// weekly hours; either condition failing means no obligation.
+    #[test]
+    fn has_submission_obligation_requires_non_assistant_and_positive_hours() {
+        assert!(has_submission_obligation("employee", 40.0));
+        assert!(has_submission_obligation("team_lead", 20.0));
+        // Assistants never have a submission obligation, regardless of hours.
+        assert!(!has_submission_obligation("assistant", 40.0));
+        assert!(!has_submission_obligation("assistant", 0.0));
+        // Non-assistants with zero (or negative, defensively) weekly hours
+        // are non-booking users and have no obligation either.
+        assert!(!has_submission_obligation("employee", 0.0));
+        assert!(!has_submission_obligation("team_lead", -1.0));
     }
 }

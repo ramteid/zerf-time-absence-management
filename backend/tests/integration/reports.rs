@@ -1087,3 +1087,109 @@ async fn report_permission_guards_reject_non_reportable_users_on_every_personal_
 
     app.cleanup().await;
 }
+
+/// A non-assistant employee with `weekly_hours=0` is a non-booking user: the
+/// monthly submission reminder already skips them, so week-completeness
+/// checks (Submissions tile, team report) must exempt them too — otherwise
+/// they are flagged "weeks missing" by a check tied to a reminder that never
+/// fires. A normal employee with unlogged past weeks is used as a control to
+/// confirm the exemption is specific to zero hours, not a blanket pass.
+#[tokio::test]
+async fn zero_weekly_hours_employee_exempt_from_week_completeness_checks() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, lead_pw, _emp_id, _emp_pw, monday, _cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "zero-hours").await;
+    let lead = login_change_pw(&app, "lead-zero-hours@example.com", &lead_pw).await;
+    let month = monday[..7].to_string();
+
+    let (st, zero_hours_body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "zero-hours-emp@example.com",
+                "first_name": "Zero",
+                "last_name": "Hours",
+                "role": "employee",
+                "weekly_hours": 0,
+                "leave_days_current_year": 30,
+                "leave_days_next_year": 30,
+                "annual_leave_days": 30,
+                "start_date": "2024-01-01",
+                "approver_ids": [lead_id]
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create zero-weekly-hours employee");
+    let zero_hours_id = id(&zero_hours_body);
+
+    let (st, control_body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "normal-hours-emp@example.com",
+                "first_name": "Normal",
+                "last_name": "Hours",
+                "role": "employee",
+                "weekly_hours": 39,
+                "leave_days_current_year": 30,
+                "leave_days_next_year": 30,
+                "annual_leave_days": 30,
+                "start_date": "2024-01-01",
+                "approver_ids": [lead_id]
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create normal-hours control employee");
+    let control_id = id(&control_body);
+
+    // Neither employee logs any time entries for the fully elapsed past week
+    // returned by bootstrap (`monday`, two weeks ago) — the control employee
+    // must be flagged "weeks missing" for it; the zero-hours employee must not.
+    let (st, zero_hours_report) = admin
+        .get(&format!(
+            "/api/v1/reports/month?user_id={zero_hours_id}&month={month}"
+        ))
+        .await;
+    assert_eq!(st, StatusCode::OK, "zero-hours employee month report");
+    assert_eq!(
+        zero_hours_report["weeks_all_submitted"], true,
+        "zero-weekly-hours employee is exempt from week-completeness checks"
+    );
+    assert_eq!(zero_hours_report["weeks_all_approved"], true);
+
+    let (st, control_report) = admin
+        .get(&format!(
+            "/api/v1/reports/month?user_id={control_id}&month={month}"
+        ))
+        .await;
+    assert_eq!(st, StatusCode::OK, "control employee month report");
+    assert_eq!(
+        control_report["weeks_all_submitted"], false,
+        "a normal employee with unlogged past weeks is still flagged (control case)"
+    );
+
+    // The team report's per-row `weeks_all_submitted` must reflect the same
+    // exemption for the same reason.
+    let (st, team_rows) = lead.get(&format!("/api/v1/reports/team?month={month}")).await;
+    assert_eq!(st, StatusCode::OK, "team report");
+    let team_rows = team_rows.as_array().unwrap();
+    let zero_hours_row = team_rows
+        .iter()
+        .find(|row| row["user_id"].as_i64() == Some(zero_hours_id))
+        .expect("zero-hours employee present in team report");
+    assert_eq!(
+        zero_hours_row["weeks_all_submitted"], true,
+        "team report exempts the zero-weekly-hours employee too"
+    );
+    let control_row = team_rows
+        .iter()
+        .find(|row| row["user_id"].as_i64() == Some(control_id))
+        .expect("control employee present in team report");
+    assert_eq!(
+        control_row["weeks_all_submitted"], false,
+        "team report still flags the normal-hours control employee"
+    );
+
+    app.cleanup().await;
+}

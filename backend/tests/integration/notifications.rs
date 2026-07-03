@@ -521,3 +521,135 @@ async fn mark_read_nonexistent_notification_returns_not_found() {
 
     app.cleanup().await;
 }
+
+/// Withdrawing a still-`requested` absence ends the pending request just like
+/// an approve/reject decision does, so it must clear the approver's original
+/// "please review" notification the same way — otherwise it lingers unread
+/// forever alongside the new "cancelled" notice.
+#[tokio::test]
+async fn withdrawing_absence_clears_pending_notification_for_approver() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (_lead_id, lead_pw, _emp_id, emp_pw, _monday_iso, _cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "withdraw-notif").await;
+    let emp = login_change_pw(&app, "emp-withdraw-notif@example.com", &emp_pw).await;
+    let lead = login_change_pw(&app, "lead-withdraw-notif@example.com", &lead_pw).await;
+
+    let future_monday_iso = next_monday(21).format("%Y-%m-%d").to_string();
+    let (st, body) = emp
+        .post(
+            "/api/v1/absences",
+            &json!({"kind": "vacation", "start_date": future_monday_iso, "end_date": future_monday_iso}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create absence request");
+    let absence_id = id(&body);
+
+    let (st, notifications) = lead.get("/api/v1/notifications").await;
+    assert_eq!(st, StatusCode::OK, "load lead notifications");
+    let pending = notifications
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["kind"] == "absence_requested")
+        .expect("lead received absence_requested notification");
+    assert_eq!(
+        pending["is_read"], false,
+        "pending notification starts unread"
+    );
+    let notification_id = pending["id"].as_i64().expect("notification has an id");
+
+    let (st, _) = emp
+        .delete(&format!("/api/v1/absences/{absence_id}"))
+        .await;
+    assert_eq!(st, StatusCode::OK, "employee withdraws the request");
+
+    let (st, notifications) = lead.get("/api/v1/notifications").await;
+    assert_eq!(st, StatusCode::OK, "reload lead notifications");
+    let same_notification = notifications
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["id"].as_i64() == Some(notification_id))
+        .expect("original notification stays in history after withdrawal");
+    assert_eq!(
+        same_notification["is_read"], true,
+        "withdrawing the request must clear the pending notification for other approvers"
+    );
+
+    app.cleanup().await;
+}
+
+/// Editing a future-dated sick request so its start date falls into the
+/// auto-approve window jumps the absence straight from `requested` to
+/// `approved`. The original "please review" notification must be cleared the
+/// same way an explicit approve/reject would clear it, alongside the new
+/// informational auto-approval notice.
+#[tokio::test]
+async fn sick_edit_into_auto_approval_clears_pending_notification_for_approver() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (_lead_id, lead_pw, _emp_id, emp_pw, _monday_iso, _cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "sick-edit-notif").await;
+    let emp = login_change_pw(&app, "emp-sick-edit-notif@example.com", &emp_pw).await;
+    let lead = login_change_pw(&app, "lead-sick-edit-notif@example.com", &lead_pw).await;
+
+    let future_start = next_monday(14).format("%Y-%m-%d").to_string();
+    let (st, body) = emp
+        .post(
+            "/api/v1/absences",
+            &json!({"kind": "sick", "start_date": future_start, "end_date": future_start}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create future sick absence");
+    assert_eq!(body["status"], "requested", "future sick stays requested");
+    let sick_id = id(&body);
+
+    let (st, notifications) = lead.get("/api/v1/notifications").await;
+    assert_eq!(st, StatusCode::OK, "load lead notifications");
+    let pending = notifications
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["kind"] == "absence_requested")
+        .expect("lead received absence_requested notification");
+    assert_eq!(
+        pending["is_read"], false,
+        "pending notification starts unread"
+    );
+    let notification_id = pending["id"].as_i64().expect("notification has an id");
+
+    let today_iso = reference_date().format("%Y-%m-%d").to_string();
+    let (st, body) = emp
+        .put(
+            &format!("/api/v1/absences/{sick_id}"),
+            &json!({"kind": "sick", "start_date": today_iso, "end_date": today_iso}),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::OK,
+        "edit moving start date into today auto-approves"
+    );
+    assert_eq!(body["status"], "approved", "sick edit auto-approves");
+
+    let (st, notifications) = lead.get("/api/v1/notifications").await;
+    assert_eq!(st, StatusCode::OK, "reload lead notifications");
+    let notifications = notifications.as_array().unwrap();
+    let same_notification = notifications
+        .iter()
+        .find(|n| n["id"].as_i64() == Some(notification_id))
+        .expect("original notification stays in history after the edit");
+    assert_eq!(
+        same_notification["is_read"], true,
+        "the auto-approving edit must clear the original pending notification"
+    );
+    assert!(
+        notifications
+            .iter()
+            .any(|n| n["kind"] == "absence_auto_approved_notice"),
+        "lead also receives the informational auto-approval notice"
+    );
+
+    app.cleanup().await;
+}

@@ -602,6 +602,17 @@ pub async fn update_absence(
         )
         .await;
     } else if absence_after_update.auto_approve_past && absence_after_update.status == "approved" {
+        // The edit moved the start date into the auto-approve window, jumping
+        // straight from `requested` to `approved` (only requested absences
+        // reach this function). Clear the original "please review" pending
+        // entry so it doesn't linger unread alongside the new informational
+        // auto-approval notice below.
+        crate::services::notifications::clear_pending_for_reference(
+            app_state,
+            "absences",
+            absence_id,
+        )
+        .await;
         notify_sick_auto_approved(app_state, requester, &absence_after_update, absence_id).await;
     }
     Ok(absence_after_update)
@@ -660,6 +671,16 @@ pub async fn cancel_absence(
         "requested" => {
             crate::repository::AbsenceDb::cancel_requested_tx(&mut transaction, absence_id).await?;
             transaction.commit().await?;
+            // The withdrawal ends the pending request just like an approve/reject
+            // decision does — drop the "please review" notification from every
+            // approver's unread queue so it doesn't linger alongside the new
+            // "cancelled" notice below.
+            crate::services::notifications::clear_pending_for_reference(
+                app_state,
+                "absences",
+                absence_id,
+            )
+            .await;
             audit::log(
                 &app_state.pool,
                 requester.id,

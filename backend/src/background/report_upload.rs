@@ -193,13 +193,16 @@ async fn process_one_entry(
         .ok_or_else(|| AppError::Internal(format!("invalid period end {}", entry.period)))?;
 
     // Check whether all working weeks in the period have been submitted.
+    // Zero-weekly-hours non-assistants are exempt from this gate too — they
+    // have no booking obligation and would otherwise never satisfy it,
+    // stranding their queue entry forever.
     let submitted = all_weeks_submitted_for_month(
         &state.pool,
         user.id,
         from,
         to,
         user.start_date,
-        crate::roles::is_assistant_role(&user.role),
+        !crate::roles::has_submission_obligation(&user.role, user.weekly_hours),
         user.workdays_per_week,
     )
     .await?;
