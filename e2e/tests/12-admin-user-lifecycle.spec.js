@@ -17,7 +17,7 @@
 // archived doesn't approve anyone (only team leads/admins can be approvers).
 
 import { test, expect } from "@playwright/test";
-import { isoOffset, setDate, signIn, storageStatePath } from "./helpers.js";
+import { isoOffset, setDate, storageStatePath } from "./helpers.js";
 import { EMPLOYEE, TEAM_LEAD } from "./users.js";
 
 test.use({ storageState: storageStatePath("admin") });
@@ -118,7 +118,7 @@ test("admin: reset the employee's password", async ({ page }) => {
 test("admin: audit log still loads after the acting user is hard-deleted (null user_id regression)", async ({
   page,
   browser,
-}) => {
+}, testInfo) => {
   // Regression test: audit_log.user_id is nullable (migration 005 added
   // ON DELETE SET NULL) but the Rust LogEntry struct had user_id: i64
   // (non-optional). sqlx panicked with "unexpected null" the moment any
@@ -127,20 +127,30 @@ test("admin: audit log still loads after the acting user is hard-deleted (null u
   //
   // This test exercises the exact failure path:
   //   1. Create a throwaway admin user (admins need no approver).
-  //   2. Log in as that admin and create a holiday so their user_id appears
-  //      in audit_log as the *actor*.
+  //   2. As that admin (via the API), create a holiday so their user_id
+  //      appears in audit_log as the *actor*.
   //   3. Hard-delete the throwaway admin via the API. PostgreSQL fires the
   //      ON DELETE SET NULL FK constraint, NULLing their actor rows.
   //   4. Verify the audit log page still loads and the entry is visible.
+  //
+  // Every identifier is scoped to the Playwright retry index: if an earlier
+  // attempt timed out after creating the throwaway user (or its holiday), the
+  // leftover rows must not make the retry fail on a duplicate email or on the
+  // holidays table's UNIQUE(holiday_date) constraint.
+  const runId = testInfo.retry;
+  const actorEmail = `temp.actor.${runId}@e2e.test`;
+  const holidayName = `Temp Actor Holiday ${runId}`;
+  const holidayDate = isoOffset(120 + runId);
 
-  // Step 1: Create the throwaway admin via the normal "Add User" flow.
+  // Step 1: Create the throwaway admin via the normal "Add User" flow and read
+  // the temporary password off the confirmation dialog.
   await page.goto("/settings/users");
   await page.getByRole("button", { name: "Add User" }).click();
   const createDialog = page.getByRole("dialog");
   await expect(createDialog).toBeVisible();
   await createDialog.locator("#user-first-name").fill("Temp");
   await createDialog.locator("#user-last-name").fill("Actor");
-  await createDialog.locator("#user-email").fill("temp.actor@e2e.test");
+  await createDialog.locator("#user-email").fill(actorEmail);
   await createDialog.locator("#user-role").selectOption("admin");
   await setDate(page, "user-start-date", isoOffset(-7));
   // Admins do not require an approver (user guide: "non-admin users must have
@@ -152,28 +162,43 @@ test("admin: audit log still loads after the acting user is hard-deleted (null u
   expect(tempPassword.length).toBeGreaterThanOrEqual(12);
   await pwDialog.getByRole("button", { name: "OK" }).click();
 
-  // Step 2: Log in as the throwaway admin, complete the forced password
-  // change, and create a holiday so their user_id becomes an audit actor.
-  const TEMP_ACTOR_PASSWORD = "TempActorPass!77";
-  const tempContext = await browser.newContext();
-  const tempPage = await tempContext.newPage();
-  await signIn(tempPage, "temp.actor@e2e.test", tempPassword);
-  await tempPage.waitForURL("**/account");
-  await tempPage.locator("#account-new-password").fill(TEMP_ACTOR_PASSWORD);
-  await tempPage.locator("#account-confirm-password").fill(TEMP_ACTOR_PASSWORD);
-  await tempPage.getByRole("button", { name: "Save" }).click();
-  await expect(tempPage.getByText("Password changed.")).toBeVisible();
-  // Create a holiday as the throwaway admin — this produces an audit_log row
-  // with user_id = throwaway admin's id and action = "created".
-  await tempPage.goto("/settings/holidays");
-  await setDate(tempPage, "holiday-date", isoOffset(120));
-  await tempPage.locator("#holiday-name").fill("Temp Actor Holiday");
-  await tempPage.getByRole("button", { name: "Add" }).click();
-  await expect(tempPage.getByText("Holiday added.")).toBeVisible();
-  // Read the throwaway admin's own user ID before closing their session.
-  const meResp = await tempPage.request.get("/api/v1/auth/me");
-  const { user: tempUser } = await meResp.json();
-  await tempContext.close();
+  // Step 2: Make the throwaway admin an *audit actor* entirely through the API.
+  // Booting a second browser context to drive the UI here was both slow (a cold
+  // SPA load per action) and the reason this test used to exceed its timeout — a
+  // few API calls on a throwaway request context are far faster and fully
+  // deterministic. The context keeps its own cookie jar, independent of the
+  // admin `page` session.
+  const actorContext = await browser.newContext();
+  const actorApi = actorContext.request;
+
+  // Log in with the temporary password. The login response carries the CSRF
+  // token and the new user's id (the flat /auth/me payload has no `user` key).
+  const loginResp = await actorApi.post("/api/v1/auth/login", {
+    data: { email: actorEmail, password: tempPassword },
+  });
+  expect(loginResp.ok()).toBeTruthy();
+  const login = await loginResp.json();
+  expect(login.must_change_password).toBeTruthy();
+  const actorCsrf = login.csrf_token;
+  const actorUserId = login.user.id;
+
+  // Complete the forced first-login password change. Until it's done, the
+  // must_change_password gate blocks every endpoint except the identity/password
+  // ones — including creating a holiday (see middleware/auth.rs).
+  const changeResp = await actorApi.put("/api/v1/auth/password", {
+    headers: { "X-CSRF-Token": actorCsrf },
+    data: { new_password: "TempActorPass!77" },
+  });
+  expect(changeResp.ok()).toBeTruthy();
+
+  // Create a holiday as the throwaway admin — this writes an audit_log row with
+  // user_id = throwaway admin's id and action = "created".
+  const holidayResp = await actorApi.post("/api/v1/holidays", {
+    headers: { "X-CSRF-Token": actorCsrf },
+    data: { holiday_date: holidayDate, name: holidayName },
+  });
+  expect(holidayResp.ok()).toBeTruthy();
+  await actorContext.close();
 
   // Step 3: Hard-delete the throwaway admin via the API. A user with no time
   // entries or absences (only audit_log rows) satisfies the backend's
@@ -182,7 +207,7 @@ test("admin: audit log still loads after the acting user is hard-deleted (null u
   // user_id = throwaway admin's id — including the holiday entry above.
   const adminMe = await page.request.get("/api/v1/auth/me");
   const { csrf_token: adminCsrf } = await adminMe.json();
-  const deleteResp = await page.request.delete(`/api/v1/users/${tempUser.id}`, {
+  const deleteResp = await page.request.delete(`/api/v1/users/${actorUserId}`, {
     headers: { "X-CSRF-Token": adminCsrf },
   });
   expect(deleteResp.ok()).toBeTruthy();
@@ -196,6 +221,6 @@ test("admin: audit log still loads after the acting user is hard-deleted (null u
   // The throwaway admin's holiday entry is still present, now labelled
   // "System" (i18n key: audit_system_user) because their account was deleted.
   await expect(
-    page.locator(".audit-row", { hasText: "Temp Actor Holiday" }),
+    page.locator(".audit-row", { hasText: holidayName }),
   ).toBeVisible();
 });
