@@ -79,6 +79,45 @@ export function isoOffset(days) {
   return date.toISOString().slice(0, 10);
 }
 
+// Returns a future ISO date (YYYY-MM-DD), at least `minOffsetDays` out, that is
+// NOT already occupied by a holiday — so creating a manual holiday on it can
+// never hit the holidays.holiday_date UNIQUE constraint.
+//
+// Why this is needed: 01-bootstrap.spec.js sets the country to DE, which makes
+// the backend seed that country's *nationwide* public holidays for the current
+// and next year. A manual holiday created on a fixed offset (e.g. isoOffset(60))
+// would therefore collide with a seeded holiday whenever "today + offset" lands
+// on one — a calendar-dependent flake that only surfaces on a handful of run
+// dates per year (e.g. a run on Aug 4 puts +60 on Oct 3, German Unity Day).
+// Walking forward from the preferred offset to the first free day makes
+// manual-holiday creation deterministic regardless of when the suite runs. It
+// also skips any manual holiday a previous (failed, retried) attempt left
+// behind, since those are returned by the same GET /holidays query.
+//
+// `request` is any authenticated Playwright APIRequestContext (e.g. page.request);
+// GET /holidays is readable by any signed-in user.
+export async function freeHolidayDate(request, minOffsetDays) {
+  // The target is always within ~6 months of today, so the current and next
+  // calendar year together always cover it (and the year boundary in between).
+  const currentYear = new Date().getFullYear();
+  const taken = new Set();
+  for (const year of [currentYear, currentYear + 1]) {
+    const response = await request.get(`/api/v1/holidays?year=${year}`);
+    if (!response.ok()) continue;
+    for (const holiday of await response.json()) taken.add(holiday.holiday_date);
+  }
+  // Nationwide holidays are sparse (<=9/year), so a free day is always found
+  // within a couple of steps; the bound is just a defensive guard against an
+  // unbounded loop if something ever went badly wrong.
+  for (let offset = minOffsetDays; offset <= minOffsetDays + 60; offset++) {
+    const iso = isoOffset(offset);
+    if (!taken.has(iso)) return iso;
+  }
+  throw new Error(
+    `no free holiday date found within 60 days of offset ${minOffsetDays}`,
+  );
+}
+
 // Fills the Login form and submits it. Does not wait for the post-login
 // redirect — callers should immediately assert on whatever the login lands
 // on (the forced /account password-change screen for a temporary password,

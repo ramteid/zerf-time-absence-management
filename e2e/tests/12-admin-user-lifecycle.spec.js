@@ -17,7 +17,7 @@
 // archived doesn't approve anyone (only team leads/admins can be approvers).
 
 import { test, expect } from "@playwright/test";
-import { isoOffset, setDate, storageStatePath } from "./helpers.js";
+import { freeHolidayDate, isoOffset, setDate, storageStatePath } from "./helpers.js";
 import { EMPLOYEE, TEAM_LEAD } from "./users.js";
 
 test.use({ storageState: storageStatePath("admin") });
@@ -133,14 +133,16 @@ test("admin: audit log still loads after the acting user is hard-deleted (null u
   //      ON DELETE SET NULL FK constraint, NULLing their actor rows.
   //   4. Verify the audit log page still loads and the entry is visible.
   //
-  // Every identifier is scoped to the Playwright retry index: if an earlier
-  // attempt timed out after creating the throwaway user (or its holiday), the
-  // leftover rows must not make the retry fail on a duplicate email or on the
-  // holidays table's UNIQUE(holiday_date) constraint.
+  // The email and holiday name are scoped to the Playwright retry index so a
+  // throwaway user / audit row left behind by a timed-out earlier attempt can't
+  // make the retry fail on a duplicate email or match two rows in the final
+  // audit assertion. The holiday date comes from freeHolidayDate, which both
+  // avoids the seeded public holidays (holidays.holiday_date is UNIQUE) and
+  // skips any holiday a prior attempt already created.
   const runId = testInfo.retry;
   const actorEmail = `temp.actor.${runId}@e2e.test`;
   const holidayName = `Temp Actor Holiday ${runId}`;
-  const holidayDate = isoOffset(120 + runId);
+  const holidayDate = await freeHolidayDate(page.request, 120);
 
   // Step 1: Create the throwaway admin via the normal "Add User" flow and read
   // the temporary password off the confirmation dialog.

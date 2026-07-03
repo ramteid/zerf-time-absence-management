@@ -7,7 +7,7 @@
 // is actually usable end-to-end, not just creatable).
 
 import { test, expect } from "@playwright/test";
-import { isoOffset, setDate, storageStatePath } from "./helpers.js";
+import { freeHolidayDate, setDate, storageStatePath } from "./helpers.js";
 // 05-employee-workflows.spec.js selects this exact category by name when
 // requesting an absence — proving a category created through the admin UI
 // is immediately available in the employee-facing dropdown. Defined in
@@ -62,7 +62,10 @@ test("admin: add a manual holiday", async ({ page }) => {
   await page.goto("/settings/holidays");
   // Unlike categories, AdminHolidays.svelte has no separate add dialog — the
   // date/name inputs and the Add button all live on the page itself.
-  await setDate(page, "holiday-date", isoOffset(60));
+  // Pick a future date that isn't already a seeded public holiday so the
+  // create can't hit the holidays.holiday_date UNIQUE constraint (see
+  // freeHolidayDate for the full rationale).
+  await setDate(page, "holiday-date", await freeHolidayDate(page.request, 60));
   await page.locator("#holiday-name").fill("E2E Company Holiday");
   await page.getByRole("button", { name: "Add" }).click();
 
