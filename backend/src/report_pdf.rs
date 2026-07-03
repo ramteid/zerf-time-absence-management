@@ -510,9 +510,7 @@ fn encode_winansi(text: &str) -> Vec<u8> {
     text.chars()
         .map(|c| {
             let cp = c as u32;
-            if cp <= 0x7F {
-                cp as u8
-            } else if (0xA0..=0xFF).contains(&cp) {
+            if cp <= 0x7F || (0xA0..=0xFF).contains(&cp) {
                 cp as u8
             } else {
                 b'?'

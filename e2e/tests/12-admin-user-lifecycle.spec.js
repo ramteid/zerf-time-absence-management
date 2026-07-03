@@ -17,7 +17,7 @@
 // archived doesn't approve anyone (only team leads/admins can be approvers).
 
 import { test, expect } from "@playwright/test";
-import { isoOffset, setDate, storageStatePath } from "./helpers.js";
+import { isoOffset, setDate, signIn, storageStatePath } from "./helpers.js";
 import { EMPLOYEE, TEAM_LEAD } from "./users.js";
 
 test.use({ storageState: storageStatePath("admin") });
@@ -113,4 +113,89 @@ test("admin: reset the employee's password", async ({ page }) => {
   await expect(tempDialog.getByText("Password reset.")).toBeVisible();
   await expect(tempDialog.getByText("Temporary password:")).toBeVisible();
   await tempDialog.getByRole("button", { name: "OK" }).click();
+});
+
+test("admin: audit log still loads after the acting user is hard-deleted (null user_id regression)", async ({
+  page,
+  browser,
+}) => {
+  // Regression test: audit_log.user_id is nullable (migration 005 added
+  // ON DELETE SET NULL) but the Rust LogEntry struct had user_id: i64
+  // (non-optional). sqlx panicked with "unexpected null" the moment any
+  // user who had acted on something was later deleted, and the API returned
+  // 500 — leaving the Audit Log settings page completely empty.
+  //
+  // This test exercises the exact failure path:
+  //   1. Create a throwaway admin user (admins need no approver).
+  //   2. Log in as that admin and create a holiday so their user_id appears
+  //      in audit_log as the *actor*.
+  //   3. Hard-delete the throwaway admin via the API. PostgreSQL fires the
+  //      ON DELETE SET NULL FK constraint, NULLing their actor rows.
+  //   4. Verify the audit log page still loads and the entry is visible.
+
+  // Step 1: Create the throwaway admin via the normal "Add User" flow.
+  await page.goto("/settings/users");
+  await page.getByRole("button", { name: "Add User" }).click();
+  const createDialog = page.getByRole("dialog");
+  await expect(createDialog).toBeVisible();
+  await createDialog.locator("#user-first-name").fill("Temp");
+  await createDialog.locator("#user-last-name").fill("Actor");
+  await createDialog.locator("#user-email").fill("temp.actor@e2e.test");
+  await createDialog.locator("#user-role").selectOption("admin");
+  await setDate(page, "user-start-date", isoOffset(-7));
+  // Admins do not require an approver (user guide: "non-admin users must have
+  // an approver"), so no approver checkbox is needed here.
+  await createDialog.getByRole("button", { name: "Add User" }).click();
+  const pwDialog = page.getByRole("dialog");
+  await expect(pwDialog.getByText("Temporary password:")).toBeVisible();
+  const tempPassword = (await pwDialog.locator("strong").first().innerText()).trim();
+  expect(tempPassword.length).toBeGreaterThanOrEqual(12);
+  await pwDialog.getByRole("button", { name: "OK" }).click();
+
+  // Step 2: Log in as the throwaway admin, complete the forced password
+  // change, and create a holiday so their user_id becomes an audit actor.
+  const TEMP_ACTOR_PASSWORD = "TempActorPass!77";
+  const tempContext = await browser.newContext();
+  const tempPage = await tempContext.newPage();
+  await signIn(tempPage, "temp.actor@e2e.test", tempPassword);
+  await tempPage.waitForURL("**/account");
+  await tempPage.locator("#account-new-password").fill(TEMP_ACTOR_PASSWORD);
+  await tempPage.locator("#account-confirm-password").fill(TEMP_ACTOR_PASSWORD);
+  await tempPage.getByRole("button", { name: "Save" }).click();
+  await expect(tempPage.getByText("Password changed.")).toBeVisible();
+  // Create a holiday as the throwaway admin — this produces an audit_log row
+  // with user_id = throwaway admin's id and action = "created".
+  await tempPage.goto("/settings/holidays");
+  await setDate(tempPage, "holiday-date", isoOffset(120));
+  await tempPage.locator("#holiday-name").fill("Temp Actor Holiday");
+  await tempPage.getByRole("button", { name: "Add" }).click();
+  await expect(tempPage.getByText("Holiday added.")).toBeVisible();
+  // Read the throwaway admin's own user ID before closing their session.
+  const meResp = await tempPage.request.get("/api/v1/auth/me");
+  const { user: tempUser } = await meResp.json();
+  await tempContext.close();
+
+  // Step 3: Hard-delete the throwaway admin via the API. A user with no time
+  // entries or absences (only audit_log rows) satisfies the backend's
+  // "no historical data" guard and can be permanently removed. PostgreSQL
+  // then fires ON DELETE SET NULL on audit_log.user_id for all rows where
+  // user_id = throwaway admin's id — including the holiday entry above.
+  const adminMe = await page.request.get("/api/v1/auth/me");
+  const { csrf_token: adminCsrf } = await adminMe.json();
+  const deleteResp = await page.request.delete(`/api/v1/users/${tempUser.id}`, {
+    headers: { "X-CSRF-Token": adminCsrf },
+  });
+  expect(deleteResp.ok()).toBeTruthy();
+
+  // Step 4: The audit log must still load. Before the fix the LogEntry
+  // struct decoded user_id as i64 (non-optional), so any NULL row caused a
+  // 500 and the page showed nothing. With user_id: Option<i64> the NULL
+  // decodes cleanly and the frontend renders "System" for that actor.
+  await page.goto("/settings/audit-log");
+  await expect(page.locator(".audit-row").first()).toBeVisible();
+  // The throwaway admin's holiday entry is still present, now labelled
+  // "System" (i18n key: audit_system_user) because their account was deleted.
+  await expect(
+    page.locator(".audit-row", { hasText: "Temp Actor Holiday" }),
+  ).toBeVisible();
 });

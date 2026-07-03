@@ -7,7 +7,8 @@ use sqlx::{FromRow, Postgres, QueryBuilder};
 #[derive(FromRow, Serialize)]
 pub struct LogEntry {
     pub id: i64,
-    pub user_id: i64,
+    // Nullable: set to NULL by the database (ON DELETE SET NULL) when the acting user is deleted.
+    pub user_id: Option<i64>,
     pub action: String,
     pub table_name: String,
     pub record_id: i64,

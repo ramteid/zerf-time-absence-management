@@ -1305,6 +1305,8 @@ system settings, and sensitive operations.
 - Time-entry audit events are grouped by week and action. This reflects the
   product workflow, where submitted weeks are handled as one unit rather than
   as separate per-day operations.
+- If the acting user has since been deleted, the actor column shows a
+  placeholder instead of a name. The audit record itself is preserved.
 
 ### Creating a user
 
@@ -1812,6 +1814,8 @@ table, including:
 - SMTP configuration changes.
 - Team settings modifications (allow_reopen_without_approval,
   allow_submission_without_approval).
+- Category creation, update, and deletion.
+- Holiday creation, update, and deletion.
 
 ### Input validation and DoS prevention
 
