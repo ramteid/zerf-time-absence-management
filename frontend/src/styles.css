@@ -47,6 +47,11 @@
   --info-soft: #e6eef8;
   --info-text: #234d80;
 
+  /* Light green, used for the "assistant" role avatar — distinct from the
+     teal-leaning --success used for "employee". */
+  --lime-soft: #eef6d9;
+  --lime-text: #4d6a17;
+
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 10px;
@@ -104,6 +109,9 @@
 
   --info-soft: #0c1e38;
   --info-text: #5a8fd4;
+
+  --lime-soft: #263314;
+  --lime-text: #b3d968;
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
   --shadow-md: 0 1px 3px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.2);
@@ -461,6 +469,7 @@ input[type="radio"]:disabled {
 }
 
 .sidebar-logo {
+  position: relative;
   padding: 20px 18px 12px;
   display: flex;
   align-items: stretch;
@@ -480,7 +489,7 @@ input[type="radio"]:disabled {
 .sidebar-logo-text {
   color: var(--nav-text-active);
   font-weight: 400;
-  font-size: 20px;
+  font-size: 18px;
   letter-spacing: -0.02em;
 }
 
@@ -681,6 +690,25 @@ input[type="radio"]:disabled {
   letter-spacing: -0.02em;
   background: var(--accent-soft);
   color: var(--accent-text);
+}
+
+/* Role-based avatar colors — same palette everywhere a user's avatar is
+   shown, so a given user always gets the same color regardless of page. */
+.avatar-role-admin {
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}
+.avatar-role-team_lead {
+  background: var(--info-soft);
+  color: var(--info-text);
+}
+.avatar-role-employee {
+  background: var(--success-soft);
+  color: var(--success-text);
+}
+.avatar-role-assistant {
+  background: var(--lime-soft);
+  color: var(--lime-text);
 }
 
 /* ── Tables ── */

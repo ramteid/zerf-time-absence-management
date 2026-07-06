@@ -23,6 +23,7 @@
   import AppLogo from "./AppLogo.svelte";
   import PullToRefresh from "./lib/ui/PullToRefresh.svelte";
   import { notificationTarget } from "./lib/domain/dashboard.js";
+  import { userAvatarClass } from "./lib/domain/users.js";
 
   // Mobile menu
   let mobileMoreOpen = false;
@@ -183,8 +184,28 @@
       <div style="display:flex;flex-direction:column;line-height:1.2;min-width:0;flex:1">
         <span class="sidebar-logo-text">{$t("Time tracking")}</span>
         {#if $settings?.organization_name}
-          <span style="font-size:12px;color:var(--nav-text-muted);word-break:break-word">{$settings.organization_name}</span>
+          <span style="font-size:12px;color:var(--nav-text-muted);word-break:break-word;padding-right:44px">{$settings.organization_name}</span>
         {/if}
+      </div>
+      <div
+        class="zf-bell-wrapper"
+        style="position:absolute;top:0;bottom:0;right:18px;margin:auto;height:30px;display:flex;align-items:center"
+      >
+        <button
+          class="zf-btn-icon-sm"
+          style="color:var(--nav-text-muted);position:relative;width:30px;height:30px"
+          on:click|stopPropagation={toggleBell}
+          title={$t("Notifications")}
+        >
+          <Icon name="Bell" size={20} />
+          {#if $notificationsUnread > 0}
+            <span
+              style="position:absolute;top:-2px;right:-2px;background:var(--danger-text);color:white;border-radius:10px;font-size:9px;padding:1px 4px;line-height:1;min-width:14px;text-align:center;font-weight:400"
+            >
+              {$notificationsUnread > 99 ? "99+" : $notificationsUnread}
+            </span>
+          {/if}
+        </button>
       </div>
     </div>
 
@@ -247,8 +268,8 @@
         aria-label={$t("Account")}
       >
         <div
-          class="avatar"
-          style="width:30px;height:30px;font-size:11px;background:var(--nav-bg-active);color:var(--nav-text-active)"
+          class="avatar {userAvatarClass($currentUser)}"
+          style="width:30px;height:30px;font-size:11px"
         >
           {initials($currentUser)}
         </div>
@@ -260,23 +281,6 @@
           <div class="sidebar-user-role">{roleLabel($currentUser.role)}</div>
         </div>
       </a>
-      <div class="zf-bell-wrapper" style="position:relative">
-        <button
-          class="zf-btn-icon-sm"
-          style="color:var(--nav-text-muted);position:relative"
-          on:click|stopPropagation={toggleBell}
-          title={$t("Notifications")}
-        >
-          <Icon name="Bell" size={17} />
-          {#if $notificationsUnread > 0}
-            <span
-              style="position:absolute;top:-2px;right:-2px;background:var(--danger-text);color:white;border-radius:10px;font-size:9px;padding:1px 4px;line-height:1;min-width:14px;text-align:center;font-weight:400"
-            >
-              {$notificationsUnread > 99 ? "99+" : $notificationsUnread}
-            </span>
-          {/if}
-        </button>
-      </div>
       <button
         class="zf-btn-icon-sm"
         style="color:var(--nav-text-muted)"
@@ -332,8 +336,8 @@
             style="display:flex;align-items:center;gap:12px;flex:1;min-width:0;color:inherit;text-decoration:none;border-radius:8px"
           >
             <div
-              class="avatar"
-              style="width:32px;height:32px;font-size:11px;background:var(--accent);color:white"
+              class="avatar {userAvatarClass($currentUser)}"
+              style="width:32px;height:32px;font-size:11px"
             >
               {initials($currentUser)}
             </div>

@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   findUserById,
   hasUserId,
+  sortUsersByRoleThenName,
   timeTrackingUsers,
+  userAvatarClass,
+  userAvatarClassFromRows,
   userFullName,
   userInitials,
   userInitialsFromRows,
@@ -73,6 +76,51 @@ describe("users domain helpers", () => {
 
   it("userInitialsFromRows looks up initials from the list", () => {
     expect(userInitialsFromRows(1, users)).toBe("AA");
+  });
+
+  it("userAvatarClass maps each role to its own CSS class", () => {
+    expect(userAvatarClass({ role: "admin" })).toBe("avatar-role-admin");
+    expect(userAvatarClass({ role: "team_lead" })).toBe("avatar-role-team_lead");
+    expect(userAvatarClass({ role: "employee" })).toBe("avatar-role-employee");
+    expect(userAvatarClass({ role: "assistant" })).toBe("avatar-role-assistant");
+  });
+
+  it("userAvatarClass returns an empty string for an unknown or missing role", () => {
+    expect(userAvatarClass({ role: "bogus" })).toBe("");
+    expect(userAvatarClass(null)).toBe("");
+  });
+
+  it("userAvatarClassFromRows looks up the role class from the list", () => {
+    expect(userAvatarClassFromRows(1, users)).toBe("avatar-role-admin");
+    expect(userAvatarClassFromRows(2, users)).toBe("avatar-role-employee");
+  });
+
+  it("sortUsersByRoleThenName groups by role (team lead, employee, assistant, admin), then by name", () => {
+    const mixed = [
+      { first_name: "Zoe", last_name: "Admin", role: "admin" },
+      { first_name: "Amy", last_name: "Assist", role: "assistant" },
+      { first_name: "Bob", last_name: "Zephyr", role: "employee" },
+      { first_name: "Cara", last_name: "Anderson", role: "employee" },
+      { first_name: "Dan", last_name: "Lead", role: "team_lead" },
+    ];
+    expect(sortUsersByRoleThenName(mixed).map((u) => u.first_name)).toEqual([
+      "Dan", // team_lead
+      "Cara", // employee, "Anderson" before "Zephyr"
+      "Bob", // employee
+      "Amy", // assistant
+      "Zoe", // admin
+    ]);
+  });
+
+  it("sortUsersByRoleThenName does not mutate the input array and handles null", () => {
+    const original = [
+      { first_name: "B", last_name: "B", role: "admin" },
+      { first_name: "A", last_name: "A", role: "team_lead" },
+    ];
+    const copy = [...original];
+    sortUsersByRoleThenName(original);
+    expect(original).toEqual(copy);
+    expect(sortUsersByRoleThenName(null)).toEqual([]);
   });
 
   it("userWorkdaysPerWeek returns the user's configured value", () => {

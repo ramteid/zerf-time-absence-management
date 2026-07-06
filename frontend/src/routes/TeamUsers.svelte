@@ -3,6 +3,7 @@
   import { toast } from "../stores.js";
   import { t } from "../i18n.js";
   import Icon from "../Icons.svelte";
+  import { sortUsersByRoleThenName, userAvatarClass } from "../lib/domain/users.js";
   import UserDialog from "../dialogs/UserDialog.svelte";
   import ArchiveUserDialog from "../dialogs/ArchiveUserDialog.svelte";
   import RestoreUserDialog from "../dialogs/RestoreUserDialog.svelte";
@@ -19,9 +20,7 @@
 
   async function load() {
     const loaded = await api("/team-users");
-    const sorted = (loaded || []).sort(
-      (a, b) => a.last_name.localeCompare(b.last_name) || a.first_name.localeCompare(b.first_name),
-    );
+    const sorted = sortUsersByRoleThenName(loaded);
     // Split active rows from archived. Only manageable assistants ever carry
     // an archived_at; non-manageable colleagues are always active.
     users = sorted.filter((u) => !u.archived_at);
@@ -74,7 +73,10 @@
           ? 'border-bottom:1px solid var(--border)'
           : ''};display:flex;align-items:center;gap:12px"
       >
-        <div class="avatar" style="width:32px;height:32px;font-size:12px;opacity:{u.can_manage ? 1 : 0.5}">
+        <div
+          class="avatar {userAvatarClass(u)}"
+          style="width:32px;height:32px;font-size:12px;opacity:{u.can_manage ? 1 : 0.5}"
+        >
           {initials(u)}
         </div>
         <div style="flex:1;min-width:0;opacity:{u.can_manage ? 1 : 0.5}">
@@ -117,7 +119,7 @@
             ? 'border-bottom:1px solid var(--border)'
             : ''};display:flex;align-items:center;gap:12px"
         >
-          <div class="avatar" style="width:32px;height:32px;font-size:12px">
+          <div class="avatar {userAvatarClass(u)}" style="width:32px;height:32px;font-size:12px">
             {initials(u)}
           </div>
           <div style="flex:1;min-width:0">

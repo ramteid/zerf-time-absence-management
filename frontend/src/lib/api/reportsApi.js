@@ -1,5 +1,6 @@
 import { api } from "../../api.js";
 import { tracksOwnTime } from "../../rolePolicy.js";
+import { sortUsersByRoleThenName } from "../domain/users.js";
 
 function paramsFrom(values) {
   const params = new URLSearchParams();
@@ -19,9 +20,9 @@ export async function getUsersForReports(canViewTeamReports, currentUser) {
   // so they are excluded from any per-user employee dropdown.
   // Inactive users are also excluded — they no longer participate in time tracking.
   const allUsers = await api("/users");
-  return (allUsers || [])
-    .filter((u) => tracksOwnTime(u) && u.active !== false)
-    .sort((a, b) => a.last_name.localeCompare(b.last_name) || a.first_name.localeCompare(b.first_name));
+  return sortUsersByRoleThenName(
+    (allUsers || []).filter((u) => tracksOwnTime(u) && u.active !== false),
+  );
 }
 
 export function getMonthReport({ userId, month }) {

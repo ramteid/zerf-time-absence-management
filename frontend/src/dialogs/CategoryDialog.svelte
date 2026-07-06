@@ -3,6 +3,7 @@
   import { api } from "../api.js";
   import { t } from "../i18n.js";
   import Dialog from "../Dialog.svelte";
+  import { sortUsersByRoleThenName } from "../lib/domain/users.js";
 
   export let template;
   export let onClose;
@@ -28,7 +29,7 @@
         api("/users"),
         api("/categories/" + template.id + "/users"),
       ]);
-      allUsers = (loadedUsers || []).sort((a, b) => a.last_name.localeCompare(b.last_name) || a.first_name.localeCompare(b.first_name));
+      allUsers = sortUsersByRoleThenName(loadedUsers);
       enabledUserIds = loadedEnabled;
     } catch {
       allUsers = [];

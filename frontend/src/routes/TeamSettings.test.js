@@ -130,11 +130,13 @@ describe("TeamSettings", () => {
     await waitForText(target, "Bob");
 
     // The page renders two cards (Submissions, then Edit Requests), each with
-    // one row per team member. After alphabetical sort by last name, Bob
-    // ("Emp") appears before Alice ("Lead"), so checkbox 0 is Bob's
-    // "auto-approve submissions" toggle in the first card.
+    // one row per team member. Rows are grouped by role (team leads before
+    // employees), so Alice ("team_lead") appears before Bob ("employee").
+    // Alice is also the signed-in user here, so her row is disabled
+    // (non-admins cannot toggle their own auto-approve setting) — checkbox 1
+    // is Bob's "auto-approve submissions" toggle in the first card.
     const checkboxes = target.querySelectorAll('input[type="checkbox"]');
-    const bobCheckbox = checkboxes[0];
+    const bobCheckbox = checkboxes[1];
     expect(bobCheckbox).not.toBeNull();
     bobCheckbox.click();
     await settle();

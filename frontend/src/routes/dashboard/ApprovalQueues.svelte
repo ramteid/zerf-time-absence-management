@@ -4,6 +4,7 @@
   import Icon from "../../Icons.svelte";
   import { absenceRequestTypeLabelKey } from "../../lib/domain/dashboard.js";
   import {
+    userAvatarClassFromRows,
     userInitialsFromRows,
     userNameFromRows,
   } from "../../lib/domain/users.js";
@@ -64,7 +65,10 @@
         tabindex="0"
         title={$t("Show")}
       >
-        <div class="avatar" style="width:30px;height:30px;font-size:11px">
+        <div
+          class="avatar {userAvatarClassFromRows(week.user_id, users)}"
+          style="width:30px;height:30px;font-size:11px"
+        >
           {userInitialsFromRows(week.user_id, users) || "?"}
         </div>
         <div style="flex:1;min-width:0">
@@ -111,7 +115,10 @@
         tabindex="0"
         title={$t("Show details")}
       >
-        <div class="avatar" style="width:30px;height:30px;font-size:11px">
+        <div
+          class="avatar {userAvatarClassFromRows(reopen.user_id, users)}"
+          style="width:30px;height:30px;font-size:11px"
+        >
           {userInitialsFromRows(reopen.user_id, users) || "?"}
         </div>
         <div style="flex:1;min-width:0">
@@ -176,7 +183,10 @@
 
     {#each pendingAbsences as absence (absence.id)}
       <div class="absence-row">
-        <div class="avatar" style="width:30px;height:30px;font-size:11px">
+        <div
+          class="avatar {userAvatarClassFromRows(absence.user_id, users)}"
+          style="width:30px;height:30px;font-size:11px"
+        >
           {userInitialsFromRows(absence.user_id, users) || "?"}
         </div>
         <div

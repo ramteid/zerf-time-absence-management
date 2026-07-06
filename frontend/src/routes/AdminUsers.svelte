@@ -8,6 +8,7 @@
   import ArchiveUserDialog from "../dialogs/ArchiveUserDialog.svelte";
   import RestoreUserDialog from "../dialogs/RestoreUserDialog.svelte";
   import { getArchivedUsers } from "../lib/api/usersApi.js";
+  import { sortUsersByRoleThenName, userAvatarClass } from "../lib/domain/users.js";
   import { confirmDialog } from "../confirm.js";
 
   let users = [];
@@ -25,9 +26,9 @@
 
   async function load() {
     const loaded = await api("/users");
-    users = (loaded || []).sort((a, b) => a.last_name.localeCompare(b.last_name) || a.first_name.localeCompare(b.first_name));
+    users = sortUsersByRoleThenName(loaded);
     try {
-      archivedUsers = await getArchivedUsers();
+      archivedUsers = sortUsersByRoleThenName(await getArchivedUsers());
     } catch (e) {
       toast($t(e?.message || "Error"), "error");
     }
@@ -107,7 +108,7 @@
           ? 'border-bottom:1px solid var(--border)'
           : ''};display:flex;align-items:center;gap:12px"
       >
-        <div class="avatar" style="width:32px;height:32px;font-size:12px">
+        <div class="avatar {userAvatarClass(u)}" style="width:32px;height:32px;font-size:12px">
           {initials(u)}
         </div>
         <div style="flex:1;min-width:0">
@@ -157,7 +158,7 @@
             ? 'border-bottom:1px solid var(--border)'
             : ''};display:flex;align-items:center;gap:12px"
         >
-          <div class="avatar" style="width:32px;height:32px;font-size:12px">
+          <div class="avatar {userAvatarClass(u)}" style="width:32px;height:32px;font-size:12px">
             {initials(u)}
           </div>
           <div style="flex:1;min-width:0">

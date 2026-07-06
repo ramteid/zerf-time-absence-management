@@ -5,6 +5,7 @@
   import { t, roleLabel, formatHours } from "../i18n.js";
   import { fmtDate, appTodayDate } from "../format.js";
   import { isAssistantUser } from "../rolePolicy.js";
+  import { userAvatarClass } from "../lib/domain/users.js";
 
   let cur = "",
     nw = "",
@@ -125,7 +126,10 @@
   <!-- Profile card -->
   <div class="zf-card" style="padding:20px;margin-bottom:16px">
     <div style="display:flex;align-items:center;gap:16px;margin-bottom:20px">
-      <div class="avatar" style="width:56px;height:56px;font-size:21px">
+      <div
+        class="avatar {userAvatarClass($currentUser)}"
+        style="width:56px;height:56px;font-size:21px"
+      >
         {initials($currentUser)}
       </div>
       <div>

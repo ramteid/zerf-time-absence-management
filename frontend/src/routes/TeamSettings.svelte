@@ -2,6 +2,7 @@
   import { api } from "../api.js";
   import { toast, currentUser } from "../stores.js";
   import { t, roleLabel } from "../i18n.js";
+  import { sortUsersByRoleThenName } from "../lib/domain/users.js";
 
   let rows = [];
   let loading = true;
@@ -11,7 +12,7 @@
     loading = true;
     try {
       const loaded = await api("/team-settings");
-      rows = (loaded || []).sort((a, b) => a.last_name.localeCompare(b.last_name) || a.first_name.localeCompare(b.first_name));
+      rows = sortUsersByRoleThenName(loaded);
     } catch (e) {
       rows = [];
       toast($t(e?.message || "Error"), "error");

@@ -9,6 +9,7 @@
   import DatePicker from "../DatePicker.svelte";
   import Icon from "../Icons.svelte";
   import TempPasswordDialog from "./TempPasswordDialog.svelte";
+  import { sortUsersByRoleThenName } from "../lib/domain/users.js";
 
   export let template;
   export let onClose;
@@ -161,14 +162,14 @@
     if (!lockedRole) {
       try {
         const allUsers = await api("/users");
-        approvers = allUsers
-          .filter(
+        approvers = sortUsersByRoleThenName(
+          allUsers.filter(
             (candidateUser) =>
               candidateUser.active &&
               (candidateUser.role === "team_lead" || candidateUser.role === "admin") &&
               candidateUser.id !== template.id,
-          )
-          .sort((a, b) => a.last_name.localeCompare(b.last_name) || a.first_name.localeCompare(b.first_name));
+          ),
+        );
       } catch {
         approvers = [];
       }
