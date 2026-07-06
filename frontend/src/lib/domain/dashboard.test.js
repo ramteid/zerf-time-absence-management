@@ -116,6 +116,12 @@ describe("dashboard domain helpers", () => {
     ).not.toContain("focus=");
   });
 
+  it("routes approval_reminder notifications to the dashboard without a focus", () => {
+    expect(
+      notificationTarget({ id: 9, kind: "approval_reminder" }, 0),
+    ).not.toContain("focus=");
+  });
+
   it("returns empty string for unrecognised notification kinds", () => {
     expect(notificationTarget({ id: 8, kind: "unknown" }, 0)).toBe("");
   });

@@ -186,7 +186,10 @@ export function notificationTarget(notification, now = Date.now()) {
   ) {
     return `/dashboard?focus=absences&${query}`;
   }
-  if (notification.kind === "submission_reminder") {
+  if (
+    notification.kind === "submission_reminder" ||
+    notification.kind === "approval_reminder"
+  ) {
     return `/dashboard?${query}`;
   }
   return "";
