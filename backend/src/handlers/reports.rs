@@ -142,7 +142,7 @@ pub async fn range_pdf(
         if !requester.is_lead() {
             return Err(AppError::Forbidden);
         }
-        let team_members: Vec<User> = app_state
+        let mut team_members: Vec<User> = app_state
             .db
             .reports
             .active_team_members(requester.id, requester.is_admin())
@@ -153,6 +153,10 @@ pub async fn range_pdf(
             .filter(|team_member| team_member.tracks_time)
             .map(crate::services::users::repo_user_to_auth_user)
             .collect();
+        // Group sections by role (team lead, employee, assistant, admin), same
+        // as every user roster in the frontend — stable sort preserves the
+        // repository's last_name/first_name/id order within each role.
+        team_members.sort_by_key(|team_member| crate::roles::role_sort_rank(&team_member.role));
 
         // Fetch each member's data sequentially and merge into one combined PDF
         // — keeps backend load comparable to the original per-employee export

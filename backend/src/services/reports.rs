@@ -1360,11 +1360,15 @@ pub async fn build_all_users_timesheet_pdf(
 ) -> AppResult<Vec<u8>> {
     let label = format!("{}_to_{}", from, to);
     let language = crate::i18n::load_ui_language(&app_state.pool).await?;
-    let members = app_state
+    let mut members = app_state
         .db
         .reports
         .timesheet_members_for_period(from, to)
         .await?;
+    // Group sections by role (team lead, employee, assistant, admin), same as
+    // every user roster in the frontend — stable sort preserves the
+    // repository's last_name/first_name/id order within each role.
+    members.sort_by_key(|member| crate::roles::role_sort_rank(&member.role));
     let mut sections = Vec::with_capacity(members.len());
     for member in &members {
         let user = crate::services::users::repo_user_to_auth_user(member.clone());

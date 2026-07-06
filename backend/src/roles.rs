@@ -39,6 +39,22 @@ pub fn is_lead_role(role: &str) -> bool {
     matches!(normalize_role(role).as_str(), ROLE_TEAM_LEAD | ROLE_ADMIN)
 }
 
+/// Display order for role-grouped user listings (team lead, employee,
+/// assistant, admin) — mirrors the frontend's identical grouping in
+/// `frontend/src/lib/domain/users.js` (`sortUsersByRoleThenName`), used
+/// wherever a roster of users is rendered or exported (e.g. the combined
+/// team timesheet PDF).
+#[inline]
+pub fn role_sort_rank(role: &str) -> u8 {
+    match normalize_role(role).as_str() {
+        ROLE_TEAM_LEAD => 0,
+        ROLE_EMPLOYEE => 1,
+        ROLE_ASSISTANT => 2,
+        ROLE_ADMIN => 3,
+        _ => 4,
+    }
+}
+
 /// Admin subjects can only be approved by other active admins.
 #[inline]
 pub fn can_approve_admin_subjects(role: &str, active: bool) -> bool {
@@ -143,5 +159,17 @@ mod tests {
         // are non-booking users and have no obligation either.
         assert!(!has_submission_obligation("employee", 0.0));
         assert!(!has_submission_obligation("team_lead", -1.0));
+    }
+
+    /// `role_sort_rank` must order team_lead, employee, assistant, admin,
+    /// with any unrecognised role sorting last.
+    #[test]
+    fn role_sort_rank_orders_team_lead_employee_assistant_admin() {
+        assert!(role_sort_rank("team_lead") < role_sort_rank("employee"));
+        assert!(role_sort_rank("employee") < role_sort_rank("assistant"));
+        assert!(role_sort_rank("assistant") < role_sort_rank("admin"));
+        assert!(role_sort_rank("admin") < role_sort_rank("bogus"));
+        // Normalization (trim/lowercase) applies here too.
+        assert_eq!(role_sort_rank(" ADMIN "), role_sort_rank("admin"));
     }
 }
