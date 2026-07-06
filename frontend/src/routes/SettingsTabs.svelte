@@ -28,9 +28,10 @@
   const teamTab = { href: "/settings/team", key: "Team Settings" };
   const teamUsersTab = { href: "/settings/team-users", key: "Users" };
 
-  // Team Settings is placed first for all roles.
+  // For admins, Team Settings sits between the general "Settings" tab and
+  // "Users" (i.e. after the first admin tab). Non-admin leads see it first.
   $: tabs = isAdmin
-    ? [teamTab, ...adminTabs]
+    ? [adminTabs[0], teamTab, ...adminTabs.slice(1)]
     : isLead
       ? canManageTeamUsers
         ? [teamTab, teamUsersTab]
