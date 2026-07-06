@@ -121,6 +121,10 @@ export function buildBreakRules(settings) {
  * exactly once — rules are not cumulative. A 10-hour block with rules [(6h→30min),
  * (9h→45min)] deducts 45 min, not 75 min.
  *
+ * Thresholds are exclusive, matching German labor law (ArbZG §4: a break is required
+ * for work of "mehr als sechs Stunden" — more than six hours). A block of exactly
+ * 6h00m does not trigger the 6-hour rule; only 6h01m or more does.
+ *
  * Applies to all non-rejected entries (including drafts) so the time tracking page
  * shows the expected deduction before entries are approved.
  *
@@ -159,7 +163,7 @@ export function computeDayBreakDeduction(items, categories, rules) {
   return blocks.reduce((total, block) => {
     const duration = block.end - block.start;
     const deduction = rules
-      .filter((r) => duration >= r.thresholdHours * 60)
+      .filter((r) => duration > r.thresholdHours * 60)
       .reduce((max, r) => Math.max(max, r.deductionMinutes), 0);
     return total + deduction;
   }, 0);

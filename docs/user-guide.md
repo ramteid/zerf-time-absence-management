@@ -458,7 +458,7 @@ If your team meeting were crediting instead, the result would be: (7+1) − 8 = 
 
 ### Automatic break deduction
 
-When the feature is enabled in Settings → General, Zerf silently deducts a configured number of break minutes from each day's credited work when consecutive work reaches or exceeds a configured threshold.
+When the feature is enabled in Settings → General, Zerf silently deducts a configured number of break minutes from each day's credited work when consecutive work exceeds a configured threshold. The threshold is exclusive: exactly 6 hours of consecutive work does not trigger a 6-hour rule, only 6 hours and 1 minute or more does (matching German labor law, ArbZG §4, which requires a break only for work of *more than* six hours).
 
 **How continuity is determined:**
 
@@ -483,18 +483,18 @@ When the feature is enabled in Settings → General, Zerf silently deducts a con
 
 The time tracking page applies the break deduction as a preview for all non-rejected entries (including drafts and submitted entries) so you can see the impact before approval. The daily total shown next to each day already includes this preview deduction. This preview matches the deduction that will be applied to the flextime balance once entries are approved.
 
-When a break is triggered, the entry block where the threshold is crossed displays a horizontal marker. Its vertical position reflects the exact moment within that entry when the threshold is reached, and its height is proportional to the deduction duration relative to the entry's length.
+When a break is triggered, the entry block where the threshold is crossed displays a horizontal marker. Its vertical position reflects the exact moment within that entry when the threshold is exceeded, and its height is proportional to the deduction duration relative to the entry's length.
 
-Example: threshold 6 hours, deduction 30 minutes. An employee books 3 hours of core work followed immediately by 4 hours of training (7 hours total, one continuous block). The threshold is crossed during the training block, 3 hours into it (6 total hours reached). The marker appears at three-quarters from the top of the training entry block, and its height corresponds to 30 minutes of the 4-hour entry (about 12.5 % of the block height).
+Example: threshold 6 hours, deduction 30 minutes. An employee books 3 hours of core work followed immediately by 4 hours of training (7 hours total, one continuous block). The threshold is crossed during the training block, 3 hours into it (6 total hours exceeded). The marker appears at three-quarters from the top of the training entry block, and its height corresponds to 30 minutes of the 4-hour entry (about 12.5 % of the block height).
 
 **Configuration (Settings → General):**
 
 | Setting | Description |
 | --- | --- |
 | Enable automatic break deduction | Enables or disables the feature. When disabled, all stored values are cleared. |
-| Break threshold (hours) | Tier-1 minimum consecutive crediting work duration that triggers a break (must be greater than 0, up to 24 h). |
-| Break deduction (minutes) | Tier-1 total minutes deducted when the threshold is reached (1–480 min). |
-| Second threshold (hours) | Optional tier-2 threshold. Must be greater than tier-1. When a block reaches this duration, the tier-2 deduction replaces tier-1. |
+| Break threshold (hours) | Tier-1 minimum consecutive crediting work duration that triggers a break (must be greater than 0, up to 24 h). A block must strictly exceed this duration — exactly matching it does not trigger a deduction. |
+| Break deduction (minutes) | Tier-1 total minutes deducted once the threshold is exceeded (1–480 min). |
+| Second threshold (hours) | Optional tier-2 threshold. Must be greater than tier-1. Once a block's duration exceeds this threshold, the tier-2 deduction replaces tier-1. |
 | Second deduction (minutes) | Tier-2 total minutes deducted (1–480 min). This is the total, not additional — e.g. configure 45 min here, not 15 min, to achieve a 45-minute break at the tier-2 threshold. |
 
 ## Submission status indicator
@@ -1555,7 +1555,7 @@ Admins configure system-wide behavior in the Settings panel (Settings → Genera
 | Submission deadline day | Day of the month (1–28) when the monthly submission reminder is sent. |
 | Submission reminders enabled | Enable or disable the monthly submission reminder. |
 | Approval reminders enabled | Enable or disable the weekly approval reminder. |
-| Automatic break deduction | When enabled, deducts a configured break from each day where consecutive crediting work meets or exceeds a threshold. See [Automatic break deduction](#automatic-break-deduction). |
+| Automatic break deduction | When enabled, deducts a configured break from each day where consecutive crediting work exceeds a threshold. See [Automatic break deduction](#automatic-break-deduction). |
 | SMTP configuration | Server, port, and credentials for outgoing email. Required for registration emails and email reminders. |
 | Public URL | Used to construct login links in registration emails. |
 | Nextcloud Upload | Configure automatic upload of encrypted DB backups and monthly timesheet PDFs to a Nextcloud public share. See [Nextcloud Upload](#nextcloud-upload). |

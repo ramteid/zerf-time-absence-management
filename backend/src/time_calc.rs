@@ -5,8 +5,12 @@ use chrono::{Datelike, Duration, NaiveDate, NaiveTime};
 ///
 /// `rules` is a slice of `(threshold_min, deduction_min)` pairs representing break tiers.
 /// For each merged continuous work block the **highest applicable rule** — the one with the
-/// greatest threshold that the block still meets or exceeds — is selected and its deduction
+/// greatest threshold that the block strictly exceeds — is selected and its deduction
 /// is applied exactly once. Rules are **not** cumulative: only one rule fires per block.
+///
+/// Thresholds are exclusive, matching German labor law (ArbZG §4: a break is required for
+/// work of "mehr als sechs Stunden" — more than six hours). A block of exactly 6h00m does
+/// not trigger the 6-hour rule; only 6h01m or more does.
 ///
 /// Example: rules = [(360, 30), (540, 45)]. A 10-hour block triggers the
 /// 9-hour rule (45 min), not both rules (75 min would be wrong).
@@ -40,10 +44,10 @@ pub fn compute_day_auto_break(entries: &[(NaiveTime, NaiveTime)], rules: &[(i64,
         .into_iter()
         .map(|(s, e)| {
             let duration = (e - s).num_minutes();
-            // Highest applicable rule wins; 0 when no rule threshold is met.
+            // Highest applicable rule wins; 0 when no rule threshold is strictly exceeded.
             rules
                 .iter()
-                .filter(|(threshold, _)| duration >= *threshold)
+                .filter(|(threshold, _)| duration > *threshold)
                 .map(|(_, deduction)| *deduction)
                 .max()
                 .unwrap_or(0)
@@ -190,10 +194,20 @@ mod tests {
     }
 
     #[test]
-    fn compute_day_auto_break_single_entry_exactly_at_threshold_deducts() {
-        // exactly 6 h → deduct 30 min
+    fn compute_day_auto_break_single_entry_exactly_at_threshold_no_deduction() {
+        // Exactly 6 h → no deduction. Thresholds are exclusive (ArbZG §4 requires a
+        // break only for work of *more than* six hours, not for six hours flat).
         assert_eq!(
             compute_day_auto_break(&[(t(8, 0), t(14, 0))], &[(360, 30)]),
+            0
+        );
+    }
+
+    #[test]
+    fn compute_day_auto_break_single_entry_one_minute_over_threshold_deducts() {
+        // 6 h 1 min → threshold strictly exceeded → deduct 30 min
+        assert_eq!(
+            compute_day_auto_break(&[(t(8, 0), t(14, 1))], &[(360, 30)]),
             30
         );
     }
@@ -218,9 +232,9 @@ mod tests {
 
     #[test]
     fn compute_day_auto_break_two_independent_long_blocks_deducts_twice() {
-        // morning 7:00–13:00 (6 h), afternoon 14:00–20:00 (6 h) → two deductions
+        // morning 7:00–13:01 (6h01m), afternoon 14:00–20:01 (6h01m) → two deductions
         assert_eq!(
-            compute_day_auto_break(&[(t(7, 0), t(13, 0)), (t(14, 0), t(20, 0))], &[(360, 30)]),
+            compute_day_auto_break(&[(t(7, 0), t(13, 1)), (t(14, 0), t(20, 1))], &[(360, 30)]),
             60
         );
     }

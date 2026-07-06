@@ -91,11 +91,12 @@
 
       const blockDuration = blockEnd - blockStart;
 
-      // Find the highest applicable rule for this block.
+      // Find the highest applicable rule for this block. Thresholds are exclusive
+      // (mirrors computeDayBreakDeduction / ArbZG §4 "more than six hours").
       let applicableRule = null;
       for (const rule of rules) {
-        if (blockDuration >= rule.thresholdHours * 60) {
-          applicableRule = rule; // last (highest threshold met) wins
+        if (blockDuration > rule.thresholdHours * 60) {
+          applicableRule = rule; // last (highest threshold strictly exceeded) wins
         }
       }
       if (!applicableRule) continue;

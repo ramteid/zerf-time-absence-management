@@ -254,8 +254,8 @@ describe("computeDayBreakDeduction", () => {
   });
 
   it("treats adjacent entries as one continuous block", () => {
-    // 3 h + 3 h with end == start of next → 6-hour block, deduction triggered.
-    const items = [entry("08:00", "11:00"), entry("11:00", "14:00")];
+    // 3 h + 3h01m with end == start of next → 6h01m block, deduction triggered.
+    const items = [entry("08:00", "11:00"), entry("11:00", "14:01")];
     expect(computeDayBreakDeduction(items, workCat, rules1)).toBe(30);
   });
 
@@ -300,8 +300,15 @@ describe("computeDayBreakDeduction", () => {
     expect(computeDayBreakDeduction(items, workCat, rules1)).toBe(30);
   });
 
-  it("deducts when block duration equals the threshold exactly", () => {
+  it("does not deduct when block duration equals the threshold exactly", () => {
+    // Thresholds are exclusive: ArbZG §4 requires a break only for work of
+    // *more than* six hours, not for six hours flat.
     const items = [entry("08:00", "14:00")];
+    expect(computeDayBreakDeduction(items, workCat, rules1)).toBe(0);
+  });
+
+  it("deducts when block duration is one minute over the threshold", () => {
+    const items = [entry("08:00", "14:01")];
     expect(computeDayBreakDeduction(items, workCat, rules1)).toBe(30);
   });
 
