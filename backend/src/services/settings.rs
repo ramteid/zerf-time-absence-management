@@ -102,9 +102,10 @@ pub async fn app_today(pool: &crate::db::DatabasePool) -> chrono::NaiveDate {
 pub async fn team_lead_assistant_management_enabled(
     pool: &crate::db::DatabasePool,
 ) -> AppResult<bool> {
-    // Default is "true": team leads can manage assistants out of the box.
-    // An admin can disable this via the general settings page.
-    Ok(load_setting(pool, ALLOW_TEAM_LEAD_MANAGE_ASSISTANTS_KEY, "true").await? != "false")
+    // Default is "false": scoped assistant management is an opt-in capability
+    // (user-guide: "off by default"). An admin can enable it via the general
+    // settings page; every /team-users* request is rejected until then.
+    Ok(load_setting(pool, ALLOW_TEAM_LEAD_MANAGE_ASSISTANTS_KEY, "false").await? == "true")
 }
 
 pub async fn app_current_year(pool: &crate::db::DatabasePool) -> i32 {
@@ -184,8 +185,9 @@ pub async fn load_admin_settings(pool: &crate::db::DatabasePool) -> AppResult<Ad
     let report_upload_enabled =
         load_setting(pool, REPORT_UPLOAD_ENABLED_KEY, "false").await? == "true";
     let report_upload_url = load_setting(pool, REPORT_UPLOAD_URL_KEY, "").await?;
-    let report_upload_password_set =
-        !load_setting(pool, REPORT_UPLOAD_PASSWORD_KEY, "").await?.is_empty();
+    let report_upload_password_set = !load_setting(pool, REPORT_UPLOAD_PASSWORD_KEY, "")
+        .await?
+        .is_empty();
     let report_upload_day_of_month: u8 = load_setting(pool, REPORT_UPLOAD_DAY_OF_MONTH_KEY, "5")
         .await?
         .parse()
@@ -194,13 +196,13 @@ pub async fn load_admin_settings(pool: &crate::db::DatabasePool) -> AppResult<Ad
     let backup_upload_enabled =
         load_setting(pool, BACKUP_UPLOAD_ENABLED_KEY, "false").await? == "true";
     let backup_upload_url = load_setting(pool, BACKUP_UPLOAD_URL_KEY, "").await?;
-    let backup_upload_password_set =
-        !load_setting(pool, BACKUP_UPLOAD_PASSWORD_KEY, "").await?.is_empty();
-    let backup_interval_days: u32 =
-        load_setting(pool, BACKUP_INTERVAL_DAYS_KEY, "1")
-            .await?
-            .parse()
-            .unwrap_or(1);
+    let backup_upload_password_set = !load_setting(pool, BACKUP_UPLOAD_PASSWORD_KEY, "")
+        .await?
+        .is_empty();
+    let backup_interval_days: u32 = load_setting(pool, BACKUP_INTERVAL_DAYS_KEY, "1")
+        .await?
+        .parse()
+        .unwrap_or(1);
 
     let allow_team_lead_manage_assistants = team_lead_assistant_management_enabled(pool).await?;
 

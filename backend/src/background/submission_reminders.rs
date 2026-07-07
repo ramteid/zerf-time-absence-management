@@ -73,15 +73,17 @@ fn advance_one_month(date: NaiveDate, desired_day: u32) -> NaiveDate {
     NaiveDate::from_ymd_opt(year, month, actual_day).unwrap_or(date)
 }
 
-/// Collect ISO week labels (e.g. "2026-W03") where the user has unsubmitted
+/// Collect the Mondays of fully elapsed weeks where the user has unsubmitted
 /// workdays, from their start_date up to (but not including) the current week.
 ///
-/// A workday is complete when it is covered by either:
-///   - at least one submitted/approved time entry (crediting or non-crediting), OR
-///   - an approved absence.
-///
-/// A workday with any draft or rejected entry is incomplete even if another
-/// entry on the same day is submitted.
+/// Completeness is evaluated per week by the canonical
+/// `services::reports::check_weeks_all_submitted`, the same rule that drives
+/// the dashboard Submissions tile, the team report, and the monthly PDF
+/// upload, so the reminder can never disagree with those views:
+///   - any draft or rejected entry anywhere in the week makes it incomplete;
+///   - otherwise every contract workday must be covered by a submitted or
+///     approved entry, a public holiday, an approved absence, or fall before
+///     the user's start date.
 async fn find_unsubmitted_weeks(
     pool: &DatabasePool,
     user_id: i64,
@@ -148,36 +150,23 @@ async fn find_unsubmitted_weeks(
         &category_flags,
     );
 
-    // Check each fully elapsed week using the same three-step logic as
-    // `check_weeks_all_submitted` in services/reports.rs so that reminders
-    // are only sent for weeks that are genuinely not yet submitted.
+    // Evaluate each fully elapsed week with the canonical helper so the
+    // reminder uses byte-for-byte the same rule as the Submissions tile,
+    // the team report, and the monthly PDF upload.
     let mut incomplete_week_mondays = Vec::new();
     let mut week_monday = first_monday;
     while week_monday <= last_checked_monday {
-        // Step 1: any incomplete (draft/rejected) entry anywhere in the
-        // Mon–Sun window means the week is not fully submitted.
-        let has_incomplete = (0..7i64)
-            .any(|d| incomplete_dates.contains(&(week_monday + chrono::Duration::days(d))));
-
-        // Step 2: if at least one day has a submitted/approved entry (and no
-        // incomplete entries per step 1), treat the whole week as submitted.
-        let has_submitted =
-            (0..7i64).any(|d| submitted_dates.contains(&(week_monday + chrono::Duration::days(d))));
-
-        // Step 3: if nothing was submitted, the week is only "excused" when
-        // every contract workday is either before the contract start, a
-        // public holiday, covered by an approved absence, or in the future.
-        let all_excused = !has_submitted
-            && (0..i64::from(workdays_per_week)).all(|d| {
-                let day = week_monday + chrono::Duration::days(d);
-                day < user_start
-                    || holiday_set.contains(&day)
-                    || absent_days.contains(&day)
-                    || day >= today
-            });
-
-        let week_incomplete = has_incomplete || (!has_submitted && !all_excused);
-        if week_incomplete {
+        let week_is_complete = crate::services::reports::check_weeks_all_submitted(
+            &[week_monday],
+            &holiday_set,
+            &absent_days,
+            &submitted_dates,
+            &incomplete_dates,
+            user_start,
+            workdays_per_week,
+            today,
+        );
+        if !week_is_complete {
             incomplete_week_mondays.push(week_monday);
         }
         week_monday += chrono::Duration::days(7);

@@ -116,6 +116,11 @@ pub(crate) async fn validate_entry(
             "Entries in the future are not allowed.",
         ));
     }
+    // Public holidays are intentionally NOT blocked here: like the documented
+    // sick-day exception, someone may still work (or be on call) on a public
+    // holiday. The day's target is 0 regardless (see reports::is_contract_workday
+    // / holiday_map), so any logged hours become a pure flextime gain with the
+    // same "day off, but you worked anyway" mechanics as the sick-leave case.
     // Validate that end is strictly after start.
     let _ = duration_min(&te.start_time, &te.end_time)?;
     let start_n = parse_time(&te.start_time)?;
@@ -385,11 +390,13 @@ impl TimeEntryDb {
         user_id_filter: Option<i64>,
         status_filter: Option<String>,
     ) -> AppResult<Vec<TimeEntry>> {
-        // Always exclude entries from users who have time tracking disabled.
-        // Their historical rows are kept immutably but must not surface in any
-        // team or approval view.
+        // Always exclude entries from users who have time tracking disabled or
+        // are archived. Their historical rows are kept immutably but must not
+        // surface in any team or approval view (the handler already rejects
+        // explicit user_id filters targeting inactive users; this keeps the
+        // unfiltered listing consistent with that rule).
         let mut builder = QueryBuilder::<Postgres>::new(format!(
-            "{TE_SELECT} WHERE user_id IN (SELECT id FROM users WHERE tracks_time=TRUE)"
+            "{TE_SELECT} WHERE user_id IN (SELECT id FROM users WHERE tracks_time=TRUE AND active=TRUE)"
         ));
         if !is_admin {
             // Non-admin leads: team members only (active, non-admin direct reports).
@@ -443,20 +450,30 @@ impl TimeEntryDb {
         )
     }
 
-    /// Revert all submitted entries for a user back to draft. Used when
-    /// time tracking is disabled so they don't linger in the approval queue
-    /// and don't reappear if tracking is later re-enabled.
+    /// Revert all submitted entries for a user back to draft and return the
+    /// affected week starts so callers can clear pending review notifications
+    /// after their transaction commits.
     pub async fn revert_submitted_to_draft_tx(
         tx: &mut sqlx::PgConnection,
         user_id: i64,
-    ) -> AppResult<()> {
-        sqlx::query(
-            "UPDATE time_entries SET status='draft' WHERE user_id=$1 AND status='submitted'",
+    ) -> AppResult<Vec<NaiveDate>> {
+        let rows: Vec<(NaiveDate,)> = sqlx::query_as(
+            "UPDATE time_entries \
+             SET status='draft', submitted_at=NULL, reviewed_by=NULL, \
+                 reviewed_at=NULL, rejection_reason=NULL, updated_at=CURRENT_TIMESTAMP \
+             WHERE user_id=$1 AND status='submitted' \
+             RETURNING entry_date",
         )
         .bind(user_id)
-        .execute(tx)
+        .fetch_all(tx)
         .await?;
-        Ok(())
+        let mut weeks: Vec<NaiveDate> = rows
+            .into_iter()
+            .map(|(entry_date,)| crate::time_calc::week_monday(entry_date))
+            .collect();
+        weeks.sort();
+        weeks.dedup();
+        Ok(weeks)
     }
 
     pub async fn find_by_id_for_update(
@@ -731,7 +748,11 @@ impl TimeEntryDb {
     /// Used when the user has `allow_submission_without_approval=TRUE`: the
     /// system is the implicit reviewer, so `reviewed_by` is set to the user's
     /// own id. Returns the IDs that were actually transitioned.
-    pub async fn submit_batch_auto_approved(&self, user_id: i64, ids: &[i64]) -> AppResult<Vec<i64>> {
+    pub async fn submit_batch_auto_approved(
+        &self,
+        user_id: i64,
+        ids: &[i64],
+    ) -> AppResult<Vec<i64>> {
         let mut tx = self.pool.begin().await?;
         let mut approved = Vec::new();
         for &id in ids {
@@ -882,6 +903,38 @@ impl TimeEntryDb {
         .bind(to)
         .fetch_all(&self.pool)
         .await?)
+    }
+
+    /// True when the user still has ANY entry in `submitted` status.
+    /// Used to decide when legacy submitter-scoped submission notifications can
+    /// be cleared after week-scoped notifications have already been resolved.
+    pub async fn has_any_submitted_entries(&self, user_id: i64) -> AppResult<bool> {
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM time_entries WHERE user_id=$1 AND status='submitted'",
+        )
+        .bind(user_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(count > 0)
+    }
+
+    pub async fn has_submitted_entries_in_week(
+        &self,
+        user_id: i64,
+        week_monday: NaiveDate,
+    ) -> AppResult<bool> {
+        let week_end = week_monday + chrono::Duration::days(6);
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM time_entries \
+             WHERE user_id=$1 AND status='submitted' \
+             AND entry_date BETWEEN $2 AND $3",
+        )
+        .bind(user_id)
+        .bind(week_monday)
+        .bind(week_end)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(count > 0)
     }
 
     pub async fn get_submitted_dates_in_range(

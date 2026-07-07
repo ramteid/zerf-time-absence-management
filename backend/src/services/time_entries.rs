@@ -67,6 +67,81 @@ pub fn week_start(date: NaiveDate) -> NaiveDate {
     crate::time_calc::week_monday(date)
 }
 
+const LEGACY_TIMESHEET_SUBMISSION_REFERENCE_TYPE: &str = "timesheet_submission";
+
+pub fn timesheet_submission_reference_type(week_monday: NaiveDate) -> String {
+    format!(
+        "{}:{}",
+        LEGACY_TIMESHEET_SUBMISSION_REFERENCE_TYPE,
+        week_monday.format("%Y-%m-%d")
+    )
+}
+
+pub async fn clear_submission_pending_for_weeks(
+    app_state: &AppState,
+    user_id: i64,
+    week_mondays: &[NaiveDate],
+) {
+    if week_mondays.is_empty() {
+        return;
+    }
+
+    let mut unique_weeks: Vec<NaiveDate> = week_mondays.to_vec();
+    unique_weeks.sort();
+    unique_weeks.dedup();
+    for week_monday in unique_weeks {
+        match app_state
+            .db
+            .time_entries
+            .has_submitted_entries_in_week(user_id, week_monday)
+            .await
+        {
+            Ok(false) => {
+                let reference_type = timesheet_submission_reference_type(week_monday);
+                crate::services::notifications::clear_pending_for_reference(
+                    app_state,
+                    &reference_type,
+                    user_id,
+                )
+                .await;
+            }
+            Ok(true) => {}
+            Err(e) => {
+                tracing::warn!(
+                    target: "zerf::time_entries",
+                    "has_submitted_entries_in_week({}, {}) failed: {e}",
+                    user_id,
+                    week_monday
+                );
+            }
+        }
+    }
+
+    match app_state
+        .db
+        .time_entries
+        .has_any_submitted_entries(user_id)
+        .await
+    {
+        Ok(false) => {
+            crate::services::notifications::clear_pending_for_reference(
+                app_state,
+                LEGACY_TIMESHEET_SUBMISSION_REFERENCE_TYPE,
+                user_id,
+            )
+            .await;
+        }
+        Ok(true) => {}
+        Err(e) => {
+            tracing::warn!(
+                target: "zerf::time_entries",
+                "has_any_submitted_entries({}) failed: {e}",
+                user_id
+            );
+        }
+    }
+}
+
 /// Enrich entries with the `counts_as_work` flag from their category.
 /// Fetches each distinct category only once to minimise DB round-trips.
 pub async fn attach_counts_as_work(
@@ -198,7 +273,9 @@ pub async fn create(
         .is_enabled_for_user(category_id, requester.id)
         .await?
     {
-        return Err(AppError::BadRequest("Category not available for you.".into()));
+        return Err(AppError::BadRequest(
+            "Category not available for you.".into(),
+        ));
     }
     let entry_data = crate::repository::NewEntryData {
         entry_date,
@@ -249,7 +326,9 @@ pub async fn update(
             .is_enabled_for_user(input.category_id, requester.id)
             .await?
         {
-            return Err(AppError::BadRequest("Category not available for you.".into()));
+            return Err(AppError::BadRequest(
+                "Category not available for you.".into(),
+            ));
         }
     }
     let entry_data = crate::repository::NewEntryData {
@@ -339,6 +418,15 @@ mod tests {
         assert_eq!(svc.status, "rejected");
         assert_eq!(svc.rejection_reason.as_deref(), Some("incorrect category"));
         assert_eq!(svc.reviewed_by, Some(1));
+    }
+
+    #[test]
+    fn timesheet_submission_reference_type_is_week_scoped() {
+        let week_monday = NaiveDate::from_ymd_opt(2026, 5, 18).unwrap();
+        assert_eq!(
+            timesheet_submission_reference_type(week_monday),
+            "timesheet_submission:2026-05-18"
+        );
     }
 
     /// `require_tracks_time` is a thin delegation guard; verify that

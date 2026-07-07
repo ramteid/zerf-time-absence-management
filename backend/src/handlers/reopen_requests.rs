@@ -9,6 +9,7 @@ use crate::services::reopen_requests::{
     approver_ids_to_notify, assert_monday, audit_reopened_entries, notification_language,
     notify_assigned_approvers_if_admin_acted, repo_rr_to_service, ReopenRequest,
 };
+use crate::services::time_entries::clear_submission_pending_for_weeks;
 use crate::AppState;
 use axum::{
     extract::{Path, State},
@@ -136,12 +137,7 @@ pub async fn create(
         audit_reopened_entries(&app_state.pool, requester.id, entries).await;
     }
     if auto_reopen_pending_submission {
-        crate::services::notifications::clear_pending_for_reference(
-            &app_state,
-            "timesheet_submission",
-            requester.id,
-        )
-        .await;
+        clear_submission_pending_for_weeks(&app_state, requester.id, &[body.week_start]).await;
     }
 
     audit::log(

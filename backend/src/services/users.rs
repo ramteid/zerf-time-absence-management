@@ -106,8 +106,7 @@ pub async fn assert_team_lead_assistant_list_access(
     if requester.is_admin() || !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
-    if !crate::services::settings::team_lead_assistant_management_enabled(&app_state.pool).await?
-    {
+    if !crate::services::settings::team_lead_assistant_management_enabled(&app_state.pool).await? {
         return Err(AppError::Forbidden);
     }
     Ok(())
@@ -320,27 +319,25 @@ pub async fn create_repo_user(
     tracks_time: bool,
 ) -> AppResult<i64> {
     let default_leave_days = UserDb::get_default_leave_days_tx(&mut *tx).await?;
-    Ok(
-        UserDb::create(
-            tx,
-            email,
-            password_hash,
-            first_name,
-            last_name,
-            role,
-            weekly_hours,
-            workdays_per_week,
-            start_date,
-            hire_date,
-            true,
-            overtime_start_balance_min,
-            tracks_time,
-            None,
-            None,
-            default_leave_days,
-        )
-        .await?,
+    Ok(UserDb::create(
+        tx,
+        email,
+        password_hash,
+        first_name,
+        last_name,
+        role,
+        weekly_hours,
+        workdays_per_week,
+        start_date,
+        hire_date,
+        true,
+        overtime_start_balance_min,
+        tracks_time,
+        None,
+        None,
+        default_leave_days,
     )
+    .await?)
 }
 
 pub async fn insert_approver_tx(
@@ -386,8 +383,8 @@ pub async fn close_pending_for_user_tx(
     tx: &mut crate::db::PgConnection,
     user_id: i64,
     reviewer_id: i64,
-) -> AppResult<()> {
-    TimeEntryDb::revert_submitted_to_draft_tx(tx, user_id).await?;
+) -> AppResult<Vec<chrono::NaiveDate>> {
+    let submitted_weeks = TimeEntryDb::revert_submitted_to_draft_tx(tx, user_id).await?;
     AbsenceDb::reject_pending_for_user_tx(tx, user_id, reviewer_id, "Time tracking disabled.")
         .await?;
     ReopenRequestDb::reject_pending_for_user_tx(
@@ -397,7 +394,7 @@ pub async fn close_pending_for_user_tx(
         "Time tracking disabled.",
     )
     .await?;
-    Ok(())
+    Ok(submitted_weeks)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -456,10 +453,7 @@ pub async fn delete_sessions_for_user_tx(
 /// Delegate to the repository: check whether `user_id` has any time entries or
 /// absences. Used by the delete handler to guard against hard-deleting users
 /// with historical data.
-pub async fn has_time_data_tx(
-    tx: &mut crate::db::PgConnection,
-    user_id: i64,
-) -> AppResult<bool> {
+pub async fn has_time_data_tx(tx: &mut crate::db::PgConnection, user_id: i64) -> AppResult<bool> {
     UserDb::has_time_data_tx(tx, user_id).await
 }
 
@@ -601,10 +595,8 @@ pub async fn create(
         let allowed = is_team_lead_role(&requester.role)
             && requester.active
             && is_assistant_role(&body.role)
-            && crate::services::settings::team_lead_assistant_management_enabled(
-                &app_state.pool,
-            )
-            .await?;
+            && crate::services::settings::team_lead_assistant_management_enabled(&app_state.pool)
+                .await?;
         if !allowed {
             return Err(AppError::Forbidden);
         }
@@ -825,9 +817,7 @@ pub async fn archive(
         return Err(AppError::Forbidden);
     }
     if target_id == requester.id {
-        return Err(AppError::BadRequest(
-            "You cannot archive yourself.".into(),
-        ));
+        return Err(AppError::BadRequest("You cannot archive yourself.".into()));
     }
 
     let mut tx = app_state.db.users.begin().await?;
@@ -882,6 +872,13 @@ pub async fn archive(
         UserDb::reassign_approver_tx(&mut tx, *dep_id, target_id, new_approver_id).await?;
     }
 
+    // Close out anything still sitting in an approval queue, mirroring the
+    // tracks_time-disable path: submitted time entries go back to draft so
+    // they stop counting toward approval queues and weekly approval reminders.
+    // Approved/rejected history is untouched.
+    let submitted_weeks_to_clear =
+        TimeEntryDb::revert_submitted_to_draft_tx(&mut tx, target_id).await?;
+
     // Auto-reject pending absences owned by the archived user.
     AbsenceDb::reject_pending_for_user_tx(
         &mut tx,
@@ -907,6 +904,13 @@ pub async fn archive(
     SessionDb::delete_for_user_tx(&mut tx, target_id).await?;
 
     tx.commit().await?;
+
+    crate::services::time_entries::clear_submission_pending_for_weeks(
+        app_state,
+        target_id,
+        &submitted_weeks_to_clear,
+    )
+    .await;
 
     audit::log(
         &app_state.pool,
@@ -998,9 +1002,7 @@ pub async fn archive_assistant(
     // without the admin-role check, since team leads have explicit permission via
     // the assistant-management feature flag.
     if target_id == requester.id {
-        return Err(AppError::BadRequest(
-            "You cannot archive yourself.".into(),
-        ));
+        return Err(AppError::BadRequest("You cannot archive yourself.".into()));
     }
 
     let mut tx = app_state.db.users.begin().await?;
@@ -1010,6 +1012,9 @@ pub async fn archive_assistant(
     if target.archived_at.is_some() {
         return Err(AppError::BadRequest("User is already archived.".into()));
     }
+
+    let submitted_weeks_to_clear =
+        TimeEntryDb::revert_submitted_to_draft_tx(&mut tx, target_id).await?;
 
     // Auto-reject pending absences and reopen requests.
     AbsenceDb::reject_pending_for_user_tx(
@@ -1030,6 +1035,13 @@ pub async fn archive_assistant(
     UserDb::archive_tx(&mut tx, target_id).await?;
     SessionDb::delete_for_user_tx(&mut tx, target_id).await?;
     tx.commit().await?;
+
+    crate::services::time_entries::clear_submission_pending_for_weeks(
+        app_state,
+        target_id,
+        &submitted_weeks_to_clear,
+    )
+    .await;
 
     audit::log(
         &app_state.pool,

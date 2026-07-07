@@ -373,6 +373,22 @@ pub async fn create_absence(
         body.end_date,
     )
     .await?;
+    // Requests that need review require approval routing. Verify it BEFORE the
+    // insert: a non-admin without an active assigned approver must be rejected
+    // while nothing has been persisted yet, not after the absence already
+    // exists (reserving budget and blocking time entries on its days).
+    // Auto-approved requests (sick-like, start date in the past) don't need a
+    // reviewer, so they are exempt.
+    let initial_status = if category.auto_approve_past && body.start_date <= today_date {
+        "approved"
+    } else {
+        "requested"
+    };
+    let approver_ids = if initial_status == "requested" {
+        crate::services::auth::required_approval_recipient_ids(&app_state.pool, requester).await?
+    } else {
+        Vec::new()
+    };
     let mut transaction = app_state.db.absences.begin().await?;
     crate::repository::AbsenceDb::lock_user_scope_tx(&mut transaction, requester.id).await?;
     crate::repository::AbsenceDb::assert_no_overlap_tx(
@@ -409,11 +425,6 @@ pub async fn create_absence(
         )
         .await?;
     }
-    let initial_status = if category.auto_approve_past && body.start_date <= today_date {
-        "approved"
-    } else {
-        "requested"
-    };
     let new_absence_id = crate::repository::AbsenceDb::insert_tx(
         &mut transaction,
         requester.id,
@@ -439,9 +450,6 @@ pub async fn create_absence(
     .await;
     if created_absence.status == "requested" {
         let language = notification_language(&app_state.pool).await;
-        let approver_ids =
-            crate::services::auth::required_approval_recipient_ids(&app_state.pool, requester)
-                .await?;
         notify_approvers(
             app_state,
             &language,
@@ -564,6 +572,15 @@ pub async fn update_absence(
     } else {
         "requested"
     };
+    // Same guard as create_absence: when the edited absence stays in review,
+    // approval routing must exist. Check before the UPDATE is committed so a
+    // missing approver rolls the whole edit back instead of persisting a
+    // request nobody can review.
+    let approver_ids = if updated_status == "requested" {
+        crate::services::auth::required_approval_recipient_ids(&app_state.pool, requester).await?
+    } else {
+        Vec::new()
+    };
     crate::repository::AbsenceDb::update_fields_tx(
         &mut transaction,
         absence_id,
@@ -589,9 +606,6 @@ pub async fn update_absence(
     .await;
     if absence_after_update.status == "requested" {
         let language = notification_language(&app_state.pool).await;
-        let approver_ids =
-            crate::services::auth::required_approval_recipient_ids(&app_state.pool, requester)
-                .await?;
         notify_approvers(
             app_state,
             &language,
@@ -608,9 +622,7 @@ pub async fn update_absence(
         // entry so it doesn't linger unread alongside the new informational
         // auto-approval notice below.
         crate::services::notifications::clear_pending_for_reference(
-            app_state,
-            "absences",
-            absence_id,
+            app_state, "absences", absence_id,
         )
         .await;
         notify_sick_auto_approved(app_state, requester, &absence_after_update, absence_id).await;
@@ -676,9 +688,7 @@ pub async fn cancel_absence(
             // approver's unread queue so it doesn't linger alongside the new
             // "cancelled" notice below.
             crate::services::notifications::clear_pending_for_reference(
-                app_state,
-                "absences",
-                absence_id,
+                app_state, "absences", absence_id,
             )
             .await;
             audit::log(
@@ -832,12 +842,8 @@ pub async fn approve_absence(
     // Drop the pending entry from every other approver's queue (and clear
     // the requester's own dashboard chip). The history row stays in the
     // notifications table for audit purposes — only `is_read` flips.
-    crate::services::notifications::clear_pending_for_reference(
-        app_state,
-        "absences",
-        absence_id,
-    )
-    .await;
+    crate::services::notifications::clear_pending_for_reference(app_state, "absences", absence_id)
+        .await;
     audit::log(
         &app_state.pool,
         requester.id,
@@ -934,12 +940,8 @@ pub async fn reject_absence(
     transaction.commit().await?;
     // See approve_absence: clear the pending entry from every approver's
     // queue once the decision has been recorded.
-    crate::services::notifications::clear_pending_for_reference(
-        app_state,
-        "absences",
-        absence_id,
-    )
-    .await;
+    crate::services::notifications::clear_pending_for_reference(app_state, "absences", absence_id)
+        .await;
     audit::log(
         &app_state.pool,
         requester.id,
@@ -1031,12 +1033,8 @@ pub async fn approve_cancellation_absence(
     }
     transaction.commit().await?;
     // Cancellation decided — drop the pending entry from every approver's queue.
-    crate::services::notifications::clear_pending_for_reference(
-        app_state,
-        "absences",
-        absence_id,
-    )
-    .await;
+    crate::services::notifications::clear_pending_for_reference(app_state, "absences", absence_id)
+        .await;
     audit::log(
         &app_state.pool,
         requester.id,
@@ -1127,12 +1125,8 @@ pub async fn reject_cancellation_absence(
     }
     transaction.commit().await?;
     // Cancellation decided — drop the pending entry from every approver's queue.
-    crate::services::notifications::clear_pending_for_reference(
-        app_state,
-        "absences",
-        absence_id,
-    )
-    .await;
+    crate::services::notifications::clear_pending_for_reference(app_state, "absences", absence_id)
+        .await;
     audit::log(
         &app_state.pool,
         requester.id,

@@ -538,18 +538,18 @@ The `Submissions` tile shows whether all required past weeks have been submitted
 
 ### How completeness is determined
 
-Completeness is checked at the **week level**, not the day level. It does not
-matter how many days you booked or whether you reached your weekly target hours.
-What counts is that you submitted the week.
+Completeness is checked **per contract workday** within each fully elapsed
+week. It does not matter whether you reached your weekly target hours; what
+counts is that every required workday is covered.
 
 A week is considered **complete** when:
 
-- At least one entry in the week is submitted or approved (crediting or
-  non-crediting), **and** no entry in the week is still in draft or rejected
-  state, **or**
-- The week has no entries at all and every contract workday is excused by an
-  approved absence, a public holiday, or falls before your contract start date.
-  (This covers e.g. full-vacation weeks.)
+- No entry anywhere in the week is still in draft or rejected state, **and**
+- Every contract workday in the week is covered by at least one submitted or
+  approved entry (crediting or non-crediting), **or** excused by an approved
+  absence, a public holiday, or falling before your contract start date.
+  (A week with no entries at all is complete when every contract workday is
+  excused, for example a full-vacation week.)
 
 For users with role `assistant`, past-week completeness is always treated as
 complete.
@@ -558,7 +558,13 @@ A week is considered **incomplete** when:
 
 - Any entry anywhere in the week is still in draft or rejected state (the week
   has not been cleanly submitted), **or**
-- The week has no entries and at least one contract workday is not excused.
+- At least one contract workday has no submitted/approved entry and is not
+  excused. Submitting only some days of a week is not enough; the remaining
+  workdays keep the week incomplete.
+
+The same rule drives the Submissions tile, the month report, the team
+report's submission column, the monthly submission reminder, and the
+scheduled timesheet PDF upload. They can never disagree with each other.
 
 ### Important: non-crediting entries affect completeness
 
@@ -650,12 +656,14 @@ The carryover expiry date is configured in Settings → General as a month and d
 - Carryover for a given year expires on that date within the year.
 - After expiry, transferred carryover is not part of total usable budget.
 
-Carryover remaining is consumed by approved taken days:
+Carryover remaining is consumed by taken days that still reserve budget
+(approved days, plus cancellation-pending days; a cancellation is not final
+until the approver decides):
 
 - With expiry date:
-	- Only approved days taken up to min(expiry date, today) reduce carryover remaining.
+	- Only days taken up to min(expiry date, today) reduce carryover remaining.
 - Without valid expiry date:
-	- All already taken approved days reduce carryover remaining.
+	- All already taken days reduce carryover remaining.
 
 Approved upcoming days do not consume carryover remaining yet, because they are not taken yet.
 
@@ -764,6 +772,10 @@ unread badge or in the dashboard's "open requests" lists for anyone else. So
 once a colleague has acted, you do not need to refresh or re-check whether
 your action is still required.
 
+Week submission notifications are tracked per week. If one submitted week is
+approved or rejected while another week from the same person is still pending,
+only the decided week's notification is marked read.
+
 ### Important: non-crediting entries trigger reminders too
 
 Because non-crediting entries participate in the full approval workflow:
@@ -835,6 +847,11 @@ If approved absence overlaps a day with recorded work:
 Result: the day can produce a positive flextime delta.
 
 This is intentional. It supports cases like partial sick days where someone worked part of the day.
+
+The same mechanics apply to public holidays: logging time on a holiday is
+allowed (someone may work or be on call that day). The daily target stays
+`0`, so any logged hours become a pure flextime gain, exactly like the
+sick-day case above.
 
 ## Approval structure examples
 
@@ -964,7 +981,9 @@ Your week is likely still in `Draft`. Approvers only review after `Submit Week`.
 Common reasons:
 
 - range contains no effective workday,
-- non-sick absence overlaps existing time entries.
+- non-sick absence overlaps existing time entries. The request itself is
+  accepted, but the approver is blocked from approving it until the
+  conflicting entries are removed or rejected.
 
 ### Why does my flextime increase on a sick day?
 
@@ -1003,8 +1022,9 @@ following rules apply:
 - Total crediting hours on that day must not exceed 14 hours.
 - The time range must not overlap with any existing non-rejected entry on the
   same day.
-- The day must not already be covered by an approved non-sick absence. Sick
-  leave does not block time entry creation; all other absence types do.
+- The day must not be covered by a non-sick absence that is approved,
+  pending cancellation, or still awaiting approval. Sick-like (auto-approve)
+  absences do not block time entry creation; all other absence types do.
 
 A new entry is always created in draft status.
 
@@ -1105,8 +1125,11 @@ Vacation, sick leave, training, special leave, unpaid leave, general absence, an
 
 - Any absence overlapping another existing absence is rejected.
 - A non-sick absence (vacation, training, etc.) that overlaps days with
-  existing time entries is rejected. Delete or move the conflicting entries
-  first.
+  existing time entries can still be *requested*. The conflict is checked at
+  **approval** time, not at creation. The approver cannot approve it until the
+  conflicting entries are removed or rejected (see [Overlap
+  rules](#overlap-rules)). Once the request is pending, creating *new* time
+  entries on the covered days is blocked so the conflict cannot get worse.
 - Sick leave overlapping existing time entries is allowed. The daily target
   becomes 0 for covered workdays, but the existing entries still count as
   worked hours.
@@ -1414,8 +1437,8 @@ creation apply to each field.
 **Guards to prevent accidental lockout:**
 
 - An admin cannot set their own role to a non-admin value.
-- Removing admin rights from a user requires at least 2 active admins
-  remaining after the change.
+- Removing admin rights from a user requires at least one other active admin
+  to remain after the change (the last active admin can never be demoted).
 - A user who still has *active* direct reports assigned cannot have their role
   changed to a non-approver role. Reassign those users first. Archived
   dependents (which keep their approver link for restore purposes) do not
@@ -1440,6 +1463,9 @@ What archiving does:
 - The user disappears from the normal user list, approver pickers, team
   reports, and dashboards.
 - All historical time entries, approved absences, and audit records are kept.
+- Time entries still waiting for approval (`submitted`) are reverted to
+  `draft` so they leave every approval queue and stop triggering approval
+  reminders. Approved and rejected entries are untouched.
 - All pending absence requests and pending reopen requests owned by the user
   are auto-rejected with the reason "User account archived."
 - Already-approved absences (including future ones) are preserved.

@@ -478,7 +478,7 @@ grep -rn "axum::extract\|axum::response\|axum::routing\|axum::Json" backend/src/
 - Add comprehensive inline comments e. g. explaining decisions, intent and high-level logic.
 - Translate all texts that are displayed to the user (UI, errors, E-Mail, etc.)
 - Translations must be handled centrally in i18n.rs for the backend and i18n.js for the frontend.
-- Update docs/user-guide.md to reflect the correct app behavior.
+- Update docs/user-guide.md to reflect the correct app behavior. It is a document meant for human users and should not contain technical background, but the mere user-view behavior. Use natural, simple and concise language.
 
 ### Migrations
 

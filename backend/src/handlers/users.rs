@@ -133,10 +133,7 @@ pub async fn list(
                 let mut v = serde_json::to_value(repo_user_to_auth_user(u))
                     .unwrap_or(serde_json::Value::Null);
                 if let serde_json::Value::Object(ref mut map) = v {
-                    map.insert(
-                        "approver_ids".to_string(),
-                        serde_json::json!(approver_ids),
-                    );
+                    map.insert("approver_ids".to_string(), serde_json::json!(approver_ids));
                 }
                 v
             })
@@ -535,14 +532,12 @@ pub async fn update(
     // absences/reopen requests) are closed out atomically so they don't
     // reappear in queues if tracking is ever re-enabled.
     let disabling_time_tracking = effective_tracks_time == Some(false) && previous_user.tracks_time;
-    if disabling_time_tracking {
-        crate::services::users::close_pending_for_user_tx(
-            &mut transaction,
-            user_id,
-            requester.id,
-        )
-        .await?;
-    }
+    let submitted_weeks_to_clear = if disabling_time_tracking {
+        crate::services::users::close_pending_for_user_tx(&mut transaction, user_id, requester.id)
+            .await?
+    } else {
+        Vec::new()
+    };
     // When (re-)enabling time tracking for an admin who currently has it
     // disabled, reset the start_date to today unless the caller is explicitly
     // setting a different start_date. Without this, the admin's old start_date
@@ -612,6 +607,12 @@ pub async fn update(
             crate::services::users::delete_sessions_for_user_tx(&mut transaction, user_id).await;
     }
     transaction.commit().await?;
+    crate::services::time_entries::clear_submission_pending_for_weeks(
+        &app_state,
+        user_id,
+        &submitted_weeks_to_clear,
+    )
+    .await;
     let updated_user = app_state
         .db
         .users
@@ -667,8 +668,7 @@ pub async fn delete_user(
     }
     // Guard: users with historical time/absence data must be archived, not hard-deleted.
     // This preserves audit trails, reports, and absence history.
-    let has_data =
-        crate::services::users::has_time_data_tx(&mut transaction, user_id).await?;
+    let has_data = crate::services::users::has_time_data_tx(&mut transaction, user_id).await?;
     if has_data {
         return Err(AppError::BadRequest(
             "User has historical data. Use archive instead.".into(),
@@ -893,7 +893,9 @@ pub async fn archive_user(
         .into_iter()
         .map(|(k, v)| {
             k.parse::<i64>()
-                .map_err(|_| AppError::BadRequest("Invalid user id key in approver_replacements.".into()))
+                .map_err(|_| {
+                    AppError::BadRequest("Invalid user id key in approver_replacements.".into())
+                })
                 .map(|id| (id, v))
         })
         .collect::<AppResult<HashMap<i64, i64>>>()?;

@@ -43,11 +43,11 @@ const TRANSLATIONS = {
     help_cost_type_none:
       "Approved days are simply absent — no balance is deducted from any account. Use for general absence, training, special leave, etc.",
     help_counts_as_vacation:
-      "Approved days are deducted from the employee's annual vacation balance (with carryover and expiry rules applied). Mutually exclusive with \"Keeps work target\".",
+      'Approved days are deducted from the employee\'s annual vacation balance (with carryover and expiry rules applied). Mutually exclusive with "Keeps work target".',
     help_keeps_work_target:
-      "Approved days keep their normal work target instead of removing it, so the absence costs the employee's flextime balance — typically used for \"flextime reduction\" categories. The flextime balance is checked at request and at approval to prevent breaching the configured minimum. Mutually exclusive with \"Counts as vacation\".",
+      'Approved days keep their normal work target instead of removing it, so the absence costs the employee\'s flextime balance — typically used for "flextime reduction" categories. The flextime balance is checked at request and at approval to prevent breaching the configured minimum. Mutually exclusive with "Counts as vacation".',
     help_auto_approve_past:
-      "Requests with a start date on or before today are approved automatically (no approver review). Time entries can coexist with the absence on the same day (allows partial-day overlap like \"worked the morning, called in sick at noon\"). Backdating is limited to 30 days. Typical use: sick leave.",
+      'Requests with a start date on or before today are approved automatically (no approver review). Time entries can coexist with the absence on the same day (allows partial-day overlap like "worked the morning, called in sick at noon"). Backdating is limited to 30 days. Typical use: sick leave.',
     "Counts as work": "Counts as work",
     help_submission_status:
       "Whether all required weeks in the selected month have been submitted.",
@@ -306,7 +306,8 @@ const TRANSLATIONS = {
     "On the configured day of each month, an individual timesheet PDF is queued for every employee. Each PDF is uploaded as soon as the employee has fully submitted all their weeks — late submitters are automatically caught up on the next daily check.":
       "On the configured day of each month, an individual timesheet PDF is queued for every employee. Each PDF is uploaded as soon as the employee has fully submitted all their weeks — late submitters are automatically caught up on the next daily check.",
     "Category not available for you.": "Category not available for you.",
-    "Absence category not available for you.": "Absence category not available for you.",
+    "Absence category not available for you.":
+      "Absence category not available for you.",
     "Available to employees": "Available to employees",
     "Unknown employee id.": "Unknown employee id.",
     "Unknown category id.": "Unknown category id.",
@@ -314,18 +315,18 @@ const TRANSLATIONS = {
     "Team leads": "Team leads",
     "Allow team leads to create assistant users":
       "Allow team leads to create assistant users",
-    'When enabled, team leads get a restricted Users tab where they may only create and manage "Assistant" users assigned to them. No other role can be created there. Enabled by default.':
-      'When enabled, team leads get a restricted Users tab where they may only create and manage "Assistant" users assigned to them. No other role can be created there. Enabled by default.',
+    'When enabled, team leads get a restricted Users tab where they may only create and manage "Assistant" users assigned to them. No other role can be created there. Disabled by default.':
+      'When enabled, team leads get a restricted Users tab where they may only create and manage "Assistant" users assigned to them. No other role can be created there. Disabled by default.',
     "You can only manage assistants assigned to you.":
       "You can only manage assistants assigned to you.",
     "You will be set as their approver.": "You will be set as their approver.",
     // --- User archive / restore ---
     "Archive user?": "Archive user?",
-    "Archive": "Archive",
+    Archive: "Archive",
     "User archived.": "User archived.",
     "Archived Users": "Archived Users",
     "Archived on {date}": "Archived on {date}",
-    "Restore": "Restore",
+    Restore: "Restore",
     "Restore user?": "Restore user?",
     "User restored.": "User restored.",
     "No archived users.": "No archived users.",
@@ -340,12 +341,15 @@ const TRANSLATIONS = {
     "Restore this archived account? The user will receive a temporary password and must change it on first login.":
       "Restore this archived account? The user will receive a temporary password and must change it on first login.",
     "New start date (optional)": "New start date (optional)",
-    "Reset start date to avoid flextime gap": "Reset start date to avoid flextime gap",
+    "Reset start date to avoid flextime gap":
+      "Reset start date to avoid flextime gap",
     "Keep original start date": "Keep original start date",
     "If the account was archived for an extended period, resetting the start date prevents a large negative flextime balance from accumulating during the absence.":
       "If the account was archived for an extended period, resetting the start date prevents a large negative flextime balance from accumulating during the absence.",
-    "Approver required for non-admin users.": "Approver required for non-admin users.",
-    "User has historical data. Use archive instead.": "User has historical data. Use archive instead.",
+    "Approver required for non-admin users.":
+      "Approver required for non-admin users.",
+    "User has historical data. Use archive instead.":
+      "User has historical data. Use archive instead.",
   },
   de: {
     "Loading...": "Wird geladen...",
@@ -656,14 +660,17 @@ const TRANSLATIONS = {
     "No cost (free day)": "Keine Kosten (freier Tag)",
     "Counts as vacation": "Zählt als Urlaub",
     "Keeps work target (flextime)": "Arbeitssoll bleibt (Gleitzeit)",
-    "Auto-approve past dates (sick-like)": "Vergangene Daten automatisch genehmigen (Krankmeldung)",
+    "Auto-approve past dates (sick-like)":
+      "Vergangene Daten automatisch genehmigen (Krankmeldung)",
     "Type is required.": "Typ ist erforderlich.",
     "Not enough flextime balance for this absence.":
       "Nicht genügend Gleitzeitguthaben für diese Abwesenheit.",
     "Cannot change absence category cost type (vacation ↔ flextime). Cancel and re-request with the new category.":
       "Der Kostentyp der Abwesenheitskategorie (Urlaub ↔ Gleitzeit) kann nicht geändert werden. Bitte Abwesenheit stornieren und neu beantragen.",
-    "Absence category slug already exists.": "Abwesenheitskategorie-Slug existiert bereits.",
-    "A category cannot both deduct vacation and reduce flextime.": "Eine Kategorie kann nicht gleichzeitig Urlaub abziehen und Gleitzeit reduzieren.",
+    "Absence category slug already exists.":
+      "Abwesenheitskategorie-Slug existiert bereits.",
+    "A category cannot both deduct vacation and reduce flextime.":
+      "Eine Kategorie kann nicht gleichzeitig Urlaub abziehen und Gleitzeit reduzieren.",
     "Cannot change the cost or approval behavior of a category that already has absences. Deactivate this category and create a new one with the desired flags instead.":
       "Die Kosten- oder Genehmigungs-Logik einer Kategorie mit bereits vorhandenen Abwesenheiten kann nicht geändert werden. Bitte diese Kategorie deaktivieren und eine neue mit den gewünschten Eigenschaften anlegen.",
     "General Settings": "Allgemeine Einstellungen",
@@ -868,10 +875,12 @@ const TRANSLATIONS = {
     "Cannot delete the last active admin.":
       "Der letzte aktive Administrator kann nicht gelöscht werden.",
     "User not found or inactive.": "Benutzer nicht gefunden oder inaktiv.",
-    "Inactive users cannot log in.": "Inaktive Benutzer können sich nicht anmelden.",
+    "Inactive users cannot log in.":
+      "Inaktive Benutzer können sich nicht anmelden.",
     // tracks_time
     "Enable time tracking": "Zeiterfassung aktivieren",
-    "Enable time tracking for this account": "Zeiterfassung für dieses Konto aktivieren",
+    "Enable time tracking for this account":
+      "Zeiterfassung für dieses Konto aktivieren",
     "Disable time tracking": "Zeiterfassung deaktivieren",
     "Disable time tracking?": "Zeiterfassung deaktivieren?",
     "When disabled, this admin works in management-only mode (no time entries or absences).":
@@ -1298,7 +1307,8 @@ const TRANSLATIONS = {
       "Das Backup-Intervall wird vom Backup-Container zu Beginn jedes Zyklus aus der Datenbank gelesen. Änderungen werden beim nächsten Backup-Lauf wirksam. Die 10 neuesten lokalen Backup-Dateien werden automatisch aufbewahrt; ältere werden gelöscht. Hochgeladene Dateien in Nextcloud werden nicht automatisch gelöscht.",
     "On the configured day of each month, an individual timesheet PDF is queued for every employee. Each PDF is uploaded as soon as the employee has fully submitted all their weeks — late submitters are automatically caught up on the next daily check.":
       "Am konfigurierten Tag des Monats wird für jeden Mitarbeiter ein individueller Stundenzettel in die Warteschlange eingereiht. Jedes PDF wird hochgeladen, sobald der Mitarbeiter alle Wochen vollständig eingereicht hat — spät Einreichende werden beim nächsten täglichen Lauf automatisch nachgeholt.",
-    "Category not available for you.": "Diese Kategorie ist für Sie nicht verfügbar.",
+    "Category not available for you.":
+      "Diese Kategorie ist für Sie nicht verfügbar.",
     "Absence category not available for you.":
       "Diese Abwesenheitskategorie ist für Sie nicht verfügbar.",
     "Available to employees": "Verfügbar für Mitarbeiter",
@@ -1308,19 +1318,19 @@ const TRANSLATIONS = {
     "Team leads": "Teamleitungen",
     "Allow team leads to create assistant users":
       "Teamleitungen erlauben, Aushilfen anzulegen",
-    'When enabled, team leads get a restricted Users tab where they may only create and manage "Assistant" users assigned to them. No other role can be created there. Enabled by default.':
-      'Wenn aktiviert, erhalten Teamleitungen einen eingeschränkten Benutzer-Tab, auf dem sie nur ihnen zugewiesene Benutzer mit Rolle "Aushilfe" anlegen und verwalten können. Andere Rollen können dort nicht angelegt werden. Standardmäßig aktiviert.',
+    'When enabled, team leads get a restricted Users tab where they may only create and manage "Assistant" users assigned to them. No other role can be created there. Disabled by default.':
+      'Wenn aktiviert, erhalten Teamleitungen einen eingeschränkten Benutzer-Tab, auf dem sie nur ihnen zugewiesene Benutzer mit Rolle "Aushilfe" anlegen und verwalten können. Andere Rollen können dort nicht angelegt werden. Standardmäßig deaktiviert.',
     "You can only manage assistants assigned to you.":
       "Sie können nur Ihnen zugewiesene Aushilfen verwalten.",
     "You will be set as their approver.":
       "Sie werden als deren Genehmiger festgelegt.",
     // --- User archive / restore ---
     "Archive user?": "Benutzer archivieren?",
-    "Archive": "Archivieren",
+    Archive: "Archivieren",
     "User archived.": "Benutzer archiviert.",
     "Archived Users": "Archivierte Benutzer",
     "Archived on {date}": "Archiviert am {date}",
-    "Restore": "Wiederherstellen",
+    Restore: "Wiederherstellen",
     "Restore user?": "Benutzer wiederherstellen?",
     "User restored.": "Benutzer wiederhergestellt.",
     "No archived users.": "Keine archivierten Benutzer.",
@@ -1335,12 +1345,15 @@ const TRANSLATIONS = {
     "Restore this archived account? The user will receive a temporary password and must change it on first login.":
       "Dieses archivierte Konto wiederherstellen? Der Benutzer erhält ein temporäres Passwort und muss es beim ersten Login ändern.",
     "New start date (optional)": "Neues Startdatum (optional)",
-    "Reset start date to avoid flextime gap": "Startdatum zurücksetzen, um Gleitzeitlücke zu vermeiden",
+    "Reset start date to avoid flextime gap":
+      "Startdatum zurücksetzen, um Gleitzeitlücke zu vermeiden",
     "Keep original start date": "Ursprüngliches Startdatum beibehalten",
     "If the account was archived for an extended period, resetting the start date prevents a large negative flextime balance from accumulating during the absence.":
       "Wenn das Konto längere Zeit archiviert war, verhindert das Zurücksetzen des Startdatums einen großen negativen Gleitzeitkontosaldo.",
-    "Approver required for non-admin users.": "Genehmiger ist für Nicht-Admin-Benutzer erforderlich.",
-    "User has historical data. Use archive instead.": "Benutzer hat historische Daten. Bitte stattdessen archivieren.",
+    "Approver required for non-admin users.":
+      "Genehmiger ist für Nicht-Admin-Benutzer erforderlich.",
+    "User has historical data. Use archive instead.":
+      "Benutzer hat historische Daten. Bitte stattdessen archivieren.",
   },
 };
 

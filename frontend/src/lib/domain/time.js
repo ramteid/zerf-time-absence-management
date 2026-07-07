@@ -69,7 +69,10 @@ export function creditedEntryMinutes(entry, categoryRows) {
   ) {
     return 0;
   }
-  return Math.max(0, durMin(entry.start_time.slice(0, 5), entry.end_time.slice(0, 5)));
+  return Math.max(
+    0,
+    durMin(entry.start_time.slice(0, 5), entry.end_time.slice(0, 5)),
+  );
 }
 
 /**
@@ -82,6 +85,10 @@ function parseHHMM(s) {
   return parseInt(parts[0], 10) * 60 + parseInt(parts[1] || "0", 10);
 }
 
+function exclusiveThresholdMinutes(thresholdHours) {
+  return Math.floor(Number(thresholdHours) * 60 + 1e-9);
+}
+
 /**
  * Builds an ordered list of break rules from the app settings object.
  * Returns an empty array when the feature is disabled or no tier-1 rule is configured.
@@ -89,20 +96,30 @@ function parseHHMM(s) {
  * rule by scanning from the end.
  *
  * @param {Object} settings - The app settings from the /settings endpoint.
- * @returns {{thresholdHours: number, deductionMinutes: number}[]}
+ * @returns {{thresholdHours: number, thresholdMinutes: number, deductionMinutes: number}[]}
  */
 export function buildBreakRules(settings) {
   if (!settings?.auto_break_enabled) return [];
   const rules = [];
-  if (settings.auto_break_threshold_hours && settings.auto_break_deduction_minutes) {
+  if (
+    settings.auto_break_threshold_hours &&
+    settings.auto_break_deduction_minutes
+  ) {
+    const thresholdHours = Number(settings.auto_break_threshold_hours);
     rules.push({
-      thresholdHours: Number(settings.auto_break_threshold_hours),
+      thresholdHours,
+      thresholdMinutes: exclusiveThresholdMinutes(thresholdHours),
       deductionMinutes: Number(settings.auto_break_deduction_minutes),
     });
   }
-  if (settings.auto_break_threshold_hours_2 && settings.auto_break_deduction_minutes_2) {
+  if (
+    settings.auto_break_threshold_hours_2 &&
+    settings.auto_break_deduction_minutes_2
+  ) {
+    const thresholdHours = Number(settings.auto_break_threshold_hours_2);
     rules.push({
-      thresholdHours: Number(settings.auto_break_threshold_hours_2),
+      thresholdHours,
+      thresholdMinutes: exclusiveThresholdMinutes(thresholdHours),
       deductionMinutes: Number(settings.auto_break_deduction_minutes_2),
     });
   }
@@ -130,7 +147,7 @@ export function buildBreakRules(settings) {
  *
  * @param {Array}  items       - All time entries for the day.
  * @param {Array}  categories  - Full category list for counts-as-work lookup.
- * @param {{thresholdHours: number, deductionMinutes: number}[]} rules
+ * @param {{thresholdHours: number, thresholdMinutes?: number, deductionMinutes: number}[]} rules
  *   Break rules sorted ascending by thresholdHours.
  * @returns {number} Total break deduction in minutes (>= 0).
  */
@@ -163,7 +180,13 @@ export function computeDayBreakDeduction(items, categories, rules) {
   return blocks.reduce((total, block) => {
     const duration = block.end - block.start;
     const deduction = rules
-      .filter((r) => duration > r.thresholdHours * 60)
+      .filter(
+        (r) =>
+          duration >
+          (Number.isFinite(r.thresholdMinutes)
+            ? r.thresholdMinutes
+            : exclusiveThresholdMinutes(r.thresholdHours)),
+      )
       .reduce((max, r) => Math.max(max, r.deductionMinutes), 0);
     return total + deduction;
   }, 0);
@@ -326,13 +349,18 @@ export function weekStatusColor(status) {
 }
 
 export function absenceColor(kind) {
-  return get(absenceCategories).find((c) => c.slug === kind)?.color || MASKED_ABSENCE_COLOR;
+  return (
+    get(absenceCategories).find((c) => c.slug === kind)?.color ||
+    MASKED_ABSENCE_COLOR
+  );
 }
 
 export function canAddEntryForDay(day, currentUser, todayIso) {
+  // Public holidays are not blocked: like the sick-leave exception, someone
+  // may still work (or be on call) on a holiday. The daily target stays 0,
+  // so logged hours become a pure flextime gain, matching backend validation.
   return !(
     day.absentForEntry ||
-    day.holiday ||
     day.ds > todayIso ||
     (currentUser?.start_date && day.ds < currentUser.start_date)
   );

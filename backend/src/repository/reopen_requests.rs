@@ -22,6 +22,25 @@ pub struct ReopenRequest {
 const RR_SELECT: &str = "SELECT id, user_id, week_start, reviewed_by, status, \
      reviewed_at, rejection_reason, reason, created_at FROM reopen_requests";
 
+/// Map an insert failure: the partial unique index on pending requests means a
+/// unique violation is the expected "duplicate request" race; anything else
+/// is a genuine database error and must surface as such, not be masked by a
+/// misleading conflict message.
+fn map_reopen_insert_error(context: &str, e: sqlx::Error) -> AppError {
+    let is_unique_violation = e
+        .as_database_error()
+        .map(|db_err| db_err.kind() == sqlx::error::ErrorKind::UniqueViolation)
+        .unwrap_or(false);
+    if is_unique_violation {
+        tracing::warn!(target:"zerf::reopen", "{context}: duplicate pending request: {e}");
+        AppError::conflict("A pending request for this week already exists.")
+    } else {
+        tracing::warn!(target:"zerf::reopen", "{context} failed");
+        // From<sqlx::Error> logs the details and hides them from the client.
+        AppError::from(e)
+    }
+}
+
 const ACTIVE_ASSIGNED_APPROVER_FOR_UPDATE_SQL: &str = "\
     SELECT TRUE \
     FROM user_approvers ua \
@@ -191,8 +210,7 @@ impl ReopenRequestDb {
         .fetch_one(&mut *tx)
         .await
         .map_err(|e| {
-            tracing::warn!(target:"zerf::reopen", "insert_auto_approved_if_all_reopenable_are_submitted failed: {e}");
-            AppError::conflict("A pending request for this week already exists.")
+            map_reopen_insert_error("insert_auto_approved_if_all_reopenable_are_submitted", e)
         })?;
         let affected = Self::perform_reopen(&mut tx, user_id, week_start).await?;
         tx.commit().await?;
@@ -242,10 +260,7 @@ impl ReopenRequestDb {
         .bind(reason)
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| {
-            tracing::warn!(target:"zerf::reopen", "insert_pending failed: {e}");
-            AppError::conflict("A pending request for this week already exists.")
-        })
+        .map_err(|e| map_reopen_insert_error("insert_pending", e))
     }
 
     /// Insert a reopen request directly as 'auto_approved' and perform the
@@ -270,10 +285,7 @@ impl ReopenRequestDb {
         .bind(reason)
         .fetch_one(&mut *tx)
         .await
-        .map_err(|e| {
-            tracing::warn!(target:"zerf::reopen", "insert_auto_approved failed: {e}");
-            AppError::conflict("A pending request for this week already exists.")
-        })?;
+        .map_err(|e| map_reopen_insert_error("insert_auto_approved", e))?;
         let affected = Self::perform_reopen(&mut tx, user_id, week_start).await?;
         tx.commit().await?;
         Ok((req_id, affected))

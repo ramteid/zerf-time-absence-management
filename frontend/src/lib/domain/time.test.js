@@ -16,11 +16,41 @@ import { absenceCategories } from "../../stores.js";
 // the absenceCategories store. Seed it with the configurable categories so the
 // helpers can resolve slugs to flags.
 const CATEGORIES = [
-  { id: 1, slug: "vacation", name: "Vacation", cost_type: "none", auto_approve_past: false },
-  { id: 2, slug: "sick", name: "Sick", cost_type: "none", auto_approve_past: true },
-  { id: 3, slug: "flextime_reduction", name: "Flextime Reduction", cost_type: "flextime", auto_approve_past: false },
-  { id: 4, slug: "custom_flex", name: "Comp Time", cost_type: "flextime", auto_approve_past: false },
-  { id: 5, slug: "custom_sick", name: "Bereavement", cost_type: "none", auto_approve_past: true },
+  {
+    id: 1,
+    slug: "vacation",
+    name: "Vacation",
+    cost_type: "none",
+    auto_approve_past: false,
+  },
+  {
+    id: 2,
+    slug: "sick",
+    name: "Sick",
+    cost_type: "none",
+    auto_approve_past: true,
+  },
+  {
+    id: 3,
+    slug: "flextime_reduction",
+    name: "Flextime Reduction",
+    cost_type: "flextime",
+    auto_approve_past: false,
+  },
+  {
+    id: 4,
+    slug: "custom_flex",
+    name: "Comp Time",
+    cost_type: "flextime",
+    auto_approve_past: false,
+  },
+  {
+    id: 5,
+    slug: "custom_sick",
+    name: "Bereavement",
+    cost_type: "none",
+    auto_approve_past: true,
+  },
 ];
 
 describe("time domain helpers", () => {
@@ -133,45 +163,71 @@ describe("time domain helpers", () => {
 
   // absenceBlocksEntry and absenceRemovesTarget behaviour
   it("absenceBlocksEntry blocks entries for requested non-sick absences", () => {
-    expect(absenceBlocksEntry({ kind: "vacation", status: "requested" })).toBe(true);
-    expect(absenceBlocksEntry({ kind: "flextime_reduction", status: "requested" })).toBe(true);
+    expect(absenceBlocksEntry({ kind: "vacation", status: "requested" })).toBe(
+      true,
+    );
+    expect(
+      absenceBlocksEntry({ kind: "flextime_reduction", status: "requested" }),
+    ).toBe(true);
   });
 
   it("absenceBlocksEntry does not block entries for requested sick absences", () => {
     // Sick leave auto-approves and allows time entries alongside it.
-    expect(absenceBlocksEntry({ kind: "sick", status: "requested" })).toBe(false);
+    expect(absenceBlocksEntry({ kind: "sick", status: "requested" })).toBe(
+      false,
+    );
   });
 
   it("absenceBlocksEntry blocks entries for approved non-sick absences", () => {
-    expect(absenceBlocksEntry({ kind: "vacation", status: "approved" })).toBe(true);
-    expect(absenceBlocksEntry({ kind: "flextime_reduction", status: "approved" })).toBe(true);
+    expect(absenceBlocksEntry({ kind: "vacation", status: "approved" })).toBe(
+      true,
+    );
+    expect(
+      absenceBlocksEntry({ kind: "flextime_reduction", status: "approved" }),
+    ).toBe(true);
   });
 
   it("absenceBlocksEntry does not block entries for approved sick absences", () => {
-    expect(absenceBlocksEntry({ kind: "sick", status: "approved" })).toBe(false);
+    expect(absenceBlocksEntry({ kind: "sick", status: "approved" })).toBe(
+      false,
+    );
   });
 
   it("absenceRemovesTarget only removes target for approved/cancellation_pending non-flextime_reduction", () => {
     // Target IS removed for these:
-    expect(absenceRemovesTarget({ kind: "vacation", status: "approved" })).toBe(true);
-    expect(absenceRemovesTarget({ kind: "sick", status: "cancellation_pending" })).toBe(true);
+    expect(absenceRemovesTarget({ kind: "vacation", status: "approved" })).toBe(
+      true,
+    );
+    expect(
+      absenceRemovesTarget({ kind: "sick", status: "cancellation_pending" }),
+    ).toBe(true);
     // Target is NOT removed for requested (not yet confirmed):
-    expect(absenceRemovesTarget({ kind: "vacation", status: "requested" })).toBe(false);
+    expect(
+      absenceRemovesTarget({ kind: "vacation", status: "requested" }),
+    ).toBe(false);
     // Target is NEVER removed for flextime_reduction (it keeps the work target):
-    expect(absenceRemovesTarget({ kind: "flextime_reduction", status: "approved" })).toBe(false);
+    expect(
+      absenceRemovesTarget({ kind: "flextime_reduction", status: "approved" }),
+    ).toBe(false);
   });
 
-  it("absenceRemovesTarget honours cost_type=\"flextime\" for admin-created custom slugs", () => {
+  it('absenceRemovesTarget honours cost_type="flextime" for admin-created custom slugs', () => {
     // A custom category with cost_type="flextime" must behave like
     // flextime_reduction: the day still requires hours, so removeTarget=false.
-    expect(absenceRemovesTarget({ kind: "custom_flex", status: "approved" })).toBe(false);
+    expect(
+      absenceRemovesTarget({ kind: "custom_flex", status: "approved" }),
+    ).toBe(false);
   });
 
   it("absenceBlocksEntry honours auto_approve_past for admin-created custom sick-like slugs", () => {
     // A custom category with auto_approve_past=true must behave like sick:
     // time entries on the same day are allowed (block=false).
-    expect(absenceBlocksEntry({ kind: "custom_sick", status: "approved" })).toBe(false);
-    expect(absenceBlocksEntry({ kind: "custom_sick", status: "requested" })).toBe(false);
+    expect(
+      absenceBlocksEntry({ kind: "custom_sick", status: "approved" }),
+    ).toBe(false);
+    expect(
+      absenceBlocksEntry({ kind: "custom_sick", status: "requested" }),
+    ).toBe(false);
   });
 });
 
@@ -188,7 +244,9 @@ describe("buildBreakRules", () => {
       auto_break_threshold_hours: 6,
       auto_break_deduction_minutes: 30,
     });
-    expect(rules).toEqual([{ thresholdHours: 6, deductionMinutes: 30 }]);
+    expect(rules).toEqual([
+      { thresholdHours: 6, thresholdMinutes: 360, deductionMinutes: 30 },
+    ]);
   });
 
   it("returns two rules sorted ascending when both tiers are configured", () => {
@@ -200,8 +258,22 @@ describe("buildBreakRules", () => {
       auto_break_deduction_minutes_2: 45,
     });
     expect(rules).toEqual([
-      { thresholdHours: 6, deductionMinutes: 30 },
-      { thresholdHours: 9, deductionMinutes: 45 },
+      { thresholdHours: 6, thresholdMinutes: 360, deductionMinutes: 30 },
+      { thresholdHours: 9, thresholdMinutes: 540, deductionMinutes: 45 },
+    ]);
+  });
+
+  it("stores fractional thresholds as backend-compatible exclusive minute floors", () => {
+    const rules = buildBreakRules({
+      auto_break_enabled: true,
+      auto_break_threshold_hours: 6.01,
+      auto_break_deduction_minutes: 30,
+      auto_break_threshold_hours_2: 6.1,
+      auto_break_deduction_minutes_2: 45,
+    });
+    expect(rules).toEqual([
+      { thresholdHours: 6.01, thresholdMinutes: 360, deductionMinutes: 30 },
+      { thresholdHours: 6.1, thresholdMinutes: 366, deductionMinutes: 45 },
     ]);
   });
 });
@@ -310,6 +382,14 @@ describe("computeDayBreakDeduction", () => {
   it("deducts when block duration is one minute over the threshold", () => {
     const items = [entry("08:00", "14:01")];
     expect(computeDayBreakDeduction(items, workCat, rules1)).toBe(30);
+  });
+
+  it("deducts at the first whole minute above a fractional threshold", () => {
+    const items = [entry("08:00", "14:01")];
+    const fractionalRules = [
+      { thresholdHours: 6.01, thresholdMinutes: 360, deductionMinutes: 30 },
+    ];
+    expect(computeDayBreakDeduction(items, workCat, fractionalRules)).toBe(30);
   });
 
   it("two-tier: applies tier-2 deduction (not cumulative) for long block", () => {

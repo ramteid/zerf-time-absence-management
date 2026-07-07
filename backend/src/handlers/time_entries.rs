@@ -3,8 +3,9 @@ use crate::error::{AppError, AppResult};
 use crate::i18n;
 use crate::middleware::auth::User;
 use crate::services::time_entries::{
-    attach_counts_as_work, notification_language, notify_week_status_change, repo_entry_to_service,
-    require_tracks_time, week_start, TimeEntry,
+    attach_counts_as_work, clear_submission_pending_for_weeks, notification_language,
+    notify_week_status_change, repo_entry_to_service, require_tracks_time,
+    timesheet_submission_reference_type, week_start, TimeEntry,
 };
 use crate::AppState;
 use axum::{
@@ -262,13 +263,21 @@ pub async fn submit(
         })));
     }
 
-    // Phase 2: atomically submit all draft entries in a single transaction.
+    // Phase 2: verify approval routing BEFORE any write. Non-admin users
+    // without an active assigned approver cannot submit (user-guide), so the
+    // check must fail here, while the entries are still editable drafts, not
+    // after the transition when they would be stranded in `submitted` with
+    // nobody able to review them.
+    let approver_ids =
+        crate::services::auth::required_approval_recipient_ids(&app_state.pool, &requester).await?;
+
+    // Phase 3: atomically submit all draft entries in a single transaction.
     let submitted_ids = app_state
         .db
         .time_entries
         .submit_batch(requester.id, &body.ids)
         .await?;
-    // Phase 3: audit logs (best-effort, after commit).
+    // Phase 4: audit logs (best-effort, after commit).
     for entry_id in &submitted_ids {
         audit::log(
             &app_state.pool,
@@ -281,7 +290,8 @@ pub async fn submit(
         )
         .await;
     }
-    // Phase 4: notify approvers with a consolidated week count.
+    // Phase 5: notify approvers. Submission notifications are week-scoped so
+    // deciding one week does not leave a stale unread notification for another.
     let submitted_count = submitted_ids.len();
     let mut submitted_weeks = HashSet::new();
     for entry_date in app_state
@@ -293,53 +303,42 @@ pub async fn submit(
         submitted_weeks.insert(week_start(entry_date));
     }
     if !submitted_weeks.is_empty() {
-        let approver_ids =
-            crate::services::auth::required_approval_recipient_ids(&app_state.pool, &requester)
-                .await?;
         let language = notification_language(&app_state.pool).await;
         let mut sorted_weeks: Vec<NaiveDate> = submitted_weeks.into_iter().collect();
         sorted_weeks.sort();
-        let week_list = sorted_weeks
-            .iter()
-            .map(|ws| i18n::format_week_label(&language, *ws))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let week_count = i18n::week_count(&language, sorted_weeks.len() as i64);
         let submitter_name = format!("{} {}", requester.first_name, requester.last_name);
 
-        // Build JSON body for frontend rendering.
-        let week_iso_strings: Vec<String> = sorted_weeks
-            .iter()
-            .map(|ws| ws.format("%Y-%m-%d").to_string())
-            .collect();
-        let frontend_body = serde_json::json!({
-            "submitter_name": submitter_name,
-            "weeks": week_iso_strings,
-        })
-        .to_string();
+        for week_monday in sorted_weeks {
+            let week_list = i18n::format_week_label(&language, week_monday);
+            let week_count = i18n::week_count(&language, 1);
+            let week_iso = week_monday.format("%Y-%m-%d").to_string();
+            let frontend_body = serde_json::json!({
+                "submitter_name": submitter_name.clone(),
+                "weeks": [week_iso],
+            })
+            .to_string();
+            let reference_type = timesheet_submission_reference_type(week_monday);
 
-        for approver_id in approver_ids {
-            // reference_type/id encode the submitter so a sibling approver's
-            // pending entry can be cleared in one shot the moment any other
-            // approver acts on the week (see batch_approve / batch_reject).
-            crate::services::notifications::create_with_frontend_body(
-                &app_state,
-                &language,
-                approver_id,
-                "timesheet_submitted",
-                "timesheet_submitted_title",
-                "timesheet_submitted_body",
-                vec![
-                    ("submitter_name", submitter_name.clone()),
-                    ("week_list", week_list.clone()),
-                    ("week_count", week_count.clone()),
-                ],
-                &frontend_body,
-                true,
-                Some("timesheet_submission"),
-                Some(requester.id),
-            )
-            .await;
+            for approver_id in &approver_ids {
+                crate::services::notifications::create_with_frontend_body(
+                    &app_state,
+                    &language,
+                    *approver_id,
+                    "timesheet_submitted",
+                    "timesheet_submitted_title",
+                    "timesheet_submitted_body",
+                    vec![
+                        ("submitter_name", submitter_name.clone()),
+                        ("week_list", week_list.clone()),
+                        ("week_count", week_count.clone()),
+                    ],
+                    &frontend_body,
+                    true,
+                    Some(&reference_type),
+                    Some(requester.id),
+                )
+                .await;
+            }
         }
     }
     Ok(Json(
@@ -395,32 +394,27 @@ pub async fn batch_approve(
             None,
         )
         .await;
-        clear_submission_pending_for_submitters(&app_state, &approved_entries).await;
+        clear_submission_pending_for_entries(&app_state, &approved_entries).await;
     }
     Ok(Json(
         serde_json::json!({"ok": true, "count": approved_entries.len()}),
     ))
 }
 
-/// Mark the open `timesheet_submission` notifications for every submitter
-/// touched by the batch as read, so all of their other approvers' dashboards
-/// drop the entry the moment one approver acts. Each submission notification
-/// was inserted with `reference_id = submitter.user_id`, which lets us clear
-/// every sibling row in one query per submitter.
-async fn clear_submission_pending_for_submitters(
+async fn clear_submission_pending_for_entries(
     app_state: &AppState,
     entries: &[crate::repository::TimeEntry],
 ) {
-    let mut seen: std::collections::HashSet<i64> = std::collections::HashSet::new();
+    let mut weeks_by_user: std::collections::HashMap<i64, Vec<NaiveDate>> =
+        std::collections::HashMap::new();
     for entry in entries {
-        if seen.insert(entry.user_id) {
-            crate::services::notifications::clear_pending_for_reference(
-                app_state,
-                "timesheet_submission",
-                entry.user_id,
-            )
-            .await;
-        }
+        weeks_by_user
+            .entry(entry.user_id)
+            .or_default()
+            .push(week_start(entry.entry_date));
+    }
+    for (user_id, week_mondays) in weeks_by_user {
+        clear_submission_pending_for_weeks(app_state, user_id, &week_mondays).await;
     }
 }
 
@@ -482,7 +476,7 @@ pub async fn batch_reject(
             Some(&rejection_reason),
         )
         .await;
-        clear_submission_pending_for_submitters(&app_state, &rejected_entries).await;
+        clear_submission_pending_for_entries(&app_state, &rejected_entries).await;
     }
     Ok(Json(
         serde_json::json!({"ok": true, "count": rejected_entries.len()}),

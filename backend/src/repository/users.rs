@@ -143,26 +143,22 @@ impl UserDb {
     /// This is the default admin user list view. Archived users are excluded —
     /// use `find_all_including_archived` or `find_archived_ordered` for those.
     pub async fn find_all_ordered(&self) -> AppResult<Vec<User>> {
-        Ok(
-            QueryBuilder::<Postgres>::new(format!(
-                "{USER_SELECT} WHERE archived_at IS NULL ORDER BY last_name, first_name"
-            ))
-            .build_query_as::<User>()
-            .fetch_all(&self.pool)
-            .await?,
-        )
+        Ok(QueryBuilder::<Postgres>::new(format!(
+            "{USER_SELECT} WHERE archived_at IS NULL ORDER BY last_name, first_name"
+        ))
+        .build_query_as::<User>()
+        .fetch_all(&self.pool)
+        .await?)
     }
 
     /// Returns all users including archived ones, ordered by name.
     /// Used only where the admin explicitly requests the full user list.
     pub async fn find_all_including_archived(&self) -> AppResult<Vec<User>> {
         Ok(
-            QueryBuilder::<Postgres>::new(format!(
-                "{USER_SELECT} ORDER BY last_name, first_name"
-            ))
-            .build_query_as::<User>()
-            .fetch_all(&self.pool)
-            .await?,
+            QueryBuilder::<Postgres>::new(format!("{USER_SELECT} ORDER BY last_name, first_name"))
+                .build_query_as::<User>()
+                .fetch_all(&self.pool)
+                .await?,
         )
     }
 
@@ -463,6 +459,7 @@ impl UserDb {
                  FROM user_approvers ua
                  JOIN user_pending up ON up.user_id = ua.user_id
                  JOIN users subject   ON subject.id = ua.user_id
+                                     AND subject.active = TRUE
                  JOIN users approver  ON approver.id = ua.approver_id
                                      AND approver.active = TRUE
                  WHERE (
@@ -797,7 +794,9 @@ impl UserDb {
     /// Fetch all approver relationships in a single query, returning a map of
     /// `user_id -> [approver_id, ...]`. Used by the admin user list to avoid N+1
     /// queries when building the full user list with approver_ids.
-    pub async fn get_all_approver_ids(&self) -> AppResult<std::collections::HashMap<i64, Vec<i64>>> {
+    pub async fn get_all_approver_ids(
+        &self,
+    ) -> AppResult<std::collections::HashMap<i64, Vec<i64>>> {
         let rows = sqlx::query_as::<_, (i64, i64)>(
             "SELECT ua.user_id, ua.approver_id FROM user_approvers ua",
         )
@@ -907,13 +906,11 @@ impl UserDb {
         old_approver_id: i64,
         new_approver_id: i64,
     ) -> AppResult<()> {
-        sqlx::query(
-            "DELETE FROM user_approvers WHERE user_id=$1 AND approver_id=$2",
-        )
-        .bind(user_id)
-        .bind(old_approver_id)
-        .execute(&mut *tx)  // explicit deref needed to reborrow before second execute
-        .await?;
+        sqlx::query("DELETE FROM user_approvers WHERE user_id=$1 AND approver_id=$2")
+            .bind(user_id)
+            .bind(old_approver_id)
+            .execute(&mut *tx) // explicit deref needed to reborrow before second execute
+            .await?;
         sqlx::query(
             "INSERT INTO user_approvers(user_id, approver_id) VALUES ($1,$2) \
              ON CONFLICT DO NOTHING",
@@ -957,10 +954,7 @@ impl UserDb {
     /// Check whether a user has any time entries or absences.
     /// Used to guard hard delete: users with historical data must be archived,
     /// not hard-deleted.
-    pub async fn has_time_data_tx(
-        tx: &mut sqlx::PgConnection,
-        user_id: i64,
-    ) -> AppResult<bool> {
+    pub async fn has_time_data_tx(tx: &mut sqlx::PgConnection, user_id: i64) -> AppResult<bool> {
         let has_entries: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM time_entries WHERE user_id=$1) \
              OR EXISTS(SELECT 1 FROM absences WHERE user_id=$1)",

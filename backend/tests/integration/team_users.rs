@@ -7,7 +7,11 @@ use serde_json::json;
 use crate::common::TestApp;
 use crate::helpers::*;
 
-async fn set_team_lead_assistant_management(app: &TestApp, admin: &crate::common::TestClient, enabled: bool) {
+async fn set_team_lead_assistant_management(
+    app: &TestApp,
+    admin: &crate::common::TestClient,
+    enabled: bool,
+) {
     let (st, _) = admin
         .put(
             "/api/v1/settings",
@@ -33,7 +37,8 @@ async fn team_users_scoped_assistant_management() {
         bootstrap_team_with_suffix(&app, &admin, false, "tu1").await;
     let lead = login_change_pw(&app, "lead-tu1@example.com", &lead_pw).await;
 
-    // -- Enabled by default: disable it first to test the forbidden path --
+    // -- Disabled by default; set it explicitly so the forbidden-path
+    // assertions don't silently depend on the default value --
     set_team_lead_assistant_management(&app, &admin, false).await;
 
     // -- Disabled: every /team-users endpoint is forbidden --
@@ -98,7 +103,10 @@ async fn team_users_scoped_assistant_management() {
             .await;
         assert_eq!(st, StatusCode::OK, "lead creates assistant");
         assistant_id = id(&body);
-        assert_eq!(body["user"]["role"], "assistant", "role forced to assistant");
+        assert_eq!(
+            body["user"]["role"], "assistant",
+            "role forced to assistant"
+        );
     }
 
     // -- List now includes the assistant with full fields --
@@ -143,7 +151,10 @@ async fn team_users_scoped_assistant_management() {
         assert_eq!(st, StatusCode::FORBIDDEN);
 
         let (st, _) = lead
-            .put(&format!("/api/v1/team-users/{}", emp_id), &json!({"active": false}))
+            .put(
+                &format!("/api/v1/team-users/{}", emp_id),
+                &json!({"active": false}),
+            )
             .await;
         assert_eq!(st, StatusCode::FORBIDDEN);
 
@@ -162,7 +173,11 @@ async fn team_users_scoped_assistant_management() {
         let (st, _) = lead2
             .get(&format!("/api/v1/team-users/{}", assistant_id))
             .await;
-        assert_eq!(st, StatusCode::FORBIDDEN, "unassigned assistant is inaccessible");
+        assert_eq!(
+            st,
+            StatusCode::FORBIDDEN,
+            "unassigned assistant is inaccessible"
+        );
     }
 
     // -- Archive, then restore, the assistant — the lead retains full
@@ -193,7 +208,11 @@ async fn team_users_scoped_assistant_management() {
         let (st, body) = lead
             .get(&format!("/api/v1/team-users/{}", assistant_id))
             .await;
-        assert_eq!(st, StatusCode::OK, "archived assistant still reachable: {body}");
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "archived assistant still reachable: {body}"
+        );
 
         let (st, body) = lead
             .post(
@@ -203,7 +222,10 @@ async fn team_users_scoped_assistant_management() {
             .await;
         assert_eq!(st, StatusCode::OK, "lead restores own assistant: {body}");
         assert_eq!(body["active"], true);
-        assert!(body["archived_at"].is_null(), "archived_at cleared after restore");
+        assert!(
+            body["archived_at"].is_null(),
+            "archived_at cleared after restore"
+        );
 
         // No delete route exists for team leads.
         let (st, _) = lead

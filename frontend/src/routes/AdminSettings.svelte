@@ -1,7 +1,13 @@
 <script>
   import { api } from "../api.js";
   import { currentUser, settings as appSettings, toast } from "../stores.js";
-  import { LANGUAGES, setLanguage, t, fmtDecimal, parseDecimal } from "../i18n.js";
+  import {
+    LANGUAGES,
+    setLanguage,
+    t,
+    fmtDecimal,
+    parseDecimal,
+  } from "../i18n.js";
 
   let settingsForm = {};
   // Locale-formatted string variables for float fields so the decimal separator
@@ -12,15 +18,18 @@
 
   // Sync float string vars from a plain settings object (after load or save).
   function syncFloatStrings(s) {
-    defaultWeeklyHoursStr = s.default_weekly_hours != null
-      ? fmtDecimal(Number(s.default_weekly_hours), 2)
-      : "";
-    breakThresholdStr = s.auto_break_threshold_hours != null
-      ? fmtDecimal(Number(s.auto_break_threshold_hours), 2)
-      : "";
-    breakThresholdStr2 = s.auto_break_threshold_hours_2 != null
-      ? fmtDecimal(Number(s.auto_break_threshold_hours_2), 2)
-      : "";
+    defaultWeeklyHoursStr =
+      s.default_weekly_hours != null
+        ? fmtDecimal(Number(s.default_weekly_hours), 2)
+        : "";
+    breakThresholdStr =
+      s.auto_break_threshold_hours != null
+        ? fmtDecimal(Number(s.auto_break_threshold_hours), 2)
+        : "";
+    breakThresholdStr2 =
+      s.auto_break_threshold_hours_2 != null
+        ? fmtDecimal(Number(s.auto_break_threshold_hours_2), 2)
+        : "";
   }
   let saving = false;
   let adminFirstName = "";
@@ -40,7 +49,14 @@
   const timezoneOptions =
     typeof Intl !== "undefined" && typeof Intl.supportedValuesOf === "function"
       ? Intl.supportedValuesOf("timeZone")
-      : ["Europe/Berlin", "UTC", "Europe/London", "America/New_York", "America/Los_Angeles", "Asia/Tokyo"];
+      : [
+          "Europe/Berlin",
+          "UTC",
+          "Europe/London",
+          "America/New_York",
+          "America/Los_Angeles",
+          "Asia/Tokyo",
+        ];
 
   function sortCountriesByName(items) {
     return [...items].sort((a, b) => a.name.localeCompare(b.name));
@@ -64,7 +80,10 @@
     regionsLoadFailed = false;
     try {
       const regions = await loadRegionsFor(normalizedCountry);
-      if (loadId !== regionLoadId || normalizedCountry !== (settingsForm.country || "")) {
+      if (
+        loadId !== regionLoadId ||
+        normalizedCountry !== (settingsForm.country || "")
+      ) {
         return;
       }
       countryRegions = regions;
@@ -73,13 +92,19 @@
         settingsForm = { ...settingsForm, region: "" };
       }
     } catch {
-      if (loadId !== regionLoadId || normalizedCountry !== (settingsForm.country || "")) {
+      if (
+        loadId !== regionLoadId ||
+        normalizedCountry !== (settingsForm.country || "")
+      ) {
         return;
       }
       countryRegions = [];
       regionsLoadFailed = true;
     } finally {
-      if (loadId === regionLoadId && normalizedCountry === (settingsForm.country || "")) {
+      if (
+        loadId === regionLoadId &&
+        normalizedCountry === (settingsForm.country || "")
+      ) {
         regionLoading = false;
       }
     }
@@ -152,12 +177,18 @@
         toast($t("Please enter the break deduction minutes."), "error");
         return;
       }
-      const hasTier2Threshold = breakThresholdStr2 != null && breakThresholdStr2 !== "";
+      const hasTier2Threshold =
+        breakThresholdStr2 != null && breakThresholdStr2 !== "";
       const hasTier2Deduction =
         settingsForm.auto_break_deduction_minutes_2 != null &&
         settingsForm.auto_break_deduction_minutes_2 !== "";
       if (hasTier2Threshold !== hasTier2Deduction) {
-        toast($t("Please enter both second threshold and second deduction, or leave both empty."), "error");
+        toast(
+          $t(
+            "Please enter both second threshold and second deduction, or leave both empty.",
+          ),
+          "error",
+        );
         return;
       }
     }
@@ -169,7 +200,8 @@
         ...settingsForm,
         // Parse locale-formatted float strings back to numbers before sending.
         default_weekly_hours: parseDecimal(defaultWeeklyHoursStr),
-        carryover_expiry_date: settingsForm.carryover_expiry_date?.trim() || null,
+        carryover_expiry_date:
+          settingsForm.carryover_expiry_date?.trim() || null,
         // Clear all break values when the feature is disabled.
         auto_break_threshold_hours: settingsForm.auto_break_enabled
           ? parseDecimal(breakThresholdStr)
@@ -178,10 +210,10 @@
           ? settingsForm.auto_break_deduction_minutes
           : null,
         auto_break_threshold_hours_2: settingsForm.auto_break_enabled
-          ? (parseDecimal(breakThresholdStr2) || null)
+          ? parseDecimal(breakThresholdStr2) || null
           : null,
         auto_break_deduction_minutes_2: settingsForm.auto_break_enabled
-          ? (settingsForm.auto_break_deduction_minutes_2 || null)
+          ? settingsForm.auto_break_deduction_minutes_2 || null
           : null,
       };
       const saved = await api("/settings", { method: "PUT", body });
@@ -206,7 +238,10 @@
         }));
       }
       if (isFirstSetup) {
-        currentUser.update((userState) => ({ ...userState, must_configure_settings: false }));
+        currentUser.update((userState) => ({
+          ...userState,
+          must_configure_settings: false,
+        }));
       }
       toast($t("Settings saved."), "ok");
     } catch (e) {
@@ -442,7 +477,10 @@
       </div>
       <div class="field-row">
         <div style="flex:0 0 auto">
-          <label class="zf-label" style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <label
+            class="zf-label"
+            style="display:flex;align-items:center;gap:8px;cursor:pointer"
+          >
             <input
               type="checkbox"
               bind:checked={settingsForm.auto_break_enabled}
@@ -520,7 +558,9 @@
               placeholder={$t("e.g. 9 (optional)")}
             />
             <div class="field-hint">
-              {$t("Optional. If the work block reaches this duration, the second deduction applies instead of the first.")}
+              {$t(
+                "Optional. If the work block reaches this duration, the second deduction applies instead of the first.",
+              )}
             </div>
           </div>
           <div>
@@ -538,7 +578,9 @@
               placeholder={$t("e.g. 45 (optional)")}
             />
             <div class="field-hint">
-              {$t("Total minutes deducted when the second threshold is reached.")}
+              {$t(
+                "Total minutes deducted when the second threshold is reached.",
+              )}
             </div>
           </div>
         </div>
@@ -562,33 +604,38 @@
           >
             <option value="">{$t("- Please select -")}</option>
             {#each countries as countryOption (countryOption.countryCode)}
-              <option value={countryOption.countryCode}>{countryOption.name}</option>
+              <option value={countryOption.countryCode}
+                >{countryOption.name}</option
+              >
             {/each}
           </select>
         </div>
         <div>
           <label class="zf-label" for="settings-region">{$t("Region")}</label>
           <select
-              id="settings-region"
-              class="zf-select"
-              bind:value={settingsForm.region}
-              disabled={!settingsForm.country || regionLoading || regionsLoadFailed || countryRegions.length === 0}
-            >
-              {#if !settingsForm.country}
-                <option value="">{$t("- Please select -")}</option>
-              {:else if regionLoading}
-                <option value="">{$t("Loading...")}</option>
-              {:else if regionsLoadFailed}
-                <option value="">{$t("Could not load regions.")}</option>
-              {:else if countryRegions.length === 0}
-                <option value="">{$t("No regions available.")}</option>
-              {:else}
-                <option value="">{$t("- Please select -")}</option>
-              {/if}
-              {#each countryRegions as regionOption (regionOption)}
-                <option value={regionOption}>{regionOption}</option>
-              {/each}
-            </select>
+            id="settings-region"
+            class="zf-select"
+            bind:value={settingsForm.region}
+            disabled={!settingsForm.country ||
+              regionLoading ||
+              regionsLoadFailed ||
+              countryRegions.length === 0}
+          >
+            {#if !settingsForm.country}
+              <option value="">{$t("- Please select -")}</option>
+            {:else if regionLoading}
+              <option value="">{$t("Loading...")}</option>
+            {:else if regionsLoadFailed}
+              <option value="">{$t("Could not load regions.")}</option>
+            {:else if countryRegions.length === 0}
+              <option value="">{$t("No regions available.")}</option>
+            {:else}
+              <option value="">{$t("- Please select -")}</option>
+            {/if}
+            {#each countryRegions as regionOption (regionOption)}
+              <option value={regionOption}>{regionOption}</option>
+            {/each}
+          </select>
         </div>
       </div>
 
@@ -599,7 +646,10 @@
       </div>
       <div class="field-row">
         <div style="flex:0 0 auto">
-          <label class="zf-label" style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <label
+            class="zf-label"
+            style="display:flex;align-items:center;gap:8px;cursor:pointer"
+          >
             <input
               type="checkbox"
               bind:checked={settingsForm.allow_team_lead_manage_assistants}
@@ -608,14 +658,18 @@
           </label>
           <div class="field-hint">
             {$t(
-              "When enabled, team leads get a restricted Users tab where they may only create and manage \"Assistant\" users assigned to them. No other role can be created there. Enabled by default.",
+              'When enabled, team leads get a restricted Users tab where they may only create and manage "Assistant" users assigned to them. No other role can be created there. Disabled by default.',
             )}
           </div>
         </div>
       </div>
 
       <div style="display:flex;justify-content:flex-end;padding-top:16px">
-        <button class="zf-btn zf-btn-primary" on:click={save} disabled={saving || regionLoading}>
+        <button
+          class="zf-btn zf-btn-primary"
+          on:click={save}
+          disabled={saving || regionLoading}
+        >
           {#if saving}
             {$t("Saving...")}
           {:else}
