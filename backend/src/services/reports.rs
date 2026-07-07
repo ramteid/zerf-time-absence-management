@@ -1350,31 +1350,44 @@ pub async fn build_timesheet_section(
     })
 }
 
-/// Build a combined PDF for all users with time-tracking activity in [from, to].
-/// Includes deactivated users who had entries/absences in the period (archive
-/// correctness — see `ReportDb::timesheet_members_for_period`).
-pub async fn build_all_users_timesheet_pdf(
+/// Build the ordered timesheet sections for a lead/admin's combined "All
+/// employees" PDF export: every active member the requester can see (pure-admin
+/// users are excluded — they have no own tracking dataset), grouped by role
+/// (team lead, employee, assistant, admin) and alphabetical within each role.
+///
+/// Member selection and ordering are business rules, so they live here in the
+/// service layer rather than in the HTTP handler.
+pub async fn build_team_timesheet_sections(
     app_state: &crate::AppState,
+    requester: &User,
     from: NaiveDate,
     to: NaiveDate,
-) -> AppResult<Vec<u8>> {
-    let label = format!("{}_to_{}", from, to);
-    let language = crate::i18n::load_ui_language(&app_state.pool).await?;
-    let mut members = app_state
+    label: &str,
+) -> AppResult<Vec<crate::report_pdf::TimesheetSection>> {
+    let mut team_members: Vec<User> = app_state
         .db
         .reports
-        .timesheet_members_for_period(from, to)
-        .await?;
+        .active_team_members(requester.id, requester.is_admin())
+        .await?
+        .into_iter()
+        // Pure-admin users (tracks_time=false) have no own tracking dataset and
+        // are excluded, same as the team report.
+        .filter(|team_member| team_member.tracks_time)
+        .map(crate::services::users::repo_user_to_auth_user)
+        .collect();
     // Group sections by role (team lead, employee, assistant, admin), same as
     // every user roster in the frontend — stable sort preserves the
     // repository's last_name/first_name/id order within each role.
-    members.sort_by_key(|member| crate::roles::role_sort_rank(&member.role));
-    let mut sections = Vec::with_capacity(members.len());
-    for member in &members {
-        let user = crate::services::users::repo_user_to_auth_user(member.clone());
-        sections.push(build_timesheet_section(&app_state.pool, &user, from, to, &label).await?);
+    team_members.sort_by_key(|team_member| crate::roles::role_sort_rank(&team_member.role));
+
+    // Fetch each member's data sequentially and merge into one combined PDF —
+    // keeps backend load comparable to the per-employee export flow and avoids
+    // opening many concurrent report queries at once.
+    let mut sections = Vec::with_capacity(team_members.len());
+    for team_member in &team_members {
+        sections.push(build_timesheet_section(&app_state.pool, team_member, from, to, label).await?);
     }
-    Ok(crate::report_pdf::render_timesheet_pdf(&sections, from, to, &language))
+    Ok(sections)
 }
 
 #[cfg(test)]

@@ -5,7 +5,7 @@
   import { t, roleLabel, formatHours } from "../i18n.js";
   import { fmtDate, appTodayDate } from "../format.js";
   import { isAssistantUser } from "../rolePolicy.js";
-  import { userAvatarClass } from "../lib/domain/users.js";
+  import { userAvatarClass, userInitials } from "../lib/domain/users.js";
 
   let cur = "",
     nw = "",
@@ -32,9 +32,6 @@
       .catch(() => {});
   }
 
-  function initials(u) {
-    return ((u.first_name?.[0] || "") + (u.last_name?.[0] || "")).toUpperCase();
-  }
 
   async function toggleDarkMode() {
     if (savingTheme) return;
@@ -130,7 +127,7 @@
         class="avatar {userAvatarClass($currentUser)}"
         style="width:56px;height:56px;font-size:21px"
       >
-        {initials($currentUser)}
+        {userInitials($currentUser)}
       </div>
       <div>
         <div style="font-size:18px;font-weight:400">

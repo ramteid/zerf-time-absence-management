@@ -4,9 +4,10 @@
   import Icon from "../../Icons.svelte";
   import { absenceRequestTypeLabelKey } from "../../lib/domain/dashboard.js";
   import {
-    userAvatarClassFromRows,
-    userInitialsFromRows,
-    userNameFromRows,
+    findUserById,
+    userAvatarClass,
+    userFullName,
+    userInitials,
   } from "../../lib/domain/users.js";
 
   export let pendingWeeks = [];
@@ -52,6 +53,7 @@
     </div>
 
     {#each pendingWeeks as week (week.key)}
+      {@const weekUser = findUserById(users, week.user_id)}
       <div
         class="dashboard-click-row"
         on:click={() => onOpenWeekDetails(week)}
@@ -66,14 +68,14 @@
         title={$t("Show")}
       >
         <div
-          class="avatar {userAvatarClassFromRows(week.user_id, users)}"
+          class="avatar {userAvatarClass(weekUser)}"
           style="width:30px;height:30px;font-size:11px"
         >
-          {userInitialsFromRows(week.user_id, users) || "?"}
+          {userInitials(weekUser) || "?"}
         </div>
         <div style="flex:1;min-width:0">
           <div style="font-size:13px;font-weight:500;display:flex;align-items:center;gap:6px">
-            {userNameFromRows(week.user_id, users)}
+            {userFullName(weekUser, `#${week.user_id}`)}
             <span class="zf-chip zf-chip-submitted" style="font-size:10px">{$t("Approval")}</span>
           </div>
           <div class="tab-num" style="font-size:11.5px;color:var(--text-tertiary)">
@@ -102,6 +104,7 @@
     {/each}
 
     {#each pendingReopens as reopen (reopen.id)}
+      {@const reopenUser = findUserById(users, reopen.user_id)}
       <div
         class="dashboard-click-row"
         on:click={() => onOpenReopenDetail(reopen)}
@@ -116,14 +119,14 @@
         title={$t("Show details")}
       >
         <div
-          class="avatar {userAvatarClassFromRows(reopen.user_id, users)}"
+          class="avatar {userAvatarClass(reopenUser)}"
           style="width:30px;height:30px;font-size:11px"
         >
-          {userInitialsFromRows(reopen.user_id, users) || "?"}
+          {userInitials(reopenUser) || "?"}
         </div>
         <div style="flex:1;min-width:0">
           <div style="font-size:13px;font-weight:500;display:flex;align-items:center;gap:6px">
-            {userNameFromRows(reopen.user_id, users)}
+            {userFullName(reopenUser, `#${reopen.user_id}`)}
             <span class="zf-chip zf-chip-pending" style="font-size:10px">{$t("Edit request")}</span>
           </div>
           <div class="tab-num" style="font-size:11.5px;color:var(--text-tertiary)">
@@ -182,12 +185,13 @@
     </div>
 
     {#each pendingAbsences as absence (absence.id)}
+      {@const absenceUser = findUserById(users, absence.user_id)}
       <div class="absence-row">
         <div
-          class="avatar {userAvatarClassFromRows(absence.user_id, users)}"
+          class="avatar {userAvatarClass(absenceUser)}"
           style="width:30px;height:30px;font-size:11px"
         >
-          {userInitialsFromRows(absence.user_id, users) || "?"}
+          {userInitials(absenceUser) || "?"}
         </div>
         <div
           class="absence-summary"
@@ -200,7 +204,7 @@
           title={$t("Show details")}
         >
           <div style="font-size:13px;font-weight:500;display:flex;align-items:center;gap:6px">
-            {userNameFromRows(absence.user_id, users)}
+            {userFullName(absenceUser, `#${absence.user_id}`)}
             <span
               class="zf-chip {absence.status === 'cancellation_pending' ? 'zf-chip-cancellation_pending' : 'zf-chip-warning'}"
               style="font-size:10px"

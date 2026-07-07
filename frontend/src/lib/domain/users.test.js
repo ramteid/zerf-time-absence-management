@@ -1,14 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  compareUsersByRoleThenName,
   findUserById,
   hasUserId,
   sortUsersByRoleThenName,
   timeTrackingUsers,
   userAvatarClass,
-  userAvatarClassFromRows,
   userFullName,
   userInitials,
-  userInitialsFromRows,
   userNameFromRows,
   userWorkdaysPerWeek,
   userWorkdaysPerWeekById,
@@ -74,10 +73,6 @@ describe("users domain helpers", () => {
     expect(userInitials(null)).toBe("");
   });
 
-  it("userInitialsFromRows looks up initials from the list", () => {
-    expect(userInitialsFromRows(1, users)).toBe("AA");
-  });
-
   it("userAvatarClass maps each role to its own CSS class", () => {
     expect(userAvatarClass({ role: "admin" })).toBe("avatar-role-admin");
     expect(userAvatarClass({ role: "team_lead" })).toBe("avatar-role-team_lead");
@@ -86,13 +81,20 @@ describe("users domain helpers", () => {
   });
 
   it("userAvatarClass returns an empty string for an unknown or missing role", () => {
+    // e.g. /team-users omits `role` for non-manageable colleagues — those rows
+    // must fall back to the neutral base .avatar rather than an invalid class.
     expect(userAvatarClass({ role: "bogus" })).toBe("");
+    expect(userAvatarClass({})).toBe("");
     expect(userAvatarClass(null)).toBe("");
   });
 
-  it("userAvatarClassFromRows looks up the role class from the list", () => {
-    expect(userAvatarClassFromRows(1, users)).toBe("avatar-role-admin");
-    expect(userAvatarClassFromRows(2, users)).toBe("avatar-role-employee");
+  it("compareUsersByRoleThenName ranks unknown/absent roles last, not interleaved", () => {
+    // Regression guard: a row without a role (redacted by the API) must sort
+    // after every known role, never above assistants.
+    const known = { role: "assistant", last_name: "Z", first_name: "Z" };
+    const unknown = { last_name: "A", first_name: "A" };
+    expect(compareUsersByRoleThenName(known, unknown)).toBeLessThan(0);
+    expect(compareUsersByRoleThenName(unknown, known)).toBeGreaterThan(0);
   });
 
   it("sortUsersByRoleThenName groups by role (team lead, employee, assistant, admin), then by name", () => {

@@ -5,9 +5,9 @@ use crate::roles::is_assistant_role;
 use crate::services::reports::{
     all_weeks_submitted_for_month, assert_can_access_user, build_flextime_for_user, build_month,
     build_month_without_submission_status, build_overtime_rows_for_year, build_range,
-    build_timesheet_section, csv_response, month_bounds, parse_report_time, pdf_response,
-    sort_categories_desc, validate_range, CategoryTotal, FlextimeDay, MonthReport, MonthRow,
-    TeamRow, UserCategoryRow,
+    build_team_timesheet_sections, build_timesheet_section, csv_response, month_bounds,
+    parse_report_time, pdf_response, sort_categories_desc, validate_range, CategoryTotal,
+    FlextimeDay, MonthReport, MonthRow, TeamRow, UserCategoryRow,
 };
 use crate::AppState;
 use axum::{
@@ -142,31 +142,8 @@ pub async fn range_pdf(
         if !requester.is_lead() {
             return Err(AppError::Forbidden);
         }
-        let mut team_members: Vec<User> = app_state
-            .db
-            .reports
-            .active_team_members(requester.id, requester.is_admin())
-            .await?
-            .into_iter()
-            // Pure-admin users (tracks_time=false) have no own tracking dataset
-            // and are excluded, same as the team report.
-            .filter(|team_member| team_member.tracks_time)
-            .map(crate::services::users::repo_user_to_auth_user)
-            .collect();
-        // Group sections by role (team lead, employee, assistant, admin), same
-        // as every user roster in the frontend — stable sort preserves the
-        // repository's last_name/first_name/id order within each role.
-        team_members.sort_by_key(|team_member| crate::roles::role_sort_rank(&team_member.role));
-
-        // Fetch each member's data sequentially and merge into one combined PDF
-        // — keeps backend load comparable to the original per-employee export
-        // flow and avoids opening many concurrent report queries at once.
-        let mut sections = Vec::with_capacity(team_members.len());
-        for team_member in &team_members {
-            sections.push(
-                build_timesheet_section(&app_state.pool, team_member, from, to, &label).await?,
-            );
-        }
+        let sections =
+            build_team_timesheet_sections(&app_state, &requester, from, to, &label).await?;
         (sections, format!("team-{}", label))
     };
 

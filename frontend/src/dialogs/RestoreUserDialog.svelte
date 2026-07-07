@@ -10,6 +10,7 @@
   import DatePicker from "../DatePicker.svelte";
   import { restoreUser } from "../lib/api/usersApi.js";
   import { roleLabel } from "../i18n.js";
+  import { sortUsersByRoleThenName } from "../lib/domain/users.js";
 
   export let user;
   export let onClose;
@@ -36,7 +37,10 @@
   onMount(async () => {
     try {
       const all = await api("/users");
-      eligibleApprovers = (all || []).filter((u) => u.active && u.id !== user.id);
+      // Grouped by role, then name, to match every other user list in the app.
+      eligibleApprovers = sortUsersByRoleThenName(
+        (all || []).filter((u) => u.active && u.id !== user.id),
+      );
     } catch (e) {
       toast($t(e?.message || "Error"), "error");
     }

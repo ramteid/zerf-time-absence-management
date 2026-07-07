@@ -12,6 +12,10 @@
   } from "../../format.js";
   import Icon from "../../Icons.svelte";
   import { getTeamAbsences } from "../../lib/api/dashboardApi.js";
+  import {
+    compareUsersByRoleThenName,
+    findUserById,
+  } from "../../lib/domain/users.js";
 
   export let users = [];
 
@@ -59,12 +63,14 @@
 
   loadWeek(week);
 
-  $: sortedData = [...data].sort((a, b) => {
-    const ua = users.find((u) => u.id === a.user_id);
-    const ub = users.find((u) => u.id === b.user_id);
-    return (ua?.last_name || "").localeCompare(ub?.last_name || "") ||
-      (ua?.first_name || "").localeCompare(ub?.first_name || "");
-  });
+  // Order absence rows by the same role grouping (team lead, employee,
+  // assistant, admin) then name used for every other user list in the app.
+  $: sortedData = [...data].sort((a, b) =>
+    compareUsersByRoleThenName(
+      findUserById(users, a.user_id),
+      findUserById(users, b.user_id),
+    ),
+  );
 </script>
 
 <div class="zf-card" style="margin-top:16px;overflow:hidden">

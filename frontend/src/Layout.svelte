@@ -23,7 +23,7 @@
   import AppLogo from "./AppLogo.svelte";
   import PullToRefresh from "./lib/ui/PullToRefresh.svelte";
   import { notificationTarget } from "./lib/domain/dashboard.js";
-  import { userAvatarClass } from "./lib/domain/users.js";
+  import { userAvatarClass, userInitials } from "./lib/domain/users.js";
 
   // Mobile menu
   let mobileMoreOpen = false;
@@ -137,11 +137,6 @@
 
   $: sections = navSections(desktopNav);
 
-  function initials(user) {
-    return (
-      (user.first_name?.[0] || "") + (user.last_name?.[0] || "")
-    ).toUpperCase();
-  }
 </script>
 
 <svelte:window on:click={onDocClick} />
@@ -271,7 +266,7 @@
           class="avatar {userAvatarClass($currentUser)}"
           style="width:30px;height:30px;font-size:11px"
         >
-          {initials($currentUser)}
+          {userInitials($currentUser)}
         </div>
         <div style="flex:1;min-width:0">
           <div class="sidebar-user-name">
@@ -339,7 +334,7 @@
               class="avatar {userAvatarClass($currentUser)}"
               style="width:32px;height:32px;font-size:11px"
             >
-              {initials($currentUser)}
+              {userInitials($currentUser)}
             </div>
             <div style="flex:1;min-width:0">
               <div style="font-weight:400;font-size:14px">

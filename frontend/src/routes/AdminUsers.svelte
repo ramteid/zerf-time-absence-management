@@ -8,7 +8,11 @@
   import ArchiveUserDialog from "../dialogs/ArchiveUserDialog.svelte";
   import RestoreUserDialog from "../dialogs/RestoreUserDialog.svelte";
   import { getArchivedUsers } from "../lib/api/usersApi.js";
-  import { sortUsersByRoleThenName, userAvatarClass } from "../lib/domain/users.js";
+  import {
+    sortUsersByRoleThenName,
+    userAvatarClass,
+    userInitials,
+  } from "../lib/domain/users.js";
   import { confirmDialog } from "../confirm.js";
 
   let users = [];
@@ -71,10 +75,6 @@
     }
   }
 
-  function initials(u) {
-    return ((u.first_name?.[0] || "") + (u.last_name?.[0] || "")).toUpperCase();
-  }
-
   function fmtDate(isoString) {
     if (!isoString) return "";
     try {
@@ -109,7 +109,7 @@
           : ''};display:flex;align-items:center;gap:12px"
       >
         <div class="avatar {userAvatarClass(u)}" style="width:32px;height:32px;font-size:12px">
-          {initials(u)}
+          {userInitials(u)}
         </div>
         <div style="flex:1;min-width:0">
           <div style="font-size:13px;font-weight:500">
@@ -159,7 +159,7 @@
             : ''};display:flex;align-items:center;gap:12px"
         >
           <div class="avatar {userAvatarClass(u)}" style="width:32px;height:32px;font-size:12px">
-            {initials(u)}
+            {userInitials(u)}
           </div>
           <div style="flex:1;min-width:0">
             <div style="font-size:13px;font-weight:500">

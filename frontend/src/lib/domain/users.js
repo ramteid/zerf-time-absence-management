@@ -43,50 +43,49 @@ export function userInitials(user) {
   ).toUpperCase();
 }
 
-export function userInitialsFromRows(userId, users) {
-  return userInitials(findUserById(users, userId));
+// Canonical role display order for user rosters: team leads, then employees,
+// then assistants, then admins. This is the single source for both the
+// role-grouped sort and the per-role avatar colour class.
+//
+// IMPORTANT: keep this in sync with the backend's `roles::role_sort_rank`
+// (backend/src/roles.rs), which orders the combined timesheet PDF sections the
+// same way. The order is pinned by tests on both sides (users.test.js here,
+// role_sort_rank_orders_* in roles.rs).
+const ROLE_ORDER = ["team_lead", "employee", "assistant", "admin"];
+
+// Sort rank for a role. Unknown or absent roles sort last — e.g. the
+// /team-users endpoint intentionally omits `role` for non-manageable
+// colleagues, so those rows carry no role to group by.
+function roleRank(role) {
+  const index = ROLE_ORDER.indexOf(role);
+  return index === -1 ? ROLE_ORDER.length : index;
 }
 
-// CSS class per role for avatar background/text color (see .avatar-role-*
-// in styles.css). Keeps avatar color consistent for a given user everywhere
-// they appear, instead of depending on ad-hoc per-page inline styles.
-const AVATAR_ROLE_CLASSES = {
-  admin: "avatar-role-admin",
-  team_lead: "avatar-role-team_lead",
-  employee: "avatar-role-employee",
-  assistant: "avatar-role-assistant",
-};
-
+// CSS class for a user's avatar background/text colour (see .avatar-role-*
+// in styles.css). Keeps a user's avatar colour consistent everywhere they
+// appear, instead of depending on ad-hoc per-page inline styles. Unknown or
+// absent roles get no class and fall back to the neutral base .avatar style.
 export function userAvatarClass(user) {
-  return AVATAR_ROLE_CLASSES[user?.role] || "";
+  return ROLE_ORDER.includes(user?.role) ? `avatar-role-${user.role}` : "";
 }
 
-export function userAvatarClassFromRows(userId, users) {
-  return userAvatarClass(findUserById(users, userId));
+// Comparator that groups users by role (team lead, employee, assistant,
+// admin), alphabetically by last/first name within each group. Exposed so
+// callers that sort something other than a plain user array (e.g. absence
+// rows keyed by user_id) can reuse the exact same ordering.
+export function compareUsersByRoleThenName(a, b) {
+  const roleDiff = roleRank(a?.role) - roleRank(b?.role);
+  if (roleDiff !== 0) return roleDiff;
+  return (
+    (a?.last_name || "").localeCompare(b?.last_name || "") ||
+    (a?.first_name || "").localeCompare(b?.first_name || "")
+  );
 }
 
-// Display order for role-grouped user lists: team leads, then employees,
-// then assistants, then admins.
-const ROLE_SORT_ORDER = {
-  team_lead: 0,
-  employee: 1,
-  assistant: 2,
-  admin: 3,
-};
-
-// Sorts users into role groups (team lead, employee, assistant, admin),
-// alphabetically by last/first name within each group. Use this wherever a
-// roster of users is displayed, instead of a flat name-only sort.
+// Sorts a roster into role groups, alphabetical within each group. Use this
+// wherever a list of users is displayed, instead of a flat name-only sort.
 export function sortUsersByRoleThenName(users) {
-  return [...(users || [])].sort((a, b) => {
-    const roleDiff =
-      (ROLE_SORT_ORDER[a?.role] ?? 99) - (ROLE_SORT_ORDER[b?.role] ?? 99);
-    if (roleDiff !== 0) return roleDiff;
-    return (
-      (a?.last_name || "").localeCompare(b?.last_name || "") ||
-      (a?.first_name || "").localeCompare(b?.first_name || "")
-    );
-  });
+  return [...(users || [])].sort(compareUsersByRoleThenName);
 }
 
 export function userWorkdaysPerWeek(user, fallback = 5) {

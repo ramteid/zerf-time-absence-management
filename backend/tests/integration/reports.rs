@@ -1193,3 +1193,107 @@ async fn zero_weekly_hours_employee_exempt_from_week_completeness_checks() {
 
     app.cleanup().await;
 }
+
+/// The combined "all employees" timesheet PDF (`GET /reports/pdf` with no
+/// `user_id`) must order its per-user sections by role — team leads, then
+/// employees, then assistants, then admins — and alphabetically within each
+/// role, matching every on-screen user roster. This mirrors
+/// `roles::role_sort_rank` / `services::reports::build_team_timesheet_sections`.
+///
+/// The names below are chosen so a naive global-alphabetical order would give a
+/// different sequence (the team lead's last name sorts last, the admin's sorts
+/// first), so the assertion genuinely exercises the role grouping rather than
+/// coincidental alphabetical order.
+#[tokio::test]
+async fn combined_timesheet_pdf_orders_sections_by_role_then_name() {
+    let app = TestApp::spawn().await;
+    // The seeded admin is "Test Admin" (role admin, tracks_time defaults TRUE).
+    let admin = admin_login(&app).await;
+
+    // Team lead whose last name ("Zeta") sorts last alphabetically — role rank
+    // must still place them first.
+    let (st, _) = admin
+        .post(
+            "/api/v1/users",
+            &json!({"email":"tl-pdf@example.com","first_name":"Tim","last_name":"Zeta",
+                "role":"team_lead","weekly_hours":39,"leave_days_current_year":30,
+                "leave_days_next_year":30,"annual_leave_days":30,
+                "start_date":"2024-01-01","approver_ids":[1]}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create team lead");
+
+    // Two employees prove alphabetical ordering *within* the employee group.
+    let (st, _) = admin
+        .post(
+            "/api/v1/users",
+            &json!({"email":"empa-pdf@example.com","first_name":"Ann","last_name":"Alpha",
+                "role":"employee","weekly_hours":39,"leave_days_current_year":30,
+                "leave_days_next_year":30,"annual_leave_days":30,
+                "start_date":"2024-01-01","approver_ids":[1]}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create employee Alpha");
+    let (st, _) = admin
+        .post(
+            "/api/v1/users",
+            &json!({"email":"empb-pdf@example.com","first_name":"Bob","last_name":"Beta",
+                "role":"employee","weekly_hours":39,"leave_days_current_year":30,
+                "leave_days_next_year":30,"annual_leave_days":30,
+                "start_date":"2024-01-01","approver_ids":[1]}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create employee Beta");
+
+    // Assistant: weekly_hours must be 0 with no fixed workdays per week.
+    let (st, _) = admin
+        .post(
+            "/api/v1/users",
+            &json!({"email":"asst-pdf@example.com","first_name":"Sam","last_name":"Sigma",
+                "role":"assistant","weekly_hours":0,"workdays_per_week":null,
+                "leave_days_current_year":0,"leave_days_next_year":0,"annual_leave_days":0,
+                "start_date":"2024-01-01","approver_ids":[1]}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create assistant");
+
+    // Omitting user_id requests the combined team export (admin scope = all).
+    let from = date_offset(-7);
+    let to = today();
+    let (st, pdf) = admin
+        .get_raw(&format!("/api/v1/reports/pdf?from={from}&to={to}"))
+        .await;
+    assert_eq!(st, StatusCode::OK, "combined PDF export");
+    assert!(pdf.starts_with("%PDF"), "response body is a PDF");
+
+    // Each section header embeds the user's full name in the (uncompressed)
+    // content stream, so section order equals the byte order of those names.
+    let position = |needle: &str| {
+        pdf.find(needle)
+            .unwrap_or_else(|| panic!("section for '{needle}' missing from PDF"))
+    };
+    let team_lead = position("Tim Zeta");
+    let employee_alpha = position("Ann Alpha");
+    let employee_beta = position("Bob Beta");
+    let assistant = position("Sam Sigma");
+    let admin_section = position("Test Admin");
+
+    assert!(
+        team_lead < employee_alpha,
+        "team lead section precedes employees despite a later last name"
+    );
+    assert!(
+        employee_alpha < employee_beta,
+        "employees are alphabetical within their role group (Alpha before Beta)"
+    );
+    assert!(
+        employee_beta < assistant,
+        "employees precede the assistant"
+    );
+    assert!(
+        assistant < admin_section,
+        "assistant precedes the admin, which sorts last despite an early last name"
+    );
+
+    app.cleanup().await;
+}

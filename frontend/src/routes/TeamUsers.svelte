@@ -3,7 +3,7 @@
   import { toast } from "../stores.js";
   import { t } from "../i18n.js";
   import Icon from "../Icons.svelte";
-  import { sortUsersByRoleThenName, userAvatarClass } from "../lib/domain/users.js";
+  import { userAvatarClass, userInitials } from "../lib/domain/users.js";
   import UserDialog from "../dialogs/UserDialog.svelte";
   import ArchiveUserDialog from "../dialogs/ArchiveUserDialog.svelte";
   import RestoreUserDialog from "../dialogs/RestoreUserDialog.svelte";
@@ -20,7 +20,16 @@
 
   async function load() {
     const loaded = await api("/team-users");
-    const sorted = sortUsersByRoleThenName(loaded);
+    // Role grouping is deliberately NOT applied here: the /team-users endpoint
+    // omits `role` for non-manageable colleagues (only manageable assistants
+    // carry it), so a role sort would float assistants above everyone else
+    // instead of grouping. A plain alphabetical order is the honest choice when
+    // roles are unavailable.
+    const sorted = [...(loaded || [])].sort(
+      (a, b) =>
+        (a.last_name || "").localeCompare(b.last_name || "") ||
+        (a.first_name || "").localeCompare(b.first_name || ""),
+    );
     // Split active rows from archived. Only manageable assistants ever carry
     // an archived_at; non-manageable colleagues are always active.
     users = sorted.filter((u) => !u.archived_at);
@@ -34,10 +43,6 @@
     } catch (e) {
       toast($t(e?.message || "Error"), "error");
     }
-  }
-
-  function initials(u) {
-    return ((u.first_name?.[0] || "") + (u.last_name?.[0] || "")).toUpperCase();
   }
 
   function fmtDate(isoString) {
@@ -77,7 +82,7 @@
           class="avatar {userAvatarClass(u)}"
           style="width:32px;height:32px;font-size:12px;opacity:{u.can_manage ? 1 : 0.5}"
         >
-          {initials(u)}
+          {userInitials(u)}
         </div>
         <div style="flex:1;min-width:0;opacity:{u.can_manage ? 1 : 0.5}">
           <div style="font-size:13px;font-weight:500">
@@ -120,7 +125,7 @@
             : ''};display:flex;align-items:center;gap:12px"
         >
           <div class="avatar {userAvatarClass(u)}" style="width:32px;height:32px;font-size:12px">
-            {initials(u)}
+            {userInitials(u)}
           </div>
           <div style="flex:1;min-width:0">
             <div style="font-size:13px;font-weight:500">

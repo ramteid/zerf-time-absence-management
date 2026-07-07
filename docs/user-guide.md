@@ -19,6 +19,7 @@ Use this document if you are:
   - [Key insight: workflow vs. work-math](#key-insight-workflow-vs-work-math)
   - [Practical examples](#practical-examples)
 - [Roles and approval model](#roles-and-approval-model)
+  - [Role colors and list order](#role-colors-and-list-order)
 - [Timezone and date behavior](#timezone-and-date-behavior)
 - [Time entry workflow](#time-entry-workflow)
   - [Status lifecycle](#status-lifecycle)
@@ -226,6 +227,33 @@ Important rules:
 
 This means the assignment list is the single source of truth for who gets asked
 to review a request.
+
+### Role colors and list order
+
+To make roles easy to recognise at a glance, Zerf colors each user's avatar
+(the circle with their initials) by role, and shows the same color everywhere
+that user appears (sidebar, account page, user lists, approval queues,
+dashboards). The colors are pastel and consistent:
+
+| Role | Avatar color |
+|------|--------------|
+| Team lead | Blue |
+| Employee | Green |
+| Assistant | Light green |
+| Admin | Red |
+
+Wherever a list of users is shown — the admin Users tab, Team Settings, the
+approver pickers when creating/archiving/restoring a user, the report
+employee dropdowns, and the dashboard "Who is absent" list — users are grouped
+by role in the order **team leads, employees, assistants, admins**, and sorted
+alphabetically by name within each group. The combined "all employees"
+timesheet PDF export (see [Viewing team reports](#viewing-team-reports)) orders
+its sections the same way.
+
+One deliberate exception: on the scoped **Users** tab a non-admin team lead
+sees (the optional assistant-management view), colleagues who are not the
+lead's assistants have their role hidden by the server, so that list stays in
+plain alphabetical order and those avatars use the neutral default color.
 
 An admin can optionally grant non-admin team leads a narrow, additional
 capability: creating and managing "Assistant" users assigned to them. This is
@@ -1259,6 +1287,10 @@ themselves.
 - Non-admin leads see only users explicitly assigned to them (plus themselves).
   Admin users are not visible in non-admin lead team reports.
 - Admins see all active users who track time.
+- The timesheet export can produce a single combined PDF for the whole team
+  (rather than one user at a time). Its per-user sections are ordered by role
+  — team leads, then employees, then assistants, then admins — and
+  alphabetically within each role, matching the on-screen user lists.
 
 ### Scoped assistant user management (optional)
 

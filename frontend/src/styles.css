@@ -690,6 +690,10 @@ input[type="radio"]:disabled {
   letter-spacing: -0.02em;
   background: var(--accent-soft);
   color: var(--accent-text);
+  /* Hairline ring in a mid-neutral so the chip stays visible on any surface —
+     the role "soft" backgrounds can otherwise blend into a dark sidebar (dark
+     theme) or a pale card, leaving only the initials floating. */
+  box-shadow: inset 0 0 0 1px rgba(128, 128, 128, 0.22);
 }
 
 /* Role-based avatar colors — same palette everywhere a user's avatar is

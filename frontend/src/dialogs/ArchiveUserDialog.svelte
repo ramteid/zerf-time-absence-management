@@ -8,6 +8,7 @@
   import { t } from "../i18n.js";
   import Dialog from "../Dialog.svelte";
   import { archiveUser } from "../lib/api/usersApi.js";
+  import { sortUsersByRoleThenName } from "../lib/domain/users.js";
 
   export let user;
   export let onClose;
@@ -31,20 +32,25 @@
       // Load the full user list to build eligible-approver and approved-users lists.
       const all = await api("/users");
       // Only team leads and admins can be approvers — employees are excluded.
-      eligibleApprovers = (all || []).filter(
-        (u) =>
-          u.active &&
-          u.id !== user.id &&
-          (u.role === "team_lead" || u.role === "admin"),
+      // Grouped by role, then name, to match every other user list in the app.
+      eligibleApprovers = sortUsersByRoleThenName(
+        (all || []).filter(
+          (u) =>
+            u.active &&
+            u.id !== user.id &&
+            (u.role === "team_lead" || u.role === "admin"),
+        ),
       );
       // Find users whose approver_ids list contains the target user's id.
       // GET /users (admin path) includes approver_ids per user so this works directly.
-      approvedUsers = (all || []).filter(
-        (u) =>
-          u.active &&
-          u.id !== user.id &&
-          Array.isArray(u.approver_ids) &&
-          u.approver_ids.includes(user.id),
+      approvedUsers = sortUsersByRoleThenName(
+        (all || []).filter(
+          (u) =>
+            u.active &&
+            u.id !== user.id &&
+            Array.isArray(u.approver_ids) &&
+            u.approver_ids.includes(user.id),
+        ),
       );
       // Initialise replacements with null so the UI shows them.
       replacements = Object.fromEntries(
