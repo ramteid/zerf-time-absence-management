@@ -715,9 +715,6 @@ pub async fn cancel_absence(
             Ok(serde_json::json!({"ok": true}))
         }
         "approved" => {
-            let approver_ids =
-                crate::services::auth::required_approval_recipient_ids(&app_state.pool, requester)
-                    .await?;
             let rows =
                 crate::repository::AbsenceDb::request_cancellation_tx(&mut transaction, absence_id)
                     .await?;
@@ -727,6 +724,13 @@ pub async fn cancel_absence(
                 ));
             }
             transaction.commit().await?;
+            // Fetch approver IDs after commit (notification-after-commit pattern).
+            // Use the non-required variant so cancellation is never blocked when
+            // the user's approver has been removed after the original approval.
+            // If no approver exists, the notification list is simply empty and
+            // the cancellation_pending row awaits admin review.
+            let approver_ids =
+                crate::services::auth::approval_recipient_ids(&app_state.pool, requester).await;
             audit::log(
                 &app_state.pool,
                 requester.id,

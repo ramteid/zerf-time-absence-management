@@ -435,15 +435,15 @@ impl UserDb {
                  SELECT user_id, COUNT(*)::bigint AS pending_count
                  FROM (
                      SELECT te.user_id FROM time_entries te
-                     JOIN users u ON u.id = te.user_id AND u.tracks_time = TRUE
+                     JOIN users u ON u.id = te.user_id AND u.tracks_time = TRUE AND u.active = TRUE
                      WHERE te.status = 'submitted'
                      UNION ALL
                      SELECT a.user_id FROM absences a
-                     JOIN users u ON u.id = a.user_id AND u.tracks_time = TRUE
+                     JOIN users u ON u.id = a.user_id AND u.tracks_time = TRUE AND u.active = TRUE
                      WHERE a.status IN ('requested','cancellation_pending')
                      UNION ALL
                      SELECT rr.user_id FROM reopen_requests rr
-                     JOIN users u ON u.id = rr.user_id AND u.tracks_time = TRUE
+                     JOIN users u ON u.id = rr.user_id AND u.tracks_time = TRUE AND u.active = TRUE
                      WHERE rr.status = 'pending'
                      AND NOT EXISTS (
                          SELECT 1 FROM time_entries te

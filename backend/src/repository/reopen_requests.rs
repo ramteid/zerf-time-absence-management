@@ -84,11 +84,12 @@ impl ReopenRequestDb {
     }
 
     pub async fn list_pending_admin(&self) -> AppResult<Vec<ReopenRequest>> {
-        // Exclude requests from users who have time tracking disabled — their
-        // historical rows are kept immutably but must not surface in any team view.
+        // Exclude requests from users who have time tracking disabled or are
+        // archived — their historical rows are kept immutably but must not
+        // surface in any team or approval view.
         Ok(QueryBuilder::<Postgres>::new(format!(
             "{RR_SELECT} WHERE status='pending' \
-             AND user_id IN (SELECT id FROM users WHERE tracks_time=TRUE) \
+             AND user_id IN (SELECT id FROM users WHERE tracks_time=TRUE AND active=TRUE) \
              AND NOT EXISTS (\
                  SELECT 1 FROM time_entries te \
                  WHERE te.user_id = reopen_requests.user_id \
