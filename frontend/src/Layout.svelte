@@ -184,7 +184,7 @@
       </div>
       <div
         class="zf-bell-wrapper"
-        style="position:absolute;top:0;bottom:0;right:18px;margin:auto;height:30px;display:flex;align-items:center"
+        style="position:absolute;top:-17px;bottom:0;right:18px;margin:auto;height:30px;display:flex;align-items:center"
       >
         <button
           class="zf-btn-icon-sm"

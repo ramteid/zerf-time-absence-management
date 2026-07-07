@@ -460,7 +460,7 @@ input[type="radio"]:disabled {
 }
 
 .sidebar {
-  width: 220px;
+  width: 240px;
   background: var(--nav-bg);
   border-right: 1px solid var(--nav-border);
   display: flex;
