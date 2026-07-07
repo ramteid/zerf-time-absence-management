@@ -224,7 +224,7 @@ async fn load_auto_break_config(
     ) else {
         return Ok(None);
     };
-    let mut rules: Vec<(i64, i64)> = vec![((t1 * 60.0) as i64, d1)];
+    let mut rules: Vec<(i64, i64)> = vec![(exclusive_threshold_minutes(t1), d1)];
 
     // Optional tier-2: only added when both fields are valid.
     let threshold2_str =
@@ -236,12 +236,17 @@ async fn load_auto_break_config(
         threshold2_str.parse::<f64>().ok().filter(|&t| t > 0.0),
         deduction2_str.parse::<i64>().ok().filter(|&d| d > 0),
     ) {
-        rules.push(((t2 * 60.0) as i64, d2));
+        rules.push((exclusive_threshold_minutes(t2), d2));
         // Ensure ascending threshold order for correct highest-rule selection.
         rules.sort_by_key(|(threshold, _)| *threshold);
     }
 
     Ok(Some(rules))
+}
+
+fn exclusive_threshold_minutes(threshold_hours: f64) -> i64 {
+    const FLOAT_ROUNDING_EPSILON: f64 = 1e-9;
+    (threshold_hours * 60.0 + FLOAT_ROUNDING_EPSILON).floor() as i64
 }
 
 pub async fn build_range_with_user(
@@ -838,8 +843,7 @@ pub async fn build_month(
         .ok_or(AppError::NotFound)?;
     let user = crate::services::users::repo_user_to_auth_user(repo_user);
     let is_assistant = is_assistant_role(&user.role);
-    let submission_exempt =
-        !crate::roles::has_submission_obligation(&user.role, user.weekly_hours);
+    let submission_exempt = !crate::roles::has_submission_obligation(&user.role, user.weekly_hours);
     let mut report = build_range_with_user(pool, &user, from, to, month).await?;
     let (all_submitted, all_approved) = submission_status_for_month(
         pool,
@@ -899,7 +903,10 @@ pub fn csv_response(r: MonthReport, uid: i64, file_label: &str) -> AppResult<Res
             "Absence", "Holiday",
         ])
         .map_err(csv_err)?;
-    let mut csv_total_min = 0i64;
+    // Use the already break-adjusted actual_min from the report rather than
+    // re-summing raw entry minutes, so the CSV Total matches the UI and the
+    // documented auto-break deduction behaviour.
+    let csv_total_min = r.actual_min;
     for day in &r.days {
         if day.entries.is_empty() {
             csv_writer
@@ -924,9 +931,6 @@ pub fn csv_response(r: MonthReport, uid: i64, file_label: &str) -> AppResult<Res
                 .map_err(csv_err)?;
         } else {
             for entry in &day.entries {
-                if entry.counts_as_work && entry.status == "approved" {
-                    csv_total_min += entry.minutes;
-                }
                 csv_writer
                     .write_record([
                         day.date.to_string(),
@@ -1039,7 +1043,8 @@ pub struct TeamRow {
     pub vacation_planned_days: f64,
     /// Sick working-days in the report month.
     pub sick_days: f64,
-    /// Current cumulative flextime balance as of today. None for assistants.
+    /// Current cumulative flextime balance up to and including yesterday
+    /// (today never contributes to the balance). None for assistants.
     pub flextime_balance_min: Option<i64>,
     /// True if all fully elapsed weeks (Sunday < today) overlapping the report month
     /// have been fully submitted.
@@ -1394,7 +1399,8 @@ pub async fn build_team_timesheet_sections(
     // opening many concurrent report queries at once.
     let mut sections = Vec::with_capacity(team_members.len());
     for team_member in &team_members {
-        sections.push(build_timesheet_section(&app_state.pool, team_member, from, to, label).await?);
+        sections
+            .push(build_timesheet_section(&app_state.pool, team_member, from, to, label).await?);
     }
     Ok(sections)
 }
@@ -1793,6 +1799,13 @@ mod tests {
             5,
             today,
         ));
+    }
+
+    #[test]
+    fn exclusive_threshold_minutes_preserves_fractional_break_boundaries() {
+        assert_eq!(exclusive_threshold_minutes(6.0), 360);
+        assert_eq!(exclusive_threshold_minutes(6.01), 360);
+        assert_eq!(exclusive_threshold_minutes(6.1), 366);
     }
 
     /// `validate_range` accepts a single-day range (from == to).

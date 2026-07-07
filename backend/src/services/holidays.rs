@@ -46,6 +46,18 @@ fn prepared_holidays_match_existing_auto(
     existing: &[crate::repository::Holiday],
     prepared: &[PreparedHoliday],
 ) -> bool {
+    // Collect the set of dates occupied by manual holidays. When a manual
+    // holiday shadows a date that the API also returns, `replace_auto_holidays`
+    // skips that date via ON CONFLICT DO NOTHING, so an auto row for that
+    // date will never exist. Excluding such dates from the prepared list
+    // ensures the comparison converges instead of triggering a fruitless
+    // delete+reinsert cycle on every startup/scheduler tick.
+    let manual_dates: std::collections::HashSet<_> = existing
+        .iter()
+        .filter(|h| !h.is_auto)
+        .map(|h| h.holiday_date)
+        .collect();
+
     let mut existing_auto: Vec<_> = existing
         .iter()
         .filter(|holiday| holiday.is_auto)
@@ -59,6 +71,7 @@ fn prepared_holidays_match_existing_auto(
         .collect();
     let mut prepared_rows: Vec<_> = prepared
         .iter()
+        .filter(|holiday| !manual_dates.contains(&holiday.holiday_date))
         .map(|holiday| {
             (
                 holiday.holiday_date,
@@ -536,12 +549,10 @@ mod tests {
             repo_holiday(new_year, "New Year's Day", Some("Neujahr"), 2026, true),
             repo_holiday(manual, "Company Holiday", None, 2026, false),
         ];
-        let prepared = vec![prepared_holiday(
-            new_year,
-            "New Year's Day",
-            "Neujahr",
-            2026,
-        )];
+        let prepared = vec![
+            prepared_holiday(new_year, "New Year's Day", "Neujahr", 2026),
+            prepared_holiday(manual, "Shadowed API Holiday", "API Feiertag", 2026),
+        ];
 
         assert!(prepared_holidays_match_existing_auto(&existing, &prepared));
     }

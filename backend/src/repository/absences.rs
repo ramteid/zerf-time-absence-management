@@ -368,11 +368,11 @@ impl AbsenceDb {
         to: Option<NaiveDate>,
         status_filter: Option<&str>,
     ) -> AppResult<Vec<Absence>> {
-        // Always exclude absences from users who have time tracking disabled.
-        // Their historical rows are kept immutably but must not surface in any
-        // team or approval view.
+        // Always exclude absences from users who have time tracking disabled or
+        // are archived. Their historical rows are kept immutably but must not
+        // surface in any team or approval view.
         let mut builder = QueryBuilder::<Postgres>::new(format!(
-            "{ABS_SELECT} WHERE a.user_id IN (SELECT id FROM users WHERE tracks_time=TRUE)"
+            "{ABS_SELECT} WHERE a.user_id IN (SELECT id FROM users WHERE tracks_time=TRUE AND active=TRUE)"
         ));
         if !is_admin {
             // Non-admin leads: only show absences from active, non-admin direct
@@ -445,7 +445,7 @@ impl AbsenceDb {
              c.name AS category_name, \
              a.start_date, a.end_date, a.comment, a.status \
              FROM absences a \
-             JOIN users u ON u.id=a.user_id AND u.tracks_time=TRUE \
+             JOIN users u ON u.id=a.user_id AND u.tracks_time=TRUE AND u.active=TRUE \
              JOIN absence_categories c ON c.id = a.category_id \
              WHERE a.status IN ('requested','approved','cancellation_pending') \
              AND a.end_date >=",
@@ -679,28 +679,47 @@ impl AbsenceDb {
         .rows_affected())
     }
 
-    /// Reject all pending absences (status 'requested' or 'cancellation_pending')
-    /// owned by `user_id` within an existing transaction. Used during archiving.
-    /// The system acts as the reviewer (reviewer_id = None is stored as NULL).
-    /// Returns the count of rejected absences.
+    /// Reject all pending absence requests (status 'requested') owned by
+    /// `user_id` within an existing transaction, and revert any
+    /// 'cancellation_pending' absences back to 'approved'. Used during
+    /// archiving. The documented invariant is that already-approved absences
+    /// are preserved; 'cancellation_pending' is an approved absence with a
+    /// pending cancellation review; rejecting the cancellation restores the
+    /// approved state. Returns the count of rows affected across both operations.
     pub async fn reject_pending_for_user_tx(
         tx: &mut sqlx::PgConnection,
         user_id: i64,
         reviewer_id: i64,
         reason: &str,
     ) -> AppResult<u64> {
-        let rows = sqlx::query(
+        // Reject genuinely pending requests (never approved).
+        let rejected = sqlx::query(
             "UPDATE absences SET status='rejected', reviewed_by=$1, \
              reviewed_at=CURRENT_TIMESTAMP, rejection_reason=$2 \
-             WHERE user_id=$3 AND status IN ('requested','cancellation_pending')",
+             WHERE user_id=$3 AND status='requested'",
         )
         .bind(reviewer_id)
         .bind(reason)
         .bind(user_id)
-        .execute(tx)
+        .execute(&mut *tx)
         .await?
         .rows_affected();
-        Ok(rows)
+
+        // Revert cancellation-pending absences to approved: these were already
+        // approved; archiving the user implicitly rejects the cancellation
+        // request and preserves the approved absence per the archiving invariant.
+        let reverted = sqlx::query(
+            "UPDATE absences SET status='approved', reviewed_by=$1, \
+             reviewed_at=CURRENT_TIMESTAMP \
+             WHERE user_id=$2 AND status='cancellation_pending'",
+        )
+        .bind(reviewer_id)
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+
+        Ok(rejected + reverted)
     }
 
     pub async fn find_for_update(
