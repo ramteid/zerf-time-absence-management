@@ -6,7 +6,7 @@
 // emails are sent). Tests verify:
 //   - The roster loads and renders with the correct labels
 //   - Toggling a checkbox calls the correct API endpoint
-//   - The current user's own row is labelled with "(you)"
+//   - A returned current-user row is labelled with "(you)"
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mount, unmount } from "svelte";
@@ -39,12 +39,12 @@ async function waitForText(target, text, timeout = 5000) {
   throw new Error(`Text not found: "${text}"`);
 }
 
-const sampleRows = [
+const adminRows = [
   {
     user_id: 1,
     first_name: "Alice",
     last_name: "Lead",
-    role: "team_lead",
+    role: "admin",
     email: "alice@example.com",
     allow_reopen_without_approval: false,
     allow_submission_without_approval: false,
@@ -59,6 +59,8 @@ const sampleRows = [
     allow_submission_without_approval: true,
   },
 ];
+
+const sampleRows = [adminRows[1]];
 
 describe("TeamSettings", () => {
   let target;
@@ -88,16 +90,19 @@ describe("TeamSettings", () => {
   });
 
   it("renders each team member's name in the list", async () => {
-    apiMock.mockResolvedValue(sampleRows);
+    apiMock.mockResolvedValue(adminRows);
     component = mount(TeamSettings, { target });
     await waitForText(target, "Alice");
     await waitForText(target, "Bob");
   });
 
-  it("marks the current user's row with '(you)'", async () => {
-    // Helps team leads identify their own row, which has additional
-    // restrictions (a non-admin cannot toggle their own auto-approve setting).
-    apiMock.mockResolvedValue(sampleRows);
+  it("marks a returned current-user row with '(you)'", async () => {
+    currentUser.set({
+      id: 1,
+      role: "admin",
+      permissions: { is_admin: true },
+    });
+    apiMock.mockResolvedValue(adminRows);
     component = mount(TeamSettings, { target });
     await waitForText(target, "you");
   });
@@ -119,7 +124,7 @@ describe("TeamSettings", () => {
     await settle();
     expect(target.textContent).toContain("Loading...");
     resolveLoad(sampleRows);
-    await waitForText(target, "Alice");
+    await waitForText(target, "Bob");
   });
 
   it("calls the team-settings PUT endpoint when a checkbox is toggled", async () => {
@@ -130,13 +135,10 @@ describe("TeamSettings", () => {
     await waitForText(target, "Bob");
 
     // The page renders two cards (Submissions, then Edit Requests), each with
-    // one row per team member. Rows are grouped by role (team leads before
-    // employees), so Alice ("team_lead") appears before Bob ("employee").
-    // Alice is also the signed-in user here, so her row is disabled
-    // (non-admins cannot toggle their own auto-approve setting) — checkbox 1
-    // is Bob's "auto-approve submissions" toggle in the first card.
+    // one row per returned team member. Checkbox 0 is Bob's
+    // "auto-approve submissions" toggle in the first card.
     const checkboxes = target.querySelectorAll('input[type="checkbox"]');
-    const bobCheckbox = checkboxes[1];
+    const bobCheckbox = checkboxes[0];
     expect(bobCheckbox).not.toBeNull();
     bobCheckbox.click();
     await settle();

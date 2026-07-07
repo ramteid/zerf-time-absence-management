@@ -30,8 +30,8 @@ where
     Option::<NaiveDate>::deserialize(deserializer).map(Some)
 }
 
-/// Per-user reopen/submission approval policy. Returned by `GET /team-settings`
-/// for every active user; visible and editable by any lead/admin.
+/// Per-user reopen/submission approval policy. Admins receive the full team
+/// settings list; non-admin leads receive only users they directly approve.
 #[derive(Serialize)]
 pub struct TeamSettings {
     pub user_id: i64,

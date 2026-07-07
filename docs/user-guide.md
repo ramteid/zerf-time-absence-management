@@ -1285,7 +1285,8 @@ reopen already happened at request time, silently.
 Team leads and admins access these settings via Settings → Team Settings.
 
 Team leads can enable or disable auto-approval of reopen requests for their
-direct reports. Admins can set it for any user (including themselves).
+direct reports. They only see users for whom they are assigned as approver.
+Admins can see and set it for any user (including themselves).
 
 Non-admin team leads cannot modify their own reopen policy — only their own
 approver (a higher lead or admin) may grant them auto-approval. This prevents
@@ -1300,7 +1301,8 @@ a lead from bypassing their own approval chain.
 ### Team settings: submission policy
 
 Team leads can enable or disable auto-approval of timesheet submissions for
-their direct reports. Admins can set it for any user (including themselves).
+their direct reports. They only see users for whom they are assigned as
+approver. Admins can see and set it for any user (including themselves).
 This is an independent setting from the reopen policy above — a user can have
 either, both, or neither enabled.
 

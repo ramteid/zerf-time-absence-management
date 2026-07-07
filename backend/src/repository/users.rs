@@ -314,7 +314,7 @@ impl UserDb {
         Ok(sqlx::query_scalar::<_, Option<bool>>(
             "SELECT TRUE FROM user_approvers ua \
              WHERE ua.user_id=$1 AND ua.approver_id=$2 \
-             AND EXISTS (SELECT 1 FROM users u WHERE u.id=$1 AND u.active=TRUE AND u.role != 'admin')",
+             AND EXISTS (SELECT 1 FROM users u WHERE u.id=$1 AND u.active=TRUE AND lower(trim(u.role)) != 'admin')",
         )
         .bind(target_id)
         .bind(approver_id)
@@ -416,9 +416,10 @@ impl UserDb {
             "SELECT id, email, first_name, last_name, role, \
              allow_reopen_without_approval, allow_submission_without_approval FROM users \
              WHERE active=TRUE AND tracks_time=TRUE \
-             AND (id=$1 OR id IN (SELECT ua.user_id FROM user_approvers ua \
-                                  JOIN users u ON u.id=ua.user_id \
-                                  WHERE ua.approver_id=$1 AND u.active=TRUE AND u.role != 'admin')) \
+             AND id<>$1 \
+             AND lower(trim(role)) != 'admin' \
+             AND id IN (SELECT ua.user_id FROM user_approvers ua \
+                        WHERE ua.approver_id=$1) \
              ORDER BY last_name, first_name",
         )
         .bind(lead_id)

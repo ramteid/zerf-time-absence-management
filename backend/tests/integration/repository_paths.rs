@@ -482,8 +482,8 @@ async fn users_repository_workflow() {
         .expect("lead team settings");
     assert_eq!(
         lead_team_settings.len(),
-        2,
-        "lead sees self and one direct report"
+        1,
+        "lead sees only one direct report"
     );
 
     let emp_client = login_change_pw(&app, "emp-repo-users@example.com", &emp_pw).await;

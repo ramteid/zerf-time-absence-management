@@ -63,9 +63,11 @@ async fn team_settings_full_workflow() {
             .await;
         assert_eq!(st, StatusCode::OK);
 
-        // Lead sees themselves + their direct report.
+        // Lead sees only users they directly approve.
         let (_, body) = lead.get("/api/v1/team-settings").await;
-        assert_eq!(body.as_array().unwrap().len(), 2);
+        let lead_rows = body.as_array().unwrap();
+        assert_eq!(lead_rows.len(), 1);
+        assert_eq!(lead_rows[0]["user_id"], emp_id);
 
         // Admin sees all (admin + lead + employee = 3).
         let (_, body) = admin.get("/api/v1/team-settings").await;
