@@ -39,8 +39,12 @@
 set -eu
 umask 077
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$ROOT"
+if [ -n "${BACKUP_LIB_ONLY:-}" ]; then
+  ROOT="${BACKUP_ROOT:-$(pwd)}"
+else
+  ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+  cd "$ROOT"
+fi
 
 OUT_DIR="${1:-$ROOT/backups}"
 
@@ -457,32 +461,35 @@ run_backup_once() {
     printf 'WARNING: pg_tde keyring not found at %s -- backup will not include it (logical restore is unaffected).\n' "$KEYRING_SRC" >&2
   fi
 
-  if ! write_backup_metadata "$temp_metadata_file" "$ts" "$keyring_included"; then
-    rm -f "$temp_file" "$temp_metadata_file" "$temp_keyring_file"
-    printf 'Failed to write backup metadata.\n' >&2
-    return 1
-  fi
-
-  chmod 600 "$temp_file" "$temp_metadata_file"
+  chmod 600 "$temp_file"
   if ! mv "$temp_file" "$output_file"; then
     rm -f "$temp_file" "$temp_metadata_file" "$temp_keyring_file"
     printf 'Failed to finalize backup file.\n' >&2
     return 1
   fi
-  if ! mv "$temp_metadata_file" "$metadata_file"; then
-    rm -f "$output_file" "$temp_metadata_file" "$temp_keyring_file"
-    printf 'Failed to finalize backup metadata.\n' >&2
-    return 1
-  fi
   # Finalize the keyring sidecar last.  A failure here is non-fatal: the dump
-  # and metadata are already valid, so downgrade to a warning rather than
-  # discarding a good backup.
+  # is already valid, so downgrade to a warning rather than discarding a good
+  # backup.  Metadata is written after this so pg_tde_keyring_included matches
+  # the sidecar that actually exists.
   if [ "$keyring_included" = "true" ]; then
     if ! mv "$temp_keyring_file" "$keyring_file"; then
       rm -f "$temp_keyring_file"
       printf 'WARNING: failed to finalize keyring sidecar -- backup kept without it.\n' >&2
       keyring_included=false
     fi
+  fi
+
+  if ! write_backup_metadata "$temp_metadata_file" "$ts" "$keyring_included"; then
+    rm -f "$output_file" "$keyring_file" "$temp_metadata_file" "$temp_keyring_file"
+    printf 'Failed to write backup metadata.\n' >&2
+    return 1
+  fi
+
+  chmod 600 "$temp_metadata_file"
+  if ! mv "$temp_metadata_file" "$metadata_file"; then
+    rm -f "$output_file" "$keyring_file" "$temp_metadata_file" "$temp_keyring_file"
+    printf 'Failed to finalize backup metadata.\n' >&2
+    return 1
   fi
 
   apply_retention

@@ -40,11 +40,12 @@ make_shim() {
   _body="$2"
   printf '#!/bin/sh\n%s\n' "$_body" > "$BATS_TMPDIR/bin/$_name"
   chmod +x "$BATS_TMPDIR/bin/$_name"
+  hash -r 2>/dev/null || true
 }
 
 # Shim openssl so `enc ... -out Y` copies its STDIN to Y, letting run_backup_once
 # succeed end-to-end without real cryptography.  backup.sh now streams the dump
-# into openssl via a pipe (`pg_dump | openssl … -out file`), so the shim reads
+# into openssl via a pipe (`pg_dump | openssl ... -out file`), so the shim reads
 # stdin and writes it to the -out path, mirroring real openssl.
 make_openssl_copy_shim() {
   make_shim openssl '
@@ -59,7 +60,7 @@ if [ -n "$out" ]; then cat > "$out"; else cat; fi
 '
 }
 
-# ── parse_share_url ──────────────────────────────────────────────────────────
+# -- parse_share_url ----------------------------------------------------------
 
 @test "parse_share_url: valid URL extracts base and token" {
   # Call without `run` so variable assignments are visible in the current shell.
@@ -89,7 +90,7 @@ if [ -n "$out" ]; then cat > "$out"; else cat; fi
   [ "$status" -ne 0 ]
 }
 
-# ── resolve_interval_days ────────────────────────────────────────────────────
+# -- resolve_interval_days ----------------------------------------------------
 
 @test "resolve_interval_days: returns value from app_settings when valid" {
   make_shim psql 'printf "7\n"'
@@ -126,7 +127,7 @@ if [ -n "$out" ]; then cat > "$out"; else cat; fi
   [ "$output" = "1" ]
 }
 
-# ── is_backup_due ────────────────────────────────────────────────────────────
+# -- is_backup_due ------------------------------------------------------------
 
 @test "is_backup_due: returns true when last_ts is empty" {
   # Empty timestamp -> treat as overdue; exit 0 means true in shell.
@@ -153,7 +154,7 @@ if [ -n "$out" ]; then cat > "$out"; else cat; fi
   [ "$status" -eq 0 ]
 }
 
-# ── seconds_until_next_backup ────────────────────────────────────────────────
+# -- seconds_until_next_backup ------------------------------------------------
 
 @test "seconds_until_next_backup: returns 0 when last_ts is empty" {
   run seconds_until_next_backup "" 1
@@ -175,7 +176,7 @@ if [ -n "$out" ]; then cat > "$out"; else cat; fi
   [ "$output" -le 86400 ]
 }
 
-# ── build_upload_target ──────────────────────────────────────────────────────
+# -- build_upload_target ------------------------------------------------------
 
 @test "build_upload_target: constructs WebDAV URL" {
   run build_upload_target "https://cloud.example.com" "AbCdEf" "zerf-20260101.dump.enc"
@@ -189,7 +190,7 @@ if [ -n "$out" ]; then cat > "$out"; else cat; fi
   [ "$output" = "https://example.com/nextcloud/public.php/webdav/backup.dump.enc" ]
 }
 
-# ── upload_backup ────────────────────────────────────────────────────────────
+# -- upload_backup ------------------------------------------------------------
 
 @test "upload_backup: passes credentials via curl config stdin not CLI args" {
   # Shim curl that records its config stdin and arguments.
@@ -213,7 +214,7 @@ exit 0
   ! grep -q "mypassword" "$BATS_TMPDIR/curl_capture/config"
 }
 
-# ── run_backup_once: 0-byte dump rejection ───────────────────────────────────
+# -- run_backup_once: 0-byte dump rejection -----------------------------------
 
 @test "run_backup_once: refuses to encrypt a zero-byte dump" {
   # pg_dump shim exits 0 but produces no output.
@@ -227,7 +228,7 @@ exit 0
   [[ "$output" =~ "zero-byte" ]]
 }
 
-# ── run_backup_once: pg_tde keyring sidecar ──────────────────────────────────
+# -- run_backup_once: pg_tde keyring sidecar ----------------------------------
 
 @test "run_backup_once: captures the pg_tde keyring sidecar when present" {
   make_shim pg_dump 'printf "PGDMP-fake-dump-bytes"'
@@ -250,6 +251,29 @@ exit 0
   grep -q '^pg_tde_keyring_included=true$' "$OUT_DIR"/zerf-*.metadata
 }
 
+@test "run_backup_once: metadata reports missing keyring if sidecar finalization fails" {
+  make_shim pg_dump 'printf "PGDMP-fake-dump-bytes"'
+  make_shim psql 'printf ""'
+  make_openssl_copy_shim
+  make_shim mv '
+case "$1" in
+  *.keyring.enc.tmp) exit 1 ;;
+esac
+exec /usr/bin/mv "$@"
+'
+
+  export OUT_DIR="$BATS_TMPDIR/out"
+  printf 'fake-encrypted-keyring' > "$BATS_TMPDIR/keyring.enc"
+  export KEYRING_SRC="$BATS_TMPDIR/keyring.enc"
+
+  run run_backup_once
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "failed to finalize keyring sidecar" ]]
+
+  ! ls "$OUT_DIR"/zerf-*.keyring.enc 2>/dev/null
+  grep -q '^pg_tde_keyring_included=false$' "$OUT_DIR"/zerf-*.metadata
+}
+
 @test "run_backup_once: succeeds without a keyring when the source is absent" {
   make_shim pg_dump 'printf "PGDMP-fake-dump-bytes"'
   make_shim psql 'printf ""'
@@ -267,7 +291,7 @@ exit 0
   grep -q '^pg_tde_keyring_included=false$' "$OUT_DIR"/zerf-*.metadata
 }
 
-# ── apply_retention (count-based: keep last 10) ──────────────────────────────
+# -- apply_retention (count-based: keep last 10) -------------------------------
 
 @test "apply_retention: deletes oldest files when more than 10 exist" {
   export OUT_DIR="$BATS_TMPDIR/out"

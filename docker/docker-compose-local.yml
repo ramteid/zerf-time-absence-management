@@ -11,7 +11,7 @@ services:
     security_opt:
       - no-new-privileges:true
     # Drop all Linux capabilities, then re-add only the minimal set the
-    # root→gosu startup needs. The custom entrypoint runs as root to chown the
+    # root-to-gosu startup needs. The custom entrypoint runs as root to chown the
     # keyring tmpfs and /data, then the upstream entrypoint drops to the postgres
     # user via gosu (setuid/setgid syscalls). CHOWN/FOWNER/DAC_OVERRIDE cover the
     # ownership and permission fixes during setup; SETUID/SETGID cover the gosu
@@ -24,17 +24,15 @@ services:
       - SETUID
       - SETGID
     # The pg_tde principal key lives on an in-memory tmpfs so it is never
-    # written to disk.  No elevated capabilities are required — pg_tde is a
+    # written to disk.  No elevated capabilities are required - pg_tde is a
     # PostgreSQL storage extension, not a FUSE filesystem.  1 MiB is plenty
     # for the keyring file (typically a few hundred bytes).
     tmpfs:
       - /var/lib/pg_tde_keyring:size=1m
-      # /tmp inside the postgres container is used during restore
-      # (docker cp copies the decrypted dump there before pg_restore reads it).
-      # Without an explicit tmpfs, /tmp is disk-backed (overlay filesystem),
-      # meaning the full plaintext dump briefly touches the host disk.
-      # A RAM-backed tmpfs ensures the plaintext never reaches persistent storage.
-      # 256 MiB is ample for both pg_restore's own temp files and the dump file.
+      # /tmp inside the postgres container is used during restore for small
+      # pg_restore TOC files. The archive itself is streamed over stdin so the
+      # full plaintext dump is not staged in the container filesystem.
+      # 256 MiB leaves room for pg_restore's own temporary files.
       - /tmp:size=256m
     environment:
       - POSTGRES_DB=${ZERF_POSTGRES_DB:-zerf}
@@ -63,7 +61,7 @@ services:
       - postgres_data:/data
       # The Percona image declares VOLUME [/data/db] in its Dockerfile, which
       # causes Docker to create an anonymous volume at /data/db on every container
-      # recreation — shadowing the parent named volume and silently losing all data.
+      # recreation - shadowing the parent named volume and silently losing all data.
       # An explicit named volume here prevents that: Docker respects explicit mounts
       # over image VOLUME declarations, so /data/db always uses zerf_postgres_db_data.
       - postgres_db_data:/data/db
@@ -174,8 +172,8 @@ services:
       # physical recovery of an orphaned, encrypted PGDATA volume possible even
       # if the keyring volume is later lost or overwritten. This volume holds
       # only the already-AES-encrypted keyring file and an empty db/ mountpoint
-      # — the data directory lives in the separate zerf_postgres_db_data volume
-      # — and the keyring is encrypted with ZERF_DB_ENCRYPTION_KEY, which this
+      # - the data directory lives in the separate zerf_postgres_db_data volume
+      # - and the keyring is encrypted with ZERF_DB_ENCRYPTION_KEY, which this
       # container already holds, so it gains no additional access to table data.
       - postgres_data:/keyring-src:ro
     entrypoint: ["/bin/sh", "/usr/local/bin/backup.sh", "/backups"]
@@ -185,7 +183,7 @@ services:
         max-size: "10m"
         max-file: "5"
     networks:
-      # backup_net only — deliberately not on `private` so a compromised app
+      # backup_net only - deliberately not on `private` so a compromised app
       # container cannot reach this service or its ZERF_DB_ENCRYPTION_KEY.
       - backup_net
       # backup_egress allows outgoing HTTPS to Nextcloud without giving the
@@ -204,7 +202,7 @@ networks:
   private:
     internal: true
   backup_net:
-    # Isolated internal network for postgres ↔ backup only.
+    # Isolated internal network for postgres-to-backup only.
     # The app container is intentionally absent from this network.
     internal: true
   backup_egress:

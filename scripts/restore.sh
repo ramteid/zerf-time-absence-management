@@ -2,28 +2,28 @@
 # Zerf backup restore helper.
 #
 # Usage:
-#   ./scripts/restore.sh                    — list available backups and choose
-#   ./scripts/restore.sh <file.dump.enc>    — restore a specific file
-#   ./scripts/restore.sh --keyring [DIR]    — extract a backup's pg_tde keyring
+#   ./scripts/restore.sh                    - list available backups and choose
+#   ./scripts/restore.sh <file.dump.enc>    - restore a specific file
+#   ./scripts/restore.sh --keyring [DIR]    - extract a backup's pg_tde keyring
 #                                             to DIR (default: cwd) for physical
 #                                             recovery; makes no database changes
 #
 # What this script does:
 #   1. Loads ZERF_DB_ENCRYPTION_KEY and database credentials from .env.
-#   2. Decrypts the chosen .dump.enc file to a host temp file.
+#   2. Verifies the chosen .dump.enc file can be decrypted and read by pg_restore.
 #   3. Stops the app container (to prevent writes during restore).
-#   4. Drops existing application objects and restores from the backup.
+#   4. Restores the backup in a single transaction.
 #   5. Optionally restarts the app.  On startup the app applies any pending
 #      sqlx migrations automatically.
 #
 # Migration compatibility:
-#   Backup older than current code  → app applies pending migrations on start.
-#   Backup newer than current code  → schema may contain columns/tables the
+#   Backup older than current code  -> app applies pending migrations on start.
+#   Backup newer than current code  -> schema may contain columns/tables the
 #                                     current binary does not understand; update
 #                                     the app before restarting after restore.
 set -euo pipefail
 
-# Ensure all temp files (PLAIN_TMP, TMP_COPY, META_TMP) are created 0600 from
+# Ensure all temp files (TMP_COPY, META_TMP) are created 0600 from
 # the instant they appear, not just after a follow-up chmod.  On Linux mktemp
 # already creates 0600 files (glibc default), but the explicit umask makes the
 # intent clear and is defensive against environments where that default differs.
@@ -41,10 +41,10 @@ POSTGRES_CONTAINER="${ZERF_RESTORE_POSTGRES_CONTAINER:-zerf-postgres}"
 APP_CONTAINER="${ZERF_RESTORE_APP_CONTAINER:-zerf-app}"
 BACKUP_VOLUME="${ZERF_RESTORE_BACKUP_VOLUME:-zerf_backup_data}"
 # postgres:18 has pg_dump / pg_restore and is already used by the backup
-# container, so it should be cached locally — no extra pull.
+# container, so it should be cached locally - no extra pull.
 HELPER_IMAGE="postgres:18"
 
-# ── Helpers ──────────────────────────────────────────────────────────────────
+# -- Helpers ------------------------------------------------------------------
 
 die()  { echo "ERROR: $*" >&2; exit 1; }
 info() { echo "  $*"; }
@@ -59,9 +59,16 @@ confirm() {
     exit 0
 }
 
-# ── Keyring extraction mode (physical recovery) ──────────────────────────────
+decrypt_backup_to_stdout() {
+    local file="$1"
+    openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 \
+        -pass env:ZERF_DB_ENCRYPTION_KEY \
+        -in "$file"
+}
+
+# -- Keyring extraction mode (physical recovery) ------------------------------
 #
-# Each backup may carry a sibling zerf-<ts>.keyring.enc — a copy of the pg_tde
+# Each backup may carry a sibling zerf-<ts>.keyring.enc - a copy of the pg_tde
 # keyring. The logical restore below does NOT need it, but recovering an
 # orphaned, encrypted PGDATA volume does. This mode copies a chosen keyring out
 # of the backup volume so it can be paired with such a volume. It never touches
@@ -69,6 +76,7 @@ confirm() {
 extract_keyring() {
     local out_dir="${1:-$PWD}"
     [ -d "$out_dir" ] || die "Output directory does not exist: $out_dir"
+    out_dir="$(cd "$out_dir" && pwd)" || die "Could not resolve output directory: $out_dir"
 
     docker volume inspect "$BACKUP_VOLUME" >/dev/null 2>&1 \
         || die "Docker volume $BACKUP_VOLUME not found. Is the stack running?"
@@ -84,7 +92,7 @@ extract_keyring() {
     )
 
     [ ${#keyrings[@]} -gt 0 ] \
-        || die "No .keyring.enc files in $BACKUP_VOLUME. Backups made before keyring capture was added do not contain one — the postgres keyring volume (zerf_postgres_data) is then the only source."
+        || die "No .keyring.enc files in $BACKUP_VOLUME. Backups made before keyring capture was added do not contain one; the postgres keyring volume (zerf_postgres_data) is then the only source."
 
     echo ""
     echo "Available keyrings (newest first):"
@@ -116,7 +124,7 @@ extract_keyring() {
     # no-op (|| true) when the copy is owned by the container's uid instead.
     chmod 600 "$out_dir/$selected" 2>/dev/null || true
     echo ""
-    echo "✓ Keyring extracted to: $out_dir/$selected"
+    echo "Keyring extracted to: $out_dir/$selected"
     echo ""
     echo "This is the pg_tde keyring, encrypted with ZERF_DB_ENCRYPTION_KEY. To"
     echo "recover an orphaned, encrypted PGDATA volume, place it as"
@@ -124,7 +132,7 @@ extract_keyring() {
     echo "and start postgres against the recovered data directory."
     echo "See docs/UPGRADING.md for the full procedure."
     echo ""
-    echo "⚠  Do NOT overwrite a working keyring: if the live database already"
+    echo "WARNING: Do NOT overwrite a working keyring: if the live database already"
     echo "   starts and decrypts its data, its current keyring is the right one."
 }
 
@@ -136,9 +144,9 @@ if [ "${1:-}" = "--keyring" ] || [ "${1:-}" = "--extract-keyring" ]; then
     exit 0
 fi
 
-# ── Load .env ─────────────────────────────────────────────────────────────────
+# -- Load .env ----------------------------------------------------------------
 
-[ -f "$ENV_FILE" ] || die ".env not found at $ENV_FILE — copy .env.example and fill in the values."
+[ -f "$ENV_FILE" ] || die ".env not found at $ENV_FILE - copy .env.example and fill in the values."
 
 # `set -a` exports every variable that gets defined during the source.
 # This is the standard way to load a .env style file into the current shell.
@@ -147,32 +155,30 @@ set -a
 . "$ENV_FILE"
 set +a
 
-# Required values — fail fast if any are missing.
+# Required values - fail fast if any are missing.
 : "${ZERF_DB_ENCRYPTION_KEY:?ZERF_DB_ENCRYPTION_KEY must be set in .env}"
 : "${ZERF_POSTGRES_USER:?ZERF_POSTGRES_USER must be set in .env}"
 : "${ZERF_POSTGRES_PASSWORD:?ZERF_POSTGRES_PASSWORD must be set in .env}"
 : "${ZERF_POSTGRES_DB:?ZERF_POSTGRES_DB must be set in .env}"
 
-# ── Cleanup on exit (success or failure) ─────────────────────────────────────
+# -- Cleanup on exit (success or failure) -------------------------------------
 
-PLAIN_TMP=""
 TMP_COPY=""
-TMP_COPY_DIR=""   # isolated dir — only this dir is mounted into helper containers
+TMP_COPY_DIR=""   # isolated dir - only this dir is mounted into helper containers
 META_TMP=""
-META_TMP_DIR=""   # isolated dir — same reason
+META_TMP_DIR=""   # isolated dir - same reason
 cleanup() {
-    [ -n "$PLAIN_TMP" ]    && rm -f  "$PLAIN_TMP"
     [ -n "$TMP_COPY" ]     && rm -f  "$TMP_COPY"
     [ -n "$TMP_COPY_DIR" ] && rm -rf "$TMP_COPY_DIR"
     [ -n "$META_TMP" ]     && rm -f  "$META_TMP"
     [ -n "$META_TMP_DIR" ] && rm -rf "$META_TMP_DIR"
-    # Best-effort: remove the temp dump and restore list from inside the
+    # Best-effort: remove restore temp files from inside the
     # postgres container.  Suppress errors so cleanup never masks the real exit.
-    docker exec "$POSTGRES_CONTAINER" rm -f /tmp/zerf-restore.dump /tmp/zerf-restore.toc 2>/dev/null || true
+    docker exec "$POSTGRES_CONTAINER" rm -f /tmp/zerf-restore.dump /tmp/zerf-restore.toc /tmp/zerf-restore.full.toc 2>/dev/null || true
 }
 trap cleanup EXIT
 
-# ── Choose backup file ────────────────────────────────────────────────────────
+# -- Choose backup file --------------------------------------------------------
 
 BACKUP_FILE="${1:-}"
 BACKUP_CAME_FROM_VOLUME=0
@@ -217,12 +223,12 @@ if [ -z "$BACKUP_FILE" ]; then
     # Use an isolated temp directory (not all of /tmp) as the bind-mount so
     # the helper container only sees one file, not every process's temp files.
     # We pass SELECTED via -e so the helper's `sh -c` sees it as an env var,
-    # never as part of the command string — shell metacharacters in the
+    # never as part of the command string - shell metacharacters in the
     # filename are therefore inert.
     #
     # chmod 0644 the copy: the helper runs as the image's postgres user (uid 999),
     # so the file it writes is owned by uid 999 mode 600 and the (non-root) host
-    # user that runs this script cannot read it — openssl would then fail with
+    # user that runs this script cannot read it - openssl would then fail with
     # "Permission denied". The helper owns the freshly-created file, so it can
     # chmod it world-readable; the enclosing mktemp -d dir is 0700 and host-owned,
     # so the copy is still only reachable by the host user.
@@ -243,7 +249,7 @@ else
     [ -f "$BACKUP_FILE" ] || die "File not found: $BACKUP_FILE"
 fi
 
-# ── Look up matching metadata (best-effort, no failure if absent) ────────────
+# -- Look up matching metadata (best-effort, no failure if absent) -------------
 
 METADATA_FILE="${BACKUP_FILE%.dump.enc}.metadata"
 
@@ -262,11 +268,12 @@ if [ ! -f "$METADATA_FILE" ] && [ "$BACKUP_CAME_FROM_VOLUME" = "1" ]; then
     [ -s "$META_TMP" ] && METADATA_FILE="$META_TMP" || { rm -rf "$META_TMP_DIR"; META_TMP_DIR=""; META_TMP=""; }
 fi
 
-# ── Show metadata and confirm ────────────────────────────────────────────────
+# -- Show metadata and confirm -------------------------------------------------
 
 echo ""
-echo "┌─ Restore target ───────────────────────────────────────────────────"
-echo "│  File:     ${SELECTED:-$BACKUP_FILE}"
+echo "Restore target"
+echo "--------------"
+echo "  File:     ${SELECTED:-$BACKUP_FILE}"
 if [ -f "$METADATA_FILE" ]; then
     BACKUP_TS=$(grep '^created_at_utc=' "$METADATA_FILE" | cut -d= -f2- || true)
     BACKUP_COMMIT=$(grep '^ZERF_GIT_COMMIT=' "$METADATA_FILE" | cut -d= -f2- || true)
@@ -280,103 +287,75 @@ if [ -f "$METADATA_FILE" ]; then
     if [ -n "$BACKUP_COMMIT" ] \
        && [ "$BACKUP_COMMIT" != "$CURRENT_COMMIT" ] \
        && [ "$BACKUP_COMMIT" != "unknown" ]; then
-        echo "│"
-        echo "│  ⚠  Backup commit ($BACKUP_COMMIT) differs from current ($CURRENT_COMMIT)."
-        echo "│     • Backup older than code → app applies pending migrations on start."
-        echo "│     • Backup newer than code → update the app BEFORE restarting it."
+        echo ""
+        echo "  WARNING: Backup commit ($BACKUP_COMMIT) differs from current ($CURRENT_COMMIT)."
+        echo "     Backup older than code -> app applies pending migrations on start."
+        echo "     Backup newer than code -> update the app BEFORE restarting it."
     fi
 fi
-echo "│  Database: $ZERF_POSTGRES_DB  (user: $ZERF_POSTGRES_USER)"
-echo "└────────────────────────────────────────────────────────────────────"
+echo "  Database: $ZERF_POSTGRES_DB  (user: $ZERF_POSTGRES_USER)"
 echo ""
-echo "⚠  This will REPLACE ALL DATA in the live database."
+echo "WARNING: This will REPLACE ALL DATA in the live database."
 confirm "Continue?"
 
-# ── Verify postgres is running before we go further ──────────────────────────
+# -- Verify postgres is running before we go further ---------------------------
 
 POSTGRES_STATUS="$(docker inspect -f '{{.State.Status}}' "$POSTGRES_CONTAINER" 2>/dev/null || echo missing)"
 [ "$POSTGRES_STATUS" = "running" ] \
     || die "Container $POSTGRES_CONTAINER is not running (status: $POSTGRES_STATUS).  Start the stack first."
 
-# ── Decrypt ───────────────────────────────────────────────────────────────────
-
-PLAIN_TMP="$(mktemp /tmp/zerf-restore-XXXXXX.dump)"
-
-echo ""
-echo "Decrypting backup…"
-openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 \
-    -pass env:ZERF_DB_ENCRYPTION_KEY \
-    -in  "$BACKUP_FILE" \
-    -out "$PLAIN_TMP" \
-    || die "Decryption failed — wrong ZERF_DB_ENCRYPTION_KEY or corrupted file."
-
-# openssl can exit 0 on a truncated input that still parses as a (very small)
-# valid stream.  Reject empty decrypted output before we touch the live DB.
-if [ ! -s "$PLAIN_TMP" ]; then
-    die "Decrypted dump is empty — refusing to restore.  Backup file is likely truncated or corrupted."
-fi
-
-# ── Stop the app to prevent mid-restore writes ───────────────────────────────
-
-APP_WAS_RUNNING=0
-APP_STATUS="$(docker inspect -f '{{.State.Status}}' "$APP_CONTAINER" 2>/dev/null || echo missing)"
-if [ "$APP_STATUS" = "running" ]; then
-    echo "Stopping app container…"
-    docker stop "$APP_CONTAINER" >/dev/null
-    APP_WAS_RUNNING=1
-fi
-
-# ── Restore ───────────────────────────────────────────────────────────────────
-
-echo "Copying dump into postgres container…"
-# Pre-clear any stale dump/list left by a previous restore that was hard-killed
-# (SIGKILL bypasses the EXIT trap, so the cleanup inside the container may
-# not have run).  Idempotent: a missing file is silently ignored.
-docker exec "$POSTGRES_CONTAINER" rm -f /tmp/zerf-restore.dump /tmp/zerf-restore.toc 2>/dev/null || true
-# Stream the dump in via `docker exec -i ... cat` rather than `docker cp`.
-# The postgres container mounts /tmp as a tmpfs; `docker cp` writes to the image
-# layer *behind* that mount, so a subsequent `docker exec` (which sees the tmpfs)
-# finds nothing and pg_restore fails with "No such file or directory". Writing
-# through a process inside the container lands the file in the tmpfs itself, and
-# keeps the decrypted plaintext in RAM (the reason /tmp is a tmpfs).
-docker exec -i "$POSTGRES_CONTAINER" sh -c 'cat > /tmp/zerf-restore.dump' < "$PLAIN_TMP" \
-    || die "Failed to copy the decrypted dump into the postgres container."
+# -- Validate backup and prepare restore list ---------------------------------
 
 # Build a restore list that EXCLUDES the pg_tde extension (and its COMMENT).
 #
 # Why this is required: --clean drops every object it is about to restore, in
 # reverse order.  With the extension in the list that includes
 # `DROP EXTENSION pg_tde`, which wipes the pg_tde principal-key configuration.
-# The extension is then recreated empty — its key-provider setup lives in the
-# container init scripts, NOT in the dump — so every `CREATE TABLE … USING
+# The extension is then recreated empty - its key-provider setup lives in the
+# container init scripts, NOT in the dump - so every `CREATE TABLE ... USING
 # tde_heap` fails with "principal key not configured" and the restore destroys
 # the database instead of repopulating it.  Filtering the extension out leaves
 # the live pg_tde (and its key) untouched while still dropping and recreating
 # all application objects.  Verified end-to-end against the Percona pg_tde image.
 #
-# Backward-compatible: a dump made without pg_tde simply has nothing to filter,
-# so the list is unchanged and the restore behaves exactly as before.
-echo "Preparing restore list (preserving the pg_tde extension)…"
-docker exec "$POSTGRES_CONTAINER" sh -c \
-    "pg_restore --list /tmp/zerf-restore.dump | grep -vE 'EXTENSION - pg_tde|COMMENT - EXTENSION pg_tde' > /tmp/zerf-restore.toc" \
-    || die "Failed to build the restore list from the dump."
+# The decrypted archive is streamed into pg_restore via stdin.  This avoids a
+# fixed container /tmp size ceiling and keeps the full plaintext archive out of
+# both the host filesystem and the postgres container filesystem.
+echo ""
+echo "Preparing restore list (preserving the pg_tde extension)..."
+docker exec "$POSTGRES_CONTAINER" rm -f /tmp/zerf-restore.dump /tmp/zerf-restore.toc /tmp/zerf-restore.full.toc 2>/dev/null || true
+decrypt_backup_to_stdout "$BACKUP_FILE" | docker exec -i "$POSTGRES_CONTAINER" sh -c \
+    "pg_restore --list > /tmp/zerf-restore.full.toc &&
+     grep -vE 'EXTENSION - pg_tde|COMMENT - EXTENSION pg_tde' /tmp/zerf-restore.full.toc > /tmp/zerf-restore.toc" \
+    || die "Failed to decrypt or inspect the backup archive. Check ZERF_DB_ENCRYPTION_KEY and the backup file."
 
-echo "Restoring…"
+# -- Stop the app to prevent mid-restore writes --------------------------------
+
+APP_WAS_RUNNING=0
+APP_STATUS="$(docker inspect -f '{{.State.Status}}' "$APP_CONTAINER" 2>/dev/null || echo missing)"
+if [ "$APP_STATUS" = "running" ]; then
+    echo "Stopping app container..."
+    docker stop "$APP_CONTAINER" >/dev/null
+    APP_WAS_RUNNING=1
+fi
+
+# -- Restore ------------------------------------------------------------------
+
+echo "Restoring..."
 # --clean      drop objects before recreating them (replaces existing data)
 # --if-exists  suppress errors for objects that don't exist in the target db
 # --no-owner   do not set ownership (current db role owns everything)
 # --no-privileges  skip GRANT/REVOKE (the app role uses its own fixed grants)
 # --use-list   restore only the filtered TOC, so pg_tde is never dropped (above)
+# --single-transaction  roll back all drops/recreates if any restore step fails
+# --exit-on-error       stop at the first SQL error instead of continuing
 #
-# PGOPTIONS --statement_timeout=0: the postgres server has statement_timeout=30s
-# to protect the application, but this also applies to sessions opened by
-# docker exec.  Schema recreations and large-table COPY operations during
-# pg_restore can exceed 30 s; cancel them and the entire restore aborts mid-way
-# leaving the database in a partially-cleaned, unusable state.  Override the
-# timeout to 0 for this session only, exactly as we do for pg_dump.
-docker exec \
+# PGOPTIONS disables server-side statement and idle-in-transaction timeouts for
+# this session.  Large schema recreations or COPY streams can legitimately exceed
+# the 30 s application timeout; cancelling them would abort the restore.
+decrypt_backup_to_stdout "$BACKUP_FILE" | docker exec -i \
     -e PGPASSWORD="$ZERF_POSTGRES_PASSWORD" \
-    -e PGOPTIONS='--statement_timeout=0' \
+    -e PGOPTIONS='--statement_timeout=0 --idle_in_transaction_session_timeout=0' \
     "$POSTGRES_CONTAINER" \
     pg_restore \
         --host 127.0.0.1 \
@@ -386,15 +365,16 @@ docker exec \
         --if-exists \
         --no-owner \
         --no-privileges \
+        --single-transaction \
+        --exit-on-error \
         --use-list=/tmp/zerf-restore.toc \
-        /tmp/zerf-restore.dump \
-    || die "pg_restore exited with errors — review the output above."
+    || die "pg_restore exited with errors. The transaction was rolled back; review the output above."
 
 echo ""
-echo "✓ Restore complete."
+echo "Restore complete."
 echo ""
 
-# ── Restart the app ──────────────────────────────────────────────────────────
+# -- Restart the app -----------------------------------------------------------
 
 if [ "$APP_WAS_RUNNING" = "1" ]; then
     if confirm "Restart the app container now?"; then
