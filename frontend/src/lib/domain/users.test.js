@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  compareUsersByName,
   compareUsersByRoleThenName,
   findUserById,
   hasUserId,
@@ -95,6 +96,20 @@ describe("users domain helpers", () => {
     const unknown = { last_name: "A", first_name: "A" };
     expect(compareUsersByRoleThenName(known, unknown)).toBeLessThan(0);
     expect(compareUsersByRoleThenName(unknown, known)).toBeGreaterThan(0);
+  });
+
+  it("compareUsersByName orders by last name then first name, null-safe", () => {
+    const anderson = { last_name: "Anderson", first_name: "Cara" };
+    const zephyr = { last_name: "Zephyr", first_name: "Bob" };
+    expect(compareUsersByName(anderson, zephyr)).toBeLessThan(0);
+    // Equal last names → first name breaks the tie.
+    const bobSmith = { last_name: "Smith", first_name: "Bob" };
+    const anaSmith = { last_name: "Smith", first_name: "Ana" };
+    expect(compareUsersByName(bobSmith, anaSmith)).toBeGreaterThan(0);
+    // Missing fields / null users are treated as empty strings (which sort
+    // before any real name) and never throw.
+    expect(compareUsersByName(null, { last_name: "A" })).toBeLessThan(0);
+    expect(compareUsersByName({}, {})).toBe(0);
   });
 
   it("sortUsersByRoleThenName groups by role (team lead, employee, assistant, admin), then by name", () => {

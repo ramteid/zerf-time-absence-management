@@ -2111,14 +2111,20 @@ async fn reopen_requests_repository_workflow() {
     let admin = admin_login(&app).await;
     let (lead_id, lead_pw, emp_id, _emp_pw, monday_iso, cat_id) =
         bootstrap_team_with_suffix(&app, &admin, false, "rr-repo").await;
-    let _lead = login_change_pw(&app, "lead-rr-repo@example.com", &lead_pw).await;
+    let lead = login_change_pw(&app, "lead-rr-repo@example.com", &lead_pw).await;
 
     let monday = chrono::NaiveDate::parse_from_str(&monday_iso, "%Y-%m-%d").unwrap();
     let week_end = monday + chrono::Duration::days(6);
 
     let reopen_requests = zerf::repository::ReopenRequestDb::new(app.state.pool.clone());
 
-    // Create a time entry via the repository and submit it so the week has non-draft entries.
+    // Create a time entry via the repository, submit it, then have the lead
+    // approve it. The week must end up APPROVED (not merely submitted) for a
+    // manual reopen request to be meaningful: a week that still has submitted
+    // entries is auto-reopenable, so list_pending_admin / list_pending_for_lead
+    // deliberately hide reopen requests for such weeks. Approving here sets up
+    // the realistic "reopen an already-approved week" scenario the pending-list
+    // assertions below exercise.
     let time_entries = zerf::repository::TimeEntryDb::new(app.state.pool.clone());
     let entry = time_entries
         .create(
@@ -2137,13 +2143,20 @@ async fn reopen_requests_repository_workflow() {
         .submit_batch(emp_id, &[entry.id])
         .await
         .expect("submit entry for reopen repo test");
+    let (st, _) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [entry.id]}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "lead approves entry for reopen repo test");
 
     // count_non_draft_entries returns the number of non-draft entries in the week.
     let non_draft = reopen_requests
         .count_non_draft_entries(emp_id, monday, week_end)
         .await
         .expect("count non-draft entries");
-    assert_eq!(non_draft, 1, "one submitted entry in the week");
+    assert_eq!(non_draft, 1, "one approved entry in the week");
 
     // get_user_full_name returns formatted name from the users table.
     let full_name = reopen_requests

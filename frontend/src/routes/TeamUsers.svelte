@@ -3,7 +3,11 @@
   import { toast } from "../stores.js";
   import { t } from "../i18n.js";
   import Icon from "../Icons.svelte";
-  import { userAvatarClass, userInitials } from "../lib/domain/users.js";
+  import {
+    compareUsersByName,
+    userAvatarClass,
+    userInitials,
+  } from "../lib/domain/users.js";
   import UserDialog from "../dialogs/UserDialog.svelte";
   import ArchiveUserDialog from "../dialogs/ArchiveUserDialog.svelte";
   import RestoreUserDialog from "../dialogs/RestoreUserDialog.svelte";
@@ -25,11 +29,7 @@
     // carry it), so a role sort would float assistants above everyone else
     // instead of grouping. A plain alphabetical order is the honest choice when
     // roles are unavailable.
-    const sorted = [...(loaded || [])].sort(
-      (a, b) =>
-        (a.last_name || "").localeCompare(b.last_name || "") ||
-        (a.first_name || "").localeCompare(b.first_name || ""),
-    );
+    const sorted = [...(loaded || [])].sort(compareUsersByName);
     // Split active rows from archived. Only manageable assistants ever carry
     // an archived_at; non-manageable colleagues are always active.
     users = sorted.filter((u) => !u.archived_at);

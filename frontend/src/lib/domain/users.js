@@ -69,17 +69,25 @@ export function userAvatarClass(user) {
   return ROLE_ORDER.includes(user?.role) ? `avatar-role-${user.role}` : "";
 }
 
-// Comparator that groups users by role (team lead, employee, assistant,
-// admin), alphabetically by last/first name within each group. Exposed so
-// callers that sort something other than a plain user array (e.g. absence
-// rows keyed by user_id) can reuse the exact same ordering.
-export function compareUsersByRoleThenName(a, b) {
-  const roleDiff = roleRank(a?.role) - roleRank(b?.role);
-  if (roleDiff !== 0) return roleDiff;
+// Null-safe last-name-then-first-name comparator — the name half of every
+// user ordering in the app. Used directly where roles aren't available to
+// group by (the Team Users list, where the server redacts colleagues' roles)
+// and as the within-role tiebreak below.
+export function compareUsersByName(a, b) {
   return (
     (a?.last_name || "").localeCompare(b?.last_name || "") ||
     (a?.first_name || "").localeCompare(b?.first_name || "")
   );
+}
+
+// Comparator that groups users by role (team lead, employee, assistant,
+// admin), alphabetically by name within each group. Exposed so callers that
+// sort something other than a plain user array (e.g. absence rows keyed by
+// user_id) can reuse the exact same ordering.
+export function compareUsersByRoleThenName(a, b) {
+  const roleDiff = roleRank(a?.role) - roleRank(b?.role);
+  if (roleDiff !== 0) return roleDiff;
+  return compareUsersByName(a, b);
 }
 
 // Sorts a roster into role groups, alphabetical within each group. Use this
