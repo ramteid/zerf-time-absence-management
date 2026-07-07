@@ -7,8 +7,8 @@
 // the employee and the assistant created below), never the whole org. They
 // can also be granted a scoped ability to create/manage "assistant"-role
 // users — gated by an admin setting (allow_team_lead_manage_assistants,
-// default enabled) that this suite never touches, so it's exercised here in
-// its default-on state via the /settings/team-users page.
+// off by default) that is explicitly enabled by
+// 03-admin-config.spec.js before this file runs.
 
 import { test, expect } from "@playwright/test";
 import {

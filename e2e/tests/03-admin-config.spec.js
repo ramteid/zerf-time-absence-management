@@ -170,3 +170,35 @@ test("admin: configure and test SMTP settings", async ({ page }) => {
   await page.getByRole("button", { name: "Save" }).click();
   await expect(page.getByText("SMTP settings saved.")).toBeVisible();
 });
+
+test("admin: enable team lead assistant management", async ({ page }) => {
+  // The `allow_team_lead_manage_assistants` setting is off by default.
+  // 04-team-lead-onboarding.spec.js relies on it being enabled so the team
+  // lead can access /settings/team-users and create an assistant. This test
+  // enables the setting through the admin general settings page so the team
+  // lead's session already has permission when that file runs.
+  const settingsLoaded = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/v1/settings") &&
+      response.request().method() === "GET",
+  );
+  await page.goto("/settings/general");
+  await settingsLoaded;
+
+  // Wait for the country select to confirm the full form has loaded (same
+  // technique as in 01-bootstrap.spec.js).
+  await page
+    .locator('#settings-country option[value="DE"]')
+    .waitFor({ state: "attached" });
+
+  // Locate the checkbox by the text of its wrapping label.
+  const label = page.locator("label", {
+    hasText: "Allow team leads to create assistant users",
+  });
+  await label.locator('input[type="checkbox"]').check();
+
+  const saveButton = page.getByRole("button", { name: "Save Changes" });
+  await expect(saveButton).toBeEnabled();
+  await saveButton.click();
+  await expect(page.getByText("Settings saved.")).toBeVisible();
+});
