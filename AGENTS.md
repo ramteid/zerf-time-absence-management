@@ -2,6 +2,11 @@
 
 Zerf (Zeiterfassung) is a self-hosted time tracking and absence management platform for teams. It covers working hours, leave requests, approvals, and monthly reports. Data stays on your infrastructure.
 
+## Development Workflow
+
+- All development happens on `main`.
+- Do not create feature branches or pull requests unless explicitly requested.
+
 ## Repository Layout
 
 ```
