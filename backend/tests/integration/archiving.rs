@@ -424,6 +424,102 @@ async fn archive_rejects_pending_absences() {
 }
 
 #[tokio::test]
+async fn archive_reverts_cancellation_pending_to_approved() {
+    // Verifies that archiving a user whose approved absence has a pending
+    // cancellation request reverts the absence back to `approved` rather than
+    // rejecting it. A cancellation_pending row represents an approved absence —
+    // it must not be treated as a pending request on archive.
+    let app = TestApp::spawn().await;
+    let admin = app.client();
+    let (st, _) = admin.login("admin@example.com", &app.admin_password).await;
+    assert_eq!(st, StatusCode::OK);
+    let (st, _) = admin
+        .change_password(&app.admin_password, "AdminPass!234")
+        .await;
+    assert_eq!(st, StatusCode::OK);
+
+    // Create an employee with admin as approver.
+    let (emp_id, emp_tmp_pw) =
+        make_emp_with_pw(&admin, "empcp@arch.com", "EmpCp", 1).await;
+
+    // Log in as employee and change password.
+    let emp = app.client();
+    let (st, _) = emp.login("empcp@arch.com", &emp_tmp_pw).await;
+    assert_eq!(st, StatusCode::OK, "employee login");
+    let (st, _) = emp.change_password(&emp_tmp_pw, "EmpPass!2345").await;
+    assert_eq!(st, StatusCode::OK, "employee change password");
+
+    // Get the vacation absence category.
+    let (st, cats) = emp.get("/api/v1/absence-categories").await;
+    assert_eq!(st, StatusCode::OK);
+    let vac_cat_id = cats
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["slug"].as_str() == Some("vacation"))
+        .expect("vacation category must exist")["id"]
+        .as_i64()
+        .unwrap();
+
+    // Employee creates an absence request (far in the future to avoid conflicts).
+    let future_start = date_offset(60);
+    let future_end = date_offset(65);
+    let (st, abs_body) = emp
+        .post(
+            "/api/v1/absences",
+            &json!({
+                "category_id": vac_cat_id,
+                "start_date": future_start,
+                "end_date": future_end,
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create absence: {abs_body}");
+    let abs_id = abs_body["id"].as_i64().unwrap();
+
+    // Admin approves the absence → status becomes `approved`.
+    let (st, body) = admin
+        .post(
+            &format!("/api/v1/absences/{abs_id}/approve"),
+            &json!({}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "approve absence: {body}");
+
+    // Employee requests cancellation of the approved absence → status becomes
+    // `cancellation_pending`. This is a pending cancellation, not a new request.
+    let (st, body) = emp
+        .delete(&format!("/api/v1/absences/{abs_id}"))
+        .await;
+    assert_eq!(st, StatusCode::OK, "request cancellation: {body}");
+
+    let (st, abs_data) = admin.get(&format!("/api/v1/absences/{abs_id}")).await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(
+        abs_data["status"],
+        json!("cancellation_pending"),
+        "absence should be cancellation_pending before archive: {abs_data}"
+    );
+
+    // Archive the employee. This must revert the cancellation_pending absence
+    // back to `approved`, preserving the approved absence as documented.
+    let (st, body) = admin
+        .post(&format!("/api/v1/users/{emp_id}/archive"), &json!({}))
+        .await;
+    assert_eq!(st, StatusCode::OK, "archive: {body}");
+
+    // The absence must be `approved` (not `rejected`) — the cancellation
+    // request is dropped and the original approval is preserved.
+    let (st, abs_after) = admin.get(&format!("/api/v1/absences/{abs_id}")).await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(
+        abs_after["status"],
+        json!("approved"),
+        "cancellation_pending absence should revert to approved on archive, not be rejected: {abs_after}"
+    );
+}
+
+#[tokio::test]
 async fn archive_non_admin_forbidden() {
     let app = TestApp::spawn().await;
     let admin = app.client();
