@@ -449,6 +449,12 @@ impl UserDb {
                      SELECT rr.user_id FROM reopen_requests rr
                      JOIN users u ON u.id = rr.user_id AND u.tracks_time = TRUE
                      WHERE rr.status = 'pending'
+                     AND NOT EXISTS (
+                         SELECT 1 FROM time_entries te
+                         WHERE te.user_id = rr.user_id
+                         AND te.entry_date BETWEEN rr.week_start AND rr.week_start + 6
+                         AND te.status = 'submitted'
+                     )
                  ) all_pending
                  GROUP BY user_id
              ),

@@ -128,7 +128,12 @@ async fn reopen_full_workflow() {
         let emp = login_change_pw(&app, "emp-2@example.com", &emp_pw).await;
         let lead = login_change_pw(&app, "lead-2@example.com", &lead_pw).await;
 
-        let _eid = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
+        let eid = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
+        let (st, body) = lead
+            .post("/api/v1/time-entries/batch-approve", &json!({"ids": [eid]}))
+            .await;
+        assert_eq!(st, StatusCode::OK, "approve before manual reopen");
+        assert_eq!(body["count"], 1);
 
         let (st, body) = emp
             .post(
@@ -173,6 +178,145 @@ async fn reopen_full_workflow() {
             .any(|n| n["kind"] == "reopen_approved"));
     }
 
+    // -- Submitted but unapproved weeks reopen immediately --
+    {
+        let (_lead_id, lead_pw, emp_id, emp_pw, monday_iso, cat_id) =
+            bootstrap_team_with_suffix(&app, &admin, false, "2a").await;
+        let emp = login_change_pw(&app, "emp-2a@example.com", &emp_pw).await;
+        let lead = login_change_pw(&app, "lead-2a@example.com", &lead_pw).await;
+
+        let entry_id = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
+        let (st, body) = emp
+            .post(
+                "/api/v1/reopen-requests",
+                &json!({"week_start": monday_iso, "reason": "Need to fix before approval"}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "submitted week reopens immediately");
+        assert_eq!(body["status"], "auto_approved");
+        assert_eq!(body["auto_approved"], true);
+        assert_eq!(body["entries_reopened"], 1);
+
+        let (st, body) = emp.get("/api/v1/time-entries").await;
+        assert_eq!(st, StatusCode::OK);
+        let entry = find_by_id(&body, entry_id).expect("entry present after immediate reopen");
+        assert_eq!(entry["status"], "draft");
+
+        let (st, body) = lead
+            .get(&format!(
+                "/api/v1/time-entries/all?status=submitted&user_id={emp_id}"
+            ))
+            .await;
+        assert_eq!(st, StatusCode::OK, "load submitted entries for employee");
+        assert!(
+            body.as_array().unwrap().is_empty(),
+            "reopened week must leave no submitted timesheet approval behind"
+        );
+
+        let (st, body) = lead.get("/api/v1/reopen-requests/pending").await;
+        assert_eq!(st, StatusCode::OK, "load pending reopen queue");
+        assert!(
+            body.as_array()
+                .unwrap()
+                .iter()
+                .all(|request| request["user_id"].as_i64() != Some(emp_id)),
+            "submitted week reopen must not create a parallel approval request"
+        );
+
+        let (st, notifications) = lead.get("/api/v1/notifications").await;
+        assert_eq!(st, StatusCode::OK, "load lead notifications");
+        let submission_notification = notifications
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|notification| {
+                notification["kind"] == "timesheet_submitted"
+                    && notification["reference_id"].as_i64() == Some(emp_id)
+            })
+            .expect("submission notification exists");
+        assert_eq!(
+            submission_notification["is_read"], true,
+            "reopening a submitted week clears the obsolete submission notification"
+        );
+    }
+
+    // -- Mixed submitted and reviewed weeks do not auto-reopen --
+    {
+        let (_lead_id, lead_pw, emp_id, emp_pw, monday_iso, cat_id) =
+            bootstrap_team_with_suffix(&app, &admin, false, "2b").await;
+        let emp = login_change_pw(&app, "emp-2b@example.com", &emp_pw).await;
+        let lead = login_change_pw(&app, "lead-2b@example.com", &lead_pw).await;
+        let tuesday_iso = (chrono::NaiveDate::parse_from_str(&monday_iso, "%Y-%m-%d").unwrap()
+            + chrono::Duration::days(1))
+        .format("%Y-%m-%d")
+        .to_string();
+
+        let monday_entry_id = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
+        let (st, body) = emp
+            .post(
+                "/api/v1/time-entries",
+                &json!({
+                    "entry_date": tuesday_iso,
+                    "start_time":"08:00",
+                    "end_time":"12:00",
+                    "category_id": cat_id,
+                    "comment":"work"
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "create second entry");
+        let tuesday_entry_id = id(&body);
+        let (st, _) = emp
+            .post(
+                "/api/v1/time-entries/submit",
+                &json!({"ids": [tuesday_entry_id]}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "submit second entry");
+
+        let (st, body) = lead
+            .post(
+                "/api/v1/time-entries/batch-approve",
+                &json!({"ids": [monday_entry_id]}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "approve one entry only");
+        assert_eq!(body["count"], 1);
+
+        let (st, _) = emp
+            .post(
+                "/api/v1/reopen-requests",
+                &json!({"week_start": monday_iso, "reason": "Mixed state should not auto-reopen"}),
+            )
+            .await;
+        assert_eq!(
+            st,
+            StatusCode::BAD_REQUEST,
+            "mixed submitted and reviewed weeks are not auto-reopened"
+        );
+
+        let (st, body) = emp.get("/api/v1/time-entries").await;
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "load entries after rejected reopen attempt"
+        );
+        let monday_entry = find_by_id(&body, monday_entry_id).expect("monday entry present");
+        let tuesday_entry = find_by_id(&body, tuesday_entry_id).expect("tuesday entry present");
+        assert_eq!(monday_entry["status"], "approved");
+        assert_eq!(tuesday_entry["status"], "submitted");
+
+        let (st, body) = lead.get("/api/v1/reopen-requests/pending").await;
+        assert_eq!(st, StatusCode::OK, "load pending reopen queue");
+        assert!(
+            body.as_array()
+                .unwrap()
+                .iter()
+                .all(|request| request["user_id"].as_i64() != Some(emp_id)),
+            "mixed state must not create a parallel edit approval"
+        );
+    }
+
     // -- Pending then reject --
     {
         let (lead_id, lead_pw, _emp_id, emp_pw, monday_iso, cat_id) =
@@ -181,6 +325,11 @@ async fn reopen_full_workflow() {
         let lead = login_change_pw(&app, "lead-3@example.com", &lead_pw).await;
 
         let eid = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
+        let (st, body) = lead
+            .post("/api/v1/time-entries/batch-approve", &json!({"ids": [eid]}))
+            .await;
+        assert_eq!(st, StatusCode::OK, "approve before rejected reopen");
+        assert_eq!(body["count"], 1);
 
         let (_, body) = emp
             .post(
@@ -214,8 +363,7 @@ async fn reopen_full_workflow() {
         assert_eq!(request["reviewed_by"], lead_id);
 
         let (_, body) = emp.get("/api/v1/time-entries").await;
-        assert_eq!(body[0]["status"], "submitted", "entry stays submitted");
-        let _ = eid;
+        assert_eq!(body[0]["status"], "approved", "entry stays approved");
 
         let (_, body) = emp.get("/api/v1/notifications").await;
         assert!(body
@@ -392,7 +540,20 @@ async fn reopen_full_workflow() {
         let lead_one = login_change_pw(&app, "lead-7@example.com", &lead_one_pw).await;
         let lead_two = login_change_pw(&app, "lead-7b@example.com", &lead_two_pw).await;
 
-        let _ = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
+        let entry_id = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
+        let (st, body) = lead_one
+            .post(
+                "/api/v1/time-entries/batch-approve",
+                &json!({"ids": [entry_id]}),
+            )
+            .await;
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "lead approves before admin-handled reopen"
+        );
+        assert_eq!(body["count"], 1);
+
         let (st, body) = emp
             .post(
                 "/api/v1/reopen-requests",

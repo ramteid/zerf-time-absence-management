@@ -365,6 +365,10 @@ does nothing. The only way to make corrections is to reopen the whole week.
   that week back to `Draft`.
 - Reopened entries become editable; once the corrections are done, submit the
   week again.
+- If all submitted/approved/rejected entries in the week are still waiting for
+  approval as `Submitted`, `Request edit` reopens it immediately and removes the
+  submitted week from the approval queue. No separate edit approval is shown to
+  approvers in parallel with the original submission.
 - If a week has no submitted, approved, or rejected entries, the edit request
   is rejected with a message that the week has no submitted, approved, or
   rejected entries.
@@ -1048,13 +1052,23 @@ Rules:
 - You cannot submit a second reopen request for the same week while one is
   still pending.
 
+**Submitted but not yet approved:** If all submitted/approved/rejected entries
+in the week are still waiting for approval as `submitted`, `Request edit`
+reopens the week immediately. The submitted entries are reset to `draft`, the
+obsolete submission approval is removed from the approver queue, and no separate
+edit request is shown to approvers. If the same week already contains approved
+or rejected entries and also still has submitted entries awaiting approval,
+finish or reopen the pending submission first; Zerf will not create a parallel
+edit request for that mixed state.
+
 **Auto-approval:** If your team lead or admin has enabled auto-approval for your
 reopen requests, the reopen takes effect immediately without requiring approval.
 This is silent by design: neither you nor your approvers receive any
 notification or email about it.
 
-**Manual approval path:** The request enters `pending` status and all your
-assigned approvers are notified.
+**Manual approval path:** If the week has no submitted entries left and reopen
+auto-approval is not enabled for you, the request enters `pending` status and
+all your assigned approvers are notified.
 
 When a reopen is executed (either path), all submitted, approved, and rejected
 entries in that week are atomically reset to `draft`.  You can then edit and
@@ -1728,11 +1742,12 @@ approved  ──[revoke by admin]───────> cancelled
 
 ```
 (creation)
-  reopen auto-approval enabled --> auto_approved (week immediately reopened, silent)
-  otherwise                    --> pending
+  all reopenable entries are submitted --> auto_approved (week immediately reopened, silent)
+  reopen auto-approval enabled         --> auto_approved (week immediately reopened, silent)
+  otherwise                            --> pending
 
-pending ──[approve]──> approved
-pending ──[reject]───> rejected
+pending --[approve]--> approved
+pending --[reject]--> rejected
 ```
 
 `approved`, `auto_approved`, and `rejected` are terminal for the request itself

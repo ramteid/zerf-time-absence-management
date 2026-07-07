@@ -54,6 +54,12 @@ pub async fn create(
         ));
     }
 
+    let submitted_entry_count = app_state
+        .db
+        .reopen_requests
+        .count_submitted_entries(requester.id, body.week_start, week_end)
+        .await?;
+
     // Reject duplicate pending request (DB also has a unique partial index).
     let existing_pending_id = app_state
         .db
@@ -77,40 +83,49 @@ pub async fn create(
         return Err(AppError::BadRequest("Reason too long.".into()));
     }
 
-    // Determine flow:
-    //   * User has `allow_reopen_without_approval=TRUE` → auto_approved
-    //   * Otherwise → pending, notify all approvers
-    let should_auto_approve = requester.allow_reopen_without_approval;
-
-    // Non-admin users who need a reviewer must have at least one active approver.
-    // Auto-approve requests resolve immediately without any reviewer action, so
-    // skip this check when the request will be auto-approved.
-    if !should_auto_approve {
-        crate::services::auth::required_approval_recipient_ids(&app_state.pool, &requester).await?;
-    }
-
-    let initial_status = if should_auto_approve {
-        "auto_approved"
+    let all_reopenable_entries_are_submitted = submitted_entry_count == reopenable_entry_count;
+    let mut auto_reopen_pending_submission = false;
+    let (new_request_id, reopened_entries, initial_status): (
+        i64,
+        Option<Vec<(i64, String)>>,
+        &str,
+    ) = if requester.allow_reopen_without_approval {
+        let (new_id, affected) = app_state
+            .db
+            .reopen_requests
+            .insert_auto_approved(requester.id, body.week_start, requester.id, request_reason)
+            .await?;
+        (new_id, Some(affected), "auto_approved")
+    } else if all_reopenable_entries_are_submitted {
+        let (new_id, affected) = app_state
+            .db
+            .reopen_requests
+            .insert_auto_approved_if_all_reopenable_are_submitted(
+                requester.id,
+                body.week_start,
+                requester.id,
+                request_reason,
+            )
+            .await?
+            .ok_or_else(|| {
+                AppError::conflict("Week approval state changed. Please refresh and try again.")
+            })?;
+        auto_reopen_pending_submission = true;
+        (new_id, Some(affected), "auto_approved")
     } else {
-        "pending"
+        if submitted_entry_count > 0 {
+            return Err(AppError::bad_request(
+                "Cannot request edit while this week still has submitted entries awaiting approval.",
+            ));
+        }
+        crate::services::auth::required_approval_recipient_ids(&app_state.pool, &requester).await?;
+        let (new_id, _created_at) = app_state
+            .db
+            .reopen_requests
+            .insert_pending(requester.id, body.week_start, request_reason)
+            .await?;
+        (new_id, None, "pending")
     };
-
-    let (new_request_id, reopened_entries): (i64, Option<Vec<(i64, String)>>) =
-        if should_auto_approve {
-            let (new_id, affected) = app_state
-                .db
-                .reopen_requests
-                .insert_auto_approved(requester.id, body.week_start, requester.id, request_reason)
-                .await?;
-            (new_id, Some(affected))
-        } else {
-            let (new_id, _created_at) = app_state
-                .db
-                .reopen_requests
-                .insert_pending(requester.id, body.week_start, request_reason)
-                .await?;
-            (new_id, None)
-        };
 
     let entries_reopened = reopened_entries
         .as_ref()
@@ -119,6 +134,14 @@ pub async fn create(
 
     if let Some(entries) = reopened_entries.as_ref() {
         audit_reopened_entries(&app_state.pool, requester.id, entries).await;
+    }
+    if auto_reopen_pending_submission {
+        crate::services::notifications::clear_pending_for_reference(
+            &app_state,
+            "timesheet_submission",
+            requester.id,
+        )
+        .await;
     }
 
     audit::log(
@@ -136,7 +159,7 @@ pub async fn create(
     )
     .await;
 
-    if should_auto_approve {
+    if initial_status == "auto_approved" {
         // Silent by design (mirrors submission auto-approval): no one is
         // notified and no emails are sent, to either the requester or the
         // approvers.

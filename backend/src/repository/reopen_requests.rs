@@ -70,6 +70,12 @@ impl ReopenRequestDb {
         Ok(QueryBuilder::<Postgres>::new(format!(
             "{RR_SELECT} WHERE status='pending' \
              AND user_id IN (SELECT id FROM users WHERE tracks_time=TRUE) \
+             AND NOT EXISTS (\
+                 SELECT 1 FROM time_entries te \
+                 WHERE te.user_id = reopen_requests.user_id \
+                 AND te.entry_date BETWEEN reopen_requests.week_start AND reopen_requests.week_start + 6 \
+                 AND te.status = 'submitted'\
+             ) \
              ORDER BY created_at"
         ))
         .build_query_as::<ReopenRequest>()
@@ -85,7 +91,14 @@ impl ReopenRequestDb {
                  JOIN users u ON u.id = ua.user_id \
                  WHERE ua.approver_id=$1 AND u.active=TRUE AND u.role != 'admin' \
                  AND u.tracks_time=TRUE\
-             ) ORDER BY created_at"
+             ) \
+             AND NOT EXISTS (\
+                 SELECT 1 FROM time_entries te \
+                 WHERE te.user_id = reopen_requests.user_id \
+                 AND te.entry_date BETWEEN reopen_requests.week_start AND reopen_requests.week_start + 6 \
+                 AND te.status = 'submitted'\
+             ) \
+             ORDER BY created_at"
         ))
         .build_query_as::<ReopenRequest>()
         .bind(lead_id)
@@ -109,6 +122,81 @@ impl ReopenRequestDb {
         .bind(week_end)
         .fetch_one(&self.pool)
         .await?)
+    }
+
+    pub async fn count_submitted_entries(
+        &self,
+        user_id: i64,
+        week_start: NaiveDate,
+        week_end: NaiveDate,
+    ) -> AppResult<i64> {
+        Ok(sqlx::query_scalar(
+            "SELECT COUNT(*) FROM time_entries \
+             WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3 \
+             AND status = 'submitted'",
+        )
+        .bind(user_id)
+        .bind(week_start)
+        .bind(week_end)
+        .fetch_one(&self.pool)
+        .await?)
+    }
+
+    /// Insert an auto-approved reopen only when every reopenable entry in the
+    /// week is still submitted. The row locks close the race with approvers who
+    /// may be approving the same week at the same time.
+    pub async fn insert_auto_approved_if_all_reopenable_are_submitted(
+        &self,
+        user_id: i64,
+        week_start: NaiveDate,
+        actor_id: i64,
+        reason: &str,
+    ) -> AppResult<Option<(i64, Vec<(i64, String)>)>> {
+        let mut tx = self.pool.begin().await?;
+        let week_end = week_start + chrono::Duration::days(6);
+        sqlx::query("SELECT pg_advisory_xact_lock($1)")
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await?;
+        let statuses: Vec<String> = sqlx::query_scalar(
+            "SELECT status FROM time_entries \
+             WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3 \
+             AND status IN ('submitted','approved','rejected') \
+             FOR UPDATE",
+        )
+        .bind(user_id)
+        .bind(week_start)
+        .bind(week_end)
+        .fetch_all(&mut *tx)
+        .await?;
+        if statuses.is_empty() {
+            return Err(AppError::bad_request(
+                "Cannot request edit - this week has no submitted, approved, or rejected entries.",
+            ));
+        }
+        if statuses.iter().any(|status| status != "submitted") {
+            tx.rollback().await?;
+            return Ok(None);
+        }
+
+        let req_id: i64 = sqlx::query_scalar(
+            "INSERT INTO reopen_requests(user_id, week_start, status, reviewed_by, reviewed_at, reason) \
+             VALUES ($1,$2,'auto_approved',$3,CURRENT_TIMESTAMP,$4) \
+             RETURNING id",
+        )
+        .bind(user_id)
+        .bind(week_start)
+        .bind(actor_id)
+        .bind(reason)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| {
+            tracing::warn!(target:"zerf::reopen", "insert_auto_approved_if_all_reopenable_are_submitted failed: {e}");
+            AppError::conflict("A pending request for this week already exists.")
+        })?;
+        let affected = Self::perform_reopen(&mut tx, user_id, week_start).await?;
+        tx.commit().await?;
+        Ok(Some((req_id, affected)))
     }
 
     pub async fn find_pending_request_id(

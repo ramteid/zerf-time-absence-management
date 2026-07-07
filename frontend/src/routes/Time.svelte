@@ -145,10 +145,19 @@
 
   async function requestReopen() {
     if (!weekFrom) return;
+    const reopenableEntries = entries.filter((entry) =>
+      ["submitted", "approved", "rejected"].includes(entry.status),
+    );
+    const reopensImmediately =
+      $currentUser?.allow_reopen_without_approval === true ||
+      (reopenableEntries.length > 0 &&
+        reopenableEntries.every((entry) => entry.status === "submitted"));
     const reason = await confirmDialog(
       $t("Request edit for this week?"),
       $t(
-        "Your team lead will be notified and must approve before the week becomes editable again.",
+        reopensImmediately
+          ? "This week will be reopened immediately for editing."
+          : "Your team lead will be notified and must approve before the week becomes editable again.",
       ),
       { confirm: $t("Request edit"), reason: true },
     );
@@ -264,11 +273,21 @@
 
   // Reopen resets only submitted, approved, and rejected entries. Drafts can
   // coexist because they are already editable.
+  $: reopenableEntries = entries.filter((entry) =>
+    ["submitted", "approved", "rejected"].includes(entry.status),
+  );
+  $: weekHasSubmittedEntries = reopenableEntries.some(
+    (entry) => entry.status === "submitted",
+  );
+  $: weekHasReviewedEntries = reopenableEntries.some((entry) =>
+    ["approved", "rejected"].includes(entry.status),
+  );
   $: canRequestReopen =
     !pendingReopen &&
-    entries.some((entry) =>
-      ["submitted", "approved", "rejected"].includes(entry.status),
-    );
+    reopenableEntries.length > 0 &&
+    ($currentUser?.allow_reopen_without_approval === true ||
+      !weekHasSubmittedEntries ||
+      !weekHasReviewedEntries);
 
 </script>
 
