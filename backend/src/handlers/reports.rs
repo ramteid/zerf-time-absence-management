@@ -3,11 +3,12 @@ use crate::middleware::auth::User;
 use crate::report_pdf::render_timesheet_pdf;
 use crate::roles::is_assistant_role;
 use crate::services::reports::{
-    all_weeks_submitted_for_month, assert_can_access_user, build_flextime_for_user, build_month,
-    build_month_without_submission_status, build_overtime_rows_for_year, build_range,
-    build_team_timesheet_sections, build_timesheet_section, csv_response, month_bounds,
-    parse_report_time, pdf_response, sort_categories_desc, validate_range, CategoryTotal,
-    FlextimeDay, MonthReport, MonthRow, TeamRow, UserCategoryRow,
+    active_reportable_team_members, all_weeks_submitted_for_month, assert_can_access_user,
+    build_flextime_for_user, build_month, build_month_without_submission_status,
+    build_overtime_rows_for_year, build_range, build_team_timesheet_sections,
+    build_timesheet_section, csv_response, month_bounds, parse_report_time, pdf_response,
+    sort_categories_desc, validate_range, CategoryTotal, FlextimeDay, MonthReport, MonthRow,
+    TeamRow, UserCategoryRow,
 };
 use crate::AppState;
 use axum::{
@@ -165,18 +166,9 @@ pub async fn team(
         return Err(AppError::Forbidden);
     }
 
-    // Admins see all active users; team leads see themselves and their direct reports.
-    let team_members: Vec<crate::middleware::auth::User> = app_state
-        .db
-        .reports
-        .active_team_members(requester.id, requester.is_admin())
-        .await?
-        .into_iter()
-        // Pure-admin users (tracks_time=false) have no own tracking dataset and
-        // are excluded from team report rows.
-        .filter(|team_member| team_member.tracks_time)
-        .map(crate::services::users::repo_user_to_auth_user)
-        .collect();
+    // Admins see all active time-tracking users; team leads see themselves and
+    // their direct reports when those users track time.
+    let team_members = active_reportable_team_members(&app_state, &requester).await?;
 
     let today = crate::services::settings::app_today(&app_state.pool).await;
     let (month_start, month_end) = month_bounds(&query.month)?;

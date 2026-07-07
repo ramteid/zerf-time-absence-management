@@ -1257,6 +1257,17 @@ async fn combined_timesheet_pdf_orders_sections_by_role_then_name() {
         .await;
     assert_eq!(st, StatusCode::OK, "create assistant");
 
+    let (st, _) = admin
+        .post(
+            "/api/v1/users",
+            &json!({"email":"technical-admin-pdf@example.com","first_name":"Nora","last_name":"NoTime",
+                "role":"admin","tracks_time":false,"weekly_hours":39,
+                "leave_days_current_year":30,"leave_days_next_year":30,
+                "annual_leave_days":30,"start_date":"2024-01-01"}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create non-tracking admin");
+
     // Omitting user_id requests the combined team export (admin scope = all).
     let from = date_offset(-7);
     let to = today();
@@ -1293,6 +1304,10 @@ async fn combined_timesheet_pdf_orders_sections_by_role_then_name() {
     assert!(
         assistant < admin_section,
         "assistant precedes the admin, which sorts last despite an early last name"
+    );
+    assert!(
+        !pdf.contains("Nora NoTime"),
+        "combined PDF must exclude users with time tracking disabled"
     );
 
     app.cleanup().await;

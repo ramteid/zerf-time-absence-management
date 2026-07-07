@@ -83,6 +83,25 @@ pub async fn assert_can_access_user(
     Ok(())
 }
 
+/// Active team members that have a reportable personal time dataset.
+///
+/// Users with time tracking disabled, such as technical admin accounts, are
+/// intentionally omitted from team reports and combined timesheet PDFs.
+pub async fn active_reportable_team_members(
+    app_state: &AppState,
+    requester: &User,
+) -> AppResult<Vec<User>> {
+    Ok(app_state
+        .db
+        .reports
+        .active_team_members(requester.id, requester.is_admin())
+        .await?
+        .into_iter()
+        .filter(|team_member| team_member.tracks_time)
+        .map(crate::services::users::repo_user_to_auth_user)
+        .collect())
+}
+
 pub fn month_bounds(month_str: &str) -> AppResult<(NaiveDate, NaiveDate)> {
     let (year_str, month_str) = month_str
         .split_once('-')
@@ -1364,17 +1383,7 @@ pub async fn build_team_timesheet_sections(
     to: NaiveDate,
     label: &str,
 ) -> AppResult<Vec<crate::report_pdf::TimesheetSection>> {
-    let mut team_members: Vec<User> = app_state
-        .db
-        .reports
-        .active_team_members(requester.id, requester.is_admin())
-        .await?
-        .into_iter()
-        // Pure-admin users (tracks_time=false) have no own tracking dataset and
-        // are excluded, same as the team report.
-        .filter(|team_member| team_member.tracks_time)
-        .map(crate::services::users::repo_user_to_auth_user)
-        .collect();
+    let mut team_members = active_reportable_team_members(app_state, requester).await?;
     // Group sections by role (team lead, employee, assistant, admin), same as
     // every user roster in the frontend — stable sort preserves the
     // repository's last_name/first_name/id order within each role.
