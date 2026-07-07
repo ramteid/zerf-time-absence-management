@@ -37,9 +37,16 @@
   onMount(async () => {
     try {
       const all = await api("/users");
-      // Grouped by role, then name, to match every other user list in the app.
+      // Only team leads and admins can be approvers (same rule the backend
+      // enforces and that UserDialog/ArchiveUserDialog apply); grouped by role
+      // then name to match every other user list in the app.
       eligibleApprovers = sortUsersByRoleThenName(
-        (all || []).filter((u) => u.active && u.id !== user.id),
+        (all || []).filter(
+          (u) =>
+            u.active &&
+            u.id !== user.id &&
+            (u.role === "team_lead" || u.role === "admin"),
+        ),
       );
     } catch (e) {
       toast($t(e?.message || "Error"), "error");
