@@ -52,6 +52,12 @@ jobs:
       - uses: actions/checkout@v7
       - name: Install bats-core
         run: |
+          # Disable third-party apt sources preinstalled on GitHub-hosted runners
+          # (e.g. packages.microsoft.com) which occasionally serve an unsigned
+          # InRelease file and fail the whole `apt-get update`. `bats` lives in
+          # the Ubuntu universe pocket, so no third-party source is needed here.
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list \
+                     /etc/apt/sources.list.d/azure-cli.list
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends bats
       - name: Run bats tests
