@@ -18,47 +18,60 @@
 
 <div class="zf-card flextime-section">
   <div class="flextime-header">
-    <Icon name="TrendingUp" size={15} sw={1.5} />
-    <span class="flextime-title">{$t("Flextime balance")}</span>
-    <button
-      class="zf-btn-icon-sm zf-btn-ghost"
-      title={$t("help_flextime_chart")}
-      on:click={() => onHelpToggle("flextime")}
-      style="color:var(--text-tertiary);font-size:14px;cursor:help"
-    >
-      <Icon name="Info" size={14} />
-    </button>
-    <div class="flextime-ranges">
-      <button class="zf-btn zf-btn-sm" on:click={() => onSetRange(30)}
-        >{$t("Last 30 days")}</button
+    <div class="flextime-title-group">
+      <Icon name="TrendingUp" size={15} sw={1.5} />
+      <span class="flextime-title">{$t("Flextime balance")}</span>
+      <button
+        class="zf-btn-icon-sm zf-btn-ghost"
+        title={$t("help_flextime_chart")}
+        on:click={() => onHelpToggle("flextime")}
+        style="color:var(--text-tertiary);font-size:14px;cursor:help"
       >
-      <button class="zf-btn zf-btn-sm" on:click={() => onSetRange(90)}
-        >{$t("Last 90 days")}</button
-      >
-      <button class="zf-btn zf-btn-sm" on:click={() => onSetRange(182)}
-        >{$t("Last 6 months")}</button
-      >
-      <button class="zf-btn zf-btn-sm" on:click={() => onSetRange(365)}
-        >{$t("Last year")}</button
-      >
-    </div>
-    <div class="flextime-date-range">
-      <DatePicker
-        bind:value={chartFrom}
-        min={$currentUser?.start_date}
-        max={chartTo}
-        style="font-size:12px;padding:3px 6px;height:28px"
-      />
-      <span class="flextime-date-separator">-</span>
-      <DatePicker
-        bind:value={chartTo}
-        min={chartFrom}
-        max={todayIso}
-        style="font-size:12px;padding:3px 6px;height:28px"
-      />
-      <button class="zf-btn zf-btn-sm" on:click={onLoadChart} aria-label={$t("Show")}>
-        <Icon name="Search" size={13} />
+        <Icon name="Info" size={14} />
       </button>
+    </div>
+
+    <div class="flextime-controls">
+      <div class="flextime-ranges">
+        <button class="zf-btn zf-btn-sm" on:click={() => onSetRange(30)}
+          >{$t("Last 30 days")}</button
+        >
+        <button class="zf-btn zf-btn-sm" on:click={() => onSetRange(90)}
+          >{$t("Last 90 days")}</button
+        >
+        <button class="zf-btn zf-btn-sm" on:click={() => onSetRange(182)}
+          >{$t("Last 6 months")}</button
+        >
+        <button class="zf-btn zf-btn-sm" on:click={() => onSetRange(365)}
+          >{$t("Last year")}</button
+        >
+      </div>
+      <div class="flextime-date-range">
+        <span class="flextime-date-picker">
+          <DatePicker
+            bind:value={chartFrom}
+            min={$currentUser?.start_date}
+            max={chartTo}
+            style="font-size:12px;padding:3px 28px 3px 6px;height:28px"
+          />
+        </span>
+        <span class="flextime-date-separator">-</span>
+        <span class="flextime-date-picker">
+          <DatePicker
+            bind:value={chartTo}
+            min={chartFrom}
+            max={todayIso}
+            style="font-size:12px;padding:3px 28px 3px 6px;height:28px"
+          />
+        </span>
+        <button
+          class="zf-btn zf-btn-sm"
+          on:click={onLoadChart}
+          aria-label={$t("Show")}
+        >
+          <Icon name="Search" size={13} />
+        </button>
+      </div>
     </div>
   </div>
   {#if activeHelp === "flextime"}
@@ -90,27 +103,50 @@
 
   .flextime-header {
     display: flex;
-    align-items: center;
-    gap: 10px;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px 16px;
     flex-wrap: wrap;
     margin-bottom: 14px;
+  }
+
+  .flextime-title-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    flex: 1 1 190px;
   }
 
   .flextime-title {
     font-size: 14px;
     font-weight: 400;
-    flex: 1;
+    min-width: 0;
+  }
+
+  .flextime-controls {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    flex: 0 1 auto;
+    flex-wrap: wrap;
+    min-width: 0;
   }
 
   .flextime-ranges,
   .flextime-date-range {
     display: flex;
+    align-items: center;
     gap: 4px;
-    flex-wrap: wrap;
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
   }
 
-  .flextime-date-range {
-    align-items: center;
+  .flextime-date-picker {
+    display: block;
+    flex: 0 0 126px;
+    width: 126px;
   }
 
   .flextime-date-separator {
@@ -155,5 +191,35 @@
     font-size: 12px;
     box-shadow: var(--shadow-sm);
     pointer-events: none;
+  }
+
+  @media (max-width: 1024px) {
+    .flextime-controls {
+      width: 100%;
+      justify-content: flex-start;
+    }
+
+    .flextime-ranges,
+    .flextime-date-range {
+      flex-wrap: wrap;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .flextime-section {
+      padding: 14px;
+    }
+
+    .flextime-title-group,
+    .flextime-controls,
+    .flextime-ranges,
+    .flextime-date-range {
+      width: 100%;
+    }
+
+    .flextime-date-picker {
+      flex: 1 1 126px;
+      width: auto;
+    }
   }
 </style>
