@@ -564,19 +564,35 @@ pub async fn update_upload_settings(
         };
     }
 
-    save_if_some!(settings::REPORT_UPLOAD_ENABLED_KEY, body.report_upload_enabled, bool);
+    save_if_some!(
+        settings::REPORT_UPLOAD_ENABLED_KEY,
+        body.report_upload_enabled,
+        bool
+    );
     save_if_some!(settings::REPORT_UPLOAD_URL_KEY, body.report_upload_url);
     // Password: None = keep, Some("") = clear, Some("...") = update.
     if let Some(ref pw) = body.report_upload_password {
         save_setting_tx(&mut transaction, settings::REPORT_UPLOAD_PASSWORD_KEY, pw).await?;
     }
-    save_if_some!(settings::REPORT_UPLOAD_DAY_OF_MONTH_KEY, body.report_upload_day_of_month, num);
-    save_if_some!(settings::BACKUP_UPLOAD_ENABLED_KEY, body.backup_upload_enabled, bool);
+    save_if_some!(
+        settings::REPORT_UPLOAD_DAY_OF_MONTH_KEY,
+        body.report_upload_day_of_month,
+        num
+    );
+    save_if_some!(
+        settings::BACKUP_UPLOAD_ENABLED_KEY,
+        body.backup_upload_enabled,
+        bool
+    );
     save_if_some!(settings::BACKUP_UPLOAD_URL_KEY, body.backup_upload_url);
     if let Some(ref pw) = body.backup_upload_password {
         save_setting_tx(&mut transaction, settings::BACKUP_UPLOAD_PASSWORD_KEY, pw).await?;
     }
-    save_if_some!(settings::BACKUP_INTERVAL_DAYS_KEY, body.backup_interval_days, num);
+    save_if_some!(
+        settings::BACKUP_INTERVAL_DAYS_KEY,
+        body.backup_interval_days,
+        num
+    );
 
     transaction.commit().await?;
 

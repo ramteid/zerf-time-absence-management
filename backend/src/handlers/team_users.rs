@@ -208,8 +208,13 @@ pub async fn update(
         let updated_last_name = last_name
             .clone()
             .unwrap_or_else(|| previous_user.last_name.clone());
-        ensure_user_name_available(&app_state, &updated_first_name, &updated_last_name, Some(user_id))
-            .await?;
+        ensure_user_name_available(
+            &app_state,
+            &updated_first_name,
+            &updated_last_name,
+            Some(user_id),
+        )
+        .await?;
     }
     update_basic_tx(
         &mut transaction,
@@ -231,7 +236,8 @@ pub async fn update(
     .await
     .map_err(|e| {
         tracing::warn!(target: "zerf::team_users", "update assistant failed: {e}");
-        user_unique_conflict(&e).unwrap_or_else(|| AppError::Conflict("Could not update user.".into()))
+        user_unique_conflict(&e)
+            .unwrap_or_else(|| AppError::Conflict("Could not update user.".into()))
     })?;
     let current_year = crate::services::settings::app_current_year(&app_state.pool).await;
     if let Some(d) = body.leave_days_current_year {
@@ -288,12 +294,8 @@ pub async fn restore_assistant(
     Path(user_id): Path<i64>,
     Json(body): Json<RestoreAssistantBody>,
 ) -> AppResult<Json<User>> {
-    let updated = crate::services::users::restore_assistant(
-        &app_state,
-        &requester,
-        user_id,
-        body.start_date,
-    )
-    .await?;
+    let updated =
+        crate::services::users::restore_assistant(&app_state, &requester, user_id, body.start_date)
+            .await?;
     Ok(Json(updated))
 }

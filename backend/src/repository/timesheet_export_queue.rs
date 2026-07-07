@@ -5,7 +5,7 @@ use crate::error::AppResult;
 #[derive(sqlx::FromRow)]
 pub struct ExportQueueEntry {
     pub user_id: i64,
-    pub period:  String, // "YYYY-MM"
+    pub period: String, // "YYYY-MM"
 }
 
 #[derive(Clone)]
@@ -50,13 +50,11 @@ impl TimesheetExportQueueDb {
 
     /// Remove a single queue entry (called after a successful upload).
     pub async fn delete_entry(&self, user_id: i64, period: &str) -> AppResult<()> {
-        sqlx::query(
-            "DELETE FROM timesheet_export_queue WHERE user_id=$1 AND period=$2",
-        )
-        .bind(user_id)
-        .bind(period)
-        .execute(&self.pool)
-        .await?;
+        sqlx::query("DELETE FROM timesheet_export_queue WHERE user_id=$1 AND period=$2")
+            .bind(user_id)
+            .bind(period)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 }

@@ -128,7 +128,9 @@ async fn category_per_user_access_workflow() {
     let emp = login_change_pw(&app, "emp-catacc@example.com", &emp_pw).await;
 
     // A newly created employee defaults to every existing category enabled.
-    let (st, body) = admin.get(&format!("/api/v1/categories/{cat_id}/users")).await;
+    let (st, body) = admin
+        .get(&format!("/api/v1/categories/{cat_id}/users"))
+        .await;
     assert_eq!(st, StatusCode::OK);
     assert!(
         body.as_array()
@@ -174,10 +176,7 @@ async fn category_per_user_access_workflow() {
     let (st, _) = admin.get("/api/v1/categories/9999999/users").await;
     assert_eq!(st, StatusCode::NOT_FOUND, "unknown category id on read");
     let (st, _) = admin
-        .put(
-            "/api/v1/categories/9999999/users",
-            &json!({"user_ids": []}),
-        )
+        .put("/api/v1/categories/9999999/users", &json!({"user_ids": []}))
         .await;
     assert_eq!(st, StatusCode::NOT_FOUND, "unknown category id on write");
 
@@ -275,7 +274,11 @@ async fn category_per_user_access_workflow() {
             }),
         )
         .await;
-    assert_eq!(st, StatusCode::OK, "re-enabled category accepts new entries");
+    assert_eq!(
+        st,
+        StatusCode::OK,
+        "re-enabled category accepts new entries"
+    );
 
     app.cleanup().await;
 }
@@ -303,7 +306,9 @@ async fn absence_category_per_user_access_workflow() {
 
     // New employees default to enabled for existing absence categories.
     let (st, body) = admin
-        .get(&format!("/api/v1/absence-categories/{training_cat_id}/users"))
+        .get(&format!(
+            "/api/v1/absence-categories/{training_cat_id}/users"
+        ))
         .await;
     assert_eq!(st, StatusCode::OK);
     assert!(
@@ -316,7 +321,9 @@ async fn absence_category_per_user_access_workflow() {
 
     // Non-admins cannot read or write the access list.
     let (st, _) = emp
-        .get(&format!("/api/v1/absence-categories/{training_cat_id}/users"))
+        .get(&format!(
+            "/api/v1/absence-categories/{training_cat_id}/users"
+        ))
         .await;
     assert_eq!(st, StatusCode::FORBIDDEN);
 
@@ -367,7 +374,11 @@ async fn absence_category_per_user_access_workflow() {
             &json!({"category_id": training_cat_id, "start_date": day, "end_date": day}),
         )
         .await;
-    assert_eq!(st, StatusCode::OK, "re-enabled absence category accepts requests: {body}");
+    assert_eq!(
+        st,
+        StatusCode::OK,
+        "re-enabled absence category accepts requests: {body}"
+    );
 
     app.cleanup().await;
 }

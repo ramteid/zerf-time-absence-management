@@ -305,10 +305,10 @@ impl ReportDb {
              ) \
              ORDER BY last_name, first_name, id";
         Ok(sqlx::query_as(SQL)
-        .bind(from)
-        .bind(to)
-        .fetch_all(&self.pool)
-        .await?)
+            .bind(from)
+            .bind(to)
+            .fetch_all(&self.pool)
+            .await?)
     }
 
     /// User start date and overtime start balance (minutes).

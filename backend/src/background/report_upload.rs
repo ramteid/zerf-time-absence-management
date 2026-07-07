@@ -73,7 +73,11 @@ pub async fn run_now(state: &AppState) -> AppResult<()> {
     populate_queue_for_prev_month(state, today).await?;
 
     let (base, token) = nextcloud::parse_share_url(&url)?;
-    let pw = if password.is_empty() { None } else { Some(password.as_str()) };
+    let pw = if password.is_empty() {
+        None
+    } else {
+        Some(password.as_str())
+    };
     process_pending_entries(state, &base, &token, pw).await;
 
     Ok(())
@@ -92,7 +96,11 @@ async fn run_once(state: &AppState) -> AppResult<()> {
     }
 
     let (base, token) = nextcloud::parse_share_url(&url)?;
-    let pw = if password.is_empty() { None } else { Some(password.as_str()) };
+    let pw = if password.is_empty() {
+        None
+    } else {
+        Some(password.as_str())
+    };
     process_pending_entries(state, &base, &token, pw).await;
 
     Ok(())
@@ -117,7 +125,11 @@ async fn populate_queue_for_prev_month(state: &AppState, today: NaiveDate) -> Ap
 
     // Include deactivated users who had entries/absences in the period so the
     // archive export is complete (see ReportDb::timesheet_members_for_period).
-    let members = state.db.reports.timesheet_members_for_period(from, to).await?;
+    let members = state
+        .db
+        .reports
+        .timesheet_members_for_period(from, to)
+        .await?;
     let ids: Vec<i64> = members.iter().map(|u| u.id).collect();
 
     state.db.export_queue.populate(&period, &ids).await?;
@@ -253,10 +265,9 @@ async fn process_one_entry(
 }
 
 async fn load_upload_settings(state: &AppState) -> AppResult<(bool, String, u8, String)> {
-    let enabled =
-        settings::load_setting(&state.pool, settings::REPORT_UPLOAD_ENABLED_KEY, "false")
-            .await?
-            == "true";
+    let enabled = settings::load_setting(&state.pool, settings::REPORT_UPLOAD_ENABLED_KEY, "false")
+        .await?
+        == "true";
     let url = settings::load_setting(&state.pool, settings::REPORT_UPLOAD_URL_KEY, "").await?;
     let day_of_month: u8 =
         settings::load_setting(&state.pool, settings::REPORT_UPLOAD_DAY_OF_MONTH_KEY, "5")
@@ -278,9 +289,9 @@ fn prev_period(today: NaiveDate) -> String {
 }
 
 fn parse_year_month(period: &str) -> AppResult<(i32, u32)> {
-    let (y, m) = period.split_once('-').ok_or_else(|| {
-        AppError::Internal(format!("invalid period string: {period}"))
-    })?;
+    let (y, m) = period
+        .split_once('-')
+        .ok_or_else(|| AppError::Internal(format!("invalid period string: {period}")))?;
     let year: i32 = y
         .parse()
         .map_err(|_| AppError::Internal(format!("invalid year in period: {period}")))?;

@@ -19,7 +19,9 @@ pub async fn list(
     State(app_state): State<AppState>,
     requester: User,
 ) -> AppResult<Json<Vec<Category>>> {
-    Ok(Json(categories::list_for_user(&app_state, requester.id).await?))
+    Ok(Json(
+        categories::list_for_user(&app_state, requester.id).await?,
+    ))
 }
 
 pub async fn list_all(

@@ -57,11 +57,12 @@ async fn main() -> Result<()> {
                 db.audit.cleanup_old().await;
 
                 // Prune resolved reopen requests older than retention setting (default 365 days).
-                let reopen_days = settings::load_setting(&pool, "reopen_request_retention_days", "365")
-                    .await
-                    .ok()
-                    .and_then(|v| v.parse::<i64>().ok())
-                    .unwrap_or(365);
+                let reopen_days =
+                    settings::load_setting(&pool, "reopen_request_retention_days", "365")
+                        .await
+                        .ok()
+                        .and_then(|v| v.parse::<i64>().ok())
+                        .unwrap_or(365);
                 db.reopen_requests.cleanup_old(reopen_days).await;
 
                 // Remove stale system-alert email throttle keys (not touched in 30 days).

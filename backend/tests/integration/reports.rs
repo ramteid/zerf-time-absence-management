@@ -1041,10 +1041,7 @@ async fn report_permission_guards_reject_non_reportable_users_on_every_personal_
     // Archive the report target (archive sets active=FALSE; archived users are
     // still included in historical reports since they had time data).
     let (status, _) = admin
-        .post(
-            &format!("/api/v1/users/{inactive_id}/archive"),
-            &json!({}),
-        )
+        .post(&format!("/api/v1/users/{inactive_id}/archive"), &json!({}))
         .await;
     assert_eq!(status, StatusCode::OK, "archive report target");
 
@@ -1171,7 +1168,9 @@ async fn zero_weekly_hours_employee_exempt_from_week_completeness_checks() {
 
     // The team report's per-row `weeks_all_submitted` must reflect the same
     // exemption for the same reason.
-    let (st, team_rows) = lead.get(&format!("/api/v1/reports/team?month={month}")).await;
+    let (st, team_rows) = lead
+        .get(&format!("/api/v1/reports/team?month={month}"))
+        .await;
     assert_eq!(st, StatusCode::OK, "team report");
     let team_rows = team_rows.as_array().unwrap();
     let zero_hours_row = team_rows
@@ -1297,10 +1296,7 @@ async fn combined_timesheet_pdf_orders_sections_by_role_then_name() {
         employee_alpha < employee_beta,
         "employees are alphabetical within their role group (Alpha before Beta)"
     );
-    assert!(
-        employee_beta < assistant,
-        "employees precede the assistant"
-    );
+    assert!(employee_beta < assistant, "employees precede the assistant");
     assert!(
         assistant < admin_section,
         "assistant precedes the admin, which sorts last despite an early last name"

@@ -162,22 +162,24 @@ impl CategoryDb {
         // New categories default to enabled for every existing employee. Same
         // transaction as the insert above so a failure here cannot leave a
         // category with zero employees able to use it.
-        sqlx::query("INSERT INTO user_category_access (user_id, category_id) SELECT id, $1 FROM users")
-            .bind(new_id)
-            .execute(&mut *tx)
-            .await?;
+        sqlx::query(
+            "INSERT INTO user_category_access (user_id, category_id) SELECT id, $1 FROM users",
+        )
+        .bind(new_id)
+        .execute(&mut *tx)
+        .await?;
         tx.commit().await?;
         Ok(new_id)
     }
 
     /// Enabled employee ids for a category (regardless of category.active).
     pub async fn enabled_user_ids(&self, category_id: i64) -> AppResult<Vec<i64>> {
-        Ok(sqlx::query_scalar(
-            "SELECT user_id FROM user_category_access WHERE category_id = $1",
+        Ok(
+            sqlx::query_scalar("SELECT user_id FROM user_category_access WHERE category_id = $1")
+                .bind(category_id)
+                .fetch_all(&self.pool)
+                .await?,
         )
-        .bind(category_id)
-        .fetch_all(&self.pool)
-        .await?)
     }
 
     /// Replace the full set of employees enabled for a category. Duplicate
@@ -192,14 +194,12 @@ impl CategoryDb {
             .execute(&mut *tx)
             .await?;
         for user_id in unique_ids {
-            sqlx::query(
-                "INSERT INTO user_category_access (user_id, category_id) VALUES ($1, $2)",
-            )
-            .bind(user_id)
-            .bind(category_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(map_user_access_error)?;
+            sqlx::query("INSERT INTO user_category_access (user_id, category_id) VALUES ($1, $2)")
+                .bind(user_id)
+                .bind(category_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(map_user_access_error)?;
         }
         tx.commit().await?;
         Ok(())

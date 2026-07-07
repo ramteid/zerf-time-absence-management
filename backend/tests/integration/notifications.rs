@@ -57,7 +57,9 @@ async fn notifications_full_workflow() {
             "unread count must be 0 after marking the only notification as read"
         );
 
-        let (st, _) = lead.post("/api/v1/notifications/read-all", &json!({})).await;
+        let (st, _) = lead
+            .post("/api/v1/notifications/read-all", &json!({}))
+            .await;
         assert_eq!(st, StatusCode::OK);
 
         let (st, body) = lead.get("/api/v1/notifications/unread-count").await;
@@ -559,9 +561,7 @@ async fn withdrawing_absence_clears_pending_notification_for_approver() {
     );
     let notification_id = pending["id"].as_i64().expect("notification has an id");
 
-    let (st, _) = emp
-        .delete(&format!("/api/v1/absences/{absence_id}"))
-        .await;
+    let (st, _) = emp.delete(&format!("/api/v1/absences/{absence_id}")).await;
     assert_eq!(st, StatusCode::OK, "employee withdraws the request");
 
     let (st, notifications) = lead.get("/api/v1/notifications").await;

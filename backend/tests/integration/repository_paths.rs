@@ -2149,7 +2149,11 @@ async fn reopen_requests_repository_workflow() {
             &json!({"ids": [entry.id]}),
         )
         .await;
-    assert_eq!(st, StatusCode::OK, "lead approves entry for reopen repo test");
+    assert_eq!(
+        st,
+        StatusCode::OK,
+        "lead approves entry for reopen repo test"
+    );
 
     // count_non_draft_entries returns the number of non-draft entries in the week.
     let non_draft = reopen_requests

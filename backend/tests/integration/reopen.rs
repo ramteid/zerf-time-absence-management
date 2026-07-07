@@ -615,11 +615,18 @@ async fn reopen_full_workflow() {
                 &json!({"kind":"vacation","start_date": monday_iso,"end_date": monday_iso}),
             )
             .await;
-        assert_eq!(st, StatusCode::OK, "vacation can be requested over a rejected entry's day");
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "vacation can be requested over a rejected entry's day"
+        );
         let absence_id = id(&body);
 
         let (st, _) = lead
-            .post(&format!("/api/v1/absences/{absence_id}/approve"), &json!({}))
+            .post(
+                &format!("/api/v1/absences/{absence_id}/approve"),
+                &json!({}),
+            )
             .await;
         assert_eq!(
             st,
@@ -714,8 +721,8 @@ async fn reopen_full_workflow() {
 
         let (st, body) = emp.get("/api/v1/time-entries").await;
         assert_eq!(st, StatusCode::OK, "list own entries after reopen");
-        let reopened_entry =
-            find_by_id(&body, entry_id).expect("entry present after reopen despite inactive category");
+        let reopened_entry = find_by_id(&body, entry_id)
+            .expect("entry present after reopen despite inactive category");
         assert_eq!(
             reopened_entry["status"], "draft",
             "reopen resets the approved entry back to draft"

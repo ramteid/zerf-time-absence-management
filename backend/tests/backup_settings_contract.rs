@@ -9,18 +9,29 @@ use zerf::services::settings;
 
 /// All setting key constants that `backup.sh` must reference as literal strings.
 const BACKUP_KEYS: &[(&str, &str)] = &[
-    ("BACKUP_INTERVAL_DAYS_KEY", settings::BACKUP_INTERVAL_DAYS_KEY),
-    ("BACKUP_LAST_SUCCESS_AT_KEY", settings::BACKUP_LAST_SUCCESS_AT_KEY),
-    ("BACKUP_UPLOAD_ENABLED_KEY", settings::BACKUP_UPLOAD_ENABLED_KEY),
+    (
+        "BACKUP_INTERVAL_DAYS_KEY",
+        settings::BACKUP_INTERVAL_DAYS_KEY,
+    ),
+    (
+        "BACKUP_LAST_SUCCESS_AT_KEY",
+        settings::BACKUP_LAST_SUCCESS_AT_KEY,
+    ),
+    (
+        "BACKUP_UPLOAD_ENABLED_KEY",
+        settings::BACKUP_UPLOAD_ENABLED_KEY,
+    ),
     ("BACKUP_UPLOAD_URL_KEY", settings::BACKUP_UPLOAD_URL_KEY),
-    ("BACKUP_UPLOAD_PASSWORD_KEY", settings::BACKUP_UPLOAD_PASSWORD_KEY),
+    (
+        "BACKUP_UPLOAD_PASSWORD_KEY",
+        settings::BACKUP_UPLOAD_PASSWORD_KEY,
+    ),
 ];
 
 #[test]
 fn backup_sh_contains_all_backup_setting_keys() {
     // Find the script relative to this test file's manifest directory.
-    let script_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../scripts/backup.sh");
+    let script_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../scripts/backup.sh");
     let script = std::fs::read_to_string(&script_path)
         .expect("scripts/backup.sh must be readable from the repo root");
 
@@ -47,8 +58,14 @@ fn backup_sh_contains_all_backup_setting_keys() {
 #[test]
 fn backup_key_constant_values_are_correct() {
     assert_eq!(settings::BACKUP_INTERVAL_DAYS_KEY, "backup_interval_days");
-    assert_eq!(settings::BACKUP_LAST_SUCCESS_AT_KEY, "backup_last_success_at");
+    assert_eq!(
+        settings::BACKUP_LAST_SUCCESS_AT_KEY,
+        "backup_last_success_at"
+    );
     assert_eq!(settings::BACKUP_UPLOAD_ENABLED_KEY, "backup_upload_enabled");
     assert_eq!(settings::BACKUP_UPLOAD_URL_KEY, "backup_upload_url");
-    assert_eq!(settings::BACKUP_UPLOAD_PASSWORD_KEY, "backup_upload_password");
+    assert_eq!(
+        settings::BACKUP_UPLOAD_PASSWORD_KEY,
+        "backup_upload_password"
+    );
 }

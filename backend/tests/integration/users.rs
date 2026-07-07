@@ -1139,11 +1139,7 @@ async fn users_full_workflow() {
         let (st, _) = lead
             .post(&format!("/api/v1/users/{emp_id}/archive"), &json!({}))
             .await;
-        assert_eq!(
-            st,
-            StatusCode::FORBIDDEN,
-            "non-admin cannot archive users"
-        );
+        assert_eq!(st, StatusCode::FORBIDDEN, "non-admin cannot archive users");
 
         let (st, _) = lead.delete(&format!("/api/v1/users/{emp_id}")).await;
         assert_eq!(st, StatusCode::FORBIDDEN, "non-admin cannot delete users");
@@ -1334,7 +1330,11 @@ async fn user_creation_with_explicit_category_selection() {
                 "category_ids":[first_cat_id],"absence_category_ids":[]}),
         )
         .await;
-    assert_eq!(st, StatusCode::OK, "create with explicit categories: {body}");
+    assert_eq!(
+        st,
+        StatusCode::OK,
+        "create with explicit categories: {body}"
+    );
     let explicit_user_id = id(&body);
 
     let (st, enabled) = admin
@@ -1434,7 +1434,10 @@ async fn admin_resets_user_password() {
 
     // Reset the employee's password — admin has must_change_password = false.
     let (st, body) = admin
-        .post(&format!("/api/v1/users/{emp_id}/reset-password"), &json!({}))
+        .post(
+            &format!("/api/v1/users/{emp_id}/reset-password"),
+            &json!({}),
+        )
         .await;
     assert_eq!(st, StatusCode::OK, "admin resets user password: {body}");
     let new_pw = body["temporary_password"]
@@ -1444,7 +1447,9 @@ async fn admin_resets_user_password() {
 
     // Verify the target user can log in with the new password.
     let target_client = app.client();
-    let (st, _) = target_client.login("reset-target@example.com", new_pw).await;
+    let (st, _) = target_client
+        .login("reset-target@example.com", new_pw)
+        .await;
     assert_eq!(st, StatusCode::OK, "target logs in with new password");
 
     // -- Admin with must_change_password = true can also reset passwords --
@@ -1471,7 +1476,10 @@ async fn admin_resets_user_password() {
     // admin2 still has must_change_password = true — verify they can reset
     // another user's password (the middleware exception).
     let (st, body) = admin2_client
-        .post(&format!("/api/v1/users/{emp_id}/reset-password"), &json!({}))
+        .post(
+            &format!("/api/v1/users/{emp_id}/reset-password"),
+            &json!({}),
+        )
         .await;
     assert_eq!(
         st,

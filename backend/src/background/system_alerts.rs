@@ -26,7 +26,12 @@ pub async fn run_loop(state: AppState) {
 /// Check for unread pinned (system-error) notifications whose failure class
 /// has not yet been emailed today and send throttled emails to all active admins.
 async fn send_pending_alert_emails(state: &AppState) {
-    let classes = match state.db.notifications.list_unread_system_error_classes().await {
+    let classes = match state
+        .db
+        .notifications
+        .list_unread_system_error_classes()
+        .await
+    {
         Ok(c) => c,
         Err(e) => {
             tracing::warn!(target: "zerf::system_alerts", "failed to query system error classes: {e}");

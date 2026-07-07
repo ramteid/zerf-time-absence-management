@@ -44,17 +44,29 @@ async fn make_emp_with_pw(
         .await;
     assert_eq!(st, StatusCode::OK, "create emp {email}: {body}");
     let id = body["id"].as_i64().unwrap();
-    let pw = body["temporary_password"].as_str().unwrap_or("").to_string();
+    let pw = body["temporary_password"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
     (id, pw)
 }
 
 /// Create an employee and return its id only (discards temporary password).
-async fn make_emp(admin: &crate::common::TestClient, email: &str, first: &str, approver: i64) -> i64 {
+async fn make_emp(
+    admin: &crate::common::TestClient,
+    email: &str,
+    first: &str,
+    approver: i64,
+) -> i64 {
     make_emp_with_pw(admin, email, first, approver).await.0
 }
 
 /// Create a team lead and return (id, temporary_password).
-async fn make_lead_with_pw(admin: &crate::common::TestClient, email: &str, first: &str) -> (i64, String) {
+async fn make_lead_with_pw(
+    admin: &crate::common::TestClient,
+    email: &str,
+    first: &str,
+) -> (i64, String) {
     let (st, body) = admin
         .post(
             "/api/v1/users",
@@ -74,7 +86,10 @@ async fn make_lead_with_pw(admin: &crate::common::TestClient, email: &str, first
         .await;
     assert_eq!(st, StatusCode::OK, "create lead {email}: {body}");
     let id = body["id"].as_i64().unwrap();
-    let pw = body["temporary_password"].as_str().unwrap_or("").to_string();
+    let pw = body["temporary_password"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
     (id, pw)
 }
 
@@ -89,7 +104,9 @@ async fn archive_basic_and_restore() {
     let admin = app.client();
     let (st, _) = admin.login("admin@example.com", &app.admin_password).await;
     assert_eq!(st, StatusCode::OK);
-    let (st, _) = admin.change_password(&app.admin_password, "AdminPass!234").await;
+    let (st, _) = admin
+        .change_password(&app.admin_password, "AdminPass!234")
+        .await;
     assert_eq!(st, StatusCode::OK);
 
     // Create an employee to archive.
@@ -111,12 +128,18 @@ async fn archive_basic_and_restore() {
         .iter()
         .filter_map(|u| u["id"].as_i64())
         .collect();
-    assert!(!ids.contains(&emp_id), "archived user should not appear in /users");
+    assert!(
+        !ids.contains(&emp_id),
+        "archived user should not appear in /users"
+    );
 
     // Employee appears in GET /users/archived.
     let (st, archived) = admin.get("/api/v1/users/archived").await;
     assert_eq!(st, StatusCode::OK);
-    assert!(has_id(&archived, emp_id), "archived user should appear in /users/archived");
+    assert!(
+        has_id(&archived, emp_id),
+        "archived user should appear in /users/archived"
+    );
 
     // The archived entry has archived_at set.
     let entry = find_by_id(&archived, emp_id).unwrap();
@@ -135,18 +158,31 @@ async fn archive_basic_and_restore() {
     assert_eq!(st, StatusCode::OK, "restore failed: {body}");
     assert_eq!(body["id"].as_i64(), Some(emp_id));
     assert_eq!(body["active"], json!(true));
-    assert!(body["archived_at"].is_null(), "archived_at should be null after restore");
-    assert_eq!(body["start_date"], json!("2025-01-01"), "start_date should be reset");
+    assert!(
+        body["archived_at"].is_null(),
+        "archived_at should be null after restore"
+    );
+    assert_eq!(
+        body["start_date"],
+        json!("2025-01-01"),
+        "start_date should be reset"
+    );
 
     // User reappears in GET /users.
     let (st, users) = admin.get("/api/v1/users").await;
     assert_eq!(st, StatusCode::OK);
-    assert!(has_id(&users, emp_id), "restored user should appear in /users again");
+    assert!(
+        has_id(&users, emp_id),
+        "restored user should appear in /users again"
+    );
 
     // User no longer in /users/archived.
     let (st, archived) = admin.get("/api/v1/users/archived").await;
     assert_eq!(st, StatusCode::OK);
-    assert!(!has_id(&archived, emp_id), "restored user should not appear in /users/archived");
+    assert!(
+        !has_id(&archived, emp_id),
+        "restored user should not appear in /users/archived"
+    );
 }
 
 #[tokio::test]
@@ -155,22 +191,29 @@ async fn archive_self_blocked() {
     let admin = app.client();
     let (st, _) = admin.login("admin@example.com", &app.admin_password).await;
     assert_eq!(st, StatusCode::OK);
-    let (st, _) = admin.change_password(&app.admin_password, "AdminPass!234").await;
+    let (st, _) = admin
+        .change_password(&app.admin_password, "AdminPass!234")
+        .await;
     assert_eq!(st, StatusCode::OK);
 
     // Admin id is 1 from seeding.
     let (st, body) = admin.post("/api/v1/users/1/archive", &json!({})).await;
-    assert_eq!(st, StatusCode::BAD_REQUEST, "self-archive must be blocked: {body}");
+    assert_eq!(
+        st,
+        StatusCode::BAD_REQUEST,
+        "self-archive must be blocked: {body}"
+    );
     assert!(
         body["error"]
             .as_str()
             .unwrap_or("")
             .to_lowercase()
-            .contains("yourself") || body["error"]
-            .as_str()
-            .unwrap_or("")
-            .to_lowercase()
-            .contains("cannot"),
+            .contains("yourself")
+            || body["error"]
+                .as_str()
+                .unwrap_or("")
+                .to_lowercase()
+                .contains("cannot"),
         "error message mismatch: {body}"
     );
 }
@@ -181,7 +224,9 @@ async fn archive_last_admin_blocked() {
     let admin = app.client();
     let (st, _) = admin.login("admin@example.com", &app.admin_password).await;
     assert_eq!(st, StatusCode::OK);
-    let (st, _) = admin.change_password(&app.admin_password, "AdminPass!234").await;
+    let (st, _) = admin
+        .change_password(&app.admin_password, "AdminPass!234")
+        .await;
     assert_eq!(st, StatusCode::OK);
 
     // Create a second admin to make admin 1 non-last, then try to archive employee
@@ -190,8 +235,14 @@ async fn archive_last_admin_blocked() {
     let emp_id = make_emp(&admin, "emp2@example.com", "Bob2", 1).await;
 
     // Archive the employee (non-admin) — should succeed.
-    let (st, body) = admin.post(&format!("/api/v1/users/{emp_id}/archive"), &json!({})).await;
-    assert_eq!(st, StatusCode::OK, "non-admin archive should succeed: {body}");
+    let (st, body) = admin
+        .post(&format!("/api/v1/users/{emp_id}/archive"), &json!({}))
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::OK,
+        "non-admin archive should succeed: {body}"
+    );
 
     // Try to archive the sole admin (id=1 cannot archive self, so we need a 2nd admin).
     // Create second admin.
@@ -219,8 +270,14 @@ async fn archive_last_admin_blocked() {
     // Now admin2 can archive admin1 since there are 2 admins.
     // (But admin1 cannot self-archive, so we test via admin2 archiving admin1.)
     // For now just verify the second admin exists and can be archived.
-    let (st, _) = admin.post(&format!("/api/v1/users/{admin2_id}/archive"), &json!({})).await;
-    assert_eq!(st, StatusCode::OK, "should be able to archive non-last admin");
+    let (st, _) = admin
+        .post(&format!("/api/v1/users/{admin2_id}/archive"), &json!({}))
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::OK,
+        "should be able to archive non-last admin"
+    );
 
     // Now admin1 is the sole active admin — archiving them should fail.
     // But admin can't self-archive so this is blocked by self-archive first.
@@ -230,7 +287,10 @@ async fn archive_last_admin_blocked() {
     // Just verify admin2 is archived.
     let (st, archived) = admin.get("/api/v1/users/archived").await;
     assert_eq!(st, StatusCode::OK);
-    assert!(has_id(&archived, admin2_id), "admin2 should be in archived list");
+    assert!(
+        has_id(&archived, admin2_id),
+        "admin2 should be in archived list"
+    );
 }
 
 #[tokio::test]
@@ -239,7 +299,9 @@ async fn archive_with_approver_requires_replacement() {
     let admin = app.client();
     let (st, _) = admin.login("admin@example.com", &app.admin_password).await;
     assert_eq!(st, StatusCode::OK);
-    let (st, _) = admin.change_password(&app.admin_password, "AdminPass!234").await;
+    let (st, _) = admin
+        .change_password(&app.admin_password, "AdminPass!234")
+        .await;
     assert_eq!(st, StatusCode::OK);
 
     // Create a lead who has an employee.
@@ -250,10 +312,22 @@ async fn archive_with_approver_requires_replacement() {
     let (st, body) = admin
         .post(&format!("/api/v1/users/{lead_id}/archive"), &json!({}))
         .await;
-    assert_eq!(st, StatusCode::BAD_REQUEST, "must fail without replacement: {body}");
+    assert_eq!(
+        st,
+        StatusCode::BAD_REQUEST,
+        "must fail without replacement: {body}"
+    );
     assert!(
-        body["error"].as_str().unwrap_or("").to_lowercase().contains("replacement")
-            || body["error"].as_str().unwrap_or("").to_lowercase().contains("approver"),
+        body["error"]
+            .as_str()
+            .unwrap_or("")
+            .to_lowercase()
+            .contains("replacement")
+            || body["error"]
+                .as_str()
+                .unwrap_or("")
+                .to_lowercase()
+                .contains("approver"),
         "error should mention replacement/approver: {body}"
     );
 
@@ -286,7 +360,9 @@ async fn archive_rejects_pending_absences() {
     let admin = app.client();
     let (st, _) = admin.login("admin@example.com", &app.admin_password).await;
     assert_eq!(st, StatusCode::OK);
-    let (st, _) = admin.change_password(&app.admin_password, "AdminPass!234").await;
+    let (st, _) = admin
+        .change_password(&app.admin_password, "AdminPass!234")
+        .await;
     assert_eq!(st, StatusCode::OK);
 
     // Create an employee and get their temporary password so we can log in.
@@ -332,7 +408,9 @@ async fn archive_rejects_pending_absences() {
     assert_eq!(abs_data["status"], json!("requested"));
 
     // Archive the employee.
-    let (st, body) = admin.post(&format!("/api/v1/users/{emp_id}/archive"), &json!({})).await;
+    let (st, body) = admin
+        .post(&format!("/api/v1/users/{emp_id}/archive"), &json!({}))
+        .await;
     assert_eq!(st, StatusCode::OK, "archive: {body}");
 
     // Absence should now be rejected.
@@ -351,7 +429,9 @@ async fn archive_non_admin_forbidden() {
     let admin = app.client();
     let (st, _) = admin.login("admin@example.com", &app.admin_password).await;
     assert_eq!(st, StatusCode::OK);
-    let (st, _) = admin.change_password(&app.admin_password, "AdminPass!234").await;
+    let (st, _) = admin
+        .change_password(&app.admin_password, "AdminPass!234")
+        .await;
     assert_eq!(st, StatusCode::OK);
 
     // Create a lead (capturing temporary password) and an employee.
@@ -362,14 +442,20 @@ async fn archive_non_admin_forbidden() {
     let lead_client = app.client();
     let (st, _) = lead_client.login("lead2@arch.com", &lead_tmp_pw).await;
     assert_eq!(st, StatusCode::OK);
-    let (st, _) = lead_client.change_password(&lead_tmp_pw, "LeadPass!234").await;
+    let (st, _) = lead_client
+        .change_password(&lead_tmp_pw, "LeadPass!234")
+        .await;
     assert_eq!(st, StatusCode::OK);
 
     // Lead tries to archive employee — must be forbidden.
     let (st, body) = lead_client
         .post(&format!("/api/v1/users/{emp_id}/archive"), &json!({}))
         .await;
-    assert_eq!(st, StatusCode::FORBIDDEN, "non-admin archive must be forbidden: {body}");
+    assert_eq!(
+        st,
+        StatusCode::FORBIDDEN,
+        "non-admin archive must be forbidden: {body}"
+    );
 
     // Lead tries to restore — must be forbidden.
     let (st, body) = lead_client
@@ -378,11 +464,19 @@ async fn archive_non_admin_forbidden() {
             &json!({"approver_ids": [lead_id]}),
         )
         .await;
-    assert_eq!(st, StatusCode::FORBIDDEN, "non-admin restore must be forbidden: {body}");
+    assert_eq!(
+        st,
+        StatusCode::FORBIDDEN,
+        "non-admin restore must be forbidden: {body}"
+    );
 
     // Lead tries to list archived — must be forbidden.
     let (st, _) = lead_client.get("/api/v1/users/archived").await;
-    assert_eq!(st, StatusCode::FORBIDDEN, "non-admin list_archived must be forbidden");
+    assert_eq!(
+        st,
+        StatusCode::FORBIDDEN,
+        "non-admin list_archived must be forbidden"
+    );
 }
 
 #[tokio::test]
@@ -391,7 +485,9 @@ async fn delete_user_blocked_when_has_time_data() {
     let admin = app.client();
     let (st, _) = admin.login("admin@example.com", &app.admin_password).await;
     assert_eq!(st, StatusCode::OK);
-    let (st, _) = admin.change_password(&app.admin_password, "AdminPass!234").await;
+    let (st, _) = admin
+        .change_password(&app.admin_password, "AdminPass!234")
+        .await;
     assert_eq!(st, StatusCode::OK);
 
     // Create an employee and log in as them to create historical time data.
@@ -456,14 +552,20 @@ async fn delete_user_allowed_without_time_data() {
     let admin = app.client();
     let (st, _) = admin.login("admin@example.com", &app.admin_password).await;
     assert_eq!(st, StatusCode::OK);
-    let (st, _) = admin.change_password(&app.admin_password, "AdminPass!234").await;
+    let (st, _) = admin
+        .change_password(&app.admin_password, "AdminPass!234")
+        .await;
     assert_eq!(st, StatusCode::OK);
 
     let emp_id = make_emp(&admin, "del2@arch.com", "DelTest2", 1).await;
 
     // No time data — hard delete must succeed.
     let (st, body) = admin.delete(&format!("/api/v1/users/{emp_id}")).await;
-    assert_eq!(st, StatusCode::OK, "delete without data must succeed: {body}");
+    assert_eq!(
+        st,
+        StatusCode::OK,
+        "delete without data must succeed: {body}"
+    );
     assert_eq!(body["ok"], json!(true));
 }
 
@@ -473,7 +575,9 @@ async fn archived_user_excluded_from_user_list() {
     let admin = app.client();
     let (st, _) = admin.login("admin@example.com", &app.admin_password).await;
     assert_eq!(st, StatusCode::OK);
-    let (st, _) = admin.change_password(&app.admin_password, "AdminPass!234").await;
+    let (st, _) = admin
+        .change_password(&app.admin_password, "AdminPass!234")
+        .await;
     assert_eq!(st, StatusCode::OK);
 
     let emp_id = make_emp(&admin, "excl@arch.com", "Excl", 1).await;
@@ -488,17 +592,25 @@ async fn archived_user_excluded_from_user_list() {
         .expect("set emp2 inactive");
 
     // Archive emp1.
-    let (st, _) = admin.post(&format!("/api/v1/users/{emp_id}/archive"), &json!({})).await;
+    let (st, _) = admin
+        .post(&format!("/api/v1/users/{emp_id}/archive"), &json!({}))
+        .await;
     assert_eq!(st, StatusCode::OK, "archive emp1");
 
     let (st, users) = admin.get("/api/v1/users").await;
     assert_eq!(st, StatusCode::OK);
 
     // Deactivated (not archived) user should still appear.
-    assert!(has_id(&users, emp2_id), "deactivated user should appear in /users");
+    assert!(
+        has_id(&users, emp2_id),
+        "deactivated user should appear in /users"
+    );
 
     // Archived user should NOT appear.
-    assert!(!has_id(&users, emp_id), "archived user must not appear in /users");
+    assert!(
+        !has_id(&users, emp_id),
+        "archived user must not appear in /users"
+    );
 }
 
 #[tokio::test]
@@ -507,7 +619,9 @@ async fn restore_without_start_date_keeps_original() {
     let admin = app.client();
     let (st, _) = admin.login("admin@example.com", &app.admin_password).await;
     assert_eq!(st, StatusCode::OK);
-    let (st, _) = admin.change_password(&app.admin_password, "AdminPass!234").await;
+    let (st, _) = admin
+        .change_password(&app.admin_password, "AdminPass!234")
+        .await;
     assert_eq!(st, StatusCode::OK);
 
     let emp_id = make_emp(&admin, "nodate@arch.com", "NoDate", 1).await;
@@ -518,7 +632,9 @@ async fn restore_without_start_date_keeps_original() {
     let original_start = user_before["start_date"].as_str().unwrap().to_string();
 
     // Archive then restore without start_date.
-    let (st, _) = admin.post(&format!("/api/v1/users/{emp_id}/archive"), &json!({})).await;
+    let (st, _) = admin
+        .post(&format!("/api/v1/users/{emp_id}/archive"), &json!({}))
+        .await;
     assert_eq!(st, StatusCode::OK);
     let (st, body) = admin
         .post(
@@ -542,20 +658,34 @@ async fn archive_already_archived_fails() {
     let admin = app.client();
     let (st, _) = admin.login("admin@example.com", &app.admin_password).await;
     assert_eq!(st, StatusCode::OK);
-    let (st, _) = admin.change_password(&app.admin_password, "AdminPass!234").await;
+    let (st, _) = admin
+        .change_password(&app.admin_password, "AdminPass!234")
+        .await;
     assert_eq!(st, StatusCode::OK);
 
     let emp_id = make_emp(&admin, "twice@arch.com", "Twice", 1).await;
 
     // Archive once.
-    let (st, _) = admin.post(&format!("/api/v1/users/{emp_id}/archive"), &json!({})).await;
+    let (st, _) = admin
+        .post(&format!("/api/v1/users/{emp_id}/archive"), &json!({}))
+        .await;
     assert_eq!(st, StatusCode::OK, "first archive");
 
     // Archive again — must fail.
-    let (st, body) = admin.post(&format!("/api/v1/users/{emp_id}/archive"), &json!({})).await;
-    assert_eq!(st, StatusCode::BAD_REQUEST, "double-archive must fail: {body}");
+    let (st, body) = admin
+        .post(&format!("/api/v1/users/{emp_id}/archive"), &json!({}))
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::BAD_REQUEST,
+        "double-archive must fail: {body}"
+    );
     assert!(
-        body["error"].as_str().unwrap_or("").to_lowercase().contains("already"),
+        body["error"]
+            .as_str()
+            .unwrap_or("")
+            .to_lowercase()
+            .contains("already"),
         "error should mention already archived: {body}"
     );
 }
@@ -566,7 +696,9 @@ async fn restore_non_archived_fails() {
     let admin = app.client();
     let (st, _) = admin.login("admin@example.com", &app.admin_password).await;
     assert_eq!(st, StatusCode::OK);
-    let (st, _) = admin.change_password(&app.admin_password, "AdminPass!234").await;
+    let (st, _) = admin
+        .change_password(&app.admin_password, "AdminPass!234")
+        .await;
     assert_eq!(st, StatusCode::OK);
 
     let emp_id = make_emp(&admin, "notarch@arch.com", "NotArch", 1).await;
@@ -578,9 +710,17 @@ async fn restore_non_archived_fails() {
             &json!({"approver_ids": [1]}),
         )
         .await;
-    assert_eq!(st, StatusCode::BAD_REQUEST, "restore non-archived must fail: {body}");
+    assert_eq!(
+        st,
+        StatusCode::BAD_REQUEST,
+        "restore non-archived must fail: {body}"
+    );
     assert!(
-        body["error"].as_str().unwrap_or("").to_lowercase().contains("not archived"),
+        body["error"]
+            .as_str()
+            .unwrap_or("")
+            .to_lowercase()
+            .contains("not archived"),
         "error should mention not archived: {body}"
     );
 }

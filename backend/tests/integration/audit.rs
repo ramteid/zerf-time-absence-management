@@ -308,7 +308,10 @@ async fn audit_log_records_category_create_and_update() {
     assert_eq!(rows.len(), 1, "category creation must be audited");
     assert_eq!(rows[0]["action"].as_str(), Some("created"));
     assert!(rows[0]["before_data"].is_null());
-    assert_eq!(rows[0]["after_data"]["name"].as_str(), Some("Audit Category"));
+    assert_eq!(
+        rows[0]["after_data"]["name"].as_str(),
+        Some("Audit Category")
+    );
 
     let (st, _) = admin
         .put(
@@ -382,7 +385,10 @@ async fn audit_log_records_holiday_create_and_delete() {
     assert_eq!(rows.len(), 1, "holiday creation must be audited");
     assert_eq!(rows[0]["action"].as_str(), Some("created"));
     assert!(rows[0]["before_data"].is_null());
-    assert_eq!(rows[0]["after_data"]["name"].as_str(), Some("Audit Holiday"));
+    assert_eq!(
+        rows[0]["after_data"]["name"].as_str(),
+        Some("Audit Holiday")
+    );
 
     let (st, _) = admin
         .delete(&format!("/api/v1/holidays/{holiday_id}"))

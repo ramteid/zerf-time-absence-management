@@ -71,8 +71,7 @@ async fn resolve_safe_addrs(url: &str) -> AppResult<(String, Vec<SocketAddr>)> {
     }
     if addrs.iter().any(|addr| is_blocked_ip(addr.ip())) {
         return Err(AppError::BadRequest(
-            "Nextcloud host resolves to a private or reserved address; refusing to connect."
-                .into(),
+            "Nextcloud host resolves to a private or reserved address; refusing to connect.".into(),
         ));
     }
     Ok((host, addrs))
@@ -215,24 +214,21 @@ mod tests {
 
     #[test]
     fn parse_share_url_extracts_base_and_token() {
-        let (base, token) =
-            parse_share_url("https://cloud.example.com/s/AbCdEfGhIj").unwrap();
+        let (base, token) = parse_share_url("https://cloud.example.com/s/AbCdEfGhIj").unwrap();
         assert_eq!(base, "https://cloud.example.com");
         assert_eq!(token, "AbCdEfGhIj");
     }
 
     #[test]
     fn parse_share_url_preserves_subpath() {
-        let (base, token) =
-            parse_share_url("https://example.com/nextcloud/s/MyToken123").unwrap();
+        let (base, token) = parse_share_url("https://example.com/nextcloud/s/MyToken123").unwrap();
         assert_eq!(base, "https://example.com/nextcloud");
         assert_eq!(token, "MyToken123");
     }
 
     #[test]
     fn parse_share_url_strips_trailing_path_from_token() {
-        let (base, token) =
-            parse_share_url("https://cloud.example.com/s/AbCdEf/download").unwrap();
+        let (base, token) = parse_share_url("https://cloud.example.com/s/AbCdEf/download").unwrap();
         assert_eq!(base, "https://cloud.example.com");
         assert_eq!(token, "AbCdEf");
     }
@@ -254,8 +250,7 @@ mod tests {
 
     #[test]
     fn parse_share_url_trims_whitespace() {
-        let (base, token) =
-            parse_share_url("  https://cloud.example.com/s/Tok  ").unwrap();
+        let (base, token) = parse_share_url("  https://cloud.example.com/s/Tok  ").unwrap();
         assert_eq!(base, "https://cloud.example.com");
         assert_eq!(token, "Tok");
     }
