@@ -51,13 +51,17 @@ fn normalize_slug(raw: &str) -> Option<String> {
     Some(out)
 }
 
-/// Active absence categories enabled for the given employee — used to
-/// populate the absence-request dropdown.
+/// All absence categories (active and inactive) the employee has access to.
+/// Used to populate the frontend `absenceCategories` store, which provides
+/// both the request dropdown (filtered to `active=true` client-side) and the
+/// behavior lookups (`absenceRemovesTarget`, `absenceBlocksEntry`) that must
+/// resolve deactivated or access-revoked categories whose live absence rows
+/// still carry their original behavior.
 pub async fn list_for_user(app_state: &AppState, user_id: i64) -> AppResult<Vec<AbsenceCategory>> {
     app_state
         .db
         .absence_categories
-        .list_active_for_user(user_id)
+        .list_all_for_user(user_id)
         .await
 }
 

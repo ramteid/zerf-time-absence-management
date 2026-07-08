@@ -1243,6 +1243,19 @@ pub async fn revoke_absence(
         )
         .await;
     }
+    // Re-queue the Nextcloud archive export for all months the revoked absence
+    // spanned. Revoking an approved absence changes which days have a work target
+    // (days that were absence-covered now count toward flextime again), so any
+    // already-archived PDF for those months now diverges from the live ledger.
+    {
+        let mut pairs: Vec<(i64, chrono::NaiveDate)> = Vec::new();
+        let mut day = absence.start_date;
+        while day <= absence.end_date {
+            pairs.push((absence.user_id, day));
+            day += chrono::Duration::days(1);
+        }
+        crate::services::reports::requeue_export_for_dates(&app_state.pool, &pairs).await;
+    }
     Ok(serde_json::json!({"ok":true}))
 }
 

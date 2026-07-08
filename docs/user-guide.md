@@ -1335,6 +1335,12 @@ themselves.
   (rather than one user at a time). Its per-user sections are ordered by role
   — team leads, then employees, then assistants, then admins — and
   alphabetically within each role, matching the on-screen user lists.
+- The PDF table shows every non-rejected entry with a **Status** column (Draft,
+  Submitted, or Approved) so you can see which entries are included in the
+  **Total (approved)** row at the bottom. The Total counts only approved,
+  work-crediting entries after automatic break deduction — entries that are
+  still draft or submitted, or belong to a non-crediting category, appear in
+  the Duration column but are not counted in the Total.
 
 ### Scoped assistant user management (optional)
 
@@ -1668,6 +1674,8 @@ If a backup fails, all active admins receive a pinned in-app notification and a 
 When enabled, Zerf queues an individual timesheet PDF for each employee on a configurable day each month. Each PDF covers the **previous calendar month**. Employees who have not yet submitted all their weeks are uploaded automatically on the next daily check — late submitters are caught up without manual intervention. Employees who were archived after the period ended are included for archive correctness.
 
 If the feature was disabled for several months and is then re-enabled, or if the server missed a month boundary, Zerf automatically backfills all intervening months so no timesheet is silently skipped. **Upload now** has the same backfill behaviour.
+
+If a past month is changed after the PDF was already uploaded — for example an entry is rejected, a week is reopened and re-submitted, or an approved absence is revoked — Zerf automatically re-queues the affected employee's timesheet for that month and uploads an updated PDF on the next daily run.
 
 | Setting | Description |
 | --- | --- |

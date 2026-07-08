@@ -13,11 +13,14 @@
   let dialog;
   $: isNew = !template.id;
   // category_id is always set for existing absences (guaranteed by migration 017).
-  $: defaultCategoryId = template.category_id ?? $absenceCategories[0]?.id ?? null;
+  // The store now includes inactive categories for behavior resolution; filter to
+  // active-only for the request dropdown so deactivated types don't appear there.
+  $: activeAbsenceCategories = $absenceCategories.filter((c) => c.active);
+  $: defaultCategoryId = template.category_id ?? activeAbsenceCategories[0]?.id ?? null;
   let category_id = defaultCategoryId;
   // Assign once the store finishes loading when opening a new request.
-  $: if (!category_id && $absenceCategories.length) {
-    category_id = $absenceCategories[0]?.id ?? null;
+  $: if (!category_id && activeAbsenceCategories.length) {
+    category_id = activeAbsenceCategories[0]?.id ?? null;
   }
   let todayIso = appTodayIsoDate($settings?.timezone);
   let lastTodayIso = todayIso;
@@ -175,10 +178,10 @@
   <div>
     <label class="zf-label" for="absence-kind">{$t("Type")}</label>
     <select id="absence-kind" class="zf-select" bind:value={category_id}>
-      {#if !isNew && template.category_id && !$absenceCategories.find((c) => c.id === template.category_id)}
+      {#if !isNew && template.category_id && !activeAbsenceCategories.find((c) => c.id === template.category_id)}
         <option value={template.category_id}>{template.category_name || $t("Unknown type")}</option>
       {/if}
-      {#each $absenceCategories as cat (cat.id)}
+      {#each activeAbsenceCategories as cat (cat.id)}
         <option value={cat.id}>{$t(cat.name)}</option>
       {/each}
     </select>

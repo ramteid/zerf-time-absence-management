@@ -232,6 +232,23 @@ impl AbsenceCategoryDb {
         .await?)
     }
 
+    /// All absence categories (active and inactive) that the employee has
+    /// access to. Used to populate the frontend store with full behavior
+    /// metadata including deactivated categories that may still have live
+    /// absence rows. The frontend uses the `active` flag to filter which
+    /// categories appear in the request dropdown.
+    pub async fn list_all_for_user(&self, user_id: i64) -> AppResult<Vec<AbsenceCategory>> {
+        Ok(sqlx::query_as::<_, AbsenceCategory>(
+            "SELECT c.id, c.slug, c.name, c.color, c.sort_order, c.active, c.cost_type, c.auto_approve_past \
+             FROM absence_categories c \
+             JOIN user_absence_category_access uaca ON uaca.category_id = c.id AND uaca.user_id = $1 \
+             ORDER BY c.sort_order, c.name",
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
     pub async fn update(&self, id: i64, input: UpdateAbsenceCategory<'_>) -> AppResult<()> {
         let result = sqlx::query(
             "UPDATE absence_categories SET \

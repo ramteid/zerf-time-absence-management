@@ -148,6 +148,12 @@ pub async fn create(
         // don't keep an unread "please review week X" item for a week that no
         // longer has anything to review.
         clear_submission_pending_for_weeks(&app_state, requester.id, &[body.week_start]).await;
+        // Re-queue the Nextcloud export for any already-uploaded month that
+        // contains this week — the archived PDF now diverges from the live data.
+        let pairs: Vec<(i64, chrono::NaiveDate)> = (0..=6)
+            .map(|d| (requester.id, body.week_start + chrono::Duration::days(d)))
+            .collect();
+        crate::services::reports::requeue_export_for_dates(&app_state.pool, &pairs).await;
     }
 
     audit::log(
@@ -334,6 +340,19 @@ pub async fn approve(
         vec![],
     )
     .await;
+    // Re-queue the Nextcloud archive export for any already-uploaded month whose
+    // entries were just reverted to draft. The archived PDF no longer matches the
+    // live ledger since approved entries were reset.
+    // `reopened_entries` holds (id, prev_status) pairs; we need dates, so we
+    // cover the full week (Mon–Sun) from the reopen request. A week can span two
+    // calendar months; the requeue helper deduplicates periods, so covering all 7
+    // days safely handles cross-month weeks without double-counting.
+    let week_start_date = reopen_request.week_start;
+    let user_id_for_requeue = reopen_request.user_id;
+    let pairs: Vec<(i64, chrono::NaiveDate)> = (0..=6)
+        .map(|d| (user_id_for_requeue, week_start_date + chrono::Duration::days(d)))
+        .collect();
+    crate::services::reports::requeue_export_for_dates(&app_state.pool, &pairs).await;
     Ok(Json(
         serde_json::json!({ "ok": true, "entries_reopened": entries_reopened }),
     ))

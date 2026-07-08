@@ -156,21 +156,28 @@ pub async fn update(
     Path(entry_id): Path<i64>,
     Json(body): Json<NewTimeEntry>,
 ) -> AppResult<Json<TimeEntry>> {
-    Ok(Json(
-        crate::services::time_entries::update(
-            &app_state,
-            &requester,
-            entry_id,
-            crate::services::time_entries::TimeEntryInput {
-                entry_date: body.entry_date,
-                start_time: body.start_time,
-                end_time: body.end_time,
-                category_id: body.category_id,
-                comment: body.comment,
-            },
-        )
-        .await?,
-    ))
+    let updated = crate::services::time_entries::update(
+        &app_state,
+        &requester,
+        entry_id,
+        crate::services::time_entries::TimeEntryInput {
+            entry_date: body.entry_date,
+            start_time: body.start_time,
+            end_time: body.end_time,
+            category_id: body.category_id,
+            comment: body.comment,
+        },
+    )
+    .await?;
+    // An admin edit of an approved entry in a past month changes the content of
+    // the already-archived official timesheet. Re-queue the Nextcloud export so
+    // the next daily run re-uploads a corrected PDF.
+    crate::services::reports::requeue_export_for_dates(
+        &app_state.pool,
+        &[(updated.user_id, updated.entry_date)],
+    )
+    .await;
+    Ok(Json(updated))
 }
 
 /// Delete a draft time entry. Only the owner may delete their own entries.
@@ -486,6 +493,14 @@ pub async fn batch_reject(
         )
         .await;
         clear_submission_pending_for_entries(&app_state, &rejected_entries).await;
+        // Re-queue the Nextcloud archive export for any already-uploaded month
+        // that was just mutated. Rejection changes which entries count towards
+        // the Total, so the archived PDF no longer matches the live ledger.
+        let user_date_pairs: Vec<(i64, NaiveDate)> = rejected_entries
+            .iter()
+            .map(|e| (e.user_id, e.entry_date))
+            .collect();
+        crate::services::reports::requeue_export_for_dates(&app_state.pool, &user_date_pairs).await;
     }
     Ok(Json(
         serde_json::json!({"ok": true, "count": rejected_entries.len()}),

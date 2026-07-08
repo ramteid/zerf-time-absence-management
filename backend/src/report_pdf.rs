@@ -17,6 +17,16 @@
 //! Helvetica metrics for that subset, giving enough precision to compute
 //! alignment offsets. Every other string is left-aligned, sidestepping the
 //! missing-metrics problem for translated, variable-width text.
+//!
+//! Column layout (all 180 mm content width):
+//! Date 22 | Weekday 18 | Start 12 | End 12 | Category 36 | Duration 14 |
+//! Status 13 | Absence 25 | Holiday 28
+//!
+//! The "Status" column is essential for reader reconciliation: the Total row
+//! counts only approved, work-crediting, break-adjusted minutes, while the
+//! Duration column shows raw minutes for every non-rejected entry (including
+//! draft, submitted, and non-crediting entries). Without a status column,
+//! readers cannot understand why summing Duration differs from Total.
 
 use crate::i18n::{self, Language};
 use crate::services::reports::{FlextimeDay, MonthReport};
@@ -61,20 +71,27 @@ struct Column {
 }
 
 /// Column layout for the timesheet table. Widths sum to [`CONTENT_WIDTH_MM`].
+/// Date 22 | Weekday 18 | Start 12 | End 12 | Category 36 | Duration 14 |
+/// Status 13 | Absence 25 | Holiday 28 = 180 mm total.
 const COLUMNS: &[Column] = &[
     Column { header_key: "pdf_column_date",     width_mm: 22.0, align: Align::Left   },
-    Column { header_key: "pdf_column_weekday",  width_mm: 20.0, align: Align::Left   },
+    Column { header_key: "pdf_column_weekday",  width_mm: 18.0, align: Align::Left   },
     Column { header_key: "pdf_column_start",    width_mm: 12.0, align: Align::Center },
     Column { header_key: "pdf_column_end",      width_mm: 12.0, align: Align::Center },
-    Column { header_key: "pdf_column_category", width_mm: 40.0, align: Align::Left   },
-    Column { header_key: "pdf_column_duration", width_mm: 16.0, align: Align::Right  },
+    Column { header_key: "pdf_column_category", width_mm: 36.0, align: Align::Left   },
+    Column { header_key: "pdf_column_duration", width_mm: 14.0, align: Align::Right  },
+    Column { header_key: "pdf_column_status",   width_mm: 13.0, align: Align::Left   },
     Column { header_key: "pdf_column_absence",  width_mm: 25.0, align: Align::Left   },
-    Column { header_key: "pdf_column_holiday",  width_mm: 33.0, align: Align::Left   },
+    Column { header_key: "pdf_column_holiday",  width_mm: 28.0, align: Align::Left   },
 ];
 
 /// Index of the `Duration` column — the total/summary rows place their value
 /// directly under it, same as the table body.
 const DURATION_COLUMN: usize = 5;
+
+/// Index of the `Status` column — used to determine the status label to display
+/// for each entry so readers can reconcile the Duration column against the Total.
+const STATUS_COLUMN: usize = 6;
 
 /// Data for one employee's timesheet, as needed to render their section.
 /// Produced by the caller (service layer) from [`MonthReport`] /
@@ -425,14 +442,22 @@ impl<'a> Renderer<'a> {
                         (3, String::new()),
                         (4, String::new()),
                         (5, format_minutes(0)),
-                        (6, absence.clone()),
-                        (7, holiday.clone()),
+                        (STATUS_COLUMN, String::new()),
+                        (7, absence.clone()),
+                        (8, holiday.clone()),
                     ],
                     row_count % 2 == 1,
                 );
                 row_count += 1;
             } else {
                 for entry in &day.entries {
+                    // A short status label so readers can reconcile the Duration
+                    // column against the Total row. The Total counts only
+                    // approved, work-crediting, break-adjusted minutes; draft,
+                    // submitted, and non-crediting entries contribute to Duration
+                    // but not to Total.
+                    let status_label =
+                        entry_status_label(self.language, &entry.status, entry.counts_as_work);
                     self.draw_row(
                         &[
                             (0, day.date.to_string()),
@@ -441,8 +466,9 @@ impl<'a> Renderer<'a> {
                             (3, entry.end_time.get(0..5).unwrap_or("").to_string()),
                             (4, i18n::work_category_label(self.language, &entry.category)),
                             (5, format_minutes(entry.minutes)),
-                            (6, absence.clone()),
-                            (7, holiday.clone()),
+                            (STATUS_COLUMN, status_label),
+                            (7, absence.clone()),
+                            (8, holiday.clone()),
                         ],
                         row_count % 2 == 1,
                     );
@@ -528,6 +554,28 @@ fn rgb_f32(color: (u8, u8, u8)) -> (f32, f32, f32) {
     )
 }
 
+/// Short localized status label for a time entry. Used in the Status column to
+/// let readers reconcile the Duration column against the Total row.
+///
+/// The Total counts only approved, work-crediting, break-adjusted minutes.
+/// Non-approved entries (draft, submitted) and non-crediting entries always
+/// show a Duration but are never part of the Total; this label makes that
+/// explicit without requiring the reader to know the business rules.
+fn entry_status_label(language: &Language, status: &str, counts_as_work: bool) -> String {
+    // Non-crediting entries: show a marker even when approved, because their
+    // minutes never reach the Total.
+    if !counts_as_work && status == "approved" {
+        return i18n::translate(language, "pdf_status_approved_nc", &[]);
+    }
+    let key = match status {
+        "draft"     => "pdf_status_draft",
+        "submitted" => "pdf_status_submitted",
+        "approved"  => "pdf_status_approved",
+        _           => "pdf_status_other",
+    };
+    i18n::translate(language, key, &[])
+}
+
 /// Break-adjusted total minutes for the report range. Uses the pre-computed
 /// `actual_min` from the report (which already applies the auto-break
 /// deduction per day) rather than re-summing raw entry minutes. This keeps
@@ -598,6 +646,37 @@ fn text_width_mm(text: &str, size_pt: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn entry_status_label_maps_statuses_and_flags_correctly() {
+        let language = Language::default();
+        // Approved crediting entry → "Approved".
+        assert_eq!(
+            entry_status_label(&language, "approved", true),
+            "Approved"
+        );
+        // Approved non-crediting entry → notes it is not counted.
+        let nc_label = entry_status_label(&language, "approved", false);
+        assert!(
+            nc_label.contains("nc") || nc_label.contains("Approv"),
+            "non-crediting approved label should mention 'nc': {nc_label}"
+        );
+        // Draft and submitted map to their respective labels.
+        assert_eq!(entry_status_label(&language, "draft", true), "Draft");
+        assert_eq!(
+            entry_status_label(&language, "submitted", true),
+            "Submitted"
+        );
+    }
+
+    #[test]
+    fn columns_sum_to_content_width() {
+        let total: f32 = COLUMNS.iter().map(|c| c.width_mm).sum();
+        assert!(
+            (total - CONTENT_WIDTH_MM).abs() < 0.01,
+            "column widths {total} mm != content width {CONTENT_WIDTH_MM} mm"
+        );
+    }
 
     #[test]
     fn format_minutes_matches_frontend_min_to_hm() {

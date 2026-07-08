@@ -107,11 +107,22 @@ static LANGUAGES: &[LangDef] = &[
             ("pdf_column_end", "End"),
             ("pdf_column_category", "Category"),
             ("pdf_column_duration", "Duration"),
+            ("pdf_column_status", "Status"),
             ("pdf_column_absence", "Absence"),
             ("pdf_column_holiday", "Holiday"),
-            ("pdf_total", "Total"),
+            ("pdf_total", "Total (approved)"),
             ("pdf_flextime_opening_balance", "Flextime opening balance"),
             ("pdf_flextime_closing_balance", "Flextime closing balance"),
+            // Short status labels for individual time-entry rows. These appear
+            // in the Status column so readers can reconcile per-row Duration
+            // values against the Total row, which counts only approved,
+            // work-crediting, break-adjusted minutes.
+            ("pdf_status_draft",       "Draft"),
+            ("pdf_status_submitted",   "Submitted"),
+            ("pdf_status_approved",    "Approved"),
+            // Approved but non-crediting: minutes show in Duration, never in Total.
+            ("pdf_status_approved_nc", "Approv. (nc)"),
+            ("pdf_status_other",       ""),
         ],
     },
     LangDef {
@@ -197,11 +208,17 @@ static LANGUAGES: &[LangDef] = &[
             ("pdf_column_end", "Ende"),
             ("pdf_column_category", "Kategorie"),
             ("pdf_column_duration", "Dauer"),
+            ("pdf_column_status", "Status"),
             ("pdf_column_absence", "Abwesenheit"),
             ("pdf_column_holiday", "Feiertag"),
-            ("pdf_total", "Gesamt"),
+            ("pdf_total", "Gesamt (genehmigt)"),
             ("pdf_flextime_opening_balance", "Gleitzeitkontostand Anfang"),
             ("pdf_flextime_closing_balance", "Gleitzeitkontostand Ende"),
+            ("pdf_status_draft",       "Entwurf"),
+            ("pdf_status_submitted",   "Eingereicht"),
+            ("pdf_status_approved",    "Genehmigt"),
+            ("pdf_status_approved_nc", "Genehm. (nk)"),
+            ("pdf_status_other",       ""),
         ],
     },
 ];

@@ -804,15 +804,19 @@ pub fn compute_current_week_status(
 }
 
 /// Returns the current week's status as a string only when `today` falls inside
-/// the report's month range. `None` for past/future months and for assistants.
+/// the report's month range. `None` for past/future months and for users without
+/// a submission obligation (assistants and zero-weekly-hours non-assistants).
+/// Mirrors `submission_exempt` from `submission_status_for_month` so the
+/// dashboard's "current week open" warning is suppressed for the same users the
+/// reminder system already exempts.
 pub async fn current_week_status(
     pool: &crate::db::DatabasePool,
     user_id: i64,
     month_start: NaiveDate,
     month_end: NaiveDate,
-    is_assistant: bool,
+    submission_exempt: bool,
 ) -> AppResult<Option<String>> {
-    if is_assistant {
+    if submission_exempt {
         return Ok(None);
     }
     let today = crate::services::settings::app_today(pool).await;
@@ -842,7 +846,6 @@ pub async fn build_month(
         .await?
         .ok_or(AppError::NotFound)?;
     let user = crate::services::users::repo_user_to_auth_user(repo_user);
-    let is_assistant = is_assistant_role(&user.role);
     let submission_exempt = !crate::roles::has_submission_obligation(&user.role, user.weekly_hours);
     let mut report = build_range_with_user(pool, &user, from, to, month).await?;
     let (all_submitted, all_approved) = submission_status_for_month(
@@ -857,7 +860,11 @@ pub async fn build_month(
     .await?;
     report.weeks_all_submitted = Some(all_submitted);
     report.weeks_all_approved = Some(all_approved);
-    report.current_week_status = current_week_status(pool, user_id, from, to, is_assistant).await?;
+    // Pass the same submission_exempt flag used for month-level checks, so
+    // zero-weekly-hours users are exempted from the current-week status nag
+    // just as they are exempt from submission reminders and month-level checks.
+    report.current_week_status =
+        current_week_status(pool, user_id, from, to, submission_exempt).await?;
     Ok(report)
 }
 
@@ -1404,6 +1411,70 @@ pub async fn build_team_timesheet_sections(
             .push(build_timesheet_section(&app_state.pool, team_member, from, to, label).await?);
     }
     Ok(sections)
+}
+
+/// Re-queue the monthly timesheet export for `(user_id, date)` pairs whenever
+/// the report upload feature is enabled and the relevant period has already been
+/// exported (entry deleted from the queue after a successful upload). Idempotent
+/// via `ON CONFLICT DO NOTHING`: if the entry is still pending from a previous
+/// queue population it is left untouched.
+///
+/// Called after any mutation that can change the content of an already-archived
+/// month (batch reject, admin time-entry edit, reopen approval, absence
+/// revocation). The caller passes every `(user_id, date)` pair that was
+/// affected; this function groups them into `YYYY-MM` periods and inserts back
+/// one queue entry per distinct (user_id, period).
+///
+/// No-op when the upload feature is disabled so the queue does not accumulate
+/// stale entries on installations that never use Nextcloud upload.
+pub async fn requeue_export_for_dates(
+    pool: &crate::db::DatabasePool,
+    user_date_pairs: &[(i64, NaiveDate)],
+) {
+    if user_date_pairs.is_empty() {
+        return;
+    }
+    // Check whether upload is enabled at all; bail out early to avoid the cost
+    // of grouping when the feature is off.
+    let enabled =
+        crate::services::settings::load_setting(pool, crate::services::settings::REPORT_UPLOAD_ENABLED_KEY, "false")
+            .await
+            .map(|v| v == "true")
+            .unwrap_or(false);
+    if !enabled {
+        return;
+    }
+
+    let today = crate::services::settings::app_today(pool).await;
+
+    // Group into distinct (user_id, YYYY-MM) pairs, excluding the current and
+    // future months (those have not been archived yet so nothing to re-queue).
+    let mut pairs: std::collections::HashMap<i64, std::collections::HashSet<String>> =
+        std::collections::HashMap::new();
+    for &(user_id, date) in user_date_pairs {
+        let period = format!("{:04}-{:02}", date.year(), date.month());
+        // Only past months can have been exported already.
+        let period_month_end = NaiveDate::from_ymd_opt(date.year(), date.month(), {
+            crate::time_calc::last_day_of_month(date.year(), date.month())
+        });
+        if period_month_end.map(|end| end < today).unwrap_or(false) {
+            pairs.entry(user_id).or_default().insert(period);
+        }
+    }
+
+    let export_queue_db = crate::repository::TimesheetExportQueueDb::new(pool.clone());
+    for (user_id, periods) in pairs {
+        for period in periods {
+            if let Err(e) = export_queue_db.populate(&period, &[user_id]).await {
+                tracing::warn!(
+                    target: "zerf::reports",
+                    "requeue_export_for_dates: failed to re-queue user {} period {}: {e}",
+                    user_id,
+                    period
+                );
+            }
+        }
+    }
 }
 
 #[cfg(test)]
