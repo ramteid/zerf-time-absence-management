@@ -106,6 +106,58 @@ async fn run_once(state: &AppState) -> AppResult<()> {
     Ok(())
 }
 
+/// Returns the list of YYYY-MM periods that need to be queued, starting from
+/// the month after `last_queued` through `target` (inclusive).
+///
+/// Behaviour by case:
+///
+/// - Empty `last_queued` or a parse failure: returns `[target]` (first-ever run).
+/// - `last_queued >= target` (valid YYYY-MM): returns `[]` (already up to date
+///   or the stored value is unexpectedly in the future).
+/// - Otherwise: every month from `last_queued + 1` through `target`.
+fn periods_to_backfill(last_queued: &str, target: &str) -> Vec<String> {
+    if last_queued.is_empty() {
+        return vec![target.to_string()];
+    }
+    match parse_year_month(last_queued) {
+        Err(_) => vec![target.to_string()], // Corrupt setting; just do the current period.
+        Ok((mut y, mut m)) => {
+            // If last_queued is already at or past the target there is nothing to queue.
+            // We rely on the parsed (y, m) values rather than string comparison to avoid
+            // lexicographic ordering surprises with malformed data.
+            let (ty, tm) = match parse_year_month(target) {
+                Ok(v) => v,
+                Err(_) => return vec![],
+            };
+            if (y, m) >= (ty, tm) {
+                return vec![];
+            }
+            let mut periods = Vec::new();
+            loop {
+                // Advance one month.
+                if m == 12 {
+                    y += 1;
+                    m = 1;
+                } else {
+                    m += 1;
+                }
+                let p = format!("{y:04}-{m:02}");
+                periods.push(p.clone());
+                if (y, m) == (ty, tm) {
+                    break;
+                }
+                // Safety: stop if we somehow overshoot.
+                if (y, m) > (ty, tm) {
+                    // Pop the overshot period we just pushed.
+                    periods.pop();
+                    break;
+                }
+            }
+            periods
+        }
+    }
+}
+
 /// Populate the export queue for all months from the period after the last
 /// queued period through `prev_period(today)`, inclusive. Guards against
 /// re-population via the `report_upload_queue_period` setting.
@@ -118,42 +170,10 @@ async fn populate_queue_for_prev_month(state: &AppState, today: NaiveDate) -> Ap
     let last_queued =
         settings::load_setting(&state.pool, settings::REPORT_UPLOAD_QUEUE_PERIOD_KEY, "").await?;
 
-    if last_queued == target {
-        return Ok(()); // Already up to date.
+    let periods_to_queue = periods_to_backfill(&last_queued, &target);
+    if periods_to_queue.is_empty() {
+        return Ok(());
     }
-
-    // Build the list of periods to queue. If last_queued is empty or cannot be
-    // parsed, start from target alone (first-ever run). Otherwise backfill all
-    // months from (last_queued + 1 month) through target.
-    let periods_to_queue: Vec<String> = if last_queued.is_empty() {
-        vec![target.clone()]
-    } else {
-        match parse_year_month(&last_queued) {
-            Err(_) => vec![target.clone()], // Corrupt setting; just do the current period.
-            Ok((mut y, mut m)) => {
-                let mut periods = Vec::new();
-                loop {
-                    // Advance one month.
-                    if m == 12 {
-                        y += 1;
-                        m = 1;
-                    } else {
-                        m += 1;
-                    }
-                    let p = format!("{y:04}-{m:02}");
-                    periods.push(p.clone());
-                    if p == target {
-                        break;
-                    }
-                    // Safety: stop if we somehow overshoot (shouldn't happen with valid data).
-                    if p > target {
-                        break;
-                    }
-                }
-                periods
-            }
-        }
-    };
 
     for period in &periods_to_queue {
         let (year, month) = parse_year_month(period)?;
@@ -387,5 +407,59 @@ mod tests {
     fn parse_year_month_rejects_invalid() {
         assert!(parse_year_month("bad").is_err());
         assert!(parse_year_month("2026-xx").is_err());
+    }
+
+    #[test]
+    fn periods_to_backfill_empty_last_queued_returns_only_target() {
+        assert_eq!(periods_to_backfill("", "2026-05"), vec!["2026-05"]);
+    }
+
+    #[test]
+    fn periods_to_backfill_same_period_returns_empty() {
+        assert_eq!(
+            periods_to_backfill("2026-05", "2026-05"),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn periods_to_backfill_future_last_queued_returns_empty() {
+        // Corrupt/future stored value — nothing to do.
+        assert_eq!(
+            periods_to_backfill("2026-07", "2026-05"),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn periods_to_backfill_one_gap_returns_single_month() {
+        assert_eq!(
+            periods_to_backfill("2026-04", "2026-05"),
+            vec!["2026-05"]
+        );
+    }
+
+    #[test]
+    fn periods_to_backfill_multi_month_gap_returns_all_months() {
+        assert_eq!(
+            periods_to_backfill("2026-03", "2026-06"),
+            vec!["2026-04", "2026-05", "2026-06"]
+        );
+    }
+
+    #[test]
+    fn periods_to_backfill_crosses_year_boundary() {
+        assert_eq!(
+            periods_to_backfill("2025-11", "2026-02"),
+            vec!["2025-12", "2026-01", "2026-02"]
+        );
+    }
+
+    #[test]
+    fn periods_to_backfill_corrupt_last_queued_returns_only_target() {
+        assert_eq!(
+            periods_to_backfill("bad-data", "2026-05"),
+            vec!["2026-05"]
+        );
     }
 }
