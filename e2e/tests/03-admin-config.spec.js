@@ -175,21 +175,15 @@ test("admin: enable team lead assistant management", async ({ page }) => {
   // The `allow_team_lead_manage_assistants` setting is off by default.
   // 04-team-lead-onboarding.spec.js relies on it being enabled so the team
   // lead can access /settings/team-users and create an assistant. This test
-  // enables the setting through the admin general settings page so the team
-  // lead's session already has permission when that file runs.
+  // enables the setting through the admin Users page (above the user list),
+  // where it was moved to be more contextually relevant.
   const settingsLoaded = page.waitForResponse(
     (response) =>
       response.url().endsWith("/api/v1/settings") &&
       response.request().method() === "GET",
   );
-  await page.goto("/settings/general");
+  await page.goto("/settings/users");
   await settingsLoaded;
-
-  // Wait for the country select to confirm the full form has loaded (same
-  // technique as in 01-bootstrap.spec.js).
-  await page
-    .locator('#settings-country option[value="DE"]')
-    .waitFor({ state: "attached" });
 
   // Locate the checkbox by the text of its wrapping label.
   const label = page.locator("label", {
