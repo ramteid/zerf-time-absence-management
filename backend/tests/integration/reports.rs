@@ -335,6 +335,103 @@ async fn report_export_queue_requeues_past_month_mutations() {
 }
 
 #[tokio::test]
+async fn report_export_gate_waits_for_pending_absence_decision() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (_lead_id, lead_pw, emp_id, emp_pw, _default_monday, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "export-pending-absence").await;
+    let lead = login_change_pw(&app, "lead-export-pending-absence@example.com", &lead_pw).await;
+    let emp = login_change_pw(&app, "emp-export-pending-absence@example.com", &emp_pw).await;
+
+    sqlx::query("UPDATE users SET weekly_hours=8, workdays_per_week=1 WHERE id=$1")
+        .bind(emp_id)
+        .execute(&app.state.pool)
+        .await
+        .expect("set one-day work week");
+
+    let day = next_monday(-75);
+    let day_iso = day.format("%Y-%m-%d").to_string();
+    let (status, body) = emp
+        .post(
+            "/api/v1/time-entries",
+            &json!({
+                "entry_date": day_iso,
+                "start_time": "08:00",
+                "end_time": "16:00",
+                "category_id": cat_id,
+                "comment": "submitted despite pending absence"
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create submitted entry candidate");
+    let entry_id = id(&body);
+    let (status, _) = emp
+        .post("/api/v1/time-entries/submit", &json!({"ids": [entry_id]}))
+        .await;
+    assert_eq!(status, StatusCode::OK, "submit entry");
+
+    let general_absence = absence_cat(&app.state.pool, "general_absence").await;
+    let (status, body) = emp
+        .post(
+            "/api/v1/absences",
+            &json!({
+                "category_id": general_absence.id,
+                "start_date": day_iso,
+                "end_date": day_iso,
+            }),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "create pending absence over submitted day"
+    );
+    let absence_id = id(&body);
+
+    let user_start_date = chrono::NaiveDate::from_ymd_opt(2024, 1, 1).unwrap();
+    let ready_while_pending = zerf::services::reports::all_weeks_submitted_for_month(
+        &app.state.pool,
+        emp_id,
+        day,
+        day,
+        user_start_date,
+        false,
+        1,
+    )
+    .await
+    .expect("check export gate while absence pending");
+    assert!(
+        !ready_while_pending,
+        "pending absence must hold the export gate even when time is submitted"
+    );
+
+    let (status, _) = lead
+        .post(
+            &format!("/api/v1/absences/{absence_id}/reject"),
+            &json!({"reason": "not an absence"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "reject pending absence");
+    let ready_after_rejection = zerf::services::reports::all_weeks_submitted_for_month(
+        &app.state.pool,
+        emp_id,
+        day,
+        day,
+        user_start_date,
+        false,
+        1,
+    )
+    .await
+    .expect("check export gate after absence rejection");
+    assert!(
+        ready_after_rejection,
+        "decided absence should release the export gate once entries are submitted"
+    );
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
 async fn reports_full_workflow() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;

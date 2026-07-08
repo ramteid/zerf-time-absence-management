@@ -1341,21 +1341,29 @@ pub async fn all_weeks_submitted_for_month(
     submission_exempt: bool,
     workdays_per_week: i16,
 ) -> AppResult<bool> {
+    let today = crate::services::settings::app_today(pool).await;
+    let complete_week_mondays = complete_weeks_in_month(month_start, month_end, today);
+    if complete_week_mondays.is_empty() {
+        return Ok(true);
+    }
+    let check_from = complete_week_mondays[0];
+    let check_to = *complete_week_mondays.last().unwrap() + Duration::days(6);
+    let reports_db = crate::repository::ReportDb::new(pool.clone());
+    if reports_db
+        .has_requested_absences_in_period(user_id, check_from, check_to)
+        .await?
+    {
+        return Ok(false);
+    }
     // Assistants and zero-weekly-hours users have no fixed target schedule /
     // no booking obligation and no mandatory day-level submission (see
     // `roles::has_submission_obligation`).
     if submission_exempt {
         return Ok(true);
     }
-    let today = crate::services::settings::app_today(pool).await;
-    let complete_week_mondays = complete_weeks_in_month(month_start, month_end, today);
-    if complete_week_mondays.is_empty() {
-        return Ok(true);
-    }
-    // Exclude requested absences from the export gate: a pending absence means
-    // the month is not yet settled.  Exporting would produce a PDF where those
-    // days render as 0-hour rows with a full daily target because the content
-    // side (approved_absence_rows) only includes finalized absences.
+    // The hard stop above handles requested absences. The remaining week
+    // completeness check uses only finalized absences so it matches the PDF
+    // content path, which also ignores undecided requests.
     let (holiday_set, absent_days, submitted_dates, incomplete_dates) =
         load_week_check_data(pool, user_id, &complete_week_mondays, false).await?;
     Ok(check_weeks_all_submitted(

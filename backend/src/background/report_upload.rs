@@ -298,14 +298,10 @@ async fn process_one_entry(
     let submission_exempt = !crate::roles::has_submission_obligation(&user.role, user.weekly_hours);
 
     // Archived users had their submitted entries reverted to draft during
-    // archiving (they can no longer log in to re-submit them).  Exporting a
-    // month that contains those reverted drafts would produce a PDF where draft
-    // rows appear but are excluded from the Total - a known reconciliation
-    // defect.  Guard against it: if any draft entry exists in the period, skip
-    // this run and notify admins so they can manually delete the draft entries
-    // to unblock the export.  The queue entry is NOT deleted: if an admin
-    // corrects the month (e.g. deletes the orphaned drafts), the next daily
-    // run will find no drafts and proceed normally.
+    // archiving and can no longer submit corrections themselves. Exporting
+    // those rows would show draft entries while excluding them from submitted
+    // totals, so keep the queue entry pending and alert admins until the data is
+    // corrected.
     if is_archived {
         let reports_db = crate::repository::ReportDb::new(state.pool.clone());
         if reports_db
@@ -313,22 +309,19 @@ async fn process_one_entry(
             .await?
         {
             let msg = format!(
-                "Archived user {} ({} {}) has draft entries in period {} that were reverted during archiving. \
+                "Archived user {} ({} {}) has draft entries in period {}. \
                  Resolve those draft entries before retrying the timesheet PDF export.",
                 user.id, user.first_name, user.last_name, entry.period
             );
             tracing::warn!(target: "zerf::report_upload", "{msg}");
             notify_admins_upload_failed(state, &msg).await;
-            // Leave in queue - admins can fix the data; the next daily run
-            // will retry and succeed once the drafts are gone.
             return Ok(());
         }
-        // No drafts: all entries are submitted/approved/rejected - safe to export
-        // without the full submission-gate check (which would be unsatisfiable).
     }
 
+    // Skip the normal submission-gate check for archived users because the gate
+    // can be permanently unsatisfiable after archiving reverts submitted entries.
     let submitted = if is_archived {
-        // No draft entries confirmed above; treat the month as submitted.
         true
     } else {
         all_weeks_submitted_for_month(

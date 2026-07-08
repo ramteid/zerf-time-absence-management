@@ -205,27 +205,27 @@ impl ReportDb {
         ))
     }
 
-    /// Returns true when at least one entry with status='draft' exists in the
-    /// given date range.  Used by the report-upload gate for archived users: when
-    /// archiving reverts submitted entries back to draft, those months must be
-    /// skipped (the user can no longer log in to re-submit them).
+    /// Returns true when at least one draft entry exists in the given date range.
+    /// The report-upload worker uses this to hold archived-user exports that
+    /// would otherwise render incomplete totals.
     pub async fn has_draft_entries_in_range(
         &self,
         user_id: i64,
         from: NaiveDate,
         to: NaiveDate,
     ) -> AppResult<bool> {
-        let (count,): (i64,) = sqlx::query_as(
-            "SELECT COUNT(*) FROM time_entries \
-             WHERE user_id=$1 AND status='draft' \
-             AND entry_date BETWEEN $2 AND $3",
+        Ok(sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS ( \
+                SELECT 1 FROM time_entries \
+                WHERE user_id=$1 AND status='draft' \
+                AND entry_date BETWEEN $2 AND $3 \
+             )",
         )
         .bind(user_id)
         .bind(from)
         .bind(to)
         .fetch_one(&self.pool)
-        .await?;
-        Ok(count > 0)
+        .await?)
     }
 
     /// Returns true when at least one entry with status='submitted' (pending approval)
@@ -300,6 +300,30 @@ impl ReportDb {
         .bind(from)
         .bind(to)
         .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// Returns true when an undecided absence request overlaps the period.
+    /// The report-upload gate uses this as a hard stop: even if the affected
+    /// days already have submitted entries, the month is not final until the
+    /// request is approved, rejected, or withdrawn.
+    pub async fn has_requested_absences_in_period(
+        &self,
+        user_id: i64,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> AppResult<bool> {
+        Ok(sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS ( \
+                SELECT 1 FROM absences a \
+                WHERE a.user_id=$1 AND a.status='requested' \
+                AND a.end_date >= $2 AND a.start_date <= $3 \
+             )",
+        )
+        .bind(user_id)
+        .bind(from)
+        .bind(to)
+        .fetch_one(&self.pool)
         .await?)
     }
 
