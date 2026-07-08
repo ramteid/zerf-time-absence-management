@@ -162,7 +162,7 @@
     </div>
   </div>
 
-  <div class="zf-card" style="overflow-x:auto">
+  <div class="zf-card" style="overflow-x:auto" data-testid="user-roster">
     {#each users as u, i (u.id)}
       <div
         style="padding:10px 16px;{i < users.length - 1

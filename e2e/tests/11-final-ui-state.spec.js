@@ -76,12 +76,11 @@ test.describe("admin sees a role-grouped, role-colored user list", () => {
   }) => {
     await page.goto("/settings/users");
 
-    // The first card in the content area is the active-users roster (a second
-    // card only appears once someone is archived, which hasn't happened yet).
-    // Scope everything to this card: the same names/role classes also appear in
-    // the sidebar account footer (e.g. the signed-in admin's own avatar), so an
-    // unscoped page-wide lookup would be ambiguous.
-    const roster = page.locator(".content-area .zf-card").first();
+    // Scope to the active-users roster card specifically (identified by
+    // data-testid="user-roster"): the same names/role classes also appear in the
+    // sidebar account footer and the settings card above the list, so an
+    // unscoped or positional lookup would be ambiguous.
+    const roster = page.locator('[data-testid="user-roster"]');
 
     // Wait until the roster has rendered a row for every role. Each assertion
     // also confirms that role's color class is present exactly where expected.
