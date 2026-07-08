@@ -334,7 +334,11 @@ docker exec "$POSTGRES_CONTAINER" rm -f /tmp/zerf-restore.toc /tmp/zerf-restore.
 if [ "$BACKUP_CAME_FROM_VOLUME" = "1" ]; then
     # The encrypted dump was already copied into the container as /tmp/zerf-restore.enc.
     # Decrypt it in-container and pipe into pg_restore --list.
-    docker exec -i \
+    # Do NOT use -i: the command reads from /tmp/zerf-restore.enc (not from host stdin),
+    # so -i would attach the host's stdin (which may be a piped prompt-response sequence)
+    # and docker exec's stdin-forwarding goroutine could consume bytes meant for later
+    # read() calls in this script (e.g. the restart confirmation prompt).
+    docker exec \
         -e ZERF_DB_ENCRYPTION_KEY="$ZERF_DB_ENCRYPTION_KEY" \
         "$POSTGRES_CONTAINER" \
         sh -c "openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 \
@@ -500,7 +504,10 @@ echo "Restoring..."
 restore_exit=0
 if [ "$BACKUP_CAME_FROM_VOLUME" = "1" ]; then
     # Decrypt in-container from the already-copied /tmp/zerf-restore.enc.
-    docker exec -i \
+    # Do NOT use -i: the command reads from /tmp/zerf-restore.enc (not from
+    # host stdin), and -i would allow docker exec's stdin-copy goroutine to
+    # consume bytes from the host's stdin pipe (prompt-response sequence).
+    docker exec \
         -e PGPASSWORD="$ZERF_POSTGRES_PASSWORD" \
         -e ZERF_DB_ENCRYPTION_KEY="$ZERF_DB_ENCRYPTION_KEY" \
         -e PGOPTIONS='--statement_timeout=0 --idle_in_transaction_session_timeout=0' \
