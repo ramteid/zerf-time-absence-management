@@ -288,7 +288,7 @@ changes when users and server run in different timezones.
 | Draft | Created by employee. Not yet in review. |
 | Submitted | Week was submitted. Approvers can review. |
 | Approved | Entry accepted. Included in reports and flextime logic. |
-| Rejected | Entry rejected. Employee must resolve and resubmit when needed. |
+| Rejected | Entry rejected. It stays visible as history; an overlapping submitted or approved correction closes it for completeness and reopen checks. |
 
 Users with submission auto-approval enabled skip `Submitted` entirely: their
 entries go directly from `Draft` to `Approved` on submit (see [Team settings:
@@ -546,10 +546,11 @@ counts is that every required workday is covered.
 A week is considered **complete** when:
 
 - No entry anywhere in the week is still in draft state, and no rejected entry
-  remains without a submitted or approved same-day replacement, **and**
+  remains without an overlapping submitted or approved correction, **and**
 - Every contract workday in the week is covered by at least one submitted or
-  approved entry (crediting or non-crediting), **or** excused by an approved
-  absence, a public holiday, or falling before your contract start date.
+  approved entry (crediting or non-crediting), **or** excused by an approved,
+  cancellation-pending, or requested absence, a public holiday, or falling
+  before your contract start date.
   (A week with no entries at all is complete when every contract workday is
   excused, for example a full-vacation week.)
 
@@ -559,7 +560,7 @@ complete.
 A week is considered **incomplete** when:
 
 - Any entry anywhere in the week is still in draft state, or a rejected entry
-  has not yet been replaced by a submitted or approved entry on the same day,
+  has not yet been closed by an overlapping submitted or approved correction,
   **or**
 - At least one contract workday has no submitted/approved entry and is not
   excused. Submitting only some days of a week is not enough; the remaining
@@ -1276,8 +1277,9 @@ Approve or reject a `pending` reopen request.
 - A rejection reason is required for rejection.
 
 On approval: the reopen is executed atomically. Submitted and approved entries,
-plus rejected entries that still need correction, are reset to `draft`. The
-employee receives a notification.
+plus rejected entries that still need correction, are reset to `draft`. Rejected
+entries already closed by a correction stay as history. The employee receives a
+notification.
 
 On rejection: the week remains unchanged. The employee receives a rejection
 notification with the reason.

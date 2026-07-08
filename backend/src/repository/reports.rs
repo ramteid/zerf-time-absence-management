@@ -226,29 +226,6 @@ impl ReportDb {
         Ok(count > 0)
     }
 
-    /// Returns true when at least one draft entry exists in the given date range.
-    /// The report-upload worker uses this to hold historical exports that would
-    /// otherwise render incomplete totals after archiving or disabling tracking.
-    pub async fn has_draft_entries_in_range(
-        &self,
-        user_id: i64,
-        from: NaiveDate,
-        to: NaiveDate,
-    ) -> AppResult<bool> {
-        Ok(sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS ( \
-                SELECT 1 FROM time_entries \
-                WHERE user_id=$1 AND status='draft' \
-                AND entry_date BETWEEN $2 AND $3 \
-             )",
-        )
-        .bind(user_id)
-        .bind(from)
-        .bind(to)
-        .fetch_one(&self.pool)
-        .await?)
-    }
-
     /// Absence ranges in a period for the submission-reminder and user-facing
     /// completeness check.
     ///

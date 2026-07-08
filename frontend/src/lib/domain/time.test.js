@@ -163,9 +163,14 @@ describe("time domain helpers", () => {
     ).toBe("partial");
   });
 
-  it("ignores rejected entries that have a submitted or approved same-day replacement", () => {
+  it("ignores rejected entries that the backend marked resolved", () => {
     const entries = [
-      { id: 1, entry_date: "2026-05-04", status: "rejected" },
+      {
+        id: 1,
+        entry_date: "2026-05-04",
+        status: "rejected",
+        rejection_resolved_at: "2026-05-05T10:00:00Z",
+      },
       { id: 2, entry_date: "2026-05-04", status: "approved" },
     ];
 
@@ -178,7 +183,22 @@ describe("time domain helpers", () => {
     ]);
   });
 
-  it("keeps rejected entries active until a same-day replacement is submitted or approved", () => {
+  it("does not infer rejected-entry resolution from same-day entries", () => {
+    const entries = [
+      { id: 1, entry_date: "2026-05-04", status: "rejected" },
+      { id: 2, entry_date: "2026-05-04", status: "approved" },
+    ];
+
+    expect(workflowRelevantEntries(entries).map((entry) => entry.id)).toEqual([
+      1, 2,
+    ]);
+    expect(weekStatus(entries, [])).toBe("partial");
+    expect(reopenableWeekEntries(entries).map((entry) => entry.id)).toEqual([
+      1, 2,
+    ]);
+  });
+
+  it("keeps rejected entries active until the backend marks them resolved", () => {
     const entries = [
       { id: 1, entry_date: "2026-05-04", status: "rejected" },
       { id: 2, entry_date: "2026-05-04", status: "draft" },

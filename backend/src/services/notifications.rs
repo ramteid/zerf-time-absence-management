@@ -236,13 +236,9 @@ pub async fn load_language(pool: &crate::db::DatabasePool) -> crate::i18n::Langu
 /// Upsert a pinned system-error notification for every active admin and send a
 /// throttled alert email (at most one email per failure class per calendar day).
 ///
-/// `dedupe_key` identifies the failure class (e.g. `"report_upload_failed"`).
+/// `dedupe_key` identifies the failure class.
 /// `title`      is the human-readable error summary shown in the UI and email.
-///
-/// Call sites should use the `SYSTEM_ERROR_*` constants below so the keys stay
-/// in sync with the strings used in `backup.sh` and `system_alerts.rs`.
 pub const SYSTEM_ERROR_KIND: &str = "system_error";
-pub const SYSTEM_ERROR_REPORT_UPLOAD_FAILED: &str = "report_upload_failed";
 
 pub async fn notify_admins_system_error(state: &AppState, dedupe_key: &str, title: &str) {
     let all_users = match state.db.users.find_all_ordered().await {

@@ -447,7 +447,9 @@ impl ReopenRequestDb {
         sqlx::query(
             "UPDATE time_entries \
              SET status='draft', submitted_at=NULL, reviewed_by=NULL, \
-                 reviewed_at=NULL, rejection_reason=NULL, updated_at=CURRENT_TIMESTAMP \
+                 reviewed_at=NULL, rejection_reason=NULL, \
+                 rejection_resolved_at=NULL, rejection_resolved_by=NULL, \
+                 updated_at=CURRENT_TIMESTAMP \
              WHERE id = ANY($1)",
         )
         .bind(&entry_ids)

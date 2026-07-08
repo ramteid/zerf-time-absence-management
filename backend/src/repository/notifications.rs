@@ -143,9 +143,9 @@ impl NotificationDb {
     ///
     /// Behaviour:
     ///  - Not exists → INSERT (unread, pinned).
-    ///  - Exists and is_read=FALSE (already unread) → DO NOTHING (no re-alert).
-    ///  - Exists and is_read=TRUE (admin had dismissed it) → UPDATE: mark unread
-    ///    again and refresh created_at so it floats back to the top.
+    ///  - Exists, unread, same title -> DO NOTHING (no re-alert).
+    ///  - Exists, read or with a changed title -> UPDATE: mark unread and
+    ///    refresh created_at so it floats back to the top.
     ///
     /// Returns `true` when a row was inserted or re-alerted (caller may want to
     /// send an email); `false` when the notification was already unread.
@@ -167,7 +167,8 @@ impl NotificationDb {
                pinned     = TRUE, \
                is_read    = FALSE, \
                created_at = NOW() \
-             WHERE notifications.is_read = TRUE",
+             WHERE notifications.is_read = TRUE \
+                OR notifications.title IS DISTINCT FROM EXCLUDED.title",
         )
         .bind(user_id)
         .bind(kind)

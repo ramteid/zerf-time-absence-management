@@ -2036,6 +2036,40 @@ async fn notifications_repository_workflow() {
         .expect("idempotent dedup second");
     assert!(!key_second, "duplicate dedup-key insert must return false");
 
+    let system_first = notifications
+        .upsert_system_error(
+            user_id,
+            "system_error",
+            "upload-failure",
+            "Old upload failure",
+        )
+        .await
+        .expect("insert first system error");
+    assert!(system_first, "first system error upsert inserts a row");
+    let system_same = notifications
+        .upsert_system_error(
+            user_id,
+            "system_error",
+            "upload-failure",
+            "Old upload failure",
+        )
+        .await
+        .expect("upsert same unread system error");
+    assert!(!system_same, "same unread system error should stay deduped");
+    let system_changed = notifications
+        .upsert_system_error(
+            user_id,
+            "system_error",
+            "upload-failure",
+            "New upload failure",
+        )
+        .await
+        .expect("upsert changed unread system error");
+    assert!(
+        system_changed,
+        "changed system error title must refresh the unread notification"
+    );
+
     // get_user_email returns the user's display info for email sending.
     let email_info = notifications
         .get_user_email(user_id)

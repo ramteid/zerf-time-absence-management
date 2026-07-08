@@ -310,21 +310,12 @@ export function entryTimeRange(entry, timeFormat) {
   )}`;
 }
 
-function hasSubmittedOrApprovedReplacement(entry, entries) {
-  if (entry?.status !== "rejected") return false;
-  const entryDate = dateKey(entry.entry_date);
-  return (entries || []).some(
-    (candidate) =>
-      candidate.id !== entry.id &&
-      dateKey(candidate.entry_date) === entryDate &&
-      ["submitted", "approved"].includes(candidate.status),
-  );
+function isResolvedRejectedEntry(entry) {
+  return entry?.status === "rejected" && !!entry.rejection_resolved_at;
 }
 
 export function workflowRelevantEntries(entries) {
-  return (entries || []).filter(
-    (entry) => !hasSubmittedOrApprovedReplacement(entry, entries),
-  );
+  return (entries || []).filter((entry) => !isResolvedRejectedEntry(entry));
 }
 
 export function reopenableWeekEntries(entries) {

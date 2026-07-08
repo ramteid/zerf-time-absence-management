@@ -26,6 +26,8 @@ pub struct TimeEntry {
     pub reviewed_by: Option<i64>,
     pub reviewed_at: Option<DateTime<Utc>>,
     pub rejection_reason: Option<String>,
+    pub rejection_resolved_at: Option<DateTime<Utc>>,
+    pub rejection_resolved_by: Option<i64>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -56,6 +58,8 @@ pub fn repo_entry_to_service(e: crate::repository::TimeEntry) -> TimeEntry {
         reviewed_by: e.reviewed_by,
         reviewed_at: e.reviewed_at,
         rejection_reason: e.rejection_reason,
+        rejection_resolved_at: e.rejection_resolved_at,
+        rejection_resolved_by: e.rejection_resolved_by,
         created_at: e.created_at,
         updated_at: e.updated_at,
     }
@@ -388,6 +392,8 @@ mod tests {
             reviewed_by: None,
             reviewed_at: None,
             rejection_reason: None,
+            rejection_resolved_at: None,
+            rejection_resolved_by: None,
             created_at: now,
             updated_at: now,
         }
@@ -411,6 +417,8 @@ mod tests {
         assert_eq!(svc.category_id, 2);
         assert_eq!(svc.comment.as_deref(), Some("deep work"));
         assert_eq!(svc.status, "submitted");
+        assert!(svc.rejection_resolved_at.is_none());
+        assert!(svc.rejection_resolved_by.is_none());
         assert!(
             svc.counts_as_work.is_none(),
             "counts_as_work is filled later by attach_counts_as_work"

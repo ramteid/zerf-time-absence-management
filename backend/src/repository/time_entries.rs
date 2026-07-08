@@ -43,6 +43,8 @@ pub struct TimeEntry {
     pub reviewed_by: Option<i64>,
     pub reviewed_at: Option<DateTime<Utc>>,
     pub rejection_reason: Option<String>,
+    pub rejection_resolved_at: Option<DateTime<Utc>>,
+    pub rejection_resolved_by: Option<i64>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -72,71 +74,30 @@ fn duration_min(start: &str, end: &str) -> AppResult<i64> {
 
 const TE_SELECT: &str =
     "SELECT id, user_id, entry_date, start_time, end_time, category_id, comment, status, \
-     submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at \
+     submitted_at, reviewed_by, reviewed_at, rejection_reason, \
+     rejection_resolved_at, rejection_resolved_by, created_at, updated_at \
      FROM time_entries";
 
-// A rejected entry is considered "replaced" - and therefore excluded from
-// completeness checks - only when submitted/approved entries on the same date
-// jointly cover the rejected entry's entire time span.  "Any overlap" was
-// not sufficient: a 30-minute re-booking over an 8-hour rejected entry would
-// neutralise the entire rejected row, silently absolving the unaddressed hours from
-// every completeness gate and the reopen selection.
-//
-// Implementation: cast times to TIME (schema CHECK guarantees the HH:MM or
-// HH:MM:SS format), then sum the intersection minutes that each
-// submitted/approved replacement contributes inside the rejected span.  If
-// the total equals or exceeds the rejected entry's own duration, the span is
-// fully covered.  Because validate_entry prevents overlapping entries on the
-// same day, replacement entries never double-count each other.
+// Rejected entries are explicit workflow items. They stay active until a
+// submitted/approved overlapping correction closes them by setting
+// rejection_resolved_at. A closed rejected row remains visible as history, but
+// no longer poisons completeness checks or week reopen selection.
 pub(crate) const EFFECTIVE_REJECTED_TIME_ENTRY_CONDITION: &str = "\
     te.status = 'rejected' \
-    AND (\
-        SELECT COALESCE(SUM(\
-            LEAST(replacement.end_time::time, te.end_time::time)\
-            - GREATEST(replacement.start_time::time, te.start_time::time)\
-        ), '0'::interval)\
-        FROM time_entries replacement \
-        WHERE replacement.user_id = te.user_id \
-        AND replacement.entry_date = te.entry_date \
-        AND replacement.status IN ('submitted','approved') \
-        AND replacement.start_time::time < te.end_time::time \
-        AND replacement.end_time::time > te.start_time::time\
-    ) < (te.end_time::time - te.start_time::time)";
+    AND te.rejection_resolved_at IS NULL";
 
 pub(crate) const INCOMPLETE_TIME_ENTRY_CONDITION: &str = "\
     te.status NOT IN ('submitted','approved') \
     AND (\
         te.status <> 'rejected' \
-        OR (\
-            SELECT COALESCE(SUM(\
-                LEAST(replacement.end_time::time, te.end_time::time)\
-                - GREATEST(replacement.start_time::time, te.start_time::time)\
-            ), '0'::interval)\
-            FROM time_entries replacement \
-            WHERE replacement.user_id = te.user_id \
-            AND replacement.entry_date = te.entry_date \
-            AND replacement.status IN ('submitted','approved') \
-            AND replacement.start_time::time < te.end_time::time \
-            AND replacement.end_time::time > te.start_time::time\
-        ) < (te.end_time::time - te.start_time::time)\
+        OR te.rejection_resolved_at IS NULL\
     )";
 
 pub(crate) const REOPENABLE_TIME_ENTRY_CONDITION: &str = "\
     te.status IN ('submitted','approved') \
     OR (\
         te.status = 'rejected' \
-        AND (\
-            SELECT COALESCE(SUM(\
-                LEAST(replacement.end_time::time, te.end_time::time)\
-                - GREATEST(replacement.start_time::time, te.start_time::time)\
-            ), '0'::interval)\
-            FROM time_entries replacement \
-            WHERE replacement.user_id = te.user_id \
-            AND replacement.entry_date = te.entry_date \
-            AND replacement.status IN ('submitted','approved') \
-            AND replacement.start_time::time < te.end_time::time \
-            AND replacement.end_time::time > te.start_time::time\
-        ) < (te.end_time::time - te.start_time::time)\
+        AND te.rejection_resolved_at IS NULL\
     )";
 
 /// Validate that a new/updated time entry is acceptable.
@@ -457,6 +418,42 @@ impl TimeEntryDb {
         Self { pool }
     }
 
+    async fn resolve_overlapping_rejected_entries_tx(
+        tx: &mut sqlx::PgConnection,
+        user_id: i64,
+        resolver_id: i64,
+        replacement_entry_ids: &[i64],
+    ) -> AppResult<()> {
+        if replacement_entry_ids.is_empty() {
+            return Ok(());
+        }
+
+        sqlx::query(
+            "UPDATE time_entries rejected \
+             SET rejection_resolved_at=CURRENT_TIMESTAMP, \
+                 rejection_resolved_by=$2, \
+                 updated_at=CURRENT_TIMESTAMP \
+             FROM time_entries replacement \
+             WHERE replacement.id = ANY($3) \
+             AND replacement.user_id=$1 \
+             AND replacement.status IN ('submitted','approved') \
+             AND rejected.user_id=$1 \
+             AND rejected.status='rejected' \
+             AND rejected.rejection_resolved_at IS NULL \
+             AND rejected.id <> replacement.id \
+             AND rejected.entry_date = replacement.entry_date \
+             AND replacement.start_time::time < rejected.end_time::time \
+             AND replacement.end_time::time > rejected.start_time::time",
+        )
+        .bind(user_id)
+        .bind(resolver_id)
+        .bind(replacement_entry_ids)
+        .execute(tx)
+        .await?;
+
+        Ok(())
+    }
+
     // ── Queries ────────────────────────────────────────────────────────────
 
     pub async fn list_for_user(
@@ -567,7 +564,9 @@ impl TimeEntryDb {
         let rows: Vec<(NaiveDate,)> = sqlx::query_as(
             "UPDATE time_entries \
              SET status='draft', submitted_at=NULL, reviewed_by=NULL, \
-                 reviewed_at=NULL, rejection_reason=NULL, updated_at=CURRENT_TIMESTAMP \
+                 reviewed_at=NULL, rejection_reason=NULL, \
+                 rejection_resolved_at=NULL, rejection_resolved_by=NULL, \
+                 updated_at=CURRENT_TIMESTAMP \
              WHERE user_id=$1 AND status='submitted' \
              RETURNING entry_date",
         )
@@ -786,6 +785,15 @@ impl TimeEntryDb {
         .bind(entry_id)
         .execute(&mut *tx)
         .await?;
+        if admin_correction {
+            Self::resolve_overlapping_rejected_entries_tx(
+                &mut tx,
+                prev.user_id,
+                requester_id,
+                &[entry_id],
+            )
+            .await?;
+        }
         tx.commit().await?;
         let updated: TimeEntry = QueryBuilder::<Postgres>::new(format!("{TE_SELECT} WHERE id=$1"))
             .build_query_as::<TimeEntry>()
@@ -861,6 +869,8 @@ impl TimeEntryDb {
             .fetch_all(&mut *tx)
             .await?
         };
+        Self::resolve_overlapping_rejected_entries_tx(&mut tx, user_id, user_id, &submitted)
+            .await?;
         tx.commit().await?;
         Ok(submitted)
     }
@@ -908,6 +918,7 @@ impl TimeEntryDb {
             .fetch_all(&mut *tx)
             .await?
         };
+        Self::resolve_overlapping_rejected_entries_tx(&mut tx, user_id, user_id, &approved).await?;
         tx.commit().await?;
         Ok(approved)
     }
@@ -992,6 +1003,23 @@ impl TimeEntryDb {
                 approved.push(entry);
             }
         }
+        let mut owner_ids_for_resolution: Vec<i64> =
+            approved.iter().map(|entry| entry.user_id).collect();
+        owner_ids_for_resolution.sort_unstable();
+        owner_ids_for_resolution.dedup();
+        for owner_id in owner_ids_for_resolution {
+            let owner_entry_ids: Vec<i64> = approved
+                .iter()
+                .filter_map(|entry| (entry.user_id == owner_id).then_some(entry.id))
+                .collect();
+            Self::resolve_overlapping_rejected_entries_tx(
+                &mut tx,
+                owner_id,
+                reviewer_id,
+                &owner_entry_ids,
+            )
+            .await?;
+        }
         tx.commit().await?;
         Ok(approved)
     }
@@ -1037,7 +1065,8 @@ impl TimeEntryDb {
             let rows = sqlx::query(
                 "UPDATE time_entries \
                  SET status='rejected', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP, \
-                     rejection_reason=$2 \
+                     rejection_reason=$2, \
+                     rejection_resolved_at=NULL, rejection_resolved_by=NULL \
                  WHERE id=$3 AND status='submitted'",
             )
             .bind(reviewer_id)

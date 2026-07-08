@@ -233,7 +233,7 @@ async fn correction_only_supersedes_overlapping_rejected_entries() {
 }
 
 #[tokio::test]
-async fn partial_correction_does_not_supersede_rejected_entry() {
+async fn partial_correction_resolves_rejected_entry_and_keeps_reopen_editable() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
     let (_lead_id, lead_pw, emp_id, emp_pw, monday_iso, cat_id) =
@@ -299,17 +299,39 @@ async fn partial_correction_does_not_supersede_rejected_entry() {
         .expect("load time incomplete dates");
     assert_eq!(
         time_incomplete_dates,
-        vec![monday],
-        "partial replacement must leave the rejected span incomplete"
+        Vec::<chrono::NaiveDate>::new(),
+        "overlapping shorter correction must close the rejected husk"
     );
     let report_incomplete_dates = zerf::repository::ReportDb::new(app.state.pool.clone())
         .incomplete_dates_in_range(emp_id, monday, monday)
         .await
         .expect("load report incomplete dates");
     assert!(
-        report_incomplete_dates.contains(&monday),
-        "report completeness must require full rejected-span coverage"
+        report_incomplete_dates.is_empty(),
+        "report completeness must treat the closed rejected row as historical"
     );
+
+    let (status, body) = emp
+        .post(
+            "/api/v1/reopen-requests",
+            &json!({"week_start": monday_iso, "reason": "edit shorter correction"}),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "reopen must not resurrect the closed rejected entry"
+    );
+    assert_eq!(body["status"], "auto_approved");
+    assert_eq!(body["entries_reopened"], 1);
+
+    let (status, entries) = emp.get("/api/v1/time-entries").await;
+    assert_eq!(status, StatusCode::OK, "load entries after reopen");
+    let rejected_entry = find_by_id(&entries, rejected_entry_id).expect("rejected entry");
+    let correction_entry = find_by_id(&entries, correction_id).expect("correction entry");
+    assert_eq!(rejected_entry["status"], "rejected");
+    assert!(rejected_entry["rejection_resolved_at"].is_string());
+    assert_eq!(correction_entry["status"], "draft");
 
     app.cleanup().await;
 }

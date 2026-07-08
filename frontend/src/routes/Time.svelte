@@ -274,9 +274,8 @@
     );
   })();
 
-  // Reopen resets submitted/approved rows and rejected rows that still lack a
-  // submitted or approved replacement. Drafts can coexist because they are
-  // already editable.
+  // Reopen resets submitted/approved rows and unresolved rejected rows. Drafts
+  // can coexist because they are already editable.
   $: reopenableEntries = reopenableWeekEntries(entries);
   $: weekHasSubmittedEntries = reopenableEntries.some(
     (entry) => entry.status === "submitted",
