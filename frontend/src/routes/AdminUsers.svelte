@@ -1,6 +1,6 @@
 <script>
   import { api, csrfToken } from "../api.js";
-  import { currentUser, toast } from "../stores.js";
+  import { currentUser, settings as appSettings, toast } from "../stores.js";
   import { t, roleLabel } from "../i18n.js";
   import Icon from "../Icons.svelte";
   import UserDialog from "../dialogs/UserDialog.svelte";
@@ -27,6 +27,9 @@
   let restoreTarget = null;
   // Whether SMTP is configured — controls the warning shown in TempPasswordDialog.
   let smtpEnabled = false;
+  // The allow_team_lead_manage_assistants setting, shown above the user list.
+  let allowTeamLeadManageAssistants = false;
+  let savingAssistantSetting = false;
 
   async function load() {
     const loaded = await api("/users");
@@ -36,13 +39,39 @@
     } catch (e) {
       toast($t(e?.message || "Error"), "error");
     }
-    // Load SMTP status once to show correct email hint after password reset.
+    // Load settings once to populate the toggle and SMTP status.
     try {
-      const settings = await api("/settings");
-      smtpEnabled = !!settings.smtp_enabled;
+      const loadedSettings = await api("/settings");
+      smtpEnabled = !!loadedSettings.smtp_enabled;
+      allowTeamLeadManageAssistants =
+        !!loadedSettings.allow_team_lead_manage_assistants;
     } catch {}
   }
   load();
+
+  async function saveAssistantSetting() {
+    savingAssistantSetting = true;
+    try {
+      // Load the full current settings first so we only change this one field.
+      const current = await api("/settings");
+      // Normalize carryover_expiry_date: the backend requires null (not empty string) when
+      // no date is set. Matches the same normalization done in AdminSettings.svelte.
+      const body = {
+        ...current,
+        carryover_expiry_date: current.carryover_expiry_date?.trim() || null,
+        allow_team_lead_manage_assistants: allowTeamLeadManageAssistants,
+      };
+      const saved = await api("/settings", { method: "PUT", body });
+      allowTeamLeadManageAssistants = !!saved.allow_team_lead_manage_assistants;
+      // Sync the global settings store so other views see the updated value.
+      appSettings.set(saved);
+      toast($t("Settings saved."), "ok");
+    } catch (e) {
+      toast($t(e?.message || "Error"), "error");
+    } finally {
+      savingAssistantSetting = false;
+    }
+  }
 
   async function refreshCurrentUser() {
     const refreshedUser = await api("/auth/me");
@@ -101,6 +130,38 @@
 </div>
 
 <div class="content-area" style="max-width:760px">
+  <!-- Team leads setting shown above the user list so admins can toggle it inline. -->
+  <div class="zf-card" style="padding:16px 20px;margin-bottom:16px">
+    <div class="field-row">
+      <div style="flex:0 0 auto">
+        <label
+          class="zf-label"
+          style="display:flex;align-items:center;gap:8px;cursor:pointer"
+        >
+          <input
+            type="checkbox"
+            bind:checked={allowTeamLeadManageAssistants}
+          />
+          {$t("Allow team leads to create assistant users")}
+        </label>
+        <div class="field-hint">
+          {$t(
+            'When enabled, team leads get a restricted Users tab where they may only create and manage "Assistant" users assigned to them. No other role can be created there. Disabled by default.',
+          )}
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;padding-top:12px">
+      <button
+        class="zf-btn zf-btn-primary zf-btn-sm"
+        on:click={saveAssistantSetting}
+        disabled={savingAssistantSetting}
+      >
+        {savingAssistantSetting ? $t("Saving...") : $t("Save Changes")}
+      </button>
+    </div>
+  </div>
+
   <div class="zf-card" style="overflow-x:auto">
     {#each users as u, i (u.id)}
       <div
