@@ -261,38 +261,42 @@ pub async fn carryover_days_into_year(
         let year_to = NaiveDate::from_ymd_opt(source_year, 12, 31).unwrap();
         let expiry_date = parse_expiry_date(expiry_setting, source_year);
 
-        // Pessimistic sourcing: count requested and cancellation_pending absences
-        // as consumed in the source year, not just approved ones. This prevents
-        // two over-grant paths:
+        // Phantom-carryover guard: if this source year has not yet started (it
+        // is entirely in the future), no vacation rows exist yet so base_usage
+        // would be 0 and we would carry over a full phantom entitlement for a
+        // year that hasn't happened. Skip such years entirely by treating them
+        // as if the employee used their full entitlement — i.e. no net carryover
+        // flows out of a year that hasn't started.
         //
-        // (A) Cross-year double-grant: a requested December absence reserves
-        //     December's budget in the in-year check (vacation_ranges_in_year_tx
-        //     includes requested/pending), but if only "approved" is counted here,
-        //     that same December absence also shows as unused, inflating carryover
-        //     into the next year — both sides get approved and the entitlement is
-        //     exceeded by the pending amount.
-        //
-        // (B) Forecast over-grant for incomplete years: for any source year that
-        //     has not yet ended (source_year >= today.year()), treat the portion
-        //     of the year beyond today as having zero usage — we cannot know how
-        //     much vacation will be taken. Pending/requested absences scheduled
-        //     before the year ends are still counted pessimistically.
-        //
-        // Using the minimum of year_to and today caps the accounting window for
-        // still-running years, giving zero phantom carryover for months that
-        // haven't happened yet.
-        let effective_year_to = if source_year >= today.year() {
-            std::cmp::min(year_to, today)
-        } else {
-            year_to
-        };
+        // Years that HAVE started (current year or past years) are handled
+        // normally: all recorded absences (including future-dated rows inside
+        // the year) are counted, because they already exist in the database.
+        if source_year > today.year() {
+            // No carry-through from an unstarted year.
+            incoming_carryover = 0;
+            continue;
+        }
 
-        // Carryover source is vacation usage (requested + approved + cancellation_pending).
-        // Since absence categories are configurable, "vacation" is no longer a fixed slug —
-        // we sum workdays across every category whose cost_type='vacation'.
+        // Pessimistic sourcing: count requested and cancellation_pending absences
+        // as consumed in the source year, not just approved ones. This closes the
+        // cross-year double-grant path:
+        //
+        //   A requested December absence reserves December's budget via
+        //   vacation_ranges_in_year_tx (which includes requested/pending) while
+        //   simultaneously appearing as unused when computing next-year carryover
+        //   (which previously counted only "approved"). Both sides would be
+        //   approved, exceeding the entitlement by the pending amount.
+        //
+        // With pessimistic sourcing, a pending request that reserves this year's
+        //  budget also reduces the carryover it grants, so the sum of approved
+        // days across both years cannot exceed the real entitlement.
         let statuses = &["approved", "requested", "cancellation_pending"];
+
+        // Carryover source is vacation usage.  Since absence categories are
+        // configurable, "vacation" is no longer a fixed slug — we sum workdays
+        // across every category whose cost_type='vacation'.
         let base_usage = if let Some(expiry) = expiry_date {
-            let pre_window_end = std::cmp::min(expiry, effective_year_to);
+            let pre_window_end = std::cmp::min(expiry, year_to);
             let post_window_start = expiry + Duration::days(1);
             let pre_usage = if year_from <= pre_window_end {
                 absence_db
@@ -306,12 +310,12 @@ pub async fn carryover_days_into_year(
             } else {
                 0.0
             };
-            let post_usage = if post_window_start <= effective_year_to {
+            let post_usage = if post_window_start <= year_to {
                 absence_db
                     .vacation_workdays_total_filtered(
                         user.id,
                         post_window_start,
-                        effective_year_to,
+                        year_to,
                         statuses,
                     )
                     .await?
@@ -321,7 +325,7 @@ pub async fn carryover_days_into_year(
             post_usage + (pre_usage - incoming_carryover as f64).max(0.0)
         } else {
             let total_usage = absence_db
-                .vacation_workdays_total_filtered(user.id, year_from, effective_year_to, statuses)
+                .vacation_workdays_total_filtered(user.id, year_from, year_to, statuses)
                 .await?;
             (total_usage - incoming_carryover as f64).max(0.0)
         };

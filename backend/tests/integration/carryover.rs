@@ -260,7 +260,12 @@ async fn carryover_policy_edge_cases() {
         let _ = create_vacation(&emp, *day).await;
     }
 
-    // Edge case 2: next-year carryover derives from approved/cancellation_pending only.
+    // Edge case 2: next-year carryover uses pessimistic sourcing — requested and
+    // cancellation_pending absences are counted as consumed in the source year,
+    // not just approved ones. This prevents cross-year double-grants where a
+    // pending December request reserves December's budget while simultaneously
+    // leaving the carryover source untouched, allowing both it and an early-next-
+    // year booking to be approved and together exceed the entitlement.
     let (st, bal_next_year_initial) = emp
         .get(&format!("/api/v1/leave-balance/{emp_id}?year={next_year}"))
         .await;
@@ -272,13 +277,15 @@ async fn carryover_policy_edge_cases() {
     );
     assert_eq!(
         json_i64(&bal_next_year_initial, "carryover_days"),
-        4,
-        "carryover should be 6 - 2 approved days = 4; requested days do not reduce carryover source"
+        2,
+        "carryover should be 6 - 2 approved - 2 requested = 2; \
+         requested absences pessimistically reduce the carryover source \
+         to prevent cross-year double-grants"
     );
     assert_eq!(
         json_f64(&bal_next_year_initial, "available"),
-        14.0,
-        "available should equal entitlement + carryover when no next-year absences exist"
+        12.0,
+        "available should equal entitlement(10) + carryover(2) when no next-year absences exist"
     );
 
     // Prepare one approved next-year vacation day.
@@ -344,8 +351,8 @@ async fn carryover_policy_edge_cases() {
 
     // Edge case 5: post-expiry vacation days must be covered by current-year
     // entitlement only; carryover can be used only up to the expiry date.
-    // Here: next-year entitlement=2, carryover=4 from current year => November
-    // bookings in next year may reserve at most 2 days.
+    // Here: next-year entitlement=2, carryover=2 (pessimistic: 6 - 2 approved - 2 requested)
+    // => November bookings in next year may reserve at most 2 days (the annual entitlement).
     set_leave_days_current_and_next(&admin, emp_id, 6, 2).await;
 
     let (st, bal_next_year_small_entitlement) = emp
@@ -359,8 +366,8 @@ async fn carryover_policy_edge_cases() {
     );
     assert_eq!(
         json_i64(&bal_next_year_small_entitlement, "carryover_days"),
-        4,
-        "carryover remains 4 from current-year entitlement 6 minus 2 approved"
+        2,
+        "carryover is 2 from current-year entitlement 6 minus 2 approved minus 2 requested (pessimistic sourcing)"
     );
 
     let nov_workdays = pick_workdays(&emp, next_year, 11, 3).await;
