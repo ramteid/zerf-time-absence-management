@@ -62,8 +62,11 @@ BEFORE_SNAPSHOT="$(snapshot)"
 echo "$BEFORE_SNAPSHOT"
 
 echo "Backup/restore check: triggering one backup cycle (same code path as the scheduled backup container)…"
+# dash (the container shell) ignores arguments to the dot (.) builtin, so
+# positional args cannot be used to set OUT_DIR when sourcing backup.sh.
+# Set OUT_DIR explicitly after sourcing, as documented in backup.sh's header.
 docker exec "$BACKUP_CONTAINER" sh -c \
-  'BACKUP_LIB_ONLY=1 . /usr/local/bin/backup.sh /backups && run_backup_once' \
+  'BACKUP_LIB_ONLY=1 . /usr/local/bin/backup.sh && OUT_DIR=/backups && run_backup_once' \
   | tee /tmp/zerf-e2e-backup-output.txt
 grep -q "^Backup written:" /tmp/zerf-e2e-backup-output.txt \
   || { echo "FAIL: backup did not report 'Backup written:'" >&2; exit 1; }
@@ -89,17 +92,17 @@ docker exec -e PGPASSWORD="$ZERF_POSTGRES_PASSWORD" "$POSTGRES_CONTAINER" \
 MUTATED_COUNT="$(psql_count holidays)"
 echo "  holidays count after mutation: $MUTATED_COUNT"
 
-echo "Backup/restore check: copying the backup out of the volume…"
-WORKDIR="$(mktemp -d)"
-trap 'rm -rf "$WORKDIR"' EXIT
-docker cp "$BACKUP_CONTAINER:$DUMP_FILE" "$WORKDIR/backup.dump.enc"
-
 echo "Backup/restore check: running scripts/restore.sh (non-interactive) against the e2e stack…"
-printf 'y\ny\n' | ZERF_RESTORE_POSTGRES_CONTAINER="$POSTGRES_CONTAINER" \
+# restore.sh reads from the backup volume directly when no path argument is
+# given -- list is newest-first, so '1' selects the backup we just created.
+# Pass BACKUP_CONTAINER so restore stops/restarts the backup daemon.
+# Input: '1' = select newest backup, 'y' = confirm restore, 'y' = restart app.
+printf '1\ny\ny\n' | ZERF_RESTORE_POSTGRES_CONTAINER="$POSTGRES_CONTAINER" \
   ZERF_RESTORE_APP_CONTAINER="$APP_CONTAINER" \
+  ZERF_RESTORE_BACKUP_CONTAINER="$BACKUP_CONTAINER" \
   ZERF_RESTORE_BACKUP_VOLUME="$BACKUP_VOLUME" \
   ZERF_RESTORE_ENV_FILE="$ENV_FILE" \
-  "$ROOT_DIR/scripts/restore.sh" "$WORKDIR/backup.dump.enc"
+  "$ROOT_DIR/scripts/restore.sh"
 
 echo "Backup/restore check: waiting for the app to come back up…"
 for _ in $(seq 1 30); do

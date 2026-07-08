@@ -29,10 +29,12 @@ services:
     # for the keyring file (typically a few hundred bytes).
     tmpfs:
       - /var/lib/pg_tde_keyring:size=1m
-      # /tmp inside the postgres container is used during restore for small
-      # pg_restore TOC files. The archive itself is streamed over stdin so the
-      # full plaintext dump is not staged in the container filesystem.
-      # 256 MiB leaves room for pg_restore's own temporary files.
+      # /tmp inside the postgres container holds the encrypted dump during
+      # restore (streamed in via `docker exec -i cat`, so it lands on this
+      # tmpfs rather than on the host or a persistent volume -- plaintext
+      # never touches persistent storage).  It also holds the small pg_restore
+      # TOC files.  256 MiB is the maximum restorable dump size; if your
+      # encrypted dump exceeds this, increase the value and restart postgres.
       - /tmp:size=256m
     environment:
       - POSTGRES_DB=${ZERF_POSTGRES_DB:-zerf}

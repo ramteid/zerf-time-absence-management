@@ -47,6 +47,16 @@ make_shim() {
 # succeed end-to-end without real cryptography.  backup.sh now streams the dump
 # into openssl via a pipe (`pg_dump | openssl ... -out file`), so the shim reads
 # stdin and writes it to the -out path, mirroring real openssl.
+#
+# IMPORTANT: the shim always prepends a fake 32-byte "Salted__" header before
+# copying stdin, mirroring what real openssl enc ALWAYS emits (8-byte magic +
+# 8-byte salt + 16-byte padded first block = 32 bytes minimum) even for empty
+# plaintext input.  A shim that only copies stdin (no header) would exit 0 and
+# produce a zero-byte file from an empty pg_dump, making the old `[ ! -s ]`
+# zero-byte guard appear to work when it actually fires against an artefact that
+# real openssl would never produce.  The new 512-byte floor correctly rejects
+# the 32-byte fake ciphertext; tests that feed real content (PGDMP + padding to
+# >512 bytes) will produce files large enough to pass the floor check.
 make_openssl_copy_shim() {
   make_shim openssl '
 out=""
@@ -56,7 +66,13 @@ while [ $# -gt 0 ]; do
     *) shift ;;
   esac
 done
-if [ -n "$out" ]; then cat > "$out"; else cat; fi
+# Always write a 32-byte fake header (Salted__ + 24 filler bytes) before the
+# plaintext content, matching real openssl enc output structure.
+if [ -n "$out" ]; then
+  { printf "Salted__"; head -c 24 /dev/zero; cat; } > "$out"
+else
+  { printf "Salted__"; head -c 24 /dev/zero; cat; }
+fi
 '
 }
 
@@ -214,24 +230,29 @@ exit 0
   ! grep -q "mypassword" "$BATS_TMPDIR/curl_capture/config"
 }
 
-# -- run_backup_once: 0-byte dump rejection -----------------------------------
+# -- run_backup_once: small ciphertext rejection (512-byte floor) -------------
 
-@test "run_backup_once: refuses to encrypt a zero-byte dump" {
+@test "run_backup_once: refuses to record a suspiciously small encrypted dump" {
   # pg_dump shim exits 0 but produces no output.
+  # The faithful openssl shim always prepends a 32-byte header regardless of
+  # plaintext size, so an empty pg_dump yields a 32-byte ciphertext file --
+  # well below the 512-byte floor that catches empty/broken dumps.
   make_shim pg_dump 'exit 0'
   make_shim psql 'printf ""'
-  make_shim openssl 'exit 0'
+  make_openssl_copy_shim
 
   export OUT_DIR="$BATS_TMPDIR/out"
   run run_backup_once
   [ "$status" -ne 0 ]
-  [[ "$output" =~ "zero-byte" ]]
+  [[ "$output" =~ "suspiciously small" ]]
 }
 
 # -- run_backup_once: pg_tde keyring sidecar ----------------------------------
 
 @test "run_backup_once: captures the pg_tde keyring sidecar when present" {
-  make_shim pg_dump 'printf "PGDMP-fake-dump-bytes"'
+  # Use >512 bytes of fake dump content so the 512-byte ciphertext floor passes.
+  # The faithful openssl shim adds 32 bytes of header; the total must exceed 512.
+  make_shim pg_dump 'printf "PGDMP"; head -c 4096 /dev/zero'
   make_shim psql 'printf ""'
   make_openssl_copy_shim
 
@@ -252,15 +273,17 @@ exit 0
 }
 
 @test "run_backup_once: metadata reports missing keyring if sidecar finalization fails" {
-  make_shim pg_dump 'printf "PGDMP-fake-dump-bytes"'
+  make_shim pg_dump 'printf "PGDMP"; head -c 4096 /dev/zero'
   make_shim psql 'printf ""'
   make_openssl_copy_shim
-  make_shim mv '
-case "$1" in
+  # Capture the real mv path before the shim overrides PATH.
+  _real_mv="$(command -v mv)"
+  make_shim mv "
+case \"\$1\" in
   *.keyring.enc.tmp) exit 1 ;;
 esac
-exec /usr/bin/mv "$@"
-'
+exec '$_real_mv' \"\$@\"
+"
 
   export OUT_DIR="$BATS_TMPDIR/out"
   printf 'fake-encrypted-keyring' > "$BATS_TMPDIR/keyring.enc"
@@ -275,7 +298,7 @@ exec /usr/bin/mv "$@"
 }
 
 @test "run_backup_once: succeeds without a keyring when the source is absent" {
-  make_shim pg_dump 'printf "PGDMP-fake-dump-bytes"'
+  make_shim pg_dump 'printf "PGDMP"; head -c 4096 /dev/zero'
   make_shim psql 'printf ""'
   make_openssl_copy_shim
 
@@ -366,4 +389,58 @@ exec /usr/bin/mv "$@"
   # Should not fail on empty directory.
   run apply_retention
   [ "$status" -eq 0 ]
+}
+
+# -- curl_config_escape -------------------------------------------------------
+
+@test "curl_config_escape: passes through plain ASCII unchanged" {
+  run curl_config_escape "MyToken1234"
+  [ "$status" -eq 0 ]
+  [ "$output" = "MyToken1234" ]
+}
+
+@test "curl_config_escape: escapes backslash" {
+  run curl_config_escape 'pa\ss'
+  [ "$status" -eq 0 ]
+  [ "$output" = 'pa\\ss' ]
+}
+
+@test "curl_config_escape: escapes double-quote" {
+  run curl_config_escape 'pa"ss'
+  [ "$status" -eq 0 ]
+  [ "$output" = 'pa\"ss' ]
+}
+
+@test "curl_config_escape: rejects value containing newline" {
+  # Use a bats-bash heredoc variable to embed a literal newline.
+  local val
+  val="$(printf 'tok\nen')"
+  run curl_config_escape "$val"
+  [ "$status" -ne 0 ]
+}
+
+# -- resolve_admins_backup_error -----------------------------------------------
+
+@test "resolve_admins_backup_error: issues UPDATE for dedupe_key" {
+  mkdir -p "$BATS_TMPDIR/psql_capture"
+  make_shim psql '
+args_file="$BATS_TMPDIR/psql_capture/last_args"
+printf "%s\n" "$*" > "$args_file"
+exit 0
+'
+  resolve_admins_backup_error "backup_failed"
+  grep -q "UPDATE notifications" "$BATS_TMPDIR/psql_capture/last_args" \
+    || grep -qF "backup_failed" "$BATS_TMPDIR/psql_capture/last_args"
+}
+
+# -- seconds_until_next_backup: sleep-cap behavior ----------------------------
+
+@test "seconds_until_next_backup: value >3600 is capped by main() sleep logic" {
+  # seconds_until_next_backup itself returns the raw remaining seconds (it does
+  # not apply the cap -- the cap is in main()).  Verify a 7-day interval from
+  # now returns a value >3600 so the main() cap has something to act on.
+  _now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  run seconds_until_next_backup "$_now" 7
+  [ "$status" -eq 0 ]
+  [ "$output" -gt 3600 ]
 }

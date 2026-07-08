@@ -3,8 +3,8 @@ use crate::error::{AppError, AppResult};
 use crate::i18n;
 use crate::middleware::auth::User;
 use crate::services::absence_balance::{
-    validate_absence_has_workday, validate_backdating_window, validate_flextime_balance,
-    validate_vacation_balance, workdays,
+    validate_absence_has_workday, validate_auto_approve_end_date, validate_backdating_window,
+    validate_flextime_balance, validate_vacation_balance, workdays,
 };
 use crate::AppState;
 use chrono::{DateTime, Duration, NaiveDate, Utc};
@@ -361,6 +361,7 @@ pub async fn create_absence(
     validate_new_absence_shape(&body)?;
     let category = resolve_requested_category(app_state, &body, requester.id).await?;
     validate_backdating_window(&category, body.start_date, today_date)?;
+    validate_auto_approve_end_date(&category, body.start_date, body.end_date, today_date)?;
     if body.start_date < requester.start_date {
         return Err(AppError::BadRequest(
             "Absence start date is before user start date.".into(),
@@ -512,6 +513,7 @@ pub async fn update_absence(
     )
     .await?;
     validate_backdating_window(&category, body.start_date, today_date)?;
+    validate_auto_approve_end_date(&category, body.start_date, body.end_date, today_date)?;
     // Auto-approve categories (sick-like) have an entirely different workflow:
     // they bypass approval and tolerate same-day time entries. Allowing a
     // requested-status absence to switch INTO or OUT of an auto-approve

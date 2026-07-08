@@ -831,6 +831,7 @@ When a technical failure occurs — such as a database backup failure or a Nextc
 - Each failure class produces **at most one active notification** per admin. If the notification is dismissed and the failure recurs, it is raised again.
 - A throttled **alert email** is sent alongside the in-app notification, at most once per failure class per calendar day.
 - The notification is created both by the Rust application (for report PDF upload failures) and detected hourly from the database (for backup failures written directly by the backup container).
+- **Backup and upload failure notifications are automatically resolved** when the next cycle succeeds. You do not need to dismiss them manually after fixing the underlying problem; the notification disappears on the next successful backup or upload.
 
 ### Notification timestamp display
 
@@ -1648,9 +1649,9 @@ When enabled, the backup container uploads each encrypted `.dump.enc` file to a 
 | Enable DB backup upload | Activates the upload step in the backup container. |
 | Share link | A Nextcloud public share URL in the form `https://cloud.example.com/s/<token>`. Only `https` links are accepted. |
 | Share password | Optional password protecting the share. Stored securely; never returned by the API. |
-| Backup interval (days) | How often the backup container runs a backup cycle. Default: 1 (daily). Changes take effect on the next cycle. |
+| Backup interval (days) | How often the backup container runs a backup cycle. Default: 1 (daily). Changes take effect within one hour. |
 
-The backup container tracks the last successful backup time in the database. This timestamp survives container restarts, so the interval is always measured from the last actual backup rather than from container start time.
+The backup container tracks the last successful backup time in the database. This timestamp survives container restarts, so the interval is always measured from the last actual backup rather than from container start time. On a fresh install, migration 024 seeds the timestamp with the current time, so the first backup runs one full interval after setup (not immediately).
 
 The **10 most recent** local backup files are kept in the backup volume; older ones are deleted automatically after each successful backup. Uploaded files in Nextcloud are **not** deleted automatically — manage the shared folder manually to avoid unlimited growth.
 
@@ -1700,13 +1701,14 @@ Absence categories define what types of absences employees can request. Each cat
 | Field | Effect |
 | --- | --- |
 | **Cost type** | A single 3-state field that determines the balance impact of approved days. `none` — no balance impact (e.g. unpaid leave, general absence): the day is removed from the daily work target but neither annual leave nor flextime is debited. `vacation` — deducts from the employee's annual leave balance, honouring per-year carryover and expiry rules. `flextime` — keeps the daily work target intact so the absence costs flextime balance. The flextime balance is checked at BOTH request and approval time against the configured floor (default 0 minutes; admin can override via the `flextime_min_balance_min` setting); the check accounts for other already-pending/approved flextime-cost absences so multiple requests that each individually fit cannot together breach the floor, and the approver's re-check catches the case where the user spent balance between request and approval. |
-| **Auto-approve past dates (sick-like)** | Absences with a start date on or before today are approved automatically. Approvers receive an informational notice, in-app and by email. This flag also disables the time-entry conflict check at creation, so partial-day overlaps are allowed (e.g. employee worked the morning and then called in sick). |
+| **Auto-approve past dates (sick-like)** | Absences with a start date on or before today are approved automatically. Approvers receive an informational notice, in-app and by email. This flag also disables the time-entry conflict check at creation, so partial-day overlaps are allowed (e.g. employee worked the morning and then called in sick). Auto-approved absences that start today may extend at most 60 days into the future; longer ongoing absences require a new submission. |
 
 Constraints:
 - A category slug is auto-generated from the name and must be unique. Existing absences are not affected when a category is deactivated or renamed.
 - Inactive categories are hidden from the absence request dialog but remain attached to existing absence records.
 - Changing the cost type of an absence (e.g. from a vacation category to a flextime category) after submission is not allowed. Cancel the existing request and re-submit with the correct category.
 - Once a category has at least one referencing absence (any status), the behavior fields (**Cost type** and **Auto-approve past dates**) are locked. Toggling them would retroactively change the financial or approval meaning of existing rows — past balance recomputations would suddenly debit or credit different ledgers and approval workflow guards would relax or tighten without the affected employees seeing it. To change a field, deactivate the existing category and create a new one with the desired settings. Cosmetic changes (name, color, sort order, active flag) are always allowed.
+- **Cost type `vacation` and Auto-approve past dates cannot both be enabled on the same category.** Setting both would let employees bypass approver review for vacation balance deductions and would cause vacation days to appear in both the vacation and the sick-days columns of the team report. Use separate categories: one with `vacation` cost type (requires approval) and one with auto-approve enabled (cost type `none` or `flextime`).
 - Like time categories, each absence category can be enabled or disabled per
   employee from the same edit dialog. Only checked employees can request the
   category going forward; existing absences already in that category are
@@ -1729,10 +1731,53 @@ without removing manually added holidays.
 
 ### Backup and restore
 
-Scheduled backups capture a full snapshot of the database. Each backup includes
-version metadata so that the correct application revision can be matched when
-restoring. Consult your deployment documentation for backup scheduling and
-restore procedures.
+Scheduled backups capture a full snapshot of the database. Each backup consists of up to three files:
+
+- `zerf-<ts>.dump.enc` — AES-256-CBC encrypted PostgreSQL custom-format dump (the file you restore from).
+- `zerf-<ts>.metadata` — plaintext sidecar with the backup timestamp and git commit so you can match a backup to a specific app version.
+- `zerf-<ts>.keyring.enc` — copy of the encrypted pg_tde keyring, for physical volume recovery only. You do not need this for a normal restore.
+
+#### Restoring a backup
+
+Run `scripts/restore.sh` from the server that has Docker access to the stack:
+
+```bash
+./scripts/restore.sh
+```
+
+The script:
+1. Lists the available backups in the backup volume (newest first) and prompts you to choose one.
+2. Validates that the backup file decrypts and is a valid pg_dump archive.
+3. Stops the app container and the backup container to prevent writes during restore.
+4. Drops all non-extension objects in the database so that a backup from an older schema version restores cleanly even if the live schema is newer.
+5. Restores all data and stops on the first error (the transaction is rolled back if anything fails).
+6. Restarts the backup container, then asks whether to restart the app.
+
+You can also supply the backup file path directly to skip the interactive listing:
+
+```bash
+./scripts/restore.sh /path/to/zerf-<ts>.dump.enc
+```
+
+**Migration compatibility:**
+- Backup older than current code: the app applies pending database migrations automatically on startup.
+- Backup newer than current code: update the app binary before restarting it, or the app may not understand the restored schema.
+
+**Size limit:** The decrypted dump is staged inside the postgres container's `/tmp` tmpfs (256 MiB by default). If your dump exceeds that, increase the `size` of the `/tmp` tmpfs in `docker-compose-local.yml` and restart the postgres container before restoring.
+
+#### Physical recovery (corrupted or orphaned data volume)
+
+If the postgres data volume is lost or unreadable but you have both a backup dump and the `ZERF_DB_ENCRYPTION_KEY`, restore normally with `scripts/restore.sh`.
+
+If you have an orphaned, encrypted PGDATA volume but the pg_tde keyring volume was lost, use the keyring sidecar from a backup to recover:
+
+```bash
+./scripts/restore.sh --keyring /tmp/keyring-out
+```
+
+This extracts the `zerf-<ts>.keyring.enc` file from the backup volume to `/tmp/keyring-out` without touching the database. Place the extracted file as `pg_tde_keyring.enc` inside the postgres keyring volume (`zerf_postgres_data`), then start postgres against the existing data directory.
+
+> **Warning:** Do not overwrite a working keyring. Only use this procedure when the keyring volume itself is gone.
 
 ---
 

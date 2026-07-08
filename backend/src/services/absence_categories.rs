@@ -140,6 +140,19 @@ pub async fn create(
     // Reject unknown cost_type strings up front so the DB CHECK is a backup
     // for direct-SQL bypass, not the user-facing validation.
     crate::repository::absence_categories::validate_cost_type(&input.cost_type)?;
+    // A category cannot simultaneously deduct vacation days AND auto-approve
+    // itself: it would let employees bypass review for vacation deductions,
+    // and would double-count days in the team report (vacation column AND
+    // sick/auto-approve column see the same absences).
+    if input.cost_type == crate::repository::absence_categories::COST_TYPE_VACATION
+        && input.auto_approve_past
+    {
+        return Err(AppError::BadRequest(
+            "A category cannot both deduct vacation days and auto-approve past dates. \
+             Use separate categories for vacation (reviewed) and sick leave (auto-approved)."
+                .into(),
+        ));
+    }
     let slug = match input.slug.as_deref().filter(|s| !s.trim().is_empty()) {
         Some(raw) => normalize_slug(raw).ok_or_else(|| {
             AppError::BadRequest(
@@ -230,6 +243,15 @@ pub async fn update(
     //
     // Renames, color, sort_order, and active toggles are safe and pass
     // through.
+    // Enforce the vacation-XOR-auto-approve invariant even before checking
+    // whether there are existing absences: this combination is never valid.
+    if final_cost_type == crate::repository::absence_categories::COST_TYPE_VACATION && final_auto {
+        return Err(AppError::BadRequest(
+            "A category cannot both deduct vacation days and auto-approve past dates. \
+             Use separate categories for vacation (reviewed) and sick leave (auto-approved)."
+                .into(),
+        ));
+    }
     let cost_type_changed = final_cost_type != current.cost_type;
     let auto_changed = final_auto != current.auto_approve_past;
     if cost_type_changed || auto_changed {

@@ -25,7 +25,7 @@
 # Local retention: always keeps the 10 most recent encrypted backup files.
 # Uploaded files in Nextcloud are never deleted automatically.
 #
-# Each backup cycle writes up to three sibling files in OUTPUT_DIR:
+# Each backup cycle writes up to four sibling files in OUTPUT_DIR:
 #   zerf-<ts>.dump.enc     encrypted pg_dump custom dump (logical restore)
 #   zerf-<ts>.metadata     plaintext metadata sidecar
 #   zerf-<ts>.keyring.enc  copy of the (already AES-encrypted) pg_tde keyring,
@@ -36,6 +36,8 @@
 #
 # Sourcing:  set BACKUP_LIB_ONLY=1 before sourcing to load helper functions
 # without starting the daemon loop -- used by automated tests (backup.bats).
+# When sourcing, the caller must set OUT_DIR explicitly after the source call;
+# the positional argument ($1) is not available to the dot builtin in dash.
 set -eu
 umask 077
 
@@ -117,7 +119,7 @@ write_app_setting() {
       --no-psqlrc \
       -c "INSERT INTO app_settings (key, value)
           VALUES ('$_key', '$_value')
-          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value" \
+          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()" \
       2>/dev/null || true
 }
 
@@ -149,7 +151,10 @@ resolve_interval_days() {
 
 # Return true (exit 0) when enough time has elapsed since the last successful
 # backup to warrant a new one.  An empty or unparseable last_ts is treated as
-# "overdue" so the backup runs immediately on a fresh install or after data loss.
+# "overdue" so the backup runs immediately when the row is missing or corrupt
+# (data-loss recovery path).  A fresh install is seeded with the current
+# timestamp by migration 024, so the first backup on a new deployment runs one
+# full interval after install, not immediately.
 is_backup_due() {
   _last="$1"
   _interval_days="$2"
@@ -184,6 +189,38 @@ seconds_until_next_backup() {
 }
 
 # -- Nextcloud upload helpers --------------------------------------------------
+
+# Escape a value for use in a curl --config file.
+# curl config values are double-quoted; backslash and double-quote must be
+# backslash-escaped.  Newlines in a token or password would inject arbitrary
+# curl directives -- reject them outright to prevent config injection.
+curl_config_escape() {
+  _val="$1"
+  # Reject values containing newlines (CR or LF): they would break the
+  # single-line "user = ..." directive and inject arbitrary curl config.
+  # Detection: count lines via wc -l; a value with an embedded LF produces
+  # two or more lines when passed through printf %s (which does not append a
+  # trailing newline itself, so "hello\nworld" → 1 line from wc -l, but
+  # "hello\nworld\n" → 1 line because printf strips trailing newline via
+  # command substitution).  Use printf without command substitution + wc -l:
+  # if the output of `printf '%s' "$_val"` contains any LF, wc -l ≥ 1.
+  _lines="$(printf '%s' "$_val" | wc -l | tr -d '[:space:]')"
+  if [ "$_lines" -gt 0 ]; then
+    printf 'backup upload: token/password must not contain newlines\n' >&2
+    return 1
+  fi
+  # CR check: a CR in the value would also break the curl config line.
+  # `printf '%s' | cat -v | grep -q '\\^M'` is not portable; use tr to remove
+  # CRs and compare lengths.
+  _without_cr="$(printf '%s' "$_val" | tr -d '\015')"
+  if [ "${#_val}" != "${#_without_cr}" ]; then
+    printf 'backup upload: token/password must not contain newlines\n' >&2
+    return 1
+  fi
+  # Escape backslash first, then double-quote, so a single backslash in the
+  # input becomes \\ in the output and is not re-interpreted.
+  printf '%s' "$_val" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
 
 # Parse a Nextcloud share URL into UPLOAD_BASE and UPLOAD_TOKEN.
 # Accepts only https:// URLs.  Returns 1 on invalid input.
@@ -225,6 +262,8 @@ build_upload_target() {
 
 # Upload a backup file to Nextcloud via WebDAV PUT.
 # Credentials are fed to curl via --config stdin so they never appear in ps output.
+# Token and password are backslash-escaped for curl config syntax; newlines are
+# rejected to prevent config injection (see curl_config_escape).
 upload_backup() {
   _file="$1"
   _base="$2"
@@ -232,6 +271,12 @@ upload_backup() {
   _password="$4"
   _filename="$(basename "$_file")"
   _target="$(build_upload_target "$_base" "$_token" "$_filename")"
+
+  # Escape both token and password before interpolating into the config file.
+  # curl_config_escape returns 1 (and prints a message) if either contains a
+  # newline, which would be treated as a directive separator by curl.
+  _esc_token="$(curl_config_escape "$_token")" || return 1
+  _esc_pw="$(curl_config_escape "$_password")" || return 1
 
   curl \
     --config - \
@@ -243,7 +288,7 @@ upload_backup() {
     --upload-file "$_file" \
     <<EOF
 url = "$_target"
-user = "$_token:$_password"
+user = "$_esc_token:$_esc_pw"
 header = "Content-Type: application/octet-stream"
 EOF
 }
@@ -289,6 +334,32 @@ notify_admins_backup_error() {
             is_read    = FALSE,
             created_at = NOW()
           WHERE notifications.is_read = TRUE" \
+      2>/dev/null || true
+}
+
+# Mark a previously-raised system-error notification as resolved (read) for all
+# active admins.  Called after a successful backup/upload cycle so that a prior
+# failure notification does not keep alarming every day through the hourly
+# system-alerts email task.  If the failure recurs the next upsert in
+# notify_admins_backup_error will flip is_read back to FALSE, re-alerting.
+# Errors are suppressed: a DB hiccup here should not abort a successful cycle.
+resolve_admins_backup_error() {
+  _dedup_key="$1"
+  if ! resolve_direct_connection; then
+    return 0
+  fi
+  PGPASSWORD="$DIRECT_PASSWORD" \
+    psql \
+      --host "$DIRECT_HOST" \
+      --port "$DIRECT_PORT" \
+      --username "$DIRECT_USER" \
+      --dbname "$DIRECT_DB" \
+      --no-psqlrc \
+      -c "UPDATE notifications
+          SET is_read = TRUE
+          WHERE kind = 'system_error'
+            AND dedupe_key = '$_dedup_key'
+            AND is_read = FALSE" \
       2>/dev/null || true
 }
 
@@ -369,6 +440,9 @@ write_backup_metadata() {
 # Local retention is count-based (not time-based) so the volume stays bounded
 # regardless of backup frequency changes.
 apply_retention() {
+  # Filenames are always zerf-*.dump.enc (no spaces/special chars); `ls -t` is
+  # the portable way to sort by mtime -- `find` has no portable -newer-than-nth.
+  # shellcheck disable=SC2012
   ls -1t "$OUT_DIR"/zerf-*.dump.enc 2>/dev/null | tail -n +11 | while IFS= read -r f; do
     rm -f "$f" "${f%.dump.enc}.metadata" "${f%.dump.enc}.keyring.enc"
   done
@@ -433,14 +507,17 @@ run_backup_once() {
     return 1
   fi
 
-  # Reject a zero-byte encrypted file.  pg_dump in custom format always emits a
-  # header, so it should never exit 0 with empty output; guard against it anyway
-  # so monitoring catches a broken state rather than silently advancing the backup
-  # timestamp.  (The old code checked the plaintext size; with streaming we check
-  # the ciphertext, the only artifact that exists.)
-  if [ ! -s "$temp_file" ]; then
+  # Reject a suspiciously small encrypted file.  openssl enc always emits at
+  # least the 8-byte "Salted__" magic + 8-byte salt + one padded cipher block
+  # (16 bytes) = 32 bytes of output even for completely empty plaintext input,
+  # so a simple -s (non-zero size) check would accept a zero-byte pg_dump as a
+  # valid backup.  A real pg_dump custom-format file starts with a multi-KB
+  # header; its ciphertext is always well above 512 bytes.  Reject anything
+  # smaller as evidence of an empty or corrupt dump.
+  _enc_bytes="$(wc -c < "$temp_file")"
+  if [ "$_enc_bytes" -lt 512 ]; then
     rm -f "$temp_file"
-    printf 'pg_dump produced empty output -- refusing to encrypt a zero-byte backup.\n' >&2
+    printf 'pg_dump produced suspiciously small output (%s encrypted bytes) -- refusing to record as a valid backup.\n' "$_enc_bytes" >&2
     return 1
   fi
 
@@ -507,30 +584,48 @@ run_backup_once() {
     _upload_url="$(printf '%s' "$_upload_url" | tr -d '[:space:]')"
     _upload_pw="$(read_app_setting "backup_upload_password")"
 
-    if [ -n "$_upload_url" ]; then
-      if parse_share_url "$_upload_url"; then
-        if upload_backup "$output_file" "$UPLOAD_BASE" "$UPLOAD_TOKEN" "$_upload_pw"; then
-          printf 'Backup uploaded: %s\n' "$(basename "$output_file")"
-        else
-          # Upload failure is non-fatal: local backup is valid.
-          printf 'WARNING: Nextcloud upload failed for %s -- local backup retained.\n' \
-            "$(basename "$output_file")" >&2
-          notify_admins_backup_error "backup_upload_failed" \
-            "Nextcloud backup upload failed. Check backup container logs."
-        fi
-        # Also upload the keyring sidecar so off-site recovery is possible.
-        # Secondary to the dump: a failure here is a warning only and does not
-        # raise the admin alert (the logical dump is what restores the data).
-        if [ "$keyring_included" = "true" ]; then
-          if upload_backup "$keyring_file" "$UPLOAD_BASE" "$UPLOAD_TOKEN" "$_upload_pw"; then
-            printf 'Backup keyring uploaded: %s\n' "$(basename "$keyring_file")"
-          else
-            printf 'WARNING: Nextcloud upload failed for %s -- local copy retained.\n' \
-              "$(basename "$keyring_file")" >&2
-          fi
-        fi
+    # An empty or invalid URL when upload is enabled is a misconfiguration:
+    # the admin has activated the feature but forgotten to save a valid link.
+    # Alert now so a silent no-op is not confused with a successful upload.
+    if [ -z "$_upload_url" ]; then
+      printf 'WARNING: backup_upload_enabled=true but backup_upload_url is empty -- no upload performed.\n' >&2
+      notify_admins_backup_error "backup_upload_failed" \
+        "Nextcloud backup upload is enabled but no share URL is configured. Set the URL in Admin > Nextcloud Upload."
+    elif ! parse_share_url "$_upload_url"; then
+      printf 'WARNING: Invalid backup_upload_url in app_settings -- skipping upload.\n' >&2
+      notify_admins_backup_error "backup_upload_failed" \
+        "Nextcloud backup upload is enabled but the share URL is invalid. Check Admin > Nextcloud Upload."
+    else
+      if upload_backup "$output_file" "$UPLOAD_BASE" "$UPLOAD_TOKEN" "$_upload_pw"; then
+        printf 'Backup uploaded: %s\n' "$(basename "$output_file")"
+        # Resolve any prior upload-failure notification: the upload succeeded.
+        resolve_admins_backup_error "backup_upload_failed"
       else
-        printf 'WARNING: Invalid backup_upload_url in app_settings -- skipping upload.\n' >&2
+        # Upload failure is non-fatal: local backup is valid.
+        printf 'WARNING: Nextcloud upload failed for %s -- local backup retained.\n' \
+          "$(basename "$output_file")" >&2
+        notify_admins_backup_error "backup_upload_failed" \
+          "Nextcloud backup upload failed. Check backup container logs."
+      fi
+      # Upload the metadata sidecar so off-site copies include provenance
+      # (created_at, git commit) that restore.sh's version-mismatch check
+      # relies on.  Secondary to the dump: failure is a warning only.
+      if upload_backup "$metadata_file" "$UPLOAD_BASE" "$UPLOAD_TOKEN" "$_upload_pw"; then
+        printf 'Backup metadata uploaded: %s\n' "$(basename "$metadata_file")"
+      else
+        printf 'WARNING: Nextcloud upload failed for %s -- local copy retained.\n' \
+          "$(basename "$metadata_file")" >&2
+      fi
+      # Also upload the keyring sidecar so off-site recovery is possible.
+      # Secondary to the dump: a failure here is a warning only and does not
+      # raise the admin alert (the logical dump is what restores the data).
+      if [ "$keyring_included" = "true" ]; then
+        if upload_backup "$keyring_file" "$UPLOAD_BASE" "$UPLOAD_TOKEN" "$_upload_pw"; then
+          printf 'Backup keyring uploaded: %s\n' "$(basename "$keyring_file")"
+        else
+          printf 'WARNING: Nextcloud upload failed for %s -- local copy retained.\n' \
+            "$(basename "$keyring_file")" >&2
+        fi
       fi
     fi
   fi
@@ -556,6 +651,8 @@ main() {
         # Write the success timestamp so the next cycle starts the interval
         # from now, not from container start.
         write_last_success_at
+        # Resolve any prior backup-failure notification: this cycle succeeded.
+        resolve_admins_backup_error "backup_failed"
       else
         notify_admins_backup_error "backup_failed" \
           "Database backup failed. Check backup container logs."
@@ -572,6 +669,12 @@ main() {
     # Guard against a tight loop if write_last_success_at failed silently or
     # the timestamp is unparseable (both produce SLEEP_SECS=0).
     if [ "$SLEEP_SECS" -le 0 ]; then
+      SLEEP_SECS=3600
+    fi
+    # Cap the sleep at 3600 s (1 hour) so that changes to the backup interval
+    # or upload settings in the Admin UI take effect within one hour, regardless
+    # of how long the current interval would otherwise keep the daemon sleeping.
+    if [ "$SLEEP_SECS" -gt 3600 ]; then
       SLEEP_SECS=3600
     fi
     sleep "$SLEEP_SECS"

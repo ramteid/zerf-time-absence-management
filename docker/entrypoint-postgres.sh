@@ -71,10 +71,35 @@ chown "$PG_UID:$PG_GID" /data
 # exists but .enc does not.  Every subsequent start would skip decryption
 # (no .enc found), postgres would fail with "principal key not configured",
 # and the volume would be permanently bricked without manual intervention.
-# Complete the interrupted rename here so the next decrypt step succeeds.
+#
+# Before completing the interrupted rename, verify the .tmp file actually
+# decrypts successfully.  If the container was killed during the openssl
+# write itself (not just between write and mv), the .tmp may be a partial/
+# garbage file.  Promoting it would result in an unrecoverable state with a
+# misleading "wrong key or corrupted blob" error and no good keyring to fall
+# back to.  A failed verification here surfaces the problem explicitly so
+# the operator can recover from a backup sidecar rather than silently
+# corrupting the only keyring path.
 if [ ! -f "$KEYRING_ENC" ] && [ -f "${KEYRING_ENC}.tmp" ]; then
-    echo "Zerf: WARNING: completing interrupted keyring encryption (found .tmp, no .enc)." >&2
-    mv "${KEYRING_ENC}.tmp" "$KEYRING_ENC"
+    echo "Zerf: WARNING: found interrupted keyring encryption (.tmp present, .enc missing); verifying before promoting..." >&2
+    if openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 \
+           -pass env:ZERF_DB_ENCRYPTION_KEY \
+           -in  "${KEYRING_ENC}.tmp" \
+           -out /dev/null 2>/dev/null; then
+        echo "Zerf: WARNING: completing interrupted keyring encryption (verification passed)." >&2
+        mv "${KEYRING_ENC}.tmp" "$KEYRING_ENC"
+    else
+        echo "ERROR: ${KEYRING_ENC}.tmp exists but failed decryption verification." >&2
+        echo "       The keyring write was interrupted before completion and the" >&2
+        echo "       partial file is corrupt.  Do NOT promote it." >&2
+        echo "       Recovery options:" >&2
+        echo "         1. Restore a keyring sidecar from a backup:" >&2
+        echo "            scripts/restore.sh --keyring <output-dir>" >&2
+        echo "            then copy <output-dir>/*.keyring.enc to zerf_postgres_data/pg_tde_keyring.enc" >&2
+        echo "         2. If no backup exists, wipe both postgres volumes and re-initialize:" >&2
+        echo "            docker volume rm zerf_postgres_data zerf_postgres_db_data" >&2
+        exit 1
+    fi
 fi
 
 # Ensure the persisted encrypted keyring is readable by the backup container.

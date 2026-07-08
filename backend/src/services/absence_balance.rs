@@ -54,6 +54,39 @@ pub fn validate_backdating_window(
     Ok(())
 }
 
+/// Enforce an end-date bound for absences that will be auto-approved on
+/// creation (auto_approve_past category, start_date <= today).  Without this
+/// guard an employee can self-approve an absence stretching months into the
+/// future in a single request, bypassing any approver review for the future
+/// portion.  60 days gives enough room for documented extended sick leave
+/// while requiring a re-submission (and implicit approver notification) for
+/// anything longer.
+///
+/// The check is intentionally limited to the case where the absence would be
+/// immediately auto-approved (start_date <= today).  A future-start absence
+/// via an auto_approve_past category still goes through the requested →
+/// approved workflow because `initial_status` is "requested" when start > today.
+pub fn validate_auto_approve_end_date(
+    category: &crate::repository::AbsenceCategory,
+    start_date: NaiveDate,
+    end_date: NaiveDate,
+    today: NaiveDate,
+) -> AppResult<()> {
+    if !category.auto_approve_past || start_date > today {
+        return Ok(());
+    }
+    let latest_end = today + Duration::days(60);
+    if end_date > latest_end {
+        return Err(AppError::BadRequest(
+            "Auto-approved absences may not extend more than 60 days into the future. \
+             Submit a shorter range now and re-submit for any extension that still requires \
+             cover — longer durations require approver review."
+                .into(),
+        ));
+    }
+    Ok(())
+}
+
 /// Check whether the date range contains at least one effective workday:
 /// a day that is both a contract workday (per workdays_per_week) and not a
 /// public holiday.
@@ -215,6 +248,7 @@ pub async fn carryover_days_into_year(
         return Ok(0);
     }
 
+    let today = crate::services::settings::app_today(pool).await;
     let anchor = leave_entitlement_anchor(user);
     let absence_db = crate::repository::AbsenceDb::new(pool.clone());
     let mut incoming_carryover = 0;
@@ -227,11 +261,38 @@ pub async fn carryover_days_into_year(
         let year_to = NaiveDate::from_ymd_opt(source_year, 12, 31).unwrap();
         let expiry_date = parse_expiry_date(expiry_setting, source_year);
 
-        // Carryover source is approved vacation usage. Since absence categories
-        // are configurable, "vacation" is no longer a fixed slug — we sum
-        // workdays across every category whose cost_type='vacation'.
+        // Pessimistic sourcing: count requested and cancellation_pending absences
+        // as consumed in the source year, not just approved ones. This prevents
+        // two over-grant paths:
+        //
+        // (A) Cross-year double-grant: a requested December absence reserves
+        //     December's budget in the in-year check (vacation_ranges_in_year_tx
+        //     includes requested/pending), but if only "approved" is counted here,
+        //     that same December absence also shows as unused, inflating carryover
+        //     into the next year — both sides get approved and the entitlement is
+        //     exceeded by the pending amount.
+        //
+        // (B) Forecast over-grant for incomplete years: for any source year that
+        //     has not yet ended (source_year >= today.year()), treat the portion
+        //     of the year beyond today as having zero usage — we cannot know how
+        //     much vacation will be taken. Pending/requested absences scheduled
+        //     before the year ends are still counted pessimistically.
+        //
+        // Using the minimum of year_to and today caps the accounting window for
+        // still-running years, giving zero phantom carryover for months that
+        // haven't happened yet.
+        let effective_year_to = if source_year >= today.year() {
+            std::cmp::min(year_to, today)
+        } else {
+            year_to
+        };
+
+        // Carryover source is vacation usage (requested + approved + cancellation_pending).
+        // Since absence categories are configurable, "vacation" is no longer a fixed slug —
+        // we sum workdays across every category whose cost_type='vacation'.
+        let statuses = &["approved", "requested", "cancellation_pending"];
         let base_usage = if let Some(expiry) = expiry_date {
-            let pre_window_end = std::cmp::min(expiry, year_to);
+            let pre_window_end = std::cmp::min(expiry, effective_year_to);
             let post_window_start = expiry + Duration::days(1);
             let pre_usage = if year_from <= pre_window_end {
                 absence_db
@@ -239,19 +300,19 @@ pub async fn carryover_days_into_year(
                         user.id,
                         year_from,
                         pre_window_end,
-                        &["approved"],
+                        statuses,
                     )
                     .await?
             } else {
                 0.0
             };
-            let post_usage = if post_window_start <= year_to {
+            let post_usage = if post_window_start <= effective_year_to {
                 absence_db
                     .vacation_workdays_total_filtered(
                         user.id,
                         post_window_start,
-                        year_to,
-                        &["approved"],
+                        effective_year_to,
+                        statuses,
                     )
                     .await?
             } else {
@@ -260,7 +321,7 @@ pub async fn carryover_days_into_year(
             post_usage + (pre_usage - incoming_carryover as f64).max(0.0)
         } else {
             let total_usage = absence_db
-                .vacation_workdays_total_filtered(user.id, year_from, year_to, &["approved"])
+                .vacation_workdays_total_filtered(user.id, year_from, effective_year_to, statuses)
                 .await?;
             (total_usage - incoming_carryover as f64).max(0.0)
         };
@@ -573,6 +634,17 @@ pub async fn validate_vacation_balance(
     count_new_for_carryover_source: bool,
 ) -> AppResult<()> {
     use crate::repository::AbsenceDb;
+
+    // Assistants use workdays_per_week=7 as a sentinel meaning "no fixed
+    // schedule". workdays_for_user with value 7 would count all 7 calendar
+    // days (Mon-Sun) as contract workdays, so a Mon-Sun vacation would cost
+    // 7 days from annual_leave_days (which is expressed in Mon-Fri units),
+    // inflating the cost by 40%. Skip vacation balance validation for
+    // assistants — they can still take vacation; it is just not capped by
+    // the budget check (consistent with how flextime validation is skipped).
+    if crate::roles::is_assistant_role(&user.role) {
+        return Ok(());
+    }
 
     let year = start_date.year();
     let year_from = NaiveDate::from_ymd_opt(year, 1, 1).unwrap();
