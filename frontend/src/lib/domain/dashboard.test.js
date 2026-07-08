@@ -239,4 +239,49 @@ describe("dashboard domain helpers", () => {
     expect(weeks[0].week_start).toBe("2026-01-19");
     expect(weeks[1].week_start).toBe("2026-01-05");
   });
+
+  it("buildPendingWeeks deducts auto-break from week totals", () => {
+    // Single day with 7h of work (420 min): a 6h rule triggers a 30-min deduction.
+    const entries = [
+      {
+        id: 1,
+        user_id: 5,
+        entry_date: "2026-01-05",
+        start_time: "08:00:00",
+        end_time: "15:00:00",
+        category_id: 1,
+        status: "submitted",
+      },
+    ];
+    const users = [{ id: 5, first_name: "X", last_name: "Y" }];
+    const categories = [{ id: 1, counts_as_work: true }];
+    // thresholdMinutes=360 means "strictly more than 360 minutes" (exclusive threshold,
+    // matching German ArbZG §4 "mehr als sechs Stunden"). 7h = 420 min > 360 → triggers.
+    const breakRules = [
+      { thresholdHours: 6, thresholdMinutes: 360, deductionMinutes: 30 },
+    ];
+    const weeks = buildPendingWeeks(entries, users, categories, breakRules);
+    expect(weeks).toHaveLength(1);
+    // 420 raw minutes − 30 break = 390 credited minutes.
+    expect(weeks[0].total_min).toBe(390);
+  });
+
+  it("buildPendingWeeks does not deduct break when no rules are supplied", () => {
+    const entries = [
+      {
+        id: 1,
+        user_id: 5,
+        entry_date: "2026-01-05",
+        start_time: "08:00:00",
+        end_time: "15:00:00",
+        category_id: 1,
+        status: "submitted",
+      },
+    ];
+    const users = [{ id: 5, first_name: "X", last_name: "Y" }];
+    const categories = [{ id: 1, counts_as_work: true }];
+    // Called without breakRules (default = []).
+    const weeks = buildPendingWeeks(entries, users, categories);
+    expect(weeks[0].total_min).toBe(420);
+  });
 });

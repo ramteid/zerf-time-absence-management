@@ -106,40 +106,83 @@ async fn run_once(state: &AppState) -> AppResult<()> {
     Ok(())
 }
 
-/// Populate the export queue for the previous month if not already done.
-/// Guards against re-population via the `report_upload_queue_period` setting.
+/// Populate the export queue for all months from the period after the last
+/// queued period through `prev_period(today)`, inclusive. Guards against
+/// re-population via the `report_upload_queue_period` setting.
+///
+/// If the upload feature was disabled for several months and is re-enabled,
+/// or if the server missed a month boundary, this call backfills every
+/// intervening period so no timesheet is silently skipped.
 async fn populate_queue_for_prev_month(state: &AppState, today: NaiveDate) -> AppResult<()> {
-    let period = prev_period(today);
-    let queue_period =
+    let target = prev_period(today);
+    let last_queued =
         settings::load_setting(&state.pool, settings::REPORT_UPLOAD_QUEUE_PERIOD_KEY, "").await?;
-    if queue_period == period {
-        return Ok(()); // Already populated for this period.
+
+    if last_queued == target {
+        return Ok(()); // Already up to date.
     }
 
-    let (year, month) = parse_year_month(&period)?;
-    let from = NaiveDate::from_ymd_opt(year, month, 1)
-        .ok_or_else(|| AppError::Internal(format!("invalid period {period}")))?;
-    let last_day = last_day_of_month(year, month);
-    let to = NaiveDate::from_ymd_opt(year, month, last_day)
-        .ok_or_else(|| AppError::Internal(format!("invalid period end {period}")))?;
+    // Build the list of periods to queue. If last_queued is empty or cannot be
+    // parsed, start from target alone (first-ever run). Otherwise backfill all
+    // months from (last_queued + 1 month) through target.
+    let periods_to_queue: Vec<String> = if last_queued.is_empty() {
+        vec![target.clone()]
+    } else {
+        match parse_year_month(&last_queued) {
+            Err(_) => vec![target.clone()], // Corrupt setting; just do the current period.
+            Ok((mut y, mut m)) => {
+                let mut periods = Vec::new();
+                loop {
+                    // Advance one month.
+                    if m == 12 {
+                        y += 1;
+                        m = 1;
+                    } else {
+                        m += 1;
+                    }
+                    let p = format!("{y:04}-{m:02}");
+                    periods.push(p.clone());
+                    if p == target {
+                        break;
+                    }
+                    // Safety: stop if we somehow overshoot (shouldn't happen with valid data).
+                    if p > target {
+                        break;
+                    }
+                }
+                periods
+            }
+        }
+    };
 
-    // Include deactivated users who had entries/absences in the period so the
-    // archive export is complete (see ReportDb::timesheet_members_for_period).
-    let members = state
-        .db
-        .reports
-        .timesheet_members_for_period(from, to)
-        .await?;
-    let ids: Vec<i64> = members.iter().map(|u| u.id).collect();
+    for period in &periods_to_queue {
+        let (year, month) = parse_year_month(period)?;
+        let from = NaiveDate::from_ymd_opt(year, month, 1)
+            .ok_or_else(|| AppError::Internal(format!("invalid period {period}")))?;
+        let last_day = last_day_of_month(year, month);
+        let to = NaiveDate::from_ymd_opt(year, month, last_day)
+            .ok_or_else(|| AppError::Internal(format!("invalid period end {period}")))?;
 
-    state.db.export_queue.populate(&period, &ids).await?;
+        // Include deactivated users who had entries/absences in the period so
+        // the archive export is complete (see ReportDb::timesheet_members_for_period).
+        let members = state
+            .db
+            .reports
+            .timesheet_members_for_period(from, to)
+            .await?;
+        let ids: Vec<i64> = members.iter().map(|u| u.id).collect();
+
+        state.db.export_queue.populate(period, &ids).await?;
+        tracing::info!("Report upload: queued {} export(s) for {period}", ids.len());
+    }
+
+    // Record the furthest period reached so future runs know where to start from.
     state
         .db
         .settings
-        .save_setting(settings::REPORT_UPLOAD_QUEUE_PERIOD_KEY, &period)
+        .save_setting(settings::REPORT_UPLOAD_QUEUE_PERIOD_KEY, &target)
         .await?;
 
-    tracing::info!("Report upload: queued {} export(s) for {period}", ids.len());
     Ok(())
 }
 
@@ -205,16 +248,21 @@ async fn process_one_entry(
         .ok_or_else(|| AppError::Internal(format!("invalid period end {}", entry.period)))?;
 
     // Check whether all working weeks in the period have been submitted.
-    // Zero-weekly-hours non-assistants are exempt from this gate too — they
-    // have no booking obligation and would otherwise never satisfy it,
-    // stranding their queue entry forever.
+    // Archived users have their submitted entries reverted to draft during
+    // archiving, making the submission gate permanently unsatisfiable (the user
+    // cannot log in to re-submit). Treat archived users as submission-exempt so
+    // their final timesheet PDF is still exported. Zero-weekly-hours
+    // non-assistants are exempt for the same reason.
+    let is_archived = user.archived_at.is_some();
+    let submission_exempt =
+        is_archived || !crate::roles::has_submission_obligation(&user.role, user.weekly_hours);
     let submitted = all_weeks_submitted_for_month(
         &state.pool,
         user.id,
         from,
         to,
         user.start_date,
-        !crate::roles::has_submission_obligation(&user.role, user.weekly_hours),
+        submission_exempt,
         user.workdays_per_week,
     )
     .await?;

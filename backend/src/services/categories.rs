@@ -155,6 +155,30 @@ pub async fn update(
         .find_by_id(category_id)
         .await?
         .ok_or(AppError::NotFound)?;
+
+    // Guard: changing counts_as_work retroactively rewrites every historical
+    // entry's contribution to flextime/overtime across all users and years.
+    // The absence-category service refuses the symmetric change on cost_type
+    // for the same reason ("past balance recomputations would suddenly
+    // debit/credit different ledgers"). Apply the same protection here:
+    // if counts_as_work is changing AND the category already has entries,
+    // reject the request. Admins who need a different policy must deactivate
+    // the existing category and create a new one.
+    if let Some(new_caw) = body.counts_as_work {
+        if new_caw != before_update.counts_as_work {
+            let usage = app_state.db.categories.entries_count(category_id).await?;
+            if usage > 0 {
+                return Err(AppError::BadRequest(
+                    "Cannot change counts_as_work for a category that already has \
+                     time entries — doing so would retroactively rewrite every \
+                     user's flextime and overtime history. Deactivate this category \
+                     and create a new one with the desired setting instead."
+                        .into(),
+                ));
+            }
+        }
+    }
+
     let normalized_name = body.name.map(|n| n.trim().to_string());
     let normalized_color = body.color.map(|c| c.trim().to_string());
     app_state

@@ -24,6 +24,7 @@
     buildSubmissionChecks,
     currentWeekIsOpen,
   } from "../lib/domain/dashboard.js";
+  import { buildBreakRules } from "../lib/domain/time.js";
   import AbsenceReviewDialog from "../dialogs/AbsenceReviewDialog.svelte";
   import ReopenReviewDialog from "../dialogs/ReopenReviewDialog.svelte";
   import WeekReviewDialog from "../dialogs/WeekReviewDialog.svelte";
@@ -212,7 +213,12 @@
 
   // ── Reactive derivations: overtime balance ────────────────────────────────────
 
-  $: pendingWeeks = buildPendingWeeks(pendingEntries, users, $categories);
+  $: pendingWeeks = buildPendingWeeks(
+    pendingEntries,
+    users,
+    $categories,
+    buildBreakRules($settings),
+  );
 
   $: currentOvertimeRow =
     overtimeRows.find((row) => row.month === currentMonthKey) ??

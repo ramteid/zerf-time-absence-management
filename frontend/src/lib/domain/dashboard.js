@@ -9,7 +9,7 @@ import {
 } from "../../format.js";
 import { absenceKindLabel } from "../../i18n.js";
 import { sortByIsoDateAndStartTime } from "./dates.js";
-import { entryCountsAsWork } from "./time.js";
+import { computeDayBreakDeduction, entryCountsAsWork } from "./time.js";
 import { userNameFromRows } from "./users.js";
 
 function monthKey(year, month) {
@@ -74,7 +74,12 @@ export function weekStartOf(entryDate) {
   return isoDate(monday(parseDate(day)));
 }
 
-export function buildPendingWeeks(submittedEntries, userRows, categories = []) {
+export function buildPendingWeeks(
+  submittedEntries,
+  userRows,
+  categories = [],
+  breakRules = [],
+) {
   const weekGroupsByKey = new Map();
   for (const entry of submittedEntries || []) {
     const weekStart = weekStartOf(entry.entry_date);
@@ -91,6 +96,28 @@ export function buildPendingWeeks(submittedEntries, userRows, categories = []) {
     existing.entries.push(entry);
     existing.total_min += entryMinutes(entry, categories);
     weekGroupsByKey.set(key, existing);
+  }
+
+  // Subtract per-day auto-break deductions from the week totals so the
+  // displayed minutes match what will actually be credited. The deduction
+  // mirrors the backend `compute_day_auto_break` logic: entries are grouped
+  // by date and the break for each day is subtracted once.
+  if (breakRules.length > 0) {
+    for (const group of weekGroupsByKey.values()) {
+      // Group entries by date.
+      const byDate = new Map();
+      for (const entry of group.entries) {
+        const d = entry.entry_date;
+        if (!byDate.has(d)) byDate.set(d, []);
+        byDate.get(d).push(entry);
+      }
+      // Sum per-day deductions.
+      let totalDeduction = 0;
+      for (const dayEntries of byDate.values()) {
+        totalDeduction += computeDayBreakDeduction(dayEntries, categories, breakRules);
+      }
+      group.total_min = Math.max(0, group.total_min - totalDeduction);
+    }
   }
 
   const sortedWeekGroups = Array.from(weekGroupsByKey.values()).map(

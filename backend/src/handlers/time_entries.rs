@@ -2,6 +2,7 @@ use crate::audit;
 use crate::error::{AppError, AppResult};
 use crate::i18n;
 use crate::middleware::auth::User;
+use crate::services::reopen_requests::cancel_zombie_reopen_requests;
 use crate::services::time_entries::{
     attach_counts_as_work, clear_submission_pending_for_weeks, notification_language,
     notify_week_status_change, repo_entry_to_service, require_tracks_time,
@@ -302,13 +303,13 @@ pub async fn submit(
     {
         submitted_weeks.insert(week_start(entry_date));
     }
-    if !submitted_weeks.is_empty() {
+    let mut sorted_submitted_weeks: Vec<NaiveDate> = submitted_weeks.into_iter().collect();
+    sorted_submitted_weeks.sort();
+    if !sorted_submitted_weeks.is_empty() {
         let language = notification_language(&app_state.pool).await;
-        let mut sorted_weeks: Vec<NaiveDate> = submitted_weeks.into_iter().collect();
-        sorted_weeks.sort();
         let submitter_name = format!("{} {}", requester.first_name, requester.last_name);
 
-        for week_monday in sorted_weeks {
+        for &week_monday in &sorted_submitted_weeks {
             let week_list = i18n::format_week_label(&language, week_monday);
             let week_count = i18n::week_count(&language, 1);
             let week_iso = week_monday.format("%Y-%m-%d").to_string();
@@ -341,6 +342,14 @@ pub async fn submit(
             }
         }
     }
+    // Phase 6: cancel any "zombie" pending reopen requests for these weeks.
+    // After a submission, pending reopen requests for the same week become
+    // invisible to approvers (they filter out weeks that have submitted entries)
+    // but remain in the DB, blocking the employee from creating a new request.
+    // Cancelling them here closes the state machine cleanly. Best-effort only —
+    // a failure does not fail the submission.
+    cancel_zombie_reopen_requests(&app_state, requester.id, &sorted_submitted_weeks).await;
+
     Ok(Json(
         serde_json::json!({"ok": true, "count": submitted_count, "auto_approved": false}),
     ))

@@ -1106,27 +1106,28 @@ pub fn group_entries_by_date(rows: Vec<RawEntryRow>) -> HashMap<NaiveDate, Vec<R
 }
 
 /// Expands a list of (start, end, slug) date ranges into a flat set of individual
-/// dates clamped to `[from, to]`. Ranges whose category has `cost_type='flextime'`
-/// (flextime reduction) are skipped: those days still require the user to log hours,
-/// so they must NOT be treated as submission-covered.
+/// dates clamped to `[from, to]`.
+///
+/// All absence statuses that block time-entry creation (requested, approved,
+/// cancellation_pending) are included — including flextime-cost (flextime-reduction)
+/// absences. Although a flextime-reduction day keeps its work target in the overtime
+/// ledger, the user cannot log entries on it (`validate_entry` rejects any entry
+/// on a day covered by a non-auto-approve absence). Excluding flextime-cost days
+/// would make those weeks permanently unsubmittable: the completeness check would
+/// demand entries that the entry validator forbids. The `absence_removes_target`
+/// function (used in reporting) is separate and still correctly reports that
+/// flextime-cost days keep their target.
+///
+/// `category_flags` is retained as a parameter to avoid a breaking signature change
+/// and to allow future per-category overrides; it is currently unused.
 pub fn expand_absence_date_set(
     ranges: &[(NaiveDate, NaiveDate, String)],
     from: NaiveDate,
     to: NaiveDate,
-    category_flags: &AbsenceCategoryFlags,
+    _category_flags: &AbsenceCategoryFlags,
 ) -> std::collections::HashSet<NaiveDate> {
     let mut set = std::collections::HashSet::new();
-    for (range_start, range_end, kind) in ranges {
-        // flextime-cost absences (e.g. flextime_reduction) do not remove the
-        // daily submission requirement; skip them so the week stays "not submitted".
-        if category_flags
-            .by_slug
-            .get(kind.as_str())
-            .map(|f| f.is_flextime_cost)
-            .unwrap_or(false)
-        {
-            continue;
-        }
+    for (range_start, range_end, _kind) in ranges {
         let mut day = (*range_start).max(from);
         while day <= (*range_end).min(to) {
             set.insert(day);
@@ -1674,10 +1675,13 @@ mod tests {
         assert!(set.contains(&NaiveDate::from_ymd_opt(2026, 5, 11).unwrap()));
     }
 
-    /// `expand_absence_date_set` skips ranges whose category has `cost_type='flextime'`,
-    /// because those days still require logged hours and must not be treated as submission-exempt.
+    /// `expand_absence_date_set` includes flextime-cost (flextime-reduction) ranges.
+    /// Flextime-cost absence days must excuse the daily submission requirement because
+    /// `validate_entry` blocks time entries on any day covered by a non-auto-approve
+    /// absence (including flextime-cost). Excluding them would make the week
+    /// permanently unsubmittable.
     #[test]
-    fn expand_absence_date_set_skips_flextime_cost_ranges() {
+    fn expand_absence_date_set_includes_flextime_cost_ranges() {
         let from = NaiveDate::from_ymd_opt(2026, 5, 1).unwrap();
         let to = NaiveDate::from_ymd_opt(2026, 5, 31).unwrap();
         let ranges = vec![
@@ -1707,10 +1711,10 @@ mod tests {
         );
         let flags = AbsenceCategoryFlags { by_slug };
         let set = expand_absence_date_set(&ranges, from, to, &flags);
-        // flextime_reduction day is skipped; vacation day is included
-        assert_eq!(set.len(), 1);
+        // Both the flextime_reduction day and the vacation day are included.
+        assert_eq!(set.len(), 2);
+        assert!(set.contains(&NaiveDate::from_ymd_opt(2026, 5, 5).unwrap()));
         assert!(set.contains(&NaiveDate::from_ymd_opt(2026, 5, 6).unwrap()));
-        assert!(!set.contains(&NaiveDate::from_ymd_opt(2026, 5, 5).unwrap()));
     }
 
     #[test]

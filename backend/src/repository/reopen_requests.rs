@@ -448,6 +448,37 @@ impl ReopenRequestDb {
         Ok(affected)
     }
 
+    /// Reject any pending reopen request for `user_id` on the given `week_start`.
+    /// Called after a successful week submission: a pending reopen request on a
+    /// week that now has submitted entries can no longer be decided by approvers
+    /// (they filter it out via the NOT EXISTS submitted-entries guard), so it
+    /// becomes a "zombie" that permanently blocks new reopen requests. Rejecting
+    /// it here closes the state machine cleanly. Returns `true` if a request was
+    /// rejected.
+    pub async fn reject_pending_for_week(
+        &self,
+        user_id: i64,
+        week_start: NaiveDate,
+        reason: &str,
+    ) -> AppResult<bool> {
+        // Use user_id as the nominal reviewer so the audit trail is self-contained.
+        // There is no "system" reviewer id; the employee's own id is the closest
+        // proxy (the request originated from them and the submission superseded it).
+        let rows = sqlx::query(
+            "UPDATE reopen_requests \
+             SET status='rejected', reviewed_by=$1, \
+                 reviewed_at=CURRENT_TIMESTAMP, rejection_reason=$2 \
+             WHERE user_id=$1 AND week_start=$3 AND status='pending'",
+        )
+        .bind(user_id)
+        .bind(reason)
+        .bind(week_start)
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
+        Ok(rows > 0)
+    }
+
     /// Reject all pending reopen requests owned by `user_id` within an existing
     /// transaction. Used during archiving to auto-reject the user's open requests.
     /// Returns the count of rejected requests.

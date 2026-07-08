@@ -147,6 +147,46 @@ pub async fn notify_assigned_approvers_if_admin_acted(
     }
 }
 
+/// Cancel any pending reopen request for the given user/week that has become
+/// a "zombie": it is no longer visible to approvers (their list filters out
+/// requests whose week contains submitted entries) but it still exists in the
+/// database, blocking the employee from creating a new request for that week.
+///
+/// This is a best-effort, fire-and-forget operation. If the underlying DB call
+/// fails the submission has already succeeded; we log the warning and continue.
+pub async fn cancel_zombie_reopen_requests(app_state: &AppState, user_id: i64, weeks: &[NaiveDate]) {
+    for &week_start in weeks {
+        match app_state
+            .db
+            .reopen_requests
+            .reject_pending_for_week(
+                user_id,
+                week_start,
+                "Superseded by a new week submission.",
+            )
+            .await
+        {
+            Ok(true) => {
+                tracing::debug!(
+                    target: "zerf::reopen_requests",
+                    user_id,
+                    week_start = %week_start,
+                    "Cancelled zombie pending reopen request after submission."
+                );
+            }
+            Ok(false) => {}
+            Err(e) => {
+                tracing::warn!(
+                    target: "zerf::reopen_requests",
+                    user_id,
+                    week_start = %week_start,
+                    "Failed to cancel zombie reopen request after submission: {e}"
+                );
+            }
+        }
+    }
+}
+
 pub fn assert_monday(d: NaiveDate) -> AppResult<()> {
     if d.weekday() != chrono::Weekday::Mon {
         return Err(crate::error::AppError::BadRequest(

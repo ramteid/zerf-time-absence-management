@@ -216,6 +216,19 @@ impl CategoryDb {
         Ok(exists.is_some())
     }
 
+    /// Count time entries referencing this category. Used to guard against
+    /// retroactive `counts_as_work` changes that would rewrite historical reports.
+    pub async fn entries_count(&self, category_id: i64) -> AppResult<i64> {
+        Ok(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM time_entries WHERE category_id = $1",
+            )
+            .bind(category_id)
+            .fetch_one(&self.pool)
+            .await?,
+        )
+    }
+
     /// Active categories enabled for a specific employee, for time-entry dropdowns.
     pub async fn list_active_for_user(&self, user_id: i64) -> AppResult<Vec<Category>> {
         Ok(sqlx::query_as::<_, Category>(

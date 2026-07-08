@@ -1663,6 +1663,8 @@ If a backup fails, all active admins receive a pinned in-app notification and a 
 
 When enabled, Zerf queues an individual timesheet PDF for each employee on a configurable day each month. Each PDF covers the **previous calendar month**. Employees who have not yet submitted all their weeks are uploaded automatically on the next daily check — late submitters are caught up without manual intervention. Employees who were archived after the period ended are included for archive correctness.
 
+If the feature was disabled for several months and is then re-enabled, or if the server missed a month boundary, Zerf automatically backfills all intervening months so no timesheet is silently skipped. **Upload now** has the same backfill behaviour.
+
 | Setting | Description |
 | --- | --- |
 | Enable report PDF upload | Activates the monthly automatic upload. |
@@ -1686,6 +1688,10 @@ Categories define what employees can book time against.
 - A category must be active to be used in a new time entry.
 - Deleting a category with existing time entries is not possible; deactivate
   instead.
+- Once a category has at least one time entry (any user, any status), the
+  **crediting flag** is locked. Changing it would retroactively rewrite every
+  user's flextime and overtime history. To change a flag, deactivate the
+  existing category and create a new one with the desired setting.
 - Each category can also be enabled or disabled per employee: editing a
   category shows a table of all employees with a checkbox per row. Only
   checked employees can see and use the category in the time-entry form. New

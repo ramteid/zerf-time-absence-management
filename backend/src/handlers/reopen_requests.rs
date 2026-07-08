@@ -85,7 +85,9 @@ pub async fn create(
     }
 
     let all_reopenable_entries_are_submitted = submitted_entry_count == reopenable_entry_count;
-    let mut auto_reopen_pending_submission = false;
+    // Tracks whether this reopen path may have cleared submitted entries whose
+    // week submission notification should now be removed from approver queues.
+    let mut is_auto_reopen = false;
     let (new_request_id, reopened_entries, initial_status): (
         i64,
         Option<Vec<(i64, String)>>,
@@ -96,6 +98,10 @@ pub async fn create(
             .reopen_requests
             .insert_auto_approved(requester.id, body.week_start, requester.id, request_reason)
             .await?;
+        // Privileged auto-reopen resets submitted entries to draft regardless
+        // of their prior status, so submission-pending notifications for this
+        // week are now stale and must be cleared.
+        is_auto_reopen = true;
         (new_id, Some(affected), "auto_approved")
     } else if all_reopenable_entries_are_submitted {
         let (new_id, affected) = app_state
@@ -111,7 +117,7 @@ pub async fn create(
             .ok_or_else(|| {
                 AppError::conflict("Week approval state changed. Please refresh and try again.")
             })?;
-        auto_reopen_pending_submission = true;
+        is_auto_reopen = true;
         (new_id, Some(affected), "auto_approved")
     } else {
         if submitted_entry_count > 0 {
@@ -136,7 +142,11 @@ pub async fn create(
     if let Some(entries) = reopened_entries.as_ref() {
         audit_reopened_entries(&app_state.pool, requester.id, entries).await;
     }
-    if auto_reopen_pending_submission {
+    if is_auto_reopen {
+        // Both auto-reopen paths (privileged and all-submitted) reset submitted
+        // entries to draft. Clear the submission-pending notifications so approvers
+        // don't keep an unread "please review week X" item for a week that no
+        // longer has anything to review.
         clear_submission_pending_for_weeks(&app_state, requester.id, &[body.week_start]).await;
     }
 
