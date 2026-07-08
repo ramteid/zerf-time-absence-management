@@ -9,6 +9,8 @@ use crate::services::settings::{
 use chrono::{Datelike, Duration, TimeZone, Timelike, Utc};
 use std::time::Duration as StdDuration;
 
+const SETTINGS_POLL_INTERVAL: StdDuration = StdDuration::from_secs(3600);
+
 /// Returns the duration to wait until the next Monday at 07:00 in the
 /// configured application timezone.
 /// If today is Monday and it is not yet 07:00, targets today.
@@ -39,6 +41,14 @@ pub fn duration_until_next_monday_7am(now: chrono::DateTime<chrono_tz::Tz>) -> S
     (target - now)
         .to_std()
         .unwrap_or(StdDuration::from_secs(60))
+}
+
+pub fn scheduler_sleep_duration(deadline_wait: StdDuration) -> StdDuration {
+    deadline_wait.min(SETTINGS_POLL_INTERVAL)
+}
+
+fn approval_reminder_is_due_now(now: chrono::DateTime<chrono_tz::Tz>) -> bool {
+    now.weekday().num_days_from_monday() == 0 && now.hour() >= 7
 }
 
 /// Rows returned by the pending-approvals query:
@@ -165,12 +175,25 @@ pub async fn run_loop(state: crate::AppState) {
             .parse::<chrono_tz::Tz>()
             .unwrap_or(chrono_tz::Europe::Berlin);
         let wait = duration_until_next_monday_7am(Utc::now().with_timezone(&tz));
+        let sleep_for = scheduler_sleep_duration(wait);
         tracing::info!(
             target:"zerf::approval_reminders",
             "Next approval reminder check scheduled in {:?}",
             wait
         );
-        tokio::time::sleep(wait).await;
+        tokio::time::sleep(sleep_for).await;
+        if wait > SETTINGS_POLL_INTERVAL {
+            continue;
+        }
+        let current_timezone = load_setting(&state.pool, TIMEZONE_KEY, DEFAULT_TIMEZONE)
+            .await
+            .unwrap_or_else(|_| DEFAULT_TIMEZONE.to_string());
+        let current_tz = current_timezone
+            .parse::<chrono_tz::Tz>()
+            .unwrap_or(chrono_tz::Europe::Berlin);
+        if !approval_reminder_is_due_now(Utc::now().with_timezone(&current_tz)) {
+            continue;
+        }
         tracing::info!(target:"zerf::approval_reminders", "Running approval reminder check");
         run_check(&state).await;
     }
@@ -189,6 +212,37 @@ mod tests {
         let wait = duration_until_next_monday_7am(now);
         let secs = wait.as_secs();
         assert!((3500..=3700).contains(&secs), "expected ~1h, got {secs}s");
+    }
+
+    #[test]
+    fn scheduler_sleep_caps_long_approval_waits() {
+        let now = Berlin.with_ymd_and_hms(2026, 5, 6, 12, 0, 0).unwrap();
+        let wait = duration_until_next_monday_7am(now);
+        assert_eq!(
+            scheduler_sleep_duration(wait),
+            StdDuration::from_secs(3600),
+            "long waits are capped so timezone settings are reloaded regularly"
+        );
+    }
+
+    #[test]
+    fn scheduler_sleep_keeps_imminent_approval_waits() {
+        let now = Berlin.with_ymd_and_hms(2026, 5, 4, 6, 30, 0).unwrap();
+        let wait = duration_until_next_monday_7am(now);
+        assert_eq!(scheduler_sleep_duration(wait).as_secs(), 30 * 60);
+    }
+
+    #[test]
+    fn approval_due_recheck_requires_monday_after_7am() {
+        assert!(approval_reminder_is_due_now(
+            Berlin.with_ymd_and_hms(2026, 5, 4, 7, 0, 0).unwrap()
+        ));
+        assert!(!approval_reminder_is_due_now(
+            Berlin.with_ymd_and_hms(2026, 5, 4, 6, 59, 0).unwrap()
+        ));
+        assert!(!approval_reminder_is_due_now(
+            Berlin.with_ymd_and_hms(2026, 5, 5, 7, 0, 0).unwrap()
+        ));
     }
 
     #[test]

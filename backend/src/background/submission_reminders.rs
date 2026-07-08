@@ -7,10 +7,11 @@ use crate::services::settings::{
     app_today, load_setting, load_smtp_config, DEFAULT_TIMEZONE, SUBMISSION_REMINDERS_ENABLED_KEY,
     TIMEZONE_KEY,
 };
-use chrono::{Datelike, NaiveDate, TimeZone, Utc};
+use chrono::{Datelike, NaiveDate, TimeZone, Timelike, Utc};
 use std::time::Duration;
 
 const SUBMISSION_DEADLINE_DAY_KEY: &str = "submission_deadline_day";
+const SETTINGS_POLL_INTERVAL: Duration = Duration::from_secs(3600);
 
 /// Returns the duration to wait until the next occurrence of `day_of_month` at 07:00 local time.
 pub fn duration_until_next_deadline(
@@ -71,6 +72,19 @@ fn advance_one_month(date: NaiveDate, desired_day: u32) -> NaiveDate {
     };
     let actual_day = desired_day.min(crate::time_calc::last_day_of_month(year, month));
     NaiveDate::from_ymd_opt(year, month, actual_day).unwrap_or(date)
+}
+
+pub fn scheduler_sleep_duration(deadline_wait: Duration) -> Duration {
+    deadline_wait.min(SETTINGS_POLL_INTERVAL)
+}
+
+fn deadline_is_due_now(now: chrono::DateTime<chrono_tz::Tz>, day_of_month: u8) -> bool {
+    let today = now.date_naive();
+    let deadline_day = u32::from(day_of_month).min(crate::time_calc::last_day_of_month(
+        today.year(),
+        today.month(),
+    ));
+    today.day() == deadline_day && now.hour() >= 7
 }
 
 /// Collect the Mondays of fully elapsed weeks where the user has unsubmitted
@@ -331,12 +345,35 @@ pub async fn run_loop(pool: DatabasePool, state: crate::AppState) {
                 .parse::<chrono_tz::Tz>()
                 .unwrap_or(chrono_tz::Europe::Berlin);
             let wait = duration_until_next_deadline(Utc::now().with_timezone(&tz), d);
+            let sleep_for = scheduler_sleep_duration(wait);
             tracing::info!(
                 target:"zerf::submission_reminders",
                 "Next submission reminder check scheduled in {:?}",
                 wait
             );
-            tokio::time::sleep(wait).await;
+            tokio::time::sleep(sleep_for).await;
+            if wait > SETTINGS_POLL_INTERVAL {
+                continue;
+            }
+            let current_day_str = load_setting(&pool, SUBMISSION_DEADLINE_DAY_KEY, "")
+                .await
+                .unwrap_or_default();
+            let current_day: Option<u8> = current_day_str
+                .parse()
+                .ok()
+                .filter(|&day: &u8| (1..=28).contains(&day));
+            let Some(current_day) = current_day else {
+                continue;
+            };
+            let current_timezone = load_setting(&pool, TIMEZONE_KEY, DEFAULT_TIMEZONE)
+                .await
+                .unwrap_or_else(|_| DEFAULT_TIMEZONE.to_string());
+            let current_tz = current_timezone
+                .parse::<chrono_tz::Tz>()
+                .unwrap_or(chrono_tz::Europe::Berlin);
+            if !deadline_is_due_now(Utc::now().with_timezone(&current_tz), current_day) {
+                continue;
+            }
             tracing::info!(target:"zerf::submission_reminders", "Running submission reminder check");
             run_check(&state).await;
         } else {
@@ -370,6 +407,44 @@ mod tests {
         let secs = dur.as_secs();
         assert!(secs >= 3500, "should be about 1 hour, got {secs}");
         assert!(secs <= 3700, "should be about 1 hour, got {secs}");
+    }
+
+    #[test]
+    fn scheduler_sleep_caps_long_deadline_waits() {
+        let now = Berlin.with_ymd_and_hms(2026, 5, 6, 8, 0, 0).unwrap();
+        let wait = duration_until_next_deadline(now, 15);
+        assert_eq!(
+            scheduler_sleep_duration(wait),
+            Duration::from_secs(3600),
+            "long waits are capped so settings are reloaded regularly"
+        );
+    }
+
+    #[test]
+    fn scheduler_sleep_keeps_imminent_deadline_waits() {
+        let now = Berlin.with_ymd_and_hms(2026, 5, 15, 6, 30, 0).unwrap();
+        let wait = duration_until_next_deadline(now, 15);
+        assert_eq!(
+            scheduler_sleep_duration(wait).as_secs(),
+            30 * 60,
+            "imminent deadline should not be delayed by polling"
+        );
+    }
+
+    #[test]
+    fn deadline_due_recheck_requires_current_day_and_hour() {
+        assert!(deadline_is_due_now(
+            Berlin.with_ymd_and_hms(2026, 5, 15, 7, 0, 0).unwrap(),
+            15
+        ));
+        assert!(!deadline_is_due_now(
+            Berlin.with_ymd_and_hms(2026, 5, 15, 6, 59, 0).unwrap(),
+            15
+        ));
+        assert!(!deadline_is_due_now(
+            Berlin.with_ymd_and_hms(2026, 5, 15, 7, 0, 0).unwrap(),
+            25
+        ));
     }
 
     #[test]

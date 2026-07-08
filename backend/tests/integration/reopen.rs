@@ -240,6 +240,130 @@ async fn reopen_full_workflow() {
         );
     }
 
+    // -- Superseded rejected rows do not block immediate reopen of submitted corrections --
+    {
+        let (_lead_id, lead_pw, emp_id, emp_pw, monday_iso, cat_id) =
+            bootstrap_team_with_suffix(&app, &admin, false, "2c").await;
+        let emp = login_change_pw(&app, "emp-2c@example.com", &emp_pw).await;
+        let lead = login_change_pw(&app, "lead-2c@example.com", &lead_pw).await;
+        let monday = chrono::NaiveDate::parse_from_str(&monday_iso, "%Y-%m-%d").unwrap();
+
+        let rejected_entry_id = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
+        let (st, _) = lead
+            .post(
+                "/api/v1/time-entries/batch-reject",
+                &json!({"ids": [rejected_entry_id], "reason": "wrong category"}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "lead rejects original entry");
+
+        let correction_id = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
+        let incomplete_dates = zerf::repository::TimeEntryDb::new(app.state.pool.clone())
+            .get_incomplete_dates_in_range(emp_id, monday, monday)
+            .await
+            .expect("load incomplete dates");
+        assert!(
+            incomplete_dates.is_empty(),
+            "submitted replacement supersedes the rejected row for completeness"
+        );
+
+        let (st, body) = emp
+            .post(
+                "/api/v1/reopen-requests",
+                &json!({"week_start": monday_iso, "reason": "Fix submitted correction"}),
+            )
+            .await;
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "submitted correction should reopen immediately despite old rejected row"
+        );
+        assert_eq!(body["status"], "auto_approved");
+        assert_eq!(body["entries_reopened"], 1);
+
+        let (st, entries) = emp.get("/api/v1/time-entries").await;
+        assert_eq!(st, StatusCode::OK, "load entries after immediate reopen");
+        let rejected_entry = find_by_id(&entries, rejected_entry_id).expect("rejected entry");
+        let correction_entry = find_by_id(&entries, correction_id).expect("correction entry");
+        assert_eq!(rejected_entry["status"], "rejected");
+        assert_eq!(correction_entry["status"], "draft");
+    }
+
+    // -- Superseded rejected rows do not poison approved corrections or pending reopen approval --
+    {
+        let (_lead_id, lead_pw, emp_id, emp_pw, monday_iso, cat_id) =
+            bootstrap_team_with_suffix(&app, &admin, false, "2d").await;
+        let emp = login_change_pw(&app, "emp-2d@example.com", &emp_pw).await;
+        let lead = login_change_pw(&app, "lead-2d@example.com", &lead_pw).await;
+        let monday = chrono::NaiveDate::parse_from_str(&monday_iso, "%Y-%m-%d").unwrap();
+
+        let rejected_entry_id = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
+        let (st, _) = lead
+            .post(
+                "/api/v1/time-entries/batch-reject",
+                &json!({"ids": [rejected_entry_id], "reason": "wrong category"}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "lead rejects original entry");
+
+        let correction_id = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
+        let (st, body) = lead
+            .post(
+                "/api/v1/time-entries/batch-approve",
+                &json!({"ids": [correction_id]}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "lead approves correction");
+        assert_eq!(body["count"], 1);
+
+        let time_incomplete_dates = zerf::repository::TimeEntryDb::new(app.state.pool.clone())
+            .get_incomplete_dates_in_range(emp_id, monday, monday)
+            .await
+            .expect("load time incomplete dates");
+        assert!(
+            time_incomplete_dates.is_empty(),
+            "approved replacement clears reminder completeness"
+        );
+        let report_incomplete_dates = zerf::repository::ReportDb::new(app.state.pool.clone())
+            .incomplete_dates_in_range(emp_id, monday, monday)
+            .await
+            .expect("load report incomplete dates");
+        assert!(
+            report_incomplete_dates.is_empty(),
+            "approved replacement clears report completeness"
+        );
+
+        let (st, body) = emp
+            .post(
+                "/api/v1/reopen-requests",
+                &json!({"week_start": monday_iso, "reason": "Fix approved correction"}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "create pending reopen");
+        assert_eq!(body["status"], "pending");
+        let req_id = id(&body);
+
+        let (st, body) = lead
+            .post(
+                &format!("/api/v1/reopen-requests/{req_id}/approve"),
+                &json!({}),
+            )
+            .await;
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "pending reopen approval should not resurrect superseded rejected row"
+        );
+        assert_eq!(body["entries_reopened"], 1);
+
+        let (st, entries) = emp.get("/api/v1/time-entries").await;
+        assert_eq!(st, StatusCode::OK, "load entries after pending reopen");
+        let rejected_entry = find_by_id(&entries, rejected_entry_id).expect("rejected entry");
+        let correction_entry = find_by_id(&entries, correction_id).expect("correction entry");
+        assert_eq!(rejected_entry["status"], "rejected");
+        assert_eq!(correction_entry["status"], "draft");
+    }
+
     // -- Mixed submitted and reviewed weeks do not auto-reopen --
     {
         let (_lead_id, lead_pw, emp_id, emp_pw, monday_iso, cat_id) =
@@ -655,6 +779,37 @@ async fn reopen_full_workflow() {
             reopened_entry["status"], "draft",
             "reopen resets the rejected entry back to draft"
         );
+
+        let (st, _) = emp
+            .post("/api/v1/time-entries/submit", &json!({"ids": [entry_id]}))
+            .await;
+        assert_eq!(
+            st,
+            StatusCode::BAD_REQUEST,
+            "reopened draft on an approved vacation day cannot be submitted unchanged"
+        );
+
+        sqlx::query("UPDATE time_entries SET status='submitted' WHERE id=$1")
+            .bind(entry_id)
+            .execute(&app.state.pool)
+            .await
+            .expect("force legacy submitted conflict");
+        let (st, _) = lead
+            .post(
+                "/api/v1/time-entries/batch-approve",
+                &json!({"ids": [entry_id]}),
+            )
+            .await;
+        assert_eq!(
+            st,
+            StatusCode::BAD_REQUEST,
+            "submitted legacy conflict cannot be approved over vacation"
+        );
+        sqlx::query("UPDATE time_entries SET status='draft' WHERE id=$1")
+            .bind(entry_id)
+            .execute(&app.state.pool)
+            .await
+            .expect("restore draft for deletion");
 
         let (st, _) = emp
             .delete(&format!("/api/v1/time-entries/{entry_id}"))

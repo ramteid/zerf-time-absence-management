@@ -1,6 +1,8 @@
 use crate::db::DatabasePool;
 use crate::error::{AppError, AppResult};
-use crate::repository::time_entries::validate_entries_after_reopen;
+use crate::repository::time_entries::{
+    validate_entries_after_reopen, REOPENABLE_TIME_ENTRY_CONDITION,
+};
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::Serialize;
 use sqlx::{Postgres, QueryBuilder};
@@ -126,22 +128,24 @@ impl ReopenRequestDb {
         .await?)
     }
 
-    pub async fn count_non_draft_entries(
+    pub async fn count_reopenable_entries(
         &self,
         user_id: i64,
         week_start: NaiveDate,
         week_end: NaiveDate,
     ) -> AppResult<i64> {
-        Ok(sqlx::query_scalar(
-            "SELECT COUNT(*) FROM time_entries \
-             WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3 \
-             AND status IN ('submitted','approved','rejected')",
-        )
-        .bind(user_id)
-        .bind(week_start)
-        .bind(week_end)
-        .fetch_one(&self.pool)
-        .await?)
+        let sql = format!(
+            "SELECT COUNT(*) FROM time_entries te \
+             WHERE te.user_id=$1 AND te.entry_date BETWEEN $2 AND $3 \
+             AND ({REOPENABLE_TIME_ENTRY_CONDITION})"
+        );
+        // AssertSqlSafe: the formatted fragment is a compile-time status predicate.
+        Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
+            .bind(user_id)
+            .bind(week_start)
+            .bind(week_end)
+            .fetch_one(&self.pool)
+            .await?)
     }
 
     pub async fn count_submitted_entries(
@@ -178,17 +182,19 @@ impl ReopenRequestDb {
             .bind(user_id)
             .execute(&mut *tx)
             .await?;
-        let statuses: Vec<String> = sqlx::query_scalar(
-            "SELECT status FROM time_entries \
-             WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3 \
-             AND status IN ('submitted','approved','rejected') \
-             FOR UPDATE",
-        )
-        .bind(user_id)
-        .bind(week_start)
-        .bind(week_end)
-        .fetch_all(&mut *tx)
-        .await?;
+        let sql = format!(
+            "SELECT te.status FROM time_entries te \
+             WHERE te.user_id=$1 AND te.entry_date BETWEEN $2 AND $3 \
+             AND ({REOPENABLE_TIME_ENTRY_CONDITION}) \
+             FOR UPDATE OF te"
+        );
+        // AssertSqlSafe: the formatted fragment is a compile-time status predicate.
+        let statuses: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
+            .bind(user_id)
+            .bind(week_start)
+            .bind(week_end)
+            .fetch_all(&mut *tx)
+            .await?;
         if statuses.is_empty() {
             return Err(AppError::bad_request(
                 "Cannot request edit - this week has no submitted, approved, or rejected entries.",
@@ -416,17 +422,19 @@ impl ReopenRequestDb {
             .bind(subject_id)
             .execute(&mut **tx)
             .await?;
-        let affected: Vec<(i64, String)> = sqlx::query_as(
-            "SELECT id, status FROM time_entries \
-             WHERE user_id=$1 AND entry_date BETWEEN $2 AND $3 \
-             AND status IN ('submitted','approved','rejected') \
-             FOR UPDATE",
-        )
-        .bind(subject_id)
-        .bind(week_start)
-        .bind(week_end)
-        .fetch_all(&mut **tx)
-        .await?;
+        let sql = format!(
+            "SELECT te.id, te.status FROM time_entries te \
+             WHERE te.user_id=$1 AND te.entry_date BETWEEN $2 AND $3 \
+             AND ({REOPENABLE_TIME_ENTRY_CONDITION}) \
+             FOR UPDATE OF te"
+        );
+        // AssertSqlSafe: the formatted fragment is a compile-time status predicate.
+        let affected: Vec<(i64, String)> = sqlx::query_as(sqlx::AssertSqlSafe(sql))
+            .bind(subject_id)
+            .bind(week_start)
+            .bind(week_end)
+            .fetch_all(&mut **tx)
+            .await?;
         if affected.is_empty() {
             return Err(AppError::bad_request(
                 "Cannot request edit - this week has no submitted, approved, or rejected entries.",

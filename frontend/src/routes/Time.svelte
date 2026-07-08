@@ -36,6 +36,7 @@
     computeDayBreakDeduction,
     creditedEntryMinutes,
     filterWeekAbsences,
+    reopenableWeekEntries,
     weekStatus as calculateWeekStatus,
     weekTargetMinutes as calculateWeekTargetMinutes,
   } from "../lib/domain/time.js";
@@ -145,9 +146,7 @@
 
   async function requestReopen() {
     if (!weekFrom) return;
-    const reopenableEntries = entries.filter((entry) =>
-      ["submitted", "approved", "rejected"].includes(entry.status),
-    );
+    const reopenableEntries = reopenableWeekEntries(entries);
     const reopensImmediately =
       $currentUser?.allow_reopen_without_approval === true ||
       (reopenableEntries.length > 0 &&
@@ -208,7 +207,11 @@
         (sum, e) => sum + creditedEntryMinutes(e, $categories),
         0,
       );
-      const deduction = computeDayBreakDeduction(dayEntries, $categories, breakRules);
+      const deduction = computeDayBreakDeduction(
+        dayEntries,
+        $categories,
+        breakRules,
+      );
       total += Math.max(0, credited - deduction);
     }
     return total;
@@ -271,11 +274,10 @@
     );
   })();
 
-  // Reopen resets only submitted, approved, and rejected entries. Drafts can
-  // coexist because they are already editable.
-  $: reopenableEntries = entries.filter((entry) =>
-    ["submitted", "approved", "rejected"].includes(entry.status),
-  );
+  // Reopen resets submitted/approved rows and rejected rows that still lack a
+  // submitted or approved replacement. Drafts can coexist because they are
+  // already editable.
+  $: reopenableEntries = reopenableWeekEntries(entries);
   $: weekHasSubmittedEntries = reopenableEntries.some(
     (entry) => entry.status === "submitted",
   );
@@ -288,7 +290,6 @@
     ($currentUser?.allow_reopen_without_approval === true ||
       !weekHasSubmittedEntries ||
       !weekHasReviewedEntries);
-
 </script>
 
 <TimeWeekHeader

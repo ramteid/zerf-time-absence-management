@@ -1,5 +1,8 @@
 use crate::db::DatabasePool;
 use crate::error::AppResult;
+use crate::repository::time_entries::{
+    EFFECTIVE_REJECTED_TIME_ENTRY_CONDITION, INCOMPLETE_TIME_ENTRY_CONDITION,
+};
 use crate::repository::users::User;
 use chrono::NaiveDate;
 use sqlx::{Postgres, QueryBuilder};
@@ -153,16 +156,18 @@ impl ReportDb {
         from: NaiveDate,
         to: NaiveDate,
     ) -> AppResult<HashSet<NaiveDate>> {
-        let rows: Vec<(NaiveDate,)> = sqlx::query_as(
-            "SELECT DISTINCT entry_date FROM time_entries \
-             WHERE user_id=$1 AND status NOT IN ('submitted','approved') \
-             AND entry_date BETWEEN $2 AND $3",
-        )
-        .bind(user_id)
-        .bind(from)
-        .bind(to)
-        .fetch_all(&self.pool)
-        .await?;
+        let sql = format!(
+            "SELECT DISTINCT te.entry_date FROM time_entries te \
+             WHERE te.user_id=$1 AND ({INCOMPLETE_TIME_ENTRY_CONDITION}) \
+             AND te.entry_date BETWEEN $2 AND $3"
+        );
+        // AssertSqlSafe: the formatted fragment is a compile-time status predicate.
+        let rows: Vec<(NaiveDate,)> = sqlx::query_as(sqlx::AssertSqlSafe(sql))
+            .bind(user_id)
+            .bind(from)
+            .bind(to)
+            .fetch_all(&self.pool)
+            .await?;
         Ok(rows.into_iter().map(|(d,)| d).collect())
     }
 
@@ -175,20 +180,23 @@ impl ReportDb {
         from: NaiveDate,
         to: NaiveDate,
     ) -> AppResult<(bool, bool, bool, bool)> {
-        let row: (Option<bool>, Option<bool>, Option<bool>, Option<bool>) = sqlx::query_as(
+        let sql = format!(
             "SELECT \
-                BOOL_OR(status = 'draft'), \
-                BOOL_OR(status = 'submitted'), \
-                BOOL_OR(status = 'approved'), \
-                BOOL_OR(status = 'rejected') \
-             FROM time_entries \
-             WHERE user_id = $1 AND entry_date BETWEEN $2 AND $3",
-        )
-        .bind(user_id)
-        .bind(from)
-        .bind(to)
-        .fetch_one(&self.pool)
-        .await?;
+                BOOL_OR(te.status = 'draft'), \
+                BOOL_OR(te.status = 'submitted'), \
+                BOOL_OR(te.status = 'approved'), \
+                BOOL_OR({EFFECTIVE_REJECTED_TIME_ENTRY_CONDITION}) \
+             FROM time_entries te \
+             WHERE te.user_id = $1 AND te.entry_date BETWEEN $2 AND $3"
+        );
+        // AssertSqlSafe: the formatted fragment is a compile-time status predicate.
+        let row: (Option<bool>, Option<bool>, Option<bool>, Option<bool>) =
+            sqlx::query_as(sqlx::AssertSqlSafe(sql))
+                .bind(user_id)
+                .bind(from)
+                .bind(to)
+                .fetch_one(&self.pool)
+                .await?;
         Ok((
             row.0.unwrap_or(false),
             row.1.unwrap_or(false),

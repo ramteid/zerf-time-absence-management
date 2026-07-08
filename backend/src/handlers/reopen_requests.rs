@@ -46,7 +46,7 @@ pub async fn create(
     let reopenable_entry_count = app_state
         .db
         .reopen_requests
-        .count_non_draft_entries(requester.id, body.week_start, week_end)
+        .count_reopenable_entries(requester.id, body.week_start, week_end)
         .await?;
     if reopenable_entry_count == 0 {
         return Err(AppError::BadRequest(

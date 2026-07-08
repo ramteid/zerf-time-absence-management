@@ -310,15 +310,44 @@ export function entryTimeRange(entry, timeFormat) {
   )}`;
 }
 
+function hasSubmittedOrApprovedReplacement(entry, entries) {
+  if (entry?.status !== "rejected") return false;
+  const entryDate = dateKey(entry.entry_date);
+  return (entries || []).some(
+    (candidate) =>
+      candidate.id !== entry.id &&
+      dateKey(candidate.entry_date) === entryDate &&
+      ["submitted", "approved"].includes(candidate.status),
+  );
+}
+
+export function workflowRelevantEntries(entries) {
+  return (entries || []).filter(
+    (entry) => !hasSubmittedOrApprovedReplacement(entry, entries),
+  );
+}
+
+export function reopenableWeekEntries(entries) {
+  return workflowRelevantEntries(entries).filter((entry) =>
+    ["submitted", "approved", "rejected"].includes(entry.status),
+  );
+}
+
 export function weekStatus(entries, drafts) {
-  if (!entries?.length) return "draft";
-  const nonDraftEntries = entries.filter((entry) => entry.status !== "draft");
-  if (drafts.length > 0) {
+  const relevantEntries = workflowRelevantEntries(entries);
+  if (!relevantEntries.length) return "draft";
+  const relevantDrafts = (drafts || []).filter((draft) =>
+    relevantEntries.some((entry) => entry.id === draft.id),
+  );
+  const nonDraftEntries = relevantEntries.filter(
+    (entry) => entry.status !== "draft",
+  );
+  if (relevantDrafts.length > 0) {
     return nonDraftEntries.length > 0 ? "partial" : "draft";
   }
   if (nonDraftEntries.length === 0) return "draft";
   if (
-    nonDraftEntries.length === entries.length &&
+    nonDraftEntries.length === relevantEntries.length &&
     nonDraftEntries.every((entry) => entry.status === "approved")
   ) {
     return "approved";

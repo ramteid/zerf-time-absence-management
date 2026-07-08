@@ -7,8 +7,10 @@ import {
   computeDayBreakDeduction,
   creditedEntryMinutes,
   filterWeekAbsences,
+  reopenableWeekEntries,
   weekStatus,
   weekTargetMinutes,
+  workflowRelevantEntries,
 } from "./time.js";
 import { absenceCategories } from "../../stores.js";
 
@@ -159,6 +161,36 @@ describe("time domain helpers", () => {
         entries.filter((entry) => entry.status === "draft"),
       ),
     ).toBe("partial");
+  });
+
+  it("ignores rejected entries that have a submitted or approved same-day replacement", () => {
+    const entries = [
+      { id: 1, entry_date: "2026-05-04", status: "rejected" },
+      { id: 2, entry_date: "2026-05-04", status: "approved" },
+    ];
+
+    expect(workflowRelevantEntries(entries).map((entry) => entry.id)).toEqual([
+      2,
+    ]);
+    expect(weekStatus(entries, [])).toBe("approved");
+    expect(reopenableWeekEntries(entries).map((entry) => entry.id)).toEqual([
+      2,
+    ]);
+  });
+
+  it("keeps rejected entries active until a same-day replacement is submitted or approved", () => {
+    const entries = [
+      { id: 1, entry_date: "2026-05-04", status: "rejected" },
+      { id: 2, entry_date: "2026-05-04", status: "draft" },
+    ];
+
+    expect(workflowRelevantEntries(entries).map((entry) => entry.id)).toEqual([
+      1, 2,
+    ]);
+    expect(weekStatus(entries, [entries[1]])).toBe("partial");
+    expect(reopenableWeekEntries(entries).map((entry) => entry.id)).toEqual([
+      1,
+    ]);
   });
 
   // absenceBlocksEntry and absenceRemovesTarget behaviour

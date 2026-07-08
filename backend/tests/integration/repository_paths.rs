@@ -2155,11 +2155,11 @@ async fn reopen_requests_repository_workflow() {
         "lead approves entry for reopen repo test"
     );
 
-    // count_non_draft_entries returns the number of non-draft entries in the week.
+    // count_reopenable_entries returns the rows that can actually be reset by reopen.
     let non_draft = reopen_requests
-        .count_non_draft_entries(emp_id, monday, week_end)
+        .count_reopenable_entries(emp_id, monday, week_end)
         .await
-        .expect("count non-draft entries");
+        .expect("count reopenable entries");
     assert_eq!(non_draft, 1, "one approved entry in the week");
 
     // get_user_full_name returns formatted name from the users table.

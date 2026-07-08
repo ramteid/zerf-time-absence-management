@@ -188,7 +188,7 @@ This means:
 **Example 3: Reopen request**
 - Your week has 8h crediting work and 2h meetings (both submitted).
 - You request to reopen the week.
-- Result: all submitted, approved, or rejected entries in the week are reset to draft and can be edited again.
+- Result: the reopenable entries in the week are reset to draft and can be edited again.
 
 If you are unsure which categories in your organization are crediting, ask your admin or check the category list in the Settings. Inactive categories remain visible to admins for maintenance, but they are hidden from normal time-entry forms.
 
@@ -361,14 +361,15 @@ does nothing. The only way to make corrections is to reopen the whole week.
 
 - Use this whenever a submitted, approved, or rejected entry needs to be
   corrected — whether it is one entry or several.
-- An approved reopen resets all submitted, approved, or rejected entries in
-  that week back to `Draft`.
+- An approved reopen resets submitted and approved entries in that week back to
+  `Draft`. Rejected entries are reset when they still have no submitted or
+  approved replacement on the same day.
 - Reopened entries become editable; once the corrections are done, submit the
   week again.
-- If all submitted/approved/rejected entries in the week are still waiting for
-  approval as `Submitted`, `Request edit` reopens it immediately and removes the
-  submitted week from the approval queue. No separate edit approval is shown to
-  approvers in parallel with the original submission.
+- If all reopenable entries in the week are still waiting for approval as
+  `Submitted`, `Request edit` reopens it immediately and removes the submitted
+  week from the approval queue. No separate edit approval is shown to approvers
+  in parallel with the original submission.
 - If a week has no submitted, approved, or rejected entries, the edit request
   is rejected with a message that the week has no submitted, approved, or
   rejected entries.
@@ -544,7 +545,8 @@ counts is that every required workday is covered.
 
 A week is considered **complete** when:
 
-- No entry anywhere in the week is still in draft or rejected state, **and**
+- No entry anywhere in the week is still in draft state, and no rejected entry
+  remains without a submitted or approved same-day replacement, **and**
 - Every contract workday in the week is covered by at least one submitted or
   approved entry (crediting or non-crediting), **or** excused by an approved
   absence, a public holiday, or falling before your contract start date.
@@ -556,8 +558,9 @@ complete.
 
 A week is considered **incomplete** when:
 
-- Any entry anywhere in the week is still in draft or rejected state (the week
-  has not been cleanly submitted), **or**
+- Any entry anywhere in the week is still in draft state, or a rejected entry
+  has not yet been replaced by a submitted or approved entry on the same day,
+  **or**
 - At least one contract workday has no submitted/approved entry and is not
   excused. Submitting only some days of a week is not enough; the remaining
   workdays keep the week incomplete.
@@ -798,7 +801,7 @@ The reminder is sent directly to the affected user, not to their approvers. Dupl
 
 **What triggers the reminder:**
 - Any required workday in a past week not covered by a submitted/approved entry or an approved absence.
-- Days with only draft or rejected entries count as incomplete.
+- Days with only draft or unresolved rejected entries count as incomplete.
 - Non-crediting entries fully participate: a day covered only by an unsubmitted non-crediting entry keeps the week incomplete.
 
 ### Weekly approval reminder
@@ -1073,14 +1076,14 @@ Rules:
 - You cannot submit a second reopen request for the same week while one is
   still pending.
 
-**Submitted but not yet approved:** If all submitted/approved/rejected entries
-in the week are still waiting for approval as `submitted`, `Request edit`
+**Submitted but not yet approved:** If all reopenable entries in the week are
+still waiting for approval as `submitted`, `Request edit`
 reopens the week immediately. The submitted entries are reset to `draft`, the
 obsolete submission approval is removed from the approver queue, and no separate
 edit request is shown to approvers. If the same week already contains approved
-or rejected entries and also still has submitted entries awaiting approval,
-finish or reopen the pending submission first; Zerf will not create a parallel
-edit request for that mixed state.
+or still-unresolved rejected entries and also still has submitted entries
+awaiting approval, finish or reopen the pending submission first; Zerf will not
+create a parallel edit request for that mixed state.
 
 **Auto-approval:** If your team lead or admin has enabled auto-approval for your
 reopen requests, the reopen takes effect immediately without requiring approval.
@@ -1091,9 +1094,10 @@ notification or email about it.
 auto-approval is not enabled for you, the request enters `pending` status and
 all your assigned approvers are notified.
 
-When a reopen is executed (either path), all submitted, approved, and rejected
-entries in that week are atomically reset to `draft`.  You can then edit and
-resubmit the week.
+When a reopen is executed (either path), submitted and approved entries are
+reset to `draft`. Rejected entries are also reset when they have not already
+been replaced by a submitted or approved entry on the same day. You can then
+edit and resubmit the week.
 
 ### Absences: creating
 
@@ -1271,9 +1275,9 @@ Approve or reject a `pending` reopen request.
 - Only pending reopen requests can be reviewed.
 - A rejection reason is required for rejection.
 
-On approval: the reopen is executed atomically — all submitted, approved, and
-rejected entries in the week are reset to `draft`. The employee receives a
-notification.
+On approval: the reopen is executed atomically. Submitted and approved entries,
+plus rejected entries that still need correction, are reset to `draft`. The
+employee receives a notification.
 
 On rejection: the week remains unchanged. The employee receives a rejection
 notification with the reason.
@@ -1795,7 +1799,7 @@ This extracts the `zerf-<ts>.keyring.enc` file from the backup volume to `/tmp/k
 draft ──[submit]──> submitted ──[approve]──> approved
                           └──[reject]───> rejected
 
-rejected ──[reopen approved]──> draft
+unresolved rejected ──[reopen approved]──> draft
 submitted ──[reopen approved]──> draft
 approved ──[reopen approved]──> draft
 ```

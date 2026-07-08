@@ -75,6 +75,39 @@ const TE_SELECT: &str =
      submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at \
      FROM time_entries";
 
+pub(crate) const EFFECTIVE_REJECTED_TIME_ENTRY_CONDITION: &str = "\
+    te.status = 'rejected' \
+    AND NOT EXISTS (\
+        SELECT 1 FROM time_entries replacement \
+        WHERE replacement.user_id = te.user_id \
+        AND replacement.entry_date = te.entry_date \
+        AND replacement.status IN ('submitted','approved')\
+    )";
+
+pub(crate) const INCOMPLETE_TIME_ENTRY_CONDITION: &str = "\
+    te.status NOT IN ('submitted','approved') \
+    AND (\
+        te.status <> 'rejected' \
+        OR NOT EXISTS (\
+            SELECT 1 FROM time_entries replacement \
+            WHERE replacement.user_id = te.user_id \
+            AND replacement.entry_date = te.entry_date \
+            AND replacement.status IN ('submitted','approved')\
+        )\
+    )";
+
+pub(crate) const REOPENABLE_TIME_ENTRY_CONDITION: &str = "\
+    te.status IN ('submitted','approved') \
+    OR (\
+        te.status = 'rejected' \
+        AND NOT EXISTS (\
+            SELECT 1 FROM time_entries replacement \
+            WHERE replacement.user_id = te.user_id \
+            AND replacement.entry_date = te.entry_date \
+            AND replacement.status IN ('submitted','approved')\
+        )\
+    )";
+
 /// Validate that a new/updated time entry is acceptable.
 /// Called within a transaction; `exclude_id` skips the entry being edited.
 pub(crate) async fn validate_entry(
@@ -335,6 +368,41 @@ pub(crate) async fn validate_entries_after_reopen(
                 "Editing would exceed the 14 hour day limit.",
             ));
         }
+    }
+
+    Ok(())
+}
+
+async fn validate_entries_do_not_overlap_blocking_absences(
+    conn: &mut sqlx::PgConnection,
+    entry_ids: &[i64],
+    action: &str,
+) -> AppResult<()> {
+    if entry_ids.is_empty() {
+        return Ok(());
+    }
+
+    let conflict: Option<(i64, NaiveDate, String)> = sqlx::query_as(
+        "SELECT te.id, te.entry_date, c.slug \
+         FROM time_entries te \
+         JOIN absences a ON a.user_id = te.user_id \
+             AND a.status IN ('requested','approved','cancellation_pending') \
+             AND a.start_date <= te.entry_date \
+             AND a.end_date >= te.entry_date \
+         JOIN absence_categories c ON c.id = a.category_id \
+         WHERE te.id = ANY($1) \
+         AND c.auto_approve_past = FALSE \
+         ORDER BY te.entry_date, te.id \
+         LIMIT 1",
+    )
+    .bind(entry_ids)
+    .fetch_optional(&mut *conn)
+    .await?;
+
+    if let Some((entry_id, entry_date, kind)) = conflict {
+        return Err(AppError::bad_request(format!(
+            "Cannot {action} time entry {entry_id} on {entry_date}: the day has a blocking absence ({kind}). Delete or adjust the entry first."
+        )));
     }
 
     Ok(())
@@ -723,22 +791,37 @@ impl TimeEntryDb {
     /// Returns the IDs that were actually transitioned from draft → submitted.
     pub async fn submit_batch(&self, user_id: i64, ids: &[i64]) -> AppResult<Vec<i64>> {
         let mut tx = self.pool.begin().await?;
-        let mut submitted = Vec::new();
-        for &id in ids {
-            let rows = sqlx::query(
-                "UPDATE time_entries \
-                 SET status='submitted', submitted_at=CURRENT_TIMESTAMP \
-                 WHERE id=$1 AND status='draft' AND user_id=$2",
-            )
-            .bind(id)
+        sqlx::query("SELECT pg_advisory_xact_lock($1)")
             .bind(user_id)
             .execute(&mut *tx)
+            .await?;
+
+        let draft_ids: Vec<i64> = sqlx::query_scalar(
+            "SELECT id FROM time_entries \
+             WHERE id = ANY($1) AND status='draft' AND user_id=$2 \
+             ORDER BY id \
+             FOR UPDATE",
+        )
+        .bind(ids)
+        .bind(user_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        validate_entries_do_not_overlap_blocking_absences(&mut tx, &draft_ids, "submit").await?;
+
+        let submitted = if draft_ids.is_empty() {
+            Vec::new()
+        } else {
+            sqlx::query_scalar(
+                "UPDATE time_entries \
+                 SET status='submitted', submitted_at=CURRENT_TIMESTAMP \
+                 WHERE id = ANY($1) AND status='draft' AND user_id=$2 \
+                 RETURNING id",
+            )
+            .bind(&draft_ids)
+            .bind(user_id)
+            .fetch_all(&mut *tx)
             .await?
-            .rows_affected();
-            if rows > 0 {
-                submitted.push(id);
-            }
-        }
+        };
         tx.commit().await?;
         Ok(submitted)
     }
@@ -754,23 +837,38 @@ impl TimeEntryDb {
         ids: &[i64],
     ) -> AppResult<Vec<i64>> {
         let mut tx = self.pool.begin().await?;
-        let mut approved = Vec::new();
-        for &id in ids {
-            let rows = sqlx::query(
+        sqlx::query("SELECT pg_advisory_xact_lock($1)")
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await?;
+
+        let draft_ids: Vec<i64> = sqlx::query_scalar(
+            "SELECT id FROM time_entries \
+             WHERE id = ANY($1) AND status='draft' AND user_id=$2 \
+             ORDER BY id \
+             FOR UPDATE",
+        )
+        .bind(ids)
+        .bind(user_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        validate_entries_do_not_overlap_blocking_absences(&mut tx, &draft_ids, "approve").await?;
+
+        let approved = if draft_ids.is_empty() {
+            Vec::new()
+        } else {
+            sqlx::query_scalar(
                 "UPDATE time_entries \
                  SET status='approved', submitted_at=CURRENT_TIMESTAMP, \
                      reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP \
-                 WHERE id=$2 AND status='draft' AND user_id=$1",
+                 WHERE id = ANY($2) AND status='draft' AND user_id=$1 \
+                 RETURNING id",
             )
             .bind(user_id)
-            .bind(id)
-            .execute(&mut *tx)
+            .bind(&draft_ids)
+            .fetch_all(&mut *tx)
             .await?
-            .rows_affected();
-            if rows > 0 {
-                approved.push(id);
-            }
-        }
+        };
         tx.commit().await?;
         Ok(approved)
     }
@@ -790,6 +888,19 @@ impl TimeEntryDb {
         ordered_ids.sort_unstable();
         ordered_ids.dedup();
         for id in ordered_ids {
+            let owner_id: Option<i64> =
+                sqlx::query_scalar("SELECT user_id FROM time_entries WHERE id=$1")
+                    .bind(id)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+            let Some(owner_id) = owner_id else {
+                continue;
+            };
+            sqlx::query("SELECT pg_advisory_xact_lock($1)")
+                .bind(owner_id)
+                .execute(&mut *tx)
+                .await?;
+
             let Some(entry) =
                 QueryBuilder::<Postgres>::new(format!("{TE_SELECT} WHERE id=$1 FOR UPDATE"))
                     .build_query_as::<TimeEntry>()
@@ -812,6 +923,8 @@ impl TimeEntryDb {
                     continue;
                 }
             }
+            validate_entries_do_not_overlap_blocking_absences(&mut tx, &[entry.id], "approve")
+                .await?;
             let rows = sqlx::query(
                 "UPDATE time_entries \
                  SET status='approved', reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP \
@@ -965,16 +1078,18 @@ impl TimeEntryDb {
         from: NaiveDate,
         to: NaiveDate,
     ) -> AppResult<Vec<NaiveDate>> {
-        let rows: Vec<(NaiveDate,)> = sqlx::query_as(
-            "SELECT DISTINCT entry_date FROM time_entries \
-             WHERE user_id=$1 AND status NOT IN ('submitted','approved') \
-             AND entry_date BETWEEN $2 AND $3",
-        )
-        .bind(user_id)
-        .bind(from)
-        .bind(to)
-        .fetch_all(&self.pool)
-        .await?;
+        let sql = format!(
+            "SELECT DISTINCT te.entry_date FROM time_entries te \
+             WHERE te.user_id=$1 AND ({INCOMPLETE_TIME_ENTRY_CONDITION}) \
+             AND te.entry_date BETWEEN $2 AND $3"
+        );
+        // AssertSqlSafe: the formatted fragment is a compile-time status predicate.
+        let rows: Vec<(NaiveDate,)> = sqlx::query_as(sqlx::AssertSqlSafe(sql))
+            .bind(user_id)
+            .bind(from)
+            .bind(to)
+            .fetch_all(&self.pool)
+            .await?;
         Ok(rows.into_iter().map(|(d,)| d).collect())
     }
 
@@ -987,21 +1102,25 @@ impl TimeEntryDb {
         from: NaiveDate,
         to: NaiveDate,
     ) -> AppResult<Vec<(i32, i32, i64, i64)>> {
-        Ok(sqlx::query_as::<_, (i32, i32, i64, i64)>(
+        let sql = format!(
             "SELECT \
-                 EXTRACT(YEAR FROM entry_date)::int AS y, \
-                 EXTRACT(MONTH FROM entry_date)::int AS m, \
+                 EXTRACT(YEAR FROM te.entry_date)::int AS y, \
+                 EXTRACT(MONTH FROM te.entry_date)::int AS m, \
                  COUNT(*) AS total, \
-                                 COUNT(*) FILTER (WHERE status NOT IN ('submitted','approved')) AS incomplete \
-                         FROM time_entries \
-                         WHERE user_id = $1 AND entry_date >= $2 AND entry_date <= $3 \
-             GROUP BY y, m",
+                 COUNT(*) FILTER (WHERE {INCOMPLETE_TIME_ENTRY_CONDITION}) AS incomplete \
+             FROM time_entries te \
+             WHERE te.user_id = $1 AND te.entry_date >= $2 AND te.entry_date <= $3 \
+             GROUP BY y, m"
+        );
+        // AssertSqlSafe: the formatted fragment is a compile-time status predicate.
+        Ok(
+            sqlx::query_as::<_, (i32, i32, i64, i64)>(sqlx::AssertSqlSafe(sql))
+                .bind(user_id)
+                .bind(from)
+                .bind(to)
+                .fetch_all(&self.pool)
+                .await?,
         )
-        .bind(user_id)
-        .bind(from)
-        .bind(to)
-        .fetch_all(&self.pool)
-        .await?)
     }
 
     pub fn parse_time_pub(s: &str) -> AppResult<NaiveTime> {
