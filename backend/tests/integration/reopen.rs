@@ -233,6 +233,88 @@ async fn correction_only_supersedes_overlapping_rejected_entries() {
 }
 
 #[tokio::test]
+async fn partial_correction_does_not_supersede_rejected_entry() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (_lead_id, lead_pw, emp_id, emp_pw, monday_iso, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "partial-rejected").await;
+    let lead = login_change_pw(&app, "lead-partial-rejected@example.com", &lead_pw).await;
+    let emp = login_change_pw(&app, "emp-partial-rejected@example.com", &emp_pw).await;
+    let monday = chrono::NaiveDate::parse_from_str(&monday_iso, "%Y-%m-%d").unwrap();
+
+    let (status, body) = emp
+        .post(
+            "/api/v1/time-entries",
+            &json!({
+                "entry_date": monday_iso,
+                "start_time": "08:00",
+                "end_time": "16:00",
+                "category_id": cat_id,
+                "comment": "rejected full day"
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create rejected full-day entry");
+    let rejected_entry_id = id(&body);
+    let (status, _) = emp
+        .post(
+            "/api/v1/time-entries/submit",
+            &json!({"ids": [rejected_entry_id]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "submit full-day entry");
+    let (status, _) = lead
+        .post(
+            "/api/v1/time-entries/batch-reject",
+            &json!({"ids": [rejected_entry_id], "reason": "partial correction required"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "reject full-day entry");
+
+    let (status, body) = emp
+        .post(
+            "/api/v1/time-entries",
+            &json!({
+                "entry_date": monday_iso,
+                "start_time": "08:00",
+                "end_time": "10:00",
+                "category_id": cat_id,
+                "comment": "partial correction"
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create partial correction");
+    let correction_id = id(&body);
+    let (status, _) = emp
+        .post(
+            "/api/v1/time-entries/submit",
+            &json!({"ids": [correction_id]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "submit partial correction");
+
+    let time_incomplete_dates = zerf::repository::TimeEntryDb::new(app.state.pool.clone())
+        .get_incomplete_dates_in_range(emp_id, monday, monday)
+        .await
+        .expect("load time incomplete dates");
+    assert_eq!(
+        time_incomplete_dates,
+        vec![monday],
+        "partial replacement must leave the rejected span incomplete"
+    );
+    let report_incomplete_dates = zerf::repository::ReportDb::new(app.state.pool.clone())
+        .incomplete_dates_in_range(emp_id, monday, monday)
+        .await
+        .expect("load report incomplete dates");
+    assert!(
+        report_incomplete_dates.contains(&monday),
+        "report completeness must require full rejected-span coverage"
+    );
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
 async fn reopen_full_workflow() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;

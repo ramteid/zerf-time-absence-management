@@ -1671,7 +1671,7 @@ If a backup fails, all active admins receive a pinned in-app notification and a 
 
 #### Report PDF Upload
 
-When enabled, Zerf queues an individual timesheet PDF for each employee on a configurable day each month. Each PDF covers the **previous calendar month**. Employees who have not yet submitted all their weeks are uploaded automatically on the next daily check — late submitters are caught up without manual intervention. Employees who were archived after the period ended are included for archive correctness.
+When enabled, Zerf queues an individual timesheet PDF for each employee on a configurable day each month. Each PDF covers the **previous calendar month**. Employees who have not yet submitted all their weeks are uploaded automatically on the next daily check - late submitters are caught up without manual intervention. If the month still contains a pending absence request, the PDF waits until that request is approved or rejected. Employees who were archived after the period ended are included for archive correctness.
 
 If the feature was disabled for several months and is then re-enabled, or if the server missed a month boundary, Zerf automatically backfills all intervening months so no timesheet is silently skipped. **Upload now** has the same backfill behaviour.
 

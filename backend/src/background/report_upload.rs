@@ -301,24 +301,26 @@ async fn process_one_entry(
     // archiving (they can no longer log in to re-submit them).  Exporting a
     // month that contains those reverted drafts would produce a PDF where draft
     // rows appear but are excluded from the Total - a known reconciliation
-    // defect.  Guard against it: if any draft entry exists in the period, drop
-    // this queue entry without uploading; the official record for that month
-    // is whatever was approved before archiving.
+    // defect.  Guard against it: if any draft entry exists in the period, skip
+    // this run and notify admins so they can manually delete the draft entries
+    // to unblock the export.  The queue entry is NOT deleted: if an admin
+    // corrects the month (e.g. deletes the orphaned drafts), the next daily
+    // run will find no drafts and proceed normally.
     if is_archived {
         let reports_db = crate::repository::ReportDb::new(state.pool.clone());
         if reports_db
             .has_draft_entries_in_range(user.id, from, to)
             .await?
         {
-            tracing::info!(
-                "Report upload: skipping archived user {} period {} - month contains draft entries reverted during archiving",
-                user.id, entry.period
+            let msg = format!(
+                "Archived user {} ({} {}) has draft entries in period {} that were reverted during archiving. \
+                 Resolve those draft entries before retrying the timesheet PDF export.",
+                user.id, user.first_name, user.last_name, entry.period
             );
-            state
-                .db
-                .export_queue
-                .delete_entry(entry.user_id, &entry.period)
-                .await?;
+            tracing::warn!(target: "zerf::report_upload", "{msg}");
+            notify_admins_upload_failed(state, &msg).await;
+            // Leave in queue - admins can fix the data; the next daily run
+            // will retry and succeed once the drafts are gone.
             return Ok(());
         }
         // No drafts: all entries are submitted/approved/rejected - safe to export

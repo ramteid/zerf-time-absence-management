@@ -670,10 +670,21 @@ pub fn complete_weeks_in_month(
 
 /// Fetches holidays, absent days, submitted dates, and incomplete dates for the
 /// range covered by `complete_week_mondays`. Assumes the slice is non-empty.
+///
+/// `include_requested_absences` controls whether `requested` (pending) absences
+/// are included in the absent-day set:
+///  - `true` for the user-facing completeness nag and submission reminders: an
+///    employee cannot log entries on days covered by a pending absence, so those
+///    days must be excused to avoid an unsatisfiable requirement.
+///  - `false` for the PDF-export gate: a pending absence means the month is not
+///    yet settled; exporting it would produce a PDF where pending days show as
+///    0-hour rows with a full daily target (unexplained deficit), because the
+///    content side (`approved_absence_rows`) only shows finalized absences.
 pub async fn load_week_check_data(
     pool: &crate::db::DatabasePool,
     user_id: i64,
     complete_week_mondays: &[NaiveDate],
+    include_requested_absences: bool,
 ) -> AppResult<(
     std::collections::HashSet<NaiveDate>,
     std::collections::HashSet<NaiveDate>,
@@ -684,9 +695,15 @@ pub async fn load_week_check_data(
     let check_to = *complete_week_mondays.last().unwrap() + Duration::days(6);
     let reports_db = crate::repository::ReportDb::new(pool.clone());
     let holiday_set = reports_db.holiday_set(check_from, check_to).await?;
-    let absence_rows = reports_db
-        .absence_ranges_in_period(user_id, check_from, check_to)
-        .await?;
+    let absence_rows = if include_requested_absences {
+        reports_db
+            .absence_ranges_in_period(user_id, check_from, check_to)
+            .await?
+    } else {
+        reports_db
+            .finalized_absence_ranges_in_period(user_id, check_from, check_to)
+            .await?
+    };
     let category_flags = AbsenceCategoryFlags::load(pool).await?;
     let absent_days = expand_absence_date_set(&absence_rows, check_from, check_to, &category_flags);
     let submitted_dates = reports_db
@@ -754,8 +771,11 @@ pub async fn submission_status_for_month(
     }
     let check_from = complete_week_mondays[0];
     let check_to = *complete_week_mondays.last().unwrap() + Duration::days(6);
+    // Include requested absences: the employee cannot log entries on pending
+    // absence days, so those days must be excused to prevent an unsatisfiable
+    // completeness requirement in the user-facing Submissions tile.
     let (holiday_set, absent_days, submitted_dates, incomplete_dates) =
-        load_week_check_data(pool, user_id, &complete_week_mondays).await?;
+        load_week_check_data(pool, user_id, &complete_week_mondays, true).await?;
     if !check_weeks_all_submitted(
         &complete_week_mondays,
         &holiday_set,
@@ -1332,8 +1352,12 @@ pub async fn all_weeks_submitted_for_month(
     if complete_week_mondays.is_empty() {
         return Ok(true);
     }
+    // Exclude requested absences from the export gate: a pending absence means
+    // the month is not yet settled.  Exporting would produce a PDF where those
+    // days render as 0-hour rows with a full daily target because the content
+    // side (approved_absence_rows) only includes finalized absences.
     let (holiday_set, absent_days, submitted_dates, incomplete_dates) =
-        load_week_check_data(pool, user_id, &complete_week_mondays).await?;
+        load_week_check_data(pool, user_id, &complete_week_mondays, false).await?;
     Ok(check_weeks_all_submitted(
         &complete_week_mondays,
         &holiday_set,

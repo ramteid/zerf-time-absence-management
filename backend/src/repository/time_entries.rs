@@ -76,53 +76,67 @@ const TE_SELECT: &str =
      FROM time_entries";
 
 // A rejected entry is considered "replaced" - and therefore excluded from
-// completeness checks - only when a submitted/approved entry exists on the
-// same date AND its time span overlaps the rejected entry's time span.  A
-// date-only match was too broad: a rejected morning entry and a rejected
-// afternoon entry would both be neutralised by re-booking only the morning,
-// silently dropping the unaddressed afternoon rejection from every
-// completeness gate and the reopen flow.
+// completeness checks - only when submitted/approved entries on the same date
+// jointly cover the rejected entry's entire time span.  "Any overlap" was
+// not sufficient: a 30-minute re-booking over an 8-hour rejected entry would
+// neutralise the entire rejected row, silently absolving the unaddressed hours from
+// every completeness gate and the reopen selection.
 //
-// Times are stored as TEXT ('HH:MM' or 'HH:MM:SS'); cast to TIME so that the
-// overlap comparison is semantic rather than lexicographic.  The cast is safe
-// because the schema-level CHECK constraint guarantees the format.
+// Implementation: cast times to TIME (schema CHECK guarantees the HH:MM or
+// HH:MM:SS format), then sum the intersection minutes that each
+// submitted/approved replacement contributes inside the rejected span.  If
+// the total equals or exceeds the rejected entry's own duration, the span is
+// fully covered.  Because validate_entry prevents overlapping entries on the
+// same day, replacement entries never double-count each other.
 pub(crate) const EFFECTIVE_REJECTED_TIME_ENTRY_CONDITION: &str = "\
     te.status = 'rejected' \
-    AND NOT EXISTS (\
-        SELECT 1 FROM time_entries replacement \
+    AND (\
+        SELECT COALESCE(SUM(\
+            LEAST(replacement.end_time::time, te.end_time::time)\
+            - GREATEST(replacement.start_time::time, te.start_time::time)\
+        ), '0'::interval)\
+        FROM time_entries replacement \
         WHERE replacement.user_id = te.user_id \
         AND replacement.entry_date = te.entry_date \
         AND replacement.status IN ('submitted','approved') \
         AND replacement.start_time::time < te.end_time::time \
         AND replacement.end_time::time > te.start_time::time\
-    )";
+    ) < (te.end_time::time - te.start_time::time)";
 
 pub(crate) const INCOMPLETE_TIME_ENTRY_CONDITION: &str = "\
     te.status NOT IN ('submitted','approved') \
     AND (\
         te.status <> 'rejected' \
-        OR NOT EXISTS (\
-            SELECT 1 FROM time_entries replacement \
+        OR (\
+            SELECT COALESCE(SUM(\
+                LEAST(replacement.end_time::time, te.end_time::time)\
+                - GREATEST(replacement.start_time::time, te.start_time::time)\
+            ), '0'::interval)\
+            FROM time_entries replacement \
             WHERE replacement.user_id = te.user_id \
             AND replacement.entry_date = te.entry_date \
             AND replacement.status IN ('submitted','approved') \
             AND replacement.start_time::time < te.end_time::time \
             AND replacement.end_time::time > te.start_time::time\
-        )\
+        ) < (te.end_time::time - te.start_time::time)\
     )";
 
 pub(crate) const REOPENABLE_TIME_ENTRY_CONDITION: &str = "\
     te.status IN ('submitted','approved') \
     OR (\
         te.status = 'rejected' \
-        AND NOT EXISTS (\
-            SELECT 1 FROM time_entries replacement \
+        AND (\
+            SELECT COALESCE(SUM(\
+                LEAST(replacement.end_time::time, te.end_time::time)\
+                - GREATEST(replacement.start_time::time, te.start_time::time)\
+            ), '0'::interval)\
+            FROM time_entries replacement \
             WHERE replacement.user_id = te.user_id \
             AND replacement.entry_date = te.entry_date \
             AND replacement.status IN ('submitted','approved') \
             AND replacement.start_time::time < te.end_time::time \
             AND replacement.end_time::time > te.start_time::time\
-        )\
+        ) < (te.end_time::time - te.start_time::time)\
     )";
 
 /// Validate that a new/updated time entry is acceptable.
