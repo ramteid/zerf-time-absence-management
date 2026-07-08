@@ -300,24 +300,14 @@ pub async fn carryover_days_into_year(
             let post_window_start = expiry + Duration::days(1);
             let pre_usage = if year_from <= pre_window_end {
                 absence_db
-                    .vacation_workdays_total_filtered(
-                        user.id,
-                        year_from,
-                        pre_window_end,
-                        statuses,
-                    )
+                    .vacation_workdays_total_filtered(user.id, year_from, pre_window_end, statuses)
                     .await?
             } else {
                 0.0
             };
             let post_usage = if post_window_start <= year_to {
                 absence_db
-                    .vacation_workdays_total_filtered(
-                        user.id,
-                        post_window_start,
-                        year_to,
-                        statuses,
-                    )
+                    .vacation_workdays_total_filtered(user.id, post_window_start, year_to, statuses)
                     .await?
             } else {
                 0.0
@@ -386,19 +376,6 @@ pub fn exceeds_vacation_budget(required_days: f64, budget_days: f64) -> bool {
     required_days - budget_days > VACATION_DAY_EPSILON
 }
 
-pub async fn approved_vacation_ranges_in_year_tx(
-    tx: &mut crate::db::PgConnection,
-    user_id: i64,
-    from: NaiveDate,
-    to: NaiveDate,
-    exclude_id: Option<i64>,
-) -> AppResult<Vec<(NaiveDate, NaiveDate)>> {
-    crate::repository::AbsenceDb::approved_vacation_ranges_in_year_tx(
-        tx, user_id, from, to, exclude_id,
-    )
-    .await
-}
-
 #[allow(clippy::too_many_arguments)]
 pub async fn carryover_from_year_into_next_year(
     pool: &crate::db::DatabasePool,
@@ -414,13 +391,32 @@ pub async fn carryover_from_year_into_next_year(
     exclude_id: Option<i64>,
     count_new_for_carryover_source: bool,
 ) -> AppResult<i64> {
-    let mut approved_ranges =
-        approved_vacation_ranges_in_year_tx(tx, user_id, year_from, year_to, exclude_id).await?;
+    // Phantom-carryover guard (mirrors carryover_days_into_year): if the source
+    // year has not yet started, no vacation rows exist, so base_usage would be
+    // zero and we would carry a full phantom entitlement into the next year for
+    // a year that hasn't happened. Return 0 immediately - no carryover flows
+    // out of an unstarted year.
+    let today = crate::services::settings::app_today(pool).await;
+    if year_from.year() > today.year() {
+        return Ok(0);
+    }
+
+    // Pessimistic sourcing (mirrors carryover_days_into_year): count requested
+    // and cancellation_pending absences as consumed in the source year, not
+    // just approved ones.  Without this a pending December absence reserves
+    // December's budget via vacation_ranges_in_year_tx (which includes
+    // requested/pending) while simultaneously appearing as unused here
+    // (approved-only), allowing both sides to be approved and exceeding the
+    // real entitlement by the pending amount.
+    let mut all_ranges = crate::repository::AbsenceDb::vacation_ranges_in_year_tx(
+        tx, user_id, year_from, year_to, exclude_id,
+    )
+    .await?;
     if count_new_for_carryover_source {
         if let Some((new_start, new_end)) =
             clamp_range_to_window(start_date, end_date, year_from, year_to)
         {
-            approved_ranges.push((new_start, new_end));
+            all_ranges.push((new_start, new_end));
         }
     }
 
@@ -428,34 +424,21 @@ pub async fn carryover_from_year_into_next_year(
         let pre_window_end = std::cmp::min(expiry, year_to);
         let post_window_start = expiry + Duration::days(1);
         let pre_usage = if year_from <= pre_window_end {
-            workdays_for_ranges_in_window(
-                pool,
-                user_id,
-                &approved_ranges,
-                year_from,
-                pre_window_end,
-            )
-            .await?
+            workdays_for_ranges_in_window(pool, user_id, &all_ranges, year_from, pre_window_end)
+                .await?
         } else {
             0.0
         };
         let post_usage = if post_window_start <= year_to {
-            workdays_for_ranges_in_window(
-                pool,
-                user_id,
-                &approved_ranges,
-                post_window_start,
-                year_to,
-            )
-            .await?
+            workdays_for_ranges_in_window(pool, user_id, &all_ranges, post_window_start, year_to)
+                .await?
         } else {
             0.0
         };
         post_usage + (pre_usage - carryover_days as f64).max(0.0)
     } else {
         let total_usage =
-            workdays_for_ranges_in_window(pool, user_id, &approved_ranges, year_from, year_to)
-                .await?;
+            workdays_for_ranges_in_window(pool, user_id, &all_ranges, year_from, year_to).await?;
         (total_usage - carryover_days as f64).max(0.0)
     };
 

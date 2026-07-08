@@ -205,6 +205,29 @@ impl ReportDb {
         ))
     }
 
+    /// Returns true when at least one entry with status='draft' exists in the
+    /// given date range.  Used by the report-upload gate for archived users: when
+    /// archiving reverts submitted entries back to draft, those months must be
+    /// skipped (the user can no longer log in to re-submit them).
+    pub async fn has_draft_entries_in_range(
+        &self,
+        user_id: i64,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> AppResult<bool> {
+        let (count,): (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM time_entries \
+             WHERE user_id=$1 AND status='draft' \
+             AND entry_date BETWEEN $2 AND $3",
+        )
+        .bind(user_id)
+        .bind(from)
+        .bind(to)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(count > 0)
+    }
+
     /// Returns true when at least one entry with status='submitted' (pending approval)
     /// exists in the given date range.
     pub async fn has_pending_submitted_entries_in_range(
@@ -226,8 +249,42 @@ impl ReportDb {
         Ok(count > 0)
     }
 
-    /// Absence ranges in a period (for all_weeks_submitted check).
+    /// Absence ranges in a period for the submission-reminder and user-facing
+    /// completeness check.
+    ///
+    /// Includes `requested`, `approved`, and `cancellation_pending` absences.
+    /// A `requested` absence already blocks time-entry creation via `validate_entry`
+    /// (the employee cannot log work on days covered by a pending non-auto-approve
+    /// absence), so those days must also be treated as excused here.  Excluding them
+    /// would make any week containing a backdated requested absence permanently
+    /// unsubmittable and trigger endless submission reminders until the approver
+    /// decides.
     pub async fn absence_ranges_in_period(
+        &self,
+        user_id: i64,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> AppResult<Vec<(NaiveDate, NaiveDate, String)>> {
+        Ok(sqlx::query_as(
+            "SELECT a.start_date, a.end_date, c.slug \
+             FROM absences a JOIN absence_categories c ON c.id = a.category_id \
+             WHERE a.user_id=$1 AND a.status IN ('requested','approved','cancellation_pending') \
+             AND a.end_date >= $2 AND a.start_date <= $3",
+        )
+        .bind(user_id)
+        .bind(from)
+        .bind(to)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// Absence ranges in a period using only finalized statuses (`approved`,
+    /// `cancellation_pending`).  Used by the PDF-export gate: a `requested`
+    /// absence means the month is not yet decided, so it should not pass the gate
+    /// because the PDF content side (`approved_absence_rows`) excludes requested
+    /// absences, so those days would render as 0-hour rows with a full daily
+    /// deficit in the archived timesheet.
+    pub async fn finalized_absence_ranges_in_period(
         &self,
         user_id: i64,
         from: NaiveDate,

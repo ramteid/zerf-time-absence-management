@@ -581,6 +581,72 @@ async fn submission_reminders_treat_approved_absence_as_covered_week() {
 }
 
 #[tokio::test]
+async fn submission_reminders_treat_requested_absence_as_covered_week() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+
+    let ref_date = reference_date();
+    let last_week_monday =
+        ref_date - chrono::Duration::days(ref_date.weekday().num_days_from_monday() as i64 + 7);
+    let week_start = last_week_monday.format("%Y-%m-%d").to_string();
+    let week_end = (last_week_monday + chrono::Duration::days(4))
+        .format("%Y-%m-%d")
+        .to_string();
+
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "requested-absence-reminder@example.com",
+                "first_name": "Requested",
+                "last_name": "Reminder",
+                "role": "employee",
+                "weekly_hours": 20,
+                "leave_days_current_year": 10,
+                "leave_days_next_year": 10,
+                "annual_leave_days": 10,
+                "start_date": week_start,
+                "approver_ids": [1]
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create employee");
+    let emp_pw = temp_pw(&body);
+
+    let emp = login_change_pw(&app, "requested-absence-reminder@example.com", &emp_pw).await;
+
+    let (st, body) = emp
+        .post(
+            "/api/v1/absences",
+            &json!({"kind":"vacation","start_date": week_start,"end_date": week_end}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create requested absence");
+    assert_eq!(body["status"], "requested");
+
+    let (st, _) = emp.delete("/api/v1/notifications").await;
+    assert_eq!(st, StatusCode::OK);
+
+    zerf::background::submission_reminders::run_check(&app.state).await;
+
+    let (st, body) = emp.get("/api/v1/notifications").await;
+    assert_eq!(st, StatusCode::OK);
+    let reminders: Vec<_> = body
+        .as_array()
+        .expect("notifications array")
+        .iter()
+        .filter(|n| n["kind"] == "submission_reminder")
+        .collect();
+    assert_eq!(
+        reminders.len(),
+        0,
+        "requested absence should suppress reminder for that week while approval is pending"
+    );
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
 async fn submission_reminders_treat_cancellation_pending_absence_as_covered_week() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;

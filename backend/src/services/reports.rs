@@ -1414,16 +1414,15 @@ pub async fn build_team_timesheet_sections(
 }
 
 /// Re-queue the monthly timesheet export for `(user_id, date)` pairs whenever
-/// the report upload feature is enabled and the relevant period has already been
-/// exported (entry deleted from the queue after a successful upload). Idempotent
-/// via `ON CONFLICT DO NOTHING`: if the entry is still pending from a previous
-/// queue population it is left untouched.
+/// the report upload feature is enabled. Idempotent via `ON CONFLICT DO
+/// NOTHING`: if the entry is still pending from a previous queue population it
+/// is left untouched.
 ///
-/// Called after any mutation that can change the content of an already-archived
-/// month (batch reject, admin time-entry edit, reopen approval, absence
-/// revocation). The caller passes every `(user_id, date)` pair that was
-/// affected; this function groups them into `YYYY-MM` periods and inserts back
-/// one queue entry per distinct (user_id, period).
+/// Called after any mutation that can change the content of a past month
+/// (approval, rejection, admin time-entry edit, reopen approval, absence status
+/// changes). The caller passes every `(user_id, date)` pair that was affected;
+/// this function groups them into `YYYY-MM` periods and inserts one queue entry
+/// per distinct (user_id, period).
 ///
 /// No-op when the upload feature is disabled so the queue does not accumulate
 /// stale entries on installations that never use Nextcloud upload.
@@ -1436,11 +1435,14 @@ pub async fn requeue_export_for_dates(
     }
     // Check whether upload is enabled at all; bail out early to avoid the cost
     // of grouping when the feature is off.
-    let enabled =
-        crate::services::settings::load_setting(pool, crate::services::settings::REPORT_UPLOAD_ENABLED_KEY, "false")
-            .await
-            .map(|v| v == "true")
-            .unwrap_or(false);
+    let enabled = crate::services::settings::load_setting(
+        pool,
+        crate::services::settings::REPORT_UPLOAD_ENABLED_KEY,
+        "false",
+    )
+    .await
+    .map(|v| v == "true")
+    .unwrap_or(false);
     if !enabled {
         return;
     }
@@ -1475,6 +1477,25 @@ pub async fn requeue_export_for_dates(
             }
         }
     }
+}
+
+/// Re-queue every past-month timesheet touched by an absence date range.
+pub async fn requeue_export_for_absence_period(
+    pool: &crate::db::DatabasePool,
+    user_id: i64,
+    start_date: NaiveDate,
+    end_date: NaiveDate,
+) {
+    if start_date > end_date {
+        return;
+    }
+    let mut pairs = Vec::new();
+    let mut day = start_date;
+    while day <= end_date {
+        pairs.push((user_id, day));
+        day += Duration::days(1);
+    }
+    requeue_export_for_dates(pool, &pairs).await;
 }
 
 #[cfg(test)]

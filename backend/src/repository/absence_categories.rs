@@ -232,16 +232,26 @@ impl AbsenceCategoryDb {
         .await?)
     }
 
-    /// All absence categories (active and inactive) that the employee has
-    /// access to. Used to populate the frontend store with full behavior
-    /// metadata including deactivated categories that may still have live
-    /// absence rows. The frontend uses the `active` flag to filter which
-    /// categories appear in the request dropdown.
+    /// Absence categories the employee may currently request, plus categories
+    /// still referenced by live absences. The projected `active` flag is
+    /// user-specific: it is true only when the category is globally active and
+    /// the employee still has access. This keeps access-revoked categories out
+    /// of request dropdowns while preserving behavior metadata for existing
+    /// requested/approved/cancellation-pending rows.
     pub async fn list_all_for_user(&self, user_id: i64) -> AppResult<Vec<AbsenceCategory>> {
         Ok(sqlx::query_as::<_, AbsenceCategory>(
-            "SELECT c.id, c.slug, c.name, c.color, c.sort_order, c.active, c.cost_type, c.auto_approve_past \
+            "SELECT c.id, c.slug, c.name, c.color, c.sort_order, \
+                    (c.active AND uaca.user_id IS NOT NULL) AS active, \
+                    c.cost_type, c.auto_approve_past \
              FROM absence_categories c \
-             JOIN user_absence_category_access uaca ON uaca.category_id = c.id AND uaca.user_id = $1 \
+             LEFT JOIN user_absence_category_access uaca \
+                    ON uaca.category_id = c.id AND uaca.user_id = $1 \
+             WHERE uaca.user_id IS NOT NULL \
+                OR EXISTS ( \
+                    SELECT 1 FROM absences a \
+                    WHERE a.user_id = $1 AND a.category_id = c.id \
+                    AND a.status IN ('requested','approved','cancellation_pending') \
+                ) \
              ORDER BY c.sort_order, c.name",
         )
         .bind(user_id)

@@ -439,8 +439,7 @@ async fn archive_reverts_cancellation_pending_to_approved() {
     assert_eq!(st, StatusCode::OK);
 
     // Create an employee with admin as approver.
-    let (emp_id, emp_tmp_pw) =
-        make_emp_with_pw(&admin, "empcp@arch.com", "EmpCp", 1).await;
+    let (emp_id, emp_tmp_pw) = make_emp_with_pw(&admin, "empcp@arch.com", "EmpCp", 1).await;
 
     // Log in as employee and change password.
     let emp = app.client();
@@ -479,18 +478,13 @@ async fn archive_reverts_cancellation_pending_to_approved() {
 
     // Admin approves the absence → status becomes `approved`.
     let (st, body) = admin
-        .post(
-            &format!("/api/v1/absences/{abs_id}/approve"),
-            &json!({}),
-        )
+        .post(&format!("/api/v1/absences/{abs_id}/approve"), &json!({}))
         .await;
     assert_eq!(st, StatusCode::OK, "approve absence: {body}");
 
     // Employee requests cancellation of the approved absence → status becomes
     // `cancellation_pending`. This is a pending cancellation, not a new request.
-    let (st, body) = emp
-        .delete(&format!("/api/v1/absences/{abs_id}"))
-        .await;
+    let (st, body) = emp.delete(&format!("/api/v1/absences/{abs_id}")).await;
     assert_eq!(st, StatusCode::OK, "request cancellation: {body}");
 
     let (st, abs_data) = admin.get(&format!("/api/v1/absences/{abs_id}")).await;

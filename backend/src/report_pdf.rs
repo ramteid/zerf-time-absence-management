@@ -74,15 +74,51 @@ struct Column {
 /// Date 22 | Weekday 18 | Start 12 | End 12 | Category 36 | Duration 14 |
 /// Status 13 | Absence 25 | Holiday 28 = 180 mm total.
 const COLUMNS: &[Column] = &[
-    Column { header_key: "pdf_column_date",     width_mm: 22.0, align: Align::Left   },
-    Column { header_key: "pdf_column_weekday",  width_mm: 18.0, align: Align::Left   },
-    Column { header_key: "pdf_column_start",    width_mm: 12.0, align: Align::Center },
-    Column { header_key: "pdf_column_end",      width_mm: 12.0, align: Align::Center },
-    Column { header_key: "pdf_column_category", width_mm: 36.0, align: Align::Left   },
-    Column { header_key: "pdf_column_duration", width_mm: 14.0, align: Align::Right  },
-    Column { header_key: "pdf_column_status",   width_mm: 13.0, align: Align::Left   },
-    Column { header_key: "pdf_column_absence",  width_mm: 25.0, align: Align::Left   },
-    Column { header_key: "pdf_column_holiday",  width_mm: 28.0, align: Align::Left   },
+    Column {
+        header_key: "pdf_column_date",
+        width_mm: 22.0,
+        align: Align::Left,
+    },
+    Column {
+        header_key: "pdf_column_weekday",
+        width_mm: 18.0,
+        align: Align::Left,
+    },
+    Column {
+        header_key: "pdf_column_start",
+        width_mm: 12.0,
+        align: Align::Center,
+    },
+    Column {
+        header_key: "pdf_column_end",
+        width_mm: 12.0,
+        align: Align::Center,
+    },
+    Column {
+        header_key: "pdf_column_category",
+        width_mm: 36.0,
+        align: Align::Left,
+    },
+    Column {
+        header_key: "pdf_column_duration",
+        width_mm: 14.0,
+        align: Align::Right,
+    },
+    Column {
+        header_key: "pdf_column_status",
+        width_mm: 13.0,
+        align: Align::Left,
+    },
+    Column {
+        header_key: "pdf_column_absence",
+        width_mm: 25.0,
+        align: Align::Left,
+    },
+    Column {
+        header_key: "pdf_column_holiday",
+        width_mm: 28.0,
+        align: Align::Left,
+    },
 ];
 
 /// Index of the `Duration` column — the total/summary rows place their value
@@ -131,11 +167,11 @@ pub fn render_timesheet_pdf(
 fn build_pdf(page_streams: Vec<Vec<u8>>) -> Vec<u8> {
     let n = page_streams.len();
 
-    let catalog_id   = Ref::new(1);
+    let catalog_id = Ref::new(1);
     let page_tree_id = Ref::new(2);
-    let helv_id      = Ref::new(3);
-    let helvb_id     = Ref::new(4);
-    let page_ids: Vec<Ref>    = (0..n).map(|i| Ref::new(5 + i as i32)).collect();
+    let helv_id = Ref::new(3);
+    let helvb_id = Ref::new(4);
+    let page_ids: Vec<Ref> = (0..n).map(|i| Ref::new(5 + i as i32)).collect();
     let content_ids: Vec<Ref> = (0..n).map(|i| Ref::new(5 + n as i32 + i as i32)).collect();
 
     let mut pdf = Pdf::new();
@@ -167,7 +203,7 @@ fn build_pdf(page_streams: Vec<Vec<u8>>) -> Vec<u8> {
         {
             let mut res = page.resources();
             let mut fonts = res.fonts();
-            fonts.pair(Name(b"Helv"),  helv_id);
+            fonts.pair(Name(b"Helv"), helv_id);
             fonts.pair(Name(b"HelvB"), helvb_id);
         }
         page.finish();
@@ -191,7 +227,7 @@ impl PdfFont {
     fn name(self) -> Name<'static> {
         match self {
             PdfFont::Regular => Name(b"Helv"),
-            PdfFont::Bold    => Name(b"HelvB"),
+            PdfFont::Bold => Name(b"HelvB"),
         }
     }
 }
@@ -263,7 +299,8 @@ impl<'a> Renderer<'a> {
         self.content.set_fill_rgb(r, g, b);
         self.content.begin_text();
         self.content.set_font(font.name(), size_pt);
-        self.content.next_line(mm_to_pt(x_mm), self.y_pt(baseline_mm));
+        self.content
+            .next_line(mm_to_pt(x_mm), self.y_pt(baseline_mm));
         self.content.show(Str(&encoded));
         self.content.end_text();
     }
@@ -297,7 +334,8 @@ impl<'a> Renderer<'a> {
         self.content.set_stroke_rgb(r, g, b);
         self.content.set_line_width(0.5);
         self.content.move_to(mm_to_pt(MARGIN_LEFT_MM), y);
-        self.content.line_to(mm_to_pt(MARGIN_LEFT_MM + CONTENT_WIDTH_MM), y);
+        self.content
+            .line_to(mm_to_pt(MARGIN_LEFT_MM + CONTENT_WIDTH_MM), y);
         self.content.stroke();
     }
 
@@ -318,15 +356,21 @@ impl<'a> Renderer<'a> {
         let column = &COLUMNS[column_index];
         let left = self.column_x(column_index);
         match column.align {
-            Align::Left   => left + 1.0,
-            Align::Right  => left + column.width_mm - 1.0 - text_width_mm(text, size_pt),
+            Align::Left => left + 1.0,
+            Align::Right => left + column.width_mm - 1.0 - text_width_mm(text, size_pt),
             Align::Center => left + (column.width_mm - text_width_mm(text, size_pt)) / 2.0,
         }
     }
 
     /// Draw the shaded column-header row and advance `y` past it.
     fn draw_table_header(&mut self) {
-        self.fill_rect(MARGIN_LEFT_MM, self.y, CONTENT_WIDTH_MM, HEADER_HEIGHT_MM, HEADER_FILL);
+        self.fill_rect(
+            MARGIN_LEFT_MM,
+            self.y,
+            CONTENT_WIDTH_MM,
+            HEADER_HEIGHT_MM,
+            HEADER_FILL,
+        );
         let baseline = self.y + 4.8;
         for (index, column) in COLUMNS.iter().enumerate() {
             let label = i18n::translate(self.language, column.header_key, &[]);
@@ -385,7 +429,14 @@ impl<'a> Renderer<'a> {
             SUMMARY_TEXT,
         );
         let value_x = self.aligned_x(DURATION_COLUMN, value, 7.5);
-        self.draw_text(value, value_x, baseline, PdfFont::Regular, 7.5, SUMMARY_TEXT);
+        self.draw_text(
+            value,
+            value_x,
+            baseline,
+            PdfFont::Regular,
+            7.5,
+            SUMMARY_TEXT,
+        );
         self.y += ROW_HEIGHT_MM;
     }
 
@@ -568,10 +619,10 @@ fn entry_status_label(language: &Language, status: &str, counts_as_work: bool) -
         return i18n::translate(language, "pdf_status_approved_nc", &[]);
     }
     let key = match status {
-        "draft"     => "pdf_status_draft",
+        "draft" => "pdf_status_draft",
         "submitted" => "pdf_status_submitted",
-        "approved"  => "pdf_status_approved",
-        _           => "pdf_status_other",
+        "approved" => "pdf_status_approved",
+        _ => "pdf_status_other",
     };
     i18n::translate(language, key, &[])
 }
@@ -651,10 +702,7 @@ mod tests {
     fn entry_status_label_maps_statuses_and_flags_correctly() {
         let language = Language::default();
         // Approved crediting entry → "Approved".
-        assert_eq!(
-            entry_status_label(&language, "approved", true),
-            "Approved"
-        );
+        assert_eq!(entry_status_label(&language, "approved", true), "Approved");
         // Approved non-crediting entry → notes it is not counted.
         let nc_label = entry_status_label(&language, "approved", false);
         assert!(

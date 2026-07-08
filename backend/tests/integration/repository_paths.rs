@@ -1388,16 +1388,6 @@ async fn absences_repository_workflow() {
     .await
     .expect("vacation ranges in year tx");
     assert_eq!(vacation_ranges.len(), 1);
-    let approved_ranges = zerf::repository::AbsenceDb::approved_vacation_ranges_in_year_tx(
-        &mut tx,
-        emp_id,
-        monday,
-        friday + Duration::days(7),
-        None,
-    )
-    .await
-    .expect("approved vacation ranges in year tx");
-    assert_eq!(approved_ranges.len(), 1);
     tx.commit().await.expect("commit absence tx");
 
     // Time-conflict is checked at approval, not at creation — requesting an absence

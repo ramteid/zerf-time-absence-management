@@ -169,14 +169,6 @@ pub async fn update(
         },
     )
     .await?;
-    // An admin edit of an approved entry in a past month changes the content of
-    // the already-archived official timesheet. Re-queue the Nextcloud export so
-    // the next daily run re-uploads a corrected PDF.
-    crate::services::reports::requeue_export_for_dates(
-        &app_state.pool,
-        &[(updated.user_id, updated.entry_date)],
-    )
-    .await;
     Ok(Json(updated))
 }
 
@@ -263,6 +255,30 @@ pub async fn submit(
                 Some(serde_json::json!({"status": "approved", "reviewed_by": requester.id})),
             )
             .await;
+        }
+        match app_state
+            .db
+            .time_entries
+            .entry_dates_for_ids(&approved_ids)
+            .await
+        {
+            Ok(entry_dates) => {
+                let user_date_pairs: Vec<(i64, NaiveDate)> = entry_dates
+                    .into_iter()
+                    .map(|entry_date| (requester.id, entry_date))
+                    .collect();
+                crate::services::reports::requeue_export_for_dates(
+                    &app_state.pool,
+                    &user_date_pairs,
+                )
+                .await;
+            }
+            Err(e) => {
+                tracing::warn!(
+                    target: "zerf::time_entries",
+                    "failed to load auto-approved entry dates for report export requeue: {e}"
+                );
+            }
         }
         return Ok(Json(serde_json::json!({
             "ok": true,
@@ -411,6 +427,14 @@ pub async fn batch_approve(
         )
         .await;
         clear_submission_pending_for_entries(&app_state, &approved_entries).await;
+        // A past-month PDF can be uploaded once all weeks are submitted, before
+        // every entry is approved. Approval changes which minutes reach the
+        // PDF Total row, so archived months must be regenerated.
+        let user_date_pairs: Vec<(i64, NaiveDate)> = approved_entries
+            .iter()
+            .map(|e| (e.user_id, e.entry_date))
+            .collect();
+        crate::services::reports::requeue_export_for_dates(&app_state.pool, &user_date_pairs).await;
     }
     Ok(Json(
         serde_json::json!({"ok": true, "count": approved_entries.len()}),

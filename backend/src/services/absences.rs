@@ -411,7 +411,7 @@ pub async fn create_absence(
             body.start_date,
             body.end_date,
             None,
-            false,
+            true,
         )
         .await?;
     }
@@ -462,6 +462,13 @@ pub async fn create_absence(
         .await;
     } else if created_absence.auto_approve_past && created_absence.status == "approved" {
         notify_sick_auto_approved(app_state, requester, &created_absence, new_absence_id).await;
+        crate::services::reports::requeue_export_for_absence_period(
+            &app_state.pool,
+            created_absence.user_id,
+            created_absence.start_date,
+            created_absence.end_date,
+        )
+        .await;
     }
     Ok(created_absence)
 }
@@ -554,7 +561,7 @@ pub async fn update_absence(
             body.start_date,
             body.end_date,
             Some(absence_id),
-            false,
+            true,
         )
         .await?;
     }
@@ -628,6 +635,13 @@ pub async fn update_absence(
         )
         .await;
         notify_sick_auto_approved(app_state, requester, &absence_after_update, absence_id).await;
+        crate::services::reports::requeue_export_for_absence_period(
+            &app_state.pool,
+            absence_after_update.user_id,
+            absence_after_update.start_date,
+            absence_after_update.end_date,
+        )
+        .await;
     }
     Ok(absence_after_update)
 }
@@ -893,6 +907,13 @@ pub async fn approve_absence(
         )
         .await;
     }
+    crate::services::reports::requeue_export_for_absence_period(
+        &app_state.pool,
+        absence.user_id,
+        absence.start_date,
+        absence.end_date,
+    )
+    .await;
     Ok(serde_json::json!({"ok":true}))
 }
 
@@ -1084,6 +1105,13 @@ pub async fn approve_cancellation_absence(
         )
         .await;
     }
+    crate::services::reports::requeue_export_for_absence_period(
+        &app_state.pool,
+        absence.user_id,
+        absence.start_date,
+        absence.end_date,
+    )
+    .await;
     Ok(serde_json::json!({"ok": true}))
 }
 
@@ -1243,19 +1271,13 @@ pub async fn revoke_absence(
         )
         .await;
     }
-    // Re-queue the Nextcloud archive export for all months the revoked absence
-    // spanned. Revoking an approved absence changes which days have a work target
-    // (days that were absence-covered now count toward flextime again), so any
-    // already-archived PDF for those months now diverges from the live ledger.
-    {
-        let mut pairs: Vec<(i64, chrono::NaiveDate)> = Vec::new();
-        let mut day = absence.start_date;
-        while day <= absence.end_date {
-            pairs.push((absence.user_id, day));
-            day += chrono::Duration::days(1);
-        }
-        crate::services::reports::requeue_export_for_dates(&app_state.pool, &pairs).await;
-    }
+    crate::services::reports::requeue_export_for_absence_period(
+        &app_state.pool,
+        absence.user_id,
+        absence.start_date,
+        absence.end_date,
+    )
+    .await;
     Ok(serde_json::json!({"ok":true}))
 }
 

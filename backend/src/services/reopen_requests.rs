@@ -154,27 +154,75 @@ pub async fn notify_assigned_approvers_if_admin_acted(
 ///
 /// This is a best-effort, fire-and-forget operation. If the underlying DB call
 /// fails the submission has already succeeded; we log the warning and continue.
-pub async fn cancel_zombie_reopen_requests(app_state: &AppState, user_id: i64, weeks: &[NaiveDate]) {
+/// When a request is successfully rejected:
+///  - Approver notifications referencing it are cleared (marked read).
+///  - An audit log entry is written.
+///  - The employee receives an in-app notification explaining the auto-rejection.
+pub async fn cancel_zombie_reopen_requests(
+    app_state: &AppState,
+    user_id: i64,
+    weeks: &[NaiveDate],
+) {
     for &week_start in weeks {
+        const REASON: &str = "Superseded by a new week submission.";
         match app_state
             .db
             .reopen_requests
-            .reject_pending_for_week(
-                user_id,
-                week_start,
-                "Superseded by a new week submission.",
-            )
+            .reject_pending_for_week(user_id, week_start, REASON)
             .await
         {
-            Ok(true) => {
+            Ok(Some(request_id)) => {
                 tracing::debug!(
                     target: "zerf::reopen_requests",
                     user_id,
                     week_start = %week_start,
+                    request_id,
                     "Cancelled zombie pending reopen request after submission."
                 );
+                // Clear pending approval notifications from every approver's queue
+                // so they don't see a stale "please review this edit request" badge.
+                notifications::clear_pending_for_reference(app_state, "reopen_request", request_id)
+                    .await;
+                // Audit trail for the auto-rejection.
+                crate::audit::log(
+                    &app_state.pool,
+                    user_id,
+                    "rejected",
+                    "reopen_requests",
+                    request_id,
+                    None,
+                    Some(serde_json::json!({
+                        "status": "rejected",
+                        "reason": REASON
+                    })),
+                )
+                .await;
+                // Notify the employee that their reopen request was auto-rejected
+                // due to the new submission, so they aren't left wondering why
+                // their request disappeared from the pending list.
+                let language = notification_language(&app_state.pool).await;
+                let week_label = crate::i18n::format_week_label(&language, week_start);
+                let week_iso = week_start.format("%Y-%m-%d").to_string();
+                let frontend_body = format!(
+                    "{{\"week\":\"{week_iso}\",\"reason\":{}}}",
+                    serde_json::json!(REASON),
+                );
+                notifications::create_with_frontend_body(
+                    app_state,
+                    &language,
+                    user_id,
+                    "reopen_rejected",
+                    "reopen_rejected_title",
+                    "reopen_rejected_body",
+                    vec![("week_label", week_label), ("reason", REASON.to_string())],
+                    &frontend_body,
+                    false, // in-app only - no email for an automatic system action
+                    Some("reopen_request"),
+                    Some(request_id),
+                )
+                .await;
             }
-            Ok(false) => {}
+            Ok(None) => {}
             Err(e) => {
                 tracing::warn!(
                     target: "zerf::reopen_requests",

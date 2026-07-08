@@ -649,7 +649,7 @@ Vacation status impact:
 
 Important distinction:
 
-- Carryover source (how many days are transferred from previous year) uses previous-year approved usage only. Cancellation-pending days from the previous year do not reduce next year's carryover: while a cancellation is undecided we favor the user and assume the day may be returned. If the cancellation is later rejected, the day reverts to approved and the carryover recomputes downward on the next read.
+- Carryover source (how many days are transferred from the previous year) uses previous-year approved, requested, and cancellation-pending vacation usage. Pending requests reduce carryover because they already reserve the previous year's budget.
 - Current-year availability uses approved plus requested plus cancellation pending reservation.
 
 ### Carryover expiry behavior
@@ -676,7 +676,7 @@ If one vacation request spans two years, Zerf validates both years separately:
 
 - Part inside start year is checked against start-year budget.
 - Part inside end year is checked against end-year budget.
-- Carryover into end year is derived from remaining start-year entitlement.
+- Carryover into end year is derived from remaining start-year entitlement after approved, requested, and cancellation-pending vacation usage.
 
 This prevents a request from being valid in one year but over budget in the other year.
 
@@ -800,7 +800,7 @@ On the configured submission deadline day each month, every active user with wee
 The reminder is sent directly to the affected user, not to their approvers. Duplicate reminders for the same user and deadline day are suppressed.
 
 **What triggers the reminder:**
-- Any required workday in a past week not covered by a submitted/approved entry or an approved absence.
+- Any required workday in a past week not covered by a submitted/approved entry or a requested, approved, or cancellation-pending absence.
 - Days with only draft or unresolved rejected entries count as incomplete.
 - Non-crediting entries fully participate: a day covered only by an unsubmitted non-crediting entry keeps the week incomplete.
 
@@ -1675,7 +1675,7 @@ When enabled, Zerf queues an individual timesheet PDF for each employee on a con
 
 If the feature was disabled for several months and is then re-enabled, or if the server missed a month boundary, Zerf automatically backfills all intervening months so no timesheet is silently skipped. **Upload now** has the same backfill behaviour.
 
-If a past month is changed after the PDF was already uploaded — for example an entry is rejected, a week is reopened and re-submitted, or an approved absence is revoked — Zerf automatically re-queues the affected employee's timesheet for that month and uploads an updated PDF on the next daily run.
+If a past month is changed after the PDF was already uploaded - for example an entry is approved or rejected, an approved entry is corrected by an admin, a week is reopened and re-submitted, or an absence is approved, cancelled, or revoked - Zerf automatically re-queues the affected employee's timesheet for that month. Older months are uploaded on the next daily run. The just-finished previous month waits until the configured upload day unless an admin clicks **Upload now**.
 
 | Setting | Description |
 | --- | --- |
@@ -1730,7 +1730,9 @@ Constraints:
 - Like time categories, each absence category can be enabled or disabled per
   employee from the same edit dialog. Only checked employees can request the
   category going forward; existing absences already in that category are
-  unaffected.
+  unaffected. If an employee still has a live absence in a category that is
+  later disabled for them, Zerf keeps that category's behavior for the existing
+  absence but does not offer it for new requests.
 
 ### Managing holidays
 

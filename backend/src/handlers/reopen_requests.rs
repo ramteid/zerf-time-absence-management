@@ -350,7 +350,12 @@ pub async fn approve(
     let week_start_date = reopen_request.week_start;
     let user_id_for_requeue = reopen_request.user_id;
     let pairs: Vec<(i64, chrono::NaiveDate)> = (0..=6)
-        .map(|d| (user_id_for_requeue, week_start_date + chrono::Duration::days(d)))
+        .map(|d| {
+            (
+                user_id_for_requeue,
+                week_start_date + chrono::Duration::days(d),
+            )
+        })
         .collect();
     crate::services::reports::requeue_export_for_dates(&app_state.pool, &pairs).await;
     Ok(Json(

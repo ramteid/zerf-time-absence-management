@@ -379,6 +379,48 @@ async fn absence_category_per_user_access_workflow() {
         StatusCode::OK,
         "re-enabled absence category accepts requests: {body}"
     );
+    let requested_absence_id = id(&body);
+
+    let (st, _) = admin
+        .put(
+            &format!("/api/v1/absence-categories/{training_cat_id}/users"),
+            &json!({"user_ids": []}),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::OK,
+        "disable category again with live absence"
+    );
+
+    let (st, category_metadata) = emp.get("/api/v1/absence-categories").await;
+    assert_eq!(st, StatusCode::OK);
+    let training_metadata = category_metadata
+        .as_array()
+        .expect("category metadata array")
+        .iter()
+        .find(|c| c["id"].as_i64() == Some(training_cat_id))
+        .expect("live absence category remains available for behavior lookup");
+    assert_eq!(
+        training_metadata["active"].as_bool(),
+        Some(false),
+        "access-revoked live absence category must not remain selectable"
+    );
+    assert_eq!(
+        training_metadata["auto_approve_past"].as_bool(),
+        Some(false),
+        "behavior metadata must still be present for frontend lookups"
+    );
+
+    let (_, absences) = emp.get("/api/v1/absences").await;
+    assert!(
+        absences
+            .as_array()
+            .expect("absences array")
+            .iter()
+            .any(|absence| absence["id"].as_i64() == Some(requested_absence_id)),
+        "access changes must not hide the existing absence"
+    );
 
     app.cleanup().await;
 }

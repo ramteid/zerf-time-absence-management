@@ -75,13 +75,26 @@ const TE_SELECT: &str =
      submitted_at, reviewed_by, reviewed_at, rejection_reason, created_at, updated_at \
      FROM time_entries";
 
+// A rejected entry is considered "replaced" - and therefore excluded from
+// completeness checks - only when a submitted/approved entry exists on the
+// same date AND its time span overlaps the rejected entry's time span.  A
+// date-only match was too broad: a rejected morning entry and a rejected
+// afternoon entry would both be neutralised by re-booking only the morning,
+// silently dropping the unaddressed afternoon rejection from every
+// completeness gate and the reopen flow.
+//
+// Times are stored as TEXT ('HH:MM' or 'HH:MM:SS'); cast to TIME so that the
+// overlap comparison is semantic rather than lexicographic.  The cast is safe
+// because the schema-level CHECK constraint guarantees the format.
 pub(crate) const EFFECTIVE_REJECTED_TIME_ENTRY_CONDITION: &str = "\
     te.status = 'rejected' \
     AND NOT EXISTS (\
         SELECT 1 FROM time_entries replacement \
         WHERE replacement.user_id = te.user_id \
         AND replacement.entry_date = te.entry_date \
-        AND replacement.status IN ('submitted','approved')\
+        AND replacement.status IN ('submitted','approved') \
+        AND replacement.start_time::time < te.end_time::time \
+        AND replacement.end_time::time > te.start_time::time\
     )";
 
 pub(crate) const INCOMPLETE_TIME_ENTRY_CONDITION: &str = "\
@@ -92,7 +105,9 @@ pub(crate) const INCOMPLETE_TIME_ENTRY_CONDITION: &str = "\
             SELECT 1 FROM time_entries replacement \
             WHERE replacement.user_id = te.user_id \
             AND replacement.entry_date = te.entry_date \
-            AND replacement.status IN ('submitted','approved')\
+            AND replacement.status IN ('submitted','approved') \
+            AND replacement.start_time::time < te.end_time::time \
+            AND replacement.end_time::time > te.start_time::time\
         )\
     )";
 
@@ -104,7 +119,9 @@ pub(crate) const REOPENABLE_TIME_ENTRY_CONDITION: &str = "\
             SELECT 1 FROM time_entries replacement \
             WHERE replacement.user_id = te.user_id \
             AND replacement.entry_date = te.entry_date \
-            AND replacement.status IN ('submitted','approved')\
+            AND replacement.status IN ('submitted','approved') \
+            AND replacement.start_time::time < te.end_time::time \
+            AND replacement.end_time::time > te.start_time::time\
         )\
     )";
 
@@ -382,11 +399,19 @@ async fn validate_entries_do_not_overlap_blocking_absences(
         return Ok(());
     }
 
+    // Only `approved` and `cancellation_pending` absences block submission and
+    // approval.  `requested` absences are deliberately excluded: the conflict
+    // resolution flow allows employees to submit entries and lets the approver
+    // handle any overlap when deciding the absence.  Blocking on `requested`
+    // would let any unresolved absence request jam the employee's ability to
+    // submit a week, and would cause the approver's batch-approve to error on
+    // a conflict that was created after submission - handing employees a lever
+    // to block approvals indefinitely.
     let conflict: Option<(i64, NaiveDate, String)> = sqlx::query_as(
         "SELECT te.id, te.entry_date, c.slug \
          FROM time_entries te \
          JOIN absences a ON a.user_id = te.user_id \
-             AND a.status IN ('requested','approved','cancellation_pending') \
+             AND a.status IN ('approved','cancellation_pending') \
              AND a.start_date <= te.entry_date \
              AND a.end_date >= te.entry_date \
          JOIN absence_categories c ON c.id = a.category_id \
@@ -887,20 +912,34 @@ impl TimeEntryDb {
         let mut ordered_ids = ids.to_vec();
         ordered_ids.sort_unstable();
         ordered_ids.dedup();
-        for id in ordered_ids {
-            let owner_id: Option<i64> =
-                sqlx::query_scalar("SELECT user_id FROM time_entries WHERE id=$1")
-                    .bind(id)
-                    .fetch_optional(&mut *tx)
-                    .await?;
-            let Some(owner_id) = owner_id else {
-                continue;
-            };
+
+        // Collect all distinct owner ids for the requested entries, sort them
+        // ascending, and acquire all advisory locks up front before entering
+        // the per-entry processing loop.  Lock ordering is the standard deadlock
+        // prevention technique: two concurrent batch approvals that touch the
+        // same two users' entries will always acquire owner locks in the same
+        // order, so they cannot deadlock each other.
+        let owner_ids: Vec<i64> = if ordered_ids.is_empty() {
+            Vec::new()
+        } else {
+            let mut ids_sorted: Vec<i64> = sqlx::query_scalar(
+                "SELECT DISTINCT user_id FROM time_entries WHERE id = ANY($1) ORDER BY user_id",
+            )
+            .bind(&ordered_ids)
+            .fetch_all(&mut *tx)
+            .await?;
+            ids_sorted.sort_unstable();
+            ids_sorted.dedup();
+            ids_sorted
+        };
+        for owner_id in owner_ids {
             sqlx::query("SELECT pg_advisory_xact_lock($1)")
                 .bind(owner_id)
                 .execute(&mut *tx)
                 .await?;
+        }
 
+        for id in ordered_ids {
             let Some(entry) =
                 QueryBuilder::<Postgres>::new(format!("{TE_SELECT} WHERE id=$1 FOR UPDATE"))
                     .build_query_as::<TimeEntry>()

@@ -96,8 +96,8 @@ fn deadline_is_due_now(now: chrono::DateTime<chrono_tz::Tz>, day_of_month: u8) -
 /// upload, so the reminder can never disagree with those views:
 ///   - any draft or rejected entry anywhere in the week makes it incomplete;
 ///   - otherwise every contract workday must be covered by a submitted or
-///     approved entry, a public holiday, an approved absence, or fall before
-///     the user's start date.
+///     approved entry, a public holiday, a requested/approved/cancellation-
+///     pending absence, or fall before the user's start date.
 async fn find_unsubmitted_weeks(
     pool: &DatabasePool,
     user_id: i64,
@@ -128,7 +128,7 @@ async fn find_unsubmitted_weeks(
             .unwrap_or_default();
 
     let time_db = crate::repository::TimeEntryDb::new(pool.clone());
-    let absence_db = crate::repository::AbsenceDb::new(pool.clone());
+    let reports_db = crate::repository::ReportDb::new(pool.clone());
 
     // Load submitted/approved time entry dates.
     let submitted_dates: std::collections::HashSet<NaiveDate> = time_db
@@ -146,9 +146,12 @@ async fn find_unsubmitted_weeks(
         .into_iter()
         .collect();
 
-    // Load approved absence date ranges and expand to a date set.
-    let absence_rows: Vec<(NaiveDate, NaiveDate, String)> = absence_db
-        .approved_ranges_in_period(user_id, first_monday, check_to)
+    // Load absence date ranges that cover the submission obligation and expand
+    // them to a date set. Requested absences count here: while they are pending
+    // the employee cannot log entries on those days, so reminders must not ask
+    // for impossible time entries.
+    let absence_rows: Vec<(NaiveDate, NaiveDate, String)> = reports_db
+        .absence_ranges_in_period(user_id, first_monday, check_to)
         .await
         .unwrap_or_default();
 

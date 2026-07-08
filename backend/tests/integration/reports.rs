@@ -13,6 +13,328 @@ async fn assert_get_forbidden(client: &TestClient, path: &str, label: &str) {
 }
 
 #[tokio::test]
+async fn report_export_queue_requeues_past_month_mutations() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    app.state
+        .db
+        .settings
+        .save_setting(zerf::services::settings::REPORT_UPLOAD_ENABLED_KEY, "true")
+        .await
+        .expect("enable report upload");
+
+    let (_lead_id, lead_pw, emp_id, emp_pw, _default_monday, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "export-requeue").await;
+    let lead = login_change_pw(&app, "lead-export-requeue@example.com", &lead_pw).await;
+    let emp = login_change_pw(&app, "emp-export-requeue@example.com", &emp_pw).await;
+
+    let original_day = next_monday(-75);
+    let moved_day = next_monday(-40);
+    let absence_day = original_day + chrono::Duration::days(1);
+    let revoked_absence_day = moved_day + chrono::Duration::days(1);
+    let original_iso = original_day.format("%Y-%m-%d").to_string();
+    let moved_iso = moved_day.format("%Y-%m-%d").to_string();
+    let absence_iso = absence_day.format("%Y-%m-%d").to_string();
+    let revoked_absence_iso = revoked_absence_day.format("%Y-%m-%d").to_string();
+    let original_period = original_day.format("%Y-%m").to_string();
+    let moved_period = moved_day.format("%Y-%m").to_string();
+    assert_ne!(
+        original_period, moved_period,
+        "test setup must span two past months"
+    );
+
+    let (status, body) = emp
+        .post(
+            "/api/v1/time-entries",
+            &json!({
+                "entry_date": original_iso,
+                "start_time": "08:00",
+                "end_time": "12:00",
+                "category_id": cat_id,
+                "comment": "approval export queue"
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create export queue entry");
+    let entry_id = id(&body);
+    let (status, _) = emp
+        .post("/api/v1/time-entries/submit", &json!({"ids": [entry_id]}))
+        .await;
+    assert_eq!(status, StatusCode::OK, "submit export queue entry");
+    let (status, _) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [entry_id]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve queues original month");
+    let pending = app.state.db.export_queue.list_pending().await.unwrap();
+    let pending_pairs: Vec<(i64, String)> = pending
+        .iter()
+        .map(|entry| (entry.user_id, entry.period.clone()))
+        .collect();
+    assert_eq!(
+        pending_pairs,
+        vec![(emp_id, original_period.clone())],
+        "batch approval must requeue the approved entry month"
+    );
+    app.state
+        .db
+        .export_queue
+        .delete_entry(emp_id, &original_period)
+        .await
+        .unwrap();
+
+    let (status, _) = admin
+        .put(
+            &format!("/api/v1/team-settings/{emp_id}"),
+            &json!({"allow_reopen_without_approval": false, "allow_submission_without_approval": true}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "enable submission auto-approval");
+    let (status, body) = emp
+        .post(
+            "/api/v1/time-entries",
+            &json!({
+                "entry_date": original_iso,
+                "start_time": "12:15",
+                "end_time": "12:45",
+                "category_id": cat_id,
+                "comment": "auto-approved export queue"
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create auto-approved queue entry");
+    let auto_approved_entry_id = id(&body);
+    let (status, body) = emp
+        .post(
+            "/api/v1/time-entries/submit",
+            &json!({"ids": [auto_approved_entry_id]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "auto-approved submit queues month");
+    assert_eq!(body["auto_approved"], true);
+    let pending = app.state.db.export_queue.list_pending().await.unwrap();
+    let pending_pairs: Vec<(i64, String)> = pending
+        .iter()
+        .map(|entry| (entry.user_id, entry.period.clone()))
+        .collect();
+    assert_eq!(
+        pending_pairs,
+        vec![(emp_id, original_period.clone())],
+        "auto-approved submission must requeue the approved entry month"
+    );
+    app.state
+        .db
+        .export_queue
+        .delete_entry(emp_id, &original_period)
+        .await
+        .unwrap();
+    let (status, _) = admin
+        .put(
+            &format!("/api/v1/team-settings/{emp_id}"),
+            &json!({"allow_reopen_without_approval": false, "allow_submission_without_approval": false}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "disable submission auto-approval");
+
+    let (status, _) = admin
+        .put(
+            &format!("/api/v1/time-entries/{entry_id}"),
+            &json!({
+                "entry_date": moved_iso,
+                "start_time": "08:00",
+                "end_time": "12:00",
+                "category_id": cat_id,
+                "comment": "moved approved entry"
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "admin moves approved entry");
+    let pending = app.state.db.export_queue.list_pending().await.unwrap();
+    let pending_pairs: Vec<(i64, String)> = pending
+        .iter()
+        .map(|entry| (entry.user_id, entry.period.clone()))
+        .collect();
+    assert_eq!(
+        pending_pairs,
+        vec![
+            (emp_id, original_period.clone()),
+            (emp_id, moved_period.clone())
+        ],
+        "admin correction must requeue both the source and destination months"
+    );
+    for period in [&original_period, &moved_period] {
+        app.state
+            .db
+            .export_queue
+            .delete_entry(emp_id, period)
+            .await
+            .unwrap();
+    }
+
+    let (status, body) = emp
+        .post(
+            "/api/v1/time-entries",
+            &json!({
+                "entry_date": original_iso,
+                "start_time": "13:00",
+                "end_time": "14:00",
+                "category_id": cat_id,
+                "comment": "rejection export queue"
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create rejection candidate");
+    let rejected_entry_id = id(&body);
+    let (status, _) = emp
+        .post(
+            "/api/v1/time-entries/submit",
+            &json!({"ids": [rejected_entry_id]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "submit rejection candidate");
+    let (status, _) = lead
+        .post(
+            "/api/v1/time-entries/batch-reject",
+            &json!({"ids": [rejected_entry_id], "reason": "needs correction"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "reject queues original month");
+    let pending = app.state.db.export_queue.list_pending().await.unwrap();
+    let pending_pairs: Vec<(i64, String)> = pending
+        .iter()
+        .map(|entry| (entry.user_id, entry.period.clone()))
+        .collect();
+    assert_eq!(
+        pending_pairs,
+        vec![(emp_id, original_period.clone())],
+        "batch rejection must requeue the rejected entry month"
+    );
+    app.state
+        .db
+        .export_queue
+        .delete_entry(emp_id, &original_period)
+        .await
+        .unwrap();
+
+    let (status, body) = emp
+        .post(
+            "/api/v1/absences",
+            &json!({
+                "kind": "general_absence",
+                "start_date": absence_iso,
+                "end_date": absence_iso
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create report-affecting absence");
+    let absence_id = id(&body);
+    let (status, _) = lead
+        .post(
+            &format!("/api/v1/absences/{absence_id}/approve"),
+            &json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "absence approval queues month");
+    let pending = app.state.db.export_queue.list_pending().await.unwrap();
+    let pending_pairs: Vec<(i64, String)> = pending
+        .iter()
+        .map(|entry| (entry.user_id, entry.period.clone()))
+        .collect();
+    assert_eq!(
+        pending_pairs,
+        vec![(emp_id, original_period.clone())],
+        "absence approval must requeue the affected month"
+    );
+    app.state
+        .db
+        .export_queue
+        .delete_entry(emp_id, &original_period)
+        .await
+        .unwrap();
+    let (status, _) = emp.delete(&format!("/api/v1/absences/{absence_id}")).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "requesting absence cancellation succeeds"
+    );
+    let pending = app.state.db.export_queue.list_pending().await.unwrap();
+    assert!(
+        pending.is_empty(),
+        "cancellation request keeps the absence report-effective and should not requeue yet"
+    );
+    let (status, _) = lead
+        .post(
+            &format!("/api/v1/absences/{absence_id}/approve-cancellation"),
+            &json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "cancellation approval queues month");
+    let pending = app.state.db.export_queue.list_pending().await.unwrap();
+    let pending_pairs: Vec<(i64, String)> = pending
+        .iter()
+        .map(|entry| (entry.user_id, entry.period.clone()))
+        .collect();
+    assert_eq!(
+        pending_pairs,
+        vec![(emp_id, original_period.clone())],
+        "approved cancellation must requeue the affected month"
+    );
+    app.state
+        .db
+        .export_queue
+        .delete_entry(emp_id, &original_period)
+        .await
+        .unwrap();
+
+    let (status, body) = emp
+        .post(
+            "/api/v1/absences",
+            &json!({
+                "kind": "general_absence",
+                "start_date": revoked_absence_iso,
+                "end_date": revoked_absence_iso
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create revoke candidate absence");
+    let revoke_absence_id = id(&body);
+    let (status, _) = lead
+        .post(
+            &format!("/api/v1/absences/{revoke_absence_id}/approve"),
+            &json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve revoke candidate absence");
+    app.state
+        .db
+        .export_queue
+        .delete_entry(emp_id, &moved_period)
+        .await
+        .unwrap();
+    let (status, _) = admin
+        .post(
+            &format!("/api/v1/absences/{revoke_absence_id}/revoke"),
+            &json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "admin revoke queues month");
+    let pending = app.state.db.export_queue.list_pending().await.unwrap();
+    let pending_pairs: Vec<(i64, String)> = pending
+        .iter()
+        .map(|entry| (entry.user_id, entry.period.clone()))
+        .collect();
+    assert_eq!(
+        pending_pairs,
+        vec![(emp_id, moved_period.clone())],
+        "admin revocation must requeue the affected month"
+    );
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
 async fn reports_full_workflow() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;

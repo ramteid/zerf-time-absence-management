@@ -355,6 +355,16 @@ pub async fn update(
         serde_json::to_value(&updated_entry).ok(),
     )
     .await;
+    if previous_entry.status != "draft" {
+        crate::services::reports::requeue_export_for_dates(
+            &app_state.pool,
+            &[
+                (previous_entry.user_id, previous_entry.entry_date),
+                (updated_entry.user_id, updated_entry.entry_date),
+            ],
+        )
+        .await;
+    }
     Ok(updated_entry)
 }
 

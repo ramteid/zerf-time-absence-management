@@ -4,11 +4,13 @@
 //!   1. Each midnight tick: if today.day() >= configured upload day, populate
 //!      the export queue for the previous month (idempotent, guarded by the
 //!      `report_upload_queue_period` app_setting).
-//!   2. Process all pending queue entries: for each (user, period), check
+//!   2. Process eligible pending queue entries: for each (user, period), check
 //!      whether all weeks of the period are fully submitted.  If yes, build
 //!      a per-user PDF, create the per-month subfolder, upload the file, and
 //!      remove the queue entry.  Entries for not-yet-submitted months are left
 //!      in the queue for the next daily check (catch-up for late submitters).
+//!      Before the configured upload day, the scheduled run still catches up
+//!      older months but defers the just-finished previous month.
 //!
 //! Folder layout in the Nextcloud share:
 //!   <period>/                                       e.g. 2026-05/
@@ -78,7 +80,7 @@ pub async fn run_now(state: &AppState) -> AppResult<()> {
     } else {
         Some(password.as_str())
     };
-    process_pending_entries(state, &base, &token, pw).await;
+    process_pending_entries(state, &base, &token, pw, None).await;
 
     Ok(())
 }
@@ -91,7 +93,9 @@ async fn run_once(state: &AppState) -> AppResult<()> {
     }
 
     let today = settings::app_today(&state.pool).await;
-    if today.day() >= u32::from(day_of_month) {
+    let target_period = prev_period(today);
+    let upload_day_reached = today.day() >= u32::from(day_of_month);
+    if upload_day_reached {
         populate_queue_for_prev_month(state, today).await?;
     }
 
@@ -101,7 +105,12 @@ async fn run_once(state: &AppState) -> AppResult<()> {
     } else {
         Some(password.as_str())
     };
-    process_pending_entries(state, &base, &token, pw).await;
+    let process_through_period = if upload_day_reached {
+        None
+    } else {
+        Some(period_before(&target_period)?)
+    };
+    process_pending_entries(state, &base, &token, pw, process_through_period.as_deref()).await;
 
     Ok(())
 }
@@ -207,7 +216,13 @@ async fn populate_queue_for_prev_month(state: &AppState, today: NaiveDate) -> Ap
 }
 
 /// Try to upload a PDF for each pending queue entry; leave unready entries in place.
-async fn process_pending_entries(state: &AppState, base: &str, token: &str, pw: Option<&str>) {
+async fn process_pending_entries(
+    state: &AppState,
+    base: &str,
+    token: &str,
+    pw: Option<&str>,
+    process_through_period: Option<&str>,
+) {
     let entries = match state.db.export_queue.list_pending().await {
         Ok(e) => e,
         Err(e) => {
@@ -228,6 +243,16 @@ async fn process_pending_entries(state: &AppState, base: &str, token: &str, pw: 
     };
 
     for entry in entries {
+        if let Some(max_period) = process_through_period {
+            if period_is_after(&entry.period, max_period) {
+                tracing::debug!(
+                    "Report upload: deferring user {} period {} until configured upload day",
+                    entry.user_id,
+                    entry.period
+                );
+                continue;
+            }
+        }
         if let Err(e) = process_one_entry(state, &entry, base, token, pw, &language).await {
             tracing::warn!(
                 "Report upload: skipping user {} period {}: {e}",
@@ -268,24 +293,53 @@ async fn process_one_entry(
         .ok_or_else(|| AppError::Internal(format!("invalid period end {}", entry.period)))?;
 
     // Check whether all working weeks in the period have been submitted.
-    // Archived users have their submitted entries reverted to draft during
-    // archiving, making the submission gate permanently unsatisfiable (the user
-    // cannot log in to re-submit). Treat archived users as submission-exempt so
-    // their final timesheet PDF is still exported. Zero-weekly-hours
-    // non-assistants are exempt for the same reason.
+    // Zero-weekly-hours non-assistants have no booking obligation.
     let is_archived = user.archived_at.is_some();
-    let submission_exempt =
-        is_archived || !crate::roles::has_submission_obligation(&user.role, user.weekly_hours);
-    let submitted = all_weeks_submitted_for_month(
-        &state.pool,
-        user.id,
-        from,
-        to,
-        user.start_date,
-        submission_exempt,
-        user.workdays_per_week,
-    )
-    .await?;
+    let submission_exempt = !crate::roles::has_submission_obligation(&user.role, user.weekly_hours);
+
+    // Archived users had their submitted entries reverted to draft during
+    // archiving (they can no longer log in to re-submit them).  Exporting a
+    // month that contains those reverted drafts would produce a PDF where draft
+    // rows appear but are excluded from the Total - a known reconciliation
+    // defect.  Guard against it: if any draft entry exists in the period, drop
+    // this queue entry without uploading; the official record for that month
+    // is whatever was approved before archiving.
+    if is_archived {
+        let reports_db = crate::repository::ReportDb::new(state.pool.clone());
+        if reports_db
+            .has_draft_entries_in_range(user.id, from, to)
+            .await?
+        {
+            tracing::info!(
+                "Report upload: skipping archived user {} period {} - month contains draft entries reverted during archiving",
+                user.id, entry.period
+            );
+            state
+                .db
+                .export_queue
+                .delete_entry(entry.user_id, &entry.period)
+                .await?;
+            return Ok(());
+        }
+        // No drafts: all entries are submitted/approved/rejected - safe to export
+        // without the full submission-gate check (which would be unsatisfiable).
+    }
+
+    let submitted = if is_archived {
+        // No draft entries confirmed above; treat the month as submitted.
+        true
+    } else {
+        all_weeks_submitted_for_month(
+            &state.pool,
+            user.id,
+            from,
+            to,
+            user.start_date,
+            submission_exempt,
+            user.workdays_per_week,
+        )
+        .await?
+    };
 
     if !submitted {
         // Not ready yet — leave in queue for the next daily check.
@@ -356,6 +410,23 @@ fn prev_period(today: NaiveDate) -> String {
     format!("{:04}-{:02}", year, month)
 }
 
+fn period_before(period: &str) -> AppResult<String> {
+    let (year, month) = parse_year_month(period)?;
+    let (previous_year, previous_month) = if month == 1 {
+        (year - 1, 12)
+    } else {
+        (year, month - 1)
+    };
+    Ok(format!("{previous_year:04}-{previous_month:02}"))
+}
+
+fn period_is_after(left: &str, right: &str) -> bool {
+    match (parse_year_month(left), parse_year_month(right)) {
+        (Ok(left), Ok(right)) => left > right,
+        _ => false,
+    }
+}
+
 fn parse_year_month(period: &str) -> AppResult<(i32, u32)> {
     let (y, m) = period
         .split_once('-')
@@ -399,6 +470,24 @@ mod tests {
     }
 
     #[test]
+    fn period_before_returns_previous_month() {
+        assert_eq!(period_before("2026-06").unwrap(), "2026-05");
+    }
+
+    #[test]
+    fn period_before_wraps_january_to_december() {
+        assert_eq!(period_before("2026-01").unwrap(), "2025-12");
+    }
+
+    #[test]
+    fn period_is_after_compares_by_year_and_month() {
+        assert!(period_is_after("2026-06", "2026-05"));
+        assert!(period_is_after("2026-01", "2025-12"));
+        assert!(!period_is_after("2026-05", "2026-05"));
+        assert!(!period_is_after("2026-04", "2026-05"));
+    }
+
+    #[test]
     fn parse_year_month_extracts_year_and_month() {
         assert_eq!(parse_year_month("2026-05").unwrap(), (2026, 5));
     }
@@ -433,10 +522,7 @@ mod tests {
 
     #[test]
     fn periods_to_backfill_one_gap_returns_single_month() {
-        assert_eq!(
-            periods_to_backfill("2026-04", "2026-05"),
-            vec!["2026-05"]
-        );
+        assert_eq!(periods_to_backfill("2026-04", "2026-05"), vec!["2026-05"]);
     }
 
     #[test]
@@ -457,9 +543,6 @@ mod tests {
 
     #[test]
     fn periods_to_backfill_corrupt_last_queued_returns_only_target() {
-        assert_eq!(
-            periods_to_backfill("bad-data", "2026-05"),
-            vec!["2026-05"]
-        );
+        assert_eq!(periods_to_backfill("bad-data", "2026-05"), vec!["2026-05"]);
     }
 }

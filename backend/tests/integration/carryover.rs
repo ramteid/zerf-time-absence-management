@@ -477,7 +477,7 @@ async fn pre_expiry_days_can_be_requested_after_expiry() {
 }
 
 #[tokio::test]
-async fn requested_days_do_not_reduce_cross_year_carryover_source() {
+async fn requested_days_reduce_cross_year_carryover_source() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
     let (_lead_id, _lead_pw, emp_id, emp_pw, _, _) = bootstrap_team(&app, &admin, false).await;
@@ -491,8 +491,9 @@ async fn requested_days_do_not_reduce_cross_year_carryover_source() {
     // funded by carryover from current year.
     set_leave_days_current_and_next(&admin, emp_id, 2, 0).await;
 
-    // Consume one current-year day as requested only; this must reserve availability
-    // but must not reduce the carryover source for next year.
+    // Consume one current-year day as requested only. It must reserve availability
+    // and reduce the carryover source for next year; otherwise a pending
+    // current-year request could grant carryover that is already reserved.
     let current_year_requested_day = pick_workdays(&emp, current_year, 6, 1).await[0];
     let day_iso = current_year_requested_day.format("%Y-%m-%d").to_string();
     let (st, body) = emp
@@ -507,9 +508,9 @@ async fn requested_days_do_not_reduce_cross_year_carryover_source() {
         "create requested current-year day: {body}"
     );
 
-    // Request an absence crossing into January next year. This should stay valid even
-    // with a requested day in current year, because requested status must not reduce
-    // the carryover source used for next-year validation.
+    // Request an absence crossing into January next year. The current-year part
+    // consumes the last remaining current-year day, so no carryover is left to
+    // fund the next-year day when next-year entitlement is zero.
     let cross_start = last_workday_in_year(&emp, current_year).await;
     let cross_end = nth_workday_from(
         &emp,
@@ -529,8 +530,8 @@ async fn requested_days_do_not_reduce_cross_year_carryover_source() {
         .await;
     assert_eq!(
         st,
-        StatusCode::OK,
-        "cross-year request should stay allowed when only requested days exist in current year: {body}"
+        StatusCode::BAD_REQUEST,
+        "cross-year request must be rejected when requested current-year days consume the carryover source: {body}"
     );
 
     app.cleanup().await;

@@ -8,6 +8,231 @@ use crate::common::TestApp;
 use crate::helpers::*;
 
 #[tokio::test]
+async fn submitting_correction_auto_rejects_zombie_reopen_request() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (_lead_id, lead_pw, _emp_id, emp_pw, monday_iso, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "zombie-reopen").await;
+    let lead = login_change_pw(&app, "lead-zombie-reopen@example.com", &lead_pw).await;
+    let emp = login_change_pw(&app, "emp-zombie-reopen@example.com", &emp_pw).await;
+
+    let rejected_entry_id = create_and_submit_entry(&emp, &monday_iso, cat_id).await;
+    let (status, _) = lead
+        .post(
+            "/api/v1/time-entries/batch-reject",
+            &json!({"ids": [rejected_entry_id], "reason": "wrong category"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "reject original entry");
+
+    let (status, body) = emp
+        .post(
+            "/api/v1/reopen-requests",
+            &json!({"week_start": monday_iso, "reason": "please reopen"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create pending reopen request");
+    assert_eq!(body["status"], "pending");
+    let request_id = id(&body);
+
+    let (status, notifications) = lead.get("/api/v1/notifications").await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "lead notifications before correction"
+    );
+    let pending_notice = notifications
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|notification| {
+            notification["reference_type"] == "reopen_request"
+                && notification["reference_id"].as_i64() == Some(request_id)
+        })
+        .expect("lead has pending reopen notification before correction");
+    assert_eq!(
+        pending_notice["is_read"], false,
+        "pending reopen notification starts unread"
+    );
+
+    let (status, body) = emp
+        .post(
+            "/api/v1/time-entries",
+            &json!({
+                "entry_date": monday_iso,
+                "start_time": "08:00",
+                "end_time": "12:00",
+                "category_id": cat_id,
+                "comment": "corrected entry"
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create corrected entry");
+    let correction_id = id(&body);
+    let (status, _) = emp
+        .post(
+            "/api/v1/time-entries/submit",
+            &json!({"ids": [correction_id]}),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "submitting correction auto-rejects stale reopen"
+    );
+
+    let (status, body) = emp.get("/api/v1/reopen-requests").await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "employee reopen list after correction"
+    );
+    let request = find_by_id(&body, request_id).expect("auto-rejected reopen remains in history");
+    assert_eq!(request["status"], "rejected");
+    assert_eq!(
+        request["rejection_reason"],
+        "Superseded by a new week submission."
+    );
+
+    let (status, notifications) = lead.get("/api/v1/notifications").await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "lead notifications after correction"
+    );
+    let stale_notice = notifications
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|notification| {
+            notification["reference_type"] == "reopen_request"
+                && notification["reference_id"].as_i64() == Some(request_id)
+        })
+        .expect("lead notification remains as read history");
+    assert_eq!(
+        stale_notice["is_read"], true,
+        "auto-rejected reopen clears approver notification"
+    );
+
+    let (status, notifications) = emp.get("/api/v1/notifications").await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "employee notifications after correction"
+    );
+    assert!(
+        notifications
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|notification| {
+                notification["kind"] == "reopen_rejected"
+                    && notification["reference_id"].as_i64() == Some(request_id)
+                    && notification["is_read"] == false
+            }),
+        "employee receives unread in-app rejection notice for the auto-rejected request"
+    );
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn correction_only_supersedes_overlapping_rejected_entries() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (_lead_id, lead_pw, emp_id, emp_pw, monday_iso, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "overlap-rejected").await;
+    let lead = login_change_pw(&app, "lead-overlap-rejected@example.com", &lead_pw).await;
+    let emp = login_change_pw(&app, "emp-overlap-rejected@example.com", &emp_pw).await;
+    let monday = chrono::NaiveDate::parse_from_str(&monday_iso, "%Y-%m-%d").unwrap();
+
+    let (status, body) = emp
+        .post(
+            "/api/v1/time-entries",
+            &json!({
+                "entry_date": monday_iso,
+                "start_time": "08:00",
+                "end_time": "10:00",
+                "category_id": cat_id,
+                "comment": "rejected morning"
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create rejected morning entry");
+    let morning_entry_id = id(&body);
+    let (status, body) = emp
+        .post(
+            "/api/v1/time-entries",
+            &json!({
+                "entry_date": monday_iso,
+                "start_time": "14:00",
+                "end_time": "16:00",
+                "category_id": cat_id,
+                "comment": "rejected afternoon"
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create rejected afternoon entry");
+    let afternoon_entry_id = id(&body);
+    let (status, _) = emp
+        .post(
+            "/api/v1/time-entries/submit",
+            &json!({"ids": [morning_entry_id, afternoon_entry_id]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "submit both entries");
+    let (status, _) = lead
+        .post(
+            "/api/v1/time-entries/batch-reject",
+            &json!({"ids": [morning_entry_id, afternoon_entry_id], "reason": "split correction"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "reject both entries");
+
+    let (status, body) = emp
+        .post(
+            "/api/v1/time-entries",
+            &json!({
+                "entry_date": monday_iso,
+                "start_time": "08:00",
+                "end_time": "10:00",
+                "category_id": cat_id,
+                "comment": "corrected morning only"
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create morning correction");
+    let correction_id = id(&body);
+    let (status, _) = emp
+        .post(
+            "/api/v1/time-entries/submit",
+            &json!({"ids": [correction_id]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "submit morning correction");
+
+    let time_incomplete_dates = zerf::repository::TimeEntryDb::new(app.state.pool.clone())
+        .get_incomplete_dates_in_range(emp_id, monday, monday)
+        .await
+        .unwrap();
+    assert_eq!(
+        time_incomplete_dates,
+        vec![monday],
+        "non-overlapping rejected afternoon entry must still mark the day incomplete"
+    );
+    let report_incomplete_dates = zerf::repository::ReportDb::new(app.state.pool.clone())
+        .incomplete_dates_in_range(emp_id, monday, monday)
+        .await
+        .unwrap();
+    assert!(
+        report_incomplete_dates.contains(&monday),
+        "report completeness must keep the day incomplete until every rejected span is corrected"
+    );
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
 async fn reopen_full_workflow() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;

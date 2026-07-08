@@ -835,44 +835,6 @@ impl AbsenceDb {
         }
     }
 
-    /// Approved-only vacation ranges, optionally excluding one absence id.
-    pub async fn approved_vacation_ranges_in_year_tx(
-        tx: &mut sqlx::PgConnection,
-        user_id: i64,
-        from: NaiveDate,
-        to: NaiveDate,
-        exclude_id: Option<i64>,
-    ) -> AppResult<Vec<(NaiveDate, NaiveDate)>> {
-        if let Some(excl) = exclude_id {
-            Ok(sqlx::query_as::<_, (NaiveDate, NaiveDate)>(
-                "SELECT a.start_date, a.end_date FROM absences a \
-                 JOIN absence_categories c ON c.id = a.category_id \
-                 WHERE a.id != $1 AND a.user_id=$2 AND c.cost_type='vacation' \
-                 AND a.status='approved' \
-                 AND a.end_date >= $3 AND a.start_date <= $4",
-            )
-            .bind(excl)
-            .bind(user_id)
-            .bind(from)
-            .bind(to)
-            .fetch_all(tx)
-            .await?)
-        } else {
-            Ok(sqlx::query_as::<_, (NaiveDate, NaiveDate)>(
-                "SELECT a.start_date, a.end_date FROM absences a \
-                 JOIN absence_categories c ON c.id = a.category_id \
-                 WHERE a.user_id=$1 AND c.cost_type='vacation' \
-                 AND a.status='approved' \
-                 AND a.end_date >= $2 AND a.start_date <= $3",
-            )
-            .bind(user_id)
-            .bind(from)
-            .bind(to)
-            .fetch_all(tx)
-            .await?)
-        }
-    }
-
     // ── Transaction helpers ────────────────────────────────────────────────
 
     pub async fn lock_user_scope_tx(
