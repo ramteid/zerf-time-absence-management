@@ -715,6 +715,42 @@ pub async fn load_week_check_data(
     Ok((holiday_set, absent_days, submitted_dates, incomplete_dates))
 }
 
+async fn load_export_week_check_data(
+    pool: &crate::db::DatabasePool,
+    user_id: i64,
+    complete_week_mondays: &[NaiveDate],
+    month_start: NaiveDate,
+    month_end: NaiveDate,
+) -> AppResult<(
+    std::collections::HashSet<NaiveDate>,
+    std::collections::HashSet<NaiveDate>,
+    std::collections::HashSet<NaiveDate>,
+    std::collections::HashSet<NaiveDate>,
+)> {
+    let check_from = complete_week_mondays[0];
+    let check_to = *complete_week_mondays.last().unwrap() + Duration::days(6);
+    let reports_db = crate::repository::ReportDb::new(pool.clone());
+    let holiday_set = reports_db.holiday_set(check_from, check_to).await?;
+    let mut absence_rows = reports_db
+        .finalized_absence_ranges_in_period(user_id, check_from, check_to)
+        .await?;
+    let outside_month_absences = reports_db
+        .absence_ranges_in_period(user_id, check_from, check_to)
+        .await?
+        .into_iter()
+        .filter(|(start_date, end_date, _)| *start_date < month_start || *end_date > month_end);
+    absence_rows.extend(outside_month_absences);
+    let category_flags = AbsenceCategoryFlags::load(pool).await?;
+    let absent_days = expand_absence_date_set(&absence_rows, check_from, check_to, &category_flags);
+    let submitted_dates = reports_db
+        .submitted_dates_in_range(user_id, check_from, check_to)
+        .await?;
+    let incomplete_dates = reports_db
+        .incomplete_dates_in_range(user_id, check_from, check_to)
+        .await?;
+    Ok((holiday_set, absent_days, submitted_dates, incomplete_dates))
+}
+
 /// Returns true when every week in `complete_week_mondays` is considered submitted.
 #[allow(clippy::too_many_arguments)]
 pub fn check_weeks_all_submitted(
@@ -1346,26 +1382,14 @@ pub async fn all_weeks_submitted_for_month(
     if complete_week_mondays.is_empty() {
         return Ok(true);
     }
-    let check_from = complete_week_mondays[0];
-    let check_to = *complete_week_mondays.last().unwrap() + Duration::days(6);
-    let reports_db = crate::repository::ReportDb::new(pool.clone());
-    if reports_db
-        .has_requested_absences_in_period(user_id, check_from, check_to)
-        .await?
-    {
-        return Ok(false);
-    }
     // Assistants and zero-weekly-hours users have no fixed target schedule /
     // no booking obligation and no mandatory day-level submission (see
     // `roles::has_submission_obligation`).
     if submission_exempt {
         return Ok(true);
     }
-    // The hard stop above handles requested absences. The remaining week
-    // completeness check uses only finalized absences so it matches the PDF
-    // content path, which also ignores undecided requests.
     let (holiday_set, absent_days, submitted_dates, incomplete_dates) =
-        load_week_check_data(pool, user_id, &complete_week_mondays, false).await?;
+        load_week_check_data(pool, user_id, &complete_week_mondays, true).await?;
     Ok(check_weeks_all_submitted(
         &complete_week_mondays,
         &holiday_set,
@@ -1376,6 +1400,63 @@ pub async fn all_weeks_submitted_for_month(
         workdays_per_week,
         today,
     ))
+}
+
+/// Checks whether a month is settled enough for the immutable timesheet PDF archive.
+/// Pending absence requests hold this gate because PDF content only includes
+/// finalized absences.
+pub async fn all_weeks_ready_for_timesheet_export(
+    pool: &crate::db::DatabasePool,
+    user_id: i64,
+    month_start: NaiveDate,
+    month_end: NaiveDate,
+    user_start_date: NaiveDate,
+    submission_exempt: bool,
+    workdays_per_week: i16,
+) -> AppResult<bool> {
+    let today = crate::services::settings::app_today(pool).await;
+    let complete_week_mondays = complete_weeks_in_month(month_start, month_end, today);
+    if complete_week_mondays.is_empty() {
+        return Ok(true);
+    }
+    if submission_exempt {
+        return Ok(true);
+    }
+
+    let reports_db = crate::repository::ReportDb::new(pool.clone());
+    if reports_db
+        .has_requested_absences_in_period(user_id, month_start, month_end)
+        .await?
+    {
+        return Ok(false);
+    }
+
+    let (holiday_set, absent_days, submitted_dates, incomplete_dates) =
+        load_export_week_check_data(
+            pool,
+            user_id,
+            &complete_week_mondays,
+            month_start,
+            month_end,
+        )
+        .await?;
+    Ok(check_weeks_all_submitted(
+        &complete_week_mondays,
+        &holiday_set,
+        &absent_days,
+        &submitted_dates,
+        &incomplete_dates,
+        user_start_date,
+        workdays_per_week,
+        today,
+    ))
+}
+
+pub fn timesheet_period_predates_user_start(
+    period_end: NaiveDate,
+    user_start_date: NaiveDate,
+) -> bool {
+    period_end < user_start_date
 }
 
 #[derive(Serialize)]
@@ -1483,22 +1564,54 @@ pub async fn requeue_export_for_dates(
 
     // Group into distinct (user_id, YYYY-MM) pairs, excluding the current and
     // future months (those have not been archived yet so nothing to re-queue).
-    let mut pairs: std::collections::HashMap<i64, std::collections::HashSet<String>> =
+    let mut pairs: std::collections::HashMap<i64, std::collections::HashSet<(i32, u32)>> =
         std::collections::HashMap::new();
     for &(user_id, date) in user_date_pairs {
-        let period = format!("{:04}-{:02}", date.year(), date.month());
         // Only past months can have been exported already.
         let period_month_end = NaiveDate::from_ymd_opt(date.year(), date.month(), {
             crate::time_calc::last_day_of_month(date.year(), date.month())
         });
         if period_month_end.map(|end| end < today).unwrap_or(false) {
-            pairs.entry(user_id).or_default().insert(period);
+            pairs
+                .entry(user_id)
+                .or_default()
+                .insert((date.year(), date.month()));
         }
     }
 
+    let user_db = crate::repository::UserDb::new(pool.clone());
     let export_queue_db = crate::repository::TimesheetExportQueueDb::new(pool.clone());
     for (user_id, periods) in pairs {
-        for period in periods {
+        let user = match user_db.find_by_id(user_id).await {
+            Ok(Some(user)) => user,
+            Ok(None) => continue,
+            Err(e) => {
+                tracing::warn!(
+                    target: "zerf::reports",
+                    "requeue_export_for_dates: failed to load user {user_id}: {e}"
+                );
+                continue;
+            }
+        };
+        for (year, month) in periods {
+            let Some(period_end) = NaiveDate::from_ymd_opt(
+                year,
+                month,
+                crate::time_calc::last_day_of_month(year, month),
+            ) else {
+                continue;
+            };
+            let period = format!("{year:04}-{month:02}");
+            if timesheet_period_predates_user_start(period_end, user.start_date) {
+                tracing::warn!(
+                    target: "zerf::reports",
+                    "requeue_export_for_dates: refused to re-queue user {} period {} because current start_date {} is after the period",
+                    user_id,
+                    period,
+                    user.start_date
+                );
+                continue;
+            }
             if let Err(e) = export_queue_db.populate(&period, &[user_id]).await {
                 tracing::warn!(
                     target: "zerf::reports",
@@ -1882,6 +1995,22 @@ mod tests {
             mondays.is_empty(),
             "expected no complete weeks, got {mondays:?}"
         );
+    }
+
+    #[test]
+    fn timesheet_period_predates_user_start_only_when_period_ends_before_start() {
+        assert!(timesheet_period_predates_user_start(
+            NaiveDate::from_ymd_opt(2026, 5, 31).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 6, 1).unwrap()
+        ));
+        assert!(!timesheet_period_predates_user_start(
+            NaiveDate::from_ymd_opt(2026, 6, 30).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 6, 1).unwrap()
+        ));
+        assert!(!timesheet_period_predates_user_start(
+            NaiveDate::from_ymd_opt(2026, 6, 30).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 6, 30).unwrap()
+        ));
     }
 
     /// `check_weeks_all_submitted` considers a week fully excused when every

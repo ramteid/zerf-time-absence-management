@@ -23,13 +23,17 @@
 use crate::error::{AppError, AppResult};
 use crate::services::{
     nextcloud,
-    reports::{all_weeks_submitted_for_month, build_timesheet_section},
+    reports::{
+        all_weeks_ready_for_timesheet_export, build_timesheet_section,
+        timesheet_period_predates_user_start,
+    },
     settings,
     users::repo_user_to_auth_user,
 };
 use crate::time_calc::last_day_of_month;
 use crate::AppState;
 use chrono::{Datelike, NaiveDate};
+use sha2::{Digest, Sha256};
 
 /// Background loop: checks once per day (midnight in app timezone).
 pub async fn run_loop(state: AppState) {
@@ -292,39 +296,43 @@ async fn process_one_entry(
     let to = NaiveDate::from_ymd_opt(year, month, last_day)
         .ok_or_else(|| AppError::Internal(format!("invalid period end {}", entry.period)))?;
 
-    // Check whether all working weeks in the period have been submitted.
-    // Zero-weekly-hours non-assistants have no booking obligation.
-    let is_archived = user.archived_at.is_some();
+    let is_historical_only = user.archived_at.is_some() || !user.tracks_time;
     let submission_exempt = !crate::roles::has_submission_obligation(&user.role, user.weekly_hours);
+    let reports_db = crate::repository::ReportDb::new(state.pool.clone());
 
-    // Archived users had their submitted entries reverted to draft during
-    // archiving and can no longer submit corrections themselves. Exporting
-    // those rows would show draft entries while excluding them from submitted
-    // totals, so keep the queue entry pending and alert admins until the data is
-    // corrected.
-    if is_archived {
-        let reports_db = crate::repository::ReportDb::new(state.pool.clone());
-        if reports_db
-            .has_draft_entries_in_range(user.id, from, to)
-            .await?
-        {
-            let msg = format!(
-                "Archived user {} ({} {}) has draft entries in period {}. \
-                 Resolve those draft entries before retrying the timesheet PDF export.",
-                user.id, user.first_name, user.last_name, entry.period
-            );
-            tracing::warn!(target: "zerf::report_upload", "{msg}");
-            notify_admins_upload_failed(state, &msg).await;
-            return Ok(());
-        }
+    if timesheet_period_predates_user_start(to, user.start_date) {
+        let msg = format!(
+            "User {} ({} {}) has current start date {} after period {}. \
+             Refusing to upload this timesheet because pre-start rows cannot be rendered faithfully.",
+            user.id, user.first_name, user.last_name, user.start_date, entry.period
+        );
+        tracing::warn!(target: "zerf::report_upload", "{msg}");
+        notify_admins_upload_failed(state, &msg).await;
+        return Ok(());
     }
 
-    // Skip the normal submission-gate check for archived users because the gate
-    // can be permanently unsatisfiable after archiving reverts submitted entries.
-    let submitted = if is_archived {
+    if !is_historical_only
+        && !submission_exempt
+        && reports_db
+            .has_requested_absences_in_period(user.id, from, to)
+            .await?
+    {
+        let msg = format!(
+            "User {} ({} {}) has pending absence requests in period {}. \
+             Decide those requests before retrying the timesheet PDF export.",
+            user.id, user.first_name, user.last_name, entry.period
+        );
+        tracing::warn!(target: "zerf::report_upload", "{msg}");
+        notify_admins_upload_failed(state, &msg).await;
+        return Ok(());
+    }
+
+    // Skip the normal submission gate for historical-only users because it can
+    // be permanently unsatisfiable after submitted entries are reverted to draft.
+    let submitted = if is_historical_only {
         true
     } else {
-        all_weeks_submitted_for_month(
+        all_weeks_ready_for_timesheet_export(
             &state.pool,
             user.id,
             from,
@@ -435,14 +443,16 @@ fn parse_year_month(period: &str) -> AppResult<(i32, u32)> {
     Ok((year, month))
 }
 
+fn report_upload_failure_dedupe_key(message: &str) -> String {
+    let digest = Sha256::digest(message.as_bytes());
+    let digest_hex = hex::encode(digest);
+    format!("report_upload_failed_{}", &digest_hex[..16])
+}
+
 async fn notify_admins_upload_failed(state: &AppState, message: &str) {
     let title = format!("Report PDF upload failed: {message}");
-    crate::services::notifications::notify_admins_system_error(
-        state,
-        crate::services::notifications::SYSTEM_ERROR_REPORT_UPLOAD_FAILED,
-        &title,
-    )
-    .await;
+    let dedupe_key = report_upload_failure_dedupe_key(message);
+    crate::services::notifications::notify_admins_system_error(state, &dedupe_key, &title).await;
 }
 
 #[cfg(test)]
@@ -467,6 +477,17 @@ mod tests {
     #[test]
     fn period_before_returns_previous_month() {
         assert_eq!(period_before("2026-06").unwrap(), "2026-05");
+    }
+
+    #[test]
+    fn report_upload_failure_dedupe_key_separates_distinct_messages() {
+        let first = report_upload_failure_dedupe_key("broken share url");
+        let same = report_upload_failure_dedupe_key("broken share url");
+        let second = report_upload_failure_dedupe_key("network timeout");
+
+        assert_eq!(first, same);
+        assert_ne!(first, second);
+        assert!(first.starts_with("report_upload_failed_"));
     }
 
     #[test]

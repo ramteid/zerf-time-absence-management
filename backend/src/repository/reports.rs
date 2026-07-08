@@ -205,29 +205,6 @@ impl ReportDb {
         ))
     }
 
-    /// Returns true when at least one draft entry exists in the given date range.
-    /// The report-upload worker uses this to hold archived-user exports that
-    /// would otherwise render incomplete totals.
-    pub async fn has_draft_entries_in_range(
-        &self,
-        user_id: i64,
-        from: NaiveDate,
-        to: NaiveDate,
-    ) -> AppResult<bool> {
-        Ok(sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS ( \
-                SELECT 1 FROM time_entries \
-                WHERE user_id=$1 AND status='draft' \
-                AND entry_date BETWEEN $2 AND $3 \
-             )",
-        )
-        .bind(user_id)
-        .bind(from)
-        .bind(to)
-        .fetch_one(&self.pool)
-        .await?)
-    }
-
     /// Returns true when at least one entry with status='submitted' (pending approval)
     /// exists in the given date range.
     pub async fn has_pending_submitted_entries_in_range(
@@ -247,6 +224,29 @@ impl ReportDb {
         .fetch_one(&self.pool)
         .await?;
         Ok(count > 0)
+    }
+
+    /// Returns true when at least one draft entry exists in the given date range.
+    /// The report-upload worker uses this to hold historical exports that would
+    /// otherwise render incomplete totals after archiving or disabling tracking.
+    pub async fn has_draft_entries_in_range(
+        &self,
+        user_id: i64,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> AppResult<bool> {
+        Ok(sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS ( \
+                SELECT 1 FROM time_entries \
+                WHERE user_id=$1 AND status='draft' \
+                AND entry_date BETWEEN $2 AND $3 \
+             )",
+        )
+        .bind(user_id)
+        .bind(from)
+        .bind(to)
+        .fetch_one(&self.pool)
+        .await?)
     }
 
     /// Absence ranges in a period for the submission-reminder and user-facing
@@ -367,10 +367,10 @@ impl ReportDb {
 
     /// All users who should appear in a monthly timesheet export for a given period.
     ///
-    /// Includes every user with `tracks_time=TRUE` who was either still active OR had
-    /// at least one time entry or approved absence that overlaps the period. This ensures
-    /// that employees deactivated after the period still appear in the archive export —
-    /// using `active=TRUE` alone would silently omit them.
+    /// Includes users with active tracking and users whose historical rows touch
+    /// the period, even if tracking is now disabled or the account is archived.
+    /// Users whose current start date is after the period are intentionally
+    /// excluded because the renderer would suppress those pre-start rows.
     pub async fn timesheet_members_for_period(
         &self,
         from: NaiveDate,
@@ -382,8 +382,8 @@ impl ReportDb {
              allow_reopen_without_approval, allow_submission_without_approval, dark_mode, \
              overtime_start_balance_min, tracks_time, annual_leave_days, archived_at \
              FROM users \
-             WHERE tracks_time=TRUE \
-             AND (active=TRUE \
+             WHERE start_date <= $2 \
+             AND ((active=TRUE AND tracks_time=TRUE) \
                   OR EXISTS (SELECT 1 FROM time_entries te \
                              WHERE te.user_id = users.id \
                              AND te.entry_date BETWEEN $1 AND $2) \

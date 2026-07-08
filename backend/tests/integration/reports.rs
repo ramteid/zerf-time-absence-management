@@ -1,6 +1,7 @@
 //! End-to-end reports workflow tests running in a single container for efficiency.
 //! All test cases run sequentially within the same app instance.
 
+use chrono::{Datelike, NaiveDate};
 use reqwest::StatusCode;
 use serde_json::json;
 
@@ -335,6 +336,139 @@ async fn report_export_queue_requeues_past_month_mutations() {
 }
 
 #[tokio::test]
+async fn report_export_requeue_refuses_period_before_current_start_date() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    app.state
+        .db
+        .settings
+        .save_setting(zerf::services::settings::REPORT_UPLOAD_ENABLED_KEY, "true")
+        .await
+        .expect("enable report upload");
+
+    let (_lead_id, _lead_pw, emp_id, _emp_pw, _default_monday, _cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "export-pre-start-requeue").await;
+    let old_day = next_monday(-75);
+    let old_period = old_day.format("%Y-%m").to_string();
+    let period_end = NaiveDate::from_ymd_opt(
+        old_day.year(),
+        old_day.month(),
+        zerf::time_calc::last_day_of_month(old_day.year(), old_day.month()),
+    )
+    .unwrap();
+    let new_start_date = period_end + chrono::Duration::days(1);
+    sqlx::query("UPDATE users SET start_date=$2 WHERE id=$1")
+        .bind(emp_id)
+        .bind(new_start_date)
+        .execute(&app.state.pool)
+        .await
+        .expect("move start date after old period");
+
+    zerf::services::reports::requeue_export_for_dates(&app.state.pool, &[(emp_id, old_day)]).await;
+
+    let pending = app.state.db.export_queue.list_pending().await.unwrap();
+    assert!(
+        pending.is_empty(),
+        "period {old_period} must not be requeued after start_date moved to {new_start_date}"
+    );
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn report_export_queue_includes_tracking_disabled_users_with_history() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    app.state
+        .db
+        .settings
+        .save_setting(zerf::services::settings::REPORT_UPLOAD_ENABLED_KEY, "true")
+        .await
+        .expect("enable report upload");
+    let (_, categories) = admin.get("/api/v1/categories").await;
+    let cat_id = categories.as_array().unwrap()[0]["id"].as_i64().unwrap();
+
+    let historical_day = next_monday(-75);
+    let period = historical_day.format("%Y-%m").to_string();
+    let month_start = NaiveDate::from_ymd_opt(historical_day.year(), historical_day.month(), 1)
+        .expect("valid month start");
+    let month_end = NaiveDate::from_ymd_opt(
+        historical_day.year(),
+        historical_day.month(),
+        zerf::time_calc::last_day_of_month(historical_day.year(), historical_day.month()),
+    )
+    .expect("valid month end");
+
+    let (status, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "historical-export-admin@example.com",
+                "first_name": "Historical",
+                "last_name": "Admin",
+                "role": "admin",
+                "tracks_time": true,
+                "weekly_hours": 39,
+                "leave_days_current_year": 30,
+                "leave_days_next_year": 30,
+                "annual_leave_days": 30,
+                "start_date": "2024-01-01"
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create tracking admin");
+    let admin_id = id(&body);
+
+    sqlx::query(
+        "INSERT INTO time_entries \
+         (user_id, entry_date, start_time, end_time, category_id, status, reviewed_by, reviewed_at) \
+         VALUES ($1, $2, '08:00', '12:00', $3, 'approved', 1, NOW())",
+    )
+    .bind(admin_id)
+    .bind(historical_day)
+    .bind(cat_id)
+    .execute(&app.state.pool)
+    .await
+    .expect("insert approved historical entry");
+
+    let (status, _) = admin
+        .put(
+            &format!("/api/v1/users/{admin_id}"),
+            &json!({ "tracks_time": false }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "disable tracking");
+
+    let members = app
+        .state
+        .db
+        .reports
+        .timesheet_members_for_period(month_start, month_end)
+        .await
+        .expect("list export members");
+    assert!(
+        members.iter().any(|member| member.id == admin_id),
+        "tracking-disabled users with approved history must still be selected for export"
+    );
+
+    zerf::services::reports::requeue_export_for_dates(
+        &app.state.pool,
+        &[(admin_id, historical_day)],
+    )
+    .await;
+    let pending = app.state.db.export_queue.list_pending().await.unwrap();
+    assert_eq!(
+        pending.len(),
+        1,
+        "disabled user's historical month is requeued"
+    );
+    assert_eq!(pending[0].user_id, admin_id);
+    assert_eq!(pending[0].period, period);
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
 async fn report_export_gate_waits_for_pending_absence_decision() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
@@ -343,13 +477,14 @@ async fn report_export_gate_waits_for_pending_absence_decision() {
     let lead = login_change_pw(&app, "lead-export-pending-absence@example.com", &lead_pw).await;
     let emp = login_change_pw(&app, "emp-export-pending-absence@example.com", &emp_pw).await;
 
-    sqlx::query("UPDATE users SET weekly_hours=8, workdays_per_week=1 WHERE id=$1")
+    let day = next_monday(-75);
+    sqlx::query("UPDATE users SET weekly_hours=8, workdays_per_week=1, start_date=$2 WHERE id=$1")
         .bind(emp_id)
+        .bind(day)
         .execute(&app.state.pool)
         .await
-        .expect("set one-day work week");
+        .expect("set one-day work week from test day");
 
-    let day = next_monday(-75);
     let day_iso = day.format("%Y-%m-%d").to_string();
     let (status, body) = emp
         .post(
@@ -370,6 +505,33 @@ async fn report_export_gate_waits_for_pending_absence_decision() {
         .await;
     assert_eq!(status, StatusCode::OK, "submit entry");
 
+    let mut later_day = day + chrono::Duration::days(7);
+    while later_day.month() == day.month() {
+        let later_iso = later_day.format("%Y-%m-%d").to_string();
+        let (status, body) = emp
+            .post(
+                "/api/v1/time-entries",
+                &json!({
+                    "entry_date": later_iso,
+                    "start_time": "08:00",
+                    "end_time": "16:00",
+                    "category_id": cat_id,
+                    "comment": "submitted later one-day week"
+                }),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "create later submitted entry");
+        let later_entry_id = id(&body);
+        let (status, _) = emp
+            .post(
+                "/api/v1/time-entries/submit",
+                &json!({"ids": [later_entry_id]}),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "submit later entry");
+        later_day += chrono::Duration::days(7);
+    }
+
     let general_absence = absence_cat(&app.state.pool, "general_absence").await;
     let (status, body) = emp
         .post(
@@ -388,8 +550,40 @@ async fn report_export_gate_waits_for_pending_absence_decision() {
     );
     let absence_id = id(&body);
 
-    let user_start_date = chrono::NaiveDate::from_ymd_opt(2024, 1, 1).unwrap();
-    let ready_while_pending = zerf::services::reports::all_weeks_submitted_for_month(
+    let user_start_date = day;
+    let user_facing_ready_while_pending = zerf::services::reports::all_weeks_submitted_for_month(
+        &app.state.pool,
+        emp_id,
+        day,
+        day,
+        user_start_date,
+        false,
+        1,
+    )
+    .await
+    .expect("check user-facing completeness while absence pending");
+    assert!(
+        user_facing_ready_while_pending,
+        "pending absence must excuse user-facing completeness when entries are blocked"
+    );
+    let month = day.format("%Y-%m").to_string();
+    let (status, team_rows) = admin
+        .get(&format!("/api/v1/reports/team?month={month}"))
+        .await;
+    assert_eq!(status, StatusCode::OK, "team report while absence pending");
+    let employee_row = team_rows
+        .as_array()
+        .and_then(|rows| {
+            rows.iter()
+                .find(|row| row["user_id"].as_i64() == Some(emp_id))
+        })
+        .expect("employee row in team report");
+    assert_eq!(
+        employee_row["weeks_all_submitted"], true,
+        "team report must use the same user-facing pending-absence completeness"
+    );
+
+    let export_ready_while_pending = zerf::services::reports::all_weeks_ready_for_timesheet_export(
         &app.state.pool,
         emp_id,
         day,
@@ -401,7 +595,7 @@ async fn report_export_gate_waits_for_pending_absence_decision() {
     .await
     .expect("check export gate while absence pending");
     assert!(
-        !ready_while_pending,
+        !export_ready_while_pending,
         "pending absence must hold the export gate even when time is submitted"
     );
 
@@ -412,7 +606,7 @@ async fn report_export_gate_waits_for_pending_absence_decision() {
         )
         .await;
     assert_eq!(status, StatusCode::OK, "reject pending absence");
-    let ready_after_rejection = zerf::services::reports::all_weeks_submitted_for_month(
+    let ready_after_rejection = zerf::services::reports::all_weeks_ready_for_timesheet_export(
         &app.state.pool,
         emp_id,
         day,
@@ -426,6 +620,71 @@ async fn report_export_gate_waits_for_pending_absence_decision() {
     assert!(
         ready_after_rejection,
         "decided absence should release the export gate once entries are submitted"
+    );
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn report_export_gate_ignores_pending_absence_outside_export_month() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (_lead_id, _lead_pw, emp_id, _emp_pw, _default_monday, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "export-adjacent-absence").await;
+
+    let month_start = NaiveDate::from_ymd_opt(2025, 7, 1).unwrap();
+    let month_end = NaiveDate::from_ymd_opt(2025, 7, 31).unwrap();
+    let user_start_date = NaiveDate::from_ymd_opt(2025, 7, 28).unwrap();
+    sqlx::query("UPDATE users SET weekly_hours=40, workdays_per_week=5, start_date=$2 WHERE id=$1")
+        .bind(emp_id)
+        .bind(user_start_date)
+        .execute(&app.state.pool)
+        .await
+        .expect("set user start date to last week of July");
+
+    for day in 28..=31 {
+        let entry_date = NaiveDate::from_ymd_opt(2025, 7, day).unwrap();
+        sqlx::query(
+            "INSERT INTO time_entries \
+             (user_id, entry_date, start_time, end_time, category_id, status, reviewed_by, reviewed_at) \
+             VALUES ($1, $2, '08:00', '16:00', $3, 'approved', 1, NOW())",
+        )
+        .bind(emp_id)
+        .bind(entry_date)
+        .bind(cat_id)
+        .execute(&app.state.pool)
+        .await
+        .expect("insert approved July entry");
+    }
+
+    let general_absence = absence_cat(&app.state.pool, "general_absence").await;
+    let adjacent_pending_day = NaiveDate::from_ymd_opt(2025, 8, 1).unwrap();
+    sqlx::query(
+        "INSERT INTO absences (user_id, category_id, start_date, end_date, status) \
+         VALUES ($1, $2, $3, $3, 'requested')",
+    )
+    .bind(emp_id)
+    .bind(general_absence.id)
+    .bind(adjacent_pending_day)
+    .execute(&app.state.pool)
+    .await
+    .expect("insert adjacent pending absence");
+
+    let export_ready = zerf::services::reports::all_weeks_ready_for_timesheet_export(
+        &app.state.pool,
+        emp_id,
+        month_start,
+        month_end,
+        user_start_date,
+        false,
+        5,
+    )
+    .await
+    .expect("check export gate with adjacent pending absence");
+
+    assert!(
+        export_ready,
+        "a pending absence outside the exported month must not hold that month's export"
     );
 
     app.cleanup().await;

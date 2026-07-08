@@ -1671,11 +1671,11 @@ If a backup fails, all active admins receive a pinned in-app notification and a 
 
 #### Report PDF Upload
 
-When enabled, Zerf queues an individual timesheet PDF for each employee on a configurable day each month. Each PDF covers the **previous calendar month**. Employees who have not yet submitted all their weeks are uploaded automatically on the next daily check - late submitters are caught up without manual intervention. If the month still contains a pending absence request, the PDF waits until that request is approved or rejected. Employees who were archived after the period ended are included for archive correctness.
+When enabled, Zerf queues an individual timesheet PDF for each employee on a configurable day each month. Each PDF covers the **previous calendar month**. Employees who have not yet submitted all their weeks are uploaded automatically on the next daily check - late submitters are caught up without manual intervention. If that month still contains a pending absence request, the PDF waits until that request is approved or rejected. Employees who were archived or had time tracking disabled after the period ended are included for archive correctness when the month still contains historical data.
 
 If the feature was disabled for several months and is then re-enabled, or if the server missed a month boundary, Zerf automatically backfills all intervening months so no timesheet is silently skipped. **Upload now** has the same backfill behaviour.
 
-If a past month is changed after the PDF was already uploaded - for example an entry is approved or rejected, an approved entry is corrected by an admin, a week is reopened and re-submitted, or an absence is approved, cancelled, or revoked - Zerf automatically re-queues the affected employee's timesheet for that month. Older months are uploaded on the next daily run. The just-finished previous month waits until the configured upload day unless an admin clicks **Upload now**.
+If a past month is changed after the PDF was already uploaded - for example an entry is approved or rejected, an approved entry is corrected by an admin, a week is reopened and re-submitted, or an absence is approved, cancelled, or revoked - Zerf automatically re-queues the affected employee's timesheet for that month. Re-queueing is skipped when the month is before the user's current start date, because the PDF can no longer show that older month faithfully. Older months are uploaded on the next daily run. The just-finished previous month waits until the configured upload day unless an admin clicks **Upload now**.
 
 | Setting | Description |
 | --- | --- |
@@ -1686,7 +1686,7 @@ If a past month is changed after the PDF was already uploaded - for example an e
 
 **Upload now** queues the previous month's PDFs for all employees immediately and uploads those who are already fully submitted. Employees who are not yet submitted are uploaded on subsequent daily checks. This does not prevent the scheduled monthly run from processing remaining entries.
 
-If an upload fails, all active admins receive a pinned in-app notification and a throttled alert email (at most one email per day). The scheduled upload retries automatically on the next daily check.
+If an upload fails or a queued PDF cannot be safely generated yet, all active admins receive a pinned in-app notification and a throttled alert email (at most one email per day). The scheduled upload retries automatically on the next daily check.
 
 ### Managing categories
 
@@ -1928,7 +1928,8 @@ re-validated server-side, independent of what the client sends:
   absences, and reopen requests are never deleted when `tracks_time` is set to
   `false`. The rows are retained immutably in the database but are silently
   excluded from all team views, approval queues, reminder notifications, and
-  calculations. This mirrors how archived users are handled.
+  calculations. If automatic report PDF upload is enabled, months that already
+  contain historical data can still be uploaded for archive completeness.
 
 ### Session invalidation
 
