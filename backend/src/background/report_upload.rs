@@ -11,10 +11,9 @@
 //!      in the queue for the next daily check (catch-up for late submitters).
 //!      Before the configured upload day, the scheduled run still catches up
 //!      older months but defers the just-finished previous month.
-//!      An entry whose user's start date has since moved past the period is
-//!      permanently unexportable, so it is removed from the queue right away
-//!      (logged only, no admin notification needed) instead of being retried
-//!      forever.
+//!      An entry whose user's current state would hide historical rows is left
+//!      in the queue and surfaced to admins so a start-date or workflow mistake
+//!      can be corrected without losing the pending export.
 //!
 //! Folder layout in the Nextcloud share:
 //!   <period>/                                       e.g. 2026-05/
@@ -27,10 +26,7 @@
 use crate::error::{AppError, AppResult};
 use crate::services::{
     nextcloud,
-    reports::{
-        all_weeks_ready_for_timesheet_export, build_timesheet_section,
-        timesheet_period_predates_user_start,
-    },
+    reports::{all_weeks_ready_for_timesheet_export, build_timesheet_section},
     settings,
     users::repo_user_to_auth_user,
 };
@@ -302,23 +298,23 @@ async fn process_one_entry(
     let submission_exempt = !crate::roles::has_submission_obligation(&user.role, user.weekly_hours);
     let reports_db = crate::repository::ReportDb::new(state.pool.clone());
 
-    if timesheet_period_predates_user_start(to, user.start_date) {
-        // The user's start date was moved forward past this period after the entry
-        // was queued (e.g. an admin corrected it). The period can never become
-        // exportable again on its own, so silently drop the stale entry now instead
-        // of retrying it forever.
+    if reports_db
+        .has_report_content_before_start_date(user.id, from, to, user.start_date)
+        .await?
+    {
         let msg = format!(
-            "User {} ({} {}) has current start date {} after period {}. \
-             Refusing to upload this timesheet because pre-start rows cannot be rendered faithfully. \
-             Removing the stale entry from the export queue.",
+            "User {} ({} {}) has current start date {} inside or after period {} while stored report rows exist before that date. \
+             Correct the start date or historical rows before retrying the timesheet PDF export.",
             user.id, user.first_name, user.last_name, user.start_date, entry.period
         );
         tracing::warn!(target: "zerf::report_upload", "{msg}");
-        state
-            .db
-            .export_queue
-            .delete_entry(entry.user_id, &entry.period)
-            .await?;
+        crate::services::notifications::notify_admins_system_error(
+            state,
+            &format!("report_upload_pre_start_{}_{}", user.id, entry.period),
+            "Report PDF upload blocked",
+            &msg,
+        )
+        .await;
         return Ok(());
     }
 
@@ -337,8 +333,31 @@ async fn process_one_entry(
         return Ok(());
     }
 
-    // Skip the normal submission gate for historical-only users because it can
-    // be permanently unsatisfiable after submitted entries are reverted to draft.
+    if is_historical_only
+        && reports_db
+            .has_unresolved_time_entries_in_range(user.id, from, to)
+            .await?
+    {
+        let msg = format!(
+            "User {} ({} {}) is archived or has time tracking disabled, but period {} still contains draft, submitted, or unresolved rejected time entries. \
+             Resolve those rows before retrying the timesheet PDF export.",
+            user.id, user.first_name, user.last_name, entry.period
+        );
+        tracing::warn!(target: "zerf::report_upload", "{msg}");
+        crate::services::notifications::notify_admins_system_error(
+            state,
+            &format!("report_upload_unsettled_time_{}_{}", user.id, entry.period),
+            "Report PDF upload blocked",
+            &msg,
+        )
+        .await;
+        return Ok(());
+    }
+
+    // Skip the normal day-coverage gate for historical-only users only after
+    // confirming the month has no unresolved time-entry workflow rows. Missing
+    // workdays can be a legitimate historical shape after archive/disable, but
+    // draft, submitted, and still-rejected rows are undecided data.
     let submitted = if is_historical_only {
         true
     } else {

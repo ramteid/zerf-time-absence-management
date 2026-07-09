@@ -336,7 +336,7 @@ async fn report_export_queue_requeues_past_month_mutations() {
 }
 
 #[tokio::test]
-async fn report_export_requeue_refuses_period_before_current_start_date() {
+async fn report_export_requeue_preserves_period_after_start_date_change() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
     app.state
@@ -346,16 +346,28 @@ async fn report_export_requeue_refuses_period_before_current_start_date() {
         .await
         .expect("enable report upload");
 
-    let (_lead_id, _lead_pw, emp_id, _emp_pw, _default_monday, _cat_id) =
+    let (_lead_id, _lead_pw, emp_id, _emp_pw, _default_monday, cat_id) =
         bootstrap_team_with_suffix(&app, &admin, false, "export-pre-start-requeue").await;
     let old_day = next_monday(-75);
     let old_period = old_day.format("%Y-%m").to_string();
+    let period_start = NaiveDate::from_ymd_opt(old_day.year(), old_day.month(), 1).unwrap();
     let period_end = NaiveDate::from_ymd_opt(
         old_day.year(),
         old_day.month(),
         zerf::time_calc::last_day_of_month(old_day.year(), old_day.month()),
     )
     .unwrap();
+    sqlx::query(
+        "INSERT INTO time_entries \
+         (user_id, entry_date, start_time, end_time, category_id, status, reviewed_by, reviewed_at) \
+         VALUES ($1, $2, '08:00', '12:00', $3, 'approved', 1, NOW())",
+    )
+    .bind(emp_id)
+    .bind(old_day)
+    .bind(cat_id)
+    .execute(&app.state.pool)
+    .await
+    .expect("insert historical pre-start entry");
     let new_start_date = period_end + chrono::Duration::days(1);
     sqlx::query("UPDATE users SET start_date=$2 WHERE id=$1")
         .bind(emp_id)
@@ -367,9 +379,24 @@ async fn report_export_requeue_refuses_period_before_current_start_date() {
     zerf::services::reports::requeue_export_for_dates(&app.state.pool, &[(emp_id, old_day)]).await;
 
     let pending = app.state.db.export_queue.list_pending().await.unwrap();
+    assert_eq!(
+        pending.len(),
+        1,
+        "period {old_period} must stay queued after start_date moved to {new_start_date}"
+    );
+    assert_eq!(pending[0].user_id, emp_id);
+    assert_eq!(pending[0].period, old_period);
+
+    let has_hidden_content = app
+        .state
+        .db
+        .reports
+        .has_report_content_before_start_date(emp_id, period_start, period_end, new_start_date)
+        .await
+        .expect("check pre-start content");
     assert!(
-        pending.is_empty(),
-        "period {old_period} must not be requeued after start_date moved to {new_start_date}"
+        has_hidden_content,
+        "upload processing must hold the queued entry instead of overwriting a PDF that contains pre-start rows"
     );
 
     app.cleanup().await;
@@ -461,6 +488,111 @@ async fn report_export_queue_includes_tracking_disabled_users_with_history() {
         pending.len(),
         1,
         "disabled user's historical month is requeued"
+    );
+    assert_eq!(pending[0].user_id, admin_id);
+    assert_eq!(pending[0].period, period);
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn report_export_holds_tracking_disabled_users_with_unresolved_time_rows() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    app.state
+        .db
+        .settings
+        .save_setting(zerf::services::settings::REPORT_UPLOAD_ENABLED_KEY, "true")
+        .await
+        .expect("enable report upload");
+    let (_, categories) = admin.get("/api/v1/categories").await;
+    let cat_id = categories.as_array().unwrap()[0]["id"].as_i64().unwrap();
+
+    let historical_day = next_monday(-75);
+    let period = historical_day.format("%Y-%m").to_string();
+    let month_start = NaiveDate::from_ymd_opt(historical_day.year(), historical_day.month(), 1)
+        .expect("valid month start");
+    let month_end = NaiveDate::from_ymd_opt(
+        historical_day.year(),
+        historical_day.month(),
+        zerf::time_calc::last_day_of_month(historical_day.year(), historical_day.month()),
+    )
+    .expect("valid month end");
+
+    let (status, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "historical-unresolved-admin@example.com",
+                "first_name": "Historical",
+                "last_name": "Unresolved",
+                "role": "admin",
+                "tracks_time": true,
+                "weekly_hours": 39,
+                "leave_days_current_year": 30,
+                "leave_days_next_year": 30,
+                "annual_leave_days": 30,
+                "start_date": "2024-01-01"
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create tracking admin");
+    let admin_id = id(&body);
+
+    sqlx::query(
+        "INSERT INTO time_entries \
+         (user_id, entry_date, start_time, end_time, category_id, status, submitted_at) \
+         VALUES ($1, $2, '08:00', '12:00', $3, 'submitted', NOW())",
+    )
+    .bind(admin_id)
+    .bind(historical_day)
+    .bind(cat_id)
+    .execute(&app.state.pool)
+    .await
+    .expect("insert submitted historical entry");
+
+    let (status, _) = admin
+        .put(
+            &format!("/api/v1/users/{admin_id}"),
+            &json!({ "tracks_time": false }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "disable tracking");
+
+    let status_after_disable: String =
+        sqlx::query_scalar("SELECT status FROM time_entries WHERE user_id=$1 AND entry_date=$2")
+            .bind(admin_id)
+            .bind(historical_day)
+            .fetch_one(&app.state.pool)
+            .await
+            .expect("load reverted entry status");
+    assert_eq!(
+        status_after_disable, "draft",
+        "disabling tracking reverts submitted rows to draft"
+    );
+
+    let has_unresolved_rows = app
+        .state
+        .db
+        .reports
+        .has_unresolved_time_entries_in_range(admin_id, month_start, month_end)
+        .await
+        .expect("check unresolved rows");
+    assert!(
+        has_unresolved_rows,
+        "historical-only exports must hold while draft rows remain in the month"
+    );
+
+    zerf::services::reports::requeue_export_for_dates(
+        &app.state.pool,
+        &[(admin_id, historical_day)],
+    )
+    .await;
+    let pending = app.state.db.export_queue.list_pending().await.unwrap();
+    assert_eq!(
+        pending.len(),
+        1,
+        "unresolved historical month stays queued for visible follow-up"
     );
     assert_eq!(pending[0].user_id, admin_id);
     assert_eq!(pending[0].period, period);

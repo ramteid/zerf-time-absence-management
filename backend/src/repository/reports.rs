@@ -226,6 +226,71 @@ impl ReportDb {
         Ok(count > 0)
     }
 
+    /// Returns true when the period still contains time-entry workflow state
+    /// that nobody has finalized. Historical-only users cannot resolve these
+    /// rows themselves, so the archive export must wait instead of producing a
+    /// PDF with draft, pending, or still-rejected data.
+    pub async fn has_unresolved_time_entries_in_range(
+        &self,
+        user_id: i64,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> AppResult<bool> {
+        let sql = format!(
+            "SELECT EXISTS ( \
+                SELECT 1 FROM time_entries te \
+                WHERE te.user_id=$1 \
+                AND te.entry_date BETWEEN $2 AND $3 \
+                AND (te.status IN ('draft','submitted') \
+                     OR ({EFFECTIVE_REJECTED_TIME_ENTRY_CONDITION})) \
+             )"
+        );
+        // AssertSqlSafe: the formatted fragment is a compile-time status predicate.
+        Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
+            .bind(user_id)
+            .bind(from)
+            .bind(to)
+            .fetch_one(&self.pool)
+            .await?)
+    }
+
+    /// Returns true when the current start date would cause the PDF renderer to
+    /// hide existing report content in this period.
+    pub async fn has_report_content_before_start_date(
+        &self,
+        user_id: i64,
+        from: NaiveDate,
+        to: NaiveDate,
+        user_start_date: NaiveDate,
+    ) -> AppResult<bool> {
+        if user_start_date <= from {
+            return Ok(false);
+        }
+
+        Ok(sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS ( \
+                SELECT 1 FROM time_entries te \
+                WHERE te.user_id=$1 \
+                AND te.entry_date BETWEEN $2 AND $3 \
+                AND te.entry_date < $4 \
+                AND te.status != 'rejected' \
+                UNION ALL \
+                SELECT 1 FROM absences a \
+                WHERE a.user_id=$1 \
+                AND a.status IN ('approved','cancellation_pending') \
+                AND a.end_date >= $2 \
+                AND a.start_date <= $3 \
+                AND a.start_date < $4 \
+             )",
+        )
+        .bind(user_id)
+        .bind(from)
+        .bind(to)
+        .bind(user_start_date)
+        .fetch_one(&self.pool)
+        .await?)
+    }
+
     /// Absence ranges in a period for the submission-reminder and user-facing
     /// completeness check.
     ///

@@ -288,7 +288,7 @@ changes when users and server run in different timezones.
 | Draft | Created by employee. Not yet in review. |
 | Submitted | Week was submitted. Approvers can review. |
 | Approved | Entry accepted. Included in reports and flextime logic. |
-| Rejected | Entry rejected. It stays visible as history; an overlapping submitted or approved correction closes it for completeness and reopen checks. |
+| Rejected | Entry rejected. It stays visible as history; an overlapping approved correction closes it for completeness and reopen checks. |
 
 Users with submission auto-approval enabled skip `Submitted` entirely: their
 entries go directly from `Draft` to `Approved` on submit (see [Team settings:
@@ -546,7 +546,7 @@ counts is that every required workday is covered.
 A week is considered **complete** when:
 
 - No entry anywhere in the week is still in draft state, and no rejected entry
-  remains without an overlapping submitted or approved correction, **and**
+  remains without an overlapping approved correction, **and**
 - Every contract workday in the week is covered by at least one submitted or
   approved entry (crediting or non-crediting), **or** excused by an approved,
   cancellation-pending, or requested absence, a public holiday, or falling
@@ -560,7 +560,7 @@ complete.
 A week is considered **incomplete** when:
 
 - Any entry anywhere in the week is still in draft state, or a rejected entry
-  has not yet been closed by an overlapping submitted or approved correction,
+  has not yet been closed by an overlapping approved correction,
   **or**
 - At least one contract workday has no submitted/approved entry and is not
   excused. Submitting only some days of a week is not enough; the remaining
@@ -1677,7 +1677,7 @@ When enabled, Zerf queues an individual timesheet PDF for each employee on a con
 
 If the feature was disabled for several months and is then re-enabled, or if the server missed a month boundary, Zerf automatically backfills all intervening months so no timesheet is silently skipped. **Upload now** has the same backfill behaviour.
 
-If a past month is changed after the PDF was already uploaded - for example an entry is approved or rejected, an approved entry is corrected by an admin, a week is reopened and re-submitted, or an absence is approved, cancelled, or revoked - Zerf automatically re-queues the affected employee's timesheet for that month. Re-queueing is skipped when the month is before the user's current start date, because the PDF can no longer show that older month faithfully. Older months are uploaded on the next daily run. The just-finished previous month waits until the configured upload day unless an admin clicks **Upload now**.
+If a past month is changed after the PDF was already uploaded - for example an entry is approved or rejected, an approved entry is corrected by an admin, a week is reopened and re-submitted, or an absence is approved, cancelled, or revoked - Zerf automatically re-queues the affected employee's timesheet for that month. If the user's current start date would hide stored rows in that month, or if an archived/tracking-disabled user still has draft, submitted, or unresolved rejected entries, the upload waits and admins receive a pinned alert. Older months are uploaded on the next daily run once they are ready. The just-finished previous month waits until the configured upload day unless an admin clicks **Upload now**.
 
 | Setting | Description |
 | --- | --- |

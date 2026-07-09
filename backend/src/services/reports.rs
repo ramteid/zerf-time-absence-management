@@ -1452,13 +1452,6 @@ pub async fn all_weeks_ready_for_timesheet_export(
     ))
 }
 
-pub fn timesheet_period_predates_user_start(
-    period_end: NaiveDate,
-    user_start_date: NaiveDate,
-) -> bool {
-    period_end < user_start_date
-}
-
 #[derive(Serialize)]
 pub struct UserCategoryRow {
     pub user_id: i64,
@@ -1582,8 +1575,8 @@ pub async fn requeue_export_for_dates(
     let user_db = crate::repository::UserDb::new(pool.clone());
     let export_queue_db = crate::repository::TimesheetExportQueueDb::new(pool.clone());
     for (user_id, periods) in pairs {
-        let user = match user_db.find_by_id(user_id).await {
-            Ok(Some(user)) => user,
+        match user_db.find_by_id(user_id).await {
+            Ok(Some(_user)) => {}
             Ok(None) => continue,
             Err(e) => {
                 tracing::warn!(
@@ -1592,26 +1585,9 @@ pub async fn requeue_export_for_dates(
                 );
                 continue;
             }
-        };
+        }
         for (year, month) in periods {
-            let Some(period_end) = NaiveDate::from_ymd_opt(
-                year,
-                month,
-                crate::time_calc::last_day_of_month(year, month),
-            ) else {
-                continue;
-            };
             let period = format!("{year:04}-{month:02}");
-            if timesheet_period_predates_user_start(period_end, user.start_date) {
-                tracing::warn!(
-                    target: "zerf::reports",
-                    "requeue_export_for_dates: refused to re-queue user {} period {} because current start_date {} is after the period",
-                    user_id,
-                    period,
-                    user.start_date
-                );
-                continue;
-            }
             if let Err(e) = export_queue_db.populate(&period, &[user_id]).await {
                 tracing::warn!(
                     target: "zerf::reports",
@@ -1995,22 +1971,6 @@ mod tests {
             mondays.is_empty(),
             "expected no complete weeks, got {mondays:?}"
         );
-    }
-
-    #[test]
-    fn timesheet_period_predates_user_start_only_when_period_ends_before_start() {
-        assert!(timesheet_period_predates_user_start(
-            NaiveDate::from_ymd_opt(2026, 5, 31).unwrap(),
-            NaiveDate::from_ymd_opt(2026, 6, 1).unwrap()
-        ));
-        assert!(!timesheet_period_predates_user_start(
-            NaiveDate::from_ymd_opt(2026, 6, 30).unwrap(),
-            NaiveDate::from_ymd_opt(2026, 6, 1).unwrap()
-        ));
-        assert!(!timesheet_period_predates_user_start(
-            NaiveDate::from_ymd_opt(2026, 6, 30).unwrap(),
-            NaiveDate::from_ymd_opt(2026, 6, 30).unwrap()
-        ));
     }
 
     /// `check_weeks_all_submitted` considers a week fully excused when every

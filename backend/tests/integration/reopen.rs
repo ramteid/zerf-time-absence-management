@@ -137,7 +137,7 @@ async fn submitting_correction_auto_rejects_zombie_reopen_request() {
 }
 
 #[tokio::test]
-async fn correction_only_supersedes_overlapping_rejected_entries() {
+async fn approved_correction_only_supersedes_overlapping_rejected_entries() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
     let (_lead_id, lead_pw, emp_id, emp_pw, monday_iso, cat_id) =
@@ -210,6 +210,13 @@ async fn correction_only_supersedes_overlapping_rejected_entries() {
         )
         .await;
     assert_eq!(status, StatusCode::OK, "submit morning correction");
+    let (status, _) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [correction_id]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve morning correction");
 
     let time_incomplete_dates = zerf::repository::TimeEntryDb::new(app.state.pool.clone())
         .get_incomplete_dates_in_range(emp_id, monday, monday)
@@ -233,10 +240,10 @@ async fn correction_only_supersedes_overlapping_rejected_entries() {
 }
 
 #[tokio::test]
-async fn partial_correction_resolves_rejected_entry_and_keeps_reopen_editable() {
+async fn submitted_correction_resolves_rejected_entry_only_after_approval() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
-    let (_lead_id, lead_pw, emp_id, emp_pw, monday_iso, cat_id) =
+    let (lead_id, lead_pw, emp_id, emp_pw, monday_iso, cat_id) =
         bootstrap_team_with_suffix(&app, &admin, false, "partial-rejected").await;
     let lead = login_change_pw(&app, "lead-partial-rejected@example.com", &lead_pw).await;
     let emp = login_change_pw(&app, "emp-partial-rejected@example.com", &emp_pw).await;
@@ -299,39 +306,95 @@ async fn partial_correction_resolves_rejected_entry_and_keeps_reopen_editable() 
         .expect("load time incomplete dates");
     assert_eq!(
         time_incomplete_dates,
-        Vec::<chrono::NaiveDate>::new(),
-        "overlapping shorter correction must close the rejected husk"
+        vec![monday],
+        "submitted correction must not close the rejected entry"
     );
     let report_incomplete_dates = zerf::repository::ReportDb::new(app.state.pool.clone())
         .incomplete_dates_in_range(emp_id, monday, monday)
         .await
         .expect("load report incomplete dates");
     assert!(
-        report_incomplete_dates.is_empty(),
-        "report completeness must treat the closed rejected row as historical"
+        report_incomplete_dates.contains(&monday),
+        "report completeness must wait for an approved correction"
     );
+
+    let (status, _) = lead
+        .post(
+            "/api/v1/time-entries/batch-reject",
+            &json!({"ids": [correction_id], "reason": "still wrong"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "reject partial correction");
+
+    let (status, entries) = emp.get("/api/v1/time-entries").await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "load entries after rejecting correction"
+    );
+    let rejected_entry = find_by_id(&entries, rejected_entry_id).expect("rejected entry");
+    let correction_entry = find_by_id(&entries, correction_id).expect("correction entry");
+    assert_eq!(rejected_entry["status"], "rejected");
+    assert!(rejected_entry["rejection_resolved_at"].is_null());
+    assert_eq!(correction_entry["status"], "rejected");
+    assert!(correction_entry["rejection_resolved_at"].is_null());
 
     let (status, body) = emp
         .post(
-            "/api/v1/reopen-requests",
-            &json!({"week_start": monday_iso, "reason": "edit shorter correction"}),
+            "/api/v1/time-entries",
+            &json!({
+                "entry_date": monday_iso,
+                "start_time": "08:00",
+                "end_time": "10:00",
+                "category_id": cat_id,
+                "comment": "approved partial correction"
+            }),
         )
         .await;
     assert_eq!(
         status,
         StatusCode::OK,
-        "reopen must not resurrect the closed rejected entry"
+        "create approved correction candidate"
     );
-    assert_eq!(body["status"], "auto_approved");
-    assert_eq!(body["entries_reopened"], 1);
+    let approved_correction_id = id(&body);
+    let (status, _) = emp
+        .post(
+            "/api/v1/time-entries/submit",
+            &json!({"ids": [approved_correction_id]}),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "submit approved correction candidate"
+    );
+    let (status, _) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [approved_correction_id]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve correction");
+
+    let time_incomplete_dates = zerf::repository::TimeEntryDb::new(app.state.pool.clone())
+        .get_incomplete_dates_in_range(emp_id, monday, monday)
+        .await
+        .expect("load time incomplete dates after approval");
+    assert_eq!(
+        time_incomplete_dates,
+        Vec::<chrono::NaiveDate>::new(),
+        "approved correction closes the overlapping rejected rows"
+    );
 
     let (status, entries) = emp.get("/api/v1/time-entries").await;
-    assert_eq!(status, StatusCode::OK, "load entries after reopen");
+    assert_eq!(status, StatusCode::OK, "load entries after approval");
     let rejected_entry = find_by_id(&entries, rejected_entry_id).expect("rejected entry");
-    let correction_entry = find_by_id(&entries, correction_id).expect("correction entry");
     assert_eq!(rejected_entry["status"], "rejected");
     assert!(rejected_entry["rejection_resolved_at"].is_string());
-    assert_eq!(correction_entry["status"], "draft");
+    assert_eq!(
+        rejected_entry["rejection_resolved_by"].as_i64(),
+        Some(lead_id)
+    );
 
     app.cleanup().await;
 }
@@ -569,7 +632,7 @@ async fn reopen_full_workflow() {
         );
     }
 
-    // -- Superseded rejected rows do not block immediate reopen of submitted corrections --
+    // -- Submitted corrections do not supersede rejected rows before approval --
     {
         let (_lead_id, lead_pw, emp_id, emp_pw, monday_iso, cat_id) =
             bootstrap_team_with_suffix(&app, &admin, false, "2c").await;
@@ -592,8 +655,8 @@ async fn reopen_full_workflow() {
             .await
             .expect("load incomplete dates");
         assert!(
-            incomplete_dates.is_empty(),
-            "submitted replacement supersedes the rejected row for completeness"
+            incomplete_dates.contains(&monday),
+            "submitted replacement must not supersede the rejected row for completeness"
         );
 
         let (st, body) = emp
@@ -604,18 +667,22 @@ async fn reopen_full_workflow() {
             .await;
         assert_eq!(
             st,
-            StatusCode::OK,
-            "submitted correction should reopen immediately despite old rejected row"
+            StatusCode::BAD_REQUEST,
+            "submitted correction and unresolved rejection are a mixed pending state"
         );
-        assert_eq!(body["status"], "auto_approved");
-        assert_eq!(body["entries_reopened"], 1);
+        assert!(
+            body.to_string()
+                .contains("submitted entries awaiting approval"),
+            "error should direct the user to finish approval first: {body}"
+        );
 
         let (st, entries) = emp.get("/api/v1/time-entries").await;
-        assert_eq!(st, StatusCode::OK, "load entries after immediate reopen");
+        assert_eq!(st, StatusCode::OK, "load entries after blocked reopen");
         let rejected_entry = find_by_id(&entries, rejected_entry_id).expect("rejected entry");
         let correction_entry = find_by_id(&entries, correction_id).expect("correction entry");
         assert_eq!(rejected_entry["status"], "rejected");
-        assert_eq!(correction_entry["status"], "draft");
+        assert!(rejected_entry["rejection_resolved_at"].is_null());
+        assert_eq!(correction_entry["status"], "submitted");
     }
 
     // -- Superseded rejected rows do not poison approved corrections or pending reopen approval --

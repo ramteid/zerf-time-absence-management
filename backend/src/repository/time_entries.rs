@@ -78,10 +78,10 @@ const TE_SELECT: &str =
      rejection_resolved_at, rejection_resolved_by, created_at, updated_at \
      FROM time_entries";
 
-// Rejected entries are explicit workflow items. They stay active until a
-// submitted/approved overlapping correction closes them by setting
-// rejection_resolved_at. A closed rejected row remains visible as history, but
-// no longer poisons completeness checks or week reopen selection.
+// Rejected entries are explicit workflow items. They stay active until an
+// approved overlapping correction closes them by setting rejection_resolved_at.
+// A closed rejected row remains visible as history, but no longer poisons
+// completeness checks or week reopen selection.
 pub(crate) const EFFECTIVE_REJECTED_TIME_ENTRY_CONDITION: &str = "\
     te.status = 'rejected' \
     AND te.rejection_resolved_at IS NULL";
@@ -436,7 +436,7 @@ impl TimeEntryDb {
              FROM time_entries replacement \
              WHERE replacement.id = ANY($3) \
              AND replacement.user_id=$1 \
-             AND replacement.status IN ('submitted','approved') \
+             AND replacement.status='approved' \
              AND rejected.user_id=$1 \
              AND rejected.status='rejected' \
              AND rejected.rejection_resolved_at IS NULL \
@@ -785,7 +785,7 @@ impl TimeEntryDb {
         .bind(entry_id)
         .execute(&mut *tx)
         .await?;
-        if admin_correction {
+        if admin_correction && prev.status == "approved" {
             Self::resolve_overlapping_rejected_entries_tx(
                 &mut tx,
                 prev.user_id,
@@ -869,8 +869,6 @@ impl TimeEntryDb {
             .fetch_all(&mut *tx)
             .await?
         };
-        Self::resolve_overlapping_rejected_entries_tx(&mut tx, user_id, user_id, &submitted)
-            .await?;
         tx.commit().await?;
         Ok(submitted)
     }
