@@ -2,10 +2,6 @@
 //! notifications that were written directly to the DB by `backup.sh` (via
 //! psql) without going through Rust.
 //!
-//! For failures that originate inside Rust (e.g. report PDF upload),
-//! `services::notifications::notify_admins_system_error` handles the email
-//! immediately.  This task acts as a catch-all for the bash side.
-//!
 //! Email throttle: at most one email per failure class per calendar day, stored
 //! as `system_alert_email_{dedupe_key}` in `app_settings`.
 

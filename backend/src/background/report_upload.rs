@@ -58,7 +58,6 @@ pub async fn run_loop(state: AppState) {
 
         if let Err(e) = run_once(&state).await {
             tracing::error!("Report upload: {e:?}");
-            notify_admins_upload_failed(&state, &e.to_string()).await;
         }
     }
 }
@@ -336,7 +335,6 @@ async fn process_one_entry(
             user.id, user.first_name, user.last_name, entry.period
         );
         tracing::warn!(target: "zerf::report_upload", "{msg}");
-        notify_admins_upload_failed(state, &msg).await;
         return Ok(());
     }
 
@@ -454,23 +452,6 @@ fn parse_year_month(period: &str) -> AppResult<(i32, u32)> {
         .parse()
         .map_err(|_| AppError::Internal(format!("invalid month in period: {period}")))?;
     Ok((year, month))
-}
-
-fn report_upload_failure_dedupe_key(message: &str) -> String {
-    let digest = Sha256::digest(message.as_bytes());
-    let digest_hex = hex::encode(digest);
-    format!("report_upload_failed_{}", &digest_hex[..16])
-}
-
-async fn notify_admins_upload_failed(state: &AppState, message: &str) {
-    let dedupe_key = report_upload_failure_dedupe_key(message);
-    crate::services::notifications::notify_admins_system_error(
-        state,
-        &dedupe_key,
-        "Report PDF upload failed",
-        message,
-    )
-    .await;
 }
 
 #[cfg(test)]

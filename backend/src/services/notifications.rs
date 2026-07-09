@@ -242,6 +242,7 @@ pub async fn load_language(pool: &crate::db::DatabasePool) -> crate::i18n::Langu
 ///              secondary text in the UI and as the email body.
 pub const SYSTEM_ERROR_KIND: &str = "system_error";
 
+#[allow(dead_code)]
 pub async fn notify_admins_system_error(state: &AppState, dedupe_key: &str, title: &str, body: &str) {
     let all_users = match state.db.users.find_all_ordered().await {
         Ok(u) => u,
