@@ -2042,6 +2042,7 @@ async fn notifications_repository_workflow() {
             "system_error",
             "upload-failure",
             "Old upload failure",
+            "detail",
         )
         .await
         .expect("insert first system error");
@@ -2052,6 +2053,7 @@ async fn notifications_repository_workflow() {
             "system_error",
             "upload-failure",
             "Old upload failure",
+            "detail",
         )
         .await
         .expect("upsert same unread system error");
@@ -2062,6 +2064,7 @@ async fn notifications_repository_workflow() {
             "system_error",
             "upload-failure",
             "New upload failure",
+            "detail",
         )
         .await
         .expect("upsert changed unread system error");

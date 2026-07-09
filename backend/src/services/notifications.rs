@@ -237,10 +237,12 @@ pub async fn load_language(pool: &crate::db::DatabasePool) -> crate::i18n::Langu
 /// throttled alert email (at most one email per failure class per calendar day).
 ///
 /// `dedupe_key` identifies the failure class.
-/// `title`      is the human-readable error summary shown in the UI and email.
+/// `title`      is a short, fixed summary shown bold in the UI and as the email subject.
+/// `body`       holds the failure-specific detail (names, dates, etc.), shown as
+///              secondary text in the UI and as the email body.
 pub const SYSTEM_ERROR_KIND: &str = "system_error";
 
-pub async fn notify_admins_system_error(state: &AppState, dedupe_key: &str, title: &str) {
+pub async fn notify_admins_system_error(state: &AppState, dedupe_key: &str, title: &str, body: &str) {
     let all_users = match state.db.users.find_all_ordered().await {
         Ok(u) => u,
         Err(e) => {
@@ -260,7 +262,7 @@ pub async fn notify_admins_system_error(state: &AppState, dedupe_key: &str, titl
         match state
             .db
             .notifications
-            .upsert_system_error(user.id, SYSTEM_ERROR_KIND, dedupe_key, title)
+            .upsert_system_error(user.id, SYSTEM_ERROR_KIND, dedupe_key, title, body)
             .await
         {
             Ok(changed) => any_changed |= changed,
@@ -293,7 +295,7 @@ pub async fn notify_admins_system_error(state: &AppState, dedupe_key: &str, titl
 
     let language = load_language(&state.pool).await;
     for user in &admins {
-        send_notification_email(state, &language, user.id, title.to_string(), title).await;
+        send_notification_email(state, &language, user.id, title.to_string(), body).await;
     }
     let _ = state.db.settings.save_setting(&email_key, &today).await;
 }

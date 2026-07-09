@@ -143,9 +143,12 @@ impl NotificationDb {
     ///
     /// Behaviour:
     ///  - Not exists → INSERT (unread, pinned).
-    ///  - Exists, unread, same title -> DO NOTHING (no re-alert).
-    ///  - Exists, read or with a changed title -> UPDATE: mark unread and
+    ///  - Exists, unread, same title and body -> DO NOTHING (no re-alert).
+    ///  - Exists, read or with a changed title/body -> UPDATE: mark unread and
     ///    refresh created_at so it floats back to the top.
+    ///
+    /// `title` is a short, fixed summary (shown bold in the UI); `body` holds
+    /// the failure-specific detail (shown as secondary text below the title).
     ///
     /// Returns `true` when a row was inserted or re-alerted (caller may want to
     /// send an email); `false` when the notification was already unread.
@@ -155,24 +158,28 @@ impl NotificationDb {
         kind: &str,
         dedupe_key: &str,
         title: &str,
+        body: &str,
     ) -> AppResult<bool> {
         let result = sqlx::query(
             "INSERT INTO notifications \
                (user_id, kind, title, body, dedupe_key, pinned, is_read) \
-             VALUES ($1, $2, $3, NULL, $4, TRUE, FALSE) \
+             VALUES ($1, $2, $3, $4, $5, TRUE, FALSE) \
              ON CONFLICT (user_id, kind, dedupe_key) \
              WHERE dedupe_key IS NOT NULL \
              DO UPDATE SET \
                title      = EXCLUDED.title, \
+               body       = EXCLUDED.body, \
                pinned     = TRUE, \
                is_read    = FALSE, \
                created_at = NOW() \
              WHERE notifications.is_read = TRUE \
-                OR notifications.title IS DISTINCT FROM EXCLUDED.title",
+                OR notifications.title IS DISTINCT FROM EXCLUDED.title \
+                OR notifications.body IS DISTINCT FROM EXCLUDED.body",
         )
         .bind(user_id)
         .bind(kind)
         .bind(title)
+        .bind(body)
         .bind(dedupe_key)
         .execute(&self.pool)
         .await?;

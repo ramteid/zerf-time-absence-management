@@ -11,6 +11,10 @@
 //!      in the queue for the next daily check (catch-up for late submitters).
 //!      Before the configured upload day, the scheduled run still catches up
 //!      older months but defers the just-finished previous month.
+//!      An entry whose user's start date has since moved past the period is
+//!      permanently unexportable, so it is removed from the queue right away
+//!      (logged only, no admin notification needed) instead of being retried
+//!      forever.
 //!
 //! Folder layout in the Nextcloud share:
 //!   <period>/                                       e.g. 2026-05/
@@ -301,13 +305,22 @@ async fn process_one_entry(
     let reports_db = crate::repository::ReportDb::new(state.pool.clone());
 
     if timesheet_period_predates_user_start(to, user.start_date) {
+        // The user's start date was moved forward past this period after the entry
+        // was queued (e.g. an admin corrected it). The period can never become
+        // exportable again on its own, so silently drop the stale entry now instead
+        // of retrying it forever.
         let msg = format!(
             "User {} ({} {}) has current start date {} after period {}. \
-             Refusing to upload this timesheet because pre-start rows cannot be rendered faithfully.",
+             Refusing to upload this timesheet because pre-start rows cannot be rendered faithfully. \
+             Removing the stale entry from the export queue.",
             user.id, user.first_name, user.last_name, user.start_date, entry.period
         );
         tracing::warn!(target: "zerf::report_upload", "{msg}");
-        notify_admins_upload_failed(state, &msg).await;
+        state
+            .db
+            .export_queue
+            .delete_entry(entry.user_id, &entry.period)
+            .await?;
         return Ok(());
     }
 
@@ -450,9 +463,14 @@ fn report_upload_failure_dedupe_key(message: &str) -> String {
 }
 
 async fn notify_admins_upload_failed(state: &AppState, message: &str) {
-    let title = format!("Report PDF upload failed: {message}");
     let dedupe_key = report_upload_failure_dedupe_key(message);
-    crate::services::notifications::notify_admins_system_error(state, &dedupe_key, &title).await;
+    crate::services::notifications::notify_admins_system_error(
+        state,
+        &dedupe_key,
+        "Report PDF upload failed",
+        message,
+    )
+    .await;
 }
 
 #[cfg(test)]
