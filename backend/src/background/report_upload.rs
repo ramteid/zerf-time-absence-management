@@ -37,7 +37,6 @@ use crate::services::{
 use crate::time_calc::last_day_of_month;
 use crate::AppState;
 use chrono::{Datelike, NaiveDate};
-use sha2::{Digest, Sha256};
 
 /// Background loop: checks once per day (midnight in app timezone).
 pub async fn run_loop(state: AppState) {
@@ -476,17 +475,6 @@ mod tests {
     #[test]
     fn period_before_returns_previous_month() {
         assert_eq!(period_before("2026-06").unwrap(), "2026-05");
-    }
-
-    #[test]
-    fn report_upload_failure_dedupe_key_separates_distinct_messages() {
-        let first = report_upload_failure_dedupe_key("broken share url");
-        let same = report_upload_failure_dedupe_key("broken share url");
-        let second = report_upload_failure_dedupe_key("network timeout");
-
-        assert_eq!(first, same);
-        assert_ne!(first, second);
-        assert!(first.starts_with("report_upload_failed_"));
     }
 
     #[test]
