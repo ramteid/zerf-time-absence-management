@@ -544,6 +544,33 @@ pub async fn update_upload_settings(
         }
     }
 
+    // Cross-field: if database backup upload will end up enabled after this
+    // update, it needs a non-empty, valid share URL. Each field can be saved
+    // independently, so compute the *effective* state by falling back to the
+    // currently stored value for whichever field this request doesn't touch.
+    // Without this check, the only place that ever caught the misconfiguration
+    // was backup.sh at 2 a.m., which had to page the admins about it instead of
+    // the save simply being rejected here.
+    let effective_backup_upload_enabled = match body.backup_upload_enabled {
+        Some(v) => v,
+        None => {
+            load_setting(&app_state.pool, settings::BACKUP_UPLOAD_ENABLED_KEY, "false").await?
+                == "true"
+        }
+    };
+    if effective_backup_upload_enabled {
+        let effective_backup_upload_url = match &body.backup_upload_url {
+            Some(v) => v.clone(),
+            None => load_setting(&app_state.pool, settings::BACKUP_UPLOAD_URL_KEY, "").await?,
+        };
+        if effective_backup_upload_url.trim().is_empty() {
+            return Err(AppError::BadRequest(
+                "A Nextcloud share URL is required to enable database backup upload.".into(),
+            ));
+        }
+        crate::services::nextcloud::parse_share_url(&effective_backup_upload_url)?;
+    }
+
     let mut transaction = app_state.db.settings.begin().await?;
 
     macro_rules! save_if_some {

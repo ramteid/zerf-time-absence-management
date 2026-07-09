@@ -29,6 +29,16 @@
   }
 
   async function save() {
+    if (
+      uploadSettings.backup_upload_enabled &&
+      !(uploadSettings.backup_upload_url || "").trim()
+    ) {
+      toast(
+        $t("A Nextcloud share URL is required to enable database backup upload."),
+        "error",
+      );
+      return;
+    }
     saving = true;
     try {
       const body = {

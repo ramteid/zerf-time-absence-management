@@ -587,14 +587,15 @@ run_backup_once() {
     # An empty or invalid URL when upload is enabled is a misconfiguration:
     # the admin has activated the feature but forgotten to save a valid link.
     # Alert now so a silent no-op is not confused with a successful upload.
+    # Both cases below (empty / invalid share URL while upload is enabled) are
+    # now rejected at save time by update_upload_settings in the Rust API, so
+    # they should be unreachable through normal admin usage. Kept here as a
+    # defensive, silent skip (log only, no admin alert) in case app_settings
+    # was ever edited directly, bypassing that validation.
     if [ -z "$_upload_url" ]; then
       printf 'WARNING: backup_upload_enabled=true but backup_upload_url is empty -- no upload performed.\n' >&2
-      notify_admins_backup_error "backup_upload_failed" \
-        "Nextcloud backup upload is enabled but no share URL is configured. Set the URL in Admin > Nextcloud Upload."
     elif ! parse_share_url "$_upload_url"; then
       printf 'WARNING: Invalid backup_upload_url in app_settings -- skipping upload.\n' >&2
-      notify_admins_backup_error "backup_upload_failed" \
-        "Nextcloud backup upload is enabled but the share URL is invalid. Check Admin > Nextcloud Upload."
     else
       if upload_backup "$output_file" "$UPLOAD_BASE" "$UPLOAD_TOKEN" "$_upload_pw"; then
         printf 'Backup uploaded: %s\n' "$(basename "$output_file")"
