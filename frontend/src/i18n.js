@@ -350,6 +350,14 @@ const TRANSLATIONS = {
       "Approver required for non-admin users.",
     "User has historical data. Use archive instead.":
       "User has historical data. Use archive instead.",
+    "System Log": "System Log",
+    "Log entry": "Log entry",
+    "No log entries.": "No log entries.",
+    Warning: "Warning",
+    Source: "Source",
+    Previous: "Previous",
+    Next: "Next",
+    "Page {page} of {count}": "Page {page} of {count}",
   },
   de: {
     "Loading...": "Wird geladen...",
@@ -1356,6 +1364,14 @@ const TRANSLATIONS = {
       "Genehmiger ist für Nicht-Admin-Benutzer erforderlich.",
     "User has historical data. Use archive instead.":
       "Benutzer hat historische Daten. Bitte stattdessen archivieren.",
+    "System Log": "Systemprotokoll",
+    "Log entry": "Protokolleintrag",
+    "No log entries.": "Keine Protokolleinträge.",
+    Warning: "Warnung",
+    Source: "Quelle",
+    Previous: "Zurück",
+    Next: "Weiter",
+    "Page {page} of {count}": "Seite {page} von {count}",
   },
 };
 

@@ -198,7 +198,8 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                 )
                 .route("/reports/overtime", get(handlers::reports::overtime))
                 .route("/reports/flextime", get(handlers::reports::flextime))
-                .route("/audit-log", get(crate::audit::list))
+                .route("/audit-log", get(handlers::audit_log::list))
+                .route("/logs", get(handlers::app_logs::list))
                 .route(
                     "/reopen-requests",
                     get(handlers::reopen_requests::list_mine)

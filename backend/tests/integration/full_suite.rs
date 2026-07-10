@@ -334,7 +334,7 @@ async fn time_entry_and_cr_workflow() {
             .get(&format!("/api/v1/audit-log?user_id={}", emp_id))
             .await;
         assert_eq!(st, StatusCode::OK, "audit log");
-        let lc = count_ids(&body);
+        let lc = count_ids(&body["entries"]);
         assert!(lc >= 4, "employee audit entries={} (need >=4)", lc);
 
         let (st, body) = admin
@@ -1314,9 +1314,9 @@ async fn tina_time_tracking_journey() {
             .get(&format!("/api/v1/audit-log?user_id={}", tina_id))
             .await;
         assert!(
-            count_ids(&body) > 15,
+            count_ids(&body["entries"]) > 15,
             "tina has >15 audit entries (got {})",
-            count_ids(&body)
+            count_ids(&body["entries"])
         );
     }
 

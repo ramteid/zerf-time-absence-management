@@ -96,6 +96,7 @@ Use this document if you are:
   - [Scoped assistant user management (optional)](#scoped-assistant-user-management-optional)
 - [Admin workflow reference](#admin-workflow-reference)
   - [Reading the audit log](#reading-the-audit-log)
+  - [Reading the system log](#reading-the-system-log)
   - [Creating a user](#creating-a-user)
   - [Updating a user](#updating-a-user)
   - [Archiving a user](#archiving-a-user)
@@ -833,8 +834,7 @@ notifications/emails.
 When a technical failure occurs — such as a database backup failure or a Nextcloud upload error — all active admins receive a **pinned** notification at the top of their notification panel. Pinned unread notifications are visually highlighted and float above regular notifications.
 
 - Each failure class produces **at most one active notification** per admin. If the notification is dismissed and the failure recurs, it is raised again.
-- A throttled **alert email** is sent alongside the in-app notification, at most once per failure class per calendar day.
-- The notification is created both by the Rust application (for report PDF upload failures) and detected hourly from the database (for backup failures written directly by the backup container).
+- These notifications appear **in the app only** — no alert email is sent. Each admin dismisses their own copy.
 - **Backup and upload failure notifications are automatically resolved** when the next cycle succeeds. You do not need to dismiss them manually after fixing the underlying problem; the notification disappears on the next successful backup or upload.
 
 ### Notification timestamp display
@@ -1391,6 +1391,23 @@ system settings, and sensitive operations.
   as separate per-day operations.
 - If the acting user has since been deleted, the actor column shows a
   placeholder instead of a name. The audit record itself is preserved.
+- Entries are listed newest first, 100 per page. Use the pager below the list
+  to move between pages.
+- Click an entry to see its details in a popup.
+
+### Reading the system log
+
+Settings > System Log shows warnings and errors that occurred while the
+application was running — for example a failed email delivery or an
+unreachable holiday service. It helps admins understand why something did not
+work without needing access to the server.
+
+- Only warnings and errors are collected; routine activity is not logged here.
+- Entries are listed newest first, 100 per page. Long messages are shortened
+  in the list — click an entry to see the full message with its context in a
+  popup.
+- The log keeps at most 1000 entries, and entries are removed after one year.
+  Older entries are deleted automatically.
 
 ### Creating a user
 
@@ -1669,7 +1686,7 @@ The **10 most recent** local backup files are kept in the backup volume; older o
 
 The backup file is AES-256-CBC encrypted before upload, so a compromised share link does not expose plaintext data.
 
-If a backup fails, all active admins receive a pinned in-app notification and a throttled alert email (at most one email per day per failure class). The notification is automatically re-raised if it was previously dismissed and the failure recurs.
+If a backup fails, all active admins receive a pinned in-app notification (no email is sent). The notification is automatically re-raised if it was previously dismissed and the failure recurs.
 
 #### Report PDF Upload
 
@@ -1677,7 +1694,7 @@ When enabled, Zerf queues an individual timesheet PDF for each employee on a con
 
 If the feature was disabled for several months and is then re-enabled, or if the server missed a month boundary, Zerf automatically backfills all intervening months so no timesheet is silently skipped. **Upload now** has the same backfill behaviour.
 
-If a past month is changed after the PDF was already uploaded - for example an entry is approved or rejected, an approved entry is corrected by an admin, a week is reopened and re-submitted, or an absence is approved, cancelled, or revoked - Zerf automatically re-queues the affected employee's timesheet for that month. If a start-date change would make a re-upload hide part of that month, if the user's current start date would hide stored rows in that month, or if an archived/tracking-disabled user still has draft, submitted, or unresolved rejected entries, the upload waits and admins receive a pinned alert. Older months are uploaded on the next daily run once they are ready. The just-finished previous month waits until the configured upload day unless an admin clicks **Upload now**.
+If a past month is changed after the PDF was already uploaded - for example an entry is approved or rejected, an approved entry is corrected by an admin, a week is reopened and re-submitted, or an absence is approved, cancelled, or revoked - Zerf automatically re-queues the affected employee's timesheet for that month. If a start-date change would make a re-upload hide part of that month, if the user's current start date would hide stored rows in that month, or if an archived/tracking-disabled user still has draft, submitted, or unresolved rejected entries, the upload waits and admins receive a pinned in-app notification. Older months are uploaded on the next daily run once they are ready. The just-finished previous month waits until the configured upload day unless an admin clicks **Upload now**.
 
 | Setting | Description |
 | --- | --- |
@@ -1688,7 +1705,7 @@ If a past month is changed after the PDF was already uploaded - for example an e
 
 **Upload now** queues the previous month's PDFs for all employees immediately and uploads those who are already fully submitted. Employees who are not yet submitted are uploaded on subsequent daily checks. This does not prevent the scheduled monthly run from processing remaining entries.
 
-If an upload fails or a queued PDF cannot be safely generated yet, all active admins receive a pinned in-app notification and a throttled alert email (at most one email per day). The scheduled upload retries automatically on the next daily check.
+If an upload fails or a queued PDF cannot be safely generated yet, all active admins receive a pinned in-app notification (no email is sent). The scheduled upload retries automatically on the next daily check.
 
 ### Managing categories
 

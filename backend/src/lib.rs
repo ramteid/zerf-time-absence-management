@@ -6,6 +6,7 @@ pub mod email;
 pub mod error;
 pub mod handlers;
 pub mod i18n;
+pub mod log_capture;
 pub mod middleware;
 pub mod report_pdf;
 pub mod repository;

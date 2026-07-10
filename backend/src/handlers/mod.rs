@@ -1,5 +1,7 @@
 pub mod absence_categories;
 pub mod absences;
+pub mod app_logs;
+pub mod audit_log;
 pub mod auth;
 pub mod categories;
 pub mod holidays;

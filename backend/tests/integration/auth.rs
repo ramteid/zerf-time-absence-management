@@ -29,6 +29,7 @@ async fn auth_full_workflow() {
             "can_manage_categories",
             "can_manage_holidays",
             "can_view_audit_log",
+            "can_view_logs",
             "can_manage_settings",
             "can_approve",
             "can_view_team_reports",

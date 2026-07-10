@@ -22,6 +22,7 @@
     { href: "/settings/email", key: "Email" },
     { href: "/settings/upload", key: "Nextcloud Backups" },
     { href: "/settings/audit-log", key: "Audit Log" },
+    { href: "/settings/system-log", key: "System Log" },
   ];
 
   // The team-settings tab is shown to all leads (including admin leads).

@@ -74,7 +74,9 @@ async fn audit_log_supports_table_and_record_filters() {
         .await;
     assert_eq!(st, StatusCode::OK, "audit log query");
 
-    let rows = body.as_array().expect("audit response must be an array");
+    let rows = body["entries"]
+        .as_array()
+        .expect("audit response must contain an entries array");
     assert!(
         !rows.is_empty(),
         "filtered audit query must return at least one row"
@@ -150,7 +152,9 @@ async fn audit_log_supports_user_id_filter() {
         .await;
     assert_eq!(st, StatusCode::OK, "audit log query by user_id");
 
-    let rows = body.as_array().expect("audit response must be an array");
+    let rows = body["entries"]
+        .as_array()
+        .expect("audit response must contain an entries array");
     assert!(
         !rows.is_empty(),
         "user_id filter must return rows for employee actions"
@@ -229,7 +233,9 @@ async fn audit_log_combines_all_filters_with_and_semantics() {
         .await;
     assert_eq!(st, StatusCode::OK, "audit query with all filters");
 
-    let rows = body.as_array().expect("audit response must be an array");
+    let rows = body["entries"]
+        .as_array()
+        .expect("audit response must contain an entries array");
     assert_eq!(
         rows.len(),
         1,
@@ -256,7 +262,9 @@ async fn audit_log_returns_empty_array_for_non_matching_filters() {
         "non-matching filters should still be OK"
     );
 
-    let rows = body.as_array().expect("audit response must be an array");
+    let rows = body["entries"]
+        .as_array()
+        .expect("audit response must contain an entries array");
     assert!(
         rows.is_empty(),
         "expected empty result for non-matching filters"
@@ -304,7 +312,9 @@ async fn audit_log_records_category_create_and_update() {
         ))
         .await;
     assert_eq!(st, StatusCode::OK, "audit log query");
-    let rows = body.as_array().expect("audit response must be an array");
+    let rows = body["entries"]
+        .as_array()
+        .expect("audit response must contain an entries array");
     assert_eq!(rows.len(), 1, "category creation must be audited");
     assert_eq!(rows[0]["action"].as_str(), Some("created"));
     assert!(rows[0]["before_data"].is_null());
@@ -327,7 +337,9 @@ async fn audit_log_records_category_create_and_update() {
         ))
         .await;
     assert_eq!(st, StatusCode::OK, "audit log query after update");
-    let rows = body.as_array().expect("audit response must be an array");
+    let rows = body["entries"]
+        .as_array()
+        .expect("audit response must contain an entries array");
     assert_eq!(rows.len(), 2, "category update must also be audited");
     let updated_row = rows
         .iter()
@@ -381,7 +393,9 @@ async fn audit_log_records_holiday_create_and_delete() {
         ))
         .await;
     assert_eq!(st, StatusCode::OK, "audit log query");
-    let rows = body.as_array().expect("audit response must be an array");
+    let rows = body["entries"]
+        .as_array()
+        .expect("audit response must contain an entries array");
     assert_eq!(rows.len(), 1, "holiday creation must be audited");
     assert_eq!(rows[0]["action"].as_str(), Some("created"));
     assert!(rows[0]["before_data"].is_null());
@@ -401,7 +415,9 @@ async fn audit_log_records_holiday_create_and_delete() {
         ))
         .await;
     assert_eq!(st, StatusCode::OK, "audit log query after delete");
-    let rows = body.as_array().expect("audit response must be an array");
+    let rows = body["entries"]
+        .as_array()
+        .expect("audit response must contain an entries array");
     assert_eq!(rows.len(), 2, "holiday deletion must also be audited");
     let deleted_row = rows
         .iter()
@@ -417,12 +433,12 @@ async fn audit_log_records_holiday_create_and_delete() {
 }
 
 #[tokio::test]
-async fn audit_log_is_sorted_desc_and_capped_to_500_rows() {
+async fn audit_log_is_sorted_desc_and_paginated() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
 
     let base = chrono::Utc::now();
-    for i in 0_i64..520_i64 {
+    for i in 0_i64..120_i64 {
         query(
             "INSERT INTO audit_log(user_id, action, table_name, record_id, before_data, after_data, occurred_at) \
              VALUES ($1,$2,$3,$4,$5,$6,$7)",
@@ -439,15 +455,23 @@ async fn audit_log_is_sorted_desc_and_capped_to_500_rows() {
         .expect("insert audit row");
     }
 
+    // First page: default limit is 100, newest entries first.
     let (st, body) = admin
         .get("/api/v1/audit-log?table_name=audit_limit_test")
         .await;
-    assert_eq!(st, StatusCode::OK, "limit/sort query");
+    assert_eq!(st, StatusCode::OK, "first page query");
 
-    let rows = body.as_array().expect("audit response must be an array");
-    assert_eq!(rows.len(), 500, "audit list must be capped at 500 rows");
-    assert_eq!(rows[0]["record_id"].as_i64(), Some(519));
-    assert_eq!(rows[499]["record_id"].as_i64(), Some(20));
+    assert_eq!(
+        body["total"].as_i64(),
+        Some(120),
+        "total must count all matching rows"
+    );
+    let rows = body["entries"]
+        .as_array()
+        .expect("audit response must contain an entries array");
+    assert_eq!(rows.len(), 100, "default page size must be 100");
+    assert_eq!(rows[0]["record_id"].as_i64(), Some(119));
+    assert_eq!(rows[99]["record_id"].as_i64(), Some(20));
 
     for pair in rows.windows(2) {
         let current = pair[0]["occurred_at"].as_str().expect("occurred_at string");
@@ -457,6 +481,19 @@ async fn audit_log_is_sorted_desc_and_capped_to_500_rows() {
             "rows must be sorted descending by occurred_at"
         );
     }
+
+    // Second page: the remaining 20 rows.
+    let (st, body) = admin
+        .get("/api/v1/audit-log?table_name=audit_limit_test&offset=100")
+        .await;
+    assert_eq!(st, StatusCode::OK, "second page query");
+    let rows = body["entries"]
+        .as_array()
+        .expect("audit response must contain an entries array");
+    assert_eq!(rows.len(), 20, "second page holds the remainder");
+    assert_eq!(rows[0]["record_id"].as_i64(), Some(19));
+    assert_eq!(rows[19]["record_id"].as_i64(), Some(0));
+    assert_eq!(body["total"].as_i64(), Some(120));
 
     app.cleanup().await;
 }

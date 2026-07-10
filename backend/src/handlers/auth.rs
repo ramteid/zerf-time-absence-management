@@ -197,6 +197,7 @@ pub async fn me(
         "can_manage_categories": user.is_admin(),
         "can_manage_holidays": user.is_admin(),
         "can_view_audit_log": user.is_admin(),
+        "can_view_logs": user.is_admin(),
         "can_manage_settings": user.is_admin(),
         "can_manage_team_settings": user.is_lead(),
         "can_manage_team_users": can_manage_team_users,

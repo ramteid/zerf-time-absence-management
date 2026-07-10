@@ -66,8 +66,8 @@ describe("SettingsTabs", () => {
     component = mount(SettingsTabs, { target });
     await settle();
     const links = target.querySelectorAll("a[data-link]");
-    // 7 admin tabs + 1 team tab = 8
-    expect(links.length).toBe(8);
+    // 8 admin tabs + 1 team tab = 9
+    expect(links.length).toBe(9);
     const text = target.textContent;
     expect(text).toContain("Settings");
     expect(text).toContain("Users");
@@ -75,6 +75,7 @@ describe("SettingsTabs", () => {
     expect(text).toContain("Holidays");
     expect(text).toContain("Email");
     expect(text).toContain("Team Settings");
+    expect(text).toContain("System Log");
   });
 
   it("renders only the Team Settings tab for a team lead", async () => {

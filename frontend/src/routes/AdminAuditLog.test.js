@@ -15,7 +15,8 @@ vi.mock("svelte", async () => {
 
 vi.mock("../api.js", () => ({
   api: vi.fn(async (urlPath) => {
-    if (urlPath === "/audit-log") return mockState.entries;
+    if (urlPath.startsWith("/audit-log"))
+      return { entries: mockState.entries, total: mockState.entries.length };
     if (urlPath === "/users") return mockState.users;
     throw new Error(`Unhandled API path: ${urlPath}`);
   }),

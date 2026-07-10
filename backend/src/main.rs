@@ -1,21 +1,32 @@
 use anyhow::Result;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::Layer;
 use zerf::background;
 use zerf::services::{auth as auth_service, categories, holidays, notifications, settings};
 use zerf::{build_app, config, db, AppState};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info,sqlx=warn".into()),
+    // Console logging (env-filtered) plus a capture layer that forwards every
+    // warn/error event to the database once the writer task starts below.
+    let (log_layer, log_receiver) = zerf::log_capture::channel();
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer().with_filter(
+                tracing_subscriber::EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| "info,sqlx=warn".into()),
+            ),
         )
+        .with(log_layer.with_filter(tracing_subscriber::filter::LevelFilter::WARN))
         .init();
 
     let config = config::Config::from_env();
     let pool = db::init(&config).await?;
+    // Drain captured warn/error events into the app_logs table.
+    tokio::spawn(zerf::log_capture::run_writer(pool.clone(), log_receiver));
     categories::ensure_initial(&pool).await?;
     let year = settings::app_current_year(&pool).await;
     holidays::ensure_holidays(&pool, year).await?;
@@ -55,6 +66,13 @@ async fn main() -> Result<()> {
 
                 // Prune audit log entries older than 10 years.
                 db.audit.cleanup_old().await;
+
+                // Enforce app log bounds (1000 rows / 365 days). Same
+                // daily-only pattern as the other prunes in this loop; a
+                // fresh install's first tick fires immediately (see
+                // tokio::time::interval), so bounds are also enforced right
+                // after every restart.
+                let _ = db.app_logs.prune().await;
 
                 // Prune resolved reopen requests older than retention setting (default 365 days).
                 let reopen_days =

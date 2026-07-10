@@ -325,6 +325,53 @@ body {
   color: var(--info-text);
 }
 
+/* Pill badge used in log lists (audit log actions, system log levels). */
+.zf-badge {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.zf-badge.action-success {
+  background: var(--success-soft);
+  color: var(--success-text);
+}
+.zf-badge.action-danger {
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}
+.zf-badge.action-info {
+  background: var(--info-soft);
+  color: var(--info-text);
+}
+.zf-badge.action-warning {
+  background: var(--warning-soft);
+  color: var(--warning-text);
+}
+.zf-badge.action-muted {
+  background: var(--bg-muted);
+  color: var(--text-secondary);
+}
+
+/* Label/value rows inside log detail dialogs. */
+.zf-detail-row {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  font-size: 13px;
+}
+.zf-detail-label {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  min-width: 80px;
+  flex-shrink: 0;
+}
+
 /* ── Card ── */
 .zf-card {
   background: var(--bg-surface);

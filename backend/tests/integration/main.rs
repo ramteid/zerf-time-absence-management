@@ -25,6 +25,7 @@ mod helpers;
 
 mod absences;
 mod admin;
+mod app_logs;
 mod approval_reminders;
 mod archiving;
 mod audit;
