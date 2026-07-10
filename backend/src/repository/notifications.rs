@@ -191,22 +191,6 @@ impl NotificationDb {
         Ok(changed)
     }
 
-    /// Return all distinct (kind, dedupe_key, representative title) for unread
-    /// pinned notifications.  Used by the system-alerts background task to
-    /// decide whether to send a throttled alert email.
-    pub async fn list_unread_system_error_classes(
-        &self,
-    ) -> AppResult<Vec<(String, String, String)>> {
-        Ok(sqlx::query_as::<_, (String, String, String)>(
-            "SELECT kind, dedupe_key, MAX(title) \
-             FROM notifications \
-             WHERE pinned = TRUE AND is_read = FALSE AND dedupe_key IS NOT NULL \
-             GROUP BY kind, dedupe_key",
-        )
-        .fetch_all(&self.pool)
-        .await?)
-    }
-
     pub async fn count_unread(&self, user_id: i64) -> AppResult<i64> {
         Ok(sqlx::query_scalar(
             "SELECT COUNT(*) FROM notifications WHERE user_id=$1 AND is_read=FALSE",

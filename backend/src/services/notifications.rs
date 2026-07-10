@@ -233,16 +233,18 @@ pub async fn load_language(pool: &crate::db::DatabasePool) -> crate::i18n::Langu
     }
 }
 
-/// Upsert a pinned system-error notification for every active admin and send a
-/// throttled alert email (at most one email per failure class per calendar day).
+/// Upsert a pinned system-error notification for every active admin.
 ///
-/// `dedupe_key` identifies the failure class.
-/// `title`      is a short, fixed summary shown bold in the UI and as the email subject.
+/// System errors are surfaced **in-app only**: each admin gets a pinned notice
+/// they can dismiss individually. No email is sent. A single recurring failure
+/// therefore can no longer mail every admin's inbox day after day.
+///
+/// `dedupe_key` identifies the failure class (deduplicates repeat alerts).
+/// `title`      is a short, fixed summary shown bold in the UI.
 /// `body`       holds the failure-specific detail (names, dates, etc.), shown as
-///              secondary text in the UI and as the email body.
+///              secondary text in the UI.
 pub const SYSTEM_ERROR_KIND: &str = "system_error";
 
-#[allow(dead_code)]
 pub async fn notify_admins_system_error(state: &AppState, dedupe_key: &str, title: &str, body: &str) {
     let all_users = match state.db.users.find_all_ordered().await {
         Ok(u) => u,
@@ -251,67 +253,23 @@ pub async fn notify_admins_system_error(state: &AppState, dedupe_key: &str, titl
             return;
         }
     };
-    let admins: Vec<_> = all_users
-        .into_iter()
-        .filter(|u| u.active && u.is_admin())
-        .collect();
 
-    // Upsert for each admin; track whether any row was inserted or re-alerted
-    // (i.e. was previously read and is now marked unread again).
-    let mut any_changed = false;
-    for user in &admins {
-        match state
+    // Upsert an in-app notification for each active admin. The repository call
+    // broadcasts a refresh to connected clients on change; no email sidecar.
+    for user in all_users.into_iter().filter(|u| u.active && u.is_admin()) {
+        if let Err(e) = state
             .db
             .notifications
             .upsert_system_error(user.id, SYSTEM_ERROR_KIND, dedupe_key, title, body)
             .await
         {
-            Ok(changed) => any_changed |= changed,
-            Err(e) => tracing::warn!(
+            tracing::warn!(
                 target: "zerf::notifications",
                 "system_error: upsert failed for user {}: {e}",
                 user.id
-            ),
+            );
         }
     }
-
-    // If every admin already has an unread notification for this class, sending
-    // another email would just be noise — skip.
-    if !any_changed {
-        return;
-    }
-
-    // Throttle to one email per failure class per calendar day.
-    let today = crate::services::settings::app_today(&state.pool)
-        .await
-        .format("%Y-%m-%d")
-        .to_string();
-    let email_key = format!("system_alert_email_{dedupe_key}");
-    let last_sent = crate::services::settings::load_setting(&state.pool, &email_key, "")
-        .await
-        .unwrap_or_default();
-    if last_sent == today {
-        return;
-    }
-
-    let language = load_language(&state.pool).await;
-    for user in &admins {
-        send_notification_email(state, &language, user.id, title.to_string(), body).await;
-    }
-    let _ = state.db.settings.save_setting(&email_key, &today).await;
-}
-
-/// Send a plain alert email to a specific user by ID.
-/// Used by `background::system_alerts` to email admins about errors that were
-/// written to the DB by `backup.sh` (outside Rust) and for which Rust never
-/// called `notify_admins_system_error`.
-pub async fn send_alert_email_to_user(
-    state: &AppState,
-    language: &Language,
-    user_id: i64,
-    subject: &str,
-) {
-    send_notification_email(state, language, user_id, subject.to_string(), subject).await;
 }
 
 /// Trim notifications older than 90 days; called from the background loop.

@@ -299,9 +299,12 @@ EOF
 # the database.  Designed to mirror the Rust services::notifications::
 # notify_admins_system_error logic but callable from shell.
 #
-# _dedup_key  e.g. "backup_failed" or "backup_upload_failed" -- must match the
-#             dedupe_key used in the Rust system-alerts email throttle so the
-#             hourly background task picks up the right key.
+# These notifications are surfaced in-app only; the app no longer emails admins
+# about system errors, so a backup failure raises an in-app notice (visible to
+# every admin, dismissable individually) but sends no mail.
+#
+# _dedup_key  e.g. "backup_failed" or "backup_upload_failed" -- deduplicates
+#             repeat alerts of the same failure class.
 # _message    Short human-readable description (no single quotes).
 #
 # Behaviour:
@@ -338,10 +341,10 @@ notify_admins_backup_error() {
 }
 
 # Mark a previously-raised system-error notification as resolved (read) for all
-# active admins.  Called after a successful backup/upload cycle so that a prior
-# failure notification does not keep alarming every day through the hourly
-# system-alerts email task.  If the failure recurs the next upsert in
-# notify_admins_backup_error will flip is_read back to FALSE, re-alerting.
+# active admins.  Called after a successful backup/upload cycle so a prior
+# failure's in-app notice clears itself once backups recover.  If the failure
+# recurs the next upsert in notify_admins_backup_error flips is_read back to
+# FALSE, re-raising the in-app notice.
 # Errors are suppressed: a DB hiccup here should not abort a successful cycle.
 resolve_admins_backup_error() {
   _dedup_key="$1"
