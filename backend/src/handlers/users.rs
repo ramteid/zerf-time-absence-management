@@ -550,6 +550,8 @@ pub async fn update(
     } else {
         body.start_date
     };
+    let start_date_change_to_requeue =
+        effective_start_date.filter(|new_start_date| *new_start_date != previous_user.start_date);
     // Use the normalized role for storage so SQL queries with direct string
     // comparisons (e.g. role = 'admin') work reliably.
     let role_to_store: Option<String> = if body.role.is_some() {
@@ -607,6 +609,15 @@ pub async fn update(
             crate::services::users::delete_sessions_for_user_tx(&mut transaction, user_id).await;
     }
     transaction.commit().await?;
+    if let Some(new_start_date) = start_date_change_to_requeue {
+        crate::services::reports::requeue_export_for_start_date_change(
+            &app_state.pool,
+            user_id,
+            previous_user.start_date,
+            new_start_date,
+        )
+        .await;
+    }
     crate::services::time_entries::clear_submission_pending_for_weeks(
         &app_state,
         user_id,

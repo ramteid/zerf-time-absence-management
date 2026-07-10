@@ -951,6 +951,10 @@ pub async fn restore(
     // Validate approver IDs for the restored user.
     validate_approver_ids(app_state, &target.role, Some(target_id), &req.approver_ids).await?;
 
+    let start_date_change_to_requeue = req
+        .new_start_date
+        .filter(|new_start_date| *new_start_date != target.start_date);
+
     // Restore: active=TRUE, archived_at=NULL, must_change_password=TRUE.
     UserDb::restore_tx(&mut tx, target_id, req.new_start_date).await?;
 
@@ -958,6 +962,16 @@ pub async fn restore(
     UserDb::set_approvers_tx(&mut tx, target_id, &req.approver_ids).await?;
 
     tx.commit().await?;
+
+    if let Some(new_start_date) = start_date_change_to_requeue {
+        crate::services::reports::requeue_export_for_start_date_change(
+            &app_state.pool,
+            target_id,
+            target.start_date,
+            new_start_date,
+        )
+        .await;
+    }
 
     // Fetch the updated user to return.
     let updated = app_state
@@ -1080,10 +1094,23 @@ pub async fn restore_assistant(
         return Err(AppError::BadRequest("User is not archived.".into()));
     }
 
+    let start_date_change_to_requeue =
+        new_start_date.filter(|new_start_date| *new_start_date != target.start_date);
+
     // Restore the user; keep the existing approver relationship (the lead is still their approver).
     UserDb::restore_tx(&mut tx, target_id, new_start_date).await?;
 
     tx.commit().await?;
+
+    if let Some(new_start_date) = start_date_change_to_requeue {
+        crate::services::reports::requeue_export_for_start_date_change(
+            &app_state.pool,
+            target_id,
+            target.start_date,
+            new_start_date,
+        )
+        .await;
+    }
 
     let updated = app_state
         .db

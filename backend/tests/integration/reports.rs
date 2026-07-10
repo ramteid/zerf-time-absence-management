@@ -346,7 +346,7 @@ async fn report_export_requeue_preserves_period_after_start_date_change() {
         .await
         .expect("enable report upload");
 
-    let (_lead_id, _lead_pw, emp_id, _emp_pw, _default_monday, cat_id) =
+    let (_lead_id, _lead_pw, emp_id, _emp_pw, _default_monday, _cat_id) =
         bootstrap_team_with_suffix(&app, &admin, false, "export-pre-start-requeue").await;
     let old_day = next_monday(-75);
     let old_period = old_day.format("%Y-%m").to_string();
@@ -357,26 +357,20 @@ async fn report_export_requeue_preserves_period_after_start_date_change() {
         zerf::time_calc::last_day_of_month(old_day.year(), old_day.month()),
     )
     .unwrap();
-    sqlx::query(
-        "INSERT INTO time_entries \
-         (user_id, entry_date, start_time, end_time, category_id, status, reviewed_by, reviewed_at) \
-         VALUES ($1, $2, '08:00', '12:00', $3, 'approved', 1, NOW())",
-    )
-    .bind(emp_id)
-    .bind(old_day)
-    .bind(cat_id)
-    .execute(&app.state.pool)
-    .await
-    .expect("insert historical pre-start entry");
-    let new_start_date = period_end + chrono::Duration::days(1);
     sqlx::query("UPDATE users SET start_date=$2 WHERE id=$1")
         .bind(emp_id)
-        .bind(new_start_date)
+        .bind(period_start)
         .execute(&app.state.pool)
         .await
-        .expect("move start date after old period");
-
-    zerf::services::reports::requeue_export_for_dates(&app.state.pool, &[(emp_id, old_day)]).await;
+        .expect("set original start date to the start of the exported period");
+    let new_start_date = period_start + chrono::Duration::days(14);
+    let (status, _) = admin
+        .put(
+            &format!("/api/v1/users/{emp_id}"),
+            &json!({ "start_date": new_start_date }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "move start date into old period");
 
     let pending = app.state.db.export_queue.list_pending().await.unwrap();
     assert_eq!(
@@ -386,6 +380,25 @@ async fn report_export_requeue_preserves_period_after_start_date_change() {
     );
     assert_eq!(pending[0].user_id, emp_id);
     assert_eq!(pending[0].period, old_period);
+    assert!(
+        pending[0].requires_start_date_review,
+        "mid-month start-date changes require explicit review before upload"
+    );
+
+    zerf::services::reports::requeue_export_for_dates(&app.state.pool, &[(emp_id, old_day)]).await;
+
+    let pending = app.state.db.export_queue.list_pending().await.unwrap();
+    assert_eq!(
+        pending.len(),
+        1,
+        "normal requeues must not duplicate the pending start-date review row"
+    );
+    assert_eq!(pending[0].user_id, emp_id);
+    assert_eq!(pending[0].period, old_period);
+    assert!(
+        pending[0].requires_start_date_review,
+        "normal requeues must not clear the review flag"
+    );
 
     let has_hidden_content = app
         .state
@@ -395,8 +408,8 @@ async fn report_export_requeue_preserves_period_after_start_date_change() {
         .await
         .expect("check pre-start content");
     assert!(
-        has_hidden_content,
-        "upload processing must hold the queued entry instead of overwriting a PDF that contains pre-start rows"
+        !has_hidden_content,
+        "the start-date review flag must cover target-only partial-month drift"
     );
 
     app.cleanup().await;

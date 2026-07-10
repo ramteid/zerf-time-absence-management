@@ -247,6 +247,18 @@ pub async fn update(
         set_leave_days_tx(&mut transaction, user_id, current_year + 1, d).await?;
     }
     transaction.commit().await?;
+    if let Some(new_start_date) = body
+        .start_date
+        .filter(|new_start_date| *new_start_date != previous_user.start_date)
+    {
+        crate::services::reports::requeue_export_for_start_date_change(
+            &app_state.pool,
+            user_id,
+            previous_user.start_date,
+            new_start_date,
+        )
+        .await;
+    }
     let updated_user = app_state
         .db
         .users

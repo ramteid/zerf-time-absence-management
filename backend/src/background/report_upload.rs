@@ -298,12 +298,20 @@ async fn process_one_entry(
     let submission_exempt = !crate::roles::has_submission_obligation(&user.role, user.weekly_hours);
     let reports_db = crate::repository::ReportDb::new(state.pool.clone());
 
-    if reports_db
-        .has_report_content_before_start_date(user.id, from, to, user.start_date)
-        .await?
+    let start_date_review_blocks_upload =
+        entry.requires_start_date_review && user.start_date > from;
+    if start_date_review_blocks_upload
+        || reports_db
+            .has_report_content_before_start_date(user.id, from, to, user.start_date)
+            .await?
     {
+        let reason = if start_date_review_blocks_upload {
+            "a start-date change queued this period for review"
+        } else {
+            "stored report rows exist before the current start date"
+        };
         let msg = format!(
-            "User {} ({} {}) has current start date {} inside or after period {} while stored report rows exist before that date. \
+            "User {} ({} {}) has current start date {} inside or after period {}, and {reason}. \
              Correct the start date or historical rows before retrying the timesheet PDF export.",
             user.id, user.first_name, user.last_name, user.start_date, entry.period
         );

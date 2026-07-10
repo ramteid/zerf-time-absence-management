@@ -1536,6 +1536,14 @@ pub async fn requeue_export_for_dates(
     pool: &crate::db::DatabasePool,
     user_date_pairs: &[(i64, NaiveDate)],
 ) {
+    requeue_export_for_dates_with_start_date_review(pool, user_date_pairs, false).await;
+}
+
+async fn requeue_export_for_dates_with_start_date_review(
+    pool: &crate::db::DatabasePool,
+    user_date_pairs: &[(i64, NaiveDate)],
+    requires_start_date_review: bool,
+) {
     if user_date_pairs.is_empty() {
         return;
     }
@@ -1588,7 +1596,14 @@ pub async fn requeue_export_for_dates(
         }
         for (year, month) in periods {
             let period = format!("{year:04}-{month:02}");
-            if let Err(e) = export_queue_db.populate(&period, &[user_id]).await {
+            let result = if requires_start_date_review {
+                export_queue_db
+                    .populate_requiring_start_date_review(&period, &[user_id])
+                    .await
+            } else {
+                export_queue_db.populate(&period, &[user_id]).await
+            };
+            if let Err(e) = result {
                 tracing::warn!(
                     target: "zerf::reports",
                     "requeue_export_for_dates: failed to re-queue user {} period {}: {e}",
@@ -1598,6 +1613,44 @@ pub async fn requeue_export_for_dates(
             }
         }
     }
+}
+
+/// Re-queue past months whose generated PDF can change after a user's start
+/// date changes. Moving the date forward marks those rows for review so the
+/// uploader cannot overwrite an archived PDF with a partial-month rendering.
+pub async fn requeue_export_for_start_date_change(
+    pool: &crate::db::DatabasePool,
+    user_id: i64,
+    previous_start_date: NaiveDate,
+    new_start_date: NaiveDate,
+) {
+    if previous_start_date == new_start_date {
+        return;
+    }
+
+    let (range_start, range_end, requires_start_date_review) =
+        if new_start_date > previous_start_date {
+            (
+                previous_start_date,
+                new_start_date - Duration::days(1),
+                true,
+            )
+        } else {
+            (
+                new_start_date,
+                previous_start_date - Duration::days(1),
+                false,
+            )
+        };
+
+    requeue_export_for_date_range_with_start_date_review(
+        pool,
+        user_id,
+        range_start,
+        range_end,
+        requires_start_date_review,
+    )
+    .await;
 }
 
 /// Re-queue every past-month timesheet touched by an absence date range.
@@ -1610,13 +1663,29 @@ pub async fn requeue_export_for_absence_period(
     if start_date > end_date {
         return;
     }
+    requeue_export_for_date_range_with_start_date_review(
+        pool, user_id, start_date, end_date, false,
+    )
+    .await;
+}
+
+async fn requeue_export_for_date_range_with_start_date_review(
+    pool: &crate::db::DatabasePool,
+    user_id: i64,
+    start_date: NaiveDate,
+    end_date: NaiveDate,
+    requires_start_date_review: bool,
+) {
+    if start_date > end_date {
+        return;
+    }
     let mut pairs = Vec::new();
     let mut day = start_date;
     while day <= end_date {
         pairs.push((user_id, day));
         day += Duration::days(1);
     }
-    requeue_export_for_dates(pool, &pairs).await;
+    requeue_export_for_dates_with_start_date_review(pool, &pairs, requires_start_date_review).await;
 }
 
 #[cfg(test)]
