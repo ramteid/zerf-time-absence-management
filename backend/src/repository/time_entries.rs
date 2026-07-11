@@ -124,15 +124,15 @@ pub(crate) async fn validate_entry(
     }
     // Only the category's active flag matters here. Whether it counts as work is
     // irrelevant now that there is no per-day hour cap to compute.
-    let cat_active: Option<(bool,)> =
-        sqlx::query_as("SELECT active FROM categories WHERE id = $1")
+    let category_active: Option<bool> =
+        sqlx::query_scalar("SELECT active FROM categories WHERE id = $1")
             .bind(te.category_id)
             .fetch_optional(&mut *conn)
             .await?;
-    let Some((cat_active,)) = cat_active else {
+    let Some(category_active) = category_active else {
         return Err(AppError::bad_request("Category not found."));
     };
-    if !cat_active {
+    if !category_active {
         return Err(AppError::bad_request("Category is inactive."));
     }
     let app_now = app_now(conn).await?;
