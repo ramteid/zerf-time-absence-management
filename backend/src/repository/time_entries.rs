@@ -122,15 +122,16 @@ pub(crate) async fn validate_entry(
             "Entry date is before user start date.",
         ));
     }
-    let cat_state: Option<(bool, bool)> =
-        sqlx::query_as("SELECT active, counts_as_work FROM categories WHERE id = $1")
+    // Only the category's active flag matters here. Whether it counts as work is
+    // irrelevant now that there is no per-day hour cap to compute.
+    let cat_active: Option<(bool,)> =
+        sqlx::query_as("SELECT active FROM categories WHERE id = $1")
             .bind(te.category_id)
             .fetch_optional(&mut *conn)
             .await?;
-    if cat_state.is_none() {
+    let Some((cat_active,)) = cat_active else {
         return Err(AppError::bad_request("Category not found."));
-    }
-    let (cat_active, new_counts_as_work) = cat_state.unwrap();
+    };
     if !cat_active {
         return Err(AppError::bad_request("Category is inactive."));
     }
@@ -154,9 +155,21 @@ pub(crate) async fn validate_entry(
         return Err(AppError::bad_request("End time cannot be in the future."));
     }
 
-    let existing: Vec<(i64, String, String, String, bool)> = sqlx::query_as(
-        "SELECT te.id, te.start_time, te.end_time, te.status, c.counts_as_work \
-         FROM time_entries te JOIN categories c ON c.id = te.category_id \
+    // Overlap check: an entry may not share wall-clock minutes with any other
+    // entry on the same day. Two entries claiming the same minutes is always a
+    // data error, so this holds regardless of whether either category counts as
+    // work (rejected entries are ignored; the entry being edited is excluded via
+    // exclude_id).
+    //
+    // Zerf deliberately does NOT validate the length of an entry or cap the daily
+    // total. There is no maximum-hours-per-day rule: assistants ("Aushilfe") have
+    // no target and no flextime account and are simply paid for the hours they
+    // work, while regular employees may legitimately log long or on-call days.
+    // Keeping it simple, the only time-range rules are "end after start", "not in
+    // the future", and "no overlap".
+    let existing: Vec<(i64, String, String, String)> = sqlx::query_as(
+        "SELECT te.id, te.start_time, te.end_time, te.status \
+         FROM time_entries te \
          WHERE te.user_id=$1 AND te.entry_date=$2",
     )
     .bind(user_id)
@@ -164,51 +177,15 @@ pub(crate) async fn validate_entry(
     .fetch_all(&mut *conn)
     .await?;
 
-    let mut parsed_existing: Vec<(bool, NaiveTime, NaiveTime)> = Vec::new();
-    for (eid, start_str, end_str, status, counts_as_work) in &existing {
+    for (eid, start_str, end_str, status) in &existing {
         if Some(*eid) == exclude_id || status == "rejected" {
             continue;
         }
         let es = parse_time(start_str)?;
         let ee = parse_time(end_str)?;
-        parsed_existing.push((*counts_as_work, es, ee));
-    }
-
-    for (_, es, ee) in &parsed_existing {
-        if start_n < *ee && *es < end_n {
+        if start_n < ee && es < end_n {
             return Err(AppError::bad_request("Overlap with an existing entry."));
         }
-    }
-
-    let mut credited_intervals: Vec<(NaiveTime, NaiveTime)> = Vec::new();
-    if new_counts_as_work {
-        credited_intervals.push((start_n, end_n));
-    }
-    for (counts_as_work, es, ee) in &parsed_existing {
-        if *counts_as_work {
-            credited_intervals.push((*es, *ee));
-        }
-    }
-    credited_intervals.sort_by_key(|(start, _)| *start);
-    let mut day_total = 0_i64;
-    let mut merged: Option<(NaiveTime, NaiveTime)> = None;
-    for (start, end) in credited_intervals {
-        if let Some((cur_start, cur_end)) = merged {
-            if start <= cur_end {
-                merged = Some((cur_start, cur_end.max(end)));
-            } else {
-                day_total += (cur_end - cur_start).num_minutes();
-                merged = Some((start, end));
-            }
-        } else {
-            merged = Some((start, end));
-        }
-    }
-    if let Some((cur_start, cur_end)) = merged {
-        day_total += (cur_end - cur_start).num_minutes();
-    }
-    if day_total > 14 * 60 {
-        return Err(AppError::bad_request("Day total exceeds 14 hours."));
     }
     // Block entry creation on any day covered by a non-auto-approve-past absence
     // that is requested, approved, or pending cancellation. Including 'requested'
@@ -243,7 +220,6 @@ struct ReopenValidationEntry {
     start_time: String,
     end_time: String,
     status: String,
-    counts_as_work: bool,
 }
 
 pub(crate) async fn validate_entries_after_reopen(
@@ -257,9 +233,8 @@ pub(crate) async fn validate_entries_after_reopen(
 
     let affected_id_set: HashSet<i64> = affected_entry_ids.iter().copied().collect();
     let affected_entries: Vec<ReopenValidationEntry> = sqlx::query_as(
-        "SELECT te.id, te.entry_date, te.start_time, te.end_time, te.status, c.counts_as_work \
+        "SELECT te.id, te.entry_date, te.start_time, te.end_time, te.status \
          FROM time_entries te \
-         JOIN categories c ON c.id = te.category_id \
          WHERE te.user_id=$1 AND te.id = ANY($2) \
          FOR UPDATE OF te",
     )
@@ -281,10 +256,11 @@ pub(crate) async fn validate_entries_after_reopen(
     // would reject historical rows for conditions that are only meaningful
     // when *creating* new data: a rejected entry whose category was later
     // deactivated, or one that now overlaps an approved absence, must still
-    // be reopenable so it can be edited or deleted. Only the two invariants
-    // that are still meaningful for a bulk status change are re-checked below:
-    // same-day overlap and the 14-hour crediting cap, since resurrecting
-    // rejected entries can newly collide with drafts created in the meantime.
+    // be reopenable so it can be edited or deleted. Only the one invariant that
+    // is still meaningful for a bulk status change is re-checked below: same-day
+    // overlap, since resurrecting rejected entries can newly collide with drafts
+    // created in the meantime. (There is no per-day hour cap to re-check — Zerf
+    // never limits how many hours a day may hold.)
     let mut affected_dates: Vec<NaiveDate> = affected_entries
         .iter()
         .map(|entry| entry.entry_date)
@@ -296,9 +272,8 @@ pub(crate) async fn validate_entries_after_reopen(
     }
 
     let date_entries: Vec<ReopenValidationEntry> = sqlx::query_as(
-        "SELECT te.id, te.entry_date, te.start_time, te.end_time, te.status, c.counts_as_work \
+        "SELECT te.id, te.entry_date, te.start_time, te.end_time, te.status \
          FROM time_entries te \
-         JOIN categories c ON c.id = te.category_id \
          WHERE te.user_id=$1 AND te.entry_date = ANY($2) \
          ORDER BY te.entry_date, te.start_time, te.id",
     )
@@ -307,58 +282,27 @@ pub(crate) async fn validate_entries_after_reopen(
     .fetch_all(&mut *conn)
     .await?;
 
-    let mut entries_by_date: BTreeMap<NaiveDate, Vec<(bool, NaiveTime, NaiveTime)>> =
-        BTreeMap::new();
+    let mut entries_by_date: BTreeMap<NaiveDate, Vec<(NaiveTime, NaiveTime)>> = BTreeMap::new();
     for entry in date_entries {
         if entry.status == "rejected" && !affected_id_set.contains(&entry.id) {
             continue;
         }
         entries_by_date.entry(entry.entry_date).or_default().push((
-            entry.counts_as_work,
             parse_time(&entry.start_time)?,
             parse_time(&entry.end_time)?,
         ));
     }
 
     for entries in entries_by_date.values_mut() {
-        entries.sort_by_key(|(_, start, end)| (*start, *end));
+        entries.sort_by_key(|(start, end)| (*start, *end));
         for window in entries.windows(2) {
-            let (_, _, previous_end) = window[0];
-            let (_, next_start, _) = window[1];
+            let (_, previous_end) = window[0];
+            let (next_start, _) = window[1];
             if next_start < previous_end {
                 return Err(AppError::bad_request(
                     "Editing would create overlapping draft entries.",
                 ));
             }
-        }
-
-        let mut credited_intervals: Vec<(NaiveTime, NaiveTime)> = entries
-            .iter()
-            .filter_map(|(counts_as_work, start, end)| counts_as_work.then_some((*start, *end)))
-            .collect();
-        credited_intervals.sort_by_key(|(start, _)| *start);
-
-        let mut day_total = 0_i64;
-        let mut merged: Option<(NaiveTime, NaiveTime)> = None;
-        for (start, end) in credited_intervals {
-            if let Some((cur_start, cur_end)) = merged {
-                if start <= cur_end {
-                    merged = Some((cur_start, cur_end.max(end)));
-                } else {
-                    day_total += (cur_end - cur_start).num_minutes();
-                    merged = Some((start, end));
-                }
-            } else {
-                merged = Some((start, end));
-            }
-        }
-        if let Some((cur_start, cur_end)) = merged {
-            day_total += (cur_end - cur_start).num_minutes();
-        }
-        if day_total > 14 * 60 {
-            return Err(AppError::bad_request(
-                "Editing would exceed the 14 hour day limit.",
-            ));
         }
     }
 

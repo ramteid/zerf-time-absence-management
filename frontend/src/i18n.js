@@ -997,11 +997,8 @@ const TRANSLATIONS = {
       "Überschneidung mit einem bestehenden Eintrag.",
     "Entries in the future are not allowed.":
       "Einträge in der Zukunft sind nicht erlaubt.",
-    "Day total exceeds 14 hours.": "Tagestotal überschreitet 14 Stunden.",
     "Editing would create overlapping draft entries.":
       "Bearbeitung würde überschneidende Entwürfe erzeugen.",
-    "Editing would exceed the 14 hour day limit.":
-      "Bearbeitung würde das Tageslimit von 14 Stunden überschreiten.",
     "End time must be after start time.":
       "Endzeit muss nach der Startzeit liegen.",
     "End time cannot be in the future.":

@@ -199,9 +199,12 @@ Zerf uses explicit approver assignments. Approvals and notifications are not
 inferred from role alone.
 
 - Employee: records time and absences, submits weeks, requests changes.
-- Assistant: records time and absences like an employee, but has no fixed
-  weekly target hours and no flextime account. This is strictly role-based —
-  it is never inferred from weekly hours being zero.
+- Assistant ("Aushilfe"): records time and absences like an employee, but has
+  no working-hours quota — no fixed weekly/daily target and therefore no
+  flextime account. Assistants are simply paid for the hours they are present
+  and work. Their weekly hours are set to `0` by convention, but the role, not
+  the zero, is what defines them: the "no target, no flextime" behaviour is
+  strictly role-based and is never inferred from weekly hours being zero.
 - A non-assistant with weekly hours set to `0` is a non-booking user: approval
   logic still applies to anything they do book, but they are exempt from
   monthly submission reminders and from week-completeness requirements (the
@@ -1026,12 +1029,16 @@ following rules apply:
 - The date must be on or after your employment start date.
 - End time must be later than start time.
 - When the date is today, end time must not be in the future.
-- Total crediting hours on that day must not exceed 14 hours.
 - The time range must not overlap with any existing non-rejected entry on the
   same day.
 - The day must not be covered by a non-sick absence that is approved,
   pending cancellation, or still awaiting approval. Sick-like (auto-approve)
   absences do not block time entry creation; all other absence types do.
+
+There is intentionally **no maximum number of hours per day** and no limit on
+the length of a single entry. Zerf records whatever hours were actually worked —
+long or on-call days are legitimate, and assistants (see the Roles section
+above) have no target to measure against anyway.
 
 A new entry is always created in draft status.
 

@@ -274,13 +274,15 @@ async fn time_entry_and_cr_workflow() {
         assert_eq!(st, StatusCode::OK, "create entry 2");
         te2 = id(&body);
 
+        // No per-day hour cap exists: a long, non-overlapping entry that pushes
+        // the day total past any legal working time is accepted as-is.
         let (st, _) = emp
             .post(
                 "/api/v1/time-entries",
                 &json!({"entry_date": &entry_day, "start_time":"15:00","end_time":"23:30","category_id": cat_id}),
             )
             .await;
-        assert_eq!(st, StatusCode::BAD_REQUEST, ">14h day rejected");
+        assert_eq!(st, StatusCode::OK, "long non-overlapping entry accepted (no day cap)");
 
         let (st, body) = emp
             .get(&format!(
@@ -1042,24 +1044,29 @@ async fn tina_time_tracking_journey() {
         );
     }
 
-    // -- 3. 14h day-cap edge cases --------------------------------------------
+    // -- 3. No per-day hour cap ----------------------------------------------
+    // Zerf does not validate entry length or cap the daily total, so even very
+    // long shifts and additional entries on top of them are accepted as long as
+    // they don't overlap.
     let id_c1: i64;
     {
         let (st, body) = tina
             .post("/api/v1/time-entries", &json!({"entry_date": &day2, "start_time":"06:00","end_time":"20:00","category_id": cat_core, "comment":"long shift"}))
             .await;
-        assert_eq!(st, StatusCode::OK, "exactly 14h allowed");
+        assert_eq!(st, StatusCode::OK, "14h shift allowed");
         id_c1 = id(&body);
 
         let (st, _) = tina
             .post("/api/v1/time-entries", &json!({"entry_date": &day2, "start_time":"20:00","end_time":"20:01","category_id": cat_other}))
             .await;
-        assert_eq!(st, StatusCode::BAD_REQUEST, ">14h day total rejected");
+        assert_eq!(st, StatusCode::OK, "extra minute past 14h accepted (no day cap)");
 
+        // Leaves 08:00-08:30 free so the long-comment case below (section 4) does
+        // not collide with this entry.
         let (st, _) = tina
-            .post("/api/v1/time-entries", &json!({"entry_date": &day3, "start_time":"05:00","end_time":"19:30","category_id": cat_core}))
+            .post("/api/v1/time-entries", &json!({"entry_date": &day3, "start_time":"09:00","end_time":"23:30","category_id": cat_core}))
             .await;
-        assert_eq!(st, StatusCode::BAD_REQUEST, "single 14:30 entry rejected");
+        assert_eq!(st, StatusCode::OK, "single 14:30 entry accepted (no day cap)");
     }
 
     // -- 4. Long comment ------------------------------------------------------
@@ -1090,7 +1097,7 @@ async fn tina_time_tracking_journey() {
             ))
             .await;
         assert!(has_id(&body, id_y1), "wide range includes Y1");
-        assert!(has_id(&body, id_c1), "wide range includes 14h block");
+        assert!(has_id(&body, id_c1), "wide range includes long shift");
 
         let body_str = serde_json::to_string(&body).unwrap();
         assert!(

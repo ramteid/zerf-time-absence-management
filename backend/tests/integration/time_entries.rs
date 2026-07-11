@@ -12,7 +12,7 @@ async fn time_entries_full_workflow() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
 
-    // -- Non-crediting entries still block overlaps, but don't consume 14h cap --
+    // -- Non-crediting entries still block overlaps (there is no per-day cap) --
     {
         let (_lead_id, _lead_pw, _emp_id, emp_pw, monday_iso, _cat_id) =
             bootstrap_team_with_suffix(&app, &admin, false, "0").await;
@@ -95,7 +95,11 @@ async fn time_entries_full_workflow() {
                 }),
             )
             .await;
-        assert_eq!(st, StatusCode::OK, "14h cap ignores non-crediting minutes");
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "long crediting entry accepted (no per-day cap)"
+        );
     }
 
     // -- Invalid category rejected --
