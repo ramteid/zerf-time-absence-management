@@ -18,13 +18,194 @@ pub fn broadcaster() -> NotificationBroadcaster {
     crate::repository::notifications::new_broadcaster()
 }
 
-/// Send notification email best-effort (non-fatal on failure).
+/// Delivery channels for a notification. `InAppAndEmail` is the default and
+/// what most notifications want; the other variants are the "switch".
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Channels {
+    /// Store an in-app notification and send an email sidecar.
+    InAppAndEmail,
+    /// In-app only (e.g. when the requester is also the recipient).
+    InAppOnly,
+    /// Email only, no stored notification (transactional auth mails).
+    EmailOnly,
+}
+
+/// A single notification addressed to one user. Build with [`Outgoing::new`],
+/// refine via the builder setters, then hand to [`deliver`] — the one entry
+/// point every part of the app uses to notify a user.
+///
+/// `body` is stored verbatim in-app (it may be structured JSON the frontend
+/// renders). `email_body`, when set, is the plain text used for the email;
+/// otherwise `body` is reused.
+pub struct Outgoing<'a> {
+    user_id: i64,
+    kind: &'a str,
+    title: &'a str,
+    body: &'a str,
+    email_body: Option<&'a str>,
+    reference_type: Option<&'a str>,
+    reference_id: Option<i64>,
+    channels: Channels,
+    dedupe_key: Option<&'a str>,
+    pinned: bool,
+    append_email_footer: bool,
+}
+
+impl<'a> Outgoing<'a> {
+    pub fn new(user_id: i64, kind: &'a str, title: &'a str, body: &'a str) -> Self {
+        Self {
+            user_id,
+            kind,
+            title,
+            body,
+            email_body: None,
+            reference_type: None,
+            reference_id: None,
+            channels: Channels::InAppAndEmail,
+            dedupe_key: None,
+            pinned: false,
+            append_email_footer: true,
+        }
+    }
+
+    /// Select the delivery channels (the switch). Default: `InAppAndEmail`.
+    pub fn channels(mut self, channels: Channels) -> Self {
+        self.channels = channels;
+        self
+    }
+
+    /// Distinct plain-text body for the email (when the in-app `body` is
+    /// structured JSON or otherwise unsuitable as email text).
+    pub fn email_body(mut self, email_body: &'a str) -> Self {
+        self.email_body = Some(email_body);
+        self
+    }
+
+    /// Link the notification to a domain item so it can be cleared later.
+    pub fn reference(mut self, reference_type: &'a str, reference_id: Option<i64>) -> Self {
+        self.reference_type = Some(reference_type);
+        self.reference_id = reference_id;
+        self
+    }
+
+    /// Deduplicate: idempotent insert (or pinned re-alert when `pinned`).
+    pub fn dedupe_key(mut self, dedupe_key: &'a str) -> Self {
+        self.dedupe_key = Some(dedupe_key);
+        self
+    }
+
+    /// Mark as a pinned notification with re-alert semantics (system errors).
+    /// Must be combined with [`Outgoing::dedupe_key`]: pinning is implemented
+    /// via the deduplicating upsert, so without a key the write falls back to a
+    /// plain (unpinned) insert.
+    pub fn pinned(mut self) -> Self {
+        self.pinned = true;
+        self
+    }
+
+    /// Suppress the timestamp/app-URL email footer (transactional auth mails
+    /// that build their own complete body).
+    pub fn append_email_footer(mut self, append: bool) -> Self {
+        self.append_email_footer = append;
+        self
+    }
+}
+
+/// Deliver one notification across its configured channels.
+///
+/// Returns whether a **new** in-app row was created/re-alerted (`false` when a
+/// dedupe guard suppressed it), so idempotent callers (reminders) can tell
+/// whether anything was actually sent. The email sidecar is sent only when a
+/// new row was created (or the channel is `EmailOnly`).
+pub async fn deliver(state: &AppState, msg: &Outgoing<'_>) -> bool {
+    // In-app write (skipped for EmailOnly, which never stores a row).
+    let created = if msg.channels == Channels::EmailOnly {
+        true
+    } else {
+        write_in_app(state, msg).await
+    };
+
+    if msg.channels != Channels::InAppOnly && created {
+        let language = load_language(&state.pool).await;
+        let email_body = msg.email_body.unwrap_or(msg.body);
+        send_notification_email(
+            state,
+            &language,
+            msg.user_id,
+            msg.title.to_string(),
+            email_body,
+            msg.append_email_footer,
+        )
+        .await;
+    }
+
+    created
+}
+
+/// Write the in-app row using the cheapest repository method for the request:
+/// pinned+dedupe → re-alert upsert; dedupe only → idempotent insert; otherwise
+/// a plain insert. Returns whether a new/re-alerted row resulted.
+async fn write_in_app(state: &AppState, msg: &Outgoing<'_>) -> bool {
+    let result = match (msg.pinned, msg.dedupe_key) {
+        (true, Some(key)) => {
+            state
+                .db
+                .notifications
+                .upsert_system_error(msg.user_id, msg.kind, key, msg.title, msg.body)
+                .await
+        }
+        (false, Some(key)) => state
+            .db
+            .notifications
+            .insert_idempotent_with_dedupe_key(
+                msg.user_id,
+                msg.kind,
+                msg.title,
+                msg.body,
+                msg.reference_type,
+                msg.reference_id,
+                Some(key),
+            )
+            .await
+            .inspect(|&inserted| {
+                // Idempotent insert does not broadcast; do it here on success.
+                if inserted {
+                    state.db.notifications.broadcast(msg.user_id);
+                }
+            }),
+        _ => state
+            .db
+            .notifications
+            .insert(
+                msg.user_id,
+                msg.kind,
+                msg.title,
+                msg.body,
+                msg.reference_type,
+                msg.reference_id,
+            )
+            .await
+            .map(|()| true),
+    };
+    match result {
+        Ok(created) => created,
+        Err(e) => {
+            tracing::warn!(target: "zerf::notifications", "insert failed for user {}: {e}", msg.user_id);
+            false
+        }
+    }
+}
+
+/// Send a notification email best-effort (non-fatal). When `append_footer` is
+/// true the configured timestamp and public app URL are appended. Silent no-op
+/// when SMTP is not configured (the whole email feature is opt-in).
 async fn send_notification_email(
     state: &AppState,
     language: &Language,
     user_id: i64,
     subject: String,
     body: &str,
+    append_footer: bool,
 ) {
     if let Some((email, first_name, last_name)) =
         state.db.notifications.get_user_email(user_id).await
@@ -36,165 +217,24 @@ async fn send_notification_email(
             .load_smtp_config()
             .await
             .map(std::sync::Arc::new);
-        let timezone = crate::services::settings::load_setting(
-            &state.pool,
-            crate::services::settings::TIMEZONE_KEY,
-            crate::services::settings::DEFAULT_TIMEZONE,
-        )
-        .await
-        .unwrap_or_else(|_| crate::services::settings::DEFAULT_TIMEZONE.to_string());
-        let timestamp =
-            crate::i18n::format_datetime_in_timezone(language, chrono::Utc::now(), &timezone);
-        let email_body = match &state.cfg.public_url {
-            Some(url) => format!("{body}\n\n{timestamp}\n\n{url}"),
-            None => format!("{body}\n\n{timestamp}"),
+        let email_body = if append_footer {
+            let timezone = crate::services::settings::load_setting(
+                &state.pool,
+                crate::services::settings::TIMEZONE_KEY,
+                crate::services::settings::DEFAULT_TIMEZONE,
+            )
+            .await
+            .unwrap_or_else(|_| crate::services::settings::DEFAULT_TIMEZONE.to_string());
+            let timestamp =
+                crate::i18n::format_datetime_in_timezone(language, chrono::Utc::now(), &timezone);
+            match &state.cfg.public_url {
+                Some(url) => format!("{body}\n\n{timestamp}\n\n{url}"),
+                None => format!("{body}\n\n{timestamp}"),
+            }
+        } else {
+            body.to_string()
         };
         crate::email::send_async(smtp, email, recipient_name, subject, email_body);
-    }
-}
-
-/// Insert a notification row. `email` is sent best-effort via SMTP if
-/// configured. Both operations are non-fatal: failures are logged but not
-/// propagated.
-///
-/// The in-app notification stores `body` verbatim. The outgoing email appends
-/// the public app URL so recipients can navigate directly to the application.
-pub async fn create(
-    state: &AppState,
-    user_id: i64,
-    kind: &str,
-    title: &str,
-    body: &str,
-    reference_type: Option<&str>,
-    reference_id: Option<i64>,
-) {
-    if let Err(e) = state
-        .db
-        .notifications
-        .insert(user_id, kind, title, body, reference_type, reference_id)
-        .await
-    {
-        tracing::warn!(target:"zerf::notifications", "insert failed: {e}");
-        return;
-    }
-    let language = crate::i18n::load_ui_language(&state.pool)
-        .await
-        .unwrap_or_default();
-    send_notification_email(state, &language, user_id, title.to_string(), body).await;
-}
-
-/// Insert an in-app-only notification row, skipping the email sidecar.
-/// Used when the requester is also the recipient (e.g. an admin approving
-/// or rejecting their own submission) to avoid self-addressed emails.
-pub async fn create_inapp_only(
-    state: &AppState,
-    user_id: i64,
-    kind: &str,
-    title: &str,
-    body: &str,
-    reference_type: Option<&str>,
-    reference_id: Option<i64>,
-) {
-    if let Err(e) = state
-        .db
-        .notifications
-        .insert(user_id, kind, title, body, reference_type, reference_id)
-        .await
-    {
-        tracing::warn!(target:"zerf::notifications", "insert failed: {e}");
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-pub async fn create_translated_inapp_only(
-    state: &AppState,
-    language: &Language,
-    user_id: i64,
-    kind: &str,
-    title_key: &str,
-    body_key: &str,
-    params: Vec<(&'static str, String)>,
-    reference_type: Option<&str>,
-    reference_id: Option<i64>,
-) {
-    let title = crate::i18n::translate(language, title_key, &params);
-    let body = crate::i18n::translate(language, body_key, &params);
-    create_inapp_only(
-        state,
-        user_id,
-        kind,
-        &title,
-        &body,
-        reference_type,
-        reference_id,
-    )
-    .await;
-}
-
-#[allow(clippy::too_many_arguments)]
-pub async fn create_translated(
-    state: &AppState,
-    language: &Language,
-    user_id: i64,
-    kind: &str,
-    title_key: &str,
-    body_key: &str,
-    params: Vec<(&'static str, String)>,
-    reference_type: Option<&str>,
-    reference_id: Option<i64>,
-) {
-    let title = crate::i18n::translate(language, title_key, &params);
-    let body = crate::i18n::translate(language, body_key, &params);
-    create(
-        state,
-        user_id,
-        kind,
-        &title,
-        &body,
-        reference_type,
-        reference_id,
-    )
-    .await;
-}
-
-/// Create a notification storing `frontend_body` in the DB (for frontend
-/// rendering from structured data) while sending the email with the
-/// i18n-rendered body. When `send_email` is false, no email is sent
-/// (used for self-notifications).
-#[allow(clippy::too_many_arguments)]
-pub async fn create_with_frontend_body(
-    state: &AppState,
-    language: &Language,
-    user_id: i64,
-    kind: &str,
-    title_key: &str,
-    email_body_key: &str,
-    params: Vec<(&'static str, String)>,
-    frontend_body: &str,
-    send_email: bool,
-    reference_type: Option<&str>,
-    reference_id: Option<i64>,
-) {
-    let title = crate::i18n::translate(language, title_key, &params);
-    if let Err(e) = state
-        .db
-        .notifications
-        .insert(
-            user_id,
-            kind,
-            &title,
-            frontend_body,
-            reference_type,
-            reference_id,
-        )
-        .await
-    {
-        tracing::warn!(target:"zerf::notifications", "insert failed: {e}");
-        return;
-    }
-    if send_email {
-        let email_body = crate::i18n::translate(language, email_body_key, &params);
-        send_notification_email(state, language, user_id, title, &email_body).await;
     }
 }
 
@@ -233,43 +273,76 @@ pub async fn load_language(pool: &crate::db::DatabasePool) -> crate::i18n::Langu
     }
 }
 
-/// Upsert a pinned system-error notification for every active admin.
-///
-/// System errors are surfaced **in-app only**: each admin gets a pinned notice
-/// they can dismiss individually. No email is sent. A single recurring failure
-/// therefore can no longer mail every admin's inbox day after day.
-///
-/// `dedupe_key` identifies the failure class (deduplicates repeat alerts).
-/// `title`      is a short, fixed summary shown bold in the UI.
-/// `body`       holds the failure-specific detail (names, dates, etc.), shown as
-///              secondary text in the UI.
+/// Notification kind for technical system-error alerts (pinned, deduped).
 pub const SYSTEM_ERROR_KIND: &str = "system_error";
 
-pub async fn notify_admins_system_error(state: &AppState, dedupe_key: &str, title: &str, body: &str) {
-    let all_users = match state.db.users.find_all_ordered().await {
-        Ok(u) => u,
+/// Enqueue a technical-error event for asynchronous fan-out to opted-in admins.
+///
+/// Producer side: returns immediately after writing one queue row. A background
+/// worker ([`deliver_error_to_opted_in_admins`]) drains the queue and delivers
+/// the in-app + email notifications. The backup container enqueues the same way
+/// via `psql`.
+///
+/// `dedupe_key` identifies the failure class (deduplicates repeat alerts);
+/// `title` is a short summary; `body` holds the failure-specific detail.
+pub async fn enqueue_error(state: &AppState, dedupe_key: &str, title: &str, body: &str) {
+    if let Err(e) = state
+        .db
+        .error_queue
+        .enqueue(Some(dedupe_key), title, Some(body), "app")
+        .await
+    {
+        tracing::warn!(target: "zerf::notifications", "enqueue_error failed: {e}");
+    }
+}
+
+/// Fan one queued error out to every active admin who opted in to technical
+/// error notifications: a pinned in-app notice plus an email, both through
+/// [`deliver`]. When SMTP is unconfigured the in-app notices are still created;
+/// a single warning is logged and no email is sent.
+///
+/// Returns whether the event was handled. `true` covers every intentional
+/// outcome — delivered, no opted-in admins, missing SMTP — and tells the worker
+/// to delete the queue row so nothing is retried endlessly. `false` means an
+/// infrastructure failure (recipients query) prevented any handling; the row
+/// stays queued for the next poll.
+pub async fn deliver_error_to_opted_in_admins(
+    state: &AppState,
+    dedupe_key: Option<&str>,
+    title: &str,
+    body: &str,
+) -> bool {
+    let recipient_ids = match state.db.users.error_notification_recipient_ids().await {
+        Ok(ids) => ids,
         Err(e) => {
-            tracing::warn!(target: "zerf::notifications", "system_error: list users failed: {e}");
-            return;
+            tracing::warn!(target: "zerf::notifications", "error recipients query failed: {e}");
+            return false;
         }
     };
-
-    // Upsert an in-app notification for each active admin. The repository call
-    // broadcasts a refresh to connected clients on change; no email sidecar.
-    for user in all_users.into_iter().filter(|u| u.active && u.is_admin()) {
-        if let Err(e) = state
-            .db
-            .notifications
-            .upsert_system_error(user.id, SYSTEM_ERROR_KIND, dedupe_key, title, body)
-            .await
-        {
-            tracing::warn!(
-                target: "zerf::notifications",
-                "system_error: upsert failed for user {}: {e}",
-                user.id
-            );
-        }
+    if recipient_ids.is_empty() {
+        return true;
     }
+    // Surface a missing email configuration once per event: opted-in admins want
+    // emails, but none can be sent. In-app notices are still posted below.
+    if state.db.settings.load_smtp_config().await.is_none() {
+        tracing::warn!(
+            target: "zerf::notifications",
+            "SMTP not configured; error notification delivered in-app only: {title}"
+        );
+    }
+    // Pinned + dedupe → re-alert upsert semantics so a recurring failure floats
+    // back to the top without piling up duplicate rows.
+    let dedupe = dedupe_key.unwrap_or(title);
+    for user_id in recipient_ids {
+        deliver(
+            state,
+            &Outgoing::new(user_id, SYSTEM_ERROR_KIND, title, body)
+                .dedupe_key(dedupe)
+                .pinned(),
+        )
+        .await;
+    }
+    true
 }
 
 /// Trim notifications older than 90 days; called from the background loop.

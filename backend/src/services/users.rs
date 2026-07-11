@@ -33,6 +33,9 @@ pub struct NewUser {
     /// Absence categories enabled for this employee. Same `None` semantics
     /// as `category_ids`.
     pub absence_category_ids: Option<Vec<i64>>,
+    /// Admin-only: opt in to technical error notifications. Coerced to FALSE
+    /// for non-admin roles by the service.
+    pub receives_error_notifications: bool,
 }
 
 pub struct CreateResponse {
@@ -63,6 +66,7 @@ pub fn repo_user_to_auth_user(u: crate::repository::User) -> User {
         tracks_time: u.tracks_time,
         annual_leave_days: u.annual_leave_days,
         archived_at: u.archived_at,
+        receives_error_notifications: u.receives_error_notifications,
     }
 }
 
@@ -443,6 +447,16 @@ pub async fn set_approvers_tx(
     UserDb::set_approvers_tx(tx, user_id, approver_ids).await
 }
 
+/// Persist the admin-only "receives technical error notifications" flag.
+/// Callers force `false` for non-admin roles.
+pub async fn set_receives_error_notifications_tx(
+    tx: &mut crate::db::PgConnection,
+    user_id: i64,
+    enabled: bool,
+) -> AppResult<()> {
+    UserDb::set_receives_error_notifications_tx(tx, user_id, enabled).await
+}
+
 pub async fn delete_sessions_for_user_tx(
     tx: &mut crate::db::PgConnection,
     user_id: i64,
@@ -719,6 +733,15 @@ pub async fn create(
         body.leave_days_next_year,
     )
     .await?;
+    // Admin-only opt-in for technical error notifications; forced off otherwise.
+    let receives_error_notifications =
+        body.receives_error_notifications && crate::roles::is_admin_role(&body.role);
+    UserDb::set_receives_error_notifications_tx(
+        &mut transaction,
+        new_user_id,
+        receives_error_notifications,
+    )
+    .await?;
     transaction.commit().await?;
     let created_user = app_state
         .db
@@ -737,9 +760,6 @@ pub async fn create(
         serde_json::to_value(&created_auth_user).ok(),
     )
     .await;
-    let smtp = crate::services::settings::load_smtp_config(&app_state.pool)
-        .await
-        .map(std::sync::Arc::new);
     let login_line = match app_state.cfg.public_url.as_deref() {
         Some(url) => format!("\nURL:      {}\n", url.trim_end_matches('/')),
         None => String::new(),
@@ -772,13 +792,20 @@ pub async fn create(
             ("login_line", login_line),
         ],
     );
-    crate::email::send_async(
-        smtp,
-        normalized_email,
-        format!("{} {}", first_name, last_name),
-        subject,
-        body_text,
-    );
+    // Email-only transactional mail (temporary password); no in-app row and no
+    // footer — the body is already the complete onboarding message.
+    crate::services::notifications::deliver(
+        app_state,
+        &crate::services::notifications::Outgoing::new(
+            new_user_id,
+            "account_created",
+            &subject,
+            &body_text,
+        )
+        .channels(crate::services::notifications::Channels::EmailOnly)
+        .append_email_footer(false),
+    )
+    .await;
     Ok(CreateResponse {
         id: new_user_id,
         user: created_auth_user,
@@ -1162,6 +1189,7 @@ mod tests {
             tracks_time: true,
             annual_leave_days: 30,
             archived_at: None,
+            receives_error_notifications: false,
         }
     }
 

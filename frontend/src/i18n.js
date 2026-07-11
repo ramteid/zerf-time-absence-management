@@ -893,6 +893,11 @@ const TRANSLATIONS = {
     "Disable time tracking?": "Zeiterfassung deaktivieren?",
     "When disabled, this admin works in management-only mode (no time entries or absences).":
       "Wenn deaktiviert, arbeitet dieser Admin nur in der Verwaltung (keine Zeiteinträge oder Abwesenheiten).",
+    // Error notifications (admin opt-in)
+    "Receives notifications about technical system errors":
+      "Erhält Benachrichtigungen über technische Fehler vom System",
+    "When enabled, this admin is alerted in the app and by email about technical errors.":
+      "Wenn aktiviert, wird dieser Admin in der App und per E-Mail über technische Fehler benachrichtigt.",
     "Disabling time tracking will permanently delete all time entries, absences, and edit requests for this user. This cannot be undone.":
       "Das Deaktivieren der Zeiterfassung löscht dauerhaft alle Zeiteinträge, Abwesenheiten und Bearbeitungsanfragen dieses Benutzers. Diese Aktion kann nicht rückgängig gemacht werden.",
     'Type "{phrase}" to confirm': 'Geben Sie "{phrase}" zur Bestätigung ein',

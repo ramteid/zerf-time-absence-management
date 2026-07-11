@@ -129,19 +129,14 @@ pub async fn notify_assigned_approvers_if_admin_acted(
         ("week_label", week_label),
     ];
     params.extend(extra_params);
+    let title = i18n::translate(language, action_title_key, &params);
+    let email_body = i18n::translate(language, action_body_key, &params);
     for approver_id in approver_ids {
-        notifications::create_with_frontend_body(
+        notifications::deliver(
             app_state,
-            language,
-            approver_id,
-            action_key,
-            action_title_key,
-            action_body_key,
-            params.clone(),
-            &frontend_body,
-            true,
-            Some("reopen_request"),
-            Some(request_id),
+            &notifications::Outgoing::new(approver_id, action_key, &title, &frontend_body)
+                .email_body(&email_body)
+                .reference("reopen_request", Some(request_id)),
         )
         .await;
     }
@@ -207,18 +202,19 @@ pub async fn cancel_zombie_reopen_requests(
                     "{{\"week\":\"{week_iso}\",\"reason\":{}}}",
                     serde_json::json!(REASON),
                 );
-                notifications::create_with_frontend_body(
+                let params = vec![("week_label", week_label), ("reason", REASON.to_string())];
+                let title = i18n::translate(&language, "reopen_rejected_title", &params);
+                notifications::deliver(
                     app_state,
-                    &language,
-                    user_id,
-                    "reopen_rejected",
-                    "reopen_rejected_title",
-                    "reopen_rejected_body",
-                    vec![("week_label", week_label), ("reason", REASON.to_string())],
-                    &frontend_body,
-                    false, // in-app only - no email for an automatic system action
-                    Some("reopen_request"),
-                    Some(request_id),
+                    // In-app only — no email for an automatic system action.
+                    &notifications::Outgoing::new(
+                        user_id,
+                        "reopen_rejected",
+                        &title,
+                        &frontend_body,
+                    )
+                    .channels(notifications::Channels::InAppOnly)
+                    .reference("reopen_request", Some(request_id)),
                 )
                 .await;
             }

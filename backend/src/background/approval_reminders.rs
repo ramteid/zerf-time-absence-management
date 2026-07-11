@@ -3,8 +3,7 @@
 
 use crate::db::DatabasePool;
 use crate::services::settings::{
-    app_today, load_setting, load_smtp_config, APPROVAL_REMINDERS_ENABLED_KEY, DEFAULT_TIMEZONE,
-    TIMEZONE_KEY,
+    app_today, load_setting, APPROVAL_REMINDERS_ENABLED_KEY, DEFAULT_TIMEZONE, TIMEZONE_KEY,
 };
 use chrono::{Datelike, Duration, TimeZone, Timelike, Utc};
 use std::time::Duration as StdDuration;
@@ -100,9 +99,7 @@ pub async fn run_check(state: &crate::AppState) {
         return;
     }
 
-    let smtp = load_smtp_config(pool).await.map(std::sync::Arc::new);
-
-    for (approver_id, approver_email, first_name, last_name, pending_count) in approvers {
+    for (approver_id, _email, _first, _last, pending_count) in approvers {
         let count_str = pending_count.to_string();
         let title = crate::i18n::translate(&language, "approval_reminder_title", &[]);
         let body = crate::i18n::translate(
@@ -122,46 +119,23 @@ pub async fn run_check(state: &crate::AppState) {
             timestamp,
         );
 
+        // Idempotent per approver per local day. `deliver` owns the in-app row,
+        // the SSE broadcast, and the email; the pre-composed `email_body` already
+        // carries the app URL and timestamp, so suppress the extra footer.
         let dedupe_key = format!("approval_reminder:{}", today_local);
-        match state
-            .db
-            .notifications
-            .insert_idempotent_with_dedupe_key(
+        crate::services::notifications::deliver(
+            state,
+            &crate::services::notifications::Outgoing::new(
                 approver_id,
                 "approval_reminder",
                 &title,
                 &body,
-                None,
-                None,
-                Some(&dedupe_key),
             )
-            .await
-        {
-            Ok(true) => {
-                let _ =
-                    state
-                        .notifications
-                        .send(crate::services::notifications::NotificationSignal {
-                            user_id: approver_id,
-                        });
-                crate::email::send_async(
-                    smtp.clone(),
-                    approver_email,
-                    format!("{} {}", first_name, last_name),
-                    title,
-                    email_body,
-                );
-            }
-            Ok(false) => {
-                // Already reminded today (idempotency guard).
-            }
-            Err(e) => {
-                tracing::warn!(
-                    target:"zerf::approval_reminders",
-                    "insert notification failed for approver {approver_id}: {e}"
-                );
-            }
-        }
+            .email_body(&email_body)
+            .append_email_footer(false)
+            .dedupe_key(&dedupe_key),
+        )
+        .await;
     }
 }
 

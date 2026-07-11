@@ -328,6 +328,35 @@ describe("UserDialog", () => {
     expect(target.textContent).not.toContain("Overtime start balance");
   });
 
+  it("hides the technical-error-notification opt-in for non-admin roles", async () => {
+    // The opt-in only makes sense for admins, so it must not appear for employees.
+    const onClose = vi.fn();
+    component = mount(UserDialog, {
+      target,
+      props: { template: { role: "employee" }, onClose },
+    });
+    await waitForText(target, "Add User");
+    await settle();
+
+    expect(target.textContent).not.toContain(
+      "Receives notifications about technical system errors",
+    );
+  });
+
+  it("offers the technical-error-notification opt-in for admins", async () => {
+    const onClose = vi.fn();
+    component = mount(UserDialog, {
+      target,
+      props: { template: { role: "admin" }, onClose },
+    });
+    await waitForText(target, "Add User");
+    await settle();
+
+    expect(target.textContent).toContain(
+      "Receives notifications about technical system errors",
+    );
+  });
+
   it("only sends category_ids/absence_category_ids on create, never on edit", async () => {
     apiMock.mockImplementation(async (path) => {
       if (path === "/users") return [];

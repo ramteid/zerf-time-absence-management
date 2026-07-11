@@ -17,7 +17,6 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use chrono::{DateTime, Duration, Utc};
 use serde::Deserialize;
-use std::sync::Arc;
 
 // Re-used constant from middleware
 const LOCKOUT_MIN: i64 = crate::middleware::auth::LOCKOUT_MIN;
@@ -89,6 +88,7 @@ pub async fn login(
             tracks_time: u.tracks_time,
             annual_leave_days: u.annual_leave_days,
             archived_at: u.archived_at,
+            receives_error_notifications: u.receives_error_notifications,
         });
     // Always perform a hash verification to keep timing constant for unknown emails.
     let dummy = "$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHRzYWx0c2FsdA$8ueQukxsrOwHPzjhsRTRppvNN0o3Qx0vg7HHmH64Bmw";
@@ -465,8 +465,9 @@ pub async fn forgot_password(
         .get_active_user_by_email(&email)
         .await?;
 
-    // Always return 200 to prevent email enumeration.
-    let Some((user_id, user_email, first_name, last_name)) = user else {
+    // Always return 200 to prevent email enumeration. The facade resolves the
+    // recipient address from the user id, so only the id is needed here.
+    let Some((user_id, _email, _first_name, _last_name)) = user else {
         return Ok(Json(serde_json::json!({ "ok": true })));
     };
 
@@ -496,14 +497,20 @@ pub async fn forgot_password(
         &[("reset_link", reset_link)],
     );
 
-    let smtp = crate::services::settings::load_smtp_config(&app_state.pool).await;
-    crate::email::send_async(
-        smtp.map(Arc::new),
-        user_email,
-        format!("{} {}", first_name, last_name),
-        subject,
-        body_text,
-    );
+    // Email-only transactional mail: no in-app row (the user is signed out) and
+    // no footer (the body is already the complete reset message).
+    crate::services::notifications::deliver(
+        &app_state,
+        &crate::services::notifications::Outgoing::new(
+            user_id,
+            "password_reset",
+            &subject,
+            &body_text,
+        )
+        .channels(crate::services::notifications::Channels::EmailOnly)
+        .append_email_footer(false),
+    )
+    .await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
 }

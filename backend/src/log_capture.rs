@@ -135,9 +135,49 @@ fn truncate_at_char_boundary(mut message: String) -> String {
 /// (main.rs), the same pattern used for every other prunable table in this
 /// codebase (audit_log, notifications, reopen_requests) — not per-write, to
 /// avoid an extra DELETE scan on every single insert during a warning burst.
+/// Fixed title for auto-generated error notifications (the raw log message is
+/// the body). Kept short and English — it is an admin diagnostic alert.
+const ERROR_NOTIFICATION_TITLE: &str = "Technical system error";
+
+/// Error logs from the notification/email/log subsystems must NOT spawn admin
+/// notifications: a delivery failure there would otherwise feed back into a new
+/// notification and loop. Their events still reach `app_logs` and stdout.
+fn target_is_notification_subsystem(target: &str) -> bool {
+    target == WRITER_TARGET
+        || target.starts_with("zerf::notifications")
+        || target.starts_with("zerf::email")
+        || target.starts_with("zerf::error_notify")
+}
+
+/// Stable dedupe key derived from an event's target + message, so repeat
+/// occurrences re-alert (pinned upsert) instead of piling up duplicate rows.
+fn error_notification_dedupe_key(target: &str, message: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(format!("{target}\n{message}").as_bytes());
+    format!("app_error_{}", &hex::encode(digest)[..16])
+}
+
 pub async fn run_writer(pool: DatabasePool, mut receiver: mpsc::Receiver<CapturedLogRecord>) {
-    let db = AppLogDb::new(pool);
+    let db = AppLogDb::new(pool.clone());
+    let error_queue = crate::repository::ErrorNotificationQueueDb::new(pool);
     while let Some(record) = receiver.recv().await {
+        // Turn error-level events into admin error notifications by enqueueing
+        // them for the async worker — unless they originate from the delivery
+        // subsystems (loop guard). Warnings are logged but never notified.
+        if record.level == "error" && !target_is_notification_subsystem(&record.target) {
+            let dedupe = error_notification_dedupe_key(&record.target, &record.message);
+            if let Err(err) = error_queue
+                .enqueue(
+                    Some(&dedupe),
+                    ERROR_NOTIFICATION_TITLE,
+                    Some(&record.message),
+                    "app",
+                )
+                .await
+            {
+                tracing::error!(target: WRITER_TARGET, "failed to enqueue error notification: {err}");
+            }
+        }
         if let Err(err) = db
             .insert(
                 record.level,

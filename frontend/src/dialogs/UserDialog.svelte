@@ -52,6 +52,8 @@
   let approver_ids = Array.isArray(template.approver_ids) ? template.approver_ids.map(Number) : [];
   let active = template.active ?? true;
   let tracks_time = template.tracks_time ?? true;
+  // Admin-only: opt in to technical system-error notifications. Default off.
+  let receives_error_notifications = template.receives_error_notifications ?? false;
   let error = "";
   let approvers = [];
   let allCategories = [];
@@ -105,6 +107,10 @@
 
   // Non-admin users always have tracks_time=true (backend enforces this too).
   $: if (normalizedRole !== "admin") tracks_time = true;
+
+  // Error notifications are admin-only; clear the flag for any other role
+  // (backend coerces this too).
+  $: if (normalizedRole !== "admin") receives_error_notifications = false;
 
   // Password fields (only for new users)
   let password = "";
@@ -306,6 +312,9 @@
       // Only admin users may have tracks_time=false; non-admin always sends true
       // to be consistent with the backend's auto-restore on demotion.
       body.tracks_time = normalizedRole === "admin" ? tracks_time : true;
+      // Admin-only opt-in for technical error notifications; non-admins send false.
+      body.receives_error_notifications =
+        normalizedRole === "admin" ? receives_error_notifications : false;
       if (isNew) {
         const createdUser = await api(apiBase, { method: "POST", body });
         dialog.close(true);
@@ -554,6 +563,24 @@
             on:click={() => (tracks_time = !tracks_time)}
           >
             {tracks_time ? $t("Active") : $t("Inactive")}
+          </button>
+        </div>
+        <div class="field-toggle-row">
+          <div>
+            <div class="field-toggle-row-title">
+              {$t("Receives notifications about technical system errors")}
+            </div>
+            <div class="field-toggle-row-hint">
+              {$t("When enabled, this admin is alerted in the app and by email about technical errors.")}
+            </div>
+          </div>
+          <button
+            class="zf-btn zf-btn-sm"
+            class:zf-btn-danger={!receives_error_notifications}
+            type="button"
+            on:click={() => (receives_error_notifications = !receives_error_notifications)}
+          >
+            {receives_error_notifications ? $t("Active") : $t("Inactive")}
           </button>
         </div>
       {/if}

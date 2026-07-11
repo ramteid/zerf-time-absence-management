@@ -17,6 +17,38 @@ use axum::{
 };
 use serde::Deserialize;
 
+/// Notify one recipient about a reopen-request event through the facade.
+/// Follows the `{event}_title` / `{event}_body` i18n key convention; the
+/// structured `frontend_body` is stored in-app while the translated text is the
+/// email body. `email = false` keeps it in-app only (self-actions).
+#[allow(clippy::too_many_arguments)]
+async fn notify_reopen(
+    app_state: &AppState,
+    language: &i18n::Language,
+    user_id: i64,
+    event: &str,
+    params: Vec<(&'static str, String)>,
+    frontend_body: &str,
+    email: bool,
+    request_id: i64,
+) {
+    let title = i18n::translate(language, &format!("{event}_title"), &params);
+    let email_body = i18n::translate(language, &format!("{event}_body"), &params);
+    let channels = if email {
+        notifications::Channels::InAppAndEmail
+    } else {
+        notifications::Channels::InAppOnly
+    };
+    notifications::deliver(
+        app_state,
+        &notifications::Outgoing::new(user_id, event, &title, frontend_body)
+            .email_body(&email_body)
+            .channels(channels)
+            .reference("reopen_request", Some(request_id)),
+    )
+    .await;
+}
+
 #[derive(Deserialize)]
 pub struct NewReopen {
     pub week_start: chrono::NaiveDate,
@@ -196,21 +228,18 @@ pub async fn create(
     })
     .to_string();
     for approver_id in &approver_ids_for_notification {
-        notifications::create_with_frontend_body(
+        notify_reopen(
             &app_state,
             &language,
             *approver_id,
             "reopen_request_created",
-            "reopen_request_created_title",
-            "reopen_request_created_body",
             vec![
                 ("requester_name", requester_full_name.clone()),
                 ("week_label", week_label.clone()),
             ],
             &frontend_body_created,
             true,
-            Some("reopen_request"),
-            Some(new_request_id),
+            new_request_id,
         )
         .await;
     }
@@ -292,38 +321,18 @@ pub async fn approve(
     .await;
     // Notify the employee whose week was reopened (in-app only when self-approved).
     let frontend_body_approved = format!("{{\"week\":\"{}\"}}", week_iso);
-    if reopen_request.user_id != requester.id {
-        notifications::create_with_frontend_body(
-            &app_state,
-            &language,
-            reopen_request.user_id,
-            "reopen_approved",
-            "reopen_approved_title",
-            "reopen_approved_body",
-            vec![("week_label", week_label.clone())],
-            &frontend_body_approved,
-            true,
-            Some("reopen_request"),
-            Some(request_id),
-        )
-        .await;
-    } else {
-        // Self-approval by admin: in-app only, no email.
-        notifications::create_with_frontend_body(
-            &app_state,
-            &language,
-            reopen_request.user_id,
-            "reopen_approved",
-            "reopen_approved_title",
-            "reopen_approved_body",
-            vec![("week_label", week_label.clone())],
-            &frontend_body_approved,
-            false,
-            Some("reopen_request"),
-            Some(request_id),
-        )
-        .await;
-    }
+    notify_reopen(
+        &app_state,
+        &language,
+        reopen_request.user_id,
+        "reopen_approved",
+        vec![("week_label", week_label.clone())],
+        &frontend_body_approved,
+        // Email the employee, unless an admin approved their own request.
+        reopen_request.user_id != requester.id,
+        request_id,
+    )
+    .await;
     // If an admin acted, notify all other explicitly assigned approvers for
     // this user so they know the item left their pending queue.
     notify_assigned_approvers_if_admin_acted(
@@ -417,44 +426,21 @@ pub async fn reject(
         week_iso,
         serde_json::json!(rejection_reason),
     );
-    if before.user_id != requester.id {
-        notifications::create_with_frontend_body(
-            &app_state,
-            &language,
-            before.user_id,
-            "reopen_rejected",
-            "reopen_rejected_title",
-            "reopen_rejected_body",
-            vec![
-                ("week_label", week_label.clone()),
-                ("reason", rejection_reason.to_string()),
-            ],
-            &frontend_body_rejected,
-            true,
-            Some("reopen_request"),
-            Some(request_id),
-        )
-        .await;
-    } else {
-        // Self-rejection by admin: in-app only, no email.
-        notifications::create_with_frontend_body(
-            &app_state,
-            &language,
-            before.user_id,
-            "reopen_rejected",
-            "reopen_rejected_title",
-            "reopen_rejected_body",
-            vec![
-                ("week_label", week_label.clone()),
-                ("reason", rejection_reason.to_string()),
-            ],
-            &frontend_body_rejected,
-            false,
-            Some("reopen_request"),
-            Some(request_id),
-        )
-        .await;
-    }
+    notify_reopen(
+        &app_state,
+        &language,
+        before.user_id,
+        "reopen_rejected",
+        vec![
+            ("week_label", week_label.clone()),
+            ("reason", rejection_reason.to_string()),
+        ],
+        &frontend_body_rejected,
+        // Email the employee, unless an admin rejected their own request.
+        before.user_id != requester.id,
+        request_id,
+    )
+    .await;
     // Symmetric with approve: if an admin rejected a request, notify all other
     // explicitly assigned approvers for this user so they know the item left
     // their queue.

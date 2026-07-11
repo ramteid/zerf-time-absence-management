@@ -831,10 +831,12 @@ notifications/emails.
 
 ### System error notifications (admin)
 
-When a technical failure occurs — such as a database backup failure or a Nextcloud upload error — all active admins receive a **pinned** notification at the top of their notification panel. Pinned unread notifications are visually highlighted and float above regular notifications.
+When a technical failure occurs — such as a database backup failure, a Nextcloud upload error, or any error logged by the application — admins can be alerted. This is **opt-in per admin**: only admins whose profile has **"Receives notifications about technical system errors"** enabled are notified. The option is off by default and is set when creating or editing an admin user (it appears only for the Admin role).
 
+- Opted-in admins receive both a **pinned** in-app notification (highlighted at the top of the notification panel) **and an email**.
+- If no admin has opted in, technical errors are still recorded in the System Log but no one is notified — enable the option for at least one admin to receive alerts.
 - Each failure class produces **at most one active notification** per admin. If the notification is dismissed and the failure recurs, it is raised again.
-- These notifications appear **in the app only** — no alert email is sent. Each admin dismisses their own copy.
+- If no email server (SMTP) is configured, the in-app notification is still created and the missing email is noted in the System Log; no delivery is retried endlessly.
 - **Backup and upload failure notifications are automatically resolved** when the next cycle succeeds. You do not need to dismiss them manually after fixing the underlying problem; the notification disappears on the next successful backup or upload.
 
 ### Notification timestamp display
@@ -1448,6 +1450,13 @@ begin on the same day.
 
 Optional: one or more approvers to assign to the new user.
 
+Optional (admin role only): **Receives notifications about technical system
+errors**. When enabled, this admin is alerted — in the app and by email —
+whenever a technical error occurs (see
+[System error notifications](#system-error-notifications-admin)). It is off by
+default and only appears when the Admin role is selected; the same option is
+available later when editing the admin.
+
 Optional: which time categories and absence categories the new user can use.
 The creation form shows both lists pre-checked (every existing category
 enabled, the default), so deselecting one is the only action needed to
@@ -1686,7 +1695,7 @@ The **10 most recent** local backup files are kept in the backup volume; older o
 
 The backup file is AES-256-CBC encrypted before upload, so a compromised share link does not expose plaintext data.
 
-If a backup fails, all active admins receive a pinned in-app notification (no email is sent). The notification is automatically re-raised if it was previously dismissed and the failure recurs.
+If a backup fails, admins who opted in to technical error notifications are alerted in the app and by email (see "System error notifications"). The notification is automatically re-raised if it was previously dismissed and the failure recurs.
 
 #### Report PDF Upload
 
@@ -1694,7 +1703,7 @@ When enabled, Zerf queues an individual timesheet PDF for each employee on a con
 
 If the feature was disabled for several months and is then re-enabled, or if the server missed a month boundary, Zerf automatically backfills all intervening months so no timesheet is silently skipped. **Upload now** has the same backfill behaviour.
 
-If a past month is changed after the PDF was already uploaded - for example an entry is approved or rejected, an approved entry is corrected by an admin, a week is reopened and re-submitted, or an absence is approved, cancelled, or revoked - Zerf automatically re-queues the affected employee's timesheet for that month. If a start-date change would make a re-upload hide part of that month, if the user's current start date would hide stored rows in that month, or if an archived/tracking-disabled user still has draft, submitted, or unresolved rejected entries, the upload waits and admins receive a pinned in-app notification. Older months are uploaded on the next daily run once they are ready. The just-finished previous month waits until the configured upload day unless an admin clicks **Upload now**.
+If a past month is changed after the PDF was already uploaded - for example an entry is approved or rejected, an approved entry is corrected by an admin, a week is reopened and re-submitted, or an absence is approved, cancelled, or revoked - Zerf automatically re-queues the affected employee's timesheet for that month. If a start-date change would make a re-upload hide part of that month, if the user's current start date would hide stored rows in that month, or if an archived/tracking-disabled user still has draft, submitted, or unresolved rejected entries, the upload waits and admins who opted in to technical error notifications are alerted in the app and by email. Older months are uploaded on the next daily run once they are ready. The just-finished previous month waits until the configured upload day unless an admin clicks **Upload now**.
 
 | Setting | Description |
 | --- | --- |
@@ -1705,7 +1714,7 @@ If a past month is changed after the PDF was already uploaded - for example an e
 
 **Upload now** queues the previous month's PDFs for all employees immediately and uploads those who are already fully submitted. Employees who are not yet submitted are uploaded on subsequent daily checks. This does not prevent the scheduled monthly run from processing remaining entries.
 
-If an upload fails or a queued PDF cannot be safely generated yet, all active admins receive a pinned in-app notification (no email is sent). The scheduled upload retries automatically on the next daily check.
+If an upload fails or a queued PDF cannot be safely generated yet, admins who opted in to technical error notifications are alerted in the app and by email. The scheduled upload retries automatically on the next daily check.
 
 ### Managing categories
 

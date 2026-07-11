@@ -22,16 +22,12 @@ async fn notify_absence(
     params: Vec<(&'static str, String)>,
     absence_id: i64,
 ) {
-    crate::services::notifications::create_translated(
+    let title = i18n::translate(language, &format!("{event}_title"), &params);
+    let body = i18n::translate(language, &format!("{event}_body"), &params);
+    crate::services::notifications::deliver(
         app_state,
-        language,
-        recipient_id,
-        event,
-        &format!("{event}_title"),
-        &format!("{event}_body"),
-        params,
-        Some("absences"),
-        Some(absence_id),
+        &crate::services::notifications::Outgoing::new(recipient_id, event, &title, &body)
+            .reference("absences", Some(absence_id)),
     )
     .await;
 }
@@ -44,16 +40,13 @@ async fn notify_absence_inapp_only(
     params: Vec<(&'static str, String)>,
     absence_id: i64,
 ) {
-    crate::services::notifications::create_translated_inapp_only(
+    let title = i18n::translate(language, &format!("{event}_title"), &params);
+    let body = i18n::translate(language, &format!("{event}_body"), &params);
+    crate::services::notifications::deliver(
         app_state,
-        language,
-        recipient_id,
-        event,
-        &format!("{event}_title"),
-        &format!("{event}_body"),
-        params,
-        Some("absences"),
-        Some(absence_id),
+        &crate::services::notifications::Outgoing::new(recipient_id, event, &title, &body)
+            .channels(crate::services::notifications::Channels::InAppOnly)
+            .reference("absences", Some(absence_id)),
     )
     .await;
 }
@@ -1472,6 +1465,7 @@ mod tests {
             tracks_time,
             annual_leave_days: 30,
             archived_at: None,
+            receives_error_notifications: false,
         }
     }
 

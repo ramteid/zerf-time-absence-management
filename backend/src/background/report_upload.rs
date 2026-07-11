@@ -316,7 +316,7 @@ async fn process_one_entry(
             user.id, user.first_name, user.last_name, user.start_date, entry.period
         );
         tracing::warn!(target: "zerf::report_upload", "{msg}");
-        crate::services::notifications::notify_admins_system_error(
+        crate::services::notifications::enqueue_error(
             state,
             &format!("report_upload_pre_start_{}_{}", user.id, entry.period),
             "Report PDF upload blocked",
@@ -352,7 +352,7 @@ async fn process_one_entry(
             user.id, user.first_name, user.last_name, entry.period
         );
         tracing::warn!(target: "zerf::report_upload", "{msg}");
-        crate::services::notifications::notify_admins_system_error(
+        crate::services::notifications::enqueue_error(
             state,
             &format!("report_upload_unsettled_time_{}_{}", user.id, entry.period),
             "Report PDF upload blocked",

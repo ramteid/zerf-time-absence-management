@@ -67,6 +67,9 @@ pub struct User {
     /// Set when the user has been archived. Archived users cannot log in.
     /// Cleared on restore.
     pub archived_at: Option<DateTime<Utc>>,
+    /// When TRUE (admin only), this user receives in-app + email notifications
+    /// for technical system errors. Default FALSE; forced FALSE for non-admins.
+    pub receives_error_notifications: bool,
 }
 
 impl User {
@@ -307,6 +310,7 @@ pub async fn auth_middleware(
         tracks_time: repo_user.tracks_time,
         annual_leave_days: repo_user.annual_leave_days,
         archived_at: repo_user.archived_at,
+        receives_error_notifications: repo_user.receives_error_notifications,
     };
 
     // Enforce must_change_password: users with a temporary password are only
@@ -380,6 +384,7 @@ mod tests {
             tracks_time: true,
             annual_leave_days: 30,
             archived_at: None,
+            receives_error_notifications: false,
         }
     }
 

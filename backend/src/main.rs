@@ -104,6 +104,10 @@ async fn main() -> Result<()> {
     // Monthly timesheet PDF upload to Nextcloud: checks daily at midnight.
     tokio::spawn(background::report_upload::run_loop(state.clone()));
 
+    // Error-notification worker: drains the error queue (backend + backup
+    // failures) and alerts opted-in admins in-app and by email.
+    tokio::spawn(background::error_notifications::run_loop(state.clone()));
+
     let app = build_app(state);
 
     let addr: SocketAddr = config.bind.parse().expect("invalid ZERF_BIND");

@@ -344,22 +344,23 @@ pub async fn submit(
             let reference_type = timesheet_submission_reference_type(week_monday);
 
             for approver_id in &approver_ids {
-                crate::services::notifications::create_with_frontend_body(
+                let params = vec![
+                    ("submitter_name", submitter_name.clone()),
+                    ("week_list", week_list.clone()),
+                    ("week_count", week_count.clone()),
+                ];
+                let title = i18n::translate(&language, "timesheet_submitted_title", &params);
+                let email_body = i18n::translate(&language, "timesheet_submitted_body", &params);
+                crate::services::notifications::deliver(
                     &app_state,
-                    &language,
-                    *approver_id,
-                    "timesheet_submitted",
-                    "timesheet_submitted_title",
-                    "timesheet_submitted_body",
-                    vec![
-                        ("submitter_name", submitter_name.clone()),
-                        ("week_list", week_list.clone()),
-                        ("week_count", week_count.clone()),
-                    ],
-                    &frontend_body,
-                    true,
-                    Some(&reference_type),
-                    Some(requester.id),
+                    &crate::services::notifications::Outgoing::new(
+                        *approver_id,
+                        "timesheet_submitted",
+                        &title,
+                        &frontend_body,
+                    )
+                    .email_body(&email_body)
+                    .reference(&reference_type, Some(requester.id)),
                 )
                 .await;
             }

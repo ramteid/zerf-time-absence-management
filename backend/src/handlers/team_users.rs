@@ -139,6 +139,8 @@ pub async fn create(
         tracks_time: true,
         category_ids: body.category_ids,
         absence_category_ids: body.absence_category_ids,
+        // Assistants are non-admin; the service coerces this to false anyway.
+        receives_error_notifications: false,
     };
     let created = crate::services::users::create(&app_state, &requester, service_body).await?;
     Ok(Json(CreateResponse {

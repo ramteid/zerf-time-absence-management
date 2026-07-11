@@ -30,6 +30,14 @@ impl AppLogDb {
     }
 
     /// Insert one captured warn/error log record.
+    ///
+    /// Returns the raw `sqlx::Error` instead of `AppError` deliberately: this
+    /// method runs inside the log-capture writer task, and the
+    /// `From<sqlx::Error> for AppError` conversion logs a capturable ERROR
+    /// event (`zerf::db`) — routing through it would feed the writer's own
+    /// failures back into the capture channel and loop forever while the
+    /// database is down. The caller logs failures under the excluded
+    /// `WRITER_TARGET` instead.
     pub async fn insert(
         &self,
         level: &str,
@@ -37,7 +45,7 @@ impl AppLogDb {
         target: &str,
         fields: Option<serde_json::Value>,
         occurred_at: DateTime<Utc>,
-    ) -> AppResult<()> {
+    ) -> Result<(), sqlx::Error> {
         sqlx::query(
             "INSERT INTO app_logs(level, message, target, fields, occurred_at) \
              VALUES ($1,$2,$3,$4,$5)",

@@ -4,8 +4,7 @@
 
 use crate::db::DatabasePool;
 use crate::services::settings::{
-    app_today, load_setting, load_smtp_config, DEFAULT_TIMEZONE, SUBMISSION_REMINDERS_ENABLED_KEY,
-    TIMEZONE_KEY,
+    app_today, load_setting, DEFAULT_TIMEZONE, SUBMISSION_REMINDERS_ENABLED_KEY, TIMEZONE_KEY,
 };
 use chrono::{Datelike, NaiveDate, TimeZone, Timelike, Utc};
 use std::time::Duration;
@@ -241,16 +240,11 @@ pub async fn run_check(state: &crate::AppState) {
         "submission reminder pass loaded non-assistant candidates"
     );
 
-    // Load SMTP config once for all users
-    let smtp = load_smtp_config(pool).await.map(std::sync::Arc::new);
-
     for crate::repository::ActiveUserRow {
         id: user_id,
-        email: user_email,
-        first_name,
-        last_name,
         start_date: user_start,
         workdays_per_week,
+        ..
     } in rows
     {
         let missing_weeks =
@@ -287,48 +281,24 @@ pub async fn run_check(state: &crate::AppState) {
             timestamp,
         );
 
-        // Use an app-timezone local-day dedupe key so reminders are unique per
-        // user/day in configured timezone, not by UTC date.
+        // Idempotent per user per local day (configured timezone, not UTC).
+        // `deliver` owns the in-app row, the SSE broadcast, and the best-effort
+        // email; the pre-composed `email_body` already carries the app URL and
+        // timestamp, so suppress the extra footer.
         let dedupe_key = format!("submission_reminder:{}", today);
-        // Only send the in-app signal and email when the row was actually inserted
-        // (rows_affected == 0 means the conflict guard fired — reminder already sent today).
-        match state
-            .db
-            .notifications
-            .insert_idempotent_with_dedupe_key(
+        crate::services::notifications::deliver(
+            state,
+            &crate::services::notifications::Outgoing::new(
                 user_id,
                 "submission_reminder",
                 &title,
                 &body,
-                None,
-                None,
-                Some(&dedupe_key),
             )
-            .await
-        {
-            Ok(true) => {
-                let _ = state
-                    .notifications
-                    .send(crate::services::notifications::NotificationSignal { user_id });
-                // Send email best-effort
-                crate::email::send_async(
-                    smtp.clone(),
-                    user_email,
-                    format!("{} {}", first_name, last_name),
-                    title,
-                    email_body,
-                );
-            }
-            Ok(_) => {
-                // Conflict guard fired: reminder already sent today, skip email too.
-            }
-            Err(e) => {
-                tracing::warn!(
-                    target:"zerf::submission_reminders",
-                    "insert notification failed for user {user_id}: {e}"
-                );
-            }
-        }
+            .email_body(&email_body)
+            .append_email_footer(false)
+            .dedupe_key(&dedupe_key),
+        )
+        .await;
     }
 }
 

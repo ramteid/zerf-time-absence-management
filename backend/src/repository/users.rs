@@ -55,6 +55,9 @@ pub struct User {
     /// Set when the user is archived. Archived users cannot log in and are
     /// excluded from active user lists. Restore clears this field.
     pub archived_at: Option<DateTime<Utc>>,
+    /// When TRUE (admin only), this user receives in-app + email notifications
+    /// for technical system errors. Default FALSE; forced FALSE for non-admins.
+    pub receives_error_notifications: bool,
 }
 
 impl User {
@@ -70,7 +73,8 @@ const USER_SELECT: &str =
     "SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, workdays_per_week, \
      start_date, hire_date, active, must_change_password, created_at, \
      allow_reopen_without_approval, allow_submission_without_approval, dark_mode, \
-     overtime_start_balance_min, tracks_time, annual_leave_days, archived_at \
+     overtime_start_balance_min, tracks_time, annual_leave_days, archived_at, \
+     receives_error_notifications \
      FROM users";
 
 /// Team settings row (id, email, first_name, last_name, role,
@@ -981,6 +985,35 @@ impl UserDb {
             .execute(&self.pool)
             .await?;
         Ok(())
+    }
+
+    /// Set the admin-only "receives technical error notifications" flag. Callers
+    /// are responsible for forcing `false` when the user is not an admin.
+    pub async fn set_receives_error_notifications_tx(
+        tx: &mut sqlx::PgConnection,
+        id: i64,
+        enabled: bool,
+    ) -> AppResult<()> {
+        sqlx::query("UPDATE users SET receives_error_notifications=$1 WHERE id=$2")
+            .bind(enabled)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        Ok(())
+    }
+
+    /// Ids of active admins who opted in to technical error notifications.
+    /// Used by the error-notification worker to fan a queued error out to the
+    /// right recipients (the facade resolves each address itself).
+    pub async fn error_notification_recipient_ids(&self) -> AppResult<Vec<i64>> {
+        Ok(sqlx::query_scalar::<_, i64>(
+            "SELECT id FROM users \
+             WHERE active=TRUE AND lower(trim(role))='admin' \
+             AND receives_error_notifications=TRUE \
+             ORDER BY id",
+        )
+        .fetch_all(&self.pool)
+        .await?)
     }
 
     pub async fn update_reopen_policy(

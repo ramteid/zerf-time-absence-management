@@ -295,22 +295,15 @@ EOF
 
 # -- Admin notifications -------------------------------------------------------
 
-# Upsert a pinned system-error notification for all active admins directly in
-# the database.  Designed to mirror the Rust services::notifications::
-# notify_admins_system_error logic but callable from shell.
-#
-# These notifications are surfaced in-app only; the app no longer emails admins
-# about system errors, so a backup failure raises an in-app notice (visible to
-# every admin, dismissable individually) but sends no mail.
+# Enqueue a technical-error event for the backend's error-notification worker.
+# The worker fans it out (in-app + email) to every active admin who opted in to
+# technical error notifications (users.receives_error_notifications), then
+# deletes the queue row. This mirrors the Rust services::notifications::
+# enqueue_error path so backup failures reach admins the same way app errors do.
 #
 # _dedup_key  e.g. "backup_failed" or "backup_upload_failed" -- deduplicates
-#             repeat alerts of the same failure class.
+#             repeat alerts of the same failure class (pinned re-alert).
 # _message    Short human-readable description (no single quotes).
-#
-# Behaviour:
-#   - Not exists -> INSERT (unread, pinned).
-#   - Exists and is_read=FALSE -> DO NOTHING (already alerting, no duplicate).
-#   - Exists and is_read=TRUE  -> UPDATE: mark unread again (re-alert).
 notify_admins_backup_error() {
   _dedup_key="$1"
   _message="$2"
@@ -324,27 +317,16 @@ notify_admins_backup_error() {
       --username "$DIRECT_USER" \
       --dbname "$DIRECT_DB" \
       --no-psqlrc \
-      -c "INSERT INTO notifications
-            (user_id, kind, title, body, dedupe_key, pinned, is_read, created_at)
-          SELECT id, 'system_error', '$_message', NULL,
-                 '$_dedup_key', TRUE, FALSE, NOW()
-          FROM users WHERE role = 'admin' AND active = TRUE
-          ON CONFLICT (user_id, kind, dedupe_key)
-          WHERE dedupe_key IS NOT NULL
-          DO UPDATE SET
-            title      = EXCLUDED.title,
-            pinned     = TRUE,
-            is_read    = FALSE,
-            created_at = NOW()
-          WHERE notifications.is_read = TRUE" \
+      -c "INSERT INTO error_notification_queue (dedupe_key, title, body, source)
+          VALUES ('$_dedup_key', '$_message', NULL, 'backup')" \
       2>/dev/null || true
 }
 
 # Mark a previously-raised system-error notification as resolved (read) for all
 # active admins.  Called after a successful backup/upload cycle so a prior
-# failure's in-app notice clears itself once backups recover.  If the failure
-# recurs the next upsert in notify_admins_backup_error flips is_read back to
-# FALSE, re-raising the in-app notice.
+# failure's in-app notice clears itself once backups recover.  The dedupe_key
+# matches the one the worker stamped on the notifications it created, so this
+# clears them; if the failure recurs, a fresh enqueue re-alerts.
 # Errors are suppressed: a DB hiccup here should not abort a successful cycle.
 resolve_admins_backup_error() {
   _dedup_key="$1"

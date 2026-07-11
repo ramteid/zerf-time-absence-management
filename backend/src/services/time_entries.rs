@@ -237,19 +237,26 @@ pub async fn notify_week_status_change(
             )
         };
 
-        let send_email = user_id != requester_id;
-        crate::services::notifications::create_with_frontend_body(
+        // Structured JSON goes in-app for the frontend; the translated text is
+        // the email body. No email when the actor notifies themselves.
+        let title = i18n::translate(&language, title_key, &params);
+        let email_body = i18n::translate(&language, body_key, &params);
+        let channels = if user_id != requester_id {
+            crate::services::notifications::Channels::InAppAndEmail
+        } else {
+            crate::services::notifications::Channels::InAppOnly
+        };
+        crate::services::notifications::deliver(
             app_state,
-            &language,
-            user_id,
-            category,
-            title_key,
-            body_key,
-            params,
-            &frontend_body,
-            send_email,
-            Some("time_entries"),
-            None,
+            &crate::services::notifications::Outgoing::new(
+                user_id,
+                category,
+                &title,
+                &frontend_body,
+            )
+            .email_body(&email_body)
+            .channels(channels)
+            .reference("time_entries", None),
         )
         .await;
     }
@@ -474,6 +481,7 @@ mod tests {
             tracks_time: true,
             annual_leave_days: 30,
             archived_at: None,
+            receives_error_notifications: false,
         };
         assert!(require_tracks_time(&tracking_user).is_ok());
         let mut non_tracking = tracking_user.clone();

@@ -183,6 +183,7 @@ pub async fn get_one(
         "overtime_start_balance_min": user.overtime_start_balance_min,
         "tracks_time": user.tracks_time,
         "annual_leave_days": user.annual_leave_days,
+        "receives_error_notifications": user.receives_error_notifications,
         "approver_ids": approver_ids,
     });
     Ok(Json(user_json))
@@ -229,6 +230,10 @@ pub struct NewUser {
     /// semantics as `category_ids`.
     #[serde(default)]
     pub absence_category_ids: Option<Vec<i64>>,
+    /// Admin-only: opt in to technical error notifications. Ignored (forced
+    /// FALSE) for non-admin roles.
+    #[serde(default)]
+    pub receives_error_notifications: bool,
 }
 
 fn default_tracks_time() -> bool {
@@ -265,6 +270,7 @@ pub async fn create(
         tracks_time: body.tracks_time,
         category_ids: body.category_ids,
         absence_category_ids: body.absence_category_ids,
+        receives_error_notifications: body.receives_error_notifications,
     };
     let created = crate::services::users::create(&app_state, &requester, service_body).await?;
     Ok(Json(CreateResponse {
@@ -304,6 +310,9 @@ pub struct UpdateUser {
     /// time or absence tracking. Existing time and absence data is retained but
     /// excluded from all views and calculations.
     pub tracks_time: Option<bool>,
+    /// Admin-only: opt in to technical error notifications. Omitted = leave
+    /// unchanged. Forced FALSE by the service when the effective role is not admin.
+    pub receives_error_notifications: Option<bool>,
 }
 
 fn deserialize_optional_vec<'de, D>(de: D) -> Result<Option<Vec<i64>>, D::Error>
@@ -559,6 +568,11 @@ pub async fn update(
     } else {
         None
     };
+    // The effective role after this update (for the admin-only error-notification
+    // flag below), captured before `role_to_store` is moved into the update call.
+    let effective_role = role_to_store
+        .clone()
+        .unwrap_or_else(|| previous_user.role.clone());
     crate::services::users::update_basic_tx(
         &mut transaction,
         user_id,
@@ -596,6 +610,24 @@ pub async fn update(
     if let Some(new_approver_ids) = &body.approver_ids {
         crate::services::users::set_approvers_tx(&mut transaction, user_id, new_approver_ids)
             .await?;
+    }
+    // Technical error notifications are admin-only. Force the flag off whenever
+    // the effective role is not admin (covers demotions); otherwise apply the
+    // submitted value if the client sent one.
+    if !crate::roles::is_admin_role(&effective_role) {
+        crate::services::users::set_receives_error_notifications_tx(
+            &mut transaction,
+            user_id,
+            false,
+        )
+        .await?;
+    } else if let Some(enabled) = body.receives_error_notifications {
+        crate::services::users::set_receives_error_notifications_tx(
+            &mut transaction,
+            user_id,
+            enabled,
+        )
+        .await?;
     }
     // Kill sessions on role change so cached role cannot be (ab)used.
     let previous_role_normalized = normalize_role(&previous_user.role);
@@ -737,9 +769,6 @@ pub async fn reset_password(
     )
     .await;
     // Send password-reset notification email (best-effort, fire-and-forget).
-    let smtp = crate::services::settings::load_smtp_config(&app_state.pool)
-        .await
-        .map(std::sync::Arc::new);
     let login_line = match app_state.cfg.public_url.as_deref() {
         Some(url) => format!("\nURL:      {}\n", url.trim_end_matches('/')),
         None => String::new(),
@@ -772,13 +801,20 @@ pub async fn reset_password(
             ("login_line", login_line),
         ],
     );
-    crate::email::send_async(
-        smtp,
-        target_user.email.clone(),
-        format!("{} {}", target_user.first_name, target_user.last_name),
-        subject,
-        body_text,
-    );
+    // Email-only transactional mail (temporary password); no in-app row and no
+    // footer — the body is already the complete reset message.
+    crate::services::notifications::deliver(
+        &app_state,
+        &crate::services::notifications::Outgoing::new(
+            target_id,
+            "admin_password_reset",
+            &subject,
+            &body_text,
+        )
+        .channels(crate::services::notifications::Channels::EmailOnly)
+        .append_email_footer(false),
+    )
+    .await;
     Ok(Json(
         serde_json::json!({"temporary_password": temporary_password}),
     ))
