@@ -191,6 +191,8 @@ const TRANSLATIONS = {
     "Workdays per week": "Workdays per week",
     "Workdays per week must be between 1 and 7.":
       "Workdays per week must be between 1 and 7.",
+    "Workdays per week must be between 1 and 5.":
+      "Workdays per week must be between 1 and 5.",
     days: "days",
     workday: "workday",
     workdays: "workdays",
@@ -235,6 +237,7 @@ const TRANSLATIONS = {
     "Account active": "Account active",
     "User activated.": "User activated.",
     Active: "Active",
+    Inactive: "Inactive",
     // Reports - new section labels and team report columns
     "Employee report": "Employee report",
     "Export timesheet": "Export timesheet",
@@ -423,6 +426,7 @@ const TRANSLATIONS = {
     Hours: "Stunden",
     Leave: "Urlaub",
     Active: "Aktiv",
+    Inactive: "Inaktiv",
     Color: "Farbe",
     Description: "Beschreibung",
     Order: "Reihenfolge",
@@ -455,6 +459,8 @@ const TRANSLATIONS = {
     "Workdays per week": "Arbeitstage pro Woche",
     "Workdays per week must be between 1 and 7.":
       "Arbeitstage pro Woche muss zwischen 1 und 7 liegen.",
+    "Workdays per week must be between 1 and 5.":
+      "Arbeitstage pro Woche muss zwischen 1 und 5 liegen.",
     "Annual leave days": "Urlaubstage pro Jahr",
     "Overtime start balance (hours)": "Überstunden-Startsaldo (Stunden)",
     "Initial overtime balance in hours when the user starts. Negative = deficit.":

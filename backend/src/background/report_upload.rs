@@ -305,21 +305,25 @@ async fn process_one_entry(
             .has_report_content_before_start_date(user.id, from, to, user.start_date)
             .await?
     {
-        let reason = if start_date_review_blocks_upload {
-            "a start-date change queued this period for review"
+        let body_key = if start_date_review_blocks_upload {
+            "report_upload_pre_start_review_body"
         } else {
-            "stored report rows exist before the current start date"
+            "report_upload_pre_start_content_body"
         };
-        let msg = format!(
-            "User {} ({} {}) has current start date {} inside or after period {}, and {reason}. \
-             Correct the start date or historical rows before retrying the timesheet PDF export.",
-            user.id, user.first_name, user.last_name, user.start_date, entry.period
-        );
+        let params: Vec<(&str, String)> = vec![
+            ("user_id", user.id.to_string()),
+            ("first_name", user.first_name.clone()),
+            ("last_name", user.last_name.clone()),
+            ("start_date", crate::i18n::format_date(language, user.start_date)),
+            ("period", entry.period.clone()),
+        ];
+        let title = crate::i18n::translate(language, "report_upload_blocked_title", &[]);
+        let msg = crate::i18n::translate(language, body_key, &params);
         tracing::warn!(target: "zerf::report_upload", "{msg}");
         crate::services::notifications::enqueue_error(
             state,
             &format!("report_upload_pre_start_{}_{}", user.id, entry.period),
-            "Report PDF upload blocked",
+            &title,
             &msg,
         )
         .await;
@@ -346,16 +350,19 @@ async fn process_one_entry(
             .has_unresolved_time_entries_in_range(user.id, from, to)
             .await?
     {
-        let msg = format!(
-            "User {} ({} {}) is archived or has time tracking disabled, but period {} still contains draft, submitted, or unresolved rejected time entries. \
-             Resolve those rows before retrying the timesheet PDF export.",
-            user.id, user.first_name, user.last_name, entry.period
-        );
+        let params: Vec<(&str, String)> = vec![
+            ("user_id", user.id.to_string()),
+            ("first_name", user.first_name.clone()),
+            ("last_name", user.last_name.clone()),
+            ("period", entry.period.clone()),
+        ];
+        let title = crate::i18n::translate(language, "report_upload_blocked_title", &[]);
+        let msg = crate::i18n::translate(language, "report_upload_unsettled_time_body", &params);
         tracing::warn!(target: "zerf::report_upload", "{msg}");
         crate::services::notifications::enqueue_error(
             state,
             &format!("report_upload_unsettled_time_{}_{}", user.id, entry.period),
-            "Report PDF upload blocked",
+            &title,
             &msg,
         )
         .await;

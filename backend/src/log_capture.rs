@@ -135,10 +135,6 @@ fn truncate_at_char_boundary(mut message: String) -> String {
 /// (main.rs), the same pattern used for every other prunable table in this
 /// codebase (audit_log, notifications, reopen_requests) — not per-write, to
 /// avoid an extra DELETE scan on every single insert during a warning burst.
-/// Fixed title for auto-generated error notifications (the raw log message is
-/// the body). Kept short and English — it is an admin diagnostic alert.
-const ERROR_NOTIFICATION_TITLE: &str = "Technical system error";
-
 /// Error logs from the notification/email/log subsystems must NOT spawn admin
 /// notifications: a delivery failure there would otherwise feed back into a new
 /// notification and loop. Their events still reach `app_logs` and stdout.
@@ -159,20 +155,24 @@ fn error_notification_dedupe_key(target: &str, message: &str) -> String {
 
 pub async fn run_writer(pool: DatabasePool, mut receiver: mpsc::Receiver<CapturedLogRecord>) {
     let db = AppLogDb::new(pool.clone());
-    let error_queue = crate::repository::ErrorNotificationQueueDb::new(pool);
+    let error_queue = crate::repository::ErrorNotificationQueueDb::new(pool.clone());
     while let Some(record) = receiver.recv().await {
         // Turn error-level events into admin error notifications by enqueueing
         // them for the async worker — unless they originate from the delivery
         // subsystems (loop guard). Warnings are logged but never notified.
         if record.level == "error" && !target_is_notification_subsystem(&record.target) {
             let dedupe = error_notification_dedupe_key(&record.target, &record.message);
+            // The queue stores fully-rendered text (matching every other
+            // notification producer in the app), so the title is translated
+            // here at enqueue time using the app's configured UI language.
+            // The raw log message itself is intentionally left untranslated —
+            // like every other tracing::warn!/error! call in the codebase, it
+            // is a technical diagnostic string, not user-facing notification
+            // copy, even though the System Log page also displays it to admins.
+            let language = crate::i18n::load_ui_language(&pool).await.unwrap_or_default();
+            let title = crate::i18n::translate(&language, "error_notification_title", &[]);
             if let Err(err) = error_queue
-                .enqueue(
-                    Some(&dedupe),
-                    ERROR_NOTIFICATION_TITLE,
-                    Some(&record.message),
-                    "app",
-                )
+                .enqueue(Some(&dedupe), &title, Some(&record.message), "app")
                 .await
             {
                 tracing::error!(target: WRITER_TARGET, "failed to enqueue error notification: {err}");
