@@ -14,8 +14,8 @@
 import { test, expect } from "@playwright/test";
 import { EMPLOYEE, NO_COST_ABSENCE_CATEGORY } from "./users.js";
 import {
+  bookableDateOffset,
   changeTempPassword,
-  isoOffset,
   readCredentials,
   setDate,
   setTime,
@@ -156,14 +156,21 @@ test("employee: request three absences of different kinds", async () => {
   // All three requests use widely-spaced future date ranges (4, 5, and 6
   // weeks out) purely so they can never overlap each other or trip the
   // backend's "Overlap with existing absence" guard — the exact dates don't
-  // matter to what's being tested.
+  // matter to what's being tested. bookableDateOffset (not isoOffset) is
+  // essential though: these week-multiple offsets keep the weekday of
+  // "today", so a suite run on a weekend would otherwise place every request
+  // on a weekend — and any offset can land on a public holiday (e.g. a
+  // late-November run puts +28 on Dec 25). Either way the dialog would
+  // refuse to submit ("Absence must include at least one workday"). Both
+  // endpoints are walked to bookable days independently; the start can never
+  // overtake the end because both walk forward to the first bookable day.
   async function requestAbsence(kindLabel, startOffset, endOffset, comment) {
     await page.getByRole("button", { name: "Request Absence" }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
     await dialog.locator("#absence-kind").selectOption({ label: kindLabel });
-    await setDate(page, "absence-start-date", isoOffset(startOffset));
-    await setDate(page, "absence-end-date", isoOffset(endOffset));
+    await setDate(page, "absence-start-date", await bookableDateOffset(page.request, startOffset));
+    await setDate(page, "absence-end-date", await bookableDateOffset(page.request, endOffset));
     await dialog.locator("#absence-comment").fill(comment);
     await dialog.getByRole("button", { name: "Submit Request" }).click();
     await expect(dialog).toBeHidden();

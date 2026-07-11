@@ -79,6 +79,52 @@ export function isoOffset(days) {
   return date.toISOString().slice(0, 10);
 }
 
+// All holiday dates (YYYY-MM-DD) known to the app for the current and next
+// calendar year — the seeded nationwide public holidays plus any manually
+// created ones. Shared by freeHolidayDate and bookableDateOffset; targets are
+// always within ~6 months of today, so two years of data always cover them.
+//
+// `request` is any authenticated Playwright APIRequestContext (e.g.
+// page.request); GET /holidays is readable by any signed-in user.
+async function holidayDates(request) {
+  const currentYear = new Date().getFullYear();
+  const taken = new Set();
+  for (const year of [currentYear, currentYear + 1]) {
+    const response = await request.get(`/api/v1/holidays?year=${year}`);
+    if (!response.ok()) continue;
+    for (const holiday of await response.json()) taken.add(holiday.holiday_date);
+  }
+  return taken;
+}
+
+// Returns a future ISO date (YYYY-MM-DD), at least `minOffsetDays` out, on
+// which an absence can actually be booked: not a Saturday/Sunday and not a
+// public holiday. Needed for absence dates — the backend rejects absence
+// ranges without a single workday ("Absence must include at least one
+// workday"), and fixed offsets from "today" break in two calendar-dependent
+// ways:
+//   - week-multiple offsets (28/35/42) keep the weekday of "today", so a
+//     suite run on a weekend puts every request on a weekend;
+//   - any offset can land on a seeded public holiday (e.g. a late-November
+//     run puts +28 on Dec 25), which counts as zero workdays just the same.
+// Walking forward to the first bookable day makes the dates deterministic
+// regardless of when the suite runs. Callers' offsets are spaced ≥ 5 days
+// apart and holidays are sparse, so the small forward shifts can never make
+// two ranges collide. The weekday is derived from the ISO string itself
+// (UTC), matching how isoOffset slices the date, so a runner in a non-UTC
+// timezone cannot misclassify the day around midnight.
+export async function bookableDateOffset(request, minOffsetDays) {
+  const holidays = await holidayDates(request);
+  for (let offset = minOffsetDays; offset <= minOffsetDays + 60; offset++) {
+    const iso = isoOffset(offset);
+    const weekday = new Date(`${iso}T00:00:00Z`).getUTCDay();
+    if (weekday !== 6 && weekday !== 0 && !holidays.has(iso)) return iso;
+  }
+  throw new Error(
+    `no bookable date found within 60 days of offset ${minOffsetDays}`,
+  );
+}
+
 // Returns a future ISO date (YYYY-MM-DD), at least `minOffsetDays` out, that is
 // NOT already occupied by a holiday — so creating a manual holiday on it can
 // never hit the holidays.holiday_date UNIQUE constraint.
@@ -93,19 +139,8 @@ export function isoOffset(days) {
 // manual-holiday creation deterministic regardless of when the suite runs. It
 // also skips any manual holiday a previous (failed, retried) attempt left
 // behind, since those are returned by the same GET /holidays query.
-//
-// `request` is any authenticated Playwright APIRequestContext (e.g. page.request);
-// GET /holidays is readable by any signed-in user.
 export async function freeHolidayDate(request, minOffsetDays) {
-  // The target is always within ~6 months of today, so the current and next
-  // calendar year together always cover it (and the year boundary in between).
-  const currentYear = new Date().getFullYear();
-  const taken = new Set();
-  for (const year of [currentYear, currentYear + 1]) {
-    const response = await request.get(`/api/v1/holidays?year=${year}`);
-    if (!response.ok()) continue;
-    for (const holiday of await response.json()) taken.add(holiday.holiday_date);
-  }
+  const taken = await holidayDates(request);
   // Nationwide holidays are sparse (<=9/year), so a free day is always found
   // within a couple of steps; the bound is just a defensive guard against an
   // unbounded loop if something ever went badly wrong.

@@ -103,13 +103,15 @@ test("admin: view an audit log entry's detail", async ({ page }) => {
   await expect(firstRow).toBeVisible();
   await firstRow.click();
 
-  await expect(page.locator(".detail-row").first()).toBeVisible();
+  // .zf-detail-row: the shared detail-dialog row class used since the audit
+  // page moved onto the LogList component (System Log refactor).
+  await expect(page.locator(".zf-detail-row").first()).toBeVisible();
   // AdminAuditLog.svelte's detail dialog has no footer/Close button — it
   // relies on the native <dialog> element's built-in Escape-to-close
   // behavior, which fires the same onClose handler the header's X button
   // would. Pressing Escape here exercises that path specifically.
   await page.keyboard.press("Escape");
-  await expect(page.locator(".detail-row")).toHaveCount(0);
+  await expect(page.locator(".zf-detail-row")).toHaveCount(0);
 });
 
 test("admin: configure and test SMTP settings", async ({ page }) => {
