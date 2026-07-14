@@ -127,7 +127,7 @@ describe("Time", () => {
 
     // The add-entry buttons should not be disabled for the Monday that only
     // has a cancelled absence.
-    const addButtons = target.querySelectorAll("button[style*='dashed']");
+    const addButtons = target.querySelectorAll("button.add-entry-btn");
     const mondayButton = addButtons[0];
     expect(mondayButton).toBeDefined();
     expect(mondayButton.disabled).toBe(false);
@@ -152,7 +152,7 @@ describe("Time", () => {
     component = mount(Time, { target });
     await settle();
 
-    const addButtons = target.querySelectorAll("button[style*='dashed']");
+    const addButtons = target.querySelectorAll("button.add-entry-btn");
     const mondayButton = addButtons[0];
     expect(mondayButton).toBeDefined();
     expect(mondayButton.disabled).toBe(true);
@@ -177,7 +177,7 @@ describe("Time", () => {
     component = mount(Time, { target });
     await settle();
 
-    const addButtons = target.querySelectorAll("button[style*='dashed']");
+    const addButtons = target.querySelectorAll("button.add-entry-btn");
     const mondayButton = addButtons[0];
     expect(mondayButton).toBeDefined();
     expect(mondayButton.disabled).toBe(true);
@@ -202,7 +202,7 @@ describe("Time", () => {
     component = mount(Time, { target });
     await settle();
 
-    const addButtons = target.querySelectorAll("button[style*='dashed']");
+    const addButtons = target.querySelectorAll("button.add-entry-btn");
     const mondayButton = addButtons[0];
     expect(mondayButton).toBeDefined();
     expect(mondayButton.disabled).toBe(false);

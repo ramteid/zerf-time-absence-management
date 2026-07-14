@@ -404,7 +404,7 @@ describe("Reports", () => {
     // When catFilteredCategories is empty (no categories), "No data." must appear
     // (the fix prevents an invisible empty table from rendering instead)
     // If the API returned no categories, catReport = [] which also shows No data.
-    const noData = catCard.querySelector("div[style*='text-tertiary']");
+    const noData = catCard.querySelector("div.zf-card-empty");
     if (noData) {
       expect(noData.textContent?.trim()).toBe("No data.");
     }
