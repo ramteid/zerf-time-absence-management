@@ -16,8 +16,22 @@ import {
 
 describe("users domain helpers", () => {
   const users = [
-    { id: 1, first_name: "Alice", last_name: "Admin", workdays_per_week: 5, tracks_time: false, role: "admin" },
-    { id: 2, first_name: "Bob", last_name: "Emp", workdays_per_week: 4, tracks_time: true, role: "employee" },
+    {
+      id: 1,
+      first_name: "Alice",
+      last_name: "Admin",
+      workdays_per_week: 5,
+      tracks_time: false,
+      role: "admin",
+    },
+    {
+      id: 2,
+      first_name: "Bob",
+      last_name: "Emp",
+      workdays_per_week: 4,
+      tracks_time: true,
+      role: "employee",
+    },
   ];
 
   it("findUserById matches numeric ids from string values", () => {
@@ -67,7 +81,9 @@ describe("users domain helpers", () => {
   });
 
   it("userInitials upper-cases the first letters of first and last name", () => {
-    expect(userInitials({ first_name: "alice", last_name: "admin" })).toBe("AA");
+    expect(userInitials({ first_name: "alice", last_name: "admin" })).toBe(
+      "AA",
+    );
   });
 
   it("userInitials returns empty string for null user", () => {
@@ -76,9 +92,13 @@ describe("users domain helpers", () => {
 
   it("userAvatarClass maps each role to its own CSS class", () => {
     expect(userAvatarClass({ role: "admin" })).toBe("avatar-role-admin");
-    expect(userAvatarClass({ role: "team_lead" })).toBe("avatar-role-team_lead");
+    expect(userAvatarClass({ role: "team_lead" })).toBe(
+      "avatar-role-team_lead",
+    );
     expect(userAvatarClass({ role: "employee" })).toBe("avatar-role-employee");
-    expect(userAvatarClass({ role: "assistant" })).toBe("avatar-role-assistant");
+    expect(userAvatarClass({ role: "assistant" })).toBe(
+      "avatar-role-assistant",
+    );
   });
 
   it("userAvatarClass returns an empty string for an unknown or missing role", () => {

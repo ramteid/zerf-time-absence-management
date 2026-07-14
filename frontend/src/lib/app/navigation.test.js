@@ -66,7 +66,9 @@ describe("navigation", () => {
     dialog.setAttribute("open", "");
     // jsdom doesn't implement HTMLDialogElement.close(); add it so spyOn
     // has a real property to wrap.
-    dialog.close = function () { this.removeAttribute("open"); };
+    dialog.close = function () {
+      this.removeAttribute("open");
+    };
     const closeSpy = vi.spyOn(dialog, "close");
     document.body.appendChild(dialog);
     const pushSpy = vi.spyOn(history, "pushState");

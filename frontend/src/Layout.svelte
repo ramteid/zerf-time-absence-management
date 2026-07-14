@@ -136,7 +136,6 @@
   }
 
   $: sections = navSections(desktopNav);
-
 </script>
 
 <svelte:window on:click={onDocClick} />
@@ -150,22 +149,20 @@
       <div class="mobile-title-bar-names">
         <span class="mobile-title-bar-appname">{$t("Time tracking")}</span>
         {#if $settings?.organization_name}
-          <span class="mobile-title-bar-org">{$settings.organization_name}</span>
+          <span class="mobile-title-bar-org">{$settings.organization_name}</span
+          >
         {/if}
       </div>
     </div>
     <div class="zf-mobile-bell-wrapper mobile-title-bar-bell">
       <button
-        class="zf-btn-icon-sm"
-        style="color:var(--nav-text-muted);position:relative"
+        class="zf-btn-icon-sm nav-icon-btn"
         on:click|stopPropagation={toggleBell}
         title={$t("Notifications")}
       >
         <Icon name="Bell" size={21} />
         {#if $notificationsUnread > 0}
-          <span
-            style="position:absolute;top:-4px;right:-4px;background:var(--danger-text);color:white;border-radius:10px;font-size:9px;padding:1px 4px;line-height:1;min-width:14px;text-align:center;font-weight:400"
-          >
+          <span class="notif-badge">
             {$notificationsUnread > 99 ? "99+" : $notificationsUnread}
           </span>
         {/if}
@@ -176,27 +173,21 @@
   <div class="sidebar">
     <div class="sidebar-logo">
       <div class="sidebar-logo-icon"><AppLogo size={30} /></div>
-      <div style="display:flex;flex-direction:column;line-height:1.2;min-width:0;flex:1">
+      <div class="sidebar-logo-names">
         <span class="sidebar-logo-text">{$t("Time tracking")}</span>
         {#if $settings?.organization_name}
-          <span style="font-size:12px;color:var(--nav-text-muted);word-break:break-word;padding-right:44px">{$settings.organization_name}</span>
+          <span class="sidebar-logo-org">{$settings.organization_name}</span>
         {/if}
       </div>
-      <div
-        class="zf-bell-wrapper"
-        style="position:absolute;top:0;bottom:0;right:18px;margin:auto;height:30px;display:flex;align-items:center"
-      >
+      <div class="zf-bell-wrapper sidebar-bell">
         <button
-          class="zf-btn-icon-sm"
-          style="color:var(--nav-text-muted);position:relative;width:30px;height:30px"
+          class="zf-btn-icon-sm nav-icon-btn"
           on:click|stopPropagation={toggleBell}
           title={$t("Notifications")}
         >
           <Icon name="Bell" size={20} />
           {#if $notificationsUnread > 0}
-            <span
-              style="position:absolute;top:-2px;right:-2px;background:var(--danger-text);color:white;border-radius:10px;font-size:9px;padding:1px 4px;line-height:1;min-width:14px;text-align:center;font-weight:400"
-            >
+            <span class="notif-badge">
               {$notificationsUnread > 99 ? "99+" : $notificationsUnread}
             </span>
           {/if}
@@ -219,7 +210,12 @@
       {/each}
 
       {#if sections.employee.length}
-        <div class="zf-nav-section" style={sections.dashboard.length ? "margin-top: 8px" : ""}>{$t("Employee")}</div>
+        <div
+          class="zf-nav-section"
+          class:zf-nav-section-spaced={sections.dashboard.length}
+        >
+          {$t("Employee")}
+        </div>
         {#each sections.employee as link (link.href)}
           <a
             href={link.href}
@@ -235,7 +231,7 @@
       {/if}
 
       {#if sections.admin.length}
-        <div class="zf-nav-section" style="margin-top: 8px">{$t("Admin")}</div>
+        <div class="zf-nav-section zf-nav-section-spaced">{$t("Admin")}</div>
         {#each sections.admin as link (link.href)}
           <a
             href={link.href}
@@ -262,13 +258,10 @@
         title={$t("Account")}
         aria-label={$t("Account")}
       >
-        <div
-          class="avatar {userAvatarClass($currentUser)}"
-          style="width:30px;height:30px;font-size:11px"
-        >
+        <div class="avatar avatar-sm {userAvatarClass($currentUser)}">
           {userInitials($currentUser)}
         </div>
-        <div style="flex:1;min-width:0">
+        <div class="flex-min0">
           <div class="sidebar-user-name">
             {$currentUser.first_name}
             {$currentUser.last_name}
@@ -277,8 +270,7 @@
         </div>
       </a>
       <button
-        class="zf-btn-icon-sm"
-        style="color:var(--nav-text-muted)"
+        class="zf-btn-icon-sm nav-icon-btn"
         on:click={logout}
         title={$t("Sign out")}
       >
@@ -328,20 +320,17 @@
             href={mobileNavItems.account?.href || "/account"}
             data-link="1"
             on:click={() => (mobileMoreOpen = false)}
-            style="display:flex;align-items:center;gap:12px;flex:1;min-width:0;color:inherit;text-decoration:none;border-radius:8px"
+            class="mobile-more-account"
           >
-            <div
-              class="avatar {userAvatarClass($currentUser)}"
-              style="width:32px;height:32px;font-size:11px"
-            >
+            <div class="avatar avatar-sm {userAvatarClass($currentUser)}">
               {userInitials($currentUser)}
             </div>
-            <div style="flex:1;min-width:0">
-              <div style="font-weight:400;font-size:14px">
+            <div class="flex-min0">
+              <div class="mobile-more-name">
                 {$currentUser.first_name}
                 {$currentUser.last_name}
               </div>
-              <div style="font-size:12px;color:var(--text-secondary)">
+              <div class="mobile-more-role">
                 {roleLabel($currentUser.role)}
               </div>
             </div>
@@ -381,17 +370,14 @@
       role="dialog"
       tabindex="-1"
     >
-      <div
-        style="padding:8px 12px;display:flex;align-items:center;gap:6px;border-bottom:1px solid var(--border)"
-      >
-        <strong style="flex:1;font-size:13px">{$t("Notifications")}</strong>
+      <div class="zf-notif-header">
+        <strong>{$t("Notifications")}</strong>
         <button
           class="zf-btn zf-btn-sm zf-btn-ghost"
           on:click={markAllRead}
           disabled={$notificationsUnread === 0}
           title={$t("Mark all as read")}
           aria-label={$t("Mark all as read")}
-          style="font-size:11px"
         >
           <Icon name="Check" size={12} />
         </button>
@@ -401,7 +387,6 @@
           disabled={$notifications.length === 0}
           title={$t("Clear all")}
           aria-label={$t("Clear all")}
-          style="font-size:11px"
         >
           <Icon name="Trash" size={12} />
         </button>
@@ -410,15 +395,12 @@
           on:click={() => (bellOpen = false)}
           title={$t("Close")}
           aria-label={$t("Close")}
-          style="font-size:11px"
         >
           <Icon name="X" size={14} />
         </button>
       </div>
       {#if $notifications.length === 0}
-        <div
-          style="padding:24px;text-align:center;color:var(--text-tertiary);font-size:12px"
-        >
+        <div class="zf-notif-empty">
           {$t("No notifications.")}
         </div>
       {:else}
@@ -434,24 +416,17 @@
             }}
             role="button"
             tabindex="0"
-            style="padding:10px 12px;border-bottom:1px solid var(--border);cursor:pointer;background:{n.pinned && !n.is_read
-              ? 'var(--warning-soft)'
-              : n.is_read
-                ? 'transparent'
-                : 'var(--accent-soft)'}"
+            class="zf-notif-item"
+            class:unread={!n.is_read}
+            class:pinned={n.pinned && !n.is_read}
           >
-            <div style="font-size:12.5px;font-weight:500">{rendered.title}</div>
+            <div class="zf-notif-item-title">{rendered.title}</div>
             {#if rendered.body}
-              <div
-                style="font-size:11.5px;color:var(--text-secondary);margin-top:2px;line-height:1.4"
-              >
+              <div class="zf-notif-item-body">
                 {rendered.body}
               </div>
             {/if}
-            <div
-              class="tab-num"
-              style="font-size:10.5px;color:var(--text-tertiary);margin-top:4px"
-            >
+            <div class="zf-notif-item-time tab-num">
               {fmtDateTime(n.created_at)}
             </div>
           </div>

@@ -6,7 +6,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mount, unmount } from "svelte";
 import AbsenceReport from "./AbsenceReport.svelte";
-import { currentUser, earliestStartDate, settings, absenceCategories } from "../../stores.js";
+import {
+  currentUser,
+  earliestStartDate,
+  settings,
+  absenceCategories,
+} from "../../stores.js";
 import { setLanguage, setAbsenceCategoryCache } from "../../i18n.js";
 
 vi.mock("svelte", async () => {
@@ -52,9 +57,27 @@ describe("AbsenceReport", () => {
     earliestStartDate.set(null);
     currentUser.set({ id: 1, role: "employee", tracks_time: true });
     const cats = [
-      { id: 1, slug: "vacation", name: "Vacation", cost_type: "vacation", auto_approve_past: false },
-      { id: 2, slug: "sick", name: "Sick", cost_type: "none", auto_approve_past: true },
-      { id: 7, slug: "flextime_reduction", name: "Flextime Reduction", cost_type: "flextime", auto_approve_past: false },
+      {
+        id: 1,
+        slug: "vacation",
+        name: "Vacation",
+        cost_type: "vacation",
+        auto_approve_past: false,
+      },
+      {
+        id: 2,
+        slug: "sick",
+        name: "Sick",
+        cost_type: "none",
+        auto_approve_past: true,
+      },
+      {
+        id: 7,
+        slug: "flextime_reduction",
+        name: "Flextime Reduction",
+        cost_type: "flextime",
+        auto_approve_past: false,
+      },
     ];
     absenceCategories.set(cats);
     setAbsenceCategoryCache(cats);
@@ -66,7 +89,10 @@ describe("AbsenceReport", () => {
   });
 
   afterEach(() => {
-    if (component) { unmount(component); component = null; }
+    if (component) {
+      unmount(component);
+      component = null;
+    }
     target.remove();
   });
 
@@ -80,7 +106,7 @@ describe("AbsenceReport", () => {
     component = mount(AbsenceReport, { target, props: { users: [] } });
     await settle();
     const showBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Show")
+      b.textContent.includes("Show"),
     );
     expect(showBtn).not.toBeNull();
   });
@@ -96,7 +122,7 @@ describe("AbsenceReport", () => {
     });
     await settle();
     const showBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Show")
+      b.textContent.includes("Show"),
     );
     showBtn.click();
     await settle();
@@ -114,7 +140,7 @@ describe("AbsenceReport", () => {
     });
     await settle();
     const showBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Show")
+      b.textContent.includes("Show"),
     );
     showBtn.click();
     await settle();
@@ -131,7 +157,7 @@ describe("AbsenceReport", () => {
     });
     await settle();
     const showBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Show")
+      b.textContent.includes("Show"),
     );
     showBtn.click();
     await waitForText(target, "No data.");
@@ -154,13 +180,15 @@ describe("AbsenceReport", () => {
     component = mount(AbsenceReport, {
       target,
       props: {
-        users: [{ id: 2, first_name: "Bob", last_name: "Emp", workdays_per_week: 5 }],
+        users: [
+          { id: 2, first_name: "Bob", last_name: "Emp", workdays_per_week: 5 },
+        ],
         isSelfOnlyReportsView: false,
       },
     });
     await settle();
     const showBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Show")
+      b.textContent.includes("Show"),
     );
     showBtn.click();
     await waitForText(target, "Vacation");

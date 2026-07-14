@@ -56,7 +56,10 @@ describe("TimesheetExport", () => {
   });
 
   afterEach(() => {
-    if (component) { unmount(component); component = null; }
+    if (component) {
+      unmount(component);
+      component = null;
+    }
     target.remove();
   });
 
@@ -78,7 +81,13 @@ describe("TimesheetExport", () => {
     // Managers export timesheets for any team member. The dropdown must be
     // present and populated with the users list.
     const users = [
-      { id: 2, first_name: "Bob", last_name: "Emp", role: "employee", tracks_time: true },
+      {
+        id: 2,
+        first_name: "Bob",
+        last_name: "Emp",
+        role: "employee",
+        tracks_time: true,
+      },
     ];
     component = mount(TimesheetExport, {
       target,
@@ -110,8 +119,20 @@ describe("TimesheetExport", () => {
 
   it("offers an 'All' option to leads/admins for the combined PDF export", async () => {
     const users = [
-      { id: 1, first_name: "Alice", last_name: "Lead", role: "lead", tracks_time: true },
-      { id: 2, first_name: "Bob", last_name: "Emp", role: "employee", tracks_time: true },
+      {
+        id: 1,
+        first_name: "Alice",
+        last_name: "Lead",
+        role: "lead",
+        tracks_time: true,
+      },
+      {
+        id: 2,
+        first_name: "Bob",
+        last_name: "Emp",
+        role: "employee",
+        tracks_time: true,
+      },
     ];
     component = mount(TimesheetExport, {
       target,
@@ -125,7 +146,13 @@ describe("TimesheetExport", () => {
 
   it("does not offer the 'All' option to regular employees", async () => {
     const users = [
-      { id: 1, first_name: "Carl", last_name: "Worker", role: "employee", tracks_time: true },
+      {
+        id: 1,
+        first_name: "Carl",
+        last_name: "Worker",
+        role: "employee",
+        tracks_time: true,
+      },
     ];
     component = mount(TimesheetExport, {
       target,
@@ -137,8 +164,20 @@ describe("TimesheetExport", () => {
 
   it("disables CSV export (but not PDF export) once 'All' is selected", async () => {
     const users = [
-      { id: 1, first_name: "Alice", last_name: "Lead", role: "lead", tracks_time: true },
-      { id: 2, first_name: "Bob", last_name: "Emp", role: "employee", tracks_time: true },
+      {
+        id: 1,
+        first_name: "Alice",
+        last_name: "Lead",
+        role: "lead",
+        tracks_time: true,
+      },
+      {
+        id: 2,
+        first_name: "Bob",
+        last_name: "Emp",
+        role: "employee",
+        tracks_time: true,
+      },
     ];
     component = mount(TimesheetExport, {
       target,

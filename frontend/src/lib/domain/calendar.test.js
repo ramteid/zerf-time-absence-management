@@ -142,7 +142,13 @@ describe("rawCellEvents", () => {
     // Holidays must always appear with the fixed holiday colour so they are
     // visually distinct from absence and work events.
     const cell = { ds: "2026-01-01", hol: "New Year", absences: [] };
-    const events = rawCellEvents(cell, new Map(), new Map(), new Map(), translate);
+    const events = rawCellEvents(
+      cell,
+      new Map(),
+      new Map(),
+      new Map(),
+      translate,
+    );
     expect(events.some((e) => e.key === "holiday")).toBe(true);
     expect(events.find((e) => e.key === "holiday").detail).toBe("New Year");
   });
@@ -153,7 +159,13 @@ describe("rawCellEvents", () => {
       hol: null,
       absences: [{ kind: "vacation", name: "Summer", comment: "" }],
     };
-    const events = rawCellEvents(cell, new Map(), new Map(), new Map(), translate);
+    const events = rawCellEvents(
+      cell,
+      new Map(),
+      new Map(),
+      new Map(),
+      translate,
+    );
     const absEvent = events.find((e) => e.key === "absence:vacation");
     expect(absEvent).not.toBeUndefined();
   });
@@ -165,7 +177,13 @@ describe("rawCellEvents", () => {
       absences: [{ kind: "vacation", name: "Summer", comment: "" }],
     };
     const absCatMap = new Map([["vacation", { color: "#1a73e8" }]]);
-    const events = rawCellEvents(cell, new Map(), new Map(), absCatMap, translate);
+    const events = rawCellEvents(
+      cell,
+      new Map(),
+      new Map(),
+      absCatMap,
+      translate,
+    );
     const absEvent = events.find((e) => e.key === "absence:vacation");
     expect(absEvent.color).toBe("#1a73e8");
   });
@@ -186,7 +204,13 @@ describe("rawCellEvents", () => {
       ],
     ]);
     const cell = { ds, hol: null, absences: [] };
-    const events = rawCellEvents(cell, entryMap, new Map(), new Map(), translate);
+    const events = rawCellEvents(
+      cell,
+      entryMap,
+      new Map(),
+      new Map(),
+      translate,
+    );
     expect(events.some((e) => e.key.startsWith("work:"))).toBe(true);
   });
 
@@ -203,7 +227,15 @@ describe("rawCellEvents", () => {
     const entryMap = new Map([[ds, [entry]]]);
     const userMap = new Map([[5, { first_name: "Eve", last_name: "Emp" }]]);
     const cell = { ds, hol: null, absences: [] };
-    const events = rawCellEvents(cell, entryMap, new Map(), new Map(), translate, userMap, 1);
+    const events = rawCellEvents(
+      cell,
+      entryMap,
+      new Map(),
+      new Map(),
+      translate,
+      userMap,
+      1,
+    );
     const workEvent = events.find((e) => e.key.startsWith("work:"));
     expect(workEvent.detail).toContain("Eve Emp");
   });
@@ -238,7 +270,13 @@ describe("buildColorMap", () => {
       [1, { name: "Cat A", color: null }],
       [2, { name: "Cat B", color: null }],
     ]);
-    const colorMap = buildColorMap(cells, entryMap, categoryMap, new Map(), translate);
+    const colorMap = buildColorMap(
+      cells,
+      entryMap,
+      categoryMap,
+      new Map(),
+      translate,
+    );
     const colors = [...colorMap.values()];
     const uniqueColors = new Set(colors);
     expect(uniqueColors.size).toBe(colors.length);
@@ -248,7 +286,13 @@ describe("buildColorMap", () => {
     // Cells from adjacent months are greyed out; they must not influence the
     // colour assignment for the current month's events.
     const cells = [{ ds: "2025-12-31", other: true, hol: null, absences: [] }];
-    const colorMap = buildColorMap(cells, new Map(), new Map(), new Map(), translate);
+    const colorMap = buildColorMap(
+      cells,
+      new Map(),
+      new Map(),
+      new Map(),
+      translate,
+    );
     expect(colorMap.size).toBe(0);
   });
 });
@@ -256,7 +300,11 @@ describe("buildColorMap", () => {
 describe("calendarEventTitle", () => {
   it("prefers the explicit title over detail or label", () => {
     expect(
-      calendarEventTitle({ title: "My title", detail: "detail", label: "label" }),
+      calendarEventTitle({
+        title: "My title",
+        detail: "detail",
+        label: "label",
+      }),
     ).toBe("My title");
   });
 

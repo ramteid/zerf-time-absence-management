@@ -28,12 +28,8 @@
   }
 </script>
 
-<Dialog
-  bind:this={dialog}
-  title={$t(title)}
-  onClose={() => onResolve(null)}
->
-  {#if text}<p style="font-size:13px;color:var(--text-secondary)">
+<Dialog bind:this={dialog} title={$t(title)} onClose={() => onResolve(null)}>
+  {#if text}<p class="text-note">
       {$t(text)}
     </p>{/if}
   {#if needReason}
@@ -44,8 +40,7 @@
         class="zf-textarea"
         rows="3"
         bind:value={reason}
-        required
-      ></textarea>
+        required></textarea>
     </div>
   {/if}
   {#if requirePhrase}

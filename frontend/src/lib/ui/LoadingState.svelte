@@ -8,7 +8,7 @@
   .loading-state {
     text-align: center;
     padding: 40px 0;
-    font-size: 13px;
+    font-size: 14px;
     color: var(--text-tertiary);
   }
 </style>

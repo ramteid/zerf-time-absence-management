@@ -46,21 +46,26 @@
   // entitlement being wrongly pro-rated from the (later) Zerf start date.
   let hire_date = template.hire_date || "";
   let overtime_start_balance_hours = fmtDecimal(
-    Math.round((template.overtime_start_balance_min || 0) / 60 * 100) / 100,
+    Math.round(((template.overtime_start_balance_min || 0) / 60) * 100) / 100,
     2,
   );
-  let approver_ids = Array.isArray(template.approver_ids) ? template.approver_ids.map(Number) : [];
+  let approver_ids = Array.isArray(template.approver_ids)
+    ? template.approver_ids.map(Number)
+    : [];
   let active = template.active ?? true;
   let tracks_time = template.tracks_time ?? true;
   // Admin-only: opt in to technical system-error notifications. Default off.
-  let receives_error_notifications = template.receives_error_notifications ?? false;
+  let receives_error_notifications =
+    template.receives_error_notifications ?? false;
   let error = "";
   let approvers = [];
   let allCategories = [];
   let allAbsenceCategories = [];
   let selectedCategoryIds = [];
   let selectedAbsenceCategoryIds = [];
-  $: normalizedRole = String(role || "").trim().toLowerCase();
+  $: normalizedRole = String(role || "")
+    .trim()
+    .toLowerCase();
   $: requiresApprover = !lockedRole && normalizedRole !== "admin";
   $: isAssistantRole = normalizedRole === "assistant";
 
@@ -88,16 +93,23 @@
   // so they are forced to make a conscious choice. Restore the previous values
   // if the admin switches back to a leave-tracking role without saving.
   let _leaveSnapshot = null; // { annual_leave_days, leave_days_current_year, leave_days_next_year }
-  let lastNormalizedRole = String(role || "").trim().toLowerCase();
+  let lastNormalizedRole = String(role || "")
+    .trim()
+    .toLowerCase();
   $: if (normalizedRole !== lastNormalizedRole) {
     if (normalizedRole === "assistant") {
       // eslint-disable-next-line no-useless-assignment
-      _leaveSnapshot = { annual_leave_days, leave_days_current_year, leave_days_next_year };
+      _leaveSnapshot = {
+        annual_leave_days,
+        leave_days_current_year,
+        leave_days_next_year,
+      };
       annual_leave_days = 0;
       leave_days_current_year = 0;
       leave_days_next_year = 0;
     } else if (lastNormalizedRole === "assistant" && _leaveSnapshot !== null) {
-      ({ annual_leave_days, leave_days_current_year, leave_days_next_year } = _leaveSnapshot);
+      ({ annual_leave_days, leave_days_current_year, leave_days_next_year } =
+        _leaveSnapshot);
       // eslint-disable-next-line no-useless-assignment
       _leaveSnapshot = null;
     }
@@ -120,7 +132,12 @@
 
   // Keep untouched start-date default aligned with timezone changes.
   $: todayIso = appTodayIsoDate($settings?.timezone);
-  $: if (isNew && !template.start_date && start_date === lastTodayIso && todayIso !== lastTodayIso) {
+  $: if (
+    isNew &&
+    !template.start_date &&
+    start_date === lastTodayIso &&
+    todayIso !== lastTodayIso
+  ) {
     start_date = todayIso;
   }
   // eslint-disable-next-line no-useless-assignment
@@ -144,9 +161,16 @@
 
   function shuffle(chars) {
     const shuffledCharacters = [...chars];
-    for (let currentIndex = shuffledCharacters.length - 1; currentIndex > 0; currentIndex--) {
+    for (
+      let currentIndex = shuffledCharacters.length - 1;
+      currentIndex > 0;
+      currentIndex--
+    ) {
       const randomIndex = secureIndex(currentIndex + 1);
-      [shuffledCharacters[currentIndex], shuffledCharacters[randomIndex]] = [shuffledCharacters[randomIndex], shuffledCharacters[currentIndex]];
+      [shuffledCharacters[currentIndex], shuffledCharacters[randomIndex]] = [
+        shuffledCharacters[randomIndex],
+        shuffledCharacters[currentIndex],
+      ];
     }
     return shuffledCharacters.join("");
   }
@@ -157,7 +181,8 @@
     const digits = "23456789";
     const symbols = "!@#*-_+";
     const all = lower + upper + digits + symbols;
-    let generatedPassword = pick(lower) + pick(upper) + pick(digits) + pick(symbols);
+    let generatedPassword =
+      pick(lower) + pick(upper) + pick(digits) + pick(symbols);
     while (generatedPassword.length < 16) generatedPassword += pick(all);
     generatedPassword = shuffle(generatedPassword);
     password = generatedPassword;
@@ -172,7 +197,8 @@
           allUsers.filter(
             (candidateUser) =>
               candidateUser.active &&
-              (candidateUser.role === "team_lead" || candidateUser.role === "admin") &&
+              (candidateUser.role === "team_lead" ||
+                candidateUser.role === "admin") &&
               candidateUser.id !== template.id,
           ),
         );
@@ -184,8 +210,12 @@
     if (!isNew) {
       try {
         const rows = await api(`/users/${template.id}/leave-days`);
-        const currentYearLeave = rows.find((leaveRow) => leaveRow.year === _thisYear);
-        const nextYearLeave = rows.find((leaveRow) => leaveRow.year === _nextYear);
+        const currentYearLeave = rows.find(
+          (leaveRow) => leaveRow.year === _thisYear,
+        );
+        const nextYearLeave = rows.find(
+          (leaveRow) => leaveRow.year === _nextYear,
+        );
         if (currentYearLeave) leave_days_current_year = currentYearLeave.days;
         if (nextYearLeave) leave_days_next_year = nextYearLeave.days;
       } catch {
@@ -241,7 +271,9 @@
   async function save() {
     error = "";
     if (requiresApprover && approver_ids.length === 0) {
-      error = $t("At least one approver is required for employees and team leads.");
+      error = $t(
+        "At least one approver is required for employees and team leads.",
+      );
       return;
     }
     if (isNew && password && password !== confirmPassword) {
@@ -252,7 +284,10 @@
       error = $t("Invalid date.");
       return;
     }
-    if (!isAssistantRole && (Number(workdays_per_week) < 1 || Number(workdays_per_week) > 5)) {
+    if (
+      !isAssistantRole &&
+      (Number(workdays_per_week) < 1 || Number(workdays_per_week) > 5)
+    ) {
       error = $t("Workdays per week must be between 1 and 5.");
       return;
     }
@@ -262,29 +297,47 @@
     if (!isNew && !tracks_time && wasTracksTime && normalizedRole === "admin") {
       const firstConfirmed = await confirmDialog(
         $t("Disable time tracking?"),
-        $t("Disabling time tracking will permanently delete all time entries, absences, and edit requests for this user. This cannot be undone."),
+        $t(
+          "Disabling time tracking will permanently delete all time entries, absences, and edit requests for this user. This cannot be undone.",
+        ),
         { danger: true, confirm: $t("Disable time tracking") },
       );
       if (!firstConfirmed) return;
       const secondConfirmed = await confirmDialog(
         $t("Disable time tracking?"),
-        $t("Disabling time tracking will permanently delete all time entries, absences, and edit requests for this user. This cannot be undone."),
-        { danger: true, confirm: $t("Disable time tracking"), requirePhrase: $t("I understand") },
+        $t(
+          "Disabling time tracking will permanently delete all time entries, absences, and edit requests for this user. This cannot be undone.",
+        ),
+        {
+          danger: true,
+          confirm: $t("Disable time tracking"),
+          requirePhrase: $t("I understand"),
+        },
       );
       if (!secondConfirmed) return;
     }
     try {
-      const normalizedWeeklyHours = isAssistantRole ? 0 : (parseDecimal(weekly_hours) || 0);
+      const normalizedWeeklyHours = isAssistantRole
+        ? 0
+        : parseDecimal(weekly_hours) || 0;
       const normalizedOvertimeStartBalanceMin = isAssistantRole
         ? 0
-        : Math.round(Math.round((parseDecimal(overtime_start_balance_hours) || 0) * 100) / 100 * 60);
+        : Math.round(
+            (Math.round(
+              (parseDecimal(overtime_start_balance_hours) || 0) * 100,
+            ) /
+              100) *
+              60,
+          );
       const body = {
         email,
         first_name,
         last_name,
         role: normalizedRole,
         weekly_hours: normalizedWeeklyHours,
-        ...(isAssistantRole ? {} : { workdays_per_week: Number(workdays_per_week) }),
+        ...(isAssistantRole
+          ? {}
+          : { workdays_per_week: Number(workdays_per_week) }),
         annual_leave_days: Number(annual_leave_days),
         leave_days_current_year: Number(leave_days_current_year),
         leave_days_next_year: Number(leave_days_next_year),
@@ -350,15 +403,16 @@
   bind:this={dialog}
   title={$t(isNew ? "Add User" : "Edit User")}
   onClose={() => onClose(false)}
-  style="max-width:520px"
+  wide
   let:dlg
 >
   {#if !showTempPassword}
-
     <div class="field-group">
       <div class="field-row">
         <div>
-          <label class="zf-label" for="user-first-name">{$t("First name")}</label>
+          <label class="zf-label" for="user-first-name"
+            >{$t("First name")}</label
+          >
           <input
             id="user-first-name"
             class="zf-input"
@@ -410,7 +464,9 @@
       <div class="field-row">
         <div>
           <div class="field-label-row">
-            <label class="zf-label" for="user-start-date">{$t("Start date")}</label>
+            <label class="zf-label" for="user-start-date"
+              >{$t("Start date")}</label
+            >
           </div>
           <DatePicker
             id="user-start-date"
@@ -420,7 +476,9 @@
         </div>
         <div>
           <div class="field-label-row">
-            <label class="zf-label" for="user-hire-date">{$t("Hire date")}</label>
+            <label class="zf-label" for="user-hire-date"
+              >{$t("Hire date")}</label
+            >
             {#if hire_date}
               <button
                 type="button"
@@ -432,7 +490,11 @@
               </button>
             {/if}
           </div>
-          <DatePicker id="user-hire-date" bind:value={hire_date} container={dlg} />
+          <DatePicker
+            id="user-hire-date"
+            bind:value={hire_date}
+            container={dlg}
+          />
           <div class="field-hint">
             {$t(
               "Used to calculate the prorated annual leave entitlement for employees who already worked before they started using Zerf. Leave empty to use the start date.",
@@ -443,7 +505,9 @@
       {#if !isAssistantRole}
         <div class="field-row">
           <div>
-            <label class="zf-label" for="user-weekly-hours">{$t("Weekly hours")}</label>
+            <label class="zf-label" for="user-weekly-hours"
+              >{$t("Weekly hours")}</label
+            >
             <input
               id="user-weekly-hours"
               class="zf-input"
@@ -453,7 +517,9 @@
             />
           </div>
           <div>
-            <label class="zf-label" for="user-workdays-per-week">{$t("Workdays per week")}</label>
+            <label class="zf-label" for="user-workdays-per-week"
+              >{$t("Workdays per week")}</label
+            >
             <input
               id="user-workdays-per-week"
               class="zf-input"
@@ -486,7 +552,9 @@
       <div>
         <div class="field-section-label">{$t("Vacation days per year")}</div>
         <div>
-          <label class="zf-label" for="leave-base">{$t("Annual leave days (base)")}</label>
+          <label class="zf-label" for="leave-base"
+            >{$t("Annual leave days (base)")}</label
+          >
           <input
             id="leave-base"
             class="zf-input"
@@ -551,9 +619,13 @@
       {#if normalizedRole === "admin"}
         <div class="field-toggle-row">
           <div>
-            <div class="field-toggle-row-title">{$t("Enable time tracking")}</div>
+            <div class="field-toggle-row-title">
+              {$t("Enable time tracking")}
+            </div>
             <div class="field-toggle-row-hint">
-              {$t("When disabled, this admin works in management-only mode (no time entries or absences).")}
+              {$t(
+                "When disabled, this admin works in management-only mode (no time entries or absences).",
+              )}
             </div>
           </div>
           <button
@@ -571,14 +643,17 @@
               {$t("Receives notifications about technical system errors")}
             </div>
             <div class="field-toggle-row-hint">
-              {$t("When enabled, this admin is alerted in the app and by email about technical errors.")}
+              {$t(
+                "When enabled, this admin is alerted in the app and by email about technical errors.",
+              )}
             </div>
           </div>
           <button
             class="zf-btn zf-btn-sm"
             class:zf-btn-danger={!receives_error_notifications}
             type="button"
-            on:click={() => (receives_error_notifications = !receives_error_notifications)}
+            on:click={() =>
+              (receives_error_notifications = !receives_error_notifications)}
           >
             {receives_error_notifications ? $t("Active") : $t("Inactive")}
           </button>
@@ -627,13 +702,13 @@
         <div>
           <div class="zf-label">{$t("Approvers (Team leads / Admins)")}</div>
           {#if approvers.length === 0}
-            <div style="font-size:13px;color:var(--text-tertiary);padding:6px 0">
+            <div class="empty-note">
               {$t("No eligible approvers found.")}
             </div>
           {:else}
-            <div style="display:flex;flex-direction:column;gap:6px;max-height:180px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px">
+            <div class="check-list">
               {#each approvers as a (a.id)}
-                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
+                <label class="zf-check-label">
                   <input
                     type="checkbox"
                     value={a.id}
@@ -646,16 +721,18 @@
             </div>
           {/if}
           <div class="field-hint">
-            {$t("At least one approver is required for employees and team leads.")}
+            {$t(
+              "At least one approver is required for employees and team leads.",
+            )}
           </div>
         </div>
       {/if}
       {#if isNew && allCategories.length > 0}
         <div>
           <div class="zf-label">{$t("Time Categories")}</div>
-          <div style="display:flex;flex-direction:column;gap:6px;max-height:160px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px">
+          <div class="check-list">
             {#each allCategories as c (c.id)}
-              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
+              <label class="zf-check-label">
                 <input
                   type="checkbox"
                   value={c.id}
@@ -670,9 +747,9 @@
       {#if isNew && allAbsenceCategories.length > 0}
         <div>
           <div class="zf-label">{$t("Absence Categories")}</div>
-          <div style="display:flex;flex-direction:column;gap:6px;max-height:160px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px">
+          <div class="check-list">
             {#each allAbsenceCategories as c (c.id)}
-              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
+              <label class="zf-check-label">
                 <input
                   type="checkbox"
                   value={c.id}
@@ -689,10 +766,32 @@
   {/if}
   <svelte:fragment slot="footer">
     {#if !showTempPassword}
-      <button class="zf-btn" on:click={() => dialog.close()}>{$t("Cancel")}</button>
+      <button class="zf-btn" on:click={() => dialog.close()}
+        >{$t("Cancel")}</button
+      >
       <button class="zf-btn zf-btn-primary" on:click={save}>
         {$t(isNew ? "Add User" : "Save")}
       </button>
     {/if}
   </svelte:fragment>
 </Dialog>
+
+<style>
+  .empty-note {
+    font-size: 14px;
+    color: var(--text-tertiary);
+    padding: 6px 0;
+  }
+
+  /* Scrollable checkbox lists (permissions, team members). */
+  .check-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 180px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 8px;
+  }
+</style>

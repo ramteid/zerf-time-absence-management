@@ -57,7 +57,10 @@ describe("SettingsTabs", () => {
   });
 
   afterEach(() => {
-    if (component) { unmount(component); component = null; }
+    if (component) {
+      unmount(component);
+      component = null;
+    }
     target.remove();
   });
 
@@ -107,7 +110,7 @@ describe("SettingsTabs", () => {
     component = mount(SettingsTabs, { target });
     await settle();
     const usersLink = [...target.querySelectorAll("a")].find(
-      (a) => a.getAttribute("href") === "/settings/users"
+      (a) => a.getAttribute("href") === "/settings/users",
     );
     expect(usersLink).not.toBeNull();
     expect(usersLink.classList.contains("active")).toBe(true);
@@ -119,7 +122,7 @@ describe("SettingsTabs", () => {
     component = mount(SettingsTabs, { target });
     await settle();
     const auditLink = [...target.querySelectorAll("a")].find(
-      (a) => a.getAttribute("href") === "/settings/audit-log"
+      (a) => a.getAttribute("href") === "/settings/audit-log",
     );
     expect(auditLink).not.toBeNull();
     expect(auditLink.classList.contains("active")).toBe(true);

@@ -51,7 +51,10 @@ describe("theme store", () => {
     // not written, the next boot will always revert to the default 'light'.
     const { theme } = await import("./theme.js");
     theme.set("dark");
-    expect(Storage.prototype.setItem).toHaveBeenCalledWith("zerf.theme", "dark");
+    expect(Storage.prototype.setItem).toHaveBeenCalledWith(
+      "zerf.theme",
+      "dark",
+    );
     let value;
     theme.subscribe((v) => (value = v))();
     expect(value).toBe("dark");

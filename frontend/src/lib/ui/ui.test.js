@@ -25,12 +25,18 @@ describe("EmptyState", () => {
   });
 
   afterEach(() => {
-    if (component) { unmount(component); component = null; }
+    if (component) {
+      unmount(component);
+      component = null;
+    }
     target.remove();
   });
 
   it("renders the text prop", async () => {
-    component = mount(EmptyState, { target, props: { text: "No items found" } });
+    component = mount(EmptyState, {
+      target,
+      props: { text: "No items found" },
+    });
     await settle();
     expect(target.textContent).toContain("No items found");
   });
@@ -58,7 +64,10 @@ describe("LoadingState", () => {
   });
 
   afterEach(() => {
-    if (component) { unmount(component); component = null; }
+    if (component) {
+      unmount(component);
+      component = null;
+    }
     target.remove();
   });
 
@@ -69,7 +78,10 @@ describe("LoadingState", () => {
   });
 
   it("renders custom text", async () => {
-    component = mount(LoadingState, { target, props: { text: "Please wait..." } });
+    component = mount(LoadingState, {
+      target,
+      props: { text: "Please wait..." },
+    });
     await settle();
     expect(target.textContent).toContain("Please wait...");
   });
@@ -85,12 +97,18 @@ describe("FormField", () => {
   });
 
   afterEach(() => {
-    if (component) { unmount(component); component = null; }
+    if (component) {
+      unmount(component);
+      component = null;
+    }
     target.remove();
   });
 
   it("renders label when provided", async () => {
-    component = mount(FormField, { target, props: { label: "Email", forId: "email" } });
+    component = mount(FormField, {
+      target,
+      props: { label: "Email", forId: "email" },
+    });
     await settle();
     const label = target.querySelector("label");
     expect(label).not.toBeNull();
@@ -115,7 +133,10 @@ describe("PageHeader", () => {
   });
 
   afterEach(() => {
-    if (component) { unmount(component); component = null; }
+    if (component) {
+      unmount(component);
+      component = null;
+    }
     target.remove();
   });
 
@@ -126,13 +147,21 @@ describe("PageHeader", () => {
   });
 
   it("renders subtitle when provided", async () => {
-    component = mount(PageHeader, { target, props: { title: "Test", subtitle: "Sub-title text" } });
+    component = mount(PageHeader, {
+      target,
+      props: { title: "Test", subtitle: "Sub-title text" },
+    });
     await settle();
-    expect(target.querySelector(".top-bar-subtitle").textContent).toContain("Sub-title text");
+    expect(target.querySelector(".top-bar-subtitle").textContent).toContain(
+      "Sub-title text",
+    );
   });
 
   it("omits subtitle element when subtitle is empty", async () => {
-    component = mount(PageHeader, { target, props: { title: "Test", subtitle: "" } });
+    component = mount(PageHeader, {
+      target,
+      props: { title: "Test", subtitle: "" },
+    });
     await settle();
     expect(target.querySelector(".top-bar-subtitle")).toBeNull();
   });

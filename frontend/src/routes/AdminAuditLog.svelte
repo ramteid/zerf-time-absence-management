@@ -73,7 +73,9 @@
       {#if row.subject_user_label}
         <span class="audit-subject">→ {row.subject_user_label}</span>
       {/if}
-      <span class="zf-badge {actionClass(row.action)}">{auditActionLabel(row.action)}</span>
+      <span class="zf-badge {actionClass(row.action)}"
+        >{auditActionLabel(row.action)}</span
+      >
       <span class="audit-table">{auditTableLabel(row.table_name)}</span>
       {#if row.data_summary}
         <span class="audit-data">{row.data_summary}</span>
@@ -81,8 +83,10 @@
     </svelte:fragment>
 
     <svelte:fragment slot="detail-title" let:selected>
-      <span class="zf-badge {actionClass(selected.action)}" style="margin-right:8px">{auditActionLabel(selected.action)}</span>
-      <span style="flex:1;font-weight:500">{auditTableLabel(selected.table_name)}</span>
+      <span class="zf-badge {actionClass(selected.action)} mr-8"
+        >{auditActionLabel(selected.action)}</span
+      >
+      <span class="flex-1 fw-500">{auditTableLabel(selected.table_name)}</span>
     </svelte:fragment>
 
     <svelte:fragment slot="detail" let:selected>
@@ -103,11 +107,13 @@
       {#if selected.is_time_entry_week}
         <div class="zf-detail-row">
           <span class="zf-detail-label">{$t("Week")}</span>
-          <span>{$t("Week {week}: {from} - {to}", {
-            week: selected.week_number,
-            from: fmtDateShort(selected.week_start),
-            to: fmtDateShort(selected.week_end),
-          })}</span>
+          <span
+            >{$t("Week {week}: {from} - {to}", {
+              week: selected.week_number,
+              from: fmtDateShort(selected.week_start),
+              to: fmtDateShort(selected.week_end),
+            })}</span
+          >
         </div>
         <div class="zf-detail-row">
           <span class="zf-detail-label">{$t("Days")}</span>
@@ -138,20 +144,20 @@
 <style>
   .audit-time {
     color: var(--text-tertiary);
-    font-size: 12px;
+    font-size: 13px;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
 
   .audit-user {
     color: var(--text-secondary);
-    font-size: 12px;
+    font-size: 13px;
     white-space: nowrap;
   }
 
   .audit-subject {
     color: var(--text-secondary);
-    font-size: 12px;
+    font-size: 13px;
     white-space: nowrap;
   }
 
@@ -162,7 +168,7 @@
 
   .audit-data {
     color: var(--text-tertiary);
-    font-size: 12px;
+    font-size: 13px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

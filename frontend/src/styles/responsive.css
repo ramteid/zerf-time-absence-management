@@ -1,0 +1,516 @@
+/* ── Mobile title bar (mobile only) ── */
+.mobile-title-bar {
+  display: none;
+}
+
+/* ── Mobile bottom navigation ── */
+.mobile-bottom-nav {
+  display: none;
+}
+
+.pull-to-refresh {
+  display: none;
+}
+
+/* ── Week grid scroll wrapper ── */
+.week-grid-scroll-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ── Scrollable table wrapper ── */
+.zf-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ── Responsive: tablet (769px – 1024px) ── */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .sidebar {
+    width: 180px;
+  }
+
+  /* Same centering formula as the desktop rules in layout.css, only with a
+     smaller minimum gutter — otherwise .page-narrow/.page-medium pages would
+     lose their width cap on tablets. */
+  .content-area {
+    padding: 16px max(20px, calc((100% - var(--page-max-width)) / 2));
+  }
+
+  .top-bar {
+    padding: 16px max(20px, calc((100% - var(--page-max-width)) / 2)) 12px;
+  }
+
+  .stat-cards {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+
+  .week-grid {
+    grid-template-columns: repeat(3, 1fr);
+    min-width: 0;
+  }
+
+  .cal-grid {
+    min-width: 0;
+  }
+}
+
+/* ── Responsive: mobile ── */
+@media (max-width: 768px) {
+  /* Prevent the whole page from scrolling horizontally */
+  html,
+  body,
+  #app {
+    overflow-x: hidden;
+  }
+
+  .app-layout {
+    overflow-x: hidden;
+  }
+
+  .sidebar {
+    display: none;
+  }
+
+  /* Mobile title bar */
+  .mobile-title-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 50px;
+    padding: 0 12px 0 14px;
+    background: var(--nav-bg);
+    border-bottom: 1px solid var(--nav-border);
+    z-index: 200;
+  }
+
+  .mobile-title-bar-brand {
+    display: flex;
+    align-items: stretch;
+    gap: 10px;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .mobile-title-bar-logo {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+
+  .mobile-title-bar-logo .app-logo {
+    display: block;
+  }
+
+  .mobile-title-bar-icon {
+    width: 34px;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .mobile-title-bar-names {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.2;
+    min-width: 0;
+  }
+
+  .mobile-title-bar-appname {
+    color: var(--nav-text-active);
+    font-weight: 400;
+    font-size: 18px;
+    letter-spacing: -0.02em;
+  }
+
+  .mobile-title-bar-org {
+    font-size: 12px;
+    color: var(--nav-text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .mobile-title-bar-bell {
+    flex-shrink: 0;
+    margin-left: 8px;
+  }
+
+  .main-content {
+    /* Account for fixed title bar + bottom nav height + safe-area */
+    padding-top: 50px;
+    padding-bottom: calc(
+      var(--mobile-bottom-nav-height) + var(--mobile-safe-area-bottom)
+    );
+  }
+
+  /* Keep the width-cap formula so .page-narrow/.page-medium still bind on
+     wide phones / small tablets in portrait. */
+  .content-area {
+    padding: 12px max(14px, calc((100% - var(--page-max-width)) / 2));
+  }
+
+  /* Stat cards: 2 per row */
+  .stat-cards {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+
+  .stat-card {
+    min-width: 0;
+  }
+
+  .stat-card-value {
+    font-size: 19px;
+  }
+
+  /* Top bar */
+  .top-bar {
+    padding: 12px max(14px, calc((100% - var(--page-max-width)) / 2)) 10px;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .top-bar-title h1 {
+    font-size: 18px;
+  }
+
+  .top-bar-actions {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+
+  .top-bar-actions.time-top-bar-actions {
+    justify-content: flex-start;
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  .time-top-bar-actions .time-week-picker {
+    min-width: 0;
+  }
+
+  .time-top-bar-actions .time-week-label {
+    min-width: 84px;
+  }
+
+  .time-top-bar-actions .time-submit-button {
+    margin-left: auto;
+    height: 32px;
+    padding: 0 10px;
+    font-size: 13.5px;
+  }
+
+  .time-top-bar-actions .time-submit-stack {
+    margin-left: auto;
+    align-items: flex-end;
+  }
+
+  /* Tables: allow horizontal scroll */
+  .zf-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin: 0 -14px;
+    padding: 0 14px;
+  }
+
+  .zf-table {
+    min-width: 480px;
+  }
+
+  /* Tables that should fill the available width without forced scroll */
+  .zf-table--fit {
+    min-width: 0;
+  }
+  .zf-table--fit th,
+  .zf-table--fit td {
+    padding: 8px 8px;
+  }
+
+  /* Week grid: stack vertically on mobile */
+  .week-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  /* Calendar: compact cells on narrow screens */
+  .cal-day {
+    min-height: 48px;
+    padding: 2px 3px;
+  }
+
+  .cal-day-number {
+    font-size: 12px;
+  }
+
+  .cal-head {
+    font-size: 10px;
+    padding: 3px 0;
+  }
+
+  /* Field rows: single column */
+  .field-row {
+    grid-template-columns: 1fr;
+  }
+
+  /* Dashboard 2-col approval grid → single column */
+  .dashboard-approval-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Admin tabs: tighter side padding on narrow viewports */
+  .admin-tabs {
+    padding-left: 14px !important;
+    padding-right: 14px !important;
+  }
+
+  /* Login: top-align so the card can be scrolled into view when the keyboard is open */
+  .login-wrap {
+    align-items: flex-start;
+    min-height: auto;
+  }
+
+  /* Login card */
+  .login-card {
+    width: min(380px, calc(100vw - 32px));
+    padding: 24px 20px;
+  }
+
+  /* Dialog: full-width bottom sheet feel on small screens */
+  dialog {
+    width: calc(100vw - 24px);
+    max-width: 480px;
+  }
+
+  /* Bottom nav */
+  .mobile-bottom-nav {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: var(--bg-surface);
+    border-top: 1px solid var(--border);
+    z-index: 100;
+    align-items: flex-start;
+    justify-content: space-around;
+    padding: 0 4px;
+    padding-bottom: var(--mobile-safe-area-bottom);
+    height: calc(
+      var(--mobile-bottom-nav-height) + var(--mobile-safe-area-bottom)
+    );
+  }
+
+  .mobile-nav-item {
+    appearance: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    flex: 1;
+    min-width: 0;
+    height: var(--mobile-bottom-nav-height);
+    border: none;
+    background: none;
+    color: var(--text-secondary);
+    font-family: inherit;
+    font-size: 11px;
+    line-height: 1.1;
+    text-decoration: none;
+    cursor: pointer;
+    padding: 4px 0;
+    transition: color 0.15s;
+  }
+
+  .mobile-nav-item svg {
+    flex: 0 0 auto;
+  }
+
+  .mobile-nav-item span {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mobile-nav-item.active {
+    color: var(--accent);
+  }
+
+  .mobile-nav-item:hover {
+    color: var(--accent);
+  }
+
+  /* Toast: above bottom nav */
+  .toast-container {
+    bottom: calc(
+      var(--mobile-bottom-nav-height) + 8px + var(--mobile-safe-area-bottom)
+    );
+    right: 12px;
+    left: 12px;
+    align-items: stretch;
+  }
+
+  /* Week grid: snap cards */
+  .day-card {
+    min-width: 0;
+    width: 100%;
+    flex-shrink: 1;
+  }
+
+  /* Top bar actions: right-aligned on mobile */
+  .top-bar-actions {
+    justify-content: flex-end;
+  }
+
+  .top-bar-actions.absence-top-actions {
+    justify-content: flex-start;
+  }
+
+  .absence-top-actions .zf-btn-primary {
+    margin-left: auto;
+  }
+
+  .top-bar-actions.calendar-top-actions {
+    justify-content: flex-start;
+  }
+
+  /* Pull-to-refresh */
+  .pull-to-refresh.ptr-open {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    background: linear-gradient(to bottom, var(--bg-surface) 60%, transparent);
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    z-index: 400;
+    border: none;
+  }
+  /* Popover API: hide when not in top layer (higher specificity wins over .ptr-open) */
+  .pull-to-refresh:not(:popover-open) {
+    display: none;
+  }
+
+  .pull-spinner {
+    font-size: 21px;
+    color: var(--text-secondary);
+    transition: color 0.2s;
+  }
+
+  .pull-spinner.active {
+    color: var(--accent);
+  }
+}
+
+@-moz-document url-prefix() {
+  :root {
+    --mobile-safe-area-bottom: 0px;
+  }
+}
+
+/* Mobile "More" overlay */
+.mobile-more-overlay {
+  position: fixed;
+  inset: 0;
+  bottom: calc(
+    var(--mobile-bottom-nav-height) + var(--mobile-safe-area-bottom)
+  );
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 150;
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+}
+
+.mobile-more-sheet {
+  width: 100%;
+  background: var(--bg-surface);
+  border-radius: 16px 16px 0 0;
+  padding: 16px;
+  max-height: 70vh;
+  overflow-y: auto;
+  animation: slideUp 0.25s ease-out;
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+.mobile-more-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 12px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Account link inside the sheet header: avatar + name, tappable as a whole. */
+.mobile-more-account {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+  border-radius: 8px;
+}
+
+.mobile-more-name {
+  font-weight: 400;
+  font-size: 15px;
+}
+
+.mobile-more-role {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.mobile-more-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 8px;
+  border: none;
+  background: none;
+  color: var(--text-primary);
+  font-size: 15px;
+  text-decoration: none;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: background 0.15s;
+}
+
+.mobile-more-item:hover,
+.mobile-more-item.active {
+  background: var(--bg-elevated, rgba(0, 0, 0, 0.04));
+}
+
+.mobile-more-item.active {
+  color: var(--accent-text);
+  font-weight: 500;
+}

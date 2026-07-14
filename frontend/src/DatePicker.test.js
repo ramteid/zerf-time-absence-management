@@ -15,7 +15,8 @@ async function settle() {
 
 function currentMonthLabel(calendar) {
   const dropdown = calendar.querySelector(".flatpickr-monthDropdown-months");
-  if (dropdown) return dropdown.options[dropdown.selectedIndex]?.textContent || "";
+  if (dropdown)
+    return dropdown.options[dropdown.selectedIndex]?.textContent || "";
   return calendar.querySelector(".cur-month")?.textContent || "";
 }
 
@@ -34,7 +35,9 @@ describe("DatePicker", () => {
       unmount(component);
       component = null;
     }
-    document.querySelectorAll(".flatpickr-calendar").forEach((el) => el.remove());
+    document
+      .querySelectorAll(".flatpickr-calendar")
+      .forEach((el) => el.remove());
     target.remove();
   });
 

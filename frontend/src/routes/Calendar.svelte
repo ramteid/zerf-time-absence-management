@@ -1,6 +1,14 @@
 <script>
   import { api } from "../api.js";
-  import { path, go, currentUser, categories, settings, earliestStartDate, absenceCategories } from "../stores.js";
+  import {
+    path,
+    go,
+    currentUser,
+    categories,
+    settings,
+    earliestStartDate,
+    absenceCategories,
+  } from "../stores.js";
   import { t } from "../i18n.js";
   import {
     fmtMonthYear,
@@ -87,23 +95,29 @@
     const isAdmin = $currentUser?.role === "admin";
     const isNonAdminLead = isLead && !isAdmin;
     try {
-      const [nextEntries, nextHolidays, teamEntries, selfEntries, nextCategories, nextUsers] =
-        await Promise.all([
-          fallbackToEmpty(api(`/absences/calendar?month=${monthString}`)),
-          Promise.all(
-            holidayYears.map((holidayYear) =>
-              fallbackToEmpty(api(`/holidays?year=${holidayYear}`)),
-            ),
-          ).then((yearRows) => yearRows.flat()),
-          isLead
-            ? fallbackToEmpty(api(`/time-entries/all?from=${from}&to=${to}`))
-            : fallbackToEmpty(api(`/time-entries?from=${from}&to=${to}`)),
-          isNonAdminLead
-            ? fallbackToEmpty(api(`/time-entries?from=${from}&to=${to}`))
-            : Promise.resolve([]),
-          api("/categories").catch(() => $categories),
-          isLead ? fallbackToEmpty(api("/users")) : Promise.resolve([]),
-        ]);
+      const [
+        nextEntries,
+        nextHolidays,
+        teamEntries,
+        selfEntries,
+        nextCategories,
+        nextUsers,
+      ] = await Promise.all([
+        fallbackToEmpty(api(`/absences/calendar?month=${monthString}`)),
+        Promise.all(
+          holidayYears.map((holidayYear) =>
+            fallbackToEmpty(api(`/holidays?year=${holidayYear}`)),
+          ),
+        ).then((yearRows) => yearRows.flat()),
+        isLead
+          ? fallbackToEmpty(api(`/time-entries/all?from=${from}&to=${to}`))
+          : fallbackToEmpty(api(`/time-entries?from=${from}&to=${to}`)),
+        isNonAdminLead
+          ? fallbackToEmpty(api(`/time-entries?from=${from}&to=${to}`))
+          : Promise.resolve([]),
+        api("/categories").catch(() => $categories),
+        isLead ? fallbackToEmpty(api("/users")) : Promise.resolve([]),
+      ]);
       if (seq !== loadSeq) return;
       entries = nextEntries;
       holidays = nextHolidays;
@@ -112,7 +126,9 @@
       // Pure-admin users (tracks_time=false) never have calendar entries; drop
       // them from the lookup so they can't appear in calendar event labels.
       // Inactive users are also excluded.
-      users = (nextUsers || []).filter((u) => tracksOwnTime(u) && u.active !== false);
+      users = (nextUsers || []).filter(
+        (u) => tracksOwnTime(u) && u.active !== false,
+      );
     } catch {
       if (seq !== loadSeq) return;
       entries = [];
@@ -194,7 +210,16 @@
   $: colorByKey = buildColorMap(cells, teMap, categoryById, absCatBySlug, $t);
   $: eventCells = cells.map((cell) => ({
     ...cell,
-    events: cellEvents(cell, teMap, categoryById, colorByKey, absCatBySlug, $t, userById, $currentUser?.id),
+    events: cellEvents(
+      cell,
+      teMap,
+      categoryById,
+      colorByKey,
+      absCatBySlug,
+      $t,
+      userById,
+      $currentUser?.id,
+    ),
   }));
 
   // ── Heading: "Team Calendar" for team leads and admins (they can always see
@@ -211,8 +236,10 @@
   $: currentMonthStr = `${year}-${String(month).padStart(2, "0")}`;
   // Leads and admins are exempt: their own start_date may be NULL (excluded
   // from the SQL MIN), so the global earliest may be newer than their own data.
-  $: isLeadOrAdmin = $currentUser?.role === "team_lead" || $currentUser?.role === "admin";
-  $: prevDisabled = !isLeadOrAdmin && earliestMonth != null && currentMonthStr <= earliestMonth;
+  $: isLeadOrAdmin =
+    $currentUser?.role === "team_lead" || $currentUser?.role === "admin";
+  $: prevDisabled =
+    !isLeadOrAdmin && earliestMonth != null && currentMonthStr <= earliestMonth;
 
   // ── Weekend column visibility: only render Sat/Sun columns when at least
   // one visible cell on Saturday or Sunday actually has events. If either
@@ -279,7 +306,7 @@
       >
         <Icon name="ChevLeft" size={16} />
       </button>
-      <span class="nav-label tab-num" style="min-width:70px">
+      <span class="nav-label tab-num cal-month-label">
         {fmtMonthYear(new Date(year, month - 1, 1))}
       </span>
       <button
@@ -295,10 +322,10 @@
 </div>
 
 <div class="content-area">
-  <div class="zf-card" style="padding:16px">
+  <div class="zf-card cal-card">
     <div
-      class="cal-grid"
-      style="grid-template-columns:repeat({calGridColumns},minmax(28px,1fr));margin-bottom:8px"
+      class="cal-grid mb-8"
+      style:grid-template-columns={`repeat(${calGridColumns},minmax(28px,1fr))`}
     >
       {#each visibleWeekdayLabels as wd (wd)}
         <div class="cal-head">{wd}</div>
@@ -306,7 +333,7 @@
     </div>
     <div
       class="cal-grid"
-      style="grid-template-columns:repeat({calGridColumns},minmax(28px,1fr))"
+      style:grid-template-columns={`repeat(${calGridColumns},minmax(28px,1fr))`}
     >
       {#each visibleEventCells as c (c.ds)}
         {@const evts = c.events}
@@ -317,9 +344,7 @@
           class:today={c.today}
           class:weekend={c.weekend && !c.today}
           class:other-month={c.other}
-          style={evts.length
-            ? `border-left:3px solid ${evts[0].color};cursor:pointer`
-            : "cursor:default"}
+          style:border-left={evts.length ? `3px solid ${evts[0].color}` : null}
           on:click={() => clickDay(c)}
           disabled={evts.length === 0}
         >
@@ -327,7 +352,7 @@
           {#if evts.length}
             <div class="cal-events">
               {#each evts.slice(0, 3) as ev (ev.key)}
-                <div class="cal-event" style="background:{ev.color}">
+                <div class="cal-event" style:background={ev.color}>
                   {calendarEventTitle(ev)}
                 </div>
               {/each}
@@ -341,12 +366,10 @@
     </div>
   </div>
 
-  <div style="display:flex;gap:12px;margin-top:16px;flex-wrap:wrap">
+  <div class="cal-legend">
     {#each legendItems as item (item.label)}
-      <div style="display:flex;align-items:center;gap:6px;font-size:12px">
-        <span
-          style="display:inline-block;width:12px;height:12px;border-radius:2px;background:{item.color}"
-        ></span>
+      <div class="cal-legend-item">
+        <span class="cal-swatch" style:background={item.color}></span>
         <span>{item.label}</span>
       </div>
     {/each}
@@ -356,21 +379,67 @@
 {#if popupCell}
   <Dialog title={fmtDate(popupCell.ds)} onClose={() => (popupCell = null)}>
     {#each popupCell.events as ev (ev.key)}
-      <div
-        style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:13px"
-      >
-        <span
-          style="display:inline-block;width:10px;height:10px;border-radius:2px;background:{ev.color};flex-shrink:0"
-        ></span>
-        <span style="font-weight:500">{ev.popupLabel || ev.label}</span>
+      <div class="cal-event">
+        <span class="cal-event-dot" style:background={ev.color}></span>
+        <span class="fw-500">{ev.popupLabel || ev.label}</span>
         {#if ev.detail}
-          <span style="color:var(--text-muted)">{ev.detail}</span>
+          <span class="text-tertiary">{ev.detail}</span>
         {/if}
       </div>
     {/each}
     <svelte:fragment slot="footer">
-      <span style="flex:1"></span>
-      <button class="zf-btn" on:click={() => (popupCell = null)}>{$t("Close")}</button>
+      <span class="flex-1"></span>
+      <button class="zf-btn" on:click={() => (popupCell = null)}
+        >{$t("Close")}</button
+      >
     </svelte:fragment>
   </Dialog>
 {/if}
+
+<style>
+  /* Fixed width so the month name does not shift the arrow buttons around. */
+  .cal-month-label {
+    min-width: 70px;
+  }
+
+  .cal-card {
+    padding: 16px;
+  }
+
+  .cal-legend {
+    display: flex;
+    gap: 12px;
+    margin-top: 16px;
+    flex-wrap: wrap;
+  }
+
+  .cal-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+  }
+
+  .cal-swatch {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+  }
+
+  .cal-event {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0;
+    font-size: 14px;
+  }
+
+  .cal-event-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+</style>

@@ -18,6 +18,6 @@
   .data-table-empty {
     padding: 16px;
     color: var(--text-tertiary);
-    font-size: 13px;
+    font-size: 14px;
   }
 </style>

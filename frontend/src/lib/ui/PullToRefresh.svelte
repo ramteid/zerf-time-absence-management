@@ -82,7 +82,7 @@
 <div
   class="pull-to-refresh"
   class:ptr-open={pullDistance > 0}
-  style="height:{pullDistance}px"
+  style:height={pullDistance + "px"}
   popover="manual"
   bind:this={pullEl}
 >
@@ -92,7 +92,8 @@
         <Icon name="Clock" size={20} />
       {:else}
         <span
-          style="transform:rotate({pullDistance * 3}deg);display:inline-block"
+          class="ptr-icon"
+          style:transform={`rotate(${pullDistance * 3}deg)`}
         >
           &#8595;
         </span>
@@ -100,3 +101,9 @@
     </div>
   {/if}
 </div>
+
+<style>
+  .ptr-icon {
+    display: inline-block;
+  }
+</style>

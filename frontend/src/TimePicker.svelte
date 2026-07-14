@@ -21,7 +21,11 @@
   }
 
   function toHHMM(hour24, minuteValue) {
-    return String(hour24).padStart(2, "0") + ":" + String(minuteValue).padStart(2, "0");
+    return (
+      String(hour24).padStart(2, "0") +
+      ":" +
+      String(minuteValue).padStart(2, "0")
+    );
   }
 
   let hour24 = 0;
@@ -58,13 +62,15 @@
       const currentDisplayHour = displayHour;
       const nextDisplayHour = ((currentDisplayHour - 1 + delta + 12) % 12) + 1;
       const nextHour24 = isPm
-        ? (nextDisplayHour === 12 ? 12 : nextDisplayHour + 12)
+        ? nextDisplayHour === 12
+          ? 12
+          : nextDisplayHour + 12
         : nextDisplayHour === 12
           ? 0
           : nextDisplayHour;
       commit(nextHour24, minuteValue);
     } else {
-      commit(((hour24 + delta) % 24 + 24) % 24, minuteValue);
+      commit((((hour24 + delta) % 24) + 24) % 24, minuteValue);
     }
   }
 
@@ -72,11 +78,14 @@
 
   function stepMinute(delta) {
     const step = delta * MIN_STEP;
-    commit(hour24, ((minuteValue + step) % 60 + 60) % 60);
+    commit(hour24, (((minuteValue + step) % 60) + 60) % 60);
   }
 
   function toggleAmPm() {
-    commit(Math.min(23, Math.max(0, isPm ? hour24 - 12 : hour24 + 12)), minuteValue);
+    commit(
+      Math.min(23, Math.max(0, isPm ? hour24 - 12 : hour24 + 12)),
+      minuteValue,
+    );
   }
 
   // Wheel accumulator - step every 80px
@@ -86,19 +95,34 @@
   function onWheelH(e) {
     keyFocus = "hour";
     wheelAccumulator.hour += e.deltaY;
-    while (wheelAccumulator.hour >= WHEEL_STEP) { stepHour(1); wheelAccumulator.hour -= WHEEL_STEP; }
-    while (wheelAccumulator.hour <= -WHEEL_STEP) { stepHour(-1); wheelAccumulator.hour += WHEEL_STEP; }
+    while (wheelAccumulator.hour >= WHEEL_STEP) {
+      stepHour(1);
+      wheelAccumulator.hour -= WHEEL_STEP;
+    }
+    while (wheelAccumulator.hour <= -WHEEL_STEP) {
+      stepHour(-1);
+      wheelAccumulator.hour += WHEEL_STEP;
+    }
   }
   function onWheelM(e) {
     keyFocus = "minute";
     wheelAccumulator.minute += e.deltaY;
-    while (wheelAccumulator.minute >= WHEEL_STEP) { stepMinute(1); wheelAccumulator.minute -= WHEEL_STEP; }
-    while (wheelAccumulator.minute <= -WHEEL_STEP) { stepMinute(-1); wheelAccumulator.minute += WHEEL_STEP; }
+    while (wheelAccumulator.minute >= WHEEL_STEP) {
+      stepMinute(1);
+      wheelAccumulator.minute -= WHEEL_STEP;
+    }
+    while (wheelAccumulator.minute <= -WHEEL_STEP) {
+      stepMinute(-1);
+      wheelAccumulator.minute += WHEEL_STEP;
+    }
   }
   function onWheelAP(e) {
     keyFocus = "meridiem";
     wheelAccumulator.meridiem += e.deltaY;
-    if (Math.abs(wheelAccumulator.meridiem) >= WHEEL_STEP) { toggleAmPm(); wheelAccumulator.meridiem = 0; }
+    if (Math.abs(wheelAccumulator.meridiem) >= WHEEL_STEP) {
+      toggleAmPm();
+      wheelAccumulator.meridiem = 0;
+    }
   }
 
   // Touch drag per column
@@ -107,9 +131,24 @@
   let touchAccY = 0;
   const TOUCH_STEP = 32;
 
-  function onTouchStartH(e) { keyFocus = "hour"; touchColumn = "hour"; touchLastY = e.touches[0].clientY; touchAccY = 0; }
-  function onTouchStartM(e) { keyFocus = "minute"; touchColumn = "minute"; touchLastY = e.touches[0].clientY; touchAccY = 0; }
-  function onTouchStartAP(e) { keyFocus = "meridiem"; touchColumn = "meridiem"; touchLastY = e.touches[0].clientY; touchAccY = 0; }
+  function onTouchStartH(e) {
+    keyFocus = "hour";
+    touchColumn = "hour";
+    touchLastY = e.touches[0].clientY;
+    touchAccY = 0;
+  }
+  function onTouchStartM(e) {
+    keyFocus = "minute";
+    touchColumn = "minute";
+    touchLastY = e.touches[0].clientY;
+    touchAccY = 0;
+  }
+  function onTouchStartAP(e) {
+    keyFocus = "meridiem";
+    touchColumn = "meridiem";
+    touchLastY = e.touches[0].clientY;
+    touchAccY = 0;
+  }
 
   function onTouchMove(e) {
     if (touchLastY === null) return;
@@ -131,7 +170,11 @@
     }
   }
 
-  function onTouchEnd() { touchColumn = null; touchLastY = null; touchAccY = 0; }
+  function onTouchEnd() {
+    touchColumn = null;
+    touchLastY = null;
+    touchAccY = 0;
+  }
 
   // Keyboard digit buffer
   let keyBuffer = "";
@@ -140,14 +183,19 @@
 
   function onKeyDown(e) {
     if (!isOpen) {
-      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); isOpen = true; }
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        isOpen = true;
+      }
       return;
     }
     const digit = e.key >= "0" && e.key <= "9" ? parseInt(e.key, 10) : null;
     if (e.key === "Escape") {
-      e.preventDefault(); isOpen = false;
+      e.preventDefault();
+      isOpen = false;
     } else if (e.key === "Enter") {
-      e.preventDefault(); isOpen = false;
+      e.preventDefault();
+      isOpen = false;
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       if (keyFocus === "hour") stepHour(-1);
@@ -160,10 +208,22 @@
       else toggleAmPm();
     } else if (e.key === "ArrowRight" || e.key === "Tab") {
       e.preventDefault();
-      keyFocus = keyFocus === "hour" ? "minute" : (keyFocus === "minute" && use12h ? "meridiem" : "hour");
+      keyFocus =
+        keyFocus === "hour"
+          ? "minute"
+          : keyFocus === "minute" && use12h
+            ? "meridiem"
+            : "hour";
     } else if (e.key === "ArrowLeft") {
       e.preventDefault();
-      keyFocus = keyFocus === "meridiem" ? "minute" : keyFocus === "minute" ? "hour" : (use12h ? "meridiem" : "minute");
+      keyFocus =
+        keyFocus === "meridiem"
+          ? "minute"
+          : keyFocus === "minute"
+            ? "hour"
+            : use12h
+              ? "meridiem"
+              : "minute";
     } else if (e.key === "a" || e.key === "A") {
       if (use12h && isPm) toggleAmPm();
     } else if (e.key === "p" || e.key === "P") {
@@ -176,22 +236,51 @@
       if (keyFocus === "hour") {
         if (typedNumber > hourMax || keyBuffer.length >= 2) {
           const clampedHour = Math.min(hourMax, Math.max(hourMin, typedNumber));
-          if (use12h) commit(isPm ? (clampedHour === 12 ? 12 : clampedHour + 12) : clampedHour === 12 ? 0 : clampedHour, minuteValue);
+          if (use12h)
+            commit(
+              isPm
+                ? clampedHour === 12
+                  ? 12
+                  : clampedHour + 12
+                : clampedHour === 12
+                  ? 0
+                  : clampedHour,
+              minuteValue,
+            );
           else commit(clampedHour, minuteValue);
-          keyBuffer = ""; keyFocus = "minute";
+          keyBuffer = "";
+          keyFocus = "minute";
         } else {
-          if (use12h) commit(isPm ? (typedNumber === 12 ? 12 : typedNumber + 12) : typedNumber === 12 ? 0 : typedNumber, minuteValue);
+          if (use12h)
+            commit(
+              isPm
+                ? typedNumber === 12
+                  ? 12
+                  : typedNumber + 12
+                : typedNumber === 12
+                  ? 0
+                  : typedNumber,
+              minuteValue,
+            );
           else commit(typedNumber, minuteValue);
-          keyTimer = setTimeout(() => { keyBuffer = ""; keyFocus = "minute"; }, 1200);
+          keyTimer = setTimeout(() => {
+            keyBuffer = "";
+            keyFocus = "minute";
+          }, 1200);
         }
       } else if (keyFocus === "minute") {
-        const snappedMinute = Math.round(Math.min(59, typedNumber) / MIN_STEP) * MIN_STEP % 60;
+        const snappedMinute =
+          (Math.round(Math.min(59, typedNumber) / MIN_STEP) * MIN_STEP) % 60;
         if (typedNumber > 5 || keyBuffer.length >= 2) {
           commit(hour24, snappedMinute);
-          keyBuffer = ""; keyFocus = use12h ? "meridiem" : "hour";
+          keyBuffer = "";
+          keyFocus = use12h ? "meridiem" : "hour";
         } else {
           commit(hour24, snappedMinute);
-          keyTimer = setTimeout(() => { keyBuffer = ""; keyFocus = use12h ? "meridiem" : "hour"; }, 1200);
+          keyTimer = setTimeout(() => {
+            keyBuffer = "";
+            keyFocus = use12h ? "meridiem" : "hour";
+          }, 1200);
         }
       }
     }
@@ -205,7 +294,9 @@
     // Move keyboard focus to the drum so it receives keydown events.
     setTimeout(() => drumElement?.focus(), 0);
   }
-  function closePicker() { isOpen = false; }
+  function closePicker() {
+    isOpen = false;
+  }
 
   function onClickOutside(e) {
     if (anchorElement && !anchorElement.contains(e.target)) closePicker();
@@ -217,7 +308,7 @@
     for (let offset = -2; offset <= 2; offset++) {
       const displayValue = use12HourClock
         ? ((displayedHour - 1 + offset + 12) % 12) + 1
-        : ((currentHour24 + offset) % 24 + 24) % 24;
+        : (((currentHour24 + offset) % 24) + 24) % 24;
       items.push({ offset, displayValue });
     }
     return items;
@@ -226,7 +317,7 @@
   function minuteItems(selectedMinute) {
     return [-2, -1, 0, 1, 2].map((offset) => ({
       offset,
-      displayValue: ((selectedMinute + offset * MIN_STEP) % 60 + 60) % 60,
+      displayValue: (((selectedMinute + offset * MIN_STEP) % 60) + 60) % 60,
     }));
   }
 
@@ -246,8 +337,8 @@
     aria-label={$t("Time")}
     aria-expanded={isOpen}
     on:click={openPicker}
-    on:keydown={onKeyDown}
-  >{displayLabel}</button>
+    on:keydown={onKeyDown}>{displayLabel}</button
+  >
 
   {#if isOpen}
     <div
@@ -276,8 +367,17 @@
             class="tp-item"
             class:tp-item-sel={item.offset === 0}
             tabindex="-1"
-            on:click|stopPropagation={() => { for (let stepIndex = 0; stepIndex < Math.abs(item.offset); stepIndex++) stepHour(item.offset > 0 ? 1 : -1); keyFocus = "hour"; drumElement?.focus(); }}
-          >{String(item.displayValue).padStart(2, "0")}</button>
+            on:click|stopPropagation={() => {
+              for (
+                let stepIndex = 0;
+                stepIndex < Math.abs(item.offset);
+                stepIndex++
+              )
+                stepHour(item.offset > 0 ? 1 : -1);
+              keyFocus = "hour";
+              drumElement?.focus();
+            }}>{String(item.displayValue).padStart(2, "0")}</button
+          >
         {/each}
       </div>
 
@@ -300,8 +400,17 @@
             class="tp-item"
             class:tp-item-sel={item.offset === 0}
             tabindex="-1"
-            on:click|stopPropagation={() => { for (let stepIndex = 0; stepIndex < Math.abs(item.offset); stepIndex++) stepMinute(item.offset > 0 ? 1 : -1); keyFocus = "minute"; drumElement?.focus(); }}
-          >{String(item.displayValue).padStart(2, "0")}</button>
+            on:click|stopPropagation={() => {
+              for (
+                let stepIndex = 0;
+                stepIndex < Math.abs(item.offset);
+                stepIndex++
+              )
+                stepMinute(item.offset > 0 ? 1 : -1);
+              keyFocus = "minute";
+              drumElement?.focus();
+            }}>{String(item.displayValue).padStart(2, "0")}</button
+          >
         {/each}
       </div>
 
@@ -321,22 +430,26 @@
             class="tp-item"
             class:tp-item-sel={!isPm}
             tabindex="-1"
-            on:click|stopPropagation={() => { if (isPm) toggleAmPm(); drumElement?.focus(); }}
-          >AM</button>
+            on:click|stopPropagation={() => {
+              if (isPm) toggleAmPm();
+              drumElement?.focus();
+            }}>AM</button
+          >
           <button
             type="button"
             class="tp-item"
             class:tp-item-sel={isPm}
             tabindex="-1"
-            on:click|stopPropagation={() => { if (!isPm) toggleAmPm(); drumElement?.focus(); }}
-          >PM</button>
+            on:click|stopPropagation={() => {
+              if (!isPm) toggleAmPm();
+              drumElement?.focus();
+            }}>PM</button
+          >
         </div>
       {/if}
-      <button
-        type="button"
-        class="tp-ok"
-        on:click|stopPropagation={closePicker}
-      >{$t("OK")}</button>
+      <button type="button" class="tp-ok" on:click|stopPropagation={closePicker}
+        >{$t("OK")}</button
+      >
     </div>
   {/if}
 </div>
@@ -397,7 +510,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 13.5px;
+    font-size: 14.5px;
     font-family: inherit;
     font-variant-numeric: tabular-nums;
     color: var(--text-tertiary);
@@ -422,12 +535,12 @@
   .tp-item-sel {
     color: var(--text-primary);
     font-weight: 400;
-    font-size: 14.5px;
+    font-size: 15.5px;
     background: var(--bg-muted);
   }
 
   .tp-sep {
-    font-size: 15px;
+    font-size: 16px;
     font-weight: 700;
     color: var(--text-secondary);
     padding: 0 3px;
@@ -438,7 +551,7 @@
     align-self: center;
     margin-left: 8px;
     padding: 4px 10px;
-    font-size: 13.5px;
+    font-size: 14.5px;
     font-weight: 400;
     font-family: inherit;
     color: var(--accent);

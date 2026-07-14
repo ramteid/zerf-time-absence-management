@@ -53,9 +53,7 @@
         ),
       );
       // Initialise replacements with null so the UI shows them.
-      replacements = Object.fromEntries(
-        approvedUsers.map((u) => [u.id, null]),
-      );
+      replacements = Object.fromEntries(approvedUsers.map((u) => [u.id, null]));
     } catch (e) {
       toast($t(e?.message || "Error"), "error");
     }
@@ -98,22 +96,25 @@
   title={$t("Archive user?")}
   onClose={() => onClose(false)}
 >
-  <div style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">
+  <div class="text-note mb-12">
     <strong>{user.first_name} {user.last_name}</strong>
   </div>
-  <p style="font-size:13px;color:var(--text-secondary)">
+  <p class="text-note">
     {$t(
       "This account will be deactivated and the user will no longer be able to log in. All data is preserved and the account can be restored later.",
     )}
   </p>
 
   {#if approvedUsers.length > 0}
-    <div style="margin-top:14px;padding:12px;background:var(--bg-subtle,var(--bg-surface));border:1px solid var(--border);border-radius:6px">
-      <p style="font-size:13px;font-weight:500;margin-bottom:10px;color:var(--warning-text,var(--text-primary))">
-        {$t("This user approves {n} active user(s). Choose a replacement approver for each.", { n: approvedUsers.length })}
+    <div class="zf-info-box">
+      <p class="zf-item-title text-warning mb-10">
+        {$t(
+          "This user approves {n} active user(s). Choose a replacement approver for each.",
+          { n: approvedUsers.length },
+        )}
       </p>
       {#each approvedUsers as member (member.id)}
-        <div style="margin-bottom:10px">
+        <div class="mb-10">
           <label class="zf-label" for="replacement-{member.id}">
             {$t("Replacement approver for {name}", {
               name: `${member.first_name} ${member.last_name}`,
@@ -138,11 +139,20 @@
   {/if}
 
   {#if error}
-    <p style="font-size:12px;color:var(--danger-text);margin-top:8px">{error}</p>
+    <p class="error-text mt-8">
+      {error}
+    </p>
   {/if}
 
   <svelte:fragment slot="footer">
-    <button class="zf-btn" type="button" on:click={() => { dialog.close(); onClose(false); }}>
+    <button
+      class="zf-btn"
+      type="button"
+      on:click={() => {
+        dialog.close();
+        onClose(false);
+      }}
+    >
       {$t("Cancel")}
     </button>
     <button

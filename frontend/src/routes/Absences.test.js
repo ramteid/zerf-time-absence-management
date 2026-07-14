@@ -58,9 +58,27 @@ describe("Absences", () => {
     currentUser.set({ id: 1 });
     setLanguage("en");
     const cats = [
-      { id: 1, slug: "vacation", name: "Vacation", cost_type: "vacation", auto_approve_past: false },
-      { id: 2, slug: "sick", name: "Sick", cost_type: "none", auto_approve_past: true },
-      { id: 7, slug: "flextime_reduction", name: "Flextime Reduction", cost_type: "flextime", auto_approve_past: false },
+      {
+        id: 1,
+        slug: "vacation",
+        name: "Vacation",
+        cost_type: "vacation",
+        auto_approve_past: false,
+      },
+      {
+        id: 2,
+        slug: "sick",
+        name: "Sick",
+        cost_type: "none",
+        auto_approve_past: true,
+      },
+      {
+        id: 7,
+        slug: "flextime_reduction",
+        name: "Flextime Reduction",
+        cost_type: "flextime",
+        auto_approve_past: false,
+      },
     ];
     absenceCategories.set(cats);
     setAbsenceCategoryCache(cats);
@@ -93,7 +111,11 @@ describe("Absences", () => {
     prevBtn.click();
     await settle();
 
-    const requestButton = await waitForElement(target, ".zf-btn-primary", 10000);
+    const requestButton = await waitForElement(
+      target,
+      ".zf-btn-primary",
+      10000,
+    );
     requestButton.click();
     await settle();
 
@@ -119,7 +141,11 @@ describe("Absences", () => {
     prevBtn.click();
     await settle();
 
-    const requestButton = await waitForElement(target, ".zf-btn-primary", 10000);
+    const requestButton = await waitForElement(
+      target,
+      ".zf-btn-primary",
+      10000,
+    );
     requestButton.click();
     await settle();
 

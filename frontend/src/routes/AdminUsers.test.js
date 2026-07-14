@@ -92,7 +92,10 @@ describe("AdminUsers", () => {
   });
 
   afterEach(() => {
-    if (component) { unmount(component); component = null; }
+    if (component) {
+      unmount(component);
+      component = null;
+    }
     target.remove();
     HTMLDialogElement.prototype.showModal = originalShowModal;
   });
@@ -121,7 +124,7 @@ describe("AdminUsers", () => {
     await waitForText(target, "Users");
 
     const addBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Add User")
+      b.textContent.includes("Add User"),
     );
     expect(addBtn).not.toBeNull();
     addBtn.click();
@@ -142,14 +145,14 @@ describe("AdminUsers", () => {
     // Row action buttons use the "ghost" style; the "Add User" button uses
     // "primary". The first ghost icon button in the list is Edit-Alice.
     const firstEditBtn = [...target.querySelectorAll("button")].find(
-      (b) => b.classList.contains("zf-btn-ghost") && b.querySelector("svg")
+      (b) => b.classList.contains("zf-btn-ghost") && b.querySelector("svg"),
     );
     firstEditBtn?.click();
     await settle();
     await settle();
 
     const getCall = apiMock.mock.calls.find(
-      ([path]) => typeof path === "string" && path.startsWith("/users/")
+      ([path]) => typeof path === "string" && path.startsWith("/users/"),
     );
     expect(getCall).toBeTruthy();
   });
@@ -167,7 +170,7 @@ describe("AdminUsers", () => {
     // Filtering out titled buttons leaves: Add User, Edit-Alice, Shield-Alice, Edit-Bob…
     // Index 2 is the Shield button for the first user (Alice, user id 1).
     const noTitleIconBtns = [...target.querySelectorAll("button")].filter(
-      (b) => b.querySelector("svg") && !b.title
+      (b) => b.querySelector("svg") && !b.title,
     );
     noTitleIconBtns[2]?.click();
     await settle();
@@ -177,7 +180,7 @@ describe("AdminUsers", () => {
       ([path, opts]) =>
         typeof path === "string" &&
         path.includes("/reset-password") &&
-        opts?.method === "POST"
+        opts?.method === "POST",
     );
     expect(resetCall).toBeTruthy();
   });
@@ -194,7 +197,7 @@ describe("AdminUsers", () => {
 
     // The archive button has title="Archive".
     const archiveBtn = [...target.querySelectorAll("button")].find(
-      (b) => b.title === "Archive"
+      (b) => b.title === "Archive",
     );
     expect(archiveBtn).not.toBeNull();
     archiveBtn.click();
@@ -214,7 +217,7 @@ describe("AdminUsers", () => {
     await waitForText(target, "Alice");
 
     const deleteBtns = [...target.querySelectorAll("button")].filter(
-      (b) => b.title === "Delete permanently"
+      (b) => b.title === "Delete permanently",
     );
     expect(deleteBtns).toHaveLength(0);
   });

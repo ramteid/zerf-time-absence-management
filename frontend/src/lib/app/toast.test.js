@@ -25,7 +25,9 @@ describe("toast", () => {
     // The default prevents callers from having to pass a type every time.
     const unsub = toasts.subscribe((v) => (values = v));
     toast("Hello");
-    expect(values.some((t) => t.message === "Hello" && t.type === "info")).toBe(true);
+    expect(values.some((t) => t.message === "Hello" && t.type === "info")).toBe(
+      true,
+    );
     unsub();
   });
 
@@ -35,7 +37,9 @@ describe("toast", () => {
     // preserved exactly as passed.
     const unsub = toasts.subscribe((v) => (values = v));
     toast("Error occurred", "error");
-    expect(values.some((t) => t.message === "Error occurred" && t.type === "error")).toBe(true);
+    expect(
+      values.some((t) => t.message === "Error occurred" && t.type === "error"),
+    ).toBe(true);
     unsub();
   });
 

@@ -59,7 +59,7 @@
 {/if}
 
 {#if selected}
-  <Dialog onClose={() => (selected = null)} style="max-width: 560px">
+  <Dialog onClose={() => (selected = null)} wide>
     <svelte:fragment slot="title">
       <slot name="detail-title" {selected} />
     </svelte:fragment>
@@ -80,7 +80,7 @@
     gap: 4px 10px;
     padding: 9px 16px;
     border-bottom: 1px solid var(--border);
-    font-size: 13px;
+    font-size: 14px;
     cursor: pointer;
     background: none;
     border-radius: 0;
@@ -113,7 +113,7 @@
 
   .log-empty {
     padding: 16px;
-    font-size: 13px;
+    font-size: 14px;
     color: var(--text-tertiary);
   }
 
@@ -126,7 +126,7 @@
   }
 
   .log-pager-status {
-    font-size: 13px;
+    font-size: 14px;
     color: var(--text-secondary);
     font-variant-numeric: tabular-nums;
   }

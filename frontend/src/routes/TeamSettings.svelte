@@ -46,57 +46,47 @@
   function rowDisabled(row) {
     return (
       saving[row.user_id] ||
-      (!$currentUser?.permissions?.is_admin &&
-        $currentUser?.id === row.user_id)
+      (!$currentUser?.permissions?.is_admin && $currentUser?.id === row.user_id)
     );
   }
 </script>
 
-<div class="top-bar">
+<div class="top-bar page-medium">
   <div class="top-bar-title">
     <h1>{$t("Team Settings")}</h1>
   </div>
 </div>
 
-<div class="content-area" style="max-width:760px">
+<div class="content-area page-medium">
   {#if loading}
     <p>{$t("Loading...")}</p>
   {:else}
     <!-- Submissions section -->
-    <div class="zf-card" style="padding:20px;margin-bottom:16px">
-      <div style="font-size:14px;font-weight:400;margin-bottom:6px">
+    <div class="zf-card zf-card-section">
+      <div class="zf-card-title mb-6">
         {$t("Time Submissions")}
       </div>
-      <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:14px">
+      <div class="text-hint mb-14">
         {$t(
           "When enabled for a user, their submitted weeks are automatically approved. No one is notified and no emails are sent.",
         )}
       </div>
 
-      {#each rows as row, i (row.user_id)}
-        <div
-          class="team-setting-row"
-          style={i < rows.length - 1
-            ? "border-bottom:1px solid var(--border);"
-            : ""}
-        >
-          <div style="flex:1;min-width:0">
-            <div style="font-size:13px;font-weight:500">
+      {#each rows as row (row.user_id)}
+        <div class="team-setting-row">
+          <div class="flex-min0">
+            <div class="zf-item-title">
               {row.first_name}
               {row.last_name}
               {#if $currentUser?.id === row.user_id}
-                <span style="color:var(--text-tertiary);font-weight:400"
-                  >· {$t("you")}</span
-                >
+                <span class="text-tertiary fw-400">· {$t("you")}</span>
               {/if}
             </div>
-            <div style="font-size:11.5px;color:var(--text-tertiary)">
+            <div class="text-hint">
               {roleLabel(row.role)} · {row.email}
             </div>
           </div>
-          <label
-            style="display:flex;align-items:center;gap:8px;font-size:12.5px;flex-shrink:0"
-          >
+          <label class="row-controls">
             <input
               type="checkbox"
               bind:checked={row.allow_submission_without_approval}
@@ -110,47 +100,38 @@
         </div>
       {/each}
       {#if rows.length === 0}
-        <div style="padding:24px;text-align:center;color:var(--text-tertiary)">
+        <div class="zf-empty">
           {$t("No data.")}
         </div>
       {/if}
     </div>
 
     <!-- Edit Requests section -->
-    <div class="zf-card" style="padding:20px;margin-bottom:16px">
-      <div style="font-size:14px;font-weight:400;margin-bottom:6px">
+    <div class="zf-card zf-card-section">
+      <div class="zf-card-title mb-6">
         {$t("Edit Requests")}
       </div>
-      <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:14px">
+      <div class="text-hint mb-14">
         {$t(
           "When enabled for a user, their edit requests are automatically approved. No one is notified and no emails are sent.",
         )}
       </div>
 
-      {#each rows as row, i (row.user_id)}
-        <div
-          class="team-setting-row"
-          style={i < rows.length - 1
-            ? "border-bottom:1px solid var(--border);"
-            : ""}
-        >
-          <div style="flex:1;min-width:0">
-            <div style="font-size:13px;font-weight:500">
+      {#each rows as row (row.user_id)}
+        <div class="team-setting-row">
+          <div class="flex-min0">
+            <div class="zf-item-title">
               {row.first_name}
               {row.last_name}
               {#if $currentUser?.id === row.user_id}
-                <span style="color:var(--text-tertiary);font-weight:400"
-                  >· {$t("you")}</span
-                >
+                <span class="text-tertiary fw-400">· {$t("you")}</span>
               {/if}
             </div>
-            <div style="font-size:11.5px;color:var(--text-tertiary)">
+            <div class="text-hint">
               {roleLabel(row.role)} · {row.email}
             </div>
           </div>
-          <label
-            style="display:flex;align-items:center;gap:8px;font-size:12.5px;flex-shrink:0"
-          >
+          <label class="row-controls">
             <input
               type="checkbox"
               bind:checked={row.allow_reopen_without_approval}
@@ -164,7 +145,7 @@
         </div>
       {/each}
       {#if rows.length === 0}
-        <div style="padding:24px;text-align:center;color:var(--text-tertiary)">
+        <div class="zf-empty">
           {$t("No data.")}
         </div>
       {/if}
@@ -173,11 +154,24 @@
 </div>
 
 <style>
+  /* Right side of a member row: approver select + controls. */
+  .row-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13.5px;
+    flex-shrink: 0;
+  }
+
   .team-setting-row {
     padding: 12px 0;
     display: flex;
     align-items: center;
     gap: 12px;
+  }
+
+  .team-setting-row:not(:last-child) {
+    border-bottom: 1px solid var(--border);
   }
 
   @media (max-width: 640px) {
@@ -187,7 +181,7 @@
       gap: 8px;
     }
     .team-setting-checkbox-label {
-      font-size: 11.5px;
+      font-size: 12.5px;
     }
   }
 </style>

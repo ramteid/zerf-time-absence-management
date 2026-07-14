@@ -8,11 +8,11 @@
 </script>
 
 <button
-  class="zf-btn-icon-sm zf-btn-ghost"
+  class="zf-btn-icon-sm zf-btn-ghost zf-help-icon"
   {title}
   aria-expanded={open}
   on:click={() => onToggle?.()}
-  style="color:var(--text-tertiary);font-size:{size}px;cursor:help"
+  style:font-size={size + "px"}
 >
   <Icon name="Info" {size} />
 </button>

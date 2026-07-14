@@ -36,7 +36,11 @@ describe("AdminAuditLog", () => {
     target = document.createElement("div");
     document.body.appendChild(target);
     setLanguage("en");
-    settings.set({ ui_language: "en", time_format: "24h", timezone: "Europe/Berlin" });
+    settings.set({
+      ui_language: "en",
+      time_format: "24h",
+      timezone: "Europe/Berlin",
+    });
     mockState.entries = [];
     mockState.users = [];
   });

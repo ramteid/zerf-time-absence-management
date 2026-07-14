@@ -9,7 +9,8 @@ const mockState = vi.hoisted(() => ({
 
 function requestFor(path, method) {
   return mockState.requests.find(
-    (r) => r.path === path && (!method || (r.options?.method || "GET") === method),
+    (r) =>
+      r.path === path && (!method || (r.options?.method || "GET") === method),
   );
 }
 

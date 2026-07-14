@@ -90,17 +90,17 @@
 </div>
 
 <div class="content-area">
-  <div class="zf-card" style="padding:20px;margin-bottom:16px">
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+  <div class="zf-card zf-card-section">
+    <div class="test-status">
       <span
         class="smtp-status-dot"
-        style="width:10px;height:10px;border-radius:50%;flex-shrink:0;background:{testResult
+        style:background={testResult
           ? testResult.ok
-            ? 'var(--success, #22c55e)'
-            : 'var(--error, #ef4444)'
-          : 'var(--text-tertiary, #888)'}"
+            ? "var(--success)"
+            : "var(--danger)"
+          : "var(--text-tertiary)"}
       ></span>
-      <span style="font-size:13px;font-weight:500;color:var(--text-secondary)">
+      <span class="zf-item-title text-secondary">
         {#if testResult}
           {testResult.ok ? $t("Connection OK") : testResult.message}
         {:else}
@@ -111,14 +111,8 @@
     <div class="field-group">
       <div class="field-row">
         <div>
-          <label
-            class="zf-label"
-            style="display:flex;align-items:center;gap:8px"
-          >
-            <input
-              type="checkbox"
-              bind:checked={smtpSettings.smtp_enabled}
-            />
+          <label class="zf-label zf-row">
+            <input type="checkbox" bind:checked={smtpSettings.smtp_enabled} />
             {$t("Enable SMTP")}
           </label>
           <div class="field-hint">
@@ -131,10 +125,7 @@
 
       <div class="field-row">
         <div>
-          <label
-            class="zf-label"
-            style="display:flex;align-items:center;gap:8px"
-          >
+          <label class="zf-label zf-row">
             <input
               type="checkbox"
               bind:checked={smtpSettings.submission_reminders_enabled}
@@ -152,10 +143,7 @@
 
       <div class="field-row">
         <div>
-          <label
-            class="zf-label"
-            style="display:flex;align-items:center;gap:8px"
-          >
+          <label class="zf-label zf-row">
             <input
               type="checkbox"
               bind:checked={smtpSettings.approval_reminders_enabled}
@@ -207,10 +195,7 @@
           <label class="zf-label" for="smtp-password">
             {$t("Password")}
             {#if smtpSettings.smtp_password_set}
-              <span
-                style="font-size:11px;color:var(--text-tertiary);font-weight:normal"
-                >({$t("stored")})</span
-              >
+              <span class="zf-label-hint">({$t("stored")})</span>
             {/if}
           </label>
           <input
@@ -223,10 +208,7 @@
             autocomplete="new-password"
           />
           {#if smtpSettings.smtp_password_set}
-            <label
-              class="zf-label"
-              style="display:flex;align-items:center;gap:8px;margin-top:8px"
-            >
+            <label class="zf-label zf-row mt-8">
               <input
                 type="checkbox"
                 bind:checked={clearStoredPassword}
@@ -264,9 +246,7 @@
         </div>
       </div>
 
-      <div
-        style="display:flex;justify-content:flex-end;gap:8px;padding-top:16px"
-      >
+      <div class="form-actions">
         <button
           class="zf-btn"
           on:click={testConnection}
@@ -293,3 +273,26 @@
     </div>
   </div>
 </div>
+
+<style>
+  .test-status {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+
+  .smtp-status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .form-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding-top: 16px;
+  }
+</style>

@@ -356,7 +356,7 @@
   onHelpToggle={() => toggleHelp("csv")}
 >
   {#if !isSelfOnlyReportsView}
-    <div style="margin-bottom:12px">
+    <div class="mb-12">
       <label class="zf-label" for="csv-user-id">{$t("Employee")}</label>
       <select id="csv-user-id" class="zf-select" bind:value={csvUserId}>
         {#if canViewTeamReports}
@@ -368,7 +368,7 @@
       </select>
     </div>
   {/if}
-  <div class="field-row" style="margin-bottom:12px">
+  <div class="field-row mb-12">
     <div>
       <label class="zf-label" for="csv-from">{$t("From")}</label>
       <DatePicker
@@ -385,11 +385,13 @@
   </div>
 
   <div class="error-text">{csvError}</div>
-  <div style="display:flex;gap:8px;flex-wrap:wrap">
+  <div class="zf-btn-row">
     <button
       class="zf-btn zf-btn-primary"
       on:click={exportCsv}
-      disabled={exportInProgress || csvUserId == null || csvUserId === ALL_USERS_VALUE}
+      disabled={exportInProgress ||
+        csvUserId == null ||
+        csvUserId === ALL_USERS_VALUE}
       title={csvUserId === ALL_USERS_VALUE
         ? $t("CSV export is only available for a single employee.")
         : null}

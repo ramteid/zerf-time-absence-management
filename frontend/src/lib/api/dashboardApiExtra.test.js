@@ -87,7 +87,9 @@ describe("dashboardApi — additional functions", () => {
     // Standard absence approval — the request was submitted normally and is
     // now awaiting manager review. A POST to /approve transitions it to 'approved'.
     await approveAbsenceById({ id: 10, status: "pending_review" });
-    expect(api).toHaveBeenCalledWith("/absences/10/approve", { method: "POST" });
+    expect(api).toHaveBeenCalledWith("/absences/10/approve", {
+      method: "POST",
+    });
   });
 
   it("approveAbsenceById uses /approve-cancellation for a cancellation_pending request", async () => {

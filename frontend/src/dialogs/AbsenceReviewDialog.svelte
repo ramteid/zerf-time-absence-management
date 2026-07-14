@@ -16,14 +16,15 @@
   export let onReject;
 
   $: requestTypeLabel = $t(absenceRequestTypeLabelKey(absence));
-  $: diffRows = absence.review_type === "change" ? absenceDiffRows(absence, $t) : [];
+  $: diffRows =
+    absence.review_type === "change" ? absenceDiffRows(absence, $t) : [];
 </script>
 
-<Dialog title={$t("Absence Request Details")} onClose={onClose}>
-  <div style="display:flex;flex-direction:column;gap:10px">
+<Dialog title={$t("Absence Request Details")} {onClose}>
+  <div class="zf-col">
     <div>
       <div class="zf-label">{$t("Employee")}</div>
-      <div style="font-weight:500">{userNameFromRows(absence.user_id, users)}</div>
+      <div class="fw-500">{userNameFromRows(absence.user_id, users)}</div>
     </div>
     <div>
       <div class="zf-label">{$t("Absence Type")}</div>
@@ -33,7 +34,9 @@
       <div class="zf-label">{$t("Request Type")}</div>
       <div>
         <span
-          class="zf-chip {absence.status === 'cancellation_pending' ? 'zf-chip-cancellation_pending' : 'zf-chip-warning'}"
+          class="zf-chip {absence.status === 'cancellation_pending'
+            ? 'zf-chip-cancellation_pending'
+            : 'zf-chip-warning'}"
         >
           {requestTypeLabel}
         </span>
@@ -52,12 +55,12 @@
     {#if absence.comment}
       <div>
         <div class="zf-label">{$t("Comment")}</div>
-        <div style="white-space:pre-wrap;font-size:13px">{absence.comment}</div>
+        <div class="zf-comment">{absence.comment}</div>
       </div>
     {/if}
     <div>
       <div class="zf-label">{$t("Requested at")}</div>
-      <div class="tab-num" style="font-size:12px">
+      <div class="tab-num fs-13">
         {fmtDateTime(absence.created_at)}
       </div>
     </div>
@@ -77,7 +80,7 @@
           </div>
         </div>
       {:else}
-        <div style="font-size:12px;color:var(--text-tertiary)">
+        <div class="text-hint">
           {$t("Diff unavailable for this request.")}
         </div>
       {/if}
@@ -85,7 +88,7 @@
   </div>
   <svelte:fragment slot="footer">
     <button class="zf-btn" on:click={onClose}>{$t("Close")}</button>
-    <span style="flex:1"></span>
+    <span class="flex-1"></span>
     <button class="zf-btn zf-btn-danger" on:click={() => onReject(absence)}>
       <Icon name="X" size={14} />{$t("Reject")}
     </button>
@@ -111,7 +114,7 @@
     border-radius: var(--radius-sm);
     background: var(--bg-subtle);
     padding: 8px 10px;
-    font-size: 12px;
+    font-size: 13px;
   }
 
   .change-diff-field {

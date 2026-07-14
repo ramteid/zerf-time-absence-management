@@ -103,7 +103,9 @@ export function absenceKindTotals(absences) {
     totals[kind] = (totals[kind] || 0) + (absence.days || 0);
   }
   // Exclude kinds whose total is zero so stat cards don't display "Sick: 0".
-  return Object.fromEntries(Object.entries(totals).filter(([, days]) => days > 0));
+  return Object.fromEntries(
+    Object.entries(totals).filter(([, days]) => days > 0),
+  );
 }
 
 export function totalAbsenceDays(absences) {

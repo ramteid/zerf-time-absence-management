@@ -1,0 +1,345 @@
+/* ── Nav Slider (shared week / month / year navigation) ── */
+.zf-nav-slider {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.zf-nav-slider .zf-btn {
+  /* width: 34px; */
+  height: 34px;
+  padding: 0;
+  justify-content: center;
+}
+.zf-nav-slider .nav-label {
+  font-size: 14.5px;
+  font-weight: 500;
+  text-align: center;
+  white-space: nowrap;
+}
+
+/* ── StatCard ── */
+.stat-cards {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.stat-card {
+  padding: 14px 16px;
+  flex: 1;
+  min-width: 120px;
+}
+
+.stat-card-label {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.stat-card-label-help {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.stat-card-label-help > span {
+  min-width: 0;
+}
+
+.stat-card-label-help .zf-btn-icon-sm {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.stat-card-value {
+  font-size: 23px;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+}
+
+.stat-card-value.accent {
+  color: var(--accent);
+}
+
+.stat-card-sub {
+  font-size: 13px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+
+/* ── Avatar ── */
+.avatar {
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 400;
+  flex-shrink: 0;
+  letter-spacing: -0.02em;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  /* Hairline ring in a mid-neutral so the chip stays visible on any surface —
+     the role "soft" backgrounds can otherwise blend into a dark sidebar (dark
+     theme) or a pale card, leaving only the initials floating. */
+  box-shadow: inset 0 0 0 1px rgba(128, 128, 128, 0.22);
+}
+
+/* Compact avatar used in navigation chrome (sidebar footer, mobile sheet). */
+.avatar-sm {
+  width: 30px;
+  height: 30px;
+  font-size: 12px;
+}
+
+/* Role-based avatar colors — same palette everywhere a user's avatar is
+   shown, so a given user always gets the same color regardless of page. */
+.avatar-role-admin {
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}
+.avatar-role-team_lead {
+  background: var(--info-soft);
+  color: var(--info-text);
+}
+.avatar-role-employee {
+  background: var(--success-soft);
+  color: var(--success-text);
+}
+.avatar-role-assistant {
+  background: var(--lime-soft);
+  color: var(--lime-text);
+}
+
+/* ── Tables ── */
+.zf-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.zf-table thead tr {
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-subtle);
+}
+
+.zf-table th {
+  padding: 8px 16px;
+  text-align: left;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.zf-table tbody tr {
+  border-bottom: 1px solid var(--border);
+}
+
+.zf-table td {
+  padding: 10px 16px;
+}
+
+/* Rejected entries: strike through data cells; chips keep their own styling
+   via .zf-chip { text-decoration: none } (base) and their own color classes */
+tr.entry-rejected > td {
+  text-decoration: line-through;
+  color: var(--text-tertiary);
+}
+
+/* ── Dialog (native <dialog>) ── */
+dialog {
+  border: none;
+  border-radius: var(--radius-lg);
+  padding: 0;
+  box-shadow: var(--shadow-lg);
+  max-width: 480px;
+  width: 90vw;
+  max-height: 90vh;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  margin: 0;
+  flex-direction: column;
+  overflow: visible;
+}
+
+dialog:not([open]) {
+  display: none;
+}
+
+dialog[open] {
+  display: flex;
+}
+
+dialog::backdrop {
+  background: rgba(20, 22, 26, 0.35);
+}
+
+dialog header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  font-size: 16px;
+  font-weight: 400;
+  display: flex;
+  align-items: center;
+}
+
+dialog .dialog-body {
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+dialog footer {
+  padding: 12px 20px 16px;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+/* ── Dashboard grouped sections ─────────────────────────────────────────────── */
+
+/* Wrapper that groups a section label with its stat-card row, providing
+   consistent vertical spacing between the three dashboard sections. */
+.dashboard-group {
+  margin-bottom: 20px;
+}
+
+/* Suppress the stat-cards own bottom margin when it is owned by a group;
+   the group container manages spacing instead. */
+.dashboard-group .stat-cards {
+  margin-bottom: 0;
+}
+
+/* Subtle uppercase label above each stat-card row (e.g. "Diese Woche"). */
+.dashboard-group-label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  margin-bottom: 8px;
+}
+
+/* ── Card header ── */
+.card-header {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.card-header-title {
+  font-size: 15px;
+  font-weight: 400;
+  flex: 1;
+}
+
+/* ── Dropdown Slider ── */
+.dropdown-slider {
+  position: relative;
+  overflow: hidden;
+}
+
+.dropdown-slider-item {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: transparent;
+}
+
+.dropdown-slider-item:last-child {
+  border-bottom: none;
+}
+
+/* Compact row of per-item action buttons in tables and lists. */
+.zf-actions {
+  display: flex;
+  gap: 4px;
+}
+
+/* Primary line of a list/table row (e.g. a user's name). */
+.zf-item-title {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* Bordered info box inside dialogs (e.g. archive/restore consequences). */
+.zf-info-box {
+  margin-top: 14px;
+  padding: 12px;
+  background: var(--bg-subtle, var(--bg-surface));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+/* Large avatar for the profile header on the Account page. */
+.avatar-lg {
+  width: 56px;
+  height: 56px;
+  font-size: 22px;
+}
+
+/* Wider dialog variant, opted into via the Dialog "wide" prop. */
+.dialog-wide {
+  max-width: 520px;
+}
+
+/* Muted heading above a secondary list section (e.g. archived users). */
+.zf-list-heading {
+  margin: 24px 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* Scrollable bordered list/table container inside dialogs. */
+.zf-scroll-box {
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.zf-divider-row {
+  border-bottom: 1px solid var(--border);
+}
+
+/* Compact cells for the small usage tables inside dialogs. */
+.zf-td-compact {
+  padding: 6px 8px;
+}
+
+.zf-td-action {
+  padding: 6px 8px;
+  text-align: right;
+  width: 32px;
+}
+
+/* User-entered comment/reason text inside dialogs: preserve line breaks. */
+.zf-comment {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 14px;
+}
+
+/* Muted icon that reveals an explanation on hover/click. */
+.zf-help-icon {
+  color: var(--text-tertiary);
+  cursor: help;
+}

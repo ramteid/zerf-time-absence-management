@@ -20,15 +20,17 @@
   loadAbsence();
 </script>
 
-<div class="top-bar">
+<div class="top-bar page-narrow">
   <div class="top-bar-title">
     <h1>{$t("Categories")}</h1>
   </div>
 </div>
 
-<div class="content-area" style="max-width:600px">
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-    <h2 style="margin:0;font-size:15px;font-weight:600">{$t("Time Categories")}</h2>
+<div class="content-area page-narrow">
+  <div class="section-head">
+    <h2 class="section-title">
+      {$t("Time Categories")}
+    </h2>
     <button class="zf-btn zf-btn-sm" on:click={() => (showDialog = {})}>
       <Icon name="Plus" size={13} />{$t("Add")}
     </button>
@@ -38,20 +40,11 @@
     the name truncate with an ellipsis so the row stays inside the mobile
     viewport even when the category name is very long.
   -->
-  <div class="zf-card" style="margin-bottom:24px">
-    {#each adminCategories as cat, i (cat.id)}
-      <div
-        style="padding:10px 16px;{i < adminCategories.length - 1
-          ? 'border-bottom:1px solid var(--border)'
-          : ''};display:flex;align-items:center;gap:10px;opacity:{cat.active
-          ? 1
-          : 0.55}"
-      >
-        <span
-          class="cat-dot"
-          style="width:10px;height:10px;background:{cat.color}"
-        ></span>
-        <span style="font-size:13px;font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{$t(cat.name)}</span>
+  <div class="zf-card mb-24">
+    {#each adminCategories as cat (cat.id)}
+      <div class="cat-row" class:inactive={!cat.active}>
+        <span class="cat-dot" style:background={cat.color}></span>
+        <span class="cat-name">{$t(cat.name)}</span>
         {#if !cat.active}
           <span class="zf-chip">{$t("Inactive")}</span>
         {/if}
@@ -65,8 +58,10 @@
     {/each}
   </div>
 
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-    <h2 style="margin:0;font-size:15px;font-weight:600">{$t("Absence Categories")}</h2>
+  <div class="section-head">
+    <h2 class="section-title">
+      {$t("Absence Categories")}
+    </h2>
     <button class="zf-btn zf-btn-sm" on:click={() => (showAbsenceDialog = {})}>
       <Icon name="Plus" size={13} />{$t("Add")}
     </button>
@@ -80,19 +75,10 @@
     fits on a phone screen without horizontal scrolling.
   -->
   <div class="zf-card">
-    {#each adminAbsenceCategories as cat, i (cat.id)}
-      <div
-        style="padding:10px 16px;{i < adminAbsenceCategories.length - 1
-          ? 'border-bottom:1px solid var(--border)'
-          : ''};display:flex;align-items:center;gap:10px;opacity:{cat.active
-          ? 1
-          : 0.55}"
-      >
-        <span
-          class="cat-dot"
-          style="width:10px;height:10px;background:{cat.color}"
-        ></span>
-        <span style="font-size:13px;font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{$t(cat.name)}</span>
+    {#each adminAbsenceCategories as cat (cat.id)}
+      <div class="cat-row" class:inactive={!cat.active}>
+        <span class="cat-dot" style:background={cat.color}></span>
+        <span class="cat-name">{$t(cat.name)}</span>
         {#if !cat.active}
           <span class="zf-chip">{$t("Inactive")}</span>
         {/if}
@@ -126,3 +112,50 @@
     }}
   />
 {/if}
+
+<style>
+  .section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+
+  .section-title {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+  }
+
+  .cat-row {
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .cat-row:not(:last-child) {
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* Deactivated categories stay listed but visually recede. */
+  .cat-row.inactive {
+    opacity: 0.55;
+  }
+
+  /* Slightly larger dot than the global 6px .cat-dot used in tables. */
+  .cat-row .cat-dot {
+    width: 10px;
+    height: 10px;
+  }
+
+  .cat-name {
+    font-size: 14px;
+    font-weight: 500;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+</style>

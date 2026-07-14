@@ -46,8 +46,20 @@ describe("AbsenceReviewDialog", () => {
     document.body.appendChild(target);
     setLanguage("en");
     const cats = [
-      { id: 1, slug: "vacation", name: "Vacation", cost_type: "vacation", auto_approve_past: false },
-      { id: 2, slug: "sick", name: "Sick", cost_type: "none", auto_approve_past: true },
+      {
+        id: 1,
+        slug: "vacation",
+        name: "Vacation",
+        cost_type: "vacation",
+        auto_approve_past: false,
+      },
+      {
+        id: 2,
+        slug: "sick",
+        name: "Sick",
+        cost_type: "none",
+        auto_approve_past: true,
+      },
     ];
     absenceCategories.set(cats);
     setAbsenceCategoryCache(cats);
@@ -58,7 +70,10 @@ describe("AbsenceReviewDialog", () => {
   });
 
   afterEach(() => {
-    if (component) { unmount(component); component = null; }
+    if (component) {
+      unmount(component);
+      component = null;
+    }
     target.remove();
     HTMLDialogElement.prototype.showModal = originalShowModal;
   });
@@ -128,7 +143,7 @@ describe("AbsenceReviewDialog", () => {
     });
     await settle();
     const approveBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Approve")
+      b.textContent.includes("Approve"),
     );
     approveBtn?.click();
     await settle();
@@ -151,7 +166,7 @@ describe("AbsenceReviewDialog", () => {
     });
     await settle();
     const rejectBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Reject")
+      b.textContent.includes("Reject"),
     );
     rejectBtn?.click();
     await settle();
@@ -165,7 +180,11 @@ describe("AbsenceReviewDialog", () => {
     component = mount(AbsenceReviewDialog, {
       target,
       props: {
-        absence: { ...baseAbsence, status: "cancellation_pending", review_type: "cancellation" },
+        absence: {
+          ...baseAbsence,
+          status: "cancellation_pending",
+          review_type: "cancellation",
+        },
         users,
         onClose: vi.fn(),
         onApprove: vi.fn(),

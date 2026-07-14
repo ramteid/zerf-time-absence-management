@@ -1,0 +1,128 @@
+/* ── Toast ── */
+.toast-container {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 8px;
+  z-index: 200;
+}
+
+.toast {
+  padding: 10px 16px;
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  font-weight: 500;
+  box-shadow: var(--shadow-md);
+  animation: toast-in 0.2s ease-out;
+}
+
+.toast-ok {
+  background: var(--success-soft);
+  color: var(--success-text);
+  border: 1px solid var(--success);
+}
+
+.toast-error {
+  background: var(--danger-soft);
+  color: var(--danger-text);
+  border: 1px solid var(--danger);
+}
+
+.toast-info {
+  background: var(--info-soft);
+  color: var(--info-text);
+  border: 1px solid var(--info);
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Login */
+.login-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* min-height 100svh (small viewport height) ensures the wrap fills the
+     visible area on desktop even when #app has height:auto set by the login
+     route. On mobile svh tracks the visual viewport so the card stays
+     centred when the keyboard is closed. */
+  min-height: 100svh;
+  padding: 24px 16px;
+  box-sizing: border-box;
+  background: var(--bg-canvas);
+}
+
+.login-card {
+  width: 380px;
+  padding: 32px;
+}
+
+.login-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.login-logo-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+}
+
+/* ── Error text ── */
+.error-text {
+  color: var(--danger-text);
+  font-size: 14px;
+  min-height: 1.4em;
+}
+
+/* ── Scrollbar ── */
+/* Targets: main content area, all dialog innards, notification panel, mobile sheet */
+.content-area::-webkit-scrollbar,
+dialog ::-webkit-scrollbar,
+.zf-notif-panel::-webkit-scrollbar,
+.mobile-more-sheet::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.content-area::-webkit-scrollbar-track,
+dialog ::-webkit-scrollbar-track,
+.zf-notif-panel::-webkit-scrollbar-track,
+.mobile-more-sheet::-webkit-scrollbar-track {
+  background: transparent;
+}
+.content-area::-webkit-scrollbar-thumb,
+dialog ::-webkit-scrollbar-thumb,
+.zf-notif-panel::-webkit-scrollbar-thumb,
+.mobile-more-sheet::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.12);
+  border-radius: 4px;
+}
+
+[data-theme="dark"] .content-area::-webkit-scrollbar-thumb,
+[data-theme="dark"] dialog ::-webkit-scrollbar-thumb,
+[data-theme="dark"] .zf-notif-panel::-webkit-scrollbar-thumb,
+[data-theme="dark"] .mobile-more-sheet::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* Plain "Loading..." paragraph shown while a route or the app boots. */
+.zf-loading {
+  padding: 2em;
+}

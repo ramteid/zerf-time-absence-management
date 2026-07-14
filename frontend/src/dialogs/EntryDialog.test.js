@@ -58,7 +58,10 @@ describe("EntryDialog", () => {
   });
 
   afterEach(() => {
-    if (component) { unmount(component); component = null; }
+    if (component) {
+      unmount(component);
+      component = null;
+    }
     target.remove();
     HTMLDialogElement.prototype.showModal = originalShowModal;
   });
@@ -93,8 +96,8 @@ describe("EntryDialog", () => {
     });
     await settle();
     expect(target.textContent).toContain("Edit Entry");
-    const saveBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.trim() === "Save"
+    const saveBtn = [...target.querySelectorAll("button")].find(
+      (b) => b.textContent.trim() === "Save",
     );
     expect(saveBtn).not.toBeNull();
   });
@@ -109,7 +112,7 @@ describe("EntryDialog", () => {
     });
     await settle();
     const options = [...target.querySelectorAll("#entry-category option")].map(
-      (o) => o.textContent
+      (o) => o.textContent,
     );
     expect(options).toContain("Core Duties");
     expect(options).toContain("Training");
@@ -125,7 +128,7 @@ describe("EntryDialog", () => {
     });
     await settle();
     const deleteBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Delete")
+      b.textContent.includes("Delete"),
     );
     expect(deleteBtn).toBeUndefined();
   });
@@ -150,7 +153,7 @@ describe("EntryDialog", () => {
     });
     await settle();
     const deleteBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Delete")
+      b.textContent.includes("Delete"),
     );
     expect(deleteBtn).not.toBeNull();
   });
@@ -168,15 +171,15 @@ describe("EntryDialog", () => {
     });
     await settle();
 
-    const addBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.trim() === "Add Entry"
+    const addBtn = [...target.querySelectorAll("button")].find(
+      (b) => b.textContent.trim() === "Add Entry",
     );
     addBtn?.click();
     await settle();
     await settle();
 
     const postCall = apiMock.mock.calls.find(
-      ([path, opts]) => path === "/time-entries" && opts?.method === "POST"
+      ([path, opts]) => path === "/time-entries" && opts?.method === "POST",
     );
     expect(postCall).toBeTruthy();
   });
@@ -203,7 +206,7 @@ describe("EntryDialog", () => {
     await settle();
 
     const deleteBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Delete")
+      b.textContent.includes("Delete"),
     );
     deleteBtn?.click();
     await settle();
@@ -211,7 +214,7 @@ describe("EntryDialog", () => {
 
     const deleteCall = apiMock.mock.calls.find(
       ([path, opts]) =>
-        path === "/time-entries/30" && opts?.method === "DELETE"
+        path === "/time-entries/30" && opts?.method === "DELETE",
     );
     expect(deleteCall).toBeTruthy();
   });

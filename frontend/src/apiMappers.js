@@ -19,10 +19,10 @@ function formatIsoDate(value) {
 
 function isWeekend(value, workdaysPerWeek = 5) {
   // Determine if a date is a non-contract day based on user's workdays_per_week.
-  // 
+  //
   // JavaScript getDay() returns: 0=Sunday, 1=Monday, ..., 6=Saturday
   // ISO weekday (expected format): 0=Monday, 1=Tuesday, ..., 6=Sunday
-  // 
+  //
   // Conversion: (getDay() + 6) % 7 converts JS day to ISO day
   // Examples:
   //   - Sunday (0) → 6 (ISO Sunday)
@@ -45,9 +45,14 @@ export function holidayDateSet(holidays = []) {
   return new Set(holidays.map((holiday) => holiday.holiday_date));
 }
 
-export function countWorkdays(startDate, endDate, holidays = new Set(), workdaysPerWeek = 5) {
+export function countWorkdays(
+  startDate,
+  endDate,
+  holidays = new Set(),
+  workdaysPerWeek = 5,
+) {
   // Count contract workdays in a date range.
-  // 
+  //
   // Contract workdays depend on user's workdays_per_week configuration:
   //   - workdaysPerWeek=5: Mon-Fri (default 5-day week)
   //   - workdaysPerWeek=4: Mon-Thu (4-day week)

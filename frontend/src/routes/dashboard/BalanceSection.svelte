@@ -19,13 +19,12 @@
 </script>
 
 <div class="dashboard-group">
-  <div class="dashboard-group-label" style="display:flex;align-items:center;gap:6px">
+  <div class="dashboard-group-label zf-row">
     {$t("My Balance")}
     <button
-      class="zf-btn-icon-sm zf-btn-ghost"
+      class="zf-btn-icon-sm zf-btn-ghost zf-help-icon"
       title={$t("help_my_balance")}
       on:click={() => onHelpToggle("balance")}
-      style="color:var(--text-tertiary);font-size:14px;cursor:help"
     >
       <Icon name="Info" size={14} />
     </button>
@@ -48,9 +47,13 @@
         {formatHours((submittedOvertimeBalanceMin || 0) / 60)}
         <span slot="sub">
           {#if submittedOvertimeBalanceMin !== overtimeBalanceMin}
-            {$t("Approved: {value}", { value: formatHours((overtimeBalanceMin || 0) / 60) })}
+            {$t("Approved: {value}", {
+              value: formatHours((overtimeBalanceMin || 0) / 60),
+            })}
           {:else}
-            {$t("This month: {value}", { value: formatHours((currentMonthDiffMin || 0) / 60) })}
+            {$t("This month: {value}", {
+              value: formatHours((currentMonthDiffMin || 0) / 60),
+            })}
           {/if}
         </span>
       </StatCard>
@@ -73,7 +76,7 @@
       {:else}
         {$t("Weeks missing")}
       {/if}
-      <span slot="sub" style="color:var(--text-tertiary);font-size:11px;margin-top:4px">
+      <span slot="sub" class="stat-note">
         {#if currentWeekOpen}
           {$t("Current week: still open")}
         {/if}
@@ -88,8 +91,14 @@
 </div>
 
 <style>
-  .dashboard-help {
+  .stat-note {
+    color: var(--text-tertiary);
     font-size: 12px;
+    margin-top: 4px;
+  }
+
+  .dashboard-help {
+    font-size: 13px;
     color: var(--text-tertiary);
     margin-bottom: 12px;
     padding: 8px;
@@ -98,7 +107,7 @@
   }
 
   .dashboard-card-error {
-    font-size: 11px;
+    font-size: 12px;
     margin-top: 4px;
   }
 </style>

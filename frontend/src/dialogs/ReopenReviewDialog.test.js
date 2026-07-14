@@ -32,9 +32,7 @@ describe("ReopenReviewDialog", () => {
     created_at: "2026-05-22T08:00:00Z",
   };
 
-  const users = [
-    { id: 7, first_name: "Dana", last_name: "Dev" },
-  ];
+  const users = [{ id: 7, first_name: "Dana", last_name: "Dev" }];
 
   beforeEach(() => {
     target = document.createElement("div");
@@ -47,7 +45,10 @@ describe("ReopenReviewDialog", () => {
   });
 
   afterEach(() => {
-    if (component) { unmount(component); component = null; }
+    if (component) {
+      unmount(component);
+      component = null;
+    }
     target.remove();
     HTMLDialogElement.prototype.showModal = originalShowModal;
   });
@@ -102,7 +103,7 @@ describe("ReopenReviewDialog", () => {
     });
     await settle();
     const approveBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Approve")
+      b.textContent.includes("Approve"),
     );
     approveBtn?.click();
     await settle();
@@ -125,7 +126,7 @@ describe("ReopenReviewDialog", () => {
     });
     await settle();
     const rejectBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Reject")
+      b.textContent.includes("Reject"),
     );
     rejectBtn?.click();
     await settle();
@@ -146,7 +147,7 @@ describe("ReopenReviewDialog", () => {
     });
     await settle();
     const closeBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Close")
+      b.textContent.includes("Close"),
     );
     closeBtn?.click();
     await settle();

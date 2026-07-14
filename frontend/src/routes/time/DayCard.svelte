@@ -110,7 +110,10 @@
         if (breakTime >= entry._start && breakTime <= entry._end) {
           const entryDuration = entry._end - entry._start;
           markers[entry.id] = {
-            positionFraction: Math.min((breakTime - entry._start) / entryDuration, 1),
+            positionFraction: Math.min(
+              (breakTime - entry._start) / entryDuration,
+              1,
+            ),
             deductionFraction: applicableRule.deductionMinutes / entryDuration,
           };
           break;
@@ -141,10 +144,8 @@
     {#if !weekend}
       <div
         class="day-total tab-num"
-        style="color: {!isAssistant &&
-        dailyTotalMinutes / 60 >= dailyTargetHours
-          ? 'var(--accent)'
-          : 'var(--text-primary)'}"
+        class:target-met={!isAssistant &&
+          dailyTotalMinutes / 60 >= dailyTargetHours}
       >
         {formatHours(dailyTotalHours)}
       </div>
@@ -156,7 +157,7 @@
       {@const statusColor = day.absenceKind
         ? absenceColor(day.absenceKind)
         : "var(--warning-text)"}
-      <div class="day-status-indicator" style={`--status-color:${statusColor}`}>
+      <div class="day-status-indicator" style:--status-color={statusColor}>
         <span class="day-status-dot" aria-hidden="true"></span>
         <span class="day-status-text">
           {day.absenceKind
@@ -183,8 +184,7 @@
   {#if !weekend && (weekStatus === "draft" || drafts.length > 0)}
     <div class="day-add-btn">
       <button
-        class="zf-btn zf-btn-ghost zf-btn-sm"
-        style="width:100%;justify-content:center;border-style:dashed;border-color:var(--border)"
+        class="zf-btn zf-btn-ghost zf-btn-sm add-entry-btn"
         disabled={!canAdd}
         on:click={() => dispatch("add", { entry_date: day.ds })}
       >
@@ -195,6 +195,18 @@
 </div>
 
 <style>
+  /* Highlight the daily total once the target hours are reached. */
+  .day-total.target-met {
+    color: var(--accent);
+  }
+
+  .add-entry-btn {
+    width: 100%;
+    justify-content: center;
+    border-style: dashed;
+    border-color: var(--border);
+  }
+
   .day-card--before-start {
     opacity: 0.4;
   }
@@ -214,7 +226,7 @@
     border: 1px solid color-mix(in srgb, var(--status-color) 28%, transparent);
     background: color-mix(in srgb, var(--status-color) 12%, transparent);
     color: var(--status-color);
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 600;
     text-align: center;
   }

@@ -18,7 +18,12 @@ import { absenceCategories } from "../../stores.js";
 const BASE_CATEGORIES = [
   { id: 1, slug: "vacation", name: "Vacation", cost_type: "vacation" },
   { id: 2, slug: "sick", name: "Sick Leave", cost_type: "none" },
-  { id: 7, slug: "flextime_reduction", name: "Flextime Reduction", cost_type: "flextime" },
+  {
+    id: 7,
+    slug: "flextime_reduction",
+    name: "Flextime Reduction",
+    cost_type: "flextime",
+  },
 ];
 
 describe("reports domain helpers", () => {
@@ -143,7 +148,10 @@ describe("reports domain helpers", () => {
   // teamCategoryMinutes returns 0 for missing category
   it("teamCategoryMinutes returns 0 when category is not in row", () => {
     expect(
-      teamCategoryMinutes({ categories: [{ category: "Admin", minutes: 30 }] }, "Project"),
+      teamCategoryMinutes(
+        { categories: [{ category: "Admin", minutes: 30 }] },
+        "Project",
+      ),
     ).toBe(0);
   });
 
@@ -207,7 +215,7 @@ describe("reports domain helpers", () => {
   });
 
   // B3: exclusion is cost_type-based, not slug-based — custom cost_type="flextime" categories are excluded too
-  it("totalAbsenceDays excludes any custom cost_type=\"flextime\" category", () => {
+  it('totalAbsenceDays excludes any custom cost_type="flextime" category', () => {
     absenceCategories.set([
       { id: 1, slug: "vacation", name: "Vacation", cost_type: "vacation" },
       { id: 8, slug: "comp_time", name: "Comp Time", cost_type: "flextime" },
@@ -220,7 +228,7 @@ describe("reports domain helpers", () => {
     ).toBe(3); // comp_time excluded because cost_type="flextime"
   });
 
-  it("absenceKindTotals excludes any custom cost_type=\"flextime\" category", () => {
+  it('absenceKindTotals excludes any custom cost_type="flextime" category', () => {
     absenceCategories.set([
       { id: 1, slug: "vacation", name: "Vacation", cost_type: "vacation" },
       { id: 8, slug: "comp_time", name: "Comp Time", cost_type: "flextime" },

@@ -41,7 +41,10 @@ describe("WeekReviewDialog", () => {
   });
 
   afterEach(() => {
-    if (component) { unmount(component); component = null; }
+    if (component) {
+      unmount(component);
+      component = null;
+    }
     target.remove();
     HTMLDialogElement.prototype.showModal = originalShowModal;
   });
@@ -81,7 +84,7 @@ describe("WeekReviewDialog", () => {
     });
     await settle();
     const approveBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Approve")
+      b.textContent.includes("Approve"),
     );
     approveBtn?.click();
     await settle();
@@ -105,7 +108,7 @@ describe("WeekReviewDialog", () => {
     });
     await settle();
     const rejectBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Reject")
+      b.textContent.includes("Reject"),
     );
     rejectBtn?.click();
     await settle();
@@ -131,10 +134,11 @@ describe("WeekReviewDialog", () => {
     // The Dialog's own header X button is not governed by the busy prop;
     // check only the named action buttons that trigger approve/reject/close API
     // calls — these must be disabled to block a double-submit.
-    const actionBtns = [...target.querySelectorAll("button")].filter((b) =>
-      b.textContent.includes("Close") ||
-      b.textContent.includes("Approve") ||
-      b.textContent.includes("Reject")
+    const actionBtns = [...target.querySelectorAll("button")].filter(
+      (b) =>
+        b.textContent.includes("Close") ||
+        b.textContent.includes("Approve") ||
+        b.textContent.includes("Reject"),
     );
     expect(actionBtns.length).toBeGreaterThan(0);
     const allDisabled = actionBtns.every((b) => b.disabled);
@@ -156,7 +160,7 @@ describe("WeekReviewDialog", () => {
     });
     await settle();
     const closeBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Close")
+      b.textContent.includes("Close"),
     );
     closeBtn?.click();
     await settle();

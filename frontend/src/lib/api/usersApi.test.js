@@ -41,7 +41,9 @@ describe("usersApi", () => {
   it("getArchivedUsers fetches the archived roster from /users/archived", async () => {
     // The AdminArchivedUsers page calls this to list users that have been
     // archived by an admin. All archived records are returned regardless of role.
-    api.mockResolvedValue([{ id: 5, first_name: "Eve", archived_at: "2025-01-01T00:00:00Z" }]);
+    api.mockResolvedValue([
+      { id: 5, first_name: "Eve", archived_at: "2025-01-01T00:00:00Z" },
+    ]);
     const result = await getArchivedUsers();
     expect(api).toHaveBeenCalledWith("/users/archived");
     expect(result[0].first_name).toBe("Eve");
@@ -51,10 +53,10 @@ describe("usersApi", () => {
     // The archive endpoint requires a replacements map when the target user
     // approves active members. String keys are required by the JSON body spec.
     api.mockResolvedValue({ ok: true });
-    await archiveUser(7, { "42": 3 });
+    await archiveUser(7, { 42: 3 });
     expect(api).toHaveBeenCalledWith("/users/7/archive", {
       method: "POST",
-      body: { approver_replacements: { "42": 3 } },
+      body: { approver_replacements: { 42: 3 } },
     });
   });
 

@@ -80,7 +80,9 @@ async function waitForPath(expectedPath, timeout = 10000) {
   } finally {
     unsubscribe();
   }
-  throw new Error(`Path did not become ${expectedPath}; latest path was ${currentPath}`);
+  throw new Error(
+    `Path did not become ${expectedPath}; latest path was ${currentPath}`,
+  );
 }
 
 describe("Calendar", () => {
@@ -153,7 +155,9 @@ describe("Calendar", () => {
     component = mount(Calendar, { target });
     await settle();
 
-    const previousButton = target.querySelector('[aria-label="Previous month"]');
+    const previousButton = target.querySelector(
+      '[aria-label="Previous month"]',
+    );
     const nextButton = target.querySelector('[aria-label="Next month"]');
 
     previousButton.click();

@@ -84,7 +84,9 @@ export function rawCellEvents(
     const durationLabel =
       startTime && endTime ? minToHM(durMin(startTime, endTime)) : "";
     const timeRange = startTime && endTime ? `${startTime} - ${endTime}` : "";
-    const timeDetail = durationLabel ? `${timeRange} (${durationLabel})` : timeRange;
+    const timeDetail = durationLabel
+      ? `${timeRange} (${durationLabel})`
+      : timeRange;
     const isOwn = entry.user_id === currentUserId;
     const entryUser = !isOwn ? userMap.get(entry.user_id) : null;
     const userName = entryUser
@@ -101,7 +103,13 @@ export function rawCellEvents(
   return events;
 }
 
-export function buildColorMap(baseCells, entryMap, categoryMap, absenceCategoryMap, translate) {
+export function buildColorMap(
+  baseCells,
+  entryMap,
+  categoryMap,
+  absenceCategoryMap,
+  translate,
+) {
   // Reserve the holiday color and all DB-stored absence colors so work-category
   // colors are never assigned a value that would clash with absence bands.
   const reservedColors = new Set([
@@ -115,7 +123,13 @@ export function buildColorMap(baseCells, entryMap, categoryMap, absenceCategoryM
   const used = new Set();
   for (const cell of baseCells) {
     if (cell.other) continue;
-    for (const event of rawCellEvents(cell, entryMap, categoryMap, absenceCategoryMap, translate)) {
+    for (const event of rawCellEvents(
+      cell,
+      entryMap,
+      categoryMap,
+      absenceCategoryMap,
+      translate,
+    )) {
       if (assigned.has(event.key)) continue;
       const isWorkEvent = event.key.startsWith("work:");
       const blocked = new Set([...used, ...reservedColors]);

@@ -21,26 +21,21 @@
   }
 </script>
 
-<Dialog bind:this={dialog} {title} onClose={onDismiss} style="max-width:520px">
-  <div
-    style="padding:12px;background:var(--bg-muted);border-radius:var(--radius-sm);font-family:monospace;font-size:14px;word-break:break-all"
-  >
+<Dialog bind:this={dialog} {title} onClose={onDismiss} wide>
+  <div class="pw-box">
     {$t("Temporary password:")} <strong>{password}</strong>
   </div>
   {#if smtpEnabled}
-    <div style="font-size:12px;color:var(--text-tertiary);margin-top:8px">
-      {mode === "reset" ? $t("Password reset email will be sent.") : $t("Registration email will be sent.")}
+    <div class="text-hint mt-8">
+      {mode === "reset"
+        ? $t("Password reset email will be sent.")
+        : $t("Registration email will be sent.")}
     </div>
   {:else}
-    <div
-      style="margin-top:10px;padding:10px 14px;background:var(--danger-bg, #fef2f2);border:2px solid var(--danger, #dc2626);border-radius:var(--radius-sm)"
-    >
-      <strong style="color:var(--danger, #dc2626);font-size:14px"
-        >{$t("No email was sent! Email / SMTP is not configured.")}</strong
+    <div class="danger-box">
+      <strong>{$t("No email was sent! Email / SMTP is not configured.")}</strong
       >
-      <div
-        style="color:var(--danger, #dc2626);font-size:13px;margin-top:4px;font-weight:400"
-      >
+      <div>
         {$t("You must deliver this password to the user in person!")}
       </div>
     </div>
@@ -58,3 +53,37 @@
     >
   </svelte:fragment>
 </Dialog>
+
+<style>
+  /* Monospace box so the generated password is easy to read and copy. */
+  .pw-box {
+    padding: 12px;
+    background: var(--bg-muted);
+    border-radius: var(--radius-sm);
+    font-family: monospace;
+    font-size: 15px;
+    word-break: break-all;
+  }
+
+  /* Hard-to-miss warning that no e-mail was sent. Uses the danger tokens
+     (the old inline version referenced an undefined --danger-bg variable). */
+  .danger-box {
+    margin-top: 10px;
+    padding: 10px 14px;
+    background: var(--danger-soft);
+    border: 2px solid var(--danger);
+    border-radius: var(--radius-sm);
+  }
+
+  .danger-box strong {
+    color: var(--danger-text);
+    font-size: 15px;
+  }
+
+  .danger-box div {
+    color: var(--danger-text);
+    font-size: 14px;
+    margin-top: 4px;
+    font-weight: 400;
+  }
+</style>

@@ -56,22 +56,42 @@ describe("ApprovalQueues", () => {
     document.body.appendChild(target);
     setLanguage("en");
     const cats = [
-      { id: 1, slug: "vacation", name: "Vacation", cost_type: "vacation", auto_approve_past: false },
-      { id: 2, slug: "sick", name: "Sick", cost_type: "none", auto_approve_past: true },
+      {
+        id: 1,
+        slug: "vacation",
+        name: "Vacation",
+        cost_type: "vacation",
+        auto_approve_past: false,
+      },
+      {
+        id: 2,
+        slug: "sick",
+        name: "Sick",
+        cost_type: "none",
+        auto_approve_past: true,
+      },
     ];
     absenceCategories.set(cats);
     setAbsenceCategoryCache(cats);
   });
 
   afterEach(() => {
-    if (component) { unmount(component); component = null; }
+    if (component) {
+      unmount(component);
+      component = null;
+    }
     target.remove();
   });
 
   it("renders the Week Approvals heading", async () => {
     component = mount(ApprovalQueues, {
       target,
-      props: { pendingWeeks: [], pendingReopens: [], pendingAbsences: [], users },
+      props: {
+        pendingWeeks: [],
+        pendingReopens: [],
+        pendingAbsences: [],
+        users,
+      },
     });
     await settle();
     expect(target.textContent).toContain("Week Approvals");
@@ -107,7 +127,7 @@ describe("ApprovalQueues", () => {
     });
     await settle();
     const approveAllBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Approve All")
+      b.textContent.includes("Approve All"),
     );
     expect(approveAllBtn).not.toBeNull();
   });
@@ -126,7 +146,7 @@ describe("ApprovalQueues", () => {
     });
     await settle();
     const approveAllBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Approve All")
+      b.textContent.includes("Approve All"),
     );
     expect(approveAllBtn).toBeUndefined();
   });
@@ -169,7 +189,12 @@ describe("ApprovalQueues", () => {
   it("renders the Absence Requests section heading", async () => {
     component = mount(ApprovalQueues, {
       target,
-      props: { pendingWeeks: [], pendingReopens: [], pendingAbsences: [], users },
+      props: {
+        pendingWeeks: [],
+        pendingReopens: [],
+        pendingAbsences: [],
+        users,
+      },
     });
     await settle();
     expect(target.textContent).toContain("Absence Requests");

@@ -99,13 +99,11 @@
       <div class="login-logo-icon">
         <Icon name="Clock" size={18} />
       </div>
-      <h1
-        style="margin:0;font-size:20px;font-weight:400;letter-spacing:-0.02em"
-      >
+      <h1 class="auth-title">
         ZERF {$t("Time tracking")}
       </h1>
     </div>
-    <p style="font-size:13px;color:var(--text-tertiary);margin-bottom:24px">
+    <p class="zf-form-intro">
       {$t("Create the initial administrator account to get started.")}
     </p>
     <form
@@ -115,8 +113,8 @@
       autocomplete="on"
       on:submit={submit}
     >
-      <div style="display:flex;gap:10px;margin-bottom:14px">
-        <div style="flex:1">
+      <div class="name-row">
+        <div class="flex-1">
           <label class="zf-label" for="setup-first-name"
             >{$t("First name")}</label
           >
@@ -130,7 +128,7 @@
             autocomplete="given-name"
           />
         </div>
-        <div style="flex:1">
+        <div class="flex-1">
           <label class="zf-label" for="setup-last-name">{$t("Last name")}</label
           >
           <input
@@ -144,7 +142,7 @@
           />
         </div>
       </div>
-      <div style="margin-bottom:14px">
+      <div class="mb-14">
         <label class="zf-label" for="setup-email">{$t("Email")}</label>
         <input
           id="setup-email"
@@ -156,7 +154,7 @@
           autocomplete="username"
         />
       </div>
-      <div style="margin-bottom:14px">
+      <div class="mb-14">
         <label class="zf-label" for="setup-password">{$t("Password")}</label>
         <input
           id="setup-password"
@@ -169,7 +167,7 @@
           autocomplete="new-password"
         />
       </div>
-      <div style="margin-bottom:14px">
+      <div class="mb-14">
         <label class="zf-label" for="setup-confirm"
           >{$t("Confirm password")}</label
         >
@@ -184,22 +182,61 @@
           autocomplete="new-password"
         />
       </div>
-      <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:14px;cursor:pointer">
-        <input type="checkbox" bind:checked={tracksTime} style="margin-top:2px" />
+      <label class="opt-check">
+        <input type="checkbox" bind:checked={tracksTime} />
         <div>
-          <div style="font-size:13px;font-weight:500;color:var(--text-primary)">{$t("Enable time tracking for this account")}</div>
-          <div style="font-size:11px;color:var(--text-tertiary);margin-top:2px">{$t("When disabled, this admin works in management-only mode (no time entries or absences).")}</div>
+          <div class="opt-title">
+            {$t("Enable time tracking for this account")}
+          </div>
+          <div class="opt-desc">
+            {$t(
+              "When disabled, this admin works in management-only mode (no time entries or absences).",
+            )}
+          </div>
         </div>
       </label>
-      <div class="error-text" style="margin-bottom:8px">{error}</div>
+      <div class="error-text mb-8">{error}</div>
       <button
-        class="zf-btn zf-btn-primary"
+        class="zf-btn zf-btn-primary zf-btn-block"
         type="submit"
         disabled={submitting}
-        style="width:100%;justify-content:center;height:38px"
       >
         {submitting ? $t("Creating account…") : $t("Create admin account")}
       </button>
     </form>
   </div>
 </div>
+
+<style>
+  .name-row {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+
+  /* Opt-in checkbox with a title and description; checkbox aligns with the
+     first text line. */
+  .opt-check {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-bottom: 14px;
+    cursor: pointer;
+  }
+
+  .opt-check input {
+    margin-top: 2px;
+  }
+
+  .opt-title {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+
+  .opt-desc {
+    font-size: 12px;
+    color: var(--text-tertiary);
+    margin-top: 2px;
+  }
+</style>

@@ -55,10 +55,12 @@
   }
 </script>
 
-<div class="top-bar">
+<div class="top-bar page-medium">
   <div class="top-bar-title">
     <h1>{$t("Users")}</h1>
-    <div class="top-bar-subtitle">{$t("You can only manage assistants assigned to you.")}</div>
+    <div class="top-bar-subtitle">
+      {$t("You can only manage assistants assigned to you.")}
+    </div>
   </div>
   <div class="top-bar-actions">
     <button
@@ -70,34 +72,33 @@
   </div>
 </div>
 
-<div class="content-area" style="max-width:760px">
-  <div class="zf-card" style="overflow-x:auto">
-    {#each users as u, i (u.id)}
-      <div
-        style="padding:10px 16px;{i < users.length - 1
-          ? 'border-bottom:1px solid var(--border)'
-          : ''};display:flex;align-items:center;gap:12px"
-      >
+<div class="content-area page-medium">
+  <div class="zf-card zf-table-wrap">
+    {#each users as u (u.id)}
+      <div class="user-row">
         <div
-          class="avatar {userAvatarClass(u)}"
-          style="width:32px;height:32px;font-size:12px;opacity:{u.can_manage ? 1 : 0.5}"
+          class="avatar avatar-sm {userAvatarClass(u)}"
+          class:dimmed={!u.can_manage}
         >
           {userInitials(u)}
         </div>
-        <div style="flex:1;min-width:0;opacity:{u.can_manage ? 1 : 0.5}">
-          <div style="font-size:13px;font-weight:500">
+        <div class="flex-min0" class:dimmed={!u.can_manage}>
+          <div class="zf-item-title">
             {u.first_name}
             {u.last_name}
           </div>
           {#if u.can_manage}
-            <div style="font-size:11.5px;color:var(--text-tertiary)">
+            <div class="text-hint">
               {$t("Assistant")}
             </div>
           {/if}
         </div>
         {#if u.can_manage}
-          <div style="display:flex;gap:4px">
-            <button class="zf-btn zf-btn-ghost zf-btn-sm" on:click={() => editUser(u)}>
+          <div class="zf-actions">
+            <button
+              class="zf-btn zf-btn-ghost zf-btn-sm"
+              on:click={() => editUser(u)}
+            >
               <Icon name="Edit" size={13} />
             </button>
             <button
@@ -114,30 +115,26 @@
   </div>
 
   {#if archivedUsers.length > 0}
-    <h2 style="margin:24px 0 8px;font-size:14px;font-weight:600;color:var(--text-secondary)">
+    <h2 class="zf-list-heading">
       {$t("Archived Users")}
     </h2>
-    <div class="zf-card" style="overflow-x:auto">
-      {#each archivedUsers as u, i (u.id)}
-        <div
-          style="padding:10px 16px;{i < archivedUsers.length - 1
-            ? 'border-bottom:1px solid var(--border)'
-            : ''};display:flex;align-items:center;gap:12px"
-        >
-          <div class="avatar {userAvatarClass(u)}" style="width:32px;height:32px;font-size:12px">
+    <div class="zf-card zf-table-wrap">
+      {#each archivedUsers as u (u.id)}
+        <div class="user-row">
+          <div class="avatar {userAvatarClass(u)} avatar-sm">
             {userInitials(u)}
           </div>
-          <div style="flex:1;min-width:0">
-            <div style="font-size:13px;font-weight:500">
+          <div class="flex-min0">
+            <div class="zf-item-title">
               {u.first_name}
               {u.last_name}
             </div>
-            <div style="font-size:11.5px;color:var(--text-tertiary)">
+            <div class="text-hint">
               {$t("Assistant")}
               · {$t("Archived on {date}", { date: fmtDate(u.archived_at) })}
             </div>
           </div>
-          <div style="display:flex;gap:4px">
+          <div class="zf-actions">
             <button
               class="zf-btn zf-btn-ghost zf-btn-sm"
               title={$t("Restore")}
@@ -185,3 +182,21 @@
     }}
   />
 {/if}
+
+<style>
+  .user-row {
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .user-row:not(:last-child) {
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* Members this team lead cannot manage stay listed but visually recede. */
+  .dimmed {
+    opacity: 0.5;
+  }
+</style>

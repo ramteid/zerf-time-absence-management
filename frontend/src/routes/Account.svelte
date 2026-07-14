@@ -32,7 +32,6 @@
       .catch(() => {});
   }
 
-
   async function toggleDarkMode() {
     if (savingTheme) return;
     savingTheme = true;
@@ -98,43 +97,35 @@
   }
 </script>
 
-<div class="top-bar">
+<div class="top-bar page-narrow">
   <div class="top-bar-title">
     <h1>{$t("Account")}</h1>
     <div class="top-bar-subtitle">{$t("Your profile & preferences")}</div>
   </div>
 </div>
 
-<div class="content-area" style="max-width:640px">
+<div class="content-area page-narrow">
   {#if $currentUser.must_change_password}
-    <div
-      class="zf-card"
-      style="padding:16px 20px;margin-bottom:16px;border-color:var(--warning)"
-    >
-      <strong style="color:var(--warning-text)"
-        >{$t("Please change your password.")}</strong
-      >
-      <p style="font-size:13px;color:var(--text-tertiary);margin-top:4px">
+    <div class="zf-card zf-card-warning">
+      <strong class="text-warning">{$t("Please change your password.")}</strong>
+      <p class="fs-14 text-tertiary mt-4">
         {$t("You are using a temporary password.")}
       </p>
     </div>
   {/if}
 
   <!-- Profile card -->
-  <div class="zf-card" style="padding:20px;margin-bottom:16px">
-    <div style="display:flex;align-items:center;gap:16px;margin-bottom:20px">
-      <div
-        class="avatar {userAvatarClass($currentUser)}"
-        style="width:56px;height:56px;font-size:21px"
-      >
+  <div class="zf-card zf-card-section">
+    <div class="profile-head">
+      <div class="avatar avatar-lg {userAvatarClass($currentUser)}">
         {userInitials($currentUser)}
       </div>
       <div>
-        <div style="font-size:18px;font-weight:400">
+        <div class="profile-name">
           {$currentUser.first_name}
           {$currentUser.last_name}
         </div>
-        <div style="font-size:13px;color:var(--text-tertiary)">
+        <div class="fs-14 text-tertiary">
           {roleLabel($currentUser.role)}
         </div>
       </div>
@@ -144,10 +135,9 @@
         <label class="zf-label" for="account-email">{$t("Email")}</label>
         <input
           id="account-email"
-          class="zf-input"
+          class="zf-input text-secondary"
           value={$currentUser.email}
           readonly
-          style="color:var(--text-secondary)"
         />
       </div>
       {#if !isAssistantCurrentUser}
@@ -157,12 +147,11 @@
           >
           <input
             id="account-weekly-hours"
-            class="zf-input"
+            class="zf-input text-secondary"
             value={$t("{hours} / week", {
               hours: formatHours($currentUser.weekly_hours),
             })}
             readonly
-            style="color:var(--text-secondary)"
           />
         </div>
         <div>
@@ -171,10 +160,9 @@
           >
           <input
             id="account-workdays-per-week"
-            class="zf-input"
+            class="zf-input text-secondary"
             value={$currentUser.workdays_per_week}
             readonly
-            style="color:var(--text-secondary)"
           />
         </div>
       {/if}
@@ -184,10 +172,9 @@
         >
         <input
           id="account-annual-leave-this"
-          class="zf-input"
+          class="zf-input text-secondary"
           value={leaveDaysThisYear}
           readonly
-          style="color:var(--text-secondary)"
         />
       </div>
       <div>
@@ -196,10 +183,9 @@
         >
         <input
           id="account-annual-leave-next"
-          class="zf-input"
+          class="zf-input text-secondary"
           value={leaveDaysNextYear}
           readonly
-          style="color:var(--text-secondary)"
         />
       </div>
       <div>
@@ -208,17 +194,18 @@
         >
         <input
           id="account-start-date"
-          class="zf-input"
+          class="zf-input text-secondary"
           value={fmtDate($currentUser.start_date)}
           readonly
-          style="color:var(--text-secondary)"
         />
       </div>
       {#if $currentUser.approvers && $currentUser.approvers.length > 0}
         <div>
           <div class="zf-label">{$t("Approvers")}</div>
-          <div style="font-size:13px;color:var(--text-secondary);padding:6px 0">
-            {$currentUser.approvers.map((a) => `${a.first_name} ${a.last_name}`).join(", ")}
+          <div class="text-note value-line">
+            {$currentUser.approvers
+              .map((a) => `${a.first_name} ${a.last_name}`)
+              .join(", ")}
           </div>
         </div>
       {/if}
@@ -226,7 +213,7 @@
   </div>
 
   <!-- Password -->
-  <div class="zf-card" style="padding:20px;margin-bottom:16px">
+  <div class="zf-card zf-card-section">
     <div class="field-card-title">{$t("Change password")}</div>
     <div class="field-group">
       {#if !$currentUser.must_change_password}
@@ -272,7 +259,7 @@
         </div>
       </div>
       <div class="error-text">{error}</div>
-      <div style="display:flex;justify-content:flex-end">
+      <div class="form-actions">
         <button class="zf-btn zf-btn-primary" on:click={changePassword}
           >{$t("Save")}</button
         >
@@ -281,7 +268,7 @@
   </div>
 
   <!-- Appearance -->
-  <div class="zf-card" style="padding:20px;margin-bottom:16px">
+  <div class="zf-card zf-card-section">
     <div class="field-card-title">{$t("Appearance")}</div>
     <div class="field-toggle-row">
       <div>
@@ -299,3 +286,27 @@
     </div>
   </div>
 </div>
+
+<style>
+  .profile-head {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+
+  .profile-name {
+    font-size: 19px;
+    font-weight: 400;
+  }
+
+  /* Read-only preference value aligned with the input rows around it. */
+  .value-line {
+    padding: 6px 0;
+  }
+
+  .form-actions {
+    display: flex;
+    justify-content: flex-end;
+  }
+</style>

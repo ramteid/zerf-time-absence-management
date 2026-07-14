@@ -31,7 +31,10 @@ function datePartsInConfiguredTimeZone(value = new Date(), timezoneOverride) {
 }
 
 export function appTodayDate(timezoneOverride) {
-  const { year, month, day } = datePartsInConfiguredTimeZone(new Date(), timezoneOverride);
+  const { year, month, day } = datePartsInConfiguredTimeZone(
+    new Date(),
+    timezoneOverride,
+  );
   return new Date(year, month - 1, day);
 }
 
@@ -52,7 +55,11 @@ export function appCurrentTimeHM(timezoneOverride) {
 }
 
 function shouldApplyConfiguredTimeZone(value) {
-  return typeof value === "string" && !ISO_DATE_RE.test(value) && UTC_ISO_DATETIME_RE.test(value);
+  return (
+    typeof value === "string" &&
+    !ISO_DATE_RE.test(value) &&
+    UTC_ISO_DATETIME_RE.test(value)
+  );
 }
 
 export function parseDate(value) {
@@ -122,10 +129,13 @@ export function fmtDateTime(d) {
 export function weekdayLabels() {
   const base = new Date(Date.UTC(2024, 0, 1));
   return Array.from({ length: 7 }, (_, dayIndex) =>
-    new Date(base.getTime() + dayIndex * 86400000).toLocaleDateString(getLocale(), {
-      weekday: "short",
-      timeZone: "UTC",
-    }),
+    new Date(base.getTime() + dayIndex * 86400000).toLocaleDateString(
+      getLocale(),
+      {
+        weekday: "short",
+        timeZone: "UTC",
+      },
+    ),
   );
 }
 export function isoDate(d) {
@@ -202,7 +212,12 @@ export function addDays(d, n) {
 export function minToHM(min) {
   const sign = min < 0 ? "-" : "";
   const absoluteMinutes = Math.abs(min);
-  return sign + Math.floor(absoluteMinutes / 60) + ":" + String(absoluteMinutes % 60).padStart(2, "0");
+  return (
+    sign +
+    Math.floor(absoluteMinutes / 60) +
+    ":" +
+    String(absoluteMinutes % 60).padStart(2, "0")
+  );
 }
 export function durMin(start, end) {
   const [bh, bm] = start.split(":").map(Number);
@@ -210,12 +225,20 @@ export function durMin(start, end) {
   return eh * 60 + em - (bh * 60 + bm);
 }
 export function isoWeek(d) {
-  const utcDate = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const utcDate = new Date(
+    Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()),
+  );
   const dayNumber = (utcDate.getUTCDay() + 6) % 7;
   utcDate.setUTCDate(utcDate.getUTCDate() - dayNumber + 3);
   const firstThursday = new Date(Date.UTC(utcDate.getUTCFullYear(), 0, 4));
   return (
-    1 + Math.round(((utcDate - firstThursday) / 86400000 - 3 + ((firstThursday.getUTCDay() + 6) % 7)) / 7)
+    1 +
+    Math.round(
+      ((utcDate - firstThursday) / 86400000 -
+        3 +
+        ((firstThursday.getUTCDay() + 6) % 7)) /
+        7,
+    )
   );
 }
 
@@ -228,8 +251,15 @@ export function fmtWeekLabel(weekStart) {
   const end = addDays(d, 6);
   const locale = getLocale();
   const prefix = locale.startsWith("de") ? "KW" : "Week";
-  const startStr = d.toLocaleDateString(locale, { day: "2-digit", month: "2-digit" });
-  const endStr = end.toLocaleDateString(locale, { day: "2-digit", month: "2-digit", year: "numeric" });
+  const startStr = d.toLocaleDateString(locale, {
+    day: "2-digit",
+    month: "2-digit",
+  });
+  const endStr = end.toLocaleDateString(locale, {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
   return `${prefix} ${kw} (${startStr}–${endStr})`;
 }
 

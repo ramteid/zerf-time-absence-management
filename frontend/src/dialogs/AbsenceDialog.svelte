@@ -16,7 +16,8 @@
   // The store now includes inactive categories for behavior resolution; filter to
   // active-only for the request dropdown so deactivated types don't appear there.
   $: activeAbsenceCategories = $absenceCategories.filter((c) => c.active);
-  $: defaultCategoryId = template.category_id ?? activeAbsenceCategories[0]?.id ?? null;
+  $: defaultCategoryId =
+    template.category_id ?? activeAbsenceCategories[0]?.id ?? null;
   let category_id = defaultCategoryId;
   // Assign once the store finishes loading when opening a new request.
   $: if (!category_id && activeAbsenceCategories.length) {
@@ -31,10 +32,20 @@
 
   // Keep untouched defaults aligned with app timezone changes.
   $: todayIso = appTodayIsoDate($settings?.timezone);
-  $: if (isNew && !template.start_date && start_date === lastTodayIso && todayIso !== lastTodayIso) {
+  $: if (
+    isNew &&
+    !template.start_date &&
+    start_date === lastTodayIso &&
+    todayIso !== lastTodayIso
+  ) {
     start_date = todayIso;
   }
-  $: if (isNew && !template.end_date && end_date === lastTodayIso && todayIso !== lastTodayIso) {
+  $: if (
+    isNew &&
+    !template.end_date &&
+    end_date === lastTodayIso &&
+    todayIso !== lastTodayIso
+  ) {
     end_date = todayIso;
   }
   // eslint-disable-next-line no-useless-assignment
@@ -172,14 +183,17 @@
 <Dialog
   bind:this={dialog}
   title={$t(isNew ? "Request Absence" : "Edit Absence")}
-  onClose={() => onClose(pendingClose?.changed ?? false, pendingClose?.savedAbsence ?? null)}
+  onClose={() =>
+    onClose(pendingClose?.changed ?? false, pendingClose?.savedAbsence ?? null)}
   let:dlg
 >
   <div>
     <label class="zf-label" for="absence-kind">{$t("Type")}</label>
     <select id="absence-kind" class="zf-select" bind:value={category_id}>
       {#if !isNew && template.category_id && !activeAbsenceCategories.find((c) => c.id === template.category_id)}
-        <option value={template.category_id}>{template.category_name || $t("Unknown type")}</option>
+        <option value={template.category_id}
+          >{template.category_name || $t("Unknown type")}</option
+        >
       {/if}
       {#each activeAbsenceCategories as cat (cat.id)}
         <option value={cat.id}>{$t(cat.name)}</option>
@@ -198,11 +212,7 @@
     </div>
     <div>
       <label class="zf-label" for="absence-end-date">{$t("To")}</label>
-      <DatePicker
-        id="absence-end-date"
-        bind:value={end_date}
-        container={dlg}
-      />
+      <DatePicker id="absence-end-date" bind:value={end_date} container={dlg} />
     </div>
   </div>
   {#if selectedDays !== null}
@@ -222,13 +232,16 @@
       id="absence-comment"
       class="zf-textarea"
       rows="3"
-      bind:value={comment}
-    ></textarea>
+      bind:value={comment}></textarea>
   </div>
   <div class="error-text">{error}</div>
   <svelte:fragment slot="footer">
     <button class="zf-btn" on:click={cancel}>{$t("Cancel")}</button>
-    <button class="zf-btn zf-btn-primary" on:click={save} disabled={!category_id}>
+    <button
+      class="zf-btn zf-btn-primary"
+      on:click={save}
+      disabled={!category_id}
+    >
       {$t(isNew ? "Submit Request" : "Save")}
     </button>
   </svelte:fragment>
@@ -236,7 +249,7 @@
 
 <style>
   .selected-days-hint {
-    font-size: 0.85rem;
+    font-size: 0.9rem;
     color: var(--text-secondary, #64748b);
     margin-top: -0.25rem;
   }

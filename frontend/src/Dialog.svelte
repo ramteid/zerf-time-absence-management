@@ -4,7 +4,8 @@
 
   export let title = "";
   export let onClose = null;
-  export let style = "";
+  // Wider layout for dialogs with tables or dense forms (e.g. user editor).
+  export let wide = false;
 
   let dlg;
   let _silent = false;
@@ -29,9 +30,17 @@
   export { dlg as element };
 </script>
 
-<dialog bind:this={dlg} on:close={() => { if (!_silent) onClose?.(); _silent = false; }} on:keydown {style}>
+<dialog
+  bind:this={dlg}
+  on:close={() => {
+    if (!_silent) onClose?.();
+    _silent = false;
+  }}
+  on:keydown
+  class:dialog-wide={wide}
+>
   <header>
-    <slot name="title"><span style="flex:1">{title}</span></slot>
+    <slot name="title"><span class="flex-1">{title}</span></slot>
     <button class="zf-btn-icon-sm zf-btn-ghost" on:click={() => close()}>
       <Icon name="X" size={16} />
     </button>

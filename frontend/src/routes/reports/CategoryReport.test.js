@@ -20,7 +20,10 @@ vi.mock("../../lib/api/reportsApi.js", () => ({
   getTeamCategoryReport: vi.fn(),
 }));
 
-import { getCategoryReport, getTeamCategoryReport } from "../../lib/api/reportsApi.js";
+import {
+  getCategoryReport,
+  getTeamCategoryReport,
+} from "../../lib/api/reportsApi.js";
 
 async function settle() {
   await Promise.resolve();
@@ -57,7 +60,10 @@ describe("CategoryReport", () => {
   });
 
   afterEach(() => {
-    if (component) { unmount(component); component = null; }
+    if (component) {
+      unmount(component);
+      component = null;
+    }
     target.remove();
   });
 
@@ -71,7 +77,7 @@ describe("CategoryReport", () => {
     component = mount(CategoryReport, { target });
     await settle();
     const showBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Show")
+      b.textContent.includes("Show"),
     );
     expect(showBtn).not.toBeNull();
   });
@@ -87,14 +93,14 @@ describe("CategoryReport", () => {
     await settle();
 
     const showBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Show")
+      b.textContent.includes("Show"),
     );
     showBtn.click();
     await settle();
     await settle();
 
     expect(getCategoryReport).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: 1 })
+      expect.objectContaining({ userId: 1 }),
     );
     expect(getTeamCategoryReport).not.toHaveBeenCalled();
   });
@@ -110,7 +116,7 @@ describe("CategoryReport", () => {
     await settle();
 
     const showBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Show")
+      b.textContent.includes("Show"),
     );
     showBtn.click();
     await settle();
@@ -134,7 +140,7 @@ describe("CategoryReport", () => {
     await settle();
 
     const showBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Show")
+      b.textContent.includes("Show"),
     );
     showBtn.click();
     await waitForText(target, "Core Duties");
@@ -151,7 +157,7 @@ describe("CategoryReport", () => {
     await settle();
 
     const showBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Show")
+      b.textContent.includes("Show"),
     );
     showBtn.click();
     await settle();

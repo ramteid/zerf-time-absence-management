@@ -189,9 +189,7 @@
       >
         <Icon name="ChevLeft" size={16} />
       </button>
-      <span class="nav-label tab-num" style="min-width:50px"
-        >{selectedYear}</span
-      >
+      <span class="nav-label tab-num abs-year-label">{selectedYear}</span>
       <button
         class="zf-btn zf-btn-ghost"
         on:click={() => {
@@ -210,20 +208,24 @@
   </div>
 </div>
 
-<div class="content-area" style="overflow-x:hidden">
+<div class="content-area absences-content">
   {#if balance}
     <div class="stat-cards">
       <div class="zf-card stat-card">
         <div class="stat-card-label">
           {$t("Vacation days ({year})", { year: selectedYear })}
         </div>
-        <div class="stat-card-value tab-num">{formatDayCount(balance.annual_entitlement)}</div>
+        <div class="stat-card-value tab-num">
+          {formatDayCount(balance.annual_entitlement)}
+        </div>
       </div>
       <div class="zf-card stat-card">
         <div class="stat-card-label">
           {$t("Vacation used ({year})", { year: selectedYear })}
         </div>
-        <div class="stat-card-value tab-num">{formatDayCount(balance.already_taken)}</div>
+        <div class="stat-card-value tab-num">
+          {formatDayCount(balance.already_taken)}
+        </div>
       </div>
       <div class="zf-card stat-card">
         <div class="stat-card-label">
@@ -238,7 +240,9 @@
         <div class="stat-card-label">
           {$t("Vacation pending ({year})", { year: selectedYear })}
         </div>
-        <div class="stat-card-value tab-num">{formatDayCount(balance.requested || 0)}</div>
+        <div class="stat-card-value tab-num">
+          {formatDayCount(balance.requested || 0)}
+        </div>
         <div class="stat-card-sub">
           {$t("Vacation requests awaiting approval")}
         </div>
@@ -253,23 +257,17 @@
       </div>
       {#if balance.carryover_days > 0}
         <div
-          class="zf-card stat-card"
-          style="border-color:{balance.carryover_expired
-            ? 'var(--danger)'
-            : 'var(--warning)'}"
+          class="zf-card stat-card carryover-card"
+          class:expired={balance.carryover_expired}
         >
           <div class="stat-card-label">
             {$t("Carryover from {year}", { year: selectedYear - 1 })}
           </div>
-          <div
-            class="stat-card-value tab-num"
-            style="color:{balance.carryover_expired
-              ? 'var(--danger-text)'
-              : 'var(--warning-text)'}"
-          >
-            {formatDayCount(balance.carryover_expired ? 0 : balance.carryover_remaining)}
-            <span
-              style="font-size:11px;font-weight:400;color:var(--text-tertiary)"
+          <div class="stat-card-value tab-num carryover-value">
+            {formatDayCount(
+              balance.carryover_expired ? 0 : balance.carryover_remaining,
+            )}
+            <span class="carryover-total"
               >/ {formatDayCount(balance.carryover_days)}</span
             >
           </div>
@@ -296,7 +294,7 @@
       <span class="card-header-title">{$t("Absence History")}</span>
     </div>
     {#if absences.length === 0}
-      <div style="padding:32px;text-align:center;color:var(--text-tertiary)">
+      <div class="zf-empty">
         {$t("No absences yet.")}
       </div>
     {:else}
@@ -334,7 +332,9 @@
               </div>
               <div class="absence-entry-field absence-entry-days">
                 <span class="absence-entry-label">{$t("Days")}</span>
-                <span class="absence-entry-value tab-num">{a.days == null ? "-" : formatDayCount(a.days)}</span>
+                <span class="absence-entry-value tab-num"
+                  >{a.days == null ? "-" : formatDayCount(a.days)}</span
+                >
               </div>
             </div>
             <div class="absence-entry-bottom">
@@ -356,7 +356,11 @@
 </div>
 
 {#if showDialog}
-  <AbsenceDialog template={showDialog} onClose={handleDialogClose} holidays={holidayDates} />
+  <AbsenceDialog
+    template={showDialog}
+    onClose={handleDialogClose}
+    holidays={holidayDates}
+  />
 {/if}
 
 {#if detailAbsence}
@@ -376,6 +380,39 @@
 {/if}
 
 <style>
+  .abs-year-label {
+    min-width: 50px;
+  }
+
+  /* Carryover card border and value switch to danger once expired. */
+  .carryover-card {
+    border-color: var(--warning);
+  }
+
+  .carryover-card.expired {
+    border-color: var(--danger);
+  }
+
+  .carryover-value {
+    color: var(--warning-text);
+  }
+
+  .expired .carryover-value {
+    color: var(--danger-text);
+  }
+
+  .carryover-total {
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--text-tertiary);
+  }
+
+  /* The horizontal calendar slider inside can overshoot during its snap
+     animation; clip it so the page never scrolls sideways. */
+  .absences-content {
+    overflow-x: hidden;
+  }
+
   .absence-list {
     display: flex;
     flex-direction: column;
@@ -427,13 +464,13 @@
   }
 
   .absence-entry-label {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--text-tertiary);
     min-width: 40px;
   }
 
   .absence-entry-value {
-    font-size: 13px;
+    font-size: 14px;
     text-align: left;
   }
 

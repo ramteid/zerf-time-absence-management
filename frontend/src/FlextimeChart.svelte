@@ -2,7 +2,11 @@
   import { t, absenceKindLabel, formatHours, fmtDecimal } from "./i18n.js";
   import { settings, absenceCategories } from "./stores.js";
   import { appTodayIsoDate, fmtDateShort, fmtDateWeekday } from "./format.js";
-  import { HOLIDAY_COLOR, WEEKEND_COLOR, MASKED_ABSENCE_COLOR } from "./colors.js";
+  import {
+    HOLIDAY_COLOR,
+    WEEKEND_COLOR,
+    MASKED_ABSENCE_COLOR,
+  } from "./colors.js";
 
   /**
    * @typedef {{date: string, actual_min: number, target_min: number,
@@ -18,7 +22,8 @@
   $: todayStr = appTodayIsoDate($settings?.timezone);
   $: lastActualIdx = (() => {
     let lastVisibleIndex = data.length - 1;
-    while (lastVisibleIndex >= 0 && data[lastVisibleIndex].date > todayStr) lastVisibleIndex--;
+    while (lastVisibleIndex >= 0 && data[lastVisibleIndex].date > todayStr)
+      lastVisibleIndex--;
     return lastVisibleIndex;
   })();
 
@@ -38,8 +43,14 @@
   const chartInstanceId = Math.random().toString(36).slice(2, 8);
 
   // Value extents (always include 0)
-  $: dataMin = data.reduce((minimumMinutes, day) => Math.min(minimumMinutes, day.cumulative_min), 0);
-  $: dataMax = data.reduce((maximumMinutes, day) => Math.max(maximumMinutes, day.cumulative_min), 0);
+  $: dataMin = data.reduce(
+    (minimumMinutes, day) => Math.min(minimumMinutes, day.cumulative_min),
+    0,
+  );
+  $: dataMax = data.reduce(
+    (maximumMinutes, day) => Math.max(maximumMinutes, day.cumulative_min),
+    0,
+  );
   $: rawRange = Math.max(dataMax - dataMin, 60); // at least 1h
 
   // Display range with padding. When all values are non-negative, the Y-axis
@@ -51,8 +62,12 @@
 
   // Coordinate transforms
   $: xOf = (pointIndex) =>
-    marginLeft + (data.length > 1 ? (pointIndex / (data.length - 1)) * plotWidth : plotWidth / 2);
-  $: yOf = (minuteValue) => marginTop + plotHeight - ((minuteValue - dispMin) / dispRange) * plotHeight;
+    marginLeft +
+    (data.length > 1
+      ? (pointIndex / (data.length - 1)) * plotWidth
+      : plotWidth / 2);
+  $: yOf = (minuteValue) =>
+    marginTop + plotHeight - ((minuteValue - dispMin) / dispRange) * plotHeight;
   $: zeroY = yOf(0);
 
   // Pre-compute point coordinates
@@ -64,7 +79,10 @@
   // zeroY clamped to the plot area for clip-path rects.
   // Without clamping, when all values are same-sign the zero line falls outside
   // the plot and the area fill bleeds through the x-axis into the label area.
-  $: clampedZeroY = Math.min(marginTop + plotHeight, Math.max(marginTop, zeroY));
+  $: clampedZeroY = Math.min(
+    marginTop + plotHeight,
+    Math.max(marginTop, zeroY),
+  );
 
   // Points subset: only up to today (for line and area)
   $: actualPts = lastActualIdx >= 0 ? pts.slice(0, lastActualIdx + 1) : [];
@@ -111,12 +129,18 @@
   $: yTicks = (() => {
     const rangeH = rawRange / 60;
     const step = rangeH / 5;
-    const niceStepHours = [0.25, 0.5, 1, 2, 4, 8, 12, 24].find((stepHours) => stepHours >= step) || 24;
+    const niceStepHours =
+      [0.25, 0.5, 1, 2, 4, 8, 12, 24].find((stepHours) => stepHours >= step) ||
+      24;
     const niceStepMinutes = niceStepHours * 60;
     // Start at first multiple of niceStepMinutes >= dataMin
     const start = Math.ceil(dataMin / niceStepMinutes) * niceStepMinutes;
     const ticks = [];
-    for (let tickMinutes = start; tickMinutes <= dataMax + niceStepMinutes * 0.01; tickMinutes += niceStepMinutes) {
+    for (
+      let tickMinutes = start;
+      tickMinutes <= dataMax + niceStepMinutes * 0.01;
+      tickMinutes += niceStepMinutes
+    ) {
       ticks.push(tickMinutes);
     }
     if (!ticks.includes(0)) ticks.push(0);
@@ -141,7 +165,10 @@
     let i = 0;
     while (i <= lastActualIdx) {
       const color = dayBandColor(data[i]);
-      if (!color) { i++; continue; }
+      if (!color) {
+        i++;
+        continue;
+      }
       let j = i;
       while (j + 1 <= lastActualIdx && dayBandColor(data[j + 1]) === color) j++;
       runs.push({ firstIdx: i, lastIdx: j, color });
@@ -162,8 +189,11 @@
       hoverIdx = null;
       return;
     }
-    const rawIndex = data.length > 1 ? (plotX / plotWidth) * (data.length - 1) : 0;
-    const hoverIndex = Math.round(Math.max(0, Math.min(data.length - 1, rawIndex)));
+    const rawIndex =
+      data.length > 1 ? (plotX / plotWidth) * (data.length - 1) : 0;
+    const hoverIndex = Math.round(
+      Math.max(0, Math.min(data.length - 1, rawIndex)),
+    );
     hoverIdx = hoverIndex <= lastActualIdx ? hoverIndex : null;
   }
 
@@ -182,8 +212,11 @@
       hoverIdx = null;
       return;
     }
-    const rawIndex = data.length > 1 ? (plotX / plotWidth) * (data.length - 1) : 0;
-    const hoverIndex = Math.round(Math.max(0, Math.min(data.length - 1, rawIndex)));
+    const rawIndex =
+      data.length > 1 ? (plotX / plotWidth) * (data.length - 1) : 0;
+    const hoverIndex = Math.round(
+      Math.max(0, Math.min(data.length - 1, rawIndex)),
+    );
     hoverIdx = hoverIndex <= lastActualIdx ? hoverIndex : null;
   }
 
@@ -205,7 +238,13 @@
         ? hoverPt.x + 10
         : 0;
   $: tooltipY = hoverPt
-    ? Math.max(marginTop, Math.min(chartHeight - marginBottom - tooltipHeight, hoverPt.y - tooltipHeight / 2))
+    ? Math.max(
+        marginTop,
+        Math.min(
+          chartHeight - marginBottom - tooltipHeight,
+          hoverPt.y - tooltipHeight / 2,
+        ),
+      )
     : 0;
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -266,14 +305,9 @@
 </script>
 
 <!-- bind:clientWidth keeps PW in sync when the card resizes -->
-<div
-  bind:clientWidth={containerW}
-  style="user-select:none;-webkit-user-select:none"
->
+<div bind:clientWidth={containerW} class="chart-root">
   {#if data.length === 0}
-    <div
-      style="text-align:center;padding:40px 0;color:var(--text-tertiary);font-size:13px"
-    >
+    <div class="zf-empty fs-14">
       {$t("No data.")}
     </div>
   {:else}
@@ -282,7 +316,7 @@
       aria-label={$t("Flextime balance")}
       width={containerW}
       height={chartHeight}
-      style="display:block;overflow:visible"
+      class="chart-svg"
       on:mousemove={onMouseMove}
       on:mouseleave={onMouseLeave}
       on:touchmove={onTouchMove}
@@ -291,11 +325,21 @@
       <defs>
         <!-- clip to the full plot area (used for absence/holiday/weekend bands) -->
         <clipPath id="clip-plot-{chartInstanceId}">
-          <rect x={marginLeft} y={marginTop} width={plotWidth} height={plotHeight} />
+          <rect
+            x={marginLeft}
+            y={marginTop}
+            width={plotWidth}
+            height={plotHeight}
+          />
         </clipPath>
         <!-- clip above zero-line → positive area (green) -->
         <clipPath id="clip-above-{chartInstanceId}">
-          <rect x={marginLeft} y={marginTop} width={plotWidth} height={clampedZeroY - marginTop} />
+          <rect
+            x={marginLeft}
+            y={marginTop}
+            width={plotWidth}
+            height={clampedZeroY - marginTop}
+          />
         </clipPath>
         <!-- clip below zero-line → negative area (red) -->
         <clipPath id="clip-below-{chartInstanceId}">
@@ -317,9 +361,10 @@
       <g clip-path="url(#clip-plot-{chartInstanceId})">
         {#each bandRuns as run (run.firstIdx)}
           {@const startX = pts[run.firstIdx].x}
-          {@const endX = run.lastIdx + 1 < data.length
-            ? pts[run.lastIdx + 1].x
-            : pts[run.lastIdx].x + barWidth}
+          {@const endX =
+            run.lastIdx + 1 < data.length
+              ? pts[run.lastIdx + 1].x
+              : pts[run.lastIdx].x + barWidth}
           <rect
             x={startX}
             y={marginTop}
@@ -496,24 +541,54 @@
 
     <!-- ── Legend ── -->
     {#if legendItems.length}
-      <div
-        style="display:flex;gap:14px;flex-wrap:wrap;margin-top:4px;padding-left:{marginLeft}px"
-      >
+      <div class="chart-legend" style:padding-left={marginLeft + "px"}>
         {#each legendItems as item (item.key)}
-          <div
-            style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-secondary)"
-          >
-            <div
-              style="width:12px;height:12px;border-radius:2px;background:{item.color};opacity:0.3;flex-shrink:0"
-            ></div>
+          <div class="chart-legend-item">
+            <div class="chart-swatch" style:background={item.color}></div>
             {item.key === "__holiday__"
               ? $t("Holidays")
               : item.key === "__weekend__"
                 ? $t("Weekends")
-              : absenceKindLabel(item.key)}
+                : absenceKindLabel(item.key)}
           </div>
         {/each}
       </div>
     {/if}
   {/if}
 </div>
+
+<style>
+  /* Chart area: drags/taps should never select surrounding text. */
+  .chart-root {
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  .chart-svg {
+    display: block;
+    overflow: visible;
+  }
+
+  .chart-legend {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+    margin-top: 4px;
+  }
+
+  .chart-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+
+  .chart-swatch {
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+    opacity: 0.3;
+    flex-shrink: 0;
+  }
+</style>

@@ -1,0 +1,19 @@
+/* Zerf global stylesheet — modular entry point.
+
+   Import order matters: later files intentionally override earlier ones
+   (e.g. responsive.css must come last so its media queries win over the
+   desktop defaults). Keep new rules in the module they belong to; page- or
+   component-specific one-offs belong in that component's <style> block
+   instead. No inline style attributes in markup. */
+
+@import "./tokens.css";
+@import "./base.css";
+@import "./buttons.css";
+@import "./badges.css";
+@import "./forms.css";
+@import "./layout.css";
+@import "./components.css";
+@import "./pages.css";
+@import "./feedback.css";
+@import "./notifications.css";
+@import "./responsive.css";

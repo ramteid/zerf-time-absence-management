@@ -39,7 +39,10 @@ describe("Setup", () => {
   });
 
   afterEach(() => {
-    if (component) { unmount(component); component = null; }
+    if (component) {
+      unmount(component);
+      component = null;
+    }
     target.remove();
     appDiv.remove();
   });
@@ -76,9 +79,13 @@ describe("Setup", () => {
     await settle();
     fillForm({ firstName: "" });
     const form = target.querySelector("form");
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    form.dispatchEvent(
+      new Event("submit", { bubbles: true, cancelable: true }),
+    );
     await settle();
-    expect(target.querySelector(".error-text").textContent).toContain("first name");
+    expect(target.querySelector(".error-text").textContent).toContain(
+      "first name",
+    );
   });
 
   it("shows error when email is invalid", async () => {
@@ -86,7 +93,9 @@ describe("Setup", () => {
     await settle();
     fillForm({ email: "not-an-email" });
     const form = target.querySelector("form");
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    form.dispatchEvent(
+      new Event("submit", { bubbles: true, cancelable: true }),
+    );
     await settle();
     expect(target.querySelector(".error-text").textContent).toContain("email");
   });
@@ -96,9 +105,13 @@ describe("Setup", () => {
     await settle();
     fillForm({ password: "Short1!", confirm: "Short1!" });
     const form = target.querySelector("form");
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    form.dispatchEvent(
+      new Event("submit", { bubbles: true, cancelable: true }),
+    );
     await settle();
-    expect(target.querySelector(".error-text").textContent).toContain("12 characters");
+    expect(target.querySelector(".error-text").textContent).toContain(
+      "12 characters",
+    );
   });
 
   it("shows error when password lacks complexity", async () => {
@@ -106,7 +119,9 @@ describe("Setup", () => {
     await settle();
     fillForm({ password: "alllowercase123", confirm: "alllowercase123" });
     const form = target.querySelector("form");
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    form.dispatchEvent(
+      new Event("submit", { bubbles: true, cancelable: true }),
+    );
     await settle();
     expect(target.querySelector(".error-text").textContent).toContain("3 of");
   });
@@ -116,7 +131,9 @@ describe("Setup", () => {
     await settle();
     fillForm({ password: "SuperSecret123!", confirm: "DifferentPass456#" });
     const form = target.querySelector("form");
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    form.dispatchEvent(
+      new Event("submit", { bubbles: true, cancelable: true }),
+    );
     await settle();
     expect(target.querySelector(".error-text").textContent).toContain("match");
   });
@@ -128,7 +145,9 @@ describe("Setup", () => {
     await settle();
     fillForm({});
     const form = target.querySelector("form");
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    form.dispatchEvent(
+      new Event("submit", { bubbles: true, cancelable: true }),
+    );
     await settle();
     await settle();
     expect(onComplete).toHaveBeenCalledWith("alice@example.com");
@@ -140,9 +159,13 @@ describe("Setup", () => {
     await settle();
     fillForm({});
     const form = target.querySelector("form");
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    form.dispatchEvent(
+      new Event("submit", { bubbles: true, cancelable: true }),
+    );
     await settle();
     await settle();
-    expect(target.querySelector(".error-text").textContent).toContain("Email already taken");
+    expect(target.querySelector(".error-text").textContent).toContain(
+      "Email already taken",
+    );
   });
 });

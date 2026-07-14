@@ -12,7 +12,7 @@
       <slot name="label">{label}</slot>
     </div>
   {/if}
-  <div class="stat-card-value tab-num" style={color ? `color:${color}` : ""}>
+  <div class="stat-card-value tab-num" style:color={color || null}>
     {#if loading}
       ...
     {:else}

@@ -13,7 +13,7 @@
 
 {#each weekendDays as day (day.ds)}
   {#if day.items.length > 0}
-    <div style="margin-top:12px">
+    <div class="mt-12">
       <DayCard
         {day}
         dayIndex={6}

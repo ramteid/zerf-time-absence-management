@@ -58,7 +58,11 @@ describe("UserDialog", () => {
     apiMock.mockImplementation(async (path) => {
       if (path === "/users") return [];
       if (path === "/settings")
-        return { default_weekly_hours: 39, default_annual_leave_days: 30, smtp_enabled: false };
+        return {
+          default_weekly_hours: 39,
+          default_annual_leave_days: 30,
+          smtp_enabled: false,
+        };
       return [];
     });
 
@@ -69,7 +73,10 @@ describe("UserDialog", () => {
   });
 
   afterEach(() => {
-    if (component) { unmount(component); component = null; }
+    if (component) {
+      unmount(component);
+      component = null;
+    }
     target.remove();
     HTMLDialogElement.prototype.showModal = originalShowModal;
   });
@@ -125,8 +132,8 @@ describe("UserDialog", () => {
     });
     await waitForText(target, "Add User");
 
-    const saveBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Save") || b.textContent.includes("Add")
+    const saveBtn = [...target.querySelectorAll("button")].find(
+      (b) => b.textContent.includes("Save") || b.textContent.includes("Add"),
     );
     saveBtn?.click();
     await settle();
@@ -183,7 +190,7 @@ describe("UserDialog", () => {
     await settle();
 
     const leaveDaysCall = apiMock.mock.calls.find(
-      ([path]) => typeof path === "string" && path.includes("/leave-days")
+      ([path]) => typeof path === "string" && path.includes("/leave-days"),
     );
     expect(leaveDaysCall).toBeTruthy();
   });
@@ -202,7 +209,7 @@ describe("UserDialog", () => {
 
     expect(target.textContent).toContain("Hire date");
     expect(target.textContent).toContain(
-      "Used to calculate the prorated annual leave entitlement"
+      "Used to calculate the prorated annual leave entitlement",
     );
   });
 
@@ -242,7 +249,7 @@ describe("UserDialog", () => {
 
     const findClearBtn = () =>
       [...target.querySelectorAll("button")].find(
-        (b) => b.getAttribute("title") === "Clear"
+        (b) => b.getAttribute("title") === "Clear",
       );
 
     expect(findClearBtn()).toBeTruthy();
@@ -259,9 +266,21 @@ describe("UserDialog", () => {
     // have to fill in by hand.
     apiMock.mockImplementation(async (path) => {
       if (path === "/users")
-        return [{ id: 5, first_name: "Lara", last_name: "Lead", role: "team_lead", active: true }];
+        return [
+          {
+            id: 5,
+            first_name: "Lara",
+            last_name: "Lead",
+            role: "team_lead",
+            active: true,
+          },
+        ];
       if (path === "/settings")
-        return { default_weekly_hours: 39, default_annual_leave_days: 30, smtp_enabled: false };
+        return {
+          default_weekly_hours: 39,
+          default_annual_leave_days: 30,
+          smtp_enabled: false,
+        };
       if (path === "/categories/all")
         return [
           { id: 1, name: "Core Duties" },
@@ -288,13 +307,13 @@ describe("UserDialog", () => {
     checkboxes.forEach((cb) => expect(cb.checked).toBe(true));
 
     // Select an approver (required for employees) and uncheck "Training".
-    const approverCheckbox = [...target.querySelectorAll('input[type="checkbox"]')].find(
-      (cb) => cb.value === "5",
-    );
+    const approverCheckbox = [
+      ...target.querySelectorAll('input[type="checkbox"]'),
+    ].find((cb) => cb.value === "5");
     approverCheckbox.click();
-    const trainingCheckbox = [...target.querySelectorAll('input[type="checkbox"]')].find(
-      (cb) => cb.value === "2",
-    );
+    const trainingCheckbox = [
+      ...target.querySelectorAll('input[type="checkbox"]'),
+    ].find((cb) => cb.value === "2");
     trainingCheckbox.click();
     await settle();
 

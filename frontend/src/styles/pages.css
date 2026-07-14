@@ -1,0 +1,337 @@
+/* ── Week grid (Time Entry) ── */
+.week-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+}
+
+.day-card {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.day-add-btn {
+  margin-top: auto;
+}
+
+.day-card--locked {
+  opacity: 0.6;
+  background: var(--bg-muted);
+}
+
+.day-card--absent {
+  opacity: 0.5;
+  background: var(--bg-muted);
+}
+
+.day-header {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.day-name {
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.day-date {
+  font-size: 12.5px;
+  color: var(--text-tertiary);
+}
+
+.day-total {
+  font-size: 16px;
+  font-weight: 400;
+}
+
+.day-entries {
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 120px;
+}
+
+.time-block {
+  position: relative;
+  overflow: hidden;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.time-block-break {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1.5px dashed var(--text-tertiary);
+  background: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent 4px,
+    color-mix(in srgb, var(--text-tertiary) 10%, transparent) 4px,
+    color-mix(in srgb, var(--text-tertiary) 10%, transparent) 8px
+  );
+  color: var(--text-tertiary);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 2px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  overflow: hidden;
+  pointer-events: none;
+  box-sizing: border-box;
+  min-height: 14px;
+}
+
+.time-block:hover {
+  background: var(--bg-muted);
+}
+
+.time-block-cat {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 3px;
+}
+
+.time-block-cat-name {
+  font-size: 13px;
+  font-weight: 500;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.time-block-times {
+  font-size: 13px;
+  color: var(--text-tertiary);
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cat-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.day-add-btn {
+  padding: 6px 8px 10px;
+}
+
+/* ── Field group ── */
+.field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+/* Small helper text below a form field */
+.field-hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+/* Grouping label above a set of related fields. The extra top margin (on top of
+   the surrounding field-group's 14px gap) gives the heading room to read as a
+   distinct section break from the preceding field rather than just another row. */
+.field-section-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  letter-spacing: 0.01em;
+  margin-top: 8px;
+  margin-bottom: 8px;
+}
+
+/* Card / section heading (e.g. "Change password") */
+.field-card-title {
+  font-size: 15px;
+  font-weight: 400;
+  margin-bottom: 14px;
+}
+
+/* Toggle/switch row: label on left, control on right */
+.field-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* When a toggle row sits inside a field-group it needs a top separator */
+.field-group .field-toggle-row {
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+
+.field-toggle-row-title {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.field-toggle-row-hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+
+/* Label row with an inline action button (e.g. clear) */
+.field-label-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  margin-bottom: 6px;
+}
+
+.field-label-row .zf-label {
+  margin-bottom: 0;
+}
+
+/* ── Calendar ── */
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(28px, 1fr));
+  gap: 1px;
+}
+
+.cal-head {
+  text-align: left;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 4px 0;
+}
+
+.cal-day {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  min-height: 80px;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  min-width: 0;
+  width: 100%;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.cal-day.has-events {
+  cursor: pointer;
+}
+
+.cal-day:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.cal-day.today {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.cal-day.weekend {
+  background: var(--bg-muted);
+}
+
+.cal-day.other-month {
+  opacity: 0.4;
+}
+
+.cal-day-number {
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+
+.cal-day.today .cal-day-number {
+  font-weight: 700;
+  color: var(--accent-text);
+}
+
+.cal-events {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cal-event {
+  font-size: 11px;
+  padding: 2px 5px;
+  border-radius: 3px;
+  color: #fff;
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+  opacity: 0.9;
+}
+
+.cal-more {
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+/* ── Absence kind colors ── */
+.abs-vacation {
+  background: #3b82f6;
+}
+.abs-sick {
+  background: #ef4444;
+}
+.abs-training {
+  background: #0d9488;
+}
+.abs-special_leave {
+  background: #d97706;
+}
+.abs-unpaid {
+  background: #6b7280;
+}
+.abs-general_absence {
+  background: #475569;
+}
+.abs-absent {
+  background: #9ca3af;
+}
+
+/* ── Auth pages (Login / Setup) ── */
+.auth-title {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+}

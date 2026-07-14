@@ -61,10 +61,10 @@
     </svelte:fragment>
 
     <svelte:fragment slot="detail-title" let:selected>
-      <span class="zf-badge {levelClass(selected.level)}" style="margin-right:8px">
+      <span class="zf-badge {levelClass(selected.level)} mr-8">
         {selected.level === "error" ? $t("Error") : $t("Warning")}
       </span>
-      <span style="flex:1;font-weight:500">{$t("Log entry")}</span>
+      <span class="flex-1 fw-500">{$t("Log entry")}</span>
     </svelte:fragment>
 
     <svelte:fragment slot="detail" let:selected>
@@ -91,7 +91,7 @@
 <style>
   .syslog-time {
     color: var(--text-tertiary);
-    font-size: 12px;
+    font-size: 13px;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
@@ -107,7 +107,7 @@
 
   .syslog-source {
     font-family: ui-monospace, monospace;
-    font-size: 12px;
+    font-size: 13px;
     word-break: break-all;
   }
 
@@ -121,7 +121,7 @@
     background: var(--bg-subtle);
     border-radius: var(--radius-md);
     font-family: ui-monospace, monospace;
-    font-size: 12.5px;
+    font-size: 13.5px;
     white-space: pre-wrap;
     word-break: break-word;
     max-height: 320px;

@@ -168,7 +168,7 @@
   helpOpen={activeHelp === "absence"}
   onHelpToggle={() => toggleHelp("absence")}
 >
-  <div class="field-row" style="margin-bottom:12px">
+  <div class="field-row mb-12">
     <div>
       <label class="zf-label" for="absence-from">{$t("From")}</label>
       <DatePicker
@@ -189,12 +189,12 @@
 
   {#if absenceReport}
     {#if absenceReport.length === 0}
-      <div style="padding:16px;color:var(--text-tertiary);font-size:13px">
+      <div class="zf-card-empty">
         {$t("No data.")}
       </div>
     {:else}
       {#if absenceTotalDays > 0}
-        <div class="stat-cards" style="margin-top:16px">
+        <div class="stat-cards mt-16">
           <StatCard
             label={$t("Total days")}
             value={formatDayCount(absenceTotalDays)}
@@ -208,15 +208,15 @@
         </div>
       {/if}
 
-      <div style="margin-top:12px">
+      <div class="mt-12">
         <DataTable>
           <thead>
             <tr>
               {#if isLeadView}<th>{$t("Employee")}</th>{/if}
               <th>{$t("Type")}</th>
-              <th style="text-align:right">{$t("From")}</th>
-              <th style="text-align:right">{$t("To")}</th>
-              <th style="text-align:right">{$t("Days")}</th>
+              <th class="text-right">{$t("From")}</th>
+              <th class="text-right">{$t("To")}</th>
+              <th class="text-right">{$t("Days")}</th>
               <th>{$t("Status")}</th>
             </tr>
           </thead>
@@ -227,22 +227,16 @@
                 : null}
               <tr class:entry-rejected={a.status === "rejected"}>
                 {#if isLeadView}
-                  <td style="font-weight:500">
+                  <td class="fw-500">
                     {absUser
                       ? `${absUser.first_name} ${absUser.last_name}`
                       : `#${a.user_id}`}
                   </td>
                 {/if}
                 <td>{absenceKindLabel(a.kind)}</td>
-                <td class="tab-num" style="text-align:right"
-                  >{fmtDate(a.start_date)}</td
-                >
-                <td class="tab-num" style="text-align:right"
-                  >{fmtDate(a.end_date)}</td
-                >
-                <td class="tab-num" style="text-align:right"
-                  >{formatDayCount(a.days)}</td
-                >
+                <td class="tab-num text-right">{fmtDate(a.start_date)}</td>
+                <td class="tab-num text-right">{fmtDate(a.end_date)}</td>
+                <td class="tab-num text-right">{formatDayCount(a.days)}</td>
                 <td>
                   <span class="zf-chip zf-chip-{a.status}"
                     >{statusLabel(a.status)}</span

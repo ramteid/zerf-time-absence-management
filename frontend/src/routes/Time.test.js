@@ -67,9 +67,27 @@ describe("Time", () => {
     // correctly. Without this they fall back to "removes target" / "blocks entry"
     // for every kind, which breaks every flextime-reduction-related assertion.
     const cats = [
-      { id: 1, slug: "vacation", name: "Vacation", cost_type: "vacation", auto_approve_past: false },
-      { id: 2, slug: "sick", name: "Sick", cost_type: "none", auto_approve_past: true },
-      { id: 3, slug: "flextime_reduction", name: "Flextime Reduction", cost_type: "flextime", auto_approve_past: false },
+      {
+        id: 1,
+        slug: "vacation",
+        name: "Vacation",
+        cost_type: "vacation",
+        auto_approve_past: false,
+      },
+      {
+        id: 2,
+        slug: "sick",
+        name: "Sick",
+        cost_type: "none",
+        auto_approve_past: true,
+      },
+      {
+        id: 3,
+        slug: "flextime_reduction",
+        name: "Flextime Reduction",
+        cost_type: "flextime",
+        auto_approve_past: false,
+      },
     ];
     absenceCategories.set(cats);
     setAbsenceCategoryCache(cats);
@@ -252,7 +270,9 @@ describe("Time", () => {
         comment: null,
       },
     ];
-    mockState.categories = [{ id: 1, name: "Core Duties", counts_as_work: true }];
+    mockState.categories = [
+      { id: 1, name: "Core Duties", counts_as_work: true },
+    ];
 
     component = mount(Time, { target });
     await settle();
@@ -299,7 +319,9 @@ describe("Time", () => {
     const monday = pastMonday();
     path.set(`/time?week=${monday}`);
 
-    mockState.categories = [{ id: 1, name: "Core Duties", counts_as_work: true }];
+    mockState.categories = [
+      { id: 1, name: "Core Duties", counts_as_work: true },
+    ];
     mockState.entries = [
       {
         id: 104,

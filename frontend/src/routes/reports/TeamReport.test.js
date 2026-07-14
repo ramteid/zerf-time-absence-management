@@ -50,7 +50,10 @@ describe("TeamReport", () => {
   });
 
   afterEach(() => {
-    if (component) { unmount(component); component = null; }
+    if (component) {
+      unmount(component);
+      component = null;
+    }
     target.remove();
   });
 
@@ -65,7 +68,7 @@ describe("TeamReport", () => {
     component = mount(TeamReport, { target });
     await settle();
     const showBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Show")
+      b.textContent.includes("Show"),
     );
     expect(showBtn).not.toBeNull();
   });
@@ -76,14 +79,16 @@ describe("TeamReport", () => {
     await settle();
 
     const showBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Show")
+      b.textContent.includes("Show"),
     );
     showBtn.click();
     await settle();
     await settle();
 
     expect(getTeamReport).toHaveBeenCalledWith(
-      expect.objectContaining({ month: expect.stringMatching(/^\d{4}-\d{2}$/) })
+      expect.objectContaining({
+        month: expect.stringMatching(/^\d{4}-\d{2}$/),
+      }),
     );
   });
 
@@ -115,7 +120,7 @@ describe("TeamReport", () => {
     await settle();
 
     const showBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Show")
+      b.textContent.includes("Show"),
     );
     showBtn.click();
     await waitForText(target, "Alice Smith");
@@ -141,7 +146,7 @@ describe("TeamReport", () => {
     await settle();
 
     const showBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Show")
+      b.textContent.includes("Show"),
     );
     showBtn.click();
     await waitForText(target, "Yes");
@@ -155,7 +160,7 @@ describe("TeamReport", () => {
     await settle();
 
     const showBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Show")
+      b.textContent.includes("Show"),
     );
     showBtn.click();
     await settle();

@@ -87,7 +87,8 @@ export function summarize(entry, translate) {
   if (!payload) return "";
 
   if (entry.table_name === "users") {
-    const fullName = `${payload.first_name || ""} ${payload.last_name || ""}`.trim();
+    const fullName =
+      `${payload.first_name || ""} ${payload.last_name || ""}`.trim();
     if (fullName && payload.email) return `${fullName} (${payload.email})`;
     if (fullName) return fullName;
     if (payload.email) return payload.email;
@@ -191,8 +192,20 @@ export function extractDetailRows(entry, userMap, translate) {
   const result = [];
 
   for (const key of fields) {
-    const bFmt = fmtFieldVal(key, before?.[key] ?? null, userMap, translate, before);
-    const aFmt = fmtFieldVal(key, after?.[key] ?? null, userMap, translate, after);
+    const bFmt = fmtFieldVal(
+      key,
+      before?.[key] ?? null,
+      userMap,
+      translate,
+      before,
+    );
+    const aFmt = fmtFieldVal(
+      key,
+      after?.[key] ?? null,
+      userMap,
+      translate,
+      after,
+    );
     if (bFmt == null && aFmt == null) continue;
     if (hasBoth && bFmt === aFmt) continue;
     result.push({
@@ -206,9 +219,19 @@ export function extractDetailRows(entry, userMap, translate) {
 }
 
 export function actionClass(action) {
-  if (action === "created" || action === "approved" || action === "reopened" || action === "restored")
+  if (
+    action === "created" ||
+    action === "approved" ||
+    action === "reopened" ||
+    action === "restored"
+  )
     return "action-success";
-  if (action === "deleted" || action === "rejected" || action === "deactivated" || action === "archived")
+  if (
+    action === "deleted" ||
+    action === "rejected" ||
+    action === "deactivated" ||
+    action === "archived"
+  )
     return "action-danger";
   if (action === "updated" || action === "status_changed") return "action-info";
   return "action-muted";

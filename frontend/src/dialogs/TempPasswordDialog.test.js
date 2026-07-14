@@ -40,7 +40,10 @@ describe("TempPasswordDialog", () => {
   });
 
   afterEach(() => {
-    if (component) { unmount(component); component = null; }
+    if (component) {
+      unmount(component);
+      component = null;
+    }
     target.remove();
     HTMLDialogElement.prototype.showModal = originalShowModal;
     delete HTMLDialogElement.prototype.close;
@@ -109,7 +112,7 @@ describe("TempPasswordDialog", () => {
     });
     await settle();
     const copyBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Copy")
+      b.textContent.includes("Copy"),
     );
     expect(copyBtn).not.toBeNull();
   });
@@ -130,7 +133,7 @@ describe("TempPasswordDialog", () => {
     await settle();
 
     const okBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("OK")
+      b.textContent.includes("OK"),
     );
     expect(okBtn).not.toBeNull();
     okBtn.click();

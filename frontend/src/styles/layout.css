@@ -1,0 +1,248 @@
+/* ── Navigation ── */
+.zf-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 34px;
+  padding: 0 10px;
+  margin: 1px 8px;
+  border-radius: var(--radius-md);
+  color: var(--nav-text);
+  font-size: 14.5px;
+  cursor: pointer;
+  transition:
+    background 0.12s,
+    color 0.12s;
+  text-decoration: none;
+}
+.zf-nav-item:hover {
+  background: var(--nav-bg-hover);
+  color: var(--nav-text-active);
+}
+.zf-nav-item.active {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.zf-nav-section {
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--nav-text-muted);
+  padding: 18px 18px 6px;
+  font-weight: 500;
+}
+.zf-nav-section-spaced {
+  margin-top: 8px;
+}
+
+/* Muted icon button used in the navigation chrome (bell, sign out).
+   position: relative anchors the absolutely-positioned .notif-badge. */
+.nav-icon-btn {
+  color: var(--nav-text-muted);
+  position: relative;
+}
+
+/* ── Layout ── */
+.app-layout {
+  display: flex;
+  height: 100%;
+}
+
+.sidebar {
+  width: 240px;
+  background: var(--nav-bg);
+  border-right: 1px solid var(--nav-border);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.sidebar-logo {
+  position: relative;
+  padding: 20px 18px 12px;
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.sidebar-logo-icon {
+  display: flex;
+  align-items: flex-start;
+  flex-shrink: 0;
+}
+
+.sidebar-logo-icon .app-logo {
+  display: block;
+}
+
+.sidebar-logo-text {
+  color: var(--nav-text-active);
+  font-weight: 400;
+  font-size: 19px;
+  letter-spacing: -0.02em;
+}
+
+.sidebar-logo-names {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+  min-width: 0;
+  flex: 1;
+}
+
+.sidebar-logo-org {
+  font-size: 13px;
+  color: var(--nav-text-muted);
+  word-break: break-word;
+  /* Keep clear of the absolutely-positioned bell button on the right. */
+  padding-right: 44px;
+}
+
+/* Bell button pinned to the right edge of the sidebar logo row, vertically
+   centered regardless of whether the organization name wraps. */
+.sidebar-bell {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 18px;
+  margin: auto;
+  height: 30px;
+  display: flex;
+  align-items: center;
+}
+
+.sidebar-bell .zf-btn-icon-sm {
+  width: 30px;
+  height: 30px;
+}
+
+.sidebar-nav {
+  padding: 8px 0;
+  flex: 1;
+  overflow: auto;
+}
+
+.sidebar-user {
+  padding: 12px 10px;
+  border-top: 1px solid var(--nav-border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sidebar-user-account {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  border-radius: var(--radius-md);
+  color: inherit;
+  text-decoration: none;
+}
+
+.sidebar-user-account:hover .sidebar-user-name,
+.sidebar-user-account.active .sidebar-user-name {
+  color: var(--accent-text);
+}
+
+.sidebar-user-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--nav-text-active);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-user-role {
+  font-size: 12px;
+  color: var(--nav-text-muted);
+}
+
+.main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.content-area {
+  flex: 1;
+  /* Centre the content on wide screens: once the available width exceeds
+     --page-max-width, the extra space becomes symmetric horizontal padding.
+     Keeping this as padding (rather than max-width on the element) leaves the
+     scrollbar at the window edge and the element itself full-width. */
+  padding: 20px max(28px, calc((100% - var(--page-max-width)) / 2));
+  overflow: auto;
+}
+
+/* Narrower page variants for form-heavy pages (settings, account, user
+   management). Apply to both the page's .top-bar and .content-area so the
+   title stays aligned with the content. */
+.page-narrow {
+  --page-max-width: 640px;
+}
+
+.page-medium {
+  --page-max-width: 760px;
+}
+
+/* ── TopBar ── */
+.top-bar {
+  /* Same horizontal centering formula as .content-area so the page title
+     stays aligned with the content below, while the bottom border still
+     spans the full width. */
+  padding: 20px max(28px, calc((100% - var(--page-max-width)) / 2)) 16px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.top-bar-title {
+  flex: 1;
+}
+
+.top-bar-title h1 {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+}
+
+.top-bar-subtitle {
+  font-size: 14px;
+  color: var(--text-tertiary);
+}
+
+.top-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.time-submit-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: stretch;
+}
+
+/* Reopen button occupies the exact slot of the submit button and shares its
+   silhouette so the swap is seamless, but uses a distinct soft-accent palette
+   so it is immediately clear that the week is already submitted and this
+   button is the way back into edit mode. */
+.time-reopen-button {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  border-color: var(--accent-text);
+}
+.time-reopen-button:hover {
+  background: var(--accent-text);
+  color: var(--bg-surface);
+  border-color: var(--accent-text);
+}

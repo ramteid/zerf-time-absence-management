@@ -13,12 +13,16 @@
     <StatCard
       label={$t("Pending Weeks")}
       value={pendingWeeks.length}
-      color={pendingWeeks.length > 0 ? "var(--danger-text)" : "var(--success-text)"}
+      color={pendingWeeks.length > 0
+        ? "var(--danger-text)"
+        : "var(--success-text)"}
     />
     <StatCard
       label={$t("Absence Requests")}
       value={pendingAbsences.length}
-      color={pendingAbsences.length > 0 ? "var(--danger-text)" : "var(--success-text)"}
+      color={pendingAbsences.length > 0
+        ? "var(--danger-text)"
+        : "var(--success-text)"}
     />
     <StatCard label={$t("Users")} value={users.length} />
   </div>

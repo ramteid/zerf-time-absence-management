@@ -1,5 +1,10 @@
 <script>
-  import { currentUser, earliestStartDate, settings, toast } from "../../stores.js";
+  import {
+    currentUser,
+    earliestStartDate,
+    settings,
+    toast,
+  } from "../../stores.js";
   import {
     t,
     absenceKindLabel,
@@ -7,12 +12,7 @@
     formatHours,
     formatDayCount,
   } from "../../i18n.js";
-  import {
-    isoDate,
-    appTodayDate,
-    minToHM,
-    fmtDate,
-  } from "../../format.js";
+  import { isoDate, appTodayDate, minToHM, fmtDate } from "../../format.js";
   import { normalizeMonthReport } from "../../apiMappers.js";
   import Icon from "../../Icons.svelte";
   import DatePicker from "../../DatePicker.svelte";
@@ -91,7 +91,8 @@
       // eslint-disable-next-line no-useless-assignment
       previousCurrentMonthStr = currentMonthStr;
     } else {
-      if (reportMonth === previousCurrentMonthStr) reportMonth = currentMonthStr;
+      if (reportMonth === previousCurrentMonthStr)
+        reportMonth = currentMonthStr;
       // eslint-disable-next-line no-useless-assignment
       previousCurrentMonthStr = currentMonthStr;
     }
@@ -113,27 +114,30 @@
       const isCurrentMonth = reportMonth === currentMonthStr;
       const chartMonthFrom = monthStart(reportMonth);
       const chartMonthTo = isCurrentMonth ? todayIso : monthEnd(reportMonth);
-      const canFetchChart = reportYearNum < currentYear || chartMonthFrom <= todayIso;
+      const canFetchChart =
+        reportYearNum < currentYear || chartMonthFrom <= todayIso;
 
-      const [monthRaw, leaveRaw, overtimeRows, flextimeRaw] = await Promise.all([
-        getMonthReport({ userId: reportUserId, month: reportMonth }),
-        getLeaveBalance({ userId: reportUserId, year: reportYear }).catch(
-          () => null,
-        ),
-        selectedUserHasFlextime
-          ? getOvertimeReport({
-              userId: reportUserId,
-              year: reportYear,
-            }).catch(() => null)
-          : Promise.resolve(null),
-        canFetchChart && selectedUserHasFlextime
-          ? getFlextimeReport({
-              userId: reportUserId,
-              from: chartMonthFrom,
-              to: chartMonthTo,
-            }).catch(() => [])
-          : Promise.resolve([]),
-      ]);
+      const [monthRaw, leaveRaw, overtimeRows, flextimeRaw] = await Promise.all(
+        [
+          getMonthReport({ userId: reportUserId, month: reportMonth }),
+          getLeaveBalance({ userId: reportUserId, year: reportYear }).catch(
+            () => null,
+          ),
+          selectedUserHasFlextime
+            ? getOvertimeReport({
+                userId: reportUserId,
+                year: reportYear,
+              }).catch(() => null)
+            : Promise.resolve(null),
+          canFetchChart && selectedUserHasFlextime
+            ? getFlextimeReport({
+                userId: reportUserId,
+                from: chartMonthFrom,
+                to: chartMonthTo,
+              }).catch(() => [])
+            : Promise.resolve([]),
+        ],
+      );
 
       const monthReport = normalizeMonthReport(
         monthRaw,
@@ -167,15 +171,11 @@
   helpOpen={activeHelp === "report"}
   onHelpToggle={() => toggleHelp("report")}
 >
-  <div class="field-row" style="margin-bottom:12px">
+  <div class="field-row mb-12">
     {#if !isSelfOnlyReportsView}
       <div>
         <label class="zf-label" for="report-user-id">{$t("Employee")}</label>
-        <select
-          id="report-user-id"
-          class="zf-select"
-          bind:value={reportUserId}
-        >
+        <select id="report-user-id" class="zf-select" bind:value={reportUserId}>
           {#each users as u (u.id)}
             <option value={u.id}>{u.first_name} {u.last_name}</option>
           {/each}
@@ -184,19 +184,29 @@
     {/if}
     <div>
       <label class="zf-label" for="report-month">{$t("Month")}</label>
-      <DatePicker id="report-month" mode="month" bind:value={reportMonth} min={reportMinMonth} max={currentMonthStr} />
+      <DatePicker
+        id="report-month"
+        mode="month"
+        bind:value={reportMonth}
+        min={reportMinMonth}
+        max={currentMonthStr}
+      />
     </div>
   </div>
 
-  <button class="zf-btn zf-btn-primary" on:click={loadReport} disabled={reportUserId == null}>{$t("Show")}</button>
+  <button
+    class="zf-btn zf-btn-primary"
+    on:click={loadReport}
+    disabled={reportUserId == null}>{$t("Show")}</button
+  >
 
   {#if reportData}
-    <div
-      style="font-size:12px;font-weight:400;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.05em;margin-top:20px;margin-bottom:6px"
-    >
-      {selectedReportUser?.id === $currentUser?.id ? $t("My Balance") : $t("Balance")}
+    <div class="report-subheading mt-20">
+      {selectedReportUser?.id === $currentUser?.id
+        ? $t("My Balance")
+        : $t("Balance")}
     </div>
-    <div class="stat-cards" style="margin-bottom:16px">
+    <div class="stat-cards mb-16">
       <StatCard
         color={selectedUserIsAssistant
           ? "var(--text-primary)"
@@ -215,10 +225,9 @@
         <span slot="label" class="stat-card-label-help">
           <span>{$t("Logged")}</span>
           <button
-            class="zf-btn-icon-sm zf-btn-ghost"
+            class="zf-btn-icon-sm zf-btn-ghost help-icon"
             title={$t("help_logged")}
             on:click={() => toggleHelp("logged")}
-            style="color:var(--text-tertiary);font-size:12px;cursor:help"
           >
             <Icon name="Info" size={12} />
           </button>
@@ -264,10 +273,9 @@
           <span slot="label" class="stat-card-label-help">
             <span>{$t("Submissions")}</span>
             <button
-              class="zf-btn-icon-sm zf-btn-ghost"
+              class="zf-btn-icon-sm zf-btn-ghost help-icon"
               title={$t("help_submission_status")}
               on:click={() => toggleHelp("approvals")}
-              style="color:var(--text-tertiary);font-size:12px;cursor:help"
             >
               <Icon name="Info" size={12} />
             </button>
@@ -280,27 +288,21 @@
     </div>
 
     {#if activeHelp === "logged"}
-      <div
-        style="font-size:12px;color:var(--text-tertiary);margin-top:-6px;margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)"
-      >
+      <div class="report-note">
         {$t("help_logged")}
       </div>
     {/if}
     {#if activeHelp === "approvals" && !selectedUserIsAssistant}
-      <div
-        style="font-size:12px;color:var(--text-tertiary);margin-top:-6px;margin-bottom:12px;padding:8px;background:var(--bg-muted);border-radius:var(--radius-sm)"
-      >
+      <div class="report-note">
         {$t("help_submission_status")}
       </div>
     {/if}
 
     {#if reportData.leaveBalance}
-      <div
-        style="font-size:12px;font-weight:400;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px"
-      >
+      <div class="report-subheading">
         {$t("Vacation")}
       </div>
-      <div class="stat-cards" style="margin-bottom:16px">
+      <div class="stat-cards mb-16">
         <StatCard
           label={$t("Entitlement")}
           value={formatDayCount(reportData.leaveBalance.annual_entitlement)}
@@ -332,12 +334,10 @@
     {/if}
 
     {#if Object.keys(reportAbsenceSummary).length > 0}
-      <div
-        style="font-size:12px;font-weight:400;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px"
-      >
+      <div class="report-subheading">
         {$t("Absences")}
       </div>
-      <div class="stat-cards" style="margin-bottom:16px">
+      <div class="stat-cards mb-16">
         {#each Object.entries(reportAbsenceSummary) as [kind, days] (kind)}
           <StatCard
             label={absenceKindLabel(kind)}
@@ -354,30 +354,21 @@
       ).sort((a, b) => b[1] - a[1])}
       {@const catMax = catEntries[0][1]}
       <SectionCard title={$t("Category breakdown")}>
-        <div style="display:flex;flex-direction:column;gap:8px">
+        <div class="cat-bars">
           {#each catEntries as [cat, mins] (cat)}
-            <div
-              style="display:grid;grid-template-columns:130px 1fr 52px;align-items:center;gap:8px;font-size:12px"
-            >
-              <span
-                style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
-                title={$t(cat)}
-              >
+            <div class="cat-bar-row">
+              <span class="cat-bar-label" title={$t(cat)}>
                 {$t(cat)}
               </span>
-              <div
-                style="background:var(--bg-muted);border-radius:3px;height:8px;overflow:hidden"
-              >
+              <div class="cat-bar-track">
                 <div
-                  style="height:100%;border-radius:3px;background:var(--accent);width:{catMax >
-                  0
+                  class="cat-bar-fill"
+                  style:width={(catMax > 0
                     ? Math.round((mins / catMax) * 100)
-                    : 0}%;transition:width .3s"
+                    : 0) + "%"}
                 ></div>
               </div>
-              <span
-                class="tab-num"
-                style="color:var(--text-tertiary);text-align:right"
+              <span class="tab-num text-tertiary text-right"
                 >{minToHM(mins)}</span
               >
             </div>
@@ -451,3 +442,68 @@
     {/if}
   {/if}
 </SectionCard>
+
+<style>
+  /* Uppercase mini heading above each report sub-table. */
+  .report-subheading {
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 6px;
+  }
+
+  .help-icon {
+    color: var(--text-tertiary);
+    font-size: 13px;
+    cursor: help;
+  }
+
+  /* Muted explanation box directly under a table it belongs to. */
+  .report-note {
+    font-size: 13px;
+    color: var(--text-tertiary);
+    margin-top: -6px;
+    margin-bottom: 12px;
+    padding: 8px;
+    background: var(--bg-muted);
+    border-radius: var(--radius-sm);
+  }
+
+  /* Horizontal bar chart: one grid row per category. */
+  .cat-bars {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .cat-bar-row {
+    display: grid;
+    grid-template-columns: 130px 1fr 52px;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+  }
+
+  .cat-bar-label {
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .cat-bar-track {
+    background: var(--bg-muted);
+    border-radius: 3px;
+    height: 8px;
+    overflow: hidden;
+  }
+
+  .cat-bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    background: var(--accent);
+    transition: width 0.3s;
+  }
+</style>

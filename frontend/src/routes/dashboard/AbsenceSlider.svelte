@@ -73,7 +73,7 @@
   );
 </script>
 
-<div class="zf-card" style="margin-top:16px;overflow:hidden">
+<div class="zf-card slider-card mt-16">
   <div class="card-header">
     <Icon name="Users" size={15} sw={1.5} />
     <span class="card-header-title">{$t("Who is absent")}</span>
@@ -108,7 +108,7 @@
   {#key week}
     <div class="dropdown-slider" in:fly={{ x: direction * 80, duration: 200 }}>
       {#if data.length === 0}
-        <div style="padding:12px;color:var(--text-tertiary);font-size:13px">
+        <div class="zf-card-empty">
           {$t("No absences this week.")}
         </div>
       {:else}
@@ -116,13 +116,16 @@
           {@const absentUser = users.find((u) => u.id === absence.user_id)}
           <div class="dropdown-slider-item">
             <div>
-              <div style="font-weight:500;font-size:13px">
+              <div class="zf-item-title">
                 {absentUser
                   ? `${absentUser.first_name} ${absentUser.last_name}`
                   : `#${absence.user_id}`}
               </div>
-              <div style="font-size:12px;color:var(--text-tertiary)">
-                {absenceKindLabel(absence.kind)} · {fmtDateShort(absence.start_date)}{#if absence.start_date !== absence.end_date} - {fmtDateShort(absence.end_date)}{/if}
+              <div class="text-hint">
+                {absenceKindLabel(absence.kind)} · {fmtDateShort(
+                  absence.start_date,
+                )}{#if absence.start_date !== absence.end_date}
+                  - {fmtDateShort(absence.end_date)}{/if}
               </div>
             </div>
           </div>
@@ -148,7 +151,7 @@
 
   .absence-week-range {
     color: var(--text-tertiary);
-    font-size: 12px;
+    font-size: 13px;
     min-width: 108px;
     justify-content: center;
     padding: 2px 6px;

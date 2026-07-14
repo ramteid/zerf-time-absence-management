@@ -45,11 +45,17 @@
     </div>
     {#if breakMarker}
       {@const top = Math.max(0, Math.min(1, breakMarker.positionFraction))}
-      {@const height = Math.max(0, Math.min(1 - top, breakMarker.deductionFraction))}
+      {@const height = Math.max(
+        0,
+        Math.min(1 - top, breakMarker.deductionFraction),
+      )}
       <div
         class="time-block-break"
-        style="top: {top * 100}%; height: {height * 100}%"
-      >{$t("Break")}</div>
+        style:top={top * 100 + "%"}
+        style:height={height * 100 + "%"}
+      >
+        {$t("Break")}
+      </div>
     {/if}
   </div>
 {:else}
@@ -81,11 +87,17 @@
     </div>
     {#if breakMarker}
       {@const top = Math.max(0, Math.min(1, breakMarker.positionFraction))}
-      {@const height = Math.max(0, Math.min(1 - top, breakMarker.deductionFraction))}
+      {@const height = Math.max(
+        0,
+        Math.min(1 - top, breakMarker.deductionFraction),
+      )}
       <div
         class="time-block-break"
-        style="top: {top * 100}%; height: {height * 100}%"
-      >{$t("Break")}</div>
+        style:top={top * 100 + "%"}
+        style:height={height * 100 + "%"}
+      >
+        {$t("Break")}
+      </div>
     {/if}
   </div>
 {/if}
@@ -107,6 +119,6 @@
 
   .time-entry-chip :global(.zf-chip) {
     height: 18px;
-    font-size: 10px;
+    font-size: 11px;
   }
 </style>

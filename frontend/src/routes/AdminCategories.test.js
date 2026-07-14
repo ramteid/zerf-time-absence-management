@@ -46,7 +46,10 @@ describe("AdminCategories", () => {
   });
 
   afterEach(() => {
-    if (component) { unmount(component); component = null; }
+    if (component) {
+      unmount(component);
+      component = null;
+    }
     target.remove();
     HTMLDialogElement.prototype.showModal = originalShowModal;
   });
@@ -84,7 +87,7 @@ describe("AdminCategories", () => {
 
     // First "Add" button in the page is the Time Categories add button.
     const addBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.trim().includes("Add")
+      b.textContent.trim().includes("Add"),
     );
     expect(addBtn).not.toBeNull();
     addBtn.click();
@@ -102,7 +105,7 @@ describe("AdminCategories", () => {
     await waitForText(target, "Core Duties");
 
     const editBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.querySelector("svg")
+      b.querySelector("svg"),
     );
     expect(editBtn).not.toBeNull();
     editBtn.click();

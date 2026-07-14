@@ -19,7 +19,8 @@ function applyTheme(t) {
   if (typeof document !== "undefined") {
     document.documentElement.setAttribute("data-theme", t);
     const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute("content", THEME_COLORS[t] ?? THEME_COLORS.light);
+    if (meta)
+      meta.setAttribute("content", THEME_COLORS[t] ?? THEME_COLORS.light);
   }
 }
 

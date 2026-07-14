@@ -25,10 +25,7 @@ const apiMock = vi.hoisted(() =>
       mockState.settings = { ...mockState.settings, ...opts.body };
       return mockState.settings;
     }
-    if (
-      path === "/settings/uploads/report/run-now" &&
-      opts.method === "POST"
-    ) {
+    if (path === "/settings/uploads/report/run-now" && opts.method === "POST") {
       return {};
     }
     throw new Error(`Unhandled API path: ${path}`);
@@ -69,7 +66,10 @@ describe("AdminUpload", () => {
   });
 
   it("renders enable backup upload checkbox reflecting loaded setting", async () => {
-    mockState.settings = { ...mockState.settings, backup_upload_enabled: false };
+    mockState.settings = {
+      ...mockState.settings,
+      backup_upload_enabled: false,
+    };
     component = mount(AdminUpload, { target });
     await settle();
 
@@ -106,8 +106,7 @@ describe("AdminUpload", () => {
     await settle();
 
     const saveCall = apiMock.mock.calls.find(
-      ([path, opts]) =>
-        path === "/settings/uploads" && opts?.method === "PUT",
+      ([path, opts]) => path === "/settings/uploads" && opts?.method === "PUT",
     );
     expect(saveCall).toBeTruthy();
     const body = saveCall[1].body;

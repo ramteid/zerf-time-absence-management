@@ -89,7 +89,9 @@
     )
       return;
     try {
-      const resetResponse = await api(`/users/${userId}/reset-password`, { method: "POST" });
+      const resetResponse = await api(`/users/${userId}/reset-password`, {
+        method: "POST",
+      });
       resetPwData = { password: resetResponse.temporary_password };
     } catch (e) {
       toast($t(e?.message || "Error"), "error");
@@ -114,7 +116,7 @@
   }
 </script>
 
-<div class="top-bar">
+<div class="top-bar page-medium">
   <div class="top-bar-title">
     <h1>{$t("Users")}</h1>
     <div class="top-bar-subtitle">{$t("Manage your team")}</div>
@@ -129,19 +131,13 @@
   </div>
 </div>
 
-<div class="content-area" style="max-width:760px">
+<div class="content-area page-medium">
   <!-- Team leads setting shown above the user list so admins can toggle it inline. -->
-  <div class="zf-card" style="padding:16px 20px;margin-bottom:16px">
+  <div class="zf-card zf-card-section">
     <div class="field-row">
-      <div style="flex:0 0 auto">
-        <label
-          class="zf-label"
-          style="display:flex;align-items:center;gap:8px;cursor:pointer"
-        >
-          <input
-            type="checkbox"
-            bind:checked={allowTeamLeadManageAssistants}
-          />
+      <div class="flex-none">
+        <label class="zf-label zf-check-label">
+          <input type="checkbox" bind:checked={allowTeamLeadManageAssistants} />
           {$t("Allow team leads to create assistant users")}
         </label>
         <div class="field-hint">
@@ -151,7 +147,7 @@
         </div>
       </div>
     </div>
-    <div style="display:flex;justify-content:flex-end;padding-top:12px">
+    <div class="form-actions">
       <button
         class="zf-btn zf-btn-primary zf-btn-sm"
         on:click={saveAssistantSetting}
@@ -162,26 +158,22 @@
     </div>
   </div>
 
-  <div class="zf-card" style="overflow-x:auto" data-testid="user-roster">
-    {#each users as u, i (u.id)}
-      <div
-        style="padding:10px 16px;{i < users.length - 1
-          ? 'border-bottom:1px solid var(--border)'
-          : ''};display:flex;align-items:center;gap:12px"
-      >
-        <div class="avatar {userAvatarClass(u)}" style="width:32px;height:32px;font-size:12px">
+  <div class="zf-card zf-table-wrap" data-testid="user-roster">
+    {#each users as u (u.id)}
+      <div class="user-row">
+        <div class="avatar {userAvatarClass(u)} avatar-sm">
           {userInitials(u)}
         </div>
-        <div style="flex:1;min-width:0">
-          <div style="font-size:13px;font-weight:500">
+        <div class="flex-min0">
+          <div class="zf-item-title">
             {u.first_name}
             {u.last_name}
           </div>
-          <div style="font-size:11.5px;color:var(--text-tertiary)">
+          <div class="text-hint">
             {roleLabel(u.role)}
           </div>
         </div>
-        <div style="display:flex;gap:4px">
+        <div class="zf-actions">
           <button
             class="zf-btn zf-btn-ghost zf-btn-sm"
             on:click={() => editUser(u)}
@@ -209,30 +201,26 @@
 
   {#if archivedUsers.length > 0}
     <!-- Archived users live below the active roster, never mixed in. -->
-    <h2 style="margin:24px 0 8px;font-size:14px;font-weight:600;color:var(--text-secondary)">
+    <h2 class="zf-list-heading">
       {$t("Archived Users")}
     </h2>
-    <div class="zf-card" style="overflow-x:auto">
-      {#each archivedUsers as u, i (u.id)}
-        <div
-          style="padding:10px 16px;{i < archivedUsers.length - 1
-            ? 'border-bottom:1px solid var(--border)'
-            : ''};display:flex;align-items:center;gap:12px"
-        >
-          <div class="avatar {userAvatarClass(u)}" style="width:32px;height:32px;font-size:12px">
+    <div class="zf-card zf-table-wrap">
+      {#each archivedUsers as u (u.id)}
+        <div class="user-row">
+          <div class="avatar {userAvatarClass(u)} avatar-sm">
             {userInitials(u)}
           </div>
-          <div style="flex:1;min-width:0">
-            <div style="font-size:13px;font-weight:500">
+          <div class="flex-min0">
+            <div class="zf-item-title">
               {u.first_name}
               {u.last_name}
             </div>
-            <div style="font-size:11.5px;color:var(--text-tertiary)">
+            <div class="text-hint">
               {roleLabel(u.role)}
               · {$t("Archived on {date}", { date: fmtDate(u.archived_at) })}
             </div>
           </div>
-          <div style="display:flex;gap:4px">
+          <div class="zf-actions">
             <button
               class="zf-btn zf-btn-ghost zf-btn-sm"
               title={$t("Restore")}
@@ -296,3 +284,22 @@
     }}
   />
 {/if}
+
+<style>
+  .user-row {
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .user-row:not(:last-child) {
+    border-bottom: 1px solid var(--border);
+  }
+
+  .form-actions {
+    display: flex;
+    justify-content: flex-end;
+    padding-top: 12px;
+  }
+</style>

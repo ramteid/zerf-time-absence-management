@@ -26,27 +26,29 @@ const mockState = vi.hoisted(() => ({
   },
 }));
 
-const apiMock = vi.hoisted(() => vi.fn(async (path, opts = {}) => {
-  if (path === "/settings" && (!opts.method || opts.method === "GET")) {
-    return mockState.settings;
-  }
-  if (path === "/settings" && opts.method === "PUT") {
-    mockState.settings = structuredClone(opts.body);
-    return mockState.settings;
-  }
-  if (path === "/holidays/countries") {
-    return mockState.countries;
-  }
-  if (path.startsWith("/holidays/regions/")) {
-    const country = path.split("/").at(-1);
-    const result = mockState.regionsByCountry[country];
-    if (result instanceof Error) {
-      throw result;
+const apiMock = vi.hoisted(() =>
+  vi.fn(async (path, opts = {}) => {
+    if (path === "/settings" && (!opts.method || opts.method === "GET")) {
+      return mockState.settings;
     }
-    return result || [];
-  }
-  throw new Error(`Unhandled API path: ${path}`);
-}));
+    if (path === "/settings" && opts.method === "PUT") {
+      mockState.settings = structuredClone(opts.body);
+      return mockState.settings;
+    }
+    if (path === "/holidays/countries") {
+      return mockState.countries;
+    }
+    if (path.startsWith("/holidays/regions/")) {
+      const country = path.split("/").at(-1);
+      const result = mockState.regionsByCountry[country];
+      if (result instanceof Error) {
+        throw result;
+      }
+      return result || [];
+    }
+    throw new Error(`Unhandled API path: ${path}`);
+  }),
+);
 
 vi.mock("svelte", async () => {
   return await import("../../node_modules/svelte/src/index-client.js");
@@ -79,7 +81,11 @@ describe("AdminSettings", () => {
       last_name: "User",
       must_configure_settings: true,
     });
-    appSettings.set({ ui_language: "en", time_format: "24h", timezone: "Europe/Berlin" });
+    appSettings.set({
+      ui_language: "en",
+      time_format: "24h",
+      timezone: "Europe/Berlin",
+    });
     setLanguage("en");
     apiMock.mockClear();
   });
@@ -142,7 +148,10 @@ describe("AdminSettings", () => {
   });
 
   it("allows saving even when region loading fails", async () => {
-    mockState.regionsByCountry = { ...mockState.regionsByCountry, DE: new Error("boom") };
+    mockState.regionsByCountry = {
+      ...mockState.regionsByCountry,
+      DE: new Error("boom"),
+    };
 
     component = mount(AdminSettings, { target });
     await settle();

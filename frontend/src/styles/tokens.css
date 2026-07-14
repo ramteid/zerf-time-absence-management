@@ -1,0 +1,124 @@
+/* Zerf design tokens */
+/* Inter via system or fallback to system-ui stack */
+
+:root {
+  color-scheme: light dark;
+
+  --bg-canvas: #f3f2ee;
+  --bg-surface: #faf9f7;
+  --bg-muted: #edecea;
+  --bg-subtle: #f7f6f3;
+  --bg-elevated: rgba(0, 0, 0, 0.04);
+
+  --border: #e8e5df;
+  --border-strong: #d8d4cc;
+
+  --text-primary: #1c1d1a;
+  --text-secondary: #4f5048;
+  --text-tertiary: #82847b;
+  --text-disabled: #b1b3a8;
+
+  --nav-bg: #f0eee9;
+  --nav-bg-hover: #e4e1db;
+  --nav-bg-active: #d8d5ce;
+  --nav-text: #4f5048;
+  --nav-text-muted: #82847b;
+  --nav-text-active: #1c1d1a;
+  --nav-border: #e0ddd6;
+
+  --accent: #0d8a7a;
+  --accent-hover: #0a7468;
+  --accent-soft: #e3f3ef;
+  --accent-text: #075e55;
+
+  --success: #2f9e6e;
+  --success-soft: #e4f4ec;
+  --success-text: #1f6b4a;
+
+  --warning: #c08217;
+  --warning-soft: #faf0d9;
+  --warning-text: #8a5d10;
+
+  --danger: #c64a3f;
+  --danger-soft: #fbe8e5;
+  --danger-text: #8a3128;
+
+  --info: #2f6cb5;
+  --info-soft: #e6eef8;
+  --info-text: #234d80;
+
+  /* Light green, used for the "assistant" role avatar — distinct from the
+     teal-leaning --success used for "employee". */
+  --lime-soft: #eef6d9;
+  --lime-text: #4d6a17;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+
+  --shadow-sm: 0 1px 2px rgba(20, 22, 26, 0.04);
+  --shadow-md:
+    0 1px 3px rgba(20, 22, 26, 0.06), 0 4px 12px rgba(20, 22, 26, 0.04);
+  --shadow-lg:
+    0 8px 28px rgba(20, 22, 26, 0.1), 0 2px 6px rgba(20, 22, 26, 0.06);
+
+  --mobile-bottom-nav-height: 56px;
+  --mobile-safe-area-bottom: env(safe-area-inset-bottom, 0px);
+
+  /* Maximum readable width for page content on wide desktop screens.
+     Form-heavy pages narrow this via the .page-narrow / .page-medium classes
+     (see layout.css), set on both .top-bar and .content-area. */
+  --page-max-width: 1200px;
+
+  --font-sans:
+    "Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg-canvas: #0f1117;
+  --bg-surface: #1a1d24;
+  --bg-muted: #1f2228;
+  --bg-subtle: #14161c;
+  --bg-elevated: rgba(255, 255, 255, 0.06);
+
+  --border: #2a2e38;
+  --border-strong: #363b48;
+
+  --nav-bg: #14161a;
+  --nav-bg-hover: #1f2228;
+  --nav-bg-active: #292d35;
+  --nav-text: #c5c8cd;
+  --nav-text-muted: #7d8089;
+  --nav-text-active: #ffffff;
+  --nav-border: #24272d;
+
+  --text-primary: #e8eaed;
+  --text-secondary: #9ea3ad;
+  --text-tertiary: #6b7180;
+  --text-disabled: #4a4f5c;
+
+  --accent-soft: #0f2e28;
+  --accent-text: #4ecbb8;
+
+  --success-soft: #0f2e1e;
+  --success-text: #5dba8a;
+
+  --warning-soft: #2e2106;
+  --warning-text: #d4a444;
+
+  --danger-soft: #2e0f0a;
+  --danger-text: #e06e62;
+
+  --info-soft: #0c1e38;
+  --info-text: #5a8fd4;
+
+  --lime-soft: #263314;
+  --lime-text: #b3d968;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 1px 3px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.2);
+  --shadow-lg: 0 8px 28px rgba(0, 0, 0, 0.4), 0 2px 6px rgba(0, 0, 0, 0.3);
+}

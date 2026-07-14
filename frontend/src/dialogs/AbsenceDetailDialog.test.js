@@ -48,7 +48,10 @@ describe("AbsenceDetailDialog", () => {
   });
 
   afterEach(() => {
-    if (component) { unmount(component); component = null; }
+    if (component) {
+      unmount(component);
+      component = null;
+    }
     target.remove();
     HTMLDialogElement.prototype.showModal = originalShowModal;
   });
@@ -106,7 +109,9 @@ describe("AbsenceDetailDialog", () => {
       },
     });
     await settle();
-    expect(target.textContent).toContain("Overlaps with mandatory project deadline");
+    expect(target.textContent).toContain(
+      "Overlaps with mandatory project deadline",
+    );
   });
 
   it("hides rejection reason when it is null", async () => {
@@ -143,7 +148,7 @@ describe("AbsenceDetailDialog", () => {
     });
     await settle();
     const cancelBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Request cancellation")
+      b.textContent.includes("Request cancellation"),
     );
     expect(cancelBtn).not.toBeNull();
     cancelBtn.click();
@@ -168,7 +173,7 @@ describe("AbsenceDetailDialog", () => {
     });
     await settle();
     const cancelBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Request cancellation")
+      b.textContent.includes("Request cancellation"),
     );
     expect(cancelBtn).toBeUndefined();
   });
@@ -187,7 +192,7 @@ describe("AbsenceDetailDialog", () => {
     });
     await settle();
     const closeBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Close")
+      b.textContent.includes("Close"),
     );
     closeBtn?.click();
     await settle();

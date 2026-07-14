@@ -157,13 +157,11 @@
         <Icon name="Clock" size={18} />
       </div>
       <div>
-        <h1
-          style="margin:0;font-size:20px;font-weight:400;letter-spacing:-0.02em"
-        >
+        <h1 class="auth-title">
           {$t("Time tracking")}
         </h1>
         {#if $settings?.organization_name}
-          <div style="font-size:12px;color:var(--text-tertiary);margin-top:2px">
+          <div class="field-hint">
             {$settings.organization_name}
           </div>
         {/if}
@@ -171,7 +169,7 @@
     </div>
 
     {#if view === "login"}
-      <p style="font-size:13px;color:var(--text-tertiary);margin-bottom:24px">
+      <p class="zf-form-intro">
         {$t("Sign in to your time-tracking workspace.")}
       </p>
       <form
@@ -181,7 +179,7 @@
         autocomplete="on"
         on:submit={submitLogin}
       >
-        <div style="margin-bottom:14px">
+        <div class="mb-14">
           <label class="zf-label" for="email">{$t("Email")}</label>
           <input
             id="email"
@@ -193,7 +191,7 @@
             autocomplete="username"
           />
         </div>
-        <div style="margin-bottom:14px">
+        <div class="mb-14">
           <label class="zf-label" for="password">{$t("Password")}</label>
           <input
             id="password"
@@ -205,17 +203,16 @@
             autocomplete="current-password"
           />
         </div>
-        <div class="error-text" style="margin-bottom:8px">{loginError}</div>
+        <div class="error-text mb-8">{loginError}</div>
         <button
-          class="zf-btn zf-btn-primary"
+          class="zf-btn zf-btn-primary zf-btn-block"
           type="submit"
           disabled={submitting}
-          style="width:100%;justify-content:center;height:38px"
         >
           {submitting ? $t("Signing in…") : $t("Sign in")}
         </button>
       </form>
-      <div style="text-align:center;margin-top:14px">
+      <div class="text-center mt-14">
         <button
           class="zf-btn zf-btn-ghost zf-btn-sm"
           type="button"
@@ -230,27 +227,24 @@
         </button>
       </div>
     {:else if view === "forgot"}
-      <p style="font-size:13px;color:var(--text-tertiary);margin-bottom:24px">
+      <p class="zf-form-intro">
         {$t("Enter your email to receive a password reset link.")}
       </p>
       {#if forgotSent}
-        <div
-          style="font-size:13px;color:var(--success-text);background:var(--success-soft);padding:12px;border-radius:var(--radius-sm);margin-bottom:16px"
-        >
+        <div class="success-note">
           {$t(
             "If your email address is registered, you will receive a reset link shortly.",
           )}
         </div>
         <button
-          class="zf-btn zf-btn-ghost zf-btn-sm"
-          style="width:100%;justify-content:center"
+          class="zf-btn zf-btn-ghost zf-btn-sm zf-btn-block"
           on:click={() => (view = "login")}
         >
           {$t("Back to sign in")}
         </button>
       {:else}
         <form on:submit={submitForgot}>
-          <div style="margin-bottom:14px">
+          <div class="mb-14">
             <label class="zf-label" for="forgot-email">{$t("Email")}</label>
             <input
               id="forgot-email"
@@ -261,17 +255,16 @@
               autocomplete="email"
             />
           </div>
-          <div class="error-text" style="margin-bottom:8px">{forgotError}</div>
+          <div class="error-text mb-8">{forgotError}</div>
           <button
-            class="zf-btn zf-btn-primary"
+            class="zf-btn zf-btn-primary zf-btn-block"
             type="submit"
             disabled={forgotBusy}
-            style="width:100%;justify-content:center;height:38px"
           >
             {forgotBusy ? $t("Sending...") : $t("Send reset link")}
           </button>
         </form>
-        <div style="text-align:center;margin-top:14px">
+        <div class="text-center mt-14">
           <button
             class="zf-btn zf-btn-ghost zf-btn-sm"
             type="button"
@@ -282,18 +275,15 @@
         </div>
       {/if}
     {:else if view === "reset"}
-      <p style="font-size:13px;color:var(--text-tertiary);margin-bottom:24px">
+      <p class="zf-form-intro">
         {$t("Choose a new password for your account.")}
       </p>
       {#if resetDone}
-        <div
-          style="font-size:13px;color:var(--success-text);background:var(--success-soft);padding:12px;border-radius:var(--radius-sm);margin-bottom:16px"
-        >
+        <div class="success-note">
           {$t("Password reset successfully. Please sign in.")}
         </div>
         <button
-          class="zf-btn zf-btn-primary"
-          style="width:100%;justify-content:center;height:38px"
+          class="zf-btn zf-btn-primary zf-btn-block"
           on:click={() => {
             view = "login";
             newPassword = "";
@@ -304,7 +294,7 @@
         </button>
       {:else}
         <form on:submit={submitReset}>
-          <div style="margin-bottom:14px">
+          <div class="mb-14">
             <label class="zf-label" for="new-password"
               >{$t("New password")}</label
             >
@@ -318,7 +308,7 @@
               autocomplete="new-password"
             />
           </div>
-          <div style="margin-bottom:14px">
+          <div class="mb-14">
             <label class="zf-label" for="new-password2"
               >{$t("Confirm password")}</label
             >
@@ -332,17 +322,16 @@
               autocomplete="new-password"
             />
           </div>
-          <div class="error-text" style="margin-bottom:8px">{resetError}</div>
+          <div class="error-text mb-8">{resetError}</div>
           <button
-            class="zf-btn zf-btn-primary"
+            class="zf-btn zf-btn-primary zf-btn-block"
             type="submit"
             disabled={resetBusy}
-            style="width:100%;justify-content:center;height:38px"
           >
             {resetBusy ? $t("Saving...") : $t("Set new password")}
           </button>
         </form>
-        <div style="text-align:center;margin-top:14px">
+        <div class="text-center mt-14">
           <button
             class="zf-btn zf-btn-ghost zf-btn-sm"
             type="button"
@@ -355,3 +344,21 @@
     {/if}
   </div>
 </div>
+
+<style>
+  .field-hint {
+    font-size: 13px;
+    color: var(--text-tertiary);
+    margin-top: 2px;
+  }
+
+  /* Confirmation that the reset e-mail was sent. */
+  .success-note {
+    font-size: 14px;
+    color: var(--success-text);
+    background: var(--success-soft);
+    padding: 12px;
+    border-radius: var(--radius-sm);
+    margin-bottom: 16px;
+  }
+</style>

@@ -164,7 +164,8 @@
       monthSubmissionChecks = buildSubmissionChecks(monthsToCheck, reports);
     } catch (error) {
       monthSubmissionChecks = [];
-      monthSubmissionError = error?.message || "Could not check submission status.";
+      monthSubmissionError =
+        error?.message || "Could not check submission status.";
     } finally {
       monthSubmissionLoading = false;
     }
@@ -224,7 +225,8 @@
     overtimeRows.find((row) => row.month === currentMonthKey) ??
     (overtimeRows.length ? overtimeRows[overtimeRows.length - 1] : null);
   $: overtimeBalanceMin = currentOvertimeRow?.cumulative_min || 0;
-  $: submittedOvertimeBalanceMin = currentOvertimeRow?.submitted_cumulative_min ?? overtimeBalanceMin;
+  $: submittedOvertimeBalanceMin =
+    currentOvertimeRow?.submitted_cumulative_min ?? overtimeBalanceMin;
   $: currentMonthDiffMin = currentOvertimeRow?.diff_min || 0;
 
   // ── Reactive derivations: submission compliance ───────────────────────────────
@@ -380,7 +382,9 @@
     const result = await confirmDialog(
       isCancellation ? $t("Reject cancellation?") : $t("Reject?"),
       isCancellation
-        ? $t("Reject this cancellation request? The absence will remain approved.")
+        ? $t(
+            "Reject this cancellation request? The absence will remain approved.",
+          )
         : $t("Reject this request?"),
       { danger: true, confirm: $t("Reject"), reason: !isCancellation },
     );

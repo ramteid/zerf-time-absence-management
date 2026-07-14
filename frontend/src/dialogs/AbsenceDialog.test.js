@@ -13,13 +13,76 @@ import { setLanguage, setAbsenceCategoryCache } from "../i18n.js";
 
 // Seed data matching the default absence_categories seeded by the backend migration.
 const MOCK_CATEGORIES = [
-  { id: 1, slug: "vacation", name: "Vacation", cost_type: "vacation", auto_approve_past: false, active: true, color: "#4CAF50", sort_order: 10 },
-  { id: 2, slug: "sick", name: "Sick Leave", cost_type: "none", auto_approve_past: true, active: true, color: "#F44336", sort_order: 20 },
-  { id: 3, slug: "training", name: "Training", cost_type: "none", auto_approve_past: false, active: true, color: "#2196F3", sort_order: 30 },
-  { id: 4, slug: "special_leave", name: "Special Leave", cost_type: "none", auto_approve_past: false, active: true, color: "#9C27B0", sort_order: 40 },
-  { id: 5, slug: "unpaid", name: "Unpaid Leave", cost_type: "none", auto_approve_past: false, active: true, color: "#FF9800", sort_order: 50 },
-  { id: 6, slug: "general_absence", name: "General Absence", cost_type: "none", auto_approve_past: false, active: true, color: "#607D8B", sort_order: 60 },
-  { id: 7, slug: "flextime_reduction", name: "Flextime Reduction", cost_type: "flextime", auto_approve_past: false, active: true, color: "#795548", sort_order: 70 },
+  {
+    id: 1,
+    slug: "vacation",
+    name: "Vacation",
+    cost_type: "vacation",
+    auto_approve_past: false,
+    active: true,
+    color: "#4CAF50",
+    sort_order: 10,
+  },
+  {
+    id: 2,
+    slug: "sick",
+    name: "Sick Leave",
+    cost_type: "none",
+    auto_approve_past: true,
+    active: true,
+    color: "#F44336",
+    sort_order: 20,
+  },
+  {
+    id: 3,
+    slug: "training",
+    name: "Training",
+    cost_type: "none",
+    auto_approve_past: false,
+    active: true,
+    color: "#2196F3",
+    sort_order: 30,
+  },
+  {
+    id: 4,
+    slug: "special_leave",
+    name: "Special Leave",
+    cost_type: "none",
+    auto_approve_past: false,
+    active: true,
+    color: "#9C27B0",
+    sort_order: 40,
+  },
+  {
+    id: 5,
+    slug: "unpaid",
+    name: "Unpaid Leave",
+    cost_type: "none",
+    auto_approve_past: false,
+    active: true,
+    color: "#FF9800",
+    sort_order: 50,
+  },
+  {
+    id: 6,
+    slug: "general_absence",
+    name: "General Absence",
+    cost_type: "none",
+    auto_approve_past: false,
+    active: true,
+    color: "#607D8B",
+    sort_order: 60,
+  },
+  {
+    id: 7,
+    slug: "flextime_reduction",
+    name: "Flextime Reduction",
+    cost_type: "flextime",
+    auto_approve_past: false,
+    active: true,
+    color: "#795548",
+    sort_order: 70,
+  },
 ];
 
 const apiMock = vi.hoisted(() => vi.fn());
@@ -75,7 +138,10 @@ describe("AbsenceDialog", () => {
   });
 
   afterEach(() => {
-    if (component) { unmount(component); component = null; }
+    if (component) {
+      unmount(component);
+      component = null;
+    }
     target.remove();
     HTMLDialogElement.prototype.showModal = originalShowModal;
     delete HTMLDialogElement.prototype.close;
@@ -127,7 +193,7 @@ describe("AbsenceDialog", () => {
     expect(select).not.toBeNull();
     // Option values are category IDs; verify one option exists per mock category.
     const optionValues = [...select.querySelectorAll("option")].map((o) =>
-      Number(o.value)
+      Number(o.value),
     );
     for (const cat of MOCK_CATEGORIES) {
       expect(optionValues).toContain(cat.id);
@@ -150,14 +216,14 @@ describe("AbsenceDialog", () => {
     await settle();
 
     const saveBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Submit Request")
+      b.textContent.includes("Submit Request"),
     );
     saveBtn?.click();
     await settle();
     await settle();
 
     const postCall = apiMock.mock.calls.find(
-      ([path, opts]) => path === "/absences" && opts?.method === "POST"
+      ([path, opts]) => path === "/absences" && opts?.method === "POST",
     );
     expect(postCall).toBeTruthy();
   });
@@ -187,14 +253,14 @@ describe("AbsenceDialog", () => {
     await settle();
 
     const saveBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Save")
+      b.textContent.includes("Save"),
     );
     saveBtn?.click();
     await settle();
     await settle();
 
     const putCall = apiMock.mock.calls.find(
-      ([path, opts]) => path === "/absences/5" && opts?.method === "PUT"
+      ([path, opts]) => path === "/absences/5" && opts?.method === "PUT",
     );
     expect(putCall).toBeTruthy();
   });
@@ -210,7 +276,7 @@ describe("AbsenceDialog", () => {
     await settle();
 
     const cancelBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Cancel")
+      b.textContent.includes("Cancel"),
     );
     cancelBtn?.click();
     await settle();
@@ -234,14 +300,14 @@ describe("AbsenceDialog", () => {
     await settle();
 
     const saveBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Submit Request")
+      b.textContent.includes("Submit Request"),
     );
     saveBtn?.click();
     await settle();
     await settle();
 
     expect(target.querySelector(".error-text")?.textContent).toContain(
-      "Overlap"
+      "Overlap",
     );
   });
 
@@ -287,7 +353,9 @@ describe("AbsenceDialog", () => {
     // holidays itself so the workday count still excludes them.
     apiMock.mockImplementation((path) =>
       path === "/holidays?year=2026"
-        ? Promise.resolve([{ holiday_date: "2026-06-03", name: "Test Holiday" }])
+        ? Promise.resolve([
+            { holiday_date: "2026-06-03", name: "Test Holiday" },
+          ])
         : Promise.resolve([]),
     );
     const onClose = vi.fn();

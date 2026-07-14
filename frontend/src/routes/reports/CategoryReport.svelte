@@ -94,7 +94,9 @@
           from: catFrom,
           to: catTo,
         });
-        teamCatReport = (loadedTeamCat || []).sort((a, b) => a.name.localeCompare(b.name));
+        teamCatReport = (loadedTeamCat || []).sort((a, b) =>
+          a.name.localeCompare(b.name),
+        );
         catReport = null;
         catFilteredCategories = categoryNamesFromTeamReport(teamCatReport);
       }
@@ -141,7 +143,7 @@
   helpOpen={activeHelp === "cat"}
   onHelpToggle={() => toggleHelp("cat")}
 >
-  <div class="field-row" style="margin-bottom:12px">
+  <div class="field-row mb-12">
     <div>
       <label class="zf-label" for="cat-from">{$t("From")}</label>
       <DatePicker
@@ -157,7 +159,7 @@
     </div>
   </div>
 
-  <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+  <div class="report-toolbar">
     <button class="zf-btn zf-btn-primary" on:click={showCat}
       >{$t("Show")}</button
     >
@@ -172,20 +174,17 @@
   </div>
 
   {#if catShowFilter && allTeamCatColumns.length > 0}
-    <div
-      style="padding:12px;background:var(--bg-muted);border-radius:var(--radius-sm);margin-bottom:12px"
-    >
-      <div style="display:flex;flex-wrap:wrap;gap:8px">
+    <div class="filter-panel">
+      <div class="filter-options">
         {#each allTeamCatColumns as col (col.category)}
-          <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <label class="filter-check">
             <input
               type="checkbox"
               checked={catFilteredCategories.includes(col.category)}
               on:change={() => toggleCategoryFilter(col.category)}
             />
-            <span class="cat-dot" style="background:{col.color || '#999'}"
-            ></span>
-            <span style="font-size:13px">{$t(col.category)}</span>
+            <span class="cat-dot" style:background={col.color || "#999"}></span>
+            <span>{$t(col.category)}</span>
           </label>
         {/each}
       </div>
@@ -193,20 +192,17 @@
   {/if}
 
   {#if catShowFilter && catReport && catReport.length > 0}
-    <div
-      style="padding:12px;background:var(--bg-muted);border-radius:var(--radius-sm);margin-bottom:12px"
-    >
-      <div style="display:flex;flex-wrap:wrap;gap:8px">
+    <div class="filter-panel">
+      <div class="filter-options">
         {#each catReport as cat (cat.category)}
-          <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <label class="filter-check">
             <input
               type="checkbox"
               checked={catFilteredCategories.includes(cat.category)}
               on:change={() => toggleCategoryFilter(cat.category)}
             />
-            <span class="cat-dot" style="background:{cat.color || '#999'}"
-            ></span>
-            <span style="font-size:13px">{$t(cat.category)}</span>
+            <span class="cat-dot" style:background={cat.color || "#999"}></span>
+            <span>{$t(cat.category)}</span>
           </label>
         {/each}
       </div>
@@ -215,42 +211,35 @@
 
   {#if teamCatReport}
     {#if teamCatReport.length === 0 || visibleTeamCatColumns.length === 0}
-      <div style="padding:16px;color:var(--text-tertiary);font-size:13px">
+      <div class="zf-card-empty">
         {$t("No data.")}
       </div>
     {:else}
-      <div style="margin-top:12px">
+      <div class="mt-12">
         <DataTable fit>
           <thead>
             <tr>
               <th>{$t("Employee")}</th>
               {#each visibleTeamCatColumns as col (col.category)}
-                <th style="text-align:right">
-                  <span
-                    style="display:inline-flex;align-items:center;gap:4px;justify-content:flex-end"
-                  >
-                    <span
-                      class="cat-dot"
-                      style="background:{col.color || '#999'}"
+                <th class="text-right">
+                  <span class="th-cat">
+                    <span class="cat-dot" style:background={col.color || "#999"}
                     ></span>
                     {$t(col.category)}
                   </span>
                 </th>
               {/each}
-              <th style="text-align:right">{$t("Total")}</th>
+              <th class="text-right">{$t("Total")}</th>
             </tr>
           </thead>
           <tbody>
             {#each teamCatReport as row (row.user_id)}
               {@const rowTotal = teamCatRowTotal(row)}
               <tr>
-                <td style="font-weight:500">{row.name}</td>
+                <td class="fw-500">{row.name}</td>
                 {#each visibleTeamCatColumns as col (col.category)}
                   {@const cellMin = teamCatMinutes(row, col.category)}
-                  <td
-                    class="tab-num"
-                    style="text-align:right;color:var(--text-tertiary)"
-                  >
+                  <td class="tab-num text-right text-tertiary">
                     {#if cellMin > 0}
                       {minToHM(cellMin)}
                     {:else}
@@ -258,7 +247,7 @@
                     {/if}
                   </td>
                 {/each}
-                <td class="tab-num" style="text-align:right;font-weight:400">
+                <td class="tab-num text-right">
                   {rowTotal > 0 ? minToHM(rowTotal) : "-"}
                 </td>
               </tr>
@@ -271,37 +260,35 @@
 
   {#if catReport}
     {#if catReport.length === 0}
-      <div style="padding:16px;color:var(--text-tertiary);font-size:13px">
+      <div class="zf-card-empty">
         {$t("No data.")}
       </div>
     {:else if catFilteredCategories.length === 0 || (filteredCatReport && filteredCatReport.length === 0)}
-      <div style="padding:16px;color:var(--text-tertiary);font-size:13px">
+      <div class="zf-card-empty">
         {$t("No data.")}
       </div>
     {:else if filteredCatReport}
-      <div class="cat-totals-wrap" style="margin-top:12px">
+      <div class="cat-totals-wrap mt-12">
         <DataTable fit>
           <thead>
             <tr>
               <th>{$t("Category")}</th>
-              <th style="text-align:right;width:22%">{$t("Hours")}</th>
-              <th style="text-align:right;width:16%">%</th>
+              <th class="text-right col-hours">{$t("Hours")}</th>
+              <th class="text-right col-pct">%</th>
             </tr>
           </thead>
           <tbody>
             {#each filteredCatReport as c (c.category)}
               <tr>
-                <td style="font-weight:500">
-                  <span style="display:inline-flex;align-items:center;gap:6px">
-                    <span class="cat-dot" style="background:{c.color || '#999'}"
+                <td class="fw-500">
+                  <span class="cat-cell">
+                    <span class="cat-dot" style:background={c.color || "#999"}
                     ></span>
                     {$t(c.category)}
                   </span>
                 </td>
-                <td class="tab-num" style="text-align:right"
-                  >{minToHM(c.minutes)}</td
-                >
-                <td class="tab-num" style="text-align:right">
+                <td class="tab-num text-right">{minToHM(c.minutes)}</td>
+                <td class="tab-num text-right">
                   {filteredCatTotal > 0
                     ? fmtDecimal((c.minutes / filteredCatTotal) * 100, 1)
                     : 0}%
@@ -316,6 +303,56 @@
 </SectionCard>
 
 <style>
+  .report-toolbar {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+
+  .filter-panel {
+    padding: 12px;
+    background: var(--bg-muted);
+    border-radius: var(--radius-sm);
+    margin-bottom: 12px;
+  }
+
+  .filter-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .filter-check {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    font-size: 14px;
+  }
+
+  /* Right-aligned category header cell: dot + name as one unit. */
+  .th-cat {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    justify-content: flex-end;
+  }
+
+  .cat-cell {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .col-hours {
+    width: 22%;
+  }
+
+  .col-pct {
+    width: 16%;
+  }
+
   .cat-dot {
     width: 10px;
     height: 10px;

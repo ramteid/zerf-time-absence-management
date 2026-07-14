@@ -260,14 +260,9 @@
 
 <div class="content-area">
   {#if isFirstSetup}
-    <div
-      class="zf-card"
-      style="padding:16px 20px;margin-bottom:16px;border-color:var(--warning)"
-    >
-      <strong style="color:var(--warning-text)"
-        >{$t("Initial setup required.")}</strong
-      >
-      <p style="font-size:13px;color:var(--text-tertiary);margin-top:4px">
+    <div class="zf-card zf-card-warning">
+      <strong class="text-warning">{$t("Initial setup required.")}</strong>
+      <p class="fs-14 text-tertiary mt-4">
         {$t(
           needsName
             ? "Please enter your name and configure the country, default weekly hours and default annual leave days before using the application."
@@ -277,8 +272,8 @@
     </div>
   {/if}
   {#if needsName}
-    <div class="zf-card" style="padding:20px;margin-bottom:16px">
-      <div style="font-size:14px;font-weight:400;margin-bottom:14px">
+    <div class="zf-card zf-card-section">
+      <div class="zf-card-title mb-14">
         {$t("Your Name")}
       </div>
       <div class="field-group">
@@ -313,7 +308,7 @@
       </div>
     </div>
   {/if}
-  <div class="zf-card" style="padding:20px;margin-bottom:16px">
+  <div class="zf-card zf-card-section">
     <div class="field-card-title">{$t("Organization")}</div>
     <div class="field-group">
       <div class="field-row">
@@ -336,7 +331,7 @@
       </div>
     </div>
   </div>
-  <div class="zf-card" style="padding:20px;margin-bottom:16px">
+  <div class="zf-card zf-card-section">
     <div class="field-card-title">{$t("General")}</div>
     <div class="field-group">
       <div class="field-row">
@@ -384,9 +379,7 @@
       </div>
 
       <!-- Default user settings -->
-      <div
-        style="font-size:14px;font-weight:400;margin-top:20px;margin-bottom:14px"
-      >
+      <div class="zf-form-section-title">
         {$t("Default weekly hours")} / {$t("Default annual leave days")}
       </div>
       <div class="field-row">
@@ -418,9 +411,7 @@
       </div>
 
       <!-- Carryover expiry date -->
-      <div
-        style="font-size:14px;font-weight:400;margin-top:20px;margin-bottom:14px"
-      >
+      <div class="zf-form-section-title">
         {$t("Vacation carryover")}
       </div>
       <div class="field-row">
@@ -442,9 +433,7 @@
       </div>
 
       <!-- Submission deadline -->
-      <div
-        style="font-size:14px;font-weight:400;margin-top:20px;margin-bottom:14px"
-      >
+      <div class="zf-form-section-title">
         {$t("Time submission deadline")}
       </div>
       <div class="field-row">
@@ -470,17 +459,12 @@
       </div>
 
       <!-- Automatic break deduction -->
-      <div
-        style="font-size:14px;font-weight:400;margin-top:20px;margin-bottom:14px"
-      >
+      <div class="zf-form-section-title">
         {$t("Automatic break deduction")}
       </div>
       <div class="field-row">
-        <div style="flex:0 0 auto">
-          <label
-            class="zf-label"
-            style="display:flex;align-items:center;gap:8px;cursor:pointer"
-          >
+        <div class="flex-none">
+          <label class="zf-label zf-check-label">
             <input
               type="checkbox"
               bind:checked={settingsForm.auto_break_enabled}
@@ -508,7 +492,7 @@
         </div>
       </div>
       {#if settingsForm.auto_break_enabled}
-        <div class="field-row" style="margin-top:10px">
+        <div class="field-row mt-10">
           <div>
             <label class="zf-label" for="settings-break-threshold"
               >{$t("Break threshold (hours)")}</label
@@ -544,7 +528,7 @@
             </div>
           </div>
         </div>
-        <div class="field-row" style="margin-top:10px">
+        <div class="field-row mt-10">
           <div>
             <label class="zf-label" for="settings-break-threshold-2"
               >{$t("Second threshold (hours)")}</label
@@ -586,9 +570,7 @@
         </div>
       {/if}
 
-      <div
-        style="font-size:14px;font-weight:400;margin-top:20px;margin-bottom:14px"
-      >
+      <div class="zf-form-section-title">
         {$t("Holidays")}
       </div>
       <div class="field-row">
@@ -639,7 +621,7 @@
         </div>
       </div>
 
-      <div style="display:flex;justify-content:flex-end;padding-top:16px">
+      <div class="form-actions">
         <button
           class="zf-btn zf-btn-primary"
           on:click={save}
@@ -655,3 +637,11 @@
     </div>
   </div>
 </div>
+
+<style>
+  .form-actions {
+    display: flex;
+    justify-content: flex-end;
+    padding-top: 16px;
+  }
+</style>

@@ -79,7 +79,10 @@ describe("TeamSettings", () => {
   });
 
   afterEach(() => {
-    if (component) { unmount(component); component = null; }
+    if (component) {
+      unmount(component);
+      component = null;
+    }
     target.remove();
   });
 
@@ -119,7 +122,11 @@ describe("TeamSettings", () => {
     // The loading state prevents the "No data." message from briefly
     // flashing before the first API response arrives.
     let resolveLoad;
-    apiMock.mockReturnValue(new Promise((r) => { resolveLoad = r; }));
+    apiMock.mockReturnValue(
+      new Promise((r) => {
+        resolveLoad = r;
+      }),
+    );
     component = mount(TeamSettings, { target });
     await settle();
     expect(target.textContent).toContain("Loading...");
@@ -148,7 +155,7 @@ describe("TeamSettings", () => {
       ([path, opts]) =>
         typeof path === "string" &&
         path.startsWith("/team-settings/") &&
-        opts?.method === "PUT"
+        opts?.method === "PUT",
     );
     expect(putCall).toBeTruthy();
   });

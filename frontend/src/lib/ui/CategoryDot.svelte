@@ -2,7 +2,7 @@
   export let color = "#999";
 </script>
 
-<span class="cat-dot" style="background:{color}"></span>
+<span class="cat-dot" style:background={color}></span>
 
 <style>
   .cat-dot {

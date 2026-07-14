@@ -22,10 +22,9 @@
       <Icon name="TrendingUp" size={15} sw={1.5} />
       <span class="flextime-title">{$t("Flextime balance")}</span>
       <button
-        class="zf-btn-icon-sm zf-btn-ghost"
+        class="zf-btn-icon-sm zf-btn-ghost zf-help-icon"
         title={$t("help_flextime_chart")}
         on:click={() => onHelpToggle("flextime")}
-        style="color:var(--text-tertiary);font-size:14px;cursor:help"
       >
         <Icon name="Info" size={14} />
       </button>
@@ -52,7 +51,7 @@
             bind:value={chartFrom}
             min={$currentUser?.start_date}
             max={chartTo}
-            style="font-size:12px;padding:3px 28px 3px 6px;height:28px"
+            class="range-select"
           />
         </span>
         <span class="flextime-date-separator">-</span>
@@ -61,7 +60,7 @@
             bind:value={chartTo}
             min={chartFrom}
             max={todayIso}
-            style="font-size:12px;padding:3px 28px 3px 6px;height:28px"
+            class="range-select"
           />
         </span>
         <button
@@ -96,6 +95,13 @@
 </div>
 
 <style>
+  /* Compact select for choosing the chart range. */
+  .range-select {
+    font-size: 13px;
+    padding: 3px 28px 3px 6px;
+    height: 28px;
+  }
+
   .flextime-section {
     padding: 16px 20px;
     margin-top: 16px;
@@ -119,7 +125,7 @@
   }
 
   .flextime-title {
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 400;
     min-width: 0;
   }
@@ -150,12 +156,12 @@
   }
 
   .flextime-date-separator {
-    font-size: 12px;
+    font-size: 13px;
     color: var(--text-tertiary);
   }
 
   .flextime-help {
-    font-size: 12px;
+    font-size: 13px;
     color: var(--text-tertiary);
     margin-bottom: 12px;
     padding: 8px;
@@ -166,7 +172,7 @@
   .flextime-loading {
     text-align: center;
     padding: 40px 0;
-    font-size: 13px;
+    font-size: 14px;
     color: var(--text-tertiary);
   }
 
@@ -188,7 +194,7 @@
     border-radius: var(--radius-sm);
     background: var(--bg-surface);
     color: var(--text-tertiary);
-    font-size: 12px;
+    font-size: 13px;
     box-shadow: var(--shadow-sm);
     pointer-events: none;
   }

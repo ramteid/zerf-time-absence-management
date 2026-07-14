@@ -52,7 +52,10 @@ describe("Login", () => {
   });
 
   afterEach(() => {
-    if (component) { unmount(component); component = null; }
+    if (component) {
+      unmount(component);
+      component = null;
+    }
     target.remove();
     appDiv.remove();
     vi.restoreAllMocks();
@@ -98,7 +101,9 @@ describe("Login", () => {
     passwordInput.dispatchEvent(new Event("input"));
 
     const form = target.querySelector("form");
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    form.dispatchEvent(
+      new Event("submit", { bubbles: true, cancelable: true }),
+    );
     await settle();
     await settle();
 
@@ -113,7 +118,9 @@ describe("Login", () => {
     await settle();
 
     const form = target.querySelector("form");
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    form.dispatchEvent(
+      new Event("submit", { bubbles: true, cancelable: true }),
+    );
     await settle();
     await settle();
 
@@ -128,20 +135,20 @@ describe("Login", () => {
       writable: true,
     });
 
-    apiMock
-      .mockResolvedValueOnce({ csrf_token: "tok" })
-      .mockResolvedValueOnce({
-        nav: [{ key: "Dashboard", href: "/dashboard" }],
-        must_change_password: false,
-        must_configure_settings: false,
-        home: "/dashboard",
-      });
+    apiMock.mockResolvedValueOnce({ csrf_token: "tok" }).mockResolvedValueOnce({
+      nav: [{ key: "Dashboard", href: "/dashboard" }],
+      must_change_password: false,
+      must_configure_settings: false,
+      home: "/dashboard",
+    });
 
     component = mount(Login, { target });
     await settle();
 
     const form = target.querySelector("form");
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    form.dispatchEvent(
+      new Event("submit", { bubbles: true, cancelable: true }),
+    );
     await settle();
     await settle();
     await settle();
@@ -156,18 +163,18 @@ describe("Login", () => {
       writable: true,
     });
 
-    apiMock
-      .mockResolvedValueOnce({ csrf_token: "tok" })
-      .mockResolvedValueOnce({
-        nav: [],
-        must_change_password: true,
-      });
+    apiMock.mockResolvedValueOnce({ csrf_token: "tok" }).mockResolvedValueOnce({
+      nav: [],
+      must_change_password: true,
+    });
 
     component = mount(Login, { target });
     await settle();
 
     const form = target.querySelector("form");
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    form.dispatchEvent(
+      new Event("submit", { bubbles: true, cancelable: true }),
+    );
     await settle();
     await settle();
     await settle();

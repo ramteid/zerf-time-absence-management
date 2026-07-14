@@ -63,7 +63,9 @@
 <div class="mobile-tabs">
   <select on:change={onSelectChange}>
     {#each tabs as tab (tab.href)}
-      <option value={tab.href} selected={pathname === tab.href}>{$t(tab.key)}</option>
+      <option value={tab.href} selected={pathname === tab.href}
+        >{$t(tab.key)}</option
+      >
     {/each}
   </select>
 </div>
@@ -72,7 +74,9 @@
   .desktop-tabs {
     display: flex;
     gap: 2px;
-    padding: 0 28px;
+    /* Align the tab strip with the centered page content on wide screens
+       (same formula as .top-bar/.content-area in styles/layout.css). */
+    padding: 0 max(28px, calc((100% - var(--page-max-width)) / 2));
     border-bottom: 1px solid var(--border);
     background: var(--bg-surface);
     overflow-x: auto;
@@ -80,7 +84,7 @@
 
   .tab-link {
     padding: 10px 14px;
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 500;
     white-space: nowrap;
     color: var(--text-secondary);
@@ -104,7 +108,7 @@
   .mobile-tabs select {
     width: 100%;
     padding: 9px 36px 9px 12px;
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 500;
     color: var(--text-primary);
     background: var(--bg-canvas);

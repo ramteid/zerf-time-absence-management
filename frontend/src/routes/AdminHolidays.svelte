@@ -50,7 +50,7 @@
   }
 </script>
 
-<div class="top-bar">
+<div class="top-bar page-narrow">
   <div class="top-bar-title">
     <h1>{$t("Holidays")}</h1>
   </div>
@@ -66,7 +66,7 @@
       >
         <Icon name="ChevLeft" size={16} />
       </button>
-      <span class="nav-label tab-num" style="min-width:60px">{year}</span>
+      <span class="nav-label tab-num year-label">{year}</span>
       <button
         class="zf-btn zf-btn-ghost"
         on:click={() => {
@@ -81,15 +81,15 @@
   </div>
 </div>
 
-<div class="content-area" style="max-width:600px">
+<div class="content-area page-narrow">
   <!-- Add form -->
-  <div class="zf-card" style="padding:16px;margin-bottom:16px">
-    <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
-      <div style="flex:1">
+  <div class="zf-card form-card mb-16">
+    <div class="zf-toolbar-row">
+      <div class="flex-1">
         <label class="zf-label" for="holiday-date">{$t("Date")}</label>
         <DatePicker id="holiday-date" bind:value={newDate} />
       </div>
-      <div style="flex:2">
+      <div class="grow-2">
         <label class="zf-label" for="holiday-name">{$t("Name")}</label>
         <input
           id="holiday-name"
@@ -104,22 +104,13 @@
     </div>
   </div>
 
-  <div class="zf-card" style="overflow-x:auto">
-    {#each holidays as h, i (h.id)}
-      <div
-        style="padding:10px 16px;{i < holidays.length - 1
-          ? 'border-bottom:1px solid var(--border)'
-          : ''};display:flex;align-items:center;gap:10px"
-      >
-        <span class="tab-num" style="font-size:13px;min-width:100px"
-          >{fmtDate(h.holiday_date)}</span
-        >
-        <span style="font-size:13px;font-weight:500;flex:1">{h.name}</span>
+  <div class="zf-card zf-table-wrap">
+    {#each holidays as h (h.id)}
+      <div class="holiday-row">
+        <span class="tab-num holiday-date">{fmtDate(h.holiday_date)}</span>
+        <span class="holiday-name">{h.name}</span>
         {#if h.is_auto}
-          <span
-            style="font-size:10px;padding:1px 6px;border-radius:8px;background:var(--bg-muted);color:var(--text-tertiary)"
-            >API</span
-          >
+          <span class="holiday-source">API</span>
         {/if}
         <button
           class="zf-btn zf-btn-ghost zf-btn-sm zf-btn-danger"
@@ -130,11 +121,56 @@
       </div>
     {/each}
     {#if holidays.length === 0}
-      <div
-        style="padding:32px;text-align:center;color:var(--text-tertiary);font-size:13px"
-      >
+      <div class="zf-empty fs-14">
         {$t("No holidays for {year}.", { year })}
       </div>
     {/if}
   </div>
 </div>
+
+<style>
+  /* Fixed width so the year does not shift the arrow buttons around. */
+  .year-label {
+    min-width: 60px;
+  }
+
+  .form-card {
+    padding: 16px;
+  }
+
+  /* Name field gets twice the width of the date field in the add-row. */
+  .grow-2 {
+    flex: 2;
+  }
+
+  .holiday-row {
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .holiday-row:not(:last-child) {
+    border-bottom: 1px solid var(--border);
+  }
+
+  .holiday-date {
+    font-size: 14px;
+    min-width: 100px;
+  }
+
+  .holiday-name {
+    font-size: 14px;
+    font-weight: 500;
+    flex: 1;
+  }
+
+  /* Small "API" pill marking holidays imported from the holiday service. */
+  .holiday-source {
+    font-size: 11px;
+    padding: 1px 6px;
+    border-radius: 8px;
+    background: var(--bg-muted);
+    color: var(--text-tertiary);
+  }
+</style>

@@ -46,7 +46,10 @@ describe("AdminHolidays", () => {
   });
 
   afterEach(() => {
-    if (component) { unmount(component); component = null; }
+    if (component) {
+      unmount(component);
+      component = null;
+    }
     target.remove();
   });
 
@@ -58,8 +61,18 @@ describe("AdminHolidays", () => {
 
   it("renders holiday list", async () => {
     apiMock.mockResolvedValue([
-      { id: 1, holiday_date: "2026-01-01", name: "New Year's Day", is_auto: false },
-      { id: 2, holiday_date: "2026-12-25", name: "Christmas Day", is_auto: true },
+      {
+        id: 1,
+        holiday_date: "2026-01-01",
+        name: "New Year's Day",
+        is_auto: false,
+      },
+      {
+        id: 2,
+        holiday_date: "2026-12-25",
+        name: "Christmas Day",
+        is_auto: true,
+      },
     ]);
     component = mount(AdminHolidays, { target });
     await waitForText(target, "New Year's Day");
@@ -68,7 +81,12 @@ describe("AdminHolidays", () => {
 
   it("shows API badge for auto-imported holidays", async () => {
     apiMock.mockResolvedValue([
-      { id: 2, holiday_date: "2026-12-25", name: "Christmas Day", is_auto: true },
+      {
+        id: 2,
+        holiday_date: "2026-12-25",
+        name: "Christmas Day",
+        is_auto: true,
+      },
     ]);
     component = mount(AdminHolidays, { target });
     await waitForText(target, "API");
@@ -86,7 +104,7 @@ describe("AdminHolidays", () => {
     await waitForText(target, "Holidays");
 
     const prevBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.querySelector("svg")
+      b.querySelector("svg"),
     );
     const currentYear = new Date().getFullYear();
     prevBtn.click();
@@ -102,7 +120,7 @@ describe("AdminHolidays", () => {
 
     // Click Add without filling date/name
     const addBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Add")
+      b.textContent.includes("Add"),
     );
     expect(addBtn).not.toBeNull();
     addBtn.click();
@@ -110,7 +128,7 @@ describe("AdminHolidays", () => {
 
     // The API should NOT have been called for POST
     const postCall = apiMock.mock.calls.find(
-      ([, opts]) => opts?.method === "POST"
+      ([, opts]) => opts?.method === "POST",
     );
     expect(postCall).toBeUndefined();
   });

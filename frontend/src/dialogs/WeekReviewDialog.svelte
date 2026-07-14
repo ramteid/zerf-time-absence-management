@@ -13,24 +13,26 @@
   export let onReject;
 </script>
 
-<Dialog title={$t("Week Approvals")} onClose={onClose}>
+<Dialog title={$t("Week Approvals")} {onClose}>
   <svelte:fragment slot="title">
-    <span style="flex:1">
+    <span class="flex-1">
       {$t("Week Approvals")} · {userNameFromRows(week.user_id, users)}
     </span>
   </svelte:fragment>
-  <div class="tab-num" style="font-size:12px;color:var(--text-secondary)">
+  <div class="tab-num fs-13 text-secondary">
     {fmtWeekLabel(week.week_start)}
   </div>
 
-  <div style="display:flex;gap:8px;flex-wrap:wrap">
-    <span class="zf-chip zf-chip-approved">{formatHours(week.total_min / 60)}</span>
+  <div class="zf-btn-row">
+    <span class="zf-chip zf-chip-approved"
+      >{formatHours(week.total_min / 60)}</span
+    >
   </div>
   <svelte:fragment slot="footer">
     <button class="zf-btn" on:click={onClose} disabled={busy}>
       {$t("Close")}
     </button>
-    <span style="flex:1"></span>
+    <span class="flex-1"></span>
     <button
       class="zf-btn zf-btn-danger"
       on:click={() => onReject(week)}
@@ -47,3 +49,5 @@
     </button>
   </svelte:fragment>
 </Dialog>
+
+<style></style>

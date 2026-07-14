@@ -34,7 +34,9 @@
       !(uploadSettings.backup_upload_url || "").trim()
     ) {
       toast(
-        $t("A Nextcloud share URL is required to enable database backup upload."),
+        $t(
+          "A Nextcloud share URL is required to enable database backup upload.",
+        ),
         "error",
       );
       return;
@@ -88,13 +90,16 @@
 
 <div class="content-area">
   <!-- DB Backup Upload -->
-  <div class="zf-card" style="padding:20px;margin-bottom:16px">
+  <div class="zf-card zf-card-section">
     <div class="field-card-title">{$t("DB Backup Upload")}</div>
     <div class="field-group">
       <div class="field-row">
         <div>
-          <label class="zf-label" style="display:flex;align-items:center;gap:8px">
-            <input type="checkbox" bind:checked={uploadSettings.backup_upload_enabled} />
+          <label class="zf-label zf-row">
+            <input
+              type="checkbox"
+              bind:checked={uploadSettings.backup_upload_enabled}
+            />
             {$t("Enable DB backup upload")}
           </label>
         </div>
@@ -118,9 +123,7 @@
           <label class="zf-label" for="backup-upload-password">
             {$t("Share password (optional)")}
             {#if uploadSettings.backup_upload_password_set}
-              <span style="font-size:11px;color:var(--text-tertiary);font-weight:normal"
-                >({$t("stored")})</span
-              >
+              <span class="zf-label-hint">({$t("stored")})</span>
             {/if}
           </label>
           <input
@@ -129,15 +132,14 @@
             type="password"
             bind:value={backupUploadPassword}
             on:input={() => (clearBackupPassword = false)}
-            placeholder={uploadSettings.backup_upload_password_set ? "********" : ""}
+            placeholder={uploadSettings.backup_upload_password_set
+              ? "********"
+              : ""}
             autocomplete="new-password"
             disabled={!uploadSettings.backup_upload_enabled}
           />
           {#if uploadSettings.backup_upload_password_set}
-            <label
-              class="zf-label"
-              style="display:flex;align-items:center;gap:8px;margin-top:8px"
-            >
+            <label class="zf-label zf-row mt-8">
               <input
                 type="checkbox"
                 bind:checked={clearBackupPassword}
@@ -173,13 +175,16 @@
   </div>
 
   <!-- Report PDF Upload -->
-  <div class="zf-card" style="padding:20px;margin-bottom:16px">
+  <div class="zf-card zf-card-section">
     <div class="field-card-title">{$t("Report PDF Upload")}</div>
     <div class="field-group">
       <div class="field-row">
         <div>
-          <label class="zf-label" style="display:flex;align-items:center;gap:8px">
-            <input type="checkbox" bind:checked={uploadSettings.report_upload_enabled} />
+          <label class="zf-label zf-row">
+            <input
+              type="checkbox"
+              bind:checked={uploadSettings.report_upload_enabled}
+            />
             {$t("Enable report PDF upload")}
           </label>
           <div class="field-hint">
@@ -208,9 +213,7 @@
           <label class="zf-label" for="report-upload-password">
             {$t("Share password (optional)")}
             {#if uploadSettings.report_upload_password_set}
-              <span style="font-size:11px;color:var(--text-tertiary);font-weight:normal"
-                >({$t("stored")})</span
-              >
+              <span class="zf-label-hint">({$t("stored")})</span>
             {/if}
           </label>
           <input
@@ -219,15 +222,14 @@
             type="password"
             bind:value={reportUploadPassword}
             on:input={() => (clearReportPassword = false)}
-            placeholder={uploadSettings.report_upload_password_set ? "********" : ""}
+            placeholder={uploadSettings.report_upload_password_set
+              ? "********"
+              : ""}
             autocomplete="new-password"
             disabled={!uploadSettings.report_upload_enabled}
           />
           {#if uploadSettings.report_upload_password_set}
-            <label
-              class="zf-label"
-              style="display:flex;align-items:center;gap:8px;margin-top:8px"
-            >
+            <label class="zf-label zf-row mt-8">
               <input
                 type="checkbox"
                 bind:checked={clearReportPassword}
@@ -255,11 +257,13 @@
           />
         </div>
       </div>
-      <div style="display:flex;justify-content:flex-end">
+      <div class="form-actions">
         <button
           class="zf-btn zf-btn-accent-soft"
           on:click={runNow}
-          disabled={uploading || saving || !uploadSettings.report_upload_enabled}
+          disabled={uploading ||
+            saving ||
+            !uploadSettings.report_upload_enabled}
         >
           {#if uploading}
             {$t("Uploading...")}
@@ -272,8 +276,8 @@
   </div>
 
   <!-- Actions -->
-  <div class="zf-card" style="padding:20px">
-    <div style="display:flex;justify-content:flex-end;gap:8px">
+  <div class="zf-card card-padded">
+    <div class="form-actions">
       <button
         class="zf-btn zf-btn-primary"
         on:click={save}

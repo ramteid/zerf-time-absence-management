@@ -258,14 +258,16 @@
     "/reports": (user) => !!user?.permissions?.can_view_reports,
     "/settings/general": (user) => !!user?.permissions?.can_manage_settings,
     "/settings/users": (user) => !!user?.permissions?.can_manage_users,
-    "/settings/categories": (user) => !!user?.permissions?.can_manage_categories,
+    "/settings/categories": (user) =>
+      !!user?.permissions?.can_manage_categories,
     "/settings/holidays": (user) => !!user?.permissions?.can_manage_holidays,
     "/settings/audit-log": (user) => !!user?.permissions?.can_view_audit_log,
     "/settings/system-log": (user) => !!user?.permissions?.can_view_logs,
     "/settings/email": (user) => !!user?.permissions?.can_manage_settings,
     "/settings/upload": (user) => !!user?.permissions?.can_manage_settings,
     "/settings/team": (user) => !!user?.permissions?.can_manage_team_settings,
-    "/settings/team-users": (user) => !!user?.permissions?.can_manage_team_users,
+    "/settings/team-users": (user) =>
+      !!user?.permissions?.can_manage_team_users,
   };
 
   $: routePromise = resolveRoute(pathname, $currentUser);
@@ -383,10 +385,10 @@
 <svelte:window on:click={onClick} />
 
 {#if booting}
-  <p style="padding: 2em">{$t("Loading...")}</p>
+  <p class="zf-loading">{$t("Loading...")}</p>
 {:else if bootNetworkError}
-  <div style="padding: 2em; text-align: center">
-    <p style="color: var(--danger-text); margin-bottom: 1em">
+  <div class="zf-loading text-center">
+    <p class="text-danger mb-16">
       {$t("Could not reach the server. Please check your connection.")}
     </p>
     <button
@@ -417,14 +419,14 @@
     {/if}
     {#key pathname}
       {#await routePromise}
-        <p style="padding: 2em">{$t("Loading...")}</p>
+        <p class="zf-loading">{$t("Loading...")}</p>
       {:then route}
         <svelte:component this={route} />
       {/await}
     {/key}
   </Layout>
 {:else}
-  <p style="padding: 2em">{$t("Loading...")}</p>
+  <p class="zf-loading">{$t("Loading...")}</p>
 {/if}
 
 <div class="toast-container">

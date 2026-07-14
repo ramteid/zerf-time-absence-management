@@ -164,9 +164,7 @@ describe("dashboard domain helpers", () => {
   it("absenceDiffRows returns empty for non-change review types", () => {
     // Only 'change' review requests have a before/after diff to display.
     // New requests and cancellations show no diff.
-    expect(
-      absenceDiffRows({ review_type: "new" }, (k) => k),
-    ).toEqual([]);
+    expect(absenceDiffRows({ review_type: "new" }, (k) => k)).toEqual([]);
   });
 
   it("absenceDiffRows detects kind, date, and comment changes", () => {
@@ -190,11 +188,14 @@ describe("dashboard domain helpers", () => {
   });
 
   it("absenceRequestTypeLabelKey identifies cancellations correctly", () => {
+    expect(absenceRequestTypeLabelKey({ status: "cancellation_pending" })).toBe(
+      "Cancellation",
+    );
     expect(
-      absenceRequestTypeLabelKey({ status: "cancellation_pending" }),
-    ).toBe("Cancellation");
-    expect(
-      absenceRequestTypeLabelKey({ status: "pending", review_type: "cancellation" }),
+      absenceRequestTypeLabelKey({
+        status: "pending",
+        review_type: "cancellation",
+      }),
     ).toBe("Cancellation");
   });
 

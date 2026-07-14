@@ -71,7 +71,9 @@ describe("Dashboard", () => {
     ]);
     setLanguage("en");
     mockState.monthReport = null;
-    mockState.overtimeRows = [{ month: "2026-05", cumulative_min: 0, diff_min: 0 }];
+    mockState.overtimeRows = [
+      { month: "2026-05", cumulative_min: 0, diff_min: 0 },
+    ];
     mockState.flextimeRows = [];
   });
 
@@ -274,8 +276,22 @@ describe("Dashboard", () => {
         if (urlPath === "/reopen-requests/pending") return [];
         if (urlPath === "/users")
           return [
-            { id: 2, first_name: "Tabea", last_name: "T", role: "team_lead", tracks_time: true, active: true },
-            { id: 3, first_name: "Eva", last_name: "E", role: "employee", tracks_time: true, active: true },
+            {
+              id: 2,
+              first_name: "Tabea",
+              last_name: "T",
+              role: "team_lead",
+              tracks_time: true,
+              active: true,
+            },
+            {
+              id: 3,
+              first_name: "Eva",
+              last_name: "E",
+              role: "employee",
+              tracks_time: true,
+              active: true,
+            },
           ];
         if (urlPath.startsWith("/reports/month?")) return mockState.monthReport;
         if (urlPath.startsWith("/reports/overtime?")) return [];

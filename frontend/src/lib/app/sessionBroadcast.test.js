@@ -32,12 +32,13 @@ describe("sessionBroadcast", () => {
     const OriginalBC = globalThis.BroadcastChannel;
     // Arrow functions can't be used as constructors; use a regular function
     // so 'new BroadcastChannel(...)' returns the mockChannel object.
-    globalThis.BroadcastChannel = function () { return mockChannel; };
+    globalThis.BroadcastChannel = function () {
+      return mockChannel;
+    };
 
     vi.resetModules();
-    const { broadcastSession, onSessionBroadcast } = await import(
-      "./sessionBroadcast.js"
-    );
+    const { broadcastSession, onSessionBroadcast } =
+      await import("./sessionBroadcast.js");
 
     const received = [];
     const off = onSessionBroadcast((data) => received.push(data));
@@ -67,9 +68,8 @@ describe("sessionBroadcast", () => {
     delete globalThis.BroadcastChannel;
 
     vi.resetModules();
-    const { onSessionBroadcast, broadcastSession } = await import(
-      "./sessionBroadcast.js"
-    );
+    const { onSessionBroadcast, broadcastSession } =
+      await import("./sessionBroadcast.js");
 
     const off = onSessionBroadcast(() => {});
     expect(typeof off).toBe("function");

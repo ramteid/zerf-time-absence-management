@@ -90,10 +90,9 @@
       <label class="zf-label" for="cat-color">{$t("Color")}</label>
       <input
         id="cat-color"
-        class="zf-input"
+        class="zf-input zf-color-input"
         type="color"
         bind:value={color}
-        style="height:36px;padding:4px"
       />
     </div>
     <div>
@@ -106,33 +105,28 @@
       />
     </div>
   </div>
-  <label
-    style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:8px"
-  >
+  <label class="zf-check-label mt-8">
     <input type="checkbox" bind:checked={counts_as_work} />
     <span>{$t("Counts as work")}</span>
   </label>
   {#if !isNew}
-    <label
-      style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:8px"
-    >
+    <label class="zf-check-label mt-8">
       <input type="checkbox" bind:checked={active} />
       <span>{$t("Active")}</span>
     </label>
     {#if allUsers.length > 0}
-      <div style="margin-top:12px">
+      <div class="mt-12">
         <div class="zf-label">{$t("Available to employees")}</div>
-        <div
-          style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm)"
-        >
-          <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <div class="zf-scroll-box">
+          <table class="zf-table">
             <tbody>
               {#each allUsers as employee (employee.id)}
-                <tr style="border-bottom:1px solid var(--border)">
-                  <td style="padding:6px 8px">
-                    {employee.first_name} {employee.last_name}
+                <tr class="zf-divider-row">
+                  <td class="zf-td-compact">
+                    {employee.first_name}
+                    {employee.last_name}
                   </td>
-                  <td style="padding:6px 8px;text-align:right;width:32px">
+                  <td class="zf-td-action">
                     <input
                       type="checkbox"
                       value={employee.id}
@@ -149,7 +143,9 @@
   {/if}
   <div class="error-text">{error}</div>
   <svelte:fragment slot="footer">
-    <button class="zf-btn" on:click={() => dialog.close()}>{$t("Cancel")}</button>
+    <button class="zf-btn" on:click={() => dialog.close()}
+      >{$t("Cancel")}</button
+    >
     <button class="zf-btn zf-btn-primary" on:click={save}>{$t("Save")}</button>
   </svelte:fragment>
 </Dialog>

@@ -1,0 +1,135 @@
+/* ── Buttons ── */
+.zf-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 14.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background 0.12s,
+    border-color 0.12s,
+    color 0.12s;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.zf-btn:hover {
+  background: var(--bg-muted);
+}
+.zf-btn:active {
+  background: var(--bg-surface);
+}
+.zf-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+.zf-btn-primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+.zf-btn-primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+.zf-btn-primary:active {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.zf-btn-ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-secondary);
+}
+.zf-btn-ghost:hover {
+  background: var(--bg-muted);
+  color: var(--text-primary);
+}
+.zf-btn-ghost:active {
+  background: transparent;
+}
+.zf-btn-accent-soft {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  border-color: var(--accent-text);
+}
+.zf-btn-accent-soft:hover {
+  background: var(--accent-text);
+  color: var(--bg-surface);
+  border-color: var(--accent-text);
+}
+.zf-btn-accent-soft:active {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  border-color: var(--accent-text);
+}
+.zf-btn-danger {
+  color: var(--danger-text);
+}
+.zf-btn-danger:hover {
+  background: var(--danger-soft);
+  border-color: var(--danger-soft);
+}
+.zf-btn-danger:active {
+  background: var(--bg-surface);
+  border-color: var(--border);
+}
+.zf-btn-ghost.zf-btn-danger:active {
+  background: transparent;
+  border-color: transparent;
+}
+.zf-btn-sm {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 13.5px;
+}
+.zf-btn-icon {
+  width: 34px;
+  padding: 0;
+  justify-content: center;
+}
+.zf-btn-icon-sm {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Full-width primary action button (login / setup forms). */
+.zf-btn-block {
+  width: 100%;
+  justify-content: center;
+  height: 38px;
+}
+
+/* Approve / reject icon buttons in review queues and lists. */
+.zf-btn-approve {
+  color: var(--success-text);
+  background: var(--success-soft);
+}
+
+.zf-btn-reject {
+  color: var(--danger-text);
+  background: var(--danger-soft);
+}
+
+/* Wrapping row of related action buttons. */
+.zf-btn-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}

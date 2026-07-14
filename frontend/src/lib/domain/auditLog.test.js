@@ -29,7 +29,7 @@ setLanguage("en");
 const translate = (key, params) => {
   // Minimal translate stub — returns key + params for assertions.
   if (!params) return key;
-  return key.replace(/\{(\w+)\}/g, (_, k) => (params[k] ?? `{${k}}`));
+  return key.replace(/\{(\w+)\}/g, (_, k) => params[k] ?? `{${k}}`);
 };
 
 describe("safeParseJson", () => {
@@ -87,7 +87,7 @@ describe("weekInfoFromEntry", () => {
       table_name: "time_entries",
       action: "updated",
       before_data: null,
-      after_data: '{}',
+      after_data: "{}",
     };
     expect(weekInfoFromEntry(entry)).toBeNull();
   });
@@ -113,7 +113,8 @@ describe("summarize", () => {
       table_name: "users",
       action: "created",
       before_data: null,
-      after_data: '{"first_name":"Alice","last_name":"Admin","email":"a@b.com"}',
+      after_data:
+        '{"first_name":"Alice","last_name":"Admin","email":"a@b.com"}',
     };
     expect(summarize(entry, translate)).toBe("Alice Admin (a@b.com)");
   });
@@ -149,7 +150,12 @@ describe("summarize", () => {
   });
 
   it("returns empty string when payload is null", () => {
-    const entry = { table_name: "categories", action: "created", before_data: null, after_data: null };
+    const entry = {
+      table_name: "categories",
+      action: "created",
+      before_data: null,
+      after_data: null,
+    };
     expect(summarize(entry, translate)).toBe("");
   });
 });
@@ -232,7 +238,12 @@ describe("fmtFieldVal", () => {
   it("formats date fields as locale date strings", () => {
     // Date fields must be human-readable (e.g. not raw ISO strings) so
     // admins can spot date-based changes without mental parsing.
-    const result = fmtFieldVal("entry_date", "2026-01-05", new Map(), translate);
+    const result = fmtFieldVal(
+      "entry_date",
+      "2026-01-05",
+      new Map(),
+      translate,
+    );
     expect(typeof result).toBe("string");
     expect(result.length).toBeGreaterThan(0);
   });
@@ -263,8 +274,10 @@ describe("extractDetailRows", () => {
     // to spot. Only fields that differ between before and after are shown.
     const entry = {
       table_name: "users",
-      before_data: '{"first_name":"Bob","last_name":"Smith","email":"b@s.com","role":"employee","active":true}',
-      after_data: '{"first_name":"Robert","last_name":"Smith","email":"b@s.com","role":"employee","active":true}',
+      before_data:
+        '{"first_name":"Bob","last_name":"Smith","email":"b@s.com","role":"employee","active":true}',
+      after_data:
+        '{"first_name":"Robert","last_name":"Smith","email":"b@s.com","role":"employee","active":true}',
     };
     const rows = extractDetailRows(entry, new Map(), translate);
     expect(rows).not.toBeNull();
@@ -275,8 +288,10 @@ describe("extractDetailRows", () => {
   it("returns null when no fields differ (no-op update)", () => {
     const entry = {
       table_name: "categories",
-      before_data: '{"name":"Work","color":"#123456","description":null,"counts_as_work":true,"active":true}',
-      after_data: '{"name":"Work","color":"#123456","description":null,"counts_as_work":true,"active":true}',
+      before_data:
+        '{"name":"Work","color":"#123456","description":null,"counts_as_work":true,"active":true}',
+      after_data:
+        '{"name":"Work","color":"#123456","description":null,"counts_as_work":true,"active":true}',
     };
     expect(extractDetailRows(entry, new Map(), translate)).toBeNull();
   });

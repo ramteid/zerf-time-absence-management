@@ -52,7 +52,9 @@ export function buildSubmissionChecks(months, reports) {
 }
 
 export function currentWeekIsOpen(checks) {
-  return (checks || []).some((c) => OPEN_WEEK_STATUSES.has(c.currentWeekStatus));
+  return (checks || []).some((c) =>
+    OPEN_WEEK_STATUSES.has(c.currentWeekStatus),
+  );
 }
 
 export function entryMinutes(entry, categories = []) {
@@ -114,7 +116,11 @@ export function buildPendingWeeks(
       // Sum per-day deductions.
       let totalDeduction = 0;
       for (const dayEntries of byDate.values()) {
-        totalDeduction += computeDayBreakDeduction(dayEntries, categories, breakRules);
+        totalDeduction += computeDayBreakDeduction(
+          dayEntries,
+          categories,
+          breakRules,
+        );
       }
       group.total_min = Math.max(0, group.total_min - totalDeduction);
     }
@@ -148,7 +154,10 @@ export function absenceDiffRows(absence, translate) {
     // are projected from the `absence_categories` join on the backend.
     rows.push({
       field: translate("Type"),
-      before: absenceKindLabel(absence.previous_kind, absence.previous_category_name),
+      before: absenceKindLabel(
+        absence.previous_kind,
+        absence.previous_category_name,
+      ),
       after: absenceKindLabel(absence.kind, absence.category_name),
     });
   }

@@ -217,6 +217,25 @@ npm run lint
 | `src/apiMappers.js` | Response-to-domain object mapping |
 | `src/dialogs/` | Modal dialogs (AbsenceDialog, EntryDialog, CategoryDialog, etc.) |
 | `src/routes/` | Page components (Time, Absences, Calendar, Reports, Admin*, Account) |
+| `src/styles/` | Global stylesheet modules, imported in order by `index.css` |
+
+### Styling
+
+- Global styles are split into ordered modules under `src/styles/` (tokens,
+  base, buttons, badges, forms, layout, components, pages, feedback,
+  notifications, responsive). `index.css` imports them in cascade order —
+  `responsive.css` must stay last so its media queries win.
+- **No inline `style=` attributes.** Shared/repeated patterns belong in the
+  matching `src/styles/` module; page- or component-specific one-offs belong in
+  that component's scoped `<style>` block. Truly dynamic values (colors from
+  data, computed positions) use Svelte `style:property={value}` directives.
+- `base.css` provides small utilities for the most common one-liners
+  (`.flex-1`, `.text-right`, `.text-tertiary`, `.fs-14`, `.mt-8`/`.mb-12` etc.)
+  plus `.zf-row`/`.zf-col` stacks - reuse them before writing a new class.
+- Page content is width-capped and centered via `--page-max-width` (default
+  1200px), applied as horizontal padding on `.top-bar` and `.content-area`.
+  Form-heavy pages narrow it with the `.page-narrow` (640px) or `.page-medium`
+  (760px) class set on **both** elements so title and content stay aligned.
 
 ### i18n
 
@@ -483,6 +502,7 @@ grep -rn "axum::extract\|axum::response\|axum::routing\|axum::Json" backend/src/
 - Add comprehensive inline comments e. g. explaining decisions, intent and high-level logic.
 - Translate all texts that are displayed to the user (UI, errors, E-Mail, etc.)
 - Translations must be handled centrally in i18n.rs for the backend and i18n.js for the frontend.
+- Frontend styling lives in CSS only — never in inline `style=` attributes. See the Styling section above for where rules belong.
 - Update docs/user-guide.md to reflect the correct app behavior. It is a document meant for human users and should not contain technical background, but the mere user-view behavior. Use natural, simple and concise language.
 
 ### Migrations

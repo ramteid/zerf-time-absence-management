@@ -60,7 +60,10 @@ describe("Account", () => {
   });
 
   afterEach(() => {
-    if (component) { unmount(component); component = null; }
+    if (component) {
+      unmount(component);
+      component = null;
+    }
     target.remove();
   });
 
@@ -115,8 +118,8 @@ describe("Account", () => {
     nw2.value = "DifferentPass456!";
     nw2.dispatchEvent(new Event("input"));
 
-    const saveBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.trim() === "Save"
+    const saveBtn = [...target.querySelectorAll("button")].find(
+      (b) => b.textContent.trim() === "Save",
     );
     saveBtn.click();
     await settle();
@@ -141,8 +144,8 @@ describe("Account", () => {
     nw2.value = "NewPass456@!!";
     nw2.dispatchEvent(new Event("input"));
 
-    const saveBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.trim() === "Save"
+    const saveBtn = [...target.querySelectorAll("button")].find(
+      (b) => b.textContent.trim() === "Save",
     );
     saveBtn.click();
     await settle();
@@ -171,8 +174,8 @@ describe("Account", () => {
     nw2.value = "NewPass456@!!";
     nw2.dispatchEvent(new Event("input"));
 
-    const saveBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.trim() === "Save"
+    const saveBtn = [...target.querySelectorAll("button")].find(
+      (b) => b.textContent.trim() === "Save",
     );
     saveBtn.click();
     await settle();
@@ -201,22 +204,20 @@ describe("Account", () => {
     nw2.value = "NewPass456@!!";
     nw2.dispatchEvent(new Event("input"));
 
-    const saveBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.trim() === "Save"
+    const saveBtn = [...target.querySelectorAll("button")].find(
+      (b) => b.textContent.trim() === "Save",
     );
     saveBtn.click();
     await settle();
     await settle();
 
     expect(target.querySelector(".error-text").textContent).toContain(
-      "Wrong current password"
+      "Wrong current password",
     );
   });
 
   it("fetches leave days on load", async () => {
-    apiMock.mockResolvedValue([
-      { year: new Date().getFullYear(), days: 25 },
-    ]);
+    apiMock.mockResolvedValue([{ year: new Date().getFullYear(), days: 25 }]);
     component = mount(Account, { target });
     await settle();
     expect(apiMock).toHaveBeenCalledWith(

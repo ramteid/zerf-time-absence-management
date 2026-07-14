@@ -31,16 +31,15 @@
 
 <div class="dashboard-approval-grid">
   <div
-    class="zf-card"
+    class="zf-card zf-table-wrap"
     class:dashboard-focus={focusedSection === "timesheets"}
-    style="overflow-x:auto"
     bind:this={timesheetsSectionEl}
   >
     <div class="card-header">
       <Icon name="CalendarCheck" size={15} sw={1.5} />
       <span class="card-header-title">{$t("Week Approvals")}</span>
       {#if pendingWeeks.length + pendingReopens.length > 0}
-        <span class="zf-chip zf-chip-pending" style="font-size:10.5px">
+        <span class="zf-chip zf-chip-pending zf-chip-sm">
           {pendingWeeks.length + pendingReopens.length}
           {$t("pending")}
         </span>
@@ -67,33 +66,30 @@
         tabindex="0"
         title={$t("Show")}
       >
-        <div
-          class="avatar {userAvatarClass(weekUser)}"
-          style="width:30px;height:30px;font-size:11px"
-        >
+        <div class="avatar {userAvatarClass(weekUser)} avatar-sm">
           {userInitials(weekUser) || "?"}
         </div>
-        <div style="flex:1;min-width:0">
-          <div style="font-size:13px;font-weight:500;display:flex;align-items:center;gap:6px">
+        <div class="flex-min0">
+          <div class="zf-row zf-item-title">
             {userFullName(weekUser, `#${week.user_id}`)}
-            <span class="zf-chip zf-chip-submitted" style="font-size:10px">{$t("Approval")}</span>
+            <span class="zf-chip zf-chip-submitted zf-chip-sm"
+              >{$t("Approval")}</span
+            >
           </div>
-          <div class="tab-num" style="font-size:11.5px;color:var(--text-tertiary)">
+          <div class="tab-num text-hint">
             {fmtWeekLabel(week.week_start)} · {formatHours(week.total_min / 60)}
           </div>
         </div>
-        <div style="display:flex;gap:4px">
+        <div class="zf-actions">
           <button
-            class="zf-btn-icon-sm"
-            style="color:var(--success-text);background:var(--success-soft)"
+            class="zf-btn-icon-sm zf-btn-approve"
             title={$t("Approve")}
             on:click|stopPropagation={() => onApproveWeek(week)}
           >
             <Icon name="Check" size={14} />
           </button>
           <button
-            class="zf-btn-icon-sm"
-            style="color:var(--danger-text);background:var(--danger-soft)"
+            class="zf-btn-icon-sm zf-btn-reject"
             title={$t("Reject")}
             on:click|stopPropagation={() => onRejectWeek(week)}
           >
@@ -118,19 +114,20 @@
         tabindex="0"
         title={$t("Show details")}
       >
-        <div
-          class="avatar {userAvatarClass(reopenUser)}"
-          style="width:30px;height:30px;font-size:11px"
-        >
+        <div class="avatar {userAvatarClass(reopenUser)} avatar-sm">
           {userInitials(reopenUser) || "?"}
         </div>
-        <div style="flex:1;min-width:0">
-          <div style="font-size:13px;font-weight:500;display:flex;align-items:center;gap:6px">
+        <div class="flex-min0">
+          <div class="zf-row zf-item-title">
             {userFullName(reopenUser, `#${reopen.user_id}`)}
-            <span class="zf-chip zf-chip-pending" style="font-size:10px">{$t("Edit request")}</span>
+            <span class="zf-chip zf-chip-pending zf-chip-sm"
+              >{$t("Edit request")}</span
+            >
           </div>
-          <div class="tab-num" style="font-size:11.5px;color:var(--text-tertiary)">
-            {$t("wants to edit {week_label}", { week_label: fmtWeekLabel(reopen.week_start) })}
+          <div class="tab-num text-hint">
+            {$t("wants to edit {week_label}", {
+              week_label: fmtWeekLabel(reopen.week_start),
+            })}
           </div>
           {#if reopen.reason}
             <div class="reopen-reason" title={reopen.reason}>
@@ -138,18 +135,16 @@
             </div>
           {/if}
         </div>
-        <div style="display:flex;gap:4px">
+        <div class="zf-actions">
           <button
-            class="zf-btn-icon-sm"
-            style="color:var(--success-text);background:var(--success-soft)"
+            class="zf-btn-icon-sm zf-btn-approve"
             title={$t("Approve")}
             on:click|stopPropagation={() => onApproveReopen(reopen.id)}
           >
             <Icon name="Check" size={14} />
           </button>
           <button
-            class="zf-btn-icon-sm"
-            style="color:var(--danger-text);background:var(--danger-soft)"
+            class="zf-btn-icon-sm zf-btn-reject"
             title={$t("Reject")}
             on:click|stopPropagation={() => onRejectReopen(reopen.id)}
           >
@@ -162,22 +157,21 @@
     {#if pendingWeeks.length === 0 && pendingReopens.length === 0}
       <div class="empty-queue">
         <Icon name="Check" size={24} sw={1.2} />
-        <div style="margin-top:8px">{$t("All caught up!")}</div>
+        <div class="mt-8">{$t("All caught up!")}</div>
       </div>
     {/if}
   </div>
 
   <div
-    class="zf-card"
+    class="zf-card zf-table-wrap"
     class:dashboard-focus={focusedSection === "absences"}
-    style="overflow-x:auto"
     bind:this={absencesSectionEl}
   >
     <div class="card-header">
       <Icon name="Plane" size={15} sw={1.5} />
       <span class="card-header-title">{$t("Absence Requests")}</span>
       {#if pendingAbsences.length}
-        <span class="zf-chip zf-chip-pending" style="font-size:10.5px">
+        <span class="zf-chip zf-chip-pending zf-chip-sm">
           {pendingAbsences.length}
           {$t("pending")}
         </span>
@@ -187,10 +181,7 @@
     {#each pendingAbsences as absence (absence.id)}
       {@const absenceUser = findUserById(users, absence.user_id)}
       <div class="absence-row">
-        <div
-          class="avatar {userAvatarClass(absenceUser)}"
-          style="width:30px;height:30px;font-size:11px"
-        >
+        <div class="avatar {userAvatarClass(absenceUser)} avatar-sm">
           {userInitials(absenceUser) || "?"}
         </div>
         <div
@@ -203,17 +194,21 @@
           tabindex="0"
           title={$t("Show details")}
         >
-          <div style="font-size:13px;font-weight:500;display:flex;align-items:center;gap:6px">
+          <div class="zf-row zf-item-title">
             {userFullName(absenceUser, `#${absence.user_id}`)}
             <span
-              class="zf-chip {absence.status === 'cancellation_pending' ? 'zf-chip-cancellation_pending' : 'zf-chip-warning'}"
-              style="font-size:10px"
+              class="zf-chip zf-chip-sm {absence.status ===
+              'cancellation_pending'
+                ? 'zf-chip-cancellation_pending'
+                : 'zf-chip-warning'}"
             >
               {$t(absenceRequestTypeLabelKey(absence))}
             </span>
           </div>
-          <div class="tab-num" style="font-size:11.5px;color:var(--text-tertiary)">
-            {absenceKindLabel(absence.kind)} · {fmtDateShort(absence.start_date)} -
+          <div class="tab-num text-hint">
+            {absenceKindLabel(absence.kind)} · {fmtDateShort(
+              absence.start_date,
+            )} -
             {fmtDateShort(absence.end_date)}
           </div>
           {#if absence.comment}
@@ -222,17 +217,15 @@
             </div>
           {/if}
         </div>
-        <div style="display:flex;gap:4px">
+        <div class="zf-actions">
           <button
-            class="zf-btn-icon-sm"
-            style="color:var(--success-text);background:var(--success-soft)"
+            class="zf-btn-icon-sm zf-btn-approve"
             on:click={() => onApproveAbsence(absence)}
           >
             <Icon name="Check" size={14} />
           </button>
           <button
-            class="zf-btn-icon-sm"
-            style="color:var(--danger-text);background:var(--danger-soft)"
+            class="zf-btn-icon-sm zf-btn-reject"
             on:click={() => onRejectAbsence(absence)}
           >
             <Icon name="X" size={14} />
@@ -244,7 +237,7 @@
     {#if pendingAbsences.length === 0}
       <div class="empty-queue">
         <Icon name="Plane" size={24} sw={1.2} />
-        <div style="margin-top:8px">{$t("No pending requests")}</div>
+        <div class="mt-8">{$t("No pending requests")}</div>
       </div>
     {/if}
   </div>
@@ -280,7 +273,7 @@
 
   .reopen-reason,
   .absence-comment {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--text-tertiary);
     margin-top: 2px;
     overflow: hidden;
@@ -299,6 +292,6 @@
     padding: 32px;
     text-align: center;
     color: var(--text-tertiary);
-    font-size: 13px;
+    font-size: 14px;
   }
 </style>

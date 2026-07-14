@@ -63,7 +63,11 @@
         body.active = active;
       }
       if (isNew) await api("/absence-categories", { method: "POST", body });
-      else await api("/absence-categories/" + template.id, { method: "PUT", body });
+      else
+        await api("/absence-categories/" + template.id, {
+          method: "PUT",
+          body,
+        });
       if (!isNew) {
         await api("/absence-categories/" + template.id + "/users", {
           method: "PUT",
@@ -92,10 +96,9 @@
       <label class="zf-label" for="abscat-color">{$t("Color")}</label>
       <input
         id="abscat-color"
-        class="zf-input"
+        class="zf-input zf-color-input"
         type="color"
         bind:value={color}
-        style="height:36px;padding:4px"
       />
     </div>
     <div>
@@ -108,7 +111,7 @@
       />
     </div>
   </div>
-  <div style="margin-top:10px;display:flex;flex-direction:column;gap:6px">
+  <div class="mt-10 choice-list">
     <!--
       Each behavior option pairs its control (radio for cost_type, checkbox
       for auto_approve_past) with a small info button that toggles a help
@@ -117,7 +120,7 @@
       click the (i) for context, click again to hide.
     -->
     <div>
-      <label style="display:flex;align-items:center;gap:8px;font-size:13px">
+      <label class="zf-check-label">
         <input
           type="radio"
           name="cost_type"
@@ -127,11 +130,10 @@
         <span>{$t("No cost (free day)")}</span>
         <button
           type="button"
-          class="zf-btn-icon-sm zf-btn-ghost"
+          class="zf-btn-icon-sm zf-btn-ghost zf-help-btn"
           aria-expanded={openHelp === "cost_type_none"}
           aria-label={$t("Show explanation")}
           on:click={() => toggleHelp("cost_type_none")}
-          style="color:var(--text-tertiary);cursor:help;margin-left:auto"
         >
           <Icon name="Info" size={14} />
         </button>
@@ -141,7 +143,7 @@
       {/if}
     </div>
     <div>
-      <label style="display:flex;align-items:center;gap:8px;font-size:13px">
+      <label class="zf-check-label">
         <input
           type="radio"
           name="cost_type"
@@ -151,11 +153,10 @@
         <span>{$t("Counts as vacation")}</span>
         <button
           type="button"
-          class="zf-btn-icon-sm zf-btn-ghost"
+          class="zf-btn-icon-sm zf-btn-ghost zf-help-btn"
           aria-expanded={openHelp === "cost_type_vacation"}
           aria-label={$t("Show explanation")}
           on:click={() => toggleHelp("cost_type_vacation")}
-          style="color:var(--text-tertiary);cursor:help;margin-left:auto"
         >
           <Icon name="Info" size={14} />
         </button>
@@ -165,7 +166,7 @@
       {/if}
     </div>
     <div>
-      <label style="display:flex;align-items:center;gap:8px;font-size:13px">
+      <label class="zf-check-label">
         <input
           type="radio"
           name="cost_type"
@@ -175,11 +176,10 @@
         <span>{$t("Keeps work target (flextime)")}</span>
         <button
           type="button"
-          class="zf-btn-icon-sm zf-btn-ghost"
+          class="zf-btn-icon-sm zf-btn-ghost zf-help-btn"
           aria-expanded={openHelp === "cost_type_flextime"}
           aria-label={$t("Show explanation")}
           on:click={() => toggleHelp("cost_type_flextime")}
-          style="color:var(--text-tertiary);cursor:help;margin-left:auto"
         >
           <Icon name="Info" size={14} />
         </button>
@@ -189,16 +189,15 @@
       {/if}
     </div>
     <div>
-      <label style="display:flex;align-items:center;gap:8px;font-size:13px">
+      <label class="zf-check-label">
         <input type="checkbox" bind:checked={auto_approve_past} />
         <span>{$t("Auto-approve past dates (sick-like)")}</span>
         <button
           type="button"
-          class="zf-btn-icon-sm zf-btn-ghost"
+          class="zf-btn-icon-sm zf-btn-ghost zf-help-btn"
           aria-expanded={openHelp === "auto_approve_past"}
           aria-label={$t("Show explanation")}
           on:click={() => toggleHelp("auto_approve_past")}
-          style="color:var(--text-tertiary);cursor:help;margin-left:auto"
         >
           <Icon name="Info" size={14} />
         </button>
@@ -215,7 +214,7 @@
     -->
     {#if !isNew}
       <div>
-        <label style="display:flex;align-items:center;gap:8px;font-size:13px">
+        <label class="zf-check-label">
           <input type="checkbox" bind:checked={active} />
           <span>{$t("Active")}</span>
         </label>
@@ -223,19 +222,18 @@
     {/if}
   </div>
   {#if !isNew && allUsers.length > 0}
-    <div style="margin-top:12px">
+    <div class="mt-12">
       <div class="zf-label">{$t("Available to employees")}</div>
-      <div
-        style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm)"
-      >
-        <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <div class="zf-scroll-box">
+        <table class="zf-table">
           <tbody>
             {#each allUsers as employee (employee.id)}
-              <tr style="border-bottom:1px solid var(--border)">
-                <td style="padding:6px 8px">
-                  {employee.first_name} {employee.last_name}
+              <tr class="zf-divider-row">
+                <td class="zf-td-compact">
+                  {employee.first_name}
+                  {employee.last_name}
                 </td>
-                <td style="padding:6px 8px;text-align:right;width:32px">
+                <td class="zf-td-action">
                   <input
                     type="checkbox"
                     value={employee.id}
@@ -251,12 +249,20 @@
   {/if}
   <div class="error-text">{error}</div>
   <svelte:fragment slot="footer">
-    <button class="zf-btn" on:click={() => dialog.close()}>{$t("Cancel")}</button>
+    <button class="zf-btn" on:click={() => dialog.close()}
+      >{$t("Cancel")}</button
+    >
     <button class="zf-btn zf-btn-primary" on:click={save}>{$t("Save")}</button>
   </svelte:fragment>
 </Dialog>
 
 <style>
+  .choice-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
   /*
     Help text appears directly below its option, indented under the checkbox
     so it visually attaches to the option above. Muted color and reduced
@@ -265,7 +271,7 @@
   .abscat-help {
     margin: 4px 0 4px 26px;
     padding: 8px 10px;
-    font-size: 12px;
+    font-size: 13px;
     line-height: 1.4;
     color: var(--text-secondary, #475569);
     background: var(--surface-muted, #f1f5f9);

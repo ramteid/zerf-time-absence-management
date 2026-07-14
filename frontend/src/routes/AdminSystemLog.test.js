@@ -52,7 +52,11 @@ describe("AdminSystemLog", () => {
     target = document.createElement("div");
     document.body.appendChild(target);
     setLanguage("en");
-    settings.set({ ui_language: "en", time_format: "24h", timezone: "Europe/Berlin" });
+    settings.set({
+      ui_language: "en",
+      time_format: "24h",
+      timezone: "Europe/Berlin",
+    });
     mockState.pages = {};
     mockState.calls = [];
   });
@@ -130,7 +134,8 @@ describe("AdminSystemLog", () => {
     await settle();
 
     expect(target.textContent).toContain("Page 1 of 3");
-    const [prevButton, nextButton] = target.querySelectorAll(".log-pager button");
+    const [prevButton, nextButton] =
+      target.querySelectorAll(".log-pager button");
     expect(prevButton.disabled).toBe(true);
 
     nextButton.click();
@@ -139,7 +144,9 @@ describe("AdminSystemLog", () => {
     expect(mockState.calls).toContain("/logs?limit=100&offset=100");
     expect(target.textContent).toContain("Page 2 of 3");
     expect(target.textContent).toContain("second page entry");
-    expect(target.querySelectorAll(".log-pager button")[0].disabled).toBe(false);
+    expect(target.querySelectorAll(".log-pager button")[0].disabled).toBe(
+      false,
+    );
   });
 
   it("shows an empty state when there are no log entries", async () => {

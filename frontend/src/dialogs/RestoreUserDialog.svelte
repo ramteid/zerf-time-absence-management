@@ -103,26 +103,26 @@
   title={$t("Restore user?")}
   onClose={() => onClose(false)}
 >
-  <div style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">
+  <div class="text-note mb-12">
     <strong>{user.first_name} {user.last_name}</strong>
-    <span style="margin-left:6px;color:var(--text-tertiary)">·</span>
-    <span style="margin-left:6px;color:var(--text-tertiary)">{roleLabel(user.role)}</span>
+    <span class="dot-sep">·</span>
+    <span class="dot-sep">{roleLabel(user.role)}</span>
   </div>
-  <p style="font-size:13px;color:var(--text-secondary)">
+  <p class="text-note">
     {$t(
       "Restore this archived account? The user will receive a temporary password and must change it on first login.",
     )}
   </p>
 
   <!-- Start date reset section -->
-  <div style="margin-top:14px;padding:12px;background:var(--bg-subtle,var(--bg-surface));border:1px solid var(--border);border-radius:6px">
-    <p style="font-size:12px;color:var(--text-tertiary);margin-bottom:8px">
+  <div class="zf-info-box">
+    <p class="text-hint mb-8">
       {$t(
         "If the account was archived for an extended period, resetting the start date prevents a large negative flextime balance from accumulating during the absence.",
       )}
     </p>
-    <div style="display:flex;flex-direction:column;gap:6px">
-      <label style="font-size:13px;display:flex;align-items:center;gap:8px;cursor:pointer">
+    <div class="choice-list">
+      <label class="zf-check-label">
         <input
           type="radio"
           name="start-date-mode"
@@ -131,7 +131,7 @@
         />
         {$t("Keep original start date")}
       </label>
-      <label style="font-size:13px;display:flex;align-items:center;gap:8px;cursor:pointer">
+      <label class="zf-check-label">
         <input
           type="radio"
           name="start-date-mode"
@@ -142,7 +142,7 @@
       </label>
     </div>
     {#if resetStartDate}
-      <div style="margin-top:10px">
+      <div class="mt-10">
         <label class="zf-label" for="restore-start-date">
           {$t("New start date (optional)")}
         </label>
@@ -159,20 +159,16 @@
        Hidden when using a custom path (e.g. team-lead restore) since the lead
        is already the approver and no reassignment is needed. -->
   {#if requiresApprover && !restoreApiPath}
-    <div style="margin-top:14px">
+    <div class="mt-14">
       <span class="zf-label">
         {$t("Approver")}
         {#if approverIds.length === 0}
-          <span style="color:var(--danger-text)"> *</span>
+          <span class="text-danger"> *</span>
         {/if}
       </span>
-      <div
-        style="border:1px solid var(--border);border-radius:6px;max-height:180px;overflow-y:auto"
-      >
+      <div class="user-list">
         {#each eligibleApprovers as approver (approver.id)}
-          <label
-            style="display:flex;align-items:center;gap:8px;padding:7px 10px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--border)"
-          >
+          <label class="user-option">
             <input
               type="checkbox"
               checked={approverIds.includes(approver.id)}
@@ -183,7 +179,7 @@
           </label>
         {/each}
         {#if eligibleApprovers.length === 0}
-          <div style="padding:10px;font-size:13px;color:var(--text-tertiary)">
+          <div class="user-empty">
             {$t("No active users available.")}
           </div>
         {/if}
@@ -192,11 +188,20 @@
   {/if}
 
   {#if error}
-    <p style="font-size:12px;color:var(--danger-text);margin-top:8px">{error}</p>
+    <p class="error-text mt-8">
+      {error}
+    </p>
   {/if}
 
   <svelte:fragment slot="footer">
-    <button class="zf-btn" type="button" on:click={() => { dialog.close(); onClose(false); }}>
+    <button
+      class="zf-btn"
+      type="button"
+      on:click={() => {
+        dialog.close();
+        onClose(false);
+      }}
+    >
       {$t("Cancel")}
     </button>
     <button
@@ -209,3 +214,41 @@
     </button>
   </svelte:fragment>
 </Dialog>
+
+<style>
+  /* "·" separator between name, e-mail and role in the intro line. */
+  .dot-sep {
+    margin-left: 6px;
+    color: var(--text-tertiary);
+  }
+
+  .choice-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  /* Scrollable pick list of users to restore. */
+  .user-list {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    max-height: 180px;
+    overflow-y: auto;
+  }
+
+  .user-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    font-size: 14px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .user-empty {
+    padding: 10px;
+    font-size: 14px;
+    color: var(--text-tertiary);
+  }
+</style>

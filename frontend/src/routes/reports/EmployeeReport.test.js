@@ -79,7 +79,10 @@ describe("EmployeeReport", () => {
   });
 
   afterEach(() => {
-    if (component) { unmount(component); component = null; }
+    if (component) {
+      unmount(component);
+      component = null;
+    }
     target.remove();
   });
 
@@ -93,7 +96,7 @@ describe("EmployeeReport", () => {
     component = mount(EmployeeReport, { target, props: { users: [] } });
     await settle();
     const showBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Show")
+      b.textContent.includes("Show"),
     );
     expect(showBtn).not.toBeNull();
   });
@@ -102,7 +105,13 @@ describe("EmployeeReport", () => {
     // Managers need to select which employee's report to view; the dropdown
     // is hidden in self-only mode since there is only one possible user.
     const users = [
-      { id: 2, first_name: "Bob", last_name: "Emp", role: "employee", tracks_time: true },
+      {
+        id: 2,
+        first_name: "Bob",
+        last_name: "Emp",
+        role: "employee",
+        tracks_time: true,
+      },
     ];
     component = mount(EmployeeReport, {
       target,
@@ -127,7 +136,13 @@ describe("EmployeeReport", () => {
 
   it("calls getMonthReport when Show is clicked", async () => {
     const users = [
-      { id: 1, first_name: "Alice", last_name: "Emp", role: "employee", tracks_time: true },
+      {
+        id: 1,
+        first_name: "Alice",
+        last_name: "Emp",
+        role: "employee",
+        tracks_time: true,
+      },
     ];
     component = mount(EmployeeReport, {
       target,
@@ -135,13 +150,13 @@ describe("EmployeeReport", () => {
     });
     await settle();
     const showBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Show")
+      b.textContent.includes("Show"),
     );
     showBtn.click();
     await settle();
     await settle();
     expect(getMonthReport).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: 1 })
+      expect.objectContaining({ userId: 1 }),
     );
   });
 
@@ -149,7 +164,15 @@ describe("EmployeeReport", () => {
     // The stat cards (Logged, Submissions) must appear so the user can see
     // their summary at a glance without scrolling to the detail table.
     const users = [
-      { id: 1, first_name: "Alice", last_name: "Emp", role: "employee", tracks_time: true, weekly_hours: 40, workdays_per_week: 5 },
+      {
+        id: 1,
+        first_name: "Alice",
+        last_name: "Emp",
+        role: "employee",
+        tracks_time: true,
+        weekly_hours: 40,
+        workdays_per_week: 5,
+      },
     ];
     getMonthReport.mockResolvedValue({
       ...monthReportEmpty,
@@ -162,7 +185,7 @@ describe("EmployeeReport", () => {
     });
     await settle();
     const showBtn = [...target.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Show")
+      b.textContent.includes("Show"),
     );
     showBtn.click();
     await waitForText(target, "Logged");

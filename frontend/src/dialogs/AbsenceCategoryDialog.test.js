@@ -9,7 +9,8 @@ const mockState = vi.hoisted(() => ({
 
 function requestFor(path, method) {
   return mockState.requests.find(
-    (r) => r.path === path && (!method || (r.options?.method || "GET") === method),
+    (r) =>
+      r.path === path && (!method || (r.options?.method || "GET") === method),
   );
 }
 
@@ -69,7 +70,12 @@ describe("AbsenceCategoryDialog", () => {
     component = mount(AbsenceCategoryDialog, {
       target,
       props: {
-        template: { id: 9, name: "Vacation", color: "#6D4C41", cost_type: "vacation" },
+        template: {
+          id: 9,
+          name: "Vacation",
+          color: "#6D4C41",
+          cost_type: "vacation",
+        },
         onClose,
       },
     });
@@ -87,7 +93,12 @@ describe("AbsenceCategoryDialog", () => {
     component = mount(AbsenceCategoryDialog, {
       target,
       props: {
-        template: { id: 9, name: "Vacation", color: "#6D4C41", cost_type: "vacation" },
+        template: {
+          id: 9,
+          name: "Vacation",
+          color: "#6D4C41",
+          cost_type: "vacation",
+        },
         onClose,
       },
     });

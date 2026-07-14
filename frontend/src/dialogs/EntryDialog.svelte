@@ -40,7 +40,8 @@
     if (h >= 23) {
       end_time = "23:59";
     } else {
-      end_time = String(h + 1).padStart(2, "0") + ":" + String(m).padStart(2, "0");
+      end_time =
+        String(h + 1).padStart(2, "0") + ":" + String(m).padStart(2, "0");
     }
   }
 
@@ -150,7 +151,8 @@
         {#if $categories.length === 0}
           <option value={null}>{$t("No categories available.")}</option>
         {:else}
-          {#each $categories as c (c.id)}<option value={c.id}>{$t(c.name)}</option
+          {#each $categories as c (c.id)}<option value={c.id}
+              >{$t(c.name)}</option
             >{/each}
         {/if}
       </select>
@@ -163,8 +165,7 @@
         id="entry-comment"
         class="zf-textarea"
         rows="2"
-        bind:value={comment}
-      ></textarea>
+        bind:value={comment}></textarea>
     </div>
     <div class="error-text">{error}</div>
   </div>
@@ -174,8 +175,10 @@
         <Icon name="Trash" size={14} />{$t("Delete")}
       </button>
     {/if}
-    <span style="flex:1"></span>
-    <button class="zf-btn" on:click={() => dialog.close()}>{$t("Cancel")}</button>
+    <span class="flex-1"></span>
+    <button class="zf-btn" on:click={() => dialog.close()}
+      >{$t("Cancel")}</button
+    >
     <button class="zf-btn zf-btn-primary" on:click={save}>
       {$t(isNew ? "Add Entry" : "Save")}
     </button>
