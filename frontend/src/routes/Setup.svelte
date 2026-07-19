@@ -3,7 +3,6 @@
   import { api } from "../api.js";
   import { t } from "../i18n.js";
   import Icon from "../Icons.svelte";
-  import { storePasswordCredential } from "../passwordCredentials.js";
 
   // On mobile, the virtual keyboard shrinks the visual viewport but not the layout
   // viewport. By removing the fixed height and overflow lock from the root elements,
@@ -37,7 +36,6 @@
   let submitting = false;
 
   async function submit(e) {
-    const form = e.currentTarget;
     e.preventDefault();
     if (submitting) return;
     error = "";
@@ -81,7 +79,6 @@
           tracks_time: tracksTime,
         },
       });
-      await storePasswordCredential(form);
       // Notify the parent (App.svelte) so it can transition to the login
       // screen and pre-fill the email without a full page reload.
       onComplete(email.trim());

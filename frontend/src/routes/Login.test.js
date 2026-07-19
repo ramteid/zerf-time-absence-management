@@ -16,10 +16,6 @@ vi.mock("../api.js", () => ({
   csrfToken: csrfTokenMock,
 }));
 
-vi.mock("../passwordCredentials.js", () => ({
-  storePasswordCredential: vi.fn().mockResolvedValue(false),
-}));
-
 async function settle() {
   await Promise.resolve();
   await new Promise((resolve) => setTimeout(resolve, 0));
