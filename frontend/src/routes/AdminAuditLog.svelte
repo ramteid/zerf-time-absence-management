@@ -144,20 +144,20 @@
 <style>
   .audit-time {
     color: var(--text-tertiary);
-    font-size: 13px;
+    font-size: 0.8125rem;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
 
   .audit-user {
     color: var(--text-secondary);
-    font-size: 13px;
+    font-size: 0.8125rem;
     white-space: nowrap;
   }
 
   .audit-subject {
     color: var(--text-secondary);
-    font-size: 13px;
+    font-size: 0.8125rem;
     white-space: nowrap;
   }
 
@@ -168,7 +168,7 @@
 
   .audit-data {
     color: var(--text-tertiary);
-    font-size: 13px;
+    font-size: 0.8125rem;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

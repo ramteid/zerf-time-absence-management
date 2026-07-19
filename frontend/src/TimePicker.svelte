@@ -510,7 +510,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 14.5px;
+    font-size: 0.90625rem;
     font-family: inherit;
     font-variant-numeric: tabular-nums;
     color: var(--text-tertiary);
@@ -535,12 +535,12 @@
   .tp-item-sel {
     color: var(--text-primary);
     font-weight: 400;
-    font-size: 15.5px;
+    font-size: 0.96875rem;
     background: var(--bg-muted);
   }
 
   .tp-sep {
-    font-size: 16px;
+    font-size: 1rem;
     font-weight: 700;
     color: var(--text-secondary);
     padding: 0 3px;
@@ -551,7 +551,7 @@
     align-self: center;
     margin-left: 8px;
     padding: 4px 10px;
-    font-size: 14.5px;
+    font-size: 0.90625rem;
     font-weight: 400;
     font-family: inherit;
     color: var(--accent);

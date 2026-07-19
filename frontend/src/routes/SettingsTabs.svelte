@@ -84,7 +84,7 @@
 
   .tab-link {
     padding: 10px 14px;
-    font-size: 14px;
+    font-size: 0.875rem;
     font-weight: 500;
     white-space: nowrap;
     color: var(--text-secondary);
@@ -108,7 +108,7 @@
   .mobile-tabs select {
     width: 100%;
     padding: 9px 36px 9px 12px;
-    font-size: 15px;
+    font-size: 0.9375rem;
     font-weight: 500;
     color: var(--text-primary);
     background: var(--bg-canvas);

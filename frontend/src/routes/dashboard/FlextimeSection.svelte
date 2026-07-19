@@ -97,7 +97,7 @@
 <style>
   /* Compact select for choosing the chart range. */
   .range-select {
-    font-size: 13px;
+    font-size: 0.8125rem;
     padding: 3px 28px 3px 6px;
     height: 28px;
   }
@@ -125,7 +125,7 @@
   }
 
   .flextime-title {
-    font-size: 15px;
+    font-size: 0.9375rem;
     font-weight: 400;
     min-width: 0;
   }
@@ -156,12 +156,12 @@
   }
 
   .flextime-date-separator {
-    font-size: 13px;
+    font-size: 0.8125rem;
     color: var(--text-tertiary);
   }
 
   .flextime-help {
-    font-size: 13px;
+    font-size: 0.8125rem;
     color: var(--text-tertiary);
     margin-bottom: 12px;
     padding: 8px;
@@ -172,7 +172,7 @@
   .flextime-loading {
     text-align: center;
     padding: 40px 0;
-    font-size: 14px;
+    font-size: 0.875rem;
     color: var(--text-tertiary);
   }
 
@@ -194,7 +194,7 @@
     border-radius: var(--radius-sm);
     background: var(--bg-surface);
     color: var(--text-tertiary);
-    font-size: 13px;
+    font-size: 0.8125rem;
     box-shadow: var(--shadow-sm);
     pointer-events: none;
   }

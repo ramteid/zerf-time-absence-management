@@ -91,7 +91,7 @@
 <style>
   .syslog-time {
     color: var(--text-tertiary);
-    font-size: 13px;
+    font-size: 0.8125rem;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
@@ -107,7 +107,7 @@
 
   .syslog-source {
     font-family: ui-monospace, monospace;
-    font-size: 13px;
+    font-size: 0.8125rem;
     word-break: break-all;
   }
 
@@ -121,7 +121,7 @@
     background: var(--bg-subtle);
     border-radius: var(--radius-md);
     font-family: ui-monospace, monospace;
-    font-size: 13.5px;
+    font-size: 0.84375rem;
     white-space: pre-wrap;
     word-break: break-word;
     max-height: 320px;

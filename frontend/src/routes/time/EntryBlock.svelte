@@ -119,6 +119,6 @@
 
   .time-entry-chip :global(.zf-chip) {
     height: 18px;
-    font-size: 11px;
+    font-size: 0.6875rem;
   }
 </style>

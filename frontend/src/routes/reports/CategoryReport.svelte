@@ -328,7 +328,7 @@
     align-items: center;
     gap: 6px;
     cursor: pointer;
-    font-size: 14px;
+    font-size: 0.875rem;
   }
 
   /* Right-aligned category header cell: dot + name as one unit. */

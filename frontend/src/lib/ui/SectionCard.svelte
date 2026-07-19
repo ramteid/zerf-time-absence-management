@@ -55,7 +55,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 15px;
+    font-size: 0.9375rem;
     font-weight: 400;
   }
 
@@ -66,7 +66,7 @@
   }
 
   .section-card-help {
-    font-size: 13px;
+    font-size: 0.8125rem;
     color: var(--text-tertiary);
     margin-bottom: 12px;
     padding: 8px;

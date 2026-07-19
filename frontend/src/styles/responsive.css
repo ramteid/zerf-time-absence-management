@@ -127,12 +127,12 @@
   .mobile-title-bar-appname {
     color: var(--nav-text-active);
     font-weight: 400;
-    font-size: 18px;
+    font-size: 1.125rem;
     letter-spacing: -0.02em;
   }
 
   .mobile-title-bar-org {
-    font-size: 12px;
+    font-size: 0.75rem;
     color: var(--nav-text-muted);
     white-space: nowrap;
     overflow: hidden;
@@ -171,7 +171,7 @@
   }
 
   .stat-card-value {
-    font-size: 19px;
+    font-size: 1.1875rem;
   }
 
   /* Top bar */
@@ -182,7 +182,7 @@
   }
 
   .top-bar-title h1 {
-    font-size: 18px;
+    font-size: 1.125rem;
   }
 
   .top-bar-actions {
@@ -208,7 +208,7 @@
     margin-left: auto;
     height: 32px;
     padding: 0 10px;
-    font-size: 13.5px;
+    font-size: 0.84375rem;
   }
 
   .time-top-bar-actions .time-submit-stack {
@@ -252,11 +252,11 @@
   }
 
   .cal-day-number {
-    font-size: 12px;
+    font-size: 0.75rem;
   }
 
   .cal-head {
-    font-size: 10px;
+    font-size: 0.625rem;
     padding: 3px 0;
   }
 
@@ -327,7 +327,7 @@
     background: none;
     color: var(--text-secondary);
     font-family: inherit;
-    font-size: 11px;
+    font-size: 0.6875rem;
     line-height: 1.1;
     text-decoration: none;
     cursor: pointer;
@@ -409,7 +409,7 @@
   }
 
   .pull-spinner {
-    font-size: 21px;
+    font-size: 1.3125rem;
     color: var(--text-secondary);
     transition: color 0.2s;
   }
@@ -481,11 +481,11 @@
 
 .mobile-more-name {
   font-weight: 400;
-  font-size: 15px;
+  font-size: 0.9375rem;
 }
 
 .mobile-more-role {
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--text-secondary);
 }
 
@@ -498,7 +498,7 @@
   border: none;
   background: none;
   color: var(--text-primary);
-  font-size: 15px;
+  font-size: 0.9375rem;
   text-decoration: none;
   cursor: pointer;
   border-radius: 8px;

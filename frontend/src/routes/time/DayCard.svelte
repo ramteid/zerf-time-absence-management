@@ -226,7 +226,7 @@
     border: 1px solid color-mix(in srgb, var(--status-color) 28%, transparent);
     background: color-mix(in srgb, var(--status-color) 12%, transparent);
     color: var(--status-color);
-    font-size: 13px;
+    font-size: 0.8125rem;
     font-weight: 600;
     text-align: center;
   }

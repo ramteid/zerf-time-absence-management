@@ -241,14 +241,14 @@
     align-items: center;
     gap: 8px;
     padding: 7px 10px;
-    font-size: 14px;
+    font-size: 0.875rem;
     cursor: pointer;
     border-bottom: 1px solid var(--border);
   }
 
   .user-empty {
     padding: 10px;
-    font-size: 14px;
+    font-size: 0.875rem;
     color: var(--text-tertiary);
   }
 </style>

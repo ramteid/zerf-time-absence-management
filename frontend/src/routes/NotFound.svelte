@@ -19,11 +19,11 @@
   .not-found-message {
     text-align: center;
     color: var(--text-tertiary);
-    font-size: 15px;
+    font-size: 0.9375rem;
   }
 
   .not-found-code {
-    font-size: 48px;
+    font-size: 3rem;
     font-weight: 700;
     margin-bottom: 8px;
   }

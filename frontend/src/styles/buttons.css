@@ -10,7 +10,7 @@
   background: var(--bg-surface);
   color: var(--text-primary);
   font-family: inherit;
-  font-size: 14.5px;
+  font-size: 0.90625rem;
   font-weight: 500;
   cursor: pointer;
   transition:
@@ -89,7 +89,7 @@
 .zf-btn-sm {
   height: 28px;
   padding: 0 10px;
-  font-size: 13.5px;
+  font-size: 0.84375rem;
 }
 .zf-btn-icon {
   width: 34px;

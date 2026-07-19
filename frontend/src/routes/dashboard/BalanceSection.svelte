@@ -93,12 +93,12 @@
 <style>
   .stat-note {
     color: var(--text-tertiary);
-    font-size: 12px;
+    font-size: 0.75rem;
     margin-top: 4px;
   }
 
   .dashboard-help {
-    font-size: 13px;
+    font-size: 0.8125rem;
     color: var(--text-tertiary);
     margin-bottom: 12px;
     padding: 8px;
@@ -107,7 +107,7 @@
   }
 
   .dashboard-card-error {
-    font-size: 12px;
+    font-size: 0.75rem;
     margin-top: 4px;
   }
 </style>

@@ -229,6 +229,9 @@ npm run lint
   matching `src/styles/` module; page- or component-specific one-offs belong in
   that component's scoped `<style>` block. Truly dynamic values (colors from
   data, computed positions) use Svelte `style:property={value}` directives.
+- Font sizes are declared in `rem`. The root size in `base.css` is the single
+  knob for the type scale: 100% (16px) as default, raised to 106.25% (17px)
+  on desktop viewports (>1024px). Never hardcode `px` font sizes.
 - `base.css` provides small utilities for the most common one-liners
   (`.flex-1`, `.text-right`, `.text-tertiary`, `.fs-14`, `.mt-8`/`.mb-12` etc.)
   plus `.zf-row`/`.zf-col` stacks - reuse them before writing a new class.

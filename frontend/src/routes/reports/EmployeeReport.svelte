@@ -446,7 +446,7 @@
 <style>
   /* Uppercase mini heading above each report sub-table. */
   .report-subheading {
-    font-size: 13px;
+    font-size: 0.8125rem;
     font-weight: 400;
     color: var(--text-tertiary);
     text-transform: uppercase;
@@ -456,13 +456,13 @@
 
   .help-icon {
     color: var(--text-tertiary);
-    font-size: 13px;
+    font-size: 0.8125rem;
     cursor: help;
   }
 
   /* Muted explanation box directly under a table it belongs to. */
   .report-note {
-    font-size: 13px;
+    font-size: 0.8125rem;
     color: var(--text-tertiary);
     margin-top: -6px;
     margin-bottom: 12px;
@@ -483,7 +483,7 @@
     grid-template-columns: 130px 1fr 52px;
     align-items: center;
     gap: 8px;
-    font-size: 13px;
+    font-size: 0.8125rem;
   }
 
   .cat-bar-label {

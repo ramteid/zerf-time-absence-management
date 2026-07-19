@@ -778,7 +778,7 @@
 
 <style>
   .empty-note {
-    font-size: 14px;
+    font-size: 0.875rem;
     color: var(--text-tertiary);
     padding: 6px 0;
   }

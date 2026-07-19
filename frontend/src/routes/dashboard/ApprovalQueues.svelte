@@ -273,7 +273,7 @@
 
   .reopen-reason,
   .absence-comment {
-    font-size: 12px;
+    font-size: 0.75rem;
     color: var(--text-tertiary);
     margin-top: 2px;
     overflow: hidden;
@@ -292,6 +292,6 @@
     padding: 32px;
     text-align: center;
     color: var(--text-tertiary);
-    font-size: 14px;
+    font-size: 0.875rem;
   }
 </style>

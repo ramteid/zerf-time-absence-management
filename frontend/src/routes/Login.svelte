@@ -347,14 +347,14 @@
 
 <style>
   .field-hint {
-    font-size: 13px;
+    font-size: 0.8125rem;
     color: var(--text-tertiary);
     margin-top: 2px;
   }
 
   /* Confirmation that the reset e-mail was sent. */
   .success-note {
-    font-size: 14px;
+    font-size: 0.875rem;
     color: var(--success-text);
     background: var(--success-soft);
     padding: 12px;

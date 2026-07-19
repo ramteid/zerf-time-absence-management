@@ -296,7 +296,7 @@
   }
 
   .profile-name {
-    font-size: 19px;
+    font-size: 1.1875rem;
     font-weight: 400;
   }
 

@@ -151,7 +151,7 @@
 
   .absence-week-range {
     color: var(--text-tertiary);
-    font-size: 13px;
+    font-size: 0.8125rem;
     min-width: 108px;
     justify-content: center;
     padding: 2px 6px;

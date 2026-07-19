@@ -6,7 +6,7 @@
   height: 22px;
   padding: 0 8px;
   border-radius: 999px;
-  font-size: 12.5px;
+  font-size: 0.78125rem;
   font-weight: 500;
   letter-spacing: 0.01em;
   white-space: nowrap;
@@ -58,7 +58,7 @@
   display: inline-block;
   padding: 1px 7px;
   border-radius: 999px;
-  font-size: 12.5px;
+  font-size: 0.78125rem;
   font-weight: 600;
   white-space: nowrap;
 }
@@ -88,10 +88,10 @@
   display: flex;
   gap: 12px;
   align-items: baseline;
-  font-size: 14px;
+  font-size: 0.875rem;
 }
 .zf-detail-label {
-  font-size: 12.5px;
+  font-size: 0.78125rem;
   font-weight: 500;
   color: var(--text-tertiary);
   text-transform: uppercase;
@@ -118,7 +118,7 @@
 .zf-card-empty {
   padding: 16px;
   color: var(--text-tertiary);
-  font-size: 14px;
+  font-size: 0.875rem;
 }
 
 /* Centered muted placeholder for empty lists outside of cards. */
@@ -138,5 +138,5 @@
 
 /* Smaller chip for dense dashboard/queue headers. */
 .zf-chip-sm {
-  font-size: 11.5px;
+  font-size: 0.71875rem;
 }

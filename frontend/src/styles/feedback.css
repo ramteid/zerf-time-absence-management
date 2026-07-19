@@ -12,7 +12,7 @@
 .toast {
   padding: 10px 16px;
   border-radius: var(--radius-md);
-  font-size: 14px;
+  font-size: 0.875rem;
   font-weight: 500;
   box-shadow: var(--shadow-md);
   animation: toast-in 0.2s ease-out;
@@ -88,7 +88,7 @@
 /* ── Error text ── */
 .error-text {
   color: var(--danger-text);
-  font-size: 14px;
+  font-size: 0.875rem;
   min-height: 1.4em;
 }
 

@@ -8,7 +8,7 @@
   margin: 1px 8px;
   border-radius: var(--radius-md);
   color: var(--nav-text);
-  font-size: 14.5px;
+  font-size: 0.90625rem;
   cursor: pointer;
   transition:
     background 0.12s,
@@ -24,7 +24,7 @@
   color: var(--accent-text);
 }
 .zf-nav-section {
-  font-size: 11.5px;
+  font-size: 0.71875rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--nav-text-muted);
@@ -78,7 +78,7 @@
 .sidebar-logo-text {
   color: var(--nav-text-active);
   font-weight: 400;
-  font-size: 19px;
+  font-size: 1.1875rem;
   letter-spacing: -0.02em;
 }
 
@@ -91,7 +91,7 @@
 }
 
 .sidebar-logo-org {
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--nav-text-muted);
   word-break: break-word;
   /* Keep clear of the absolutely-positioned bell button on the right. */
@@ -147,7 +147,7 @@
 }
 
 .sidebar-user-name {
-  font-size: 14px;
+  font-size: 0.875rem;
   font-weight: 500;
   color: var(--nav-text-active);
   white-space: nowrap;
@@ -156,7 +156,7 @@
 }
 
 .sidebar-user-role {
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--nav-text-muted);
 }
 
@@ -208,14 +208,14 @@
 
 .top-bar-title h1 {
   margin: 0;
-  font-size: 21px;
+  font-size: 1.3125rem;
   font-weight: 400;
   letter-spacing: -0.02em;
   color: var(--text-primary);
 }
 
 .top-bar-subtitle {
-  font-size: 14px;
+  font-size: 0.875rem;
   color: var(--text-tertiary);
 }
 

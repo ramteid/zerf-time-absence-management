@@ -417,7 +417,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 13px;
+    font-size: 0.8125rem;
   }
 
   .cal-swatch {
@@ -432,7 +432,7 @@
     align-items: center;
     gap: 8px;
     padding: 6px 0;
-    font-size: 14px;
+    font-size: 0.875rem;
   }
 
   .cal-event-dot {

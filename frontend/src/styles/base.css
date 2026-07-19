@@ -14,6 +14,20 @@ body,
   overflow: hidden;
 }
 
+/* All font sizes are declared in rem, so this root size is the single knob
+   for the type scale. 100% = 16px everywhere; on desktop viewports the scale
+   is raised one step (17px) for better readability on large screens while
+   phones and tablets keep the compact size. */
+html {
+  font-size: 100%;
+}
+
+@media (min-width: 1025px) {
+  html {
+    font-size: 106.25%;
+  }
+}
+
 button,
 a,
 [role="button"],
@@ -27,7 +41,7 @@ label {
 body {
   font-family: var(--font-sans);
   color: var(--text-primary);
-  font-size: 15px;
+  font-size: 0.9375rem;
   line-height: 1.45;
   font-feature-settings: "cv11", "ss01";
   -webkit-font-smoothing: antialiased;
@@ -79,7 +93,7 @@ body {
 
 /* Small tertiary hint text (field notes, table footnotes). */
 .text-hint {
-  font-size: 12.5px;
+  font-size: 0.78125rem;
   color: var(--text-tertiary);
 }
 
@@ -136,7 +150,7 @@ body {
 
 /* Regular secondary body text (one step smaller than the 15px default). */
 .text-note {
-  font-size: 14px;
+  font-size: 0.875rem;
   color: var(--text-secondary);
 }
 
@@ -157,7 +171,7 @@ body {
 }
 
 .fs-14 {
-  font-size: 14px;
+  font-size: 0.875rem;
 }
 
 .text-success {
@@ -185,7 +199,7 @@ body {
 }
 
 .fs-13 {
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 .mt-16 {

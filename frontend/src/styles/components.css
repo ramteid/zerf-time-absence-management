@@ -11,7 +11,7 @@
   justify-content: center;
 }
 .zf-nav-slider .nav-label {
-  font-size: 14.5px;
+  font-size: 0.90625rem;
   font-weight: 500;
   text-align: center;
   white-space: nowrap;
@@ -31,7 +31,7 @@
 }
 
 .stat-card-label {
-  font-size: 12.5px;
+  font-size: 0.78125rem;
   font-weight: 500;
   color: var(--text-tertiary);
   letter-spacing: 0.02em;
@@ -56,7 +56,7 @@
 }
 
 .stat-card-value {
-  font-size: 23px;
+  font-size: 1.4375rem;
   font-weight: 400;
   letter-spacing: -0.02em;
 }
@@ -66,7 +66,7 @@
 }
 
 .stat-card-sub {
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--text-tertiary);
   margin-top: 2px;
 }
@@ -92,7 +92,7 @@
 .avatar-sm {
   width: 30px;
   height: 30px;
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 /* Role-based avatar colors — same palette everywhere a user's avatar is
@@ -118,7 +118,7 @@
 .zf-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 14px;
+  font-size: 0.875rem;
 }
 
 .zf-table thead tr {
@@ -129,7 +129,7 @@
 .zf-table th {
   padding: 8px 16px;
   text-align: left;
-  font-size: 12.5px;
+  font-size: 0.78125rem;
   font-weight: 500;
   color: var(--text-tertiary);
   text-transform: uppercase;
@@ -186,7 +186,7 @@ dialog::backdrop {
 dialog header {
   padding: 16px 20px;
   border-bottom: 1px solid var(--border);
-  font-size: 16px;
+  font-size: 1rem;
   font-weight: 400;
   display: flex;
   align-items: center;
@@ -225,7 +225,7 @@ dialog footer {
 
 /* Subtle uppercase label above each stat-card row (e.g. "Diese Woche"). */
 .dashboard-group-label {
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -243,7 +243,7 @@ dialog footer {
 }
 
 .card-header-title {
-  font-size: 15px;
+  font-size: 0.9375rem;
   font-weight: 400;
   flex: 1;
 }
@@ -275,7 +275,7 @@ dialog footer {
 
 /* Primary line of a list/table row (e.g. a user's name). */
 .zf-item-title {
-  font-size: 14px;
+  font-size: 0.875rem;
   font-weight: 500;
 }
 
@@ -292,7 +292,7 @@ dialog footer {
 .avatar-lg {
   width: 56px;
   height: 56px;
-  font-size: 22px;
+  font-size: 1.375rem;
 }
 
 /* Wider dialog variant, opted into via the Dialog "wide" prop. */
@@ -303,7 +303,7 @@ dialog footer {
 /* Muted heading above a secondary list section (e.g. archived users). */
 .zf-list-heading {
   margin: 24px 0 8px;
-  font-size: 15px;
+  font-size: 0.9375rem;
   font-weight: 600;
   color: var(--text-secondary);
 }
@@ -335,7 +335,7 @@ dialog footer {
 .zf-comment {
   white-space: pre-wrap;
   word-break: break-word;
-  font-size: 14px;
+  font-size: 0.875rem;
 }
 
 /* Muted icon that reveals an explanation on hover/click. */

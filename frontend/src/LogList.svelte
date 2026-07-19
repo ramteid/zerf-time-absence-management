@@ -80,7 +80,7 @@
     gap: 4px 10px;
     padding: 9px 16px;
     border-bottom: 1px solid var(--border);
-    font-size: 14px;
+    font-size: 0.875rem;
     cursor: pointer;
     background: none;
     border-radius: 0;
@@ -113,7 +113,7 @@
 
   .log-empty {
     padding: 16px;
-    font-size: 14px;
+    font-size: 0.875rem;
     color: var(--text-tertiary);
   }
 
@@ -126,7 +126,7 @@
   }
 
   .log-pager-status {
-    font-size: 14px;
+    font-size: 0.875rem;
     color: var(--text-secondary);
     font-variant-numeric: tabular-nums;
   }

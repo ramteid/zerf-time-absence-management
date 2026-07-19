@@ -229,13 +229,13 @@
   }
 
   .opt-title {
-    font-size: 14px;
+    font-size: 0.875rem;
     font-weight: 500;
     color: var(--text-primary);
   }
 
   .opt-desc {
-    font-size: 12px;
+    font-size: 0.75rem;
     color: var(--text-tertiary);
     margin-top: 2px;
   }

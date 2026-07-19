@@ -580,7 +580,7 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    font-size: 12px;
+    font-size: 0.75rem;
     color: var(--text-secondary);
   }
 

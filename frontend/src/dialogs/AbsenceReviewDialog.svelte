@@ -114,7 +114,7 @@
     border-radius: var(--radius-sm);
     background: var(--bg-subtle);
     padding: 8px 10px;
-    font-size: 13px;
+    font-size: 0.8125rem;
   }
 
   .change-diff-field {

@@ -402,7 +402,7 @@
   }
 
   .carryover-total {
-    font-size: 12px;
+    font-size: 0.75rem;
     font-weight: 400;
     color: var(--text-tertiary);
   }
@@ -464,13 +464,13 @@
   }
 
   .absence-entry-label {
-    font-size: 12px;
+    font-size: 0.75rem;
     color: var(--text-tertiary);
     min-width: 40px;
   }
 
   .absence-entry-value {
-    font-size: 14px;
+    font-size: 0.875rem;
     text-align: left;
   }
 

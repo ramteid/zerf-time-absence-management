@@ -155,19 +155,19 @@
   }
 
   .holiday-date {
-    font-size: 14px;
+    font-size: 0.875rem;
     min-width: 100px;
   }
 
   .holiday-name {
-    font-size: 14px;
+    font-size: 0.875rem;
     font-weight: 500;
     flex: 1;
   }
 
   /* Small "API" pill marking holidays imported from the holiday service. */
   .holiday-source {
-    font-size: 11px;
+    font-size: 0.6875rem;
     padding: 1px 6px;
     border-radius: 8px;
     background: var(--bg-muted);

@@ -123,7 +123,7 @@
 
   .section-title {
     margin: 0;
-    font-size: 16px;
+    font-size: 1rem;
     font-weight: 600;
   }
 
@@ -150,7 +150,7 @@
   }
 
   .cat-name {
-    font-size: 14px;
+    font-size: 0.875rem;
     font-weight: 500;
     flex: 1;
     min-width: 0;

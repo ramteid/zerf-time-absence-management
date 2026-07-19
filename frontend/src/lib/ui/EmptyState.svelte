@@ -16,7 +16,7 @@
     padding: 32px;
     text-align: center;
     color: var(--text-tertiary);
-    font-size: 14px;
+    font-size: 0.875rem;
   }
 
   .empty-state :global(svg) {

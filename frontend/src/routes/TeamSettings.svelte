@@ -159,7 +159,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 13.5px;
+    font-size: 0.84375rem;
     flex-shrink: 0;
   }
 
@@ -181,7 +181,7 @@
       gap: 8px;
     }
     .team-setting-checkbox-label {
-      font-size: 12.5px;
+      font-size: 0.78125rem;
     }
   }
 </style>

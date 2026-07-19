@@ -61,7 +61,7 @@
     background: var(--bg-muted);
     border-radius: var(--radius-sm);
     font-family: monospace;
-    font-size: 15px;
+    font-size: 0.9375rem;
     word-break: break-all;
   }
 
@@ -77,12 +77,12 @@
 
   .danger-box strong {
     color: var(--danger-text);
-    font-size: 15px;
+    font-size: 0.9375rem;
   }
 
   .danger-box div {
     color: var(--danger-text);
-    font-size: 14px;
+    font-size: 0.875rem;
     margin-top: 4px;
     font-weight: 400;
   }

@@ -427,7 +427,7 @@
     left: auto;
     padding: 0;
     height: auto;
-    font-size: 14px;
+    font-size: 0.875rem;
     font-weight: 500;
     display: flex;
     align-items: center;
@@ -478,7 +478,7 @@
     color: var(--text-primary);
     background: transparent;
     font-weight: 500;
-    font-size: 14px;
+    font-size: 0.875rem;
     padding: 2px 4px;
     margin: 0;
     border-radius: var(--radius-sm);
@@ -539,7 +539,7 @@
   :global(.zf-date-picker-calendar span.flatpickr-weekday) {
     background: transparent;
     color: var(--text-tertiary);
-    font-size: 12px;
+    font-size: 0.75rem;
     font-weight: 600;
   }
 
