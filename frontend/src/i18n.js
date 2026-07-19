@@ -266,29 +266,6 @@ const TRANSLATIONS = {
     "Enable approval reminders": "Enable approval reminders",
     "When enabled, approvers are reminded by email about pending approvals every Monday.":
       "When enabled, approvers are reminded by email about pending approvals every Monday.",
-    // --- In-app notification labels (rendered from notification.kind) ---
-    "notif:timesheet_submitted": "New timesheet submission",
-    "notif:timesheet_approved": "Week approved",
-    "notif:timesheet_rejected": "Week rejected",
-    "notif:submission_reminder": "Weeks not yet submitted",
-    "notif:approval_reminder": "Pending approvals",
-    "notif:absence_requested": "New absence request",
-    "notif:absence_updated": "Absence request updated",
-    "notif:absence_auto_approved_notice": "Sick leave recorded",
-    "notif:absence_approved": "Absence approved",
-    "notif:absence_rejected": "Absence rejected",
-    "notif:absence_revoked": "Absence revoked",
-    "notif:absence_cancelled": "Absence request withdrawn",
-    "notif:absence_cancellation_requested": "Absence cancellation requested",
-    "notif:absence_cancellation_approved": "Absence cancellation approved",
-    "notif:absence_cancellation_rejected": "Absence cancellation rejected",
-    "notif:reopen_auto_approved": "Week editing enabled",
-    "notif:reopen_auto_approved_notice": "Week edit auto-approved",
-    "notif:reopen_request_created": "New week edit request",
-    "notif:reopen_approved": "Week edit request approved",
-    "notif:reopen_approved_by_admin": "Week edit request approved by admin",
-    "notif:reopen_rejected": "Week edit request rejected",
-    "notif:reopen_rejected_by_admin": "Week edit request rejected by admin",
     // --- Nextcloud upload settings ---
     "Nextcloud Backups": "Nextcloud Backups",
     "DB Backup Upload": "DB Backup Upload",
@@ -1277,33 +1254,6 @@ const TRANSLATIONS = {
       "Änderungen nicht verfügbar für diese Anfrage.",
     Empty: "Leer",
     Week: "Woche",
-    // --- In-app notification labels (rendered from notification.kind) ---
-    "notif:timesheet_submitted": "Neue Wocheneinreichung",
-    "notif:timesheet_approved": "Woche genehmigt",
-    "notif:timesheet_rejected": "Woche abgelehnt",
-    "notif:submission_reminder": "Arbeitszeiten noch nicht eingereicht",
-    "notif:approval_reminder": "Offene Genehmigungen",
-    "notif:absence_requested": "Neue Abwesenheitsanfrage",
-    "notif:absence_updated": "Abwesenheitsanfrage aktualisiert",
-    "notif:absence_auto_approved_notice": "Krankmeldung erfasst",
-    "notif:absence_approved": "Abwesenheit genehmigt",
-    "notif:absence_rejected": "Abwesenheit abgelehnt",
-    "notif:absence_revoked": "Abwesenheit widerrufen",
-    "notif:absence_cancelled": "Abwesenheitsantrag zurückgezogen",
-    "notif:absence_cancellation_requested":
-      "Stornierungsanfrage für Abwesenheit",
-    "notif:absence_cancellation_approved": "Stornierung genehmigt",
-    "notif:absence_cancellation_rejected": "Stornierung abgelehnt",
-    "notif:reopen_auto_approved": "Woche zur Bearbeitung freigegeben",
-    "notif:reopen_auto_approved_notice":
-      "Bearbeitungsanfrage automatisch genehmigt",
-    "notif:reopen_request_created": "Neue Bearbeitungsanfrage",
-    "notif:reopen_approved": "Bearbeitungsanfrage genehmigt",
-    "notif:reopen_approved_by_admin":
-      "Bearbeitungsanfrage durch Admin genehmigt",
-    "notif:reopen_rejected": "Bearbeitungsanfrage abgelehnt",
-    "notif:reopen_rejected_by_admin":
-      "Bearbeitungsanfrage durch Admin abgelehnt",
     // --- Nextcloud upload settings ---
     "Nextcloud Backups": "Nextcloud-Backup",
     "DB Backup Upload": "DB-Backup-Upload",
@@ -1425,83 +1375,6 @@ function interpolate(template, params) {
 export function translate(lang, key, params = {}) {
   const tpl = TRANSLATIONS[lang]?.[key] ?? key;
   return interpolate(tpl, params);
-}
-
-/**
- * Format a Monday ISO date string (YYYY-MM-DD) as a localized week label.
- * e.g. "CW 20 (05/11/2026 – 05/17/2026)" or "KW 20 (11.05.2026 – 17.05.2026)"
- */
-export function formatWeekLabel(mondayIso, lang) {
-  const monday = new Date(mondayIso + "T00:00:00");
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-  // ISO week number: find Thursday of this week, then compute from week 1.
-  const thu = new Date(monday);
-  thu.setDate(monday.getDate() + 3);
-  // Jan 4 is always in ISO week 1; find the Monday of that week.
-  const jan4 = new Date(thu.getFullYear(), 0, 4);
-  const week1Mon = new Date(jan4);
-  week1Mon.setDate(jan4.getDate() - ((jan4.getDay() + 6) % 7));
-  const weekNum = 1 + Math.round((monday - week1Mon) / 604800000);
-  const locale = LANGUAGES[lang]?.locale ?? "en-US";
-  const fmt = new Intl.DateTimeFormat(locale, {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  });
-  const prefix = lang === "de" ? "KW" : "CW";
-  return `${prefix} ${weekNum} (${fmt.format(monday)} – ${fmt.format(sunday)})`;
-}
-
-/**
- * Try to parse the notification body as structured JSON and build a
- * human-readable body string with formatted week labels.
- */
-function formatNotificationBody(notification, lang) {
-  if (!notification.body) return null;
-  try {
-    const data = JSON.parse(notification.body);
-    const parts = [];
-    // Name first (who triggered it)
-    if (data.submitter_name) {
-      parts.push(data.submitter_name);
-    }
-    if (data.requester_name) {
-      parts.push(data.requester_name);
-    }
-    // Week info
-    if (Array.isArray(data.weeks)) {
-      parts.push(data.weeks.map((w) => formatWeekLabel(w, lang)).join(", "));
-    }
-    if (data.week) {
-      parts.push(formatWeekLabel(data.week, lang));
-    }
-    // Reason last
-    if (data.reason) {
-      parts.push(data.reason);
-    }
-    return parts.length > 0 ? parts.join(" · ") : null;
-  } catch {
-    // Not JSON — return raw body as-is (legacy notifications).
-    return notification.body;
-  }
-}
-
-/**
- * Render in-app notification title from the notification kind.
- * Returns a translated label if a frontend template exists for this kind,
- * otherwise falls back to the pre-rendered title/body from the backend.
- */
-export function renderNotification(notification, lang) {
-  const key = `notif:${notification.kind}`;
-  const label =
-    TRANSLATIONS[lang]?.[key] ?? TRANSLATIONS[DEFAULT_LANGUAGE]?.[key];
-  if (label) {
-    const body = formatNotificationBody(notification, lang);
-    return { title: label, body };
-  }
-  // Fallback for unknown kinds or old notifications.
-  return { title: notification.title, body: notification.body };
 }
 
 // --- Error message localization ---

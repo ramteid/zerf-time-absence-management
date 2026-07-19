@@ -335,12 +335,6 @@ pub async fn submit(
         for &week_monday in &sorted_submitted_weeks {
             let week_list = i18n::format_week_label(&language, week_monday);
             let week_count = i18n::week_count(&language, 1);
-            let week_iso = week_monday.format("%Y-%m-%d").to_string();
-            let frontend_body = serde_json::json!({
-                "submitter_name": submitter_name.clone(),
-                "weeks": [week_iso],
-            })
-            .to_string();
             let reference_type = timesheet_submission_reference_type(week_monday);
 
             for approver_id in &approver_ids {
@@ -349,15 +343,17 @@ pub async fn submit(
                     ("week_list", week_list.clone()),
                     ("week_count", week_count.clone()),
                 ];
-                let title = i18n::translate(&language, "timesheet_submitted_title", &params);
-                let email_body = i18n::translate(&language, "timesheet_submitted_body", &params);
+                let text = i18n::notification_event_text(&language, "timesheet_submitted", &params);
+                let email_body =
+                    i18n::notification_email_body(&language, "timesheet_submitted", &params);
                 crate::services::notifications::deliver(
                     &app_state,
                     &crate::services::notifications::Outgoing::new(
                         *approver_id,
+                        &language,
                         "timesheet_submitted",
-                        &title,
-                        &frontend_body,
+                        &text.title,
+                        &text.body,
                     )
                     .email_body(&email_body)
                     .reference(&reference_type, Some(requester.id)),
@@ -422,8 +418,6 @@ pub async fn batch_approve(
             requester.id,
             &approved_entries,
             "timesheet_approved",
-            "timesheet_approved_title",
-            "timesheet_batch_approved_body",
             None,
         )
         .await;
@@ -512,8 +506,6 @@ pub async fn batch_reject(
             requester.id,
             &rejected_entries,
             "timesheet_rejected",
-            "timesheet_rejected_title",
-            "timesheet_batch_rejected_body",
             Some(&rejection_reason),
         )
         .await;

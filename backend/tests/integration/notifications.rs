@@ -489,17 +489,22 @@ async fn notifications_full_workflow() {
             .find(|item| item["kind"] == "timesheet_approved")
             .expect("timesheet_approved notification must exist");
 
-        assert_eq!(approval_notification["title"], "Week approved");
+        assert_eq!(approval_notification["title"], "1 week approved");
         let body = approval_notification["body"]
             .as_str()
             .expect("timesheet approval notification body must be string");
-        // Body is now structured JSON for frontend rendering (contains week ISO dates).
-        let parsed: serde_json::Value =
-            serde_json::from_str(body).expect("notification body must be valid JSON");
-        let weeks = parsed["weeks"]
-            .as_array()
-            .expect("JSON body must contain 'weeks' array");
-        assert_eq!(weeks.len(), 1, "one distinct week expected");
+        assert!(
+            body.starts_with("Approved:\n"),
+            "in-app text must come from the central backend template: {body:?}"
+        );
+        assert!(
+            body.contains(&monday.format("%m/%d/%Y").to_string()),
+            "notification must identify the one affected week: {body:?}"
+        );
+        assert!(
+            serde_json::from_str::<serde_json::Value>(body).is_err(),
+            "notification body must be rendered text rather than frontend-specific JSON"
+        );
     }
 
     app.cleanup().await;
@@ -520,6 +525,50 @@ async fn mark_read_nonexistent_notification_returns_not_found() {
         StatusCode::NOT_FOUND,
         "marking a non-existent notification should return 404"
     );
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn legacy_structured_notification_is_rendered_by_the_backend() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let admin_id = app
+        .state
+        .db
+        .users
+        .find_by_email("admin@example.com")
+        .await
+        .expect("load admin")
+        .expect("admin exists")
+        .id;
+    app.state
+        .db
+        .notifications
+        .insert(
+            admin_id,
+            "timesheet_approved",
+            "Week approved",
+            r#"{"weeks":["2030-01-07","2030-01-14"]}"#,
+            None,
+            None,
+        )
+        .await
+        .expect("insert legacy notification");
+
+    let (status, notifications) = admin.get("/api/v1/notifications").await;
+    assert_eq!(status, StatusCode::OK);
+    let notification = notifications
+        .as_array()
+        .expect("notifications array")
+        .iter()
+        .find(|notification| notification["kind"] == "timesheet_approved")
+        .expect("legacy notification returned");
+    assert_eq!(notification["title"], "2 weeks approved");
+    let body = notification["body"].as_str().expect("rendered body");
+    assert!(body.starts_with("Approved:\nCW 2"));
+    assert!(body.contains("CW 3"));
+    assert!(serde_json::from_str::<serde_json::Value>(body).is_err());
 
     app.cleanup().await;
 }

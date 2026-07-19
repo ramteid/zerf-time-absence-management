@@ -106,6 +106,32 @@ async fn error_notifications_opt_in_and_delivery() {
         "queue entry must be deleted after processing even without SMTP"
     );
 
+    // Backup producers send only a stable event key. The backend resolves all
+    // visible copy from the same central templates used by app notifications.
+    app.state
+        .db
+        .error_queue
+        .enqueue(Some("backup_failed"), "", None, "backup")
+        .await
+        .expect("enqueue backup error");
+    zerf::background::error_notifications::process_pending(&app.state).await;
+    let backup_notes = app
+        .state
+        .db
+        .notifications
+        .list_for_user(opted_in_id)
+        .await
+        .unwrap();
+    let backup_note = backup_notes
+        .iter()
+        .find(|notification| notification.title == "Database backup failed")
+        .expect("centrally rendered backup notification");
+    assert_eq!(backup_note.title, "Database backup failed");
+    assert_eq!(
+        backup_note.body.as_deref(),
+        Some("Component: Database backup\nAction: Review the backup container logs.")
+    );
+
     // Turning the flag off via update is honored.
     let (st, _) = admin
         .put(

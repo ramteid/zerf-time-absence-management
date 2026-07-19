@@ -301,12 +301,10 @@ EOF
 # deletes the queue row. This mirrors the Rust services::notifications::
 # enqueue_error path so backup failures reach admins the same way app errors do.
 #
-# _dedup_key  e.g. "backup_failed" or "backup_upload_failed" -- deduplicates
-#             repeat alerts of the same failure class (pinned re-alert).
-# _message    Short human-readable description (no single quotes).
+# _dedup_key  e.g. "backup_failed" or "backup_upload_failed" -- identifies
+#             the centrally translated text and deduplicates repeat alerts.
 notify_admins_backup_error() {
   _dedup_key="$1"
-  _message="$2"
   if ! resolve_direct_connection; then
     return 0
   fi
@@ -318,7 +316,7 @@ notify_admins_backup_error() {
       --dbname "$DIRECT_DB" \
       --no-psqlrc \
       -c "INSERT INTO error_notification_queue (dedupe_key, title, body, source)
-          VALUES ('$_dedup_key', '$_message', NULL, 'backup')" \
+          VALUES ('$_dedup_key', '', NULL, 'backup')" \
       2>/dev/null || true
 }
 
@@ -590,8 +588,7 @@ run_backup_once() {
         # Upload failure is non-fatal: local backup is valid.
         printf 'WARNING: Nextcloud upload failed for %s -- local backup retained.\n' \
           "$(basename "$output_file")" >&2
-        notify_admins_backup_error "backup_upload_failed" \
-          "Nextcloud backup upload failed. Check backup container logs."
+        notify_admins_backup_error "backup_upload_failed"
       fi
       # Upload the metadata sidecar so off-site copies include provenance
       # (created_at, git commit) that restore.sh's version-mismatch check
@@ -640,8 +637,7 @@ main() {
         # Resolve any prior backup-failure notification: this cycle succeeded.
         resolve_admins_backup_error "backup_failed"
       else
-        notify_admins_backup_error "backup_failed" \
-          "Database backup failed. Check backup container logs."
+        notify_admins_backup_error "backup_failed"
         # On failure retry in 1 hour rather than waiting the full interval.
         sleep 3600
         continue

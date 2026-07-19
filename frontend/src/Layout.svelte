@@ -17,7 +17,7 @@
     markNotificationRead,
     refreshNotifications,
   } from "./notificationService.js";
-  import { t, language, roleLabel, renderNotification } from "./i18n.js";
+  import { t, roleLabel } from "./i18n.js";
   import { fmtDateTime } from "./format.js";
   import Icon from "./Icons.svelte";
   import AppLogo from "./AppLogo.svelte";
@@ -405,7 +405,6 @@
         </div>
       {:else}
         {#each $notifications as n (n.id)}
-          {@const rendered = renderNotification(n, $language)}
           <div
             on:click={() => openNotification(n)}
             on:keydown={(e) => {
@@ -420,10 +419,10 @@
             class:unread={!n.is_read}
             class:pinned={n.pinned && !n.is_read}
           >
-            <div class="zf-notif-item-title">{rendered.title}</div>
-            {#if rendered.body}
+            <div class="zf-notif-item-title">{n.title}</div>
+            {#if n.body}
               <div class="zf-notif-item-body">
-                {rendered.body}
+                {n.body}
               </div>
             {/if}
             <div class="zf-notif-item-time tab-num">

@@ -9,6 +9,7 @@ pub struct ErrorNotificationEntry {
     pub dedupe_key: Option<String>,
     pub title: String,
     pub body: Option<String>,
+    pub source: String,
 }
 
 #[derive(Clone)]
@@ -21,7 +22,9 @@ impl ErrorNotificationQueueDb {
         Self { pool }
     }
 
-    /// Enqueue one error event. `source` is 'app' or 'backup' (diagnostics only).
+    /// Enqueue one error event. `source` is `app:<language>` for rendered
+    /// application diagnostics, legacy `app`, or `backup` for an event key
+    /// localized by the worker.
     ///
     /// Returns the raw `sqlx::Error` instead of `AppError` deliberately: the
     /// log-capture writer calls this for every ERROR-level event, and the
@@ -52,7 +55,7 @@ impl ErrorNotificationQueueDb {
     /// Oldest-first batch of pending events for the worker to process.
     pub async fn list_pending(&self, limit: i64) -> AppResult<Vec<ErrorNotificationEntry>> {
         Ok(sqlx::query_as::<_, ErrorNotificationEntry>(
-            "SELECT id, dedupe_key, title, body FROM error_notification_queue \
+            "SELECT id, dedupe_key, title, body, source FROM error_notification_queue \
              ORDER BY id LIMIT $1",
         )
         .bind(limit)

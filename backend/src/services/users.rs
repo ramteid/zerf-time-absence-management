@@ -760,31 +760,21 @@ pub async fn create(
         serde_json::to_value(&created_auth_user).ok(),
     )
     .await;
-    let login_line = match app_state.cfg.public_url.as_deref() {
-        Some(url) => format!("\nURL:      {}\n", url.trim_end_matches('/')),
-        None => String::new(),
-    };
     let language = i18n::load_ui_language(&app_state.pool)
         .await
         .unwrap_or_default();
+    let login_line = i18n::email_login_line(&language, app_state.cfg.public_url.as_deref());
     let org_name_raw =
         crate::services::settings::load_setting(&app_state.pool, "organization_name", "")
             .await
             .unwrap_or_default();
-    let org_name = if org_name_raw.trim().is_empty() {
-        "Zerf".to_string()
-    } else {
-        org_name_raw
-    };
-    let subject = i18n::translate(
+    let org_name = i18n::email_organization_name(&language, &org_name_raw);
+    let text = i18n::notification_text(
         &language,
         "account_created_subject",
-        &[("org_name", org_name)],
-    );
-    let body_text = i18n::translate(
-        &language,
         "account_created_body",
         &[
+            ("org_name", org_name),
             ("first_name", first_name.clone()),
             ("last_name", last_name.clone()),
             ("email", normalized_email.clone()),
@@ -798,9 +788,10 @@ pub async fn create(
         app_state,
         &crate::services::notifications::Outgoing::new(
             new_user_id,
+            &language,
             "account_created",
-            &subject,
-            &body_text,
+            &text.title,
+            &text.body,
         )
         .channels(crate::services::notifications::Channels::EmailOnly)
         .append_email_footer(false),

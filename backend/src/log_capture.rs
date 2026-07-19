@@ -164,15 +164,19 @@ pub async fn run_writer(pool: DatabasePool, mut receiver: mpsc::Receiver<Capture
             let dedupe = error_notification_dedupe_key(&record.target, &record.message);
             // The queue stores fully-rendered text (matching every other
             // notification producer in the app), so the title is translated
-            // here at enqueue time using the app's configured UI language.
+            // here at enqueue time using the app's configured UI language. The
+            // source records that language for the later email wrapper too.
             // The raw log message itself is intentionally left untranslated —
             // like every other tracing::warn!/error! call in the codebase, it
             // is a technical diagnostic string, not user-facing notification
             // copy, even though the System Log page also displays it to admins.
-            let language = crate::i18n::load_ui_language(&pool).await.unwrap_or_default();
-            let title = crate::i18n::translate(&language, "error_notification_title", &[]);
+            let language = crate::i18n::load_ui_language(&pool)
+                .await
+                .unwrap_or_default();
+            let text = crate::i18n::technical_error_text(&language, record.message.clone());
+            let source = format!("app:{}", language.code());
             if let Err(err) = error_queue
-                .enqueue(Some(&dedupe), &title, Some(&record.message), "app")
+                .enqueue(Some(&dedupe), &text.title, Some(&text.body), &source)
                 .await
             {
                 tracing::error!(target: WRITER_TARGET, "failed to enqueue error notification: {err}");
@@ -203,8 +207,7 @@ mod tests {
 
     fn capture_events(emit: impl FnOnce()) -> Vec<CapturedLogRecord> {
         let (layer, mut receiver) = channel();
-        let subscriber =
-            tracing_subscriber::registry().with(layer.with_filter(LevelFilter::WARN));
+        let subscriber = tracing_subscriber::registry().with(layer.with_filter(LevelFilter::WARN));
         tracing::subscriber::with_default(subscriber, emit);
 
         let mut records = Vec::new();

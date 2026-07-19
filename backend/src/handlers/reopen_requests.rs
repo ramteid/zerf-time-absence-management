@@ -18,22 +18,21 @@ use axum::{
 use serde::Deserialize;
 
 /// Notify one recipient about a reopen-request event through the facade.
-/// Follows the `{event}_title` / `{event}_body` i18n key convention; the
-/// structured `frontend_body` is stored in-app while the translated text is the
-/// email body. `email = false` keeps it in-app only (self-actions).
-#[allow(clippy::too_many_arguments)]
+/// Follows the `{event}_title` / `{event}_body` i18n key convention. The
+/// centrally translated body is stored in-app, while the matching professional
+/// email body is used for email delivery. `email = false` keeps the
+/// notification in-app only for self-actions.
 async fn notify_reopen(
     app_state: &AppState,
     language: &i18n::Language,
     user_id: i64,
     event: &str,
     params: Vec<(&'static str, String)>,
-    frontend_body: &str,
     email: bool,
     request_id: i64,
 ) {
-    let title = i18n::translate(language, &format!("{event}_title"), &params);
-    let email_body = i18n::translate(language, &format!("{event}_body"), &params);
+    let text = i18n::notification_event_text(language, event, &params);
+    let email_body = i18n::notification_email_body(language, event, &params);
     let channels = if email {
         notifications::Channels::InAppAndEmail
     } else {
@@ -41,7 +40,7 @@ async fn notify_reopen(
     };
     notifications::deliver(
         app_state,
-        &notifications::Outgoing::new(user_id, event, &title, frontend_body)
+        &notifications::Outgoing::new(user_id, language, event, &text.title, &text.body)
             .email_body(&email_body)
             .channels(channels)
             .reference("reopen_request", Some(request_id)),
@@ -220,13 +219,7 @@ pub async fn create(
     let approver_ids_for_notification = approver_ids_to_notify(&app_state.pool, &requester).await;
     let language = notification_language(&app_state.pool).await;
     let week_label = i18n::format_week_label(&language, body.week_start);
-    let week_iso = body.week_start.format("%Y-%m-%d").to_string();
     let requester_full_name = requester.full_name();
-    let frontend_body_created = serde_json::json!({
-        "week": week_iso,
-        "requester_name": requester_full_name,
-    })
-    .to_string();
     for approver_id in &approver_ids_for_notification {
         notify_reopen(
             &app_state,
@@ -237,7 +230,6 @@ pub async fn create(
                 ("requester_name", requester_full_name.clone()),
                 ("week_label", week_label.clone()),
             ],
-            &frontend_body_created,
             true,
             new_request_id,
         )
@@ -306,7 +298,6 @@ pub async fn approve(
     .await;
     let language = notification_language(&app_state.pool).await;
     let week_label = i18n::format_week_label(&language, reopen_request.week_start);
-    let week_iso = reopen_request.week_start.format("%Y-%m-%d").to_string();
     audit_reopened_entries(&app_state.pool, requester.id, &reopened_entries).await;
     let entries_reopened = reopened_entries.len() as i64;
     audit::log(
@@ -320,14 +311,12 @@ pub async fn approve(
     )
     .await;
     // Notify the employee whose week was reopened (in-app only when self-approved).
-    let frontend_body_approved = format!("{{\"week\":\"{}\"}}", week_iso);
     notify_reopen(
         &app_state,
         &language,
         reopen_request.user_id,
         "reopen_approved",
         vec![("week_label", week_label.clone())],
-        &frontend_body_approved,
         // Email the employee, unless an admin approved their own request.
         reopen_request.user_id != requester.id,
         request_id,
@@ -339,13 +328,9 @@ pub async fn approve(
         &app_state,
         &language,
         &requester,
-        reopen_request.user_id,
-        request_id,
+        &reopen_request,
         "reopen_approved_by_admin",
-        "reopen_approved_by_admin_title",
-        "reopen_approved_by_admin_body",
         week_label,
-        &week_iso,
         vec![],
     )
     .await;
@@ -419,13 +404,7 @@ pub async fn reject(
     .await;
     let language = notification_language(&app_state.pool).await;
     let week_label = i18n::format_week_label(&language, before.week_start);
-    let week_iso = before.week_start.format("%Y-%m-%d").to_string();
     // Notify the employee whose reopen request was rejected (in-app only when self-rejected).
-    let frontend_body_rejected = format!(
-        "{{\"week\":\"{}\",\"reason\":{}}}",
-        week_iso,
-        serde_json::json!(rejection_reason),
-    );
     notify_reopen(
         &app_state,
         &language,
@@ -435,7 +414,6 @@ pub async fn reject(
             ("week_label", week_label.clone()),
             ("reason", rejection_reason.to_string()),
         ],
-        &frontend_body_rejected,
         // Email the employee, unless an admin rejected their own request.
         before.user_id != requester.id,
         request_id,
@@ -448,13 +426,9 @@ pub async fn reject(
         &app_state,
         &language,
         &requester,
-        before.user_id,
-        request_id,
+        &before,
         "reopen_rejected_by_admin",
-        "reopen_rejected_by_admin_title",
-        "reopen_rejected_by_admin_body",
         week_label,
-        &week_iso,
         vec![("reason", rejection_reason.to_string())],
     )
     .await;

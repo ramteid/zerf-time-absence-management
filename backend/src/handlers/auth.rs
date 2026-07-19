@@ -2,6 +2,7 @@
 //! initial setup, and password reset.
 
 use crate::error::{AppError, AppResult};
+use crate::i18n;
 use crate::middleware::auth::{
     build_session_cookie, enforce_same_origin_headers, extract_token, hash_token, User,
     ABSOLUTE_TIMEOUT_HOURS,
@@ -490,9 +491,9 @@ pub async fn forgot_password(
     let language = crate::i18n::load_ui_language(&app_state.pool)
         .await
         .unwrap_or_default();
-    let subject = crate::i18n::translate(&language, "password_reset_subject", &[]);
-    let body_text = crate::i18n::translate(
+    let text = i18n::notification_text(
         &language,
+        "password_reset_subject",
         "password_reset_body",
         &[("reset_link", reset_link)],
     );
@@ -503,9 +504,10 @@ pub async fn forgot_password(
         &app_state,
         &crate::services::notifications::Outgoing::new(
             user_id,
+            &language,
             "password_reset",
-            &subject,
-            &body_text,
+            &text.title,
+            &text.body,
         )
         .channels(crate::services::notifications::Channels::EmailOnly)
         .append_email_footer(false),

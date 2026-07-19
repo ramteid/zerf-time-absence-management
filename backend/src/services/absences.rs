@@ -22,12 +22,19 @@ async fn notify_absence(
     params: Vec<(&'static str, String)>,
     absence_id: i64,
 ) {
-    let title = i18n::translate(language, &format!("{event}_title"), &params);
-    let body = i18n::translate(language, &format!("{event}_body"), &params);
+    let text = i18n::notification_event_text(language, event, &params);
+    let email_body = i18n::notification_email_body(language, event, &params);
     crate::services::notifications::deliver(
         app_state,
-        &crate::services::notifications::Outgoing::new(recipient_id, event, &title, &body)
-            .reference("absences", Some(absence_id)),
+        &crate::services::notifications::Outgoing::new(
+            recipient_id,
+            language,
+            event,
+            &text.title,
+            &text.body,
+        )
+        .email_body(&email_body)
+        .reference("absences", Some(absence_id)),
     )
     .await;
 }
@@ -40,13 +47,18 @@ async fn notify_absence_inapp_only(
     params: Vec<(&'static str, String)>,
     absence_id: i64,
 ) {
-    let title = i18n::translate(language, &format!("{event}_title"), &params);
-    let body = i18n::translate(language, &format!("{event}_body"), &params);
+    let text = i18n::notification_event_text(language, event, &params);
     crate::services::notifications::deliver(
         app_state,
-        &crate::services::notifications::Outgoing::new(recipient_id, event, &title, &body)
-            .channels(crate::services::notifications::Channels::InAppOnly)
-            .reference("absences", Some(absence_id)),
+        &crate::services::notifications::Outgoing::new(
+            recipient_id,
+            language,
+            event,
+            &text.title,
+            &text.body,
+        )
+        .channels(crate::services::notifications::Channels::InAppOnly)
+        .reference("absences", Some(absence_id)),
     )
     .await;
 }
@@ -454,7 +466,7 @@ pub async fn create_absence(
         )
         .await;
     } else if created_absence.auto_approve_past && created_absence.status == "approved" {
-        notify_sick_auto_approved(app_state, requester, &created_absence, new_absence_id).await;
+        notify_auto_approved_absence(app_state, requester, &created_absence, new_absence_id).await;
         crate::services::reports::requeue_export_for_absence_period(
             &app_state.pool,
             created_absence.user_id,
@@ -627,7 +639,7 @@ pub async fn update_absence(
             app_state, "absences", absence_id,
         )
         .await;
-        notify_sick_auto_approved(app_state, requester, &absence_after_update, absence_id).await;
+        notify_auto_approved_absence(app_state, requester, &absence_after_update, absence_id).await;
         crate::services::reports::requeue_export_for_absence_period(
             &app_state.pool,
             absence_after_update.user_id,
@@ -639,7 +651,7 @@ pub async fn update_absence(
     Ok(absence_after_update)
 }
 
-async fn notify_sick_auto_approved(
+async fn notify_auto_approved_absence(
     app_state: &AppState,
     requester: &User,
     absence: &Absence,

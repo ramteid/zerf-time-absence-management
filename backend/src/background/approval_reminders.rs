@@ -83,14 +83,6 @@ pub async fn run_check(state: &crate::AppState) {
         }
     };
 
-    let app_url = state
-        .cfg
-        .public_url
-        .clone()
-        .unwrap_or_else(|| "http://localhost".to_string());
-    let timezone = load_setting(pool, TIMEZONE_KEY, DEFAULT_TIMEZONE)
-        .await
-        .unwrap_or_else(|_| DEFAULT_TIMEZONE.to_string());
     let today_local = app_today(pool).await;
 
     let approvers = find_approvers_with_pending(pool).await;
@@ -101,38 +93,30 @@ pub async fn run_check(state: &crate::AppState) {
 
     for (approver_id, _email, _first, _last, pending_count) in approvers {
         let count_str = pending_count.to_string();
-        let title = crate::i18n::translate(&language, "approval_reminder_title", &[]);
-        let body = crate::i18n::translate(
+        let text = crate::i18n::notification_event_text(
             &language,
-            "approval_reminder_body",
+            "approval_reminder",
             &[("count", count_str.clone())],
         );
-        let timestamp =
-            crate::i18n::format_datetime_in_timezone(&language, chrono::Utc::now(), &timezone);
-        let email_body = format!(
-            "{}\n\n{}",
-            crate::i18n::translate(
-                &language,
-                "approval_reminder_email_body",
-                &[("count", count_str), ("app_url", app_url.clone())],
-            ),
-            timestamp,
+        let email_body = crate::i18n::notification_email_body(
+            &language,
+            "approval_reminder",
+            &[("count", count_str)],
         );
 
         // Idempotent per approver per local day. `deliver` owns the in-app row,
-        // the SSE broadcast, and the email; the pre-composed `email_body` already
-        // carries the app URL and timestamp, so suppress the extra footer.
+        // the SSE broadcast, the email, and its shared footer.
         let dedupe_key = format!("approval_reminder:{}", today_local);
         crate::services::notifications::deliver(
             state,
             &crate::services::notifications::Outgoing::new(
                 approver_id,
+                &language,
                 "approval_reminder",
-                &title,
-                &body,
+                &text.title,
+                &text.body,
             )
             .email_body(&email_body)
-            .append_email_footer(false)
             .dedupe_key(&dedupe_key),
         )
         .await;

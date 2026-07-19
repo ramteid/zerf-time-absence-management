@@ -34,11 +34,14 @@ pub enum Channels {
 /// refine via the builder setters, then hand to [`deliver`] — the one entry
 /// point every part of the app uses to notify a user.
 ///
-/// `body` is stored verbatim in-app (it may be structured JSON the frontend
-/// renders). `email_body`, when set, is the plain text used for the email;
-/// otherwise `body` is reused.
+/// `body` is stored verbatim in-app. `email_body`, when set, is the plain text
+/// used for the email; otherwise `body` is reused. All user-facing copy is
+/// rendered from the central templates in `i18n.rs` before constructing this
+/// value. The rendering language travels with the message so its shared email
+/// footer cannot switch language while an asynchronous delivery is pending.
 pub struct Outgoing<'a> {
     user_id: i64,
+    language: Language,
     kind: &'a str,
     title: &'a str,
     body: &'a str,
@@ -52,9 +55,16 @@ pub struct Outgoing<'a> {
 }
 
 impl<'a> Outgoing<'a> {
-    pub fn new(user_id: i64, kind: &'a str, title: &'a str, body: &'a str) -> Self {
+    pub fn new(
+        user_id: i64,
+        language: &Language,
+        kind: &'a str,
+        title: &'a str,
+        body: &'a str,
+    ) -> Self {
         Self {
             user_id,
+            language: *language,
             kind,
             title,
             body,
@@ -74,8 +84,8 @@ impl<'a> Outgoing<'a> {
         self
     }
 
-    /// Distinct plain-text body for the email (when the in-app `body` is
-    /// structured JSON or otherwise unsuitable as email text).
+    /// Distinct plain-text body for the email when a channel needs additional
+    /// content such as a login URL or reminder instructions.
     pub fn email_body(mut self, email_body: &'a str) -> Self {
         self.email_body = Some(email_body);
         self
@@ -126,11 +136,10 @@ pub async fn deliver(state: &AppState, msg: &Outgoing<'_>) -> bool {
     };
 
     if msg.channels != Channels::InAppOnly && created {
-        let language = load_language(&state.pool).await;
         let email_body = msg.email_body.unwrap_or(msg.body);
         send_notification_email(
             state,
-            &language,
+            &msg.language,
             msg.user_id,
             msg.title.to_string(),
             email_body,
@@ -227,10 +236,12 @@ async fn send_notification_email(
             .unwrap_or_else(|_| crate::services::settings::DEFAULT_TIMEZONE.to_string());
             let timestamp =
                 crate::i18n::format_datetime_in_timezone(language, chrono::Utc::now(), &timezone);
-            match &state.cfg.public_url {
-                Some(url) => format!("{body}\n\n{timestamp}\n\n{url}"),
-                None => format!("{body}\n\n{timestamp}"),
-            }
+            crate::i18n::email_with_footer(
+                language,
+                body,
+                &timestamp,
+                state.cfg.public_url.as_deref(),
+            )
         } else {
             body.to_string()
         };
@@ -285,11 +296,18 @@ pub const SYSTEM_ERROR_KIND: &str = "system_error";
 ///
 /// `dedupe_key` identifies the failure class (deduplicates repeat alerts);
 /// `title` is a short summary; `body` holds the failure-specific detail.
-pub async fn enqueue_error(state: &AppState, dedupe_key: &str, title: &str, body: &str) {
+pub async fn enqueue_error(
+    state: &AppState,
+    language: &Language,
+    dedupe_key: &str,
+    title: &str,
+    body: &str,
+) {
+    let source = format!("app:{}", language.code());
     if let Err(e) = state
         .db
         .error_queue
-        .enqueue(Some(dedupe_key), title, Some(body), "app")
+        .enqueue(Some(dedupe_key), title, Some(body), &source)
         .await
     {
         tracing::warn!(target: "zerf::notifications", "enqueue_error failed: {e}");
@@ -308,6 +326,7 @@ pub async fn enqueue_error(state: &AppState, dedupe_key: &str, title: &str, body
 /// stays queued for the next poll.
 pub async fn deliver_error_to_opted_in_admins(
     state: &AppState,
+    language: &Language,
     dedupe_key: Option<&str>,
     title: &str,
     body: &str,
@@ -333,10 +352,12 @@ pub async fn deliver_error_to_opted_in_admins(
     // Pinned + dedupe → re-alert upsert semantics so a recurring failure floats
     // back to the top without piling up duplicate rows.
     let dedupe = dedupe_key.unwrap_or(title);
+    let email_body = crate::i18n::technical_error_email_body(language, title, body);
     for user_id in recipient_ids {
         deliver(
             state,
-            &Outgoing::new(user_id, SYSTEM_ERROR_KIND, title, body)
+            &Outgoing::new(user_id, language, SYSTEM_ERROR_KIND, title, body)
+                .email_body(&email_body)
                 .dedupe_key(dedupe)
                 .pinned(),
         )
@@ -351,7 +372,20 @@ pub async fn cleanup_old(db: &crate::repository::Db) {
 }
 
 pub async fn list_for_user(state: &AppState, user_id: i64) -> AppResult<Vec<Notification>> {
-    state.db.notifications.list_for_user(user_id).await
+    let language = load_language(&state.pool).await;
+    let mut notifications = state.db.notifications.list_for_user(user_id).await?;
+    for notification in &mut notifications {
+        let Some(body) = notification.body.as_deref() else {
+            continue;
+        };
+        let Some(text) = crate::i18n::legacy_notification_text(&language, &notification.kind, body)
+        else {
+            continue;
+        };
+        notification.title = text.title;
+        notification.body = Some(text.body);
+    }
+    Ok(notifications)
 }
 
 pub async fn unread_count(state: &AppState, user_id: i64) -> AppResult<i64> {

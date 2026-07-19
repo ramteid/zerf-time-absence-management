@@ -720,6 +720,9 @@ Users sometimes see that available days do not increase immediately after reques
 
 ## Notifications
 
+Notification titles, bodies, and email wording use the interface language that
+is configured when Zerf creates the notification.
+
 ### Employee receives notifications when
 
 - a week is approved or rejected (one notification per action, identifying the affected weeks),

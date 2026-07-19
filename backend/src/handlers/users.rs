@@ -1,5 +1,6 @@
 use crate::audit;
 use crate::error::{AppError, AppResult};
+use crate::i18n;
 use crate::middleware::auth::User;
 use crate::roles::{
     can_approve_admin_subjects, can_approve_non_admin_subjects, is_admin_role, is_assistant_role,
@@ -769,31 +770,21 @@ pub async fn reset_password(
     )
     .await;
     // Send password-reset notification email (best-effort, fire-and-forget).
-    let login_line = match app_state.cfg.public_url.as_deref() {
-        Some(url) => format!("\nURL:      {}\n", url.trim_end_matches('/')),
-        None => String::new(),
-    };
     let language = crate::i18n::load_ui_language(&app_state.pool)
         .await
         .unwrap_or_default();
+    let login_line = i18n::email_login_line(&language, app_state.cfg.public_url.as_deref());
     let org_name_raw =
         crate::services::settings::load_setting(&app_state.pool, "organization_name", "")
             .await
             .unwrap_or_default();
-    let org_name = if org_name_raw.trim().is_empty() {
-        "Zerf".to_string()
-    } else {
-        org_name_raw
-    };
-    let subject = crate::i18n::translate(
+    let org_name = i18n::email_organization_name(&language, &org_name_raw);
+    let text = i18n::notification_text(
         &language,
         "admin_password_reset_subject",
-        &[("org_name", org_name)],
-    );
-    let body_text = crate::i18n::translate(
-        &language,
         "admin_password_reset_body",
         &[
+            ("org_name", org_name),
             ("first_name", target_user.first_name.clone()),
             ("last_name", target_user.last_name.clone()),
             ("email", target_user.email.clone()),
@@ -807,9 +798,10 @@ pub async fn reset_password(
         &app_state,
         &crate::services::notifications::Outgoing::new(
             target_id,
+            &language,
             "admin_password_reset",
-            &subject,
-            &body_text,
+            &text.title,
+            &text.body,
         )
         .channels(crate::services::notifications::Channels::EmailOnly)
         .append_email_footer(false),

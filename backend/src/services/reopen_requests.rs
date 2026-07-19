@@ -78,24 +78,24 @@ pub async fn notification_language(pool: &crate::db::DatabasePool) -> i18n::Lang
 /// If an admin acted on a request, notify all other explicitly assigned
 /// approvers for the request's user so they know the item left their pending
 /// queue.
-#[allow(clippy::too_many_arguments)]
 pub async fn notify_assigned_approvers_if_admin_acted(
     app_state: &AppState,
     language: &i18n::Language,
     requester: &User,
-    request_user_id: i64,
-    request_id: i64,
+    reopen_request: &ReopenRequest,
     action_key: &str,
-    action_title_key: &str,
-    action_body_key: &str,
     week_label: String,
-    week_iso: &str,
     extra_params: Vec<(&'static str, String)>,
 ) {
     if !requester.is_admin() {
         return;
     }
-    let approver_ids: Vec<i64> = match app_state.db.users.get_approver_ids(request_user_id).await {
+    let approver_ids: Vec<i64> = match app_state
+        .db
+        .users
+        .get_approver_ids(reopen_request.user_id)
+        .await
+    {
         Ok(ids) => ids
             .into_iter()
             .filter(|approver_id| *approver_id != requester.id)
@@ -108,35 +108,35 @@ pub async fn notify_assigned_approvers_if_admin_acted(
     let employee_full_name: String = app_state
         .db
         .reopen_requests
-        .get_user_full_name(request_user_id)
+        .get_user_full_name(reopen_request.user_id)
         .await
-        .unwrap_or_else(|_| format!("User {request_user_id}"));
-
-    // Build frontend JSON with the employee's name (not the admin's).
-    let reason = extra_params
-        .iter()
-        .find(|(k, _)| *k == "reason")
-        .map(|(_, v)| v.as_str());
-    let frontend_body = if let Some(r) = reason {
-        serde_json::json!({"week": week_iso, "requester_name": employee_full_name, "reason": r})
-    } else {
-        serde_json::json!({"week": week_iso, "requester_name": employee_full_name})
-    }
-    .to_string();
+        .unwrap_or_else(|_| {
+            i18n::translate(
+                language,
+                "notification_user_fallback",
+                &[("user_id", reopen_request.user_id.to_string())],
+            )
+        });
 
     let mut params = vec![
         ("requester_name", employee_full_name),
         ("week_label", week_label),
     ];
     params.extend(extra_params);
-    let title = i18n::translate(language, action_title_key, &params);
-    let email_body = i18n::translate(language, action_body_key, &params);
+    let text = i18n::notification_event_text(language, action_key, &params);
+    let email_body = i18n::notification_email_body(language, action_key, &params);
     for approver_id in approver_ids {
         notifications::deliver(
             app_state,
-            &notifications::Outgoing::new(approver_id, action_key, &title, &frontend_body)
-                .email_body(&email_body)
-                .reference("reopen_request", Some(request_id)),
+            &notifications::Outgoing::new(
+                approver_id,
+                language,
+                action_key,
+                &text.title,
+                &text.body,
+            )
+            .email_body(&email_body)
+            .reference("reopen_request", Some(reopen_request.id)),
         )
         .await;
     }
@@ -158,12 +158,13 @@ pub async fn cancel_zombie_reopen_requests(
     user_id: i64,
     weeks: &[NaiveDate],
 ) {
+    let language = notification_language(&app_state.pool).await;
+    let reason = i18n::translate(&language, "reopen_superseded_reason", &[]);
     for &week_start in weeks {
-        const REASON: &str = "Superseded by a new week submission.";
         match app_state
             .db
             .reopen_requests
-            .reject_pending_for_week(user_id, week_start, REASON)
+            .reject_pending_for_week(user_id, week_start, &reason)
             .await
         {
             Ok(Some(request_id)) => {
@@ -188,30 +189,25 @@ pub async fn cancel_zombie_reopen_requests(
                     None,
                     Some(serde_json::json!({
                         "status": "rejected",
-                        "reason": REASON
+                        "reason": reason.clone()
                     })),
                 )
                 .await;
                 // Notify the employee that their reopen request was auto-rejected
                 // due to the new submission, so they aren't left wondering why
                 // their request disappeared from the pending list.
-                let language = notification_language(&app_state.pool).await;
-                let week_label = crate::i18n::format_week_label(&language, week_start);
-                let week_iso = week_start.format("%Y-%m-%d").to_string();
-                let frontend_body = format!(
-                    "{{\"week\":\"{week_iso}\",\"reason\":{}}}",
-                    serde_json::json!(REASON),
-                );
-                let params = vec![("week_label", week_label), ("reason", REASON.to_string())];
-                let title = i18n::translate(&language, "reopen_rejected_title", &params);
+                let week_label = i18n::format_week_label(&language, week_start);
+                let params = vec![("week_label", week_label), ("reason", reason.clone())];
+                let text = i18n::notification_event_text(&language, "reopen_rejected", &params);
                 notifications::deliver(
                     app_state,
                     // In-app only — no email for an automatic system action.
                     &notifications::Outgoing::new(
                         user_id,
+                        &language,
                         "reopen_rejected",
-                        &title,
-                        &frontend_body,
+                        &text.title,
+                        &text.body,
                     )
                     .channels(notifications::Channels::InAppOnly)
                     .reference("reopen_request", Some(request_id)),

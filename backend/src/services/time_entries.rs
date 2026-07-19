@@ -179,9 +179,7 @@ pub async fn notify_week_status_change(
     app_state: &AppState,
     requester_id: i64,
     entries: &[crate::repository::TimeEntry],
-    category: &str,
-    title_key: &str,
-    body_key: &str,
+    event: &str,
     reason: Option<&str>,
 ) {
     let language = notification_language(&app_state.pool).await;
@@ -211,36 +209,8 @@ pub async fn notify_week_status_change(
             params.push(("reason", r.to_string()));
         }
 
-        // Build JSON body for frontend rendering (weeks + optional reason).
-        let week_iso_strings: Vec<String> = sorted_weeks
-            .iter()
-            .map(|ws| ws.format("%Y-%m-%d").to_string())
-            .collect();
-        let frontend_body = if let Some(r) = reason {
-            format!(
-                "{{\"weeks\":[{}],\"reason\":{}}}",
-                week_iso_strings
-                    .iter()
-                    .map(|w| format!("\"{}\"", w))
-                    .collect::<Vec<_>>()
-                    .join(","),
-                serde_json::json!(r),
-            )
-        } else {
-            format!(
-                "{{\"weeks\":[{}]}}",
-                week_iso_strings
-                    .iter()
-                    .map(|w| format!("\"{}\"", w))
-                    .collect::<Vec<_>>()
-                    .join(","),
-            )
-        };
-
-        // Structured JSON goes in-app for the frontend; the translated text is
-        // the email body. No email when the actor notifies themselves.
-        let title = i18n::translate(&language, title_key, &params);
-        let email_body = i18n::translate(&language, body_key, &params);
+        let text = i18n::notification_event_text(&language, event, &params);
+        let email_body = i18n::notification_email_body(&language, event, &params);
         let channels = if user_id != requester_id {
             crate::services::notifications::Channels::InAppAndEmail
         } else {
@@ -250,9 +220,10 @@ pub async fn notify_week_status_change(
             app_state,
             &crate::services::notifications::Outgoing::new(
                 user_id,
-                category,
-                &title,
-                &frontend_body,
+                &language,
+                event,
+                &text.title,
+                &text.body,
             )
             .email_body(&email_body)
             .channels(channels)

@@ -20,6 +20,30 @@ const BATCH_LIMIT: i64 = 50;
 /// indexed queue.
 const POLL_INTERVAL: Duration = Duration::from_secs(10);
 
+fn queued_error_text(
+    language: &crate::i18n::Language,
+    entry: &crate::repository::ErrorNotificationEntry,
+) -> (String, String) {
+    if entry.source != "backup" {
+        return (entry.title.clone(), entry.body.clone().unwrap_or_default());
+    }
+
+    let error_code = entry.dedupe_key.as_deref().unwrap_or("unknown");
+    let text = crate::i18n::backup_error_text(language, error_code);
+    (text.title, text.body)
+}
+
+fn queued_error_language(
+    current_language: &crate::i18n::Language,
+    entry: &crate::repository::ErrorNotificationEntry,
+) -> crate::i18n::Language {
+    entry
+        .source
+        .strip_prefix("app:")
+        .map(crate::i18n::Language::from_setting)
+        .unwrap_or(*current_language)
+}
+
 pub async fn run_loop(state: AppState) {
     loop {
         process_pending(&state).await;
@@ -37,12 +61,19 @@ pub async fn process_pending(state: &AppState) {
             return;
         }
     };
+    if entries.is_empty() {
+        return;
+    }
+    let current_language = crate::services::notifications::load_language(&state.pool).await;
     for entry in entries {
+        let language = queued_error_language(&current_language, &entry);
+        let (title, body) = queued_error_text(&language, &entry);
         let handled = crate::services::notifications::deliver_error_to_opted_in_admins(
             state,
+            &language,
             entry.dedupe_key.as_deref(),
-            &entry.title,
-            entry.body.as_deref().unwrap_or(""),
+            &title,
+            &body,
         )
         .await;
         // Delete once the event was handled — delivered, nobody opted in, or
@@ -55,5 +86,38 @@ pub async fn process_pending(state: &AppState) {
         if let Err(e) = state.db.error_queue.delete_entry(entry.id).await {
             tracing::error!(target: "zerf::error_notify", "delete entry {} failed: {e}", entry.id);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(source: &str) -> crate::repository::ErrorNotificationEntry {
+        crate::repository::ErrorNotificationEntry {
+            id: 1,
+            dedupe_key: Some("test".to_string()),
+            title: "title".to_string(),
+            body: Some("body".to_string()),
+            source: source.to_string(),
+        }
+    }
+
+    #[test]
+    fn application_error_email_uses_the_language_recorded_at_enqueue_time() {
+        let current_language = crate::i18n::Language::from_setting("de");
+
+        assert_eq!(
+            queued_error_language(&current_language, &entry("app:en")).code(),
+            "en"
+        );
+        assert_eq!(
+            queued_error_language(&current_language, &entry("app")).code(),
+            "de"
+        );
+        assert_eq!(
+            queued_error_language(&current_language, &entry("backup")).code(),
+            "de"
+        );
     }
 }

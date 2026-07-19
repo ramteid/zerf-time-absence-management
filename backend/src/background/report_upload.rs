@@ -314,17 +314,25 @@ async fn process_one_entry(
             ("user_id", user.id.to_string()),
             ("first_name", user.first_name.clone()),
             ("last_name", user.last_name.clone()),
-            ("start_date", crate::i18n::format_date(language, user.start_date)),
+            (
+                "start_date",
+                crate::i18n::format_date(language, user.start_date),
+            ),
             ("period", entry.period.clone()),
         ];
-        let title = crate::i18n::translate(language, "report_upload_blocked_title", &[]);
-        let msg = crate::i18n::translate(language, body_key, &params);
-        tracing::warn!(target: "zerf::report_upload", "{msg}");
+        let text = crate::i18n::notification_text(
+            language,
+            "report_upload_blocked_title",
+            body_key,
+            &params,
+        );
+        tracing::warn!(target: "zerf::report_upload", "{}", text.body);
         crate::services::notifications::enqueue_error(
             state,
+            language,
             &format!("report_upload_pre_start_{}_{}", user.id, entry.period),
-            &title,
-            &msg,
+            &text.title,
+            &text.body,
         )
         .await;
         return Ok(());
@@ -356,14 +364,19 @@ async fn process_one_entry(
             ("last_name", user.last_name.clone()),
             ("period", entry.period.clone()),
         ];
-        let title = crate::i18n::translate(language, "report_upload_blocked_title", &[]);
-        let msg = crate::i18n::translate(language, "report_upload_unsettled_time_body", &params);
-        tracing::warn!(target: "zerf::report_upload", "{msg}");
+        let text = crate::i18n::notification_text(
+            language,
+            "report_upload_blocked_title",
+            "report_upload_unsettled_time_body",
+            &params,
+        );
+        tracing::warn!(target: "zerf::report_upload", "{}", text.body);
         crate::services::notifications::enqueue_error(
             state,
+            language,
             &format!("report_upload_unsettled_time_{}_{}", user.id, entry.period),
-            &title,
-            &msg,
+            &text.title,
+            &text.body,
         )
         .await;
         return Ok(());
