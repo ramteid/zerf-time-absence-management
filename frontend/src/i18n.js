@@ -20,8 +20,6 @@ const TRANSLATIONS = {
     hours_unit: "h",
     "{hours} / week": "{hours} / week",
     "As of yesterday": "As of yesterday",
-    help_monthly_report:
-      "Shows the monthly report for a user with target/actual hours and daily details.",
     help_team_report:
       "Compares target and actual hours for all active users in the selected month. For the current month, data is available including today.",
     help_category_breakdown:
@@ -32,8 +30,6 @@ const TRANSLATIONS = {
       "Submitted and approved hours including the current day for the current month.",
     help_employee_details:
       "View detailed information about a user including balance and statistics.",
-    help_csv_export:
-      "Exports the selected employee and date range as a CSV file.",
     help_my_balance:
       "Overview of your current flextime balance and submission status. The balance is calculated up to and including yesterday; today's hours are not yet counted. The overtime overview also factors in submitted hours pending approval.",
     help_flextime_chart:
@@ -241,6 +237,11 @@ const TRANSLATIONS = {
     // Reports - new section labels and team report columns
     "Employee report": "Employee report",
     "Export timesheet": "Export timesheet",
+    "Export team PDF": "Export team PDF",
+    future_period_no_time_data:
+      "This period is entirely in the future — hours and flextime data will appear once it begins.",
+    team_table_month_only:
+      "The team overview table is only available in month view.",
     "Current flextime balance": "Current flextime balance",
     "Monthly diff": "Monthly diff",
     Weekend: "Weekend",
@@ -1035,8 +1036,6 @@ const TRANSLATIONS = {
     Absent: "Abwesend",
     // Reports help tooltips
     "As of yesterday": "Stand gestern",
-    help_monthly_report:
-      "Zeigt den Monatsbericht eines Mitarbeiters mit Soll-/Ist-Stunden und Details pro Tag.",
     help_team_report:
       "Vergleicht Soll- und Ist-Stunden aller aktiven Benutzer für den gewählten Monat. Für den laufenden Monat sind Daten inklusive heute verfügbar.",
     help_category_breakdown:
@@ -1047,8 +1046,6 @@ const TRANSLATIONS = {
       "Eingereichte und genehmigte Stunden einschließlich des aktuellen Tages für den laufenden Monat.",
     help_employee_details:
       "Zeigt detaillierte Informationen über einen Mitarbeiter einschließlich Saldo und Statistiken.",
-    help_csv_export:
-      "Exportiert den gewählten Mitarbeiter und Zeitraum als CSV-Datei.",
     help_my_balance:
       "Überblick über deinen aktuellen Gleitzeitstand und den Einreichungen. Der Gleitzeitstand wird bis einschließlich gestern berechnet; die heute geleisteten Stunden werden noch nicht mitgezählt. Die Überstundenübersicht berücksichtigt zusätzlich eingereichte, noch ausstehende Stunden.",
     help_flextime_chart:
@@ -1235,6 +1232,11 @@ const TRANSLATIONS = {
     // Reports - labels and team report columns
     "Employee report": "Mitarbeiterbericht",
     "Export timesheet": "Export Stundennachweis",
+    "Export team PDF": "Team-PDF exportieren",
+    future_period_no_time_data:
+      "Dieser Zeitraum liegt vollständig in der Zukunft — Stunden- und Gleitzeitdaten erscheinen, sobald er beginnt.",
+    team_table_month_only:
+      "Die Teamübersichtstabelle ist nur in der Monatsansicht verfügbar.",
     "Current flextime balance": "Aktueller Gleitzeitkontostand",
     "Monthly diff": "Monatsdifferenz",
     "Sick days": "Krankheitstage",

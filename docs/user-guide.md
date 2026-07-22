@@ -66,6 +66,7 @@ Use this document if you are:
   - [Example approval flow](#example-approval-flow)
   - [What explicit assignment means](#what-explicit-assignment-means)
 - [Reporting behavior (important)](#reporting-behavior-important)
+  - [Reports page layout](#reports-page-layout)
   - [Month and overtime/flextime math](#month-and-overtimeflextime-math)
   - [Category breakdown reports](#category-breakdown-reports)
   - [Team report scope](#team-report-scope)
@@ -937,6 +938,29 @@ notifications just because they are an admin.
 ## Reporting behavior (important)
 
 Zerf distinguishes between workflow coverage and work-credit math.
+
+### Reports page layout
+
+- Employees without team-report access see a single report: their own balance,
+  vacation, absences, category breakdown, entries, and flextime chart.
+- Team leads and admins additionally see an **Employee** / **Team** switch at
+  the top of the page. The Employee tab shows one person's report at a time
+  (with a dropdown to pick who); the Team tab shows the whole team side by
+  side: a per-person balance table, a category breakdown across everyone, and
+  team absences.
+- A single toolbar above the report controls both tabs: pick a month with the
+  ◀ / ▶ arrows, or switch to **Custom range** to pick any from/to date span
+  (useful for a quarter, or for looking ahead at planned absences beyond the
+  current month). Switching tabs keeps the selected person and period.
+- Everything loads automatically as soon as you change the employee or the
+  period — there is no separate "Show" button.
+- **CSV** and **PDF** export buttons in the toolbar export exactly what is
+  currently on screen: the selected employee and period on the Employee tab,
+  or a combined PDF for the whole team on the Team tab.
+- Absences look forward: picking a custom range that extends into the future
+  still shows planned/approved time off in that range. Worked hours, flextime,
+  and exports never include future days — a period entirely in the future
+  shows a note instead of empty balance figures.
 
 ### Month and overtime/flextime math
 

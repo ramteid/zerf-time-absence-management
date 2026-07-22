@@ -1,17 +1,36 @@
 <script>
-  // Reports page for monthly and team-related statistics.
-  // Delegates each section to a sub-component in routes/reports/.
-  import { currentUser, toast } from "../stores.js";
+  // Reports page: an Employee/Team scope switch sharing one filter toolbar
+  // (person, period) instead of five independently-filtered cards. Exports
+  // act on whatever is currently shown ("export what you see").
+  import {
+    currentUser,
+    earliestStartDate,
+    settings,
+    toast,
+  } from "../stores.js";
   import { t } from "../i18n.js";
   import { tracksOwnTime } from "../rolePolicy.js";
-  import { getUsersForReports } from "../lib/api/reportsApi.js";
-  import EmployeeReport from "./reports/EmployeeReport.svelte";
+  import { isoDate, appTodayDate } from "../format.js";
+  import Icon from "../Icons.svelte";
+  import PeriodPicker from "../lib/ui/PeriodPicker.svelte";
+  import PersonReport from "./reports/PersonReport.svelte";
   import TeamReport from "./reports/TeamReport.svelte";
-  import CategoryReport from "./reports/CategoryReport.svelte";
-  import AbsenceReport from "./reports/AbsenceReport.svelte";
-  import TimesheetExport from "./reports/TimesheetExport.svelte";
+  import {
+    getUsersForReports,
+    getRangeReport,
+    getFlextimeReport,
+    getTimesheetPdf,
+  } from "../lib/api/reportsApi.js";
+  import { findUserById, hasUserId } from "../lib/domain/users.js";
+  import { timeQueryRange } from "../lib/domain/reportPeriod.js";
+  import {
+    buildTimesheetCsv,
+    timesheetCsvBlob,
+    downloadBlob,
+    safeFileNamePart,
+  } from "../lib/domain/timesheetCsv.js";
 
-  // Leads and admins load all users for the dropdowns. Non-lead roles only see
+  // Leads and admins load all users for the dropdown. Other roles only see
   // their own data.
   let users = [];
   let lastUsersLoadKey = "";
@@ -23,25 +42,29 @@
       : "";
   }
 
-  function isCurrentUsersLoad(loadKey, requestId) {
-    return loadKey === lastUsersLoadKey && requestId === latestUsersLoadRequest;
-  }
-
   async function initUsers(loadKey, requestId, user) {
     try {
       const canTeam = !!user?.permissions?.can_view_team_reports;
       if (!user?.id) {
-        if (isCurrentUsersLoad(loadKey, requestId)) {
+        if (
+          loadKey === lastUsersLoadKey &&
+          requestId === latestUsersLoadRequest
+        )
           users = [];
-        }
         return;
       }
       const loadedUsers = await getUsersForReports(canTeam, user);
-      if (isCurrentUsersLoad(loadKey, requestId)) {
+      if (
+        loadKey === lastUsersLoadKey &&
+        requestId === latestUsersLoadRequest
+      ) {
         users = loadedUsers;
       }
     } catch (e) {
-      if (isCurrentUsersLoad(loadKey, requestId)) {
+      if (
+        loadKey === lastUsersLoadKey &&
+        requestId === latestUsersLoadRequest
+      ) {
         toast($t(e?.message || "Error"), "error");
       }
     }
@@ -57,12 +80,138 @@
       initUsers(loadKey, latestUsersLoadRequest, user);
     }
   }
-  // Pure-admin users (admins with tracks_time=false) have no personal data, so
-  // the self-only sections (Category, Absence, Timesheet self-views) collapse
-  // into team-style views as well. Also covers any other future case where the
-  // logged-in user can view team reports but doesn't track their own time.
   $: currentUserTracksTime = tracksOwnTime($currentUser);
   $: isSelfOnlyReportsView = !canViewTeamReports && currentUserTracksTime;
+
+  // --- Shared filter state ---
+  let today = appTodayDate();
+  let todayIso = isoDate(today);
+  $: today = appTodayDate($settings?.timezone);
+  $: todayIso = isoDate(today);
+  $: currentMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+
+  let activeTab = "employee"; // "employee" | "team"
+  let periodMode = "month";
+  let month = currentMonthStr;
+  let from = "";
+  let to = "";
+  let selectedUserId = tracksOwnTime($currentUser) ? $currentUser.id : null;
+
+  $: if (isSelfOnlyReportsView) selectedUserId = $currentUser.id;
+  $: if (
+    !isSelfOnlyReportsView &&
+    (selectedUserId == null || !hasUserId(users, selectedUserId)) &&
+    users.length > 0
+  ) {
+    selectedUserId = users[0].id;
+  }
+  $: if (!canViewTeamReports) activeTab = "employee";
+
+  $: selectedReportUser = findUserById(users, selectedUserId, $currentUser);
+
+  // Month/date lower bound depends on the active tab: an individual's own
+  // start date on the Employee tab, the earliest start date across everyone
+  // shown on the Team tab.
+  $: minMonth =
+    activeTab === "team"
+      ? ($earliestStartDate?.slice(0, 7) ?? null)
+      : (selectedReportUser?.start_date?.slice(0, 7) ??
+        $earliestStartDate?.slice(0, 7) ??
+        null);
+  $: minDate =
+    activeTab === "team"
+      ? $earliestStartDate
+      : (selectedReportUser?.start_date ?? $earliestStartDate);
+
+  $: if (minMonth && month < minMonth) month = minMonth;
+  $: if (minDate && from && from < minDate) from = minDate;
+  // Switching from the Team tab to an employee whose own start date is later
+  // than the currently-selected `to` would otherwise clamp `from` past `to`,
+  // producing an invalid range that fails validation on every fetch.
+  $: if (from && to && from > to) to = from;
+
+  $: period = { mode: periodMode, month, from, to };
+
+  // --- Export: acts on whatever the Employee tab currently shows ---
+  let exportInProgress = false;
+  let exportError = "";
+
+  function exportFileNamePart() {
+    if (!selectedReportUser) return String(selectedUserId ?? "report");
+    return `${selectedReportUser.first_name} ${selectedReportUser.last_name}`;
+  }
+
+  async function exportCsv() {
+    if (exportInProgress || selectedUserId == null) return;
+    exportInProgress = true;
+    exportError = "";
+    try {
+      const { from: qFrom, to: qTo, active } = timeQueryRange(period, todayIso);
+      if (!active) {
+        exportError = $t("future_period_no_time_data");
+        return;
+      }
+      const [report, flextimeData] = await Promise.all([
+        getRangeReport({ userId: selectedUserId, from: qFrom, to: qTo }),
+        getFlextimeReport({
+          userId: selectedUserId,
+          from: qFrom,
+          to: qTo,
+        }).catch(() => []),
+      ]);
+      const csvText = buildTimesheetCsv({
+        report,
+        flextimeData,
+        translate: $t,
+      });
+      downloadBlob(
+        timesheetCsvBlob(csvText),
+        `stundennachweis-${safeFileNamePart(exportFileNamePart())}-${qFrom}_${qTo}.csv`,
+      );
+      toast($t("CSV download started."), "ok");
+    } catch (e) {
+      exportError = $t(e?.message || "Export failed.");
+    } finally {
+      exportInProgress = false;
+    }
+  }
+
+  async function exportPdf(teamWide = false) {
+    if (exportInProgress) return;
+    if (!teamWide && selectedUserId == null) return;
+    exportInProgress = true;
+    exportError = "";
+    try {
+      // A fully-future custom range would otherwise cap `to` at today while
+      // leaving `from` in the future, sending from > to to the backend (which
+      // rejects it with a raw, untranslated validation error). Bail out with
+      // the same friendly message exportCsv() already shows for this case.
+      const { from: qFrom, to: qTo, active } = timeQueryRange(
+        period,
+        todayIso,
+      );
+      if (!active) {
+        exportError = $t("future_period_no_time_data");
+        return;
+      }
+      const response = await getTimesheetPdf({
+        userId: teamWide ? undefined : selectedUserId,
+        from: qFrom,
+        to: qTo,
+      });
+      const blob = await response.blob();
+      const namePart = teamWide ? $t("All") : exportFileNamePart();
+      downloadBlob(
+        blob,
+        `stundennachweis-${safeFileNamePart(namePart)}-${qFrom}_${qTo}.pdf`,
+      );
+      toast($t("PDF download started."), "ok");
+    } catch (e) {
+      exportError = $t(e?.message || "Export failed.");
+    } finally {
+      exportInProgress = false;
+    }
+  }
 </script>
 
 <div class="top-bar">
@@ -78,12 +227,119 @@
   </div>
 </div>
 
+{#if canViewTeamReports}
+  <div class="admin-tabs desktop-tabs">
+    <button
+      type="button"
+      class="tab-link"
+      class:active={activeTab === "employee"}
+      on:click={() => (activeTab = "employee")}
+    >
+      {$t("Employee report")}
+    </button>
+    <button
+      type="button"
+      class="tab-link"
+      class:active={activeTab === "team"}
+      on:click={() => (activeTab = "team")}
+    >
+      {$t("Team report")}
+    </button>
+  </div>
+  <div class="mobile-tabs">
+    <select value={activeTab} on:change={(e) => (activeTab = e.target.value)}>
+      <option value="employee">{$t("Employee report")}</option>
+      <option value="team">{$t("Team report")}</option>
+    </select>
+  </div>
+{/if}
+
 <div class="content-area">
-  <EmployeeReport {users} {isSelfOnlyReportsView} />
-  {#if canViewTeamReports}
-    <TeamReport />
+  <div class="zf-card reports-toolbar">
+    <div class="zf-toolbar-row">
+      {#if activeTab === "employee" && !isSelfOnlyReportsView}
+        <div>
+          <label class="zf-label" for="reports-user-select"
+            >{$t("Employee")}</label
+          >
+          <select
+            id="reports-user-select"
+            class="zf-select"
+            bind:value={selectedUserId}
+          >
+            {#each users as u (u.id)}
+              <option value={u.id}>{u.first_name} {u.last_name}</option>
+            {/each}
+          </select>
+        </div>
+      {/if}
+
+      <PeriodPicker
+        id="reports-period"
+        bind:mode={periodMode}
+        bind:month
+        bind:from
+        bind:to
+        {minMonth}
+        maxMonth={currentMonthStr}
+        {minDate}
+      />
+
+      <div class="reports-export-actions">
+        {#if activeTab === "employee"}
+          <button
+            class="zf-btn zf-btn-primary"
+            on:click={exportCsv}
+            disabled={exportInProgress || selectedUserId == null}
+          >
+            <Icon name="Download" size={14} />{$t("Export CSV")}
+          </button>
+          <button
+            class="zf-btn zf-btn-primary"
+            on:click={() => exportPdf(false)}
+            disabled={exportInProgress || selectedUserId == null}
+          >
+            <Icon name="FileText" size={14} />{$t("Export PDF")}
+          </button>
+        {:else}
+          <button
+            class="zf-btn zf-btn-primary"
+            on:click={() => exportPdf(true)}
+            disabled={exportInProgress}
+          >
+            <Icon name="FileText" size={14} />{$t("Export team PDF")}
+          </button>
+        {/if}
+      </div>
+    </div>
+    {#if exportError}
+      <div class="error-text">{exportError}</div>
+    {/if}
+  </div>
+
+  {#if activeTab === "team" && canViewTeamReports}
+    <TeamReport {users} {periodMode} {month} {from} {to} />
+  {:else}
+    <PersonReport
+      userId={selectedUserId}
+      {users}
+      {periodMode}
+      {month}
+      {from}
+      {to}
+    />
   {/if}
-  <CategoryReport {isSelfOnlyReportsView} />
-  <AbsenceReport {users} {isSelfOnlyReportsView} />
-  <TimesheetExport {users} {isSelfOnlyReportsView} {canViewTeamReports} />
 </div>
+
+<style>
+  .reports-toolbar {
+    padding: 16px 20px;
+    margin-bottom: 16px;
+  }
+
+  .reports-export-actions {
+    display: flex;
+    gap: 8px;
+    margin-left: auto;
+  }
+</style>

@@ -33,22 +33,12 @@ export function getLeaveBalance({ userId, year }) {
   return api(`/leave-balance/${userId}?${paramsFrom({ year })}`);
 }
 
-export function getOvertimeReport({ userId, year }) {
-  return api(`/reports/overtime?${paramsFrom({ user_id: userId, year })}`);
-}
-
 export function getFlextimeReport({ userId, from, to }) {
   return api(`/reports/flextime?${paramsFrom({ user_id: userId, from, to })}`);
 }
 
 export function getTeamReport({ month }) {
   return api(`/reports/team?${paramsFrom({ month })}`);
-}
-
-export function getCategoryReport({ userId, from, to }) {
-  return api(
-    `/reports/categories?${paramsFrom({ user_id: userId, from, to })}`,
-  );
 }
 
 export function getTeamCategoryReport({ from, to }) {

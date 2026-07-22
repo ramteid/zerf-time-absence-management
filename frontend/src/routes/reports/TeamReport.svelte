@@ -1,56 +1,217 @@
 <script>
-  import { earliestStartDate, settings, toast } from "../../stores.js";
-  import { t, fmtDecimal } from "../../i18n.js";
-  import { appTodayDate, minToHM } from "../../format.js";
-  import DatePicker from "../../DatePicker.svelte";
+  // The "Team" tab of the Reports page: three related views over the same
+  // shared toolbar period — per-person month totals, a category matrix, and
+  // team absences — instead of three separately-filtered cards.
+  import { currentUser, toast } from "../../stores.js";
+  import {
+    t,
+    fmtDecimal,
+    absenceKindLabel,
+    statusLabel,
+    formatDayCount,
+  } from "../../i18n.js";
+  import { minToHM, fmtDate } from "../../format.js";
   import SectionCard from "../../lib/ui/SectionCard.svelte";
   import DataTable from "../../lib/ui/DataTable.svelte";
-  import { getTeamReport } from "../../lib/api/reportsApi.js";
+  import LoadingState from "../../lib/ui/LoadingState.svelte";
+  import {
+    getTeamReport,
+    getTeamCategoryReport,
+    getAbsenceReport,
+    getUserAbsencesByYear,
+    getHolidaysByYear,
+  } from "../../lib/api/reportsApi.js";
+  import { periodBounds } from "../../lib/domain/reportPeriod.js";
+  import { yearsBetweenDates } from "../../lib/domain/dates.js";
+  import {
+    categoryColumnsFromTeamReport,
+    filterTeamCategoryColumns,
+    teamCategoryMinutes,
+    teamCategoryRowTotal,
+    dedupeAbsences,
+  } from "../../lib/domain/reports.js";
+  import { countWorkdays, holidayDateSet } from "../../apiMappers.js";
+  import { tracksOwnTime } from "../../rolePolicy.js";
+  import { userWorkdaysPerWeekById } from "../../lib/domain/users.js";
 
-  let today = appTodayDate();
-  let currentYear = today.getFullYear();
-  // eslint-disable-next-line no-useless-assignment
-  let currentMonthStr = `${currentYear}-${String(today.getMonth() + 1).padStart(2, "0")}`;
-  $: today = appTodayDate($settings?.timezone);
-  $: currentYear = today.getFullYear();
-  $: currentMonthStr = `${currentYear}-${String(today.getMonth() + 1).padStart(2, "0")}`;
-  $: earliestStartMonth = $earliestStartDate?.slice(0, 7) ?? null;
+  export let users = [];
+  export let periodMode = "month";
+  export let month = "";
+  export let from = "";
+  export let to = "";
 
-  let teamMonth = currentMonthStr;
-  let teamReport = null;
   let activeHelp = null;
-
   function toggleHelp(id) {
     activeHelp = activeHelp === id ? null : id;
   }
 
-  // Clamp teamMonth to the earliest start month.
-  $: if (earliestStartMonth && teamMonth < earliestStartMonth) {
-    teamMonth = earliestStartMonth;
-  }
-
-  // Keep teamMonth aligned with app-timezone date changes if still on default.
-  let previousCurrentMonthStr = "";
-  $: {
-    if (!previousCurrentMonthStr) {
-      // eslint-disable-next-line no-useless-assignment
-      previousCurrentMonthStr = currentMonthStr;
-    } else {
-      if (teamMonth === previousCurrentMonthStr) teamMonth = currentMonthStr;
-      // eslint-disable-next-line no-useless-assignment
-      previousCurrentMonthStr = currentMonthStr;
-    }
-  }
-
-  async function showTeam() {
-    teamReport = null;
+  // --- Section 1: team month table (month mode only) ---
+  let teamReport = null;
+  let teamLoading = false;
+  let lastTeamKey = "";
+  async function loadTeam(key) {
+    teamLoading = true;
     try {
-      const loaded = await getTeamReport({ month: teamMonth });
-      teamReport = (loaded || []).sort((a, b) => a.name.localeCompare(b.name));
+      const loaded = await getTeamReport({ month });
+      if (key === lastTeamKey) {
+        // eslint-disable-next-line svelte/infinite-reactive-loop -- teamReport isn't read by the triggering $: block, so there's no cycle.
+        teamReport = (loaded || []).sort((a, b) =>
+          a.name.localeCompare(b.name),
+        );
+      }
     } catch (e) {
-      teamReport = null;
-      toast($t(e?.message || "Error"), "error");
+      if (key === lastTeamKey) {
+        // eslint-disable-next-line svelte/infinite-reactive-loop -- see above.
+        teamReport = null;
+        toast($t(e?.message || "Error"), "error");
+      }
+    } finally {
+      if (key === lastTeamKey) teamLoading = false;
     }
+  }
+  $: {
+    if (periodMode === "month" && month) {
+      const key = `month:${month}`;
+      if (key !== lastTeamKey) {
+        lastTeamKey = key;
+        // eslint-disable-next-line svelte/infinite-reactive-loop -- loadTeam only writes teamReport, which this block never reads.
+        loadTeam(key);
+      }
+    } else {
+      lastTeamKey = "";
+      teamReport = null;
+    }
+  }
+
+  // --- Section 2: category matrix ---
+  let teamCatReport = null;
+  let catFilteredCategories = [];
+  let catShowFilter = false;
+  let catLoading = false;
+  let lastCatKey = "";
+  async function loadCategories(key, catFrom, catTo) {
+    catLoading = true;
+    try {
+      const loaded = await getTeamCategoryReport({ from: catFrom, to: catTo });
+      if (key === lastCatKey) {
+        teamCatReport = (loaded || []).sort((a, b) =>
+          a.name.localeCompare(b.name),
+        );
+        catFilteredCategories = categoryColumnsFromTeamReport(
+          teamCatReport,
+        ).map((c) => c.category);
+        catShowFilter = false;
+      }
+    } catch (e) {
+      if (key === lastCatKey) {
+        teamCatReport = null;
+        toast($t(e?.message || "Error"), "error");
+      }
+    } finally {
+      if (key === lastCatKey) catLoading = false;
+    }
+  }
+  $: catBounds = periodBounds({ mode: periodMode, month, from, to });
+  $: {
+    const key = `${catBounds.from}:${catBounds.to}`;
+    if (catBounds.from && catBounds.to && key !== lastCatKey) {
+      lastCatKey = key;
+      loadCategories(key, catBounds.from, catBounds.to);
+    }
+  }
+
+  function toggleCategoryFilter(categoryName) {
+    catFilteredCategories = catFilteredCategories.includes(categoryName)
+      ? catFilteredCategories.filter((name) => name !== categoryName)
+      : [...catFilteredCategories, categoryName];
+  }
+  $: allTeamCatColumns = teamCatReport
+    ? categoryColumnsFromTeamReport(teamCatReport)
+    : [];
+  $: visibleTeamCatColumns = filterTeamCategoryColumns(
+    allTeamCatColumns,
+    catFilteredCategories,
+  );
+
+  // --- Section 3: team absences (full period — planned absences look forward) ---
+  let teamAbsences = null;
+  let absencesLoading = false;
+  let lastAbsenceKey = "";
+  async function loadAbsences(key, absenceFrom, absenceTo) {
+    absencesLoading = true;
+    try {
+      const [teamRaw, ownRaw] = await Promise.all([
+        getAbsenceReport({ from: absenceFrom, to: absenceTo }),
+        tracksOwnTime($currentUser)
+          ? Promise.all(
+              yearsBetweenDates(absenceFrom, absenceTo).map((year) =>
+                getUserAbsencesByYear(year),
+              ),
+            ).then((lists) =>
+              lists
+                .flat()
+                .filter(
+                  (a) => a.end_date >= absenceFrom && a.start_date <= absenceTo,
+                ),
+            )
+          : Promise.resolve([]),
+      ]);
+      let raw = dedupeAbsences([...(teamRaw || []), ...ownRaw]).filter(
+        (a) => a.status !== "rejected" && a.status !== "cancelled",
+      );
+      if (raw.length === 0) {
+        if (key === lastAbsenceKey) teamAbsences = [];
+        return;
+      }
+      const years = [
+        ...new Set(
+          raw.flatMap((a) => [
+            parseInt(a.start_date.slice(0, 4), 10),
+            parseInt(a.end_date.slice(0, 4), 10),
+          ]),
+        ),
+      ];
+      const holidayLists = await Promise.all(
+        years.map((y) => getHolidaysByYear(y)),
+      );
+      const holidayDates = holidayDateSet(holidayLists.flat());
+      const withDays = raw.map((a) => {
+        const clampedFrom =
+          a.start_date > absenceFrom ? a.start_date : absenceFrom;
+        const clampedTo = a.end_date < absenceTo ? a.end_date : absenceTo;
+        const workdaysPerWeek = userWorkdaysPerWeekById(users, a.user_id, 5);
+        const days =
+          clampedTo < clampedFrom
+            ? 0
+            : countWorkdays(
+                clampedFrom,
+                clampedTo,
+                holidayDates,
+                workdaysPerWeek,
+              );
+        return { ...a, days };
+      });
+      if (key === lastAbsenceKey) teamAbsences = withDays;
+    } catch (e) {
+      if (key === lastAbsenceKey) {
+        teamAbsences = null;
+        toast($t(e?.message || "Error"), "error");
+      }
+    } finally {
+      if (key === lastAbsenceKey) absencesLoading = false;
+    }
+  }
+  $: {
+    const key = `${catBounds.from}:${catBounds.to}`;
+    if (catBounds.from && catBounds.to && key !== lastAbsenceKey) {
+      lastAbsenceKey = key;
+      loadAbsences(key, catBounds.from, catBounds.to);
+    }
+  }
+
+  function userName(userId) {
+    const u = users.find((user) => user.id === userId);
+    return u ? `${u.first_name} ${u.last_name}` : `#${userId}`;
   }
 </script>
 
@@ -60,23 +221,11 @@
   helpOpen={activeHelp === "team"}
   onHelpToggle={() => toggleHelp("team")}
 >
-  <div class="zf-toolbar-row mb-12">
-    <div class="flex-1">
-      <label class="zf-label" for="team-month">{$t("Month")}</label>
-      <DatePicker
-        id="team-month"
-        mode="month"
-        bind:value={teamMonth}
-        min={earliestStartMonth}
-        max={currentMonthStr}
-      />
-    </div>
-    <button class="zf-btn zf-btn-primary" on:click={showTeam}
-      >{$t("Show")}</button
-    >
-  </div>
-
-  {#if teamReport}
+  {#if periodMode !== "month"}
+    <div class="report-note">{$t("team_table_month_only")}</div>
+  {:else if teamLoading && !teamReport}
+    <LoadingState />
+  {:else if teamReport}
     <DataTable fit>
       <thead>
         <tr>
@@ -155,8 +304,183 @@
   {/if}
 </SectionCard>
 
+<SectionCard
+  title={$t("Category breakdown")}
+  helpText={$t("help_category_breakdown")}
+  helpOpen={activeHelp === "cat"}
+  onHelpToggle={() => toggleHelp("cat")}
+>
+  {#if allTeamCatColumns.length > 0}
+    <div class="report-toolbar">
+      <button class="zf-btn" on:click={() => (catShowFilter = !catShowFilter)}>
+        {$t("Filter")}
+        {#if catFilteredCategories.length > 0 && catFilteredCategories.length < allTeamCatColumns.length}
+          ({catFilteredCategories.length})
+        {/if}
+      </button>
+    </div>
+    {#if catShowFilter}
+      <div class="filter-panel">
+        <div class="filter-options">
+          {#each allTeamCatColumns as col (col.category)}
+            <label class="filter-check">
+              <input
+                type="checkbox"
+                checked={catFilteredCategories.includes(col.category)}
+                on:change={() => toggleCategoryFilter(col.category)}
+              />
+              <span class="cat-dot" style:background={col.color || "#999"}
+              ></span>
+              <span>{$t(col.category)}</span>
+            </label>
+          {/each}
+        </div>
+      </div>
+    {/if}
+  {/if}
+
+  {#if catLoading && !teamCatReport}
+    <LoadingState />
+  {:else if teamCatReport}
+    {#if teamCatReport.length === 0 || visibleTeamCatColumns.length === 0}
+      <div class="zf-card-empty">{$t("No data.")}</div>
+    {:else}
+      <DataTable fit>
+        <thead>
+          <tr>
+            <th>{$t("Employee")}</th>
+            {#each visibleTeamCatColumns as col (col.category)}
+              <th class="text-right">
+                <span class="th-cat">
+                  <span class="cat-dot" style:background={col.color || "#999"}
+                  ></span>
+                  {$t(col.category)}
+                </span>
+              </th>
+            {/each}
+            <th class="text-right">{$t("Total")}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each teamCatReport as row (row.user_id)}
+            {@const rowTotal = teamCategoryRowTotal(row, catFilteredCategories)}
+            <tr>
+              <td class="fw-500">{row.name}</td>
+              {#each visibleTeamCatColumns as col (col.category)}
+                {@const cellMin = teamCategoryMinutes(row, col.category)}
+                <td class="tab-num text-right text-tertiary">
+                  {cellMin > 0 ? minToHM(cellMin) : "-"}
+                </td>
+              {/each}
+              <td class="tab-num text-right"
+                >{rowTotal > 0 ? minToHM(rowTotal) : "-"}</td
+              >
+            </tr>
+          {/each}
+        </tbody>
+      </DataTable>
+    {/if}
+  {/if}
+</SectionCard>
+
+<SectionCard
+  title={$t("Absences")}
+  padded={false}
+  helpText={$t("help_absence_report")}
+  helpOpen={activeHelp === "absence"}
+  onHelpToggle={() => toggleHelp("absence")}
+>
+  {#if absencesLoading && !teamAbsences}
+    <LoadingState />
+  {:else if teamAbsences}
+    {#if teamAbsences.length === 0}
+      <div class="zf-card-empty">{$t("No data.")}</div>
+    {:else}
+      <DataTable>
+        <thead>
+          <tr>
+            <th>{$t("Employee")}</th>
+            <th>{$t("Type")}</th>
+            <th class="text-right">{$t("From")}</th>
+            <th class="text-right">{$t("To")}</th>
+            <th class="text-right">{$t("Days")}</th>
+            <th>{$t("Status")}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each teamAbsences as a (a.id)}
+            <tr class:entry-rejected={a.status === "rejected"}>
+              <td class="fw-500">{userName(a.user_id)}</td>
+              <td>{absenceKindLabel(a.kind)}</td>
+              <td class="tab-num text-right">{fmtDate(a.start_date)}</td>
+              <td class="tab-num text-right">{fmtDate(a.end_date)}</td>
+              <td class="tab-num text-right">{formatDayCount(a.days)}</td>
+              <td>
+                <span class="zf-chip zf-chip-{a.status}"
+                  >{statusLabel(a.status)}</span
+                >
+              </td>
+            </tr>
+          {/each}
+        </tbody>
+      </DataTable>
+    {/if}
+  {/if}
+</SectionCard>
+
 <style>
   .col-employee {
     min-width: 120px;
+  }
+
+  .report-note {
+    font-size: 13px;
+    color: var(--text-tertiary);
+    padding: 8px;
+    background: var(--bg-muted);
+    border-radius: var(--radius-sm);
+  }
+
+  .report-toolbar {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+
+  .filter-panel {
+    padding: 12px;
+    background: var(--bg-muted);
+    border-radius: var(--radius-sm);
+    margin-bottom: 12px;
+  }
+
+  .filter-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .filter-check {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    font-size: 14px;
+  }
+
+  .th-cat {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    justify-content: flex-end;
+  }
+
+  .cat-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+    flex-shrink: 0;
   }
 </style>
