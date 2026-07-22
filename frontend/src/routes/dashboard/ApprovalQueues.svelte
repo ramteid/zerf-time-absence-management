@@ -31,7 +31,7 @@
 
 <div class="dashboard-approval-grid">
   <div
-    class="zf-card zf-table-wrap"
+    class="zf-card"
     class:dashboard-focus={focusedSection === "timesheets"}
     bind:this={timesheetsSectionEl}
   >
@@ -163,7 +163,7 @@
   </div>
 
   <div
-    class="zf-card zf-table-wrap"
+    class="zf-card"
     class:dashboard-focus={focusedSection === "absences"}
     bind:this={absencesSectionEl}
   >

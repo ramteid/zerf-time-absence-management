@@ -113,6 +113,27 @@ describe("ApprovalQueues", () => {
     expect(target.textContent).toContain("pending");
   });
 
+  it("keeps approval cards within the mobile dashboard gutters", async () => {
+    component = mount(ApprovalQueues, {
+      target,
+      props: {
+        pendingWeeks: [],
+        pendingReopens: [],
+        pendingAbsences: [],
+        users,
+      },
+    });
+    await settle();
+
+    const approvalCards = target.querySelectorAll(
+      ".dashboard-approval-grid > .zf-card",
+    );
+    expect(approvalCards).toHaveLength(2);
+    for (const card of approvalCards) {
+      expect(card.classList.contains("zf-table-wrap")).toBe(false);
+    }
+  });
+
   it("shows 'Approve All' when there are pending weeks", async () => {
     // Batch approval lets managers approve a week of entries in one click
     // when they trust the submitted data without needing to review each entry.
