@@ -419,7 +419,20 @@ exec '$_real_mv' \"\$@\"
   [ "$status" -ne 0 ]
 }
 
-# -- resolve_admins_backup_error -----------------------------------------------
+# -- backup error notifications ------------------------------------------------
+
+@test "notify_admins_backup_error: queues only the central event key" {
+  mkdir -p "$BATS_TMPDIR/psql_capture"
+  make_shim psql '
+args_file="$BATS_TMPDIR/psql_capture/last_args"
+printf "%s\n" "$*" > "$args_file"
+exit 0
+'
+  notify_admins_backup_error "backup_failed"
+  grep -qF "VALUES ('backup_failed', '', NULL, 'backup')" \
+    "$BATS_TMPDIR/psql_capture/last_args"
+  ! grep -qF "Database backup failed" "$BATS_TMPDIR/psql_capture/last_args"
+}
 
 @test "resolve_admins_backup_error: issues UPDATE for dedupe_key" {
   mkdir -p "$BATS_TMPDIR/psql_capture"
