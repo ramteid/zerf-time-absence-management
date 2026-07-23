@@ -3,6 +3,7 @@
 #
 # Run with:  bats scripts/backup.bats
 # Requires:  bats-core  (https://github.com/bats-core/bats-core)
+#            zip / unzip  (apt-get install zip unzip)
 #
 # The tests source backup.sh with BACKUP_LIB_ONLY=1 so the daemon loop
 # never starts.  External commands (psql, curl, openssl, pg_dump) are
@@ -44,7 +45,7 @@ make_shim() {
 }
 
 # Shim openssl so `enc ... -out Y` copies its STDIN to Y, letting run_backup_once
-# succeed end-to-end without real cryptography.  backup.sh now streams the dump
+# succeed end-to-end without real cryptography.  backup.sh streams the dump
 # into openssl via a pipe (`pg_dump | openssl ... -out file`), so the shim reads
 # stdin and writes it to the -out path, mirroring real openssl.
 #
@@ -195,15 +196,15 @@ fi
 # -- build_upload_target ------------------------------------------------------
 
 @test "build_upload_target: constructs WebDAV URL" {
-  run build_upload_target "https://cloud.example.com" "AbCdEf" "zerf-20260101.dump.enc"
+  run build_upload_target "https://cloud.example.com" "AbCdEf" "zerf-20260101T000000Z.zip"
   [ "$status" -eq 0 ]
-  [ "$output" = "https://cloud.example.com/public.php/webdav/zerf-20260101.dump.enc" ]
+  [ "$output" = "https://cloud.example.com/public.php/webdav/zerf-20260101T000000Z.zip" ]
 }
 
 @test "build_upload_target: works with subpath base" {
-  run build_upload_target "https://example.com/nextcloud" "TokXyz" "backup.dump.enc"
+  run build_upload_target "https://example.com/nextcloud" "TokXyz" "zerf-20260101T000000Z.zip"
   [ "$status" -eq 0 ]
-  [ "$output" = "https://example.com/nextcloud/public.php/webdav/backup.dump.enc" ]
+  [ "$output" = "https://example.com/nextcloud/public.php/webdav/zerf-20260101T000000Z.zip" ]
 }
 
 # -- upload_backup ------------------------------------------------------------
@@ -218,10 +219,10 @@ printf "%s\n" "$*" > "$config_file"
 cat > "$stdin_file"
 exit 0
 '
-  # Create a small dummy file to upload.
-  printf "dummy content" > "$BATS_TMPDIR/dummy.dump.enc"
+  # Create a small dummy archive to upload.
+  printf "dummy content" > "$BATS_TMPDIR/dummy.zip"
 
-  upload_backup "$BATS_TMPDIR/dummy.dump.enc" \
+  upload_backup "$BATS_TMPDIR/dummy.zip" \
     "https://cloud.example.com" "MyToken" "mypassword"
 
   # Verify the token and password appear in stdin config, NOT in the CLI args.
@@ -247,11 +248,37 @@ exit 0
   [[ "$output" =~ "suspiciously small" ]]
 }
 
-# -- run_backup_once: pg_tde keyring sidecar ----------------------------------
+# -- run_backup_once: zip archive creation ------------------------------------
 
-@test "run_backup_once: captures the pg_tde keyring sidecar when present" {
+@test "run_backup_once: produces a single zip archive containing dump.enc and metadata" {
+  # Use >512 bytes of fake dump content so the 512-byte floor passes.
+  make_shim pg_dump 'printf "PGDMP"; head -c 4096 /dev/zero'
+  make_shim psql 'printf ""'
+  make_openssl_copy_shim
+
+  export OUT_DIR="$BATS_TMPDIR/out"
+  export KEYRING_SRC="$BATS_TMPDIR/does-not-exist.enc"
+
+  run run_backup_once
+  [ "$status" -eq 0 ]
+
+  # Exactly one zip archive is produced.
+  archive="$(ls "$OUT_DIR"/zerf-*.zip)"
+  [ -f "$archive" ]
+
+  # Archive must contain dump.enc and metadata entries.
+  unzip -l "$archive" | grep -q 'dump\.enc'
+  unzip -l "$archive" | grep -q 'metadata'
+
+  # Without a keyring source there should be no keyring.enc entry.
+  ! unzip -l "$archive" | grep -q 'keyring\.enc'
+
+  # Metadata records keyring absent.
+  unzip -p "$archive" metadata | grep -q '^pg_tde_keyring_included=false$'
+}
+
+@test "run_backup_once: captures the pg_tde keyring inside the zip archive" {
   # Use >512 bytes of fake dump content so the 512-byte ciphertext floor passes.
-  # The faithful openssl shim adds 32 bytes of header; the total must exceed 512.
   make_shim pg_dump 'printf "PGDMP"; head -c 4096 /dev/zero'
   make_shim psql 'printf ""'
   make_openssl_copy_shim
@@ -264,25 +291,33 @@ exit 0
   run run_backup_once
   [ "$status" -eq 0 ]
 
-  # Exactly one keyring sidecar exists and is a verbatim copy of the source.
-  kr="$(ls "$OUT_DIR"/zerf-*.keyring.enc)"
-  [ -f "$kr" ]
-  [ "$(cat "$kr")" = "fake-encrypted-keyring" ]
-  # Metadata records that the keyring was included.
-  grep -q '^pg_tde_keyring_included=true$' "$OUT_DIR"/zerf-*.metadata
+  archive="$(ls "$OUT_DIR"/zerf-*.zip)"
+  [ -f "$archive" ]
+
+  # Archive contains all three entries.
+  unzip -l "$archive" | grep -q 'dump\.enc'
+  unzip -l "$archive" | grep -q 'metadata'
+  unzip -l "$archive" | grep -q 'keyring\.enc'
+
+  # Keyring content is preserved verbatim inside the zip.
+  [ "$(unzip -p "$archive" keyring.enc)" = "fake-encrypted-keyring" ]
+
+  # Metadata records keyring included.
+  unzip -p "$archive" metadata | grep -q '^pg_tde_keyring_included=true$'
 }
 
-@test "run_backup_once: metadata reports missing keyring if sidecar finalization fails" {
+@test "run_backup_once: metadata records keyring absent when keyring copy fails" {
   make_shim pg_dump 'printf "PGDMP"; head -c 4096 /dev/zero'
   make_shim psql 'printf ""'
   make_openssl_copy_shim
-  # Capture the real mv path before the shim overrides PATH.
-  _real_mv="$(command -v mv)"
-  make_shim mv "
-case \"\$1\" in
-  *.keyring.enc.tmp) exit 1 ;;
+  # Capture the real cp path before the shim overrides PATH.
+  _real_cp="$(command -v cp)"
+  # Fail cp when the destination is keyring.enc inside the work directory.
+  make_shim cp "
+case \"\$2\" in
+  */keyring.enc) exit 1 ;;
 esac
-exec '$_real_mv' \"\$@\"
+exec '$_real_cp' \"\$@\"
 "
 
   export OUT_DIR="$BATS_TMPDIR/out"
@@ -291,10 +326,13 @@ exec '$_real_mv' \"\$@\"
 
   run run_backup_once
   [ "$status" -eq 0 ]
-  [[ "$output" =~ "failed to finalize keyring sidecar" ]]
+  [[ "$output" =~ "failed to copy" ]]
 
-  ! ls "$OUT_DIR"/zerf-*.keyring.enc 2>/dev/null
-  grep -q '^pg_tde_keyring_included=false$' "$OUT_DIR"/zerf-*.metadata
+  archive="$(ls "$OUT_DIR"/zerf-*.zip)"
+  # Archive exists but has no keyring entry.
+  ! unzip -l "$archive" 2>/dev/null | grep -q 'keyring\.enc'
+  # Metadata records keyring absent.
+  unzip -p "$archive" metadata | grep -q '^pg_tde_keyring_included=false$'
 }
 
 @test "run_backup_once: succeeds without a keyring when the source is absent" {
@@ -308,78 +346,45 @@ exec '$_real_mv' \"\$@\"
   run run_backup_once
   # A missing keyring is a warning, never a failure.
   [ "$status" -eq 0 ]
-  # No keyring sidecar is produced...
-  ! ls "$OUT_DIR"/zerf-*.keyring.enc 2>/dev/null
-  # ...and the metadata records its absence.
-  grep -q '^pg_tde_keyring_included=false$' "$OUT_DIR"/zerf-*.metadata
+
+  archive="$(ls "$OUT_DIR"/zerf-*.zip)"
+  # No keyring entry in the archive.
+  ! unzip -l "$archive" 2>/dev/null | grep -q 'keyring\.enc'
+  # Metadata records keyring absent.
+  unzip -p "$archive" metadata | grep -q '^pg_tde_keyring_included=false$'
 }
 
 # -- apply_retention (count-based: keep last 10) -------------------------------
 
-@test "apply_retention: deletes oldest files when more than 10 exist" {
+@test "apply_retention: deletes oldest archives when more than 10 exist" {
   export OUT_DIR="$BATS_TMPDIR/out"
   mkdir -p "$OUT_DIR"
 
-  # Create 12 backup files with staggered mtimes so ls -t sorts them reliably.
+  # Create 12 zip archives with staggered mtimes so ls -t sorts them reliably.
   for i in $(seq 1 12); do
-    f="$OUT_DIR/zerf-$(printf '%012d' "$i").dump.enc"
-    printf 'backup' > "$f"
+    f="$OUT_DIR/zerf-$(printf '%012d' "$i").zip"
+    printf 'archive' > "$f"
     touch -d "$i seconds ago" "$f"
   done
 
   apply_retention
 
-  count="$(ls "$OUT_DIR"/*.dump.enc 2>/dev/null | wc -l | tr -d '[:space:]')"
+  count="$(ls "$OUT_DIR"/*.zip 2>/dev/null | wc -l | tr -d '[:space:]')"
   [ "$count" -eq 10 ]
 }
 
-@test "apply_retention: keeps fewer than 10 files untouched" {
+@test "apply_retention: keeps fewer than 10 archives untouched" {
   export OUT_DIR="$BATS_TMPDIR/out"
   mkdir -p "$OUT_DIR"
 
   for i in $(seq 1 3); do
-    printf 'backup' > "$OUT_DIR/zerf-$(printf '%012d' "$i").dump.enc"
+    printf 'archive' > "$OUT_DIR/zerf-$(printf '%012d' "$i").zip"
   done
 
   apply_retention
 
-  count="$(ls "$OUT_DIR"/*.dump.enc 2>/dev/null | wc -l | tr -d '[:space:]')"
+  count="$(ls "$OUT_DIR"/*.zip 2>/dev/null | wc -l | tr -d '[:space:]')"
   [ "$count" -eq 3 ]
-}
-
-@test "apply_retention: also removes associated metadata files for deleted backups" {
-  export OUT_DIR="$BATS_TMPDIR/out"
-  mkdir -p "$OUT_DIR"
-
-  for i in $(seq 1 12); do
-    f="$OUT_DIR/zerf-$(printf '%012d' "$i").dump.enc"
-    m="${f%.dump.enc}.metadata"
-    printf 'backup' > "$f"
-    printf 'meta'   > "$m"
-    touch -d "$i seconds ago" "$f"
-  done
-
-  apply_retention
-
-  meta_count="$(ls "$OUT_DIR"/*.metadata 2>/dev/null | wc -l | tr -d '[:space:]')"
-  [ "$meta_count" -eq 10 ]
-}
-
-@test "apply_retention: also removes keyring sidecars for deleted backups" {
-  export OUT_DIR="$BATS_TMPDIR/out"
-  mkdir -p "$OUT_DIR"
-
-  for i in $(seq 1 12); do
-    f="$OUT_DIR/zerf-$(printf '%012d' "$i").dump.enc"
-    printf 'backup' > "$f"
-    printf 'keyr'   > "${f%.dump.enc}.keyring.enc"
-    touch -d "$i seconds ago" "$f"
-  done
-
-  apply_retention
-
-  kr_count="$(ls "$OUT_DIR"/*.keyring.enc 2>/dev/null | wc -l | tr -d '[:space:]')"
-  [ "$kr_count" -eq 10 ]
 }
 
 @test "apply_retention: no-ops when backup directory is empty" {

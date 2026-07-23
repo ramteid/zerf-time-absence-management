@@ -274,7 +274,7 @@ Supported languages: `en` (en-US) and `de` (de-DE). Stored in localStorage key `
 - **CSRF**: SameSite=Strict + Origin/Referer check + X-CSRF-Token double-submit
 - **Database auth**: SCRAM-SHA-256, checksums, internal-only Docker network
 - **Data at rest**: [pg_tde](https://docs.percona.com/pg-tde/) (Percona Transparent Data Encryption) encrypts all tables and WAL segments at the PostgreSQL storage layer. The pg_tde principal key is auto-generated on first start, then encrypted with `ZERF_DB_ENCRYPTION_KEY` (AES-256-CBC, PBKDF2) and stored as `pg_tde_keyring.enc` in the data volume. On each container start the custom entrypoint decrypts the blob into a Docker-managed in-memory tmpfs (`/var/lib/pg_tde_keyring`); no elevated container capabilities are needed.
-- **Backups**: Each `.dump.enc` file is AES-256-CBC encrypted (PBKDF2, 100 000 iterations) using the same `ZERF_DB_ENCRYPTION_KEY`. One key governs both layers.
+- **Backups**: Each backup is a zip archive (`zerf-<ts>.zip`) whose `dump.enc` entry is AES-256-CBC encrypted (PBKDF2, 100 000 iterations) using the same `ZERF_DB_ENCRYPTION_KEY`. One key governs both layers.
 - **Audit log**: All mutations logged with JSON snapshots; passwords and secrets never logged
 - **Password reset**: One-time 1h tokens, forced change on first login
 
@@ -319,10 +319,10 @@ The `backup` service in `docker-compose-local.yml` is connected to two networks:
 |--------|---------|
 | `start_local.sh` | Start local stack (set `DEBUG=true` in `.env` for debug build) |
 | `start_public.sh` | Start public stack |
-| `scripts/backup.sh` | Dump, AES-encrypt, and optionally upload the database to a Nextcloud share. Each cycle also copies the pg_tde keyring (`zerf-<ts>.keyring.enc`, from the read-only `/keyring-src` mount) next to the dump so an orphaned encrypted PGDATA volume can be recovered. The backup interval is read from `app_settings` at runtime via `psql`; local retention is a fixed count (the 10 most recent). Refactored into sourceable functions (guarded by `BACKUP_LIB_ONLY=1`) for bats unit tests. |
-| `scripts/restore.sh` | Interactive: decrypt a backup and restore it into the live instance. `--keyring [DIR]` extracts a backup's captured pg_tde keyring for physical recovery without touching the database. Container names, the backup volume, and the `.env` path default to the production values but are overridable (`ZERF_RESTORE_POSTGRES_CONTAINER`, `ZERF_RESTORE_APP_CONTAINER`, `ZERF_RESTORE_BACKUP_VOLUME`, `ZERF_RESTORE_ENV_FILE`) — used by `e2e/backup-restore-check.sh` to run it non-interactively against the isolated e2e stack. |
-| `scripts/backup.bats` | bats unit tests for `backup.sh` helper functions (parse_share_url, interval resolution, upload credential handling, 0-byte rejection, keyring sidecar capture, retention pruning) |
-| `e2e/backup-restore-check.sh` | Final step of `e2e/run.sh`: triggers a real backup cycle, mutates the live e2e database, restores via `scripts/restore.sh`, and verifies the mutation is undone, every table's row count matches the pre-backup snapshot, and (via `e2e/post-restore-ui-check.mjs`, a real browser) the restored data renders in the app's UI. |
+| `scripts/backup.sh` | Dump, AES-encrypt, and bundle into a single zip archive (`zerf-<ts>.zip`), then optionally upload that archive to a Nextcloud share. The zip contains `dump.enc` (encrypted pg_dump), `metadata` (plaintext provenance), and — when the keyring volume is mounted at `/keyring-src` — `keyring.enc` (already-AES-encrypted pg_tde keyring for physical PGDATA recovery). Backup interval is read from `app_settings` at runtime via `psql`; local retention is a fixed count (the 10 most recent archives). Refactored into sourceable functions (guarded by `BACKUP_LIB_ONLY=1`) for bats unit tests. |
+| `scripts/restore.sh` | Interactive: extract and decrypt a backup archive, then restore it into the live instance. Supports both the new zip format (`zerf-<ts>.zip`) and legacy encrypted dumps (`zerf-<ts>.dump.enc`). `--keyring [DIR]` extracts the `keyring.enc` entry from the selected archive for physical recovery without touching the database. Container names, the backup volume, and the `.env` path default to the production values but are overridable (`ZERF_RESTORE_POSTGRES_CONTAINER`, `ZERF_RESTORE_APP_CONTAINER`, `ZERF_RESTORE_BACKUP_VOLUME`, `ZERF_RESTORE_ENV_FILE`) — used by `e2e/backup-restore-check.sh` to run it non-interactively against the isolated e2e stack. Requires `unzip` on the host. |
+| `scripts/backup.bats` | bats unit tests for `backup.sh` helper functions (parse_share_url, interval resolution, upload credential handling, 0-byte rejection, zip archive creation with and without keyring, keyring-copy failure handling, retention pruning). Requires `zip` and `unzip` in the test environment. |
+| `e2e/backup-restore-check.sh` | Final step of `e2e/run.sh`: triggers a real backup cycle, verifies the zip archive and its entries (dump.enc, metadata, keyring.enc), mutates the live e2e database, restores via `scripts/restore.sh`, and verifies the mutation is undone, every table's row count matches the pre-backup snapshot, and (via `e2e/post-restore-ui-check.mjs`, a real browser) the restored data renders in the app's UI. |
 
 ### Disaster recovery prerequisites
 
@@ -338,10 +338,9 @@ losing either renders the database unrecoverable:**
    captures only the data volume **cannot be decrypted**.
 
 For recovery you therefore need **either** both volumes (`zerf_postgres_db_data`
-*and* `zerf_postgres_data`) **or** a logical backup `zerf-<ts>.dump.enc` plus the
-key. Each backup cycle also captures a `zerf-<ts>.keyring.enc` sidecar so an
-orphaned, encrypted data volume can still be recovered with
-`scripts/restore.sh --keyring`.
+*and* `zerf_postgres_data`) **or** a logical backup archive `zerf-<ts>.zip` plus the
+key. Each backup archive bundles a `keyring.enc` entry so an orphaned, encrypted
+data volume can still be recovered with `scripts/restore.sh --keyring`.
 
 ### Key environment variables (encryption)
 

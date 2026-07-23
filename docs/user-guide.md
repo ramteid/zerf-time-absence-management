@@ -1714,7 +1714,7 @@ Zerf can automatically upload two types of files to Nextcloud shared folders usi
 
 #### DB Backup Upload
 
-When enabled, the backup container uploads each encrypted `.dump.enc` file to a Nextcloud public share immediately after it is created.
+When enabled, the backup container uploads the backup archive (a `.zip` file) to a Nextcloud public share immediately after it is created. Each archive bundles the encrypted database dump, a plaintext metadata record, and (where available) the encrypted pg_tde keyring into a single file for easy off-site storage.
 
 | Setting | Description |
 | --- | --- |
@@ -1725,9 +1725,9 @@ When enabled, the backup container uploads each encrypted `.dump.enc` file to a 
 
 The backup container tracks the last successful backup time in the database. This timestamp survives container restarts, so the interval is always measured from the last actual backup rather than from container start time. On a fresh install, migration 024 seeds the timestamp with the current time, so the first backup runs one full interval after setup (not immediately).
 
-The **10 most recent** local backup files are kept in the backup volume; older ones are deleted automatically after each successful backup. Uploaded files in Nextcloud are **not** deleted automatically — manage the shared folder manually to avoid unlimited growth.
+The **10 most recent** local backup archives are kept in the backup volume; older ones are deleted automatically after each successful backup. Uploaded files in Nextcloud are **not** deleted automatically — manage the shared folder manually to avoid unlimited growth.
 
-The backup file is AES-256-CBC encrypted before upload, so a compromised share link does not expose plaintext data.
+The database dump inside the archive is AES-256-CBC encrypted, so a compromised share link does not expose plaintext data.
 
 If a backup fails, admins who opted in to technical error notifications are alerted in the app and by email (see "System error notifications"). The notification is automatically re-raised if it was previously dismissed and the failure recurs.
 
@@ -1813,33 +1813,36 @@ without removing manually added holidays.
 
 ### Backup and restore
 
-Scheduled backups capture a full snapshot of the database. Each backup consists of up to three files:
+Scheduled backups capture a full snapshot of the database. Each backup is stored as a single zip archive:
 
-- `zerf-<ts>.dump.enc` — AES-256-CBC encrypted PostgreSQL custom-format dump (the file you restore from).
-- `zerf-<ts>.metadata` — plaintext sidecar with the backup timestamp and git commit so you can match a backup to a specific app version.
-- `zerf-<ts>.keyring.enc` — copy of the encrypted pg_tde keyring, for physical volume recovery only. You do not need this for a normal restore.
+- `zerf-<ts>.zip` — contains all backup data in one file with these entries:
+  - `dump.enc` — AES-256-CBC encrypted PostgreSQL custom-format dump (the data you restore from).
+  - `metadata` — plaintext record with the backup timestamp and git commit, used to match a backup to a specific app version.
+  - `keyring.enc` — copy of the encrypted pg_tde keyring, for physical volume recovery only. Not needed for a normal restore. Included only when the keyring volume is mounted in the backup container.
 
 #### Restoring a backup
 
-Run `scripts/restore.sh` from the server that has Docker access to the stack:
+`unzip` must be available on the machine running `restore.sh` (`apt-get install unzip`). Then run the script from the server that has Docker access to the stack:
 
 ```bash
 ./scripts/restore.sh
 ```
 
 The script:
-1. Lists the available backups in the backup volume (newest first) and prompts you to choose one.
-2. Validates that the backup file decrypts and is a valid pg_dump archive.
+1. Lists the available backup archives in the backup volume (newest first) and prompts you to choose one.
+2. Extracts the encrypted dump from the archive and validates that it decrypts to a valid pg_dump archive.
 3. Stops the app container and the backup container to prevent writes during restore.
 4. Drops all non-extension objects in the database so that a backup from an older schema version restores cleanly even if the live schema is newer.
 5. Restores all data and stops on the first error (the transaction is rolled back if anything fails).
 6. Restarts the backup container, then asks whether to restart the app.
 
-You can also supply the backup file path directly to skip the interactive listing:
+You can also supply the archive path directly to skip the interactive listing:
 
 ```bash
-./scripts/restore.sh /path/to/zerf-<ts>.dump.enc
+./scripts/restore.sh /path/to/zerf-<ts>.zip
 ```
+
+Legacy backups created before this format change (individual `.dump.enc` files) are still listed and fully restorable.
 
 **Migration compatibility:**
 - Backup older than current code: the app applies pending database migrations automatically on startup.
@@ -1849,15 +1852,15 @@ You can also supply the backup file path directly to skip the interactive listin
 
 #### Physical recovery (corrupted or orphaned data volume)
 
-If the postgres data volume is lost or unreadable but you have both a backup dump and the `ZERF_DB_ENCRYPTION_KEY`, restore normally with `scripts/restore.sh`.
+If the postgres data volume is lost or unreadable but you have both a backup archive and the `ZERF_DB_ENCRYPTION_KEY`, restore normally with `scripts/restore.sh`.
 
-If you have an orphaned, encrypted PGDATA volume but the pg_tde keyring volume was lost, use the keyring sidecar from a backup to recover:
+If you have an orphaned, encrypted PGDATA volume but the pg_tde keyring volume was lost, extract the keyring from a backup archive:
 
 ```bash
 ./scripts/restore.sh --keyring /tmp/keyring-out
 ```
 
-This extracts the `zerf-<ts>.keyring.enc` file from the backup volume to `/tmp/keyring-out` without touching the database. Place the extracted file as `pg_tde_keyring.enc` inside the postgres keyring volume (`zerf_postgres_data`), then start postgres against the existing data directory.
+This extracts the `keyring.enc` entry from the selected backup archive to `/tmp/keyring-out` (as `zerf-<ts>.keyring.enc`) without touching the database. Place the extracted file as `pg_tde_keyring.enc` inside the postgres keyring volume (`zerf_postgres_data`), then start postgres against the existing data directory.
 
 > **Warning:** Do not overwrite a working keyring. Only use this procedure when the keyring volume itself is gone.
 

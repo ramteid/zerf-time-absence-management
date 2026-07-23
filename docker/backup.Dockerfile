@@ -2,9 +2,11 @@ FROM postgres:18
 
 # curl is needed for Nextcloud WebDAV uploads.
 # ca-certificates ensures HTTPS connections are trusted.
+# zip/unzip are needed to bundle backup files into a single archive and
+# to inspect archive contents (e2e tests, restore verification).
 # openssl and psql are already present in the postgres base image.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl ca-certificates && \
+    apt-get install -y --no-install-recommends curl ca-certificates zip unzip && \
     rm -rf /var/lib/apt/lists/*
 
 # Bake the backup script into the image so it is self-contained: the published
