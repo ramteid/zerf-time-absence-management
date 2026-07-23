@@ -445,6 +445,7 @@ fi
 # (pg_tde registers its objects with pg_depend deptype='e') before the restore
 # runs.  The pg_tde extension itself is preserved.
 echo "Pre-dropping all non-extension public-schema objects..."
+predrop_exit=0
 docker exec -i \
     -e PGPASSWORD="$ZERF_POSTGRES_PASSWORD" \
     -e PGOPTIONS='--statement_timeout=0 --idle_in_transaction_session_timeout=0' \
@@ -454,7 +455,7 @@ docker exec -i \
         --username "$ZERF_POSTGRES_USER" \
         --dbname "$ZERF_POSTGRES_DB" \
         -v ON_ERROR_STOP=1 \
-        <<'EOSQL'
+        <<'EOSQL' || predrop_exit=$?
 DO $$
 DECLARE
     _obj RECORD;
@@ -529,7 +530,6 @@ BEGIN
 END;
 $$;
 EOSQL
-predrop_exit=$?
 if [ "$predrop_exit" -ne 0 ]; then
     echo ""
     echo "ERROR: pre-drop failed. The database may be in a partial state." >&2
