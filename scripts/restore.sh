@@ -340,9 +340,14 @@ case "$SELECTED" in
             METADATA_FILE="${BACKUP_FILE%.dump.enc}.metadata"
             if [ -f "$METADATA_FILE" ] && [ -s "$METADATA_FILE" ]; then
                 # Copy to a temp file so cleanup() never deletes the user's file.
+                # 2>/dev/null || true: metadata is best-effort; a permission or
+                # disk-full error here must not abort the restore (set -e is live).
                 META_TMP_DIR="$(mktemp -d)"
                 META_TMP="$META_TMP_DIR/metadata"
-                cp "$METADATA_FILE" "$META_TMP"
+                cp "$METADATA_FILE" "$META_TMP" 2>/dev/null || true
+                if [ ! -s "$META_TMP" ]; then
+                    rm -rf "$META_TMP_DIR"; META_TMP_DIR=""; META_TMP=""
+                fi
             fi
         fi
         ;;
