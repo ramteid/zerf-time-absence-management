@@ -368,6 +368,15 @@
     padding-right: 34px;
   }
 
+  /* Flatpickr's own stylesheet applies a hardcoded dark background/color to
+     .flatpickr-input. Override it here so the altInput respects the app's
+     theme tokens regardless of light or dark mode. */
+  :global(.flatpickr-input.zf-input) {
+    background: var(--bg-surface) !important;
+    color: var(--text-primary) !important;
+    border-color: var(--border) !important;
+  }
+
   /* ── Calendar container base (light + dark theming) ── */
   :global(.flatpickr-calendar.zf-date-picker-calendar) {
     background: var(--bg-surface);
