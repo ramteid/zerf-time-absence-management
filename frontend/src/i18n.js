@@ -653,8 +653,8 @@ const TRANSLATIONS = {
     "No cost (free day)": "Belastet keinen Saldo",
     "Counts as vacation": "Zählt als Urlaub",
     "Keeps work target (flextime)": "Arbeitssoll bleibt (Gleitzeit)",
-    "Auto-approve past dates (sick-like)":
-      "Vergangene Daten automatisch genehmigen (Krankmeldung)",
+    "Auto-approve past dates":
+      "Vergangene Daten automatisch genehmigen",
     "Type is required.": "Typ ist erforderlich.",
     "Not enough flextime balance for this absence.":
       "Nicht genügend Gleitzeitguthaben für diese Abwesenheit.",
