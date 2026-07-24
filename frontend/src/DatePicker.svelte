@@ -368,23 +368,6 @@
     padding-right: 34px;
   }
 
-  /* Flatpickr's own stylesheet applies a hardcoded dark background/color to
-     .flatpickr-input. Override it here for the alt input (the visible input
-     element) so it respects the app's theme tokens in both light and dark mode.
-     Using .flatpickr-alt-input targets only the visible alt input, not the
-     hidden original input, regardless of what altInputClass is set to. */
-  :global(.flatpickr-input.flatpickr-alt-input) {
-    background: var(--bg-surface) !important;
-    color: var(--text-primary) !important;
-    border-color: var(--border) !important;
-  }
-
-  /* Prevent the calendar popup from overflowing the viewport horizontally.
-     Flatpickr positions the calendar with absolute left/right values based
-     on the anchor input position; this caps it at the viewport edge. */
-  :global(.zf-date-picker-calendar) {
-    max-width: calc(100vw - 16px) !important;
-  }
 
   /* ── Calendar container base (light + dark theming) ── */
   :global(.flatpickr-calendar.zf-date-picker-calendar) {

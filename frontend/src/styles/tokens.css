@@ -2,7 +2,12 @@
 /* Inter via system or fallback to system-ui stack */
 
 :root {
-  color-scheme: light dark;
+  /* color-scheme: light (not "light dark") so that native form controls
+     follow the app's active theme, not the OS color-scheme preference.
+     When the user selects the light theme, inputs stay light even on
+     a system running in dark mode. The dark-theme override below sets
+     color-scheme: dark for [data-theme="dark"]. */
+  color-scheme: light;
 
   --bg-canvas: #f3f2ee;
   --bg-surface: #faf9f7;
