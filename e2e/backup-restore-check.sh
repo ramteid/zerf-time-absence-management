@@ -81,13 +81,34 @@ ARCHIVE_SIZE="$(docker exec "$BACKUP_CONTAINER" sh -c "stat -c%s '$ARCHIVE_FILE'
   || { echo "FAIL: backup archive missing or empty: $ARCHIVE_FILE" >&2; exit 1; }
 echo "  ok: $ARCHIVE_FILE ($ARCHIVE_SIZE bytes)"
 
+# List the archive once and reuse that single listing for every entry check
+# below, instead of shelling out to `docker exec ... unzip -l` again per
+# entry (six invocations for three entries). Piping a fresh `docker exec`
+# straight into `grep -q` per entry made this check flaky under CI load: if
+# that particular exec call transiently failed or its output was dropped,
+# `grep -q` silently saw empty input and reported the generic (and
+# misleading) "archive does not contain entry" -- observed in CI as a
+# *different* entry "missing" on each run, even though the zip -j log
+# confirmed all three entries were written every time. Failing loudly here
+# (via `docker exec`'s own exit status, `set -e`) and dumping the actual
+# listing on a genuine mismatch makes a real content bug distinguishable
+# from a transient exec hiccup.
+ARCHIVE_LISTING="$(docker exec "$BACKUP_CONTAINER" sh -c "unzip -l '$ARCHIVE_FILE'")"
+if [ -z "$ARCHIVE_LISTING" ]; then
+  echo "FAIL: unzip -l returned no output for $ARCHIVE_FILE" >&2
+  exit 1
+fi
+
 # Verify that all three expected entries are present inside the archive.
 for entry in dump.enc metadata keyring.enc; do
-  docker exec "$BACKUP_CONTAINER" sh -c "unzip -l '$ARCHIVE_FILE'" \
-    | grep -q "$entry" \
-    || { echo "FAIL: archive does not contain entry: $entry" >&2; exit 1; }
-  entry_size="$(docker exec "$BACKUP_CONTAINER" sh -c \
-    "unzip -l '$ARCHIVE_FILE' | awk '/$entry/ {print \$1}'")"
+  entry_line="$(printf '%s\n' "$ARCHIVE_LISTING" | grep "$entry" || true)"
+  if [ -z "$entry_line" ]; then
+    echo "FAIL: archive does not contain entry: $entry" >&2
+    echo "--- unzip -l $ARCHIVE_FILE ---" >&2
+    printf '%s\n' "$ARCHIVE_LISTING" >&2
+    exit 1
+  fi
+  entry_size="$(printf '%s\n' "$entry_line" | awk '{print $1}')"
   [ "${entry_size:-0}" -gt 0 ] \
     || { echo "FAIL: archive entry is empty: $entry" >&2; exit 1; }
   echo "  ok: $ARCHIVE_FILE contains $entry ($entry_size bytes)"
