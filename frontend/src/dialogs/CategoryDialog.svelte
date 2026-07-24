@@ -23,14 +23,17 @@
   let enabledUserIds = [];
 
   onMount(async () => {
-    if (isNew) return;
     try {
       const [loadedUsers, loadedEnabled] = await Promise.all([
         api("/users"),
-        api("/categories/" + template.id + "/users"),
+        isNew
+          ? Promise.resolve(null)
+          : api("/categories/" + template.id + "/users"),
       ]);
       allUsers = sortUsersByRoleThenName(loadedUsers);
-      enabledUserIds = loadedEnabled;
+      // New categories default to visible for everyone, matching the
+      // backend's default when no explicit user list is saved yet.
+      enabledUserIds = isNew ? allUsers.map((u) => u.id) : loadedEnabled;
     } catch {
       allUsers = [];
       enabledUserIds = [];
@@ -50,14 +53,17 @@
       if (!isNew) {
         body.active = active;
       }
-      if (isNew) await api("/categories", { method: "POST", body });
-      else await api("/categories/" + template.id, { method: "PUT", body });
-      if (!isNew) {
-        await api("/categories/" + template.id + "/users", {
-          method: "PUT",
-          body: { user_ids: enabledUserIds },
-        });
+      let categoryId = template.id;
+      if (isNew) {
+        const created = await api("/categories", { method: "POST", body });
+        categoryId = created.id;
+      } else {
+        await api("/categories/" + template.id, { method: "PUT", body });
       }
+      await api("/categories/" + categoryId + "/users", {
+        method: "PUT",
+        body: { user_ids: enabledUserIds },
+      });
       dialog.close(true);
       onClose(true);
     } catch (e) {
@@ -114,32 +120,32 @@
       <input type="checkbox" bind:checked={active} />
       <span>{$t("Active")}</span>
     </label>
-    {#if allUsers.length > 0}
-      <div class="mt-12">
-        <div class="zf-label">{$t("Available to employees")}</div>
-        <div class="zf-scroll-box">
-          <table class="zf-table">
-            <tbody>
-              {#each allUsers as employee (employee.id)}
-                <tr class="zf-divider-row">
-                  <td class="zf-td-compact">
-                    {employee.first_name}
-                    {employee.last_name}
-                  </td>
-                  <td class="zf-td-action">
-                    <input
-                      type="checkbox"
-                      value={employee.id}
-                      bind:group={enabledUserIds}
-                    />
-                  </td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
+  {/if}
+  {#if allUsers.length > 0}
+    <div class="mt-12">
+      <div class="zf-label">{$t("Available to employees")}</div>
+      <div class="zf-scroll-box">
+        <table class="zf-table">
+          <tbody>
+            {#each allUsers as employee (employee.id)}
+              <tr class="zf-divider-row">
+                <td class="zf-td-compact">
+                  {employee.first_name}
+                  {employee.last_name}
+                </td>
+                <td class="zf-td-action">
+                  <input
+                    type="checkbox"
+                    value={employee.id}
+                    bind:group={enabledUserIds}
+                  />
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
       </div>
-    {/if}
+    </div>
   {/if}
   <div class="error-text">{error}</div>
   <svelte:fragment slot="footer">

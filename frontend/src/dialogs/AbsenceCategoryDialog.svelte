@@ -26,14 +26,17 @@
   let enabledUserIds = [];
 
   onMount(async () => {
-    if (isNew) return;
     try {
       const [loadedUsers, loadedEnabled] = await Promise.all([
         api("/users"),
-        api("/absence-categories/" + template.id + "/users"),
+        isNew
+          ? Promise.resolve(null)
+          : api("/absence-categories/" + template.id + "/users"),
       ]);
       allUsers = sortUsersByRoleThenName(loadedUsers);
-      enabledUserIds = loadedEnabled;
+      // New categories default to visible for everyone, matching the
+      // backend's default when no explicit user list is saved yet.
+      enabledUserIds = isNew ? allUsers.map((u) => u.id) : loadedEnabled;
     } catch {
       allUsers = [];
       enabledUserIds = [];
@@ -62,18 +65,23 @@
       if (!isNew) {
         body.active = active;
       }
-      if (isNew) await api("/absence-categories", { method: "POST", body });
-      else
+      let categoryId = template.id;
+      if (isNew) {
+        const created = await api("/absence-categories", {
+          method: "POST",
+          body,
+        });
+        categoryId = created.id;
+      } else {
         await api("/absence-categories/" + template.id, {
           method: "PUT",
           body,
         });
-      if (!isNew) {
-        await api("/absence-categories/" + template.id + "/users", {
-          method: "PUT",
-          body: { user_ids: enabledUserIds },
-        });
       }
+      await api("/absence-categories/" + categoryId + "/users", {
+        method: "PUT",
+        body: { user_ids: enabledUserIds },
+      });
       dialog.close(true);
       onClose(true);
     } catch (e) {
@@ -221,7 +229,7 @@
       </div>
     {/if}
   </div>
-  {#if !isNew && allUsers.length > 0}
+  {#if allUsers.length > 0}
     <div class="mt-12">
       <div class="zf-label">{$t("Available to employees")}</div>
       <div class="zf-scroll-box">

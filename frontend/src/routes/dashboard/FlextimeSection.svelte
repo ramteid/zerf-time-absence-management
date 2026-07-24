@@ -145,14 +145,19 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    flex: 0 0 auto;
-    flex-wrap: nowrap;
+    /* flex: 0 1 auto allows the row to shrink when the tile is narrow;
+       min-width: 0 prevents flex children from overflowing their container. */
+    flex: 0 1 auto;
+    min-width: 0;
   }
 
   .flextime-date-picker {
     display: block;
-    flex: 0 0 126px;
+    /* flex-shrink: 1 allows the picker to shrink below 126px when the tile
+       is too narrow, preventing overflow beyond the card boundary. */
+    flex: 0 1 126px;
     width: 126px;
+    min-width: 80px;
   }
 
   .flextime-date-separator {

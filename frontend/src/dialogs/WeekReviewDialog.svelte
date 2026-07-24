@@ -34,19 +34,21 @@
     {fmtWeekLabel(week.week_start)}
   </div>
 
-  <div class="zf-btn-row">
+  <div class="week-review-summary">
     <span class="zf-chip zf-chip-approved"
       >{formatHours(week.total_min / 60)}</span
     >
+    <!-- Secondary navigation action lives in the body, not the footer, so the
+         footer keeps its clean Close / Reject / Approve grouping. -->
+    <button class="zf-btn zf-btn-ghost" on:click={goToReport} disabled={busy}>
+      <Icon name="BarChart" size={14} />{$t("View in report")}
+    </button>
   </div>
   <svelte:fragment slot="footer">
     <button class="zf-btn" on:click={onClose} disabled={busy}>
       {$t("Close")}
     </button>
     <span class="flex-1"></span>
-    <button class="zf-btn" on:click={goToReport} disabled={busy}>
-      <Icon name="BarChart" size={14} />{$t("View in report")}
-    </button>
     <button
       class="zf-btn zf-btn-danger"
       on:click={() => onReject(week)}
@@ -64,4 +66,12 @@
   </svelte:fragment>
 </Dialog>
 
-<style></style>
+<style>
+  /* Hours chip on the left, the "View in report" action on the right. */
+  .week-review-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+</style>
