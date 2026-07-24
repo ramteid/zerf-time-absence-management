@@ -18,9 +18,16 @@
   let counts_as_work = template.counts_as_work ?? true;
   let active = template.active ?? true;
   let error = "";
+  let saving = false;
 
   let allUsers = [];
   let enabledUserIds = [];
+  // Set once a new category's initial POST succeeds. If the follow-up
+  // users-PUT then fails, retrying save() must reuse this id instead of
+  // POSTing again — the category's name is unique, so a second POST would
+  // fail with a confusing "already exists" error for a category that in
+  // fact was already created by the first attempt.
+  let createdId = null;
 
   onMount(async () => {
     try {
@@ -41,7 +48,9 @@
   });
 
   async function save() {
+    if (saving) return;
     error = "";
+    saving = true;
     try {
       const body = {
         name: !isNew && !nameChanged ? canonicalName : name,
@@ -53,21 +62,36 @@
       if (!isNew) {
         body.active = active;
       }
-      let categoryId = template.id;
-      if (isNew) {
+      // categoryId is falsy only for a category that has never been
+      // POSTed yet. It stays set across a failed retry (via createdId) so
+      // a second Save always PUTs the existing row instead of POSTing a
+      // duplicate — and that PUT also (re-)persists any field edits made
+      // since the first attempt, rather than silently dropping them.
+      let categoryId = isNew ? createdId : template.id;
+      if (!categoryId) {
         const created = await api("/categories", { method: "POST", body });
         categoryId = created.id;
+        createdId = categoryId;
       } else {
-        await api("/categories/" + template.id, { method: "PUT", body });
+        await api("/categories/" + categoryId, { method: "PUT", body });
       }
-      await api("/categories/" + categoryId + "/users", {
-        method: "PUT",
-        body: { user_ids: enabledUserIds },
-      });
+      // New categories already default to enabled for everyone on the
+      // backend (see repository::categories::create); only push an explicit
+      // list if the admin actually narrowed it down. This also means a
+      // failed or not-yet-finished /users fetch can't wipe the default down
+      // to "nobody" via an empty enabledUserIds.
+      if (!isNew || enabledUserIds.length < allUsers.length) {
+        await api("/categories/" + categoryId + "/users", {
+          method: "PUT",
+          body: { user_ids: enabledUserIds },
+        });
+      }
       dialog.close(true);
       onClose(true);
     } catch (e) {
       error = $t(e?.message || "Error");
+    } finally {
+      saving = false;
     }
   }
 </script>
@@ -152,6 +176,8 @@
     <button class="zf-btn" on:click={() => dialog.close()}
       >{$t("Cancel")}</button
     >
-    <button class="zf-btn zf-btn-primary" on:click={save}>{$t("Save")}</button>
+    <button class="zf-btn zf-btn-primary" disabled={saving} on:click={save}>
+      {saving ? $t("Saving...") : $t("Save")}
+    </button>
   </svelte:fragment>
 </Dialog>

@@ -5,6 +5,8 @@ import { setLanguage } from "../i18n.js";
 
 const mockState = vi.hoisted(() => ({
   requests: [],
+  usersGate: Promise.resolve(),
+  failUsersPutOnce: false,
 }));
 
 function requestFor(path, method) {
@@ -27,7 +29,15 @@ vi.mock("svelte", async () => {
 vi.mock("../api.js", () => ({
   api: vi.fn(async (path, options) => {
     mockState.requests.push({ path, options });
+    if (path === "/absence-categories/42/users" && options?.method === "PUT") {
+      if (mockState.failUsersPutOnce) {
+        mockState.failUsersPutOnce = false;
+        throw new Error("Network error");
+      }
+      return { ok: true };
+    }
     if (path === "/users") {
+      await mockState.usersGate;
       return [
         { id: 1, first_name: "Ada", last_name: "Lovelace" },
         { id: 2, first_name: "Grace", last_name: "Hopper" },
@@ -57,6 +67,8 @@ describe("AbsenceCategoryDialog", () => {
     };
     setLanguage("en");
     mockState.requests = [];
+    mockState.usersGate = Promise.resolve();
+    mockState.failUsersPutOnce = false;
   });
 
   afterEach(() => {
@@ -158,5 +170,146 @@ describe("AbsenceCategoryDialog", () => {
     const usersRequest = requestFor("/absence-categories/42/users", "PUT");
     expect(usersRequest).toBeDefined();
     expect(usersRequest.options.body).toEqual({ user_ids: [1] });
+  });
+
+  it("does not call the users endpoint when creating a category with everyone left selected", async () => {
+    const onClose = vi.fn();
+    component = mount(AbsenceCategoryDialog, {
+      target,
+      props: { template: {}, onClose },
+    });
+
+    await settle();
+
+    target.querySelector("button.zf-btn.zf-btn-primary").click();
+    await settle();
+
+    expect(requestFor("/absence-categories", "POST")).toBeDefined();
+    expect(requestFor("/absence-categories/42/users", "PUT")).toBeUndefined();
+  });
+
+  it("does not wipe access when Save is clicked before the employee list finishes loading", async () => {
+    let releaseUsers;
+    mockState.usersGate = new Promise((resolve) => {
+      releaseUsers = resolve;
+    });
+    const onClose = vi.fn();
+    component = mount(AbsenceCategoryDialog, {
+      target,
+      props: { template: {}, onClose },
+    });
+
+    // Click Save immediately, before onMount's /users fetch resolves.
+    target.querySelector("button.zf-btn.zf-btn-primary").click();
+    await settle();
+
+    releaseUsers();
+    await settle();
+
+    expect(requestFor("/absence-categories", "POST")).toBeDefined();
+    expect(requestFor("/absence-categories/42/users", "PUT")).toBeUndefined();
+  });
+
+  it("does not create a duplicate category when retrying save after the users endpoint fails", async () => {
+    const onClose = vi.fn();
+    component = mount(AbsenceCategoryDialog, {
+      target,
+      props: { template: {}, onClose },
+    });
+
+    await settle();
+
+    const checkboxes = target.querySelectorAll(
+      "table tbody input[type=checkbox]",
+    );
+    checkboxes[0].click();
+    await settle();
+
+    mockState.failUsersPutOnce = true;
+    const saveButton = target.querySelector("button.zf-btn.zf-btn-primary");
+
+    saveButton.click();
+    await settle();
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(
+      mockState.requests.filter(
+        (r) => r.path === "/absence-categories" && r.options?.method === "POST",
+      ),
+    ).toHaveLength(1);
+
+    saveButton.click();
+    await settle();
+
+    expect(
+      mockState.requests.filter(
+        (r) => r.path === "/absence-categories" && r.options?.method === "POST",
+      ),
+    ).toHaveLength(1);
+    expect(
+      mockState.requests.filter(
+        (r) =>
+          r.path === "/absence-categories/42/users" &&
+          r.options?.method === "PUT",
+      ),
+    ).toHaveLength(2);
+  });
+
+  it("persists field edits made between a failed users-PUT and the retry", async () => {
+    const onClose = vi.fn();
+    component = mount(AbsenceCategoryDialog, {
+      target,
+      props: { template: {}, onClose },
+    });
+
+    await settle();
+
+    mockState.failUsersPutOnce = true;
+    const saveButton = target.querySelector("button.zf-btn.zf-btn-primary");
+    const checkboxes = target.querySelectorAll(
+      "table tbody input[type=checkbox]",
+    );
+    checkboxes[0].click();
+    await settle();
+
+    saveButton.click();
+    await settle();
+
+    // Edit the name after the first (failed) attempt already created the
+    // category server-side.
+    const nameInput = target.querySelector("#abscat-name");
+    nameInput.value = "Renamed after failure";
+    nameInput.dispatchEvent(new Event("input"));
+    await settle();
+
+    saveButton.click();
+    await settle();
+
+    const fieldUpdate = requestFor("/absence-categories/42");
+    expect(fieldUpdate).toBeDefined();
+    expect(fieldUpdate.options.body).toMatchObject({
+      name: "Renamed after failure",
+    });
+  });
+
+  it("does not create a duplicate category when Save is double-clicked before the first request resolves", async () => {
+    const onClose = vi.fn();
+    component = mount(AbsenceCategoryDialog, {
+      target,
+      props: { template: {}, onClose },
+    });
+
+    await settle();
+
+    const saveButton = target.querySelector("button.zf-btn.zf-btn-primary");
+    saveButton.click();
+    saveButton.click();
+    await settle();
+
+    expect(
+      mockState.requests.filter(
+        (r) => r.path === "/absence-categories" && r.options?.method === "POST",
+      ),
+    ).toHaveLength(1);
   });
 });
