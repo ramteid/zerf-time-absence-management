@@ -93,24 +93,28 @@
 }
 
 /* ── Scrollbar ── */
-/* Targets: main content area, all dialog innards, notification panel, mobile sheet */
+/* Targets: main content area, all dialog innards, notification panel, mobile
+   sheet, and horizontally scrollable table wrappers inside cards. */
 .content-area::-webkit-scrollbar,
 dialog ::-webkit-scrollbar,
 .zf-notif-panel::-webkit-scrollbar,
-.mobile-more-sheet::-webkit-scrollbar {
+.mobile-more-sheet::-webkit-scrollbar,
+.zf-table-wrap::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 .content-area::-webkit-scrollbar-track,
 dialog ::-webkit-scrollbar-track,
 .zf-notif-panel::-webkit-scrollbar-track,
-.mobile-more-sheet::-webkit-scrollbar-track {
+.mobile-more-sheet::-webkit-scrollbar-track,
+.zf-table-wrap::-webkit-scrollbar-track {
   background: transparent;
 }
 .content-area::-webkit-scrollbar-thumb,
 dialog ::-webkit-scrollbar-thumb,
 .zf-notif-panel::-webkit-scrollbar-thumb,
-.mobile-more-sheet::-webkit-scrollbar-thumb {
+.mobile-more-sheet::-webkit-scrollbar-thumb,
+.zf-table-wrap::-webkit-scrollbar-thumb {
   background: rgba(0, 0, 0, 0.12);
   border-radius: 4px;
 }
@@ -118,7 +122,8 @@ dialog ::-webkit-scrollbar-thumb,
 [data-theme="dark"] .content-area::-webkit-scrollbar-thumb,
 [data-theme="dark"] dialog ::-webkit-scrollbar-thumb,
 [data-theme="dark"] .zf-notif-panel::-webkit-scrollbar-thumb,
-[data-theme="dark"] .mobile-more-sheet::-webkit-scrollbar-thumb {
+[data-theme="dark"] .mobile-more-sheet::-webkit-scrollbar-thumb,
+[data-theme="dark"] .zf-table-wrap::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.12);
 }
 

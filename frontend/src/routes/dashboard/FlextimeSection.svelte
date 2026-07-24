@@ -96,7 +96,7 @@
 
 <style>
   /* Compact select for choosing the chart range. */
-  .range-select {
+  .flextime-date-picker :global(.range-select) {
     font-size: 0.8125rem;
     padding: 3px 28px 3px 6px;
     height: 28px;

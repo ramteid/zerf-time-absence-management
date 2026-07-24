@@ -10,7 +10,7 @@
 
 <section class="zf-card section-card" class:section-card--padded={padded}>
   {#if title || $$slots.actions}
-    <div class="section-card-header">
+    <div class="section-card-header" class:section-card-header--inset={!padded}>
       <div class="section-card-title">
         {#if title}<span>{title}</span>{/if}
         {#if helpText}
@@ -28,7 +28,7 @@
   {/if}
 
   {#if helpOpen && helpText}
-    <div class="section-card-help">{helpText}</div>
+    <div class="section-card-help" class:section-card-help--inset={!padded}>{helpText}</div>
   {/if}
 
   <slot />
@@ -49,6 +49,16 @@
     justify-content: space-between;
     gap: 12px;
     margin-bottom: 14px;
+  }
+
+  /* When the card has no padding (e.g. edge-to-edge tables), add horizontal
+     inset to the header and help text so they match the standard card look. */
+  .section-card-header--inset {
+    padding: 20px 20px 0;
+  }
+
+  .section-card-help--inset {
+    margin: 0 20px 12px;
   }
 
   .section-card-title {
