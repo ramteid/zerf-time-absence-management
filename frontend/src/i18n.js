@@ -37,7 +37,7 @@ const TRANSLATIONS = {
     "Show explanation": "Show explanation",
     "No cost (free day)": "Affects no balance",
     help_cost_type_none:
-      "The day counts as absent, but nothing is deducted from vacation or flextime. Example: a day of special leave for your own wedding.",
+      "The day counts as absent, but nothing is deducted from vacation or flextime. Example: a day off for your own wedding.",
     help_counts_as_vacation:
       'Approved days are deducted from the employee\'s annual vacation balance (with carryover and expiry rules applied). Mutually exclusive with "Keeps work target".',
     help_keeps_work_target:
@@ -650,7 +650,7 @@ const TRANSLATIONS = {
     "Absence Categories": "Abwesenheitskategorien",
     "Add Absence Category": "Abwesenheitskategorie hinzufügen",
     "Edit Absence Category": "Abwesenheitskategorie bearbeiten",
-    "No cost (free day)": "Belastet kein Saldo",
+    "No cost (free day)": "Belastet keinen Saldo",
     "Counts as vacation": "Zählt als Urlaub",
     "Keeps work target (flextime)": "Arbeitssoll bleibt (Gleitzeit)",
     "Auto-approve past dates (sick-like)":
@@ -1063,7 +1063,7 @@ const TRANSLATIONS = {
       "Verlauf deines kumulierten Gleitzeitkontostands über den gewählten Zeitraum. Der Gleitzeitstand wird bis einschließlich gestern berechnet; die heute geleisteten Stunden werden noch nicht mitgezählt.",
     "Show explanation": "Erklärung anzeigen",
     help_cost_type_none:
-      "Der Tag gilt als abwesend, aber weder Urlaub noch Gleitzeit werden verringert. Beispiel: ein Tag Sonderurlaub für die eigene Hochzeit.",
+      "Der Tag gilt als abwesend, aber weder Urlaub noch Gleitzeit wird verringert. Beispiel: ein freier Tag für die eigene Hochzeit.",
     help_counts_as_vacation:
       "Genehmigte Tage werden vom Jahresurlaubsanspruch des Mitarbeitenden abgezogen (inkl. Übertrag- und Verfallsregeln). Schließt sich gegenseitig mit „Arbeitssoll bleibt“ aus.",
     help_keeps_work_target:
