@@ -51,7 +51,7 @@
             bind:value={chartFrom}
             min={$currentUser?.start_date}
             max={chartTo}
-            class="range-select"
+            class="zf-input range-select"
           />
         </span>
         <span class="flextime-date-separator">-</span>
@@ -60,7 +60,7 @@
             bind:value={chartTo}
             min={chartFrom}
             max={todayIso}
-            class="range-select"
+            class="zf-input range-select"
           />
         </span>
         <button
@@ -95,11 +95,15 @@
 </div>
 
 <style>
-  /* Compact select for choosing the chart range. */
-  .flextime-date-picker :global(.range-select) {
-    font-size: 0.8125rem;
-    padding: 3px 28px 3px 6px;
+  /* Compact date inputs for choosing the chart range. They keep the shared
+     `.zf-input` styling (border, surface background, light/dark theming and
+     width: 100%) and only shrink the height and type scale to align with the
+     range/search buttons next to them. The `.zf-input.range-select` compound
+     outweighs both the base `.zf-input` rule and DatePicker's
+     `.date-picker-wrap :global(.zf-input)`, so these overrides always win. */
+  .flextime-date-picker :global(.zf-input.range-select) {
     height: 28px;
+    font-size: 0.84375rem;
   }
 
   .flextime-section {

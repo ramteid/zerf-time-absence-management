@@ -273,6 +273,16 @@
   $: reportAbsenceSummary = reportData
     ? absenceKindTotals(reportData.absences)
     : {};
+
+  // Assistants (Aushilfen) normally have no weekly target and no vacation
+  // entitlement — hide those cards rather than show a meaningless "0".
+  // Admins can still assign an assistant real leave days, so the vacation
+  // card only disappears when the entitlement is actually 0.
+  $: hideTargetSub =
+    reportData?.isAssistant && (reportData.targetForSub || 0) === 0;
+  $: showVacation =
+    reportData?.leaveBalance &&
+    !(reportData.isAssistant && !reportData.leaveBalance.annual_entitlement);
 </script>
 
 <SectionCard>
@@ -305,7 +315,7 @@
                 (reportData.targetForSub || 0)
               ? "var(--accent)"
               : "var(--warning-text)"}
-          sub={reportData.isAssistant
+          sub={hideTargetSub
             ? ""
             : $t("of {target} target", {
                 target: formatHours((reportData.targetForSub || 0) / 60),
@@ -385,7 +395,7 @@
       {/if}
     {/if}
 
-    {#if reportData.leaveBalance}
+    {#if showVacation}
       <div class="report-subheading">{$t("Vacation")}</div>
       <div class="stat-cards mb-16">
         <StatCard

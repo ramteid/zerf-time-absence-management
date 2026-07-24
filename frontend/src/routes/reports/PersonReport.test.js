@@ -210,6 +210,49 @@ describe("PersonReport", () => {
     expect(getFlextimeReport).not.toHaveBeenCalled();
   });
 
+  it("hides the vacation card for an assistant with 0 leave entitlement", async () => {
+    getMonthReport.mockResolvedValue(
+      monthReportFixture({ target_min: 0, full_month_target_min: 0 }),
+    );
+    getLeaveBalance.mockResolvedValue({
+      annual_entitlement: 0,
+      already_taken: 0,
+      approved_upcoming: 0,
+      requested: 0,
+      available: 0,
+    });
+    component = mount(PersonReport, {
+      target,
+      props: { userId: 2, users, periodMode: "month", month: "2026-06" },
+    });
+    await waitForText(target, "Logged");
+    await settle();
+
+    expect(target.textContent).not.toContain("Vacation");
+    expect(target.textContent).not.toContain("Entitlement");
+  });
+
+  it("still shows the vacation card for an assistant with a real leave entitlement", async () => {
+    getMonthReport.mockResolvedValue(
+      monthReportFixture({ target_min: 0, full_month_target_min: 0 }),
+    );
+    getLeaveBalance.mockResolvedValue({
+      annual_entitlement: 10,
+      already_taken: 2,
+      approved_upcoming: 0,
+      requested: 0,
+      available: 8,
+    });
+    component = mount(PersonReport, {
+      target,
+      props: { userId: 2, users, periodMode: "month", month: "2026-06" },
+    });
+    await waitForText(target, "Entitlement");
+
+    expect(target.textContent).toContain("Vacation");
+    expect(target.textContent).toContain("Remaining");
+  });
+
   it("renders leave balance cards, including Planned/Requested only when > 0", async () => {
     getLeaveBalance.mockResolvedValue({
       annual_entitlement: 30,
