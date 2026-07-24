@@ -130,7 +130,7 @@
             })}
           </div>
           {#if reopen.reason}
-            <div class="reopen-reason" title={reopen.reason}>
+            <div class="text-truncate-tooltip queue-note" title={reopen.reason}>
               {reopen.reason}
             </div>
           {/if}
@@ -212,7 +212,7 @@
             {fmtDateShort(absence.end_date)}
           </div>
           {#if absence.comment}
-            <div class="absence-comment" title={absence.comment}>
+            <div class="text-truncate-tooltip queue-note" title={absence.comment}>
               {absence.comment}
             </div>
           {/if}
@@ -271,15 +271,10 @@
     box-shadow: 0 0 0 2px var(--accent);
   }
 
-  .reopen-reason,
-  .absence-comment {
-    font-size: 0.75rem;
-    color: var(--text-tertiary);
+  /* Truncation/color come from the shared .text-truncate-tooltip utility;
+     only the queue-specific top spacing lives here. */
+  .queue-note {
     margin-top: 2px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 300px;
   }
 
   .absence-summary {

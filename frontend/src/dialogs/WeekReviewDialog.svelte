@@ -4,6 +4,7 @@
   import Icon from "../Icons.svelte";
   import Dialog from "../Dialog.svelte";
   import { userNameFromRows } from "../lib/domain/users.js";
+  import { go } from "../stores.js";
 
   export let week;
   export let users;
@@ -11,6 +12,16 @@
   export let onClose;
   export let onApprove;
   export let onReject;
+
+  // Deep-link into the per-person detailed report for this exact user/week so
+  // approvers can spot-check entries before approving without manually
+  // navigating Reports and picking the user and date range.
+  function goToReport() {
+    go(
+      `/reports?user=${week.user_id}&from=${week.week_start}&to=${week.week_end}`,
+    );
+    onClose();
+  }
 </script>
 
 <Dialog title={$t("Week Approvals")} {onClose}>
@@ -33,6 +44,9 @@
       {$t("Close")}
     </button>
     <span class="flex-1"></span>
+    <button class="zf-btn" on:click={goToReport} disabled={busy}>
+      <Icon name="BarChart" size={14} />{$t("View in report")}
+    </button>
     <button
       class="zf-btn zf-btn-danger"
       on:click={() => onReject(week)}

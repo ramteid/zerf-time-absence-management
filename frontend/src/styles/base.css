@@ -97,6 +97,18 @@ body {
   color: var(--text-tertiary);
 }
 
+/* Single-line truncated secondary text paired with a native title tooltip
+   for the full value (comments, reasons). */
+.text-truncate-tooltip {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 300px;
+}
+
 /* Horizontal row: vertically centered children with the default 8px gap. */
 .zf-row {
   display: flex;

@@ -477,6 +477,7 @@
               <th>{$t("End")}</th>
               <th>{$t("Duration")}</th>
               <th>{$t("Category")}</th>
+              <th>{$t("Comment")}</th>
               <th>{$t("Status")}</th>
             </tr>
           </thead>
@@ -488,6 +489,15 @@
                 <td class="tab-num">{e.end_time?.slice(0, 5)}</td>
                 <td class="tab-num">{minToHM(e.minutes || 0)}</td>
                 <td>{e.category_name ? $t(e.category_name) : "-"}</td>
+                <td>
+                  {#if e.comment}
+                    <span class="text-truncate-tooltip" title={e.comment}>
+                      {e.comment}
+                    </span>
+                  {:else}
+                    -
+                  {/if}
+                </td>
                 <td>
                   <span class="zf-chip zf-chip-{e.status}"
                     >{statusLabel(e.status)}</span

@@ -7,6 +7,7 @@
     earliestStartDate,
     settings,
     toast,
+    path,
   } from "../stores.js";
   import { t } from "../i18n.js";
   import { tracksOwnTime } from "../rolePolicy.js";
@@ -96,6 +97,31 @@
   let from = "";
   let to = "";
   let selectedUserId = tracksOwnTime($currentUser) ? $currentUser.id : null;
+
+  // Deep-link support: when navigated here from a pending approval's
+  // WeekReviewDialog ("View in report"), the URL carries user/from/to query
+  // params. Apply them once per navigation to preselect the person, force a
+  // custom date range covering that week, and switch to the Employee tab.
+  // Reports never calls go() for its own filter changes, so $path stays put
+  // afterwards and this won't fight manual filter edits made later.
+  function applyDeepLink(currentPath) {
+    const queryString = currentPath.includes("?")
+      ? currentPath.split("?")[1]
+      : "";
+    const params = new URLSearchParams(queryString);
+    const user = params.get("user");
+    const fromParam = params.get("from");
+    const toParam = params.get("to");
+    if (user && fromParam && toParam) {
+      selectedUserId = Number(user);
+      periodMode = "range";
+      from = fromParam;
+      to = toParam;
+      activeTab = "employee";
+    }
+  }
+
+  $: if ($path.startsWith("/reports?")) applyDeepLink($path);
 
   $: if (isSelfOnlyReportsView) selectedUserId = $currentUser.id;
   $: if (

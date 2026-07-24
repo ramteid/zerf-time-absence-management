@@ -943,6 +943,9 @@ Zerf distinguishes between workflow coverage and work-credit math.
 
 - Employees without team-report access see a single report: their own balance,
   vacation, absences, category breakdown, entries, and flextime chart.
+- The entries table includes a **Comment** column showing any note attached to
+  an entry. Long comments are shortened with an ellipsis; hover over one to read
+  the full text. Entries without a comment show a dash.
 - Team leads and admins additionally see an **Employee** / **Team** switch at
   the top of the page. The Employee tab shows one person's report at a time
   (with a dropdown to pick who); the Team tab shows the whole team side by
@@ -1267,6 +1270,10 @@ within a week are handled in the background.
 - Entries from users with submission auto-approval enabled never reach this
   queue — they are approved at submission time, silently (see [Team settings:
   submission policy](#team-settings-submission-policy)).
+- When you open a pending week, the review dialog offers a `View in report`
+  button. It takes you straight to that employee's detailed report for exactly
+  that week, so you can inspect every entry — including any comments the
+  employee added — before approving or rejecting.
 
 ### Reviewing an absence
 

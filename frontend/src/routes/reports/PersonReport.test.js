@@ -282,6 +282,53 @@ describe("PersonReport", () => {
     expect(target.querySelector(".zf-chip-approved")).not.toBeNull();
   });
 
+  it("renders the entry comment truncated with a tooltip in the entries table", async () => {
+    getMonthReport.mockResolvedValue(
+      monthReportFixture({
+        days: [
+          {
+            date: "2026-06-01",
+            weekday: "Monday",
+            entries: [
+              {
+                start_time: "08:00",
+                end_time: "16:00",
+                category: "Development",
+                minutes: 480,
+                status: "approved",
+                comment: "Investigated the flaky login test",
+              },
+            ],
+            actual_min: 480,
+            target_min: 480,
+            absence: null,
+            holiday: null,
+          },
+        ],
+      }),
+    );
+    component = mount(PersonReport, {
+      target,
+      props: { userId: 1, users, periodMode: "month", month: "2026-06" },
+    });
+    await waitForText(target, "Investigated the flaky login test");
+    const commentCell = target.querySelector(".text-truncate-tooltip");
+    expect(commentCell).not.toBeNull();
+    expect(commentCell.getAttribute("title")).toBe(
+      "Investigated the flaky login test",
+    );
+  });
+
+  it("shows a dash for an entry without a comment", async () => {
+    // monthReportFixture uses an empty comment; the table must render "-".
+    component = mount(PersonReport, {
+      target,
+      props: { userId: 1, users, periodMode: "month", month: "2026-06" },
+    });
+    await waitForText(target, "Development");
+    expect(target.querySelector(".text-truncate-tooltip")).toBeNull();
+  });
+
   it("fetches own absences via getUserAbsencesByYear, not the team endpoint", async () => {
     component = mount(PersonReport, {
       target,

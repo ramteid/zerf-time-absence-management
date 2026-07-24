@@ -625,6 +625,7 @@ const TRANSLATIONS = {
     "Pending Weeks": "Ausstehende Wochen",
     "Absence Requests": "Abwesenheitsanträge",
     "Week Approvals": "Wochen-Genehmigungen",
+    "View in report": "Im Bericht ansehen",
     "Approve All": "Alle genehmigen",
     "Approve all?": "Alle genehmigen?",
     "Approve all {n} weeks across all users?":

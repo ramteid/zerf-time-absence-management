@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mount, unmount } from "svelte";
 import Reports from "./Reports.svelte";
 import { api } from "../api.js";
-import { currentUser, absenceCategories } from "../stores.js";
+import { currentUser, absenceCategories, path } from "../stores.js";
 import { setLanguage, setAbsenceCategoryCache } from "../i18n.js";
 
 const mockState = vi.hoisted(() => ({
@@ -183,6 +183,9 @@ describe("Reports", () => {
     // Restore the default routing in case a previous test overrode it via
     // api.mockImplementation() (e.g. the race-guard test below).
     api.mockImplementation(defaultApiImpl);
+    // Reset the routing path so deep-link tests don't leak query params into
+    // unrelated tests.
+    path.set("/reports");
   });
 
   afterEach(() => {
@@ -191,6 +194,7 @@ describe("Reports", () => {
       component = null;
     }
     target.remove();
+    path.set("/reports");
   });
 
   it("loads the employee's own report automatically, without a Show button", async () => {
@@ -439,5 +443,44 @@ describe("Reports", () => {
         b.textContent.includes("Export CSV"),
       ),
     ).toBe(false);
+  }, 20000);
+
+  it("applies a ?user/from/to deep link: employee tab, that user, custom range", async () => {
+    // Simulates arriving from a pending approval's "View in report" button.
+    currentUser.set({
+      id: 7,
+      role: "team_lead",
+      first_name: "Ada",
+      last_name: "Lead",
+      weekly_hours: 40,
+      start_date: "2020-01-01",
+      permissions: { can_view_team_reports: true },
+    });
+    mockState.users = [
+      { id: 7, first_name: "Ada", last_name: "Lead", role: "team_lead" },
+      { id: 8, first_name: "Ben", last_name: "Employee", role: "employee" },
+    ];
+    mockState.rangeReport = monthReportFixture({ user_id: 8 });
+
+    path.set("/reports?user=8&from=2030-01-06&to=2030-01-12");
+    component = mount(Reports, { target });
+
+    // The range endpoint is queried for the linked user and dates, proving the
+    // deep link forced periodMode="range" and selected user 8.
+    await waitFor(() =>
+      api.mock.calls.some(
+        ([p]) =>
+          p.startsWith("/reports/range?") &&
+          p.includes("user_id=8") &&
+          p.includes("from=2030-01-06") &&
+          p.includes("to=2030-01-12"),
+      ),
+    );
+
+    // The Employee tab stays selected and the picker reflects the linked user.
+    await waitFor(
+      () => target.querySelector("#reports-user-select")?.value === "8",
+    );
+    expect(target.querySelector("#reports-user-select").value).toBe("8");
   }, 20000);
 });
