@@ -493,7 +493,7 @@ async fn users_repository_workflow() {
         .pending_approvers_for_reminders()
         .await
         .expect("pending approver reminders");
-    assert!(pending.iter().any(|row| row.0 == lead_id && row.4 > 0));
+    assert!(pending.iter().any(|row| row.0 == lead_id && row.1 > 0));
 
     users
         .update_allow_reopen(emp_id, true)

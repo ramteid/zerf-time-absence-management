@@ -50,9 +50,8 @@ fn approval_reminder_is_due_now(now: chrono::DateTime<chrono_tz::Tz>) -> bool {
     now.weekday().num_days_from_monday() == 0 && now.hour() >= 7
 }
 
-/// Rows returned by the pending-approvals query:
-/// (approver_id, approver_email, first_name, last_name, total_pending_count)
-type PendingApproverRow = (i64, String, String, String, i64);
+/// Rows returned by the pending-approvals query: (approver_id, total_pending_count)
+type PendingApproverRow = (i64, i64);
 
 /// Query all active approvers who currently have at least one pending item.
 /// Uses explicit approver assignments only.
@@ -91,7 +90,7 @@ pub async fn run_check(state: &crate::AppState) {
         return;
     }
 
-    for (approver_id, _email, _first, _last, pending_count) in approvers {
+    for (approver_id, pending_count) in approvers {
         let count_str = pending_count.to_string();
         let text = crate::i18n::notification_event_text(
             &language,

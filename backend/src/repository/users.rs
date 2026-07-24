@@ -91,8 +91,8 @@ pub struct ActiveUserRow {
     pub workdays_per_week: i16,
 }
 
-/// Approval reminder row (approver_id, approver_email, first_name, last_name, total_pending_count).
-pub type PendingApproverReminderRow = (i64, String, String, String, i64);
+/// Approval reminder row (approver_id, total_pending_count).
+pub type PendingApproverReminderRow = (i64, i64);
 
 #[derive(Serialize, sqlx::FromRow)]
 pub struct AnnualLeaveRow {
@@ -439,9 +439,13 @@ impl UserDb {
             "WITH user_pending AS (
                  SELECT user_id, COUNT(*)::bigint AS pending_count
                  FROM (
+                     -- One submitted week (however many daily rows it has) counts
+                     -- as a single pending item, matching how approvers actually
+                     -- review and how the submission notification groups them.
                      SELECT te.user_id FROM time_entries te
                      JOIN users u ON u.id = te.user_id AND u.tracks_time = TRUE AND u.active = TRUE
                      WHERE te.status = 'submitted'
+                     GROUP BY te.user_id, date_trunc('week', te.entry_date)
                      UNION ALL
                      SELECT a.user_id FROM absences a
                      JOIN users u ON u.id = a.user_id AND u.tracks_time = TRUE AND u.active = TRUE
@@ -476,10 +480,10 @@ impl UserDb {
              combined AS (
                  SELECT approver_id, pending_count FROM via_assignment
              )
-             SELECT c.approver_id, u.email, u.first_name, u.last_name, SUM(c.pending_count)::bigint AS total_pending
+             SELECT c.approver_id, SUM(c.pending_count)::bigint AS total_pending
              FROM combined c
              JOIN users u ON u.id = c.approver_id AND u.active = TRUE
-             GROUP BY c.approver_id, u.email, u.first_name, u.last_name
+             GROUP BY c.approver_id
              HAVING SUM(c.pending_count) > 0",
         )
         .fetch_all(&self.pool)
