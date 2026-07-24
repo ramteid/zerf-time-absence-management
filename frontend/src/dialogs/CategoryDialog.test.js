@@ -36,6 +36,9 @@ vi.mock("../api.js", () => ({
     if (path.endsWith("/users")) {
       return [1];
     }
+    if (path === "/categories" && options?.method === "POST") {
+      return { id: 42, ...options.body };
+    }
     return { ok: true };
   }),
 }));
@@ -136,6 +139,50 @@ describe("CategoryDialog", () => {
     await settle();
 
     const usersRequest = requestFor("/categories/17/users", "PUT");
+    expect(usersRequest).toBeDefined();
+    expect(usersRequest.options.body).toEqual({ user_ids: [1] });
+  });
+
+  it("loads and renders the per-employee access table when creating a new category, pre-selecting everyone", async () => {
+    const onClose = vi.fn();
+    component = mount(CategoryDialog, {
+      target,
+      props: { template: {}, onClose },
+    });
+
+    await settle();
+
+    expect(requestFor("/users")).toBeDefined();
+    const rows = target.querySelectorAll("table tbody tr");
+    expect(rows.length).toBe(2);
+    const checkboxes = target.querySelectorAll(
+      "table tbody input[type=checkbox]",
+    );
+    expect([...checkboxes].every((cb) => cb.checked)).toBe(true);
+  });
+
+  it("saves the selected user ids to the newly created category's users endpoint", async () => {
+    const onClose = vi.fn();
+    component = mount(CategoryDialog, {
+      target,
+      props: { template: {}, onClose },
+    });
+
+    await settle();
+
+    const checkboxes = target.querySelectorAll(
+      "table tbody input[type=checkbox]",
+    );
+    checkboxes[0].click();
+    await settle();
+
+    target.querySelector("button.zf-btn.zf-btn-primary").click();
+    await settle();
+
+    const createRequest = requestFor("/categories", "POST");
+    expect(createRequest).toBeDefined();
+
+    const usersRequest = requestFor("/categories/42/users", "PUT");
     expect(usersRequest).toBeDefined();
     expect(usersRequest.options.body).toEqual({ user_ids: [1] });
   });
