@@ -132,4 +132,102 @@ describe("AdminHolidays", () => {
     );
     expect(postCall).toBeUndefined();
   });
+
+  it("shows a Recurring badge for holidays marked as recurring", async () => {
+    apiMock.mockResolvedValue([
+      {
+        id: 3,
+        holiday_date: "2026-12-24",
+        name: "Heiligabend",
+        is_auto: false,
+        recurring: true,
+        recurrence_end_year: null,
+      },
+    ]);
+    component = mount(AdminHolidays, { target });
+    await waitForText(target, "Recurring");
+  });
+
+  it("keeps the end-year select hidden until 'Repeats every year' is checked", async () => {
+    apiMock.mockResolvedValue([]);
+    component = mount(AdminHolidays, { target });
+    await waitForText(target, "Holidays");
+
+    expect(target.querySelector("select.end-year-select")).toBeNull();
+
+    const checkboxes = () => [
+      ...target.querySelectorAll('input[type="checkbox"]'),
+    ];
+    const recurringCheckbox = checkboxes().find((cb) =>
+      cb.closest("label")?.textContent?.includes("Repeats every year"),
+    );
+    const endCheckbox = checkboxes().find((cb) =>
+      cb.closest("label")?.textContent?.includes("End"),
+    );
+    expect(recurringCheckbox).not.toBeNull();
+    expect(endCheckbox).not.toBeNull();
+    expect(endCheckbox.disabled).toBe(true);
+
+    recurringCheckbox.click();
+    await settle();
+    expect(endCheckbox.disabled).toBe(false);
+
+    endCheckbox.click();
+    await settle();
+    expect(target.querySelector("select.end-year-select")).not.toBeNull();
+
+    // Unchecking "Repeats every year" hides the end-year option again.
+    recurringCheckbox.click();
+    await settle();
+    expect(target.querySelector("select.end-year-select")).toBeNull();
+    expect(endCheckbox.checked).toBe(false);
+  });
+
+  it("sends recurring and recurrence_end_year in the add payload", async () => {
+    apiMock.mockResolvedValue([]);
+    component = mount(AdminHolidays, { target });
+    await waitForText(target, "Holidays");
+
+    const nameInput = target.querySelector("#holiday-name");
+    nameInput.value = "Heiligabend";
+    nameInput.dispatchEvent(new Event("input"));
+
+    const dateButton = target.querySelector(".date-picker-button");
+    expect(dateButton).not.toBeNull();
+    dateButton.click();
+    await settle();
+    const calendar = document.querySelector(".flatpickr-calendar.open");
+    expect(calendar).not.toBeNull();
+    const todayCell = calendar.querySelector(".flatpickr-day.today");
+    expect(todayCell).not.toBeNull();
+    todayCell.click();
+    await settle();
+
+    const checkboxes = () => [
+      ...target.querySelectorAll('input[type="checkbox"]'),
+    ];
+    checkboxes()
+      .find((cb) =>
+        cb.closest("label")?.textContent?.includes("Repeats every year"),
+      )
+      .click();
+    await settle();
+    checkboxes()
+      .find((cb) => cb.closest("label")?.textContent?.includes("End"))
+      .click();
+    await settle();
+
+    const addBtn = [...target.querySelectorAll("button")].find((b) =>
+      b.textContent.includes("Add"),
+    );
+    addBtn.click();
+    await settle();
+
+    const postCall = apiMock.mock.calls.find(
+      ([, opts]) => opts?.method === "POST",
+    );
+    expect(postCall).toBeDefined();
+    expect(postCall[1].body.recurring).toBe(true);
+    expect(typeof postCall[1].body.recurrence_end_year).toBe("number");
+  });
 });

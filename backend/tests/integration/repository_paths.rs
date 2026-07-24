@@ -999,7 +999,7 @@ async fn holidays_repository_workflow() {
 
     let manual_date = NaiveDate::from_ymd_opt(current_year + 2, 12, 30).unwrap();
     holidays
-        .create_manual(manual_date, "Repository Manual Holiday")
+        .create_manual(manual_date, "Repository Manual Holiday", false, None)
         .await
         .expect("create manual holiday");
     let created = holidays
@@ -1049,6 +1049,166 @@ async fn holidays_repository_workflow() {
         .expect("list replaced auto holidays");
     assert_eq!(replaced.iter().filter(|row| row.is_auto).count(), 1);
     assert_eq!(replaced[0].name, "Repo Auto Replacement");
+
+    app.cleanup().await;
+}
+
+#[tokio::test]
+async fn recurring_holidays_repository_workflow() {
+    let app = TestApp::spawn().await;
+
+    let holidays = zerf::repository::HolidayDb::new(app.state.pool.clone());
+    let absences = zerf::repository::AbsenceDb::new(app.state.pool.clone());
+    let reports = zerf::repository::ReportDb::new(app.state.pool.clone());
+    let current_year = reference_date().year();
+
+    // A recurring holiday with no end, defined on a date that is never a
+    // real German public holiday (Heiligabend/Christmas Eve) so it can't
+    // collide with an auto-imported Nager.Date row.
+    let defining_date = NaiveDate::from_ymd_opt(current_year, 12, 24).unwrap();
+    let recurring_id = holidays
+        .create_manual(defining_date, "Recurring Test Holiday", true, None)
+        .await
+        .expect("create recurring holiday");
+
+    let future_year = current_year + 5;
+    let future_date = NaiveDate::from_ymd_opt(future_year, 12, 24).unwrap();
+
+    let future_list = holidays
+        .list_for_year(future_year)
+        .await
+        .expect("list future year");
+    let projected = future_list
+        .iter()
+        .find(|h| h.holiday_date == future_date)
+        .expect("recurring holiday must be projected into a future year");
+    assert_eq!(
+        projected.id, recurring_id,
+        "the projected row must reuse the defining row's id, so deleting it \
+         removes the whole series regardless of which year it was viewed from"
+    );
+    assert!(projected.recurring);
+
+    let past_year = current_year - 5;
+    assert!(
+        !holidays
+            .list_for_year(past_year)
+            .await
+            .expect("list past year")
+            .iter()
+            .any(|h| h.id == recurring_id),
+        "a recurring holiday must not apply to years before it was defined"
+    );
+
+    let window_from = NaiveDate::from_ymd_opt(future_year, 12, 1).unwrap();
+    let window_to = NaiveDate::from_ymd_opt(future_year, 12, 31).unwrap();
+    assert!(
+        holidays
+            .get_dates_in_range(window_from, window_to)
+            .await
+            .expect("dates in range")
+            .contains(&future_date)
+    );
+
+    // The concrete proof the vacation-day-deduction path is fixed: it must
+    // delegate to HolidayDb rather than running its own literal-date query.
+    assert!(
+        absences
+            .holidays_set(window_from, window_to)
+            .await
+            .expect("absence holidays_set")
+            .contains(&future_date),
+        "AbsenceDb::holidays_set must respect recurring holidays"
+    );
+
+    // Same proof for the report-generation path.
+    assert!(
+        reports
+            .holiday_set(window_from, window_to)
+            .await
+            .expect("report holiday_set")
+            .contains(&future_date),
+        "ReportDb::holiday_set must respect recurring holidays"
+    );
+
+    // A bounded recurring holiday: present through its end year, gone after.
+    // August 20th is never near any moveable German holiday (Easter-linked
+    // holidays fall between late March and late June at the latest), so this
+    // can't collide with an auto-imported row in any year.
+    let end_year = current_year + 3;
+    let bounded_date = NaiveDate::from_ymd_opt(current_year, 8, 20).unwrap();
+    holidays
+        .create_manual(
+            bounded_date,
+            "Bounded Recurring Holiday",
+            true,
+            Some(end_year),
+        )
+        .await
+        .expect("create bounded recurring holiday");
+
+    let present_date = NaiveDate::from_ymd_opt(end_year, 8, 20).unwrap();
+    assert!(
+        holidays
+            .list_for_year(end_year)
+            .await
+            .expect("list end year")
+            .iter()
+            .any(|h| h.holiday_date == present_date),
+        "a bounded recurring holiday must still apply in its end year"
+    );
+    assert!(
+        !holidays
+            .list_for_year(end_year + 1)
+            .await
+            .expect("list year after end")
+            .iter()
+            .any(|h| h.name == "Bounded Recurring Holiday"),
+        "a bounded recurring holiday must not apply after its end year"
+    );
+
+    // A recurring holiday defined on Feb 29 must not error, and must simply
+    // not occur, when projected onto a non-leap year.
+    let leap_year = (current_year..current_year + 8)
+        .find(|y| NaiveDate::from_ymd_opt(*y, 2, 29).is_some())
+        .expect("a leap year within range");
+    let feb29 = NaiveDate::from_ymd_opt(leap_year, 2, 29).unwrap();
+    holidays
+        .create_manual(feb29, "Leap Day Holiday", true, None)
+        .await
+        .expect("create leap day recurring holiday");
+    let non_leap_year = leap_year + 1;
+    let non_leap_list = holidays
+        .list_for_year(non_leap_year)
+        .await
+        .expect("list non-leap year");
+    assert!(
+        !non_leap_list.iter().any(|h| h.name == "Leap Day Holiday"),
+        "a Feb 29 recurring holiday must not error or appear in a non-leap year"
+    );
+
+    // Deleting the one row removes the whole series, from every year's view.
+    holidays
+        .delete(recurring_id)
+        .await
+        .expect("delete recurring holiday");
+    assert!(
+        !holidays
+            .list_for_year(current_year)
+            .await
+            .expect("list defining year after delete")
+            .iter()
+            .any(|h| h.id == recurring_id)
+    );
+    assert!(
+        !holidays
+            .list_for_year(future_year)
+            .await
+            .expect("list future year after delete")
+            .iter()
+            .any(|h| h.id == recurring_id),
+        "deleting a recurring holiday must remove it from every projected year too"
+    );
 
     app.cleanup().await;
 }

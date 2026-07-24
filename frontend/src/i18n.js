@@ -729,6 +729,12 @@ const TRANSLATIONS = {
     "Holiday added.": "Feiertag hinzugefügt.",
     "No holidays for {year}.": "Keine Feiertage für {year}.",
     "Delete this holiday?": "Diesen Feiertag löschen?",
+    "Repeats every year": "Wiederholt sich jedes Jahr",
+    Recurring: "Jährlich",
+    "Recurs every year.": "Wiederholt sich jährlich.",
+    "Recurs until {year}.": "Wiederholt sich bis {year}.",
+    "This holiday repeats every year. Deleting it removes it for every year, not only {year}.":
+      "Dieser Feiertag wiederholt sich jedes Jahr. Beim Löschen wird er für alle Jahre entfernt, nicht nur für {year}.",
     "Add Entry": "Eintrag hinzufügen",
     "Edit Entry": "Eintrag bearbeiten",
     "Edit Absence": "Abwesenheit bearbeiten",
@@ -905,6 +911,10 @@ const TRANSLATIONS = {
     "CSV export failed.": "CSV-Export fehlgeschlagen.",
     "Name already exists": "Name existiert bereits.",
     "Holiday already exists": "Feiertag existiert bereits.",
+    "An end year requires the recurring option to be enabled.":
+      "Ein Endjahr setzt voraus, dass die Wiederholung aktiviert ist.",
+    "The recurrence end year cannot be before the holiday's year.":
+      "Das Endjahr der Wiederholung darf nicht vor dem Jahr des Feiertags liegen.",
     "Conflict: {message}": "Konflikt: {message}",
     "week_start must be a Monday (ISO).":
       "Wochenbeginn muss ein Montag sein (ISO).",

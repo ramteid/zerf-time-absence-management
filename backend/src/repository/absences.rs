@@ -92,14 +92,13 @@ impl AbsenceDb {
         from: NaiveDate,
         to: NaiveDate,
     ) -> AppResult<HashSet<NaiveDate>> {
-        let rows: Vec<(NaiveDate,)> = sqlx::query_as(
-            "SELECT holiday_date FROM holidays WHERE holiday_date BETWEEN $1 AND $2",
-        )
-        .bind(from)
-        .bind(to)
-        .fetch_all(&self.pool)
-        .await?;
-        Ok(rows.into_iter().map(|(d,)| d).collect())
+        // Delegates to HolidayDb, the single source of truth for holiday
+        // dates: it also accounts for recurring manual holidays, which a
+        // literal `holiday_date BETWEEN` query here would miss for any year
+        // after the one they were first added for.
+        crate::repository::HolidayDb::new(self.pool.clone())
+            .get_dates_in_range(from, to)
+            .await
     }
 
     /// Count contract workdays in a date range, excluding public holidays.

@@ -1811,6 +1811,13 @@ Auto-imported holidays are compared with the configured country/region source
 when Zerf ensures a year, so missing or changed imported holidays are refreshed
 without removing manually added holidays.
 
+A manually added holiday can be marked to repeat every year, optionally with
+a last year it still applies. This is useful for days your organization
+treats as time off that aren't official public holidays — for example,
+Christmas Eve or New Year's Eve — so you don't have to re-add them every
+year. Deleting a repeating holiday removes it for every year, not just the
+one you were viewing.
+
 ### Backup and restore
 
 Scheduled backups capture a full snapshot of the database. Each backup is stored as a single zip archive:

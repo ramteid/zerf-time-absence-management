@@ -2,7 +2,7 @@
   import { api } from "../api.js";
   import { settings, toast } from "../stores.js";
   import { t } from "../i18n.js";
-  import { fmtDate, appTodayDate } from "../format.js";
+  import { fmtDate, appTodayDate, parseDate } from "../format.js";
   import Icon from "../Icons.svelte";
   import { confirmDialog } from "../confirm.js";
   import DatePicker from "../DatePicker.svelte";
@@ -16,6 +16,32 @@
   }
   let newDate = "";
   let newName = "";
+  let recurring = false;
+  let hasEnd = false;
+  let recurrenceEndYear = null;
+
+  // The end-year dropdown only offers years after the holiday's own year (a
+  // recurring holiday whose end year equals its start year would never
+  // actually recur, which the backend permits but is confusing to offer).
+  $: selectedYear = newDate ? parseDate(newDate).getFullYear() : year;
+  $: endYearOptions = Array.from(
+    { length: 30 },
+    (_, i) => selectedYear + 1 + i,
+  );
+
+  // Unchecking "repeats every year" clears the now-meaningless end option.
+  $: if (!recurring && (hasEnd || recurrenceEndYear !== null)) {
+    hasEnd = false;
+    recurrenceEndYear = null;
+  }
+  // Pick a sensible default once "End" is checked, and re-clamp it if the
+  // chosen date's year later moves past the previously picked end year.
+  $: if (
+    hasEnd &&
+    (recurrenceEndYear === null || recurrenceEndYear < selectedYear + 1)
+  ) {
+    recurrenceEndYear = selectedYear + 10;
+  }
 
   async function load() {
     holidays = await api(`/holidays?year=${year}`);
@@ -29,23 +55,39 @@
     }
     await api("/holidays", {
       method: "POST",
-      body: { holiday_date: newDate, name: newName },
+      body: {
+        holiday_date: newDate,
+        name: newName,
+        recurring,
+        recurrence_end_year: recurring && hasEnd ? recurrenceEndYear : null,
+      },
     });
     newDate = "";
     newName = "";
+    recurring = false;
+    hasEnd = false;
+    recurrenceEndYear = null;
     toast($t("Holiday added."), "ok");
     load();
   }
 
-  async function del(id) {
+  async function del(holiday) {
+    const message = holiday.recurring
+      ? $t("Delete this holiday?") +
+        " " +
+        $t(
+          "This holiday repeats every year. Deleting it removes it for every year, not only {year}.",
+          { year },
+        )
+      : $t("Delete this holiday?");
     if (
-      !(await confirmDialog($t("Delete?"), $t("Delete this holiday?"), {
+      !(await confirmDialog($t("Delete?"), message, {
         danger: true,
         confirm: $t("Delete"),
       }))
     )
       return;
-    await api("/holidays/" + id, { method: "DELETE" });
+    await api("/holidays/" + holiday.id, { method: "DELETE" });
     load();
   }
 </script>
@@ -102,6 +144,23 @@
         <Icon name="Plus" size={13} />{$t("Add")}
       </button>
     </div>
+    <div class="recurrence-row mt-8">
+      <label class="zf-check-label">
+        <input type="checkbox" bind:checked={recurring} />
+        <span>{$t("Repeats every year")}</span>
+      </label>
+      <label class="zf-check-label">
+        <input type="checkbox" bind:checked={hasEnd} disabled={!recurring} />
+        <span>{$t("End")}</span>
+      </label>
+      {#if recurring && hasEnd}
+        <select class="zf-input end-year-select" bind:value={recurrenceEndYear}>
+          {#each endYearOptions as optionYear (optionYear)}
+            <option value={optionYear}>{optionYear}</option>
+          {/each}
+        </select>
+      {/if}
+    </div>
   </div>
 
   <div class="zf-card zf-table-wrap">
@@ -112,9 +171,19 @@
         {#if h.is_auto}
           <span class="holiday-source">API</span>
         {/if}
+        {#if h.recurring}
+          <span
+            class="holiday-source"
+            title={h.recurrence_end_year
+              ? $t("Recurs until {year}.", { year: h.recurrence_end_year })
+              : $t("Recurs every year.")}
+          >
+            {$t("Recurring")}
+          </span>
+        {/if}
         <button
           class="zf-btn zf-btn-ghost zf-btn-sm zf-btn-danger"
-          on:click={() => del(h.id)}
+          on:click={() => del(h)}
         >
           <Icon name="Trash" size={13} />
         </button>
@@ -141,6 +210,17 @@
   /* Name field gets twice the width of the date field in the add-row. */
   .grow-2 {
     flex: 2;
+  }
+
+  .recurrence-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .end-year-select {
+    width: auto;
   }
 
   .holiday-row {

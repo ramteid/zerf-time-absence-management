@@ -55,6 +55,8 @@ pub async fn list(
                 "name": display_name,
                 "year": holiday.year,
                 "is_auto": holiday.is_auto,
+                "recurring": holiday.recurring,
+                "recurrence_end_year": holiday.recurrence_end_year,
             })
         })
         .collect();
@@ -66,6 +68,9 @@ pub async fn list(
 pub struct NewHoliday {
     pub holiday_date: NaiveDate,
     pub name: String,
+    #[serde(default)]
+    pub recurring: bool,
+    pub recurrence_end_year: Option<i32>,
 }
 
 pub async fn create(
@@ -78,6 +83,8 @@ pub async fn create(
         &requester,
         body.holiday_date,
         &body.name,
+        body.recurring,
+        body.recurrence_end_year,
     )
     .await?;
     Ok(Json(serde_json::json!({"ok":true})))

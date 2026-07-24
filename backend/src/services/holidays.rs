@@ -277,11 +277,20 @@ pub async fn refresh_holidays(
 }
 
 /// Create a manually-added holiday (admin-only) and record it in the audit log.
+///
+/// `recurring` marks the holiday as also applying every year after
+/// `holiday_date`'s own year. `recurrence_end_year`, only meaningful when
+/// `recurring` is set, bounds how far forward it recurs (inclusive); `None`
+/// means it applies forever going forward. Both invariants are also enforced
+/// by DB CHECK constraints (see migration 034) — validating them here first
+/// gives a clean, translatable 400 instead of a raw constraint-violation error.
 pub async fn create_manual(
     pool: &crate::db::DatabasePool,
     requester: &crate::middleware::auth::User,
     holiday_date: NaiveDate,
     name: &str,
+    recurring: bool,
+    recurrence_end_year: Option<i32>,
 ) -> AppResult<i64> {
     if !requester.is_admin() {
         return Err(AppError::Forbidden);
@@ -290,8 +299,22 @@ pub async fn create_manual(
     if name.is_empty() || name.len() > 200 {
         return Err(AppError::BadRequest("Invalid holiday name.".into()));
     }
+    if let Some(end_year) = recurrence_end_year {
+        if !recurring {
+            return Err(AppError::BadRequest(
+                "An end year requires the recurring option to be enabled.".into(),
+            ));
+        }
+        if end_year < holiday_date.year() {
+            return Err(AppError::BadRequest(
+                "The recurrence end year cannot be before the holiday's year.".into(),
+            ));
+        }
+    }
     let db = crate::repository::HolidayDb::new(pool.clone());
-    let new_id = db.create_manual(holiday_date, name).await?;
+    let new_id = db
+        .create_manual(holiday_date, name, recurring, recurrence_end_year)
+        .await?;
     let created = db
         .find_by_id(new_id)
         .await?
@@ -453,6 +476,8 @@ mod tests {
             local_name: local_name.map(str::to_string),
             year,
             is_auto,
+            recurring: false,
+            recurrence_end_year: None,
         }
     }
 
