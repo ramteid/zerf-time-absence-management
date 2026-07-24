@@ -207,6 +207,11 @@ dialog footer {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
+  /* Wrap onto additional rows instead of overflowing the dialog when the
+     button set is wide (e.g. many actions, or long translated labels). Without
+     this, extra buttons pushed a leading action (like Close) outside the
+     dialog's left edge. */
+  flex-wrap: wrap;
 }
 
 /* ── Dashboard grouped sections ─────────────────────────────────────────────── */
