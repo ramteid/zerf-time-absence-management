@@ -282,7 +282,11 @@ async fn time_entry_and_cr_workflow() {
                 &json!({"entry_date": &entry_day, "start_time":"15:00","end_time":"23:30","category_id": cat_id}),
             )
             .await;
-        assert_eq!(st, StatusCode::OK, "long non-overlapping entry accepted (no day cap)");
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "long non-overlapping entry accepted (no day cap)"
+        );
 
         let (st, body) = emp
             .get(&format!(
@@ -1061,14 +1065,22 @@ async fn tina_time_tracking_journey() {
         let (st, _) = tina
             .post("/api/v1/time-entries", &json!({"entry_date": &day2, "start_time":"20:00","end_time":"20:01","category_id": cat_other}))
             .await;
-        assert_eq!(st, StatusCode::OK, "extra minute past 14h accepted (no day cap)");
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "extra minute past 14h accepted (no day cap)"
+        );
 
         // Leaves 08:00-08:30 free so the long-comment case below (section 4) does
         // not collide with this entry.
         let (st, _) = tina
             .post("/api/v1/time-entries", &json!({"entry_date": &day3, "start_time":"09:00","end_time":"23:30","category_id": cat_core}))
             .await;
-        assert_eq!(st, StatusCode::OK, "single 14:30 entry accepted (no day cap)");
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "single 14:30 entry accepted (no day cap)"
+        );
     }
 
     // -- 4. Long comment ------------------------------------------------------

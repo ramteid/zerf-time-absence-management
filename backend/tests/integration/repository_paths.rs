@@ -1091,13 +1091,11 @@ async fn recurring_holidays_repository_workflow() {
 
     let window_from = NaiveDate::from_ymd_opt(future_year, 12, 1).unwrap();
     let window_to = NaiveDate::from_ymd_opt(future_year, 12, 31).unwrap();
-    assert!(
-        holidays
-            .get_dates_in_range(window_from, window_to)
-            .await
-            .expect("dates in range")
-            .contains(&future_date)
-    );
+    assert!(holidays
+        .get_dates_in_range(window_from, window_to)
+        .await
+        .expect("dates in range")
+        .contains(&future_date));
 
     // The concrete proof the vacation-day-deduction path is fixed: it must
     // delegate to HolidayDb rather than running its own literal-date query.
@@ -1181,14 +1179,12 @@ async fn recurring_holidays_repository_workflow() {
         .delete(recurring_id)
         .await
         .expect("delete recurring holiday");
-    assert!(
-        !holidays
-            .list_for_year(current_year)
-            .await
-            .expect("list defining year after delete")
-            .iter()
-            .any(|h| h.id == recurring_id)
-    );
+    assert!(!holidays
+        .list_for_year(current_year)
+        .await
+        .expect("list defining year after delete")
+        .iter()
+        .any(|h| h.id == recurring_id));
     assert!(
         !holidays
             .list_for_year(future_year)

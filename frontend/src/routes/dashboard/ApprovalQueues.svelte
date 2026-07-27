@@ -212,7 +212,10 @@
             {fmtDateShort(absence.end_date)}
           </div>
           {#if absence.comment}
-            <div class="text-truncate-tooltip queue-note" title={absence.comment}>
+            <div
+              class="text-truncate-tooltip queue-note"
+              title={absence.comment}
+            >
               {absence.comment}
             </div>
           {/if}

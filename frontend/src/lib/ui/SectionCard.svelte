@@ -28,7 +28,9 @@
   {/if}
 
   {#if helpOpen && helpText}
-    <div class="section-card-help" class:section-card-help--inset={!padded}>{helpText}</div>
+    <div class="section-card-help" class:section-card-help--inset={!padded}>
+      {helpText}
+    </div>
   {/if}
 
   <slot />

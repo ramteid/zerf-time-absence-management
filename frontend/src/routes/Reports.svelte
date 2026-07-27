@@ -212,10 +212,7 @@
       // leaving `from` in the future, sending from > to to the backend (which
       // rejects it with a raw, untranslated validation error). Bail out with
       // the same friendly message exportCsv() already shows for this case.
-      const { from: qFrom, to: qTo, active } = timeQueryRange(
-        period,
-        todayIso,
-      );
+      const { from: qFrom, to: qTo, active } = timeQueryRange(period, todayIso);
       if (!active) {
         exportError = $t("future_period_no_time_data");
         return;

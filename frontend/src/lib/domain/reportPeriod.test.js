@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { periodBounds, timeQueryRange, leaveYearForPeriod } from "./reportPeriod.js";
+import {
+  periodBounds,
+  timeQueryRange,
+  leaveYearForPeriod,
+} from "./reportPeriod.js";
 
 describe("periodBounds", () => {
   it("expands a month into its first/last day", () => {

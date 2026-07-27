@@ -112,7 +112,11 @@ async fn logs_endpoint_clamps_an_oversized_limit_to_500() {
     let rows = body["entries"]
         .as_array()
         .expect("logs response must contain an entries array");
-    assert_eq!(rows.len(), 500, "limit must be clamped to the 500-row ceiling");
+    assert_eq!(
+        rows.len(),
+        500,
+        "limit must be clamped to the 500-row ceiling"
+    );
     assert_eq!(body["total"].as_i64(), Some(510));
 
     app.cleanup().await;

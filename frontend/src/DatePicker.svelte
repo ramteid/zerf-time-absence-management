@@ -368,7 +368,6 @@
     padding-right: 34px;
   }
 
-
   /* ── Calendar container base (light + dark theming) ── */
   :global(.flatpickr-calendar.zf-date-picker-calendar) {
     background: var(--bg-surface);
