@@ -190,7 +190,7 @@
                   on:change={(event) =>
                     toggleCategory(category.slug, event.currentTarget.checked)}
                 />
-                {category.name}
+                {$t(category.name)}
                 {#if !category.active}
                   <span class="zf-label-hint">({$t("inactive")})</span>
                 {/if}
@@ -224,30 +224,22 @@
           </label>
         </div>
       </div>
-
-      <div class="form-actions">
-        <button
-          class="zf-btn zf-btn-accent-soft"
-          on:click={sendNow}
-          disabled={sending || saving || !settings.payroll_report_enabled}
-        >
-          {#if sending}
-            {$t("Sending...")}
-          {:else}
-            {$t("Send now")}
-          {/if}
-        </button>
-      </div>
-      <div class="field-hint">
-        {$t(
-          "Send now prepares the previous month immediately and sends it if the month is already final. It does not replace the scheduled monthly run.",
-        )}
-      </div>
     </div>
   </div>
 
-  <div class="zf-card card-padded">
+  <div class="zf-card zf-card-section">
     <div class="form-actions">
+      <button
+        class="zf-btn zf-btn-accent-soft"
+        on:click={sendNow}
+        disabled={sending || saving || !settings.payroll_report_enabled}
+      >
+        {#if sending}
+          {$t("Sending...")}
+        {:else}
+          {$t("Send now")}
+        {/if}
+      </button>
       <button
         class="zf-btn zf-btn-primary"
         on:click={save}
@@ -260,15 +252,30 @@
         {/if}
       </button>
     </div>
+    <div class="field-hint">
+      {$t(
+        "Send now prepares the previous month immediately and sends it if the month is already final. It does not replace the scheduled monthly run.",
+      )}
+    </div>
   </div>
 </div>
 
 <style>
-  /* Category checkboxes wrap into columns so a long list stays compact. */
+  /* Category checkboxes line up in a fixed grid (instead of free-flowing
+     flex-wrap) so entries stay aligned into clean rows/columns regardless of
+     label length — flex-wrap let longer German translations push later
+     entries into ragged, inconsistent positions. Collapses to a single
+     column once the viewport is too narrow for a second one. */
   .category-options {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px 24px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 8px 24px;
     margin-top: 8px;
+  }
+
+  .form-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
   }
 </style>

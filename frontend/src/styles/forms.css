@@ -84,6 +84,13 @@ input[type="radio"]:disabled {
   letter-spacing: 0.01em;
 }
 
+/* .zf-label doubles as a flex row when paired with .zf-row (e.g. a checkbox
+   label): the block display above must lose to the flex layout so the
+   control and its caption stay vertically centered on one line. */
+.zf-label.zf-row {
+  display: flex;
+}
+
 /* Checkbox/radio row: control and caption on one line. */
 .zf-check-label {
   display: flex;
