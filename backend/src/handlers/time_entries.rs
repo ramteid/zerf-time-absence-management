@@ -6,7 +6,7 @@ use crate::services::reopen_requests::cancel_zombie_reopen_requests;
 use crate::services::time_entries::{
     attach_counts_as_work, clear_submission_pending_for_weeks, log_week_status_audit,
     notification_language, notify_week_status_change, repo_entry_to_service, require_tracks_time,
-    timesheet_submission_reference_type, week_start, AuditedEntry, TimeEntry,
+    timesheet_submission_reference_type, week_start, TimeEntry,
 };
 use crate::AppState;
 use axum::{
@@ -202,20 +202,6 @@ pub async fn delete(
 // Week-level submission, approval, and rejection
 // ---------------------------------------------------------------------------
 
-/// Adapt the `(entry id, entry date)` pairs returned by the submit paths into
-/// the shape the week-level audit helper expects. Both submit paths only ever
-/// touch the requester's own entries, so the owner is the same for all of them.
-fn own_entries_for_audit(owner_id: i64, entries: &[(i64, NaiveDate)]) -> Vec<AuditedEntry> {
-    entries
-        .iter()
-        .map(|(id, entry_date)| AuditedEntry {
-            id: *id,
-            user_id: owner_id,
-            entry_date: *entry_date,
-        })
-        .collect()
-}
-
 /// Submit draft entries for approval. The employee selects entries by ID;
 /// the backend transitions them from draft → submitted in a single transaction
 /// and notifies all assigned approvers. Users with
@@ -265,14 +251,12 @@ pub async fn submit(
             "auto_approved",
             "draft",
             "approved",
-            &own_entries_for_audit(requester.id, &approved),
+            &approved,
             None,
         )
         .await;
-        let user_date_pairs: Vec<(i64, NaiveDate)> = approved
-            .iter()
-            .map(|(_, entry_date)| (requester.id, *entry_date))
-            .collect();
+        let user_date_pairs: Vec<(i64, NaiveDate)> =
+            approved.iter().map(|e| (e.user_id, e.entry_date)).collect();
         crate::services::reports::requeue_export_for_dates(&app_state.pool, &user_date_pairs).await;
         return Ok(Json(serde_json::json!({
             "ok": true,
@@ -303,7 +287,7 @@ pub async fn submit(
         "status_changed",
         "draft",
         "submitted",
-        &own_entries_for_audit(requester.id, &submitted),
+        &submitted,
         None,
     )
     .await;
@@ -311,8 +295,8 @@ pub async fn submit(
     // deciding one week does not leave a stale unread notification for another.
     let submitted_count = submitted.len();
     let mut submitted_weeks = HashSet::new();
-    for (_, entry_date) in &submitted {
-        submitted_weeks.insert(week_start(*entry_date));
+    for entry in &submitted {
+        submitted_weeks.insert(week_start(entry.entry_date));
     }
     let mut sorted_submitted_weeks: Vec<NaiveDate> = submitted_weeks.into_iter().collect();
     sorted_submitted_weeks.sort();
@@ -387,17 +371,14 @@ pub async fn batch_approve(
         .batch_approve(&body.ids, requester.id, requester.is_admin())
         .await?;
     // One audit row per approved week — an approver decides whole weeks, so the
-    // trail records the week and keeps the entry ids in its payload.
+    // trail records the week and embeds a snapshot of every entry in it.
     log_week_status_audit(
         &app_state.pool,
         requester.id,
         "approved",
         "submitted",
         "approved",
-        &approved_entries
-            .iter()
-            .map(AuditedEntry::from)
-            .collect::<Vec<_>>(),
+        &approved_entries,
         None,
     )
     .await;
@@ -483,10 +464,7 @@ pub async fn batch_reject(
         "rejected",
         "submitted",
         "rejected",
-        &rejected_entries
-            .iter()
-            .map(AuditedEntry::from)
-            .collect::<Vec<_>>(),
+        &rejected_entries,
         Some(&rejection_reason),
     )
     .await;

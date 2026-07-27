@@ -1,9 +1,11 @@
 // Tests for the auditLog domain module. The audit log shows admins a history
 // of every data change: who changed what, when, and what it looked like before
 // and after. Key concerns:
-//   - Time-entry audit rows for the same user+action+week are grouped into one
-//     summary row (e.g. "Week 5: 3 changes") to reduce noise
-//   - Non-time-entry rows (users, absences, categories, …) are never grouped
+//   - Week-level decisions (submit/approve/reject/auto-approve a timesheet
+//     week) are their own audit table and always render as a single row,
+//     carrying a full snapshot of every day entry in the week
+//   - Every other row (including individual time entry create/update/delete)
+//     is shown individually, never merged with another row
 //   - Summaries are human-readable with entity-specific formatting
 //   - Action classes control the colour coding in the UI (green = good, red = bad)
 
@@ -22,6 +24,7 @@ import {
   weekInfoFromEntry,
 } from "./auditLog.js";
 import { setLanguage } from "../../i18n.js";
+import { fmtDateShort } from "../../format.js";
 
 // Use English translations so label assertions are predictable across locales.
 setLanguage("en");
@@ -77,36 +80,31 @@ describe("relevantPayload", () => {
 });
 
 describe("weekInfoFromEntry", () => {
-  it("returns null for non-time-entry tables", () => {
-    // Only time_entries rows get grouped by week; other tables display individually.
+  it("returns null for tables other than the week-level audit table", () => {
+    // A single entry edit is its own event and is never shown as a week.
     expect(weekInfoFromEntry({ table_name: "users" })).toBeNull();
+    expect(
+      weekInfoFromEntry({
+        table_name: "time_entries",
+        action: "updated",
+        before_data: null,
+        after_data: '{"entry_date":"2026-01-07"}',
+      }),
+    ).toBeNull();
   });
 
-  it("returns null when entry_date is missing from the payload", () => {
+  it("returns null when week_start_date is missing from the payload", () => {
     const entry = {
-      table_name: "time_entries",
-      action: "updated",
+      table_name: "time_entry_weeks",
+      action: "approved",
       before_data: null,
       after_data: "{}",
     };
     expect(weekInfoFromEntry(entry)).toBeNull();
   });
 
-  it("computes the Monday-based week containing the entry date", () => {
-    // 2026-01-07 (Wednesday) → week starts Monday 2026-01-05.
-    const entry = {
-      table_name: "time_entries",
-      action: "updated",
-      before_data: null,
-      after_data: '{"entry_date":"2026-01-07"}',
-    };
-    const info = weekInfoFromEntry(entry);
-    expect(info.week_start).toBe("2026-01-05");
-    expect(info.week_end).toBe("2026-01-11");
-    expect(typeof info.week_number).toBe("number");
-  });
-
   it("reads the week directly from a week-level row", () => {
+    // 2026-01-05 is already the Monday the backend computed.
     const entry = {
       table_name: "time_entry_weeks",
       action: "approved",
@@ -117,19 +115,7 @@ describe("weekInfoFromEntry", () => {
     const info = weekInfoFromEntry(entry);
     expect(info.week_start).toBe("2026-01-05");
     expect(info.week_end).toBe("2026-01-11");
-  });
-
-  it("falls back to the before snapshot when after_data holds only the status", () => {
-    // Rows written before week-level auditing put the full entry into
-    // before_data and only the new status into after_data. They must still
-    // resolve to a week so historic approvals stay grouped.
-    const entry = {
-      table_name: "time_entries",
-      action: "approved",
-      before_data: '{"entry_date":"2026-01-07","status":"submitted"}',
-      after_data: '{"status":"approved","reviewed_by":1}',
-    };
-    expect(weekInfoFromEntry(entry).week_start).toBe("2026-01-05");
+    expect(typeof info.week_number).toBe("number");
   });
 });
 
@@ -153,6 +139,29 @@ describe("summarize", () => {
       after_data: '{"first_name":"Bob","last_name":"Smith"}',
     };
     expect(summarize(entry, translate)).toBe("Bob Smith");
+  });
+
+  it("returns date and time range for time entry rows", () => {
+    const entry = {
+      table_name: "time_entries",
+      action: "created",
+      before_data: null,
+      after_data:
+        '{"entry_date":"2026-01-07","start_time":"08:00","end_time":"16:00"}',
+    };
+    expect(summarize(entry, translate)).toBe(
+      `${fmtDateShort("2026-01-07")}, 08:00–16:00`,
+    );
+  });
+
+  it("returns just the date for time entry rows without a time range", () => {
+    const entry = {
+      table_name: "time_entries",
+      action: "deleted",
+      before_data: '{"entry_date":"2026-01-07"}',
+      after_data: null,
+    };
+    expect(summarize(entry, translate)).toBe(fmtDateShort("2026-01-07"));
   });
 
   it("returns the category name for category entries", () => {
@@ -347,13 +356,12 @@ describe("actionClass", () => {
   });
 });
 
-describe("buildRows — time-entry grouping", () => {
+describe("buildRows — individual entry rows are never merged", () => {
   const userMap = new Map([[1, "Ada Lead"]]);
 
-  it("groups multiple time_entry changes for the same user+action+week", () => {
-    // Individually showing 20 entry edits for the same week would bury other
-    // audit entries. Grouping them into one row with a count keeps the log
-    // scannable without losing the key facts (who, what week, how many).
+  it("shows each time entry change as its own row, even for the same user/action/week", () => {
+    // A single entry edit is its own event: showing two edits as one merged
+    // row would hide which specific day was touched and when.
     const entries = [
       {
         id: 1,
@@ -373,34 +381,8 @@ describe("buildRows — time-entry grouping", () => {
       },
     ];
     const rows = buildRows(entries, userMap, translate);
-    expect(rows).toHaveLength(1);
-    expect(rows[0].group_count).toBe(2);
-    expect(rows[0].is_time_entry_week).toBe(true);
-  });
-
-  it("does not group entries across different users or actions", () => {
-    // Grouping must be scoped to (user × action × week) — otherwise edits by
-    // different users, or creates vs. deletes, would be incorrectly merged.
-    const entries = [
-      {
-        id: 1,
-        user_id: 1,
-        action: "updated",
-        table_name: "time_entries",
-        before_data: null,
-        after_data: '{"entry_date":"2026-01-06"}',
-      },
-      {
-        id: 2,
-        user_id: 2,
-        action: "updated",
-        table_name: "time_entries",
-        before_data: null,
-        after_data: '{"entry_date":"2026-01-06"}',
-      },
-    ];
-    const rows = buildRows(entries, userMap, translate);
     expect(rows).toHaveLength(2);
+    expect(rows.every((r) => !r.is_time_entry_week)).toBe(true);
   });
 
   it("never groups non-time-entry tables regardless of user and action", () => {
@@ -490,5 +472,67 @@ describe("buildRows — week-level rows", () => {
     ];
     const rows = buildRows(entries, userMap, translate);
     expect(rows[0].week_reason).toBe("Tuesday is missing");
+  });
+
+  it("exposes the per-day entry snapshots embedded in the week payload", () => {
+    const entries = [
+      {
+        id: 13,
+        user_id: 1,
+        action: "approved",
+        table_name: "time_entry_weeks",
+        record_id: 7,
+        before_data: '{"status":"submitted"}',
+        after_data: JSON.stringify({
+          status: "approved",
+          user_id: 7,
+          week_start_date: "2026-01-05",
+          entry_count: 2,
+          entries: [
+            {
+              id: 101,
+              entry_date: "2026-01-05",
+              start_time: "08:00",
+              end_time: "12:00",
+              category_id: 3,
+              category_name: "Core Duties",
+              comment: "morning shift",
+            },
+            {
+              id: 102,
+              entry_date: "2026-01-06",
+              start_time: "09:00",
+              end_time: "17:00",
+              category_id: 3,
+              category_name: "Core Duties",
+              comment: null,
+            },
+          ],
+        }),
+      },
+    ];
+    const rows = buildRows(entries, userMap, translate);
+    expect(rows[0].week_entries).toHaveLength(2);
+    expect(rows[0].week_entries[0].category_name).toBe("Core Duties");
+    expect(rows[0].week_entries[1].comment).toBeNull();
+  });
+
+  it("falls back to an empty entry list for legacy rows without a snapshot", () => {
+    // Rows written before per-entry snapshots existed only carry entry_count.
+    const entries = [
+      {
+        id: 14,
+        user_id: 1,
+        action: "approved",
+        table_name: "time_entry_weeks",
+        record_id: 7,
+        before_data: '{"status":"submitted"}',
+        after_data:
+          '{"status":"approved","user_id":7,"week_start_date":"2026-01-05","entry_count":3,"entry_ids":[1,2,3]}',
+      },
+    ];
+    const rows = buildRows(entries, userMap, translate);
+    expect(rows[0].week_entries).toEqual([]);
+    expect(rows[0].group_count).toBe(3);
   });
 });

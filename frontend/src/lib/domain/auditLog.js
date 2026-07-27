@@ -4,14 +4,13 @@ import {
   fmtDateShort,
   isoDate,
   isoWeek,
-  monday,
   parseDate,
 } from "../../format.js";
 import { absenceKindLabel } from "../../i18n.js";
 
 // Fields to show in the detail popup, per table.
 export const TABLE_FIELDS = {
-  time_entries: ["entry_date", "start_time", "end_time", "status", "note"],
+  time_entries: ["entry_date", "start_time", "end_time", "status", "comment"],
   users: ["first_name", "last_name", "email", "role", "active"],
   absences: ["kind", "start_date", "end_date", "status", "note"],
   categories: ["name", "color", "description", "counts_as_work", "active"],
@@ -25,6 +24,7 @@ export const FIELD_LABEL_KEYS = {
   start_time: "Start",
   end_time: "End",
   status: "Status",
+  comment: "Comment",
   note: "Note",
   first_name: "First name",
   last_name: "Last name",
@@ -68,31 +68,18 @@ export function relevantPayload(entry) {
 }
 
 // Logical table of the backend's week-level audit rows: one row per employee
-// week for submit, approve, reject, and silent auto-approval.
+// week for submit, approve, reject, and silent auto-approval. A single entry
+// edit (create/update/delete) is its own event and is never merged into these
+// — only whole-week decisions are.
 // Mirrors services::time_entries::TIME_ENTRY_WEEK_AUDIT_TABLE.
 export const TIME_ENTRY_WEEK_TABLE = "time_entry_weeks";
 
-// Date that anchors an audit row to a calendar week.
-// Week rows carry their Monday directly. Per-entry rows are anchored by their
-// entry_date; rows written before week-level auditing only put the new status
-// into after_data, so the before snapshot — which still holds the full entry —
-// serves as the fallback.
-function weekAnchorDate(entry) {
-  const payload = relevantPayload(entry);
-  if (entry.table_name === TIME_ENTRY_WEEK_TABLE) {
-    return payload?.week_start_date ?? null;
-  }
-  if (entry.table_name !== "time_entries") return null;
-  return (
-    payload?.entry_date ?? safeParseJson(entry.before_data)?.entry_date ?? null
-  );
-}
-
 export function weekInfoFromEntry(entry) {
-  const anchorDate = weekAnchorDate(entry);
-  if (!anchorDate) return null;
+  if (entry.table_name !== TIME_ENTRY_WEEK_TABLE) return null;
+  const weekStart = relevantPayload(entry)?.week_start_date;
+  if (!weekStart) return null;
 
-  const weekStartDate = monday(parseDate(anchorDate));
+  const weekStartDate = parseDate(weekStart);
   const weekEndDate = addDays(weekStartDate, 6);
   return {
     week_start: isoDate(weekStartDate),
@@ -112,6 +99,13 @@ export function summarize(entry, translate) {
     if (fullName) return fullName;
     if (payload.email) return payload.email;
     return "";
+  }
+
+  if (entry.table_name === "time_entries") {
+    if (payload.entry_date && payload.start_time && payload.end_time) {
+      return `${fmtDateShort(payload.entry_date)}, ${payload.start_time}–${payload.end_time}`;
+    }
+    return payload.entry_date ? fmtDateShort(payload.entry_date) : "";
   }
 
   if (entry.table_name === "absences") {
@@ -266,7 +260,14 @@ function weekSummary(weekInfo, dayCount, translate) {
   });
 }
 
-function weekRow(entry, weekInfo, dayCount, userMap, translate) {
+// A week row embeds a full snapshot of every day entry it covers (date, time
+// range, category, comment) so the detail popup can show all of them without
+// depending on the live time_entries rows. Older rows written before this
+// existed only carry entry_count, so week_entries falls back to [].
+function weekRow(entry, weekInfo, userMap, translate) {
+  const payload = relevantPayload(entry);
+  const weekEntries = payload?.entries ?? [];
+  const dayCount = payload?.entry_count ?? weekEntries.length;
   return {
     ...entry,
     user_label: userLabel(entry.user_id, userMap, translate),
@@ -276,58 +277,30 @@ function weekRow(entry, weekInfo, dayCount, userMap, translate) {
     week_end: weekInfo.week_end,
     week_number: weekInfo.week_number,
     group_count: dayCount,
+    week_entries: weekEntries,
     // Rejections carry the approver's reason; every other action leaves it unset.
-    week_reason: relevantPayload(entry)?.reason ?? null,
+    week_reason: payload?.reason ?? null,
     data_summary: weekSummary(weekInfo, dayCount, translate),
   };
 }
 
+// A week-level row (submit/approve/reject/auto-approve) is one whole-week
+// decision and always stands on its own — including against a second decision
+// on the same week (approve → reopen → approve again), which is a separate
+// event with its own day count. A single entry edit (create/update/delete) is
+// likewise its own event and is shown individually, never merged with others.
 export function buildRows(entries, userMap, translate) {
-  const result = [];
-  // Maps "(user_id):(action):(week_start)" -> index in result
-  const weekGroupIndex = new Map();
-
-  for (const entry of entries) {
-    const weekInfo =
-      entry.table_name === "time_entries" ||
-      entry.table_name === TIME_ENTRY_WEEK_TABLE
-        ? weekInfoFromEntry(entry)
-        : null;
-
-    if (!weekInfo) {
-      result.push({
-        ...entry,
-        user_label: userLabel(entry.user_id, userMap, translate),
-        subject_user_label: subjectUserLabel(entry, userMap),
-        data_summary: summarize(entry, translate),
-        is_time_entry_week: false,
-      });
-      continue;
+  return entries.map((entry) => {
+    const weekInfo = weekInfoFromEntry(entry);
+    if (weekInfo) {
+      return weekRow(entry, weekInfo, userMap, translate);
     }
-
-    // A week row is already one whole-week decision and stands on its own: two
-    // decisions on the same week (approve → reopen → approve again) are
-    // separate events, each with its own day count, and must not be merged.
-    if (entry.table_name === TIME_ENTRY_WEEK_TABLE) {
-      const dayCount = relevantPayload(entry)?.entry_count ?? 1;
-      result.push(weekRow(entry, weekInfo, dayCount, userMap, translate));
-      continue;
-    }
-
-    // Per-entry rows (create/edit/delete of single days) are still written one
-    // per entry, so they get collapsed here into one row per user+action+week.
-    const groupKey = `${entry.user_id ?? ""}:${entry.action}:${weekInfo.week_start}`;
-    const existingIdx = weekGroupIndex.get(groupKey);
-
-    if (existingIdx !== undefined) {
-      const group = result[existingIdx];
-      group.group_count += 1;
-      group.data_summary = weekSummary(group, group.group_count, translate);
-    } else {
-      weekGroupIndex.set(groupKey, result.length);
-      result.push(weekRow(entry, weekInfo, 1, userMap, translate));
-    }
-  }
-
-  return result;
+    return {
+      ...entry,
+      user_label: userLabel(entry.user_id, userMap, translate),
+      subject_user_label: subjectUserLabel(entry, userMap),
+      data_summary: summarize(entry, translate),
+      is_time_entry_week: false,
+    };
+  });
 }

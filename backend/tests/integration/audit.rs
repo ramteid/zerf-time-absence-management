@@ -558,13 +558,32 @@ async fn audit_log_records_one_row_per_submitted_and_approved_week() {
         Some(1),
         "the approving admin is the acting user"
     );
+    let approved_entry_details = approved_row["after_data"]["entries"]
+        .as_array()
+        .expect("the approved week must embed a per-entry snapshot");
     assert_eq!(
-        approved_row["after_data"]["entry_ids"]
-            .as_array()
-            .map(|ids| ids.len()),
-        Some(3),
-        "the approved day entries stay traceable in the payload"
+        approved_entry_details.len(),
+        3,
+        "all three day entries stay individually traceable in the payload"
     );
+    for (day_offset, detail) in approved_entry_details.iter().enumerate() {
+        let expected_date = (week_monday + chrono::Duration::days(day_offset as i64))
+            .format("%Y-%m-%d")
+            .to_string();
+        assert_eq!(
+            detail["entry_date"].as_str(),
+            Some(expected_date.as_str()),
+            "entries are ordered chronologically within the week"
+        );
+        assert_eq!(detail["start_time"].as_str(), Some("08:00"));
+        assert_eq!(detail["end_time"].as_str(), Some("16:00"));
+        assert_eq!(detail["category_id"].as_i64(), Some(category_id));
+        assert!(
+            detail["category_name"].is_string(),
+            "category name must be embedded, not just its id"
+        );
+        assert_eq!(detail["comment"].as_str(), Some("week audit"));
+    }
 
     // No per-entry status rows are written any more.
     for entry_id in &entry_ids {

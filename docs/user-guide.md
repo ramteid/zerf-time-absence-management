@@ -1430,11 +1430,13 @@ system settings, and sensitive operations.
 
 - Audit rows are shown in a human-readable format (for example names, date
   ranges, category names, or setting keys) instead of raw field dumps.
-- Time-entry audit events are shown per week, because that is how a week is
-  submitted and decided. Submitting, approving, and rejecting a week each
-  appear as one row that names the week and how many day entries it covers,
-  and a rejection also shows the reason. Changes to single days (adding,
-  editing, or deleting an entry) are likewise grouped by week and action.
+- Submitting, approving, or rejecting a week each appear as a single row,
+  because that is how a week is actually decided — one row names the week,
+  how many day entries it covers, and (for a rejection) the reason. Clicking
+  it opens every day entry the decision covered, with its time range,
+  category, and comment. Adding, editing, or deleting a single day entry
+  shows up as its own separate row instead, since that is an individual
+  action, not a week-level decision.
 - If the acting user has since been deleted, the actor column shows a
   placeholder instead of a name. The audit record itself is preserved.
 - Entries are listed newest first, 100 per page. Use the pager below the list

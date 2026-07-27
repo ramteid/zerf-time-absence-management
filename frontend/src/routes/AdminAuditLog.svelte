@@ -2,6 +2,8 @@
   import { api } from "../api.js";
   import { t, auditTableLabel, auditActionLabel } from "../i18n.js";
   import { fmtDateTime, fmtDateShort } from "../format.js";
+  import { entryTimeRange } from "../lib/domain/time.js";
+  import { settings } from "../stores.js";
   import LogList from "../LogList.svelte";
   import {
     actionClass,
@@ -17,6 +19,8 @@
   let usersById = new Map();
   // eslint-disable-next-line no-useless-assignment
   let rows = [];
+
+  $: timeFormat = $settings.time_format === "12h" ? "12h" : "24h";
 
   // User names are needed to label every row; load them once up front.
   // Swallow failures here (rather than letting them reject `usersLoaded`
@@ -115,14 +119,38 @@
             })}</span
           >
         </div>
-        <div class="zf-detail-row">
-          <span class="zf-detail-label">{$t("Entries")}</span>
-          <span>{selected.group_count}</span>
-        </div>
         {#if selected.week_reason}
           <div class="zf-detail-row">
             <span class="zf-detail-label">{$t("Reason")}</span>
             <span>{selected.week_reason}</span>
+          </div>
+        {/if}
+        {#if selected.week_entries.length > 0}
+          <div class="week-entries">
+            {#each selected.week_entries as weekEntry (weekEntry.id)}
+              <div class="week-entry-row">
+                <span class="week-entry-date tab-num"
+                  >{fmtDateShort(weekEntry.entry_date)}</span
+                >
+                <span class="week-entry-time tab-num"
+                  >{entryTimeRange(weekEntry, timeFormat)}</span
+                >
+                <span class="week-entry-cat"
+                  >{weekEntry.category_name ??
+                    `#${weekEntry.category_id}`}</span
+                >
+                {#if weekEntry.comment}
+                  <span class="zf-comment week-entry-comment"
+                    >{weekEntry.comment}</span
+                  >
+                {/if}
+              </div>
+            {/each}
+          </div>
+        {:else}
+          <div class="zf-detail-row">
+            <span class="zf-detail-label">{$t("Entries")}</span>
+            <span>{selected.group_count}</span>
           </div>
         {/if}
       {:else}
@@ -199,5 +227,35 @@
 
   .detail-new {
     color: var(--text-primary);
+  }
+
+  .week-entries {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-top: 4px;
+    border-top: 1px solid var(--border);
+  }
+
+  .week-entry-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex-wrap: wrap;
+    font-size: 0.8125rem;
+  }
+
+  .week-entry-date {
+    color: var(--text-secondary);
+    min-width: 4.5rem;
+  }
+
+  .week-entry-cat {
+    color: var(--text-secondary);
+  }
+
+  .week-entry-comment {
+    flex-basis: 100%;
+    color: var(--text-tertiary);
   }
 </style>

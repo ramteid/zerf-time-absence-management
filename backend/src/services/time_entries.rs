@@ -245,60 +245,76 @@ pub async fn notify_week_status_change(
 /// delete, where each row really is an individual action.
 pub const TIME_ENTRY_WEEK_AUDIT_TABLE: &str = "time_entry_weeks";
 
-/// The fields of a time entry needed to attribute it to an employee's week.
-pub struct AuditedEntry {
-    pub id: i64,
-    pub user_id: i64,
-    pub entry_date: NaiveDate,
-}
-
-impl From<&crate::repository::TimeEntry> for AuditedEntry {
-    fn from(entry: &crate::repository::TimeEntry) -> Self {
-        Self {
-            id: entry.id,
-            user_id: entry.user_id,
-            entry_date: entry.entry_date,
-        }
-    }
-}
-
 /// Write one audit row per affected (employee, ISO week) for a week-level
 /// status transition.
 ///
-/// The payload keeps the ids of the entries that moved, so an individual day
-/// remains traceable even though the log shows the week as one event.
-/// Best-effort, like every other audit write: called after the transaction has
-/// committed and never fails the request.
+/// The payload embeds a full snapshot of every entry in the week (date, time
+/// range, category, comment) so the detail popup can show "all days, all
+/// entries" without depending on the live `time_entries` rows, which may since
+/// have been edited, reopened, or deleted. Best-effort, like every other audit
+/// write: called after the transaction has committed and never fails the
+/// request.
 pub async fn log_week_status_audit(
     pool: &crate::db::DatabasePool,
     actor_id: i64,
     action: &str,
     from_status: &str,
     to_status: &str,
-    entries: &[AuditedEntry],
+    entries: &[crate::repository::TimeEntry],
     reason: Option<&str>,
 ) {
-    let mut entry_ids_by_week: HashMap<(i64, NaiveDate), Vec<i64>> = HashMap::new();
+    // Resolve category names once for the whole batch. Embedding the name
+    // (rather than just category_id) keeps the snapshot readable even after
+    // the category is later renamed or deactivated.
+    let category_db = crate::repository::CategoryDb::new(pool.clone());
+    let mut category_names: HashMap<i64, String> = HashMap::new();
+    for category_id in entries
+        .iter()
+        .map(|e| e.category_id)
+        .collect::<HashSet<_>>()
+    {
+        if let Ok(Some(category)) = category_db.find_by_id(category_id).await {
+            category_names.insert(category_id, category.name);
+        }
+    }
+
+    let mut entries_by_week: HashMap<(i64, NaiveDate), Vec<&crate::repository::TimeEntry>> =
+        HashMap::new();
     for entry in entries {
-        entry_ids_by_week
+        entries_by_week
             .entry((entry.user_id, week_start(entry.entry_date)))
             .or_default()
-            .push(entry.id);
+            .push(entry);
     }
 
     // Stable order (employee, then week) so a multi-week batch always produces
     // the same sequence of audit rows.
-    let mut weeks: Vec<((i64, NaiveDate), Vec<i64>)> = entry_ids_by_week.into_iter().collect();
+    let mut weeks: Vec<_> = entries_by_week.into_iter().collect();
     weeks.sort_by_key(|(key, _)| *key);
 
-    for ((user_id, week_monday), mut entry_ids) in weeks {
-        entry_ids.sort_unstable();
+    for ((user_id, week_monday), mut week_entries) in weeks {
+        week_entries.sort_by_key(|e| (e.entry_date, e.id));
+        let entry_details: Vec<serde_json::Value> = week_entries
+            .iter()
+            .map(|e| {
+                serde_json::json!({
+                    "id": e.id,
+                    "entry_date": e.entry_date,
+                    "start_time": e.start_time,
+                    "end_time": e.end_time,
+                    "category_id": e.category_id,
+                    "category_name": category_names.get(&e.category_id),
+                    "comment": e.comment,
+                })
+            })
+            .collect();
+
         let mut after = serde_json::json!({
             "status": to_status,
             "user_id": user_id,
             "week_start_date": week_monday,
-            "entry_count": entry_ids.len(),
-            "entry_ids": entry_ids,
+            "entry_count": entry_details.len(),
+            "entries": entry_details,
         });
         if let Some(reason) = reason {
             after["reason"] = serde_json::Value::String(reason.to_string());
