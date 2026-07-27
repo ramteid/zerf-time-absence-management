@@ -116,9 +116,15 @@
           >
         </div>
         <div class="zf-detail-row">
-          <span class="zf-detail-label">{$t("Days")}</span>
+          <span class="zf-detail-label">{$t("Entries")}</span>
           <span>{selected.group_count}</span>
         </div>
+        {#if selected.week_reason}
+          <div class="zf-detail-row">
+            <span class="zf-detail-label">{$t("Reason")}</span>
+            <span>{selected.week_reason}</span>
+          </div>
+        {/if}
       {:else}
         {#each extractDetailRows(selected, usersById, $t) ?? [] as field (field.label)}
           <div class="zf-detail-row">

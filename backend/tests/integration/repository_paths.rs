@@ -767,17 +767,6 @@ async fn time_entries_repository_workflow() {
         .await
         .expect("empty owned list"));
 
-    let distinct_dates = time_entries
-        .entry_dates_for_ids(&[monday_entry.id, tuesday_entry.id])
-        .await
-        .expect("entry dates for ids");
-    assert_eq!(distinct_dates.len(), 2);
-    assert!(time_entries
-        .entry_dates_for_ids(&[])
-        .await
-        .expect("entry dates for empty ids")
-        .is_empty());
-
     let updated = time_entries
         .update(
             tuesday_entry.id,

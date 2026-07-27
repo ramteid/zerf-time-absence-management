@@ -1429,9 +1429,11 @@ system settings, and sensitive operations.
 
 - Audit rows are shown in a human-readable format (for example names, date
   ranges, category names, or setting keys) instead of raw field dumps.
-- Time-entry audit events are grouped by week and action. This reflects the
-  product workflow, where submitted weeks are handled as one unit rather than
-  as separate per-day operations.
+- Time-entry audit events are shown per week, because that is how a week is
+  submitted and decided. Submitting, approving, and rejecting a week each
+  appear as one row that names the week and how many day entries it covers,
+  and a rejection also shows the reason. Changes to single days (adding,
+  editing, or deleting an entry) are likewise grouped by week and action.
 - If the acting user has since been deleted, the actor column shows a
   placeholder instead of a name. The audit record itself is preserved.
 - Entries are listed newest first, 100 per page. Use the pager below the list
@@ -2029,7 +2031,7 @@ table, including:
 - User creation, update, archive, restore, and deletion.
 - Password resets.
 - Time entry status transitions (submit, approve, reject, reopen, and silent
-  auto-approval on submit).
+  auto-approval on submit), recorded once per week and employee.
 - Absence creation, approval, rejection, revocation, and cancellation.
 - Admin settings changes (language, timezone, country, region).
 - SMTP configuration changes.

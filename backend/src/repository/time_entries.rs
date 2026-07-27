@@ -594,20 +594,6 @@ impl TimeEntryDb {
         Ok(unowned == 0)
     }
 
-    /// Returns the distinct entry dates for the given entry IDs.
-    /// A single query replaces the previous N+1 per-entry date fetches.
-    pub async fn entry_dates_for_ids(&self, ids: &[i64]) -> AppResult<Vec<NaiveDate>> {
-        if ids.is_empty() {
-            return Ok(vec![]);
-        }
-        Ok(
-            sqlx::query_scalar("SELECT DISTINCT entry_date FROM time_entries WHERE id = ANY($1)")
-                .bind(ids)
-                .fetch_all(&self.pool)
-                .await?,
-        )
-    }
-
     pub async fn get_credited_submitted_dates_for_entries(
         &self,
         user_id: i64,
@@ -778,9 +764,15 @@ impl TimeEntryDb {
         Ok(entry)
     }
 
-    /// Atomically mark a batch of entries as submitted for a specific user.
-    /// Returns the IDs that were actually transitioned from draft → submitted.
-    pub async fn submit_batch(&self, user_id: i64, ids: &[i64]) -> AppResult<Vec<i64>> {
+    /// Atomically transition a batch of draft entries to `submitted` for a
+    /// specific user. Returns `(entry id, entry date)` for every entry that
+    /// actually moved, so callers can derive the affected weeks without a
+    /// second query.
+    pub async fn submit_batch(
+        &self,
+        user_id: i64,
+        ids: &[i64],
+    ) -> AppResult<Vec<(i64, NaiveDate)>> {
         let mut tx = self.pool.begin().await?;
         sqlx::query("SELECT pg_advisory_xact_lock($1)")
             .bind(user_id)
@@ -802,11 +794,11 @@ impl TimeEntryDb {
         let submitted = if draft_ids.is_empty() {
             Vec::new()
         } else {
-            sqlx::query_scalar(
+            sqlx::query_as::<_, (i64, NaiveDate)>(
                 "UPDATE time_entries \
                  SET status='submitted', submitted_at=CURRENT_TIMESTAMP \
                  WHERE id = ANY($1) AND status='draft' AND user_id=$2 \
-                 RETURNING id",
+                 RETURNING id, entry_date",
             )
             .bind(&draft_ids)
             .bind(user_id)
@@ -821,12 +813,13 @@ impl TimeEntryDb {
     /// bypassing the 'submitted' stop entirely (draft -> approved directly).
     /// Used when the user has `allow_submission_without_approval=TRUE`: the
     /// system is the implicit reviewer, so `reviewed_by` is set to the user's
-    /// own id. Returns the IDs that were actually transitioned.
+    /// own id. Returns `(entry id, entry date)` for every entry that actually
+    /// moved, like [`Self::submit_batch`].
     pub async fn submit_batch_auto_approved(
         &self,
         user_id: i64,
         ids: &[i64],
-    ) -> AppResult<Vec<i64>> {
+    ) -> AppResult<Vec<(i64, NaiveDate)>> {
         let mut tx = self.pool.begin().await?;
         sqlx::query("SELECT pg_advisory_xact_lock($1)")
             .bind(user_id)
@@ -848,19 +841,21 @@ impl TimeEntryDb {
         let approved = if draft_ids.is_empty() {
             Vec::new()
         } else {
-            sqlx::query_scalar(
+            sqlx::query_as::<_, (i64, NaiveDate)>(
                 "UPDATE time_entries \
                  SET status='approved', submitted_at=CURRENT_TIMESTAMP, \
                      reviewed_by=$1, reviewed_at=CURRENT_TIMESTAMP \
                  WHERE id = ANY($2) AND status='draft' AND user_id=$1 \
-                 RETURNING id",
+                 RETURNING id, entry_date",
             )
             .bind(user_id)
             .bind(&draft_ids)
             .fetch_all(&mut *tx)
             .await?
         };
-        Self::resolve_overlapping_rejected_entries_tx(&mut tx, user_id, user_id, &approved).await?;
+        let approved_ids: Vec<i64> = approved.iter().map(|(id, _)| *id).collect();
+        Self::resolve_overlapping_rejected_entries_tx(&mut tx, user_id, user_id, &approved_ids)
+            .await?;
         tx.commit().await?;
         Ok(approved)
     }

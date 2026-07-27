@@ -87,7 +87,7 @@ describe("AdminAuditLog", () => {
 
     rows[0].click();
     await settle();
-    expect(target.textContent).toContain("Days");
+    expect(target.textContent).toContain("Entries");
     expect(target.textContent).toContain("2");
   });
 

@@ -233,6 +233,92 @@ pub async fn notify_week_status_change(
     }
 }
 
+/// Logical table name used for week-level time entry audit rows.
+///
+/// Submitting, approving and rejecting are week operations: the employee sends
+/// a whole week and the approver decides a whole week with a single click.
+/// Recording one audit row per day entry described the database write, not the
+/// action a person took, and buried every other event in the log. These
+/// transitions therefore get their own logical table whose *record* is the
+/// affected employee; the week itself is carried in `week_start_date` inside
+/// the payload. Per-entry rows (`time_entries`) still cover create/update/
+/// delete, where each row really is an individual action.
+pub const TIME_ENTRY_WEEK_AUDIT_TABLE: &str = "time_entry_weeks";
+
+/// The fields of a time entry needed to attribute it to an employee's week.
+pub struct AuditedEntry {
+    pub id: i64,
+    pub user_id: i64,
+    pub entry_date: NaiveDate,
+}
+
+impl From<&crate::repository::TimeEntry> for AuditedEntry {
+    fn from(entry: &crate::repository::TimeEntry) -> Self {
+        Self {
+            id: entry.id,
+            user_id: entry.user_id,
+            entry_date: entry.entry_date,
+        }
+    }
+}
+
+/// Write one audit row per affected (employee, ISO week) for a week-level
+/// status transition.
+///
+/// The payload keeps the ids of the entries that moved, so an individual day
+/// remains traceable even though the log shows the week as one event.
+/// Best-effort, like every other audit write: called after the transaction has
+/// committed and never fails the request.
+pub async fn log_week_status_audit(
+    pool: &crate::db::DatabasePool,
+    actor_id: i64,
+    action: &str,
+    from_status: &str,
+    to_status: &str,
+    entries: &[AuditedEntry],
+    reason: Option<&str>,
+) {
+    let mut entry_ids_by_week: HashMap<(i64, NaiveDate), Vec<i64>> = HashMap::new();
+    for entry in entries {
+        entry_ids_by_week
+            .entry((entry.user_id, week_start(entry.entry_date)))
+            .or_default()
+            .push(entry.id);
+    }
+
+    // Stable order (employee, then week) so a multi-week batch always produces
+    // the same sequence of audit rows.
+    let mut weeks: Vec<((i64, NaiveDate), Vec<i64>)> = entry_ids_by_week.into_iter().collect();
+    weeks.sort_by_key(|(key, _)| *key);
+
+    for ((user_id, week_monday), mut entry_ids) in weeks {
+        entry_ids.sort_unstable();
+        let mut after = serde_json::json!({
+            "status": to_status,
+            "user_id": user_id,
+            "week_start_date": week_monday,
+            "entry_count": entry_ids.len(),
+            "entry_ids": entry_ids,
+        });
+        if let Some(reason) = reason {
+            after["reason"] = serde_json::Value::String(reason.to_string());
+        }
+        audit::log(
+            pool,
+            actor_id,
+            action,
+            TIME_ENTRY_WEEK_AUDIT_TABLE,
+            // The record identified by a week row is the employee whose week
+            // changed; `?table_name=time_entry_weeks&record_id=<user id>`
+            // therefore yields that employee's full week-level history.
+            user_id,
+            Some(serde_json::json!({"status": from_status})),
+            Some(after),
+        )
+        .await;
+    }
+}
+
 /// Return `Forbidden` when the requesting user has time tracking disabled.
 /// Delegates to the canonical implementation in `services::users`.
 pub fn require_tracks_time(user: &User) -> AppResult<()> {

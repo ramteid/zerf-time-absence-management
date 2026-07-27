@@ -4,9 +4,9 @@ use crate::i18n;
 use crate::middleware::auth::User;
 use crate::services::reopen_requests::cancel_zombie_reopen_requests;
 use crate::services::time_entries::{
-    attach_counts_as_work, clear_submission_pending_for_weeks, notification_language,
-    notify_week_status_change, repo_entry_to_service, require_tracks_time,
-    timesheet_submission_reference_type, week_start, TimeEntry,
+    attach_counts_as_work, clear_submission_pending_for_weeks, log_week_status_audit,
+    notification_language, notify_week_status_change, repo_entry_to_service, require_tracks_time,
+    timesheet_submission_reference_type, week_start, AuditedEntry, TimeEntry,
 };
 use crate::AppState;
 use axum::{
@@ -202,6 +202,20 @@ pub async fn delete(
 // Week-level submission, approval, and rejection
 // ---------------------------------------------------------------------------
 
+/// Adapt the `(entry id, entry date)` pairs returned by the submit paths into
+/// the shape the week-level audit helper expects. Both submit paths only ever
+/// touch the requester's own entries, so the owner is the same for all of them.
+fn own_entries_for_audit(owner_id: i64, entries: &[(i64, NaiveDate)]) -> Vec<AuditedEntry> {
+    entries
+        .iter()
+        .map(|(id, entry_date)| AuditedEntry {
+            id: *id,
+            user_id: owner_id,
+            entry_date: *entry_date,
+        })
+        .collect()
+}
+
 /// Submit draft entries for approval. The employee selects entries by ID;
 /// the backend transitions them from draft → submitted in a single transaction
 /// and notifies all assigned approvers. Users with
@@ -239,50 +253,30 @@ pub async fn submit(
     // silent by design (mirrors reopen auto-approval) — no one is notified
     // and no emails are sent, to either the requester or the approvers.
     if requester.allow_submission_without_approval {
-        let approved_ids = app_state
+        let approved = app_state
             .db
             .time_entries
             .submit_batch_auto_approved(requester.id, &body.ids)
             .await?;
-        for entry_id in &approved_ids {
-            audit::log(
-                &app_state.pool,
-                requester.id,
-                "auto_approved",
-                "time_entries",
-                *entry_id,
-                Some(serde_json::json!({"status": "draft"})),
-                Some(serde_json::json!({"status": "approved", "reviewed_by": requester.id})),
-            )
-            .await;
-        }
-        match app_state
-            .db
-            .time_entries
-            .entry_dates_for_ids(&approved_ids)
-            .await
-        {
-            Ok(entry_dates) => {
-                let user_date_pairs: Vec<(i64, NaiveDate)> = entry_dates
-                    .into_iter()
-                    .map(|entry_date| (requester.id, entry_date))
-                    .collect();
-                crate::services::reports::requeue_export_for_dates(
-                    &app_state.pool,
-                    &user_date_pairs,
-                )
-                .await;
-            }
-            Err(e) => {
-                tracing::warn!(
-                    target: "zerf::time_entries",
-                    "failed to load auto-approved entry dates for report export requeue: {e}"
-                );
-            }
-        }
+        // One audit row per auto-approved week, not per day entry.
+        log_week_status_audit(
+            &app_state.pool,
+            requester.id,
+            "auto_approved",
+            "draft",
+            "approved",
+            &own_entries_for_audit(requester.id, &approved),
+            None,
+        )
+        .await;
+        let user_date_pairs: Vec<(i64, NaiveDate)> = approved
+            .iter()
+            .map(|(_, entry_date)| (requester.id, *entry_date))
+            .collect();
+        crate::services::reports::requeue_export_for_dates(&app_state.pool, &user_date_pairs).await;
         return Ok(Json(serde_json::json!({
             "ok": true,
-            "count": approved_ids.len(),
+            "count": approved.len(),
             "auto_approved": true,
         })));
     }
@@ -296,35 +290,29 @@ pub async fn submit(
         crate::services::auth::required_approval_recipient_ids(&app_state.pool, &requester).await?;
 
     // Phase 3: atomically submit all draft entries in a single transaction.
-    let submitted_ids = app_state
+    let submitted = app_state
         .db
         .time_entries
         .submit_batch(requester.id, &body.ids)
         .await?;
-    // Phase 4: audit logs (best-effort, after commit).
-    for entry_id in &submitted_ids {
-        audit::log(
-            &app_state.pool,
-            requester.id,
-            "status_changed",
-            "time_entries",
-            *entry_id,
-            Some(serde_json::json!({"status": "draft"})),
-            Some(serde_json::json!({"status": "submitted"})),
-        )
-        .await;
-    }
+    // Phase 4: audit logs (best-effort, after commit) — one row per submitted
+    // week, mirroring the week the employee actually submitted.
+    log_week_status_audit(
+        &app_state.pool,
+        requester.id,
+        "status_changed",
+        "draft",
+        "submitted",
+        &own_entries_for_audit(requester.id, &submitted),
+        None,
+    )
+    .await;
     // Phase 5: notify approvers. Submission notifications are week-scoped so
     // deciding one week does not leave a stale unread notification for another.
-    let submitted_count = submitted_ids.len();
+    let submitted_count = submitted.len();
     let mut submitted_weeks = HashSet::new();
-    for entry_date in app_state
-        .db
-        .time_entries
-        .entry_dates_for_ids(&submitted_ids)
-        .await?
-    {
-        submitted_weeks.insert(week_start(entry_date));
+    for (_, entry_date) in &submitted {
+        submitted_weeks.insert(week_start(*entry_date));
     }
     let mut sorted_submitted_weeks: Vec<NaiveDate> = submitted_weeks.into_iter().collect();
     sorted_submitted_weeks.sort();
@@ -398,19 +386,21 @@ pub async fn batch_approve(
         .time_entries
         .batch_approve(&body.ids, requester.id, requester.is_admin())
         .await?;
-    // Audit each entry individually for traceability.
-    for entry in &approved_entries {
-        audit::log(
-            &app_state.pool,
-            requester.id,
-            "approved",
-            "time_entries",
-            entry.id,
-            serde_json::to_value(entry).ok(),
-            Some(serde_json::json!({"status": "approved", "reviewed_by": requester.id})),
-        )
-        .await;
-    }
+    // One audit row per approved week — an approver decides whole weeks, so the
+    // trail records the week and keeps the entry ids in its payload.
+    log_week_status_audit(
+        &app_state.pool,
+        requester.id,
+        "approved",
+        "submitted",
+        "approved",
+        &approved_entries
+            .iter()
+            .map(AuditedEntry::from)
+            .collect::<Vec<_>>(),
+        None,
+    )
+    .await;
     // Send one consolidated notification per affected user.
     if !approved_entries.is_empty() {
         notify_week_status_change(
@@ -486,19 +476,20 @@ pub async fn batch_reject(
             &rejection_reason,
         )
         .await?;
-    // Audit each rejected entry individually for traceability.
-    for entry in &rejected_entries {
-        audit::log(
-            &app_state.pool,
-            requester.id,
-            "rejected",
-            "time_entries",
-            entry.id,
-            serde_json::to_value(entry).ok(),
-            Some(serde_json::json!({"status": "rejected", "reason": rejection_reason})),
-        )
-        .await;
-    }
+    // One audit row per rejected week, carrying the reason the approver gave.
+    log_week_status_audit(
+        &app_state.pool,
+        requester.id,
+        "rejected",
+        "submitted",
+        "rejected",
+        &rejected_entries
+            .iter()
+            .map(AuditedEntry::from)
+            .collect::<Vec<_>>(),
+        Some(&rejection_reason),
+    )
+    .await;
     // Send one consolidated rejection notification per affected user.
     if !rejected_entries.is_empty() {
         notify_week_status_change(

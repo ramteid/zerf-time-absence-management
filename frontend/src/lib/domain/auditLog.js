@@ -67,13 +67,32 @@ export function relevantPayload(entry) {
   return safeParseJson(payload);
 }
 
-export function weekInfoFromEntry(entry) {
-  if (entry.table_name !== "time_entries") return null;
-  const payload = relevantPayload(entry);
-  const entryDate = payload?.entry_date;
-  if (!entryDate) return null;
+// Logical table of the backend's week-level audit rows: one row per employee
+// week for submit, approve, reject, and silent auto-approval.
+// Mirrors services::time_entries::TIME_ENTRY_WEEK_AUDIT_TABLE.
+export const TIME_ENTRY_WEEK_TABLE = "time_entry_weeks";
 
-  const weekStartDate = monday(parseDate(entryDate));
+// Date that anchors an audit row to a calendar week.
+// Week rows carry their Monday directly. Per-entry rows are anchored by their
+// entry_date; rows written before week-level auditing only put the new status
+// into after_data, so the before snapshot — which still holds the full entry —
+// serves as the fallback.
+function weekAnchorDate(entry) {
+  const payload = relevantPayload(entry);
+  if (entry.table_name === TIME_ENTRY_WEEK_TABLE) {
+    return payload?.week_start_date ?? null;
+  }
+  if (entry.table_name !== "time_entries") return null;
+  return (
+    payload?.entry_date ?? safeParseJson(entry.before_data)?.entry_date ?? null
+  );
+}
+
+export function weekInfoFromEntry(entry) {
+  const anchorDate = weekAnchorDate(entry);
+  if (!anchorDate) return null;
+
+  const weekStartDate = monday(parseDate(anchorDate));
   const weekEndDate = addDays(weekStartDate, 6);
   return {
     week_start: isoDate(weekStartDate),
@@ -222,6 +241,7 @@ export function actionClass(action) {
   if (
     action === "created" ||
     action === "approved" ||
+    action === "auto_approved" ||
     action === "reopened" ||
     action === "restored"
   )
@@ -237,6 +257,31 @@ export function actionClass(action) {
   return "action-muted";
 }
 
+function weekSummary(weekInfo, dayCount, translate) {
+  return translate("audit_time_entries_week_summary", {
+    week: weekInfo.week_number,
+    from: fmtDateShort(weekInfo.week_start),
+    to: fmtDateShort(weekInfo.week_end),
+    count: dayCount,
+  });
+}
+
+function weekRow(entry, weekInfo, dayCount, userMap, translate) {
+  return {
+    ...entry,
+    user_label: userLabel(entry.user_id, userMap, translate),
+    subject_user_label: subjectUserLabel(entry, userMap),
+    is_time_entry_week: true,
+    week_start: weekInfo.week_start,
+    week_end: weekInfo.week_end,
+    week_number: weekInfo.week_number,
+    group_count: dayCount,
+    // Rejections carry the approver's reason; every other action leaves it unset.
+    week_reason: relevantPayload(entry)?.reason ?? null,
+    data_summary: weekSummary(weekInfo, dayCount, translate),
+  };
+}
+
 export function buildRows(entries, userMap, translate) {
   const result = [];
   // Maps "(user_id):(action):(week_start)" -> index in result
@@ -244,7 +289,10 @@ export function buildRows(entries, userMap, translate) {
 
   for (const entry of entries) {
     const weekInfo =
-      entry.table_name === "time_entries" ? weekInfoFromEntry(entry) : null;
+      entry.table_name === "time_entries" ||
+      entry.table_name === TIME_ENTRY_WEEK_TABLE
+        ? weekInfoFromEntry(entry)
+        : null;
 
     if (!weekInfo) {
       result.push({
@@ -257,36 +305,27 @@ export function buildRows(entries, userMap, translate) {
       continue;
     }
 
+    // A week row is already one whole-week decision and stands on its own: two
+    // decisions on the same week (approve → reopen → approve again) are
+    // separate events, each with its own day count, and must not be merged.
+    if (entry.table_name === TIME_ENTRY_WEEK_TABLE) {
+      const dayCount = relevantPayload(entry)?.entry_count ?? 1;
+      result.push(weekRow(entry, weekInfo, dayCount, userMap, translate));
+      continue;
+    }
+
+    // Per-entry rows (create/edit/delete of single days) are still written one
+    // per entry, so they get collapsed here into one row per user+action+week.
     const groupKey = `${entry.user_id ?? ""}:${entry.action}:${weekInfo.week_start}`;
     const existingIdx = weekGroupIndex.get(groupKey);
 
     if (existingIdx !== undefined) {
       const group = result[existingIdx];
       group.group_count += 1;
-      group.data_summary = translate("audit_time_entries_week_summary", {
-        week: group.week_number,
-        from: fmtDateShort(group.week_start),
-        to: fmtDateShort(group.week_end),
-        count: group.group_count,
-      });
+      group.data_summary = weekSummary(group, group.group_count, translate);
     } else {
       weekGroupIndex.set(groupKey, result.length);
-      result.push({
-        ...entry,
-        user_label: userLabel(entry.user_id, userMap, translate),
-        subject_user_label: subjectUserLabel(entry, userMap),
-        is_time_entry_week: true,
-        week_start: weekInfo.week_start,
-        week_end: weekInfo.week_end,
-        week_number: weekInfo.week_number,
-        group_count: 1,
-        data_summary: translate("audit_time_entries_week_summary", {
-          week: weekInfo.week_number,
-          from: fmtDateShort(weekInfo.week_start),
-          to: fmtDateShort(weekInfo.week_end),
-          count: 1,
-        }),
-      });
+      result.push(weekRow(entry, weekInfo, 1, userMap, translate));
     }
   }
 

@@ -343,13 +343,15 @@ async fn time_entry_and_cr_workflow() {
             .get(&format!("/api/v1/audit-log?user_id={}", lead_id))
             .await;
         assert_eq!(st, StatusCode::OK, "lead audit log");
+        // The lead decided whole weeks, so their approve and their reject each
+        // leave exactly one week-level row instead of one row per day entry.
         let reviewer_entries = serde_json::to_string(&body)
             .unwrap()
-            .matches("\"table_name\":\"time_entries\"")
+            .matches("\"table_name\":\"time_entry_weeks\"")
             .count();
         assert!(
             reviewer_entries >= 2,
-            "reviewer time-entry audit entries={} (need >=2)",
+            "reviewer week audit entries={} (need >=2)",
             reviewer_entries
         );
     }
@@ -1320,10 +1322,18 @@ async fn tina_time_tracking_journey() {
         let (_, body) = admin
             .get(&format!("/api/v1/audit-log?user_id={}", tina_id))
             .await;
+        // One row per entry she created or edited, plus one week-level row per
+        // week she submitted (a submission is a single event, not one per day).
         assert!(
-            count_ids(&body["entries"]) > 15,
-            "tina has >15 audit entries (got {})",
+            count_ids(&body["entries"]) > 10,
+            "tina has >10 audit entries (got {})",
             count_ids(&body["entries"])
+        );
+        assert!(
+            serde_json::to_string(&body)
+                .unwrap()
+                .contains("\"table_name\":\"time_entry_weeks\""),
+            "tina's week submissions must be audited at week level"
         );
     }
 

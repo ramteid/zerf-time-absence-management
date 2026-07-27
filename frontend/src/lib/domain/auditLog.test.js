@@ -105,6 +105,32 @@ describe("weekInfoFromEntry", () => {
     expect(info.week_end).toBe("2026-01-11");
     expect(typeof info.week_number).toBe("number");
   });
+
+  it("reads the week directly from a week-level row", () => {
+    const entry = {
+      table_name: "time_entry_weeks",
+      action: "approved",
+      before_data: '{"status":"submitted"}',
+      after_data:
+        '{"status":"approved","user_id":7,"week_start_date":"2026-01-05","entry_count":5}',
+    };
+    const info = weekInfoFromEntry(entry);
+    expect(info.week_start).toBe("2026-01-05");
+    expect(info.week_end).toBe("2026-01-11");
+  });
+
+  it("falls back to the before snapshot when after_data holds only the status", () => {
+    // Rows written before week-level auditing put the full entry into
+    // before_data and only the new status into after_data. They must still
+    // resolve to a week so historic approvals stay grouped.
+    const entry = {
+      table_name: "time_entries",
+      action: "approved",
+      before_data: '{"entry_date":"2026-01-07","status":"submitted"}',
+      after_data: '{"status":"approved","reviewed_by":1}',
+    };
+    expect(weekInfoFromEntry(entry).week_start).toBe("2026-01-05");
+  });
 });
 
 describe("summarize", () => {
@@ -401,5 +427,68 @@ describe("buildRows — time-entry grouping", () => {
     const rows = buildRows(entries, userMap, translate);
     expect(rows).toHaveLength(2);
     expect(rows.every((r) => !r.is_time_entry_week)).toBe(true);
+  });
+});
+
+describe("buildRows — week-level rows", () => {
+  const userMap = new Map([
+    [1, "Ada Lead"],
+    [7, "Bob Employee"],
+  ]);
+
+  it("renders one row per week decision with the backend's entry count", () => {
+    const entries = [
+      {
+        id: 10,
+        user_id: 1,
+        action: "approved",
+        table_name: "time_entry_weeks",
+        record_id: 7,
+        before_data: '{"status":"submitted"}',
+        after_data:
+          '{"status":"approved","user_id":7,"week_start_date":"2026-01-05","entry_count":5,"entry_ids":[1,2,3,4,5]}',
+      },
+    ];
+    const rows = buildRows(entries, userMap, translate);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].is_time_entry_week).toBe(true);
+    expect(rows[0].group_count).toBe(5);
+    // The approver acted for someone else, so the subject is shown separately.
+    expect(rows[0].subject_user_label).toBe("Bob Employee");
+    expect(rows[0].week_start).toBe("2026-01-05");
+  });
+
+  it("keeps repeated decisions on the same week as separate rows", () => {
+    // Approve → reopen → approve again are distinct events. Merging them would
+    // invent a single approval covering the sum of both day counts.
+    const week = (id, count) => ({
+      id,
+      user_id: 1,
+      action: "approved",
+      table_name: "time_entry_weeks",
+      record_id: 7,
+      before_data: '{"status":"submitted"}',
+      after_data: `{"status":"approved","user_id":7,"week_start_date":"2026-01-05","entry_count":${count}}`,
+    });
+    const rows = buildRows([week(11, 5), week(10, 2)], userMap, translate);
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.group_count)).toEqual([5, 2]);
+  });
+
+  it("exposes the rejection reason of a rejected week", () => {
+    const entries = [
+      {
+        id: 12,
+        user_id: 1,
+        action: "rejected",
+        table_name: "time_entry_weeks",
+        record_id: 7,
+        before_data: '{"status":"submitted"}',
+        after_data:
+          '{"status":"rejected","user_id":7,"week_start_date":"2026-01-05","entry_count":3,"reason":"Tuesday is missing"}',
+      },
+    ];
+    const rows = buildRows(entries, userMap, translate);
+    expect(rows[0].week_reason).toBe("Tuesday is missing");
   });
 });
