@@ -18,6 +18,33 @@ use serde::Deserialize;
 
 // All setting key constants are used via `settings::` module — no re-imports needed.
 
+/// Persist one optional settings field inside an open transaction.
+/// `None` means "the request did not touch this field", so the stored value is
+/// kept. The three arms cover the value shapes the settings tabs submit:
+/// strings (default), booleans, and numbers.
+macro_rules! save_if_some {
+    ($transaction:expr, $key:expr, $value:expr) => {
+        if let Some(ref value) = $value {
+            save_setting_tx(&mut $transaction, $key, value).await?;
+        }
+    };
+    ($transaction:expr, $key:expr, $value:expr, bool) => {
+        if let Some(value) = $value {
+            save_setting_tx(
+                &mut $transaction,
+                $key,
+                if value { "true" } else { "false" },
+            )
+            .await?;
+        }
+    };
+    ($transaction:expr, $key:expr, $value:expr, num) => {
+        if let Some(value) = $value {
+            save_setting_tx(&mut $transaction, $key, &value.to_string()).await?;
+        }
+    };
+}
+
 #[derive(Deserialize)]
 pub struct UpdateSettings {
     pub ui_language: String,
@@ -554,7 +581,12 @@ pub async fn update_upload_settings(
     let effective_backup_upload_enabled = match body.backup_upload_enabled {
         Some(v) => v,
         None => {
-            load_setting(&app_state.pool, settings::BACKUP_UPLOAD_ENABLED_KEY, "false").await?
+            load_setting(
+                &app_state.pool,
+                settings::BACKUP_UPLOAD_ENABLED_KEY,
+                "false",
+            )
+            .await?
                 == "true"
         }
     };
@@ -573,49 +605,43 @@ pub async fn update_upload_settings(
 
     let mut transaction = app_state.db.settings.begin().await?;
 
-    macro_rules! save_if_some {
-        ($key:expr, $val:expr) => {
-            if let Some(ref v) = $val {
-                save_setting_tx(&mut transaction, $key, v).await?;
-            }
-        };
-        ($key:expr, $val:expr, bool) => {
-            if let Some(v) = $val {
-                save_setting_tx(&mut transaction, $key, if v { "true" } else { "false" }).await?;
-            }
-        };
-        ($key:expr, $val:expr, num) => {
-            if let Some(v) = $val {
-                save_setting_tx(&mut transaction, $key, &v.to_string()).await?;
-            }
-        };
-    }
-
     save_if_some!(
+        transaction,
         settings::REPORT_UPLOAD_ENABLED_KEY,
         body.report_upload_enabled,
         bool
     );
-    save_if_some!(settings::REPORT_UPLOAD_URL_KEY, body.report_upload_url);
+    save_if_some!(
+        transaction,
+        settings::REPORT_UPLOAD_URL_KEY,
+        body.report_upload_url
+    );
     // Password: None = keep, Some("") = clear, Some("...") = update.
     if let Some(ref pw) = body.report_upload_password {
         save_setting_tx(&mut transaction, settings::REPORT_UPLOAD_PASSWORD_KEY, pw).await?;
     }
     save_if_some!(
+        transaction,
         settings::REPORT_UPLOAD_DAY_OF_MONTH_KEY,
         body.report_upload_day_of_month,
         num
     );
     save_if_some!(
+        transaction,
         settings::BACKUP_UPLOAD_ENABLED_KEY,
         body.backup_upload_enabled,
         bool
     );
-    save_if_some!(settings::BACKUP_UPLOAD_URL_KEY, body.backup_upload_url);
+    save_if_some!(
+        transaction,
+        settings::BACKUP_UPLOAD_URL_KEY,
+        body.backup_upload_url
+    );
     if let Some(ref pw) = body.backup_upload_password {
         save_setting_tx(&mut transaction, settings::BACKUP_UPLOAD_PASSWORD_KEY, pw).await?;
     }
     save_if_some!(
+        transaction,
         settings::BACKUP_INTERVAL_DAYS_KEY,
         body.backup_interval_days,
         num
@@ -638,6 +664,175 @@ pub async fn update_upload_settings(
     .await;
 
     Ok(Json(load_admin_settings(&app_state.pool).await?))
+}
+
+/// Request body for the monthly payroll report settings. Every field is
+/// optional so the tab can save individual changes; omitted fields keep their
+/// stored value.
+#[derive(Deserialize)]
+pub struct UpdatePayrollReportSettings {
+    pub payroll_report_enabled: Option<bool>,
+    pub payroll_report_recipient: Option<String>,
+    pub payroll_report_day_of_month: Option<u8>,
+    /// Absence category slugs to include; an empty list disables the section.
+    pub payroll_report_absence_categories: Option<Vec<String>>,
+    pub payroll_report_include_assistant_hours: Option<bool>,
+    pub payroll_report_include_employee_hours: Option<bool>,
+}
+
+pub async fn update_payroll_report_settings(
+    State(app_state): State<AppState>,
+    user: User,
+    Json(body): Json<UpdatePayrollReportSettings>,
+) -> AppResult<Json<AdminSettingsData>> {
+    if !user.is_admin() {
+        return Err(AppError::Forbidden);
+    }
+
+    if let Some(day) = body.payroll_report_day_of_month {
+        if !(1..=28).contains(&day) {
+            return Err(AppError::BadRequest(
+                "payroll_report_day_of_month must be between 1 and 28.".into(),
+            ));
+        }
+    }
+
+    let recipient = body
+        .payroll_report_recipient
+        .as_deref()
+        .map(str::trim)
+        .map(str::to_string);
+    if let Some(ref address) = recipient {
+        if !address.is_empty() {
+            address
+                .parse::<Mailbox>()
+                .map_err(|_| AppError::BadRequest("Invalid payroll report recipient.".into()))?;
+        }
+    }
+
+    // Only known category slugs may be stored — a typo or a deleted category
+    // would otherwise silently drop a section from the report.
+    let categories = match body.payroll_report_absence_categories {
+        Some(ref slugs) => {
+            let known = app_state.db.absence_categories.list_all().await?;
+            let normalized = crate::services::payroll_report::format_category_slugs(slugs);
+            for slug in crate::services::payroll_report::parse_category_slugs(&normalized) {
+                if !known.iter().any(|category| category.slug == slug) {
+                    return Err(AppError::BadRequest(format!(
+                        "Unknown absence category: {slug}"
+                    )));
+                }
+            }
+            Some(normalized)
+        }
+        None => None,
+    };
+
+    // Everything the report needs must be present once it is switched on:
+    // an empty recipient or a report with no sections could never be sent.
+    // Each field saves independently, so compute the effective end state by
+    // falling back to what is stored for the fields this request omits.
+    let stored = crate::services::payroll_report::load_config(&app_state.pool).await?;
+    let effective = crate::services::payroll_report::PayrollReportConfig {
+        enabled: body.payroll_report_enabled.unwrap_or(stored.enabled),
+        recipient: recipient.clone().unwrap_or(stored.recipient),
+        day_of_month: body
+            .payroll_report_day_of_month
+            .unwrap_or(stored.day_of_month),
+        absence_category_slugs: categories
+            .as_deref()
+            .map(crate::services::payroll_report::parse_category_slugs)
+            .unwrap_or(stored.absence_category_slugs),
+        include_assistant_hours: body
+            .payroll_report_include_assistant_hours
+            .unwrap_or(stored.include_assistant_hours),
+        include_employee_hours: body
+            .payroll_report_include_employee_hours
+            .unwrap_or(stored.include_employee_hours),
+    };
+    if effective.enabled {
+        if effective.recipient.trim().is_empty() {
+            return Err(AppError::BadRequest(
+                "A recipient address is required to enable the payroll report.".into(),
+            ));
+        }
+        if effective.has_no_content() {
+            return Err(AppError::BadRequest(
+                "Select at least one section for the payroll report.".into(),
+            ));
+        }
+    }
+
+    let mut transaction = app_state.db.settings.begin().await?;
+    save_if_some!(
+        transaction,
+        settings::PAYROLL_REPORT_ENABLED_KEY,
+        body.payroll_report_enabled,
+        bool
+    );
+    save_if_some!(
+        transaction,
+        settings::PAYROLL_REPORT_RECIPIENT_KEY,
+        recipient
+    );
+    save_if_some!(
+        transaction,
+        settings::PAYROLL_REPORT_DAY_OF_MONTH_KEY,
+        body.payroll_report_day_of_month,
+        num
+    );
+    save_if_some!(
+        transaction,
+        settings::PAYROLL_REPORT_ABSENCE_CATEGORIES_KEY,
+        categories
+    );
+    save_if_some!(
+        transaction,
+        settings::PAYROLL_REPORT_ASSISTANT_HOURS_KEY,
+        body.payroll_report_include_assistant_hours,
+        bool
+    );
+    save_if_some!(
+        transaction,
+        settings::PAYROLL_REPORT_EMPLOYEE_HOURS_KEY,
+        body.payroll_report_include_employee_hours,
+        bool
+    );
+    transaction.commit().await?;
+
+    audit::log(
+        &app_state.pool,
+        user.id,
+        "updated",
+        "payroll_report_settings",
+        0,
+        None,
+        Some(serde_json::json!({
+            "payroll_report_enabled": body.payroll_report_enabled,
+            "payroll_report_day_of_month": body.payroll_report_day_of_month,
+        })),
+    )
+    .await;
+
+    Ok(Json(load_admin_settings(&app_state.pool).await?))
+}
+
+/// Trigger an immediate payroll report run: queue the previous month
+/// (idempotent) and send every queued month that is ready.
+/// Does not affect the scheduled monthly run.
+pub async fn run_payroll_report_now(
+    State(app_state): State<AppState>,
+    user: User,
+) -> AppResult<Json<serde_json::Value>> {
+    if !user.is_admin() {
+        return Err(AppError::Forbidden);
+    }
+    let summary = crate::background::payroll_report::run_now(&app_state).await?;
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "sent": summary.sent,
+        "pending": summary.pending,
+    })))
 }
 
 /// Trigger an immediate report upload: populate the queue for the previous

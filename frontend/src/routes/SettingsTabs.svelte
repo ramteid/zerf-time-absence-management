@@ -21,6 +21,7 @@
     { href: "/settings/holidays", key: "Holidays" },
     { href: "/settings/email", key: "Email" },
     { href: "/settings/upload", key: "Nextcloud Backups" },
+    { href: "/settings/payroll-report", key: "Payroll Report" },
     { href: "/settings/audit-log", key: "Audit Log" },
     { href: "/settings/system-log", key: "System Log" },
   ];

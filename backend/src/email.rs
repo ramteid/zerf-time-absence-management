@@ -5,12 +5,20 @@
 //! The whole feature is no-op when SMTP is not configured in admin settings.
 
 use crate::config::SmtpConfig;
-use lettre::message::{header::ContentType, Mailbox, Message};
+use lettre::message::{header::ContentType, Attachment, Mailbox, Message, MultiPart, SinglePart};
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::transport::smtp::client::{Tls, TlsParameters};
 use lettre::{AsyncSmtpTransport, AsyncTransport, Tokio1Executor};
 use std::sync::Arc;
 use std::time::Duration;
+
+/// A file attached to an outbound email.
+pub struct EmailAttachment {
+    pub filename: String,
+    /// MIME type, e.g. `application/pdf`.
+    pub content_type: String,
+    pub bytes: Vec<u8>,
+}
 
 /// Send `subject` / `body_text` to `to`. `to_name` is the recipient's display
 /// name (e.g. `"Jane Doe"`); when non-empty the envelope becomes
@@ -30,11 +38,42 @@ pub fn send_async(
         return;
     }
     tokio::spawn(async move {
-        if let Err(e) = send_now(&cfg, &to, &to_name, &subject, &body_text).await {
+        if let Err(e) = send_now(&cfg, &to, &to_name, &subject, &body_text, None).await {
             tracing::warn!(target:"zerf::email", "failed to send email to {}: {}", to, e);
         }
     });
 }
+
+/// Send an email and wait for the SMTP transaction to finish, optionally with
+/// one attached file. Unlike [`send_async`] the caller learns whether delivery
+/// succeeded — required for the scheduled payroll report, which may only drop a
+/// month from its queue once the message was actually accepted.
+pub async fn send_with_attachment(
+    cfg: &SmtpConfig,
+    to: &str,
+    to_name: &str,
+    subject: &str,
+    body_text: &str,
+    attachment: EmailAttachment,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // The caller awaits this inside a background loop, so an unresponsive SMTP
+    // server must fail rather than stall the loop until the process restarts.
+    tokio::time::timeout(
+        ATTACHMENT_SEND_TIMEOUT,
+        send_now(cfg, to, to_name, subject, body_text, Some(attachment)),
+    )
+    .await
+    .map_err(|_| -> Box<dyn std::error::Error + Send + Sync> {
+        format!(
+            "SMTP delivery timed out after {} seconds",
+            ATTACHMENT_SEND_TIMEOUT.as_secs()
+        )
+        .into()
+    })?
+}
+
+/// Upper bound for one awaited delivery including its attachment upload.
+const ATTACHMENT_SEND_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Test the SMTP connection by performing a NOOP command. Returns `Ok(())`
 /// on success or an error describing the failure.
@@ -72,6 +111,7 @@ async fn send_now(
     to_name: &str,
     subject: &str,
     body_text: &str,
+    attachment: Option<EmailAttachment>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let from: Mailbox = cfg.from.parse()?;
     // Build a properly quoted RFC 5322 display-name when a name is provided.
@@ -81,12 +121,29 @@ async fn send_now(
         let quoted_name = to_name.trim().replace('\\', "\\\\").replace('"', "\\\"");
         format!("\"{}\" <{}>", quoted_name, to).parse()?
     };
-    let email = Message::builder()
-        .from(from)
-        .to(to_box)
-        .subject(subject)
-        .header(ContentType::TEXT_PLAIN)
-        .body(body_text.to_string())?;
+    let builder = Message::builder().from(from).to(to_box).subject(subject);
+    let email = match attachment {
+        // Plain text stays a single-part message so nothing changes for the
+        // existing notification emails.
+        None => builder
+            .header(ContentType::TEXT_PLAIN)
+            .body(body_text.to_string())?,
+        Some(file) => {
+            let content_type = ContentType::parse(&file.content_type)
+                .unwrap_or_else(|_| ContentType::parse("application/octet-stream").unwrap());
+            builder.multipart(
+                MultiPart::mixed()
+                    .singlepart(
+                        SinglePart::builder()
+                            .header(ContentType::TEXT_PLAIN)
+                            .body(body_text.to_string()),
+                    )
+                    .singlepart(
+                        Attachment::new(file.filename.clone()).body(file.bytes, content_type),
+                    ),
+            )?
+        }
+    };
     build_mailer(cfg, None)?.send(email).await?;
     Ok(())
 }

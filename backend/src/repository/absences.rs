@@ -1,6 +1,6 @@
 use crate::db::DatabasePool;
 use crate::error::{AppError, AppResult};
-use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::Serialize;
 use sqlx::{Postgres, QueryBuilder};
 use std::collections::HashSet;
@@ -102,35 +102,15 @@ impl AbsenceDb {
     }
 
     /// Count contract workdays in a date range, excluding public holidays.
-    ///
-    /// Contract workdays are determined by `workdays_per_week`:
-    ///   - workdays_per_week=5: Mon-Fri (ISO weekday 0-4)
-    ///   - workdays_per_week=4: Mon-Thu (ISO weekday 0-3)
-    ///   - workdays_per_week=6: Mon-Sat (ISO weekday 0-5)
-    ///
-    /// ISO weekday mapping: 0=Monday, 1=Tuesday, ..., 6=Sunday
-    /// A day is a contract workday if: ISO_weekday < workdays_per_week
+    /// Thin alias for [`crate::time_calc::count_workdays`], the single
+    /// implementation shared with the reporting services.
     fn workdays_in_window(
         from: NaiveDate,
         to: NaiveDate,
         holidays: &HashSet<NaiveDate>,
         workdays_per_week: i16,
     ) -> f64 {
-        if to < from {
-            return 0.0;
-        }
-        let mut count = 0.0;
-        let mut d = from;
-        while d <= to {
-            // ISO weekday 0=Mon, 6=Sun; contract workdays are first N days of week
-            if d.weekday().num_days_from_monday() < workdays_per_week as u32
-                && !holidays.contains(&d)
-            {
-                count += 1.0;
-            }
-            d += Duration::days(1);
-        }
-        count
+        crate::time_calc::count_workdays(from, to, holidays, workdays_per_week)
     }
 
     /// Fetch the user's configured workdays_per_week (contract hours per week).

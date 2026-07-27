@@ -1,7 +1,7 @@
 use super::{
     AbsenceCategoryDb, AbsenceDb, AppLogDb, AuditDb, CategoryDb, ErrorNotificationQueueDb,
-    HolidayDb, NotificationBroadcaster, NotificationDb, ReopenRequestDb, ReportDb, SessionDb,
-    SettingsDb, TimeEntryDb, TimesheetExportQueueDb, UserDb,
+    HolidayDb, NotificationBroadcaster, NotificationDb, PayrollReportQueueDb, ReopenRequestDb,
+    ReportDb, SessionDb, SettingsDb, TimeEntryDb, TimesheetExportQueueDb, UserDb,
 };
 use crate::db::DatabasePool;
 
@@ -24,6 +24,7 @@ pub struct Db {
     pub settings: SettingsDb,
     pub reports: ReportDb,
     pub export_queue: TimesheetExportQueueDb,
+    pub payroll_queue: PayrollReportQueueDb,
     pub error_queue: ErrorNotificationQueueDb,
 }
 
@@ -44,6 +45,7 @@ impl Db {
             settings: SettingsDb::new(pool.clone()),
             reports: ReportDb::new(pool.clone()),
             export_queue: TimesheetExportQueueDb::new(pool.clone()),
+            payroll_queue: PayrollReportQueueDb::new(pool.clone()),
             error_queue: ErrorNotificationQueueDb::new(pool),
         }
     }

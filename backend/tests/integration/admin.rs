@@ -598,3 +598,73 @@ async fn admin_full_workflow() {
 
     app.cleanup().await;
 }
+
+/// `PUT /settings/uploads` saves each field independently: fields the request
+/// omits keep their stored value. Guards the shared `save_if_some!` helper the
+/// upload and payroll-report tabs both use.
+#[tokio::test]
+async fn upload_settings_save_and_keep_omitted_fields() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+
+    let (st, body) = admin
+        .put(
+            "/api/v1/settings/uploads",
+            &json!({
+                "report_upload_enabled": true,
+                "report_upload_url": "https://cloud.example.com/s/token123",
+                "report_upload_password": "share-secret",
+                "report_upload_day_of_month": 9,
+                "backup_interval_days": 3,
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "save upload settings: {body}");
+    assert_eq!(body["report_upload_enabled"], true);
+    assert_eq!(
+        body["report_upload_url"],
+        "https://cloud.example.com/s/token123"
+    );
+    assert_eq!(body["report_upload_password_set"], true);
+    assert_eq!(body["report_upload_day_of_month"], 9);
+    assert_eq!(body["backup_interval_days"], 3);
+
+    // A partial update must not clear anything it does not mention.
+    let (st, body) = admin
+        .put(
+            "/api/v1/settings/uploads",
+            &json!({"backup_interval_days": 5}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "partial save: {body}");
+    assert_eq!(body["backup_interval_days"], 5);
+    assert_eq!(body["report_upload_enabled"], true);
+    assert_eq!(
+        body["report_upload_url"],
+        "https://cloud.example.com/s/token123"
+    );
+    assert_eq!(body["report_upload_password_set"], true);
+    assert_eq!(body["report_upload_day_of_month"], 9);
+
+    // Validation still applies.
+    let (st, _) = admin
+        .put(
+            "/api/v1/settings/uploads",
+            &json!({"report_upload_day_of_month": 31}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST, "upload day must be 1-28");
+    let (st, _) = admin
+        .put(
+            "/api/v1/settings/uploads",
+            &json!({"backup_upload_enabled": true, "backup_upload_url": ""}),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::BAD_REQUEST,
+        "enabling backup upload requires a share URL"
+    );
+
+    app.cleanup().await;
+}

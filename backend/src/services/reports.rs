@@ -1452,6 +1452,81 @@ pub async fn all_weeks_ready_for_timesheet_export(
     ))
 }
 
+/// Why a user's month is (not) settled enough to be exported.
+///
+/// Shared by every scheduled monthly export — the per-employee timesheet PDF
+/// upload and the payroll report email — so both judge "this month is final"
+/// by exactly the same rules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MonthExportReadiness {
+    /// Everything in the period is decided; the month can be exported.
+    Ready,
+    /// An archived / tracking-disabled account still has draft, submitted, or
+    /// unresolved rejected entries that nobody can settle from the app.
+    UnresolvedTimeEntries,
+    /// An undecided absence request overlaps the period.
+    PendingAbsenceRequests,
+    /// At least one fully elapsed week of the period is not submitted.
+    WeeksNotSubmitted,
+}
+
+impl MonthExportReadiness {
+    pub fn is_ready(self) -> bool {
+        matches!(self, MonthExportReadiness::Ready)
+    }
+}
+
+/// Evaluate the shared month-finality gate for one user.
+///
+/// Historical-only accounts (archived, or time tracking switched off) cannot
+/// submit anything any more, so missing workdays are a legitimate historical
+/// shape for them — only undecided time-entry rows block their export. Everyone
+/// else must have all elapsed weeks submitted and no pending absence request in
+/// the period, because both would change the exported content afterwards.
+pub async fn month_export_readiness(
+    pool: &crate::db::DatabasePool,
+    user: &crate::repository::User,
+    from: NaiveDate,
+    to: NaiveDate,
+) -> AppResult<MonthExportReadiness> {
+    let reports_db = crate::repository::ReportDb::new(pool.clone());
+    let is_historical_only = user.archived_at.is_some() || !user.tracks_time;
+    if is_historical_only {
+        if reports_db
+            .has_unresolved_time_entries_in_range(user.id, from, to)
+            .await?
+        {
+            return Ok(MonthExportReadiness::UnresolvedTimeEntries);
+        }
+        return Ok(MonthExportReadiness::Ready);
+    }
+
+    let submission_exempt = !crate::roles::has_submission_obligation(&user.role, user.weekly_hours);
+    if !submission_exempt
+        && reports_db
+            .has_requested_absences_in_period(user.id, from, to)
+            .await?
+    {
+        return Ok(MonthExportReadiness::PendingAbsenceRequests);
+    }
+
+    let submitted = all_weeks_ready_for_timesheet_export(
+        pool,
+        user.id,
+        from,
+        to,
+        user.start_date,
+        submission_exempt,
+        user.workdays_per_week,
+    )
+    .await?;
+    Ok(if submitted {
+        MonthExportReadiness::Ready
+    } else {
+        MonthExportReadiness::WeeksNotSubmitted
+    })
+}
+
 #[derive(Serialize)]
 pub struct UserCategoryRow {
     pub user_id: i64,

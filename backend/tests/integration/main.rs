@@ -36,6 +36,7 @@ mod error_notifications;
 mod full_suite;
 mod holidays;
 mod notifications;
+mod payroll_report;
 mod reopen;
 mod reports;
 mod repository_paths;

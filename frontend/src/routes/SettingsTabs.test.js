@@ -69,14 +69,15 @@ describe("SettingsTabs", () => {
     component = mount(SettingsTabs, { target });
     await settle();
     const links = target.querySelectorAll("a[data-link]");
-    // 8 admin tabs + 1 team tab = 9
-    expect(links.length).toBe(9);
+    // 9 admin tabs + 1 team tab = 10
+    expect(links.length).toBe(10);
     const text = target.textContent;
     expect(text).toContain("Settings");
     expect(text).toContain("Users");
     expect(text).toContain("Categories");
     expect(text).toContain("Holidays");
     expect(text).toContain("Email");
+    expect(text).toContain("Payroll Report");
     expect(text).toContain("Team Settings");
     expect(text).toContain("System Log");
   });

@@ -110,6 +110,7 @@ Use this document if you are:
   - [Revoking an approved absence](#revoking-an-approved-absence)
   - [System settings](#system-settings)
   - [Nextcloud Upload](#nextcloud-upload)
+  - [Payroll Report](#payroll-report)
   - [Managing categories](#managing-categories)
   - [Managing holidays](#managing-holidays)
   - [Backup and restore](#backup-and-restore)
@@ -1715,6 +1716,7 @@ Admins configure system-wide behavior in the Settings panel (Settings → Genera
 | SMTP configuration | Server, port, and credentials for outgoing email. Required for registration emails and email reminders. |
 | Public URL | Used to construct login links in registration emails. |
 | Nextcloud Upload | Configure automatic upload of encrypted DB backups and monthly timesheet PDFs to a Nextcloud public share. See [Nextcloud Upload](#nextcloud-upload). |
+| Payroll Report | Email a monthly PDF with absence days and working hours to your payroll accountant or tax office. See [Payroll Report](#payroll-report). |
 | Allow team leads to create assistant users | Off by default. Only an admin can change it. When on, non-admin team leads get a scoped Users tab limited to creating/managing "Assistant" users assigned to them. See [Scoped assistant user management (optional)](#scoped-assistant-user-management-optional). |
 
 ### Nextcloud Upload
@@ -1758,6 +1760,65 @@ If a past month is changed after the PDF was already uploaded - for example an e
 **Upload now** queues the previous month's PDFs for all employees immediately and uploads those who are already fully submitted. Employees who are not yet submitted are uploaded on subsequent daily checks. This does not prevent the scheduled monthly run from processing remaining entries.
 
 If an upload fails or a queued PDF cannot be safely generated yet, admins who opted in to technical error notifications are alerted in the app and by email. The scheduled upload retries automatically on the next daily check.
+
+### Payroll Report
+
+Zerf can email a monthly overview to the people who run your payroll — typically
+a tax office or payroll accountant. The report replaces a hand-maintained
+spreadsheet: it lists the absence days that change what has to be filed or paid,
+and the working days and hours the people paid by the hour actually worked.
+
+The report covers the **previous calendar month** and is sent as a PDF
+attachment to a single configured address. It uses the email server configured
+under Settings → Email, so email must be set up first.
+
+| Setting | Description |
+| --- | --- |
+| Send the payroll report by email | Activates the monthly report. |
+| Recipient email address | The single address the report is sent to. |
+| Send day of month (1–28) | The day on which the previous month is prepared. Default: 5. Set it after your submission deadline so most months are already complete on the first attempt. |
+| Absence days per employee | Tick every absence category that has to appear. Sick days are needed for health-insurance reimbursement, unpaid days reduce the salary payout. Sick and unpaid are pre-selected. |
+| Working days and hours | Tick whose working days and hours are listed: assistants, all other employees, or both. |
+
+At least one recipient and one section are required before the report can be
+switched on.
+
+#### What the PDF contains
+
+- **Absence days**: one row per absence period — person, category, first and last
+  day within the reported month, and the number of contract working days it
+  covers. Weekends, public holidays, and days before a person's start date are
+  not counted; a period that covers only such days is left out entirely.
+  A row that started in the previous month or continues into the next one is cut
+  to the reported month.
+- **Working days and hours**: one row per person — the number of days with
+  approved working time and the total approved hours, given both as hours:minutes
+  and as a decimal value for payroll. Automatic break deduction is already
+  applied, exactly as on the timesheet PDF.
+
+#### When it is sent
+
+The schedule works like the Nextcloud timesheet export. On the configured day the
+previous month is prepared; if the month is not final yet the report waits and is
+retried every day until it can be sent. A month counts as final when, for
+everyone it covers:
+
+- all elapsed weeks are submitted,
+- no absence request is still undecided, and
+- for everyone whose hours are in the report, all time entries of that month are
+  approved — payroll pays by those hours, so a month that is only submitted would
+  understate them, and
+- no stored entries or absences lie before a person's start date, because those
+  days are hidden from every report and would make the figures too low.
+
+While a month is held back, admins who opted in to technical error notifications
+are told which people are still open, so the missing approvals can be chased. If
+the feature was switched off for a while, or the server missed a month boundary,
+all intervening months are prepared as soon as it is switched on again.
+
+**Send now** prepares the previous month immediately and sends it if that month
+is already final. It never skips the checks above and does not replace the
+scheduled monthly run.
 
 ### Managing categories
 

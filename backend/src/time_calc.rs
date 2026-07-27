@@ -75,6 +75,37 @@ pub fn last_day_of_month(year: i32, month: u32) -> u32 {
         .unwrap_or(28)
 }
 
+/// Count contract workdays in `[from, to]`, excluding public holidays.
+///
+/// Contract workdays are determined by `workdays_per_week`:
+///   - workdays_per_week=5: Mon-Fri (ISO weekday 0-4)
+///   - workdays_per_week=4: Mon-Thu (ISO weekday 0-3)
+///   - workdays_per_week=6: Mon-Sat (ISO weekday 0-5)
+///
+/// ISO weekday mapping: 0=Monday, 1=Tuesday, ..., 6=Sunday
+/// A day is a contract workday if: ISO_weekday < workdays_per_week
+pub fn count_workdays(
+    from: NaiveDate,
+    to: NaiveDate,
+    holidays: &std::collections::HashSet<NaiveDate>,
+    workdays_per_week: i16,
+) -> f64 {
+    if to < from {
+        return 0.0;
+    }
+    let mut count = 0.0;
+    let mut date = from;
+    while date <= to {
+        if date.weekday().num_days_from_monday() < workdays_per_week as u32
+            && !holidays.contains(&date)
+        {
+            count += 1.0;
+        }
+        date += Duration::days(1);
+    }
+    count
+}
+
 pub fn parse_hhmm_or_hhmmss(value: &str) -> Option<NaiveTime> {
     NaiveTime::parse_from_str(value, "%H:%M")
         .or_else(|_| NaiveTime::parse_from_str(value, "%H:%M:%S"))

@@ -51,6 +51,17 @@ pub const REPORT_UPLOAD_DAY_OF_MONTH_KEY: &str = "report_upload_day_of_month";
 /// Prevents re-populating the queue after all entries have been processed.
 pub const REPORT_UPLOAD_QUEUE_PERIOD_KEY: &str = "report_upload_queue_period";
 
+// Monthly payroll report email (tax office / payroll accountant).
+pub const PAYROLL_REPORT_ENABLED_KEY: &str = "payroll_report_enabled";
+pub const PAYROLL_REPORT_RECIPIENT_KEY: &str = "payroll_report_recipient";
+pub const PAYROLL_REPORT_DAY_OF_MONTH_KEY: &str = "payroll_report_day_of_month";
+/// Comma-separated absence category slugs whose days are listed in the report.
+pub const PAYROLL_REPORT_ABSENCE_CATEGORIES_KEY: &str = "payroll_report_absence_categories";
+pub const PAYROLL_REPORT_ASSISTANT_HOURS_KEY: &str = "payroll_report_include_assistant_hours";
+pub const PAYROLL_REPORT_EMPLOYEE_HOURS_KEY: &str = "payroll_report_include_employee_hours";
+/// Period for which the payroll report queue was last populated ("YYYY-MM").
+pub const PAYROLL_REPORT_QUEUE_PERIOD_KEY: &str = "payroll_report_queue_period";
+
 // Nextcloud upload — DB backup (backup container reads these via psql; app writes them).
 pub const BACKUP_UPLOAD_ENABLED_KEY: &str = "backup_upload_enabled";
 pub const BACKUP_UPLOAD_URL_KEY: &str = "backup_upload_url";
@@ -206,6 +217,8 @@ pub async fn load_admin_settings(pool: &crate::db::DatabasePool) -> AppResult<Ad
 
     let allow_team_lead_manage_assistants = team_lead_assistant_management_enabled(pool).await?;
 
+    let payroll_report = crate::services::payroll_report::load_config(pool).await?;
+
     Ok(AdminSettingsData {
         base,
         smtp_host: host,
@@ -225,6 +238,12 @@ pub async fn load_admin_settings(pool: &crate::db::DatabasePool) -> AppResult<Ad
         backup_upload_password_set,
         backup_interval_days,
         allow_team_lead_manage_assistants,
+        payroll_report_enabled: payroll_report.enabled,
+        payroll_report_recipient: payroll_report.recipient,
+        payroll_report_day_of_month: payroll_report.day_of_month,
+        payroll_report_absence_categories: payroll_report.absence_category_slugs,
+        payroll_report_include_assistant_hours: payroll_report.include_assistant_hours,
+        payroll_report_include_employee_hours: payroll_report.include_employee_hours,
     })
 }
 
@@ -373,6 +392,14 @@ pub struct AdminSettingsData {
     /// When TRUE, non-admin team leads may create/manage "assistant" users
     /// assigned to them (see `/team-users*`). On by default.
     pub allow_team_lead_manage_assistants: bool,
+    // --- Monthly payroll report email (tax office / payroll accountant) ---
+    pub payroll_report_enabled: bool,
+    pub payroll_report_recipient: String,
+    pub payroll_report_day_of_month: u8,
+    /// Absence category slugs whose days are listed in the report.
+    pub payroll_report_absence_categories: Vec<String>,
+    pub payroll_report_include_assistant_hours: bool,
+    pub payroll_report_include_employee_hours: bool,
 }
 
 #[cfg(test)]

@@ -61,6 +61,14 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                     post(handlers::settings::run_report_upload_now),
                 )
                 .route(
+                    "/settings/payroll-report",
+                    put(handlers::settings::update_payroll_report_settings),
+                )
+                .route(
+                    "/settings/payroll-report/send-now",
+                    post(handlers::settings::run_payroll_report_now),
+                )
+                .route(
                     "/time-entries",
                     get(handlers::time_entries::list).post(handlers::time_entries::create),
                 )

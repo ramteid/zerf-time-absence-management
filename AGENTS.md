@@ -58,7 +58,7 @@ Additional modules:
 | Module | Purpose |
 |--------|---------|
 | `middleware/auth.rs` | `auth_middleware`, `User` struct, cookie/token/CSRF helpers — single source of `User` |
-| `background/` | Scheduled loops: submission reminders, approval reminders, holiday seeding |
+| `background/` | Scheduled loops: submission reminders, approval reminders, holiday seeding, monthly timesheet upload, monthly payroll report |
 | `state.rs` | `AppState` definition |
 | `router.rs` | Route declarations (`build_api_router`, `build_app`) |
 | `config.rs` | Environment variable loading |
@@ -80,7 +80,7 @@ Additional modules:
 
 **Sub-repositories** (fields on `repository::Db`):
 
-`sessions`, `users`, `time_entries`, `absences`, `reopen_requests`, `categories`, `holidays`, `notifications`, `audit`, `settings`, `reports`
+`sessions`, `users`, `time_entries`, `absences`, `reopen_requests`, `categories`, `holidays`, `notifications`, `audit`, `settings`, `reports`, `export_queue`, `payroll_queue`, `error_queue`
 
 **Access patterns in services:**
 
@@ -113,6 +113,13 @@ let user = UserDb::new(pool.clone()).find_by_id(id).await?;
 - Notification cleanup: delete notifications older than 90 days (daily)
 - Holiday scheduler: ensure current and next year holidays exist (weekly, Monday noon)
 - Submission reminder scheduler
+- Monthly timesheet PDF upload to Nextcloud (daily, after midnight)
+- Monthly payroll report email to the tax office (daily, after midnight)
+
+Both monthly jobs share `background/schedule.rs` (daily loop, `YYYY-MM` period
+math, queue backfill through the previous month, day-of-month deferral) and the
+`services::reports::month_export_readiness` gate, so they judge "this month is
+final" by the same rules.
 
 ### Configuration (environment variables)
 
@@ -144,6 +151,7 @@ let user = UserDb::new(pool.clone()).find_by_id(id).await?;
 | `absences` | Absence requests with status workflow |
 | `holidays` | Public holidays (auto-fetched or manual) |
 | `reopen_requests` | Requests to reopen a submitted week |
+| `payroll_report_queue` | Months whose payroll report PDF still has to be emailed |
 | `notifications` | Per-user in-app notifications |
 | `app_settings` | Key-value app settings |
 | `audit_log` | Before/after JSON snapshots of all mutations |
@@ -263,7 +271,7 @@ Supported languages: `en` (en-US) and `de` (de-DE). Stored in localStorage key `
 /holidays/*         CRUD, country/region lists
 /reports/*          Month, range, team, categories, overtime, flextime, CSV
 /audit-log          Read audit history
-/settings/*         Public and admin settings
+/settings/*         Public and admin settings, uploads, payroll report
 /notifications/*    List, mark read, dismiss
 ```
 
@@ -350,7 +358,7 @@ data volume can still be recovered with `scripts/restore.sh --keyring`.
 
 ### Backup and upload settings (app_settings)
 
-Backup frequency and Nextcloud upload settings are stored in `app_settings` (not in `.env`) and are editable in the Admin UI under **Nextcloud Upload**. The backup container reads them via `psql` at the start of each cycle. Local retention is not configurable — the 10 most recent backups are always kept.
+Backup frequency, Nextcloud upload, and payroll report settings are stored in `app_settings` (not in `.env`) and are editable in the Admin UI under **Nextcloud Backups** and **Payroll Report**. The backup container reads them via `psql` at the start of each cycle. Local retention is not configurable — the 10 most recent backups are always kept.
 
 | Key | Default | Description |
 |-----|---------|-------------|
@@ -362,6 +370,12 @@ Backup frequency and Nextcloud upload settings are stored in `app_settings` (not
 | `report_upload_url` | — | Nextcloud public share URL for timesheets |
 | `report_upload_password` | — | Optional share password (write-only) |
 | `report_upload_day_of_month` | 5 | Day of month to upload previous month's PDF |
+| `payroll_report_enabled` | false | Email the monthly payroll report |
+| `payroll_report_recipient` | — | Single recipient address (tax office / payroll accountant) |
+| `payroll_report_day_of_month` | 5 | Day of month the previous month's report is prepared |
+| `payroll_report_absence_categories` | `sick,unpaid` | Comma-separated absence category slugs listed in the report |
+| `payroll_report_include_assistant_hours` | true | List assistants' working days and hours |
+| `payroll_report_include_employee_hours` | false | List all other employees' working days and hours |
 
 The earlier `backup_interval_seconds`/`backup_retention_days` keys are gone: migration 023 replaced the interval with `backup_interval_days`, and migration 024 dropped the retention setting in favour of a fixed count (the 10 most recent backups). Neither is set via environment variables.
 

@@ -244,6 +244,8 @@
     "/settings/system-log": () => import("./routes/AdminSystemLog.svelte"),
     "/settings/email": () => import("./routes/AdminEmail.svelte"),
     "/settings/upload": () => import("./routes/AdminUpload.svelte"),
+    "/settings/payroll-report": () =>
+      import("./routes/AdminPayrollReport.svelte"),
     "/settings/team": () => import("./routes/TeamSettings.svelte"),
     "/settings/team-users": () => import("./routes/TeamUsers.svelte"),
   };
@@ -265,6 +267,8 @@
     "/settings/system-log": (user) => !!user?.permissions?.can_view_logs,
     "/settings/email": (user) => !!user?.permissions?.can_manage_settings,
     "/settings/upload": (user) => !!user?.permissions?.can_manage_settings,
+    "/settings/payroll-report": (user) =>
+      !!user?.permissions?.can_manage_settings,
     "/settings/team": (user) => !!user?.permissions?.can_manage_team_settings,
     "/settings/team-users": (user) =>
       !!user?.permissions?.can_manage_team_users,

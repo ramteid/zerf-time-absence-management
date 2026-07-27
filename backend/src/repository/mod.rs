@@ -7,6 +7,7 @@ pub mod error_notification_queue;
 pub mod facade;
 pub mod holidays;
 pub mod notifications;
+pub mod payroll_report_queue;
 pub mod reopen_requests;
 pub mod reports;
 pub mod sessions;
@@ -27,6 +28,7 @@ pub use holidays::{Holiday, HolidayDb, PreparedHoliday};
 pub use notifications::{
     new_broadcaster, NotificationBroadcaster, NotificationDb, NotificationSignal,
 };
+pub use payroll_report_queue::PayrollReportQueueDb;
 pub use reopen_requests::{ReopenRequest, ReopenRequestDb};
 pub use reports::ReportDb;
 pub use sessions::SessionDb;
