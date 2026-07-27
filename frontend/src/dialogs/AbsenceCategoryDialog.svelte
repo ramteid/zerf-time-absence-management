@@ -159,7 +159,7 @@
           value="none"
           bind:group={cost_type}
         />
-        <span>{$t("No cost (free day)")}</span>
+        <span>{$t("label_cost_type_none")}</span>
         <button
           type="button"
           class="zf-btn-icon-sm zf-btn-ghost zf-help-btn"
@@ -182,7 +182,7 @@
           value="vacation"
           bind:group={cost_type}
         />
-        <span>{$t("Counts as vacation")}</span>
+        <span>{$t("label_cost_type_vacation")}</span>
         <button
           type="button"
           class="zf-btn-icon-sm zf-btn-ghost zf-help-btn"
@@ -194,7 +194,7 @@
         </button>
       </label>
       {#if openHelp === "cost_type_vacation"}
-        <div class="abscat-help">{$t("help_counts_as_vacation")}</div>
+        <div class="abscat-help">{$t("help_cost_type_vacation")}</div>
       {/if}
     </div>
     <div>
@@ -205,7 +205,7 @@
           value="flextime"
           bind:group={cost_type}
         />
-        <span>{$t("Keeps work target (flextime)")}</span>
+        <span>{$t("label_cost_type_flextime")}</span>
         <button
           type="button"
           class="zf-btn-icon-sm zf-btn-ghost zf-help-btn"
@@ -217,7 +217,7 @@
         </button>
       </label>
       {#if openHelp === "cost_type_flextime"}
-        <div class="abscat-help">{$t("help_keeps_work_target")}</div>
+        <div class="abscat-help">{$t("help_cost_type_flextime")}</div>
       {/if}
     </div>
     <div>

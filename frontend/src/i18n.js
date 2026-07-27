@@ -35,13 +35,15 @@ const TRANSLATIONS = {
     help_flextime_chart:
       "Your cumulative flextime balance over the selected period. The balance is calculated up to and including yesterday; today's hours are not yet counted.",
     "Show explanation": "Show explanation",
-    "No cost (free day)": "Affects no balance",
+    label_cost_type_none: "Uses nothing (no vacation, no flextime)",
     help_cost_type_none:
-      "The day counts as absent, but nothing is deducted from vacation or flextime. Example: a day off for your own wedding.",
-    help_counts_as_vacation:
-      'Approved days are deducted from the employee\'s annual vacation balance (with carryover and expiry rules applied). Mutually exclusive with "Keeps work target".',
-    help_keeps_work_target:
-      'Approved days keep their normal work target instead of removing it, so the absence costs the employee\'s flextime balance — typically used for "flextime reduction" categories. The flextime balance is checked at request and at approval to prevent breaching the configured minimum. Mutually exclusive with "Counts as vacation".',
+      "The day is excused: no time has to be logged and the work target for that day falls away. Nothing is taken from the vacation balance and the flextime balance stays unchanged, so the hours never have to be made up. Whether the day is paid is decided in payroll, not in Zerf: training is normally paid, unpaid leave is not.",
+    label_cost_type_vacation: "Uses vacation days",
+    help_cost_type_vacation:
+      "Every approved day is deducted from the employee's annual leave, including any carryover from the previous year and its expiry date. The work target for that day falls away, so the flextime balance is unaffected.",
+    label_cost_type_flextime: "Uses flextime hours",
+    help_cost_type_flextime:
+      "Employees have the day off, but the work target for that day stays in place. The day therefore lowers the flextime balance by one daily target — this is how time off in lieu is taken. No vacation days are used. Zerf checks the flextime balance when the request is made and again when it is approved, so the balance cannot drop below the configured minimum.",
     help_auto_approve_past:
       'Requests with a start date on or before today are approved automatically (no approver review). Time entries can coexist with the absence on the same day (allows partial-day overlap like "worked the morning, called in sick at noon"). Backdating is limited to 30 days. Typical use: sick leave.',
     "Counts as work": "Counts as work",
@@ -650,11 +652,10 @@ const TRANSLATIONS = {
     "Absence Categories": "Abwesenheitskategorien",
     "Add Absence Category": "Abwesenheitskategorie hinzufügen",
     "Edit Absence Category": "Abwesenheitskategorie bearbeiten",
-    "No cost (free day)": "Belastet keinen Saldo",
-    "Counts as vacation": "Zählt als Urlaub",
-    "Keeps work target (flextime)": "Arbeitssoll bleibt (Gleitzeit)",
-    "Auto-approve past dates":
-      "Vergangene Daten automatisch genehmigen",
+    label_cost_type_none: "Verbraucht nichts (kein Urlaub, keine Gleitzeit)",
+    label_cost_type_vacation: "Verbraucht Urlaubstage",
+    label_cost_type_flextime: "Verbraucht Gleitzeitstunden",
+    "Auto-approve past dates": "Vergangene Daten automatisch genehmigen",
     "Type is required.": "Typ ist erforderlich.",
     "Not enough flextime balance for this absence.":
       "Nicht genügend Gleitzeitguthaben für diese Abwesenheit.",
@@ -1063,11 +1064,11 @@ const TRANSLATIONS = {
       "Verlauf deines kumulierten Gleitzeitkontostands über den gewählten Zeitraum. Der Gleitzeitstand wird bis einschließlich gestern berechnet; die heute geleisteten Stunden werden noch nicht mitgezählt.",
     "Show explanation": "Erklärung anzeigen",
     help_cost_type_none:
-      "Der Tag gilt als abwesend, aber weder Urlaub noch Gleitzeit wird verringert. Beispiel: ein freier Tag für die eigene Hochzeit.",
-    help_counts_as_vacation:
-      "Genehmigte Tage werden vom Jahresurlaubsanspruch des Mitarbeitenden abgezogen (inkl. Übertrag- und Verfallsregeln). Schließt sich gegenseitig mit „Arbeitssoll bleibt“ aus.",
-    help_keeps_work_target:
-      "Genehmigte Tage behalten ihr normales Arbeitssoll, statt es zu entfernen — die Abwesenheit „kostet“ also das Gleitzeitguthaben. Typisch für Gleitzeitabbau-Kategorien. Das Gleitzeitguthaben wird bei der Beantragung UND bei der Genehmigung geprüft, damit der konfigurierte Mindeststand nicht unterschritten wird. Schließt sich gegenseitig mit „Zählt als Urlaub“ aus.",
+      "Der Tag ist entschuldigt: Es muss keine Zeit erfasst werden, das Arbeitssoll für den Tag entfällt. Vom Urlaubskonto wird nichts abgezogen und der Gleitzeitstand bleibt unverändert — die Stunden müssen also auch nicht nachgearbeitet werden. Ob der Tag bezahlt wird, entscheidet nicht Zerf, sondern die Lohnabrechnung: Fortbildung ist normalerweise bezahlt, unbezahlter Urlaub nicht.",
+    help_cost_type_vacation:
+      "Jeder genehmigte Tag wird vom Jahresurlaub der Mitarbeitenden abgezogen — inklusive Resturlaub aus dem Vorjahr und dessen Verfallsfrist. Das Arbeitssoll für den Tag entfällt, der Gleitzeitstand bleibt unverändert.",
+    help_cost_type_flextime:
+      "Mitarbeitende haben frei, das Arbeitssoll für den Tag bleibt aber bestehen. Der Tag senkt den Gleitzeitstand dadurch um ein Tagessoll — so wird Gleitzeit abgebaut. Urlaubstage werden nicht verbraucht. Zerf prüft den Gleitzeitstand bei der Beantragung und noch einmal bei der Genehmigung, damit der eingestellte Mindeststand nicht unterschritten wird.",
     help_auto_approve_past:
       "Anträge mit Startdatum heute oder in der Vergangenheit werden automatisch genehmigt (ohne Freigabe durch eine vorgesetzte Person). Zeitbuchungen am selben Tag bleiben erlaubt (z. B. „vormittags gearbeitet, mittags krankgemeldet“). Rückdatieren ist auf 30 Tage begrenzt. Typische Verwendung: Krankmeldung.",
     help_submission_status:
