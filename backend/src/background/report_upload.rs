@@ -5,12 +5,15 @@
 //!      the export queue for the previous month (idempotent, guarded by the
 //!      `report_upload_queue_period` app_setting).
 //!   2. Process eligible pending queue entries: for each (user, period), check
-//!      whether all weeks of the period are fully submitted.  If yes, build
-//!      a per-user PDF, create the per-month subfolder, upload the file, and
-//!      remove the queue entry.  Entries for not-yet-submitted months are left
-//!      in the queue for the next daily check (catch-up for late submitters).
-//!      Before the configured upload day, the scheduled run still catches up
-//!      older months but defers the just-finished previous month.
+//!      the shared month-finality gate (`services::reports::month_export_readiness`,
+//!      with full approval required — the PDF Total row only counts approved,
+//!      crediting minutes). If ready, build a per-user PDF, create the
+//!      per-month subfolder, upload the file, and remove the queue entry.
+//!      Entries for a month that is not submitted or not yet fully approved
+//!      are left in the queue for the next daily check (catch-up for late
+//!      submitters and pending approvals). Before the configured upload day,
+//!      the scheduled run still catches up older months but defers the
+//!      just-finished previous month.
 //!      An entry whose user's current state would hide historical rows is left
 //!      in the queue and surfaced to admins so a start-date or workflow mistake
 //!      can be corrected without losing the pending export.
@@ -196,20 +199,11 @@ async fn process_one_entry(
 
     let (from, to) = schedule::period_bounds(&entry.period)?;
 
-    let reports_db = crate::repository::ReportDb::new(state.pool.clone());
-
-    let start_date_review_blocks_upload =
-        entry.requires_start_date_review && user.start_date > from;
-    if start_date_review_blocks_upload
-        || reports_db
-            .has_report_content_before_start_date(user.id, from, to, user.start_date)
-            .await?
-    {
-        let body_key = if start_date_review_blocks_upload {
-            "report_upload_pre_start_review_body"
-        } else {
-            "report_upload_pre_start_content_body"
-        };
+    // A start-date change that still needs admin review takes priority over
+    // the shared gate's plain pre-start-content check below: it has its own,
+    // more specific message ("the change still requires review") even when no
+    // stored row actually falls before the new start date yet.
+    if entry.requires_start_date_review && user.start_date > from {
         let params: Vec<(&str, String)> = vec![
             ("user_id", user.id.to_string()),
             ("first_name", user.first_name.clone()),
@@ -223,7 +217,7 @@ async fn process_one_entry(
         let text = crate::i18n::notification_text(
             language,
             "report_upload_blocked_title",
-            body_key,
+            "report_upload_pre_start_review_body",
             &params,
         );
         tracing::warn!(target: "zerf::report_upload", "{}", text.body);
@@ -240,9 +234,39 @@ async fn process_one_entry(
 
     // Shared month-finality gate (see `services::reports::month_export_readiness`):
     // historical-only accounts only need settled time-entry rows, everyone else
-    // needs decided absences and fully submitted weeks.
-    match month_export_readiness(&state.pool, &user, from, to).await? {
+    // needs decided absences, fully submitted weeks, and full approval — the
+    // PDF's Total row counts only approved, crediting minutes, so a merely
+    // submitted month would archive too few hours.
+    match month_export_readiness(&state.pool, &user, from, to, true).await? {
         MonthExportReadiness::Ready => {}
+        MonthExportReadiness::PreStartContent => {
+            let params: Vec<(&str, String)> = vec![
+                ("user_id", user.id.to_string()),
+                ("first_name", user.first_name.clone()),
+                ("last_name", user.last_name.clone()),
+                (
+                    "start_date",
+                    crate::i18n::format_date(language, user.start_date),
+                ),
+                ("period", entry.period.clone()),
+            ];
+            let text = crate::i18n::notification_text(
+                language,
+                "report_upload_blocked_title",
+                "report_upload_pre_start_content_body",
+                &params,
+            );
+            tracing::warn!(target: "zerf::report_upload", "{}", text.body);
+            crate::services::notifications::enqueue_error(
+                state,
+                language,
+                &format!("report_upload_pre_start_{}_{}", user.id, entry.period),
+                &text.title,
+                &text.body,
+            )
+            .await;
+            return Ok(());
+        }
         MonthExportReadiness::UnresolvedTimeEntries => {
             let params: Vec<(&str, String)> = vec![
                 ("user_id", user.id.to_string()),
@@ -276,8 +300,11 @@ async fn process_one_entry(
             );
             return Ok(());
         }
-        // Not ready yet — leave in queue for the next daily check.
-        MonthExportReadiness::WeeksNotSubmitted => return Ok(()),
+        // Not ready yet, but a routine, expected wait (nobody has to be
+        // alerted): leave in the queue for the next daily check.
+        MonthExportReadiness::WeeksNotSubmitted | MonthExportReadiness::UnapprovedTimeEntries => {
+            return Ok(())
+        }
     }
 
     // Build a single-user timesheet PDF.

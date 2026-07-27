@@ -1461,6 +1461,11 @@ pub async fn all_weeks_ready_for_timesheet_export(
 pub enum MonthExportReadiness {
     /// Everything in the period is decided; the month can be exported.
     Ready,
+    /// Stored time entries or absences fall before the user's current start
+    /// date, so the renderer would silently hide them from the export. A
+    /// start-date correction moved backwards without fixing the underlying
+    /// data, or the data was never fixed after an earlier correction.
+    PreStartContent,
     /// An archived / tracking-disabled account still has draft, submitted, or
     /// unresolved rejected entries that nobody can settle from the app.
     UnresolvedTimeEntries,
@@ -1468,6 +1473,11 @@ pub enum MonthExportReadiness {
     PendingAbsenceRequests,
     /// At least one fully elapsed week of the period is not submitted.
     WeeksNotSubmitted,
+    /// The month's weeks are submitted, but at least one entry is still
+    /// draft, submitted, or unresolved-rejected — i.e. not yet approved.
+    /// Only checked when the caller requires full approval (see
+    /// `month_export_readiness`'s `require_full_approval` parameter).
+    UnapprovedTimeEntries,
 }
 
 impl MonthExportReadiness {
@@ -1483,13 +1493,30 @@ impl MonthExportReadiness {
 /// shape for them — only undecided time-entry rows block their export. Everyone
 /// else must have all elapsed weeks submitted and no pending absence request in
 /// the period, because both would change the exported content afterwards.
+///
+/// `require_full_approval` additionally requires every time entry in the
+/// period to be approved, not merely submitted. The timesheet PDF export and
+/// the payroll report both need this — the PDF Total row and the payroll
+/// hours count only approved, crediting minutes, so a month that is only
+/// submitted would archive/report too few hours until an approver catches up.
 pub async fn month_export_readiness(
     pool: &crate::db::DatabasePool,
     user: &crate::repository::User,
     from: NaiveDate,
     to: NaiveDate,
+    require_full_approval: bool,
 ) -> AppResult<MonthExportReadiness> {
     let reports_db = crate::repository::ReportDb::new(pool.clone());
+
+    // Universal: the renderer hides everything before the user's current
+    // start date, so stored rows there would silently vanish from the export.
+    if reports_db
+        .has_report_content_before_start_date(user.id, from, to, user.start_date)
+        .await?
+    {
+        return Ok(MonthExportReadiness::PreStartContent);
+    }
+
     let is_historical_only = user.archived_at.is_some() || !user.tracks_time;
     if is_historical_only {
         if reports_db
@@ -1520,11 +1547,19 @@ pub async fn month_export_readiness(
         user.workdays_per_week,
     )
     .await?;
-    Ok(if submitted {
-        MonthExportReadiness::Ready
-    } else {
-        MonthExportReadiness::WeeksNotSubmitted
-    })
+    if !submitted {
+        return Ok(MonthExportReadiness::WeeksNotSubmitted);
+    }
+
+    if require_full_approval
+        && reports_db
+            .has_unresolved_time_entries_in_range(user.id, from, to)
+            .await?
+    {
+        return Ok(MonthExportReadiness::UnapprovedTimeEntries);
+    }
+
+    Ok(MonthExportReadiness::Ready)
 }
 
 #[derive(Serialize)]

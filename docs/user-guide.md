@@ -1744,7 +1744,7 @@ If a backup fails, admins who opted in to technical error notifications are aler
 
 #### Report PDF Upload
 
-When enabled, Zerf queues an individual timesheet PDF for each employee on a configurable day each month. Each PDF covers the **previous calendar month**. Employees who have not yet submitted all their weeks are uploaded automatically on the next daily check - late submitters are caught up without manual intervention. If that month still contains a pending absence request, the PDF waits until that request is approved or rejected. Employees who were archived or had time tracking disabled after the period ended are included for archive correctness when the month still contains historical data.
+When enabled, Zerf queues an individual timesheet PDF for each employee on a configurable day each month. Each PDF covers the **previous calendar month**. A month is only uploaded once it is final: all weeks are submitted **and approved** — a week that is only submitted still waits, because the PDF's total row counts only approved hours, and uploading a merely-submitted month would archive too few. Late submitters and pending approvals are caught up automatically on the next daily check. If that month still contains a pending absence request, the PDF waits until that request is approved or rejected. Employees who were archived or had time tracking disabled after the period ended are included for archive correctness when the month still contains historical data.
 
 If the feature was disabled for several months and is then re-enabled, or if the server missed a month boundary, Zerf automatically backfills all intervening months so no timesheet is silently skipped. **Upload now** has the same backfill behaviour.
 
@@ -1757,7 +1757,7 @@ If a past month is changed after the PDF was already uploaded - for example an e
 | Share password | Optional password protecting the share. |
 | Upload day of month (1–28) | The day of the month on which the previous month's PDFs are queued. Default: 5. Set this after your team's submission deadline to maximise how many employees are already submitted when the queue is first processed. |
 
-**Upload now** queues the previous month's PDFs for all employees immediately and uploads those who are already fully submitted. Employees who are not yet submitted are uploaded on subsequent daily checks. This does not prevent the scheduled monthly run from processing remaining entries.
+**Upload now** queues the previous month's PDFs for all employees immediately and uploads those whose month is already final. Employees who are not yet ready are uploaded on subsequent daily checks. This does not prevent the scheduled monthly run from processing remaining entries.
 
 If an upload fails or a queued PDF cannot be safely generated yet, admins who opted in to technical error notifications are alerted in the app and by email. The scheduled upload retries automatically on the next daily check.
 

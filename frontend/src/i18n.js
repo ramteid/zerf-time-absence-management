@@ -288,8 +288,8 @@ const TRANSLATIONS = {
     "Upload failed.": "Upload failed.",
     "The backup interval is read by the backup container from the database at the start of each cycle. Changes take effect on the next backup run. The 10 most recent local backup files are kept automatically; older ones are deleted. Uploaded files in Nextcloud are not deleted automatically.":
       "The backup interval is read by the backup container from the database at the start of each cycle. Changes take effect on the next backup run. The 10 most recent local backup files are kept automatically; older ones are deleted. Uploaded files in Nextcloud are not deleted automatically.",
-    "On the configured day of each month, an individual timesheet PDF is queued for every employee. Each PDF is uploaded as soon as the employee has fully submitted all their weeks — late submitters are automatically caught up on the next daily check.":
-      "On the configured day of each month, an individual timesheet PDF is queued for every employee. Each PDF is uploaded as soon as the employee has fully submitted all their weeks — late submitters are automatically caught up on the next daily check.",
+    "On the configured day of each month, an individual timesheet PDF is queued for every employee. Each PDF is uploaded once the employee's month is final — all weeks submitted and approved — late submitters and pending approvals are automatically caught up on the next daily check.":
+      "On the configured day of each month, an individual timesheet PDF is queued for every employee. Each PDF is uploaded once the employee's month is final — all weeks submitted and approved — late submitters and pending approvals are automatically caught up on the next daily check.",
     // --- Payroll report settings ---
     "Payroll Report": "Payroll Report",
     "Monthly payroll report": "Monthly payroll report",
@@ -1328,8 +1328,8 @@ const TRANSLATIONS = {
       "Für die Aktivierung des Datenbank-Backup-Uploads ist eine Nextcloud-Share-URL erforderlich.",
     "The backup interval is read by the backup container from the database at the start of each cycle. Changes take effect on the next backup run. The 10 most recent local backup files are kept automatically; older ones are deleted. Uploaded files in Nextcloud are not deleted automatically.":
       "Das Backup-Intervall wird vom Backup-Container zu Beginn jedes Zyklus aus der Datenbank gelesen. Änderungen werden beim nächsten Backup-Lauf wirksam. Die 10 neuesten lokalen Backup-Dateien werden automatisch aufbewahrt; ältere werden gelöscht. Hochgeladene Dateien in Nextcloud werden nicht automatisch gelöscht.",
-    "On the configured day of each month, an individual timesheet PDF is queued for every employee. Each PDF is uploaded as soon as the employee has fully submitted all their weeks — late submitters are automatically caught up on the next daily check.":
-      "Am konfigurierten Tag des Monats wird für jeden Mitarbeiter ein individueller Stundenzettel in die Warteschlange eingereiht. Jedes PDF wird hochgeladen, sobald der Mitarbeiter alle Wochen vollständig eingereicht hat — spät Einreichende werden beim nächsten täglichen Lauf automatisch nachgeholt.",
+    "On the configured day of each month, an individual timesheet PDF is queued for every employee. Each PDF is uploaded once the employee's month is final — all weeks submitted and approved — late submitters and pending approvals are automatically caught up on the next daily check.":
+      "Am konfigurierten Tag des Monats wird für jeden Mitarbeiter ein individueller Stundenzettel in die Warteschlange eingereiht. Jedes PDF wird hochgeladen, sobald der Monat des Mitarbeiters abgeschlossen ist — alle Wochen eingereicht und genehmigt. Spät Einreichende und offene Genehmigungen werden beim nächsten täglichen Lauf automatisch nachgeholt.",
     // --- Lohnmeldung ---
     "Payroll Report": "Lohnmeldung",
     "Monthly payroll report": "Monatliche Lohnmeldung",

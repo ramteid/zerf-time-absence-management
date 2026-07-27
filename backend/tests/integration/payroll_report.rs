@@ -364,10 +364,16 @@ async fn payroll_report_waits_until_every_month_is_final() {
         .expect("load assistant")
         .expect("assistant exists");
     assert!(
-        zerf::services::reports::month_export_readiness(&app.state.pool, &assistant_user, from, to)
-            .await
-            .expect("readiness")
-            .is_ready(),
+        zerf::services::reports::month_export_readiness(
+            &app.state.pool,
+            &assistant_user,
+            from,
+            to,
+            false,
+        )
+        .await
+        .expect("readiness")
+        .is_ready(),
         "assistants pass the shared submission gate"
     );
     assert!(

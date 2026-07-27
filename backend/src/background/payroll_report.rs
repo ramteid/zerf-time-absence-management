@@ -246,8 +246,18 @@ async fn collect_blockers(
 ) -> AppResult<Vec<Blocker>> {
     let mut blockers = Vec::new();
     for member in members {
-        let readiness = month_export_readiness(&state.pool, member, from, to).await?;
-        let mut reason_key = match readiness {
+        // Hours are only payroll-grade once every entry behind them is
+        // approved — a still-open or merely submitted month would be paid out
+        // too low. Full approval is required exactly when this person's hours
+        // are actually part of the report.
+        let require_full_approval = config.includes_hours_for(&member.role);
+        let readiness =
+            month_export_readiness(&state.pool, member, from, to, require_full_approval).await?;
+        let reason_key = match readiness {
+            MonthExportReadiness::Ready => None,
+            MonthExportReadiness::PreStartContent => {
+                Some("payroll_report_reason_pre_start_content")
+            }
             MonthExportReadiness::WeeksNotSubmitted => Some("payroll_report_reason_not_submitted"),
             MonthExportReadiness::PendingAbsenceRequests => {
                 Some("payroll_report_reason_pending_absences")
@@ -255,29 +265,10 @@ async fn collect_blockers(
             MonthExportReadiness::UnresolvedTimeEntries => {
                 Some("payroll_report_reason_unresolved_entries")
             }
-            // Hours are only payroll-grade once every entry behind them is
-            // approved — a still-open or merely submitted month would be paid
-            // out too low.
-            MonthExportReadiness::Ready if config.includes_hours_for(&member.role) => state
-                .db
-                .reports
-                .has_unresolved_time_entries_in_range(member.id, from, to)
-                .await?
-                .then_some("payroll_report_reason_unapproved_entries"),
-            MonthExportReadiness::Ready => None,
+            MonthExportReadiness::UnapprovedTimeEntries => {
+                Some("payroll_report_reason_unapproved_entries")
+            }
         };
-        // Absence days and worked days before the stored start date are hidden
-        // from every report, so a start date that was set too late would quietly
-        // shrink the payroll figures. Hold the month instead of filing too little.
-        if reason_key.is_none()
-            && state
-                .db
-                .reports
-                .has_report_content_before_start_date(member.id, from, to, member.start_date)
-                .await?
-        {
-            reason_key = Some("payroll_report_reason_pre_start_content");
-        }
         if let Some(reason_key) = reason_key {
             blockers.push(Blocker {
                 name: format!("{} {}", member.first_name, member.last_name),
