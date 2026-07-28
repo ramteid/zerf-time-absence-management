@@ -107,7 +107,9 @@ extract_keyring() {
     local choice
     read -r choice
     [[ "$choice" =~ ^[0-9]+$ ]] || die "Not a number."
-    [ "$choice" -ge 1 ] && [ "$choice" -le "${#keyrings[@]}" ] || die "Choice out of range."
+    if [ "$choice" -lt 1 ] || [ "$choice" -gt "${#keyrings[@]}" ]; then
+        die "Choice out of range."
+    fi
 
     local selected="${keyrings[$((choice-1))]}"
 
@@ -236,8 +238,9 @@ if [ -z "$BACKUP_FILE" ]; then
     read -r CHOICE
 
     [[ "$CHOICE" =~ ^[0-9]+$ ]] || die "Not a number."
-    [ "$CHOICE" -ge 1 ] && [ "$CHOICE" -le "${#BACKUPS[@]}" ] \
-        || die "Choice out of range."
+    if [ "$CHOICE" -lt 1 ] || [ "$CHOICE" -gt "${#BACKUPS[@]}" ]; then
+        die "Choice out of range."
+    fi
 
     SELECTED="${BACKUPS[$((CHOICE-1))]}"
     # BACKUP_FILE is a placeholder for display; actual data comes from the volume.
