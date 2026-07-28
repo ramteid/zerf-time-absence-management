@@ -1821,8 +1821,11 @@ the feature was switched off for a while, or the server missed a month boundary,
 all intervening months are prepared as soon as it is switched on again.
 
 **Send now** prepares the previous month immediately and sends it if that month
-is already final. It never skips the checks above and does not replace the
-scheduled monthly run.
+is already final. It never skips the checks above, and it does not replace the
+scheduled monthly run: the month is not marked as delivered, so the automatic
+send on the configured day still goes out separately even after a successful
+**Send now**. The manually sent copy's email says so explicitly, so the
+recipient does not mistake it for the final delivery.
 
 ### Managing categories
 

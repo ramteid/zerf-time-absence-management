@@ -20,7 +20,10 @@
 //!
 //! `run_now` (admin "Send now" button) queues the previous month and processes
 //! everything immediately, skipping only the day-of-month threshold — never the
-//! readiness gate.
+//! readiness gate. A manual send does **not** remove the period from the
+//! queue: the regular scheduled delivery for that month still goes out
+//! separately on the configured day, and the manual copy's email body carries
+//! a note saying so, so the recipient does not mistake it for the final one.
 
 use crate::background::schedule;
 use crate::error::{AppError, AppResult};
@@ -62,7 +65,7 @@ async fn run_once(state: &AppState) -> AppResult<()> {
         queue_previous_month(state, today).await?;
     }
 
-    process_pending_periods(state, &config, process_through_period.as_deref()).await;
+    process_pending_periods(state, &config, process_through_period.as_deref(), false).await;
     Ok(())
 }
 
@@ -104,7 +107,7 @@ pub async fn run_now(state: &AppState) -> AppResult<RunSummary> {
 
     let today = settings::app_today(&state.pool).await;
     queue_previous_month(state, today).await?;
-    Ok(process_pending_periods(state, &config, None).await)
+    Ok(process_pending_periods(state, &config, None, true).await)
 }
 
 /// Queue every month from the last recorded one through the previous month.
@@ -123,10 +126,15 @@ async fn queue_previous_month(state: &AppState, today: NaiveDate) -> AppResult<(
 }
 
 /// Send every queued period that is due and ready; leave the rest queued.
+///
+/// `is_manual` distinguishes an admin-triggered "Send now" run from the daily
+/// scheduled one: a manual send never removes the period from the queue (see
+/// [`process_period`]), so it never stops the regular delivery for that month.
 async fn process_pending_periods(
     state: &AppState,
     config: &PayrollReportConfig,
     process_through_period: Option<&str>,
+    is_manual: bool,
 ) -> RunSummary {
     let mut summary = RunSummary::default();
     let periods = match state.db.payroll_queue.list_pending().await {
@@ -156,7 +164,7 @@ async fn process_pending_periods(
             summary.pending += 1;
             continue;
         }
-        match process_period(state, &period, config, &language).await {
+        match process_period(state, &period, config, &language, is_manual).await {
             Ok(true) => summary.sent += 1,
             Ok(false) => summary.pending += 1,
             Err(e) => {
@@ -170,11 +178,17 @@ async fn process_pending_periods(
 
 /// Build and send one period's report. Returns whether it was sent; `false`
 /// means the month is not final yet and stays queued for the next daily check.
+///
+/// `is_manual` marks an admin-triggered "Send now" copy: its email carries an
+/// extra note, and — unlike the scheduled run — it never deletes the queue
+/// entry, so the regular automatic delivery for this month still happens on
+/// the configured day even after a successful manual send.
 async fn process_period(
     state: &AppState,
     period: &str,
     config: &PayrollReportConfig,
     language: &Language,
+    is_manual: bool,
 ) -> AppResult<bool> {
     let (from, to) = schedule::period_bounds(period)?;
     // Same member set as the timesheet export: everyone the month actually
@@ -208,6 +222,7 @@ async fn process_period(
         language,
         &data.period_label,
         &organization_label(state, language).await,
+        is_manual,
     );
 
     crate::email::send_with_attachment(
@@ -224,12 +239,22 @@ async fn process_period(
     .await
     .map_err(|e| AppError::Internal(format!("Payroll report email failed: {e}")))?;
 
-    // Only drop the period once the SMTP server accepted the message.
-    state.db.payroll_queue.delete_entry(period).await?;
-    tracing::info!(
-        "Payroll report: sent period {period} to {}",
-        config.recipients.join(", ")
-    );
+    if is_manual {
+        // A manual "Send now" copy never replaces the scheduled delivery: the
+        // period stays queued, so the automatic run still sends the regular
+        // copy for this month on the configured day.
+        tracing::info!(
+            "Payroll report: sent period {period} manually to {} (period stays queued for the scheduled run)",
+            config.recipients.join(", ")
+        );
+    } else {
+        // Only drop the period once the SMTP server accepted the message.
+        state.db.payroll_queue.delete_entry(period).await?;
+        tracing::info!(
+            "Payroll report: sent period {period} to {}",
+            config.recipients.join(", ")
+        );
+    }
     Ok(true)
 }
 
@@ -288,12 +313,17 @@ async fn collect_blockers(
 /// Kept separate from the send path so the template parameters are covered by a
 /// unit test: `i18n::notification_text` panics on a missing parameter, and this
 /// runs inside a background task where that would kill the loop.
+///
+/// `manual` appends a note identifying the email as an admin-triggered "Send
+/// now" copy, so the recipient does not mistake it for the regular automatic
+/// delivery, which — see [`process_period`] — is still sent separately.
 fn email_text(
     language: &Language,
     period_label: &str,
     organization: &str,
+    manual: bool,
 ) -> crate::i18n::NotificationText {
-    crate::i18n::notification_text(
+    let mut text = crate::i18n::notification_text(
         language,
         "payroll_report_email_subject",
         "payroll_report_email_body",
@@ -301,7 +331,12 @@ fn email_text(
             ("period", period_label.to_string()),
             ("org_name", organization.to_string()),
         ],
-    )
+    );
+    if manual {
+        text.body
+            .push_str(&crate::i18n::translate(language, "payroll_report_email_manual_note", &[]));
+    }
+    text
 }
 
 /// Title and body of the "the report could not go out yet" admin notification,
@@ -387,7 +422,7 @@ mod tests {
         for code in ["en", "de"] {
             let language = crate::i18n::Language::from_setting(code);
 
-            let email = email_text(&language, "May 2026", "Example GmbH");
+            let email = email_text(&language, "May 2026", "Example GmbH", false);
             assert!(email.title.contains("May 2026"), "subject: {}", email.title);
             assert!(email.title.contains("Example GmbH"));
             assert!(email.body.contains("May 2026"));
@@ -396,6 +431,36 @@ mod tests {
             assert!(!blocked.title.is_empty());
             assert!(blocked.body.contains("2026-05"));
             assert!(blocked.body.contains("Jane Doe"));
+        }
+    }
+
+    /// A manually triggered "Send now" copy must carry a note so the recipient
+    /// does not mistake it for the regular automatic delivery, which — since
+    /// the queue entry is never deleted for a manual send — still goes out
+    /// separately. A scheduled send must not carry that note.
+    #[test]
+    fn email_text_adds_the_manual_note_only_for_manual_sends() {
+        for code in ["en", "de"] {
+            let language = crate::i18n::Language::from_setting(code);
+
+            let scheduled = email_text(&language, "May 2026", "Example GmbH", false);
+            let manual = email_text(&language, "May 2026", "Example GmbH", true);
+
+            assert_eq!(
+                scheduled.body,
+                email_text(&language, "May 2026", "Example GmbH", false).body,
+                "scheduled body is deterministic"
+            );
+            assert!(
+                manual.body.len() > scheduled.body.len(),
+                "manual body must be strictly longer than the scheduled one ({code})"
+            );
+            assert!(
+                manual.body.starts_with(&scheduled.body),
+                "the manual note is appended, not mixed into the main body ({code})"
+            );
+            // Subject stays identical — only the body gains the note.
+            assert_eq!(scheduled.title, manual.title);
         }
     }
 

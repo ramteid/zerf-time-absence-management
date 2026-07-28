@@ -164,6 +164,7 @@ static LANGUAGES: &[LangDef] = &[
             // Monthly payroll report
             ("payroll_report_email_subject", "Payroll report {period} - {org_name}"),
             ("payroll_report_email_body", "Hello,\n\nattached you will find the payroll report for {period} from {org_name}.\n\nIt lists the absence days per employee and the working days and hours for the selected groups.\n\nThis email was generated automatically."),
+            ("payroll_report_email_manual_note", "\n\nNote: this report was sent manually via \"Send now\" in Zerf. It does not replace the regular automatic delivery for this month, which is still scheduled to go out separately."),
             ("payroll_report_blocked_title", "Payroll report not sent yet"),
             ("payroll_report_blocked_body", "Component: Payroll report\nPeriod: {period}\nIssue: The month is not final for the following people:\n{employees}\nAction: Complete and approve the open entries; the report is sent automatically on the next daily check."),
             ("payroll_report_blocked_more", "\n- and {count} more"),
@@ -335,6 +336,7 @@ static LANGUAGES: &[LangDef] = &[
             // Monatliche Lohnmeldung
             ("payroll_report_email_subject", "Lohnmeldung {period} - {org_name}"),
             ("payroll_report_email_body", "Hallo,\n\nim Anhang finden Sie die Lohnmeldung f\u{00fc}r {period} von {org_name}.\n\nSie enth\u{00e4}lt die Abwesenheitstage je Person sowie die Arbeitstage und Arbeitsstunden der ausgew\u{00e4}hlten Gruppen.\n\nDiese E-Mail wurde automatisch erstellt."),
+            ("payroll_report_email_manual_note", "\n\nHinweis: Dieser Bericht wurde manuell \u{00fc}ber \"Jetzt senden\" in Zerf versendet. Er ersetzt nicht den regul\u{00e4}ren automatischen Versand f\u{00fc}r diesen Monat, der weiterhin separat erfolgt."),
             ("payroll_report_blocked_title", "Lohnmeldung noch nicht versendet"),
             ("payroll_report_blocked_body", "Komponente: Lohnmeldung\nZeitraum: {period}\nProblem: Der Monat ist f\u{00fc}r folgende Personen noch nicht abgeschlossen:\n{employees}\nAktion: Kl\u{00e4}ren und genehmigen Sie die offenen Eintr\u{00e4}ge; die Meldung wird bei der n\u{00e4}chsten t\u{00e4}glichen Pr\u{00fc}fung automatisch versendet."),
             ("payroll_report_blocked_more", "\n- und {count} weitere"),
