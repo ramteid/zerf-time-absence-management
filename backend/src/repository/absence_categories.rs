@@ -66,6 +66,16 @@ impl AbsenceCategory {
     pub fn is_flextime_cost(&self) -> bool {
         self.cost_type == COST_TYPE_FLEXTIME
     }
+
+    /// True for categories the monthly payroll report includes automatically:
+    /// sick-like categories (`auto_approve_past`) and anything that costs
+    /// neither vacation nor flextime (`cost_type == "none"`) — days that don't
+    /// move any balance the app tracks. Vacation- and flextime-cost categories
+    /// are excluded because their cost already shows up in the leave/flextime
+    /// balances, not in this report.
+    pub fn is_payroll_relevant(&self) -> bool {
+        self.auto_approve_past || self.cost_type == COST_TYPE_NONE
+    }
 }
 
 const ABS_CAT_COLUMNS: &str =

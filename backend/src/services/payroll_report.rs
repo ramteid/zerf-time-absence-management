@@ -3,8 +3,10 @@
 //! The report is one PDF per month for the whole company, emailed to the
 //! payroll accountant / tax office. It replaces a hand-maintained spreadsheet
 //! and therefore contains exactly what payroll needs to file:
-//!   * absence days per employee for the selected categories — sick days drive
-//!     health-insurance reimbursement, unpaid days reduce the salary payout,
+//!   * absence days per employee for the categories that are automatically
+//!     payroll-relevant (see [`AbsenceCategory::is_payroll_relevant`]) — sick
+//!     days drive health-insurance reimbursement, unpaid days reduce the
+//!     salary payout,
 //!   * working days and worked hours per assistant (and optionally per
 //!     employee), which is what assistants are paid by.
 //!
@@ -16,7 +18,7 @@ use crate::i18n::Language;
 use crate::report_pdf::{
     PayrollAbsenceRow, PayrollHoursRow, PayrollHoursSection, PayrollReportData,
 };
-use crate::repository::User;
+use crate::repository::{AbsenceCategory, AbsenceCategoryDb, User};
 use crate::roles::is_assistant_role;
 use crate::services::settings;
 use crate::time_calc::count_workdays;
@@ -32,12 +34,11 @@ pub const EMPLOYEE_HOURS_HEADING_KEY: &str = "pdf_payroll_employee_hours_heading
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PayrollReportConfig {
     pub enabled: bool,
-    /// Single recipient address (the payroll accountant / tax office).
-    pub recipient: String,
+    /// Recipient addresses, in stored order. All recipients are equal — every
+    /// address goes in the message's `To` header, none is primary/CC.
+    pub recipients: Vec<String>,
     /// Day of month on which the previous month is queued (1-28).
     pub day_of_month: u8,
-    /// Absence category slugs whose days are listed, in stored order.
-    pub absence_category_slugs: Vec<String>,
     pub include_assistant_hours: bool,
     pub include_employee_hours: bool,
 }
@@ -45,9 +46,12 @@ pub struct PayrollReportConfig {
 impl PayrollReportConfig {
     /// True when the report would contain no section at all. Such a
     /// configuration is rejected on save and skipped by the scheduler, because
-    /// mailing an empty document to the tax office helps nobody.
-    pub fn has_no_content(&self) -> bool {
-        self.absence_category_slugs.is_empty()
+    /// mailing an empty document to the tax office helps nobody. The absence
+    /// section is no longer admin-picked, so its presence depends on whether
+    /// any category currently qualifies as payroll-relevant — pass the result
+    /// of [`payroll_relevant_categories`].
+    pub fn has_no_content(&self, relevant_categories: &[AbsenceCategory]) -> bool {
+        relevant_categories.is_empty()
             && !self.include_assistant_hours
             && !self.include_employee_hours
     }
@@ -69,19 +73,13 @@ pub async fn load_config(pool: &crate::db::DatabasePool) -> AppResult<PayrollRep
         enabled: settings::load_setting(pool, settings::PAYROLL_REPORT_ENABLED_KEY, "false")
             .await?
             == "true",
-        recipient: settings::load_setting(pool, settings::PAYROLL_REPORT_RECIPIENT_KEY, "").await?,
+        recipients: parse_recipient_list(
+            &settings::load_setting(pool, settings::PAYROLL_REPORT_RECIPIENT_KEY, "").await?,
+        ),
         day_of_month: settings::load_setting(pool, settings::PAYROLL_REPORT_DAY_OF_MONTH_KEY, "5")
             .await?
             .parse()
             .unwrap_or(5),
-        absence_category_slugs: parse_category_slugs(
-            &settings::load_setting(
-                pool,
-                settings::PAYROLL_REPORT_ABSENCE_CATEGORIES_KEY,
-                "sick,unpaid",
-            )
-            .await?,
-        ),
         include_assistant_hours: settings::load_setting(
             pool,
             settings::PAYROLL_REPORT_ASSISTANT_HOURS_KEY,
@@ -99,23 +97,42 @@ pub async fn load_config(pool: &crate::db::DatabasePool) -> AppResult<PayrollRep
     })
 }
 
-/// Split the stored comma-separated slug list, dropping blanks and duplicates
-/// while preserving the admin's order.
-pub fn parse_category_slugs(stored: &str) -> Vec<String> {
-    let mut slugs: Vec<String> = Vec::new();
-    for slug in stored.split(',') {
-        let slug = slug.trim();
-        if slug.is_empty() || slugs.iter().any(|existing| existing == slug) {
-            continue;
-        }
-        slugs.push(slug.to_string());
-    }
-    slugs
+/// Absence categories the payroll report includes automatically — sick-like
+/// categories and anything that costs neither vacation nor flextime (see
+/// [`AbsenceCategory::is_payroll_relevant`]). Order follows `list_all()`
+/// (active first, then sort_order, then name), which is also the order rows
+/// appear in the rendered PDF.
+pub async fn payroll_relevant_categories(
+    pool: &crate::db::DatabasePool,
+) -> AppResult<Vec<AbsenceCategory>> {
+    let categories = AbsenceCategoryDb::new(pool.clone()).list_all().await?;
+    Ok(categories
+        .into_iter()
+        .filter(AbsenceCategory::is_payroll_relevant)
+        .collect())
 }
 
-/// Serialize a slug list back into the stored comma-separated form.
-pub fn format_category_slugs(slugs: &[String]) -> String {
-    parse_category_slugs(&slugs.join(",")).join(",")
+/// Split the stored comma-separated recipient list, dropping blanks and
+/// duplicates (case-insensitively) while preserving the admin's order.
+pub fn parse_recipient_list(stored: &str) -> Vec<String> {
+    let mut recipients: Vec<String> = Vec::new();
+    for address in stored.split(',') {
+        let address = address.trim();
+        if address.is_empty()
+            || recipients
+                .iter()
+                .any(|existing: &String| existing.eq_ignore_ascii_case(address))
+        {
+            continue;
+        }
+        recipients.push(address.to_string());
+    }
+    recipients
+}
+
+/// Serialize a recipient list back into the stored comma-separated form.
+pub fn format_recipient_list(recipients: &[String]) -> String {
+    parse_recipient_list(&recipients.join(",")).join(",")
 }
 
 /// Assemble everything the payroll report PDF renders for one period.
@@ -134,10 +151,11 @@ pub async fn build_report_data(
     let organization_name =
         settings::load_setting(&app_state.pool, settings::ORGANIZATION_NAME_KEY, "").await?;
 
-    let absence_rows = if config.absence_category_slugs.is_empty() {
+    let relevant_categories = payroll_relevant_categories(&app_state.pool).await?;
+    let absence_rows = if relevant_categories.is_empty() {
         None
     } else {
-        Some(build_absence_rows(app_state, from, to, members, config).await?)
+        Some(build_absence_rows(app_state, from, to, members, &relevant_categories).await?)
     };
 
     let mut hours_sections = Vec::new();
@@ -165,32 +183,22 @@ pub async fn build_report_data(
     })
 }
 
-/// One row per absence period of a selected category, clamped to the reported
-/// month and to the employee's start date.
+/// One row per absence period of a payroll-relevant category, clamped to the
+/// reported month and to the employee's start date.
 async fn build_absence_rows(
     app_state: &AppState,
     from: NaiveDate,
     to: NaiveDate,
     members: &[User],
-    config: &PayrollReportConfig,
+    relevant_categories: &[AbsenceCategory],
 ) -> AppResult<Vec<PayrollAbsenceRow>> {
-    // Category order in the PDF follows the admin's category sort order, so all
-    // sick days stay together, then all unpaid days, and so on.
-    let categories = app_state.db.absence_categories.list_all().await?;
-    let selected: Vec<(String, String, usize)> = config
-        .absence_category_slugs
+    // Category order in the PDF follows `list_all()`'s order, so all sick days
+    // stay together, then all unpaid days, and so on.
+    let selected: Vec<(String, String, usize)> = relevant_categories
         .iter()
-        .filter_map(|slug| {
-            categories
-                .iter()
-                .enumerate()
-                .find(|(_, category)| &category.slug == slug)
-                .map(|(index, category)| (category.slug.clone(), category.name.clone(), index))
-        })
+        .enumerate()
+        .map(|(index, category)| (category.slug.clone(), category.name.clone(), index))
         .collect();
-    if selected.is_empty() {
-        return Ok(Vec::new());
-    }
 
     let holidays = app_state.db.reports.holiday_set(from, to).await?;
 
@@ -293,59 +301,78 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_category_slugs_trims_and_deduplicates() {
+    fn parse_recipient_list_trims_and_deduplicates_case_insensitively() {
         assert_eq!(
-            parse_category_slugs(" sick , unpaid ,sick, "),
-            vec!["sick".to_string(), "unpaid".to_string()]
+            parse_recipient_list(" a@example.com , B@Example.com ,a@example.com, "),
+            vec!["a@example.com".to_string(), "B@Example.com".to_string()]
         );
-        assert!(parse_category_slugs("").is_empty());
-        assert!(parse_category_slugs("  ,  ").is_empty());
+        assert!(parse_recipient_list("").is_empty());
+        assert!(parse_recipient_list("  ,  ").is_empty());
     }
 
     #[test]
-    fn format_category_slugs_round_trips_the_stored_value() {
-        let slugs = vec!["sick".to_string(), "unpaid".to_string()];
-        assert_eq!(format_category_slugs(&slugs), "sick,unpaid");
-        assert_eq!(parse_category_slugs(&format_category_slugs(&slugs)), slugs);
-        assert_eq!(format_category_slugs(&[]), "");
+    fn format_recipient_list_round_trips_the_stored_value() {
+        let recipients = vec!["a@example.com".to_string(), "b@example.com".to_string()];
+        assert_eq!(
+            format_recipient_list(&recipients),
+            "a@example.com,b@example.com"
+        );
+        assert_eq!(
+            parse_recipient_list(&format_recipient_list(&recipients)),
+            recipients
+        );
+        assert_eq!(format_recipient_list(&[]), "");
     }
 
-    fn config(
-        slugs: &[&str],
-        include_assistant_hours: bool,
-        include_employee_hours: bool,
-    ) -> PayrollReportConfig {
+    fn config(include_assistant_hours: bool, include_employee_hours: bool) -> PayrollReportConfig {
         PayrollReportConfig {
             enabled: true,
-            recipient: "payroll@example.com".into(),
+            recipients: vec!["payroll@example.com".into()],
             day_of_month: 5,
-            absence_category_slugs: slugs.iter().map(|slug| slug.to_string()).collect(),
             include_assistant_hours,
             include_employee_hours,
         }
     }
 
+    fn category(slug: &str, cost_type: &str, auto_approve_past: bool) -> AbsenceCategory {
+        AbsenceCategory {
+            id: 1,
+            slug: slug.to_string(),
+            name: slug.to_string(),
+            color: "#000000".to_string(),
+            sort_order: 0,
+            active: true,
+            cost_type: cost_type.to_string(),
+            auto_approve_past,
+        }
+    }
+
     #[test]
     fn has_no_content_only_when_every_section_is_off() {
-        assert!(config(&[], false, false).has_no_content());
-        assert!(!config(&["sick"], false, false).has_no_content());
-        assert!(!config(&[], true, false).has_no_content());
-        assert!(!config(&[], false, true).has_no_content());
+        let sick = category(
+            "sick",
+            crate::repository::absence_categories::COST_TYPE_NONE,
+            true,
+        );
+        assert!(config(false, false).has_no_content(&[]));
+        assert!(!config(false, false).has_no_content(&[sick]));
+        assert!(!config(true, false).has_no_content(&[]));
+        assert!(!config(false, true).has_no_content(&[]));
     }
 
     #[test]
     fn includes_hours_for_splits_assistants_from_everyone_else() {
-        let assistants_only = config(&[], true, false);
+        let assistants_only = config(true, false);
         assert!(assistants_only.includes_hours_for("assistant"));
         assert!(!assistants_only.includes_hours_for("employee"));
         assert!(!assistants_only.includes_hours_for("team_lead"));
 
-        let employees_only = config(&[], false, true);
+        let employees_only = config(false, true);
         assert!(!employees_only.includes_hours_for("assistant"));
         assert!(employees_only.includes_hours_for("employee"));
         assert!(employees_only.includes_hours_for("admin"));
 
-        let neither = config(&["sick"], false, false);
+        let neither = config(false, false);
         assert!(!neither.includes_hours_for("assistant"));
         assert!(!neither.includes_hours_for("employee"));
     }

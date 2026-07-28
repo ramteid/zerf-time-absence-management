@@ -1771,19 +1771,21 @@ spreadsheet: it lists the absence days that change what has to be filed or paid,
 and the working days and hours the people paid by the hour actually worked.
 
 The report covers the **previous calendar month** and is sent as a PDF
-attachment to a single configured address. It uses the email server configured
-under Settings → Email, so email must be set up first.
+attachment to every configured recipient — all of them receive the same email,
+with no primary recipient or copy distinction. It uses the email server
+configured under Settings → Email, so email must be set up first.
 
 | Setting | Description |
 | --- | --- |
 | Send the payroll report by email | Activates the monthly report. |
-| Recipient email address | The single address the report is sent to. |
+| Recipient email addresses | One or more addresses the report is sent to. Separate multiple addresses with a comma. |
 | Send day of month (1–28) | The day on which the previous month is prepared. Default: 5. Set it after your submission deadline so most months are already complete on the first attempt. |
-| Absence days per employee | Tick every absence category that has to appear. Sick days are needed for health-insurance reimbursement, unpaid days reduce the salary payout. Sick and unpaid are pre-selected. |
+| Absence days per employee | Which categories appear is decided automatically — there is nothing to tick. Sick-like categories and any category that neither counts as vacation nor reduces flextime are included, because those are exactly the days that change what payroll has to file: sick days are needed for health-insurance reimbursement, unpaid days reduce the salary payout. The categories currently included are listed for reference. To change what appears, adjust the category's behavior on the Categories page. |
 | Working days and hours | Tick whose working days and hours are listed: assistants, all other employees, or both. |
 
-At least one recipient and one section are required before the report can be
-switched on.
+At least one recipient is required before the report can be switched on, and
+the report must have at least one section with content (an absence category
+that qualifies, or working hours).
 
 #### What the PDF contains
 

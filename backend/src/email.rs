@@ -44,14 +44,15 @@ pub fn send_async(
     });
 }
 
-/// Send an email and wait for the SMTP transaction to finish, optionally with
-/// one attached file. Unlike [`send_async`] the caller learns whether delivery
-/// succeeded — required for the scheduled payroll report, which may only drop a
-/// month from its queue once the message was actually accepted.
+/// Send an email to one or more equal recipients (all placed in the `To`
+/// header — no primary/CC distinction) and wait for the SMTP transaction to
+/// finish, optionally with one attached file. Unlike [`send_async`] the caller
+/// learns whether delivery succeeded — required for the scheduled payroll
+/// report, which may only drop a month from its queue once the message was
+/// actually accepted.
 pub async fn send_with_attachment(
     cfg: &SmtpConfig,
-    to: &str,
-    to_name: &str,
+    to: &[String],
     subject: &str,
     body_text: &str,
     attachment: EmailAttachment,
@@ -60,7 +61,7 @@ pub async fn send_with_attachment(
     // server must fail rather than stall the loop until the process restarts.
     tokio::time::timeout(
         ATTACHMENT_SEND_TIMEOUT,
-        send_now(cfg, to, to_name, subject, body_text, Some(attachment)),
+        send_now_multi(cfg, to, subject, body_text, Some(attachment)),
     )
     .await
     .map_err(|_| -> Box<dyn std::error::Error + Send + Sync> {
@@ -122,7 +123,39 @@ async fn send_now(
         format!("\"{}\" <{}>", quoted_name, to).parse()?
     };
     let builder = Message::builder().from(from).to(to_box).subject(subject);
-    let email = match attachment {
+    let email = finish_message(builder, body_text, attachment)?;
+    build_mailer(cfg, None)?.send(email).await?;
+    Ok(())
+}
+
+/// Like `send_now`, but addresses every entry in `to` as an equal recipient
+/// in a single message's `To` header (no per-recipient display name — repeated
+/// `.to()` calls append to the same header instead of overwriting it).
+async fn send_now_multi(
+    cfg: &SmtpConfig,
+    to: &[String],
+    subject: &str,
+    body_text: &str,
+    attachment: Option<EmailAttachment>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let from: Mailbox = cfg.from.parse()?;
+    let mut builder = Message::builder().from(from).subject(subject);
+    for address in to {
+        builder = builder.to(address.parse()?);
+    }
+    let email = finish_message(builder, body_text, attachment)?;
+    build_mailer(cfg, None)?.send(email).await?;
+    Ok(())
+}
+
+/// Render the plain-text body, plus the attachment as a second part when
+/// present, onto an already-addressed message builder.
+fn finish_message(
+    builder: lettre::message::MessageBuilder,
+    body_text: &str,
+    attachment: Option<EmailAttachment>,
+) -> Result<Message, Box<dyn std::error::Error + Send + Sync>> {
+    Ok(match attachment {
         // Plain text stays a single-part message so nothing changes for the
         // existing notification emails.
         None => builder
@@ -143,7 +176,39 @@ async fn send_now(
                     ),
             )?
         }
-    };
-    build_mailer(cfg, None)?.send(email).await?;
-    Ok(())
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Guards the assumption `send_now_multi` relies on: repeated `.to()`
+    /// calls append to the same `To` header instead of overwriting it, so
+    /// every payroll report recipient is addressed as an equal `To`
+    /// recipient in one message rather than only the last one winning.
+    #[test]
+    fn repeated_to_calls_join_into_one_header_with_every_recipient() {
+        let message = Message::builder()
+            .from("from@example.com".parse::<Mailbox>().unwrap())
+            .to("a@example.com".parse::<Mailbox>().unwrap())
+            .to("b@example.com".parse::<Mailbox>().unwrap())
+            .subject("subject")
+            .header(ContentType::TEXT_PLAIN)
+            .body("body".to_string())
+            .unwrap();
+
+        let raw = String::from_utf8(message.formatted()).unwrap();
+        let to_line = raw
+            .lines()
+            .find(|line| line.starts_with("To:"))
+            .expect("To header present");
+        assert!(to_line.contains("a@example.com"), "To header: {to_line}");
+        assert!(to_line.contains("b@example.com"), "To header: {to_line}");
+        assert_eq!(
+            raw.lines().filter(|line| line.starts_with("To:")).count(),
+            1,
+            "recipients share a single To header, not one each"
+        );
+    }
 }

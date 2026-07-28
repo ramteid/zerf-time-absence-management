@@ -672,10 +672,10 @@ pub async fn update_upload_settings(
 #[derive(Deserialize)]
 pub struct UpdatePayrollReportSettings {
     pub payroll_report_enabled: Option<bool>,
-    pub payroll_report_recipient: Option<String>,
+    /// Recipient addresses; all are equal (everyone goes in `To`, none is
+    /// primary/CC).
+    pub payroll_report_recipients: Option<Vec<String>>,
     pub payroll_report_day_of_month: Option<u8>,
-    /// Absence category slugs to include; an empty list disables the section.
-    pub payroll_report_absence_categories: Option<Vec<String>>,
     pub payroll_report_include_assistant_hours: Option<bool>,
     pub payroll_report_include_employee_hours: Option<bool>,
 }
@@ -697,31 +697,16 @@ pub async fn update_payroll_report_settings(
         }
     }
 
-    let recipient = body
-        .payroll_report_recipient
-        .as_deref()
-        .map(str::trim)
-        .map(str::to_string);
-    if let Some(ref address) = recipient {
-        if !address.is_empty() {
-            address
-                .parse::<Mailbox>()
-                .map_err(|_| AppError::BadRequest("Invalid payroll report recipient.".into()))?;
-        }
-    }
-
-    // Only known category slugs may be stored — a typo or a deleted category
-    // would otherwise silently drop a section from the report.
-    let categories = match body.payroll_report_absence_categories {
-        Some(ref slugs) => {
-            let known = app_state.db.absence_categories.list_all().await?;
-            let normalized = crate::services::payroll_report::format_category_slugs(slugs);
-            for slug in crate::services::payroll_report::parse_category_slugs(&normalized) {
-                if !known.iter().any(|category| category.slug == slug) {
-                    return Err(AppError::BadRequest(format!(
-                        "Unknown absence category: {slug}"
-                    )));
-                }
+    // Every recipient must be a valid address; duplicates are folded
+    // case-insensitively so the same person entered twice doesn't get the
+    // report twice.
+    let recipients = match body.payroll_report_recipients {
+        Some(ref addresses) => {
+            let normalized = crate::services::payroll_report::format_recipient_list(addresses);
+            for address in crate::services::payroll_report::parse_recipient_list(&normalized) {
+                address
+                    .parse::<Mailbox>()
+                    .map_err(|_| AppError::BadRequest("Invalid payroll report recipient.".into()))?;
             }
             Some(normalized)
         }
@@ -729,20 +714,19 @@ pub async fn update_payroll_report_settings(
     };
 
     // Everything the report needs must be present once it is switched on:
-    // an empty recipient or a report with no sections could never be sent.
+    // no recipient or a report with no sections could never be sent.
     // Each field saves independently, so compute the effective end state by
     // falling back to what is stored for the fields this request omits.
     let stored = crate::services::payroll_report::load_config(&app_state.pool).await?;
     let effective = crate::services::payroll_report::PayrollReportConfig {
         enabled: body.payroll_report_enabled.unwrap_or(stored.enabled),
-        recipient: recipient.clone().unwrap_or(stored.recipient),
+        recipients: recipients
+            .as_deref()
+            .map(crate::services::payroll_report::parse_recipient_list)
+            .unwrap_or(stored.recipients),
         day_of_month: body
             .payroll_report_day_of_month
             .unwrap_or(stored.day_of_month),
-        absence_category_slugs: categories
-            .as_deref()
-            .map(crate::services::payroll_report::parse_category_slugs)
-            .unwrap_or(stored.absence_category_slugs),
         include_assistant_hours: body
             .payroll_report_include_assistant_hours
             .unwrap_or(stored.include_assistant_hours),
@@ -751,12 +735,14 @@ pub async fn update_payroll_report_settings(
             .unwrap_or(stored.include_employee_hours),
     };
     if effective.enabled {
-        if effective.recipient.trim().is_empty() {
+        if effective.recipients.is_empty() {
             return Err(AppError::BadRequest(
                 "A recipient address is required to enable the payroll report.".into(),
             ));
         }
-        if effective.has_no_content() {
+        let relevant_categories =
+            crate::services::payroll_report::payroll_relevant_categories(&app_state.pool).await?;
+        if effective.has_no_content(&relevant_categories) {
             return Err(AppError::BadRequest(
                 "Select at least one section for the payroll report.".into(),
             ));
@@ -773,18 +759,13 @@ pub async fn update_payroll_report_settings(
     save_if_some!(
         transaction,
         settings::PAYROLL_REPORT_RECIPIENT_KEY,
-        recipient
+        recipients
     );
     save_if_some!(
         transaction,
         settings::PAYROLL_REPORT_DAY_OF_MONTH_KEY,
         body.payroll_report_day_of_month,
         num
-    );
-    save_if_some!(
-        transaction,
-        settings::PAYROLL_REPORT_ABSENCE_CATEGORIES_KEY,
-        categories
     );
     save_if_some!(
         transaction,

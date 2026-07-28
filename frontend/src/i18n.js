@@ -296,12 +296,16 @@ const TRANSLATIONS = {
     "Send the payroll report by email": "Send the payroll report by email",
     "On the configured day of each month, the previous month's report is prepared and emailed as a PDF. It is only sent once every employee's month is final: weeks submitted, absence requests decided, and — for everyone whose hours are in the report — all time entries approved. Otherwise the report waits and is retried daily. Requires a configured email server.":
       "On the configured day of each month, the previous month's report is prepared and emailed as a PDF. It is only sent once every employee's month is final: weeks submitted, absence requests decided, and — for everyone whose hours are in the report — all time entries approved. Otherwise the report waits and is retried daily. Requires a configured email server.",
-    "Recipient email address": "Recipient email address",
+    "Recipient email addresses": "Recipient email addresses",
+    "Separate multiple addresses with a comma. Every recipient receives the same email.":
+      "Separate multiple addresses with a comma. Every recipient receives the same email.",
     "Send day of month (1–28)": "Send day of month (1–28)",
     "Report content": "Report content",
     "Absence days per employee": "Absence days per employee",
     "One row per absence period with the number of working days. Sick days are needed for health-insurance reimbursement, unpaid days reduce the salary payout.":
       "One row per absence period with the number of working days. Sick days are needed for health-insurance reimbursement, unpaid days reduce the salary payout.",
+    "Included automatically — sick-like categories, and any category that counts neither as vacation nor as flextime. Nothing to select here; manage the behavior on the Categories page.":
+      "Included automatically — sick-like categories, and any category that counts neither as vacation nor as flextime. Nothing to select here; manage the behavior on the Categories page.",
     "Working days and hours": "Working days and hours",
     "Worked days and approved hours per person, shown in hours:minutes and as a decimal value for payroll.":
       "Worked days and approved hours per person, shown in hours:minutes and as a decimal value for payroll.",
@@ -1336,12 +1340,16 @@ const TRANSLATIONS = {
     "Send the payroll report by email": "Lohnmeldung per E-Mail senden",
     "On the configured day of each month, the previous month's report is prepared and emailed as a PDF. It is only sent once every employee's month is final: weeks submitted, absence requests decided, and — for everyone whose hours are in the report — all time entries approved. Otherwise the report waits and is retried daily. Requires a configured email server.":
       "Am konfigurierten Tag des Monats wird die Meldung für den Vormonat erstellt und als PDF per E-Mail versendet. Sie wird erst gesendet, wenn der Monat für alle Personen abgeschlossen ist: Wochen eingereicht, Abwesenheitsanträge entschieden und — für alle, deren Stunden in der Meldung stehen — alle Zeiteinträge genehmigt. Andernfalls wartet die Meldung und wird täglich erneut geprüft. Ein eingerichteter E-Mail-Server ist erforderlich.",
-    "Recipient email address": "E-Mail-Adresse des Empfängers",
+    "Recipient email addresses": "E-Mail-Adressen der Empfänger",
+    "Separate multiple addresses with a comma. Every recipient receives the same email.":
+      "Mehrere Adressen durch Komma trennen. Jeder Empfänger erhält dieselbe E-Mail.",
     "Send day of month (1–28)": "Versandtag im Monat (1–28)",
     "Report content": "Inhalt der Meldung",
     "Absence days per employee": "Abwesenheitstage je Person",
     "One row per absence period with the number of working days. Sick days are needed for health-insurance reimbursement, unpaid days reduce the salary payout.":
       "Eine Zeile je Abwesenheitszeitraum mit der Anzahl der Arbeitstage. Krankheitstage werden für die Erstattung durch die Krankenkasse benötigt, unbezahlte Tage verringern die Lohnauszahlung.",
+    "Included automatically — sick-like categories, and any category that counts neither as vacation nor as flextime. Nothing to select here; manage the behavior on the Categories page.":
+      "Automatisch enthalten sind krankheitsähnliche Kategorien sowie alle Kategorien, die weder als Urlaub zählen noch die Gleitzeit belasten. Hier ist nichts auszuwählen; das Verhalten wird auf der Seite Kategorien verwaltet.",
     "Working days and hours": "Arbeitstage und Arbeitsstunden",
     "Worked days and approved hours per person, shown in hours:minutes and as a decimal value for payroll.":
       "Gearbeitete Tage und genehmigte Stunden je Person, angegeben in Stunden:Minuten und zusätzlich als Dezimalwert für die Lohnabrechnung.",

@@ -4,12 +4,15 @@
   import { t } from "../i18n.js";
 
   let settings = {};
-  // Absence categories offered as checkboxes; loaded once with the settings.
+  // Absence categories, loaded once so the read-only "included automatically"
+  // list below can show each category's translated name and color.
   let categories = [];
-  // Selected category slugs, kept as a plain array so the payload order is stable.
-  let selectedSlugs = [];
   let saving = false;
   let sending = false;
+  // Recipients are edited as one comma-separated string and only split into
+  // an array on save/load — simpler than a multi-value widget for a handful
+  // of addresses.
+  let recipientsInput = "";
 
   async function load() {
     const [loadedSettings, loadedCategories] = await Promise.all([
@@ -18,29 +21,45 @@
     ]);
     settings = loadedSettings;
     categories = loadedCategories;
-    selectedSlugs = [
-      ...(loadedSettings.payroll_report_absence_categories || []),
-    ];
+    recipientsInput = (loadedSettings.payroll_report_recipients || []).join(
+      ", ",
+    );
   }
   load();
 
-  function toggleCategory(slug, checked) {
-    selectedSlugs = checked
-      ? [...selectedSlugs, slug]
-      : selectedSlugs.filter((entry) => entry !== slug);
+  function parseRecipients(value) {
+    return [
+      ...new Set(
+        value
+          .split(",")
+          .map((address) => address.trim())
+          .filter((address) => address.length > 0),
+      ),
+    ];
   }
+
+  // Categories the report currently includes automatically. The backend
+  // decides membership from each category's behavior (sick-like, or costing
+  // neither vacation nor flextime) — there is nothing to pick here, this just
+  // resolves the returned slugs to their display name and color.
+  $: includedCategories = categories.filter((category) =>
+    (settings.payroll_report_absence_categories || []).includes(
+      category.slug,
+    ),
+  );
 
   // The report must have a recipient and at least one section before it can be
   // switched on — the backend rejects anything else, so mirror it here for a
   // direct error message instead of a round-trip.
   $: hasContent =
-    selectedSlugs.length > 0 ||
+    (settings.payroll_report_absence_categories || []).length > 0 ||
     !!settings.payroll_report_include_assistant_hours ||
     !!settings.payroll_report_include_employee_hours;
 
   async function save() {
+    const recipients = parseRecipients(recipientsInput);
     if (settings.payroll_report_enabled) {
-      if (!(settings.payroll_report_recipient || "").trim()) {
+      if (recipients.length === 0) {
         toast(
           $t("A recipient address is required to enable the payroll report."),
           "error",
@@ -59,12 +78,9 @@
     try {
       const body = {
         payroll_report_enabled: !!settings.payroll_report_enabled,
-        payroll_report_recipient: (
-          settings.payroll_report_recipient || ""
-        ).trim(),
+        payroll_report_recipients: recipients,
         payroll_report_day_of_month:
           parseInt(settings.payroll_report_day_of_month) || 5,
-        payroll_report_absence_categories: selectedSlugs,
         payroll_report_include_assistant_hours:
           !!settings.payroll_report_include_assistant_hours,
         payroll_report_include_employee_hours:
@@ -75,7 +91,7 @@
         body,
       });
       settings = saved;
-      selectedSlugs = [...(saved.payroll_report_absence_categories || [])];
+      recipientsInput = (saved.payroll_report_recipients || []).join(", ");
       toast($t("Payroll report settings saved."), "ok");
     } catch (e) {
       toast(e?.message || $t("Error"), "error");
@@ -139,17 +155,22 @@
 
       <div class="field-row">
         <div>
-          <label class="zf-label" for="payroll-recipient"
-            >{$t("Recipient email address")}</label
+          <label class="zf-label" for="payroll-recipients"
+            >{$t("Recipient email addresses")}</label
           >
           <input
-            id="payroll-recipient"
+            id="payroll-recipients"
             class="zf-input"
-            type="email"
-            bind:value={settings.payroll_report_recipient}
-            placeholder="lohn@steuerbuero.example"
+            type="text"
+            bind:value={recipientsInput}
+            placeholder="lohn@steuerbuero.example, buchhaltung@example.com"
             disabled={!settings.payroll_report_enabled}
           />
+          <div class="field-hint">
+            {$t(
+              "Separate multiple addresses with a comma. Every recipient receives the same email.",
+            )}
+          </div>
         </div>
         <div>
           <label class="zf-label" for="payroll-day"
@@ -181,22 +202,25 @@
               "One row per absence period with the number of working days. Sick days are needed for health-insurance reimbursement, unpaid days reduce the salary payout.",
             )}
           </div>
-          <div class="category-options">
-            {#each categories as category (category.slug)}
-              <label class="zf-label zf-row">
-                <input
-                  type="checkbox"
-                  checked={selectedSlugs.includes(category.slug)}
-                  on:change={(event) =>
-                    toggleCategory(category.slug, event.currentTarget.checked)}
-                />
-                {$t(category.name)}
-                {#if !category.active}
-                  <span class="zf-label-hint">({$t("inactive")})</span>
-                {/if}
-              </label>
-            {/each}
+          <div class="field-hint">
+            {$t(
+              "Included automatically — sick-like categories, and any category that counts neither as vacation nor as flextime. Nothing to select here; manage the behavior on the Categories page.",
+            )}
           </div>
+          {#if includedCategories.length > 0}
+            <div class="category-list">
+              {#each includedCategories as category (category.slug)}
+                <span class="category-chip">
+                  <span class="cat-dot" style:background={category.color}
+                  ></span>
+                  {$t(category.name)}
+                  {#if !category.active}
+                    <span class="zf-label-hint">({$t("inactive")})</span>
+                  {/if}
+                </span>
+              {/each}
+            </div>
+          {/if}
         </div>
       </div>
 
@@ -229,59 +253,86 @@
 
   <div class="zf-card zf-card-section">
     <div class="form-actions">
-      <button
-        class="zf-btn zf-btn-accent-soft"
-        on:click={sendNow}
-        disabled={sending || saving || !settings.payroll_report_enabled}
-      >
-        {#if sending}
-          {$t("Sending...")}
-        {:else}
-          {$t("Send now")}
-        {/if}
-      </button>
-      <button
-        class="zf-btn zf-btn-primary"
-        on:click={save}
-        disabled={saving || sending}
-      >
-        {#if saving}
-          {$t("Saving...")}
-        {:else}
-          {$t("Save")}
-        {/if}
-      </button>
-    </div>
-    <div class="field-hint">
-      {$t(
-        "Send now prepares the previous month immediately and sends it if the month is already final. It does not replace the scheduled monthly run.",
-      )}
+      <div class="field-hint form-actions-hint">
+        {$t(
+          "Send now prepares the previous month immediately and sends it if the month is already final. It does not replace the scheduled monthly run.",
+        )}
+      </div>
+      <div class="form-actions-buttons">
+        <button
+          class="zf-btn zf-btn-accent-soft"
+          on:click={sendNow}
+          disabled={sending || saving || !settings.payroll_report_enabled}
+        >
+          {#if sending}
+            {$t("Sending...")}
+          {:else}
+            {$t("Send now")}
+          {/if}
+        </button>
+        <button
+          class="zf-btn zf-btn-primary"
+          on:click={save}
+          disabled={saving || sending}
+        >
+          {#if saving}
+            {$t("Saving...")}
+          {:else}
+            {$t("Save")}
+          {/if}
+        </button>
+      </div>
     </div>
   </div>
 </div>
 
 <style>
-  /* Category checkboxes line up in a fixed grid (instead of free-flowing
-     flex-wrap) so entries stay aligned into clean rows/columns regardless of
-     label length — flex-wrap let longer German translations push later
-     entries into ragged, inconsistent positions. Collapses to a single
-     column once the viewport is too narrow for a second one. */
-  .category-options {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: 8px 24px;
+  /* Read-only list of categories the report includes automatically — a
+     wrapping row of small color-dot + name chips, not an input. */
+  .category-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 20px;
     margin-top: 8px;
   }
 
-  /* Category names are free text (admin-defined) and unbounded in length —
-     let long ones wrap within their grid column instead of overflowing it. */
-  .category-options label {
-    flex-wrap: wrap;
+  .category-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
   }
 
+  /* Matches the Nextcloud Backups page's form-actions spacing (gap, padding-top);
+     the explanatory text sits beside the buttons instead of below them. */
   .form-actions {
     display: flex;
-    justify-content: flex-end;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    padding-top: 16px;
+  }
+
+  .form-actions-hint {
+    margin-top: 0;
+  }
+
+  .form-actions-buttons {
+    display: flex;
+    flex-shrink: 0;
     gap: 8px;
+  }
+
+  /* Too narrow for hint text and both buttons on one line — stack them. */
+  @media (max-width: 768px) {
+    .form-actions {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .form-actions-buttons {
+      justify-content: flex-end;
+    }
   }
 </style>

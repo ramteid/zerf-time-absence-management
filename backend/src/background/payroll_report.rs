@@ -48,7 +48,11 @@ pub async fn run_loop(state: AppState) {
 /// month is reached, then send every queued period that is ready.
 async fn run_once(state: &AppState) -> AppResult<()> {
     let config = payroll_report::load_config(&state.pool).await?;
-    if !config.enabled || config.recipient.trim().is_empty() || config.has_no_content() {
+    if !config.enabled || config.recipients.is_empty() {
+        return Ok(());
+    }
+    let relevant_categories = payroll_report::payroll_relevant_categories(&state.pool).await?;
+    if config.has_no_content(&relevant_categories) {
         return Ok(());
     }
 
@@ -81,12 +85,13 @@ pub async fn run_now(state: &AppState) -> AppResult<RunSummary> {
             "The payroll report is not enabled.".into(),
         ));
     }
-    if config.recipient.trim().is_empty() {
+    if config.recipients.is_empty() {
         return Err(AppError::BadRequest(
             "No recipient address configured for the payroll report.".into(),
         ));
     }
-    if config.has_no_content() {
+    let relevant_categories = payroll_report::payroll_relevant_categories(&state.pool).await?;
+    if config.has_no_content(&relevant_categories) {
         return Err(AppError::BadRequest(
             "Select at least one section for the payroll report.".into(),
         ));
@@ -207,8 +212,7 @@ async fn process_period(
 
     crate::email::send_with_attachment(
         &smtp,
-        config.recipient.trim(),
-        "",
+        &config.recipients,
         &text.title,
         &text.body,
         crate::email::EmailAttachment {
@@ -224,7 +228,7 @@ async fn process_period(
     state.db.payroll_queue.delete_entry(period).await?;
     tracing::info!(
         "Payroll report: sent period {period} to {}",
-        config.recipient.trim()
+        config.recipients.join(", ")
     );
     Ok(true)
 }

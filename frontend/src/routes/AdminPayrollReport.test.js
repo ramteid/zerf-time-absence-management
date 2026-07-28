@@ -6,16 +6,24 @@ import { setLanguage } from "../i18n.js";
 const mockState = vi.hoisted(() => ({
   settings: {
     payroll_report_enabled: true,
-    payroll_report_recipient: "payroll@example.com",
+    payroll_report_recipients: ["payroll@example.com"],
     payroll_report_day_of_month: 5,
+    // Read-only: which categories the backend currently includes
+    // automatically (sick-like, or costing neither vacation nor flextime).
     payroll_report_absence_categories: ["sick"],
     payroll_report_include_assistant_hours: true,
     payroll_report_include_employee_hours: false,
   },
   categories: [
-    { id: 1, slug: "sick", name: "Sick", active: true },
-    { id: 2, slug: "unpaid", name: "Unpaid", active: true },
-    { id: 3, slug: "old_leave", name: "Old leave", active: false },
+    { id: 1, slug: "sick", name: "Sick", color: "#ef4444", active: true },
+    { id: 2, slug: "unpaid", name: "Unpaid", color: "#64748b", active: true },
+    {
+      id: 3,
+      slug: "old_leave",
+      name: "Old leave",
+      color: "#0ea5e9",
+      active: false,
+    },
   ],
 }));
 
@@ -86,7 +94,7 @@ describe("AdminPayrollReport", () => {
     toastMock.mockClear();
     mockState.settings = {
       payroll_report_enabled: true,
-      payroll_report_recipient: "payroll@example.com",
+      payroll_report_recipients: ["payroll@example.com"],
       payroll_report_day_of_month: 5,
       payroll_report_absence_categories: ["sick"],
       payroll_report_include_assistant_hours: true,
@@ -102,31 +110,35 @@ describe("AdminPayrollReport", () => {
     target.remove();
   });
 
-  it("renders one checkbox per absence category and preselects the stored ones", async () => {
+  it("shows the automatically included categories as a read-only list", async () => {
     component = mount(AdminPayrollReport, { target });
     await settle();
 
-    const checkboxes = [...target.querySelectorAll('input[type="checkbox"]')];
-    const sick = checkboxes.find((box) =>
-      box.closest("label")?.textContent?.includes("Sick"),
-    );
-    const unpaid = checkboxes.find((box) =>
-      box.closest("label")?.textContent?.includes("Unpaid"),
-    );
-    expect(sick.checked).toBe(true);
-    expect(unpaid.checked).toBe(false);
-    // Inactive categories stay selectable but are marked as such.
-    expect(target.textContent).toContain("inactive");
+    // No manual picker — nothing to check or toggle here.
+    expect(target.querySelectorAll('input[type="checkbox"]').length).toBe(3);
+    expect(target.textContent).toContain("Sick");
+    expect(target.textContent).not.toContain("Unpaid");
   });
 
-  it("saves every configured field including the toggled categories", async () => {
+  it("prefills the recipients field from the stored list", async () => {
+    mockState.settings.payroll_report_recipients = [
+      "payroll@example.com",
+      "second@example.com",
+    ];
     component = mount(AdminPayrollReport, { target });
     await settle();
 
-    const unpaid = [...target.querySelectorAll('input[type="checkbox"]')].find(
-      (box) => box.closest("label")?.textContent?.includes("Unpaid"),
-    );
-    unpaid.click();
+    const input = target.querySelector("#payroll-recipients");
+    expect(input.value).toBe("payroll@example.com, second@example.com");
+  });
+
+  it("saves every configured field, parsing recipients from the input", async () => {
+    component = mount(AdminPayrollReport, { target });
+    await settle();
+
+    const input = target.querySelector("#payroll-recipients");
+    input.value = "payroll@example.com, second@example.com, second@example.com";
+    input.dispatchEvent(new Event("input"));
     await settle();
 
     clickButton(target, "Save");
@@ -139,9 +151,11 @@ describe("AdminPayrollReport", () => {
     expect(saveCall).toBeTruthy();
     const body = saveCall[1].body;
     expect(body.payroll_report_enabled).toBe(true);
-    expect(body.payroll_report_recipient).toBe("payroll@example.com");
+    expect(body.payroll_report_recipients).toEqual([
+      "payroll@example.com",
+      "second@example.com",
+    ]);
     expect(body.payroll_report_day_of_month).toBe(5);
-    expect(body.payroll_report_absence_categories).toEqual(["sick", "unpaid"]);
     expect(body.payroll_report_include_assistant_hours).toBe(true);
     expect(body.payroll_report_include_employee_hours).toBe(false);
   });
@@ -149,7 +163,7 @@ describe("AdminPayrollReport", () => {
   it("refuses to enable the report without a recipient", async () => {
     mockState.settings = {
       ...mockState.settings,
-      payroll_report_recipient: "",
+      payroll_report_recipients: [],
     };
     component = mount(AdminPayrollReport, { target });
     await settle();

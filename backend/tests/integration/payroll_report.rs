@@ -31,12 +31,11 @@ fn month_bounds(date: NaiveDate) -> (NaiveDate, NaiveDate) {
     )
 }
 
-fn config(slugs: &[&str], assistant_hours: bool, employee_hours: bool) -> PayrollReportConfig {
+fn config(assistant_hours: bool, employee_hours: bool) -> PayrollReportConfig {
     PayrollReportConfig {
         enabled: true,
-        recipient: "payroll@example.com".into(),
+        recipients: vec!["payroll@example.com".into()],
         day_of_month: 1,
-        absence_category_slugs: slugs.iter().map(|slug| slug.to_string()).collect(),
         include_assistant_hours: assistant_hours,
         include_employee_hours: employee_hours,
     }
@@ -92,30 +91,19 @@ async fn payroll_report_settings_are_validated_and_persisted() {
     let (status, _) = admin
         .put(
             "/api/v1/settings/payroll-report",
-            &json!({"payroll_report_enabled": true, "payroll_report_recipient": ""}),
+            &json!({"payroll_report_enabled": true, "payroll_report_recipients": []}),
         )
         .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "recipient is required");
-
-    // Enabling without any section is rejected — an empty PDF helps nobody.
-    let (status, _) = admin
-        .put(
-            "/api/v1/settings/payroll-report",
-            &json!({
-                "payroll_report_enabled": true,
-                "payroll_report_recipient": "payroll@example.com",
-                "payroll_report_absence_categories": [],
-                "payroll_report_include_assistant_hours": false,
-                "payroll_report_include_employee_hours": false,
-            }),
-        )
-        .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "content is required");
+    // The "no section enabled" case (both hours off and no payroll-relevant
+    // absence category exists) is covered at the unit level in
+    // `services::payroll_report::tests` — reaching it here would require
+    // reconfiguring every seeded category's cost_type first.
 
     let (status, _) = admin
         .put(
             "/api/v1/settings/payroll-report",
-            &json!({"payroll_report_recipient": "not-an-address"}),
+            &json!({"payroll_report_recipients": ["not-an-address"]}),
         )
         .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "recipient must be valid");
@@ -128,23 +116,15 @@ async fn payroll_report_settings_are_validated_and_persisted() {
         .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "day must be 1-28");
 
-    let (status, _) = admin
-        .put(
-            "/api/v1/settings/payroll-report",
-            &json!({"payroll_report_absence_categories": ["does_not_exist"]}),
-        )
-        .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "unknown category rejected");
-
     // A complete, valid configuration round-trips through the admin settings.
+    // Recipients are equal, order-preserving, and folded case-insensitively.
     let (status, body) = admin
         .put(
             "/api/v1/settings/payroll-report",
             &json!({
                 "payroll_report_enabled": true,
-                "payroll_report_recipient": " payroll@example.com ",
+                "payroll_report_recipients": [" payroll@example.com ", "PAYROLL@example.com", "second@example.com"],
                 "payroll_report_day_of_month": 7,
-                "payroll_report_absence_categories": ["sick", "unpaid", "sick"],
                 "payroll_report_include_assistant_hours": true,
                 "payroll_report_include_employee_hours": false,
             }),
@@ -152,13 +132,25 @@ async fn payroll_report_settings_are_validated_and_persisted() {
         .await;
     assert_eq!(status, StatusCode::OK, "valid save: {body}");
     assert_eq!(body["payroll_report_enabled"], true);
-    assert_eq!(body["payroll_report_recipient"], "payroll@example.com");
-    assert_eq!(body["payroll_report_day_of_month"], 7);
     assert_eq!(
-        body["payroll_report_absence_categories"],
-        json!(["sick", "unpaid"]),
-        "duplicates are collapsed"
+        body["payroll_report_recipients"],
+        json!(["payroll@example.com", "second@example.com"]),
+        "case-insensitive duplicates are collapsed"
     );
+    assert_eq!(body["payroll_report_day_of_month"], 7);
+    // Absence categories are no longer admin-picked: the seeded "sick" and
+    // "unpaid" categories qualify automatically (sick-like / cost_type=none),
+    // while "vacation" and "flextime_reduction" are excluded.
+    let auto_categories: Vec<String> = body["payroll_report_absence_categories"]
+        .as_array()
+        .expect("categories array")
+        .iter()
+        .map(|value| value.as_str().unwrap().to_string())
+        .collect();
+    assert!(auto_categories.contains(&"sick".to_string()));
+    assert!(auto_categories.contains(&"unpaid".to_string()));
+    assert!(!auto_categories.contains(&"vacation".to_string()));
+    assert!(!auto_categories.contains(&"flextime_reduction".to_string()));
 
     let (status, settings) = admin.get("/api/v1/settings").await;
     assert_eq!(status, StatusCode::OK);
@@ -173,7 +165,10 @@ async fn payroll_report_settings_are_validated_and_persisted() {
         )
         .await;
     assert_eq!(status, StatusCode::OK, "partial save: {body}");
-    assert_eq!(body["payroll_report_recipient"], "payroll@example.com");
+    assert_eq!(
+        body["payroll_report_recipients"],
+        json!(["payroll@example.com", "second@example.com"])
+    );
     assert_eq!(body["payroll_report_day_of_month"], 3);
 
     // Non-admins may not touch the configuration or trigger a run.
@@ -267,7 +262,7 @@ async fn payroll_report_lists_absence_days_and_assistant_hours() {
         from,
         to,
         &members,
-        &config(&["sick", "unpaid"], true, false),
+        &config(true, false),
         &language,
     )
     .await
@@ -337,9 +332,8 @@ async fn payroll_report_waits_until_every_month_is_final() {
             "/api/v1/settings/payroll-report",
             &json!({
                 "payroll_report_enabled": true,
-                "payroll_report_recipient": "payroll@example.com",
+                "payroll_report_recipients": ["payroll@example.com"],
                 "payroll_report_day_of_month": 1,
-                "payroll_report_absence_categories": [],
                 "payroll_report_include_assistant_hours": true,
                 "payroll_report_include_employee_hours": false,
             }),
