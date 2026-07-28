@@ -37,13 +37,13 @@ const TRANSLATIONS = {
     "Show explanation": "Show explanation",
     label_cost_type_none: "Uses nothing (no vacation, no flextime)",
     help_cost_type_none:
-      "The day is excused: no time has to be logged and the work target for that day falls away. Nothing is taken from the vacation balance and no flextime is used, so the hours never have to be made up. If time is logged on such a day anyway (possible for categories with auto-approval, e.g. worked the morning and called in sick at noon), those hours count in full as a flextime gain. Whether the day is paid is decided in payroll, not in Zerf: training is normally paid, unpaid leave is not.",
+      "The day is excused: no time has to be logged and the work target for that day falls away. Nothing is taken from the vacation balance and no flextime is used, so the hours never have to be made up. If time is logged on such a day anyway (possible for categories with auto-approval, e.g. worked the morning and called in sick at noon), those hours count in full as a flextime gain. Whether the day is paid is decided in payroll, not by the application: training is normally paid, unpaid leave is not.",
     label_cost_type_vacation: "Uses vacation days",
     help_cost_type_vacation:
       "Every approved day is deducted from the employee's annual leave, including any carryover from the previous year and its expiry date. The work target for that day falls away, so the flextime balance is unaffected.",
     label_cost_type_flextime: "Uses flextime hours",
     help_cost_type_flextime:
-      "Employees have the day off, but the work target for that day stays in place. The day therefore lowers the flextime balance by one daily target — this is how time off in lieu is taken. No vacation days are used. Zerf checks the flextime balance when the request is made and again when it is approved, so the balance cannot drop below the configured minimum.",
+      "Employees have the day off, but the work target for that day stays in place. The day therefore lowers the flextime balance by one daily target — this is how time off in lieu is taken. No vacation days are used. The application checks the flextime balance when the request is made and again when it is approved, so the balance cannot drop below the configured minimum.",
     help_auto_approve_past:
       'Requests with a start date on or before today are approved automatically (no approver review). Time entries can coexist with the absence on the same day (allows partial-day overlap like "worked the morning, called in sick at noon"). Backdating is limited to 30 days. Typical use: sick leave.',
     label_unpaid: "Unpaid (reduces salary)",
@@ -492,8 +492,8 @@ const TRANSLATIONS = {
       "Anfangssaldo der Überstunden in Stunden zum Startdatum. Negativ = Defizit.",
     "Start date": "Startdatum",
     "Hire date": "Eintrittsdatum",
-    "Used to calculate the prorated annual leave entitlement for employees who already worked before they started using Zerf. Leave empty to use the start date.":
-      "Wird verwendet, um den anteiligen Urlaubsanspruch für Mitarbeitende zu berechnen, die bereits vor der Nutzung von Zerf gearbeitet haben. Leer lassen, um das Startdatum zu verwenden.",
+    "Used to calculate the prorated annual leave entitlement for employees who already worked before they started using the application. Leave empty to use the start date.":
+      "Wird verwendet, um den anteiligen Urlaubsanspruch für Mitarbeitende zu berechnen, die bereits vor der Nutzung der Anwendung gearbeitet haben. Leer lassen, um das Startdatum zu verwenden.",
     Clear: "Löschen",
     Settings: "Einstellungen",
     "Language settings": "Spracheinstellungen",
@@ -1110,11 +1110,11 @@ const TRANSLATIONS = {
       "Verlauf deines kumulierten Gleitzeitkontostands über den gewählten Zeitraum. Der Gleitzeitstand wird bis einschließlich gestern berechnet; die heute geleisteten Stunden werden noch nicht mitgezählt.",
     "Show explanation": "Erklärung anzeigen",
     help_cost_type_none:
-      "Der Tag ist entschuldigt: Es muss keine Zeit erfasst werden, das Arbeitssoll für den Tag entfällt. Vom Urlaubskonto wird nichts abgezogen und es wird keine Gleitzeit verbraucht — die Stunden müssen also nicht nachgearbeitet werden. Wird an einem solchen Tag trotzdem Zeit gebucht (möglich bei Kategorien mit automatischer Genehmigung, z. B. vormittags gearbeitet, mittags krankgemeldet), zählen diese Stunden voll als Plus auf dem Gleitzeitkonto. Ob der Tag bezahlt wird, entscheidet nicht Zerf, sondern die Lohnabrechnung: Fortbildung ist normalerweise bezahlt, unbezahlter Urlaub nicht.",
+      "Der Tag ist entschuldigt: Es muss keine Zeit erfasst werden, das Arbeitssoll für den Tag entfällt. Vom Urlaubskonto wird nichts abgezogen und es wird keine Gleitzeit verbraucht — die Stunden müssen also nicht nachgearbeitet werden. Wird an einem solchen Tag trotzdem Zeit gebucht (möglich bei Kategorien mit automatischer Genehmigung, z. B. vormittags gearbeitet, mittags krankgemeldet), zählen diese Stunden voll als Plus auf dem Gleitzeitkonto. Ob der Tag bezahlt wird, entscheidet die Lohnabrechnung und nicht die Anwendung: Fortbildung ist normalerweise bezahlt, unbezahlter Urlaub nicht.",
     help_cost_type_vacation:
       "Jeder genehmigte Tag wird vom Jahresurlaub der Mitarbeitenden abgezogen — inklusive Resturlaub aus dem Vorjahr und dessen Verfallsfrist. Das Arbeitssoll für den Tag entfällt, der Gleitzeitstand bleibt unverändert.",
     help_cost_type_flextime:
-      "Mitarbeitende haben frei, das Arbeitssoll für den Tag bleibt aber bestehen. Der Tag senkt den Gleitzeitstand dadurch um ein Tagessoll — so wird Gleitzeit abgebaut. Urlaubstage werden nicht verbraucht. Zerf prüft den Gleitzeitstand bei der Beantragung und noch einmal bei der Genehmigung, damit der eingestellte Mindeststand nicht unterschritten wird.",
+      "Mitarbeitende haben frei, das Arbeitssoll für den Tag bleibt aber bestehen. Der Tag senkt den Gleitzeitstand dadurch um ein Tagessoll — so wird Gleitzeit abgebaut. Urlaubstage werden nicht verbraucht. Die Anwendung prüft den Gleitzeitstand bei der Beantragung und noch einmal bei der Genehmigung, damit der eingestellte Mindeststand nicht unterschritten wird.",
     help_auto_approve_past:
       "Anträge mit Startdatum heute oder in der Vergangenheit werden automatisch genehmigt (ohne Freigabe durch eine vorgesetzte Person). Zeitbuchungen am selben Tag bleiben erlaubt (z. B. „vormittags gearbeitet, mittags krankgemeldet“). Rückdatieren ist auf 30 Tage begrenzt. Typische Verwendung: Krankmeldung.",
     help_unpaid:

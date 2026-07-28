@@ -497,7 +497,7 @@
           />
           <div class="field-hint">
             {$t(
-              "Used to calculate the prorated annual leave entitlement for employees who already worked before they started using Zerf. Leave empty to use the start date.",
+              "Used to calculate the prorated annual leave entitlement for employees who already worked before they started using the application. Leave empty to use the start date.",
             )}
           </div>
         </div>

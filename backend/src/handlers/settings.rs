@@ -704,9 +704,9 @@ pub async fn update_payroll_report_settings(
         Some(ref addresses) => {
             let normalized = crate::services::payroll_report::format_recipient_list(addresses);
             for address in crate::services::payroll_report::parse_recipient_list(&normalized) {
-                address
-                    .parse::<Mailbox>()
-                    .map_err(|_| AppError::BadRequest("Invalid payroll report recipient.".into()))?;
+                address.parse::<Mailbox>().map_err(|_| {
+                    AppError::BadRequest("Invalid payroll report recipient.".into())
+                })?;
             }
             Some(normalized)
         }

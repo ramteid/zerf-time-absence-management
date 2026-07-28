@@ -334,7 +334,12 @@ mod tests {
         }
     }
 
-    fn category(slug: &str, cost_type: &str, auto_approve_past: bool, unpaid: bool) -> AbsenceCategory {
+    fn category(
+        slug: &str,
+        cost_type: &str,
+        auto_approve_past: bool,
+        unpaid: bool,
+    ) -> AbsenceCategory {
         AbsenceCategory {
             id: 1,
             slug: slug.to_string(),

@@ -33,6 +33,9 @@
 #   Backup newer than current code  -> schema may contain columns/tables the
 #                                     current binary does not understand; update
 #                                     the app before restarting after restore.
+#
+# Sourcing: set RESTORE_LIB_ONLY=1 before sourcing to load helper functions
+# without starting a restore -- used by automated tests (restore.bats).
 set -euo pipefail
 
 # Ensure all temp files are created 0600 from the instant they appear.
@@ -55,6 +58,34 @@ HELPER_IMAGE="${ZERF_RESTORE_HELPER_IMAGE:-postgres:18}"
 
 die()  { echo "ERROR: $*" >&2; exit 1; }
 info() { echo "  $*"; }
+
+# Convert a one-based decimal choice to a safe zero-based array index.
+resolve_selection_index() {
+    local choice="$1"
+    local option_count="$2"
+    local LC_ALL=C
+    local max_safe_digits=18
+
+    [[ "$choice" =~ ^[1-9][0-9]*$ ]] || return 1
+    [[ "$option_count" =~ ^[1-9][0-9]*$ ]] || return 1
+    [ "${#option_count}" -le "$max_safe_digits" ] || return 1
+
+    # Compare decimal strings before arithmetic so oversized input cannot wrap.
+    if [ "${#choice}" -gt "${#option_count}" ]; then
+        return 1
+    fi
+    if [ "${#choice}" -eq "${#option_count}" ] && [[ "$choice" > "$option_count" ]]; then
+        return 1
+    fi
+
+    printf '%d\n' "$((10#$choice - 1))"
+}
+
+if [ -n "${RESTORE_LIB_ONLY:-}" ]; then
+    # `return` handles sourcing; `exit` handles accidental direct execution.
+    # shellcheck disable=SC2317
+    return 0 2>/dev/null || exit 0
+fi
 
 # Prompt for confirmation.  Returns 0 on yes, 1 on no/anything else.
 confirm() {
@@ -107,11 +138,11 @@ extract_keyring() {
     local choice
     read -r choice
     [[ "$choice" =~ ^[0-9]+$ ]] || die "Not a number."
-    if [ "$choice" -lt 1 ] || [ "$choice" -gt "${#keyrings[@]}" ]; then
-        die "Choice out of range."
-    fi
+    local selection_index
+    selection_index="$(resolve_selection_index "$choice" "${#keyrings[@]}")" \
+        || die "Choice out of range."
 
-    local selected="${keyrings[$((choice-1))]}"
+    local selected="${keyrings[$selection_index]}"
 
     case "$selected" in
         *.zip)
@@ -238,11 +269,10 @@ if [ -z "$BACKUP_FILE" ]; then
     read -r CHOICE
 
     [[ "$CHOICE" =~ ^[0-9]+$ ]] || die "Not a number."
-    if [ "$CHOICE" -lt 1 ] || [ "$CHOICE" -gt "${#BACKUPS[@]}" ]; then
-        die "Choice out of range."
-    fi
+    SELECTION_INDEX="$(resolve_selection_index "$CHOICE" "${#BACKUPS[@]}")" \
+        || die "Choice out of range."
 
-    SELECTED="${BACKUPS[$((CHOICE-1))]}"
+    SELECTED="${BACKUPS[$SELECTION_INDEX]}"
     # BACKUP_FILE is a placeholder for display; actual data comes from the volume.
     BACKUP_FILE="/volume/${SELECTED}"
     BACKUP_CAME_FROM_VOLUME=1

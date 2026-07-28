@@ -1920,6 +1920,8 @@ The script:
 5. Restores all data and stops on the first error (the transaction is rolled back if anything fails).
 6. Restarts the backup container, then asks whether to restart the app.
 
+Enter the listed number exactly as shown, without leading zeroes. Invalid and out-of-range choices are rejected before the restore begins.
+
 You can also supply the archive path directly to skip the interactive listing:
 
 ```bash

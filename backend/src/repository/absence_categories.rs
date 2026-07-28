@@ -371,9 +371,7 @@ fn map_constraint_error(e: sqlx::Error) -> AppError {
             );
         }
         if code == "23514" && constraint == "abs_cat_unpaid_requires_none_cost" {
-            return AppError::bad_request(
-                "Unpaid can only be set when cost_type is 'none'.",
-            );
+            return AppError::bad_request("Unpaid can only be set when cost_type is 'none'.");
         }
     }
     AppError::from(e)
