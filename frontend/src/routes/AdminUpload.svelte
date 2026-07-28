@@ -257,27 +257,23 @@
           />
         </div>
       </div>
-      <div class="form-actions">
-        <button
-          class="zf-btn zf-btn-accent-soft"
-          on:click={runNow}
-          disabled={uploading ||
-            saving ||
-            !uploadSettings.report_upload_enabled}
-        >
-          {#if uploading}
-            {$t("Uploading...")}
-          {:else}
-            {$t("Upload now")}
-          {/if}
-        </button>
-      </div>
     </div>
   </div>
 
   <!-- Actions -->
   <div class="zf-card zf-card-section">
     <div class="form-actions">
+      <button
+        class="zf-btn zf-btn-accent-soft"
+        on:click={runNow}
+        disabled={uploading || saving || !uploadSettings.report_upload_enabled}
+      >
+        {#if uploading}
+          {$t("Uploading...")}
+        {:else}
+          {$t("Upload now")}
+        {/if}
+      </button>
       <button
         class="zf-btn zf-btn-primary"
         on:click={save}
@@ -294,6 +290,7 @@
 </div>
 
 <style>
+  /* Matches the Payroll Report page's action bar (gap, padding-top). */
   .form-actions {
     display: flex;
     justify-content: flex-end;
