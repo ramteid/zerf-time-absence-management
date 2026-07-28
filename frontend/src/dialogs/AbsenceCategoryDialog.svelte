@@ -20,11 +20,10 @@
   // impossible to violate in either direction.
   let cost_type = template.cost_type ?? "none";
   let auto_approve_past = template.auto_approve_past ?? false;
-  // Only meaningful when cost_type is "none" — see help_unpaid. Switching
-  // cost_type away from "none" would otherwise leave a stale, contradictory
-  // value the backend has to reject on save; reset it here instead so the
-  // checkbox (hidden once cost_type changes) doesn't silently carry a value
-  // the admin can no longer see or intend.
+  // Only meaningful when cost_type is "none" — see help_unpaid. The backend
+  // rejects unpaid=true paired with any other cost_type, so keep the two in
+  // sync client-side too: the checkbox is hidden outside cost_type "none",
+  // and its value resets alongside it.
   let unpaid = template.unpaid ?? false;
   $: if (cost_type !== "none") unpaid = false;
   let error = "";

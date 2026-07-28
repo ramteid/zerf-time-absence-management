@@ -53,9 +53,8 @@ pub const REPORT_UPLOAD_QUEUE_PERIOD_KEY: &str = "report_upload_queue_period";
 
 // Monthly payroll report email (tax office / payroll accountant).
 pub const PAYROLL_REPORT_ENABLED_KEY: &str = "payroll_report_enabled";
-/// Comma-separated recipient addresses (key name kept from when it was a
-/// single recipient; existing installs' one address is a valid one-element
-/// list, so no migration is needed for the format change).
+/// Comma-separated recipient addresses. A single address is a valid
+/// one-element list, so the singular key name still applies.
 pub const PAYROLL_REPORT_RECIPIENT_KEY: &str = "payroll_report_recipient";
 pub const PAYROLL_REPORT_DAY_OF_MONTH_KEY: &str = "payroll_report_day_of_month";
 pub const PAYROLL_REPORT_ASSISTANT_HOURS_KEY: &str = "payroll_report_include_assistant_hours";

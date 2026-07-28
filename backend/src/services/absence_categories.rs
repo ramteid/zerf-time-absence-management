@@ -269,10 +269,11 @@ pub async fn update(
                 .into(),
         ));
     }
-    // Same reasoning as on create(): "unpaid" is contradictory outside
-    // cost_type='none'. Checked against the merged final state so e.g.
-    // switching cost_type away from 'none' without also clearing a
-    // previously-set unpaid flag is rejected rather than silently stored.
+    // "Unpaid" is contradictory outside cost_type='none' (vacation and
+    // flextime categories are always paid through their own balance
+    // mechanics). Checked against the merged final state so a request that
+    // changes cost_type without also clearing an already-stored unpaid flag
+    // is rejected rather than silently stored.
     if final_unpaid && final_cost_type != crate::repository::absence_categories::COST_TYPE_NONE {
         return Err(AppError::BadRequest(
             "Unpaid can only be set when cost_type is 'none'.".into(),

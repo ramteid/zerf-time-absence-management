@@ -138,15 +138,14 @@ async fn payroll_report_settings_are_validated_and_persisted() {
         "case-insensitive duplicates are collapsed"
     );
     assert_eq!(body["payroll_report_day_of_month"], 7);
-    // Absence categories are no longer admin-picked: "sick" qualifies as
-    // sick-like (auto_approve_past) and the seeded "unpaid" category is
-    // explicitly flagged unpaid (migration 037 backfill). "vacation" and
-    // "flextime_reduction" are excluded because their cost already shows up
-    // in the leave/flextime balances. "special_leave" and "general_absence"
-    // are cost_type='none' but NOT flagged unpaid, so — unlike the old,
-    // wrong cost_type=='none'-alone rule — they must NOT be auto-included:
-    // paid special leave and paid/neutral general absence don't reduce
-    // salary, so listing them here would misreport what payroll owes.
+    // Categories are included automatically: "sick" qualifies as sick-like
+    // (auto_approve_past) and the seeded "unpaid" category is flagged
+    // unpaid. "vacation" and "flextime_reduction" are excluded because their
+    // cost already shows up in the leave/flextime balances. "special_leave"
+    // and "general_absence" are cost_type='none' but not flagged unpaid, so
+    // they must be excluded too: paid special leave and neutral general
+    // absence don't reduce salary, so listing them here would misreport
+    // what payroll owes.
     let auto_categories: Vec<String> = body["payroll_report_absence_categories"]
         .as_array()
         .expect("categories array")
@@ -204,11 +203,11 @@ async fn payroll_report_settings_are_validated_and_persisted() {
     app.cleanup().await;
 }
 
-/// Regression test for a real bug: marking a category `cost_type = 'none'`
-/// does not by itself mean the day is unpaid — paid special leave and paid
-/// training are `cost_type = 'none'` too. The payroll report must only
-/// auto-include a category once an admin explicitly flags it `unpaid` (or it
-/// is sick-like), and toggling that flag must take effect immediately.
+/// `cost_type = 'none'` does not by itself mean a day is unpaid — paid
+/// special leave and paid training are `cost_type = 'none'` too. The
+/// payroll report only auto-includes a category once it is explicitly
+/// flagged `unpaid` (or it is sick-like), and toggling that flag takes
+/// effect immediately.
 #[tokio::test]
 async fn payroll_report_only_includes_categories_explicitly_marked_unpaid() {
     let app = TestApp::spawn().await;

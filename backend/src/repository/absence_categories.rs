@@ -409,12 +409,10 @@ mod tests {
         }
     }
 
-    /// Regression test: `cost_type == "none"` alone must NOT make a category
-    /// payroll-relevant. Real-world "none"-cost categories include paid
-    /// special leave, paid training counted as working time, and legally
-    /// mandated paid educational leave (Bildungsurlaub) — none of these
-    /// reduce salary, so the payroll report must not list them just because
-    /// they don't touch the vacation/flextime balance.
+    /// A `cost_type == "none"` category is not payroll-relevant unless it is
+    /// also marked `unpaid`: paid special leave, paid training, and legally
+    /// mandated paid educational leave (Bildungsurlaub) are all
+    /// `cost_type == "none"` too, and none of them reduce salary.
     #[test]
     fn cost_type_none_alone_is_not_payroll_relevant() {
         let paid_special_leave = category(COST_TYPE_NONE, false, false);

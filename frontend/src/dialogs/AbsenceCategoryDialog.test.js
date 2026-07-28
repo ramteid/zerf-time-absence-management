@@ -345,7 +345,7 @@ describe("AbsenceCategoryDialog", () => {
     vacationRadio.click();
     await settle();
 
-    // The checkbox (and its row) disappear once cost_type is no longer "none".
+    // The checkbox (and its row) only render for cost_type "none".
     expect(
       [...target.querySelectorAll("label")].find((label) =>
         label.textContent.includes("Unpaid"),

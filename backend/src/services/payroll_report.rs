@@ -47,9 +47,9 @@ impl PayrollReportConfig {
     /// True when the report would contain no section at all. Such a
     /// configuration is rejected on save and skipped by the scheduler, because
     /// mailing an empty document to the tax office helps nobody. The absence
-    /// section is no longer admin-picked, so its presence depends on whether
-    /// any category currently qualifies as payroll-relevant — pass the result
-    /// of [`payroll_relevant_categories`].
+    /// section's presence depends on whether any category currently
+    /// qualifies as payroll-relevant — pass the result of
+    /// [`payroll_relevant_categories`].
     pub fn has_no_content(&self, relevant_categories: &[AbsenceCategory]) -> bool {
         relevant_categories.is_empty()
             && !self.include_assistant_hours

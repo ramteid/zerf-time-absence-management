@@ -304,8 +304,8 @@
     color: var(--text-secondary);
   }
 
-  /* Matches the Nextcloud Backups page's form-actions spacing (gap, padding-top);
-     the explanatory text sits beside the buttons instead of below them. */
+  /* Matches the Nextcloud Backups page's form-actions spacing (gap,
+     padding-top); the explanatory text sits beside the buttons. */
   .form-actions {
     display: flex;
     justify-content: space-between;
