@@ -4,7 +4,7 @@
   import { t } from "../i18n.js";
   import Icon from "../Icons.svelte";
   import {
-    compareUsersByName,
+    compareTeamUserRows,
     userAvatarClass,
     userInitials,
   } from "../lib/domain/users.js";
@@ -24,12 +24,10 @@
 
   async function load() {
     const loaded = await api("/team-users");
-    // Role grouping is deliberately NOT applied here: the /team-users endpoint
-    // omits `role` for non-manageable colleagues (only manageable assistants
-    // carry it), so a role sort would float assistants above everyone else
-    // instead of grouping. A plain alphabetical order is the honest choice when
-    // roles are unavailable.
-    const sorted = [...(loaded || [])].sort(compareUsersByName);
+    // Groups by manageability (assistants after everyone else, matching every
+    // other user list in the app), alphabetical by name within each group —
+    // see compareTeamUserRows for why `can_manage` stands in for `role` here.
+    const sorted = [...(loaded || [])].sort(compareTeamUserRows);
     // Split active rows from archived. Only manageable assistants ever carry
     // an archived_at; non-manageable colleagues are always active.
     users = sorted.filter((u) => !u.archived_at);

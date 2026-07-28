@@ -323,14 +323,12 @@
     // Resolve redirects without side-effects — just return the target component
     // directly so the reactive chain never yields null for a logged-in user.
     if (p === "/" || p === "" || p === "/settings") {
-      // "/settings" (no sub-path) redirects to the first accessible settings tab.
-      // Team leads with assistant management access land on the Users tab;
-      // other leads land on the team tab; admins on general settings.
+      // "/settings" (no sub-path) redirects to the first accessible settings tab:
+      // admins land on general settings, leads land on the team tab (the
+      // leftmost tab in their settings tab bar — see SettingsTabs.svelte).
       const settingsDest = user?.permissions?.can_manage_settings
         ? "/settings/general"
-        : user?.permissions?.can_manage_team_users
-          ? "/settings/team-users"
-          : "/settings/team";
+        : "/settings/team";
       const dest = user.must_change_password
         ? "/account"
         : user.must_configure_settings

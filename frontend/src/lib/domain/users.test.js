@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  compareTeamUserRows,
   compareUsersByName,
   compareUsersByRoleThenName,
   findUserById,
@@ -146,6 +147,26 @@ describe("users domain helpers", () => {
       "Bob", // employee
       "Amy", // assistant
       "Zoe", // admin
+    ]);
+  });
+
+  it("compareTeamUserRows groups non-manageable colleagues before manageable assistants, then by name", () => {
+    // /team-users redacts `role` for non-manageable colleagues, so `can_manage`
+    // is the only grouping signal available — this mirrors the app-wide
+    // role-grouped convention (assistants sort after everyone else).
+    const mixed = [
+      { first_name: "Amy", last_name: "Assist", can_manage: true },
+      { first_name: "Zoe", last_name: "Zephyr", can_manage: false },
+      { first_name: "Cara", last_name: "Anderson", can_manage: false },
+      { first_name: "Ben", last_name: "Best", can_manage: true },
+    ];
+    expect(
+      [...mixed].sort(compareTeamUserRows).map((u) => u.first_name),
+    ).toEqual([
+      "Cara", // non-manageable, "Anderson" before "Zephyr"
+      "Zoe", // non-manageable
+      "Amy", // manageable assistant, "Assist" before "Best"
+      "Ben", // manageable assistant
     ]);
   });
 

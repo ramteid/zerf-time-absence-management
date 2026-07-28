@@ -98,6 +98,16 @@ export function sortUsersByRoleThenName(users) {
   return [...(users || [])].sort(compareUsersByRoleThenName);
 }
 
+// Comparator for the /team-users roster: the endpoint redacts `role` for
+// colleagues the requesting lead can't manage, so `can_manage` (assistant vs.
+// not) is the only grouping signal available. Non-manageable colleagues sort
+// first, manageable assistants after — matching where "assistant" falls in
+// ROLE_ORDER above — alphabetical by name within each group.
+export function compareTeamUserRows(a, b) {
+  const manageDiff = (a?.can_manage ? 1 : 0) - (b?.can_manage ? 1 : 0);
+  return manageDiff || compareUsersByName(a, b);
+}
+
 export function userWorkdaysPerWeek(user, fallback = 5) {
   const value = Number(user?.workdays_per_week);
   return Number.isFinite(value) && value >= 1 && value <= 7 ? value : fallback;

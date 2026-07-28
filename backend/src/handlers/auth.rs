@@ -229,19 +229,15 @@ pub async fn me(
     navigation_items.push(serde_json::json!({"href":"/reports","key":"Reports","icon":"📊"}));
     navigation_items.push(serde_json::json!({"href":"/account","key":"Account","icon":"👤"}));
     // Both admins and team leads get a unified "Settings" entry. Admins land on
-    // the general settings tab; team leads with assistant-management permission
-    // land on the Users tab, all other leads land on the team tab.
+    // the general settings tab; team leads always land on the team tab, since
+    // it's the leftmost (first) tab in their settings tab bar — see
+    // SettingsTabs.svelte.
     if user.is_admin() {
         navigation_items
             .push(serde_json::json!({"href":"/settings/general","key":"Settings","icon":"⚙"}));
     } else if user.is_lead() {
-        let settings_href = if can_manage_team_users {
-            "/settings/team-users"
-        } else {
-            "/settings/team"
-        };
         navigation_items
-            .push(serde_json::json!({"href": settings_href,"key":"Settings","icon":"⚙"}));
+            .push(serde_json::json!({"href":"/settings/team","key":"Settings","icon":"⚙"}));
     }
     // Assistants go to /time (no dashboard); everyone else lands on /dashboard.
     let home = if is_assistant { "/time" } else { "/dashboard" };
