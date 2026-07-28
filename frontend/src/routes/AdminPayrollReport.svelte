@@ -1,4 +1,5 @@
 <script>
+  import { tick } from "svelte";
   import { api } from "../api.js";
   import { toast } from "../stores.js";
   import { t } from "../i18n.js";
@@ -9,10 +10,18 @@
   let categories = [];
   let saving = false;
   let sending = false;
-  // Recipients are edited as one comma-separated string and only split into
-  // an array on save/load — simpler than a multi-value widget for a handful
-  // of addresses.
+  // Recipients are edited as one address per line and only split into an
+  // array on save/load — a textarea reads more naturally than a
+  // comma-separated line once there are more than a couple of addresses.
   let recipientsInput = "";
+  let recipientsTextarea;
+
+  // Grows the textarea to fit its content instead of scrolling internally.
+  function resizeRecipientsTextarea() {
+    if (!recipientsTextarea) return;
+    recipientsTextarea.style.height = "auto";
+    recipientsTextarea.style.height = `${recipientsTextarea.scrollHeight}px`;
+  }
 
   async function load() {
     const [loadedSettings, loadedCategories] = await Promise.all([
@@ -22,8 +31,10 @@
     settings = loadedSettings;
     categories = loadedCategories;
     recipientsInput = (loadedSettings.payroll_report_recipients || []).join(
-      ", ",
+      "\n",
     );
+    await tick();
+    resizeRecipientsTextarea();
   }
   load();
 
@@ -31,7 +42,7 @@
     return [
       ...new Set(
         value
-          .split(",")
+          .split("\n")
           .map((address) => address.trim())
           .filter((address) => address.length > 0),
       ),
@@ -43,9 +54,7 @@
   // neither vacation nor flextime) — there is nothing to pick here, this just
   // resolves the returned slugs to their display name and color.
   $: includedCategories = categories.filter((category) =>
-    (settings.payroll_report_absence_categories || []).includes(
-      category.slug,
-    ),
+    (settings.payroll_report_absence_categories || []).includes(category.slug),
   );
 
   // The report must have a recipient and at least one section before it can be
@@ -91,7 +100,9 @@
         body,
       });
       settings = saved;
-      recipientsInput = (saved.payroll_report_recipients || []).join(", ");
+      recipientsInput = (saved.payroll_report_recipients || []).join("\n");
+      await tick();
+      resizeRecipientsTextarea();
       toast($t("Payroll report settings saved."), "ok");
     } catch (e) {
       toast(e?.message || $t("Error"), "error");
@@ -158,17 +169,19 @@
           <label class="zf-label" for="payroll-recipients"
             >{$t("Recipient email addresses")}</label
           >
-          <input
+          <textarea
             id="payroll-recipients"
-            class="zf-input"
-            type="text"
+            class="zf-textarea"
+            rows="1"
+            bind:this={recipientsTextarea}
             bind:value={recipientsInput}
-            placeholder="lohn@steuerbuero.example, buchhaltung@example.com"
-            disabled={!settings.payroll_report_enabled}
-          />
+            on:input={resizeRecipientsTextarea}
+            placeholder="lohn@steuerbuero.example
+buchhaltung@example.com"
+            disabled={!settings.payroll_report_enabled}></textarea>
           <div class="field-hint">
             {$t(
-              "Separate multiple addresses with a comma. Every recipient receives the same email.",
+              "One address per line. Every recipient receives the same email.",
             )}
           </div>
         </div>
@@ -287,6 +300,12 @@
 </div>
 
 <style>
+  /* Grown via JS to fit its content on every keystroke, so a scrollbar
+     should never appear even for the one frame before the height updates. */
+  #payroll-recipients {
+    overflow-y: hidden;
+  }
+
   /* Read-only list of categories the report includes automatically — a
      wrapping row of small color-dot + name chips, not an input. */
   .category-list {

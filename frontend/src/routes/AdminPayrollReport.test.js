@@ -129,7 +129,7 @@ describe("AdminPayrollReport", () => {
     await settle();
 
     const input = target.querySelector("#payroll-recipients");
-    expect(input.value).toBe("payroll@example.com, second@example.com");
+    expect(input.value).toBe("payroll@example.com\nsecond@example.com");
   });
 
   it("saves every configured field, parsing recipients from the input", async () => {
@@ -137,7 +137,8 @@ describe("AdminPayrollReport", () => {
     await settle();
 
     const input = target.querySelector("#payroll-recipients");
-    input.value = "payroll@example.com, second@example.com, second@example.com";
+    input.value =
+      "payroll@example.com\n second@example.com \nsecond@example.com\n";
     input.dispatchEvent(new Event("input"));
     await settle();
 

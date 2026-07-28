@@ -282,7 +282,7 @@ const TRANSLATIONS = {
     "Enable report PDF upload": "Enable report PDF upload",
     "Share link (https://…/s/…)": "Share link (https://…/s/…)",
     "Share password (optional)": "Share password (optional)",
-    "Upload day of month (1–28)": "Upload day of month (1–28)",
+    "Upload day of month (1-28)": "Upload day of month (1-28)",
     "Backup interval (days)": "Backup interval (days)",
     "Upload now": "Upload now",
     "Uploading...": "Uploading...",
@@ -300,9 +300,9 @@ const TRANSLATIONS = {
     "On the configured day of each month, the previous month's report is prepared and emailed as a PDF. It is only sent once every employee's month is final: weeks submitted, absence requests decided, and — for everyone whose hours are in the report — all time entries approved. Otherwise the report waits and is retried daily. Requires a configured email server.":
       "On the configured day of each month, the previous month's report is prepared and emailed as a PDF. It is only sent once every employee's month is final: weeks submitted, absence requests decided, and — for everyone whose hours are in the report — all time entries approved. Otherwise the report waits and is retried daily. Requires a configured email server.",
     "Recipient email addresses": "Recipient email addresses",
-    "Separate multiple addresses with a comma. Every recipient receives the same email.":
-      "Separate multiple addresses with a comma. Every recipient receives the same email.",
-    "Send day of month (1–28)": "Send day of month (1–28)",
+    "One address per line. Every recipient receives the same email.":
+      "One address per line. Every recipient receives the same email.",
+    "Send day of month (1-28)": "Send day of month (1-28)",
     "Report content": "Report content",
     "Absence days per employee": "Absence days per employee",
     "One row per absence period with the number of working days. Sick days are needed for health-insurance reimbursement, unpaid days reduce the salary payout.":
@@ -1327,7 +1327,7 @@ const TRANSLATIONS = {
     "Enable report PDF upload": "Stundenzettel-Export aktivieren",
     "Share link (https://…/s/…)": "Share-Link (https://…/s/…)",
     "Share password (optional)": "Share-Passwort (optional)",
-    "Upload day of month (1–28)": "Upload-Tag im Monat (1–28)",
+    "Upload day of month (1-28)": "Upload-Tag im Monat (1-28)",
     "Backup interval (days)": "Backup-Intervall (Tage)",
     "Upload now": "Jetzt hochladen",
     "Uploading...": "Wird hochgeladen...",
@@ -1347,9 +1347,9 @@ const TRANSLATIONS = {
     "On the configured day of each month, the previous month's report is prepared and emailed as a PDF. It is only sent once every employee's month is final: weeks submitted, absence requests decided, and — for everyone whose hours are in the report — all time entries approved. Otherwise the report waits and is retried daily. Requires a configured email server.":
       "Am konfigurierten Tag des Monats wird die Meldung für den Vormonat erstellt und als PDF per E-Mail versendet. Sie wird erst gesendet, wenn der Monat für alle Personen abgeschlossen ist: Wochen eingereicht, Abwesenheitsanträge entschieden und — für alle, deren Stunden in der Meldung stehen — alle Zeiteinträge genehmigt. Andernfalls wartet die Meldung und wird täglich erneut geprüft. Ein eingerichteter E-Mail-Server ist erforderlich.",
     "Recipient email addresses": "E-Mail-Adressen der Empfänger",
-    "Separate multiple addresses with a comma. Every recipient receives the same email.":
-      "Mehrere Adressen durch Komma trennen. Jeder Empfänger erhält dieselbe E-Mail.",
-    "Send day of month (1–28)": "Versandtag im Monat (1–28)",
+    "One address per line. Every recipient receives the same email.":
+      "Eine E-Mail-Adresse pro Zeile. Jeder Empfänger erhält dieselbe E-Mail.",
+    "Send day of month (1-28)": "Versandtag im Monat (1-28)",
     "Report content": "Inhalt der Meldung",
     "Absence days per employee": "Abwesenheitstage je Person",
     "One row per absence period with the number of working days. Sick days are needed for health-insurance reimbursement, unpaid days reduce the salary payout.":

@@ -1778,7 +1778,7 @@ configured under Settings → Email, so email must be set up first.
 | Setting | Description |
 | --- | --- |
 | Send the payroll report by email | Activates the monthly report. |
-| Recipient email addresses | One or more addresses the report is sent to. Separate multiple addresses with a comma. |
+| Recipient email addresses | One or more addresses the report is sent to, one address per line. |
 | Send day of month (1–28) | The day on which the previous month is prepared. Default: 5. Set it after your submission deadline so most months are already complete on the first attempt. |
 | Absence days per employee | Which categories appear is decided automatically — there is nothing to tick. Sick-like categories and any category marked **Unpaid** are included, because those are exactly the days that change what payroll has to file: sick days are needed for health-insurance reimbursement, unpaid days reduce the salary payout. Categories that don't affect pay — such as paid special leave or paid training — are left out even if they don't count as vacation or flextime either. The categories currently included are listed for reference. To change what appears, mark or unmark categories as Unpaid on the [Managing categories](#managing-categories) page. |
 | Working days and hours | Tick whose working days and hours are listed: assistants, all other employees, or both. |
