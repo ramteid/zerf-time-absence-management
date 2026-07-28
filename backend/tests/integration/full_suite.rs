@@ -364,7 +364,7 @@ async fn time_entry_and_cr_workflow() {
 }
 
 // ============================================================================
-// 3. Absence workflows and reports (vacation, sick leave, general absence)
+// 3. Absence workflows and reports (vacation, sick leave, special leave)
 // ============================================================================
 
 #[tokio::test]
@@ -438,7 +438,7 @@ async fn absence_and_report_workflow() {
         balance_after_vacation = bal;
     }
 
-    // -- General absence: happy path ------------------------------------------
+    // -- Special leave: happy path ------------------------------------------
     let ga_from = next_monday(30);
     let ga_to = ga_from + chrono::Duration::days(4);
     let ga_to2 = ga_from + chrono::Duration::days(10);
@@ -448,12 +448,12 @@ async fn absence_and_report_workflow() {
         let (st, body) = emp
             .post(
                 "/api/v1/absences",
-                &json!({"kind":"general_absence","start_date": ga_from.to_string(),"end_date": ga_to.to_string(),"comment":"parental leave"}),
+                &json!({"kind":"special_leave","start_date": ga_from.to_string(),"end_date": ga_to.to_string(),"comment":"parental leave"}),
             )
             .await;
-        assert_eq!(st, StatusCode::OK, "POST general_absence");
+        assert_eq!(st, StatusCode::OK, "POST special_leave");
         gabs = id(&body);
-        assert_eq!(body["kind"], "general_absence");
+        assert_eq!(body["kind"], "special_leave");
         assert_eq!(body["status"], "requested");
         assert_eq!(body["comment"], "parental leave");
 
@@ -471,10 +471,10 @@ async fn absence_and_report_workflow() {
         let (st, body) = emp
             .put(
                 &format!("/api/v1/absences/{}", gabs),
-                &json!({"kind":"general_absence","start_date": ga_from.to_string(),"end_date": ga_to2.to_string(),"comment":"updated"}),
+                &json!({"kind":"special_leave","start_date": ga_from.to_string(),"end_date": ga_to2.to_string(),"comment":"updated"}),
             )
             .await;
-        assert_eq!(st, StatusCode::OK, "edit pending general_absence");
+        assert_eq!(st, StatusCode::OK, "edit pending special_leave");
         assert_eq!(body["end_date"], ga_to2.to_string());
 
         // Lead approves.
@@ -491,7 +491,7 @@ async fn absence_and_report_workflow() {
         let (st, _) = emp
             .put(
                 &format!("/api/v1/absences/{}", gabs),
-                &json!({"kind":"general_absence","start_date": ga_from.to_string(),"end_date": ga_to.to_string(),"comment":"x"}),
+                &json!({"kind":"special_leave","start_date": ga_from.to_string(),"end_date": ga_to.to_string(),"comment":"x"}),
             )
             .await;
         assert_eq!(st, StatusCode::BAD_REQUEST, "edit approved rejected");
@@ -517,18 +517,18 @@ async fn absence_and_report_workflow() {
         assert!(
             serde_json::to_string(&body)
                 .unwrap()
-                .contains("\"general_absence\""),
-            "calendar shows general_absence"
+                .contains("\"special_leave\""),
+            "calendar shows special_leave"
         );
 
-        // Vacation balance unchanged by general absence.
+        // Vacation balance unchanged by special leave.
         let (_, body) = emp
             .get(&format!("/api/v1/leave-balance/{}?year={}", emp_id, year()))
             .await;
         assert_eq!(body["annual_entitlement"], 30);
         assert_eq!(
             body["available"], balance_after_vacation["available"],
-            "balance unchanged after general_absence"
+            "balance unchanged after special_leave"
         );
 
         // Monthly report includes it.
@@ -538,7 +538,7 @@ async fn absence_and_report_workflow() {
         assert!(
             serde_json::to_string(&body)
                 .unwrap()
-                .contains("\"general_absence\""),
+                .contains("\"special_leave\""),
             "monthly report flags day"
         );
 
@@ -557,12 +557,12 @@ async fn absence_and_report_workflow() {
         );
     }
 
-    // -- General absence: overlap and validation edge cases -------------------
+    // -- Special leave: overlap and validation edge cases -------------------
     {
         let (st, _) = emp
             .post(
                 "/api/v1/absences",
-                &json!({"kind":"general_absence","start_date": ga_from.to_string(),"end_date": ga_from.to_string()}),
+                &json!({"kind":"special_leave","start_date": ga_from.to_string(),"end_date": ga_from.to_string()}),
             )
             .await;
         assert!(
@@ -586,7 +586,7 @@ async fn absence_and_report_workflow() {
         let (st, _) = emp
             .post(
                 "/api/v1/absences",
-                &json!({"kind":"general_absence","start_date":"2099-01-10","end_date":"2099-01-05"}),
+                &json!({"kind":"special_leave","start_date":"2099-01-10","end_date":"2099-01-05"}),
             )
             .await;
         assert_eq!(st, StatusCode::BAD_REQUEST, "inverted range rejected");
@@ -597,13 +597,13 @@ async fn absence_and_report_workflow() {
         let (st, body) = emp
             .post(
                 "/api/v1/absences",
-                &json!({"kind":"general_absence","start_date": &editable_day,"end_date": &editable_day}),
+                &json!({"kind":"special_leave","start_date": &editable_day,"end_date": &editable_day}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "create editable pending absence");
         let editable_id = id(&body);
 
-        // B7: editing within the same cost type (both general_absence and training
+        // B7: editing within the same cost type (both special_leave and training
         // have cost_type='none') must still be allowed.
         let (st, body) = emp
             .put(
@@ -652,7 +652,7 @@ async fn absence_and_report_workflow() {
         let (st, _) = anon
             .post(
                 "/api/v1/absences",
-                &json!({"kind":"general_absence","start_date": &anon_day,"end_date": &anon_day}),
+                &json!({"kind":"special_leave","start_date": &anon_day,"end_date": &anon_day}),
             )
             .await;
         assert_eq!(st, StatusCode::UNAUTHORIZED, "anon create rejected");
@@ -675,7 +675,7 @@ async fn absence_and_report_workflow() {
         assert_eq!(st, StatusCode::BAD_REQUEST, "empty kind rejected");
     }
 
-    // -- General absence: cancel, reject and RBAC journeys -------------------
+    // -- Special leave: cancel, reject and RBAC journeys -------------------
     {
         // Use a later offset to keep this cancellation journey isolated from the
         // pending sick-edit scenario above while still avoiding common holidays.
@@ -688,7 +688,7 @@ async fn absence_and_report_workflow() {
         let (st, body) = emp
             .post(
                 "/api/v1/absences",
-                &json!({"kind":"general_absence","start_date": &ga4_from,"end_date": &ga4_to}),
+                &json!({"kind":"special_leave","start_date": &ga4_from,"end_date": &ga4_to}),
             )
             .await;
         assert_eq!(st, StatusCode::OK);
@@ -700,7 +700,7 @@ async fn absence_and_report_workflow() {
         let (st, _) = emp
             .post(
                 "/api/v1/absences",
-                &json!({"kind":"general_absence","start_date": &ga4_from,"end_date": &ga4_to}),
+                &json!({"kind":"special_leave","start_date": &ga4_from,"end_date": &ga4_to}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "re-request after cancel allowed");
@@ -715,7 +715,7 @@ async fn absence_and_report_workflow() {
         let (_, body) = emp
             .post(
                 "/api/v1/absences",
-                &json!({"kind":"general_absence","start_date": &ga5_from,"end_date": &ga5_to}),
+                &json!({"kind":"special_leave","start_date": &ga5_from,"end_date": &ga5_to}),
             )
             .await;
         let gabs5 = id(&body);
@@ -747,7 +747,7 @@ async fn absence_and_report_workflow() {
                 &json!({"reason":"Need more documentation."}),
             )
             .await;
-        assert_eq!(st, StatusCode::OK, "lead reject general_absence");
+        assert_eq!(st, StatusCode::OK, "lead reject special_leave");
 
         let (st, _) = emp.delete(&format!("/api/v1/absences/{}", gabs5)).await;
         assert_eq!(st, StatusCode::BAD_REQUEST, "cancel-after-reject rejected");
@@ -755,7 +755,7 @@ async fn absence_and_report_workflow() {
         let (st, _) = emp
             .post(
                 "/api/v1/absences",
-                &json!({"kind":"general_absence","start_date": &ga5_from,"end_date": &ga5_to}),
+                &json!({"kind":"special_leave","start_date": &ga5_from,"end_date": &ga5_to}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "re-request after reject allowed");

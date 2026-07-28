@@ -223,7 +223,7 @@ async fn report_export_queue_requeues_past_month_mutations() {
         .post(
             "/api/v1/absences",
             &json!({
-                "kind": "general_absence",
+                "kind": "special_leave",
                 "start_date": absence_iso,
                 "end_date": absence_iso
             }),
@@ -293,7 +293,7 @@ async fn report_export_queue_requeues_past_month_mutations() {
         .post(
             "/api/v1/absences",
             &json!({
-                "kind": "general_absence",
+                "kind": "special_leave",
                 "start_date": revoked_absence_iso,
                 "end_date": revoked_absence_iso
             }),
@@ -677,12 +677,12 @@ async fn report_export_gate_waits_for_pending_absence_decision() {
         later_day += chrono::Duration::days(7);
     }
 
-    let general_absence = absence_cat(&app.state.pool, "general_absence").await;
+    let special_leave = absence_cat(&app.state.pool, "special_leave").await;
     let (status, body) = emp
         .post(
             "/api/v1/absences",
             &json!({
-                "category_id": general_absence.id,
+                "category_id": special_leave.id,
                 "start_date": day_iso,
                 "end_date": day_iso,
             }),
@@ -802,14 +802,14 @@ async fn report_export_gate_ignores_pending_absence_outside_export_month() {
         .expect("insert approved July entry");
     }
 
-    let general_absence = absence_cat(&app.state.pool, "general_absence").await;
+    let special_leave = absence_cat(&app.state.pool, "special_leave").await;
     let adjacent_pending_day = NaiveDate::from_ymd_opt(2025, 8, 1).unwrap();
     sqlx::query(
         "INSERT INTO absences (user_id, category_id, start_date, end_date, status) \
          VALUES ($1, $2, $3, $3, 'requested')",
     )
     .bind(emp_id)
-    .bind(general_absence.id)
+    .bind(special_leave.id)
     .bind(adjacent_pending_day)
     .execute(&app.state.pool)
     .await

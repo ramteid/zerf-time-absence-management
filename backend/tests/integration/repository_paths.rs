@@ -1215,7 +1215,6 @@ async fn absences_repository_workflow() {
     let vacation_cat = absence_cat(&app.state.pool, "vacation").await;
     let training_cat = absence_cat(&app.state.pool, "training").await;
     let sick_cat = absence_cat(&app.state.pool, "sick").await;
-    let general_cat = absence_cat(&app.state.pool, "general_absence").await;
     let special_cat = absence_cat(&app.state.pool, "special_leave").await;
 
     assert_eq!(
@@ -1476,8 +1475,8 @@ async fn absences_repository_workflow() {
     let requested_cancel = absences
         .create(
             emp_id,
-            general_cat.id,
-            general_cat.auto_approve_past,
+            special_cat.id,
+            special_cat.auto_approve_past,
             friday + Duration::days(3),
             friday + Duration::days(3),
             Some("cancel requested"),

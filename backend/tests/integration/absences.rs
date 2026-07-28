@@ -84,14 +84,7 @@ async fn absences_full_workflow() {
             .format("%Y-%m-%d")
             .to_string();
 
-        for kind in [
-            "vacation",
-            "sick",
-            "training",
-            "special_leave",
-            "unpaid",
-            "general_absence",
-        ] {
+        for kind in ["vacation", "sick", "training", "special_leave", "unpaid"] {
             let (st, body) = emp
                 .post(
                     "/api/v1/absences",
@@ -1052,7 +1045,7 @@ async fn assistant_absence_any_weekday() {
     let (st, _) = assistant
         .post(
             "/api/v1/absences",
-            &json!({"kind": "general_absence", "start_date": saturday, "end_date": sunday}),
+            &json!({"kind": "special_leave", "start_date": saturday, "end_date": sunday}),
         )
         .await;
     assert_eq!(
@@ -1065,7 +1058,7 @@ async fn assistant_absence_any_weekday() {
     let (st, _) = assistant
         .post(
             "/api/v1/absences",
-            &json!({"kind": "general_absence", "start_date": next_saturday, "end_date": next_saturday}),
+            &json!({"kind": "special_leave", "start_date": next_saturday, "end_date": next_saturday}),
         )
         .await;
     assert_eq!(
@@ -1205,27 +1198,27 @@ async fn edit_requested_absence_allowed_when_inactive_category_unchanged() {
     // Switching INTO another inactive category must still be rejected.
     // First deactivate a second category to use as the switch target.
     let (_, cats_body) = admin.get("/api/v1/absence-categories/all").await;
-    let general_cat_id = cats_body
+    let special_cat_id = cats_body
         .as_array()
         .expect("categories array")
         .iter()
-        .find(|c| c["slug"].as_str() == Some("general_absence"))
-        .expect("general_absence seeded category exists")["id"]
+        .find(|c| c["slug"].as_str() == Some("special_leave"))
+        .expect("special_leave seeded category exists")["id"]
         .as_i64()
         .expect("id is number");
     let (st, _) = admin
         .put(
-            &format!("/api/v1/absence-categories/{general_cat_id}"),
+            &format!("/api/v1/absence-categories/{special_cat_id}"),
             &json!({"active": false}),
         )
         .await;
-    assert_eq!(st, StatusCode::OK, "deactivate general_absence category");
+    assert_eq!(st, StatusCode::OK, "deactivate special_leave category");
 
     let (st, body) = emp
         .put(
             &format!("/api/v1/absences/{absence_id}"),
             &json!({
-                "category_id": general_cat_id,
+                "category_id": special_cat_id,
                 "start_date": day_a,
                 "end_date": day_a,
             }),

@@ -142,10 +142,9 @@ async fn payroll_report_settings_are_validated_and_persisted() {
     // (auto_approve_past) and the seeded "unpaid" category is flagged
     // unpaid. "vacation" and "flextime_reduction" are excluded because their
     // cost already shows up in the leave/flextime balances. "special_leave"
-    // and "general_absence" are cost_type='none' but not flagged unpaid, so
-    // they must be excluded too: paid special leave and neutral general
-    // absence don't reduce salary, so listing them here would misreport
-    // what payroll owes.
+    // is cost_type='none' but not flagged unpaid, so it must be excluded
+    // too: a paid day off doesn't reduce salary, so listing it here would
+    // misreport what payroll owes.
     let auto_categories: Vec<String> = body["payroll_report_absence_categories"]
         .as_array()
         .expect("categories array")
@@ -159,10 +158,6 @@ async fn payroll_report_settings_are_validated_and_persisted() {
     assert!(
         !auto_categories.contains(&"special_leave".to_string()),
         "paid special leave must not be auto-included just because cost_type=none"
-    );
-    assert!(
-        !auto_categories.contains(&"general_absence".to_string()),
-        "general absence must not be auto-included just because cost_type=none"
     );
 
     let (status, settings) = admin.get("/api/v1/settings").await;
