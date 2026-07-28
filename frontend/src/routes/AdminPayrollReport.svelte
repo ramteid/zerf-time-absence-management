@@ -265,7 +265,7 @@ buchhaltung@example.com"
     <div class="form-actions">
       <div class="field-hint form-actions-hint">
         {$t(
-          "Sends the previous month's report now if the month is complete. Automatic delivery stays active.",
+          "Sends the previous month's report right away if it is complete. It does not replace the automatic delivery — the same report is still sent again automatically on the configured day.",
         )}
       </div>
       <div class="form-actions-buttons">
