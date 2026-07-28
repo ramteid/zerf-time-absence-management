@@ -46,6 +46,9 @@ const TRANSLATIONS = {
       "Employees have the day off, but the work target for that day stays in place. The day therefore lowers the flextime balance by one daily target — this is how time off in lieu is taken. No vacation days are used. Zerf checks the flextime balance when the request is made and again when it is approved, so the balance cannot drop below the configured minimum.",
     help_auto_approve_past:
       'Requests with a start date on or before today are approved automatically (no approver review). Time entries can coexist with the absence on the same day (allows partial-day overlap like "worked the morning, called in sick at noon"). Backdating is limited to 30 days. Typical use: sick leave.',
+    label_unpaid: "Unpaid (reduces salary)",
+    help_unpaid:
+      "Only available when the category uses nothing: marks days in this category as unpaid, so they reduce the salary payout. Leave unchecked for paid days off that happen to use neither vacation nor flextime, such as special leave or paid training — those don't affect pay and must not appear in the monthly payroll report. Sick leave is always included in the payroll report regardless of this setting, since it needs separate handling for health-insurance reimbursement.",
     "Counts as work": "Counts as work",
     help_submission_status:
       "Whether all required weeks in the selected month have been submitted.",
@@ -698,6 +701,7 @@ const TRANSLATIONS = {
     label_cost_type_none: "Verbraucht nichts (kein Urlaub, keine Gleitzeit)",
     label_cost_type_vacation: "Verbraucht Urlaubstage",
     label_cost_type_flextime: "Verbraucht Gleitzeitstunden",
+    label_unpaid: "Unbezahlt (mindert das Gehalt)",
     "Auto-approve past dates": "Vergangene Daten automatisch genehmigen",
     "Type is required.": "Typ ist erforderlich.",
     "Not enough flextime balance for this absence.":
@@ -1114,6 +1118,8 @@ const TRANSLATIONS = {
       "Mitarbeitende haben frei, das Arbeitssoll für den Tag bleibt aber bestehen. Der Tag senkt den Gleitzeitstand dadurch um ein Tagessoll — so wird Gleitzeit abgebaut. Urlaubstage werden nicht verbraucht. Zerf prüft den Gleitzeitstand bei der Beantragung und noch einmal bei der Genehmigung, damit der eingestellte Mindeststand nicht unterschritten wird.",
     help_auto_approve_past:
       "Anträge mit Startdatum heute oder in der Vergangenheit werden automatisch genehmigt (ohne Freigabe durch eine vorgesetzte Person). Zeitbuchungen am selben Tag bleiben erlaubt (z. B. „vormittags gearbeitet, mittags krankgemeldet“). Rückdatieren ist auf 30 Tage begrenzt. Typische Verwendung: Krankmeldung.",
+    help_unpaid:
+      "Nur verfügbar, wenn die Kategorie nichts verbraucht: markiert Tage dieser Kategorie als unbezahlt, sodass sie das Gehalt mindern. Bei bezahlten freien Tagen, die zufällig weder Urlaub noch Gleitzeit verbrauchen — etwa Sonderurlaub oder bezahlte Fortbildung —, bitte nicht aktivieren: Diese wirken sich nicht aufs Gehalt aus und dürfen nicht in der monatlichen Lohnmeldung erscheinen. Krankmeldungen erscheinen unabhängig von dieser Einstellung immer in der Lohnmeldung, da sie für die Krankenkassen-Erstattung gesondert behandelt werden müssen.",
     help_submission_status:
       "Zeigt an, ob alle erforderlichen Wochen im gewählten Monat eingereicht wurden.",
     Approvals: "Genehmigungen",

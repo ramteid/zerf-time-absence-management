@@ -42,6 +42,8 @@ pub struct NewAbsenceCategoryRequest {
     pub cost_type: String,
     #[serde(default)]
     pub auto_approve_past: bool,
+    #[serde(default)]
+    pub unpaid: bool,
 }
 
 pub async fn create(
@@ -60,6 +62,7 @@ pub async fn create(
                 sort_order: body.sort_order,
                 cost_type: body.cost_type,
                 auto_approve_past: body.auto_approve_past,
+                unpaid: body.unpaid,
             },
         )
         .await?,
@@ -74,6 +77,7 @@ pub struct UpdateAbsenceCategoryRequest {
     pub active: Option<bool>,
     pub cost_type: Option<String>,
     pub auto_approve_past: Option<bool>,
+    pub unpaid: Option<bool>,
 }
 
 pub async fn update(
@@ -94,6 +98,7 @@ pub async fn update(
                 active: body.active,
                 cost_type: body.cost_type,
                 auto_approve_past: body.auto_approve_past,
+                unpaid: body.unpaid,
             },
         )
         .await?,

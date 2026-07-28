@@ -125,6 +125,7 @@ pub struct NewCategoryInput {
     pub sort_order: Option<i64>,
     pub cost_type: String,
     pub auto_approve_past: bool,
+    pub unpaid: bool,
 }
 
 pub async fn create(
@@ -158,6 +159,14 @@ pub async fn create(
                 .into(),
         ));
     }
+    // "Unpaid" only makes sense for cost_type='none': vacation and flextime
+    // categories are always paid through their own balance mechanics, so
+    // marking either unpaid would be a contradictory, confusing state.
+    if input.unpaid && input.cost_type != crate::repository::absence_categories::COST_TYPE_NONE {
+        return Err(AppError::BadRequest(
+            "Unpaid can only be set when cost_type is 'none'.".into(),
+        ));
+    }
     let slug = match input.slug.as_deref().filter(|s| !s.trim().is_empty()) {
         Some(raw) => normalize_slug(raw).ok_or_else(|| {
             AppError::BadRequest(
@@ -180,6 +189,7 @@ pub async fn create(
             active: true,
             cost_type: &input.cost_type,
             auto_approve_past: input.auto_approve_past,
+            unpaid: input.unpaid,
         })
         .await?;
     app_state
@@ -197,6 +207,7 @@ pub struct UpdateCategoryInput {
     pub active: Option<bool>,
     pub cost_type: Option<String>,
     pub auto_approve_past: Option<bool>,
+    pub unpaid: Option<bool>,
 }
 
 pub async fn update(
@@ -237,6 +248,7 @@ pub async fn update(
         .clone()
         .unwrap_or_else(|| current.cost_type.clone());
     let final_auto = input.auto_approve_past.unwrap_or(current.auto_approve_past);
+    let final_unpaid = input.unpaid.unwrap_or(current.unpaid);
     // Toggling the cost type or the auto-approve behavior would silently
     // change the financial / approval meaning of EXISTING absences
     // referencing this category — past balance recomputations would
@@ -255,6 +267,15 @@ pub async fn update(
             "A category cannot both deduct vacation days and auto-approve past dates. \
              Use separate categories for vacation (reviewed) and sick leave (auto-approved)."
                 .into(),
+        ));
+    }
+    // Same reasoning as on create(): "unpaid" is contradictory outside
+    // cost_type='none'. Checked against the merged final state so e.g.
+    // switching cost_type away from 'none' without also clearing a
+    // previously-set unpaid flag is rejected rather than silently stored.
+    if final_unpaid && final_cost_type != crate::repository::absence_categories::COST_TYPE_NONE {
+        return Err(AppError::BadRequest(
+            "Unpaid can only be set when cost_type is 'none'.".into(),
         ));
     }
     let cost_type_changed = final_cost_type != current.cost_type;
@@ -288,6 +309,7 @@ pub async fn update(
                 active: input.active,
                 cost_type: input.cost_type.as_deref(),
                 auto_approve_past: input.auto_approve_past,
+                unpaid: input.unpaid,
             },
         )
         .await?;

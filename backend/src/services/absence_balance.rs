@@ -932,6 +932,7 @@ mod tests {
             active: true,
             cost_type: "none".to_string(),
             auto_approve_past,
+            unpaid: false,
         }
     }
 

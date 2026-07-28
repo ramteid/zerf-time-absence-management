@@ -20,6 +20,13 @@
   // impossible to violate in either direction.
   let cost_type = template.cost_type ?? "none";
   let auto_approve_past = template.auto_approve_past ?? false;
+  // Only meaningful when cost_type is "none" — see help_unpaid. Switching
+  // cost_type away from "none" would otherwise leave a stale, contradictory
+  // value the backend has to reject on save; reset it here instead so the
+  // checkbox (hidden once cost_type changes) doesn't silently carry a value
+  // the admin can no longer see or intend.
+  let unpaid = template.unpaid ?? false;
+  $: if (cost_type !== "none") unpaid = false;
   let error = "";
   let saving = false;
 
@@ -70,6 +77,7 @@
         sort_order: Number(sort_order),
         cost_type,
         auto_approve_past,
+        unpaid,
       };
       if (!isNew) {
         body.active = active;
@@ -172,6 +180,24 @@
       </label>
       {#if openHelp === "cost_type_none"}
         <div class="abscat-help">{$t("help_cost_type_none")}</div>
+      {/if}
+      {#if cost_type === "none"}
+        <label class="zf-check-label abscat-suboption">
+          <input type="checkbox" bind:checked={unpaid} />
+          <span>{$t("label_unpaid")}</span>
+          <button
+            type="button"
+            class="zf-btn-icon-sm zf-btn-ghost zf-help-btn"
+            aria-expanded={openHelp === "unpaid"}
+            aria-label={$t("Show explanation")}
+            on:click={() => toggleHelp("unpaid")}
+          >
+            <Icon name="Info" size={14} />
+          </button>
+        </label>
+        {#if openHelp === "unpaid"}
+          <div class="abscat-help">{$t("help_unpaid")}</div>
+        {/if}
       {/if}
     </div>
     <div>
@@ -295,6 +321,12 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
+  }
+
+  /* "Unpaid" only applies to the "none" cost type, so it's indented to read
+     as a sub-option nested under it rather than a sibling choice. */
+  .abscat-suboption {
+    margin-left: 26px;
   }
 
   /*

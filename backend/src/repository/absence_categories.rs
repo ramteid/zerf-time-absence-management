@@ -53,6 +53,14 @@ pub struct AbsenceCategory {
     /// Sick-like behavior: auto-approve when start_date <= today, allow
     /// backdating up to 30 days, and coexist with logged time on the same day.
     pub auto_approve_past: bool,
+    /// Whether an approved absence in this category actually reduces the
+    /// employee's pay. Independent of `cost_type`: a `cost_type == "none"`
+    /// category can be paid (special leave, paid training, Bildungsurlaub) or
+    /// unpaid — Zerf otherwise has no opinion on pay, only on balances (see
+    /// `help_cost_type_none`). Only meaningful when `cost_type == "none"`
+    /// (enforced by the `abs_cat_unpaid_requires_none_cost` CHECK): vacation
+    /// and flextime categories are always paid through their own mechanics.
+    pub unpaid: bool,
 }
 
 impl AbsenceCategory {
@@ -68,18 +76,19 @@ impl AbsenceCategory {
     }
 
     /// True for categories the monthly payroll report includes automatically:
-    /// sick-like categories (`auto_approve_past`) and anything that costs
-    /// neither vacation nor flextime (`cost_type == "none"`) — days that don't
-    /// move any balance the app tracks. Vacation- and flextime-cost categories
-    /// are excluded because their cost already shows up in the leave/flextime
-    /// balances, not in this report.
+    /// sick-like categories (`auto_approve_past`) and categories explicitly
+    /// marked `unpaid`. Vacation- and flextime-cost categories are excluded
+    /// because their cost already shows up in the leave/flextime balances;
+    /// paid `cost_type == "none"` categories (special leave, paid training,
+    /// Bildungsurlaub) are excluded because they don't change what payroll
+    /// has to pay out.
     pub fn is_payroll_relevant(&self) -> bool {
-        self.auto_approve_past || self.cost_type == COST_TYPE_NONE
+        self.auto_approve_past || self.unpaid
     }
 }
 
 const ABS_CAT_COLUMNS: &str =
-    "id, slug, name, color, sort_order, active, cost_type, auto_approve_past";
+    "id, slug, name, color, sort_order, active, cost_type, auto_approve_past, unpaid";
 
 #[derive(Clone)]
 pub struct AbsenceCategoryDb {
@@ -157,8 +166,8 @@ impl AbsenceCategoryDb {
         let mut tx = self.pool.begin().await?;
         let new_id: i64 = sqlx::query_scalar(
             "INSERT INTO absence_categories \
-             (slug, name, color, sort_order, active, cost_type, auto_approve_past) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id",
+             (slug, name, color, sort_order, active, cost_type, auto_approve_past, unpaid) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id",
         )
         .bind(input.slug)
         .bind(input.name)
@@ -167,6 +176,7 @@ impl AbsenceCategoryDb {
         .bind(input.active)
         .bind(input.cost_type)
         .bind(input.auto_approve_past)
+        .bind(input.unpaid)
         .fetch_one(&mut *tx)
         .await
         .map_err(map_constraint_error)?;
@@ -232,7 +242,7 @@ impl AbsenceCategoryDb {
     /// Active absence categories enabled for a specific employee, for absence-request dropdowns.
     pub async fn list_active_for_user(&self, user_id: i64) -> AppResult<Vec<AbsenceCategory>> {
         Ok(sqlx::query_as::<_, AbsenceCategory>(
-            "SELECT c.id, c.slug, c.name, c.color, c.sort_order, c.active, c.cost_type, c.auto_approve_past \
+            "SELECT c.id, c.slug, c.name, c.color, c.sort_order, c.active, c.cost_type, c.auto_approve_past, c.unpaid \
              FROM absence_categories c \
              JOIN user_absence_category_access uaca ON uaca.category_id = c.id AND uaca.user_id = $1 \
              WHERE c.active = TRUE ORDER BY c.sort_order, c.name",
@@ -252,7 +262,7 @@ impl AbsenceCategoryDb {
         Ok(sqlx::query_as::<_, AbsenceCategory>(
             "SELECT c.id, c.slug, c.name, c.color, c.sort_order, \
                     (c.active AND uaca.user_id IS NOT NULL) AS active, \
-                    c.cost_type, c.auto_approve_past \
+                    c.cost_type, c.auto_approve_past, c.unpaid \
              FROM absence_categories c \
              LEFT JOIN user_absence_category_access uaca \
                     ON uaca.category_id = c.id AND uaca.user_id = $1 \
@@ -277,8 +287,9 @@ impl AbsenceCategoryDb {
                 sort_order=COALESCE($3,sort_order), \
                 active=COALESCE($4,active), \
                 cost_type=COALESCE($5,cost_type), \
-                auto_approve_past=COALESCE($6,auto_approve_past) \
-             WHERE id=$7",
+                auto_approve_past=COALESCE($6,auto_approve_past), \
+                unpaid=COALESCE($7,unpaid) \
+             WHERE id=$8",
         )
         .bind(input.name)
         .bind(input.color)
@@ -286,6 +297,7 @@ impl AbsenceCategoryDb {
         .bind(input.active)
         .bind(input.cost_type)
         .bind(input.auto_approve_past)
+        .bind(input.unpaid)
         .bind(id)
         .execute(&self.pool)
         .await
@@ -319,6 +331,10 @@ pub struct NewAbsenceCategory<'a> {
     /// validates via `validate_cost_type` before passing it through.
     pub cost_type: &'a str,
     pub auto_approve_past: bool,
+    /// Only valid when `cost_type == "none"` (enforced by the
+    /// `abs_cat_unpaid_requires_none_cost` CHECK); service-layer code
+    /// validates this before passing it through.
+    pub unpaid: bool,
 }
 
 pub struct UpdateAbsenceCategory<'a> {
@@ -328,6 +344,7 @@ pub struct UpdateAbsenceCategory<'a> {
     pub active: Option<bool>,
     pub cost_type: Option<&'a str>,
     pub auto_approve_past: Option<bool>,
+    pub unpaid: Option<bool>,
 }
 
 /// Translate the database constraints we care about into client-facing errors.
@@ -343,15 +360,19 @@ fn map_constraint_error(e: sqlx::Error) -> AppError {
         if code == "23505" {
             return AppError::conflict("Absence category slug already exists.");
         }
-        // 23514 = check_violation. After migration 019 the only
-        // category-level CHECK that user input can violate is the
-        // cost_type whitelist — and the service layer validates it up
-        // front via `validate_cost_type`, so this branch only fires if a
-        // future direct-SQL caller bypasses the service. Keep the mapping
-        // anyway so the error stays user-facing instead of a 500.
+        // 23514 = check_violation. The service layer validates both of these
+        // up front (`validate_cost_type`, the unpaid/cost_type pairing), so
+        // these branches only fire if a future direct-SQL caller bypasses the
+        // service. Keep the mapping anyway so the error stays user-facing
+        // instead of a 500.
         if code == "23514" && constraint == "abs_cat_cost_type" {
             return AppError::bad_request(
                 "Invalid cost_type; expected 'none', 'vacation', or 'flextime'.",
+            );
+        }
+        if code == "23514" && constraint == "abs_cat_unpaid_requires_none_cost" {
+            return AppError::bad_request(
+                "Unpaid can only be set when cost_type is 'none'.",
             );
         }
     }
@@ -368,4 +389,53 @@ fn map_user_access_error(e: sqlx::Error) -> AppError {
         }
     }
     AppError::from(e)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn category(cost_type: &str, auto_approve_past: bool, unpaid: bool) -> AbsenceCategory {
+        AbsenceCategory {
+            id: 1,
+            slug: "test".to_string(),
+            name: "Test".to_string(),
+            color: "#000000".to_string(),
+            sort_order: 0,
+            active: true,
+            cost_type: cost_type.to_string(),
+            auto_approve_past,
+            unpaid,
+        }
+    }
+
+    /// Regression test: `cost_type == "none"` alone must NOT make a category
+    /// payroll-relevant. Real-world "none"-cost categories include paid
+    /// special leave, paid training counted as working time, and legally
+    /// mandated paid educational leave (Bildungsurlaub) — none of these
+    /// reduce salary, so the payroll report must not list them just because
+    /// they don't touch the vacation/flextime balance.
+    #[test]
+    fn cost_type_none_alone_is_not_payroll_relevant() {
+        let paid_special_leave = category(COST_TYPE_NONE, false, false);
+        assert!(!paid_special_leave.is_payroll_relevant());
+    }
+
+    #[test]
+    fn unpaid_flag_makes_a_none_cost_category_payroll_relevant() {
+        let unpaid_leave = category(COST_TYPE_NONE, false, true);
+        assert!(unpaid_leave.is_payroll_relevant());
+    }
+
+    #[test]
+    fn auto_approve_past_makes_a_category_payroll_relevant_regardless_of_unpaid() {
+        let sick = category(COST_TYPE_NONE, true, false);
+        assert!(sick.is_payroll_relevant());
+    }
+
+    #[test]
+    fn vacation_and_flextime_cost_categories_are_never_payroll_relevant() {
+        assert!(!category(COST_TYPE_VACATION, false, false).is_payroll_relevant());
+        assert!(!category(COST_TYPE_FLEXTIME, false, false).is_payroll_relevant());
+    }
 }

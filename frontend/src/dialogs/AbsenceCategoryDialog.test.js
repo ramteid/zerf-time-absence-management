@@ -292,6 +292,73 @@ describe("AbsenceCategoryDialog", () => {
     });
   });
 
+  it("only shows the Unpaid checkbox for cost_type 'none' and includes it in the save payload", async () => {
+    const onClose = vi.fn();
+    component = mount(AbsenceCategoryDialog, {
+      target,
+      props: {
+        template: { id: 9, name: "Special leave", color: "#0ea5e9" },
+        onClose,
+      },
+    });
+    await settle();
+
+    function unpaidCheckbox() {
+      return [...target.querySelectorAll("label")]
+        .find((label) => label.textContent.includes("Unpaid"))
+        ?.querySelector('input[type="checkbox"]');
+    }
+
+    // Defaults to cost_type "none", so the checkbox is visible.
+    expect(unpaidCheckbox()).toBeTruthy();
+    unpaidCheckbox().click();
+    await settle();
+
+    target.querySelector("button.zf-btn.zf-btn-primary").click();
+    await settle();
+
+    const updateRequest = requestFor("/absence-categories/9", "PUT");
+    expect(updateRequest).toBeDefined();
+    expect(updateRequest.options.body).toMatchObject({ unpaid: true });
+  });
+
+  it("resets unpaid to false when cost_type changes away from 'none'", async () => {
+    const onClose = vi.fn();
+    component = mount(AbsenceCategoryDialog, {
+      target,
+      props: {
+        template: { id: 9, name: "Special leave", color: "#0ea5e9" },
+        onClose,
+      },
+    });
+    await settle();
+
+    const unpaidCheckbox = [...target.querySelectorAll("label")]
+      .find((label) => label.textContent.includes("Unpaid"))
+      .querySelector('input[type="checkbox"]');
+    unpaidCheckbox.click();
+    await settle();
+
+    const vacationRadio = target.querySelector(
+      'input[type="radio"][value="vacation"]',
+    );
+    vacationRadio.click();
+    await settle();
+
+    // The checkbox (and its row) disappear once cost_type is no longer "none".
+    expect(
+      [...target.querySelectorAll("label")].find((label) =>
+        label.textContent.includes("Unpaid"),
+      ),
+    ).toBeUndefined();
+
+    target.querySelector("button.zf-btn.zf-btn-primary").click();
+    await settle();
+
+    const updateRequest = requestFor("/absence-categories/9", "PUT");
+    expect(updateRequest.options.body).toMatchObject({ unpaid: false });
+  });
+
   it("does not create a duplicate category when Save is double-clicked before the first request resolves", async () => {
     const onClose = vi.fn();
     component = mount(AbsenceCategoryDialog, {

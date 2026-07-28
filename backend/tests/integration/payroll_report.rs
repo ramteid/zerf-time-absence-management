@@ -138,9 +138,15 @@ async fn payroll_report_settings_are_validated_and_persisted() {
         "case-insensitive duplicates are collapsed"
     );
     assert_eq!(body["payroll_report_day_of_month"], 7);
-    // Absence categories are no longer admin-picked: the seeded "sick" and
-    // "unpaid" categories qualify automatically (sick-like / cost_type=none),
-    // while "vacation" and "flextime_reduction" are excluded.
+    // Absence categories are no longer admin-picked: "sick" qualifies as
+    // sick-like (auto_approve_past) and the seeded "unpaid" category is
+    // explicitly flagged unpaid (migration 037 backfill). "vacation" and
+    // "flextime_reduction" are excluded because their cost already shows up
+    // in the leave/flextime balances. "special_leave" and "general_absence"
+    // are cost_type='none' but NOT flagged unpaid, so — unlike the old,
+    // wrong cost_type=='none'-alone rule — they must NOT be auto-included:
+    // paid special leave and paid/neutral general absence don't reduce
+    // salary, so listing them here would misreport what payroll owes.
     let auto_categories: Vec<String> = body["payroll_report_absence_categories"]
         .as_array()
         .expect("categories array")
@@ -151,6 +157,14 @@ async fn payroll_report_settings_are_validated_and_persisted() {
     assert!(auto_categories.contains(&"unpaid".to_string()));
     assert!(!auto_categories.contains(&"vacation".to_string()));
     assert!(!auto_categories.contains(&"flextime_reduction".to_string()));
+    assert!(
+        !auto_categories.contains(&"special_leave".to_string()),
+        "paid special leave must not be auto-included just because cost_type=none"
+    );
+    assert!(
+        !auto_categories.contains(&"general_absence".to_string()),
+        "general absence must not be auto-included just because cost_type=none"
+    );
 
     let (status, settings) = admin.get("/api/v1/settings").await;
     assert_eq!(status, StatusCode::OK);
@@ -186,6 +200,95 @@ async fn payroll_report_settings_are_validated_and_persisted() {
         .post("/api/v1/settings/payroll-report/send-now", &json!({}))
         .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "lead cannot trigger a run");
+
+    app.cleanup().await;
+}
+
+/// Regression test for a real bug: marking a category `cost_type = 'none'`
+/// does not by itself mean the day is unpaid — paid special leave and paid
+/// training are `cost_type = 'none'` too. The payroll report must only
+/// auto-include a category once an admin explicitly flags it `unpaid` (or it
+/// is sick-like), and toggling that flag must take effect immediately.
+#[tokio::test]
+async fn payroll_report_only_includes_categories_explicitly_marked_unpaid() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+
+    let (_, cats_body) = admin.get("/api/v1/absence-categories/all").await;
+    let special_leave_id = cats_body
+        .as_array()
+        .expect("categories array")
+        .iter()
+        .find(|c| c["slug"].as_str() == Some("special_leave"))
+        .expect("special_leave seeded category exists")["id"]
+        .as_i64()
+        .expect("id is int");
+
+    let (status, settings) = admin.get("/api/v1/settings").await;
+    assert_eq!(status, StatusCode::OK);
+    let included = |settings: &serde_json::Value| -> Vec<String> {
+        settings["payroll_report_absence_categories"]
+            .as_array()
+            .expect("categories array")
+            .iter()
+            .map(|value| value.as_str().unwrap().to_string())
+            .collect()
+    };
+    assert!(
+        !included(&settings).contains(&"special_leave".to_string()),
+        "cost_type='none' alone must not make a paid category payroll-relevant"
+    );
+
+    // Setting unpaid=true on a cost_type='vacation' category is nonsensical
+    // (vacation is always paid through its own balance mechanics) and is
+    // rejected by the same invariant the DB CHECK enforces.
+    let vacation_id = cats_body
+        .as_array()
+        .expect("categories array")
+        .iter()
+        .find(|c| c["slug"].as_str() == Some("vacation"))
+        .expect("vacation seeded category exists")["id"]
+        .as_i64()
+        .expect("id is int");
+    let (status, body) = admin
+        .put(
+            &format!("/api/v1/absence-categories/{vacation_id}"),
+            &json!({"unpaid": true}),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "unpaid requires cost_type='none': {body}"
+    );
+
+    // Flip special_leave to unpaid — it must now appear.
+    let (status, body) = admin
+        .put(
+            &format!("/api/v1/absence-categories/{special_leave_id}"),
+            &json!({"unpaid": true}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "mark special_leave unpaid: {body}");
+
+    let (status, settings) = admin.get("/api/v1/settings").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        included(&settings).contains(&"special_leave".to_string()),
+        "explicitly unpaid categories are included"
+    );
+
+    // Flipping it back off removes it again.
+    let (status, _) = admin
+        .put(
+            &format!("/api/v1/absence-categories/{special_leave_id}"),
+            &json!({"unpaid": false}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, settings) = admin.get("/api/v1/settings").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(!included(&settings).contains(&"special_leave".to_string()));
 
     app.cleanup().await;
 }

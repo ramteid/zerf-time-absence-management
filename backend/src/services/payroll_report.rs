@@ -334,7 +334,7 @@ mod tests {
         }
     }
 
-    fn category(slug: &str, cost_type: &str, auto_approve_past: bool) -> AbsenceCategory {
+    fn category(slug: &str, cost_type: &str, auto_approve_past: bool, unpaid: bool) -> AbsenceCategory {
         AbsenceCategory {
             id: 1,
             slug: slug.to_string(),
@@ -344,6 +344,7 @@ mod tests {
             active: true,
             cost_type: cost_type.to_string(),
             auto_approve_past,
+            unpaid,
         }
     }
 
@@ -353,6 +354,7 @@ mod tests {
             "sick",
             crate::repository::absence_categories::COST_TYPE_NONE,
             true,
+            false,
         );
         assert!(config(false, false).has_no_content(&[]));
         assert!(!config(false, false).has_no_content(&[sick]));
