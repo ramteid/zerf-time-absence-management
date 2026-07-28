@@ -8,8 +8,7 @@ const mockState = vi.hoisted(() => ({
     payroll_report_enabled: true,
     payroll_report_recipients: ["payroll@example.com"],
     payroll_report_day_of_month: 5,
-    // Read-only: which categories the backend currently includes
-    // automatically (sick-like, or costing neither vacation nor flextime).
+    // Read-only: categories the backend includes automatically.
     payroll_report_absence_categories: ["sick"],
     payroll_report_include_assistant_hours: true,
     payroll_report_include_employee_hours: false,
@@ -120,6 +119,19 @@ describe("AdminPayrollReport", () => {
     expect(target.textContent).not.toContain("Unpaid");
   });
 
+  it("shows concise German settings text", async () => {
+    setLanguage("de");
+    component = mount(AdminPayrollReport, { target });
+    await settle();
+
+    expect(target.textContent).toContain("Lohnmeldung automatisch senden");
+    expect(target.textContent).toContain("Versandtag (1-28)");
+    expect(target.textContent).toContain(
+      "Sind noch Wochen, Abwesenheiten oder Arbeitszeiten offen",
+    );
+    expect(target.textContent).not.toContain("am konfigurierten Tag");
+  });
+
   it("prefills the recipients field from the stored list", async () => {
     mockState.settings.payroll_report_recipients = [
       "payroll@example.com",
@@ -179,7 +191,7 @@ describe("AdminPayrollReport", () => {
       ),
     ).toBe(false);
     expect(toastMock).toHaveBeenCalledWith(
-      "A recipient address is required to enable the payroll report.",
+      "Enter at least one recipient.",
       "error",
     );
   });
@@ -204,7 +216,7 @@ describe("AdminPayrollReport", () => {
       ),
     ).toBe(false);
     expect(toastMock).toHaveBeenCalledWith(
-      "Select at least one section for the payroll report.",
+      "Select at least one type of content.",
       "error",
     );
   });
@@ -224,7 +236,7 @@ describe("AdminPayrollReport", () => {
           opts?.method === "POST",
       ),
     ).toBe(true);
-    expect(toastMock).toHaveBeenCalledWith("Payroll report sent.", "ok");
+    expect(toastMock).toHaveBeenCalledWith("Report sent.", "ok");
   });
 
   it("explains when nothing was sent because a month is not final", async () => {
@@ -236,7 +248,7 @@ describe("AdminPayrollReport", () => {
     await settle();
 
     expect(toastMock).toHaveBeenCalledWith(
-      "Nothing was sent: every month was already sent or is not final yet.",
+      "No report was sent. It was already sent or the month is not complete.",
       "info",
     );
   });

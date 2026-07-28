@@ -75,7 +75,7 @@ describe("AdminUpload", () => {
 
     const checkboxes = target.querySelectorAll('input[type="checkbox"]');
     const backupCb = [...checkboxes].find((cb) =>
-      cb.closest("label")?.textContent?.includes("DB backup"),
+      cb.closest("label")?.textContent?.includes("database backups"),
     );
     expect(backupCb).not.toBeNull();
     expect(backupCb.checked).toBe(false);
@@ -88,10 +88,21 @@ describe("AdminUpload", () => {
 
     const checkboxes = target.querySelectorAll('input[type="checkbox"]');
     const reportCb = [...checkboxes].find((cb) =>
-      cb.closest("label")?.textContent?.includes("report PDF"),
+      cb.closest("label")?.textContent?.includes("timesheets"),
     );
     expect(reportCb).not.toBeNull();
     expect(reportCb.checked).toBe(true);
+  });
+
+  it("shows concise German settings text", async () => {
+    setLanguage("de");
+    component = mount(AdminUpload, { target });
+    await settle();
+
+    expect(target.textContent).toContain("Datenbank-Backups hochladen");
+    expect(target.textContent).toContain("Tage zwischen Backups");
+    expect(target.textContent).toContain("Tag für den Upload (1-28)");
+    expect(target.textContent).not.toContain("Backup-Container");
   });
 
   it("includes all upload fields in the save body", async () => {

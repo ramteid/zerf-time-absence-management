@@ -50,9 +50,8 @@
   }
 
   // Categories the report currently includes automatically. The backend
-  // decides membership from each category's behavior (sick-like, or costing
-  // neither vacation nor flextime) — there is nothing to pick here, this just
-  // resolves the returned slugs to their display name and color.
+  // includes sick-like and unpaid categories; this list only resolves the
+  // returned slugs to their display name and color.
   $: includedCategories = categories.filter((category) =>
     (settings.payroll_report_absence_categories || []).includes(category.slug),
   );
@@ -103,7 +102,7 @@
       recipientsInput = (saved.payroll_report_recipients || []).join("\n");
       await tick();
       resizeRecipientsTextarea();
-      toast($t("Payroll report settings saved."), "ok");
+      toast($t("Settings saved."), "ok");
     } catch (e) {
       toast(e?.message || $t("Error"), "error");
     } finally {
@@ -120,11 +119,11 @@
       // Nothing sent means either every month went out already or a month is
       // still open — the admins who opted in were notified with the details.
       if (result?.sent > 0) {
-        toast($t("Payroll report sent."), "ok");
+        toast($t("Report sent."), "ok");
       } else {
         toast(
           $t(
-            "Nothing was sent: every month was already sent or is not final yet.",
+            "No report was sent. It was already sent or the month is not complete.",
           ),
           "info",
         );
@@ -145,7 +144,7 @@
 
 <div class="content-area page-medium">
   <div class="zf-card zf-card-section">
-    <div class="field-card-title">{$t("Monthly payroll report")}</div>
+    <div class="field-card-title">{$t("Automatic delivery")}</div>
     <div class="field-group">
       <div class="field-row">
         <div>
@@ -154,11 +153,11 @@
               type="checkbox"
               bind:checked={settings.payroll_report_enabled}
             />
-            {$t("Send the payroll report by email")}
+            {$t("Send the payroll report automatically")}
           </label>
           <div class="field-hint">
             {$t(
-              "On the configured day of each month, the previous month's report is prepared and emailed as a PDF. It is only sent once every employee's month is final: weeks submitted, absence requests decided, and — for everyone whose hours are in the report — all time entries approved. Otherwise the report waits and is retried daily. Requires a configured email server.",
+              "Sends the previous month's report as a PDF on the selected day. If weeks, absences, or working hours are still open, it is sent later automatically. Email must be set up first.",
             )}
           </div>
         </div>
@@ -167,7 +166,7 @@
       <div class="field-row">
         <div>
           <label class="zf-label" for="payroll-recipients"
-            >{$t("Recipient email addresses")}</label
+            >{$t("Recipients")}</label
           >
           <textarea
             id="payroll-recipients"
@@ -181,13 +180,13 @@ buchhaltung@example.com"
             disabled={!settings.payroll_report_enabled}></textarea>
           <div class="field-hint">
             {$t(
-              "One address per line. Every recipient receives the same email.",
+              "Enter one email address per line. Everyone receives the same report.",
             )}
           </div>
         </div>
         <div>
           <label class="zf-label" for="payroll-day"
-            >{$t("Send day of month (1–28)")}</label
+            >{$t("Send day (1-28)")}</label
           >
           <input
             id="payroll-day"
@@ -205,19 +204,17 @@ buchhaltung@example.com"
   </div>
 
   <div class="zf-card zf-card-section">
-    <div class="field-card-title">{$t("Report content")}</div>
+    <div class="field-card-title">{$t("Content")}</div>
     <div class="field-group">
       <div class="field-row">
         <div>
-          <span class="zf-label">{$t("Absence days per employee")}</span>
+          <span class="zf-label">{$t("Absences")}</span>
           <div class="field-hint">
-            {$t(
-              "One row per absence period with the number of working days. Sick days are needed for health-insurance reimbursement, unpaid days reduce the salary payout.",
-            )}
+            {$t("Shows each absence and its number of workdays.")}
           </div>
           <div class="field-hint">
             {$t(
-              "Included automatically — sick-like categories, and any category that counts neither as vacation nor as flextime. Nothing to select here; manage the behavior on the Categories page.",
+              "Sick and unpaid categories are included automatically. You can change this under Categories.",
             )}
           </div>
           {#if includedCategories.length > 0}
@@ -239,10 +236,10 @@ buchhaltung@example.com"
 
       <div class="field-row">
         <div>
-          <span class="zf-label">{$t("Working days and hours")}</span>
+          <span class="zf-label">{$t("Workdays and hours")}</span>
           <div class="field-hint">
             {$t(
-              "Worked days and approved hours per person, shown in hours:minutes and as a decimal value for payroll.",
+              "Shows each person's workdays and approved hours. Hours are also shown as a decimal.",
             )}
           </div>
           <label class="zf-label zf-row">
@@ -268,7 +265,7 @@ buchhaltung@example.com"
     <div class="form-actions">
       <div class="field-hint form-actions-hint">
         {$t(
-          "Send now prepares the previous month immediately and sends it if the month is already final. It does not replace the scheduled monthly run.",
+          "Sends the previous month's report now if the month is complete. Automatic delivery stays active.",
         )}
       </div>
       <div class="form-actions-buttons">

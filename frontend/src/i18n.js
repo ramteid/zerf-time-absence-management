@@ -276,64 +276,63 @@ const TRANSLATIONS = {
       "When enabled, approvers are reminded by email about pending approvals every Monday.",
     // --- Nextcloud upload settings ---
     "Nextcloud Backups": "Nextcloud Backups",
-    "DB Backup Upload": "DB Backup Upload",
-    "Report PDF Upload": "Report PDF Upload",
-    "Enable DB backup upload": "Enable DB backup upload",
-    "Enable report PDF upload": "Enable report PDF upload",
-    "Share link (https://…/s/…)": "Share link (https://…/s/…)",
-    "Share password (optional)": "Share password (optional)",
-    "Upload day of month (1-28)": "Upload day of month (1-28)",
-    "Backup interval (days)": "Backup interval (days)",
+    "Database backups": "Database backups",
+    Timesheets: "Timesheets",
+    "Upload database backups": "Upload database backups",
+    "Upload timesheets": "Upload timesheets",
+    "Nextcloud share link": "Nextcloud share link",
+    "Password (optional)": "Password (optional)",
+    "Upload day (1-28)": "Upload day (1-28)",
+    "Days between backups": "Days between backups",
     "Upload now": "Upload now",
     "Uploading...": "Uploading...",
-    "Upload settings saved.": "Upload settings saved.",
-    "Report uploaded successfully.": "Report uploaded successfully.",
+    "Upload started.": "Upload started.",
     "Upload failed.": "Upload failed.",
-    "The backup interval is read by the backup container from the database at the start of each cycle. Changes take effect on the next backup run. The 10 most recent local backup files are kept automatically; older ones are deleted. Uploaded files in Nextcloud are not deleted automatically.":
-      "The backup interval is read by the backup container from the database at the start of each cycle. Changes take effect on the next backup run. The 10 most recent local backup files are kept automatically; older ones are deleted. Uploaded files in Nextcloud are not deleted automatically.",
-    "On the configured day of each month, an individual timesheet PDF is queued for every employee. Each PDF is uploaded once the employee's month is final — all weeks submitted and approved — late submitters and pending approvals are automatically caught up on the next daily check.":
-      "On the configured day of each month, an individual timesheet PDF is queued for every employee. Each PDF is uploaded once the employee's month is final — all weeks submitted and approved — late submitters and pending approvals are automatically caught up on the next daily check.",
+    "The 10 latest backups stay on this server; older ones are deleted. Files in Nextcloud are not deleted automatically.":
+      "The 10 latest backups stay on this server; older ones are deleted. Files in Nextcloud are not deleted automatically.",
+    "Uploads the previous month's timesheets on the selected day. If submissions or approvals are missing, the upload happens later automatically.":
+      "Uploads the previous month's timesheets on the selected day. If submissions or approvals are missing, the upload happens later automatically.",
     // --- Payroll report settings ---
     "Payroll Report": "Payroll Report",
-    "Monthly payroll report": "Monthly payroll report",
-    "Send the payroll report by email": "Send the payroll report by email",
-    "On the configured day of each month, the previous month's report is prepared and emailed as a PDF. It is only sent once every employee's month is final: weeks submitted, absence requests decided, and — for everyone whose hours are in the report — all time entries approved. Otherwise the report waits and is retried daily. Requires a configured email server.":
-      "On the configured day of each month, the previous month's report is prepared and emailed as a PDF. It is only sent once every employee's month is final: weeks submitted, absence requests decided, and — for everyone whose hours are in the report — all time entries approved. Otherwise the report waits and is retried daily. Requires a configured email server.",
-    "Recipient email addresses": "Recipient email addresses",
-    "One address per line. Every recipient receives the same email.":
-      "One address per line. Every recipient receives the same email.",
-    "Send day of month (1-28)": "Send day of month (1-28)",
-    "Report content": "Report content",
-    "Absence days per employee": "Absence days per employee",
-    "One row per absence period with the number of working days. Sick days are needed for health-insurance reimbursement, unpaid days reduce the salary payout.":
-      "One row per absence period with the number of working days. Sick days are needed for health-insurance reimbursement, unpaid days reduce the salary payout.",
-    "Included automatically — sick-like categories, and any category that counts neither as vacation nor as flextime. Nothing to select here; manage the behavior on the Categories page.":
-      "Included automatically — sick-like categories, and any category that counts neither as vacation nor as flextime. Nothing to select here; manage the behavior on the Categories page.",
-    "Working days and hours": "Working days and hours",
-    "Worked days and approved hours per person, shown in hours:minutes and as a decimal value for payroll.":
-      "Worked days and approved hours per person, shown in hours:minutes and as a decimal value for payroll.",
+    "Automatic delivery": "Automatic delivery",
+    "Send the payroll report automatically":
+      "Send the payroll report automatically",
+    "Sends the previous month's report as a PDF on the selected day. If weeks, absences, or working hours are still open, it is sent later automatically. Email must be set up first.":
+      "Sends the previous month's report as a PDF on the selected day. If weeks, absences, or working hours are still open, it is sent later automatically. Email must be set up first.",
+    Recipients: "Recipients",
+    "Enter one email address per line. Everyone receives the same report.":
+      "Enter one email address per line. Everyone receives the same report.",
+    "Send day (1-28)": "Send day (1-28)",
+    Content: "Content",
+    Absences: "Absences",
+    "Shows each absence and its number of workdays.":
+      "Shows each absence and its number of workdays.",
+    "Sick and unpaid categories are included automatically. You can change this under Categories.":
+      "Sick and unpaid categories are included automatically. You can change this under Categories.",
+    "Workdays and hours": "Workdays and hours",
+    "Shows each person's workdays and approved hours. Hours are also shown as a decimal.":
+      "Shows each person's workdays and approved hours. Hours are also shown as a decimal.",
     Assistants: "Assistants",
     "All other employees": "All other employees",
     inactive: "inactive",
     "Send now": "Send now",
-    "Send now prepares the previous month immediately and sends it if the month is already final. It does not replace the scheduled monthly run.":
-      "Send now prepares the previous month immediately and sends it if the month is already final. It does not replace the scheduled monthly run.",
-    "Payroll report settings saved.": "Payroll report settings saved.",
-    "Payroll report sent.": "Payroll report sent.",
-    "Nothing was sent: every month was already sent or is not final yet.":
-      "Nothing was sent: every month was already sent or is not final yet.",
+    "Sends the previous month's report now if the month is complete. Automatic delivery stays active.":
+      "Sends the previous month's report now if the month is complete. Automatic delivery stays active.",
+    "Report sent.": "Report sent.",
+    "No report was sent. It was already sent or the month is not complete.":
+      "No report was sent. It was already sent or the month is not complete.",
     "A recipient address is required to enable the payroll report.":
-      "A recipient address is required to enable the payroll report.",
-    "The payroll report is not enabled.": "The payroll report is not enabled.",
+      "Enter at least one recipient.",
+    "The payroll report is not enabled.": "Automatic delivery is off.",
     "No recipient address configured for the payroll report.":
-      "No recipient address configured for the payroll report.",
+      "No recipient has been entered.",
     "Email delivery is not configured; the payroll report cannot be sent.":
-      "Email delivery is not configured; the payroll report cannot be sent.",
-    "Invalid payroll report recipient.": "Invalid payroll report recipient.",
+      "Set up email before sending the report.",
+    "Invalid payroll report recipient.": "Check the recipient address.",
     "payroll_report_day_of_month must be between 1 and 28.":
       "The send day must be between 1 and 28.",
     "Select at least one section for the payroll report.":
-      "Select at least one section for the payroll report.",
+      "Select at least one type of content.",
     "Category not available for you.": "Category not available for you.",
     "Absence category not available for you.":
       "Absence category not available for you.",
@@ -1321,69 +1320,64 @@ const TRANSLATIONS = {
     Week: "Woche",
     // --- Nextcloud upload settings ---
     "Nextcloud Backups": "Nextcloud-Backup",
-    "DB Backup Upload": "DB-Backup-Upload",
-    "Report PDF Upload": "Stundenzettel-Export",
-    "Enable DB backup upload": "DB-Backup-Upload aktivieren",
-    "Enable report PDF upload": "Stundenzettel-Export aktivieren",
-    "Share link (https://…/s/…)": "Share-Link (https://…/s/…)",
-    "Share password (optional)": "Share-Passwort (optional)",
-    "Upload day of month (1-28)": "Upload-Tag im Monat (1-28)",
-    "Backup interval (days)": "Backup-Intervall (Tage)",
+    "Database backups": "Datenbank-Backups",
+    Timesheets: "Stundenzettel",
+    "Upload database backups": "Datenbank-Backups hochladen",
+    "Upload timesheets": "Stundenzettel hochladen",
+    "Nextcloud share link": "Nextcloud-Freigabelink",
+    "Password (optional)": "Passwort (optional)",
+    "Upload day (1-28)": "Tag für den Upload (1-28)",
+    "Days between backups": "Tage zwischen Backups",
     "Upload now": "Jetzt hochladen",
     "Uploading...": "Wird hochgeladen...",
-    "Upload settings saved.": "Upload-Einstellungen gespeichert.",
-    "Report uploaded successfully.": "Bericht erfolgreich hochgeladen.",
+    "Upload started.": "Upload gestartet.",
     "Upload failed.": "Upload fehlgeschlagen.",
     "A Nextcloud share URL is required to enable database backup upload.":
-      "Für die Aktivierung des Datenbank-Backup-Uploads ist eine Nextcloud-Share-URL erforderlich.",
-    "The backup interval is read by the backup container from the database at the start of each cycle. Changes take effect on the next backup run. The 10 most recent local backup files are kept automatically; older ones are deleted. Uploaded files in Nextcloud are not deleted automatically.":
-      "Das Backup-Intervall wird vom Backup-Container zu Beginn jedes Zyklus aus der Datenbank gelesen. Änderungen werden beim nächsten Backup-Lauf wirksam. Die 10 neuesten lokalen Backup-Dateien werden automatisch aufbewahrt; ältere werden gelöscht. Hochgeladene Dateien in Nextcloud werden nicht automatisch gelöscht.",
-    "On the configured day of each month, an individual timesheet PDF is queued for every employee. Each PDF is uploaded once the employee's month is final — all weeks submitted and approved — late submitters and pending approvals are automatically caught up on the next daily check.":
-      "Am konfigurierten Tag des Monats wird für jeden Mitarbeiter ein individueller Stundenzettel in die Warteschlange eingereiht. Jedes PDF wird hochgeladen, sobald der Monat des Mitarbeiters abgeschlossen ist — alle Wochen eingereicht und genehmigt. Spät Einreichende und offene Genehmigungen werden beim nächsten täglichen Lauf automatisch nachgeholt.",
+      "Bitte einen Nextcloud-Link für die Backups eingeben.",
+    "The 10 latest backups stay on this server; older ones are deleted. Files in Nextcloud are not deleted automatically.":
+      "Die 10 neuesten Backups bleiben auf diesem Server; ältere werden gelöscht. Dateien in Nextcloud werden nicht automatisch gelöscht.",
+    "Uploads the previous month's timesheets on the selected day. If submissions or approvals are missing, the upload happens later automatically.":
+      "Lädt am gewählten Tag die Stundenzettel des Vormonats hoch. Fehlen Einreichungen oder Genehmigungen, erfolgt der Upload später automatisch.",
     // --- Lohnmeldung ---
     "Payroll Report": "Lohnmeldung",
-    "Monthly payroll report": "Monatliche Lohnmeldung",
-    "Send the payroll report by email": "Lohnmeldung per E-Mail senden",
-    "On the configured day of each month, the previous month's report is prepared and emailed as a PDF. It is only sent once every employee's month is final: weeks submitted, absence requests decided, and — for everyone whose hours are in the report — all time entries approved. Otherwise the report waits and is retried daily. Requires a configured email server.":
-      "Am konfigurierten Tag des Monats wird die Meldung für den Vormonat erstellt und als PDF per E-Mail versendet. Sie wird erst gesendet, wenn der Monat für alle Personen abgeschlossen ist: Wochen eingereicht, Abwesenheitsanträge entschieden und — für alle, deren Stunden in der Meldung stehen — alle Zeiteinträge genehmigt. Andernfalls wartet die Meldung und wird täglich erneut geprüft. Ein eingerichteter E-Mail-Server ist erforderlich.",
-    "Recipient email addresses": "E-Mail-Adressen der Empfänger",
-    "One address per line. Every recipient receives the same email.":
-      "Eine E-Mail-Adresse pro Zeile. Jeder Empfänger erhält dieselbe E-Mail.",
-    "Send day of month (1-28)": "Versandtag im Monat (1-28)",
-    "Report content": "Inhalt der Meldung",
-    "Absence days per employee": "Abwesenheitstage je Person",
-    "One row per absence period with the number of working days. Sick days are needed for health-insurance reimbursement, unpaid days reduce the salary payout.":
-      "Eine Zeile je Abwesenheitszeitraum mit der Anzahl der Arbeitstage. Krankheitstage werden für die Erstattung durch die Krankenkasse benötigt, unbezahlte Tage verringern die Lohnauszahlung.",
-    "Included automatically — sick-like categories, and any category that counts neither as vacation nor as flextime. Nothing to select here; manage the behavior on the Categories page.":
-      "Automatisch enthalten sind krankheitsähnliche Kategorien sowie alle Kategorien, die weder als Urlaub zählen noch die Gleitzeit belasten. Hier ist nichts auszuwählen; das Verhalten wird auf der Seite Kategorien verwaltet.",
-    "Working days and hours": "Arbeitstage und Arbeitsstunden",
-    "Worked days and approved hours per person, shown in hours:minutes and as a decimal value for payroll.":
-      "Gearbeitete Tage und genehmigte Stunden je Person, angegeben in Stunden:Minuten und zusätzlich als Dezimalwert für die Lohnabrechnung.",
+    "Automatic delivery": "Automatischer Versand",
+    "Send the payroll report automatically": "Lohnmeldung automatisch senden",
+    "Sends the previous month's report as a PDF on the selected day. If weeks, absences, or working hours are still open, it is sent later automatically. Email must be set up first.":
+      "Sendet die Lohnmeldung für den Vormonat am gewählten Tag als PDF. Sind noch Wochen, Abwesenheiten oder Arbeitszeiten offen, erfolgt der Versand später automatisch. Der E-Mail-Versand muss eingerichtet sein.",
+    Recipients: "Empfänger",
+    "Enter one email address per line. Everyone receives the same report.":
+      "Eine E-Mail-Adresse pro Zeile. Alle erhalten dieselbe Lohnmeldung.",
+    "Send day (1-28)": "Versandtag (1-28)",
+    Content: "Inhalt",
+    "Shows each absence and its number of workdays.":
+      "Zeigt jede Abwesenheit und die Zahl der Arbeitstage.",
+    "Sick and unpaid categories are included automatically. You can change this under Categories.":
+      "Kategorien für Krankheit und unbezahlte Abwesenheiten sind automatisch enthalten. Änderungen sind unter Kategorien möglich.",
+    "Workdays and hours": "Arbeitstage und Stunden",
+    "Shows each person's workdays and approved hours. Hours are also shown as a decimal.":
+      "Zeigt Arbeitstage und genehmigte Stunden je Person. Die Stunden erscheinen zusätzlich als Dezimalzahl.",
     Assistants: "Aushilfen",
     "All other employees": "Alle übrigen Mitarbeitenden",
     inactive: "inaktiv",
     "Send now": "Jetzt senden",
-    "Send now prepares the previous month immediately and sends it if the month is already final. It does not replace the scheduled monthly run.":
-      "Jetzt senden erstellt den Vormonat sofort und versendet ihn, sofern der Monat bereits abgeschlossen ist. Der geplante monatliche Lauf bleibt davon unberührt.",
-    "Payroll report settings saved.":
-      "Einstellungen der Lohnmeldung gespeichert.",
-    "Payroll report sent.": "Lohnmeldung versendet.",
-    "Nothing was sent: every month was already sent or is not final yet.":
-      "Es wurde nichts versendet: Alle Monate wurden bereits versendet oder sind noch nicht abgeschlossen.",
+    "Sends the previous month's report now if the month is complete. Automatic delivery stays active.":
+      "Sendet die Lohnmeldung für den Vormonat sofort, wenn der Monat abgeschlossen ist. Der automatische Versand bleibt aktiv.",
+    "Report sent.": "Lohnmeldung gesendet.",
+    "No report was sent. It was already sent or the month is not complete.":
+      "Keine Lohnmeldung gesendet. Sie wurde bereits gesendet oder der Monat ist noch nicht abgeschlossen.",
     "A recipient address is required to enable the payroll report.":
-      "Für die Aktivierung der Lohnmeldung ist eine Empfängeradresse erforderlich.",
+      "Bitte mindestens einen Empfänger eingeben.",
     "The payroll report is not enabled.":
-      "Die Lohnmeldung ist nicht aktiviert.",
+      "Der automatische Versand ist ausgeschaltet.",
     "No recipient address configured for the payroll report.":
-      "Für die Lohnmeldung ist keine Empfängeradresse konfiguriert.",
+      "Es wurde kein Empfänger eingetragen.",
     "Email delivery is not configured; the payroll report cannot be sent.":
-      "Der E-Mail-Versand ist nicht eingerichtet; die Lohnmeldung kann nicht versendet werden.",
-    "Invalid payroll report recipient.":
-      "Ungültige Empfängeradresse für die Lohnmeldung.",
+      "Vor dem Versand muss der E-Mail-Versand eingerichtet werden.",
+    "Invalid payroll report recipient.": "Bitte die Empfängeradresse prüfen.",
     "payroll_report_day_of_month must be between 1 and 28.":
       "Der Versandtag muss zwischen 1 und 28 liegen.",
     "Select at least one section for the payroll report.":
-      "Wählen Sie mindestens einen Abschnitt für die Lohnmeldung aus.",
+      "Bitte mindestens einen Inhalt auswählen.",
     "Category not available for you.":
       "Diese Kategorie ist für Sie nicht verfügbar.",
     "Absence category not available for you.":

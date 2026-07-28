@@ -61,7 +61,7 @@
       clearBackupPassword = false;
       reportUploadPassword = "";
       clearReportPassword = false;
-      toast($t("Upload settings saved."), "ok");
+      toast($t("Settings saved."), "ok");
     } catch (e) {
       toast(e?.message || $t("Error"), "error");
     } finally {
@@ -73,7 +73,7 @@
     uploading = true;
     try {
       await api("/settings/uploads/report/run-now", { method: "POST" });
-      toast($t("Report uploaded successfully."), "ok");
+      toast($t("Upload started."), "ok");
     } catch (e) {
       toast(e?.message || $t("Upload failed."), "error");
     } finally {
@@ -89,9 +89,9 @@
 </div>
 
 <div class="content-area">
-  <!-- DB Backup Upload -->
+  <!-- Database backups -->
   <div class="zf-card zf-card-section">
-    <div class="field-card-title">{$t("DB Backup Upload")}</div>
+    <div class="field-card-title">{$t("Database backups")}</div>
     <div class="field-group">
       <div class="field-row">
         <div>
@@ -100,7 +100,7 @@
               type="checkbox"
               bind:checked={uploadSettings.backup_upload_enabled}
             />
-            {$t("Enable DB backup upload")}
+            {$t("Upload database backups")}
           </label>
         </div>
       </div>
@@ -108,7 +108,7 @@
       <div class="field-row">
         <div>
           <label class="zf-label" for="backup-upload-url"
-            >{$t("Share link (https://…/s/…)")}</label
+            >{$t("Nextcloud share link")}</label
           >
           <input
             id="backup-upload-url"
@@ -121,7 +121,7 @@
         </div>
         <div>
           <label class="zf-label" for="backup-upload-password">
-            {$t("Share password (optional)")}
+            {$t("Password (optional)")}
             {#if uploadSettings.backup_upload_password_set}
               <span class="zf-label-hint">({$t("stored")})</span>
             {/if}
@@ -154,7 +154,7 @@
       <div class="field-row">
         <div>
           <label class="zf-label" for="backup-interval"
-            >{$t("Backup interval (days)")}</label
+            >{$t("Days between backups")}</label
           >
           <input
             id="backup-interval"
@@ -166,7 +166,7 @@
           />
           <div class="field-hint">
             {$t(
-              "The backup interval is read by the backup container from the database at the start of each cycle. Changes take effect on the next backup run. The 10 most recent local backup files are kept automatically; older ones are deleted. Uploaded files in Nextcloud are not deleted automatically.",
+              "The 10 latest backups stay on this server; older ones are deleted. Files in Nextcloud are not deleted automatically.",
             )}
           </div>
         </div>
@@ -174,9 +174,9 @@
     </div>
   </div>
 
-  <!-- Report PDF Upload -->
+  <!-- Timesheets -->
   <div class="zf-card zf-card-section">
-    <div class="field-card-title">{$t("Report PDF Upload")}</div>
+    <div class="field-card-title">{$t("Timesheets")}</div>
     <div class="field-group">
       <div class="field-row">
         <div>
@@ -185,11 +185,11 @@
               type="checkbox"
               bind:checked={uploadSettings.report_upload_enabled}
             />
-            {$t("Enable report PDF upload")}
+            {$t("Upload timesheets")}
           </label>
           <div class="field-hint">
             {$t(
-              "On the configured day of each month, an individual timesheet PDF is queued for every employee. Each PDF is uploaded once the employee's month is final — all weeks submitted and approved — late submitters and pending approvals are automatically caught up on the next daily check.",
+              "Uploads the previous month's timesheets on the selected day. If submissions or approvals are missing, the upload happens later automatically.",
             )}
           </div>
         </div>
@@ -198,7 +198,7 @@
       <div class="field-row">
         <div>
           <label class="zf-label" for="report-upload-url"
-            >{$t("Share link (https://…/s/…)")}</label
+            >{$t("Nextcloud share link")}</label
           >
           <input
             id="report-upload-url"
@@ -211,7 +211,7 @@
         </div>
         <div>
           <label class="zf-label" for="report-upload-password">
-            {$t("Share password (optional)")}
+            {$t("Password (optional)")}
             {#if uploadSettings.report_upload_password_set}
               <span class="zf-label-hint">({$t("stored")})</span>
             {/if}
@@ -244,7 +244,7 @@
       <div class="field-row">
         <div>
           <label class="zf-label" for="report-upload-day"
-            >{$t("Upload day of month (1–28)")}</label
+            >{$t("Upload day (1-28)")}</label
           >
           <input
             id="report-upload-day"
