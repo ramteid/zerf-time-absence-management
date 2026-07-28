@@ -276,7 +276,7 @@
   </div>
 
   <!-- Actions -->
-  <div class="zf-card card-padded">
+  <div class="zf-card zf-card-section">
     <div class="form-actions">
       <button
         class="zf-btn zf-btn-primary"
@@ -292,3 +292,12 @@
     </div>
   </div>
 </div>
+
+<style>
+  .form-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding-top: 16px;
+  }
+</style>

@@ -273,6 +273,12 @@
     margin-top: 8px;
   }
 
+  /* Category names are free text (admin-defined) and unbounded in length —
+     let long ones wrap within their grid column instead of overflowing it. */
+  .category-options label {
+    flex-wrap: wrap;
+  }
+
   .form-actions {
     display: flex;
     justify-content: flex-end;
