@@ -316,8 +316,8 @@ const TRANSLATIONS = {
     "All other employees": "All other employees",
     inactive: "inactive",
     "Send now": "Send now",
-    "Sends the previous month's report right away if it is complete. It does not replace the automatic delivery — the same report is still sent again automatically on the configured day.":
-      "Sends the previous month's report right away if it is complete. It does not replace the automatic delivery — the same report is still sent again automatically on the configured day.",
+    "Sends the previous month's report right away if it is complete. It does not replace the automatic delivery — the same report is still sent again automatically on the selected day.":
+      "Sends the previous month's report right away if it is complete. It does not replace the automatic delivery — the same report is still sent again automatically on the selected day.",
     "Report sent.": "Report sent.",
     "No report was sent. It was already sent or the month is not complete.":
       "No report was sent. It was already sent or the month is not complete.",
@@ -1360,8 +1360,8 @@ const TRANSLATIONS = {
     "All other employees": "Alle übrigen Mitarbeitenden",
     inactive: "inaktiv",
     "Send now": "Jetzt senden",
-    "Sends the previous month's report right away if it is complete. It does not replace the automatic delivery — the same report is still sent again automatically on the configured day.":
-      "Sendet die Lohnmeldung für den Vormonat sofort, wenn der Monat abgeschlossen ist. Das ersetzt nicht den automatischen Versand — dieselbe Meldung wird am konfigurierten Tag trotzdem automatisch erneut verschickt.",
+    "Sends the previous month's report right away if it is complete. It does not replace the automatic delivery — the same report is still sent again automatically on the selected day.":
+      "Sendet die Lohnmeldung für den Vormonat sofort, wenn der Monat abgeschlossen ist. Das ersetzt nicht den automatischen Versand — dieselbe Meldung wird am gewählten Tag trotzdem automatisch erneut verschickt.",
     "Report sent.": "Lohnmeldung gesendet.",
     "No report was sent. It was already sent or the month is not complete.":
       "Keine Lohnmeldung gesendet. Sie wurde bereits gesendet oder der Monat ist noch nicht abgeschlossen.",
