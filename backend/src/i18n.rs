@@ -335,7 +335,7 @@ static LANGUAGES: &[LangDef] = &[
             ("report_upload_unsettled_time_body", "Person: {first_name} {last_name} (ID {user_id})\nZeitraum: {period}\nProblem: Das Konto ist archiviert oder die Zeiterfassung ist deaktiviert, aber es gibt noch ungekl\u{00e4}rte Zeiteintr\u{00e4}ge.\nAktion: Kl\u{00e4}ren Sie Eintr\u{00e4}ge im Entwurf, eingereichte und abgelehnte Eintr\u{00e4}ge und starten Sie den PDF-Export erneut."),
             // Monatliche Lohnmeldung
             ("payroll_report_email_subject", "Lohnmeldung {period} - {org_name}"),
-            ("payroll_report_email_body", "Hallo,\n\nim Anhang finden Sie die Lohnmeldung f\u{00fc}r {period} von {org_name}.\n\nSie enth\u{00e4}lt die Abwesenheitstage je Person sowie die Arbeitstage und Arbeitsstunden der ausgew\u{00e4}hlten Gruppen.\n\nDiese E-Mail wurde automatisch erstellt."),
+            ("payroll_report_email_body", "Hallo,\n\nim Anhang finden Sie die Lohnmeldung f\u{00fc}r {period} von {org_name}.\n\nDiese E-Mail wurde automatisch erstellt."),
             ("payroll_report_email_manual_note", "\n\nHinweis: Dieser Bericht wurde manuell \u{00fc}ber \"Jetzt senden\" in Zerf versendet. Er ersetzt nicht den regul\u{00e4}ren automatischen Versand f\u{00fc}r diesen Monat, der weiterhin separat erfolgt."),
             ("payroll_report_blocked_title", "Lohnmeldung noch nicht versendet"),
             ("payroll_report_blocked_body", "Komponente: Lohnmeldung\nZeitraum: {period}\nProblem: Der Monat ist f\u{00fc}r folgende Personen noch nicht abgeschlossen:\n{employees}\nAktion: Kl\u{00e4}ren und genehmigen Sie die offenen Eintr\u{00e4}ge; die Meldung wird bei der n\u{00e4}chsten t\u{00e4}glichen Pr\u{00fc}fung automatisch versendet."),
