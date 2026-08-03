@@ -270,6 +270,17 @@
     grid-template-columns: 1fr !important;
   }
 
+  /* Prevent cards from pushing the grid column wider than 1fr */
+  .dashboard-approval-grid > * {
+    min-width: 0;
+  }
+
+  /* Card header wraps so the Approve-All button doesn't overflow narrow screens */
+  .dashboard-approval-grid .card-header {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+
   /* Admin tabs: tighter side padding on narrow viewports */
   .admin-tabs {
     padding-left: 14px !important;
