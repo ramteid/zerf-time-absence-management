@@ -18,7 +18,7 @@ export default defineConfig({
     emptyOutDir: true,
     minify: frontendDebugBuild ? false : undefined,
     sourcemap: frontendDebugBuild,
-    target: "es2020",
+    target: "es2018",
     rollupOptions: frontendDebugBuild
       ? {
           output: {

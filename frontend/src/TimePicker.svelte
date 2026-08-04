@@ -1,4 +1,5 @@
 <script>
+  import { onDestroy } from "svelte";
   import { settings } from "./stores.js";
   import { t } from "./i18n.js";
 
@@ -34,6 +35,9 @@
   let isOpen = false;
   let anchorElement;
   let drumElement;
+  let panelStyle = "";
+  let panelPlacement = "below";
+  let detachViewportListeners = null;
 
   $: {
     const parsedTime = parseHHMM(value);
@@ -181,21 +185,68 @@
   let keyTimer = null;
   let keyFocus = "hour"; // "hour" | "minute" | "meridiem"
 
+  function clamp(value, min, max) {
+    return Math.min(Math.max(value, min), max);
+  }
+
+  function updateDrumPosition() {
+    if (!isOpen || !anchorElement) return;
+    const displayButton = anchorElement.querySelector(".tp-display");
+    const anchor = displayButton || anchorElement;
+    const anchorRect = anchor.getBoundingClientRect();
+    const panelWidth = drumElement?.offsetWidth || (use12h ? 236 : 196);
+    const panelHeight = drumElement?.offsetHeight || 220;
+    const margin = 8;
+    const gap = 6;
+    const showAbove =
+      window.innerHeight - anchorRect.bottom < panelHeight + gap &&
+      anchorRect.top > panelHeight + gap;
+
+    const maxLeft = Math.max(margin, window.innerWidth - panelWidth - margin);
+    const left = clamp(anchorRect.left, margin, maxLeft);
+    const rawTop = showAbove
+      ? anchorRect.top - panelHeight - gap
+      : anchorRect.bottom + gap;
+    const maxTop = Math.max(margin, window.innerHeight - panelHeight - margin);
+    const top = clamp(rawTop, margin, maxTop);
+
+    panelPlacement = showAbove ? "above" : "below";
+    panelStyle = `top:${Math.round(top)}px;left:${Math.round(left)}px;`;
+  }
+
+  function detachGlobalListeners() {
+    if (!detachViewportListeners) return;
+    detachViewportListeners();
+    detachViewportListeners = null;
+  }
+
+  function attachGlobalListeners() {
+    if (detachViewportListeners) return;
+    const handleViewportChange = () => updateDrumPosition();
+    window.addEventListener("resize", handleViewportChange);
+    // Use capture so scrolling nested containers (like dialog bodies) repositions the panel.
+    document.addEventListener("scroll", handleViewportChange, true);
+    detachViewportListeners = () => {
+      window.removeEventListener("resize", handleViewportChange);
+      document.removeEventListener("scroll", handleViewportChange, true);
+    };
+  }
+
   function onKeyDown(e) {
     if (!isOpen) {
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
-        isOpen = true;
+        openPicker();
       }
       return;
     }
     const digit = e.key >= "0" && e.key <= "9" ? parseInt(e.key, 10) : null;
     if (e.key === "Escape") {
       e.preventDefault();
-      isOpen = false;
+      closePicker();
     } else if (e.key === "Enter") {
       e.preventDefault();
-      isOpen = false;
+      closePicker();
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       if (keyFocus === "hour") stepHour(-1);
@@ -291,11 +342,17 @@
     keyFocus = "hour";
     keyBuffer = "";
     wheelAccumulator = { hour: 0, minute: 0, meridiem: 0 };
+    attachGlobalListeners();
     // Move keyboard focus to the drum so it receives keydown events.
-    setTimeout(() => drumElement?.focus(), 0);
+    setTimeout(() => {
+      updateDrumPosition();
+      drumElement?.focus();
+    }, 0);
   }
   function closePicker() {
     isOpen = false;
+    panelStyle = "";
+    detachGlobalListeners();
   }
 
   function onClickOutside(e) {
@@ -323,6 +380,11 @@
 
   $: hourColumnItems = hourItems(displayHour, hour24, use12h);
   $: minuteColumnItems = minuteItems(minuteValue);
+
+  onDestroy(() => {
+    clearTimeout(keyTimer);
+    detachGlobalListeners();
+  });
 </script>
 
 <svelte:window on:click={onClickOutside} />
@@ -343,9 +405,11 @@
   {#if isOpen}
     <div
       class="tp-drum"
+      class:tp-drum-above={panelPlacement === "above"}
       role="dialog"
       aria-label={$t("Time")}
       bind:this={drumElement}
+      style={panelStyle}
       tabindex="-1"
       on:click|stopPropagation
       on:keydown={onKeyDown}
@@ -468,9 +532,7 @@
   }
 
   .tp-drum {
-    position: absolute;
-    top: calc(100% + 6px);
-    left: 0;
+    position: fixed;
     z-index: 999;
     display: flex;
     align-items: center;
@@ -482,6 +544,10 @@
     padding: 6px 10px 10px;
     user-select: none;
     touch-action: none;
+  }
+
+  .tp-drum.tp-drum-above {
+    transform-origin: bottom left;
   }
 
   .tp-col {

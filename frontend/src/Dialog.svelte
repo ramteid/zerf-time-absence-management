@@ -20,7 +20,13 @@
 
   export function close(silent = false) {
     _silent = silent;
-    dlg.close();
+    if (typeof dlg.close === "function") {
+      dlg.close();
+      return;
+    }
+    dlg.removeAttribute("open");
+    if (!_silent) onClose?.();
+    _silent = false;
   }
 
   export function querySelector(selector) {

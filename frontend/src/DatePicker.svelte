@@ -14,6 +14,7 @@
   export let max = "";
   export let id = "";
   export let style = "";
+  export let mobileNative = false;
   export let container = null;
   let cls = "zf-input";
   export { cls as class };
@@ -254,7 +255,8 @@
       locale: lang === "de" ? German : "default",
       allowInput: false,
       clickOpens: false,
-      disableMobile: true,
+      // Let callers enable native mobile pickers for better fallback support.
+      disableMobile: !mobileNative,
       dateFormat: isMonth ? "Y-m" : "Y-m-d",
       altInput: true,
       altInputClass: cls,

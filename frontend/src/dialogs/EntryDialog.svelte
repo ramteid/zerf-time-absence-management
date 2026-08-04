@@ -104,6 +104,7 @@
   function onDialogKeydown(e) {
     const pickerOpen =
       dialog.querySelector(".tp-drum") ||
+      dialog.querySelector(".flatpickr-calendar.open") ||
       document.querySelector(".flatpickr-calendar.open");
     if (e.key === "Enter" && !pickerOpen) {
       e.preventDefault();
@@ -127,6 +128,7 @@
         bind:value={entry_date}
         min={$currentUser?.start_date}
         max={todayIso}
+          mobileNative={true}
         container={dlg}
       />
     </div>
