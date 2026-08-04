@@ -16,6 +16,7 @@
   let categories = [];
   let saving = false;
   let sending = false;
+  let sendNotice = "";
   // Recipients are edited as one address per line and only split into an
   // array on save/load — a textarea reads more naturally than a
   // comma-separated line once there are more than a couple of addresses.
@@ -144,14 +145,12 @@
       // Nothing sent means every month already went out, or nobody has
       // finished the month yet — a report with no people in it is not useful.
       if (result?.sent > 0) {
+        sendNotice = "";
         toast($t("Report sent."), "ok");
+      } else if (result?.pending > 0) {
+        sendNotice = $t("Payroll report not sent yet.");
       } else {
-        toast(
-          $t(
-            "No report was sent. It was already sent, or nobody has finished the month yet.",
-          ),
-          "info",
-        );
+        sendNotice = "";
       }
     } catch (e) {
       toast(e?.message || $t("Error"), "error");
@@ -349,6 +348,11 @@ buchhaltung@example.com"
             {$t("Send now")}
           {/if}
         </button>
+        {#if sendNotice}
+          <div class="field-hint form-actions-hint" aria-live="polite">
+            {sendNotice}
+          </div>
+        {/if}
         <button
           class="zf-btn zf-btn-primary"
           on:click={save}

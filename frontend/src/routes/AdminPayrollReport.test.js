@@ -324,9 +324,19 @@ describe("AdminPayrollReport", () => {
     clickButton(target, "Send now");
     await settle();
 
-    expect(toastMock).toHaveBeenCalledWith(
-      "No report was sent. It was already sent, or nobody has finished the month yet.",
-      "info",
-    );
+    expect(toastMock).not.toHaveBeenCalled();
+    expect(target.textContent).toContain("Payroll report not sent yet.");
+  });
+
+  it("stays quiet when the report was already sent", async () => {
+    sendNowResult.value = { sent: 0, pending: 0 };
+    component = mount(AdminPayrollReport, { target });
+    await settle();
+
+    clickButton(target, "Send now");
+    await settle();
+
+    expect(toastMock).not.toHaveBeenCalled();
+    expect(target.textContent).not.toContain("Payroll report not sent yet.");
   });
 });
