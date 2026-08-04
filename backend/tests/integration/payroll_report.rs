@@ -815,16 +815,88 @@ async fn payroll_report_settles_a_month_that_covers_nobody() {
         "a month with nobody in it must not stay queued forever: {pending:?}"
     );
 
-    let last_sent = zerf::services::settings::load_setting(
-        &app.state.pool,
-        zerf::services::settings::PAYROLL_REPORT_LAST_SENT_PERIOD_KEY,
-        "",
-    )
-    .await
-    .expect("last sent period");
-    assert!(
-        !last_sent.is_empty(),
-        "the settled month is recorded so the dashboard card greys out"
+    // With the period gone from the queue (and recorded as reached), the
+    // dashboard card reports the month as done rather than staying live
+    // forever on a delivery that can never happen.
+    let (status, card) = admin.get("/api/v1/reports/payroll-status").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(card["total"], json!(0), "nobody is covered");
+    assert_eq!(
+        card["sent"],
+        json!(true),
+        "a settled month greys the dashboard card out"
+    );
+
+    app.cleanup().await;
+}
+
+/// The card must not claim an outstanding delivery on an installation that has
+/// been running for a while: months whose report already went out are gone
+/// from the queue, and that is what "already sent" is read from.
+#[tokio::test]
+async fn payroll_status_reports_an_already_delivered_month_as_sent() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (_lead_id, _lead_pw, _emp_id, _emp_pw, _monday, _cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "payroll-sent").await;
+
+    let (status, _) = admin
+        .put(
+            "/api/v1/settings/payroll-report",
+            &json!({
+                "payroll_report_enabled": true,
+                "payroll_report_recipients": ["payroll@example.com"],
+                "payroll_report_day_of_month": 1,
+                "payroll_report_include_assistant_hours": true,
+                "payroll_report_include_employee_hours": false,
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "enable payroll report");
+
+    let today = zerf::services::settings::app_today(&app.state.pool).await;
+    let period = zerf::background::schedule::previous_period(today);
+
+    // Not queued yet (before the send day): outstanding, so the card is live.
+    let (_, card) = admin.get("/api/v1/reports/payroll-status").await;
+    assert_eq!(card["period"], json!(period));
+    assert_eq!(
+        card["sent"],
+        json!(false),
+        "a month that has not been queued yet is still outstanding"
+    );
+
+    // Queued and still waiting: outstanding.
+    app.state
+        .db
+        .payroll_queue
+        .enqueue(&period)
+        .await
+        .expect("enqueue");
+    app.state
+        .db
+        .settings
+        .save_setting(
+            zerf::services::settings::PAYROLL_REPORT_QUEUE_PERIOD_KEY,
+            &period,
+        )
+        .await
+        .expect("record queue period");
+    let (_, card) = admin.get("/api/v1/reports/payroll-status").await;
+    assert_eq!(card["sent"], json!(false), "a queued month is outstanding");
+
+    // Delivered: the scheduler drops the queue entry, and the card follows.
+    app.state
+        .db
+        .payroll_queue
+        .delete_entry(&period)
+        .await
+        .expect("delete entry");
+    let (_, card) = admin.get("/api/v1/reports/payroll-status").await;
+    assert_eq!(
+        card["sent"],
+        json!(true),
+        "a delivered month greys the card out"
     );
 
     app.cleanup().await;

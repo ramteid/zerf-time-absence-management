@@ -188,8 +188,14 @@
       pendingAbsences = [];
       pendingReopens = [];
       users = [];
+      payrollStatus = null;
       return;
     }
+    // Every approve/reject on this page calls load() again. The payroll card
+    // tracks exactly those approvals, so it has to refresh with them —
+    // otherwise approving the last outstanding week leaves the card claiming
+    // somebody is still missing until the page is reloaded by hand.
+    loadPayrollStatus();
     try {
       const {
         submittedTimeEntries,
@@ -217,7 +223,6 @@
   let payrollDetailOpen = false;
 
   async function loadPayrollStatus() {
-    if (!get(currentUser)?.permissions?.can_approve) return;
     try {
       const status = await getPayrollStatus();
       payrollStatus = status?.enabled ? status : null;
@@ -232,7 +237,6 @@
   loadChart();
   loadOvertimeSummary();
   loadPastMonthSubmissionStatus();
-  loadPayrollStatus();
 
   // ── Reactive derivations: overtime balance ────────────────────────────────────
 

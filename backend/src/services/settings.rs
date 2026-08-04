@@ -64,12 +64,10 @@ pub const PAYROLL_REPORT_EMPLOYEE_HOURS_KEY: &str = "payroll_report_include_empl
 /// excluded unconditionally and are never part of this list.
 pub const PAYROLL_REPORT_EXCLUDED_USERS_KEY: &str = "payroll_report_excluded_users";
 /// Period for which the payroll report queue was last populated ("YYYY-MM").
+/// Together with the queue table this also answers "has this month already
+/// been delivered?" for the dashboard card — see
+/// `services::payroll_report::build_status`.
 pub const PAYROLL_REPORT_QUEUE_PERIOD_KEY: &str = "payroll_report_queue_period";
-/// Last period whose payroll report was actually delivered by the *scheduled*
-/// run, stored as "YYYY-MM". Drives the dashboard tile's "already sent" state.
-/// A manual "Send now" copy deliberately does not update this: the regular
-/// delivery for that month is still outstanding.
-pub const PAYROLL_REPORT_LAST_SENT_PERIOD_KEY: &str = "payroll_report_last_sent_period";
 
 // Nextcloud upload — DB backup (backup container reads these via psql; app writes them).
 pub const BACKUP_UPLOAD_ENABLED_KEY: &str = "backup_upload_enabled";

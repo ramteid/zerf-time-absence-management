@@ -9,17 +9,43 @@ const mockState = vi.hoisted(() => ({
   monthReport: null,
   overtimeRows: [],
   flextimeRows: [],
+  payrollStatus: {
+    enabled: true,
+    period: "2026-07",
+    period_label: "July 2026",
+    from: "2026-07-01",
+    to: "2026-07-31",
+    sent: false,
+    day_of_month: 5,
+    total: 2,
+    ready: 1,
+    awaiting_approval: 0,
+    not_submitted: 1,
+    members: [],
+  },
 }));
 
 vi.mock("svelte", async () => {
   return await import("../../node_modules/svelte/src/index-client.js");
 });
 
+// "Approve all" waits on a confirmation modal that nothing clicks in jsdom;
+// auto-confirming lets the approval path (and the reload it triggers) run.
+vi.mock("../confirm.js", () => ({
+  confirmDialog: vi.fn(async () => true),
+}));
+
 vi.mock("../api.js", () => ({
   api: vi.fn(async (urlPath) => {
     if (urlPath.startsWith("/reports/month?")) return mockState.monthReport;
     if (urlPath.startsWith("/reports/overtime?")) return mockState.overtimeRows;
     if (urlPath.startsWith("/reports/flextime?")) return mockState.flextimeRows;
+    // Approver-only endpoints, reached when can_approve is set below.
+    if (urlPath === "/reports/payroll-status") return mockState.payrollStatus;
+    if (urlPath.startsWith("/time-entries/all")) return [];
+    if (urlPath.startsWith("/absences/all")) return [];
+    if (urlPath.startsWith("/reopen-requests/pending")) return [];
+    if (urlPath === "/users") return [];
     throw new Error(`Unhandled API path: ${urlPath}`);
   }),
 }));
@@ -346,6 +372,123 @@ describe("Dashboard", () => {
       // The BalanceSection shows overtime balance text; it should not be present
       expect(target.textContent).not.toContain("Overtime balance");
       expect(target.textContent).not.toContain("Überstundensaldo");
+    });
+  });
+  // The payroll card tracks exactly the approvals this page performs, so it
+  // must refresh together with the approval queues — a card that keeps
+  // claiming somebody is missing after their week was approved is worse than
+  // no card at all.
+  describe("payroll report card", () => {
+    const submittedEntry = {
+      id: 91,
+      user_id: 3,
+      entry_date: "2026-07-06",
+      start_time: "09:00",
+      end_time: "17:00",
+      category_id: 1,
+      status: "submitted",
+    };
+
+    function approverApi(overrides = {}) {
+      return async (urlPath, opts = {}) => {
+        if (urlPath === "/reports/payroll-status") return mockState.payrollStatus;
+        if (urlPath === "/time-entries/all?status=submitted")
+          return overrides.submitted ?? [submittedEntry];
+        if (urlPath === "/absences/all?status=pending_review") return [];
+        if (urlPath === "/reopen-requests/pending") return [];
+        if (urlPath === "/users")
+          return [
+            {
+              id: 3,
+              first_name: "Eva",
+              last_name: "E",
+              role: "employee",
+              tracks_time: true,
+              active: true,
+            },
+          ];
+        if (urlPath === "/time-entries/batch-approve" && opts.method === "POST")
+          return { approved: 1 };
+        if (urlPath.startsWith("/reports/month?")) return mockState.monthReport;
+        if (urlPath.startsWith("/reports/overtime?")) return [];
+        if (urlPath.startsWith("/reports/flextime?")) return [];
+        return [];
+      };
+    }
+
+    function payrollCalls() {
+      return api.mock.calls.filter(([p]) => p === "/reports/payroll-status")
+        .length;
+    }
+
+    function queueCalls() {
+      return api.mock.calls.filter(
+        ([p]) => p === "/time-entries/all?status=submitted",
+      ).length;
+    }
+
+    beforeEach(() => {
+      currentUser.set({
+        id: 1,
+        role: "team_lead",
+        tracks_time: true,
+        weekly_hours: 40,
+        start_date: "2026-01-01",
+        permissions: {
+          can_approve: true,
+          can_view_dashboard: true,
+          can_view_team_reports: true,
+        },
+      });
+      api.mockImplementation(approverApi());
+    });
+
+    it("shows the card with the month's progress", async () => {
+      component = mount(Dashboard, { target });
+      await settle();
+      await settle();
+
+      await waitForText(target, "1 of 2 done");
+      expect(target.querySelector(".payroll-card")).toBeTruthy();
+    });
+
+    it("refreshes together with the approval queues", async () => {
+      component = mount(Dashboard, { target });
+      await settle();
+      await settle();
+      await waitForText(target, "1 of 2 done");
+
+      const before = payrollCalls();
+      expect(before).toBe(queueCalls());
+
+      // Approving re-runs the dashboard load; the card has to come along.
+      const approveAll = [...target.querySelectorAll("button")].find(
+        (button) => button.textContent.trim() === "Approve All",
+      );
+      expect(approveAll, "Approve All button not found").toBeTruthy();
+      approveAll.click();
+      await settle();
+      await settle();
+
+      expect(payrollCalls()).toBeGreaterThan(before);
+      expect(payrollCalls()).toBe(queueCalls());
+    });
+
+    it("is not requested at all for someone who cannot approve", async () => {
+      currentUser.set({
+        id: 3,
+        role: "employee",
+        tracks_time: true,
+        weekly_hours: 40,
+        start_date: "2026-01-01",
+        permissions: { can_approve: false },
+      });
+      component = mount(Dashboard, { target });
+      await settle();
+      await settle();
+
+      expect(payrollCalls()).toBe(0);
+      expect(target.querySelector(".payroll-card")).toBeNull();
     });
   });
 });

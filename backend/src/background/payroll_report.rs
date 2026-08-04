@@ -222,7 +222,6 @@ async fn process_period(
         // forever and leaving the dashboard card stuck on "0 of 0".
         if !is_manual {
             state.db.payroll_queue.delete_entry(period).await?;
-            record_last_sent_period(state, period).await;
         }
         tracing::info!("Payroll report: period {period} covers nobody; nothing to send");
         return Ok(false);
@@ -310,8 +309,8 @@ async fn process_period(
         );
     } else {
         // Only drop the period once the SMTP server accepted the message.
+        // Removing it is also what tells the dashboard card the month is done.
         state.db.payroll_queue.delete_entry(period).await?;
-        record_last_sent_period(state, period).await;
         tracing::info!(
             "Payroll report: sent period {period} to {}",
             config.recipients.join(", ")
@@ -380,33 +379,6 @@ fn email_text(
         ));
     }
     text
-}
-
-/// Record a settled period so the dashboard card can show the month as done.
-///
-/// Only ever moves forward: catch-up runs process the oldest queued month
-/// first, and a stale value would make the card claim a newer month had
-/// already gone out. Failing to record must not fail the run — the report is
-/// already delivered at this point — so problems are logged, not propagated.
-async fn record_last_sent_period(state: &AppState, period: &str) {
-    let stored = settings::load_setting(
-        &state.pool,
-        settings::PAYROLL_REPORT_LAST_SENT_PERIOD_KEY,
-        "",
-    )
-    .await
-    .unwrap_or_default();
-    if !stored.is_empty() && !schedule::period_is_after(period, &stored) {
-        return;
-    }
-    if let Err(e) = state
-        .db
-        .settings
-        .save_setting(settings::PAYROLL_REPORT_LAST_SENT_PERIOD_KEY, period)
-        .await
-    {
-        tracing::warn!("Payroll report: could not record last sent period {period}: {e}");
-    }
 }
 
 /// Organization name for the email copy, falling back to the product name when

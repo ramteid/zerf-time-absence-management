@@ -184,26 +184,17 @@ pub async fn build_status(
     let period = crate::background::schedule::previous_period(today);
     let (from, to) = crate::background::schedule::period_bounds(&period)?;
 
-    // The tile tracks the previous month until its scheduled delivery went out;
-    // afterwards it is done for this month. A manual "Send now" copy does not
-    // count — the regular delivery is still outstanding.
-    let last_sent = settings::load_setting(
-        &app_state.pool,
-        settings::PAYROLL_REPORT_LAST_SENT_PERIOD_KEY,
-        "",
-    )
-    .await?;
-    let sent = last_sent == period || crate::background::schedule::period_is_after(&last_sent, &period);
-
     let period_label = crate::i18n::format_month(language, from.year(), from.month());
     if !config.enabled {
+        // Nothing to show, and no reason to touch the queue: the card is
+        // hidden entirely while the payroll report is switched off.
         return Ok(PayrollStatus {
             enabled: false,
             period,
             period_label,
             from,
             to,
-            sent,
+            sent: false,
             day_of_month: config.day_of_month,
             total: 0,
             ready: 0,
@@ -212,6 +203,36 @@ pub async fn build_status(
             members: Vec::new(),
         });
     }
+
+    // "Already delivered" is read straight off the queue, which is the same
+    // state the scheduler acts on: a period is queued when its turn comes and
+    // deleted only once the SMTP server accepted the message.
+    //
+    // Deriving it rather than storing a separate "last sent" marker matters —
+    // a stored marker would start out empty on an existing installation and
+    // wrongly show months that went out long ago as still outstanding.
+    //
+    // Before the send day the period has not been queued yet; that counts as
+    // outstanding, so the card is already live from the 1st. A manual "Send
+    // now" copy never deletes the queue entry, so it correctly leaves the card
+    // active — the regular delivery is still to come.
+    let queued_through = settings::load_setting(
+        &app_state.pool,
+        settings::PAYROLL_REPORT_QUEUE_PERIOD_KEY,
+        "",
+    )
+    .await?;
+    let reached_the_queue = !queued_through.is_empty()
+        && (queued_through == period
+            || crate::background::schedule::period_is_after(&queued_through, &period));
+    let still_queued = app_state
+        .db
+        .payroll_queue
+        .list_pending()
+        .await?
+        .iter()
+        .any(|queued| queued == &period);
+    let sent = reached_the_queue && !still_queued;
 
     let members = payroll_members(
         app_state
@@ -255,7 +276,8 @@ pub async fn build_status(
         members: Vec::with_capacity(evaluated.len()),
     };
     for member in evaluated {
-        let value = status_for_reason(member.reason_key);
+        let value =
+            status_for_member(app_state, &member.user, member.readiness, from, to).await?;
         match value {
             status_value::READY => status.ready += 1,
             status_value::AWAITING_APPROVAL => status.awaiting_approval += 1,
@@ -275,21 +297,66 @@ pub async fn build_status(
     Ok(status)
 }
 
-/// Map a blocking reason onto the tile's three-colour scale: everything that
-/// only waits for a decision is amber, everything else is red.
-fn status_for_reason(reason_key: Option<&'static str>) -> &'static str {
-    match reason_key {
-        None => status_value::READY,
-        Some("payroll_report_reason_unapproved_entries")
-        | Some("payroll_report_reason_pending_absences") => status_value::AWAITING_APPROVAL,
-        Some(_) => status_value::NOT_SUBMITTED,
+/// Colour for the readiness values that decide themselves.
+///
+/// [`MonthExportReadiness::PendingAbsenceRequests`] is deliberately missing: the
+/// shared gate reports it *before* it ever looks at week submission, so on its
+/// own it cannot tell "handed everything in, waiting for a decision" (amber)
+/// from "also still owes weeks" (red). [`status_for_member`] resolves it.
+fn unambiguous_status(readiness: MonthExportReadiness) -> Option<&'static str> {
+    match readiness {
+        MonthExportReadiness::Ready => Some(status_value::READY),
+        MonthExportReadiness::UnapprovedTimeEntries => Some(status_value::AWAITING_APPROVAL),
+        MonthExportReadiness::WeeksNotSubmitted
+        | MonthExportReadiness::UnresolvedTimeEntries
+        | MonthExportReadiness::PreStartContent => Some(status_value::NOT_SUBMITTED),
+        MonthExportReadiness::PendingAbsenceRequests => None,
     }
+}
+
+/// Traffic-light colour for one person on the dashboard card.
+///
+/// Red always wins over amber: the card's whole purpose is to show who still
+/// has to hand something in, so somebody who owes weeks must not be painted
+/// amber merely because they *also* have an absence request awaiting a
+/// decision.
+async fn status_for_member(
+    app_state: &AppState,
+    user: &User,
+    readiness: MonthExportReadiness,
+    from: NaiveDate,
+    to: NaiveDate,
+) -> AppResult<&'static str> {
+    if let Some(status) = unambiguous_status(readiness) {
+        return Ok(status);
+    }
+    // Only `PendingAbsenceRequests` reaches here. Ask the week question the
+    // gate skipped: an open request is "submitted, awaiting approval" (amber),
+    // but missing weeks outrank it (red).
+    let submission_exempt =
+        !crate::roles::has_submission_obligation(&user.role, user.weekly_hours);
+    let weeks_in = crate::services::reports::all_weeks_submitted_for_month(
+        &app_state.pool,
+        user.id,
+        from,
+        to,
+        user.start_date,
+        submission_exempt,
+        user.workdays_per_week,
+    )
+    .await?;
+    Ok(if weeks_in {
+        status_value::AWAITING_APPROVAL
+    } else {
+        status_value::NOT_SUBMITTED
+    })
 }
 
 /// One covered person plus why their month is not final yet. `reason_key` is
 /// `None` when they are ready to be reported.
 pub struct MemberReadiness {
     pub user: User,
+    pub readiness: MonthExportReadiness,
     pub reason_key: Option<&'static str>,
 }
 
@@ -322,6 +389,7 @@ pub async fn evaluate_members(
         .await?;
         evaluated.push(MemberReadiness {
             user: member.clone(),
+            readiness,
             reason_key: readiness_reason_key(readiness),
         });
     }
@@ -625,31 +693,39 @@ mod tests {
         assert_eq!(parse_excluded_ids(&format_excluded_ids(&[3, 7])), vec![3, 7]);
     }
 
-    /// The three-colour scale the dashboard tile paints: anything merely
-    /// waiting for a decision is amber, anything still missing data is red.
+    /// The three-colour scale the dashboard tile paints: everything that only
+    /// waits for a decision is amber, everything still missing is red.
     #[test]
     fn readiness_maps_onto_the_traffic_light_scale() {
         use status_value::*;
-        assert_eq!(status_for_reason(None), READY);
+        assert_eq!(unambiguous_status(MonthExportReadiness::Ready), Some(READY));
         assert_eq!(
-            status_for_reason(Some("payroll_report_reason_unapproved_entries")),
-            AWAITING_APPROVAL
+            unambiguous_status(MonthExportReadiness::UnapprovedTimeEntries),
+            Some(AWAITING_APPROVAL)
         );
         assert_eq!(
-            status_for_reason(Some("payroll_report_reason_pending_absences")),
-            AWAITING_APPROVAL
+            unambiguous_status(MonthExportReadiness::WeeksNotSubmitted),
+            Some(NOT_SUBMITTED)
         );
         assert_eq!(
-            status_for_reason(Some("payroll_report_reason_not_submitted")),
-            NOT_SUBMITTED
+            unambiguous_status(MonthExportReadiness::UnresolvedTimeEntries),
+            Some(NOT_SUBMITTED)
         );
         assert_eq!(
-            status_for_reason(Some("payroll_report_reason_unresolved_entries")),
-            NOT_SUBMITTED
+            unambiguous_status(MonthExportReadiness::PreStartContent),
+            Some(NOT_SUBMITTED)
         );
+    }
+
+    /// A pending absence request cannot pick its own colour: the shared gate
+    /// returns it before it checks week submission, so somebody who *also*
+    /// owes weeks would be painted amber instead of red. `status_for_member`
+    /// has to resolve it with an extra lookup — guard that it stays that way.
+    #[test]
+    fn pending_absence_requests_need_the_extra_week_lookup() {
         assert_eq!(
-            status_for_reason(Some("payroll_report_reason_pre_start_content")),
-            NOT_SUBMITTED
+            unambiguous_status(MonthExportReadiness::PendingAbsenceRequests),
+            None
         );
     }
 

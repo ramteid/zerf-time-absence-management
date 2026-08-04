@@ -5,12 +5,14 @@
   export let ready = 0;
   export let awaitingApproval = 0;
   export let notSubmitted = 0;
-  export let size = 72;
-  export let stroke = 10;
+  export let size = 58;
+  export let stroke = 26;
 
   // Geometry: the circle is drawn from the top (rotated -90deg in CSS) so the
   // first segment starts where a reader expects a progress ring to start.
-  const RADIUS = 50;
+  // The radius leaves room for half the stroke on each side (42 + 13 = 55),
+  // so a thick ring still fits inside the 120-unit viewBox without clipping.
+  const RADIUS = 42;
   const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
   $: total = ready + awaitingApproval + notSubmitted;
