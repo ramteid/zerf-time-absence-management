@@ -14,7 +14,10 @@
 //! Finality is the shared `month_export_readiness` gate, plus one extra rule:
 //! for everybody whose *hours* are in the report, all time entries of the month
 //! must be approved. Payroll pays by those hours, so reporting a draft or
-//! not-yet-approved month would understate what is owed.
+//! not-yet-approved month would understate what is owed. This relaxation is
+//! specific to *what goes in the document* — the dashboard tile asks a
+//! stricter, unconditional question (everyone's own submitted+approved
+//! status) and must not reuse it; see `services::payroll_report::evaluate_members`.
 //!
 //! A blocked scheduled period is **not** an error: people simply have not
 //! finished their month yet. It is logged and otherwise stays silent — the
@@ -210,7 +213,14 @@ async fn process_period(
         &config.excluded_user_ids,
     );
 
-    let readiness = payroll_report::evaluate_members(state, &members, config, from, to).await?;
+    // Full approval is only required when this person's hours literally end
+    // up in the PDF — an unapproved entry that never gets printed doesn't
+    // make the document wrong. (The dashboard tile asks a stricter,
+    // unconditional question; see `evaluate_members`'s doc comment.)
+    let readiness = payroll_report::evaluate_members(state, &members, from, to, |role| {
+        config.includes_hours_for(role)
+    })
+    .await?;
     let (ready, pending): (Vec<_>, Vec<_>) = readiness
         .into_iter()
         .partition(|member| member.reason_key.is_none());

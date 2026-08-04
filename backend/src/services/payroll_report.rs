@@ -242,7 +242,10 @@ pub async fn build_status(
             .await?,
         &config.excluded_user_ids,
     );
-    let evaluated = evaluate_members(app_state, &members, &config, from, to).await?;
+    // The tile's colours always require full approval, for every person —
+    // see the doc comment on `evaluate_members` for why this must not reuse
+    // the send path's role-conditional rule.
+    let evaluated = evaluate_members(app_state, &members, from, to, |_role| true).await?;
 
     // Team leads only see the names of their own people; everybody else on the
     // tile is counted but anonymized.
@@ -362,29 +365,41 @@ pub struct MemberReadiness {
 
 /// Evaluate the month-finality gate for everyone the report covers.
 ///
-/// Shared by the send path and the dashboard tile so both judge readiness by
-/// exactly the same rules — a tile that shows "all done" while the report
-/// refuses to go out would be worse than no tile at all.
+/// `require_full_approval` decides, per person, whether an approved-but-open
+/// month blocks them or not. The two callers need different answers to that
+/// question, which is why it is a parameter instead of being derived from
+/// [`PayrollReportConfig`] here:
+///
+/// * the **send path** only needs a person's entries approved when their
+///   hours literally end up in the PDF (`config.includes_hours_for`) — if
+///   their working time isn't printed, an unapproved entry doesn't make the
+///   document wrong;
+/// * the **dashboard tile** always requires full approval for everyone. Its
+///   green/amber/red split ("submitted and approved" / "submitted, not yet
+///   approved" / "not submitted") is a per-person status the admin asked for
+///   unconditionally — whether this person's hours happen to be toggled into
+///   the report is a business decision about document *content*, not about
+///   whether they personally finished their month.
+///
+/// Reusing the send path's relaxed rule for the tile was the bug this
+/// parameter fixes: with `payroll_report_include_employee_hours` off by
+/// default, a regular employee's submitted-but-unapproved month used to read
+/// as `Ready` — green — on the dashboard.
 pub async fn evaluate_members(
     app_state: &AppState,
     members: &[User],
-    config: &PayrollReportConfig,
     from: NaiveDate,
     to: NaiveDate,
+    require_full_approval: impl Fn(&str) -> bool,
 ) -> AppResult<Vec<MemberReadiness>> {
     let mut evaluated = Vec::with_capacity(members.len());
     for member in members {
-        // Hours are only payroll-grade once every entry behind them is
-        // approved — a still-open or merely submitted month would be paid out
-        // too low. Full approval is required exactly when this person's hours
-        // are actually part of the report.
-        let require_full_approval = config.includes_hours_for(&member.role);
         let readiness = crate::services::reports::month_export_readiness(
             &app_state.pool,
             member,
             from,
             to,
-            require_full_approval,
+            require_full_approval(&member.role),
         )
         .await?;
         evaluated.push(MemberReadiness {

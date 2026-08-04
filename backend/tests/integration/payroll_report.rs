@@ -901,3 +901,84 @@ async fn payroll_status_reports_an_already_delivered_month_as_sent() {
 
     app.cleanup().await;
 }
+
+/// The card's colours must not reuse the send gate's relaxed rule, which only
+/// requires approval when a person's hours literally appear in the PDF. With
+/// employee hours excluded by default, a regular employee's submitted-but-
+/// unapproved month must still show amber ("submitted, not yet approved") on
+/// the tile — not green, which would silently misreport them as finished.
+#[tokio::test]
+async fn payroll_status_requires_approval_even_when_hours_are_not_in_the_report() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, _lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "payroll-approval-gate").await;
+
+    // A zero-weekly-hours "employee" isolates the one condition this test
+    // exists to check: `has_submission_obligation` exempts them from the
+    // weekly-submission gate (same as an assistant), so a single unapproved
+    // entry is the *only* thing keeping their month from `Ready` — a real
+    // full-time employee would also need every day of the week populated,
+    // which is unrelated setup noise for what this test is proving. They
+    // still fall into the "employee hours" bucket (`is_assistant_role` is
+    // false for role `employee`), so `include_employee_hours=false` (the
+    // default) is exactly the condition under test: their hours are not part
+    // of the report content, and must still gate their card colour.
+    let (status, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({
+                "email": "zero-hours-payroll-approval-gate@example.com",
+                "first_name": "Zoe", "last_name": "ZeroHours",
+                "role": "employee", "weekly_hours": 0,
+                "leave_days_current_year": 0, "leave_days_next_year": 0, "annual_leave_days": 0,
+                "start_date": "2024-01-01", "approver_ids": [lead_id],
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create zero-hours employee: {body}");
+    let emp_id = id(&body);
+    let emp_pw = temp_pw(&body);
+    let employee = login_change_pw(
+        &app,
+        "zero-hours-payroll-approval-gate@example.com",
+        &emp_pw,
+    )
+    .await;
+
+    // Default configuration: assistant hours included, employee hours are not
+    // — so this employee's working time never appears in the PDF.
+    let (status, _) = admin
+        .put(
+            "/api/v1/settings/payroll-report",
+            &json!({
+                "payroll_report_enabled": true,
+                "payroll_report_recipients": ["payroll@example.com"],
+                "payroll_report_day_of_month": 1,
+                "payroll_report_include_assistant_hours": true,
+                "payroll_report_include_employee_hours": false,
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "enable payroll report");
+
+    let monday = anchor_monday();
+    let day = monday.format("%Y-%m-%d").to_string();
+    create_and_submit_entry(&employee, &day, cat_id).await;
+
+    let (status, card) = admin.get("/api/v1/reports/payroll-status").await;
+    assert_eq!(status, StatusCode::OK);
+    let member = card["members"]
+        .as_array()
+        .expect("members")
+        .iter()
+        .find(|m| m["user_id"].as_i64() == Some(emp_id))
+        .unwrap_or_else(|| panic!("employee not found in payroll status: {card}"));
+    assert_eq!(
+        member["status"], "awaiting_approval",
+        "submitted-but-unapproved must be amber even though this employee's \
+         hours are not part of the report content: {member}"
+    );
+
+    app.cleanup().await;
+}
