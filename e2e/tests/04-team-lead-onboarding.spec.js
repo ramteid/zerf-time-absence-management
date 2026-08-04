@@ -60,6 +60,17 @@ test("team lead: sign in and change the temporary password", async () => {
   );
 });
 
+// Resolves once a team-setting save has actually round-tripped. Must be called
+// *before* the click that triggers it, so the listener is armed in time.
+function waitForTeamSettingSave() {
+  return page.waitForResponse(
+    (response) =>
+      response.request().method() === "PUT" &&
+      response.url().includes("/team-settings/") &&
+      response.ok(),
+  );
+}
+
 test("team lead: toggle and revert an auto-approval setting", async () => {
   await page.goto("/settings/team");
   // TeamSettings.svelte lists every user this team lead approves, twice over
@@ -79,14 +90,26 @@ test("team lead: toggle and revert an auto-approval setting", async () => {
   // 05-employee-workflows.spec.js, which would silently remove the manual
   // approval coverage that 06-team-lead-approves-employee.spec.js is for —
   // so the round-trip here is deliberate, not an oversight.
+  //
+  // Each toggle waits for its own PUT to come back rather than for a toast.
+  // Toasts linger 3.5s (lib/app/toast.js), so the *first* "Settings saved."
+  // is still on screen when the second toggle fires and any toast-based
+  // assertion — `.last()` included — matches that stale one and resolves
+  // immediately. The test would then finish, the next test would navigate
+  // away, and the in-flight revert PUT would be aborted, leaving
+  // auto-approval switched ON. That is not a hypothetical: it silently
+  // auto-approves Eve's week in 05, whose "Week submitted." toast becomes
+  // "Week approved." instead.
+  const savedOn = waitForTeamSettingSave();
   await checkbox.check();
+  await savedOn;
   await expect(page.getByText("Settings saved.")).toBeVisible();
+
+  const savedOff = waitForTeamSettingSave();
   await checkbox.uncheck();
-  // Toasts stay visible for 3.5s (see lib/app/toast.js), so the first one
-  // can still be on screen when the second fires — ".last()" always refers
-  // to the most recent toast regardless of whether an older one is still
-  // fading out, avoiding a strict-mode violation from matching both.
-  await expect(page.getByText("Settings saved.").last()).toBeVisible();
+  await savedOff;
+  // Assert the end state itself, so a silently-failed revert cannot pass.
+  await expect(checkbox).not.toBeChecked();
 });
 
 test("team lead: create an assistant", async () => {
