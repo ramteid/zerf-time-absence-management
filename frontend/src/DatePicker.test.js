@@ -75,7 +75,10 @@ describe("DatePicker", () => {
     expect(document.activeElement.id).toBe("entry-date");
   });
 
-  it("uses a labelled and styled native date input on mobile browsers", async () => {
+  // flatpickr swaps in a bare native <input type="date"> on mobile user
+  // agents, which loses our theming, min/max navigation and localised
+  // formatting. `disableMobile` must keep the themed calendar everywhere.
+  it("keeps the themed flatpickr calendar on mobile browsers", async () => {
     Object.defineProperty(Navigator.prototype, "userAgent", {
       configurable: true,
       value:
@@ -86,16 +89,16 @@ describe("DatePicker", () => {
       props: {
         id: "entry-date",
         value: "2024-01-15",
-        mobileNative: true,
         container: dialog,
       },
     });
     await settle();
 
-    const mobileInput = dialog.querySelector("#entry-date");
-    expect(mobileInput.type).toBe("date");
-    expect(mobileInput.classList.contains("flatpickr-mobile")).toBe(true);
-    expect(mobileInput.classList.contains("zf-input")).toBe(true);
-    expect(mobileInput.tabIndex).toBe(0);
+    const input = dialog.querySelector("#entry-date");
+    expect(input.type).toBe("text");
+    expect(input.classList.contains("flatpickr-mobile")).toBe(false);
+    expect(input.classList.contains("zf-input")).toBe(true);
+    // Read-only so tapping opens our calendar instead of a keyboard.
+    expect(input.readOnly).toBe(true);
   });
 });

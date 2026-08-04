@@ -175,7 +175,6 @@
         bind:value={entry_date}
         min={$currentUser?.start_date}
         max={todayIso}
-        mobileNative={true}
         container={dlg}
       />
     </div>

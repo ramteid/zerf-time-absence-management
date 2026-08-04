@@ -13,7 +13,6 @@
   export let min = "";
   export let max = "";
   export let id = "";
-  export let mobileNative = false;
   export let container = null;
   let cls = "zf-input";
   export { cls as class };
@@ -205,7 +204,7 @@
 
   function attachPositionListeners(instance) {
     removePositionListeners();
-    if (!container || instance.isMobile) return;
+    if (!container) return;
     const dialogContainer = container;
 
     const updatePosition = () => {
@@ -336,8 +335,10 @@
       locale: lang === "de" ? German : "default",
       allowInput: false,
       clickOpens: false,
-      // Let callers enable native mobile pickers for better fallback support.
-      disableMobile: !mobileNative,
+      // Always use flatpickr's own calendar. Its mobile branch swaps in a
+      // native <input type="date">, which drops our theming, min/max nav and
+      // localised formatting.
+      disableMobile: true,
       dateFormat: isMonth ? "Y-m" : "Y-m-d",
       altInput: true,
       altInputClass: cls,
@@ -389,15 +390,7 @@
     bindCalendarNavHandlers(datePickerInstance);
     lockYearInput(datePickerInstance);
     if (isMonth) updateNextYearBtnState(datePickerInstance);
-    if (datePickerInstance.isMobile && datePickerInstance.mobileInput) {
-      for (const className of cls.split(/\s+/).filter(Boolean)) {
-        datePickerInstance.mobileInput.classList.add(className);
-      }
-      datePickerInstance.mobileInput.tabIndex = 0;
-      if (id) datePickerInstance.mobileInput.id = id;
-    } else if (id && datePickerInstance.altInput) {
-      datePickerInstance.altInput.id = id;
-    }
+    if (id && datePickerInstance.altInput) datePickerInstance.altInput.id = id;
     if (datePickerInstance.altInput) {
       // Keep native mobile keyboard closed while still allowing date selection.
       datePickerInstance.altInput.readOnly = true;

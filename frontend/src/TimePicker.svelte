@@ -1,15 +1,13 @@
 <script>
-  import { onDestroy, onMount, tick } from "svelte";
+  import { onDestroy, tick } from "svelte";
   import { settings } from "./stores.js";
   import { t } from "./i18n.js";
 
   export let value = "";
   export let id = "";
   export let label = "";
-  export let nativeOnMobile = true;
   let inputClass = "zf-input tab-num";
   export { inputClass as class };
-  let useNativeInput = false;
 
   $: use12h = $settings.time_format === "12h";
 
@@ -43,19 +41,6 @@
   let panelPositioned = false;
   let detachViewportListeners = null;
   let focusOutTimer = null;
-
-  function shouldUseNativeMobileInput() {
-    if (!nativeOnMobile || typeof window === "undefined") return false;
-    const ua = window.navigator?.userAgent || "";
-    const iOSLike =
-      /iPad|iPhone|iPod/.test(ua) ||
-      (window.navigator?.platform === "MacIntel" &&
-        (window.navigator?.maxTouchPoints || 0) > 1);
-    const coarsePointer =
-      typeof window.matchMedia === "function" &&
-      window.matchMedia("(pointer: coarse)").matches;
-    return iOSLike || coarsePointer;
-  }
 
   $: {
     const parsedTime = parseHHMM(value);
@@ -425,11 +410,6 @@
     if (anchorElement && !anchorElement.contains(e.target)) closePicker();
   }
 
-  function onWindowClick(e) {
-    if (useNativeInput) return;
-    onClickOutside(e);
-  }
-
   function onFocusOut() {
     clearTimeout(focusOutTimer);
     focusOutTimer = setTimeout(() => {
@@ -466,53 +446,39 @@
     clearTimeout(focusOutTimer);
     detachGlobalListeners();
   });
-
-  onMount(() => {
-    useNativeInput = shouldUseNativeMobileInput();
-  });
 </script>
 
-<svelte:window on:click={onWindowClick} />
+<svelte:window on:click={onClickOutside} />
 
-{#if useNativeInput}
-  <input
+<div class="tp-root" bind:this={anchorElement} on:focusout={onFocusOut}>
+  <button
     {id}
-    type="time"
-    class={inputClass}
-    bind:value
-    step="900"
+    type="button"
+    class="tp-display {inputClass}"
     aria-label={label || $t("Time")}
-  />
-{:else}
-  <div class="tp-root" bind:this={anchorElement} on:focusout={onFocusOut}>
-    <button
-      {id}
-      type="button"
-      class="tp-display {inputClass}"
-      aria-label={label || $t("Time")}
-      aria-expanded={isOpen}
-      aria-haspopup="dialog"
-      aria-controls={id ? `${id}-picker` : undefined}
-      on:click={openPicker}
-      on:keydown={onKeyDown}>{displayLabel}</button
-    >
+    aria-expanded={isOpen}
+    aria-haspopup="dialog"
+    aria-controls={id ? `${id}-picker` : undefined}
+    on:click={openPicker}
+    on:keydown={onKeyDown}>{displayLabel}</button
+  >
 
-    {#if isOpen}
-      <div
-        id={id ? `${id}-picker` : undefined}
-        class="tp-drum"
-        class:tp-drum-positioned={panelPositioned}
-        role="dialog"
-        aria-label={$t("Time")}
-        bind:this={drumElement}
-        style:top={panelTop}
-        style:left={panelLeft}
-        style:max-width={panelMaxWidth}
-        style:max-height={panelMaxHeight}
-        tabindex="-1"
-        on:click|stopPropagation
-        on:keydown={onKeyDown}
-      >
+  {#if isOpen}
+    <div
+      id={id ? `${id}-picker` : undefined}
+      class="tp-drum"
+      class:tp-drum-positioned={panelPositioned}
+      role="dialog"
+      aria-label={$t("Time")}
+      bind:this={drumElement}
+      style:top={panelTop}
+      style:left={panelLeft}
+      style:max-width={panelMaxWidth}
+      style:max-height={panelMaxHeight}
+      tabindex="-1"
+      on:click|stopPropagation
+      on:keydown={onKeyDown}
+    >
       <!-- Hour column -->
       <div
         class="tp-col"
@@ -610,15 +576,14 @@
           >
         </div>
       {/if}
-        <button
-          type="button"
-          class="tp-ok"
-          on:click|stopPropagation={() => closePicker(true)}>{$t("OK")}</button
-        >
-      </div>
-    {/if}
-  </div>
-{/if}
+      <button
+        type="button"
+        class="tp-ok"
+        on:click|stopPropagation={() => closePicker(true)}>{$t("OK")}</button
+      >
+    </div>
+  {/if}
+</div>
 
 <style>
   .tp-root {

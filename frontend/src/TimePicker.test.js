@@ -67,7 +67,10 @@ describe("TimePicker", () => {
     expect(target.querySelector(".tp-drum")).not.toBeNull();
   });
 
-  it("uses native input on coarse-pointer mobile browsers", async () => {
+  // Touch devices must get the same drum picker as everyone else: it enforces
+  // the 15-minute step and the app's formatting, which a native time input
+  // does not.
+  it("keeps the custom drum picker on coarse-pointer mobile browsers", async () => {
     window.matchMedia = vi.fn().mockImplementation((query) => ({
       matches: query === "(pointer: coarse)",
       media: query,
@@ -85,10 +88,10 @@ describe("TimePicker", () => {
     });
     await settle();
 
-    const input = target.querySelector('input[type="time"]');
-    expect(input).not.toBeNull();
-    expect(input.id).toBe("start-time");
-    expect(input.value).toBe("08:00");
-    expect(target.querySelector(".tp-display")).toBeNull();
+    expect(target.querySelector('input[type="time"]')).toBeNull();
+    const display = target.querySelector(".tp-display");
+    expect(display).not.toBeNull();
+    expect(display.id).toBe("start-time");
+    expect(display.textContent.trim()).toBe("08:00");
   });
 });
