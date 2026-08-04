@@ -397,8 +397,7 @@
           fill={tick === 0 ? "var(--text-secondary)" : "var(--text-tertiary)"}
         >
           {formatHours(
-            (tick >= 0 ? "+" : "-") +
-              fmtDecimal(Math.abs(tick / 60), tick % 60 === 0 ? 0 : 1),
+            (tick >= 0 ? "+" : "-") + fmtDecimal(Math.abs(tick / 60), 2),
           )}
         </text>
       {/each}

@@ -106,6 +106,38 @@ describe("Time", () => {
     target.remove();
   });
 
+  it("shows daily total hours with two decimal places", async () => {
+    const monday = pastMonday();
+    path.set(`/time?week=${monday}`);
+
+    mockState.categories = [
+      {
+        id: 1,
+        name: "Core Duties",
+        counts_as_work: true,
+        color: "#336699",
+      },
+    ];
+    mockState.entries = [
+      {
+        id: 1,
+        user_id: 1,
+        entry_date: monday,
+        start_time: "08:00",
+        end_time: "15:30",
+        category_id: 1,
+        status: "draft",
+      },
+    ];
+
+    component = mount(Time, { target });
+    await settle();
+
+    expect(
+      target.querySelector(".day-card .day-total").textContent.trim(),
+    ).toBe("7.50h");
+  });
+
   it("cancelled absences do not block time entry creation", async () => {
     const monday = pastMonday();
     path.set(`/time?week=${monday}`);
@@ -241,7 +273,7 @@ describe("Time", () => {
     component = mount(Time, { target });
     await settle();
 
-    expect(target.textContent).toContain("of 40h target");
+    expect(target.textContent).toContain("of 40.00h target");
   });
 
   it("flextime reduction absences keep the weekly target", async () => {
@@ -277,7 +309,7 @@ describe("Time", () => {
     component = mount(Time, { target });
     await settle();
 
-    expect(target.textContent).toContain("of 40h target");
+    expect(target.textContent).toContain("of 40.00h target");
   });
 
   it("flextime reduction entries do not add credited weekly hours", async () => {
@@ -312,7 +344,7 @@ describe("Time", () => {
     component = mount(Time, { target });
     await settle();
 
-    expect(target.textContent).toContain("of 40h target");
+    expect(target.textContent).toContain("of 40.00h target");
   });
 
   it("uses entry counts_as_work when category lookup is unavailable", async () => {
@@ -338,6 +370,6 @@ describe("Time", () => {
     component = mount(Time, { target });
     await settle();
 
-    expect(target.textContent).toContain("of 40h target");
+    expect(target.textContent).toContain("of 40.00h target");
   });
 });

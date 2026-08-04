@@ -1693,7 +1693,7 @@ export function hoursUnit() {
 export function formatHours(value) {
   // When a raw number is passed, apply locale-aware decimal formatting.
   // Strings (e.g. pre-formatted HH:MM values like "+5:30") are passed through as-is.
-  const formatted = typeof value === "number" ? formatDayCount(value) : value;
+  const formatted = typeof value === "number" ? fmtDecimal(value, 2) : value;
   return translate(get(language), "{value}{unit}", {
     value: formatted,
     unit: hoursUnit(),

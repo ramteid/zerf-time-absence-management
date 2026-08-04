@@ -221,13 +221,13 @@ describe("label helpers", () => {
     expect(formatHours("39")).toBe("39 Std.");
   });
 
-  it("formatHours formats numbers with locale-aware decimal", () => {
+  it("formatHours formats numbers with two locale-aware decimal places", () => {
     setLanguage("en");
-    expect(formatHours(5.5)).toBe("5.5h");
-    expect(formatHours(5)).toBe("5h");
+    expect(formatHours(5.5)).toBe("5.50h");
+    expect(formatHours(5)).toBe("5.00h");
     setLanguage("de");
-    expect(formatHours(5.5)).toBe("5,5 Std.");
-    expect(formatHours(5)).toBe("5 Std.");
+    expect(formatHours(5.5)).toBe("5,50 Std.");
+    expect(formatHours(5)).toBe("5,00 Std.");
   });
 
   it("fmtDecimal formats decimals with locale separator", () => {

@@ -316,7 +316,7 @@ to correct them is to reopen the whole week (see "Changes after submission").
 In the weekly Time Entry view, the first summary tile always shows recorded
 crediting hours for the current week (rejected entries are excluded).
 
-- Display format: logged hours and target hours (for example `6.0h of 8.0h target`).
+- Display format: decimal hour values always use two decimal places (for example `6.00h of 8.00h target`).
 - Color logic:
   - red when logged hours are below the weekly target,
   - green when logged hours are equal to or above the weekly target.
