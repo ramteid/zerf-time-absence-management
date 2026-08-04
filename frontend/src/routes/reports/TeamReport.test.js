@@ -93,6 +93,29 @@ describe("TeamReport", () => {
     ).toBe(false);
   });
 
+  it("renders the month table with wrapping-optimized headers", async () => {
+    getTeamReport.mockResolvedValueOnce([
+      {
+        user_id: 1,
+        name: "Alice Smith",
+        flextime_balance_min: 120,
+        diff_min: 30,
+        sick_days: 0,
+        vacation_days: 5,
+        vacation_planned_days: 0,
+        weeks_all_submitted: true,
+      },
+    ]);
+    component = mount(TeamReport, {
+      target,
+      props: { users, periodMode: "month", month: "2026-05", from: "", to: "" },
+    });
+    await waitForText(target, "Alice Smith");
+
+    expect(target.querySelector(".team-report-table")).not.toBeNull();
+    expect(target.querySelectorAll(".team-report-header")).not.toHaveLength(0);
+  });
+
   it("renders employee rows once the month table resolves", async () => {
     getTeamReport.mockResolvedValueOnce([
       {

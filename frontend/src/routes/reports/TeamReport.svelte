@@ -226,18 +226,19 @@
   {:else if teamLoading && !teamReport}
     <LoadingState />
   {:else if teamReport}
-    <DataTable fit>
-      <thead>
-        <tr>
-          <th class="col-employee">{$t("Employee")}</th>
-          <th class="text-right nowrap">{$t("Current flextime balance")}</th>
-          <th class="text-right nowrap">{$t("Monthly diff")}</th>
-          <th class="text-right nowrap">{$t("Sick days")}</th>
-          <th class="text-right nowrap">{$t("Vacation taken")}</th>
-          <th class="text-right nowrap">{$t("Vacation planned")}</th>
-          <th class="text-center nowrap">{$t("All weeks submitted")}</th>
-        </tr>
-      </thead>
+    <div class="team-report-table">
+      <DataTable fit>
+        <thead>
+          <tr>
+            <th class="col-employee team-report-header">{$t("Employee")}</th>
+            <th class="text-right team-report-header">{$t("Current flextime balance")}</th>
+            <th class="text-right team-report-header">{$t("Monthly diff")}</th>
+            <th class="text-right team-report-header">{$t("Sick days")}</th>
+            <th class="text-right team-report-header">{$t("Vacation taken")}</th>
+            <th class="text-right team-report-header">{$t("Vacation planned")}</th>
+            <th class="text-center team-report-header">{$t("All weeks submitted")}</th>
+          </tr>
+        </thead>
       <tbody>
         {#each teamReport as r (r.user_id)}
           <tr>
@@ -300,7 +301,8 @@
           </tr>
         {/each}
       </tbody>
-    </DataTable>
+      </DataTable>
+    </div>
   {/if}
 </SectionCard>
 
@@ -429,8 +431,25 @@
 </SectionCard>
 
 <style>
+  .team-report-table {
+    width: 100%;
+  }
+
+  .team-report-table :global(.zf-table) {
+    table-layout: auto;
+    min-width: 0;
+  }
+
+  .team-report-header {
+    white-space: normal;
+    min-width: 110px;
+    max-width: 180px;
+    vertical-align: top;
+  }
+
   .col-employee {
-    min-width: 120px;
+    min-width: 140px;
+    white-space: nowrap;
   }
 
   .report-note {
