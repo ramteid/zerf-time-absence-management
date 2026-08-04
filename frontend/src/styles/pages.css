@@ -139,7 +139,11 @@
 .field-group {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 0;
+}
+
+.field-group > * + * {
+  margin-top: 14px;
 }
 
 .field-row {

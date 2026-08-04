@@ -1,4 +1,5 @@
 <script>
+  import { onMount, tick } from "svelte";
   import { api } from "../api.js";
   import { categories, currentUser, settings } from "../stores.js";
   import { t } from "../i18n.js";
@@ -21,6 +22,23 @@
   let category_id = template.category_id ?? $categories[0]?.id ?? null;
   let comment = template.comment || "";
   let error = "";
+  let errorElement;
+
+  onMount(() => {
+    let refreshInterval;
+    const refreshToday = () => {
+      todayIso = appTodayIsoDate($settings?.timezone);
+    };
+    const delayToNextMinute = 60_000 - (Date.now() % 60_000) + 50;
+    const refreshTimeout = setTimeout(() => {
+      refreshToday();
+      refreshInterval = setInterval(refreshToday, 60_000);
+    }, delayToNextMinute);
+    return () => {
+      clearTimeout(refreshTimeout);
+      clearInterval(refreshInterval);
+    };
+  });
 
   // Keep untouched default date aligned with app timezone changes.
   $: todayIso = appTodayIsoDate($settings?.timezone);
@@ -35,6 +53,10 @@
   // eslint-disable-next-line no-useless-assignment
   $: lastTodayIso = todayIso;
 
+  $: if (category_id == null && $categories.length > 0) {
+    category_id = $categories[0].id;
+  }
+
   $: if (isNew && start_time >= end_time) {
     const [h, m] = start_time.split(":").map(Number);
     if (h >= 23) {
@@ -45,25 +67,31 @@
     }
   }
 
+  async function showError(message) {
+    error = message;
+    await tick();
+    errorElement?.scrollIntoView?.({ block: "nearest" });
+  }
+
   async function save() {
     error = "";
     if (!entry_date) {
-      error = $t("Invalid date.");
+      await showError($t("Invalid date."));
       return;
     }
     if (start_time >= end_time) {
-      error = $t("End time must be after start time.");
+      await showError($t("End time must be after start time."));
       return;
     }
     if (entry_date === todayIso) {
       const currentTime = appCurrentTimeHM($settings?.timezone);
       if (end_time > currentTime) {
-        error = $t("End time cannot be in the future.");
+        await showError($t("End time cannot be in the future."));
         return;
       }
     }
     if (category_id == null) {
-      error = $t("Category required.");
+      await showError($t("Category required."));
       return;
     }
     try {
@@ -80,7 +108,7 @@
       dialog.close(true);
       onClose({ changed: true, entry: saved, deletedId: null });
     } catch (e) {
-      error = $t(e?.message || "Error");
+      await showError($t(e?.message || "Error"));
     }
   }
 
@@ -97,7 +125,7 @@
       dialog.close(true);
       onClose({ changed: true, entry: null, deletedId: template.id });
     } catch (e) {
-      error = $t(e?.message || "Error");
+      await showError($t(e?.message || "Error"));
     }
   }
 
@@ -128,18 +156,26 @@
         bind:value={entry_date}
         min={$currentUser?.start_date}
         max={todayIso}
-          mobileNative={true}
+        mobileNative={true}
         container={dlg}
       />
     </div>
     <div class="field-row">
       <div>
         <label class="zf-label" for="entry-start-time">{$t("Start")}</label>
-        <TimePicker id="entry-start-time" bind:value={start_time} required />
+        <TimePicker
+          id="entry-start-time"
+          label={$t("Start")}
+          bind:value={start_time}
+        />
       </div>
       <div>
         <label class="zf-label" for="entry-end-time">{$t("End")}</label>
-        <TimePicker id="entry-end-time" bind:value={end_time} required />
+        <TimePicker
+          id="entry-end-time"
+          label={$t("End")}
+          bind:value={end_time}
+        />
       </div>
     </div>
     <div>
@@ -169,19 +205,26 @@
         rows="2"
         bind:value={comment}></textarea>
     </div>
-    <div class="error-text">{error}</div>
+    <div
+      class="error-text"
+      role="alert"
+      aria-live="assertive"
+      bind:this={errorElement}
+    >
+      {error}
+    </div>
   </div>
   <svelte:fragment slot="footer">
     {#if !isNew}
-      <button class="zf-btn zf-btn-danger" on:click={remove}>
+      <button class="zf-btn zf-btn-danger" type="button" on:click={remove}>
         <Icon name="Trash" size={14} />{$t("Delete")}
       </button>
     {/if}
     <span class="flex-1"></span>
-    <button class="zf-btn" on:click={() => dialog.close()}
+    <button class="zf-btn" type="button" on:click={() => dialog.close()}
       >{$t("Cancel")}</button
     >
-    <button class="zf-btn zf-btn-primary" on:click={save}>
+    <button class="zf-btn zf-btn-primary" type="button" on:click={save}>
       {$t(isNew ? "Add Entry" : "Save")}
     </button>
   </svelte:fragment>

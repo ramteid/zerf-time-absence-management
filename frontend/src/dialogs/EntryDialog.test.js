@@ -118,6 +118,20 @@ describe("EntryDialog", () => {
     expect(options).toContain("Training");
   });
 
+  it("selects the first category when categories arrive after the dialog opens", async () => {
+    categories.set([]);
+    component = mount(EntryDialog, {
+      target,
+      props: { template: { entry_date: "2024-01-15" }, onClose: vi.fn() },
+    });
+    await settle();
+
+    categories.set([{ id: 7, name: "Late category", counts_as_work: true }]);
+    await settle();
+
+    expect(target.querySelector("#entry-category").value).toBe("7");
+  });
+
   it("hides the Delete button for new entries", async () => {
     // New entries that have not been saved yet cannot be deleted — there is
     // nothing on the server to delete. The button must not be rendered.
@@ -182,6 +196,29 @@ describe("EntryDialog", () => {
       ([path, opts]) => path === "/time-entries" && opts?.method === "POST",
     );
     expect(postCall).toBeTruthy();
+  });
+
+  it("announces and reveals API errors in the scrolling dialog body", async () => {
+    apiMock.mockRejectedValueOnce(new Error("Server rejected"));
+    component = mount(EntryDialog, {
+      target,
+      props: { template: { entry_date: "2024-01-15" }, onClose: vi.fn() },
+    });
+    await settle();
+
+    const errorElement = target.querySelector('[role="alert"]');
+    const scrollIntoView = vi.fn();
+    errorElement.scrollIntoView = scrollIntoView;
+    const addButton = [...target.querySelectorAll("button")].find(
+      (button) => button.textContent.trim() === "Add Entry",
+    );
+    addButton.click();
+    await settle();
+    await settle();
+
+    expect(errorElement.textContent).toContain("Server rejected");
+    expect(errorElement.getAttribute("aria-live")).toBe("assertive");
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
   });
 
   it("DELETEs the entry after the user confirms deletion", async () => {

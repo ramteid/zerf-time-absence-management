@@ -13,7 +13,6 @@
   export let min = "";
   export let max = "";
   export let id = "";
-  export let style = "";
   export let mobileNative = false;
   export let container = null;
   let cls = "zf-input";
@@ -25,6 +24,7 @@
   let lastMode = mode;
   let lastContainer = container;
   let cleanupNavHandlers = null;
+  let cleanupPositionListeners = null;
   const overlayGap = 6;
   const overlayMargin = 8;
 
@@ -99,6 +99,12 @@
     cleanupNavHandlers = null;
   }
 
+  function removePositionListeners() {
+    if (!cleanupPositionListeners) return;
+    cleanupPositionListeners();
+    cleanupPositionListeners = null;
+  }
+
   function clamp(val, lo, hi) {
     return Math.min(Math.max(val, lo), hi);
   }
@@ -111,39 +117,68 @@
     return childHeight || calendar.offsetHeight;
   }
 
-  // Position the calendar so it floats above the dialog without affecting its
-  // layout. The calendar is appended to the dialog (top-layer stacking context).
-  // The dialog has `transform: translate(-50%, -50%)` which makes it the
-  // containing block for position:fixed children, so we use position:absolute
-  // with dialog-relative coordinates derived from getBoundingClientRect offsets.
+  function visualViewportBounds() {
+    const viewport = window.visualViewport;
+    return {
+      left: viewport?.offsetLeft ?? 0,
+      top: viewport?.offsetTop ?? 0,
+      width: viewport?.width ?? window.innerWidth,
+      height: viewport?.height ?? window.innerHeight,
+    };
+  }
+
+  // The calendar remains a dialog descendant so it stays in the same top layer,
+  // but fixed positioning lets it escape the scrolling dialog body. Its size and
+  // position are constrained to the currently visible viewport.
   function positionInDialog(instance, positionElement) {
     const calendar = instance.calendarContainer;
     const anchor = positionElement || instance.altInput || instance._input;
     if (!calendar || !anchor || !container) return;
 
-    const containerRect = container.getBoundingClientRect();
     const anchorRect = anchor.getBoundingClientRect();
-    const calendarWidth = calendar.offsetWidth;
-    const calendarHeight = measureCalendarHeight(calendar);
-    const spaceBelow = window.innerHeight - anchorRect.bottom;
-    const spaceAbove = anchorRect.top;
-    const showAbove =
-      spaceBelow < calendarHeight + overlayGap &&
-      spaceAbove > calendarHeight + overlayGap;
+    const viewport = visualViewportBounds();
+    const viewportRight = viewport.left + viewport.width;
+    const viewportBottom = viewport.top + viewport.height;
+    const availableWidth = Math.max(0, viewport.width - overlayMargin * 2);
+    const availableHeight = Math.max(0, viewport.height - overlayMargin * 2);
 
-    // Convert viewport-relative anchor coords to dialog-relative coords.
-    const anchorLeft = anchorRect.left - containerRect.left;
-    const maxLeft = Math.max(
-      overlayMargin,
-      containerRect.width - calendarWidth - overlayMargin,
+    calendar.style.setProperty(
+      "--zf-date-picker-max-width",
+      `${Math.floor(availableWidth)}px`,
     );
-    const left = clamp(anchorLeft, overlayMargin, maxLeft);
-    const top = showAbove
-      ? anchorRect.top - containerRect.top - calendarHeight - overlayGap
-      : anchorRect.bottom - containerRect.top + overlayGap;
+    calendar.style.setProperty(
+      "--zf-date-picker-max-height",
+      `${Math.floor(availableHeight)}px`,
+    );
+
+    const calendarWidth = calendar.offsetWidth;
+    const calendarHeight = Math.min(
+      measureCalendarHeight(calendar),
+      availableHeight,
+    );
+    const spaceBelow = viewportBottom - overlayMargin - anchorRect.bottom;
+    const spaceAbove = anchorRect.top - viewport.top - overlayMargin;
+    const showAbove =
+      spaceBelow < calendarHeight + overlayGap && spaceAbove > spaceBelow;
+
+    const minLeft = viewport.left + overlayMargin;
+    const maxLeft = Math.max(
+      minLeft,
+      viewportRight - calendarWidth - overlayMargin,
+    );
+    const left = clamp(anchorRect.left, minLeft, maxLeft);
+    const rawTop = showAbove
+      ? anchorRect.top - calendarHeight - overlayGap
+      : anchorRect.bottom + overlayGap;
+    const minTop = viewport.top + overlayMargin;
+    const maxTop = Math.max(
+      minTop,
+      viewportBottom - calendarHeight - overlayMargin,
+    );
+    const top = clamp(rawTop, minTop, maxTop);
 
     const arrowLeft = clamp(
-      anchorLeft - left + anchorRect.width / 2,
+      anchorRect.left - left + anchorRect.width / 2,
       16,
       Math.max(16, calendarWidth - 16),
     );
@@ -158,7 +193,7 @@
       "arrowRight",
     );
     calendar.classList.add(showAbove ? "arrowBottom" : "arrowTop");
-    calendar.style.position = "absolute";
+    calendar.style.position = "fixed";
     calendar.style.top = `${Math.round(top)}px`;
     calendar.style.left = `${Math.round(left)}px`;
     calendar.style.right = "auto";
@@ -166,6 +201,50 @@
       "--zf-date-picker-arrow-left",
       `${Math.round(arrowLeft)}px`,
     );
+  }
+
+  function attachPositionListeners(instance) {
+    removePositionListeners();
+    if (!container || instance.isMobile) return;
+
+    const updatePosition = () => {
+      if (!instance.isOpen) return;
+      const anchor = instance.altInput || instance._input;
+      const scrollContainer = anchor?.closest(".dialog-body");
+      if (anchor && scrollContainer) {
+        const anchorRect = anchor.getBoundingClientRect();
+        const scrollRect = scrollContainer.getBoundingClientRect();
+        if (
+          anchorRect.bottom <= scrollRect.top ||
+          anchorRect.top >= scrollRect.bottom
+        ) {
+          instance.close();
+          return;
+        }
+      }
+      positionInDialog(instance, anchor);
+    };
+    const preventDialogEscape = (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      instance.close();
+      (instance.altInput || instance._input)?.focus();
+    };
+
+    const viewport = window.visualViewport;
+    window.addEventListener("resize", updatePosition);
+    document.addEventListener("scroll", updatePosition, true);
+    container.addEventListener("keydown", preventDialogEscape, true);
+    viewport?.addEventListener("resize", updatePosition);
+    viewport?.addEventListener("scroll", updatePosition);
+    cleanupPositionListeners = () => {
+      window.removeEventListener("resize", updatePosition);
+      document.removeEventListener("scroll", updatePosition, true);
+      container.removeEventListener("keydown", preventDialogEscape, true);
+      viewport?.removeEventListener("resize", updatePosition);
+      viewport?.removeEventListener("scroll", updatePosition);
+    };
   }
 
   // For month pickers: disables the "next year" button when already at the max year.
@@ -243,6 +322,7 @@
 
   function build(lang) {
     if (datePickerInstance) {
+      removePositionListeners();
       removeCalendarNavHandlers();
       removeAltInputListeners();
       datePickerInstance.destroy();
@@ -268,6 +348,11 @@
       onChange: (_, str) => {
         if (str !== value) value = str;
       },
+      onClose: removePositionListeners,
+      onOpen: (_, __, instance) => {
+        if (isMonth) updateNextYearBtnState(instance);
+        attachPositionListeners(instance);
+      },
       plugins: isMonth
         ? [
             monthSelectPlugin({
@@ -283,11 +368,9 @@
     // updateNavigationCurrentMonth (the arrows navigate month-by-month there).
     if (isMonth) {
       opts.onYearChange = (_, __, inst) => updateNextYearBtnState(inst);
-      opts.onOpen = (_, __, inst) => updateNextYearBtnState(inst);
     }
     // When rendered inside a <dialog>, append the calendar to the dialog so it
-    // participates in the top-layer stacking context. Use absolute positioning
-    // with dialog-relative coordinates to avoid disrupting the dialog layout.
+    // participates in the top-layer stacking context.
     if (container) {
       opts.appendTo = container;
       opts.position = positionInDialog;
@@ -305,9 +388,16 @@
     bindCalendarNavHandlers(datePickerInstance);
     lockYearInput(datePickerInstance);
     if (isMonth) updateNextYearBtnState(datePickerInstance);
-    if (id && datePickerInstance.altInput) datePickerInstance.altInput.id = id;
+    if (datePickerInstance.isMobile && datePickerInstance.mobileInput) {
+      for (const className of cls.split(/\s+/).filter(Boolean)) {
+        datePickerInstance.mobileInput.classList.add(className);
+      }
+      datePickerInstance.mobileInput.tabIndex = 0;
+      if (id) datePickerInstance.mobileInput.id = id;
+    } else if (id && datePickerInstance.altInput) {
+      datePickerInstance.altInput.id = id;
+    }
     if (datePickerInstance.altInput) {
-      if (style) datePickerInstance.altInput.setAttribute("style", style);
       // Keep native mobile keyboard closed while still allowing date selection.
       datePickerInstance.altInput.readOnly = true;
       datePickerInstance.altInput.setAttribute("inputmode", "none");
@@ -317,6 +407,7 @@
 
   onMount(() => build($language));
   onDestroy(() => {
+    removePositionListeners();
     removeCalendarNavHandlers();
     removeAltInputListeners();
     if (datePickerInstance) datePickerInstance.destroy();
@@ -372,12 +463,35 @@
 
   /* ── Calendar container base (light + dark theming) ── */
   :global(.flatpickr-calendar.zf-date-picker-calendar) {
+    width: min(307.875px, var(--zf-date-picker-max-width, 307.875px));
+    max-width: var(--zf-date-picker-max-width, calc(100vw - 16px));
+    max-height: var(--zf-date-picker-max-height, calc(100vh - 16px));
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
     background: var(--bg-surface);
     border: 1px solid var(--border);
     box-shadow: var(--shadow-md);
     color: var(--text-primary);
     border-radius: var(--radius-lg);
     font-family: var(--font-sans);
+  }
+
+  :global(.zf-date-picker-calendar .flatpickr-innerContainer),
+  :global(.zf-date-picker-calendar .flatpickr-rContainer),
+  :global(.zf-date-picker-calendar .flatpickr-days),
+  :global(.zf-date-picker-calendar .dayContainer) {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  :global(.zf-date-picker-calendar .flatpickr-rContainer) {
+    flex: 1;
+  }
+
+  :global(.zf-date-picker-calendar .flatpickr-day) {
+    max-width: none;
   }
 
   /* Overlay z-index */

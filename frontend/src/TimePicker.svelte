@@ -1,12 +1,11 @@
 <script>
-  import { onDestroy } from "svelte";
+  import { onDestroy, tick } from "svelte";
   import { settings } from "./stores.js";
   import { t } from "./i18n.js";
 
   export let value = "";
   export let id = "";
-  export let style = "";
-  export let required = false;
+  export let label = "";
   let inputClass = "zf-input tab-num";
   export { inputClass as class };
 
@@ -35,9 +34,13 @@
   let isOpen = false;
   let anchorElement;
   let drumElement;
-  let panelStyle = "";
-  let panelPlacement = "below";
+  let panelTop = "0px";
+  let panelLeft = "0px";
+  let panelMaxWidth = "calc(100vw - 16px)";
+  let panelMaxHeight = "calc(100vh - 16px)";
+  let panelPositioned = false;
   let detachViewportListeners = null;
+  let focusOutTimer = null;
 
   $: {
     const parsedTime = parseHHMM(value);
@@ -189,29 +192,62 @@
     return Math.min(Math.max(value, min), max);
   }
 
-  function updateDrumPosition() {
-    if (!isOpen || !anchorElement) return;
+  function visualViewportBounds() {
+    const viewport = window.visualViewport;
+    return {
+      left: viewport?.offsetLeft ?? 0,
+      top: viewport?.offsetTop ?? 0,
+      width: viewport?.width ?? window.innerWidth,
+      height: viewport?.height ?? window.innerHeight,
+    };
+  }
+
+  async function updateDrumPosition() {
+    if (!isOpen || !anchorElement || !drumElement) return;
     const displayButton = anchorElement.querySelector(".tp-display");
     const anchor = displayButton || anchorElement;
     const anchorRect = anchor.getBoundingClientRect();
-    const panelWidth = drumElement?.offsetWidth || (use12h ? 236 : 196);
-    const panelHeight = drumElement?.offsetHeight || 220;
+    const scrollContainer = anchor.closest(".dialog-body");
+    if (scrollContainer) {
+      const scrollRect = scrollContainer.getBoundingClientRect();
+      if (
+        anchorRect.bottom <= scrollRect.top ||
+        anchorRect.top >= scrollRect.bottom
+      ) {
+        closePicker();
+        return;
+      }
+    }
+
+    const viewport = visualViewportBounds();
     const margin = 8;
     const gap = 6;
-    const showAbove =
-      window.innerHeight - anchorRect.bottom < panelHeight + gap &&
-      anchorRect.top > panelHeight + gap;
+    panelMaxWidth = `${Math.max(0, Math.floor(viewport.width - margin * 2))}px`;
+    panelMaxHeight = `${Math.max(0, Math.floor(viewport.height - margin * 2))}px`;
+    await tick();
+    if (!isOpen || !drumElement) return;
 
-    const maxLeft = Math.max(margin, window.innerWidth - panelWidth - margin);
-    const left = clamp(anchorRect.left, margin, maxLeft);
+    const panelWidth = drumElement.offsetWidth;
+    const panelHeight = drumElement.offsetHeight;
+    const viewportRight = viewport.left + viewport.width;
+    const viewportBottom = viewport.top + viewport.height;
+    const spaceBelow = viewportBottom - margin - anchorRect.bottom;
+    const spaceAbove = anchorRect.top - viewport.top - margin;
+    const showAbove = spaceBelow < panelHeight + gap && spaceAbove > spaceBelow;
+
+    const minLeft = viewport.left + margin;
+    const maxLeft = Math.max(minLeft, viewportRight - panelWidth - margin);
+    const left = clamp(anchorRect.left, minLeft, maxLeft);
     const rawTop = showAbove
       ? anchorRect.top - panelHeight - gap
       : anchorRect.bottom + gap;
-    const maxTop = Math.max(margin, window.innerHeight - panelHeight - margin);
-    const top = clamp(rawTop, margin, maxTop);
+    const minTop = viewport.top + margin;
+    const maxTop = Math.max(minTop, viewportBottom - panelHeight - margin);
+    const top = clamp(rawTop, minTop, maxTop);
 
-    panelPlacement = showAbove ? "above" : "below";
-    panelStyle = `top:${Math.round(top)}px;left:${Math.round(left)}px;`;
+    panelTop = `${Math.round(top)}px`;
+    panelLeft = `${Math.round(left)}px`;
+    panelPositioned = true;
   }
 
   function detachGlobalListeners() {
@@ -223,12 +259,17 @@
   function attachGlobalListeners() {
     if (detachViewportListeners) return;
     const handleViewportChange = () => updateDrumPosition();
+    const viewport = window.visualViewport;
     window.addEventListener("resize", handleViewportChange);
     // Use capture so scrolling nested containers (like dialog bodies) repositions the panel.
     document.addEventListener("scroll", handleViewportChange, true);
+    viewport?.addEventListener("resize", handleViewportChange);
+    viewport?.addEventListener("scroll", handleViewportChange);
     detachViewportListeners = () => {
       window.removeEventListener("resize", handleViewportChange);
       document.removeEventListener("scroll", handleViewportChange, true);
+      viewport?.removeEventListener("resize", handleViewportChange);
+      viewport?.removeEventListener("scroll", handleViewportChange);
     };
   }
 
@@ -236,6 +277,7 @@
     if (!isOpen) {
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
+        e.stopPropagation();
         openPicker();
       }
       return;
@@ -243,10 +285,12 @@
     const digit = e.key >= "0" && e.key <= "9" ? parseInt(e.key, 10) : null;
     if (e.key === "Escape") {
       e.preventDefault();
-      closePicker();
+      e.stopPropagation();
+      closePicker(true);
     } else if (e.key === "Enter") {
       e.preventDefault();
-      closePicker();
+      e.stopPropagation();
+      closePicker(true);
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       if (keyFocus === "hour") stepHour(-1);
@@ -257,7 +301,7 @@
       if (keyFocus === "hour") stepHour(1);
       else if (keyFocus === "minute") stepMinute(1);
       else toggleAmPm();
-    } else if (e.key === "ArrowRight" || e.key === "Tab") {
+    } else if (e.key === "ArrowRight") {
       e.preventDefault();
       keyFocus =
         keyFocus === "hour"
@@ -338,7 +382,12 @@
   }
 
   function openPicker() {
+    if (isOpen) {
+      closePicker(true);
+      return;
+    }
     isOpen = true;
+    panelPositioned = false;
     keyFocus = "hour";
     keyBuffer = "";
     wheelAccumulator = { hour: 0, minute: 0, meridiem: 0 };
@@ -349,14 +398,25 @@
       drumElement?.focus();
     }, 0);
   }
-  function closePicker() {
+  function closePicker(restoreFocus = false) {
     isOpen = false;
-    panelStyle = "";
+    panelPositioned = false;
     detachGlobalListeners();
+    if (restoreFocus)
+      setTimeout(() => anchorElement?.querySelector("button")?.focus(), 0);
   }
 
   function onClickOutside(e) {
     if (anchorElement && !anchorElement.contains(e.target)) closePicker();
+  }
+
+  function onFocusOut() {
+    clearTimeout(focusOutTimer);
+    focusOutTimer = setTimeout(() => {
+      if (isOpen && !anchorElement?.contains(document.activeElement)) {
+        closePicker();
+      }
+    }, 0);
   }
 
   // Items rendered in each drum column (prev2 prev1 SELECTED next1 next2)
@@ -383,33 +443,38 @@
 
   onDestroy(() => {
     clearTimeout(keyTimer);
+    clearTimeout(focusOutTimer);
     detachGlobalListeners();
   });
 </script>
 
 <svelte:window on:click={onClickOutside} />
 
-<input type="hidden" {id} {value} {required} />
-
-<div class="tp-root" bind:this={anchorElement}>
+<div class="tp-root" bind:this={anchorElement} on:focusout={onFocusOut}>
   <button
+    {id}
     type="button"
     class="tp-display {inputClass}"
-    {style}
-    aria-label={$t("Time")}
+    aria-label={label || $t("Time")}
     aria-expanded={isOpen}
+    aria-haspopup="dialog"
+    aria-controls={id ? `${id}-picker` : undefined}
     on:click={openPicker}
     on:keydown={onKeyDown}>{displayLabel}</button
   >
 
   {#if isOpen}
     <div
+      id={id ? `${id}-picker` : undefined}
       class="tp-drum"
-      class:tp-drum-above={panelPlacement === "above"}
+      class:tp-drum-positioned={panelPositioned}
       role="dialog"
       aria-label={$t("Time")}
       bind:this={drumElement}
-      style={panelStyle}
+      style:top={panelTop}
+      style:left={panelLeft}
+      style:max-width={panelMaxWidth}
+      style:max-height={panelMaxHeight}
       tabindex="-1"
       on:click|stopPropagation
       on:keydown={onKeyDown}
@@ -511,8 +576,10 @@
           >
         </div>
       {/if}
-      <button type="button" class="tp-ok" on:click|stopPropagation={closePicker}
-        >{$t("OK")}</button
+      <button
+        type="button"
+        class="tp-ok"
+        on:click|stopPropagation={() => closePicker(true)}>{$t("OK")}</button
       >
     </div>
   {/if}
@@ -542,12 +609,15 @@
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-md);
     padding: 6px 10px 10px;
+    overflow: auto;
+    overscroll-behavior: contain;
+    opacity: 0;
     user-select: none;
-    touch-action: none;
+    touch-action: pan-x pan-y;
   }
 
-  .tp-drum.tp-drum-above {
-    transform-origin: bottom left;
+  .tp-drum-positioned {
+    opacity: 1;
   }
 
   .tp-col {
@@ -558,6 +628,7 @@
     border-radius: var(--radius-md);
     overflow: hidden;
     min-width: 36px;
+    touch-action: none;
   }
 
   .tp-col-active {
