@@ -259,3 +259,66 @@ export async function setTime(page, hiddenInputId, hhmm) {
   await page.locator(`${root} .tp-ok`).click();
   await expect(page.locator(`#${hiddenInputId}`)).toHaveValue(hhmm);
 }
+
+// Creates a user through the admin's "Add User" dialog and returns the
+// generated temporary password shown afterwards.
+//
+// Lives here rather than in 02-admin-create-users.spec.js because more than
+// one spec file needs to onboard somebody: 02 builds the team the suite
+// operates on, and 13 adds a person whose contract started early enough to
+// land in the previous month's payroll report.
+//
+// `startDateOffsetDays` backdates the contract start. It must stay negative:
+// per the user guide an entry's date has to fall on/after the user's
+// start_date, so a future start date would make the account unusable.
+export async function createUserViaAdminUi(
+  page,
+  {
+    firstName,
+    lastName,
+    email,
+    role,
+    approverEmail,
+    startDateOffsetDays = -21,
+  },
+) {
+  await page.goto("/settings/users");
+  await page.getByRole("button", { name: "Add User" }).click();
+
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+
+  await dialog.locator("#user-first-name").fill(firstName);
+  await dialog.locator("#user-last-name").fill(lastName);
+  await dialog.locator("#user-email").fill(email);
+  await dialog.locator("#user-role").selectOption(role);
+
+  await setDate(page, "user-start-date", isoOffset(startDateOffsetDays));
+
+  // The approver checklist lists every active team_lead/admin user except
+  // the one being created; each row's label includes "(email)", so matching
+  // on the approver's email uniquely selects their checkbox regardless of
+  // how many other eligible approvers are listed.
+  await dialog
+    .locator("label", { hasText: approverEmail })
+    .locator('input[type="checkbox"]')
+    .check();
+
+  // No password is supplied, so the backend generates a random temporary one
+  // and the UI surfaces it via TempPasswordDialog.
+  await dialog.getByRole("button", { name: "Add User" }).click();
+
+  const tempDialog = page.getByRole("dialog");
+  await expect(tempDialog.getByText("Temporary password:")).toBeVisible();
+  const password = (
+    await tempDialog.locator("strong").first().innerText()
+  ).trim();
+  // Matches the backend's generated-password length floor (see
+  // generate_password() in services/users.rs) — a loose sanity check that we
+  // actually read a real generated value, not an empty string.
+  expect(password.length).toBeGreaterThanOrEqual(12);
+  await tempDialog.getByRole("button", { name: "OK" }).click();
+
+  await expect(page.getByText(`${firstName} ${lastName}`)).toBeVisible();
+  return password;
+}

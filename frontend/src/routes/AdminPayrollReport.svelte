@@ -2,9 +2,15 @@
   import { tick } from "svelte";
   import { api } from "../api.js";
   import { toast } from "../stores.js";
-  import { t } from "../i18n.js";
+  import { t, roleLabel } from "../i18n.js";
+  import { sortUsersByRoleThenName } from "../lib/domain/users.js";
 
   let settings = {};
+  // Everyone who can appear in the report, for the exclusion list below.
+  // Admins are never part of the report, so they are not offered here either.
+  let selectableUsers = [];
+  // IDs ticked in the "except" list — these people are left out of the report.
+  let excludedUserIds = [];
   // Absence categories, loaded once so the read-only "included automatically"
   // list below can show each category's translated name and color.
   let categories = [];
@@ -24,12 +30,20 @@
   }
 
   async function load() {
-    const [loadedSettings, loadedCategories] = await Promise.all([
+    const [loadedSettings, loadedCategories, loadedUsers] = await Promise.all([
       api("/settings"),
       api("/absence-categories/all"),
+      api("/users"),
     ]);
     settings = loadedSettings;
     categories = loadedCategories;
+    // Only people who can actually show up in the report: deactivated accounts
+    // are filtered out here and archived ones never reach the endpoint, so a
+    // former colleague cannot linger in the list. Admins are never reported on.
+    selectableUsers = sortUsersByRoleThenName(
+      (loadedUsers || []).filter((user) => user.active && user.role !== "admin"),
+    );
+    excludedUserIds = loadedSettings.payroll_report_excluded_user_ids || [];
     recipientsInput = (loadedSettings.payroll_report_recipients || []).join(
       "\n",
     );
@@ -37,6 +51,13 @@
     resizeRecipientsTextarea();
   }
   load();
+
+  // Only IDs that still match a selectable person count — a stale ID left
+  // behind by a deleted account must not skew the "N of M included" summary.
+  $: excludedVisibleCount = selectableUsers.filter((user) =>
+    excludedUserIds.includes(user.id),
+  ).length;
+  $: includedCount = selectableUsers.length - excludedVisibleCount;
 
   function parseRecipients(value) {
     return [
@@ -93,12 +114,14 @@
           !!settings.payroll_report_include_assistant_hours,
         payroll_report_include_employee_hours:
           !!settings.payroll_report_include_employee_hours,
+        payroll_report_excluded_user_ids: excludedUserIds,
       };
       const saved = await api("/settings/payroll-report", {
         method: "PUT",
         body,
       });
       settings = saved;
+      excludedUserIds = saved.payroll_report_excluded_user_ids || [];
       recipientsInput = (saved.payroll_report_recipients || []).join("\n");
       await tick();
       resizeRecipientsTextarea();
@@ -116,14 +139,14 @@
       const result = await api("/settings/payroll-report/send-now", {
         method: "POST",
       });
-      // Nothing sent means either every month went out already or a month is
-      // still open — the admins who opted in were notified with the details.
+      // Nothing sent means every month already went out, or nobody has
+      // finished the month yet — a report with no people in it is not useful.
       if (result?.sent > 0) {
         toast($t("Report sent."), "ok");
       } else {
         toast(
           $t(
-            "No report was sent. It was already sent or the month is not complete.",
+            "No report was sent. It was already sent, or nobody has finished the month yet.",
           ),
           "info",
         );
@@ -262,10 +285,54 @@ buchhaltung@example.com"
   </div>
 
   <div class="zf-card zf-card-section">
+    <div class="field-card-title">{$t("People included")}</div>
+    <div class="field-group">
+      <div class="field-row">
+        <div>
+          <span class="zf-label">{$t("All employees and assistants")}</span>
+          <div class="field-hint">
+            {$t("Administrators never appear in the payroll report.")}
+          </div>
+
+          <span class="zf-label except-label">{$t("except")}</span>
+          <div class="field-hint">
+            {$t(
+              "Anyone ticked here is left out of the report and does not hold up its delivery.",
+            )}
+          </div>
+          {#if selectableUsers.length === 0}
+            <div class="field-hint">{$t("No people to select.")}</div>
+          {:else}
+            <div class="check-list">
+              {#each selectableUsers as person (person.id)}
+                <label class="zf-check-label">
+                  <input
+                    type="checkbox"
+                    value={person.id}
+                    bind:group={excludedUserIds}
+                  />
+                  {person.first_name}
+                  {person.last_name}
+                  <span class="zf-label-hint">({roleLabel(person.role)})</span>
+                </label>
+              {/each}
+            </div>
+            <div class="field-hint">
+              {$t("{included} of {total} people included")
+                .replace("{included}", includedCount)
+                .replace("{total}", selectableUsers.length)}
+            </div>
+          {/if}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="zf-card zf-card-section">
     <div class="form-actions">
       <div class="field-hint form-actions-hint">
         {$t(
-          "Sends the previous month's report right away if it is complete. It does not replace the automatic delivery — the same report is still sent again automatically on the selected day.",
+          "Sends the previous month's report right away, covering everyone who has finished their month. Anyone still open is named in the report as missing. It does not replace the automatic delivery — the complete report is still sent on the selected day.",
         )}
       </div>
       <div class="form-actions-buttons">
@@ -318,6 +385,26 @@ buchhaltung@example.com"
     gap: 6px;
     font-size: 0.8125rem;
     color: var(--text-secondary);
+  }
+
+  /* "except" introduces the exclusion list below it, so it needs air above
+     but stays tight to its own hint text. */
+  .except-label {
+    margin-top: 14px;
+  }
+
+  /* Scrollable checkbox list of people, same shape as the team/permission
+     lists in UserDialog. */
+  .check-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 220px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 8px;
+    margin-top: 8px;
   }
 
   /* Matches the Nextcloud Backups page's form-actions spacing (gap,

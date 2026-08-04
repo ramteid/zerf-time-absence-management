@@ -24,6 +24,38 @@ const mockState = vi.hoisted(() => ({
       active: false,
     },
   ],
+  // Candidates for the exclusion list. The admin and the deactivated employee
+  // must never be offered — neither can appear in the payroll report.
+  users: [
+    {
+      id: 1,
+      first_name: "Ada",
+      last_name: "Admin",
+      role: "admin",
+      active: true,
+    },
+    {
+      id: 2,
+      first_name: "Erin",
+      last_name: "Employee",
+      role: "employee",
+      active: true,
+    },
+    {
+      id: 3,
+      first_name: "Alex",
+      last_name: "Assistant",
+      role: "assistant",
+      active: true,
+    },
+    {
+      id: 4,
+      first_name: "Dana",
+      last_name: "Deactivated",
+      role: "employee",
+      active: false,
+    },
+  ],
 }));
 
 const toastMock = vi.hoisted(() => vi.fn());
@@ -38,6 +70,9 @@ const apiMock = vi.hoisted(() =>
     }
     if (path === "/absence-categories/all") {
       return mockState.categories;
+    }
+    if (path === "/users") {
+      return mockState.users;
     }
     if (path === "/settings/payroll-report" && opts.method === "PUT") {
       mockState.settings = { ...mockState.settings, ...opts.body };
@@ -98,6 +133,7 @@ describe("AdminPayrollReport", () => {
       payroll_report_absence_categories: ["sick"],
       payroll_report_include_assistant_hours: true,
       payroll_report_include_employee_hours: false,
+      payroll_report_excluded_user_ids: [],
     };
   });
 
@@ -113,10 +149,51 @@ describe("AdminPayrollReport", () => {
     component = mount(AdminPayrollReport, { target });
     await settle();
 
-    // No manual picker — nothing to check or toggle here.
-    expect(target.querySelectorAll('input[type="checkbox"]').length).toBe(3);
+    // No manual category picker: the only checkboxes are "send automatically",
+    // the two hours sections, and one per selectable person in the exclusion
+    // list (admins and deactivated accounts are not offered).
+    expect(target.querySelectorAll('input[type="checkbox"]').length).toBe(5);
     expect(target.textContent).toContain("Sick");
     expect(target.textContent).not.toContain("Unpaid");
+  });
+
+  it("offers only active non-admins in the exclusion list", async () => {
+    component = mount(AdminPayrollReport, { target });
+    await settle();
+
+    // Collapse the template's indentation so names read as written.
+    const list = target
+      .querySelector(".check-list")
+      .textContent.replace(/\s+/g, " ");
+    expect(list).toContain("Erin Employee");
+    expect(list).toContain("Alex Assistant");
+    // Admins never appear in the report, so excluding them is meaningless.
+    expect(list).not.toContain("Ada Admin");
+    // Deactivated accounts must not be shown at all.
+    expect(list).not.toContain("Dana Deactivated");
+    expect(target.textContent).toContain("2 of 2 people included");
+  });
+
+  it("saves ticked people as the excluded list", async () => {
+    mockState.settings.payroll_report_excluded_user_ids = [3];
+    component = mount(AdminPayrollReport, { target });
+    await settle();
+
+    // The stored exclusion is reflected back into the list on load.
+    const assistantBox = [
+      ...target.querySelectorAll('.check-list input[type="checkbox"]'),
+    ].find((box) => box.value === "3");
+    expect(assistantBox.checked).toBe(true);
+    expect(target.textContent).toContain("1 of 2 people included");
+
+    clickButton(target, "Save");
+    await settle();
+
+    const saveCall = apiMock.mock.calls.find(
+      ([path, opts]) =>
+        path === "/settings/payroll-report" && opts?.method === "PUT",
+    );
+    expect(saveCall[1].body.payroll_report_excluded_user_ids).toEqual([3]);
   });
 
   it("shows concise German settings text", async () => {
@@ -239,7 +316,7 @@ describe("AdminPayrollReport", () => {
     expect(toastMock).toHaveBeenCalledWith("Report sent.", "ok");
   });
 
-  it("explains when nothing was sent because a month is not final", async () => {
+  it("explains when nothing was sent because nobody has finished the month", async () => {
     sendNowResult.value = { sent: 0, pending: 1 };
     component = mount(AdminPayrollReport, { target });
     await settle();
@@ -248,7 +325,7 @@ describe("AdminPayrollReport", () => {
     await settle();
 
     expect(toastMock).toHaveBeenCalledWith(
-      "No report was sent. It was already sent or the month is not complete.",
+      "No report was sent. It was already sent, or nobody has finished the month yet.",
       "info",
     );
   });

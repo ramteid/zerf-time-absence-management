@@ -14,30 +14,30 @@
 //! Finality is the shared `month_export_readiness` gate, plus one extra rule:
 //! for everybody whose *hours* are in the report, all time entries of the month
 //! must be approved. Payroll pays by those hours, so reporting a draft or
-//! not-yet-approved month would understate what is owed. When a queued period
-//! is blocked, admins who opted in to technical error notifications are told
-//! who is holding it up.
+//! not-yet-approved month would understate what is owed.
+//!
+//! A blocked scheduled period is **not** an error: people simply have not
+//! finished their month yet. It is logged and otherwise stays silent — the
+//! payroll dashboard tile (`services::payroll_report::build_status`) is where
+//! admins and team leads see who is still missing.
 //!
 //! `run_now` (admin "Send now" button) queues the previous month and processes
-//! everything immediately, skipping only the day-of-month threshold — never the
-//! readiness gate. A manual send does **not** remove the period from the
-//! queue: the regular scheduled delivery for that month still goes out
-//! separately on the configured day, and the manual copy's email body carries
-//! a note saying so, so the recipient does not mistake it for the final one.
+//! everything immediately, skipping the day-of-month threshold. Unlike the
+//! scheduled run it does **not** wait for everyone: it sends a *provisional*
+//! report covering whoever is already final, clearly marked as partial in both
+//! the PDF and the email so the recipient cannot mistake short figures for
+//! final ones. A manual send never removes the period from the queue, so the
+//! regular scheduled delivery for that month still goes out separately.
 
 use crate::background::schedule;
 use crate::error::{AppError, AppResult};
 use crate::i18n::Language;
 use crate::repository::User;
+use crate::report_pdf::{PayrollOmittedPerson, ProvisionalNotice};
 use crate::services::payroll_report::{self, PayrollReportConfig};
-use crate::services::reports::{month_export_readiness, MonthExportReadiness};
 use crate::services::settings;
 use crate::AppState;
 use chrono::NaiveDate;
-
-/// How many blocking employees are listed in the admin notification before it
-/// is truncated — enough to act on, short enough to stay readable.
-const MAX_LISTED_BLOCKERS: usize = 10;
 
 /// Background loop: checks once per day (midnight in app timezone).
 pub async fn run_loop(state: AppState) {
@@ -49,7 +49,10 @@ pub async fn run_loop(state: AppState) {
 
 /// Daily scheduled run: queue the previous month once the configured day of
 /// month is reached, then send every queued period that is ready.
-async fn run_once(state: &AppState) -> AppResult<()> {
+///
+/// Public so integration tests can drive one scheduled tick directly instead
+/// of waiting on the real midnight loop.
+pub async fn run_once(state: &AppState) -> AppResult<()> {
     let config = payroll_report::load_config(&state.pool).await?;
     if !config.enabled || config.recipients.is_empty() {
         return Ok(());
@@ -176,13 +179,17 @@ async fn process_pending_periods(
     summary
 }
 
-/// Build and send one period's report. Returns whether it was sent; `false`
-/// means the month is not final yet and stays queued for the next daily check.
+/// Build and send one period's report. Returns whether anything was sent.
 ///
-/// `is_manual` marks an admin-triggered "Send now" copy: its email carries an
-/// extra note, and — unlike the scheduled run — it never deletes the queue
-/// entry, so the regular automatic delivery for this month still happens on
-/// the configured day even after a successful manual send.
+/// The two callers differ in what an unfinished month means:
+///
+/// * **scheduled run** — nothing goes out until every covered person is final.
+///   The period stays queued and is retried tomorrow. This is the delivery the
+///   payroll accountant treats as authoritative, so it must be complete.
+/// * **`is_manual`** (admin "Send now") — sends a provisional report with
+///   whoever is already final, marked as partial in the PDF and the email. It
+///   never deletes the queue entry, so the complete scheduled delivery still
+///   follows on the configured day.
 async fn process_period(
     state: &AppState,
     period: &str,
@@ -191,22 +198,73 @@ async fn process_period(
     is_manual: bool,
 ) -> AppResult<bool> {
     let (from, to) = schedule::period_bounds(period)?;
-    // Same member set as the timesheet export: everyone the month actually
-    // covers, including archived accounts that still have data in it.
-    let members = state
-        .db
-        .reports
-        .timesheet_members_for_period(from, to)
-        .await?;
+    // Same member set as the timesheet export — everyone the month actually
+    // covers, including archived accounts that still have data in it — minus
+    // admins and anyone the admin excluded from the report.
+    let members = payroll_report::payroll_members(
+        state
+            .db
+            .reports
+            .timesheet_members_for_period(from, to)
+            .await?,
+        &config.excluded_user_ids,
+    );
 
-    let blockers = collect_blockers(state, &members, config, from, to).await?;
-    if !blockers.is_empty() {
-        report_blocked(state, period, &blockers, language).await;
+    let readiness = payroll_report::evaluate_members(state, &members, config, from, to).await?;
+    let (ready, pending): (Vec<_>, Vec<_>) = readiness
+        .into_iter()
+        .partition(|member| member.reason_key.is_none());
+
+    if ready.is_empty() && pending.is_empty() {
+        // The month covers nobody at all — the installation is younger than
+        // the period, or everyone in it was excluded. There is nothing to
+        // report, so settle the period instead of retrying it every night
+        // forever and leaving the dashboard card stuck on "0 of 0".
+        if !is_manual {
+            state.db.payroll_queue.delete_entry(period).await?;
+            record_last_sent_period(state, period).await;
+        }
+        tracing::info!("Payroll report: period {period} covers nobody; nothing to send");
+        return Ok(false);
+    }
+    if !pending.is_empty() && !is_manual {
+        // Not an error — people just have not finished their month. Stay
+        // silent and retry tomorrow; the dashboard tile shows who is missing.
+        tracing::info!(
+            "Payroll report: period {period} still waiting for {} of {} people",
+            pending.len(),
+            ready.len() + pending.len()
+        );
+        return Ok(false);
+    }
+    if ready.is_empty() {
+        // A manual send while nobody has finished yet: an empty document helps
+        // the payroll accountant no more than no document at all.
+        tracing::info!("Payroll report: period {period} has no finalized people yet");
         return Ok(false);
     }
 
-    let data =
-        payroll_report::build_report_data(state, from, to, &members, config, language).await?;
+    // Only a manual send can get here with people missing, and only then does
+    // the report need the "this is partial" marker.
+    let provisional = (!pending.is_empty()).then(|| ProvisionalNotice {
+        included: ready.len(),
+        total: ready.len() + pending.len(),
+        omitted: pending
+            .iter()
+            .map(|member| PayrollOmittedPerson {
+                name: format!("{} {}", member.user.first_name, member.user.last_name),
+                reason_key: member
+                    .reason_key
+                    .unwrap_or("payroll_report_reason_not_submitted"),
+            })
+            .collect(),
+    });
+
+    let included: Vec<User> = ready.into_iter().map(|member| member.user).collect();
+    let data = payroll_report::build_report_data(
+        state, from, to, &included, config, language, provisional,
+    )
+    .await?;
     let bytes = crate::report_pdf::render_payroll_report_pdf(&data, language);
     if bytes.is_empty() {
         return Err(AppError::Internal(format!(
@@ -223,6 +281,7 @@ async fn process_period(
         &data.period_label,
         &organization_label(state, language).await,
         is_manual,
+        data.provisional.as_ref(),
     );
 
     crate::email::send_with_attachment(
@@ -242,7 +301,9 @@ async fn process_period(
     if is_manual {
         // A manual "Send now" copy never replaces the scheduled delivery: the
         // period stays queued, so the automatic run still sends the regular
-        // copy for this month on the configured day.
+        // copy for this month on the configured day. For the same reason it
+        // must not mark the period as sent — the dashboard tile has to keep
+        // showing the outstanding delivery.
         tracing::info!(
             "Payroll report: sent period {period} manually to {} (period stays queued for the scheduled run)",
             config.recipients.join(", ")
@@ -250,62 +311,13 @@ async fn process_period(
     } else {
         // Only drop the period once the SMTP server accepted the message.
         state.db.payroll_queue.delete_entry(period).await?;
+        record_last_sent_period(state, period).await;
         tracing::info!(
             "Payroll report: sent period {period} to {}",
             config.recipients.join(", ")
         );
     }
     Ok(true)
-}
-
-/// One employee holding up a period, with the reason in the report language.
-struct Blocker {
-    name: String,
-    reason_key: &'static str,
-}
-
-/// Everyone whose month is not final yet. An empty result means the period can
-/// be sent.
-async fn collect_blockers(
-    state: &AppState,
-    members: &[User],
-    config: &PayrollReportConfig,
-    from: NaiveDate,
-    to: NaiveDate,
-) -> AppResult<Vec<Blocker>> {
-    let mut blockers = Vec::new();
-    for member in members {
-        // Hours are only payroll-grade once every entry behind them is
-        // approved — a still-open or merely submitted month would be paid out
-        // too low. Full approval is required exactly when this person's hours
-        // are actually part of the report.
-        let require_full_approval = config.includes_hours_for(&member.role);
-        let readiness =
-            month_export_readiness(&state.pool, member, from, to, require_full_approval).await?;
-        let reason_key = match readiness {
-            MonthExportReadiness::Ready => None,
-            MonthExportReadiness::PreStartContent => {
-                Some("payroll_report_reason_pre_start_content")
-            }
-            MonthExportReadiness::WeeksNotSubmitted => Some("payroll_report_reason_not_submitted"),
-            MonthExportReadiness::PendingAbsenceRequests => {
-                Some("payroll_report_reason_pending_absences")
-            }
-            MonthExportReadiness::UnresolvedTimeEntries => {
-                Some("payroll_report_reason_unresolved_entries")
-            }
-            MonthExportReadiness::UnapprovedTimeEntries => {
-                Some("payroll_report_reason_unapproved_entries")
-            }
-        };
-        if let Some(reason_key) = reason_key {
-            blockers.push(Blocker {
-                name: format!("{} {}", member.first_name, member.last_name),
-                reason_key,
-            });
-        }
-    }
-    Ok(blockers)
 }
 
 /// Subject and body of the payroll report email.
@@ -317,11 +329,14 @@ async fn collect_blockers(
 /// `manual` appends a note identifying the email as an admin-triggered "Send
 /// now" copy, so the recipient does not mistake it for the regular automatic
 /// delivery, which — see [`process_period`] — is still sent separately.
+/// `provisional` additionally spells out that the attached report covers only
+/// part of the staff, mirroring the notice printed in the PDF.
 fn email_text(
     language: &Language,
     period_label: &str,
     organization: &str,
     manual: bool,
+    provisional: Option<&ProvisionalNotice>,
 ) -> crate::i18n::NotificationText {
     let mut text = crate::i18n::notification_text(
         language,
@@ -332,63 +347,66 @@ fn email_text(
             ("org_name", organization.to_string()),
         ],
     );
+    if let Some(notice) = provisional {
+        text.body.push_str(&crate::i18n::translate(
+            language,
+            "payroll_report_email_provisional_note",
+            &[
+                ("included", notice.included.to_string()),
+                ("total", notice.total.to_string()),
+                (
+                    "employees",
+                    notice
+                        .omitted
+                        .iter()
+                        .map(|person| {
+                            format!(
+                                "- {} ({})",
+                                person.name,
+                                crate::i18n::translate(language, person.reason_key, &[])
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                ),
+            ],
+        ));
+    }
     if manual {
-        text.body
-            .push_str(&crate::i18n::translate(language, "payroll_report_email_manual_note", &[]));
+        text.body.push_str(&crate::i18n::translate(
+            language,
+            "payroll_report_email_manual_note",
+            &[],
+        ));
     }
     text
 }
 
-/// Title and body of the "the report could not go out yet" admin notification,
-/// listing who is holding the month up (truncated after
-/// [`MAX_LISTED_BLOCKERS`] names).
-fn blocked_text(
-    language: &Language,
-    period: &str,
-    blockers: &[Blocker],
-) -> crate::i18n::NotificationText {
-    let listed: Vec<String> = blockers
-        .iter()
-        .take(MAX_LISTED_BLOCKERS)
-        .map(|blocker| {
-            format!(
-                "- {} ({})",
-                blocker.name,
-                crate::i18n::translate(language, blocker.reason_key, &[])
-            )
-        })
-        .collect();
-    let mut details = listed.join("\n");
-    if blockers.len() > MAX_LISTED_BLOCKERS {
-        details.push_str(&crate::i18n::translate(
-            language,
-            "payroll_report_blocked_more",
-            &[("count", (blockers.len() - MAX_LISTED_BLOCKERS).to_string())],
-        ));
+/// Record a settled period so the dashboard card can show the month as done.
+///
+/// Only ever moves forward: catch-up runs process the oldest queued month
+/// first, and a stale value would make the card claim a newer month had
+/// already gone out. Failing to record must not fail the run — the report is
+/// already delivered at this point — so problems are logged, not propagated.
+async fn record_last_sent_period(state: &AppState, period: &str) {
+    let stored = settings::load_setting(
+        &state.pool,
+        settings::PAYROLL_REPORT_LAST_SENT_PERIOD_KEY,
+        "",
+    )
+    .await
+    .unwrap_or_default();
+    if !stored.is_empty() && !schedule::period_is_after(period, &stored) {
+        return;
     }
-
-    crate::i18n::notification_text(
-        language,
-        "payroll_report_blocked_title",
-        "payroll_report_blocked_body",
-        &[("period", period.to_string()), ("employees", details)],
-    )
-}
-
-/// Log the blocked period and alert opted-in admins so the missing approvals
-/// can be chased — a payroll report that silently never goes out is worse than
-/// a late one.
-async fn report_blocked(state: &AppState, period: &str, blockers: &[Blocker], language: &Language) {
-    let text = blocked_text(language, period, blockers);
-    tracing::warn!(target: "zerf::payroll_report", "{}", text.body);
-    crate::services::notifications::enqueue_error(
-        state,
-        language,
-        &format!("payroll_report_blocked_{period}"),
-        &text.title,
-        &text.body,
-    )
-    .await;
+    if let Err(e) = state
+        .db
+        .settings
+        .save_setting(settings::PAYROLL_REPORT_LAST_SENT_PERIOD_KEY, period)
+        .await
+    {
+        tracing::warn!("Payroll report: could not record last sent period {period}: {e}");
+    }
 }
 
 /// Organization name for the email copy, falling back to the product name when
@@ -408,29 +426,68 @@ async fn organization_label(state: &AppState, language: &Language) -> String {
 mod tests {
     use super::*;
 
-    fn blocker(name: &str) -> Blocker {
-        Blocker {
-            name: name.to_string(),
-            reason_key: "payroll_report_reason_not_submitted",
+    fn notice(included: usize, total: usize, names: &[&str]) -> ProvisionalNotice {
+        ProvisionalNotice {
+            included,
+            total,
+            omitted: names
+                .iter()
+                .map(|name| PayrollOmittedPerson {
+                    name: (*name).to_string(),
+                    reason_key: "payroll_report_reason_not_submitted",
+                })
+                .collect(),
         }
     }
 
-    /// Both templates must render in every supported language: a missing key or
+    /// Every template must render in every supported language: a missing key or
     /// parameter panics, and this code runs inside a background loop.
     #[test]
-    fn email_and_blocked_texts_render_in_every_language() {
+    fn email_texts_render_in_every_language() {
         for code in ["en", "de"] {
             let language = crate::i18n::Language::from_setting(code);
 
-            let email = email_text(&language, "May 2026", "Example GmbH", false);
+            let email = email_text(&language, "May 2026", "Example GmbH", false, None);
             assert!(email.title.contains("May 2026"), "subject: {}", email.title);
             assert!(email.title.contains("Example GmbH"));
             assert!(email.body.contains("May 2026"));
 
-            let blocked = blocked_text(&language, "2026-05", &[blocker("Jane Doe")]);
-            assert!(!blocked.title.is_empty());
-            assert!(blocked.body.contains("2026-05"));
-            assert!(blocked.body.contains("Jane Doe"));
+            let partial = email_text(
+                &language,
+                "May 2026",
+                "Example GmbH",
+                true,
+                Some(&notice(8, 12, &["Jane Doe"])),
+            );
+            assert!(partial.body.contains("Jane Doe"), "{code}: names the gap");
+            assert!(partial.body.contains('8') && partial.body.contains("12"));
+        }
+    }
+
+    /// A partial send must say so in the email body. Without it the payroll
+    /// accountant cannot tell short figures from final ones.
+    #[test]
+    fn email_text_marks_provisional_sends() {
+        for code in ["en", "de"] {
+            let language = crate::i18n::Language::from_setting(code);
+
+            let complete = email_text(&language, "May 2026", "Example GmbH", true, None);
+            let partial = email_text(
+                &language,
+                "May 2026",
+                "Example GmbH",
+                true,
+                Some(&notice(1, 2, &["Jane Doe"])),
+            );
+
+            assert!(
+                partial.body.len() > complete.body.len(),
+                "{code}: the provisional note is added on top of the normal body"
+            );
+            assert!(
+                !complete.body.contains("Jane Doe"),
+                "{code}: a complete report names nobody as missing"
+            );
         }
     }
 
@@ -443,12 +500,12 @@ mod tests {
         for code in ["en", "de"] {
             let language = crate::i18n::Language::from_setting(code);
 
-            let scheduled = email_text(&language, "May 2026", "Example GmbH", false);
-            let manual = email_text(&language, "May 2026", "Example GmbH", true);
+            let scheduled = email_text(&language, "May 2026", "Example GmbH", false, None);
+            let manual = email_text(&language, "May 2026", "Example GmbH", true, None);
 
             assert_eq!(
                 scheduled.body,
-                email_text(&language, "May 2026", "Example GmbH", false).body,
+                email_text(&language, "May 2026", "Example GmbH", false, None).body,
                 "scheduled body is deterministic"
             );
             assert!(
@@ -464,24 +521,24 @@ mod tests {
         }
     }
 
+    /// Every missing person must be named — unlike the old admin notification
+    /// this list is not truncated, because the recipient needs the complete
+    /// picture of what the attached figures leave out.
     #[test]
-    fn blocked_text_truncates_long_blocker_lists() {
+    fn provisional_note_lists_every_missing_person() {
         let language = crate::i18n::Language::default();
-        let blockers: Vec<Blocker> = (0..MAX_LISTED_BLOCKERS + 2)
-            .map(|index| blocker(&format!("Person {index}")))
-            .collect();
+        let names: Vec<String> = (0..12).map(|index| format!("Person {index}")).collect();
+        let refs: Vec<&str> = names.iter().map(String::as_str).collect();
 
-        let text = blocked_text(&language, "2026-05", &blockers);
-        assert!(text.body.contains("Person 0"));
-        assert!(
-            text.body
-                .contains(&format!("Person {}", MAX_LISTED_BLOCKERS - 1)),
-            "the last listed name is included"
+        let text = email_text(
+            &language,
+            "May 2026",
+            "Example GmbH",
+            true,
+            Some(&notice(3, 15, &refs)),
         );
-        assert!(
-            !text.body.contains(&format!("Person {MAX_LISTED_BLOCKERS}")),
-            "names beyond the limit are dropped"
-        );
-        assert!(text.body.contains('2'), "the remaining count is mentioned");
+        for name in &names {
+            assert!(text.body.contains(name), "{name} must be listed");
+        }
     }
 }

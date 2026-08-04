@@ -41,3 +41,19 @@ export const ASSISTANT = {
 // employee with only a couple of time entries never has — "none" is the only
 // cost_type a fresh user can always request regardless of their balance.
 export const NO_COST_ABSENCE_CATEGORY = "E2E Day Off";
+
+// Created last, by 13-payroll-report.spec.js. Their contract start is
+// backdated far enough (see PAYROLL_START_OFFSET_DAYS) that they always fall
+// inside the previous calendar month, which is what the payroll report and
+// its dashboard card cover. Without that guarantee the card's population
+// would depend on which day of the month the suite happens to run.
+export const PAYROLL_EMPLOYEE = {
+  firstName: "Pia",
+  lastName: "Payroll",
+  email: "payroll.employee@e2e.test",
+};
+
+// The largest possible gap between today and the last day of the previous
+// month is 31 days (on the 31st of a month), so any offset beyond that always
+// starts the contract on or before the end of the previous month.
+export const PAYROLL_START_OFFSET_DAYS = -70;

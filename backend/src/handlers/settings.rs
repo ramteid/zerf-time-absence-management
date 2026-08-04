@@ -678,6 +678,9 @@ pub struct UpdatePayrollReportSettings {
     pub payroll_report_day_of_month: Option<u8>,
     pub payroll_report_include_assistant_hours: Option<bool>,
     pub payroll_report_include_employee_hours: Option<bool>,
+    /// People to leave out of the report entirely. An empty list means
+    /// everybody (except admins, who are never included) is covered.
+    pub payroll_report_excluded_user_ids: Option<Vec<i64>>,
 }
 
 pub async fn update_payroll_report_settings(
@@ -733,6 +736,10 @@ pub async fn update_payroll_report_settings(
         include_employee_hours: body
             .payroll_report_include_employee_hours
             .unwrap_or(stored.include_employee_hours),
+        excluded_user_ids: body
+            .payroll_report_excluded_user_ids
+            .clone()
+            .unwrap_or(stored.excluded_user_ids),
     };
     if effective.enabled {
         if effective.recipients.is_empty() {
@@ -779,6 +786,13 @@ pub async fn update_payroll_report_settings(
         body.payroll_report_include_employee_hours,
         bool
     );
+    save_if_some!(
+        transaction,
+        settings::PAYROLL_REPORT_EXCLUDED_USERS_KEY,
+        body.payroll_report_excluded_user_ids
+            .as_deref()
+            .map(crate::services::payroll_report::format_excluded_ids)
+    );
     transaction.commit().await?;
 
     audit::log(
@@ -791,6 +805,7 @@ pub async fn update_payroll_report_settings(
         Some(serde_json::json!({
             "payroll_report_enabled": body.payroll_report_enabled,
             "payroll_report_day_of_month": body.payroll_report_day_of_month,
+            "payroll_report_excluded_user_ids": body.payroll_report_excluded_user_ids,
         })),
     )
     .await;

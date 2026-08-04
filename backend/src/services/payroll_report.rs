@@ -20,6 +20,7 @@ use crate::report_pdf::{
 };
 use crate::repository::{AbsenceCategory, AbsenceCategoryDb, User};
 use crate::roles::is_assistant_role;
+use crate::services::reports::MonthExportReadiness;
 use crate::services::settings;
 use crate::time_calc::count_workdays;
 use crate::AppState;
@@ -41,6 +42,9 @@ pub struct PayrollReportConfig {
     pub day_of_month: u8,
     pub include_assistant_hours: bool,
     pub include_employee_hours: bool,
+    /// People the admin deliberately left out of the report. They neither
+    /// appear in the document nor hold its delivery up.
+    pub excluded_user_ids: Vec<i64>,
 }
 
 impl PayrollReportConfig {
@@ -94,7 +98,284 @@ pub async fn load_config(pool: &crate::db::DatabasePool) -> AppResult<PayrollRep
         )
         .await?
             == "true",
+        excluded_user_ids: parse_excluded_ids(
+            &settings::load_setting(pool, settings::PAYROLL_REPORT_EXCLUDED_USERS_KEY, "").await?,
+        ),
     })
+}
+
+/// The people a payroll report for this period actually covers.
+///
+/// Two groups never appear, and therefore never block delivery either:
+///   * **admins** — they are the ones running the system, not staff the payroll
+///     accountant files for, so they are dropped unconditionally;
+///   * anyone the admin put on the exclusion list.
+///
+/// Report content, the readiness gate and the dashboard tile all go through
+/// this one filter, so what the tile counts is exactly what the PDF contains.
+pub fn payroll_members(members: Vec<User>, excluded_user_ids: &[i64]) -> Vec<User> {
+    members
+        .into_iter()
+        .filter(|member| {
+            !crate::roles::is_admin_role(&member.role)
+                && !excluded_user_ids.contains(&member.id)
+        })
+        .collect()
+}
+
+/// Traffic-light status of one person's month, as shown on the dashboard tile.
+pub mod status_value {
+    /// Everything submitted and approved — this person is done.
+    pub const READY: &str = "ready";
+    /// Everything submitted, but an approval or absence decision is missing.
+    pub const AWAITING_APPROVAL: &str = "awaiting_approval";
+    /// Weeks are still missing, or the data needs an admin's attention.
+    pub const NOT_SUBMITTED: &str = "not_submitted";
+}
+
+/// One row of the payroll status tile's detail list.
+///
+/// `user_id` and `name` are `None` for people the requesting team lead is not
+/// allowed to see. Their status still counts towards the totals — a lead needs
+/// to know whether the month is complete even when the outstanding person is
+/// not on their team — but the identity never leaves the server.
+#[derive(serde::Serialize)]
+pub struct PayrollStatusMember {
+    pub user_id: Option<i64>,
+    pub name: Option<String>,
+    pub status: &'static str,
+    pub reason_key: Option<&'static str>,
+}
+
+/// Everything the payroll dashboard tile renders for the tracked month.
+#[derive(serde::Serialize)]
+pub struct PayrollStatus {
+    /// False when the payroll report is switched off; the tile stays hidden.
+    pub enabled: bool,
+    /// Tracked period, "YYYY-MM" — always the previous month.
+    pub period: String,
+    /// Localized month name, e.g. "Juli 2026".
+    pub period_label: String,
+    pub from: NaiveDate,
+    pub to: NaiveDate,
+    /// True once the scheduled delivery for this period has gone out. The tile
+    /// is greyed out from that moment until the next month begins.
+    pub sent: bool,
+    pub day_of_month: u8,
+    pub total: usize,
+    pub ready: usize,
+    pub awaiting_approval: usize,
+    pub not_submitted: usize,
+    pub members: Vec<PayrollStatusMember>,
+}
+
+/// Build the payroll status for the dashboard tile.
+///
+/// Covers exactly the people the report itself covers (see [`payroll_members`])
+/// and judges them with the same gate the send path uses, so "12 of 12 done"
+/// on the tile means the next scheduled run will actually deliver.
+pub async fn build_status(
+    app_state: &AppState,
+    requester: &crate::middleware::auth::User,
+    language: &Language,
+) -> AppResult<PayrollStatus> {
+    let config = load_config(&app_state.pool).await?;
+    let today = settings::app_today(&app_state.pool).await;
+    let period = crate::background::schedule::previous_period(today);
+    let (from, to) = crate::background::schedule::period_bounds(&period)?;
+
+    // The tile tracks the previous month until its scheduled delivery went out;
+    // afterwards it is done for this month. A manual "Send now" copy does not
+    // count — the regular delivery is still outstanding.
+    let last_sent = settings::load_setting(
+        &app_state.pool,
+        settings::PAYROLL_REPORT_LAST_SENT_PERIOD_KEY,
+        "",
+    )
+    .await?;
+    let sent = last_sent == period || crate::background::schedule::period_is_after(&last_sent, &period);
+
+    let period_label = crate::i18n::format_month(language, from.year(), from.month());
+    if !config.enabled {
+        return Ok(PayrollStatus {
+            enabled: false,
+            period,
+            period_label,
+            from,
+            to,
+            sent,
+            day_of_month: config.day_of_month,
+            total: 0,
+            ready: 0,
+            awaiting_approval: 0,
+            not_submitted: 0,
+            members: Vec::new(),
+        });
+    }
+
+    let members = payroll_members(
+        app_state
+            .db
+            .reports
+            .timesheet_members_for_period(from, to)
+            .await?,
+        &config.excluded_user_ids,
+    );
+    let evaluated = evaluate_members(app_state, &members, &config, from, to).await?;
+
+    // Team leads only see the names of their own people; everybody else on the
+    // tile is counted but anonymized.
+    let visible_ids: Option<std::collections::HashSet<i64>> = if requester.is_admin() {
+        None
+    } else {
+        Some(
+            app_state
+                .db
+                .reports
+                .active_team_members(requester.id, false)
+                .await?
+                .into_iter()
+                .map(|member| member.id)
+                .collect(),
+        )
+    };
+
+    let mut status = PayrollStatus {
+        enabled: true,
+        period,
+        period_label,
+        from,
+        to,
+        sent,
+        day_of_month: config.day_of_month,
+        total: evaluated.len(),
+        ready: 0,
+        awaiting_approval: 0,
+        not_submitted: 0,
+        members: Vec::with_capacity(evaluated.len()),
+    };
+    for member in evaluated {
+        let value = status_for_reason(member.reason_key);
+        match value {
+            status_value::READY => status.ready += 1,
+            status_value::AWAITING_APPROVAL => status.awaiting_approval += 1,
+            _ => status.not_submitted += 1,
+        }
+        let visible = visible_ids
+            .as_ref()
+            .is_none_or(|ids| ids.contains(&member.user.id));
+        status.members.push(PayrollStatusMember {
+            user_id: visible.then_some(member.user.id),
+            name: visible
+                .then(|| format!("{} {}", member.user.first_name, member.user.last_name)),
+            status: value,
+            reason_key: member.reason_key,
+        });
+    }
+    Ok(status)
+}
+
+/// Map a blocking reason onto the tile's three-colour scale: everything that
+/// only waits for a decision is amber, everything else is red.
+fn status_for_reason(reason_key: Option<&'static str>) -> &'static str {
+    match reason_key {
+        None => status_value::READY,
+        Some("payroll_report_reason_unapproved_entries")
+        | Some("payroll_report_reason_pending_absences") => status_value::AWAITING_APPROVAL,
+        Some(_) => status_value::NOT_SUBMITTED,
+    }
+}
+
+/// One covered person plus why their month is not final yet. `reason_key` is
+/// `None` when they are ready to be reported.
+pub struct MemberReadiness {
+    pub user: User,
+    pub reason_key: Option<&'static str>,
+}
+
+/// Evaluate the month-finality gate for everyone the report covers.
+///
+/// Shared by the send path and the dashboard tile so both judge readiness by
+/// exactly the same rules — a tile that shows "all done" while the report
+/// refuses to go out would be worse than no tile at all.
+pub async fn evaluate_members(
+    app_state: &AppState,
+    members: &[User],
+    config: &PayrollReportConfig,
+    from: NaiveDate,
+    to: NaiveDate,
+) -> AppResult<Vec<MemberReadiness>> {
+    let mut evaluated = Vec::with_capacity(members.len());
+    for member in members {
+        // Hours are only payroll-grade once every entry behind them is
+        // approved — a still-open or merely submitted month would be paid out
+        // too low. Full approval is required exactly when this person's hours
+        // are actually part of the report.
+        let require_full_approval = config.includes_hours_for(&member.role);
+        let readiness = crate::services::reports::month_export_readiness(
+            &app_state.pool,
+            member,
+            from,
+            to,
+            require_full_approval,
+        )
+        .await?;
+        evaluated.push(MemberReadiness {
+            user: member.clone(),
+            reason_key: readiness_reason_key(readiness),
+        });
+    }
+    Ok(evaluated)
+}
+
+/// Translation key describing why a month is not final, or `None` when it is.
+fn readiness_reason_key(readiness: MonthExportReadiness) -> Option<&'static str> {
+    match readiness {
+        MonthExportReadiness::Ready => None,
+        MonthExportReadiness::PreStartContent => Some("payroll_report_reason_pre_start_content"),
+        MonthExportReadiness::WeeksNotSubmitted => Some("payroll_report_reason_not_submitted"),
+        MonthExportReadiness::PendingAbsenceRequests => {
+            Some("payroll_report_reason_pending_absences")
+        }
+        MonthExportReadiness::UnresolvedTimeEntries => {
+            Some("payroll_report_reason_unresolved_entries")
+        }
+        MonthExportReadiness::UnapprovedTimeEntries => {
+            Some("payroll_report_reason_unapproved_entries")
+        }
+    }
+}
+
+/// Split the stored comma-separated user ID list. Blanks, duplicates and
+/// non-numeric leftovers are dropped: a user who was hard-deleted after being
+/// excluded would otherwise keep a dangling ID in the setting forever, and a
+/// stale ID simply matches nobody.
+pub fn parse_excluded_ids(stored: &str) -> Vec<i64> {
+    let mut ids: Vec<i64> = Vec::new();
+    for candidate in stored.split(',') {
+        let Ok(id) = candidate.trim().parse::<i64>() else {
+            continue;
+        };
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+    ids
+}
+
+/// Serialize an excluded-user list back into the stored comma-separated form,
+/// normalized through the parser so the stored value is always duplicate-free.
+pub fn format_excluded_ids(ids: &[i64]) -> String {
+    parse_excluded_ids(
+        &ids.iter()
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>()
+            .join(","),
+    )
+    .iter()
+    .map(|id| id.to_string())
+    .collect::<Vec<_>>()
+    .join(",")
 }
 
 /// Absence categories the payroll report includes automatically — sick-like
@@ -137,9 +418,9 @@ pub fn format_recipient_list(recipients: &[String]) -> String {
 
 /// Assemble everything the payroll report PDF renders for one period.
 ///
-/// `members` are the people the period covers — the same set the timesheet
-/// export uses, so archived accounts with data in the month are included and
-/// people who only joined later are not.
+/// `members` are the people the report actually covers, already narrowed by
+/// [`payroll_members`]. For a manual partial send this is only the subset whose
+/// month is final; `provisional` then describes what is missing.
 pub async fn build_report_data(
     app_state: &AppState,
     from: NaiveDate,
@@ -147,6 +428,7 @@ pub async fn build_report_data(
     members: &[User],
     config: &PayrollReportConfig,
     language: &Language,
+    provisional: Option<crate::report_pdf::ProvisionalNotice>,
 ) -> AppResult<PayrollReportData> {
     let organization_name =
         settings::load_setting(&app_state.pool, settings::ORGANIZATION_NAME_KEY, "").await?;
@@ -180,6 +462,7 @@ pub async fn build_report_data(
         organization_name,
         absence_rows,
         hours_sections,
+        provisional,
     })
 }
 
@@ -324,6 +607,71 @@ mod tests {
         assert_eq!(format_recipient_list(&[]), "");
     }
 
+    #[test]
+    fn parse_excluded_ids_drops_blanks_duplicates_and_junk() {
+        assert_eq!(parse_excluded_ids(" 3 , 7,3 , ,x, 11 "), vec![3, 7, 11]);
+        assert!(parse_excluded_ids("").is_empty());
+        assert!(parse_excluded_ids(" , ").is_empty());
+        // A hard-deleted user leaves a stale ID behind; it simply matches nobody.
+        assert_eq!(parse_excluded_ids("999999"), vec![999999]);
+    }
+
+    #[test]
+    fn format_excluded_ids_round_trips_the_stored_value() {
+        assert_eq!(format_excluded_ids(&[3, 7, 11]), "3,7,11");
+        assert_eq!(format_excluded_ids(&[]), "");
+        // Duplicates are normalized away on save.
+        assert_eq!(format_excluded_ids(&[3, 3, 7]), "3,7");
+        assert_eq!(parse_excluded_ids(&format_excluded_ids(&[3, 7])), vec![3, 7]);
+    }
+
+    /// The three-colour scale the dashboard tile paints: anything merely
+    /// waiting for a decision is amber, anything still missing data is red.
+    #[test]
+    fn readiness_maps_onto_the_traffic_light_scale() {
+        use status_value::*;
+        assert_eq!(status_for_reason(None), READY);
+        assert_eq!(
+            status_for_reason(Some("payroll_report_reason_unapproved_entries")),
+            AWAITING_APPROVAL
+        );
+        assert_eq!(
+            status_for_reason(Some("payroll_report_reason_pending_absences")),
+            AWAITING_APPROVAL
+        );
+        assert_eq!(
+            status_for_reason(Some("payroll_report_reason_not_submitted")),
+            NOT_SUBMITTED
+        );
+        assert_eq!(
+            status_for_reason(Some("payroll_report_reason_unresolved_entries")),
+            NOT_SUBMITTED
+        );
+        assert_eq!(
+            status_for_reason(Some("payroll_report_reason_pre_start_content")),
+            NOT_SUBMITTED
+        );
+    }
+
+    /// Every `MonthExportReadiness` variant must have a reason key, so a new
+    /// variant cannot silently show up as "ready" on the tile.
+    #[test]
+    fn every_non_ready_readiness_has_a_reason() {
+        for readiness in [
+            MonthExportReadiness::PreStartContent,
+            MonthExportReadiness::UnresolvedTimeEntries,
+            MonthExportReadiness::PendingAbsenceRequests,
+            MonthExportReadiness::WeeksNotSubmitted,
+            MonthExportReadiness::UnapprovedTimeEntries,
+        ] {
+            assert!(
+                readiness_reason_key(readiness).is_some(),
+                "{readiness:?} must explain itself"
+            );
+        }
+        assert!(readiness_reason_key(MonthExportReadiness::Ready).is_none());
+    }
+
     fn config(include_assistant_hours: bool, include_employee_hours: bool) -> PayrollReportConfig {
         PayrollReportConfig {
             enabled: true,
@@ -331,6 +679,7 @@ mod tests {
             day_of_month: 5,
             include_assistant_hours,
             include_employee_hours,
+            excluded_user_ids: Vec::new(),
         }
     }
 

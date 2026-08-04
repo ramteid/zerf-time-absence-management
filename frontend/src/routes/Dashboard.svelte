@@ -14,6 +14,7 @@
     getFlextime,
     getMonthSubmissionReport,
     getOvertimeSummary,
+    getPayrollStatus,
     rejectAbsenceById,
     rejectReopen as rejectReopenRequest,
     rejectWeek as rejectWeekEntries,
@@ -28,7 +29,9 @@
   import AbsenceReviewDialog from "../dialogs/AbsenceReviewDialog.svelte";
   import ReopenReviewDialog from "../dialogs/ReopenReviewDialog.svelte";
   import WeekReviewDialog from "../dialogs/WeekReviewDialog.svelte";
+  import PayrollStatusDialog from "../dialogs/PayrollStatusDialog.svelte";
   import ApprovalQueues from "./dashboard/ApprovalQueues.svelte";
+  import PayrollStatus from "./dashboard/PayrollStatus.svelte";
   import AbsenceSlider from "./dashboard/AbsenceSlider.svelte";
   import BalanceSection from "./dashboard/BalanceSection.svelte";
   import FlextimeSection from "./dashboard/FlextimeSection.svelte";
@@ -207,10 +210,29 @@
     }
   }
 
+  // ── Payroll report progress (team leads and admins) ───────────────────────────
+  // `null` while loading or when the payroll report is switched off, in which
+  // case the tile stays hidden rather than showing an empty circle.
+  let payrollStatus = null;
+  let payrollDetailOpen = false;
+
+  async function loadPayrollStatus() {
+    if (!get(currentUser)?.permissions?.can_approve) return;
+    try {
+      const status = await getPayrollStatus();
+      payrollStatus = status?.enabled ? status : null;
+    } catch {
+      // A missing payroll status must not break the rest of the dashboard —
+      // the tile simply stays hidden.
+      payrollStatus = null;
+    }
+  }
+
   load();
   loadChart();
   loadOvertimeSummary();
   loadPastMonthSubmissionStatus();
+  loadPayrollStatus();
 
   // ── Reactive derivations: overtime balance ────────────────────────────────────
 
@@ -469,6 +491,15 @@
     <TeamSummary {pendingWeeks} {pendingAbsences} {users} />
   {/if}
 
+  {#if $currentUser?.permissions?.can_approve && payrollStatus}
+    <PayrollStatus
+      status={payrollStatus}
+      {activeHelp}
+      onHelpToggle={toggleHelp}
+      onOpen={() => (payrollDetailOpen = true)}
+    />
+  {/if}
+
   {#if $currentUser?.permissions?.can_approve}
     <ApprovalQueues
       {pendingWeeks}
@@ -507,6 +538,13 @@
     />
   {/if}
 </div>
+
+{#if payrollDetailOpen && payrollStatus}
+  <PayrollStatusDialog
+    status={payrollStatus}
+    onClose={() => (payrollDetailOpen = false)}
+  />
+{/if}
 
 {#if absenceDetail}
   <AbsenceReviewDialog

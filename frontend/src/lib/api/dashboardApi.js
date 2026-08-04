@@ -84,3 +84,8 @@ export function rejectReopen(id, reason) {
     body: { reason },
   });
 }
+
+// Payroll report progress for the dashboard tile (team leads and admins).
+export function getPayrollStatus() {
+  return api("/reports/payroll-status");
+}

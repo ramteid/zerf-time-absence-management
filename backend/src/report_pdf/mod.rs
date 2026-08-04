@@ -28,7 +28,7 @@ mod timesheet;
 
 pub use payroll::{
     render_payroll_report_pdf, PayrollAbsenceRow, PayrollHoursRow, PayrollHoursSection,
-    PayrollReportData,
+    PayrollOmittedPerson, PayrollReportData, ProvisionalNotice,
 };
 pub use timesheet::{render_timesheet_pdf, TimesheetSection};
 

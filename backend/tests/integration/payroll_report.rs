@@ -38,6 +38,7 @@ fn config(assistant_hours: bool, employee_hours: bool) -> PayrollReportConfig {
         day_of_month: 1,
         include_assistant_hours: assistant_hours,
         include_employee_hours: employee_hours,
+        excluded_user_ids: Vec::new(),
     }
 }
 
@@ -361,6 +362,7 @@ async fn payroll_report_lists_absence_days_and_assistant_hours() {
         &members,
         &config(true, false),
         &language,
+        None,
     )
     .await
     .expect("build report data");
@@ -413,8 +415,11 @@ async fn payroll_report_lists_absence_days_and_assistant_hours() {
     app.cleanup().await;
 }
 
+/// An unfinished month is a normal business state, not a system fault. It must
+/// never reach admins through the technical-error channel — the dashboard tile
+/// is where an outstanding payroll report is surfaced now.
 #[tokio::test]
-async fn payroll_report_waits_until_every_month_is_final() {
+async fn payroll_report_never_reports_missing_submissions_as_a_technical_error() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
     let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
@@ -502,11 +507,11 @@ async fn payroll_report_waits_until_every_month_is_final() {
         .await
         .expect("error queue");
     assert!(
-        queued_errors.iter().any(|entry| entry
+        !queued_errors.iter().any(|entry| entry
             .dedupe_key
             .as_deref()
             .is_some_and(|key| key.starts_with("payroll_report_blocked_"))),
-        "admins are told which month is blocked"
+        "people who have not submitted yet must not raise a technical error"
     );
 
     // Approving the entry settles the assistant's month: their hours are final
@@ -526,6 +531,300 @@ async fn payroll_report_waits_until_every_month_is_final() {
             .await
             .expect("unresolved check"),
         "approved hours are payroll-final"
+    );
+
+    app.cleanup().await;
+}
+
+/// Admins are never staff the payroll accountant files for, and anyone the
+/// admin excluded is deliberately out — neither may appear in the report, and
+/// neither may hold its delivery up.
+#[tokio::test]
+async fn payroll_members_drops_admins_and_excluded_people() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, _lead_pw, emp_id, _emp_pw, _monday, _cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "payroll-filter").await;
+    let (assistant_id, _assistant_pw) = create_assistant(&admin, lead_id, "filter").await;
+
+    let monday = anchor_monday();
+    let (from, to) = month_bounds(monday);
+    let mut members = app
+        .state
+        .db
+        .reports
+        .timesheet_members_for_period(from, to)
+        .await
+        .expect("members");
+
+    // The seeded admin does not track time, so the period query leaves them
+    // out already. Add them explicitly: in a real deployment an admin who
+    // tracks their own hours *is* in the raw set, and that is exactly the case
+    // the filter has to handle.
+    let admin_user = app
+        .state
+        .db
+        .users
+        .find_by_id(1)
+        .await
+        .expect("load admin")
+        .expect("admin exists");
+    assert_eq!(admin_user.role, "admin", "user 1 is the bootstrap admin");
+    members.push(admin_user);
+
+    // Nothing excluded yet: everyone but the admin is covered.
+    let covered = payroll_report::payroll_members(members.clone(), &[]);
+    assert!(
+        !covered.iter().any(|member| member.role == "admin"),
+        "admins never appear in the payroll report"
+    );
+    for expected in [lead_id, emp_id, assistant_id] {
+        assert!(
+            covered.iter().any(|member| member.id == expected),
+            "user {expected} is covered by the report"
+        );
+    }
+
+    // Excluding an employee and an assistant removes exactly those two.
+    let narrowed = payroll_report::payroll_members(members, &[emp_id, assistant_id]);
+    assert!(!narrowed.iter().any(|member| member.id == emp_id));
+    assert!(!narrowed.iter().any(|member| member.id == assistant_id));
+    assert!(
+        narrowed.iter().any(|member| member.id == lead_id),
+        "people who were not excluded stay in"
+    );
+
+    app.cleanup().await;
+}
+
+/// The exclusion list survives a save/load round trip through `app_settings`.
+#[tokio::test]
+async fn payroll_report_settings_persist_the_exclusion_list() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, _lead_pw, emp_id, _emp_pw, _monday, _cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "payroll-excl").await;
+
+    let (status, body) = admin
+        .put(
+            "/api/v1/settings/payroll-report",
+            &json!({ "payroll_report_excluded_user_ids": [emp_id, lead_id] }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "save exclusion list");
+    assert_eq!(
+        body["payroll_report_excluded_user_ids"]
+            .as_array()
+            .expect("excluded list")
+            .iter()
+            .filter_map(|value| value.as_i64())
+            .collect::<Vec<_>>(),
+        vec![emp_id, lead_id],
+        "the saved order is preserved"
+    );
+
+    let stored = payroll_report::load_config(&app.state.pool)
+        .await
+        .expect("load config");
+    assert_eq!(stored.excluded_user_ids, vec![emp_id, lead_id]);
+
+    // Clearing it puts everybody back in.
+    let (status, body) = admin
+        .put(
+            "/api/v1/settings/payroll-report",
+            &json!({ "payroll_report_excluded_user_ids": [] }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "clear exclusion list");
+    assert!(body["payroll_report_excluded_user_ids"]
+        .as_array()
+        .expect("excluded list")
+        .is_empty());
+
+    app.cleanup().await;
+}
+
+/// The dashboard tile must give a team lead the true company-wide picture —
+/// otherwise they cannot tell whether the report is ready to go — while never
+/// leaking the names of people outside their team.
+#[tokio::test]
+async fn payroll_status_counts_everyone_but_anonymizes_outside_a_leads_team() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, lead_pw, emp_id, emp_pw, _monday, _cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "payroll-status").await;
+    let lead = login_change_pw(&app, "lead-payroll-status@example.com", &lead_pw).await;
+    let employee = login_change_pw(&app, "emp-payroll-status@example.com", &emp_pw).await;
+
+    // A second lead with their own employee, so each lead has somebody the
+    // other one is not allowed to see.
+    let (status, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({"email": "lead2-payroll-status@example.com", "first_name": "Otto",
+                "last_name": "Other", "role": "team_lead", "weekly_hours": 39,
+                "leave_days_current_year": 30, "leave_days_next_year": 30, "annual_leave_days": 30,
+                "start_date": "2024-01-01", "approver_ids": [1]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create second lead");
+    let other_lead_id = id(&body);
+
+    let (status, _) = admin
+        .put(
+            "/api/v1/settings/payroll-report",
+            &json!({
+                "payroll_report_enabled": false,
+                "payroll_report_recipients": ["payroll@example.com"],
+                "payroll_report_day_of_month": 1,
+                "payroll_report_include_assistant_hours": true,
+                "payroll_report_include_employee_hours": false,
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "store payroll settings");
+
+    // Switched off: the tile has nothing to show and stays hidden.
+    let (status, body) = admin.get("/api/v1/reports/payroll-status").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["enabled"], json!(false), "disabled report hides the tile");
+
+    let (status, _) = admin
+        .put(
+            "/api/v1/settings/payroll-report",
+            &json!({ "payroll_report_enabled": true }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "enable payroll report");
+
+    let (status, admin_view) = admin.get("/api/v1/reports/payroll-status").await;
+    assert_eq!(status, StatusCode::OK);
+    let total = admin_view["total"].as_u64().expect("total");
+    assert!(total > 0, "the previous month covers somebody");
+    assert_eq!(
+        admin_view["ready"].as_u64().unwrap()
+            + admin_view["awaiting_approval"].as_u64().unwrap()
+            + admin_view["not_submitted"].as_u64().unwrap(),
+        total,
+        "every covered person lands in exactly one bucket"
+    );
+    let admin_members = admin_view["members"].as_array().expect("members");
+    assert_eq!(admin_members.len() as u64, total);
+    assert!(
+        admin_members.iter().all(|member| !member["name"].is_null()),
+        "an admin sees every name"
+    );
+    assert!(
+        !admin_members
+            .iter()
+            .any(|member| member["user_id"].as_i64() == Some(1)),
+        "the admin account itself is not part of the payroll report"
+    );
+
+    let (status, lead_view) = lead.get("/api/v1/reports/payroll-status").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        lead_view["total"].as_u64().unwrap(),
+        total,
+        "a team lead sees the true company-wide count"
+    );
+    let lead_members = lead_view["members"].as_array().expect("members");
+    let named: Vec<i64> = lead_members
+        .iter()
+        .filter_map(|member| member["user_id"].as_i64())
+        .collect();
+    assert!(named.contains(&lead_id), "a lead sees themselves");
+    assert!(named.contains(&emp_id), "a lead sees their own report");
+    assert!(
+        !named.contains(&other_lead_id),
+        "a lead must not see people outside their team"
+    );
+    // The hidden person is still counted, just stripped of any identity.
+    let hidden: Vec<&serde_json::Value> = lead_members
+        .iter()
+        .filter(|member| member["user_id"].is_null())
+        .collect();
+    assert!(!hidden.is_empty(), "the outside person is still listed");
+    assert!(
+        hidden.iter().all(|member| member["name"].is_null()),
+        "no name leaks for people the lead may not see"
+    );
+
+    // The tile is a lead-only feature.
+    let (status, _) = employee.get("/api/v1/reports/payroll-status").await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "employees have no payroll tile");
+
+    app.cleanup().await;
+}
+
+/// A month that covers nobody (a fresh installation, or everyone excluded) has
+/// nothing to report. It must be settled rather than retried every night
+/// forever — otherwise the queue grows without bound and the dashboard card
+/// stays stuck on an outstanding month that can never be delivered.
+#[tokio::test]
+async fn payroll_report_settles_a_month_that_covers_nobody() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (_lead_id, _lead_pw, emp_id, _emp_pw, _monday, _cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "payroll-empty").await;
+
+    configure_unreachable_smtp(&app).await;
+
+    // Exclude everyone the period could cover, so the report has no subject.
+    let everyone: Vec<i64> = app
+        .state
+        .db
+        .users
+        .find_all_ordered()
+        .await
+        .expect("users")
+        .into_iter()
+        .map(|user| user.id)
+        .collect();
+    assert!(everyone.contains(&emp_id));
+
+    let (status, _) = admin
+        .put(
+            "/api/v1/settings/payroll-report",
+            &json!({
+                "payroll_report_enabled": true,
+                "payroll_report_recipients": ["payroll@example.com"],
+                "payroll_report_day_of_month": 1,
+                "payroll_report_include_assistant_hours": true,
+                "payroll_report_include_employee_hours": false,
+                "payroll_report_excluded_user_ids": everyone,
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "enable with everyone excluded");
+
+    // The scheduled run settles the empty month instead of parking it.
+    zerf::background::payroll_report::run_once(&app.state)
+        .await
+        .expect("scheduled run");
+
+    let pending = app
+        .state
+        .db
+        .payroll_queue
+        .list_pending()
+        .await
+        .expect("queue");
+    assert!(
+        pending.is_empty(),
+        "a month with nobody in it must not stay queued forever: {pending:?}"
+    );
+
+    let last_sent = zerf::services::settings::load_setting(
+        &app.state.pool,
+        zerf::services::settings::PAYROLL_REPORT_LAST_SENT_PERIOD_KEY,
+        "",
+    )
+    .await
+    .expect("last sent period");
+    assert!(
+        !last_sent.is_empty(),
+        "the settled month is recorded so the dashboard card greys out"
     );
 
     app.cleanup().await;

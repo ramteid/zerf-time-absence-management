@@ -59,8 +59,17 @@ pub const PAYROLL_REPORT_RECIPIENT_KEY: &str = "payroll_report_recipient";
 pub const PAYROLL_REPORT_DAY_OF_MONTH_KEY: &str = "payroll_report_day_of_month";
 pub const PAYROLL_REPORT_ASSISTANT_HOURS_KEY: &str = "payroll_report_include_assistant_hours";
 pub const PAYROLL_REPORT_EMPLOYEE_HOURS_KEY: &str = "payroll_report_include_employee_hours";
+/// Comma-separated user IDs that are left out of the payroll report entirely —
+/// they neither appear in the document nor hold its delivery up. Admins are
+/// excluded unconditionally and are never part of this list.
+pub const PAYROLL_REPORT_EXCLUDED_USERS_KEY: &str = "payroll_report_excluded_users";
 /// Period for which the payroll report queue was last populated ("YYYY-MM").
 pub const PAYROLL_REPORT_QUEUE_PERIOD_KEY: &str = "payroll_report_queue_period";
+/// Last period whose payroll report was actually delivered by the *scheduled*
+/// run, stored as "YYYY-MM". Drives the dashboard tile's "already sent" state.
+/// A manual "Send now" copy deliberately does not update this: the regular
+/// delivery for that month is still outstanding.
+pub const PAYROLL_REPORT_LAST_SENT_PERIOD_KEY: &str = "payroll_report_last_sent_period";
 
 // Nextcloud upload — DB backup (backup container reads these via psql; app writes them).
 pub const BACKUP_UPLOAD_ENABLED_KEY: &str = "backup_upload_enabled";
@@ -249,6 +258,7 @@ pub async fn load_admin_settings(pool: &crate::db::DatabasePool) -> AppResult<Ad
             .collect(),
         payroll_report_include_assistant_hours: payroll_report.include_assistant_hours,
         payroll_report_include_employee_hours: payroll_report.include_employee_hours,
+        payroll_report_excluded_user_ids: payroll_report.excluded_user_ids,
     })
 }
 
@@ -408,6 +418,9 @@ pub struct AdminSettingsData {
     pub payroll_report_absence_categories: Vec<String>,
     pub payroll_report_include_assistant_hours: bool,
     pub payroll_report_include_employee_hours: bool,
+    /// User IDs left out of the report entirely. Admins are always left out and
+    /// are never listed here.
+    pub payroll_report_excluded_user_ids: Vec<i64>,
 }
 
 #[cfg(test)]

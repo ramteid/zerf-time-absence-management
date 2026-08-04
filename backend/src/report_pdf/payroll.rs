@@ -102,6 +102,28 @@ pub struct PayrollHoursSection {
     pub rows: Vec<PayrollHoursRow>,
 }
 
+/// One person the report had to leave out, with the reason in the report
+/// language.
+pub struct PayrollOmittedPerson {
+    pub name: String,
+    /// Translation key of the reason, e.g. `payroll_report_reason_not_submitted`.
+    pub reason_key: &'static str,
+}
+
+/// Marks a report that covers only part of the staff, because an admin sent it
+/// before everyone had finished their month.
+///
+/// Without this, a partial report is indistinguishable from a complete one and
+/// the payroll accountant would file short hours as if they were final — so the
+/// notice is rendered prominently at the top of the document, not as a footnote.
+pub struct ProvisionalNotice {
+    /// People actually covered by the tables below.
+    pub included: usize,
+    /// People the month covers in total (included + omitted).
+    pub total: usize,
+    pub omitted: Vec<PayrollOmittedPerson>,
+}
+
 /// Everything the payroll report PDF renders. Assembled by
 /// `services::payroll_report`; this module only lays it out.
 pub struct PayrollReportData {
@@ -112,6 +134,9 @@ pub struct PayrollReportData {
     pub absence_rows: Option<Vec<PayrollAbsenceRow>>,
     /// Empty when neither hours section is enabled.
     pub hours_sections: Vec<PayrollHoursSection>,
+    /// `Some` only for a manually triggered partial send; a complete report
+    /// carries no notice.
+    pub provisional: Option<ProvisionalNotice>,
 }
 
 /// Render the payroll report as PDF bytes.
@@ -126,6 +151,10 @@ pub fn render_payroll_report_pdf(data: &PayrollReportData, language: &Language) 
     };
     renderer.draw_title_block(&title, &subtitle);
 
+    if let Some(notice) = &data.provisional {
+        render_provisional_notice(&mut renderer, language, notice);
+    }
+
     if let Some(rows) = &data.absence_rows {
         render_absence_table(&mut renderer, language, rows);
     }
@@ -134,6 +163,43 @@ pub fn render_payroll_report_pdf(data: &PayrollReportData, language: &Language) 
     }
 
     super::build_pdf(renderer.finish())
+}
+
+/// Draw the "this report is not complete yet" block directly under the title,
+/// listing who is still missing and why, so the recipient can see at a glance
+/// that the figures below cover only part of the staff.
+fn render_provisional_notice(
+    renderer: &mut Renderer,
+    language: &Language,
+    notice: &ProvisionalNotice,
+) {
+    renderer.draw_section_heading(&i18n::translate(
+        language,
+        "pdf_payroll_provisional_heading",
+        &[],
+    ));
+    renderer.draw_note(&i18n::translate(
+        language,
+        "pdf_payroll_provisional_summary",
+        &[
+            ("included", notice.included.to_string()),
+            ("total", notice.total.to_string()),
+        ],
+    ));
+    if !notice.omitted.is_empty() {
+        renderer.draw_note(&i18n::translate(
+            language,
+            "pdf_payroll_provisional_missing",
+            &[],
+        ));
+        for person in &notice.omitted {
+            renderer.draw_note(&format!(
+                "- {} ({})",
+                person.name,
+                i18n::translate(language, person.reason_key, &[])
+            ));
+        }
+    }
 }
 
 fn render_absence_table(renderer: &mut Renderer, language: &Language, rows: &[PayrollAbsenceRow]) {
@@ -291,9 +357,35 @@ mod tests {
                     minutes: 930,
                 }],
             }],
+            provisional: None,
         };
         let bytes = render_payroll_report_pdf(&data, &language);
         assert!(bytes.starts_with(b"%PDF"));
+    }
+
+    /// A provisional report must render in every language — the notice goes
+    /// through `i18n::translate`, which panics on a missing key/parameter.
+    #[test]
+    fn renders_a_provisional_pdf_in_every_language() {
+        for code in ["en", "de"] {
+            let language = Language::from_setting(code);
+            let data = PayrollReportData {
+                period_label: "May 2026".into(),
+                organization_name: "Example GmbH".into(),
+                absence_rows: Some(vec![]),
+                hours_sections: vec![],
+                provisional: Some(ProvisionalNotice {
+                    included: 8,
+                    total: 12,
+                    omitted: vec![PayrollOmittedPerson {
+                        name: "Doe, Jane".into(),
+                        reason_key: "payroll_report_reason_not_submitted",
+                    }],
+                }),
+            };
+            let bytes = render_payroll_report_pdf(&data, &language);
+            assert!(bytes.starts_with(b"%PDF"), "{code}");
+        }
     }
 
     #[test]
@@ -307,6 +399,7 @@ mod tests {
                 heading_key: "pdf_payroll_assistant_hours_heading",
                 rows: vec![],
             }],
+            provisional: None,
         };
         let bytes = render_payroll_report_pdf(&data, &language);
         assert!(bytes.starts_with(b"%PDF"));

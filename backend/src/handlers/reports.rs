@@ -497,3 +497,19 @@ pub async fn flextime(
         build_flextime_for_user(&app_state.pool, &user, query.from, query.to).await?;
     Ok(Json(flextime_days))
 }
+
+/// Payroll report status for the dashboard tile: how far the previous month is
+/// from being deliverable. Leads only — team leads see the full counts but only
+/// their own team members by name (see `services::payroll_report::build_status`).
+pub async fn payroll_status(
+    State(app_state): State<AppState>,
+    requester: User,
+) -> AppResult<Json<crate::services::payroll_report::PayrollStatus>> {
+    if !requester.is_lead() {
+        return Err(AppError::Forbidden);
+    }
+    let language = crate::i18n::load_ui_language(&app_state.pool).await?;
+    Ok(Json(
+        crate::services::payroll_report::build_status(&app_state, &requester, &language).await?,
+    ))
+}

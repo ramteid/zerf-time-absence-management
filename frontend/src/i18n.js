@@ -316,11 +316,33 @@ const TRANSLATIONS = {
     "All other employees": "All other employees",
     inactive: "inactive",
     "Send now": "Send now",
-    "Sends the previous month's report right away if it is complete. It does not replace the automatic delivery — the same report is still sent again automatically on the selected day.":
-      "Sends the previous month's report right away if it is complete. It does not replace the automatic delivery — the same report is still sent again automatically on the selected day.",
+    "Sends the previous month's report right away, covering everyone who has finished their month. Anyone still open is named in the report as missing. It does not replace the automatic delivery — the complete report is still sent on the selected day.":
+      "Sends the previous month's report right away, covering everyone who has finished their month. Anyone still open is named in the report as missing. It does not replace the automatic delivery — the complete report is still sent on the selected day.",
     "Report sent.": "Report sent.",
-    "No report was sent. It was already sent or the month is not complete.":
-      "No report was sent. It was already sent or the month is not complete.",
+    "No report was sent. It was already sent, or nobody has finished the month yet.":
+      "No report was sent. It was already sent, or nobody has finished the month yet.",
+    // --- Payroll report: people included ---
+    "People included": "People included",
+    "All employees and assistants": "All employees and assistants",
+    "Administrators never appear in the payroll report.":
+      "Administrators never appear in the payroll report.",
+    except: "except",
+    "Anyone ticked here is left out of the report and does not hold up its delivery.":
+      "Anyone ticked here is left out of the report and does not hold up its delivery.",
+    "No people to select.": "No people to select.",
+    "{included} of {total} people included":
+      "{included} of {total} people included",
+    // --- Payroll report: dashboard tile ---
+    "{ready} of {total} done": "{ready} of {total} done",
+    "{month} sent": "{month} sent",
+    "Nothing left to do this month.": "Nothing left to do this month.",
+    "Not visible to you": "Not visible to you",
+    "No people in this month.": "No people in this month.",
+    Done: "Done",
+    "Waiting for approval": "Waiting for approval",
+    "Not submitted": "Not submitted",
+    help_payroll_report:
+      "The payroll report for the previous month is sent automatically on day {day} of the month, shortly after midnight. If anyone has not submitted and had their weeks approved yet, it is checked again every night and sent as soon as everyone is done. Green means submitted and approved, amber means submitted but still waiting for approval, red means not submitted yet.",
     "A recipient address is required to enable the payroll report.":
       "Enter at least one recipient.",
     "The payroll report is not enabled.": "Automatic delivery is off.",
@@ -1360,11 +1382,32 @@ const TRANSLATIONS = {
     "All other employees": "Alle übrigen Mitarbeitenden",
     inactive: "inaktiv",
     "Send now": "Jetzt senden",
-    "Sends the previous month's report right away if it is complete. It does not replace the automatic delivery — the same report is still sent again automatically on the selected day.":
-      "Sendet die Lohnmeldung für den Vormonat sofort, wenn der Monat abgeschlossen ist. Das ersetzt nicht den automatischen Versand — dieselbe Meldung wird am gewählten Tag trotzdem automatisch erneut verschickt.",
+    "Sends the previous month's report right away, covering everyone who has finished their month. Anyone still open is named in the report as missing. It does not replace the automatic delivery — the complete report is still sent on the selected day.":
+      "Sendet die Lohnmeldung für den Vormonat sofort mit allen Personen, die ihren Monat abgeschlossen haben. Wer noch offen ist, wird in der Meldung als fehlend aufgeführt. Das ersetzt nicht den automatischen Versand — die vollständige Meldung wird am gewählten Tag trotzdem verschickt.",
     "Report sent.": "Lohnmeldung gesendet.",
-    "No report was sent. It was already sent or the month is not complete.":
-      "Keine Lohnmeldung gesendet. Sie wurde bereits gesendet oder der Monat ist noch nicht abgeschlossen.",
+    "No report was sent. It was already sent, or nobody has finished the month yet.":
+      "Keine Lohnmeldung gesendet. Sie wurde bereits gesendet oder es hat noch niemand den Monat abgeschlossen.",
+    // --- Lohnmeldung: einbezogene Personen ---
+    "People included": "Einbezogene Personen",
+    "All employees and assistants": "Alle Mitarbeitenden und Aushilfen",
+    "Administrators never appear in the payroll report.":
+      "Administratoren erscheinen nie in der Lohnmeldung.",
+    except: "außer",
+    "Anyone ticked here is left out of the report and does not hold up its delivery.":
+      "Wer hier angehakt ist, wird in der Lohnmeldung nicht berücksichtigt und hält den Versand nicht auf.",
+    "No people to select.": "Keine Personen zur Auswahl.",
+    "{included} of {total} people included":
+      "{included} von {total} Personen einbezogen",
+    // --- Lohnmeldung: Dashboard-Kachel ---
+    "{ready} of {total} done": "{ready} von {total} fertig",
+    "{month} sent": "{month} versendet",
+    "Nothing left to do this month.": "Diesen Monat ist nichts mehr zu tun.",
+    "Not visible to you": "Für Sie nicht sichtbar",
+    "No people in this month.": "Keine Personen in diesem Monat.",
+    Done: "Fertig",
+    "Not submitted": "Nicht eingereicht",
+    help_payroll_report:
+      "Die Lohnmeldung für den Vormonat wird automatisch am {day}. des Monats kurz nach Mitternacht versendet. Wenn jemand seine Wochen noch nicht eingereicht und genehmigt bekommen hat, wird jede Nacht erneut geprüft und versendet, sobald alle fertig sind. Grün heißt eingereicht und genehmigt, gelb heißt eingereicht, aber noch nicht genehmigt, rot heißt noch nicht eingereicht.",
     "A recipient address is required to enable the payroll report.":
       "Bitte mindestens einen Empfänger eingeben.",
     "The payroll report is not enabled.":

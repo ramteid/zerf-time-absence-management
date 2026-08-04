@@ -28,6 +28,7 @@ database — each builds on state left by the previous ones:
 | `10-team-lead-final-reviews.spec.js` | Team lead rejects a reopen request, approves a cancellation |
 | `11-final-ui-state.spec.js` | Employee and assistant confirm, through their own UI, that every approve/reject/cancel decision landed as the right persistent status chip |
 | `12-admin-user-lifecycle.spec.js` | Admin archives, restores, and resets a user's password |
+| `13-payroll-report.spec.js` | Payroll report: who is included (exclusion list), and the dashboard card leads and admins use to see how far the month is |
 
 `tests/helpers.js` holds the shared building blocks (sign-in, date/time picker
 drivers, the credential store written/read across files). Each role's

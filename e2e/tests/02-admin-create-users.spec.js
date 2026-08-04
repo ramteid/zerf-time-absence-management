@@ -12,7 +12,11 @@
 // (Playwright disallows importing one spec file from another).
 
 import { test, expect } from "@playwright/test";
-import { isoOffset, setDate, storageStatePath, writeCredential } from "./helpers.js";
+import {
+  createUserViaAdminUi,
+  storageStatePath,
+  writeCredential,
+} from "./helpers.js";
 import { ADMIN, EMPLOYEE, TEAM_LEAD } from "./users.js";
 
 // Resumes the admin session saved at the end of 01-bootstrap.spec.js — no
@@ -22,58 +26,10 @@ import { ADMIN, EMPLOYEE, TEAM_LEAD } from "./users.js";
 // between tests beyond what's already persisted server-side.
 test.use({ storageState: storageStatePath("admin") });
 
-// Shared "create a user via the admin's Add User dialog" flow, used for
-// both the team lead and the employee below — they differ only in role and
-// who approves them, so this one helper covers both instead of duplicating
-// the whole dialog interaction twice.
-async function createUser(page, { firstName, lastName, email, role, approverEmail }) {
-  await page.goto("/settings/users");
-  await page.getByRole("button", { name: "Add User" }).click();
-
-  const dialog = page.getByRole("dialog");
-  await expect(dialog).toBeVisible();
-
-  await dialog.locator("#user-first-name").fill(firstName);
-  await dialog.locator("#user-last-name").fill(lastName);
-  await dialog.locator("#user-email").fill(email);
-  await dialog.locator("#user-role").selectOption(role);
-
-  // Backdate the contract start so the user has bookable past weekdays once
-  // they log in (per the user guide: an entry's date must be on/after the
-  // user's start_date and on/before today — never in the future).
-  await setDate(page, "user-start-date", isoOffset(-21));
-
-  // The approver checklist lists every active team_lead/admin user except
-  // the one being created; each row's label includes "(email)", so matching
-  // on the approver's email uniquely selects their checkbox regardless of
-  // how many other eligible approvers are listed.
-  await dialog
-    .locator("label", { hasText: approverEmail })
-    .locator('input[type="checkbox"]')
-    .check();
-
-  // No password is supplied here, so the backend generates a random
-  // temporary one (UserDialog.svelte only sends `password` in the request
-  // body when the admin typed one) and the UI immediately surfaces it via
-  // TempPasswordDialog — with a "no SMTP configured, deliver this in person"
-  // warning, since 03-admin-config.spec.js's SMTP test runs later and leaves
-  // SMTP disabled afterward anyway.
-  await dialog.getByRole("button", { name: "Add User" }).click();
-
-  const tempDialog = page.getByRole("dialog");
-  await expect(tempDialog.getByText("Temporary password:")).toBeVisible();
-  const password = (
-    await tempDialog.locator("strong").first().innerText()
-  ).trim();
-  // Matches the backend's generated-password length floor (see
-  // generate_password() in services/users.rs) — a loose sanity check that
-  // we actually read a real generated value, not an empty string.
-  expect(password.length).toBeGreaterThanOrEqual(12);
-  await tempDialog.getByRole("button", { name: "OK" }).click();
-
-  await expect(page.getByText(`${firstName} ${lastName}`)).toBeVisible();
-  return password;
-}
+// The "create a user via the admin's Add User dialog" flow lives in
+// helpers.js as createUserViaAdminUi — 13-payroll-report.spec.js onboards a
+// user too, so the interaction is shared rather than duplicated.
+const createUser = createUserViaAdminUi;
 
 test("admin: create a team lead, approved by the admin", async ({ page }) => {
   // At this point in the suite the admin is the *only* existing

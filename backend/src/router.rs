@@ -206,6 +206,10 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                 )
                 .route("/reports/overtime", get(handlers::reports::overtime))
                 .route("/reports/flextime", get(handlers::reports::flextime))
+                .route(
+                    "/reports/payroll-status",
+                    get(handlers::reports::payroll_status),
+                )
                 .route("/audit-log", get(handlers::audit_log::list))
                 .route("/logs", get(handlers::app_logs::list))
                 .route(

@@ -1782,10 +1782,21 @@ configured under Settings → Email, so email must be set up first.
 | Send day of month (1–28) | The day on which the previous month is prepared. Default: 5. Set it after your submission deadline so most months are already complete on the first attempt. |
 | Absence days per employee | Which categories appear is decided automatically — there is nothing to tick. Sick-like categories and any category marked **Unpaid** are included, because those are exactly the days that change what payroll has to file: sick days are needed for health-insurance reimbursement, unpaid days reduce the salary payout. Categories that don't affect pay — such as paid special leave or paid training — are left out even if they don't count as vacation or flextime either. The categories currently included are listed for reference. To change what appears, mark or unmark categories as Unpaid on the [Managing categories](#managing-categories) page. |
 | Working days and hours | Tick whose working days and hours are listed: assistants, all other employees, or both. |
+| People included | Everyone is included by default. Tick people under **except** to leave them out. |
 
 At least one recipient is required before the report can be switched on, and
 the report must have at least one section with content (an absence category
 that qualifies, or working hours).
+
+#### Choosing who is included
+
+By default the report covers every employee and assistant. Under **People
+included** you can tick individual people under **except** — they are then left
+out of the report entirely and no longer hold up its delivery, so an employee
+who has nothing to do with payroll never blocks the monthly send.
+
+Administrators never appear in the payroll report and are not offered in the
+list. Deactivated and deleted accounts are not shown either.
 
 #### What the PDF contains
 
@@ -1815,17 +1826,47 @@ everyone it covers:
 - no stored entries or absences lie before a person's start date, because those
   days are hidden from every report and would make the figures too low.
 
-While a month is held back, admins who opted in to technical error notifications
-are told which people are still open, so the missing approvals can be chased. If
-the feature was switched off for a while, or the server missed a month boundary,
+A month that is still open is a normal situation, not a fault — nobody is
+emailed about it. Instead, the **Payroll Report** card on the dashboard shows
+team leads and admins how far the month is, and who is still missing. If the
+feature was switched off for a while, or the server missed a month boundary,
 all intervening months are prepared as soon as it is switched on again.
 
-**Send now** prepares the previous month immediately and sends it if that month
-is already final. It never skips the checks above, and it does not replace the
-scheduled monthly run: the month is not marked as delivered, so the automatic
-send on the configured day still goes out separately even after a successful
-**Send now**. The manually sent copy's email says so explicitly, so the
-recipient does not mistake it for the final delivery.
+**Send now** sends the previous month immediately, without waiting for everyone.
+It includes everybody who has already finished their month and marks the report
+clearly as **provisional**: the PDF and the email both state how many of the
+people it covers and name those who are missing, together with the reason. This
+way an early copy can never be mistaken for the final figures. If nobody has
+finished the month yet, nothing is sent — an empty report helps nobody.
+
+**Send now** does not replace the scheduled monthly run: the month is not marked
+as delivered, so the complete report still goes out automatically on the
+configured day.
+
+#### The dashboard card
+
+Team leads and admins see a **Payroll Report** card on their dashboard while the
+previous month's report is still outstanding. It shows a ring split into three
+colours and the summary **"X of Y done"**:
+
+| Colour | Meaning |
+| --- | --- |
+| Green | Everything submitted and approved — this person is done. |
+| Amber | Everything submitted, but an approval or an absence decision is still missing. |
+| Red | Weeks are still missing, or the data needs an administrator's attention. |
+
+Clicking the card opens the full list, with the people who are still missing at
+the top. Clicking a person opens their report for that month, so you can go
+straight to what needs approving.
+
+Team leads see the counts and colours for **everyone**, so they can tell whether
+the report as a whole is ready. People outside their own team are shown as
+*Not visible to you* — they still count towards the totals, but their names are
+not revealed.
+
+Once the report has been sent, the card greys out and reads e.g. *"June sent"*
+for the rest of the month. The card is hidden entirely when the payroll report
+is switched off.
 
 ### Managing categories
 
