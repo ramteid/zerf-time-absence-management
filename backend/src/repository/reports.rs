@@ -248,6 +248,26 @@ impl ReportDb {
             .await?)
     }
 
+    /// User IDs with at least one time entry in the period, regardless of its
+    /// workflow status. Payroll uses this to ignore assistants who did not
+    /// work at all in a given month while retaining every assistant who has
+    /// started recording hours for it.
+    pub async fn user_ids_with_time_entries_in_range(
+        &self,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> AppResult<HashSet<i64>> {
+        let rows: Vec<(i64,)> = sqlx::query_as(
+            "SELECT DISTINCT user_id FROM time_entries \
+             WHERE entry_date BETWEEN $1 AND $2",
+        )
+        .bind(from)
+        .bind(to)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(|(user_id,)| user_id).collect())
+    }
+
     /// Returns true when the current start date would cause the PDF renderer to
     /// hide existing report content in this period.
     pub async fn has_report_content_before_start_date(

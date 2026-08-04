@@ -35,8 +35,8 @@
 use crate::background::schedule;
 use crate::error::{AppError, AppResult};
 use crate::i18n::Language;
-use crate::repository::User;
 use crate::report_pdf::{PayrollOmittedPerson, ProvisionalNotice};
+use crate::repository::User;
 use crate::services::payroll_report::{self, PayrollReportConfig};
 use crate::services::settings;
 use crate::AppState;
@@ -201,17 +201,11 @@ async fn process_period(
     is_manual: bool,
 ) -> AppResult<bool> {
     let (from, to) = schedule::period_bounds(period)?;
-    // Same member set as the timesheet export — everyone the month actually
-    // covers, including archived accounts that still have data in it — minus
-    // admins and anyone the admin excluded from the report.
-    let members = payroll_report::payroll_members(
-        state
-            .db
-            .reports
-            .timesheet_members_for_period(from, to)
-            .await?,
-        &config.excluded_user_ids,
-    );
+    // Start with the same period-aware member set as the timesheet export,
+    // then remove admins, explicitly excluded people, and assistants without
+    // any recorded hours in this month.
+    let members =
+        payroll_report::payroll_members(state, from, to, &config.excluded_user_ids).await?;
 
     // Full approval is only required when this person's hours literally end
     // up in the PDF — an unapproved entry that never gets printed doesn't
@@ -271,7 +265,13 @@ async fn process_period(
 
     let included: Vec<User> = ready.into_iter().map(|member| member.user).collect();
     let data = payroll_report::build_report_data(
-        state, from, to, &included, config, language, provisional,
+        state,
+        from,
+        to,
+        &included,
+        config,
+        language,
+        provisional,
     )
     .await?;
     let bytes = crate::report_pdf::render_payroll_report_pdf(&data, language);

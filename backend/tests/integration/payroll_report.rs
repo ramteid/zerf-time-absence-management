@@ -536,44 +536,121 @@ async fn payroll_report_never_reports_missing_submissions_as_a_technical_error()
     app.cleanup().await;
 }
 
-/// Admins are never staff the payroll accountant files for, and anyone the
-/// admin excluded is deliberately out — neither may appear in the report, and
-/// neither may hold its delivery up.
+/// The dashboard and the send path use the same assistant relevance rule. An
+/// assistant with booked hours is amber until approval, while an assistant
+/// without any entry in the month is absent from the status altogether.
 #[tokio::test]
-async fn payroll_members_drops_admins_and_excluded_people() {
+async fn payroll_status_tracks_only_assistants_with_month_activity() {
     let app = TestApp::spawn().await;
     let admin = admin_login(&app).await;
-    let (lead_id, _lead_pw, emp_id, _emp_pw, _monday, _cat_id) =
+    let (lead_id, lead_pw, _emp_id, _emp_pw, _monday, cat_id) =
+        bootstrap_team_with_suffix(&app, &admin, false, "payroll-assistant-status").await;
+    let lead = login_change_pw(&app, "lead-payroll-assistant-status@example.com", &lead_pw).await;
+    let (active_assistant_id, active_assistant_pw) =
+        create_assistant(&admin, lead_id, "assistant-status-active").await;
+    let (inactive_assistant_id, _inactive_assistant_pw) =
+        create_assistant(&admin, lead_id, "assistant-status-inactive").await;
+    let active_assistant = login_change_pw(
+        &app,
+        "aushilfe-assistant-status-active@example.com",
+        &active_assistant_pw,
+    )
+    .await;
+
+    let (status, _) = admin
+        .put(
+            "/api/v1/settings/payroll-report",
+            &json!({
+                "payroll_report_enabled": true,
+                "payroll_report_recipients": ["payroll@example.com"],
+                "payroll_report_day_of_month": 1,
+                "payroll_report_include_assistant_hours": true,
+                "payroll_report_include_employee_hours": false,
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "enable payroll report");
+
+    let monday = anchor_monday();
+    let day = monday.format("%Y-%m-%d").to_string();
+    let entry_id = create_and_submit_entry(&active_assistant, &day, cat_id).await;
+
+    let (status, card) = admin.get("/api/v1/reports/payroll-status").await;
+    assert_eq!(status, StatusCode::OK);
+    let members = card["members"].as_array().expect("payroll members");
+    let active_member = members
+        .iter()
+        .find(|member| member["user_id"].as_i64() == Some(active_assistant_id))
+        .unwrap_or_else(|| panic!("active assistant missing from payroll status: {card}"));
+    assert_eq!(
+        active_member["status"], "awaiting_approval",
+        "booked but unapproved assistant hours must be amber"
+    );
+    assert!(
+        !members
+            .iter()
+            .any(|member| member["user_id"].as_i64() == Some(inactive_assistant_id)),
+        "an assistant without month activity must not be counted or displayed"
+    );
+
+    let (status, _) = lead
+        .post(
+            "/api/v1/time-entries/batch-approve",
+            &json!({"ids": [entry_id]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve assistant entry");
+
+    let (status, card) = admin.get("/api/v1/reports/payroll-status").await;
+    assert_eq!(status, StatusCode::OK);
+    let active_member = card["members"]
+        .as_array()
+        .expect("payroll members")
+        .iter()
+        .find(|member| member["user_id"].as_i64() == Some(active_assistant_id))
+        .unwrap_or_else(|| panic!("active assistant missing after approval: {card}"));
+    assert_eq!(active_member["status"], "ready");
+
+    app.cleanup().await;
+}
+
+/// Assistants only matter in months in which they recorded time. The same
+/// period-aware selection removes explicitly excluded people and admins.
+#[tokio::test]
+async fn payroll_members_drops_inactive_assistants_and_excluded_people() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let (lead_id, _lead_pw, emp_id, _emp_pw, _monday, cat_id) =
         bootstrap_team_with_suffix(&app, &admin, false, "payroll-filter").await;
-    let (assistant_id, _assistant_pw) = create_assistant(&admin, lead_id, "filter").await;
+    let (assistant_id, assistant_pw) = create_assistant(&admin, lead_id, "filter").await;
+    let (inactive_assistant_id, _inactive_assistant_pw) =
+        create_assistant(&admin, lead_id, "filter-inactive").await;
+    let assistant = login_change_pw(&app, "aushilfe-filter@example.com", &assistant_pw).await;
 
     let monday = anchor_monday();
     let (from, to) = month_bounds(monday);
-    let mut members = app
-        .state
-        .db
-        .reports
-        .timesheet_members_for_period(from, to)
-        .await
-        .expect("members");
+    let day = monday.format("%Y-%m-%d").to_string();
+    let (status, body) = assistant
+        .post(
+            "/api/v1/time-entries",
+            &json!({
+                "entry_date": day,
+                "start_time": "08:00",
+                "end_time": "12:00",
+                "category_id": cat_id,
+                "comment": "work"
+            }),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "create draft assistant entry: {body}"
+    );
 
-    // The seeded admin does not track time, so the period query leaves them
-    // out already. Add them explicitly: in a real deployment an admin who
-    // tracks their own hours *is* in the raw set, and that is exactly the case
-    // the filter has to handle.
-    let admin_user = app
-        .state
-        .db
-        .users
-        .find_by_id(1)
+    let covered = payroll_report::payroll_members(&app.state, from, to, &[])
         .await
-        .expect("load admin")
-        .expect("admin exists");
-    assert_eq!(admin_user.role, "admin", "user 1 is the bootstrap admin");
-    members.push(admin_user);
-
-    // Nothing excluded yet: everyone but the admin is covered.
-    let covered = payroll_report::payroll_members(members.clone(), &[]);
+        .expect("covered payroll members");
     assert!(
         !covered.iter().any(|member| member.role == "admin"),
         "admins never appear in the payroll report"
@@ -584,9 +661,17 @@ async fn payroll_members_drops_admins_and_excluded_people() {
             "user {expected} is covered by the report"
         );
     }
+    assert!(
+        !covered
+            .iter()
+            .any(|member| member.id == inactive_assistant_id),
+        "an assistant without a time entry is irrelevant for this month"
+    );
 
     // Excluding an employee and an assistant removes exactly those two.
-    let narrowed = payroll_report::payroll_members(members, &[emp_id, assistant_id]);
+    let narrowed = payroll_report::payroll_members(&app.state, from, to, &[emp_id, assistant_id])
+        .await
+        .expect("narrowed payroll members");
     assert!(!narrowed.iter().any(|member| member.id == emp_id));
     assert!(!narrowed.iter().any(|member| member.id == assistant_id));
     assert!(
@@ -687,7 +772,11 @@ async fn payroll_status_counts_everyone_but_anonymizes_outside_a_leads_team() {
     // Switched off: the tile has nothing to show and stays hidden.
     let (status, body) = admin.get("/api/v1/reports/payroll-status").await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["enabled"], json!(false), "disabled report hides the tile");
+    assert_eq!(
+        body["enabled"],
+        json!(false),
+        "disabled report hides the tile"
+    );
 
     let (status, _) = admin
         .put(
@@ -752,7 +841,11 @@ async fn payroll_status_counts_everyone_but_anonymizes_outside_a_leads_team() {
 
     // The tile is a lead-only feature.
     let (status, _) = employee.get("/api/v1/reports/payroll-status").await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "employees have no payroll tile");
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "employees have no payroll tile"
+    );
 
     app.cleanup().await;
 }

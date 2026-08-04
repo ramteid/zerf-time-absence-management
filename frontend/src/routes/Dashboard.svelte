@@ -495,15 +495,6 @@
     <TeamSummary {pendingWeeks} {pendingAbsences} {users} />
   {/if}
 
-  {#if $currentUser?.permissions?.can_approve && payrollStatus}
-    <PayrollStatus
-      status={payrollStatus}
-      {activeHelp}
-      onHelpToggle={toggleHelp}
-      onOpen={() => (payrollDetailOpen = true)}
-    />
-  {/if}
-
   {#if $currentUser?.permissions?.can_approve}
     <ApprovalQueues
       {pendingWeeks}
@@ -525,7 +516,17 @@
       onRejectAbsence={rejectAbsence}
     />
 
-    <AbsenceSlider {users} />
+    <div class:single={!payrollStatus} class="dashboard-overview-grid">
+      <AbsenceSlider {users} />
+      {#if payrollStatus}
+        <PayrollStatus
+          status={payrollStatus}
+          {activeHelp}
+          onHelpToggle={toggleHelp}
+          onOpen={() => (payrollDetailOpen = true)}
+        />
+      {/if}
+    </div>
   {/if}
 
   {#if !isAssistantCurrentUser && hasOwnTrackingData}
@@ -592,3 +593,22 @@
     onReject={rejectWeek}
   />
 {/if}
+
+<style>
+  .dashboard-overview-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-top: 16px;
+  }
+
+  .dashboard-overview-grid.single {
+    grid-template-columns: 1fr;
+  }
+
+  @media (max-width: 768px) {
+    .dashboard-overview-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

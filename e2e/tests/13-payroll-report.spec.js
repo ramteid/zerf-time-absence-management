@@ -130,9 +130,8 @@ test.describe("payroll report dashboard card", () => {
     await page.goto("/dashboard");
 
     await page
-      .locator(".dashboard-group", { hasText: "Payroll Report" })
-      .getByRole("button")
-      .first()
+      .locator(".payroll-card")
+      .getByTitle(/payroll report/i)
       .click();
 
     const help = page.locator(".dashboard-help");
@@ -190,7 +189,9 @@ test.describe("payroll report card visibility", () => {
     await page.goto("/dashboard");
     // Wait for the dashboard to actually render before asserting an absence,
     // so this cannot pass simply because the page had not loaded yet.
-    await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Dashboard" }),
+    ).toBeVisible();
     await expect(page.locator(".payroll-card")).toHaveCount(0);
     await context.close();
   });

@@ -391,7 +391,8 @@ describe("Dashboard", () => {
 
     function approverApi(overrides = {}) {
       return async (urlPath, opts = {}) => {
-        if (urlPath === "/reports/payroll-status") return mockState.payrollStatus;
+        if (urlPath === "/reports/payroll-status")
+          return mockState.payrollStatus;
         if (urlPath === "/time-entries/all?status=submitted")
           return overrides.submitted ?? [submittedEntry];
         if (urlPath === "/absences/all?status=pending_review") return [];
@@ -450,6 +451,13 @@ describe("Dashboard", () => {
 
       await waitForText(target, "1 of 2 done");
       expect(target.querySelector(".payroll-card")).toBeTruthy();
+      const overviewCards = target.querySelector(".dashboard-overview-grid");
+      expect(overviewCards.children[0].classList.contains("slider-card")).toBe(
+        true,
+      );
+      expect(overviewCards.children[1].classList.contains("payroll-card")).toBe(
+        true,
+      );
     });
 
     it("refreshes together with the approval queues", async () => {

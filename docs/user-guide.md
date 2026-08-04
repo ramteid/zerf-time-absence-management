@@ -1790,10 +1790,12 @@ that qualifies, or working hours).
 
 #### Choosing who is included
 
-By default the report covers every employee and assistant. Under **People
-included** you can tick individual people under **except** — they are then left
-out of the report entirely and no longer hold up its delivery, so an employee
-who has nothing to do with payroll never blocks the monthly send.
+By default the report covers every employee. An assistant is included only if
+they recorded at least one time entry in the reported month. An assistant with
+no booked hours is irrelevant for that month: they do not appear in the PDF or
+dashboard status and cannot hold up delivery. Under **People included** you can
+tick individual people under **except** - they are then left out of the report
+entirely and no longer hold up its delivery.
 
 Administrators never appear in the payroll report and are not offered in the
 list. Deactivated and deleted accounts are not shown either.
@@ -1809,7 +1811,8 @@ list. Deactivated and deleted accounts are not shown either.
 - **Working days and hours**: one row per person — the number of days with
   approved working time and the total approved hours, given both as hours:minutes
   and as a decimal value for payroll. Automatic break deduction is already
-  applied, exactly as on the timesheet PDF.
+  applied, exactly as on the timesheet PDF. Assistants without any time entry in
+  the month are omitted.
 
 #### When it is sent
 
@@ -1845,9 +1848,11 @@ configured day.
 
 #### The dashboard card
 
-Team leads and admins see a **Payroll Report** card on their dashboard while the
-previous month's report is still outstanding. It shows a ring split into three
-colours and the summary **"X of Y done"**:
+Team leads and admins see a **Payroll Report** card next to **Who is absent** on
+their dashboard while the previous month's report is still outstanding. It
+shows a ring split into three colours and the summary **"X of Y done"**. The
+ring and detail list count only people relevant to that month; assistants
+without any time entry are omitted:
 
 | Colour | Meaning |
 | --- | --- |

@@ -106,21 +106,43 @@ pub async fn load_config(pool: &crate::db::DatabasePool) -> AppResult<PayrollRep
 
 /// The people a payroll report for this period actually covers.
 ///
-/// Two groups never appear, and therefore never block delivery either:
+/// Three groups never appear, and therefore never block delivery either:
 ///   * **admins** — they are the ones running the system, not staff the payroll
 ///     accountant files for, so they are dropped unconditionally;
 ///   * anyone the admin put on the exclusion list.
+///   * assistants without any time entry in this period. Assistants have no
+///     fixed target, so an empty month needs no declaration and is complete by
+///     definition. Any recorded entry makes the assistant relevant, regardless
+///     of whether it is still a draft, submitted, approved, or rejected.
 ///
 /// Report content, the readiness gate and the dashboard tile all go through
 /// this one filter, so what the tile counts is exactly what the PDF contains.
-pub fn payroll_members(members: Vec<User>, excluded_user_ids: &[i64]) -> Vec<User> {
-    members
+pub async fn payroll_members(
+    app_state: &AppState,
+    from: NaiveDate,
+    to: NaiveDate,
+    excluded_user_ids: &[i64],
+) -> AppResult<Vec<User>> {
+    let assistants_with_entries = app_state
+        .db
+        .reports
+        .user_ids_with_time_entries_in_range(from, to)
+        .await?;
+    let members = app_state
+        .db
+        .reports
+        .timesheet_members_for_period(from, to)
+        .await?;
+
+    Ok(members
         .into_iter()
         .filter(|member| {
             !crate::roles::is_admin_role(&member.role)
                 && !excluded_user_ids.contains(&member.id)
+                && (!is_assistant_role(&member.role)
+                    || assistants_with_entries.contains(&member.id))
         })
-        .collect()
+        .collect())
 }
 
 /// Traffic-light status of one person's month, as shown on the dashboard tile.
@@ -234,14 +256,7 @@ pub async fn build_status(
         .any(|queued| queued == &period);
     let sent = reached_the_queue && !still_queued;
 
-    let members = payroll_members(
-        app_state
-            .db
-            .reports
-            .timesheet_members_for_period(from, to)
-            .await?,
-        &config.excluded_user_ids,
-    );
+    let members = payroll_members(app_state, from, to, &config.excluded_user_ids).await?;
     // The tile's colours always require full approval, for every person —
     // see the doc comment on `evaluate_members` for why this must not reuse
     // the send path's role-conditional rule.
@@ -279,8 +294,7 @@ pub async fn build_status(
         members: Vec::with_capacity(evaluated.len()),
     };
     for member in evaluated {
-        let value =
-            status_for_member(app_state, &member.user, member.readiness, from, to).await?;
+        let value = status_for_member(app_state, &member.user, member.readiness, from, to).await?;
         match value {
             status_value::READY => status.ready += 1,
             status_value::AWAITING_APPROVAL => status.awaiting_approval += 1,
@@ -291,8 +305,7 @@ pub async fn build_status(
             .is_none_or(|ids| ids.contains(&member.user.id));
         status.members.push(PayrollStatusMember {
             user_id: visible.then_some(member.user.id),
-            name: visible
-                .then(|| format!("{} {}", member.user.first_name, member.user.last_name)),
+            name: visible.then(|| format!("{} {}", member.user.first_name, member.user.last_name)),
             status: value,
             reason_key: member.reason_key,
         });
@@ -336,8 +349,7 @@ async fn status_for_member(
     // Only `PendingAbsenceRequests` reaches here. Ask the week question the
     // gate skipped: an open request is "submitted, awaiting approval" (amber),
     // but missing weeks outrank it (red).
-    let submission_exempt =
-        !crate::roles::has_submission_obligation(&user.role, user.weekly_hours);
+    let submission_exempt = !crate::roles::has_submission_obligation(&user.role, user.weekly_hours);
     let weeks_in = crate::services::reports::all_weeks_submitted_for_month(
         &app_state.pool,
         user.id,
@@ -705,7 +717,10 @@ mod tests {
         assert_eq!(format_excluded_ids(&[]), "");
         // Duplicates are normalized away on save.
         assert_eq!(format_excluded_ids(&[3, 3, 7]), "3,7");
-        assert_eq!(parse_excluded_ids(&format_excluded_ids(&[3, 7])), vec![3, 7]);
+        assert_eq!(
+            parse_excluded_ids(&format_excluded_ids(&[3, 7])),
+            vec![3, 7]
+        );
     }
 
     /// The three-colour scale the dashboard tile paints: everything that only

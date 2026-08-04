@@ -91,6 +91,7 @@ describe("PayrollStatus tile", () => {
     expect(target.textContent).toContain("July 2026");
     // One coloured arc for each non-zero state.
     expect(target.querySelectorAll(".donut-segment").length).toBe(3);
+    expect(target.querySelector(".seg-awaiting")).toBeTruthy();
   });
 
   it("omits arcs for states nobody is in", async () => {
@@ -218,5 +219,19 @@ describe("PayrollStatusDialog", () => {
     );
     expect(labels[0]).toContain("Not submitted");
     expect(labels[labels.length - 1]).toContain("Done");
+  });
+
+  it("marks a booked but unapproved person with the amber status", async () => {
+    component = mount(PayrollStatusDialog, {
+      target,
+      props: { status: status(), onClose: () => {} },
+    });
+    await settle();
+
+    const awaitingRow = [...document.querySelectorAll(".payroll-row")].find(
+      (row) => row.textContent.includes("Alex Assistant"),
+    );
+    expect(awaitingRow.querySelector(".zf-chip-pending")).toBeTruthy();
+    expect(awaitingRow.textContent).toContain("Waiting for approval");
   });
 });

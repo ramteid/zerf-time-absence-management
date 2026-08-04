@@ -14,9 +14,10 @@
   $: done = !!status?.sent;
 </script>
 
-<div class="dashboard-group">
-  <div class="dashboard-group-label zf-row">
-    {$t("Payroll Report")}
+<div class="zf-card payroll-card" class:is-dimmed={done}>
+  <div class="card-header">
+    <Icon name="FileText" size={15} sw={1.5} />
+    <span class="card-header-title">{$t("Payroll Report")}</span>
     <button
       class="zf-btn-icon-sm zf-btn-ghost zf-help-icon"
       title={$t("help_payroll_report")}
@@ -26,43 +27,39 @@
     </button>
   </div>
   {#if activeHelp === "payroll"}
-    <div class="dashboard-help">
+    <div class="dashboard-help payroll-help">
       {$t("help_payroll_report").replace("{day}", status?.day_of_month ?? 5)}
     </div>
   {/if}
 
   {#if done}
-    <div class="zf-card payroll-card is-dimmed">
-      <div class="payroll-body">
-        <Icon name="Check" size={20} />
-        <div>
-          <div class="payroll-headline">
-            {$t("{month} sent").replace("{month}", status?.period_label ?? "")}
-          </div>
-          <div class="payroll-sub">{$t("Nothing left to do this month.")}</div>
+    <div class="payroll-body">
+      <Icon name="Check" size={20} />
+      <div>
+        <div class="payroll-headline">
+          {$t("{month} sent").replace("{month}", status?.period_label ?? "")}
         </div>
+        <div class="payroll-sub">{$t("Nothing left to do this month.")}</div>
       </div>
     </div>
   {:else}
     <button
-      class="zf-card payroll-card payroll-card-button"
+      class="payroll-body payroll-card-button"
       on:click={onOpen}
       disabled={!status}
     >
-      <div class="payroll-body">
-        <StatusDonut
-          ready={status?.ready ?? 0}
-          awaitingApproval={status?.awaiting_approval ?? 0}
-          notSubmitted={status?.not_submitted ?? 0}
-        />
-        <div>
-          <div class="payroll-headline">
-            {$t("{ready} of {total} done")
-              .replace("{ready}", status?.ready ?? 0)
-              .replace("{total}", status?.total ?? 0)}
-          </div>
-          <div class="payroll-sub">{status?.period_label ?? ""}</div>
+      <StatusDonut
+        ready={status?.ready ?? 0}
+        awaitingApproval={status?.awaiting_approval ?? 0}
+        notSubmitted={status?.not_submitted ?? 0}
+      />
+      <div>
+        <div class="payroll-headline">
+          {$t("{ready} of {total} done")
+            .replace("{ready}", status?.ready ?? 0)
+            .replace("{total}", status?.total ?? 0)}
         </div>
+        <div class="payroll-sub">{status?.period_label ?? ""}</div>
       </div>
     </button>
   {/if}
@@ -70,17 +67,21 @@
 
 <style>
   .payroll-card {
-    padding: 16px;
     width: 100%;
     text-align: left;
+    min-width: 0;
   }
 
-  /* The clickable variant is a <button> so it is keyboard reachable; strip the
-     button chrome so it still reads as a card. */
+  /* The content is a button so the card remains keyboard reachable while the
+     header keeps the same structure as the other dashboard cards. */
   .payroll-card-button {
     font: inherit;
     color: inherit;
     cursor: pointer;
+    border: 0;
+    background: transparent;
+    width: 100%;
+    text-align: left;
   }
 
   .payroll-card-button:hover:not(:disabled) {
@@ -99,8 +100,17 @@
     display: flex;
     align-items: center;
     gap: 16px;
-    /* Keeps the text from pushing the card wider than its grid column. */
+    padding: 16px;
     min-width: 0;
+  }
+
+  .payroll-help {
+    font-size: 0.8125rem;
+    color: var(--text-tertiary);
+    margin: 12px 16px 0;
+    padding: 8px;
+    background: var(--bg-muted);
+    border-radius: var(--radius-sm);
   }
 
   .payroll-headline {

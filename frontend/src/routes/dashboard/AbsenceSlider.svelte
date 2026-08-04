@@ -73,7 +73,7 @@
   );
 </script>
 
-<div class="zf-card slider-card mt-16">
+<div class="zf-card slider-card">
   <div class="card-header">
     <Icon name="Users" size={15} sw={1.5} />
     <span class="card-header-title">{$t("Who is absent")}</span>
