@@ -23,6 +23,7 @@
   let comment = template.comment || "";
   let error = "";
   let errorElement;
+  let busy = false;
 
   onMount(() => {
     let refreshInterval;
@@ -76,6 +77,7 @@
   }
 
   async function save() {
+    if (busy) return;
     error = "";
     if (!entry_date) {
       await showError($t("Invalid date."));
@@ -96,6 +98,7 @@
       await showError($t("Category required."));
       return;
     }
+    busy = true;
     try {
       const body = {
         entry_date,
@@ -111,46 +114,60 @@
       onClose({ changed: true, entry: saved, deletedId: null });
     } catch (e) {
       await showError($t(e?.message || "Error"));
+    } finally {
+      busy = false;
     }
   }
 
   async function remove() {
-    if (
-      !(await confirmDialog($t("Delete?"), $t("Delete this entry?"), {
-        danger: true,
-        confirm: $t("Delete"),
-      }))
-    )
-      return;
+    if (busy) return;
+    busy = true;
     try {
+      const confirmed = await confirmDialog(
+        $t("Delete?"),
+        $t("Delete this entry?"),
+        {
+          danger: true,
+          confirm: $t("Delete"),
+        },
+      );
+      if (!confirmed) return;
       await api("/time-entries/" + template.id, { method: "DELETE" });
       dialog.close(true);
       onClose({ changed: true, entry: null, deletedId: template.id });
     } catch (e) {
       await showError($t(e?.message || "Error"));
+    } finally {
+      busy = false;
     }
   }
 
   function onDialogKeydown(e) {
+    if (e.key !== "Enter" || busy) return;
     const pickerOpen =
       dialog.querySelector(".tp-drum") ||
       dialog.querySelector(".flatpickr-calendar.open") ||
       document.querySelector(".flatpickr-calendar.open");
-    if (e.key === "Enter" && !pickerOpen) {
-      e.preventDefault();
-      save();
-    }
+    const interactiveTarget = e.target?.closest?.(
+      "button, textarea, select, a, [role='button']",
+    );
+    if (pickerOpen || interactiveTarget) return;
+    e.preventDefault();
+    save();
   }
 </script>
 
 <Dialog
   bind:this={dialog}
   title={$t(isNew ? "Add Entry" : "Edit Entry")}
-  onClose={() => onClose({ changed: false, entry: null, deletedId: null })}
+  closeDisabled={busy}
+  onClose={() => {
+    if (!busy) onClose({ changed: false, entry: null, deletedId: null });
+  }}
   on:keydown={onDialogKeydown}
   let:dlg
 >
-  <div class="field-group">
+  <div class="field-group" aria-busy={busy}>
     <div>
       <label class="zf-label" for="entry-date">{$t("Date")}</label>
       <DatePicker
@@ -218,15 +235,28 @@
   </div>
   <svelte:fragment slot="footer">
     {#if !isNew}
-      <button class="zf-btn zf-btn-danger" type="button" on:click={remove}>
+      <button
+        class="zf-btn zf-btn-danger"
+        type="button"
+        disabled={busy}
+        on:click={remove}
+      >
         <Icon name="Trash" size={14} />{$t("Delete")}
       </button>
     {/if}
     <span class="flex-1"></span>
-    <button class="zf-btn" type="button" on:click={() => dialog.close()}
-      >{$t("Cancel")}</button
+    <button
+      class="zf-btn"
+      type="button"
+      disabled={busy}
+      on:click={() => dialog.close()}>{$t("Cancel")}</button
     >
-    <button class="zf-btn zf-btn-primary" type="button" on:click={save}>
+    <button
+      class="zf-btn zf-btn-primary"
+      type="button"
+      disabled={busy}
+      on:click={save}
+    >
       {$t(isNew ? "Add Entry" : "Save")}
     </button>
   </svelte:fragment>

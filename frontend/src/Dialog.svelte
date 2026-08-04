@@ -1,3 +1,33 @@
+<script context="module">
+  const fallbackInertStates = new WeakMap();
+
+  function acquireFallbackInert(element) {
+    const existingState = fallbackInertStates.get(element);
+    if (existingState) {
+      existingState.references += 1;
+      return;
+    }
+    fallbackInertStates.set(element, {
+      references: 1,
+      inert: element.inert,
+      ariaHidden: element.getAttribute("aria-hidden"),
+    });
+    element.inert = true;
+    element.setAttribute("aria-hidden", "true");
+  }
+
+  function releaseFallbackInert(element) {
+    const state = fallbackInertStates.get(element);
+    if (!state) return;
+    state.references -= 1;
+    if (state.references > 0) return;
+    element.inert = state.inert;
+    if (state.ariaHidden == null) element.removeAttribute("aria-hidden");
+    else element.setAttribute("aria-hidden", state.ariaHidden);
+    fallbackInertStates.delete(element);
+  }
+</script>
+
 <script>
   import { onDestroy, onMount, tick } from "svelte";
   import Icon from "./Icons.svelte";
@@ -7,6 +37,7 @@
   export let onClose = null;
   // Wider layout for dialogs with tables or dense forms (e.g. user editor).
   export let wide = false;
+  export let closeDisabled = false;
 
   let dlg;
   let _silent = false;
@@ -38,23 +69,16 @@
       for (const sibling of parent.children) {
         if (sibling === branch || sibling.classList.contains("dialog-backdrop"))
           continue;
-        changedElements.push({
-          element: sibling,
-          inert: sibling.inert,
-          ariaHidden: sibling.getAttribute("aria-hidden"),
-        });
-        sibling.inert = true;
-        sibling.setAttribute("aria-hidden", "true");
+        changedElements.push(sibling);
+        acquireFallbackInert(sibling);
       }
       if (parent === document.body) break;
       branch = parent;
     }
 
     restoreOutsideState = () => {
-      for (const { element, inert, ariaHidden } of changedElements) {
-        element.inert = inert;
-        if (ariaHidden == null) element.removeAttribute("aria-hidden");
-        else element.setAttribute("aria-hidden", ariaHidden);
+      for (const element of changedElements) {
+        releaseFallbackInert(element);
       }
       restoreOutsideState = null;
     };
@@ -68,6 +92,13 @@
       previouslyFocusedElement.focus();
     }
     previouslyFocusedElement = null;
+  }
+
+  function isTopmostFallbackDialog() {
+    const openFallbackDialogs = document.querySelectorAll(
+      "dialog.dialog-fallback[open]",
+    );
+    return openFallbackDialogs[openFallbackDialogs.length - 1] === dlg;
   }
 
   onMount(() => {
@@ -93,11 +124,17 @@
   onDestroy(restoreFallbackState);
 
   export function close(silent = false) {
+    if (closeDisabled && !silent) return;
     _silent = silent;
     restoreFallbackState();
     if (typeof dlg.close === "function") {
-      dlg.close();
-      return;
+      try {
+        dlg.close();
+        if (!dlg.hasAttribute("open")) return;
+      } catch {
+        // Fall through when a partial dialog implementation exposes close()
+        // but cannot close a non-native fallback dialog.
+      }
     }
     dlg.removeAttribute("open");
     if (!_silent) onClose?.();
@@ -105,7 +142,8 @@
   }
 
   function onFallbackKeydown(event) {
-    if (!fallbackMode || event.defaultPrevented) return;
+    if (!fallbackMode || event.defaultPrevented || !isTopmostFallbackDialog())
+      return;
     if (event.key === "Escape") {
       event.preventDefault();
       close();
@@ -154,6 +192,9 @@
     if (!_silent) onClose?.();
     _silent = false;
   }}
+  on:cancel={(event) => {
+    if (closeDisabled) event.preventDefault();
+  }}
   on:keydown
   class:dialog-wide={wide}
   class:dialog-fallback={fallbackMode}
@@ -163,6 +204,7 @@
     <button
       class="zf-btn-icon-sm zf-btn-ghost"
       type="button"
+      disabled={closeDisabled}
       aria-label={$t("Close")}
       title={$t("Close")}
       on:click={() => close()}

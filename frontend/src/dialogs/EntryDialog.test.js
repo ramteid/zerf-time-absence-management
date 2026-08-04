@@ -198,6 +198,83 @@ describe("EntryDialog", () => {
     expect(postCall).toBeTruthy();
   });
 
+  it("does not treat Enter on interactive controls as a save command", async () => {
+    component = mount(EntryDialog, {
+      target,
+      props: {
+        template: { entry_date: "2024-01-15" },
+        onClose: vi.fn(),
+      },
+    });
+    await settle();
+
+    const interactiveControls = [
+      target.querySelector("#entry-comment"),
+      target.querySelector("#entry-category"),
+      target.querySelector(".date-picker-button"),
+      [...target.querySelectorAll("dialog footer button")].find(
+        (button) => button.textContent.trim() === "Cancel",
+      ),
+    ];
+    for (const control of interactiveControls) {
+      const enterEvent = new KeyboardEvent("keydown", {
+        key: "Enter",
+        bubbles: true,
+        cancelable: true,
+      });
+      control.dispatchEvent(enterEvent);
+      expect(enterEvent.defaultPrevented).toBe(false);
+    }
+
+    expect(apiMock).not.toHaveBeenCalled();
+    expect(target.querySelector("dialog").open).toBe(true);
+  });
+
+  it("submits only once while a save request is pending", async () => {
+    let resolveRequest;
+    apiMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveRequest = resolve;
+        }),
+    );
+    const onClose = vi.fn();
+    component = mount(EntryDialog, {
+      target,
+      props: { template: { entry_date: "2024-01-15" }, onClose },
+    });
+    await settle();
+    const addButton = [...target.querySelectorAll("button")].find(
+      (button) => button.textContent.trim() === "Add Entry",
+    );
+
+    addButton.click();
+    addButton.click();
+    await settle();
+
+    expect(apiMock).toHaveBeenCalledTimes(1);
+    expect(addButton.disabled).toBe(true);
+    expect(target.querySelector('button[aria-label="Close"]').disabled).toBe(
+      true,
+    );
+    expect(
+      [...target.querySelectorAll("dialog footer button")].find(
+        (button) => button.textContent.trim() === "Cancel",
+      ).disabled,
+    ).toBe(true);
+
+    resolveRequest({ id: 57 });
+    await settle();
+    await settle();
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledWith({
+      changed: true,
+      entry: { id: 57 },
+      deletedId: null,
+    });
+  });
+
   it("announces and reveals API errors in the scrolling dialog body", async () => {
     apiMock.mockRejectedValueOnce(new Error("Server rejected"));
     component = mount(EntryDialog, {
@@ -219,6 +296,11 @@ describe("EntryDialog", () => {
     expect(errorElement.textContent).toContain("Server rejected");
     expect(errorElement.getAttribute("aria-live")).toBe("assertive");
     expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
+    expect(
+      [...target.querySelectorAll("button")].find(
+        (button) => button.textContent.trim() === "Add Entry",
+      ).disabled,
+    ).toBe(false);
   });
 
   it("moves an untouched default date forward when the app day changes", async () => {
