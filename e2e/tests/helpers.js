@@ -92,7 +92,8 @@ async function holidayDates(request) {
   for (const year of [currentYear, currentYear + 1]) {
     const response = await request.get(`/api/v1/holidays?year=${year}`);
     if (!response.ok()) continue;
-    for (const holiday of await response.json()) taken.add(holiday.holiday_date);
+    for (const holiday of await response.json())
+      taken.add(holiday.holiday_date);
   }
   return taken;
 }
@@ -177,7 +178,13 @@ export async function signIn(page, email, password) {
 // spec files can resume this exact session via
 // `test.use({ storageState: storageStatePath(role) })` rather than repeating
 // the sign-in + password-change dance.
-export async function changeTempPassword(page, context, role, email, newPassword) {
+export async function changeTempPassword(
+  page,
+  context,
+  role,
+  email,
+  newPassword,
+) {
   await page.waitForURL("**/account");
   await page.locator("#account-new-password").fill(newPassword);
   await page.locator("#account-confirm-password").fill(newPassword);
@@ -238,17 +245,12 @@ export async function setDate(page, altInputId, iso) {
 // minutes are snapped to 15-minute steps by the component itself, so callers
 // must always pass a quarter-hour value (":00", ":15", ":30", ":45").
 //
-// The drum is closed via its own "OK" button rather than pressing Enter.
-// This matters: the drum's keydown handler treats Enter as "close the drum",
-// but Enter is not stopped from bubbling further up the DOM — and the
-// EntryDialog/AbsenceDialog wrapping the time picker has its own Enter
-// shortcut that submits ("saves") the whole dialog. Pressing Enter here would
-// therefore close the *dialog* prematurely (with whatever was filled in so
-// far), not just the time drum. The drum's "OK" button click handler stops
-// propagation, so it closes only the drum.
-export async function setTime(page, hiddenInputId, hhmm) {
-  const root = `#${hiddenInputId} + .tp-root`;
-  await page.locator(`${root} .tp-display`).click();
+// The drum is closed through its own "OK" button so the helper exercises the
+// same explicit confirmation path as pointer users and waits for it to close.
+export async function setTime(page, controlId, hhmm) {
+  const display = page.locator(`#${controlId}`);
+  const picker = page.locator(`#${controlId}-picker`);
+  await display.click();
   // Give the drum a moment to open and move keyboard focus onto itself —
   // openPicker() in TimePicker.svelte focuses it via a setTimeout(…, 0), so a
   // synchronous click-then-type would race that focus move.
@@ -256,8 +258,9 @@ export async function setTime(page, hiddenInputId, hhmm) {
   const [hours, minutes] = hhmm.split(":");
   for (const digit of hours) await page.keyboard.press(digit);
   for (const digit of minutes) await page.keyboard.press(digit);
-  await page.locator(`${root} .tp-ok`).click();
-  await expect(page.locator(`#${hiddenInputId}`)).toHaveValue(hhmm);
+  await picker.locator(".tp-ok").click();
+  await expect(picker).toBeHidden();
+  await expect(display).toHaveText(hhmm);
 }
 
 // Creates a user through the admin's "Add User" dialog and returns the
