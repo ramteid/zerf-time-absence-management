@@ -319,7 +319,6 @@ const TRANSLATIONS = {
     "Sends the previous month's report right away, covering everyone who has finished their month. Anyone still open is named in the report as missing. It does not replace the automatic delivery — the complete report is still sent on the selected day.":
       "Sends the previous month's report right away, covering everyone who has finished their month. Anyone still open is named in the report as missing. It does not replace the automatic delivery — the complete report is still sent on the selected day.",
     "Report sent.": "Report sent.",
-    "Payroll report not sent yet.": "Payroll report not sent yet.",
     // --- Payroll report: people included ---
     "People included": "People included",
     "All employees and assistants": "All employees and assistants",
@@ -1384,7 +1383,6 @@ const TRANSLATIONS = {
     "Sends the previous month's report right away, covering everyone who has finished their month. Anyone still open is named in the report as missing. It does not replace the automatic delivery — the complete report is still sent on the selected day.":
       "Sendet die Lohnmeldung für den Vormonat sofort mit allen Personen, die ihren Monat abgeschlossen haben. Wer noch offen ist, wird in der Meldung als fehlend aufgeführt. Das ersetzt nicht den automatischen Versand — die vollständige Meldung wird am gewählten Tag trotzdem verschickt.",
     "Report sent.": "Lohnmeldung gesendet.",
-    "Payroll report not sent yet.": "Lohnmeldung noch nicht versendet.",
     // --- Lohnmeldung: einbezogene Personen ---
     "People included": "Einbezogene Personen",
     "All employees and assistants": "Alle Mitarbeitenden und Aushilfen",

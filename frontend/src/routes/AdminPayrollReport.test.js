@@ -325,7 +325,6 @@ describe("AdminPayrollReport", () => {
     await settle();
 
     expect(toastMock).not.toHaveBeenCalled();
-    expect(target.textContent).toContain("Payroll report not sent yet.");
   });
 
   it("stays quiet when the report was already sent", async () => {
@@ -337,6 +336,5 @@ describe("AdminPayrollReport", () => {
     await settle();
 
     expect(toastMock).not.toHaveBeenCalled();
-    expect(target.textContent).not.toContain("Payroll report not sent yet.");
   });
 });
