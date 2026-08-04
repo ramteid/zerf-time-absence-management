@@ -229,7 +229,17 @@ dialog .dialog-body {
   display: flex;
   flex-direction: column;
   gap: 0;
-  flex: 1;
+  /* `flex-basis` must stay `auto`, not `0`. The dialog is an auto-height
+     column flex container (only `max-height` is capped), and WebKit sizes such
+     a container from its items' hypothetical main sizes. With `flex: 1`
+     (= `flex-basis: 0%`) plus `min-height: 0` that hypothetical size is zero,
+     so WebKit collapses the body to its padding and hides every field while
+     the header and footer still render. Blink/Gecko use the max-content
+     contribution instead, which is why this only broke on Safari/iOS.
+     `flex: 1 1 auto` keeps the grow/shrink behaviour but bases the item on its
+     content, so the dialog shrink-wraps short forms and still scrolls once the
+     content exceeds the height cap. */
+  flex: 1 1 auto;
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
