@@ -41,7 +41,9 @@
     // are filtered out here and archived ones never reach the endpoint, so a
     // former colleague cannot linger in the list. Admins are never reported on.
     selectableUsers = sortUsersByRoleThenName(
-      (loadedUsers || []).filter((user) => user.active && user.role !== "admin"),
+      (loadedUsers || []).filter(
+        (user) => user.active && user.role !== "admin",
+      ),
     );
     excludedUserIds = loadedSettings.payroll_report_excluded_user_ids || [];
     recipientsInput = (loadedSettings.payroll_report_recipients || []).join(

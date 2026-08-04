@@ -11,9 +11,7 @@
   // still learns that somebody is holding the month up, just not who.
   function openReport(member) {
     if (!member.user_id) return;
-    go(
-      `/reports?user=${member.user_id}&from=${status.from}&to=${status.to}`,
-    );
+    go(`/reports?user=${member.user_id}&from=${status.from}&to=${status.to}`);
     onClose();
   }
 

@@ -52,7 +52,13 @@
   role="img"
   aria-label={`${ready}/${total}`}
 >
-  <circle class="donut-track" cx="60" cy="60" r={RADIUS} stroke-width={stroke} />
+  <circle
+    class="donut-track"
+    cx="60"
+    cy="60"
+    r={RADIUS}
+    stroke-width={stroke}
+  />
   {#each segments as segment (segment.key)}
     <circle
       class="donut-segment {segment.className}"

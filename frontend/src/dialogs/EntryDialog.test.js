@@ -221,6 +221,70 @@ describe("EntryDialog", () => {
     expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
   });
 
+  it("moves an untouched default date forward when the app day changes", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-08-04T23:59:30Z"));
+      settings.set({ ui_language: "en", time_format: "24h", timezone: "UTC" });
+      component = mount(EntryDialog, {
+        target,
+        props: { template: {}, onClose: vi.fn() },
+      });
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(target.querySelector("#entry-date").value).toBe("2026-08-04");
+
+      await vi.advanceTimersByTimeAsync(30_100);
+
+      expect(target.querySelector("#entry-date").value).toBe("2026-08-05");
+    } finally {
+      if (component) {
+        unmount(component);
+        component = null;
+      }
+      vi.useRealTimers();
+    }
+  });
+
+  it("accepts an explicit prior-day entry after midnight", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-08-04T23:59:30Z"));
+      settings.set({ ui_language: "en", time_format: "24h", timezone: "UTC" });
+      apiMock.mockResolvedValueOnce({ id: 56 });
+      component = mount(EntryDialog, {
+        target,
+        props: {
+          template: {
+            entry_date: "2026-08-04",
+            start_time: "08:00",
+            end_time: "23:45",
+          },
+          onClose: vi.fn(),
+        },
+      });
+      await vi.advanceTimersByTimeAsync(30_100);
+
+      const addButton = [...target.querySelectorAll("button")].find(
+        (button) => button.textContent.trim() === "Add Entry",
+      );
+      addButton.click();
+      await vi.advanceTimersByTimeAsync(0);
+
+      const postCall = apiMock.mock.calls.find(
+        ([path, opts]) => path === "/time-entries" && opts?.method === "POST",
+      );
+      expect(postCall).toBeTruthy();
+      expect(target.querySelector('[role="alert"]').textContent).toBe("");
+    } finally {
+      if (component) {
+        unmount(component);
+        component = null;
+      }
+      vi.useRealTimers();
+    }
+  });
+
   it("DELETEs the entry after the user confirms deletion", async () => {
     // The delete confirmation prevents accidental data loss. Once confirmed,
     // the backend must receive a DELETE request with the correct entry ID.

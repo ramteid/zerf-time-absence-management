@@ -206,6 +206,7 @@
   function attachPositionListeners(instance) {
     removePositionListeners();
     if (!container || instance.isMobile) return;
+    const dialogContainer = container;
 
     const updatePosition = () => {
       if (!instance.isOpen) return;
@@ -235,13 +236,13 @@
     const viewport = window.visualViewport;
     window.addEventListener("resize", updatePosition);
     document.addEventListener("scroll", updatePosition, true);
-    container.addEventListener("keydown", preventDialogEscape, true);
+    dialogContainer.addEventListener("keydown", preventDialogEscape, true);
     viewport?.addEventListener("resize", updatePosition);
     viewport?.addEventListener("scroll", updatePosition);
     cleanupPositionListeners = () => {
       window.removeEventListener("resize", updatePosition);
       document.removeEventListener("scroll", updatePosition, true);
-      container.removeEventListener("keydown", preventDialogEscape, true);
+      dialogContainer.removeEventListener("keydown", preventDialogEscape, true);
       viewport?.removeEventListener("resize", updatePosition);
       viewport?.removeEventListener("scroll", updatePosition);
     };
@@ -426,12 +427,14 @@
     lastContainer = container;
     build($language);
   }
-  // Reactive value/min/max sync
-  $: if (datePickerInstance && datePickerInstance.input.value !== value)
-    datePickerInstance.setDate(value || null, false);
-  $: if (datePickerInstance) datePickerInstance.set("minDate", min || null);
+  // Apply bounds before the value so a newly valid boundary date is not
+  // discarded against stale min/max configuration.
   $: if (datePickerInstance) {
+    datePickerInstance.set("minDate", min || null);
     datePickerInstance.set("maxDate", max || null);
+    if (datePickerInstance.input.value !== value) {
+      datePickerInstance.setDate(value || null, false);
+    }
     if (mode === "month") updateNextYearBtnState(datePickerInstance);
   }
 </script>

@@ -42,16 +42,18 @@
 
   // Keep untouched default date aligned with app timezone changes.
   $: todayIso = appTodayIsoDate($settings?.timezone);
-  $: if (
-    isNew &&
-    !template.entry_date &&
-    entry_date === lastTodayIso &&
-    todayIso !== lastTodayIso
-  ) {
-    entry_date = todayIso;
+  $: {
+    if (
+      isNew &&
+      !template.entry_date &&
+      entry_date === lastTodayIso &&
+      todayIso !== lastTodayIso
+    ) {
+      entry_date = todayIso;
+    }
+    // eslint-disable-next-line no-useless-assignment
+    lastTodayIso = todayIso;
   }
-  // eslint-disable-next-line no-useless-assignment
-  $: lastTodayIso = todayIso;
 
   $: if (category_id == null && $categories.length > 0) {
     category_id = $categories[0].id;
