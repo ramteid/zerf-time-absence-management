@@ -26,7 +26,6 @@
   import {
     categoryColumnsFromTeamReport,
     filterTeamCategoryColumns,
-    leaveAccountUsage,
     teamCategoryMinutes,
     teamCategoryRowTotal,
     dedupeAbsences,
@@ -56,12 +55,9 @@
       const loaded = await getTeamReport({ month });
       if (key === lastTeamKey) {
         // eslint-disable-next-line svelte/infinite-reactive-loop -- teamReport isn't read by the triggering $: block, so there's no cycle.
-        teamReport = {
-          leave_account_categories: loaded?.leave_account_categories || [],
-          rows: [...(loaded?.rows || [])].sort((a, b) =>
-            a.name.localeCompare(b.name),
-          ),
-        };
+        teamReport = (loaded || []).sort((a, b) =>
+          a.name.localeCompare(b.name),
+        );
       }
     } catch (e) {
       if (key === lastTeamKey) {
@@ -235,93 +231,76 @@
         <thead>
           <tr>
             <th class="col-employee team-report-header">{$t("Employee")}</th>
-            <th class="text-right team-report-header"
-              >{$t("Current flextime balance")}</th
-            >
+            <th class="text-right team-report-header">{$t("Current flextime balance")}</th>
             <th class="text-right team-report-header">{$t("Monthly diff")}</th>
             <th class="text-right team-report-header">{$t("Sick days")}</th>
-            {#each teamReport.leave_account_categories as leaveAccount (leaveAccount.category_id)}
-              <th
-                class="text-right team-report-header leave-account-report-header"
-                data-testid={`team-leave-account-column-${leaveAccount.category_id}`}
-              >
-                <span class="th-cat">
-                  <span
-                    class="cat-dot"
-                    style:background={leaveAccount.color || "#999"}
-                  ></span>
-                  {$t(leaveAccount.name)}
-                </span>
-                <span class="leave-account-report-header-sub"
-                  >{$t("Taken / planned")}</span
-                >
-              </th>
-            {/each}
-            <th class="text-center team-report-header"
-              >{$t("All weeks submitted")}</th
-            >
+            <th class="text-right team-report-header">{$t("Vacation taken")}</th>
+            <th class="text-right team-report-header">{$t("Vacation planned")}</th>
+            <th class="text-center team-report-header">{$t("All weeks submitted")}</th>
           </tr>
         </thead>
-        <tbody>
-          {#each teamReport.rows as r (r.user_id)}
-            <tr>
-              <td class="fw-500">{r.name}</td>
-              <td
-                class="tab-num text-right fw-500"
-                style:color={r.flextime_balance_min == null
-                  ? "var(--text-tertiary)"
-                  : r.flextime_balance_min < 0
-                    ? "var(--danger-text)"
-                    : "var(--success-text)"}
-              >
-                {#if r.flextime_balance_min == null}
-                  -
-                {:else}
-                  {r.flextime_balance_min >= 0 ? "+" : ""}{minToHM(
-                    r.flextime_balance_min,
-                  )}
-                {/if}
-              </td>
-              <td
-                class="tab-num text-right"
-                style:color={r.diff_min == null
-                  ? "var(--text-tertiary)"
-                  : r.diff_min < 0
-                    ? "var(--danger-text)"
-                    : "var(--success-text)"}
-              >
-                {#if r.diff_min == null}
-                  -
-                {:else}
-                  {r.diff_min >= 0 ? "+" : ""}{minToHM(r.diff_min)}
-                {/if}
-              </td>
-              <td class="tab-num text-right text-tertiary">
-                {r.sick_days > 0
-                  ? fmtDecimal(r.sick_days, r.sick_days % 1 === 0 ? 0 : 1)
-                  : "-"}
-              </td>
-              {#each teamReport.leave_account_categories as leaveAccount (leaveAccount.category_id)}
-                {@const usage = leaveAccountUsage(r, leaveAccount.category_id)}
-                <td
-                  class="tab-num text-right text-tertiary"
-                  data-testid={`team-leave-account-${r.user_id}-${leaveAccount.category_id}`}
-                >
-                  {formatDayCount(usage.taken_days)} / {formatDayCount(
-                    usage.planned_days,
-                  )}
-                </td>
-              {/each}
-              <td class="text-center">
-                {#if r.weeks_all_submitted}
-                  <span class="text-success">{$t("Yes")}</span>
-                {:else}
-                  <span class="text-danger">{$t("No")}</span>
-                {/if}
-              </td>
-            </tr>
-          {/each}
-        </tbody>
+      <tbody>
+        {#each teamReport as r (r.user_id)}
+          <tr>
+            <td class="fw-500">{r.name}</td>
+            <td
+              class="tab-num text-right fw-500"
+              style:color={r.flextime_balance_min == null
+                ? "var(--text-tertiary)"
+                : r.flextime_balance_min < 0
+                  ? "var(--danger-text)"
+                  : "var(--success-text)"}
+            >
+              {#if r.flextime_balance_min == null}
+                -
+              {:else}
+                {r.flextime_balance_min >= 0 ? "+" : ""}{minToHM(
+                  r.flextime_balance_min,
+                )}
+              {/if}
+            </td>
+            <td
+              class="tab-num text-right"
+              style:color={r.diff_min == null
+                ? "var(--text-tertiary)"
+                : r.diff_min < 0
+                  ? "var(--danger-text)"
+                  : "var(--success-text)"}
+            >
+              {#if r.diff_min == null}
+                -
+              {:else}
+                {r.diff_min >= 0 ? "+" : ""}{minToHM(r.diff_min)}
+              {/if}
+            </td>
+            <td class="tab-num text-right text-tertiary">
+              {r.sick_days > 0
+                ? fmtDecimal(r.sick_days, r.sick_days % 1 === 0 ? 0 : 1)
+                : "-"}
+            </td>
+            <td class="tab-num text-right text-tertiary">
+              {r.vacation_days > 0
+                ? fmtDecimal(r.vacation_days, r.vacation_days % 1 === 0 ? 0 : 1)
+                : "-"}
+            </td>
+            <td class="tab-num text-right text-tertiary">
+              {r.vacation_planned_days > 0
+                ? fmtDecimal(
+                    r.vacation_planned_days,
+                    r.vacation_planned_days % 1 === 0 ? 0 : 1,
+                  )
+                : "-"}
+            </td>
+            <td class="text-center">
+              {#if r.weeks_all_submitted}
+                <span class="text-success">{$t("Yes")}</span>
+              {:else}
+                <span class="text-danger">{$t("No")}</span>
+              {/if}
+            </td>
+          </tr>
+        {/each}
+      </tbody>
       </DataTable>
     </div>
   {/if}
@@ -458,8 +437,7 @@
 
   .team-report-table :global(.zf-table) {
     table-layout: auto;
-    min-width: 100%;
-    width: max-content;
+    min-width: 0;
   }
 
   .team-report-header {
@@ -467,18 +445,6 @@
     min-width: 110px;
     max-width: 180px;
     vertical-align: top;
-  }
-
-  .leave-account-report-header {
-    min-width: 124px;
-  }
-
-  .leave-account-report-header-sub {
-    display: block;
-    color: var(--text-tertiary);
-    font-size: 0.75rem;
-    font-weight: 400;
-    margin-top: 2px;
   }
 
   .col-employee {
