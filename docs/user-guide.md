@@ -659,7 +659,8 @@ and sends an in-app-only notification (no email) back to the same user.
 ### Approver receives notifications when
 
 - a week is submitted (one notification identifying the submitted weeks),
-- an absence request is submitted,
+- an absence request is submitted (the notification and email include the
+  employee's comment, if one was added),
 - a reopen request is submitted,
 - a weekly approval reminder is triggered (pending items awaiting review).
 

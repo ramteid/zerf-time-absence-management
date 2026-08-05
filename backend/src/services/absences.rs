@@ -92,6 +92,10 @@ pub fn absence_period_params(
             i18n::format_date(language, absence.start_date),
         ),
         ("end_date", i18n::format_date(language, absence.end_date)),
+        (
+            "comment_line",
+            i18n::absence_comment_line(language, absence.comment.as_deref()),
+        ),
     ]
 }
 
@@ -1786,6 +1790,27 @@ mod tests {
         assert_eq!(by_key("requester_name"), "Alice Smith");
         // "vacation" localises to "Vacation" in English.
         assert_eq!(by_key("kind"), "Vacation");
+        // No comment on the sample absence: the line stays empty.
+        assert_eq!(by_key("comment_line"), "");
+    }
+
+    /// When the absence carries a comment, it must flow through into the
+    /// `comment_line` parameter so the "new absence request" email includes it.
+    #[test]
+    fn absence_period_params_includes_comment_when_present() {
+        use crate::i18n::Language;
+        let language = Language::from_setting("en");
+        let user = sample_user(true);
+        let mut absence = sample_absence(1, "requested", "vacation");
+        absence.comment = Some("Family event".to_string());
+        let params = absence_period_params(&language, &user, &absence);
+
+        let comment_line = params
+            .iter()
+            .find(|(k, _)| *k == "comment_line")
+            .map(|(_, v)| v.as_str())
+            .unwrap_or("");
+        assert_eq!(comment_line, "\nComment: Family event");
     }
 
     // ──────────────────────────────────────────────────────────────────────

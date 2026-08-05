@@ -91,8 +91,9 @@ static LANGUAGES: &[LangDef] = &[
             ("absence_kind_general_absence", "General absence"),
             ("absence_kind_flextime_reduction", "Flextime Reduction"),
             ("absence_requested_title", "New absence request from {requester_name}"),
-            ("absence_requested_body", "{requester_name} requested a {kind} absence.\n\nPeriod: {start_date} to {end_date}"),
-            ("absence_requested_email_body", "Hello,\n\nAn absence request is ready for your review.\n\nEmployee: {requester_name}\nType: {kind}\nPeriod: {start_date} to {end_date}\n\nPlease open the application to approve or reject the request."),
+            ("absence_requested_body", "{requester_name} requested a {kind} absence.\n\nPeriod: {start_date} to {end_date}{comment_line}"),
+            ("absence_requested_email_body", "Hello,\n\nAn absence request is ready for your review.\n\nEmployee: {requester_name}\nType: {kind}\nPeriod: {start_date} to {end_date}{comment_line}\n\nPlease open the application to approve or reject the request."),
+            ("absence_comment_line", "\nComment: {comment}"),
             ("absence_updated_title", "Absence request from {requester_name} updated"),
             ("absence_updated_body", "{requester_name} updated their {kind} absence request.\n\nPeriod: {start_date} to {end_date}"),
             ("absence_updated_email_body", "Hello,\n\nAn absence request awaiting your review was updated.\n\nEmployee: {requester_name}\nType: {kind}\nPeriod: {start_date} to {end_date}\n\nPlease open the application to review the changes."),
@@ -264,8 +265,9 @@ static LANGUAGES: &[LangDef] = &[
             ("absence_kind_general_absence", "Allgemeine Abwesenheit"),
             ("absence_kind_flextime_reduction", "Gleitzeitabbau"),
             ("absence_requested_title", "Neue Abwesenheitsanfrage von {requester_name}"),
-            ("absence_requested_body", "{requester_name}: {kind}\n\nZeitraum: {start_date} bis {end_date}"),
-            ("absence_requested_email_body", "Hallo,\n\neine Abwesenheitsanfrage wartet auf Ihre Pr\u{00fc}fung.\n\nMitarbeitende Person: {requester_name}\nArt: {kind}\nZeitraum: {start_date} bis {end_date}\n\nBitte \u{00f6}ffnen Sie die Anwendung und genehmigen Sie die Anfrage oder lehnen Sie sie ab."),
+            ("absence_requested_body", "{requester_name}: {kind}\n\nZeitraum: {start_date} bis {end_date}{comment_line}"),
+            ("absence_requested_email_body", "Hallo,\n\neine Abwesenheitsanfrage wartet auf Ihre Pr\u{00fc}fung.\n\nMitarbeitende Person: {requester_name}\nArt: {kind}\nZeitraum: {start_date} bis {end_date}{comment_line}\n\nBitte \u{00f6}ffnen Sie die Anwendung und genehmigen Sie die Anfrage oder lehnen Sie sie ab."),
+            ("absence_comment_line", "\nBemerkung: {comment}"),
             ("absence_updated_title", "Abwesenheitsanfrage von {requester_name} aktualisiert"),
             ("absence_updated_body", "{requester_name} hat die Anfrage aktualisiert.\n\nArt: {kind}\nZeitraum: {start_date} bis {end_date}"),
             ("absence_updated_email_body", "Hallo,\n\neine Abwesenheitsanfrage, die auf Ihre Pr\u{00fc}fung wartet, wurde aktualisiert.\n\nMitarbeitende Person: {requester_name}\nArt: {kind}\nZeitraum: {start_date} bis {end_date}\n\nBitte \u{00f6}ffnen Sie die Anwendung und pr\u{00fc}fen Sie die \u{00c4}nderungen."),
@@ -690,6 +692,19 @@ pub fn email_login_line(language: &Language, public_url: Option<&str>) -> String
     )
 }
 
+/// Render the requester's absence comment as an appended line, or an empty
+/// string when there is no comment (or it is blank).
+pub fn absence_comment_line(language: &Language, comment: Option<&str>) -> String {
+    let Some(comment) = comment.map(str::trim).filter(|c| !c.is_empty()) else {
+        return String::new();
+    };
+    required_translation(
+        language,
+        "absence_comment_line",
+        &[("comment", comment.to_string())],
+    )
+}
+
 pub fn email_organization_name(language: &Language, organization_name: &str) -> String {
     let organization_name = organization_name.trim();
     if organization_name.is_empty() {
@@ -966,6 +981,7 @@ mod tests {
                 ("week_list", "Example Week".to_string()),
                 ("weeks", "Example Week".to_string()),
                 ("count", "2".to_string()),
+                ("comment_line", "\nComment: Example comment".to_string()),
             ];
             for event in NOTIFICATION_EVENTS {
                 for suffix in ["title", "body", "email_body"] {
@@ -1339,6 +1355,23 @@ mod tests {
         assert_eq!(
             absence_kind_label(&de, "comp_time", "Comp Time"),
             "Comp Time"
+        );
+    }
+
+    #[test]
+    fn absence_comment_line_renders_only_when_a_non_blank_comment_is_given() {
+        let en = Language::from_setting("en");
+        assert_eq!(absence_comment_line(&en, None), "");
+        assert_eq!(absence_comment_line(&en, Some("   ")), "");
+        assert_eq!(
+            absence_comment_line(&en, Some("Doctor's appointment")),
+            "\nComment: Doctor's appointment"
+        );
+
+        let de = Language::from_setting("de");
+        assert_eq!(
+            absence_comment_line(&de, Some("Arzttermin")),
+            "\nBemerkung: Arzttermin"
         );
     }
 
