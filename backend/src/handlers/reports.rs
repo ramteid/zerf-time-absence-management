@@ -7,8 +7,8 @@ use crate::services::reports::{
     build_flextime_for_user, build_month, build_month_without_submission_status,
     build_overtime_rows_for_year, build_range, build_team_timesheet_sections,
     build_timesheet_section, csv_response, month_bounds, parse_report_time, pdf_response,
-    sort_categories_desc, validate_range, CategoryTotal, FlextimeDay, LeaveAccountCategory,
-    LeaveAccountUsage, MonthReport, MonthRow, TeamReport, TeamRow, UserCategoryRow,
+    sort_categories_desc, validate_range, CategoryTotal, FlextimeDay, LeaveAccountUsage,
+    MonthReport, MonthRow, TeamRow, UserCategoryRow,
 };
 use crate::AppState;
 use axum::{
@@ -161,7 +161,7 @@ pub async fn team(
     State(app_state): State<AppState>,
     requester: User,
     Query(query): Query<TeamQuery>,
-) -> AppResult<Json<TeamReport>> {
+) -> AppResult<Json<Vec<TeamRow>>> {
     if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
@@ -183,14 +183,6 @@ pub async fn team(
         .await?
         .into_iter()
         .filter(|definition| definition.start_year <= month_start.year())
-        .collect();
-    let leave_account_categories: Vec<_> = leave_account_definitions
-        .iter()
-        .map(|definition| LeaveAccountCategory {
-            category_id: definition.category_id,
-            name: definition.category_name.clone(),
-            color: definition.color.clone(),
-        })
         .collect();
     let account_ids: Vec<_> = leave_account_definitions
         .iter()
@@ -366,10 +358,7 @@ pub async fn team(
         }
     }
 
-    Ok(Json(TeamReport {
-        leave_account_categories,
-        rows: result?,
-    }))
+    Ok(Json(result?))
 }
 
 #[derive(Deserialize)]

@@ -925,7 +925,7 @@ async fn users_full_workflow() {
         assert_eq!(account["current_year_days"], 24);
         assert_eq!(account["next_year_days"], 23);
 
-        let year = today().format("%Y");
+        let year = year().to_string();
         let (st, balances) = admin
             .get(&format!("/api/v1/leave-balances/{emp_id}?year={year}"))
             .await;

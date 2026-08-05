@@ -1355,13 +1355,15 @@ async fn absences_repository_workflow() {
     let mut tx = absences.begin().await.expect("begin update tx");
     zerf::repository::AbsenceDb::update_fields_tx(
         &mut tx,
-        requested.id,
-        training_cat.id,
-        None,
-        monday,
-        wednesday,
-        Some("repo updated absence"),
-        "requested",
+        zerf::repository::UpdateAbsenceRecord {
+            absence_id: requested.id,
+            category_id: training_cat.id,
+            leave_account_category_id: None,
+            start_date: monday,
+            end_date: wednesday,
+            comment: Some("repo updated absence"),
+            new_status: "requested",
+        },
     )
     .await
     .expect("update_fields_tx");
@@ -1419,13 +1421,15 @@ async fn absences_repository_workflow() {
         .expect("begin approved leave-account transaction");
     let approved_vacation_id = zerf::repository::AbsenceDb::insert_tx(
         &mut approved_leave_account_transaction,
-        emp_id,
-        vacation_cat.id,
-        Some(vacation_cat.id),
-        friday,
-        friday,
-        Some("approved vacation"),
-        "approved",
+        zerf::repository::NewAbsenceRecord {
+            user_id: emp_id,
+            category_id: vacation_cat.id,
+            leave_account_category_id: Some(vacation_cat.id),
+            start_date: friday,
+            end_date: friday,
+            comment: Some("approved vacation"),
+            initial_status: "approved",
+        },
     )
     .await
     .expect("create approved leave-account absence");
@@ -1524,25 +1528,29 @@ async fn absences_repository_workflow() {
     .expect("no overlap helper");
     let inserted_id = zerf::repository::AbsenceDb::insert_tx(
         &mut tx,
-        emp_id,
-        vacation_cat.id,
-        Some(vacation_cat.id),
-        friday + Duration::days(4),
-        friday + Duration::days(4),
-        Some("insert tx absence"),
-        "requested",
+        zerf::repository::NewAbsenceRecord {
+            user_id: emp_id,
+            category_id: vacation_cat.id,
+            leave_account_category_id: Some(vacation_cat.id),
+            start_date: friday + Duration::days(4),
+            end_date: friday + Duration::days(4),
+            comment: Some("insert tx absence"),
+            initial_status: "requested",
+        },
     )
     .await
     .expect("insert tx absence");
     zerf::repository::AbsenceDb::update_fields_tx(
         &mut tx,
-        inserted_id,
-        special_cat.id,
-        None,
-        friday + Duration::days(4),
-        friday + Duration::days(5),
-        Some("updated in tx"),
-        "requested",
+        zerf::repository::UpdateAbsenceRecord {
+            absence_id: inserted_id,
+            category_id: special_cat.id,
+            leave_account_category_id: None,
+            start_date: friday + Duration::days(4),
+            end_date: friday + Duration::days(5),
+            comment: Some("updated in tx"),
+            new_status: "requested",
+        },
     )
     .await
     .expect("update fields tx");
