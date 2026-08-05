@@ -47,7 +47,9 @@ const ABSENCE_COLUMNS: &[Column] = &[
 /// Index of the `Days` column in [`ABSENCE_COLUMNS`].
 const ABSENCE_DAYS_COLUMN: usize = 4;
 
-/// Hours table: one row per person in the section.
+/// Hours table: one row per person in the section. All columns are
+/// left-aligned so data rows line up under the (always left-aligned) header
+/// labels — see [`Renderer::draw_table_header`].
 const HOURS_COLUMNS: &[Column] = &[
     Column {
         header_key: "pdf_payroll_column_employee",
@@ -57,17 +59,17 @@ const HOURS_COLUMNS: &[Column] = &[
     Column {
         header_key: "pdf_payroll_column_work_days",
         width_mm: 30.0,
-        align: Align::Right,
+        align: Align::Left,
     },
     Column {
         header_key: "pdf_payroll_column_hours",
         width_mm: 40.0,
-        align: Align::Right,
+        align: Align::Left,
     },
     Column {
         header_key: "pdf_payroll_column_hours_decimal",
         width_mm: 40.0,
-        align: Align::Right,
+        align: Align::Left,
     },
 ];
 
@@ -225,12 +227,6 @@ fn render_absence_table(renderer: &mut Renderer, language: &Language, rows: &[Pa
             index % 2 == 1,
         );
     }
-
-    let total_days: f64 = rows.iter().map(|row| row.days).sum();
-    renderer.draw_total_row(
-        &i18n::translate(language, "pdf_payroll_total", &[]),
-        &[(ABSENCE_DAYS_COLUMN, format_days(total_days, language))],
-    );
 }
 
 fn render_hours_table(renderer: &mut Renderer, language: &Language, section: &PayrollHoursSection) {

@@ -14,7 +14,7 @@
 //! *what* is in the document.
 
 use crate::error::AppResult;
-use crate::i18n::Language;
+use crate::i18n::{self, Language};
 use crate::report_pdf::{
     PayrollAbsenceRow, PayrollHoursRow, PayrollHoursSection, PayrollReportData,
 };
@@ -532,7 +532,10 @@ pub async fn build_report_data(
     let absence_rows = if relevant_categories.is_empty() {
         None
     } else {
-        Some(build_absence_rows(app_state, from, to, members, &relevant_categories).await?)
+        Some(
+            build_absence_rows(app_state, from, to, members, &relevant_categories, language)
+                .await?,
+        )
     };
 
     let mut hours_sections = Vec::new();
@@ -569,6 +572,7 @@ async fn build_absence_rows(
     to: NaiveDate,
     members: &[User],
     relevant_categories: &[AbsenceCategory],
+    language: &Language,
 ) -> AppResult<Vec<PayrollAbsenceRow>> {
     // Category order in the PDF follows `list_all()`'s order, so all sick days
     // stay together, then all unpaid days, and so on.
@@ -613,7 +617,7 @@ async fn build_absence_rows(
                 employee_name(member),
                 PayrollAbsenceRow {
                     employee: employee_name(member),
-                    category: category_name.clone(),
+                    category: i18n::absence_kind_label(language, &slug, category_name),
                     from: row_from,
                     to: row_to,
                     days,
