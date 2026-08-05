@@ -1,7 +1,17 @@
 # The Percona Distribution for PostgreSQL image is based on Red Hat UBI 9
 # (not Debian).  Package manager is microdnf, the postgres user is uid 26,
 # PGDATA defaults to /data/db, and the upstream entrypoint is /entrypoint.sh.
-FROM percona/percona-distribution-postgresql:18
+#
+# Pinned to a specific digest to prevent pg_tde keyring format changes from
+# silently breaking an existing encrypted data volume on the next rebuild.
+# pg_tde stores its principal key in a format that is not guaranteed to be
+# stable across Percona major releases.  An unplanned upgrade would make the
+# live database unreadable until a dump-upgrade-restore cycle is performed.
+#
+# To upgrade: (1) take a backup, (2) update this digest, (3) rebuild,
+# (4) wipe the postgres volumes, (5) start postgres (fresh init), (6) restore
+# from the backup with scripts/restore.sh.
+FROM percona/percona-distribution-postgresql:18@sha256:40b133dec71f85dbc391bdf686bbc6b745517c2a9ffe49158ff77809f9bf28e4
 
 # We need root to install packages and copy our scripts into system paths.
 # The base image switches to USER 26 (postgres) before its ENTRYPOINT;
