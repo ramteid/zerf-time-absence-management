@@ -33,6 +33,19 @@ jobs:
         run: cargo build --release --locked
       - name: Unit tests
         run: cargo test --lib
+      - name: Pre-pull postgres image for testcontainers (retry)
+        run: |
+          # Avoid flaky first-test failures caused by transient registry stream
+          # errors while testcontainers tries to pull postgres:17 on demand.
+          for i in $(seq 1 5); do
+            if docker pull postgres:17; then
+              exit 0
+            fi
+            echo "Pull attempt ${i}/5 failed; retrying in 5s"
+            sleep 5
+          done
+          echo "Unable to pull postgres:17 after 5 attempts"
+          exit 1
       - name: Integration tests (testcontainers)
         env:
           TEST_REFERENCE_DATE: "2030-01-07"
