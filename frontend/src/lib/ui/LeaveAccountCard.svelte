@@ -86,6 +86,7 @@
     flex-direction: column;
     gap: 14px;
     min-width: 0;
+    padding: 16px 20px;
   }
 
   .leave-account-card-header {
@@ -113,7 +114,7 @@
   .leave-account-card-available {
     display: flex;
     flex-direction: column;
-    align-items: flex-end;
+    align-items: flex-start;
     color: var(--success-text);
   }
 
