@@ -311,8 +311,8 @@ describe("AbsenceDialog", () => {
     );
   });
 
-  it("counts only contract workdays, excluding weekends and holidays", async () => {
-    // The duration hint must reflect contract workdays, not calendar days:
+  it("counts only effective workdays, excluding non-workdays and holidays", async () => {
+    // The duration hint must reflect effective workdays, not calendar days:
     // weekends (per workdays_per_week) and public holidays are excluded.
     const onClose = vi.fn();
     component = mount(AbsenceDialog, {

@@ -88,7 +88,7 @@ pub fn validate_auto_approve_end_date(
 }
 
 /// Check whether the date range contains at least one effective workday:
-/// a day that is both a contract workday (per workdays_per_week) and not a
+/// a day that belongs to the user's potential workday pool and is not a
 /// public holiday.
 pub fn has_effective_workday(
     start_date: NaiveDate,
@@ -98,8 +98,7 @@ pub fn has_effective_workday(
 ) -> bool {
     let mut day = start_date;
     while day <= end_date {
-        let is_contract_day =
-            Datelike::weekday(&day).num_days_from_monday() < workdays_per_week as u32;
+        let is_contract_day = crate::time_calc::is_potential_workday(day, workdays_per_week);
         if is_contract_day && !holidays.contains(&day) {
             return true;
         }
@@ -610,8 +609,11 @@ pub async fn validate_flextime_balance(
     if crate::roles::is_assistant_role(&user.role) || user.workdays_per_week == 0 {
         return Ok(());
     }
-    let target_per_day_min =
-        (user.weekly_hours / f64::from(user.workdays_per_week) * 60.0).round() as i64;
+    let base_days = crate::time_calc::potential_workdays_per_week(user.workdays_per_week);
+    if base_days == 0 {
+        return Ok(());
+    }
+    let target_per_day_min = (user.weekly_hours / f64::from(base_days) * 60.0).round() as i64;
 
     let floor_min: i64 =
         crate::services::settings::load_setting(pool, "flextime_min_balance_min", "0")
@@ -927,14 +929,14 @@ mod tests {
         assert!(!has_effective_workday(monday, monday, 5, &holidays));
     }
 
-    /// A 4-day contract (Mon–Thu) means Friday is not a workday.
+    /// A 4-day schedule does not pin fixed weekdays; Friday can be a valid
+    /// potential workday within Mon-Fri.
     #[test]
     fn has_effective_workday_respects_workdays_per_week() {
         // 2026-05-22 is a Friday.
         let friday = NaiveDate::from_ymd_opt(2026, 5, 22).unwrap();
-        // Friday is NOT a contract workday for a 4-day week.
-        assert!(!has_effective_workday(friday, friday, 4, &HashSet::new()));
-        // Thursday is the last contract workday for a 4-day week.
+        assert!(has_effective_workday(friday, friday, 4, &HashSet::new()));
+        // Thursday is also a valid potential workday.
         let thursday = NaiveDate::from_ymd_opt(2026, 5, 21).unwrap();
         assert!(has_effective_workday(
             thursday,

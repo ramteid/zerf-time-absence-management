@@ -540,20 +540,25 @@ The `Submissions` tile shows whether all required past weeks have been submitted
 
 ### How completeness is determined
 
-Completeness is checked **per contract workday** within each fully elapsed
-week. It does not matter whether you reached your weekly target hours; what
-counts is that every required workday is covered.
+Completeness is checked per fully elapsed week against your configured
+`workdays per week` value. It does not matter whether you reached your weekly
+target hours; what counts is that the required number of days is covered.
+
+Important: Zerf does **not** pin you to fixed weekdays (for example, not
+automatically "Mon-Thu" for 4-day schedules). For 1-5 day schedules, days are
+treated as flexible within Monday-Friday.
 
 A week is considered **complete** when:
 
 - No entry anywhere in the week is still in draft state, and no rejected entry
   remains without an overlapping approved correction, **and**
-- Every contract workday in the week is covered by at least one submitted or
-  approved entry (crediting or non-crediting), **or** excused by an approved,
+- The week has enough covered days for your configured day quota
+  (`workdays per week`). A day is covered when it has at least one submitted or
+  approved entry (crediting or non-crediting), or is excused by an approved,
   cancellation-pending, or requested absence, a public holiday, or falling
   before your contract start date.
-  (A week with no entries at all is complete when every contract workday is
-  excused, for example a full-vacation week.)
+  (A week with no entries at all is complete when enough days are excused,
+  for example a full-vacation week.)
 
 For users with role `assistant`, past-week completeness is always treated as
 complete.
@@ -563,9 +568,8 @@ A week is considered **incomplete** when:
 - Any entry anywhere in the week is still in draft state, or a rejected entry
   has not yet been closed by an overlapping approved correction,
   **or**
-- At least one contract workday has no submitted/approved entry and is not
-  excused. Submitting only some days of a week is not enough; the remaining
-  workdays keep the week incomplete.
+- Covered days in the week are fewer than your configured weekly day quota.
+  Submitting only some days can still be incomplete if the quota is not met.
 
 The same rule drives the Submissions tile, the month report, the team
 report's submission column, the monthly submission reminder, and the
@@ -1066,8 +1070,9 @@ Vacation, sick leave, training, special leave, unpaid leave, general absence, an
 - End date must be on or after start date.
 - The range must not exceed one year.
 - The range must include at least one effective workday. An effective workday
-  is a contract workday that is not a public holiday. A request covering only
-  weekends or public holidays is not valid.
+  is a potential workday (based on your configured days per week) that is not
+  a public holiday. A request covering only non-workdays or public holidays is
+  not valid.
 - Start date must be on or after your employment start date.
 - Comment, if provided, must not exceed 2000 characters.
 

@@ -57,7 +57,7 @@ describe("countWorkdays", () => {
   });
 
   it("respects custom workdays_per_week for 4-day schedules", () => {
-    // Mon-Fri with 4-day schedule counts only Mon-Thu.
+    // Mon-Fri contains 5 potential days, capped to 4 configured days.
     expect(countWorkdays("2026-05-04", "2026-05-08", new Set(), 4)).toBe(4);
   });
 });
@@ -277,7 +277,7 @@ describe("normalizeMonthReport", () => {
         kind: "vacation",
         start_date: "2026-05-08",
         end_date: "2026-05-09",
-        days: 0,
+        days: 1,
       },
     ]);
   });

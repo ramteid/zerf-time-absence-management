@@ -75,35 +75,66 @@ pub fn last_day_of_month(year: i32, month: u32) -> u32 {
         .unwrap_or(28)
 }
 
-/// Count contract workdays in `[from, to]`, excluding public holidays.
+/// Returns the weekly pool of potential workdays used for users without fixed
+/// per-weekday contracts.
 ///
-/// Contract workdays are determined by `workdays_per_week`:
-///   - workdays_per_week=5: Mon-Fri (ISO weekday 0-4)
-///   - workdays_per_week=4: Mon-Thu (ISO weekday 0-3)
-///   - workdays_per_week=6: Mon-Sat (ISO weekday 0-5)
+/// For 1-5 configured days, all weekdays (Mon-Fri) are potential days.
+/// For 6 configured days, Mon-Sat are potential days.
+/// For 7 configured days, every calendar day is a potential day.
+pub fn potential_workdays_per_week(workdays_per_week: i16) -> u32 {
+    match workdays_per_week {
+        i16::MIN..=0 => 0,
+        1..=5 => 5,
+        6 => 6,
+        _ => 7,
+    }
+}
+
+/// True when `date` belongs to the user's potential workday pool.
 ///
-/// ISO weekday mapping: 0=Monday, 1=Tuesday, ..., 6=Sunday
-/// A day is a contract workday if: ISO_weekday < workdays_per_week
+/// This intentionally does not pin a user to fixed weekdays for 1-5 day
+/// schedules: those users can distribute their workdays across Mon-Fri.
+pub fn is_potential_workday(date: NaiveDate, workdays_per_week: i16) -> bool {
+    let weekday = date.weekday().num_days_from_monday();
+    match workdays_per_week {
+        i16::MIN..=0 => false,
+        1..=5 => weekday < 5,
+        6 => weekday < 6,
+        _ => true,
+    }
+}
+
+/// Count effective workdays in `[from, to]`, excluding public holidays,
+/// without forcing fixed weekdays for 1-5 day contracts.
+///
+/// The range is split by ISO week; each week's effective days are capped by
+/// the configured `workdays_per_week`. This preserves the weekly day quota
+/// while allowing flexible distribution across the week's potential day pool.
 pub fn count_workdays(
     from: NaiveDate,
     to: NaiveDate,
     holidays: &std::collections::HashSet<NaiveDate>,
     workdays_per_week: i16,
 ) -> f64 {
-    if to < from {
+    if to < from || workdays_per_week <= 0 {
         return 0.0;
     }
-    let mut count = 0.0;
+
+    let mut effective_days_by_week: std::collections::HashMap<NaiveDate, i16> =
+        std::collections::HashMap::new();
     let mut date = from;
     while date <= to {
-        if date.weekday().num_days_from_monday() < workdays_per_week as u32
-            && !holidays.contains(&date)
-        {
-            count += 1.0;
+        if is_potential_workday(date, workdays_per_week) && !holidays.contains(&date) {
+            let monday = week_monday(date);
+            *effective_days_by_week.entry(monday).or_insert(0) += 1;
         }
         date += Duration::days(1);
     }
-    count
+
+    effective_days_by_week
+        .into_values()
+        .map(|days| i16::min(days, workdays_per_week) as f64)
+        .sum()
 }
 
 pub fn parse_hhmm_or_hhmmss(value: &str) -> Option<NaiveTime> {

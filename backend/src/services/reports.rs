@@ -187,14 +187,22 @@ fn weekday_en(d: NaiveDate) -> &'static str {
     ][d.weekday().num_days_from_monday() as usize]
 }
 
-/// Determine if a date is a contract workday based on user's workdays_per_week.
+/// Determine whether a date belongs to the user's potential workday pool.
+///
+/// For 1-5 day schedules this is intentionally Mon-Fri (flexible day
+/// placement), not a fixed Mon..N mapping.
 fn is_contract_workday(date: NaiveDate, workdays_per_week: i16) -> bool {
-    date.weekday().num_days_from_monday() < workdays_per_week as u32
+    crate::time_calc::is_potential_workday(date, workdays_per_week)
 }
 
-/// Calculate the daily target work minutes based on user's weekly hours and workdays_per_week.
+/// Calculate the per-day target based on weekly hours and the potential
+/// workday pool size.
 fn target_minutes_per_day(weekly_hours: f64, workdays_per_week: i16) -> i64 {
-    (weekly_hours / f64::from(workdays_per_week) * 60.0).round() as i64
+    let base_days = crate::time_calc::potential_workdays_per_week(workdays_per_week);
+    if base_days == 0 {
+        return 0;
+    }
+    (weekly_hours / f64::from(base_days) * 60.0).round() as i64
 }
 
 /// Loads the auto-break configuration from the database.
@@ -464,8 +472,12 @@ pub async fn build_flextime_for_user(
     let target_user_id = user.id;
     let target_per_day_min = {
         let weekly_hours = user.weekly_hours;
-        let workdays_per_week = user.workdays_per_week;
-        (weekly_hours / f64::from(workdays_per_week) * 60.0).round() as i64
+        let base_days = crate::time_calc::potential_workdays_per_week(user.workdays_per_week);
+        if base_days == 0 {
+            0
+        } else {
+            (weekly_hours / f64::from(base_days) * 60.0).round() as i64
+        }
     };
 
     let reports_db = crate::repository::ReportDb::new(pool.clone());
@@ -761,7 +773,6 @@ pub fn check_weeks_all_submitted(
     incomplete_dates: &std::collections::HashSet<NaiveDate>,
     user_start_date: NaiveDate,
     workdays_per_week: i16,
-    today: NaiveDate,
 ) -> bool {
     for &week_monday in complete_week_mondays {
         let has_incomplete =
@@ -769,15 +780,27 @@ pub fn check_weeks_all_submitted(
         if has_incomplete {
             return false;
         }
-        let all_required_days_covered = (0..i64::from(workdays_per_week)).all(|d| {
+
+        let mut potential_days = 0i64;
+        let mut covered_days = 0i64;
+        for d in 0..7i64 {
             let day = week_monday + Duration::days(d);
-            day < user_start_date
+            if !crate::time_calc::is_potential_workday(day, workdays_per_week) {
+                continue;
+            }
+            potential_days += 1;
+
+            if day < user_start_date
                 || holiday_set.contains(&day)
                 || absent_days.contains(&day)
-                || day >= today
                 || submitted_dates.contains(&day)
-        });
-        if !all_required_days_covered {
+            {
+                covered_days += 1;
+            }
+        }
+
+        let required_days = i64::from(workdays_per_week.max(0)).min(potential_days);
+        if covered_days < required_days {
             return false;
         }
     }
@@ -820,7 +843,6 @@ pub async fn submission_status_for_month(
         &incomplete_dates,
         user_start_date,
         workdays_per_week,
-        today,
     ) {
         return Ok((false, false));
     }
@@ -1421,7 +1443,6 @@ pub async fn all_weeks_submitted_for_month(
         &incomplete_dates,
         user_start_date,
         workdays_per_week,
-        today,
     ))
 }
 
@@ -1471,7 +1492,6 @@ pub async fn all_weeks_ready_for_timesheet_export(
         &incomplete_dates,
         user_start_date,
         workdays_per_week,
-        today,
     ))
 }
 
@@ -1883,13 +1903,13 @@ mod tests {
         assert!(is_contract_workday(monday, 5));
         assert!(is_contract_workday(friday, 5));
         assert!(!is_contract_workday(saturday, 5));
-        assert!(!is_contract_workday(friday, 4));
+        assert!(is_contract_workday(friday, 4));
     }
 
     #[test]
     fn target_minutes_per_day_uses_weekly_hours_divided_by_workdays() {
         assert_eq!(target_minutes_per_day(40.0, 5), 480);
-        assert_eq!(target_minutes_per_day(40.0, 4), 600);
+        assert_eq!(target_minutes_per_day(40.0, 4), 480);
         assert_eq!(target_minutes_per_day(37.5, 5), 450);
     }
 
@@ -1983,7 +2003,6 @@ mod tests {
             &HashSet::new(),
             NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
             5,
-            NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
         ));
 
         submitted_dates.remove(&(monday + Duration::days(4)));
@@ -1995,7 +2014,6 @@ mod tests {
             &HashSet::new(),
             NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
             5,
-            NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
         ));
 
         let holiday_set: HashSet<NaiveDate> = (0..5).map(|d| monday + Duration::days(d)).collect();
@@ -2007,7 +2025,6 @@ mod tests {
             &HashSet::new(),
             NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
             5,
-            NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
         ));
 
         let mut incomplete = HashSet::new();
@@ -2020,7 +2037,6 @@ mod tests {
             &incomplete,
             NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
             5,
-            NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
         ));
     }
 
@@ -2183,8 +2199,6 @@ mod tests {
         let complete_weeks = vec![monday];
         // User starts on the Monday of the NEXT week.
         let user_start = NaiveDate::from_ymd_opt(2026, 5, 11).unwrap();
-        let today = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
-
         // No submitted entries, no holidays, no absences, but all workdays are
         // before user_start — the week must be considered excused.
         assert!(check_weeks_all_submitted(
@@ -2195,7 +2209,6 @@ mod tests {
             &HashSet::new(),
             user_start,
             5,
-            today,
         ));
     }
 
@@ -2206,8 +2219,6 @@ mod tests {
         let monday = NaiveDate::from_ymd_opt(2026, 5, 4).unwrap();
         let complete_weeks = vec![monday];
         let user_start = NaiveDate::from_ymd_opt(2020, 1, 1).unwrap();
-        let today = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
-
         assert!(!check_weeks_all_submitted(
             &complete_weeks,
             &HashSet::new(), // no holidays
@@ -2216,7 +2227,6 @@ mod tests {
             &HashSet::new(), // no incomplete dates
             user_start,
             5,
-            today,
         ));
     }
 

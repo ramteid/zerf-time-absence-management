@@ -36,9 +36,9 @@ pub struct User {
     pub last_name: String,
     pub role: String,
     pub weekly_hours: f64,
-    /// User's configured contract workdays per week (1-7, default 5).
+    /// User's configured workdays per week (1-7, default 5).
     /// Used to calculate daily targets, vacation days, submission status, etc.
-    /// ISO weekday semantics: contract days = first N days of week (0=Mon, 1=Tue, ...)
+    /// For 1-5 schedules, days are flexible within Mon-Fri (not fixed weekdays).
     pub workdays_per_week: i16,
     pub start_date: chrono::NaiveDate,
     /// Optional employment start date that anchors annual-leave proration.

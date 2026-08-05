@@ -120,8 +120,8 @@
 
   $: absenceRows = absences.map((absence) => ({
     ...absence,
-    // Count absence days respecting user's workdays_per_week setting (1-7 days per week).
-    // Only contract workdays are counted (e.g., Mon-Fri for 5-day week).
+    // Count absence days using the user's weekly day quota (flexible for 1-5
+    // day schedules) and excluding public holidays.
     days: countWorkdays(
       absence.start_date,
       absence.end_date,

@@ -28,10 +28,20 @@
 
   const dispatch = createEventDispatcher();
 
-  $: dailyTargetHours =
-    dayIndex < (currentUser?.workdays_per_week || 5)
-      ? (currentUser?.weekly_hours || 0) / (currentUser?.workdays_per_week || 5)
-      : 0;
+  function potentialWorkdaysPerWeek(workdaysPerWeek) {
+    const configured = Number(workdaysPerWeek || 0);
+    if (!Number.isFinite(configured) || configured <= 0) return 0;
+    if (configured <= 5) return 5;
+    if (configured === 6) return 6;
+    return 7;
+  }
+
+  $: configuredWorkdays = Number(currentUser?.workdays_per_week || 5);
+  $: potentialWorkdays = potentialWorkdaysPerWeek(configuredWorkdays);
+  $: isPotentialDay = dayIndex < potentialWorkdays;
+  $: dailyTargetHours = isPotentialDay
+    ? (currentUser?.weekly_hours || 0) / potentialWorkdays
+    : 0;
   $: breakRules = buildBreakRules($settings);
   // Automatic break deduction for this day (0 when the feature is off).
   $: dailyBreakMinutes = breakRules.length

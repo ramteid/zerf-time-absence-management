@@ -94,9 +94,10 @@ fn deadline_is_due_now(now: chrono::DateTime<chrono_tz::Tz>, day_of_month: u8) -
 /// the dashboard Submissions tile, the team report, and the monthly PDF
 /// upload, so the reminder can never disagree with those views:
 ///   - any draft or rejected entry anywhere in the week makes it incomplete;
-///   - otherwise every contract workday must be covered by a submitted or
-///     approved entry, a public holiday, a requested/approved/cancellation-
-///     pending absence, or fall before the user's start date.
+///   - otherwise the week's covered-day count must meet the configured
+///     `workdays_per_week` quota (covered by submitted/approved entries,
+///     public holidays, requested/approved/cancellation-pending absences,
+///     or days before the user's start date).
 async fn find_unsubmitted_weeks(
     pool: &DatabasePool,
     user_id: i64,
@@ -180,7 +181,6 @@ async fn find_unsubmitted_weeks(
             &incomplete_dates,
             user_start,
             workdays_per_week,
-            today,
         );
         if !week_is_complete {
             incomplete_week_mondays.push(week_monday);

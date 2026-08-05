@@ -272,6 +272,20 @@ export function buildWeekDays(weekFrom, entries, absences, holidays) {
   };
 }
 
+function potentialWorkdaysPerWeek(workdaysPerWeek) {
+  const configured = Number(workdaysPerWeek || 0);
+  if (!Number.isFinite(configured) || configured <= 0) return 0;
+  if (configured <= 5) return 5;
+  if (configured === 6) return 6;
+  return 7;
+}
+
+function isPotentialDay(dayName, workdaysPerWeek) {
+  const index = WEEKDAY_NAMES.indexOf(dayName);
+  if (index < 0) return false;
+  return index < potentialWorkdaysPerWeek(workdaysPerWeek);
+}
+
 export function weekTargetMinutes({
   weekdays,
   weekendDays,
@@ -280,19 +294,20 @@ export function weekTargetMinutes({
 }) {
   const weeklyHours = Number(currentUser?.weekly_hours || 0);
   const workdaysPerWeek = Number(currentUser?.workdays_per_week || 5);
-  const perDayMinutes = Math.round((weeklyHours / workdaysPerWeek) * 60);
+  const potentialDays = potentialWorkdaysPerWeek(workdaysPerWeek);
+  if (potentialDays <= 0 || workdaysPerWeek <= 0) return 0;
+  const perDayMinutes = Math.round((weeklyHours / potentialDays) * 60);
   if (perDayMinutes <= 0) return 0;
-  return [...(weekdays || []), ...(weekendDays || [])]
-    .slice(0, workdaysPerWeek)
-    .reduce((totalMinutes, day) => {
+  const eligibleDays = [...(weekdays || []), ...(weekendDays || [])]
+    .filter((day) => isPotentialDay(day.dayName, workdaysPerWeek))
+    .filter((day) => {
       const isBeforeStart =
         currentUser?.start_date && day.ds < currentUser.start_date;
       const isFuture = day.ds > todayIso;
-      if (day.absentForTarget || day.holiday || isBeforeStart || isFuture) {
-        return totalMinutes;
-      }
-      return totalMinutes + perDayMinutes;
-    }, 0);
+      return !(day.absentForTarget || day.holiday || isBeforeStart || isFuture);
+    });
+
+  return Math.min(eligibleDays.length, workdaysPerWeek) * perDayMinutes;
 }
 
 export function entryDurationHours(startTime, endTime) {
