@@ -157,10 +157,10 @@ test("team lead: edit the assistant", async () => {
   await expect(dialog).toBeVisible();
   // UserDialog forces weekly_hours/workdays_per_week/overtime to 0 and
   // disables those inputs for the assistant role (assistants don't accrue
-  // contract hours or overtime), but the vacation-day override fields have
-  // no such restriction — editing one proves the edit path (and its
-  // "User updated." confirmation) works for a role-locked dialog too.
-  await dialog.locator("#leave-cur").fill("25");
+  // contract hours or overtime), but individual leave-account values remain
+  // editable. Changing the first current-year account value proves the
+  // account-based update path works for a role-locked dialog too.
+  await dialog.locator('[id^="leave-account-"][id$="-current"]').first().fill("25");
   await dialog.getByRole("button", { name: "Save" }).click();
 
   await expect(page.getByText("User updated.")).toBeVisible();

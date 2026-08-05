@@ -13,7 +13,11 @@ import { freeHolidayDate, setDate, storageStatePath } from "./helpers.js";
 // is immediately available in the employee-facing dropdown. Defined in
 // users.js, not exported from here, since Playwright disallows importing
 // one spec file from another.
-import { NO_COST_ABSENCE_CATEGORY } from "./users.js";
+import {
+  EMPLOYEE,
+  LEAVE_ACCOUNT_CATEGORY,
+  NO_COST_ABSENCE_CATEGORY,
+} from "./users.js";
 
 test.use({ storageState: storageStatePath("admin") });
 
@@ -56,6 +60,43 @@ test("admin: add an absence category", async ({ page }) => {
   await dialog.getByRole("button", { name: "Save" }).click();
 
   await expect(page.getByText(NO_COST_ABSENCE_CATEGORY)).toBeVisible();
+});
+
+test("admin: add a second leave-account category", async ({ page }) => {
+  await page.goto("/settings/categories");
+  await page.getByRole("button", { name: "Add" }).nth(1).click();
+
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByText("Add Absence Category")).toBeVisible();
+  await dialog.locator("#abscat-name").fill(LEAVE_ACCOUNT_CATEGORY);
+  await dialog.locator("#abscat-cost-type-vacation").check();
+  await dialog.locator("#abscat-leave-account-default-days").fill("5");
+  await dialog.locator("#abscat-leave-account-carryover-expiry").fill("01-01");
+  await dialog.getByRole("button", { name: "Save" }).click();
+
+  await expect(page.getByText(LEAVE_ACCOUNT_CATEGORY)).toBeVisible();
+
+  const usersResponse = await page.request.get("/api/v1/users");
+  expect(usersResponse.ok()).toBeTruthy();
+  const employee = (await usersResponse.json()).find(
+    (user) => user.email === EMPLOYEE.email,
+  );
+  expect(employee).toBeTruthy();
+  const accountsResponse = await page.request.get(
+    `/api/v1/users/${employee.id}/leave-accounts`,
+  );
+  expect(accountsResponse.ok()).toBeTruthy();
+  const account = (await accountsResponse.json()).find(
+    (entry) => entry.category_name === LEAVE_ACCOUNT_CATEGORY,
+  );
+  expect(account?.base_days).toBe(5);
+
+  const row = page.locator(".zf-card > div", { hasText: LEAVE_ACCOUNT_CATEGORY });
+  await row.getByRole("button").first().click();
+  await expect(dialog.locator("#abscat-cost-type-vacation")).toBeDisabled();
+  await expect(dialog.locator("#abscat-leave-account-default-days")).toHaveValue("5");
+  await expect(dialog.locator("#abscat-leave-account-carryover-expiry")).toHaveValue("01-01");
+  await dialog.getByRole("button", { name: "Cancel" }).click();
 });
 
 test("admin: add a manual holiday", async ({ page }) => {

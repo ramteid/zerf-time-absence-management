@@ -4,7 +4,7 @@ use crate::i18n;
 use crate::middleware::auth::User;
 use crate::services::absence_balance::{
     validate_absence_has_workday, validate_auto_approve_end_date, validate_backdating_window,
-    validate_flextime_balance, validate_vacation_balance, workdays,
+    validate_flextime_balance, validate_leave_account_balance, workdays,
 };
 use crate::AppState;
 use chrono::{DateTime, Duration, NaiveDate, Utc};
@@ -100,6 +100,7 @@ pub fn repo_absence_to_service(a: crate::repository::Absence) -> Absence {
         id: a.id,
         user_id: a.user_id,
         category_id: a.category_id,
+        leave_account_category_id: a.leave_account_category_id,
         kind: a.kind,
         category_name: a.category_name,
         category_color: a.category_color,
@@ -176,6 +177,10 @@ pub struct Absence {
     pub id: i64,
     pub user_id: i64,
     pub category_id: i64,
+    /// Internal booking information. It is deliberately excluded from all
+    /// absence DTOs: clients cannot read or choose the charged account.
+    #[serde(skip_serializing)]
+    pub leave_account_category_id: Option<i64>,
     /// Slug of the absence category, kept for backward-compatible API consumers
     /// and i18n key lookup (e.g. `absence_kind_vacation`). The canonical
     /// reference is `category_id`.
@@ -210,11 +215,6 @@ pub struct Absence {
 }
 
 impl Absence {
-    /// True when the absence's category has `cost_type='vacation'` (deducts
-    /// from the annual leave balance).
-    pub fn is_vacation_cost(&self) -> bool {
-        self.cost_type == crate::repository::absence_categories::COST_TYPE_VACATION
-    }
     /// True when the absence's category has `cost_type='flextime'` (debits the
     /// flextime balance via the kept work target).
     pub fn is_flextime_cost(&self) -> bool {
@@ -223,7 +223,7 @@ impl Absence {
 }
 
 /// Validate the incoming request shape (comment length, date order/range).
-/// Category-flag-aware checks (vacation balance, sick backdating) are applied
+/// Category-flag-aware checks (leave-account balance, sick backdating) are applied
 /// later once the category has been resolved.
 pub fn validate_new_absence_shape(input: &NewAbsence) -> AppResult<()> {
     if let Some(comment) = &input.comment {
@@ -328,6 +328,27 @@ pub async fn resolve_requested_category_for_edit(
     Ok(category)
 }
 
+/// Resolve the immutable account recorded on an absence. A category can be
+/// renamed, deactivated, or access-revoked after a booking, but the account
+/// must remain valid for its historical balance calculation.
+async fn resolve_leave_account_category(
+    app_state: &AppState,
+    category_id: i64,
+) -> AppResult<crate::repository::AbsenceCategory> {
+    let category = app_state
+        .db
+        .absence_categories
+        .find_by_id(category_id)
+        .await?
+        .ok_or_else(|| AppError::Internal("Absence refers to a missing leave account.".into()))?;
+    if !category.has_leave_account() {
+        return Err(AppError::Internal(
+            "Absence refers to a category without a leave account.".into(),
+        ));
+    }
+    Ok(category)
+}
+
 #[derive(Deserialize)]
 pub struct NewAbsence {
     /// Preferred reference. Falls back to `kind` (slug) for legacy callers.
@@ -408,15 +429,15 @@ pub async fn create_absence(
     // Time-entry conflict is checked at approval, not at request creation.
     // This lets employees request an absence even if they have forgotten to remove
     // existing time entries; the approver then sees and handles the conflict.
-    if category.is_vacation_cost() {
-        validate_vacation_balance(
+    if category.has_leave_account() {
+        validate_leave_account_balance(
             &app_state.pool,
             &mut transaction,
             requester,
+            &category,
             body.start_date,
             body.end_date,
             None,
-            true,
         )
         .await?;
     }
@@ -433,12 +454,15 @@ pub async fn create_absence(
     }
     let new_absence_id = crate::repository::AbsenceDb::insert_tx(
         &mut transaction,
-        requester.id,
-        category.id,
-        body.start_date,
-        body.end_date,
-        body.comment.as_deref(),
-        initial_status,
+        crate::repository::NewAbsenceRecord {
+            user_id: requester.id,
+            category_id: category.id,
+            leave_account_category_id: category.has_leave_account().then_some(category.id),
+            start_date: body.start_date,
+            end_date: body.end_date,
+            comment: body.comment.as_deref(),
+            initial_status,
+        },
     )
     .await?;
     transaction.commit().await?;
@@ -558,15 +582,24 @@ pub async fn update_absence(
     .await?;
     // Time-entry conflict is checked at approval, not at edit time —
     // consistent with create_absence behavior.
-    if category.is_vacation_cost() {
-        validate_vacation_balance(
+    // Keep the historic booking when only dates or the comment change. A
+    // real category change deliberately rebooks the absence to the new
+    // category's account (or clears it for a non-account category).
+    let leave_account_category_id = if category.id == absence_before_update.category_id {
+        absence_before_update.leave_account_category_id
+    } else {
+        category.has_leave_account().then_some(category.id)
+    };
+    if let Some(account_id) = leave_account_category_id {
+        let leave_account_category = resolve_leave_account_category(app_state, account_id).await?;
+        validate_leave_account_balance(
             &app_state.pool,
             &mut transaction,
             requester,
+            &leave_account_category,
             body.start_date,
             body.end_date,
             Some(absence_id),
-            true,
         )
         .await?;
     }
@@ -597,12 +630,15 @@ pub async fn update_absence(
     };
     crate::repository::AbsenceDb::update_fields_tx(
         &mut transaction,
-        absence_id,
-        category.id,
-        body.start_date,
-        body.end_date,
-        body.comment.as_deref(),
-        updated_status,
+        crate::repository::UpdateAbsenceRecord {
+            absence_id,
+            category_id: category.id,
+            leave_account_category_id,
+            start_date: body.start_date,
+            end_date: body.end_date,
+            comment: body.comment.as_deref(),
+            new_status: updated_status,
+        },
     )
     .await?;
     transaction.commit().await?;
@@ -823,7 +859,7 @@ pub async fn approve_absence(
     // the request was filed, and other balance-affecting absences may have
     // landed in between. Without this, a request that passed validation at
     // creation could be approved into a balance breach.
-    if absence.is_vacation_cost() || absence.is_flextime_cost() {
+    if absence.leave_account_category_id.is_some() || absence.is_flextime_cost() {
         let repo_user = app_state
             .db
             .users
@@ -831,15 +867,17 @@ pub async fn approve_absence(
             .await?
             .ok_or(AppError::NotFound)?;
         let absence_owner = crate::services::users::repo_user_to_auth_user(repo_user);
-        if absence.is_vacation_cost() {
-            validate_vacation_balance(
+        if let Some(account_id) = absence.leave_account_category_id {
+            let leave_account_category =
+                resolve_leave_account_category(app_state, account_id).await?;
+            validate_leave_account_balance(
                 &app_state.pool,
                 &mut transaction,
                 &absence_owner,
+                &leave_account_category,
                 absence.start_date,
                 absence.end_date,
                 Some(absence_id),
-                true,
             )
             .await?;
         }
@@ -1299,6 +1337,10 @@ where
 
 #[derive(Serialize)]
 pub struct LeaveBalance {
+    pub category_id: i64,
+    pub category_name: String,
+    pub color: String,
+    pub active: bool,
     pub annual_entitlement: i64,
     #[serde(serialize_with = "serialize_day_count")]
     pub already_taken: f64,
@@ -1315,15 +1357,16 @@ pub struct LeaveBalance {
     pub carryover_expired: bool,
 }
 
-pub async fn compute_balance(
+pub async fn compute_balances(
     app_state: &AppState,
     requester: &User,
     target_user_id: i64,
     year: i32,
-) -> AppResult<LeaveBalance> {
+) -> AppResult<Vec<LeaveBalance>> {
     use crate::services::absence_balance::{
-        carryover_remaining_days, parse_expiry_date, total_entitlement_with_carryover,
-        vacation_year_context, workdays_for_ranges_in_window, CarryoverRemainingInput,
+        carryover_remaining_days, effective_leave_account_start_year, leave_account_year_context,
+        parse_expiry_date, total_entitlement_with_carryover, workdays_for_ranges_in_window,
+        CarryoverRemainingInput,
     };
 
     assert_can_access_user(app_state, requester, target_user_id).await?;
@@ -1339,68 +1382,112 @@ pub async fn compute_balance(
     let year_to = NaiveDate::from_ymd_opt(year, 12, 31)
         .ok_or_else(|| AppError::BadRequest("Invalid year.".into()))?;
     let today = crate::services::settings::app_today(&app_state.pool).await;
-    let vacation_absences: Vec<Absence> = app_state
+    let categories_by_id: std::collections::HashMap<_, _> = app_state
         .db
-        .absences
-        .vacation_absences_in_year(target_user_id, year_from, year_to)
+        .absence_categories
+        .list_all()
         .await?
         .into_iter()
-        .map(repo_absence_to_service)
+        .filter(|category| category.has_leave_account())
+        .map(|category| (category.id, category))
         .collect();
-    let mut taken_days = 0.0;
-    let mut upcoming_days = 0.0;
-    let mut requested_days = 0.0;
-    for absence in &vacation_absences {
-        let clamped_start = std::cmp::max(absence.start_date, year_from);
-        let clamped_end = std::cmp::min(absence.end_date, year_to);
-        if absence.status == "approved" {
-            if clamped_end <= today {
-                taken_days +=
-                    workdays(&app_state.pool, target_user.id, clamped_start, clamped_end).await?;
-            } else if clamped_start > today {
-                upcoming_days +=
-                    workdays(&app_state.pool, target_user.id, clamped_start, clamped_end).await?;
-            } else {
-                taken_days +=
-                    workdays(&app_state.pool, target_user.id, clamped_start, today).await?;
-                let tomorrow = today + Duration::days(1);
-                if tomorrow <= clamped_end {
-                    upcoming_days +=
-                        workdays(&app_state.pool, target_user.id, tomorrow, clamped_end).await?;
-                }
-            }
-        } else if absence.status == "requested" || absence.status == "cancellation_pending" {
-            requested_days +=
-                workdays(&app_state.pool, target_user.id, clamped_start, clamped_end).await?;
+    let definitions = app_state
+        .db
+        .users
+        .leave_account_definitions_for_user(target_user_id)
+        .await?;
+    let mut balances = Vec::with_capacity(definitions.len());
+
+    for definition in definitions {
+        let category = categories_by_id
+            .get(&definition.category_id)
+            .ok_or_else(|| {
+                AppError::Internal("User leave account refers to a missing category.".into())
+            })?;
+        if year < effective_leave_account_start_year(&target_user, category)? {
+            continue;
         }
-    }
-    let expiry_setting =
-        crate::services::settings::load_setting(&app_state.pool, "carryover_expiry_date", "03-31")
-            .await?;
-    let expiry_date = parse_expiry_date(&expiry_setting, year);
-    let (effective_entitlement, carryover_days, carryover_expired) =
-        vacation_year_context(&app_state.pool, &target_user, year, today, &expiry_setting).await?;
-    let carryover_remaining = carryover_remaining_days(CarryoverRemainingInput {
-        pool: &app_state.pool,
-        user_id: target_user.id,
-        vacation_absences: &vacation_absences,
-        year_start: year_from,
-        today,
-        expiry_date,
-        carryover_days,
-        carryover_expired,
-    })
-    .await?;
-    let total_entitlement =
-        total_entitlement_with_carryover(effective_entitlement, carryover_days, carryover_expired);
-    let available = if carryover_expired {
-        if let Some(expiry) = expiry_date {
-            let reserved_ranges: Vec<(NaiveDate, NaiveDate)> = vacation_absences
-                .iter()
-                .map(|a| (a.start_date, a.end_date))
-                .collect();
-            let pre_window_end = std::cmp::min(expiry, year_to);
-            let post_window_start = expiry + Duration::days(1);
+        let account_absences: Vec<Absence> = app_state
+            .db
+            .absences
+            .leave_account_absences_in_year(target_user_id, category.id, year_from, year_to)
+            .await?
+            .into_iter()
+            .map(repo_absence_to_service)
+            .collect();
+        let mut taken_days = 0.0;
+        let mut upcoming_days = 0.0;
+        let mut requested_days = 0.0;
+        for absence in &account_absences {
+            let clamped_start = std::cmp::max(absence.start_date, year_from);
+            let clamped_end = std::cmp::min(absence.end_date, year_to);
+            if absence.status == "approved" {
+                if clamped_end <= today {
+                    taken_days +=
+                        workdays(&app_state.pool, target_user.id, clamped_start, clamped_end)
+                            .await?;
+                } else if clamped_start > today {
+                    upcoming_days +=
+                        workdays(&app_state.pool, target_user.id, clamped_start, clamped_end)
+                            .await?;
+                } else {
+                    taken_days +=
+                        workdays(&app_state.pool, target_user.id, clamped_start, today).await?;
+                    let tomorrow = today + Duration::days(1);
+                    if tomorrow <= clamped_end {
+                        upcoming_days +=
+                            workdays(&app_state.pool, target_user.id, tomorrow, clamped_end)
+                                .await?;
+                    }
+                }
+            } else if absence.status == "requested" || absence.status == "cancellation_pending" {
+                requested_days +=
+                    workdays(&app_state.pool, target_user.id, clamped_start, clamped_end).await?;
+            }
+        }
+
+        let expiry_setting = category
+            .leave_account_carryover_expiry
+            .as_deref()
+            .ok_or_else(|| {
+                AppError::Internal("Leave-account category has no carryover expiry.".into())
+            })?;
+        let expiry_date = parse_expiry_date(expiry_setting, year).ok_or_else(|| {
+            AppError::Internal("Leave-account category has an invalid carryover expiry.".into())
+        })?;
+        let (effective_entitlement, carryover_days, carryover_expired) =
+            leave_account_year_context(&app_state.pool, &target_user, category, year, today)
+                .await?;
+        let carryover_ranges: Vec<_> = account_absences
+            .iter()
+            .filter(|absence| {
+                absence.status == "approved" || absence.status == "cancellation_pending"
+            })
+            .map(|absence| (absence.start_date, absence.end_date))
+            .collect();
+        let carryover_remaining = carryover_remaining_days(CarryoverRemainingInput {
+            pool: &app_state.pool,
+            user_id: target_user.id,
+            leave_account_ranges: &carryover_ranges,
+            year_start: year_from,
+            today,
+            expiry_date: Some(expiry_date),
+            carryover_days,
+            carryover_expired,
+        })
+        .await?;
+        let total_entitlement = total_entitlement_with_carryover(
+            effective_entitlement,
+            carryover_days,
+            carryover_expired,
+        );
+        let reserved_ranges: Vec<_> = account_absences
+            .iter()
+            .map(|absence| (absence.start_date, absence.end_date))
+            .collect();
+        let available = if carryover_expired {
+            let pre_window_end = std::cmp::min(expiry_date, year_to);
+            let post_window_start = expiry_date + Duration::days(1);
             let pre_reserved = if year_from <= pre_window_end {
                 workdays_for_ranges_in_window(
                     &app_state.pool,
@@ -1429,21 +1516,24 @@ pub async fn compute_balance(
             effective_entitlement as f64 - base_consumed_before_or_on_expiry - post_reserved
         } else {
             total_entitlement - taken_days - upcoming_days - requested_days
-        }
-    } else {
-        total_entitlement - taken_days - upcoming_days - requested_days
-    };
-    Ok(LeaveBalance {
-        annual_entitlement: effective_entitlement,
-        already_taken: taken_days,
-        approved_upcoming: upcoming_days,
-        requested: requested_days,
-        available,
-        carryover_days,
-        carryover_remaining,
-        carryover_expiry: expiry_date.map(|d| d.to_string()),
-        carryover_expired,
-    })
+        };
+        balances.push(LeaveBalance {
+            category_id: definition.category_id,
+            category_name: definition.category_name,
+            color: definition.color,
+            active: definition.active,
+            annual_entitlement: effective_entitlement,
+            already_taken: taken_days,
+            approved_upcoming: upcoming_days,
+            requested: requested_days,
+            available,
+            carryover_days,
+            carryover_remaining,
+            carryover_expiry: Some(expiry_date.to_string()),
+            carryover_expired,
+        });
+    }
+    Ok(balances)
 }
 
 #[cfg(test)]
@@ -1475,7 +1565,6 @@ mod tests {
             dark_mode: false,
             overtime_start_balance_min: 0,
             tracks_time,
-            annual_leave_days: 30,
             archived_at: None,
             receives_error_notifications: false,
         }
@@ -1492,6 +1581,7 @@ mod tests {
             id,
             user_id: 1,
             category_id: 1,
+            leave_account_category_id: (kind == "vacation").then_some(1),
             kind: kind.to_string(),
             category_name: kind.to_string(),
             category_color: "#000000".to_string(),
@@ -1710,6 +1800,7 @@ mod tests {
             id: 99,
             user_id: 7,
             category_id: 2,
+            leave_account_category_id: None,
             kind: "sick".to_string(),
             category_name: "Sick".to_string(),
             category_color: "#ef4444".to_string(),
@@ -1750,6 +1841,10 @@ mod tests {
     #[test]
     fn serialize_day_count_emits_integer_for_whole_numbers_and_float_for_fractions() {
         let balance = LeaveBalance {
+            category_id: 1,
+            category_name: "Vacation".to_string(),
+            color: "#3b82f6".to_string(),
+            active: true,
             annual_entitlement: 25,
             already_taken: 3.0,
             approved_upcoming: 2.5,

@@ -12,8 +12,6 @@ const mockState = vi.hoisted(() => ({
     country: "DE",
     region: "",
     default_weekly_hours: 40,
-    default_annual_leave_days: 30,
-    carryover_expiry_date: "03-31",
     submission_deadline_day: null,
   },
   countries: [
@@ -145,6 +143,8 @@ describe("AdminSettings", () => {
     );
     expect(saveCall).toBeTruthy();
     expect(saveCall[1].body.region).toBe("");
+    expect(saveCall[1].body).not.toHaveProperty("default_annual_leave_days");
+    expect(saveCall[1].body).not.toHaveProperty("carryover_expiry_date");
   });
 
   it("allows saving even when region loading fails", async () => {

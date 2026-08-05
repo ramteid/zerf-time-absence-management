@@ -121,9 +121,6 @@ async fn notifications_full_workflow() {
                     "last_name":"Lead",
                     "role":"team_lead",
                     "weekly_hours":39,
-                    "leave_days_current_year":30,
-                    "leave_days_next_year":30,
-                    "annual_leave_days": 30,
                     "start_date":"2024-01-01",
                     "approver_ids":[1]
                 }),
@@ -237,9 +234,6 @@ async fn notifications_full_workflow() {
                     "last_name":"User",
                     "role":"admin",
                     "weekly_hours":39,
-                    "leave_days_current_year":30,
-                    "leave_days_next_year":30,
-                    "annual_leave_days": 30,
                     "start_date":"2024-01-01",
                     "approver_ids":[]
                 }),
@@ -258,9 +252,6 @@ async fn notifications_full_workflow() {
                     "last_name":"User",
                     "role":"admin",
                     "weekly_hours":39,
-                    "leave_days_current_year":30,
-                    "leave_days_next_year":30,
-                    "annual_leave_days": 30,
                     "start_date":"2024-01-01",
                     "approver_ids":[]
                 }),

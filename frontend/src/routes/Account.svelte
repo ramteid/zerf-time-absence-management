@@ -1,9 +1,9 @@
 <script>
   import { api } from "../api.js";
-  import { currentUser, settings, theme, toast } from "../stores.js";
+  import { currentUser, theme, toast } from "../stores.js";
   import { loadPostAuthData } from "../appData.js";
   import { t, roleLabel, formatHours } from "../i18n.js";
-  import { fmtDate, appTodayDate } from "../format.js";
+  import { fmtDate } from "../format.js";
   import { isAssistantUser } from "../rolePolicy.js";
   import { userAvatarClass, userInitials } from "../lib/domain/users.js";
 
@@ -12,24 +12,27 @@
     nw2 = "",
     error = "";
   let savingTheme = false;
-  let leaveDaysThisYear = 0;
-  let leaveDaysNextYear = 0;
+  let leaveAccounts = [];
+  let loadedLeaveAccountsForUserId = null;
   $: isAssistantCurrentUser = isAssistantUser($currentUser);
-  $: thisYear = appTodayDate($settings?.timezone).getFullYear();
-  $: nextYear = thisYear + 1;
 
-  // Re-fetch whenever currentUser becomes available (store starts as null)
-  $: if ($currentUser?.id) {
-    api(`/users/${$currentUser.id}/leave-days`)
+  // Re-fetch whenever the authenticated user changes. The response already
+  // carries the relevant current and next year, so this remains correct when
+  // the configured application timezone changes.
+  $: if ($currentUser?.id && loadedLeaveAccountsForUserId !== $currentUser.id) {
+    const userId = $currentUser.id;
+    loadedLeaveAccountsForUserId = userId;
+    api(`/users/${userId}/leave-accounts`)
       .then((rows) => {
-        const cur = rows.find((r) => r.year === thisYear);
-        const nxt = rows.find((r) => r.year === nextYear);
+        if (loadedLeaveAccountsForUserId !== userId) return;
         // eslint-disable-next-line svelte/infinite-reactive-loop
-        leaveDaysThisYear = cur?.days ?? 0;
-        // eslint-disable-next-line svelte/infinite-reactive-loop
-        leaveDaysNextYear = nxt?.days ?? 0;
+        leaveAccounts = Array.isArray(rows) ? rows : [];
       })
-      .catch(() => {});
+      .catch(() => {
+        if (loadedLeaveAccountsForUserId !== userId) return;
+        // eslint-disable-next-line svelte/infinite-reactive-loop
+        leaveAccounts = [];
+      });
   }
 
   async function toggleDarkMode() {
@@ -151,28 +154,6 @@
         </div>
       {/if}
       <div>
-        <label class="zf-label" for="account-annual-leave-this"
-          >{$t("Annual leave days")} {thisYear}</label
-        >
-        <input
-          id="account-annual-leave-this"
-          class="zf-input text-secondary"
-          value={leaveDaysThisYear}
-          readonly
-        />
-      </div>
-      <div>
-        <label class="zf-label" for="account-annual-leave-next"
-          >{$t("Annual leave days")} {nextYear}</label
-        >
-        <input
-          id="account-annual-leave-next"
-          class="zf-input text-secondary"
-          value={leaveDaysNextYear}
-          readonly
-        />
-      </div>
-      <div>
         <label class="zf-label" for="account-start-date"
           >{$t("Start date")}</label
         >
@@ -195,6 +176,40 @@
       {/if}
     </div>
   </div>
+
+  {#if leaveAccounts.length > 0}
+    <div class="zf-card zf-card-section">
+      <div class="field-card-title">{$t("Leave accounts")}</div>
+      <div class="leave-account-list">
+        {#each leaveAccounts as leaveAccount (leaveAccount.category_id)}
+          <div
+            class="leave-account-row"
+            data-testid={`account-leave-account-${leaveAccount.category_id}`}
+          >
+            <div class="leave-account-name">
+              <span
+                class="leave-account-dot"
+                style:background={leaveAccount.color || "#64748b"}
+              ></span>
+              <span>{$t(leaveAccount.category_name)}</span>
+            </div>
+            <div class="leave-account-years">
+              <span
+                >{leaveAccount.current_year}:
+                <strong class="tab-num">{leaveAccount.current_year_days}</strong
+                ></span
+              >
+              <span
+                >{leaveAccount.next_year}:
+                <strong class="tab-num">{leaveAccount.next_year_days}</strong
+                ></span
+              >
+            </div>
+          </div>
+        {/each}
+      </div>
+    </div>
+  {/if}
 
   <!-- Password -->
   <div class="zf-card zf-card-section">
@@ -292,5 +307,53 @@
   .form-actions {
     display: flex;
     justify-content: flex-end;
+  }
+
+  .leave-account-list {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .leave-account-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 10px 0;
+  }
+
+  .leave-account-row + .leave-account-row {
+    border-top: 1px solid var(--border);
+  }
+
+  .leave-account-name,
+  .leave-account-years {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .leave-account-name {
+    font-weight: 600;
+  }
+
+  .leave-account-years {
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+  }
+
+  .leave-account-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex: 0 0 auto;
+  }
+
+  @media (max-width: 560px) {
+    .leave-account-row,
+    .leave-account-years {
+      align-items: flex-start;
+      flex-direction: column;
+    }
   }
 </style>

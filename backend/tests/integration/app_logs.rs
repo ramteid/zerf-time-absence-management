@@ -21,9 +21,6 @@ async fn logs_endpoint_is_forbidden_for_non_admin_users() {
                 "last_name": "Employee",
                 "role": "employee",
                 "weekly_hours": 39,
-                "leave_days_current_year": 30,
-                "leave_days_next_year": 30,
-                "annual_leave_days": 30,
                 "start_date": "2024-01-01",
                 "approver_ids": [1]
             }),

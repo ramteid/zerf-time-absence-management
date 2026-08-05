@@ -449,9 +449,6 @@ async fn report_export_queue_includes_tracking_disabled_users_with_history() {
                 "role": "admin",
                 "tracks_time": true,
                 "weekly_hours": 39,
-                "leave_days_current_year": 30,
-                "leave_days_next_year": 30,
-                "annual_leave_days": 30,
                 "start_date": "2024-01-01"
             }),
         )
@@ -542,9 +539,6 @@ async fn report_export_holds_tracking_disabled_users_with_unresolved_time_rows()
                 "role": "admin",
                 "tracks_time": true,
                 "weekly_hours": 39,
-                "leave_days_current_year": 30,
-                "leave_days_next_year": 30,
-                "annual_leave_days": 30,
                 "start_date": "2024-01-01"
             }),
         )
@@ -885,9 +879,6 @@ async fn reports_full_workflow() {
                     "last_name": "CategoryScope",
                     "role": "admin",
                     "weekly_hours": 0,
-                    "leave_days_current_year": 0,
-                    "leave_days_next_year": 0,
-                    "annual_leave_days": 0,
                     "start_date": "2024-01-01",
                     "approver_ids": [1],
                     "tracks_time": false
@@ -906,9 +897,6 @@ async fn reports_full_workflow() {
                     "last_name": "CategoryScope",
                     "role": "employee",
                     "weekly_hours": 39,
-                    "leave_days_current_year": 30,
-                    "leave_days_next_year": 30,
-                    "annual_leave_days": 30,
                     "start_date": "2024-01-01",
                     "approver_ids": [lead_id]
                 }),
@@ -1544,9 +1532,6 @@ async fn reports_full_workflow() {
                     "last_name":"Assistant",
                     "role":"assistant",
                     "weekly_hours":0,
-                    "leave_days_current_year":0,
-                    "leave_days_next_year":0,
-                    "annual_leave_days": 0,
                     "start_date":"2024-01-01",
                     "approver_ids":[lead_id]
                 }),
@@ -1738,9 +1723,6 @@ async fn reports_full_workflow() {
                     "last_name":"Report",
                     "role":"assistant",
                     "weekly_hours":0,
-                    "leave_days_current_year":0,
-                    "leave_days_next_year":0,
-                    "annual_leave_days": 0,
                     "start_date":"2024-01-01",
                     "approver_ids":[lead_id]
                 }),
@@ -1760,9 +1742,6 @@ async fn reports_full_workflow() {
                     "last_name":"Subject",
                     "role":"admin",
                     "weekly_hours":39,
-                    "leave_days_current_year":30,
-                    "leave_days_next_year":30,
-                    "annual_leave_days": 30,
                     "start_date":"2024-01-01",
                     "approver_ids":[1]
                 }),
@@ -1825,9 +1804,6 @@ async fn report_permission_guards_reject_non_reportable_users_on_every_personal_
                 "role": "admin",
                 "tracks_time": false,
                 "weekly_hours": 39,
-                "leave_days_current_year": 30,
-                "leave_days_next_year": 30,
-                "annual_leave_days": 30,
                 "start_date": "2024-01-01"
             }),
         )
@@ -1851,9 +1827,6 @@ async fn report_permission_guards_reject_non_reportable_users_on_every_personal_
                 "last_name": "ReportTarget",
                 "role": "employee",
                 "weekly_hours": 39,
-                "leave_days_current_year": 30,
-                "leave_days_next_year": 30,
-                "annual_leave_days": 30,
                 "start_date": "2024-01-01",
                 "approver_ids": [lead_id]
             }),
@@ -1932,9 +1905,6 @@ async fn zero_weekly_hours_employee_exempt_from_week_completeness_checks() {
                 "last_name": "Hours",
                 "role": "employee",
                 "weekly_hours": 0,
-                "leave_days_current_year": 30,
-                "leave_days_next_year": 30,
-                "annual_leave_days": 30,
                 "start_date": "2024-01-01",
                 "approver_ids": [lead_id]
             }),
@@ -1952,9 +1922,6 @@ async fn zero_weekly_hours_employee_exempt_from_week_completeness_checks() {
                 "last_name": "Hours",
                 "role": "employee",
                 "weekly_hours": 39,
-                "leave_days_current_year": 30,
-                "leave_days_next_year": 30,
-                "annual_leave_days": 30,
                 "start_date": "2024-01-01",
                 "approver_ids": [lead_id]
             }),
@@ -2038,8 +2005,7 @@ async fn combined_timesheet_pdf_orders_sections_by_role_then_name() {
         .post(
             "/api/v1/users",
             &json!({"email":"tl-pdf@example.com","first_name":"Tim","last_name":"Zeta",
-                "role":"team_lead","weekly_hours":39,"leave_days_current_year":30,
-                "leave_days_next_year":30,"annual_leave_days":30,
+                "role":"team_lead","weekly_hours":39,
                 "start_date":"2024-01-01","approver_ids":[1]}),
         )
         .await;
@@ -2050,8 +2016,7 @@ async fn combined_timesheet_pdf_orders_sections_by_role_then_name() {
         .post(
             "/api/v1/users",
             &json!({"email":"empa-pdf@example.com","first_name":"Ann","last_name":"Alpha",
-                "role":"employee","weekly_hours":39,"leave_days_current_year":30,
-                "leave_days_next_year":30,"annual_leave_days":30,
+                "role":"employee","weekly_hours":39,
                 "start_date":"2024-01-01","approver_ids":[1]}),
         )
         .await;
@@ -2060,8 +2025,7 @@ async fn combined_timesheet_pdf_orders_sections_by_role_then_name() {
         .post(
             "/api/v1/users",
             &json!({"email":"empb-pdf@example.com","first_name":"Bob","last_name":"Beta",
-                "role":"employee","weekly_hours":39,"leave_days_current_year":30,
-                "leave_days_next_year":30,"annual_leave_days":30,
+                "role":"employee","weekly_hours":39,
                 "start_date":"2024-01-01","approver_ids":[1]}),
         )
         .await;
@@ -2073,7 +2037,6 @@ async fn combined_timesheet_pdf_orders_sections_by_role_then_name() {
             "/api/v1/users",
             &json!({"email":"asst-pdf@example.com","first_name":"Sam","last_name":"Sigma",
                 "role":"assistant","weekly_hours":0,"workdays_per_week":null,
-                "leave_days_current_year":0,"leave_days_next_year":0,"annual_leave_days":0,
                 "start_date":"2024-01-01","approver_ids":[1]}),
         )
         .await;
@@ -2084,8 +2047,7 @@ async fn combined_timesheet_pdf_orders_sections_by_role_then_name() {
             "/api/v1/users",
             &json!({"email":"technical-admin-pdf@example.com","first_name":"Nora","last_name":"NoTime",
                 "role":"admin","tracks_time":false,"weekly_hours":39,
-                "leave_days_current_year":30,"leave_days_next_year":30,
-                "annual_leave_days":30,"start_date":"2024-01-01"}),
+                "start_date":"2024-01-01"}),
         )
         .await;
     assert_eq!(st, StatusCode::OK, "create non-tracking admin");

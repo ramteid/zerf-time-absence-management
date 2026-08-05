@@ -6,6 +6,7 @@ import { setLanguage, setAbsenceCategoryCache } from "../i18n.js";
 
 const mockState = vi.hoisted(() => ({
   absences: [],
+  leaveBalances: [],
 }));
 
 vi.mock("svelte", async () => {
@@ -15,14 +16,25 @@ vi.mock("svelte", async () => {
 vi.mock("../api.js", () => ({
   api: vi.fn(async (path) => {
     if (path.startsWith("/absences")) return mockState.absences;
-    if (path.startsWith("/leave-balance")) {
-      return {
-        annual_entitlement: 30,
-        already_taken: 0,
-        approved_upcoming: 0,
-        requested: 0,
-        available: 30,
-      };
+    if (path.startsWith("/leave-balances")) {
+      return mockState.leaveBalances.length > 0
+        ? mockState.leaveBalances
+        : [
+            {
+              category_id: 1,
+              category_name: "Vacation",
+              color: "#3b82f6",
+              annual_entitlement: 30,
+              already_taken: 0,
+              approved_upcoming: 0,
+              requested: 0,
+              available: 30,
+              carryover_days: 0,
+              carryover_remaining: 0,
+              carryover_expiry: null,
+              carryover_expired: false,
+            },
+          ];
     }
     if (path.startsWith("/holidays")) return [];
     throw new Error(`Unhandled API path: ${path}`);
@@ -83,6 +95,7 @@ describe("Absences", () => {
     absenceCategories.set(cats);
     setAbsenceCategoryCache(cats);
     mockState.absences = [];
+    mockState.leaveBalances = [];
     originalShowModal = HTMLDialogElement.prototype.showModal;
     HTMLDialogElement.prototype.showModal = function showModal() {
       this.setAttribute("open", "");
@@ -197,6 +210,48 @@ describe("Absences", () => {
       entry.querySelector(".absence-entry-status .zf-chip-requested")
         .textContent,
     ).toContain("Requested");
+  });
+
+  it("renders one compact card for each leave account", async () => {
+    mockState.leaveBalances = [
+      {
+        category_id: 1,
+        category_name: "Vacation",
+        color: "#3b82f6",
+        annual_entitlement: 30,
+        already_taken: 3,
+        approved_upcoming: 2,
+        requested: 1,
+        available: 24,
+        carryover_days: 2,
+        carryover_remaining: 1,
+        carryover_expiry: "2026-03-31",
+        carryover_expired: false,
+      },
+      {
+        category_id: 8,
+        category_name: "Education leave",
+        color: "#14b8a6",
+        annual_entitlement: 5,
+        already_taken: 1,
+        approved_upcoming: 0,
+        requested: 0,
+        available: 4,
+        carryover_days: 0,
+        carryover_remaining: 0,
+        carryover_expiry: null,
+        carryover_expired: false,
+      },
+    ];
+    component = mount(Absences, { target });
+    await settle();
+
+    expect(
+      target.querySelectorAll("[data-testid^='leave-account-card-']"),
+    ).toHaveLength(2);
+    expect(target.textContent).toContain("Education leave");
+    expect(target.textContent).toContain("Carryover from");
+    expect(target.textContent).toContain("Available");
   });
 
   it("shows zero days for weekend-only training absences", async () => {

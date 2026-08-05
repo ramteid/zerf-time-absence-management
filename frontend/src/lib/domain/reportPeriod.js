@@ -21,7 +21,7 @@ export function timeQueryRange(period, todayIso) {
   return { from, to: cappedTo, active: from <= todayIso };
 }
 
-// The single calendar year a leave-balance card should report on, or null when
+// The single calendar year a leave-account card should report on, or null when
 // the range spans more than one year (annual entitlement is a per-year concept
 // that can't be shown for a multi-year span). Month mode is always one year.
 export function leaveYearForPeriod({ mode, month, from, to }) {

@@ -65,8 +65,8 @@ test("admin: sign in and complete first-run settings", async () => {
   await page.locator("#password").fill(ADMIN.password);
   await page.getByRole("button", { name: "Sign in" }).click();
 
-  // A brand-new admin always has must_configure_settings=true until country,
-  // default weekly hours, and default annual leave days are all set — the
+  // A brand-new admin always has must_configure_settings=true until country
+  // and default weekly hours are set — the
   // SPA's router (App.svelte resolveRoute) redirects any route to
   // /settings/general until that's done, even if the admin tries to go
   // straight to e.g. /dashboard. This is the app's own "you can't use Zerf
@@ -89,7 +89,6 @@ test("admin: sign in and complete first-run settings", async () => {
   await page.locator("#settings-country").selectOption("DE");
   await page.locator("#settings-language").selectOption("en");
   await page.locator("#settings-default-hours").fill("40");
-  await page.locator("#settings-default-leave").fill("30");
 
   // Selecting a country kicks off an async fetch of that country's regions
   // (for region-specific holiday calendars); the Save button is disabled

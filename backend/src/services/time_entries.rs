@@ -552,7 +552,6 @@ mod tests {
             dark_mode: false,
             overtime_start_balance_min: 0,
             tracks_time: true,
-            annual_leave_days: 30,
             archived_at: None,
             receives_error_notifications: false,
         };

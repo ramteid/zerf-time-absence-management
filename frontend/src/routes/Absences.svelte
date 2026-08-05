@@ -8,11 +8,12 @@
   import AbsenceDialog from "../dialogs/AbsenceDialog.svelte";
   import AbsenceDetailDialog from "../dialogs/AbsenceDetailDialog.svelte";
   import { confirmDialog } from "../confirm.js";
+  import LeaveAccountCard from "../lib/ui/LeaveAccountCard.svelte";
 
   let absences = [];
   // eslint-disable-next-line no-useless-assignment
   let absenceRows = [];
-  let balance = null;
+  let leaveBalances = [];
   let holidayDates = new Set();
   let showDialog = null;
   let loadToken = 0;
@@ -42,21 +43,21 @@
     } catch (e) {
       if (token !== loadToken) return;
       absences = [];
-      balance = null;
+      leaveBalances = [];
       holidayDates = new Set();
       toast($t(e?.message || "Error"), "error");
       return;
     }
 
     try {
-      const nextBalance = await api(
-        `/leave-balance/${$currentUser.id}?year=${year}`,
+      const nextBalances = await api(
+        `/leave-balances/${$currentUser.id}?year=${year}`,
       );
       if (token !== loadToken) return;
-      balance = nextBalance;
+      leaveBalances = Array.isArray(nextBalances) ? nextBalances : [];
     } catch (e) {
       if (token !== loadToken) return;
-      balance = null;
+      leaveBalances = [];
       toast($t(e?.message || "Leave balance unavailable."), "error");
     }
 
@@ -209,84 +210,12 @@
 </div>
 
 <div class="content-area absences-content">
-  {#if balance}
-    <div class="stat-cards">
-      <div class="zf-card stat-card">
-        <div class="stat-card-label">
-          {$t("Vacation days ({year})", { year: selectedYear })}
-        </div>
-        <div class="stat-card-value tab-num">
-          {formatDayCount(balance.annual_entitlement)}
-        </div>
-      </div>
-      <div class="zf-card stat-card">
-        <div class="stat-card-label">
-          {$t("Vacation used ({year})", { year: selectedYear })}
-        </div>
-        <div class="stat-card-value tab-num">
-          {formatDayCount(balance.already_taken)}
-        </div>
-      </div>
-      <div class="zf-card stat-card">
-        <div class="stat-card-label">
-          {$t("Approved upcoming ({year})", { year: selectedYear })}
-        </div>
-        <div class="stat-card-value tab-num">
-          {formatDayCount(balance.approved_upcoming || 0)}
-        </div>
-        <div class="stat-card-sub">{$t("Approved days not yet taken")}</div>
-      </div>
-      <div class="zf-card stat-card">
-        <div class="stat-card-label">
-          {$t("Vacation pending ({year})", { year: selectedYear })}
-        </div>
-        <div class="stat-card-value tab-num">
-          {formatDayCount(balance.requested || 0)}
-        </div>
-        <div class="stat-card-sub">
-          {$t("Vacation requests awaiting approval")}
-        </div>
-      </div>
-      <div class="zf-card stat-card">
-        <div class="stat-card-label">
-          {$t("Vacation remaining ({year})", { year: selectedYear })}
-        </div>
-        <div class="stat-card-value accent tab-num">
-          {formatDayCount(balance.available)}
-        </div>
-      </div>
-      {#if balance.carryover_days > 0}
-        <div
-          class="zf-card stat-card carryover-card"
-          class:expired={balance.carryover_expired}
-        >
-          <div class="stat-card-label">
-            {$t("Carryover from {year}", { year: selectedYear - 1 })}
-          </div>
-          <div class="stat-card-value tab-num carryover-value">
-            {formatDayCount(
-              balance.carryover_expired ? 0 : balance.carryover_remaining,
-            )}
-            <span class="carryover-total"
-              >/ {formatDayCount(balance.carryover_days)}</span
-            >
-          </div>
-          {#if balance.carryover_expiry}
-            <div class="stat-card-sub">
-              {#if balance.carryover_expired}
-                {$t("Expired on {date}", {
-                  date: fmtDate(balance.carryover_expiry),
-                })}
-              {:else}
-                {$t("Expires on {date}", {
-                  date: fmtDate(balance.carryover_expiry),
-                })}
-              {/if}
-            </div>
-          {/if}
-        </div>
-      {/if}
-    </div>
+  {#if leaveBalances.length > 0}
+    <section class="leave-account-cards" aria-label={$t("Leave accounts")}>
+      {#each leaveBalances as leaveBalance (leaveBalance.category_id)}
+        <LeaveAccountCard balance={leaveBalance} year={selectedYear} />
+      {/each}
+    </section>
   {/if}
 
   <div class="zf-card">
@@ -384,27 +313,11 @@
     min-width: 50px;
   }
 
-  /* Carryover card border and value switch to danger once expired. */
-  .carryover-card {
-    border-color: var(--warning);
-  }
-
-  .carryover-card.expired {
-    border-color: var(--danger);
-  }
-
-  .carryover-value {
-    color: var(--warning-text);
-  }
-
-  .expired .carryover-value {
-    color: var(--danger-text);
-  }
-
-  .carryover-total {
-    font-size: 0.75rem;
-    font-weight: 400;
-    color: var(--text-tertiary);
+  .leave-account-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
   }
 
   /* The horizontal calendar slider inside can overshoot during its snap

@@ -12,7 +12,11 @@
 //   - "E2E training" cancelled immediately (never reaches anyone's queue)
 
 import { test, expect } from "@playwright/test";
-import { EMPLOYEE, NO_COST_ABSENCE_CATEGORY } from "./users.js";
+import {
+  EMPLOYEE,
+  LEAVE_ACCOUNT_CATEGORY,
+  NO_COST_ABSENCE_CATEGORY,
+} from "./users.js";
 import {
   bookableDateOffset,
   changeTempPassword,
@@ -150,7 +154,7 @@ test("employee: book, edit, and delete time entries, then submit the week", asyn
   await expect(page.getByText("Week submitted.")).toBeVisible();
 });
 
-test("employee: request three absences of different kinds", async () => {
+test("employee: request absences including an independent leave account", async () => {
   await page.goto("/absences");
 
   // All three requests use widely-spaced future date ranges (4, 5, and 6
@@ -188,6 +192,31 @@ test("employee: request three absences of different kinds", async () => {
   await requestAbsence("Training", 35, 35, "E2E training");
   await requestAbsence(NO_COST_ABSENCE_CATEGORY, 42, 42, "E2E day off");
 
+  const vacationCard = page.locator(".leave-account-card", {
+    hasText: "Vacation",
+  });
+  const vacationStatsBefore = await vacationCard
+    .locator(".leave-account-card-stats")
+    .innerText();
+
+  await requestAbsence(
+    LEAVE_ACCOUNT_CATEGORY,
+    49,
+    49,
+    "E2E educational leave",
+  );
+
+  const educationCard = page.locator(".leave-account-card", {
+    hasText: LEAVE_ACCOUNT_CATEGORY,
+  });
+  await expect(educationCard).toBeVisible();
+  await expect(educationCard.locator(".leave-account-card-stats")).toContainText(
+    /Requested\s*1/,
+  );
+  await expect(vacationCard.locator(".leave-account-card-stats")).toHaveText(
+    vacationStatsBefore,
+  );
+
   // Scoped to the absence-entry row, not a bare page-wide text search:
   // Playwright's getByText does a case-insensitive substring match, and the
   // category named "E2E Day Off" would otherwise also match the comment
@@ -195,6 +224,9 @@ test("employee: request three absences of different kinds", async () => {
   await expect(page.locator(".absence-entry", { hasText: "E2E vacation" })).toBeVisible();
   await expect(page.locator(".absence-entry", { hasText: "E2E training" })).toBeVisible();
   await expect(page.locator(".absence-entry", { hasText: "E2E day off" })).toBeVisible();
+  await expect(
+    page.locator(".absence-entry", { hasText: "E2E educational leave" }),
+  ).toBeVisible();
 });
 
 test("employee: cancel a still-pending absence request", async () => {
@@ -214,8 +246,8 @@ test("employee: cancel a still-pending absence request", async () => {
     .getByRole("button", { name: "Yes, cancel absence" })
     .click();
   await expect(page.getByText("Absence cancelled.")).toBeVisible();
-  // Only "E2E vacation" and "E2E day off" remain pending after this —
-  // 06-team-lead-approves-employee.spec.js expects exactly those two.
+  // Vacation, the free day, and the independent leave-account request remain
+  // pending for the team lead in 06.
 });
 
 test("employee: view reports and calendar", async () => {
@@ -224,6 +256,9 @@ test("employee: view reports and calendar", async () => {
   // Reports.svelte falls back to "Your hours overview" rather than the
   // team-lead/admin "Team hours overview" subtitle.
   await expect(page.getByText("Your hours overview")).toBeVisible();
+  await expect(
+    page.locator(".leave-account-card", { hasText: LEAVE_ACCOUNT_CATEGORY }),
+  ).toBeVisible();
 
   await page.goto("/calendar");
   // Same self-only framing applies to the calendar heading.

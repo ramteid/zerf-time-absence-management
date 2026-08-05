@@ -77,9 +77,6 @@ async fn submission_reminders_full_workflow() {
                     "last_name": "User",
                     "role": "employee",
                     "weekly_hours": 20,
-                    "leave_days_current_year": 10,
-                    "leave_days_next_year": 10,
-                    "annual_leave_days": 10,
                     "start_date": start_date,
                     "approver_ids": [1]
                 }),
@@ -152,9 +149,6 @@ async fn submission_reminders_full_workflow() {
                     "last_name": "Reminder",
                     "role": "assistant",
                     "weekly_hours": 0,
-                    "leave_days_current_year": 0,
-                    "leave_days_next_year": 0,
-                    "annual_leave_days": 0,
                     "start_date": "2024-01-01",
                     "approver_ids": [1]
                 }),
@@ -200,9 +194,6 @@ async fn submission_reminders_full_workflow() {
                     "last_name": "Hours",
                     "role": "employee",
                     "weekly_hours": 0,
-                    "leave_days_current_year": 0,
-                    "leave_days_next_year": 0,
-                    "annual_leave_days": 0,
                     "start_date": "2024-01-01",
                     "approver_ids": [1]
                 }),
@@ -249,9 +240,6 @@ async fn submission_reminders_full_workflow() {
                     "role": "admin",
                     "tracks_time": false,
                     "weekly_hours": 20,
-                    "leave_days_current_year": 10,
-                    "leave_days_next_year": 10,
-                    "annual_leave_days": 10,
                     "start_date": start_date
                 }),
             )
@@ -300,9 +288,6 @@ async fn submission_reminders_full_workflow() {
                     "last_name": "Reminder",
                     "role": "employee",
                     "weekly_hours": 20,
-                    "leave_days_current_year": 10,
-                    "leave_days_next_year": 10,
-                    "annual_leave_days": 10,
                     "start_date": start_date,
                     "approver_ids": [1]
                 }),
@@ -352,8 +337,6 @@ async fn submission_reminders_full_workflow() {
                     "country": settings["country"],
                     "region": settings["region"],
                     "default_weekly_hours": settings["default_weekly_hours"],
-                    "default_annual_leave_days": settings["default_annual_leave_days"],
-                    "carryover_expiry_date": settings["carryover_expiry_date"],
                     "submission_deadline_day": 15
                 }),
             )
@@ -373,8 +356,6 @@ async fn submission_reminders_full_workflow() {
                     "country": settings["country"],
                     "region": settings["region"],
                     "default_weekly_hours": settings["default_weekly_hours"],
-                    "default_annual_leave_days": settings["default_annual_leave_days"],
-                    "carryover_expiry_date": settings["carryover_expiry_date"],
                     "submission_deadline_day": 0
                 }),
             )
@@ -390,8 +371,6 @@ async fn submission_reminders_full_workflow() {
                     "country": settings["country"],
                     "region": settings["region"],
                     "default_weekly_hours": settings["default_weekly_hours"],
-                    "default_annual_leave_days": settings["default_annual_leave_days"],
-                    "carryover_expiry_date": settings["carryover_expiry_date"],
                     "submission_deadline_day": 29
                 }),
             )
@@ -407,8 +386,6 @@ async fn submission_reminders_full_workflow() {
                     "country": settings["country"],
                     "region": settings["region"],
                     "default_weekly_hours": settings["default_weekly_hours"],
-                    "default_annual_leave_days": settings["default_annual_leave_days"],
-                    "carryover_expiry_date": settings["carryover_expiry_date"],
                     "submission_deadline_day": null
                 }),
             )
@@ -528,9 +505,6 @@ async fn submission_reminders_treat_approved_absence_as_covered_week() {
                 "last_name": "Reminder",
                 "role": "employee",
                 "weekly_hours": 20,
-                "leave_days_current_year": 10,
-                "leave_days_next_year": 10,
-                "annual_leave_days": 10,
                 "start_date": week_start,
                 "approver_ids": [1]
             }),
@@ -602,9 +576,6 @@ async fn submission_reminders_treat_requested_absence_as_covered_week() {
                 "last_name": "Reminder",
                 "role": "employee",
                 "weekly_hours": 20,
-                "leave_days_current_year": 10,
-                "leave_days_next_year": 10,
-                "annual_leave_days": 10,
                 "start_date": week_start,
                 "approver_ids": [1]
             }),
@@ -668,9 +639,6 @@ async fn submission_reminders_treat_cancellation_pending_absence_as_covered_week
                 "last_name": "Pending",
                 "role": "employee",
                 "weekly_hours": 20,
-                "leave_days_current_year": 10,
-                "leave_days_next_year": 10,
-                "annual_leave_days": 10,
                 "start_date": week_start,
                 "approver_ids": [1]
             }),

@@ -158,13 +158,6 @@
       toast($t("Please enter default weekly hours."), "error");
       return;
     }
-    if (
-      settingsForm.default_annual_leave_days == null ||
-      settingsForm.default_annual_leave_days === ""
-    ) {
-      toast($t("Please enter default annual leave days."), "error");
-      return;
-    }
     if (settingsForm.auto_break_enabled) {
       if (breakThresholdStr == null || breakThresholdStr === "") {
         toast($t("Please enter the break threshold."), "error");
@@ -194,14 +187,10 @@
     }
     saving = true;
     try {
-      // Normalize the carryover expiry date: send null when the field is empty so the
-      // backend treats it as "no date" rather than trying to parse an empty string.
       const body = {
         ...settingsForm,
         // Parse locale-formatted float strings back to numbers before sending.
         default_weekly_hours: parseDecimal(defaultWeeklyHoursStr),
-        carryover_expiry_date:
-          settingsForm.carryover_expiry_date?.trim() || null,
         // Clear all break values when the feature is disabled.
         auto_break_threshold_hours: settingsForm.auto_break_enabled
           ? parseDecimal(breakThresholdStr)
@@ -265,8 +254,8 @@
       <p class="fs-14 text-tertiary mt-4">
         {$t(
           needsName
-            ? "Please enter your name and configure the country, default weekly hours and default annual leave days before using the application."
-            : "Please configure the country, default weekly hours and default annual leave days before using the application.",
+            ? "Please enter your name and configure the country and default weekly hours before using the application."
+            : "Please configure the country and default weekly hours before using the application.",
         )}
       </p>
     </div>
@@ -380,7 +369,7 @@
 
       <!-- Default user settings -->
       <div class="zf-form-section-title">
-        {$t("Default weekly hours")} / {$t("Default annual leave days")}
+        {$t("Default weekly hours")}
       </div>
       <div class="field-row">
         <div>
@@ -394,41 +383,6 @@
             inputmode="decimal"
             bind:value={defaultWeeklyHoursStr}
           />
-        </div>
-        <div>
-          <label class="zf-label" for="settings-default-leave"
-            >{$t("Default annual leave days")}</label
-          >
-          <input
-            id="settings-default-leave"
-            class="zf-input"
-            type="number"
-            min="0"
-            max="366"
-            bind:value={settingsForm.default_annual_leave_days}
-          />
-        </div>
-      </div>
-
-      <!-- Carryover expiry date -->
-      <div class="zf-form-section-title">
-        {$t("Vacation carryover")}
-      </div>
-      <div class="field-row">
-        <div>
-          <label class="zf-label" for="settings-carryover-expiry"
-            >{$t("Carryover expiry date (MM-DD)")}</label
-          >
-          <input
-            id="settings-carryover-expiry"
-            class="zf-input"
-            bind:value={settingsForm.carryover_expiry_date}
-            placeholder="03-31"
-            maxlength="5"
-          />
-          <div class="field-hint">
-            {$t("Unused vacation from the previous year expires on this date.")}
-          </div>
         </div>
       </div>
 

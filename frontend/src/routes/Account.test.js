@@ -216,13 +216,36 @@ describe("Account", () => {
     );
   });
 
-  it("fetches leave days on load", async () => {
-    apiMock.mockResolvedValue([{ year: new Date().getFullYear(), days: 25 }]);
+  it("fetches and renders leave accounts on load", async () => {
+    apiMock.mockResolvedValue([
+      {
+        category_id: 1,
+        category_name: "Vacation",
+        color: "#3b82f6",
+        base_days: 30,
+        current_year: 2026,
+        current_year_days: 25,
+        next_year: 2027,
+        next_year_days: 30,
+      },
+      {
+        category_id: 8,
+        category_name: "Education leave",
+        color: "#14b8a6",
+        base_days: 5,
+        current_year: 2026,
+        current_year_days: 5,
+        next_year: 2027,
+        next_year_days: 5,
+      },
+    ]);
     component = mount(Account, { target });
     await settle();
     expect(apiMock).toHaveBeenCalledWith(
-      expect.stringContaining("/users/1/leave-days"),
+      expect.stringContaining("/users/1/leave-accounts"),
     );
+    expect(target.textContent).toContain("Education leave");
+    expect(target.textContent).toContain("2026: 25");
   });
 
   it("renders dark mode toggle button", async () => {

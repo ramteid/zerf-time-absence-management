@@ -25,8 +25,6 @@ pub const TIME_FORMAT_KEY: &str = "time_format";
 pub const COUNTRY_KEY: &str = "country";
 pub const REGION_KEY: &str = "region";
 pub const DEFAULT_WEEKLY_HOURS_KEY: &str = "default_weekly_hours";
-pub const DEFAULT_ANNUAL_LEAVE_DAYS_KEY: &str = "default_annual_leave_days";
-pub const CARRYOVER_EXPIRY_DATE_KEY: &str = "carryover_expiry_date";
 pub const SMTP_ENABLED_KEY: &str = "smtp_enabled";
 pub const SMTP_HOST_KEY: &str = "smtp_host";
 pub const SMTP_PORT_KEY: &str = "smtp_port";
@@ -38,7 +36,6 @@ pub const DEFAULT_UI_LANGUAGE: &str = "en";
 const DEFAULT_TIME_FORMAT: &str = "24h";
 const DEFAULT_COUNTRY: &str = "DE";
 const DEFAULT_REGION: &str = "";
-const DEFAULT_CARRYOVER_EXPIRY_DATE: &str = "03-31";
 pub const SUBMISSION_DEADLINE_DAY_KEY: &str = "submission_deadline_day";
 pub const ORGANIZATION_NAME_KEY: &str = "organization_name";
 
@@ -149,8 +146,6 @@ pub async fn load_all_public_settings(
     pool: &crate::db::DatabasePool,
 ) -> AppResult<PublicSettingsData> {
     let default_weekly_hours_str = load_setting(pool, DEFAULT_WEEKLY_HOURS_KEY, "").await?;
-    let default_annual_leave_days_str =
-        load_setting(pool, DEFAULT_ANNUAL_LEAVE_DAYS_KEY, "").await?;
     let submission_deadline_day_str = load_setting(pool, SUBMISSION_DEADLINE_DAY_KEY, "").await?;
     let auto_break_threshold_str = load_setting(pool, AUTO_BREAK_THRESHOLD_HOURS_KEY, "").await?;
     let auto_break_deduction_str = load_setting(pool, AUTO_BREAK_DEDUCTION_MINUTES_KEY, "").await?;
@@ -165,13 +160,6 @@ pub async fn load_all_public_settings(
         country: load_setting(pool, COUNTRY_KEY, DEFAULT_COUNTRY).await?,
         region: load_setting(pool, REGION_KEY, DEFAULT_REGION).await?,
         default_weekly_hours: default_weekly_hours_str.parse().ok(),
-        default_annual_leave_days: default_annual_leave_days_str.parse().ok(),
-        carryover_expiry_date: load_setting(
-            pool,
-            CARRYOVER_EXPIRY_DATE_KEY,
-            DEFAULT_CARRYOVER_EXPIRY_DATE,
-        )
-        .await?,
         submission_deadline_day: submission_deadline_day_str.parse().ok(),
         organization_name: load_setting(pool, ORGANIZATION_NAME_KEY, "").await?,
         auto_break_enabled: load_setting(pool, AUTO_BREAK_ENABLED_KEY, "false").await? == "true",
@@ -358,8 +346,6 @@ pub struct PublicSettingsData {
     pub country: String,
     pub region: String,
     pub default_weekly_hours: Option<f64>,
-    pub default_annual_leave_days: Option<i32>,
-    pub carryover_expiry_date: String,
     pub submission_deadline_day: Option<u8>,
     pub organization_name: String,
     pub auto_break_enabled: bool,

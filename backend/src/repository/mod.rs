@@ -18,7 +18,10 @@ pub mod timesheet_export_queue;
 pub mod users;
 
 pub use absence_categories::{AbsenceCategory, AbsenceCategoryDb};
-pub use absences::{Absence, AbsenceDb, CalendarEntry};
+pub use absences::{
+    Absence, AbsenceDb, CalendarEntry, LeaveAccountAbsenceRange, NewAbsenceRecord,
+    UpdateAbsenceRecord,
+};
 pub use app_logs::{AppLogDb, AppLogEntry};
 pub use audit::{AuditDb, LogEntry};
 pub use categories::{Category, CategoryDb};
@@ -36,4 +39,7 @@ pub use settings::SettingsDb;
 pub use system_metadata::SystemMetadataDb;
 pub use time_entries::{NewEntryData, TimeEntry, TimeEntryDb};
 pub use timesheet_export_queue::{ExportQueueEntry, TimesheetExportQueueDb};
-pub use users::{ActiveUserRow, User, UserDb};
+pub use users::{
+    ActiveUserRow, LeaveAccountDefinition, User, UserDb, UserLeaveAccountDetails,
+    UserLeaveAccountInput,
+};

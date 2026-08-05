@@ -87,7 +87,6 @@ pub async fn login(
             dark_mode: u.dark_mode,
             overtime_start_balance_min: u.overtime_start_balance_min,
             tracks_time: u.tracks_time,
-            annual_leave_days: u.annual_leave_days,
             archived_at: u.archived_at,
             receives_error_notifications: u.receives_error_notifications,
         });
@@ -251,15 +250,9 @@ pub async fn me(
             .settings
             .get_raw("default_weekly_hours")
             .await?;
-        let default_annual_leave_days = app_state
-            .db
-            .settings
-            .get_raw("default_annual_leave_days")
-            .await?;
         let needs_name = user.first_name.is_empty() || user.last_name.is_empty();
         country.is_none_or(|value| value.is_empty())
             || default_weekly_hours.is_none_or(|value| value.is_empty())
-            || default_annual_leave_days.is_none_or(|value| value.is_empty())
             || needs_name
     } else {
         false

@@ -221,4 +221,39 @@ describe("AdminUsers", () => {
     );
     expect(deleteBtns).toHaveLength(0);
   });
+
+  it("does not send removed global leave settings when saving assistant management", async () => {
+    const settingsResponse = {
+      allow_team_lead_manage_assistants: false,
+      default_weekly_hours: 39,
+    };
+    apiMock.mockImplementation(async (requestPath, options) => {
+      if (requestPath === "/users") return sampleUsers;
+      if (requestPath === "/users/archived") return [];
+      if (requestPath === "/settings" && !options?.method) {
+        return settingsResponse;
+      }
+      if (requestPath === "/settings" && options?.method === "PUT") {
+        return options.body;
+      }
+      return [];
+    });
+    component = mount(AdminUsers, { target });
+    await waitForText(target, "Allow team leads to create assistant users");
+
+    const checkbox = target.querySelector('input[type="checkbox"]');
+    checkbox.click();
+    const saveButton = [...target.querySelectorAll("button")].find((button) =>
+      button.textContent.includes("Save Changes"),
+    );
+    saveButton.click();
+    await settle();
+
+    const saveCall = apiMock.mock.calls.find(
+      ([requestPath, options]) =>
+        requestPath === "/settings" && options?.method === "PUT",
+    );
+    expect(saveCall[1].body).not.toHaveProperty("default_annual_leave_days");
+    expect(saveCall[1].body).not.toHaveProperty("carryover_expiry_date");
+  });
 });

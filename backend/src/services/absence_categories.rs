@@ -1,6 +1,8 @@
+use crate::audit;
 use crate::error::{AppError, AppResult};
 use crate::middleware::auth::User;
 use crate::repository::absence_categories::{NewAbsenceCategory, UpdateAbsenceCategory};
+use crate::repository::{AbsenceCategoryDb, UserDb};
 use crate::AppState;
 
 pub use crate::repository::AbsenceCategory;
@@ -8,6 +10,41 @@ pub use crate::repository::AbsenceCategory;
 fn is_valid_hex_color(color: &str) -> bool {
     let bytes = color.as_bytes();
     bytes.len() == 7 && bytes[0] == b'#' && bytes[1..].iter().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn normalize_leave_account_carryover_expiry(value: &str) -> AppResult<String> {
+    let value = value.trim();
+    let Some((month, day)) = value.split_once('-') else {
+        return Err(AppError::BadRequest(
+            "Leave-account carryover expiry must use MM-DD.".into(),
+        ));
+    };
+    if month.len() != 2 || day.len() != 2 || day.contains('-') {
+        return Err(AppError::BadRequest(
+            "Leave-account carryover expiry must use MM-DD.".into(),
+        ));
+    }
+    let month: u32 = month.parse().map_err(|_| {
+        AppError::BadRequest("Invalid month in leave-account carryover expiry.".into())
+    })?;
+    let day: u32 = day.parse().map_err(|_| {
+        AppError::BadRequest("Invalid day in leave-account carryover expiry.".into())
+    })?;
+    if chrono::NaiveDate::from_ymd_opt(2024, month, day).is_none() {
+        return Err(AppError::BadRequest(
+            "Invalid leave-account carryover expiry.".into(),
+        ));
+    }
+    Ok(format!("{month:02}-{day:02}"))
+}
+
+fn validate_leave_account_days(days: i64) -> AppResult<()> {
+    if !(0..=366).contains(&days) {
+        return Err(AppError::BadRequest(
+            "Leave-account days must be between 0 and 366.".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// Normalize a user-supplied slug into the URL-safe form the DB constraint
@@ -126,6 +163,8 @@ pub struct NewCategoryInput {
     pub cost_type: String,
     pub auto_approve_past: bool,
     pub unpaid: bool,
+    pub leave_account_default_days: Option<i64>,
+    pub leave_account_carryover_expiry: Option<String>,
 }
 
 pub async fn create(
@@ -146,6 +185,39 @@ pub async fn create(
     // Reject unknown cost_type strings up front so the DB CHECK is a backup
     // for direct-SQL bypass, not the user-facing validation.
     crate::repository::absence_categories::validate_cost_type(&input.cost_type)?;
+    let is_leave_account =
+        input.cost_type == crate::repository::absence_categories::COST_TYPE_VACATION;
+    let leave_account_default_days = if is_leave_account {
+        let days = input.leave_account_default_days.ok_or_else(|| {
+            AppError::BadRequest(
+                "Leave-account default days are required for vacation categories.".into(),
+            )
+        })?;
+        validate_leave_account_days(days)?;
+        Some(days)
+    } else {
+        if input.leave_account_default_days.is_some()
+            || input.leave_account_carryover_expiry.is_some()
+        {
+            return Err(AppError::BadRequest(
+                "Leave-account fields are only allowed for vacation categories.".into(),
+            ));
+        }
+        None
+    };
+    let leave_account_carryover_expiry = if is_leave_account {
+        let expiry = input
+            .leave_account_carryover_expiry
+            .as_deref()
+            .ok_or_else(|| {
+                AppError::BadRequest(
+                    "Leave-account carryover expiry is required for vacation categories.".into(),
+                )
+            })?;
+        Some(normalize_leave_account_carryover_expiry(expiry)?)
+    } else {
+        None
+    };
     // A category cannot simultaneously deduct vacation days AND auto-approve
     // itself: it would let employees bypass review for vacation deductions,
     // and would double-count days in the team report (vacation column AND
@@ -178,10 +250,16 @@ pub async fn create(
         })?,
     };
     let color = input.color.trim().to_string();
-    let new_id = app_state
-        .db
-        .absence_categories
-        .create(NewAbsenceCategory {
+    let leave_account_start_year = if is_leave_account {
+        Some(crate::services::settings::app_current_year(&app_state.pool).await)
+    } else {
+        None
+    };
+    let mut transaction = app_state.db.users.begin().await?;
+    crate::services::auth::lock_user_graph(&mut transaction).await?;
+    let new_id = AbsenceCategoryDb::create_tx(
+        &mut transaction,
+        NewAbsenceCategory {
             slug: &slug,
             name: &name,
             color: &color,
@@ -190,14 +268,31 @@ pub async fn create(
             cost_type: &input.cost_type,
             auto_approve_past: input.auto_approve_past,
             unpaid: input.unpaid,
-        })
-        .await?;
-    app_state
-        .db
-        .absence_categories
-        .find_by_id(new_id)
+            leave_account_default_days,
+            leave_account_carryover_expiry: leave_account_carryover_expiry.as_deref(),
+            leave_account_start_year,
+        },
+    )
+    .await?;
+    AbsenceCategoryDb::grant_default_access_to_all_users_tx(&mut transaction, new_id).await?;
+    if is_leave_account {
+        UserDb::seed_leave_accounts_for_category_tx(&mut transaction, new_id).await?;
+    }
+    let created = AbsenceCategoryDb::find_by_id_tx(&mut transaction, new_id)
         .await?
-        .ok_or_else(|| AppError::Internal("Created absence category not found".into()))
+        .ok_or_else(|| AppError::Internal("Created absence category not found".into()))?;
+    transaction.commit().await?;
+    audit::log(
+        &app_state.pool,
+        requester.id,
+        "created",
+        "absence_categories",
+        new_id,
+        None,
+        serde_json::to_value(&created).ok(),
+    )
+    .await;
+    Ok(created)
 }
 
 pub struct UpdateCategoryInput {
@@ -208,6 +303,8 @@ pub struct UpdateCategoryInput {
     pub cost_type: Option<String>,
     pub auto_approve_past: Option<bool>,
     pub unpaid: Option<bool>,
+    pub leave_account_default_days: Option<i64>,
+    pub leave_account_carryover_expiry: Option<String>,
 }
 
 pub async fn update(
@@ -219,49 +316,68 @@ pub async fn update(
     if !requester.is_admin() {
         return Err(AppError::Forbidden);
     }
-    if let Some(ref new_name) = input.name {
+    let UpdateCategoryInput {
+        name,
+        color,
+        sort_order,
+        active,
+        cost_type,
+        auto_approve_past,
+        unpaid,
+        leave_account_default_days,
+        leave_account_carryover_expiry,
+    } = input;
+    if let Some(ref new_name) = name {
         let trimmed = new_name.trim();
         if trimmed.is_empty() || trimmed.len() > 200 {
             return Err(AppError::BadRequest("Invalid category name.".into()));
         }
     }
-    if let Some(ref new_color) = input.color {
+    if let Some(ref new_color) = color {
         if !is_valid_hex_color(new_color.trim()) {
             return Err(AppError::BadRequest("Invalid color.".into()));
         }
     }
-    // We need to know whether the resulting row would violate the
-    // vacation-XOR-flextime invariant; load the current values and merge in
-    // whichever flag is being changed so we can decide whether the
-    // Bug-9 in-use lock applies.
-    let current = app_state
-        .db
-        .absence_categories
-        .find_by_id(category_id)
+    let mut transaction = app_state.db.users.begin().await?;
+    let current = AbsenceCategoryDb::find_by_id_tx(&mut transaction, category_id)
         .await?
         .ok_or(AppError::NotFound)?;
-    if let Some(ref new_cost_type) = input.cost_type {
+    if let Some(ref new_cost_type) = cost_type {
         crate::repository::absence_categories::validate_cost_type(new_cost_type)?;
     }
-    let final_cost_type = input
-        .cost_type
+    let final_cost_type = cost_type
         .clone()
         .unwrap_or_else(|| current.cost_type.clone());
-    let final_auto = input.auto_approve_past.unwrap_or(current.auto_approve_past);
-    let final_unpaid = input.unpaid.unwrap_or(current.unpaid);
-    // Toggling the cost type or the auto-approve behavior would silently
-    // change the financial / approval meaning of EXISTING absences
-    // referencing this category — past balance recomputations would
-    // suddenly debit/credit different ledgers, and approval-flow guards
-    // would relax or tighten without the affected employees seeing it.
-    // We refuse such changes whenever there is at least one absence row
-    // in this category. Admins who need a different policy must
-    // deactivate the existing category and create a new one.
-    //
-    // Renames, color, sort_order, and active toggles are safe and pass
-    // through.
-    // Enforce the vacation-XOR-auto-approve invariant even before checking
-    // whether there are existing absences: this combination is never valid.
+    let final_auto = auto_approve_past.unwrap_or(current.auto_approve_past);
+    let final_unpaid = unpaid.unwrap_or(current.unpaid);
+    let final_has_leave_account =
+        final_cost_type == crate::repository::absence_categories::COST_TYPE_VACATION;
+    if !current.has_leave_account() && final_has_leave_account {
+        return Err(AppError::BadRequest(
+            "An existing category cannot be changed into a leave-account category.".into(),
+        ));
+    }
+    if current.has_leave_account() && !final_has_leave_account {
+        return Err(AppError::BadRequest(
+            "A leave-account category cannot be changed to another cost type.".into(),
+        ));
+    }
+    let normalized_carryover_expiry = if final_has_leave_account {
+        if let Some(days) = leave_account_default_days {
+            validate_leave_account_days(days)?;
+        }
+        leave_account_carryover_expiry
+            .as_deref()
+            .map(normalize_leave_account_carryover_expiry)
+            .transpose()?
+    } else {
+        if leave_account_default_days.is_some() || leave_account_carryover_expiry.is_some() {
+            return Err(AppError::BadRequest(
+                "Leave-account fields are only allowed for leave-account categories.".into(),
+            ));
+        }
+        None
+    };
     if final_cost_type == crate::repository::absence_categories::COST_TYPE_VACATION && final_auto {
         return Err(AppError::BadRequest(
             "A category cannot both deduct vacation days and auto-approve past dates. \
@@ -269,11 +385,6 @@ pub async fn update(
                 .into(),
         ));
     }
-    // "Unpaid" is contradictory outside cost_type='none' (vacation and
-    // flextime categories are always paid through their own balance
-    // mechanics). Checked against the merged final state so a request that
-    // changes cost_type without also clearing an already-stored unpaid flag
-    // is rejected rather than silently stored.
     if final_unpaid && final_cost_type != crate::repository::absence_categories::COST_TYPE_NONE {
         return Err(AppError::BadRequest(
             "Unpaid can only be set when cost_type is 'none'.".into(),
@@ -296,30 +407,40 @@ pub async fn update(
             ));
         }
     }
-    let normalized_name = input.name.map(|n| n.trim().to_string());
-    let normalized_color = input.color.map(|c| c.trim().to_string());
-    app_state
-        .db
-        .absence_categories
-        .update(
-            category_id,
-            UpdateAbsenceCategory {
-                name: normalized_name.as_deref(),
-                color: normalized_color.as_deref(),
-                sort_order: input.sort_order,
-                active: input.active,
-                cost_type: input.cost_type.as_deref(),
-                auto_approve_past: input.auto_approve_past,
-                unpaid: input.unpaid,
-            },
-        )
-        .await?;
-    app_state
-        .db
-        .absence_categories
-        .find_by_id(category_id)
+    let normalized_name = name.map(|value| value.trim().to_string());
+    let normalized_color = color.map(|value| value.trim().to_string());
+    AbsenceCategoryDb::update_tx(
+        &mut transaction,
+        category_id,
+        UpdateAbsenceCategory {
+            name: normalized_name.as_deref(),
+            color: normalized_color.as_deref(),
+            sort_order,
+            active,
+            cost_type: cost_type.as_deref(),
+            auto_approve_past,
+            unpaid,
+            leave_account_default_days,
+            leave_account_carryover_expiry: normalized_carryover_expiry.as_deref(),
+            leave_account_start_year: None,
+        },
+    )
+    .await?;
+    let updated = AbsenceCategoryDb::find_by_id_tx(&mut transaction, category_id)
         .await?
-        .ok_or(AppError::NotFound)
+        .ok_or(AppError::NotFound)?;
+    transaction.commit().await?;
+    audit::log(
+        &app_state.pool,
+        requester.id,
+        "updated",
+        "absence_categories",
+        category_id,
+        serde_json::to_value(&current).ok(),
+        serde_json::to_value(&updated).ok(),
+    )
+    .await;
+    Ok(updated)
 }
 
 #[cfg(test)]

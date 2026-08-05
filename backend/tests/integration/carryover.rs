@@ -8,6 +8,7 @@ use crate::helpers::{admin_login, bootstrap_team, id, login_change_pw, reference
 fn json_f64(value: &Value, key: &str) -> f64 {
     value[key]
         .as_f64()
+        .or_else(|| value[key].as_i64().map(|number| number as f64))
         .unwrap_or_else(|| panic!("missing numeric field {key}: {value}"))
 }
 
@@ -17,68 +18,135 @@ fn json_i64(value: &Value, key: &str) -> i64 {
         .unwrap_or_else(|| panic!("missing integer field {key}: {value}"))
 }
 
-async fn update_carryover_expiry(admin: &crate::common::TestClient, expiry_mm_dd: &str) {
-    let (st, settings) = admin.get("/api/v1/settings").await;
-    assert_eq!(st, StatusCode::OK, "load settings before update");
+fn leave_account_values(
+    category_id: i64,
+    base_days: i64,
+    current_year_days: i64,
+    next_year_days: i64,
+) -> Value {
+    json!([{
+        "category_id": category_id,
+        "base_days": base_days,
+        "current_year_days": current_year_days,
+        "next_year_days": next_year_days,
+    }])
+}
 
-    let default_weekly_hours = settings["default_weekly_hours"].as_f64().unwrap_or(39.0);
-    let default_annual_leave_days = settings["default_annual_leave_days"].as_i64().unwrap_or(30);
+async fn vacation_leave_account_category_id(admin: &crate::common::TestClient) -> i64 {
+    let (st, categories) = admin.get("/api/v1/absence-categories/all").await;
+    assert_eq!(st, StatusCode::OK, "load absence categories");
+    categories
+        .as_array()
+        .and_then(|items| items.iter().find(|category| category["slug"] == "vacation"))
+        .and_then(|category| category["id"].as_i64())
+        .expect("canonical vacation leave-account category")
+}
 
+async fn update_carryover_expiry(
+    admin: &crate::common::TestClient,
+    category_id: i64,
+    expiry_mm_dd: &str,
+) {
     let (st, body) = admin
         .put(
-            "/api/v1/settings",
-            &json!({
-                "ui_language": settings["ui_language"],
-                "time_format": settings["time_format"],
-                "country": settings["country"],
-                "region": settings["region"],
-                "default_weekly_hours": default_weekly_hours,
-                "default_annual_leave_days": default_annual_leave_days,
-                "carryover_expiry_date": expiry_mm_dd,
-                "submission_deadline_day": settings["submission_deadline_day"],
-            }),
+            &format!("/api/v1/absence-categories/{category_id}"),
+            &json!({"leave_account_carryover_expiry": expiry_mm_dd}),
         )
         .await;
     assert_eq!(
         st,
         StatusCode::OK,
-        "update carryover expiry date failed for {expiry_mm_dd}: {body}"
+        "update leave-account carryover expiry failed for {expiry_mm_dd}: {body}"
     );
 }
 
-async fn set_leave_days_current_and_next(
+async fn set_vacation_account_days_current_and_next(
     admin: &crate::common::TestClient,
     user_id: i64,
+    category_id: i64,
     current_year_days: i64,
     next_year_days: i64,
 ) {
+    let (st, accounts) = admin
+        .get(&format!("/api/v1/users/{user_id}/leave-accounts"))
+        .await;
+    assert_eq!(st, StatusCode::OK, "load user leave accounts before update");
+    let base_days = accounts
+        .as_array()
+        .and_then(|items| {
+            items
+                .iter()
+                .find(|account| account["category_id"].as_i64() == Some(category_id))
+        })
+        .and_then(|account| account["base_days"].as_i64())
+        .expect("user has canonical vacation leave account");
+
     let (st, body) = admin
         .put(
             &format!("/api/v1/users/{user_id}"),
             &json!({
-                "leave_days_current_year": current_year_days,
-                "leave_days_next_year": next_year_days
+                "leave_accounts": [{
+                    "category_id": category_id,
+                    "base_days": base_days,
+                    "current_year_days": current_year_days,
+                    "next_year_days": next_year_days
+                }]
             }),
         )
         .await;
     assert_eq!(
         st,
         StatusCode::OK,
-        "set current/next leave days failed: {body}"
+        "set current/next leave-account days failed: {body}"
     );
 }
 
-async fn set_leave_days_for_year(app: &TestApp, user_id: i64, year: i32, days: i64) {
+async fn set_vacation_account_days_for_year(
+    app: &TestApp,
+    user_id: i64,
+    category_id: i64,
+    year: i32,
+    days: i64,
+) {
     sqlx::query(
-        "INSERT INTO user_annual_leave(user_id, year, days) VALUES ($1,$2,$3) \
-         ON CONFLICT (user_id, year) DO UPDATE SET days = EXCLUDED.days",
+        "INSERT INTO user_leave_account_year_overrides(user_id, category_id, year, days) \
+         VALUES ($1, $2, $3, $4) \
+         ON CONFLICT (user_id, category_id, year) DO UPDATE SET days = EXCLUDED.days",
     )
     .bind(user_id)
+    .bind(category_id)
     .bind(year)
     .bind(days)
     .execute(&app.state.pool)
     .await
-    .expect("set annual leave row");
+    .expect("set leave-account year override");
+}
+
+async fn leave_account_balance(
+    client: &crate::common::TestClient,
+    user_id: i64,
+    category_id: i64,
+    year: i32,
+) -> Value {
+    let (st, balances) = client
+        .get(&format!("/api/v1/leave-balances/{user_id}?year={year}"))
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::OK,
+        "load leave-account balances: {balances}"
+    );
+    balances
+        .as_array()
+        .and_then(|items| {
+            items
+                .iter()
+                .find(|balance| balance["category_id"].as_i64() == Some(category_id))
+        })
+        .cloned()
+        .unwrap_or_else(|| {
+            panic!("leave-account balance for category {category_id} was missing from {balances}")
+        })
 }
 
 async fn pick_workdays(
@@ -210,37 +278,29 @@ async fn carryover_policy_edge_cases() {
 
     let current_year = reference_date().year();
     let next_year = current_year + 1;
+    let vacation_account_id = vacation_leave_account_category_id(&admin).await;
 
-    // Make yearly entitlement deterministic for this scenario.
-    set_leave_days_current_and_next(&admin, emp_id, 6, 10).await;
+    // Make the canonical leave-account entitlement deterministic for this scenario.
+    set_vacation_account_days_current_and_next(&admin, emp_id, vacation_account_id, 6, 10).await;
 
     // Edge case 1: carryover_expired reflects expiry-date boundary in current year.
-    update_carryover_expiry(&admin, "12-31").await;
-    let (st, bal_not_expired) = emp
-        .get(&format!(
-            "/api/v1/leave-balance/{emp_id}?year={current_year}"
-        ))
-        .await;
-    assert_eq!(st, StatusCode::OK);
+    update_carryover_expiry(&admin, vacation_account_id, "12-31").await;
+    let bal_not_expired =
+        leave_account_balance(&emp, emp_id, vacation_account_id, current_year).await;
     assert_eq!(
         bal_not_expired["carryover_expired"], false,
         "carryover should not be expired with 12-31 cutoff"
     );
 
-    update_carryover_expiry(&admin, "01-01").await;
-    let (st, bal_expired) = emp
-        .get(&format!(
-            "/api/v1/leave-balance/{emp_id}?year={current_year}"
-        ))
-        .await;
-    assert_eq!(st, StatusCode::OK);
+    update_carryover_expiry(&admin, vacation_account_id, "01-01").await;
+    let bal_expired = leave_account_balance(&emp, emp_id, vacation_account_id, current_year).await;
     assert_eq!(
         bal_expired["carryover_expired"], true,
         "carryover should be expired with 01-01 cutoff after Jan 1"
     );
 
     // Reset to default-like value so subsequent assertions stay intuitive.
-    update_carryover_expiry(&admin, "03-31").await;
+    update_carryover_expiry(&admin, vacation_account_id, "03-31").await;
 
     // Build previous-year usage for next-year carryover:
     // - 2 approved vacation days (consume carryover source)
@@ -266,10 +326,8 @@ async fn carryover_policy_edge_cases() {
     // pending December request reserves December's budget while simultaneously
     // leaving the carryover source untouched, allowing both it and an early-next-
     // year booking to be approved and together exceed the entitlement.
-    let (st, bal_next_year_initial) = emp
-        .get(&format!("/api/v1/leave-balance/{emp_id}?year={next_year}"))
-        .await;
-    assert_eq!(st, StatusCode::OK);
+    let bal_next_year_initial =
+        leave_account_balance(&emp, emp_id, vacation_account_id, next_year).await;
     assert_eq!(
         json_i64(&bal_next_year_initial, "annual_entitlement"),
         10,
@@ -299,10 +357,8 @@ async fn carryover_policy_edge_cases() {
         .await;
     assert_eq!(st, StatusCode::OK, "approve next-year vacation");
 
-    let (st, bal_after_approved) = emp
-        .get(&format!("/api/v1/leave-balance/{emp_id}?year={next_year}"))
-        .await;
-    assert_eq!(st, StatusCode::OK);
+    let bal_after_approved =
+        leave_account_balance(&emp, emp_id, vacation_account_id, next_year).await;
 
     // Edge case 3: before next year starts, approved upcoming days do not consume
     // carryover_remaining yet (only already taken approved days do).
@@ -328,10 +384,8 @@ async fn carryover_policy_edge_cases() {
     );
     assert_eq!(body["pending"], true, "must enter cancellation workflow");
 
-    let (st, bal_cancellation_pending) = emp
-        .get(&format!("/api/v1/leave-balance/{emp_id}?year={next_year}"))
-        .await;
-    assert_eq!(st, StatusCode::OK);
+    let bal_cancellation_pending =
+        leave_account_balance(&emp, emp_id, vacation_account_id, next_year).await;
 
     assert_eq!(
         json_f64(&bal_cancellation_pending, "approved_upcoming"),
@@ -349,16 +403,14 @@ async fn carryover_policy_edge_cases() {
         "available must stay unchanged while cancellation is pending"
     );
 
-    // Edge case 5: post-expiry vacation days must be covered by current-year
+    // Edge case 5: post-expiry leave-account days must be covered by current-year
     // entitlement only; carryover can be used only up to the expiry date.
     // Here: next-year entitlement=2, carryover=2 (pessimistic: 6 - 2 approved - 2 requested)
     // => November bookings in next year may reserve at most 2 days (the annual entitlement).
-    set_leave_days_current_and_next(&admin, emp_id, 6, 2).await;
+    set_vacation_account_days_current_and_next(&admin, emp_id, vacation_account_id, 6, 2).await;
 
-    let (st, bal_next_year_small_entitlement) = emp
-        .get(&format!("/api/v1/leave-balance/{emp_id}?year={next_year}"))
-        .await;
-    assert_eq!(st, StatusCode::OK);
+    let bal_next_year_small_entitlement =
+        leave_account_balance(&emp, emp_id, vacation_account_id, next_year).await;
     assert_eq!(
         json_i64(&bal_next_year_small_entitlement, "annual_entitlement"),
         2,
@@ -384,12 +436,12 @@ async fn carryover_policy_edge_cases() {
     assert_eq!(
         st,
         StatusCode::BAD_REQUEST,
-        "third post-expiry day should be rejected; only annual entitlement is usable after expiry"
+        "third post-expiry day should be rejected; only annual account entitlement is usable after expiry"
     );
     assert!(
         body.to_string()
-            .contains("Not enough remaining vacation days"),
-        "error should mention remaining vacation days: {body}"
+            .contains("Not enough remaining leave-account days"),
+        "error should mention remaining leave-account days: {body}"
     );
 
     app.cleanup().await;
@@ -404,10 +456,11 @@ async fn cross_year_request_enforces_end_year_post_expiry_budget() {
 
     let current_year = reference_date().year();
     let next_year = current_year + 1;
+    let vacation_account_id = vacation_leave_account_category_id(&admin).await;
 
-    update_carryover_expiry(&admin, "03-31").await;
+    update_carryover_expiry(&admin, vacation_account_id, "03-31").await;
     // Build a large carryover into next year while keeping next-year entitlement tiny.
-    set_leave_days_current_and_next(&admin, emp_id, 90, 2).await;
+    set_vacation_account_days_current_and_next(&admin, emp_id, vacation_account_id, 90, 2).await;
 
     let start = last_workday_in_year(&emp, current_year).await;
     let end = nth_workday_from(
@@ -435,8 +488,8 @@ async fn cross_year_request_enforces_end_year_post_expiry_budget() {
     );
     assert!(
         body.to_string()
-            .contains("Not enough remaining vacation days"),
-        "error should mention remaining vacation days: {body}"
+            .contains("Not enough remaining leave-account days"),
+        "error should mention remaining leave-account days: {body}"
     );
 
     app.cleanup().await;
@@ -451,11 +504,12 @@ async fn pre_expiry_days_can_be_requested_after_expiry() {
 
     let current_year = reference_date().year();
     let prev_year = current_year - 1;
+    let vacation_account_id = vacation_leave_account_category_id(&admin).await;
 
     // Ensure carryover exists for current year and expiry is already in the past.
-    update_carryover_expiry(&admin, "01-31").await;
-    set_leave_days_for_year(&app, emp_id, prev_year, 2).await;
-    set_leave_days_current_and_next(&admin, emp_id, 1, 1).await;
+    update_carryover_expiry(&admin, vacation_account_id, "01-31").await;
+    set_vacation_account_days_for_year(&app, emp_id, vacation_account_id, prev_year, 2).await;
+    set_vacation_account_days_current_and_next(&admin, emp_id, vacation_account_id, 1, 1).await;
 
     let january_workdays = pick_workdays(&emp, current_year, 1, 2).await;
     for day in january_workdays {
@@ -485,11 +539,12 @@ async fn requested_days_reduce_cross_year_carryover_source() {
 
     let current_year = reference_date().year();
     let next_year = current_year + 1;
+    let vacation_account_id = vacation_leave_account_category_id(&admin).await;
 
-    update_carryover_expiry(&admin, "03-31").await;
+    update_carryover_expiry(&admin, vacation_account_id, "03-31").await;
     // With next-year base entitlement set to 0, January days in next year must be
     // funded by carryover from current year.
-    set_leave_days_current_and_next(&admin, emp_id, 2, 0).await;
+    set_vacation_account_days_current_and_next(&admin, emp_id, vacation_account_id, 2, 0).await;
 
     // Consume one current-year day as requested only. It must reserve availability
     // and reduce the carryover source for next year; otherwise a pending
@@ -545,14 +600,10 @@ async fn carryover_expiry_allows_leap_day_and_normalizes_non_leap_years() {
     let emp = login_change_pw(&app, "emp-r@example.com", &emp_pw).await;
 
     let current_year = reference_date().year();
-    update_carryover_expiry(&admin, "02-29").await;
+    let vacation_account_id = vacation_leave_account_category_id(&admin).await;
+    update_carryover_expiry(&admin, vacation_account_id, "02-29").await;
 
-    let (st, balance) = emp
-        .get(&format!(
-            "/api/v1/leave-balance/{emp_id}?year={current_year}"
-        ))
-        .await;
-    assert_eq!(st, StatusCode::OK, "load leave balance with 02-29 expiry");
+    let balance = leave_account_balance(&emp, emp_id, vacation_account_id, current_year).await;
 
     let expected_expiry = if NaiveDate::from_ymd_opt(current_year, 2, 29).is_some() {
         format!("{current_year:04}-02-29")
@@ -581,6 +632,7 @@ async fn hire_date_anchors_proration_independent_of_start_date() {
     let admin = admin_login(&app).await;
 
     let current_year = reference_date().year();
+    let vacation_account_id = vacation_leave_account_category_id(&admin).await;
     // Mid-year Zerf start date: by itself this would halve the entitlement
     // (6 of 12 months remaining from July onward).
     let start_date = format!("{current_year}-07-01");
@@ -595,7 +647,7 @@ async fn hire_date_anchors_proration_independent_of_start_date() {
             &json!({
                 "email": "midyear-hire@example.com", "first_name": "Mira", "last_name": "Midyear",
                 "role": "employee", "weekly_hours": 39,
-                "leave_days_current_year": 30, "leave_days_next_year": 30, "annual_leave_days": 30,
+                "leave_accounts": leave_account_values(vacation_account_id, 30, 30, 30),
                 "start_date": start_date, "hire_date": hire_date,
                 "approver_ids": [1],
             }),
@@ -605,12 +657,7 @@ async fn hire_date_anchors_proration_independent_of_start_date() {
     let user_id = id(&body);
 
     // -- hire_date predates the queried year entirely: full entitlement, no proration --
-    let (st, balance) = admin
-        .get(&format!(
-            "/api/v1/leave-balance/{user_id}?year={current_year}"
-        ))
-        .await;
-    assert_eq!(st, StatusCode::OK, "load leave balance: {balance}");
+    let balance = leave_account_balance(&admin, user_id, vacation_account_id, current_year).await;
     assert_eq!(
         json_i64(&balance, "annual_entitlement"),
         30,
@@ -630,16 +677,7 @@ async fn hire_date_anchors_proration_independent_of_start_date() {
         "cleared hire_date should be null in the response: {body}"
     );
 
-    let (st, balance) = admin
-        .get(&format!(
-            "/api/v1/leave-balance/{user_id}?year={current_year}"
-        ))
-        .await;
-    assert_eq!(
-        st,
-        StatusCode::OK,
-        "load leave balance after clearing: {balance}"
-    );
+    let balance = leave_account_balance(&admin, user_id, vacation_account_id, current_year).await;
     // start_date = July 1st → 6 of 12 months remaining → ceil(30 * 6 / 12) = 15
     assert_eq!(
         json_i64(&balance, "annual_entitlement"),
@@ -668,6 +706,7 @@ async fn hire_date_does_not_inflate_carryover_with_phantom_pre_start_date_years(
 
     let current_year = reference_date().year();
     let next_year = current_year + 1;
+    let vacation_account_id = vacation_leave_account_category_id(&admin).await;
     // Mid-year Zerf go-live: carryover into `next_year` must be derived starting
     // from this year (the only one Zerf has usage data for)...
     let start_date = format!("{current_year}-07-01");
@@ -681,7 +720,7 @@ async fn hire_date_does_not_inflate_carryover_with_phantom_pre_start_date_years(
             &json!({
                 "email": "phantom-years@example.com", "first_name": "Penny", "last_name": "Phantom",
                 "role": "employee", "weekly_hours": 39,
-                "leave_days_current_year": 12, "leave_days_next_year": 12, "annual_leave_days": 12,
+                "leave_accounts": leave_account_values(vacation_account_id, 12, 12, 12),
                 "start_date": start_date, "hire_date": hire_date,
                 "approver_ids": [1],
             }),
@@ -693,7 +732,7 @@ async fn hire_date_does_not_inflate_carryover_with_phantom_pre_start_date_years(
 
     // A plain year-end cutoff keeps the carryover formula easy to hand-verify:
     // the whole approved-usage window falls before the expiry date.
-    update_carryover_expiry(&admin, "12-31").await;
+    update_carryover_expiry(&admin, vacation_account_id, "12-31").await;
 
     // 4 approved vacation days, safely within the start_date year and after
     // start_date itself (August, vs. a July 1st start).
@@ -709,14 +748,7 @@ async fn hire_date_does_not_inflate_carryover_with_phantom_pre_start_date_years(
         assert_eq!(st, StatusCode::OK, "approve vacation on {day}");
     }
 
-    let (st, balance) = admin
-        .get(&format!("/api/v1/leave-balance/{user_id}?year={next_year}"))
-        .await;
-    assert_eq!(
-        st,
-        StatusCode::OK,
-        "load next-year leave balance: {balance}"
-    );
+    let balance = leave_account_balance(&admin, user_id, vacation_account_id, next_year).await;
 
     // Correct: only the start_date year is iterated -- entitlement 12 minus the
     // 4 approved usage days = 8.

@@ -17,7 +17,6 @@ async fn create_lead(admin: &crate::common::TestClient, email: &str, first: &str
             &json!({
                 "email": email, "first_name": first, "last_name": "Lead",
                 "role": "team_lead", "weekly_hours": 39,
-                "leave_days_current_year": 30, "leave_days_next_year": 30, "annual_leave_days": 30,
                 "start_date": "2024-01-01", "approver_ids": [1],
             }),
         )
@@ -39,7 +38,6 @@ async fn create_emp(
             &json!({
                 "email": email, "first_name": first, "last_name": "Emp",
                 "role": "employee", "weekly_hours": 39,
-                "leave_days_current_year": 30, "leave_days_next_year": 30, "annual_leave_days": 30,
                 "start_date": "2024-01-01", "approver_ids": [approver_id],
             }),
         )
@@ -66,8 +64,7 @@ async fn users_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"a@example.com","first_name":"A","last_name":"A",
-                    "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,
-                    "start_date":"2024-01-01"}),
+                    "role":"employee","weekly_hours":39,"start_date":"2024-01-01"}),
             )
             .await;
         assert_eq!(st, StatusCode::BAD_REQUEST, "missing approver rejected");
@@ -82,8 +79,7 @@ async fn users_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"lead-missing@example.com","first_name":"Lead","last_name":"Missing",
-                    "role":"team_lead","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,
-                    "start_date":"2024-01-01"}),
+                    "role":"team_lead","weekly_hours":39,"start_date":"2024-01-01"}),
             )
             .await;
         assert_eq!(
@@ -102,8 +98,7 @@ async fn users_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"b@example.com","first_name":"B","last_name":"B",
-                    "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,
-                    "start_date":"2024-01-01","approver_ids": [1]}),
+                    "role":"employee","weekly_hours":39,"start_date":"2024-01-01","approver_ids": [1]}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "with approver works");
@@ -113,8 +108,7 @@ async fn users_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"lead-approver@example.com","first_name":"Lead","last_name":"Approver",
-                    "role":"team_lead","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,
-                    "start_date":"2024-01-01","approver_ids":[1]}),
+                    "role":"team_lead","weekly_hours":39,"start_date":"2024-01-01","approver_ids":[1]}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "create team lead approver");
@@ -124,8 +118,7 @@ async fn users_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"lead-report@example.com","first_name":"Lead","last_name":"Report",
-                    "role":"team_lead","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,
-                    "start_date":"2024-01-01","approver_ids":[lead_approver_id]}),
+                    "role":"team_lead","weekly_hours":39,"start_date":"2024-01-01","approver_ids":[lead_approver_id]}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "create team lead with lead approver");
@@ -164,8 +157,7 @@ async fn users_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"c@example.com","first_name":"C","last_name":"C",
-                    "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,
-                    "start_date":"2024-01-01","approver_ids": [99999]}),
+                    "role":"employee","weekly_hours":39,"start_date":"2024-01-01","approver_ids": [99999]}),
             )
             .await;
         assert_eq!(st, StatusCode::BAD_REQUEST, "missing approver row rejected");
@@ -182,8 +174,7 @@ async fn users_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"employee-report@example.com","first_name":"Employee","last_name":"Report",
-                    "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,
-                    "start_date":"2024-01-01","approver_ids": [employee_approver_id]}),
+                    "role":"employee","weekly_hours":39,"start_date":"2024-01-01","approver_ids": [employee_approver_id]}),
             )
             .await;
         assert_eq!(
@@ -202,8 +193,7 @@ async fn users_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"dup-approver@example.com","first_name":"Dup","last_name":"Approver",
-                    "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,
-                    "start_date":"2024-01-01","approver_ids": [1, 1]}),
+                    "role":"employee","weekly_hours":39,"start_date":"2024-01-01","approver_ids": [1, 1]}),
             )
             .await;
         assert_eq!(st, StatusCode::BAD_REQUEST, "duplicate approver rejected");
@@ -223,8 +213,7 @@ async fn users_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"self-approver@example.com","first_name":"Self","last_name":"Approver",
-                    "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,
-                    "start_date":"2024-01-01","approver_ids": [1]}),
+                    "role":"employee","weekly_hours":39,"start_date":"2024-01-01","approver_ids": [1]}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "create self-approver user: {body}");
@@ -251,8 +240,7 @@ async fn users_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"assistant-invalid-hours@example.com","first_name":"Assist","last_name":"Hours",
-                    "role":"assistant","weekly_hours":10,"leave_days_current_year":0,"leave_days_next_year":0, "annual_leave_days": 0,
-                    "start_date":"2024-01-01","approver_ids": [1]}),
+                    "role":"assistant","weekly_hours":10,"start_date":"2024-01-01","approver_ids": [1]}),
             )
             .await;
         assert_eq!(
@@ -270,8 +258,7 @@ async fn users_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"assistant-invalid-overtime@example.com","first_name":"Assist","last_name":"Overtime",
-                    "role":"assistant","weekly_hours":0,"leave_days_current_year":0,"leave_days_next_year":0, "annual_leave_days": 0,
-                    "start_date":"2024-01-01","approver_ids": [1],"overtime_start_balance_min":60}),
+                    "role":"assistant","weekly_hours":0,"start_date":"2024-01-01","approver_ids": [1],"overtime_start_balance_min":60}),
             )
             .await;
         assert_eq!(
@@ -289,8 +276,7 @@ async fn users_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"assistant-valid@example.com","first_name":"Assist","last_name":"Valid",
-                    "role":"assistant","weekly_hours":0,"leave_days_current_year":0,"leave_days_next_year":0, "annual_leave_days": 0,
-                    "start_date":"2024-01-01","approver_ids": [1]}),
+                    "role":"assistant","weekly_hours":0,"start_date":"2024-01-01","approver_ids": [1]}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "create assistant user");
@@ -336,8 +322,7 @@ async fn users_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"assistant-invalid-workdays@example.com","first_name":"Assist","last_name":"Workdays",
-                    "role":"assistant","weekly_hours":0,"leave_days_current_year":0,"leave_days_next_year":0, "annual_leave_days": 0,
-                    "workdays_per_week":5,"start_date":"2024-01-01","approver_ids": [1]}),
+                    "role":"assistant","weekly_hours":0,"workdays_per_week":5,"start_date":"2024-01-01","approver_ids": [1]}),
             )
             .await;
         assert_eq!(
@@ -406,8 +391,7 @@ async fn users_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"employee-invalid-overtime@example.com","first_name":"Emp","last_name":"Overtime",
-                    "role":"employee","weekly_hours":40,"leave_days_current_year":20,"leave_days_next_year":20, "annual_leave_days": 20,
-                    "overtime_start_balance_min":600001,"start_date":"2024-01-01","approver_ids":[1]}),
+                    "role":"employee","weekly_hours":40,"overtime_start_balance_min":600001,"start_date":"2024-01-01","approver_ids":[1]}),
             )
             .await;
         assert_eq!(
@@ -424,8 +408,7 @@ async fn users_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"employee-tracks-off@example.com","first_name":"Emp","last_name":"TracksOff",
-                    "role":"employee","weekly_hours":40,"leave_days_current_year":20,"leave_days_next_year":20, "annual_leave_days": 20,
-                    "tracks_time": false,"start_date":"2024-01-01","approver_ids":[1]}),
+                    "role":"employee","weekly_hours":40,"tracks_time": false,"start_date":"2024-01-01","approver_ids":[1]}),
             )
             .await;
         assert_eq!(
@@ -442,8 +425,7 @@ async fn users_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"employee-invalid-workdays@example.com","first_name":"Emp","last_name":"Wdays",
-                    "role":"employee","weekly_hours":40,"leave_days_current_year":20,"leave_days_next_year":20, "annual_leave_days": 20,
-                    "workdays_per_week":6,"start_date":"2024-01-01","approver_ids": [1]}),
+                    "role":"employee","weekly_hours":40,"workdays_per_week":6,"start_date":"2024-01-01","approver_ids": [1]}),
             )
             .await;
         assert_eq!(
@@ -463,8 +445,7 @@ async fn users_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"employee-invalid-workdays7@example.com","first_name":"Emp","last_name":"Wdays7",
-                    "role":"employee","weekly_hours":40,"leave_days_current_year":20,"leave_days_next_year":20, "annual_leave_days": 20,
-                    "workdays_per_week":7,"start_date":"2024-01-01","approver_ids": [1]}),
+                    "role":"employee","weekly_hours":40,"workdays_per_week":7,"start_date":"2024-01-01","approver_ids": [1]}),
             )
             .await;
         assert_eq!(
@@ -492,7 +473,6 @@ async fn users_full_workflow() {
                     "last_name": "Person",
                     "role": "employee",
                     "weekly_hours": 39,
-                    "leave_days_current_year": 30, "leave_days_next_year": 30, "annual_leave_days": 30,
                     "start_date": "2024-01-01",
                     "approver_ids": [1],
                 }),
@@ -510,7 +490,6 @@ async fn users_full_workflow() {
                     "last_name": "Person",
                     "role": "employee",
                     "weekly_hours": 39,
-                    "leave_days_current_year": 30, "leave_days_next_year": 30, "annual_leave_days": 30,
                     "start_date": "2024-01-01",
                     "approver_ids": [1],
                 }),
@@ -531,7 +510,6 @@ async fn users_full_workflow() {
                     "last_name": " Person ",
                     "role": "employee",
                     "weekly_hours": 39,
-                    "leave_days_current_year": 30, "leave_days_next_year": 30, "annual_leave_days": 30,
                     "start_date": "2024-01-01",
                     "approver_ids": [1],
                 }),
@@ -552,7 +530,6 @@ async fn users_full_workflow() {
                     "last_name": "Person",
                     "role": "employee",
                     "weekly_hours": 39,
-                    "leave_days_current_year": 30, "leave_days_next_year": 30, "annual_leave_days": 30,
                     "start_date": "2024-01-01",
                     "approver_ids": [1],
                 }),
@@ -616,7 +593,6 @@ async fn users_full_workflow() {
                     "last_name": "User",
                     "role": "team_lead",
                     "weekly_hours": 39,
-                    "leave_days_current_year": 30, "leave_days_next_year": 30, "annual_leave_days": 30,
                     "start_date": "2024-01-01",
                     "approver_ids": [1],
                     "password": manual_password,
@@ -644,7 +620,6 @@ async fn users_full_workflow() {
                     "last_name": "User",
                     "role": "employee",
                     "weekly_hours": 39,
-                    "leave_days_current_year": 30, "leave_days_next_year": 30, "annual_leave_days": 30,
                     "start_date": "2024-01-01",
                     "approver_ids": [1],
                     "password": generated_password,
@@ -873,90 +848,149 @@ async fn users_full_workflow() {
         assert_eq!(st, StatusCode::OK, "archive with replacement must succeed");
     }
 
-    // -- Leave-days endpoint scope and validation --
+    // -- Leave-account endpoints, nested user values, and authorization --
     {
+        let (st, definitions) = admin.get("/api/v1/leave-accounts").await;
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "admin can list leave-account definitions"
+        );
+        let leave_account_category_id = definitions
+            .as_array()
+            .and_then(|accounts| accounts.first())
+            .and_then(|account| account["category_id"].as_i64())
+            .expect("seeded vacation leave account");
+        assert!(
+            definitions[0]["carryover_expiry"].is_string(),
+            "leave-account definitions expose their own carryover expiry"
+        );
+        assert!(
+            definitions[0].get("carryover_expiry_date").is_none(),
+            "the removed global-setting API name is not reused"
+        );
+
         let (st, _) = admin
             .post(
                 "/api/v1/users",
                 &json!({"email":"emp-invalid-leave@example.com","first_name":"Leave","last_name":"Invalid",
-                    "role":"employee","weekly_hours":39,"leave_days_current_year":367,"leave_days_next_year":30, "annual_leave_days": 367,
+                    "role":"employee","weekly_hours":39,
+                    "leave_accounts":[{"category_id":leave_account_category_id,"base_days":367,"current_year_days":30,"next_year_days":30}],
                     "start_date":"2024-01-01","approver_ids":[1]}),
             )
             .await;
         assert_eq!(
             st,
             StatusCode::BAD_REQUEST,
-            "create rejects invalid leave_days_current_year"
+            "create rejects out-of-range leave-account values"
         );
 
         let lead_id = create_lead(&admin, "lead-leave@example.com", "LeaveLead").await;
         let emp_id = create_emp(&admin, "emp-leave@example.com", "LeaveEmp", lead_id).await;
 
         let (st, body) = admin
-            .get(&format!("/api/v1/users/{emp_id}/leave-days"))
+            .get(&format!("/api/v1/users/{emp_id}/leave-accounts"))
             .await;
-        assert_eq!(st, StatusCode::OK, "admin can read leave days");
+        assert_eq!(st, StatusCode::OK, "admin can read user leave accounts");
         assert_eq!(
-            body.as_array().unwrap().len(),
-            2,
-            "returns current + next year rows"
+            body[0]["category_id"], leave_account_category_id,
+            "returns a category-specific account"
         );
+        assert!(body[0]["carryover_expiry"].is_string());
 
-        let (st, body) = admin
+        let (st, _) = admin
             .put(
-                &format!("/api/v1/users/{emp_id}/leave-days"),
-                &json!({"year": year(), "days": 25}),
+                &format!("/api/v1/users/{emp_id}"),
+                &json!({"leave_accounts":[{
+                    "category_id":leave_account_category_id,
+                    "base_days":25,
+                    "current_year_days":24,
+                    "next_year_days":23
+                }]}),
             )
             .await;
-        assert_eq!(
-            st,
-            StatusCode::OK,
-            "admin can set leave days for current year"
-        );
-        assert_eq!(body["ok"], true);
+        assert_eq!(st, StatusCode::OK, "admin can update leave-account values");
 
         let (st, body) = admin
-            .get(&format!("/api/v1/users/{emp_id}/leave-days"))
+            .get(&format!("/api/v1/users/{emp_id}/leave-accounts"))
             .await;
         assert_eq!(st, StatusCode::OK);
-        assert!(body
+        let account = body
             .as_array()
             .unwrap()
             .iter()
-            .any(|row| row["year"].as_i64() == Some(year() as i64)
-                && row["days"].as_i64() == Some(25)));
+            .find(|account| account["category_id"] == leave_account_category_id)
+            .expect("updated leave account");
+        assert_eq!(account["base_days"], 25);
+        assert_eq!(account["current_year_days"], 24);
+        assert_eq!(account["next_year_days"], 23);
+
+        let year = today().format("%Y");
+        let (st, balances) = admin
+            .get(&format!("/api/v1/leave-balances/{emp_id}?year={year}"))
+            .await;
+        assert_eq!(st, StatusCode::OK, "plural leave-balance route works");
+        assert!(
+            balances.is_array(),
+            "leave balances are returned as an array"
+        );
+        assert!(
+            balances
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|balance| balance["category_id"] == leave_account_category_id),
+            "balance is identified by leave-account category id"
+        );
 
         let (st, _) = admin
             .put(
-                &format!("/api/v1/users/{emp_id}/leave-days"),
-                &json!({"year": year() + 2, "days": 25}),
+                &format!("/api/v1/users/{emp_id}"),
+                &json!({"leave_accounts":[
+                    {"category_id":leave_account_category_id,"base_days":25,"current_year_days":24,"next_year_days":23},
+                    {"category_id":leave_account_category_id,"base_days":25,"current_year_days":24,"next_year_days":23}
+                ]}),
             )
             .await;
         assert_eq!(
             st,
             StatusCode::BAD_REQUEST,
-            "cannot set leave days more than one year ahead"
+            "duplicate leave-account category ids are rejected"
         );
 
         let (st, _) = admin
             .put(
-                &format!("/api/v1/users/{emp_id}/leave-days"),
-                &json!({"year": year() - 2, "days": 25}),
+                &format!("/api/v1/users/{emp_id}"),
+                &json!({"leave_accounts":[{
+                    "category_id":999999,
+                    "base_days":25,
+                    "current_year_days":24,
+                    "next_year_days":23
+                }]}),
             )
             .await;
         assert_eq!(
             st,
             StatusCode::BAD_REQUEST,
-            "cannot set leave days before previous year"
+            "unknown leave-account categories are rejected"
         );
 
         let (st, _) = admin
             .put(
-                &format!("/api/v1/users/{emp_id}/leave-days"),
-                &json!({"year": year(), "days": 367}),
+                &format!("/api/v1/users/{emp_id}"),
+                &json!({"leave_accounts":[{
+                    "category_id":leave_account_category_id,
+                    "base_days":25,
+                    "current_year_days":367,
+                    "next_year_days":23
+                }]}),
             )
             .await;
-        assert_eq!(st, StatusCode::BAD_REQUEST, "days upper bound enforced");
+        assert_eq!(
+            st,
+            StatusCode::BAD_REQUEST,
+            "leave-account day bounds enforced"
+        );
 
         let lead_pw = {
             let (st, body) = admin
@@ -971,28 +1005,41 @@ async fn users_full_workflow() {
         let lead = login_change_pw(&app, "lead-leave@example.com", &lead_pw).await;
 
         let (st, _) = lead
-            .get(&format!("/api/v1/users/{emp_id}/leave-days"))
+            .get(&format!("/api/v1/users/{emp_id}/leave-accounts"))
             .await;
-        assert_eq!(st, StatusCode::OK, "lead can read direct report leave days");
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "lead can read direct report leave accounts"
+        );
         let (st, _) = lead
             .put(
-                &format!("/api/v1/users/{emp_id}/leave-days"),
-                &json!({"year": year(), "days": 24}),
+                &format!("/api/v1/users/{emp_id}"),
+                &json!({"leave_accounts":[{
+                    "category_id":leave_account_category_id,
+                    "base_days":24,
+                    "current_year_days":24,
+                    "next_year_days":24
+                }]}),
             )
             .await;
-        assert_eq!(st, StatusCode::FORBIDDEN, "non-admin cannot set leave days");
+        assert_eq!(
+            st,
+            StatusCode::FORBIDDEN,
+            "non-admin cannot update leave accounts"
+        );
 
         let (other_lead_id, other_lead_pw, _other_emp_id, _other_emp_pw, _monday, _cat) =
             bootstrap_team_with_suffix(&app, &admin, false, "leave-other").await;
         let other_lead =
             login_change_pw(&app, "lead-leave-other@example.com", &other_lead_pw).await;
         let (st, _) = other_lead
-            .get(&format!("/api/v1/users/{emp_id}/leave-days"))
+            .get(&format!("/api/v1/users/{emp_id}/leave-accounts"))
             .await;
         assert_eq!(
             st,
             StatusCode::FORBIDDEN,
-            "unrelated lead cannot read leave days"
+            "unrelated lead cannot read leave accounts"
         );
 
         let emp_pw = {
@@ -1007,12 +1054,12 @@ async fn users_full_workflow() {
         };
         let emp = login_change_pw(&app, "emp-leave@example.com", &emp_pw).await;
         let (st, _) = emp
-            .get(&format!("/api/v1/users/{other_lead_id}/leave-days"))
+            .get(&format!("/api/v1/users/{other_lead_id}/leave-accounts"))
             .await;
         assert_eq!(
             st,
             StatusCode::FORBIDDEN,
-            "employee cannot read another user's leave days"
+            "employee cannot read another user's leave accounts"
         );
 
         let (st, _) = admin
@@ -1020,16 +1067,9 @@ async fn users_full_workflow() {
             .await;
         assert_eq!(st, StatusCode::OK, "archive employee");
         let (st, _) = admin
-            .put(
-                &format!("/api/v1/users/{emp_id}/leave-days"),
-                &json!({"year": year(), "days": 20}),
-            )
+            .get(&format!("/api/v1/users/{emp_id}/leave-accounts"))
             .await;
-        assert_eq!(
-            st,
-            StatusCode::BAD_REQUEST,
-            "cannot set leave days for archived user"
-        );
+        assert_eq!(st, StatusCode::OK, "archived users retain leave accounts");
 
         let (st, _) = admin.post("/api/v1/users/1/archive", &json!({})).await;
         assert_eq!(st, StatusCode::BAD_REQUEST, "admin cannot archive self");
@@ -1047,18 +1087,6 @@ async fn users_full_workflow() {
             st,
             StatusCode::BAD_REQUEST,
             "reset password rejects inactive target"
-        );
-
-        let (st, _) = admin
-            .put(
-                &format!("/api/v1/users/{emp_id}"),
-                &json!({"leave_days_next_year": 367}),
-            )
-            .await;
-        assert_eq!(
-            st,
-            StatusCode::BAD_REQUEST,
-            "update rejects invalid leave_days_next_year"
         );
 
         // `emp_id` (lead_id's original direct report) was archived above, so it
@@ -1228,18 +1256,27 @@ async fn users_full_workflow() {
             "non-admin roles cannot disable tracks_time"
         );
 
-        // Out-of-range leave_days_current_year (branch not otherwise tested — only
-        // leave_days_next_year is tested above).
+        let (_, leave_account_definitions) = admin.get("/api/v1/leave-accounts").await;
+        let leave_account_category_id = leave_account_definitions
+            .as_array()
+            .and_then(|accounts| accounts.first())
+            .and_then(|account| account["category_id"].as_i64())
+            .expect("seeded leave account");
         let (st, body) = admin
             .put(
                 &format!("/api/v1/users/{emp_id}"),
-                &json!({"leave_days_current_year": 400}),
+                &json!({"leave_accounts":[{
+                    "category_id":leave_account_category_id,
+                    "base_days":400,
+                    "current_year_days":30,
+                    "next_year_days":30
+                }]}),
             )
             .await;
         assert_eq!(
             st,
             StatusCode::BAD_REQUEST,
-            "leave_days_current_year=400 rejected: {body}"
+            "leave-account base_days=400 rejected: {body}"
         );
 
         // Admin user may only have another admin as approver (not a team lead).
@@ -1301,8 +1338,7 @@ async fn user_creation_with_explicit_category_selection() {
         .post(
             "/api/v1/users",
             &json!({"email":"omit-cats@example.com","first_name":"Omit","last_name":"Cats",
-                "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,
-                "start_date":"2024-01-01","approver_ids":[1]}),
+                "role":"employee","weekly_hours":39,"start_date":"2024-01-01","approver_ids":[1]}),
         )
         .await;
     assert_eq!(st, StatusCode::OK, "create without category fields: {body}");
@@ -1325,8 +1361,7 @@ async fn user_creation_with_explicit_category_selection() {
         .post(
             "/api/v1/users",
             &json!({"email":"explicit-cats@example.com","first_name":"Explicit","last_name":"Cats",
-                "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,
-                "start_date":"2024-01-01","approver_ids":[1],
+                "role":"employee","weekly_hours":39,"start_date":"2024-01-01","approver_ids":[1],
                 "category_ids":[first_cat_id],"absence_category_ids":[]}),
         )
         .await;
@@ -1380,8 +1415,7 @@ async fn user_creation_with_explicit_category_selection() {
         .post(
             "/api/v1/users",
             &json!({"email":"bad-cat@example.com","first_name":"Bad","last_name":"Cat",
-                "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,
-                "start_date":"2024-01-01","approver_ids":[1],
+                "role":"employee","weekly_hours":39,"start_date":"2024-01-01","approver_ids":[1],
                 "category_ids":[9999999]}),
         )
         .await;
@@ -1397,8 +1431,7 @@ async fn user_creation_with_explicit_category_selection() {
         .post(
             "/api/v1/users",
             &json!({"email":"bad-absence-cat@example.com","first_name":"Bad","last_name":"AbsCat",
-                "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,
-                "start_date":"2024-01-01","approver_ids":[1],
+                "role":"employee","weekly_hours":39,"start_date":"2024-01-01","approver_ids":[1],
                 "absence_category_ids":[9999999]}),
         )
         .await;
@@ -1460,7 +1493,6 @@ async fn admin_resets_user_password() {
             &json!({
                 "email": "admin2@example.com", "first_name": "Admin", "last_name": "Two",
                 "role": "admin", "weekly_hours": 39,
-                "leave_days_current_year": 30, "leave_days_next_year": 30, "annual_leave_days": 30,
                 "start_date": "2024-01-01",
             }),
         )

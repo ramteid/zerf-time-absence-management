@@ -191,8 +191,6 @@ APP_SETTINGS = {
     "country": "DE",
     "region": "DE-BW",
     "default_weekly_hours": "39",
-    "default_annual_leave_days": "30",
-    "carryover_expiry_date": "03-31",
     "submission_deadline_day": "5",
     "organization_name": "Waldkindergarten Gundelfingen",
     "submission_reminders_enabled": "true",
@@ -220,7 +218,7 @@ class Persona:
     allow_reopen_without_approval: bool
     must_change_password: bool
     password: str
-    annual_leave_days: dict[int, int] = field(default_factory=dict)
+    leave_account_days: dict[int, int] = field(default_factory=dict)
     # Filled in at runtime once the user row is inserted:
     user_id: int = 0
 
@@ -242,7 +240,7 @@ PERSONAS: list[Persona] = [
         allow_reopen_without_approval=False,
         must_change_password=False,
         password="Admin!Pass-2026",
-        annual_leave_days={2026: 30, 2027: 30},
+        leave_account_days={2026: 30, 2027: 30},
     ),
     Persona(
         key="team_lead",
@@ -260,7 +258,7 @@ PERSONAS: list[Persona] = [
         allow_reopen_without_approval=False,
         must_change_password=False,
         password="TeamLead!2026",
-        annual_leave_days={2026: 30, 2027: 30},
+        leave_account_days={2026: 30, 2027: 30},
     ),
     Persona(
         key="employee",
@@ -276,7 +274,7 @@ PERSONAS: list[Persona] = [
         allow_reopen_without_approval=False,
         must_change_password=False,
         password="Employee!2026",
-        annual_leave_days={2026: 30, 2027: 30},
+        leave_account_days={2026: 30, 2027: 30},
     ),
     Persona(
         key="assistant",
@@ -298,7 +296,7 @@ PERSONAS: list[Persona] = [
         password="Assistant!2026",
         # Assistants typically have no annual-leave entitlement.  Recording
         # zero days explicitly keeps the dashboards consistent.
-        annual_leave_days={2026: 0, 2027: 0},
+        leave_account_days={2026: 0, 2027: 0},
     ),
 ]
 
@@ -752,16 +750,47 @@ def insert_user_approvers(cur) -> None:
         )
 
 
-def insert_annual_leave(cur) -> None:
+def insert_leave_accounts(cur) -> None:
+    """Seed every account category for every user and Vacation overrides.
+
+    The database migration creates the canonical Vacation account on a new
+    installation. Resolving categories from the live table instead of using an
+    ID keeps this seed data valid when an administrator adds another account
+    before running the script.
+    """
+    cur.execute(
+        """
+        SELECT id, slug, leave_account_default_days
+        FROM absence_categories
+        WHERE cost_type = 'vacation'
+        ORDER BY id
+        """
+    )
+    account_categories = cur.fetchall()
     for persona in PERSONAS:
-        for year, days in sorted(persona.annual_leave_days.items()):
+        for category_id, slug, default_days in account_categories:
+            base_days = 0 if persona.role == "assistant" else default_days
             cur.execute(
                 """
-                INSERT INTO user_annual_leave(user_id, year, days)
+                INSERT INTO user_leave_accounts(user_id, category_id, base_days)
                 VALUES (%s, %s, %s)
+                ON CONFLICT (user_id, category_id) DO UPDATE
+                SET base_days = EXCLUDED.base_days
                 """,
-                (persona.user_id, year, days),
+                (persona.user_id, category_id, base_days),
             )
+            if slug != "vacation":
+                continue
+            for year, days in sorted(persona.leave_account_days.items()):
+                cur.execute(
+                    """
+                    INSERT INTO user_leave_account_year_overrides(user_id, category_id, year, days)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (user_id, category_id, year) DO UPDATE
+                    SET days = EXCLUDED.days
+                    """,
+                    (persona.user_id, category_id, year, days),
+                )
 
 
 def absence_timestamps(
@@ -849,8 +878,10 @@ def insert_absences(cur) -> None:
     # Build a slug → category_id map from the live table. Seeded slugs are
     # populated by migration 017; admin-added categories are not used by the
     # seed script but would also be resolvable.
-    cur.execute("SELECT slug, id FROM absence_categories")
-    category_id_by_slug: dict[str, int] = {slug: cid for slug, cid in cur.fetchall()}
+    cur.execute("SELECT slug, id, cost_type FROM absence_categories")
+    category_by_slug: dict[str, tuple[int, str]] = {
+        slug: (category_id, cost_type) for slug, category_id, cost_type in cur.fetchall()
+    }
 
     for persona_key, kind, start, end, status, comment in ABSENCE_SCRIPT:
         persona = persona_by_key(persona_key)
@@ -870,23 +901,25 @@ def insert_absences(cur) -> None:
                 rejection_reason = "Im aktuellen Quartal leider kein Budget."
 
         created_at, reviewed_at = absence_timestamps(kind, start, status)
-        category_id = category_id_by_slug.get(kind)
-        if category_id is None:
+        category = category_by_slug.get(kind)
+        if category is None:
             raise ValueError(
                 f"Unknown absence category slug {kind!r} — seed script ran before "
                 "migration 017 populated absence_categories, or slug was renamed."
             )
+        category_id, cost_type = category
+        leave_account_category_id = category_id if cost_type == "vacation" else None
         cur.execute(
             """
             INSERT INTO absences(user_id, category_id, start_date, end_date, comment,
                                  status, reviewed_by, reviewed_at, rejection_reason,
-                                 created_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                 created_at, leave_account_category_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 persona.user_id, category_id, start, end, comment,
                 status, reviewed_by, reviewed_at, rejection_reason,
-                created_at,
+                created_at, leave_account_category_id,
             ),
         )
 
@@ -1294,7 +1327,7 @@ def main() -> int:
             insert_holidays(cur)
             insert_users(cur)
             insert_user_approvers(cur)
-            insert_annual_leave(cur)
+            insert_leave_accounts(cur)
             insert_absences(cur)
             insert_time_entries(cur)
             insert_reopen_requests(cur)

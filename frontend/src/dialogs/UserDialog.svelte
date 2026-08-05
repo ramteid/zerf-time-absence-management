@@ -30,13 +30,15 @@
   let workdays_per_week = Math.min(template.workdays_per_week ?? 5, 5);
   $: _thisYear = appTodayDate($settings?.timezone).getFullYear();
   $: _nextYear = _thisYear + 1;
-  // Base annual leave entitlement (days/year), used whenever no per-year
-  // override below exists. Defaults to the org-wide setting for new users,
-  // but admins may set a different value (e.g. special agreements).
-  let annual_leave_days = template.annual_leave_days ?? 30;
-  // Leave days — two explicit per-year override fields (current + next year)
-  let leave_days_current_year = 30;
-  let leave_days_next_year = 30;
+  let leaveAccounts = [];
+  let leaveAccountsLoaded = false;
+  let leaveAccountsLoading = false;
+  let leaveAccountsLoadError = "";
+  // Aushilfen start with zero values for every leave account. Preserve all
+  // account values when the role is changed temporarily, so a switch back
+  // before saving does not discard deliberate individual entitlements.
+  let _leaveSnapshot = null;
+  let assistantSnapshotPending = false;
   let todayIso = appTodayIsoDate($settings?.timezone);
   let lastTodayIso = todayIso;
   let start_date = template.start_date || todayIso;
@@ -81,41 +83,121 @@
         return "Employee";
     }
   }
+
+  function cloneLeaveAccounts(accounts) {
+    return accounts.map((account) => ({ ...account }));
+  }
+
+  function zeroLeaveAccounts(accounts) {
+    return accounts.map((account) => ({
+      ...account,
+      base_days: 0,
+      current_year_days: 0,
+      next_year_days: 0,
+    }));
+  }
+
+  function newUserLeaveAccounts(definitions) {
+    return definitions.map((definition) => ({
+      category_id: definition.category_id,
+      category_name: definition.category_name,
+      color: definition.color,
+      active: definition.active,
+      base_days: definition.default_base_days,
+      current_year: _thisYear,
+      current_year_days: definition.default_base_days,
+      next_year: _nextYear,
+      next_year_days: definition.default_base_days,
+    }));
+  }
+
+  function applyLoadedLeaveAccounts(accounts) {
+    if (isAssistantRole && (isNew || assistantSnapshotPending)) {
+      if (assistantSnapshotPending) {
+        _leaveSnapshot = cloneLeaveAccounts(accounts);
+        assistantSnapshotPending = false;
+      }
+      leaveAccounts = zeroLeaveAccounts(accounts);
+      return;
+    }
+    leaveAccounts = accounts;
+  }
+
+  async function loadLeaveAccounts() {
+    leaveAccountsLoading = true;
+    leaveAccountsLoadError = "";
+    try {
+      const path = isNew
+        ? "/leave-accounts"
+        : `/users/${template.id}/leave-accounts`;
+      const rows = await api(path);
+      if (!Array.isArray(rows)) {
+        throw new Error("Invalid leave accounts response.");
+      }
+      const accounts = isNew ? newUserLeaveAccounts(rows) : rows;
+      applyLoadedLeaveAccounts(accounts);
+      leaveAccountsLoaded = true;
+    } catch {
+      leaveAccounts = [];
+      leaveAccountsLoaded = false;
+      leaveAccountsLoadError = $t("Leave accounts could not be loaded.");
+    } finally {
+      leaveAccountsLoading = false;
+    }
+  }
+
+  function leaveAccountsPayload() {
+    const payload = [];
+    for (const account of leaveAccounts) {
+      const values = [
+        account.base_days,
+        account.current_year_days,
+        account.next_year_days,
+      ].map(Number);
+      if (
+        values.some(
+          (value) => !Number.isInteger(value) || value < 0 || value > 366,
+        )
+      ) {
+        error = $t("Leave account values must be between 0 and 366.");
+        return null;
+      }
+      payload.push({
+        category_id: account.category_id,
+        base_days: values[0],
+        current_year_days: values[1],
+        next_year_days: values[2],
+      });
+    }
+    return payload;
+  }
+
+  function changeRole(nextRole) {
+    const previousRole = normalizedRole;
+    const normalizedNextRole = String(nextRole || "")
+      .trim()
+      .toLowerCase();
+    if (normalizedNextRole === previousRole) return;
+
+    if (normalizedNextRole === "assistant") {
+      if (leaveAccountsLoaded) {
+        _leaveSnapshot = cloneLeaveAccounts(leaveAccounts);
+      } else {
+        assistantSnapshotPending = true;
+      }
+      leaveAccounts = zeroLeaveAccounts(leaveAccounts);
+    } else if (previousRole === "assistant" && _leaveSnapshot !== null) {
+      leaveAccounts = cloneLeaveAccounts(_leaveSnapshot);
+      _leaveSnapshot = null;
+      assistantSnapshotPending = false;
+    }
+    role = normalizedNextRole;
+  }
+
   $: if (isAssistantRole) {
     weekly_hours = fmtDecimal(0, 2);
     overtime_start_balance_hours = fmtDecimal(0, 2);
   }
-
-  // German Minijob (assistant) leave entitlement is calculated based on actual
-  // days worked per year, which varies per person. Pre-filled default leave days
-  // are therefore meaningless for assistants and must be entered manually each
-  // year. When the admin selects the assistant role, zero out the leave fields
-  // so they are forced to make a conscious choice. Restore the previous values
-  // if the admin switches back to a leave-tracking role without saving.
-  let _leaveSnapshot = null; // { annual_leave_days, leave_days_current_year, leave_days_next_year }
-  let lastNormalizedRole = String(role || "")
-    .trim()
-    .toLowerCase();
-  $: if (normalizedRole !== lastNormalizedRole) {
-    if (normalizedRole === "assistant") {
-      // eslint-disable-next-line no-useless-assignment
-      _leaveSnapshot = {
-        annual_leave_days,
-        leave_days_current_year,
-        leave_days_next_year,
-      };
-      annual_leave_days = 0;
-      leave_days_current_year = 0;
-      leave_days_next_year = 0;
-    } else if (lastNormalizedRole === "assistant" && _leaveSnapshot !== null) {
-      ({ annual_leave_days, leave_days_current_year, leave_days_next_year } =
-        _leaveSnapshot);
-      // eslint-disable-next-line no-useless-assignment
-      _leaveSnapshot = null;
-    }
-  }
-  // eslint-disable-next-line no-useless-assignment
-  $: lastNormalizedRole = normalizedRole;
 
   // Non-admin users always have tracks_time=true (backend enforces this too).
   $: if (normalizedRole !== "admin") tracks_time = true;
@@ -206,37 +288,15 @@
         approvers = [];
       }
     }
-    // Load leave days for existing users
-    if (!isNew) {
-      try {
-        const rows = await api(`/users/${template.id}/leave-days`);
-        const currentYearLeave = rows.find(
-          (leaveRow) => leaveRow.year === _thisYear,
-        );
-        const nextYearLeave = rows.find(
-          (leaveRow) => leaveRow.year === _nextYear,
-        );
-        if (currentYearLeave) leave_days_current_year = currentYearLeave.days;
-        if (nextYearLeave) leave_days_next_year = nextYearLeave.days;
-      } catch {
-        // leave defaults
-      }
-    }
-    // Prefill defaults for new users. Skipped in locked-role mode: `/settings`
-    // is admin-only and weekly_hours/overtime are forced to 0 for assistants
-    // anyway, so there is nothing useful to prefill here.
+    await loadLeaveAccounts();
+    // Prefill global user defaults for new users. Leave-account defaults are
+    // fetched separately from their category definitions above, because each
+    // account owns its own standard entitlement.
     if (isNew && !lockedRole) {
       try {
         const settings = await api("/settings");
         if (settings.default_weekly_hours != null) {
           weekly_hours = fmtDecimal(Number(settings.default_weekly_hours), 2);
-        }
-        // Guard: if the admin already switched to assistant while this async call
-        // was in flight, don't overwrite the zeroed leave fields with the default.
-        if (settings.default_annual_leave_days != null && !isAssistantRole) {
-          annual_leave_days = Number(settings.default_annual_leave_days);
-          leave_days_current_year = Number(settings.default_annual_leave_days);
-          leave_days_next_year = Number(settings.default_annual_leave_days);
         }
         smtpEnabled = !!settings.smtp_enabled;
       } catch {}
@@ -284,6 +344,17 @@
       error = $t("Invalid date.");
       return;
     }
+    if (leaveAccountsLoading) {
+      error = $t("Leave accounts are still loading.");
+      return;
+    }
+    if (!leaveAccountsLoaded) {
+      error =
+        leaveAccountsLoadError || $t("Leave accounts could not be loaded.");
+      return;
+    }
+    const leave_accounts = leaveAccountsPayload();
+    if (leave_accounts === null) return;
     if (
       !isAssistantRole &&
       (Number(workdays_per_week) < 1 || Number(workdays_per_week) > 5)
@@ -338,9 +409,7 @@
         ...(isAssistantRole
           ? {}
           : { workdays_per_week: Number(workdays_per_week) }),
-        annual_leave_days: Number(annual_leave_days),
-        leave_days_current_year: Number(leave_days_current_year),
-        leave_days_next_year: Number(leave_days_next_year),
+        leave_accounts,
         start_date,
         // Always send explicitly: `null` clears it back to the start_date
         // fallback on update, and is simply stored as unset on create.
@@ -453,7 +522,12 @@
             {$t("You will be set as their approver.")}
           </div>
         {:else}
-          <select id="user-role" class="zf-select" bind:value={role}>
+          <select
+            id="user-role"
+            class="zf-select"
+            value={role}
+            on:change={(event) => changeRole(event.currentTarget.value)}
+          >
             <option value="employee">{$t("Employee")}</option>
             <option value="assistant">{$t("Assistant")}</option>
             <option value="team_lead">{$t("Team lead")}</option>
@@ -497,7 +571,7 @@
           />
           <div class="field-hint">
             {$t(
-              "Used to calculate the prorated annual leave entitlement for employees who already worked before they started using the application. Leave empty to use the start date.",
+              "Used to calculate the prorated leave-account entitlement for employees who already worked before they started using the application. Leave empty to use the start date.",
             )}
           </div>
         </div>
@@ -550,53 +624,77 @@
         </div>
       {/if}
       <div>
-        <div class="field-section-label">{$t("Vacation days per year")}</div>
-        <div>
-          <label class="zf-label" for="leave-base"
-            >{$t("Annual leave days (base)")}</label
-          >
-          <input
-            id="leave-base"
-            class="zf-input"
-            type="number"
-            min="0"
-            max="366"
-            bind:value={annual_leave_days}
-          />
+        <div class="field-section-label">{$t("Leave accounts")}</div>
+        {#if leaveAccountsLoading}
+          <div class="field-hint">{$t("Loading leave accounts...")}</div>
+        {:else if leaveAccountsLoadError}
+          <div class="error-text">{leaveAccountsLoadError}</div>
+        {:else if leaveAccounts.length === 0}
           <div class="field-hint">
-            {$t(
-              "Default entitlement used for every year unless overridden below (e.g. for special agreements).",
-            )}
+            {$t("No leave accounts are configured.")}
           </div>
-        </div>
-        <div class="field-row">
-          <div>
-            <label class="zf-label" for="leave-cur"
-              >{$t("Override")} {_thisYear}</label
-            >
-            <input
-              id="leave-cur"
-              class="zf-input"
-              type="number"
-              min="0"
-              max="366"
-              bind:value={leave_days_current_year}
-            />
+        {:else}
+          <div class="leave-account-editor-list">
+            {#each leaveAccounts as leaveAccount (leaveAccount.category_id)}
+              <section class="leave-account-editor">
+                <div class="leave-account-editor-title">
+                  <span
+                    class="leave-account-editor-dot"
+                    style:background={leaveAccount.color || "#64748b"}
+                  ></span>
+                  <span>{$t(leaveAccount.category_name)}</span>
+                </div>
+                <div class="field-row">
+                  <div>
+                    <label
+                      class="zf-label"
+                      for={`leave-account-${leaveAccount.category_id}-base`}
+                      >{$t("Base entitlement")}</label
+                    >
+                    <input
+                      id={`leave-account-${leaveAccount.category_id}-base`}
+                      class="zf-input"
+                      type="number"
+                      min="0"
+                      max="366"
+                      bind:value={leaveAccount.base_days}
+                    />
+                  </div>
+                  <div>
+                    <label
+                      class="zf-label"
+                      for={`leave-account-${leaveAccount.category_id}-current`}
+                      >{$t("Override")} {leaveAccount.current_year}</label
+                    >
+                    <input
+                      id={`leave-account-${leaveAccount.category_id}-current`}
+                      class="zf-input"
+                      type="number"
+                      min="0"
+                      max="366"
+                      bind:value={leaveAccount.current_year_days}
+                    />
+                  </div>
+                  <div>
+                    <label
+                      class="zf-label"
+                      for={`leave-account-${leaveAccount.category_id}-next`}
+                      >{$t("Override")} {leaveAccount.next_year}</label
+                    >
+                    <input
+                      id={`leave-account-${leaveAccount.category_id}-next`}
+                      class="zf-input"
+                      type="number"
+                      min="0"
+                      max="366"
+                      bind:value={leaveAccount.next_year_days}
+                    />
+                  </div>
+                </div>
+              </section>
+            {/each}
           </div>
-          <div>
-            <label class="zf-label" for="leave-nxt"
-              >{$t("Override")} {_nextYear}</label
-            >
-            <input
-              id="leave-nxt"
-              class="zf-input"
-              type="number"
-              min="0"
-              max="366"
-              bind:value={leave_days_next_year}
-            />
-          </div>
-        </div>
+        {/if}
       </div>
       {#if !isNew}
         <div class="field-toggle-row">
@@ -793,5 +891,32 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     padding: 8px;
+  }
+
+  .leave-account-editor-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .leave-account-editor {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 12px;
+  }
+
+  .leave-account-editor-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    margin-bottom: 10px;
+  }
+
+  .leave-account-editor-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex: 0 0 auto;
   }
 </style>

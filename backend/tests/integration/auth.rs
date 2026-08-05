@@ -55,8 +55,7 @@ async fn auth_full_workflow() {
                 "/api/v1/users",
                 &json!({
                     "email":"emp-me@example.com","first_name":"E","last_name":"M",
-                    "role":"employee","weekly_hours":39.0,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,
-                    "start_date": today(), "approver_ids": [1]
+                    "role":"employee","weekly_hours":39.0,"start_date": today(), "approver_ids": [1]
                 }),
             )
             .await;
@@ -676,17 +675,6 @@ async fn create_password_reset_user(
         .execute(&app.state.pool)
         .await
         .expect("link reset test user to admin approver");
-
-    sqlx::query(
-        "INSERT INTO user_annual_leave(user_id, year, days) VALUES \
-         ($1, EXTRACT(YEAR FROM CURRENT_DATE)::INTEGER, 30), \
-         ($1, EXTRACT(YEAR FROM CURRENT_DATE)::INTEGER + 1, 30) \
-         ON CONFLICT (user_id, year) DO UPDATE SET days=EXCLUDED.days",
-    )
-    .bind(user_id)
-    .execute(&app.state.pool)
-    .await
-    .expect("seed reset test user leave days");
 
     user_id
 }

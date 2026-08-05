@@ -48,7 +48,7 @@ async fn admin_full_workflow() {
         assert_eq!(st, StatusCode::OK, "admin can approve self-submitted entry");
     }
 
-    // -- Settings validate and persist user defaults --
+    // -- Settings validate and persist working-time defaults --
     {
         let (st, _) = admin
             .put(
@@ -58,8 +58,7 @@ async fn admin_full_workflow() {
                     "time_format": "24h",
                     "country": "DE",
                     "region": "DE-BW",
-                    "default_weekly_hours": 169,
-                    "default_annual_leave_days": 30
+                    "default_weekly_hours": 169
                 }),
             )
             .await;
@@ -77,8 +76,7 @@ async fn admin_full_workflow() {
                     "time_format": "24h",
                     "country": "DE",
                     "region": "DE-BW",
-                    "default_weekly_hours": 35.5,
-                    "default_annual_leave_days": 28
+                    "default_weekly_hours": 35.5
                 }),
             )
             .await;
@@ -89,7 +87,10 @@ async fn admin_full_workflow() {
         assert_eq!(st, StatusCode::OK);
         assert_eq!(body["ui_language"], "de");
         assert_eq!(body["default_weekly_hours"], 35.5);
-        assert_eq!(body["default_annual_leave_days"], 28);
+        assert!(
+            body.get("default_annual_leave_days").is_none(),
+            "global annual leave default is no longer exposed"
+        );
     }
 
     // -- Lead with admin approver notifies admin on self submission --
@@ -102,8 +103,7 @@ async fn admin_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"lead-with-admin-approver@example.com","first_name":"Nora","last_name":"Lead",
-                    "role":"team_lead","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,
-                    "start_date":"2024-01-01","approver_ids":[1]}),
+                    "role":"team_lead","weekly_hours":39,"start_date":"2024-01-01","approver_ids":[1]}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "create lead");
@@ -129,8 +129,7 @@ async fn admin_full_workflow() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"lead-settings@example.com","first_name":"Set","last_name":"Lead",
-                    "role":"team_lead","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,
-                    "start_date":"2024-01-01","approver_ids":[1]}),
+                    "role":"team_lead","weekly_hours":39,"start_date":"2024-01-01","approver_ids":[1]}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "create lead for settings permissions");
@@ -152,8 +151,6 @@ async fn admin_full_workflow() {
                     "country": "DE",
                     "region": "",
                     "default_weekly_hours": 39,
-                    "default_annual_leave_days": 30,
-                    "carryover_expiry_date": "03-31",
                     "organization_name": "Lead cannot update"
                 }),
             )
@@ -208,8 +205,6 @@ async fn admin_full_workflow() {
                     "country": "DE",
                     "region": "",
                     "default_weekly_hours": 39,
-                    "default_annual_leave_days": 30,
-                    "carryover_expiry_date": "03-31"
                 }),
             )
             .await;
@@ -225,8 +220,6 @@ async fn admin_full_workflow() {
                     "country": "DEU",
                     "region": "",
                     "default_weekly_hours": 39,
-                    "default_annual_leave_days": 30,
-                    "carryover_expiry_date": "03-31"
                 }),
             )
             .await;
@@ -242,8 +235,6 @@ async fn admin_full_workflow() {
                     "country": "DE",
                     "region": "R".repeat(21),
                     "default_weekly_hours": 39,
-                    "default_annual_leave_days": 30,
-                    "carryover_expiry_date": "03-31"
                 }),
             )
             .await;
@@ -259,29 +250,6 @@ async fn admin_full_workflow() {
                     "country": "DE",
                     "region": "",
                     "default_weekly_hours": 39,
-                    "default_annual_leave_days": 30,
-                    "carryover_expiry_date": "13-01"
-                }),
-            )
-            .await;
-        assert_eq!(
-            st,
-            StatusCode::BAD_REQUEST,
-            "invalid carryover date rejected"
-        );
-
-        let (st, _) = admin
-            .put(
-                "/api/v1/settings",
-                &json!({
-                    "ui_language": "en",
-                    "time_format": "24h",
-                    "timezone": "Europe/Berlin",
-                    "country": "DE",
-                    "region": "",
-                    "default_weekly_hours": 39,
-                    "default_annual_leave_days": 30,
-                    "carryover_expiry_date": "03-31",
                     "organization_name": "X".repeat(201)
                 }),
             )
@@ -299,66 +267,9 @@ async fn admin_full_workflow() {
                     "ui_language": "en",
                     "time_format": "24h",
                     "timezone": "Europe/Berlin",
-                    "country": "DE",
-                    "region": "",
-                    "default_weekly_hours": 39,
-                    "default_annual_leave_days": 367,
-                    "carryover_expiry_date": "03-31"
-                }),
-            )
-            .await;
-        assert_eq!(
-            st,
-            StatusCode::BAD_REQUEST,
-            "default annual leave days upper bound guard"
-        );
-
-        let (st, _) = admin
-            .put(
-                "/api/v1/settings",
-                &json!({
-                    "ui_language": "en",
-                    "time_format": "24h",
-                    "timezone": "Europe/Berlin",
-                    "country": "DE",
-                    "region": "",
-                    "default_weekly_hours": 39,
-                    "default_annual_leave_days": 30,
-                    "carryover_expiry_date": "03"
-                }),
-            )
-            .await;
-        assert_eq!(st, StatusCode::BAD_REQUEST, "carryover expiry format guard");
-
-        let (st, _) = admin
-            .put(
-                "/api/v1/settings",
-                &json!({
-                    "ui_language": "en",
-                    "time_format": "24h",
-                    "timezone": "Europe/Berlin",
-                    "country": "DE",
-                    "region": "",
-                    "default_weekly_hours": 39,
-                    "default_annual_leave_days": 30,
-                    "carryover_expiry_date": "13-40"
-                }),
-            )
-            .await;
-        assert_eq!(st, StatusCode::BAD_REQUEST, "carryover expiry range guard");
-
-        let (st, _) = admin
-            .put(
-                "/api/v1/settings",
-                &json!({
-                    "ui_language": "en",
-                    "time_format": "24h",
-                    "timezone": "Europe/Berlin",
                     "country": "AT",
                     "region": "",
                     "default_weekly_hours": 39,
-                    "default_annual_leave_days": 30,
-                    "carryover_expiry_date": "03-31"
                 }),
             )
             .await;

@@ -10,7 +10,13 @@
 
 import { test, expect } from "@playwright/test";
 import { storageStatePath } from "./helpers.js";
-import { ADMIN, ASSISTANT, EMPLOYEE, TEAM_LEAD } from "./users.js";
+import {
+  ADMIN,
+  ASSISTANT,
+  EMPLOYEE,
+  LEAVE_ACCOUNT_CATEGORY,
+  TEAM_LEAD,
+} from "./users.js";
 
 test.describe("employee sees the final state of their items", () => {
   test.use({ storageState: storageStatePath("employee") });
@@ -43,6 +49,18 @@ test.describe("employee sees the final state of their items", () => {
     await expect(
       page.locator(".absence-entry", { hasText: "E2E day off" }),
     ).toContainText("Rejected");
+    await expect(
+      page.locator(".absence-entry", { hasText: "E2E educational leave" }),
+    ).toContainText("Approved");
+  });
+
+  test("employee: personal report shows the approved planned account day", async ({
+    page,
+  }) => {
+    await page.goto("/reports");
+    await expect(
+      page.locator(".leave-account-card", { hasText: LEAVE_ACCOUNT_CATEGORY }),
+    ).toContainText(/Approved planned\s*1/);
   });
 });
 
@@ -122,5 +140,40 @@ test.describe("admin sees a role-grouped, role-colored user list", () => {
     expect(rows[employee].avatarClass).toContain("avatar-role-employee");
     expect(rows[assistant].avatarClass).toContain("avatar-role-assistant");
     expect(rows[admin].avatarClass).toContain("avatar-role-admin");
+  });
+});
+
+test.describe("admin sees independent leave-account columns in the team report", () => {
+  test.use({ storageState: storageStatePath("admin") });
+
+  test("team report: one column is rendered for the added account", async ({
+    page,
+  }) => {
+    const [categoriesResponse, usersResponse] = await Promise.all([
+      page.request.get("/api/v1/absence-categories/all"),
+      page.request.get("/api/v1/users"),
+    ]);
+    expect(categoriesResponse.ok()).toBeTruthy();
+    expect(usersResponse.ok()).toBeTruthy();
+    const category = (await categoriesResponse.json()).find(
+      (entry) => entry.name === LEAVE_ACCOUNT_CATEGORY,
+    );
+    const employee = (await usersResponse.json()).find(
+      (entry) => entry.email === EMPLOYEE.email,
+    );
+    expect(category).toBeTruthy();
+    expect(employee).toBeTruthy();
+
+    await page.goto("/reports");
+    await page.getByRole("button", { name: "Team report" }).click();
+    await expect(
+      page.getByTestId(`team-leave-account-column-${category.id}`),
+    ).toHaveCount(1);
+    await expect(
+      page.getByTestId(`team-leave-account-column-${category.id}`),
+    ).toContainText(LEAVE_ACCOUNT_CATEGORY);
+    await expect(
+      page.getByTestId(`team-leave-account-${employee.id}-${category.id}`),
+    ).toBeVisible();
   });
 });

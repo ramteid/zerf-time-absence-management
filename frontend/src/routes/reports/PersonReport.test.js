@@ -17,7 +17,7 @@ vi.mock("svelte", async () => {
 vi.mock("../../lib/api/reportsApi.js", () => ({
   getMonthReport: vi.fn(),
   getRangeReport: vi.fn(),
-  getLeaveBalance: vi.fn(),
+  getLeaveBalances: vi.fn(),
   getFlextimeReport: vi.fn(),
   getAbsenceReport: vi.fn(),
   getUserAbsencesByYear: vi.fn(),
@@ -27,7 +27,7 @@ vi.mock("../../lib/api/reportsApi.js", () => ({
 import {
   getMonthReport,
   getRangeReport,
-  getLeaveBalance,
+  getLeaveBalances,
   getFlextimeReport,
   getAbsenceReport,
   getUserAbsencesByYear,
@@ -91,6 +91,25 @@ function monthReportFixture(overrides = {}) {
   };
 }
 
+function leaveBalanceFixture(overrides = {}) {
+  return {
+    category_id: 1,
+    category_name: "Vacation",
+    color: "#3b82f6",
+    active: true,
+    annual_entitlement: 30,
+    already_taken: 0,
+    approved_upcoming: 0,
+    requested: 0,
+    available: 30,
+    carryover_days: 0,
+    carryover_remaining: 0,
+    carryover_expiry: null,
+    carryover_expired: false,
+    ...overrides,
+  };
+}
+
 const users = [
   {
     id: 1,
@@ -144,7 +163,7 @@ describe("PersonReport", () => {
     vi.clearAllMocks();
     getMonthReport.mockResolvedValue(monthReportFixture());
     getRangeReport.mockResolvedValue(monthReportFixture());
-    getLeaveBalance.mockResolvedValue(null);
+    getLeaveBalances.mockResolvedValue([]);
     getFlextimeReport.mockResolvedValue([]);
     getAbsenceReport.mockResolvedValue([]);
     getUserAbsencesByYear.mockResolvedValue([]);
@@ -210,17 +229,19 @@ describe("PersonReport", () => {
     expect(getFlextimeReport).not.toHaveBeenCalled();
   });
 
-  it("hides the vacation card for an assistant with 0 leave entitlement", async () => {
+  it("renders every leave account for an assistant, including a zero account", async () => {
     getMonthReport.mockResolvedValue(
       monthReportFixture({ target_min: 0, full_month_target_min: 0 }),
     );
-    getLeaveBalance.mockResolvedValue({
-      annual_entitlement: 0,
-      already_taken: 0,
-      approved_upcoming: 0,
-      requested: 0,
-      available: 0,
-    });
+    getLeaveBalances.mockResolvedValue([
+      leaveBalanceFixture({
+        annual_entitlement: 0,
+        already_taken: 0,
+        approved_upcoming: 0,
+        requested: 0,
+        available: 0,
+      }),
+    ]);
     component = mount(PersonReport, {
       target,
       props: { userId: 2, users, periodMode: "month", month: "2026-06" },
@@ -228,21 +249,23 @@ describe("PersonReport", () => {
     await waitForText(target, "Logged");
     await settle();
 
-    expect(target.textContent).not.toContain("Vacation");
-    expect(target.textContent).not.toContain("Entitlement");
+    expect(target.textContent).toContain("Vacation");
+    expect(target.textContent).toContain("Entitlement");
   });
 
-  it("still shows the vacation card for an assistant with a real leave entitlement", async () => {
+  it("shows leave-account values for an assistant with a real entitlement", async () => {
     getMonthReport.mockResolvedValue(
       monthReportFixture({ target_min: 0, full_month_target_min: 0 }),
     );
-    getLeaveBalance.mockResolvedValue({
-      annual_entitlement: 10,
-      already_taken: 2,
-      approved_upcoming: 0,
-      requested: 0,
-      available: 8,
-    });
+    getLeaveBalances.mockResolvedValue([
+      leaveBalanceFixture({
+        annual_entitlement: 10,
+        already_taken: 2,
+        approved_upcoming: 0,
+        requested: 0,
+        available: 8,
+      }),
+    ]);
     component = mount(PersonReport, {
       target,
       props: { userId: 2, users, periodMode: "month", month: "2026-06" },
@@ -250,27 +273,41 @@ describe("PersonReport", () => {
     await waitForText(target, "Entitlement");
 
     expect(target.textContent).toContain("Vacation");
-    expect(target.textContent).toContain("Remaining");
+    expect(target.textContent).toContain("Available");
   });
 
-  it("renders leave balance cards, including Planned/Requested only when > 0", async () => {
-    getLeaveBalance.mockResolvedValue({
-      annual_entitlement: 30,
-      already_taken: 5,
-      approved_upcoming: 2,
-      requested: 0,
-      available: 23,
-    });
+  it("renders one leave-account card per category", async () => {
+    getLeaveBalances.mockResolvedValue([
+      leaveBalanceFixture({
+        annual_entitlement: 30,
+        already_taken: 5,
+        approved_upcoming: 2,
+        requested: 0,
+        available: 23,
+      }),
+      leaveBalanceFixture({
+        category_id: 8,
+        category_name: "Education leave",
+        annual_entitlement: 5,
+        already_taken: 1,
+        approved_upcoming: 1,
+        requested: 1,
+        available: 2,
+      }),
+    ]);
     component = mount(PersonReport, {
       target,
       props: { userId: 1, users, periodMode: "month", month: "2026-06" },
     });
     await waitForText(target, "Entitlement");
 
+    expect(
+      target.querySelectorAll("[data-testid^='leave-account-card-']"),
+    ).toHaveLength(2);
+    expect(target.textContent).toContain("Education leave");
     expect(target.textContent).toContain("Taken");
-    expect(target.textContent).toContain("Planned");
-    expect(target.textContent).not.toContain("Requested");
-    expect(target.textContent).toContain("Remaining");
+    expect(target.textContent).toContain("Approved planned");
+    expect(target.textContent).toContain("Requested");
   });
 
   it("hides absence stat cards entirely when every absence has 0 effective days", async () => {
@@ -474,7 +511,7 @@ describe("PersonReport", () => {
     });
     await waitForText(target, "Logged");
 
-    expect(getLeaveBalance).not.toHaveBeenCalled();
+    expect(getLeaveBalances).not.toHaveBeenCalled();
     expect(target.textContent).not.toContain("Entitlement");
   });
 

@@ -8,22 +8,56 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
+/// Public category shape. The internal leave-account start year is deliberately
+/// omitted: it controls historical entitlement calculations but is not an
+/// editable or visible category setting.
+#[derive(Serialize)]
+pub struct AbsenceCategoryResponse {
+    pub id: i64,
+    pub slug: String,
+    pub name: String,
+    pub color: String,
+    pub sort_order: i64,
+    pub active: bool,
+    pub cost_type: String,
+    pub auto_approve_past: bool,
+    pub unpaid: bool,
+    pub leave_account_default_days: Option<i64>,
+    pub leave_account_carryover_expiry: Option<String>,
+}
+
+impl From<AbsenceCategory> for AbsenceCategoryResponse {
+    fn from(category: AbsenceCategory) -> Self {
+        Self {
+            id: category.id,
+            slug: category.slug,
+            name: category.name,
+            color: category.color,
+            sort_order: category.sort_order,
+            active: category.active,
+            cost_type: category.cost_type,
+            auto_approve_past: category.auto_approve_past,
+            unpaid: category.unpaid,
+            leave_account_default_days: category.leave_account_default_days,
+            leave_account_carryover_expiry: category.leave_account_carryover_expiry,
+        }
+    }
+}
+
 pub async fn list(
     State(app_state): State<AppState>,
     requester: User,
-) -> AppResult<Json<Vec<AbsenceCategory>>> {
-    Ok(Json(
-        absence_categories::list_for_user(&app_state, requester.id).await?,
-    ))
+) -> AppResult<Json<Vec<AbsenceCategoryResponse>>> {
+    let categories = absence_categories::list_for_user(&app_state, requester.id).await?;
+    Ok(Json(categories.into_iter().map(Into::into).collect()))
 }
 
 pub async fn list_all(
     State(app_state): State<AppState>,
     requester: User,
-) -> AppResult<Json<Vec<AbsenceCategory>>> {
-    Ok(Json(
-        absence_categories::list_all(&app_state, &requester).await?,
-    ))
+) -> AppResult<Json<Vec<AbsenceCategoryResponse>>> {
+    let categories = absence_categories::list_all(&app_state, &requester).await?;
+    Ok(Json(categories.into_iter().map(Into::into).collect()))
 }
 
 fn default_cost_type() -> String {
@@ -44,13 +78,19 @@ pub struct NewAbsenceCategoryRequest {
     pub auto_approve_past: bool,
     #[serde(default)]
     pub unpaid: bool,
+    /// Required for a category with `cost_type = "vacation"` and otherwise
+    /// rejected. Existing user accounts keep their own base values.
+    pub leave_account_default_days: Option<i64>,
+    /// Required for a category with `cost_type = "vacation"` in `MM-DD`
+    /// format and otherwise rejected.
+    pub leave_account_carryover_expiry: Option<String>,
 }
 
 pub async fn create(
     State(app_state): State<AppState>,
     requester: User,
     Json(body): Json<NewAbsenceCategoryRequest>,
-) -> AppResult<Json<AbsenceCategory>> {
+) -> AppResult<Json<AbsenceCategoryResponse>> {
     Ok(Json(
         absence_categories::create(
             &app_state,
@@ -63,9 +103,12 @@ pub async fn create(
                 cost_type: body.cost_type,
                 auto_approve_past: body.auto_approve_past,
                 unpaid: body.unpaid,
+                leave_account_default_days: body.leave_account_default_days,
+                leave_account_carryover_expiry: body.leave_account_carryover_expiry,
             },
         )
-        .await?,
+        .await?
+        .into(),
     ))
 }
 
@@ -78,6 +121,8 @@ pub struct UpdateAbsenceCategoryRequest {
     pub cost_type: Option<String>,
     pub auto_approve_past: Option<bool>,
     pub unpaid: Option<bool>,
+    pub leave_account_default_days: Option<i64>,
+    pub leave_account_carryover_expiry: Option<String>,
 }
 
 pub async fn update(
@@ -85,7 +130,7 @@ pub async fn update(
     requester: User,
     Path(category_id): Path<i64>,
     Json(body): Json<UpdateAbsenceCategoryRequest>,
-) -> AppResult<Json<AbsenceCategory>> {
+) -> AppResult<Json<AbsenceCategoryResponse>> {
     Ok(Json(
         absence_categories::update(
             &app_state,
@@ -99,9 +144,12 @@ pub async fn update(
                 cost_type: body.cost_type,
                 auto_approve_past: body.auto_approve_past,
                 unpaid: body.unpaid,
+                leave_account_default_days: body.leave_account_default_days,
+                leave_account_carryover_expiry: body.leave_account_carryover_expiry,
             },
         )
-        .await?,
+        .await?
+        .into(),
     ))
 }
 

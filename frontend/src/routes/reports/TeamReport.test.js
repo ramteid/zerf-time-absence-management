@@ -32,6 +32,15 @@ const users = [
   { id: 2, first_name: "Bob", last_name: "Jones", workdays_per_week: 5 },
 ];
 
+const leaveAccountCategories = [
+  { category_id: 1, name: "Vacation", color: "#3b82f6" },
+  { category_id: 8, name: "Education leave", color: "#14b8a6" },
+];
+
+function teamReportFixture(rows = []) {
+  return { leave_account_categories: leaveAccountCategories, rows };
+}
+
 async function settle() {
   await Promise.resolve();
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -63,7 +72,7 @@ describe("TeamReport", () => {
       permissions: { can_view_team_reports: true },
     });
     vi.clearAllMocks();
-    getTeamReport.mockResolvedValue([]);
+    getTeamReport.mockResolvedValue(teamReportFixture());
     getTeamCategoryReport.mockResolvedValue([]);
     getAbsenceReport.mockResolvedValue([]);
     getUserAbsencesByYear.mockResolvedValue([]);
@@ -94,18 +103,22 @@ describe("TeamReport", () => {
   });
 
   it("renders the month table with wrapping-optimized headers", async () => {
-    getTeamReport.mockResolvedValueOnce([
-      {
-        user_id: 1,
-        name: "Alice Smith",
-        flextime_balance_min: 120,
-        diff_min: 30,
-        sick_days: 0,
-        vacation_days: 5,
-        vacation_planned_days: 0,
-        weeks_all_submitted: true,
-      },
-    ]);
+    getTeamReport.mockResolvedValueOnce(
+      teamReportFixture([
+        {
+          user_id: 1,
+          name: "Alice Smith",
+          flextime_balance_min: 120,
+          diff_min: 30,
+          sick_days: 0,
+          leave_account_usage: [
+            { category_id: 1, taken_days: 5, planned_days: 0 },
+            { category_id: 8, taken_days: 1, planned_days: 2 },
+          ],
+          weeks_all_submitted: true,
+        },
+      ]),
+    );
     component = mount(TeamReport, {
       target,
       props: { users, periodMode: "month", month: "2026-05", from: "", to: "" },
@@ -114,31 +127,42 @@ describe("TeamReport", () => {
 
     expect(target.querySelector(".team-report-table")).not.toBeNull();
     expect(target.querySelectorAll(".team-report-header")).not.toHaveLength(0);
+    expect(
+      target.querySelector('[data-testid="team-leave-account-column-8"]'),
+    ).not.toBeNull();
+    expect(
+      target.querySelector('[data-testid="team-leave-account-1-8"]')
+        .textContent,
+    ).toContain("1 / 2");
   });
 
   it("renders employee rows once the month table resolves", async () => {
-    getTeamReport.mockResolvedValueOnce([
-      {
-        user_id: 1,
-        name: "Alice Smith",
-        flextime_balance_min: 120,
-        diff_min: 30,
-        sick_days: 0,
-        vacation_days: 5,
-        vacation_planned_days: 0,
-        weeks_all_submitted: true,
-      },
-      {
-        user_id: 2,
-        name: "Bob Jones",
-        flextime_balance_min: -60,
-        diff_min: -60,
-        sick_days: 1,
-        vacation_days: 0,
-        vacation_planned_days: 0,
-        weeks_all_submitted: false,
-      },
-    ]);
+    getTeamReport.mockResolvedValueOnce(
+      teamReportFixture([
+        {
+          user_id: 1,
+          name: "Alice Smith",
+          flextime_balance_min: 120,
+          diff_min: 30,
+          sick_days: 0,
+          leave_account_usage: [
+            { category_id: 1, taken_days: 5, planned_days: 0 },
+          ],
+          weeks_all_submitted: true,
+        },
+        {
+          user_id: 2,
+          name: "Bob Jones",
+          flextime_balance_min: -60,
+          diff_min: -60,
+          sick_days: 1,
+          leave_account_usage: [
+            { category_id: 8, taken_days: 0, planned_days: 3 },
+          ],
+          weeks_all_submitted: false,
+        },
+      ]),
+    );
     component = mount(TeamReport, {
       target,
       props: { users, periodMode: "month", month: "2026-05", from: "", to: "" },

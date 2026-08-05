@@ -156,7 +156,8 @@ final" by the same rules.
 | `app_settings` | Key-value app settings |
 | `audit_log` | Before/after JSON snapshots of all mutations |
 | `password_reset_tokens` | One-time hashed tokens (1h expiry) |
-| `user_annual_leave` | Annual leave entitlement per user per year |
+| `user_leave_accounts` | Per-user base entitlement for each leave-account absence category |
+| `user_leave_account_year_overrides` | Per-user leave-account entitlement overrides by year |
 
 Notable constraints: non-admin users must have an approver; users cannot approve themselves; vacation range <= 1 year; time entry end_time >= start_time.
 
@@ -264,9 +265,9 @@ Supported languages: `en` (en-US) and `de` (de-DE). Stored in localStorage key `
 ```
 /auth/*             Login, logout, setup, forgot/reset password, preferences
 /time-entries/*     CRUD, submit, batch-approve, batch-reject
-/absences/*         CRUD, approve, reject, revoke, calendar, leave balance
+/absences/*         CRUD, approve, reject, revoke, calendar, leave balances
 /reopen-requests/*  Create, list pending, approve/reject
-/users/*            CRUD, deactivate, reset password, annual leave days
+/users/*            CRUD, deactivate, reset password, leave-account entitlements
 /categories/*       CRUD
 /holidays/*         CRUD, country/region lists
 /reports/*          Month, range, team, categories, overtime, flextime, CSV

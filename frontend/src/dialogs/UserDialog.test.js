@@ -16,6 +16,40 @@ import { setLanguage } from "../i18n.js";
 
 const apiMock = vi.hoisted(() => vi.fn());
 
+const leaveAccountDefinitions = [
+  {
+    category_id: 1,
+    category_name: "Vacation",
+    color: "#3b82f6",
+    default_base_days: 30,
+    active: true,
+    carryover_expiry: "03-31",
+  },
+  {
+    category_id: 8,
+    category_name: "Education leave",
+    color: "#14b8a6",
+    default_base_days: 5,
+    active: true,
+    carryover_expiry: "01-31",
+  },
+];
+
+function userLeaveAccounts() {
+  const currentYear = new Date().getFullYear();
+  return leaveAccountDefinitions.map((account) => ({
+    category_id: account.category_id,
+    category_name: account.category_name,
+    color: account.color,
+    active: account.active,
+    base_days: account.default_base_days,
+    current_year: currentYear,
+    current_year_days: account.default_base_days,
+    next_year: currentYear + 1,
+    next_year_days: account.default_base_days,
+  }));
+}
+
 vi.mock("svelte", async () => {
   return await import("../../node_modules/svelte/src/index-client.js");
 });
@@ -60,9 +94,10 @@ describe("UserDialog", () => {
       if (path === "/settings")
         return {
           default_weekly_hours: 39,
-          default_annual_leave_days: 30,
           smtp_enabled: false,
         };
+      if (path === "/leave-accounts") return leaveAccountDefinitions;
+      if (path === "/users/7/leave-accounts") return userLeaveAccounts();
       return [];
     });
 
@@ -95,7 +130,7 @@ describe("UserDialog", () => {
     // immediately know they are modifying, not creating, an account.
     apiMock.mockImplementation(async (path) => {
       if (path === "/users") return [];
-      if (path.endsWith("/leave-days")) return [];
+      if (path === "/users/7/leave-accounts") return userLeaveAccounts();
       return {};
     });
     const onClose = vi.fn();
@@ -157,13 +192,12 @@ describe("UserDialog", () => {
     expect(passwordFields.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("fetches leave days when editing an existing user", async () => {
-    // Leave days are stored separately from the user record. The form must
-    // load them so the admin can see and update this year's and next year's entitlement.
+  it("fetches leave accounts when editing an existing user", async () => {
+    // Entitlements are stored separately from the user record. The form must
+    // load every account so the admin can edit the base and two year values.
     apiMock.mockImplementation(async (path) => {
       if (path === "/users") return [];
-      if (path === "/users/7/leave-days")
-        return [{ year: new Date().getFullYear(), days: 25 }];
+      if (path === "/users/7/leave-accounts") return userLeaveAccounts();
       return {};
     });
     const onClose = vi.fn();
@@ -189,10 +223,11 @@ describe("UserDialog", () => {
     await waitForText(target, "Edit User");
     await settle();
 
-    const leaveDaysCall = apiMock.mock.calls.find(
-      ([path]) => typeof path === "string" && path.includes("/leave-days"),
+    const leaveAccountsCall = apiMock.mock.calls.find(
+      ([path]) => typeof path === "string" && path.includes("/leave-accounts"),
     );
-    expect(leaveDaysCall).toBeTruthy();
+    expect(leaveAccountsCall).toBeTruthy();
+    expect(target.textContent).toContain("Education leave");
   });
 
   it("shows the optional hire date field with its explanatory helper text", async () => {
@@ -209,7 +244,7 @@ describe("UserDialog", () => {
 
     expect(target.textContent).toContain("Hire date");
     expect(target.textContent).toContain(
-      "Used to calculate the prorated annual leave entitlement",
+      "Used to calculate the prorated leave-account entitlement",
     );
   });
 
@@ -220,7 +255,7 @@ describe("UserDialog", () => {
     // something to clear.
     apiMock.mockImplementation(async (path) => {
       if (path === "/users") return [];
-      if (path.endsWith("/leave-days")) return [];
+      if (path === "/users/7/leave-accounts") return userLeaveAccounts();
       return {};
     });
     const onClose = vi.fn();
@@ -278,9 +313,9 @@ describe("UserDialog", () => {
       if (path === "/settings")
         return {
           default_weekly_hours: 39,
-          default_annual_leave_days: 30,
           smtp_enabled: false,
         };
+      if (path === "/leave-accounts") return leaveAccountDefinitions;
       if (path === "/categories/all")
         return [
           { id: 1, name: "Core Duties" },
@@ -296,7 +331,7 @@ describe("UserDialog", () => {
       props: { template: { role: "employee" }, onClose },
     });
     await waitForText(target, "Add User");
-    await settle();
+    await waitForText(target, "Education leave");
 
     expect(target.textContent).toContain("Core Duties");
     expect(target.textContent).toContain("Vacation");
@@ -329,6 +364,44 @@ describe("UserDialog", () => {
     expect(postCall).toBeTruthy();
     expect(postCall[1].body.category_ids).toEqual([1]);
     expect(postCall[1].body.absence_category_ids).toEqual([10]);
+    expect(postCall[1].body.leave_accounts).toEqual([
+      {
+        category_id: 1,
+        base_days: 30,
+        current_year_days: 30,
+        next_year_days: 30,
+      },
+      {
+        category_id: 8,
+        base_days: 5,
+        current_year_days: 5,
+        next_year_days: 5,
+      },
+    ]);
+  });
+
+  it("sets all leave accounts to zero for assistants and restores them after switching back", async () => {
+    const onClose = vi.fn();
+    component = mount(UserDialog, {
+      target,
+      props: { template: { role: "employee" }, onClose },
+    });
+    await waitForText(target, "Education leave");
+
+    const roleSelect = target.querySelector("#user-role");
+    roleSelect.value = "assistant";
+    roleSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    await settle();
+
+    expect(target.querySelector("#leave-account-1-base").value).toBe("0");
+    expect(target.querySelector("#leave-account-8-current").value).toBe("0");
+
+    roleSelect.value = "employee";
+    roleSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    await settle();
+
+    expect(target.querySelector("#leave-account-1-base").value).toBe("30");
+    expect(target.querySelector("#leave-account-8-current").value).toBe("5");
   });
 
   it("hides weekly hours, workdays, and overtime fields when role is assistant", async () => {
@@ -379,7 +452,7 @@ describe("UserDialog", () => {
   it("only sends category_ids/absence_category_ids on create, never on edit", async () => {
     apiMock.mockImplementation(async (path) => {
       if (path === "/users") return [];
-      if (path.endsWith("/leave-days")) return [];
+      if (path === "/users/7/leave-accounts") return userLeaveAccounts();
       return {};
     });
     const onClose = vi.fn();

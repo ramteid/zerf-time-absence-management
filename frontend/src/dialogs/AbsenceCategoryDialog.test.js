@@ -90,6 +90,8 @@ describe("AbsenceCategoryDialog", () => {
           name: "Vacation",
           color: "#6D4C41",
           cost_type: "vacation",
+          leave_account_default_days: 30,
+          leave_account_carryover_expiry: "03-31",
         },
         onClose,
       },
@@ -113,6 +115,8 @@ describe("AbsenceCategoryDialog", () => {
           name: "Vacation",
           color: "#6D4C41",
           cost_type: "vacation",
+          leave_account_default_days: 30,
+          leave_account_carryover_expiry: "03-31",
         },
         onClose,
       },
@@ -322,7 +326,7 @@ describe("AbsenceCategoryDialog", () => {
     expect(updateRequest.options.body).toMatchObject({ unpaid: true });
   });
 
-  it("resets unpaid to false when cost_type changes away from 'none'", async () => {
+  it("resets unpaid to false when cost_type changes from 'none' to 'flextime'", async () => {
     const onClose = vi.fn();
     component = mount(AbsenceCategoryDialog, {
       target,
@@ -339,10 +343,10 @@ describe("AbsenceCategoryDialog", () => {
     unpaidCheckbox.click();
     await settle();
 
-    const vacationRadio = target.querySelector(
-      'input[type="radio"][value="vacation"]',
+    const flextimeRadio = target.querySelector(
+      'input[type="radio"][value="flextime"]',
     );
-    vacationRadio.click();
+    flextimeRadio.click();
     await settle();
 
     // The checkbox (and its row) only render for cost_type "none".
@@ -357,6 +361,107 @@ describe("AbsenceCategoryDialog", () => {
 
     const updateRequest = requestFor("/absence-categories/9", "PUT");
     expect(updateRequest.options.body).toMatchObject({ unpaid: false });
+  });
+
+  it("requires valid account fields for a new leave-account category", async () => {
+    const onClose = vi.fn();
+    component = mount(AbsenceCategoryDialog, {
+      target,
+      props: { template: {}, onClose },
+    });
+    await settle();
+
+    target.querySelector('input[type="radio"][value="vacation"]').click();
+    await settle();
+
+    target.querySelector("button.zf-btn.zf-btn-primary").click();
+    await settle();
+
+    expect(target.textContent).toContain("valid carryover expiry date");
+    expect(requestFor("/absence-categories", "POST")).toBeUndefined();
+  });
+
+  it("sends leave-account fields without exposing an internal start year", async () => {
+    const onClose = vi.fn();
+    component = mount(AbsenceCategoryDialog, {
+      target,
+      props: { template: {}, onClose },
+    });
+    await settle();
+
+    target.querySelector('input[type="radio"][value="vacation"]').click();
+    await settle();
+    const defaultDays = target.querySelector(
+      "#abscat-leave-account-default-days",
+    );
+    const expiry = target.querySelector(
+      "#abscat-leave-account-carryover-expiry",
+    );
+    defaultDays.value = "5";
+    defaultDays.dispatchEvent(new Event("input"));
+    expiry.value = "01-31";
+    expiry.dispatchEvent(new Event("input"));
+    await settle();
+
+    target.querySelector("button.zf-btn.zf-btn-primary").click();
+    await settle();
+
+    const createRequest = requestFor("/absence-categories", "POST");
+    expect(createRequest.options.body).toMatchObject({
+      cost_type: "vacation",
+      leave_account_default_days: 5,
+      leave_account_carryover_expiry: "01-31",
+    });
+    expect(createRequest.options.body).not.toHaveProperty(
+      "leave_account_start_year",
+    );
+    expect(target.textContent).not.toContain("start year");
+  });
+
+  it("does not let an existing non-account category become a leave account", async () => {
+    const onClose = vi.fn();
+    component = mount(AbsenceCategoryDialog, {
+      target,
+      props: {
+        template: { id: 9, name: "Special leave", color: "#0ea5e9" },
+        onClose,
+      },
+    });
+    await settle();
+
+    expect(
+      target.querySelector('input[type="radio"][value="vacation"]').disabled,
+    ).toBe(true);
+  });
+
+  it("keeps an existing leave-account category on its account type", async () => {
+    const onClose = vi.fn();
+    component = mount(AbsenceCategoryDialog, {
+      target,
+      props: {
+        template: {
+          id: 9,
+          name: "Vacation",
+          color: "#6D4C41",
+          cost_type: "vacation",
+          leave_account_default_days: 30,
+          leave_account_carryover_expiry: "03-31",
+        },
+        onClose,
+      },
+    });
+    await settle();
+
+    expect(target.querySelector('input[value="none"]').disabled).toBe(true);
+    expect(target.querySelector('input[value="flextime"]').disabled).toBe(true);
+    target.querySelector("button.zf-btn.zf-btn-primary").click();
+    await settle();
+
+    expect(
+      requestFor("/absence-categories/9", "PUT").options.body,
+    ).toMatchObject({
+      cost_type: "vacation",
+    });
   });
 
   it("does not create a duplicate category when Save is double-clicked before the first request resolves", async () => {

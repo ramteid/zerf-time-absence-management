@@ -55,7 +55,7 @@ If you are new to Zerf, start there for:
 - first-login and first-week onboarding,
 - role-based workflows,
 - status and approval logic,
-- flextime and vacation balance behavior,
+- flextime and leave-account behavior,
 - practical answers for common edge cases.
 
 ## Quick setup

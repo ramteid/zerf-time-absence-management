@@ -94,11 +94,24 @@ pub async fn seed_admin(
         .execute(pool)
         .await?;
         let current_year = ref_date.year();
-        let user_db = UserDb::new(pool.clone());
-        user_db.set_leave_days(admin_id, current_year, 30).await?;
-        user_db
-            .set_leave_days(admin_id, current_year + 1, 30)
-            .await?;
+        let vacation_category_id: i64 =
+            sqlx::query_scalar("SELECT id FROM absence_categories WHERE slug = 'vacation'")
+                .fetch_one(pool)
+                .await?;
+        let mut transaction = pool.begin().await?;
+        UserDb::apply_leave_account_values_tx(
+            &mut transaction,
+            admin_id,
+            current_year,
+            &[zerf::repository::UserLeaveAccountInput {
+                category_id: vacation_category_id,
+                base_days: 30,
+                current_year_days: 30,
+                next_year_days: 30,
+            }],
+        )
+        .await?;
+        transaction.commit().await?;
 
         Ok(Some(temp))
     } else {

@@ -805,6 +805,10 @@ mod tests {
             cost_type: cost_type.to_string(),
             auto_approve_past,
             unpaid,
+            leave_account_default_days: (cost_type == "vacation").then_some(30),
+            leave_account_carryover_expiry: (cost_type == "vacation")
+                .then_some("03-31".to_string()),
+            leave_account_start_year: (cost_type == "vacation").then_some(2026),
         }
     }
 

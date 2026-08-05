@@ -9,8 +9,8 @@ use crate::roles::{
 use crate::services::auth::lock_user_graph;
 use crate::services::users::{
     assert_can_access_user, ensure_email_available, ensure_user_name_available, generate_password,
-    get_leave_days, normalize_optional_user_name, repo_user_to_auth_user, user_unique_conflict,
-    validate_approver_ids, ArchiveRequest, RestoreRequest,
+    normalize_optional_user_name, repo_user_to_auth_user, user_unique_conflict,
+    validate_approver_ids, ArchiveRequest, LeaveAccountInput, RestoreRequest,
 };
 use crate::AppState;
 use axum::{
@@ -183,11 +183,31 @@ pub async fn get_one(
         "dark_mode": user.dark_mode,
         "overtime_start_balance_min": user.overtime_start_balance_min,
         "tracks_time": user.tracks_time,
-        "annual_leave_days": user.annual_leave_days,
         "receives_error_notifications": user.receives_error_notifications,
         "approver_ids": approver_ids,
     });
     Ok(Json(user_json))
+}
+
+/// User-specific values for one leave-account category. The same shape is
+/// accepted by the regular-user and scoped assistant-management endpoints.
+#[derive(Clone, Deserialize)]
+pub struct LeaveAccountRequest {
+    pub category_id: i64,
+    pub base_days: i64,
+    pub current_year_days: i64,
+    pub next_year_days: i64,
+}
+
+impl From<LeaveAccountRequest> for LeaveAccountInput {
+    fn from(value: LeaveAccountRequest) -> Self {
+        Self {
+            category_id: value.category_id,
+            base_days: value.base_days,
+            current_year_days: value.current_year_days,
+            next_year_days: value.next_year_days,
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -199,14 +219,10 @@ pub struct NewUser {
     pub weekly_hours: f64,
     #[serde(default)]
     pub workdays_per_week: Option<i16>,
-    /// Leave days for the current year (required on creation).
-    pub leave_days_current_year: i64,
-    /// Leave days for next year (required on creation).
-    pub leave_days_next_year: i64,
-    /// Base annual leave entitlement (days/year), used whenever no explicit
-    /// per-year override exists. Defaults to the org-wide setting in the UI,
-    /// but admins may set a different value (e.g. special agreements).
-    pub annual_leave_days: i64,
+    /// Optional values for individual leave accounts. Omitted accounts are
+    /// initialized with their category default (or zero for assistants).
+    #[serde(default)]
+    pub leave_accounts: Option<Vec<LeaveAccountRequest>>,
     pub start_date: NaiveDate,
     /// Optional employment start date used to anchor annual-leave proration
     /// instead of `start_date`. Useful when onboarding an employee who already
@@ -260,9 +276,9 @@ pub async fn create(
         role: body.role,
         weekly_hours: body.weekly_hours,
         workdays_per_week: body.workdays_per_week,
-        leave_days_current_year: body.leave_days_current_year,
-        leave_days_next_year: body.leave_days_next_year,
-        annual_leave_days: body.annual_leave_days,
+        leave_accounts: body
+            .leave_accounts
+            .map(|accounts| accounts.into_iter().map(Into::into).collect()),
         start_date: body.start_date,
         hire_date: body.hire_date,
         overtime_start_balance_min: body.overtime_start_balance_min,
@@ -289,12 +305,10 @@ pub struct UpdateUser {
     pub role: Option<String>,
     pub weekly_hours: Option<f64>,
     pub workdays_per_week: Option<i16>,
-    /// If provided, sets leave days for the current year.
-    pub leave_days_current_year: Option<i64>,
-    /// If provided, sets leave days for next year.
-    pub leave_days_next_year: Option<i64>,
-    /// If provided, sets the user's base annual leave entitlement (days/year).
-    pub annual_leave_days: Option<i64>,
+    /// Omitted means leave accounts unchanged; supplied values replace the
+    /// affected base/current/next-year values atomically.
+    #[serde(default, deserialize_with = "deserialize_optional_leave_accounts")]
+    pub leave_accounts: Option<Vec<LeaveAccountRequest>>,
     pub start_date: Option<NaiveDate>,
     /// Triple state via double-Option: omitted = leave unchanged, `null` =
     /// clear back to the `start_date` fallback, value = set explicitly.
@@ -324,6 +338,15 @@ where
         None => Ok(None),
         Some(v) => Ok(Some(v)),
     }
+}
+
+fn deserialize_optional_leave_accounts<'de, D>(
+    deserializer: D,
+) -> Result<Option<Vec<LeaveAccountRequest>>, D::Error>
+where
+    D: serde::de::Deserializer<'de>,
+{
+    Option::<Vec<LeaveAccountRequest>>::deserialize(deserializer)
 }
 
 pub async fn update(
@@ -367,16 +390,6 @@ pub async fn update(
             return Err(AppError::BadRequest("Invalid workdays_per_week.".into()));
         }
     }
-    if let Some(d) = body.leave_days_current_year {
-        if !(0..=366).contains(&d) {
-            return Err(AppError::BadRequest("Invalid leave_days.".into()));
-        }
-    }
-    if let Some(d) = body.leave_days_next_year {
-        if !(0..=366).contains(&d) {
-            return Err(AppError::BadRequest("Invalid leave_days.".into()));
-        }
-    }
     if let Some(overtime_start_balance) = body.overtime_start_balance_min {
         if !(-525_600..=525_600).contains(&overtime_start_balance) {
             return Err(AppError::BadRequest(
@@ -397,6 +410,10 @@ pub async fn update(
     lock_user_graph(&mut transaction).await?;
     let previous_user: User =
         crate::services::users::fetch_for_update(&mut transaction, user_id).await?;
+    let previous_audit_snapshot =
+        crate::services::users::user_audit_snapshot(&app_state, &previous_user)
+            .await
+            .or_else(|| serde_json::to_value(&previous_user).ok());
     if let Some(email) = &normalized_email {
         ensure_email_available(&app_state, email, Some(user_id)).await?;
     }
@@ -589,7 +606,6 @@ pub async fn update(
         body.allow_submission_without_approval,
         body.overtime_start_balance_min,
         effective_tracks_time,
-        body.annual_leave_days,
     )
     .await
     .map_err(|e| {
@@ -597,15 +613,23 @@ pub async fn update(
         user_unique_conflict(&e)
             .unwrap_or_else(|| AppError::Conflict("Could not update user.".into()))
     })?;
-    // Update leave days if provided
-    let current_year = crate::services::settings::app_current_year(&app_state.pool).await;
-    if let Some(d) = body.leave_days_current_year {
-        crate::services::users::set_leave_days_tx(&mut transaction, user_id, current_year, d)
-            .await?;
-    }
-    if let Some(d) = body.leave_days_next_year {
-        crate::services::users::set_leave_days_tx(&mut transaction, user_id, current_year + 1, d)
-            .await?;
+    crate::services::users::seed_leave_accounts_for_user_tx(
+        &mut transaction,
+        user_id,
+        &effective_role,
+    )
+    .await?;
+    if let Some(leave_accounts) = body.leave_accounts {
+        let current_year = crate::services::settings::app_current_year(&app_state.pool).await;
+        let leave_account_inputs: Vec<LeaveAccountInput> =
+            leave_accounts.into_iter().map(Into::into).collect();
+        crate::services::users::apply_leave_account_values_tx(
+            &mut transaction,
+            user_id,
+            current_year,
+            &leave_account_inputs,
+        )
+        .await?;
     }
     // Handle approver_ids update if provided
     if let Some(new_approver_ids) = &body.approver_ids {
@@ -664,14 +688,18 @@ pub async fn update(
         .await?
         .ok_or(AppError::NotFound)?;
     let updated_auth_user = repo_user_to_auth_user(updated_user);
+    let updated_audit_snapshot =
+        crate::services::users::user_audit_snapshot(&app_state, &updated_auth_user)
+            .await
+            .or_else(|| serde_json::to_value(&updated_auth_user).ok());
     audit::log(
         &app_state.pool,
         requester.id,
         "updated",
         "users",
         user_id,
-        serde_json::to_value(&previous_user).ok(),
-        serde_json::to_value(&updated_auth_user).ok(),
+        previous_audit_snapshot,
+        updated_audit_snapshot,
     )
     .await;
     Ok(Json(updated_auth_user))
@@ -812,97 +840,26 @@ pub async fn reset_password(
     ))
 }
 
-// ---------------------------------------------------------------------------
-// Annual leave facade — single source of truth backed by user_annual_leave.
-// ---------------------------------------------------------------------------
-
-/// Row returned by the leave endpoints.
-#[derive(serde::Serialize)]
-pub struct AnnualLeaveRow {
-    pub user_id: i64,
-    pub year: i32,
-    pub days: i64,
+/// GET /leave-accounts - account definitions available to the requester.
+pub async fn list_leave_accounts(
+    State(app_state): State<AppState>,
+    requester: User,
+) -> AppResult<Json<Vec<crate::services::users::LeaveAccountDefinition>>> {
+    Ok(Json(
+        crate::services::users::leave_account_definitions(&app_state, &requester).await?,
+    ))
 }
 
-// HTTP: GET /users/{id}/leave-days — returns current + next year rows
-pub async fn get_leave_days_handler(
+/// GET /users/{id}/leave-accounts - user-specific base and current/next-year
+/// values for every category-specific leave account.
+pub async fn get_user_leave_accounts(
     State(app_state): State<AppState>,
     requester: User,
     Path(user_id): Path<i64>,
-) -> AppResult<Json<Vec<AnnualLeaveRow>>> {
-    assert_can_access_user(&app_state, &requester, user_id).await?;
-    let current_year = crate::services::settings::app_current_year(&app_state.pool).await;
-    let this = get_leave_days(&app_state.pool, user_id, current_year).await?;
-    let next = get_leave_days(&app_state.pool, user_id, current_year + 1).await?;
-    Ok(Json(vec![
-        AnnualLeaveRow {
-            user_id,
-            year: current_year,
-            days: this,
-        },
-        AnnualLeaveRow {
-            user_id,
-            year: current_year + 1,
-            days: next,
-        },
-    ]))
-}
-
-#[derive(Deserialize)]
-pub struct SetLeaveBody {
-    pub year: i32,
-    pub days: i64,
-}
-
-// HTTP: PUT /users/{id}/leave-days — admin sets a specific year
-pub async fn set_leave_days_handler(
-    State(app_state): State<AppState>,
-    requester: User,
-    Path(user_id): Path<i64>,
-    Json(body): Json<SetLeaveBody>,
-) -> AppResult<Json<serde_json::Value>> {
-    if !requester.is_admin() {
-        return Err(AppError::Forbidden);
-    }
-    let current_year = crate::services::settings::app_current_year(&app_state.pool).await;
-    if body.year < current_year - 1 {
-        return Err(AppError::BadRequest(
-            "Leave days cannot be set for years before the previous year.".into(),
-        ));
-    }
-    if body.year > current_year + 1 {
-        return Err(AppError::BadRequest(
-            "Leave days cannot be set more than one year ahead.".into(),
-        ));
-    }
-    if !(0..=366).contains(&body.days) {
-        return Err(AppError::BadRequest("Invalid days value.".into()));
-    }
-    let is_active = app_state
-        .db
-        .users
-        .get_active_flag(user_id)
-        .await?
-        .ok_or(AppError::NotFound)?;
-    if !is_active {
-        return Err(AppError::BadRequest("User is inactive.".into()));
-    }
-    app_state
-        .db
-        .users
-        .set_leave_days(user_id, body.year, body.days)
-        .await?;
-    audit::log(
-        &app_state.pool,
-        requester.id,
-        "updated",
-        "users",
-        user_id,
-        None,
-        Some(serde_json::json!({"annual_leave": {"year": body.year, "days": body.days}})),
-    )
-    .await;
-    Ok(Json(serde_json::json!({"ok": true})))
+) -> AppResult<Json<Vec<crate::services::users::UserLeaveAccountDetails>>> {
+    Ok(Json(
+        crate::services::users::leave_accounts_for_user(&app_state, &requester, user_id).await?,
+    ))
 }
 
 // ---------------------------------------------------------------------------

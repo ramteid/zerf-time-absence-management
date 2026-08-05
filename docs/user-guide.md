@@ -41,14 +41,9 @@ Use this document if you are:
 - [Submission status indicator](#submission-status-indicator)
   - [How completeness is determined](#how-completeness-is-determined)
   - [Important: non-crediting entries affect completeness](#important-non-crediting-entries-affect-completeness)
-- [Vacation balance and carryover logic](#vacation-balance-and-carryover-logic)
-  - [Balance fields in the UI](#balance-fields-in-the-ui)
-  - [Core formulas](#core-formulas)
-  - [Which statuses affect carryover and available days](#which-statuses-affect-carryover-and-available-days)
-  - [Carryover expiry behavior](#carryover-expiry-behavior)
-  - [Cross-year vacation requests](#cross-year-vacation-requests)
-  - [Worked examples](#worked-examples)
-  - [Why this can feel strict](#why-this-can-feel-strict)
+- [Leave accounts and carryover logic](#leave-accounts-and-carryover-logic)
+  - [Balance cards](#balance-cards)
+  - [Entitlement, start year, and carryover](#entitlement-start-year-and-carryover)
 - [Notifications](#notifications)
   - [Employee receives notifications when](#employee-receives-notifications-when)
   - [Approver receives notifications when](#approver-receives-notifications-when)
@@ -84,7 +79,7 @@ Use this document if you are:
   - [Absences: creating](#absences-creating)
   - [Absences: editing a pending absence](#absences-editing-a-pending-absence)
   - [Absences: cancelling](#absences-cancelling)
-  - [Vacation balance](#vacation-balance)
+  - [Leave accounts](#leave-accounts)
 - [Team lead workflow reference](#team-lead-workflow-reference)
   - [Scope of lead authority](#scope-of-lead-authority)
   - [Reviewing time entries (week level)](#reviewing-time-entries-week-level)
@@ -106,7 +101,7 @@ Use this document if you are:
   - [Resetting a password](#resetting-a-password)
   - [Managing approver assignments](#managing-approver-assignments)
   - [Direct correction of submitted or approved entries](#direct-correction-of-submitted-or-approved-entries)
-  - [Managing annual leave](#managing-annual-leave)
+  - [Managing leave accounts](#managing-leave-accounts)
   - [Revoking an approved absence](#revoking-an-approved-absence)
   - [System settings](#system-settings)
   - [Nextcloud Upload](#nextcloud-upload)
@@ -597,128 +592,49 @@ States:
 - `All submitted (approvals pending)` (orange): every elapsed week has been submitted, but at least one entry is still waiting for approval.
 - `Weeks missing` (orange): at least one elapsed week has missing or unfinished submissions.
 
-## Vacation balance and carryover logic
+## Leave accounts and carryover logic
 
-This section explains exactly how vacation balances are calculated, including carryover from the previous year.
+Each absence category that uses a leave account has its own independent yearly
+budget. Vacation remains one leave account; an organisation can add accounts
+such as educational leave without mixing their balances.
 
-### Balance fields in the UI
+### Balance cards
+
+The Absences page and personal report show one card per leave account. Each
+card contains the category, annual entitlement, carryover, already taken,
+approved upcoming, requested, available amount, and any remaining carryover.
+The team report has one compact taken/planned column per account.
 
 | Field | Meaning |
 | --- | --- |
-| Annual entitlement | Configured annual leave for the selected year (after start-date pro-rating). |
-| Carryover days | Unused vacation from previous year that can be transferred into selected year. |
-| Carryover remaining | Portion of transferred carryover that is still unused. |
-| Carryover expiry | Date when carryover becomes unusable (month and day configured by admin, applied to the selected year). |
-| Already taken | Approved vacation days in the selected year that are already in the past (or up to today). |
-| Approved upcoming | Approved vacation days in the selected year that are still in the future. |
-| Requested | Vacation requests waiting for approval. Includes cancellation pending days. |
-| Available | Total budget minus already taken, approved upcoming, and requested. |
+| Annual entitlement | The user's entitlement for this account and selected year, after any start-date proration. |
+| Carryover days | Unused days from the same account in previous years. |
+| Carryover expiry | The account's own month and day on which carryover expires. |
+| Already taken | Approved account days in the past or today. |
+| Approved upcoming | Approved account days after today. |
+| Requested | Requested and cancellation-pending account days. |
+| Available | Usable budget after all reserved account days. |
 
-### Core formulas
+### Entitlement, start year, and carryover
 
-For selected year Y:
+An account starts for a user in the later of the user's Zerf start year and the
+account's internal start year. Before that year it has neither entitlement nor
+carryover. This prevents a newly added category from creating historic
+entitlements.
 
-1. Annual entitlement Y:
-- Uses the leave-day value configured for user and year Y.
-- Proration is anchored on the user's hire date if one is set, otherwise on
-  their start date (see "Creating a user"). If that anchor date falls within
-  Y, entitlement is pro-rated from it.
+Within a valid year, entitlement uses the account's user-specific base value
+or a yearly override. If the hire date, or otherwise the Zerf start date, falls
+in that year, entitlement is pro-rated. Each account has its own carryover
+chain and expiry date; changing an account's expiry affects newly calculated
+balances immediately, including historic views.
 
-2. Carryover days into Y:
-- Start with previous year entitlement after pro-rating.
-- Subtract previous year approved vacation usage.
-- Never below zero.
+Approved, requested, and cancellation-pending absences reduce the source
+year's carryover. Rejected and cancelled absences have no balance effect. A
+cancellation remains reserved until it is decided.
 
-In short: carryover equals any unused days from the previous year (never below zero).
-
-3. Total usable budget in Y:
-- If carryover has expired: only annual entitlement.
-- If carryover has not expired: annual entitlement + carryover days.
-
-4. Available days in Y:
-- Available = total usable budget - already taken - approved upcoming - requested
-
-### Which statuses affect carryover and available days
-
-Vacation status impact:
-
-- Approved:
-	- Counts as usage for budget checks.
-	- Split into already taken or approved upcoming depending on date.
-- Requested:
-	- Reserves budget and is counted in requested.
-	- Not counted as already taken.
-- Cancellation pending:
-	- Still reserves budget and is counted in requested.
-	- Reason: cancellation is not final until approver decision.
-- Rejected or cancelled:
-	- No budget impact.
-
-Important distinction:
-
-- Carryover source (how many days are transferred from the previous year) uses previous-year approved, requested, and cancellation-pending vacation usage. Pending requests reduce carryover because they already reserve the previous year's budget.
-- Current-year availability uses approved plus requested plus cancellation pending reservation.
-
-### Carryover expiry behavior
-
-The carryover expiry date is configured in Settings → General as a month and day (for example 03-31 for March 31).
-
-- Carryover for a given year expires on that date within the year.
-- After expiry, transferred carryover is not part of total usable budget.
-
-Carryover remaining is consumed by taken days that still reserve budget
-(approved days, plus cancellation-pending days; a cancellation is not final
-until the approver decides):
-
-- With expiry date:
-	- Only days taken up to min(expiry date, today) reduce carryover remaining.
-- Without valid expiry date:
-	- All already taken days reduce carryover remaining.
-
-Approved upcoming days do not consume carryover remaining yet, because they are not taken yet.
-
-### Cross-year vacation requests
-
-If one vacation request spans two years, Zerf validates both years separately:
-
-- Part inside start year is checked against start-year budget.
-- Part inside end year is checked against end-year budget.
-- Carryover into end year is derived from remaining start-year entitlement after approved, requested, and cancellation-pending vacation usage.
-
-This prevents a request from being valid in one year but over budget in the other year.
-
-### Worked examples
-
-Example A: standard carryover
-
-- 2026 entitlement: 30
-- 2026 approved vacation used: 22
-- Carryover into 2027: 8
-- 2027 entitlement: 30
-- 2027 total budget before expiry: 38
-
-Example B: pending requests reserve budget
-
-- Total budget: 38
-- Already taken: 5
-- Approved upcoming: 4
-- Requested (pending): 3
-- Available: 38 - 5 - 4 - 3 = 26
-
-Example C: cancellation pending
-
-- One approved upcoming day is moved to cancellation pending.
-- Approved upcoming decreases by 1.
-- Requested increases by 1.
-- Available stays unchanged until cancellation is approved or rejected.
-
-### Why this can feel strict
-
-Users sometimes see that available days do not increase immediately after requesting cancellation. This is intentional.
-
-- A cancellation request is not final.
-- The day stays reserved until approver decision.
-- This avoids overbooking the same budget window during pending review.
+If an absence crosses New Year's Day, Zerf validates each affected year for
+the same leave account. Days after an account's carryover expiry must fit into
+the remaining annual entitlement.
 
 ## Notifications
 
@@ -1155,10 +1071,10 @@ Vacation, sick leave, training, special leave, unpaid leave, general absence, an
 - Start date must be on or after your employment start date.
 - Comment, if provided, must not exceed 2000 characters.
 
-**Additional rules for vacation:**
+**Additional rules for leave-account categories:**
 
-- The vacation balance for all years covered by the request is validated at
-  creation time. Insufficient balance blocks the request.
+- The balance of the selected leave account is validated for every year
+  covered by the request. Insufficient balance blocks the request.
 
 **Additional rules for sick leave:**
 
@@ -1207,23 +1123,26 @@ The cancellation path depends on the current absence status:
 Only `requested` and `approved` absences can be cancelled. Already cancelled,
 rejected, or cancellation-pending absences cannot be cancelled again.
 
-### Vacation balance
+### Leave accounts
 
-Your vacation balance is visible in the leave overview. The balance fields are:
+Your leave-account balances are visible in the leave overview. There is one
+card for every account available to you. The balance fields are:
 
 - **Annual entitlement**: configured leave days for the year, pro-rated if you
   started during the year.
-- **Carryover days**: unused vacation days carried over from the previous year (never below zero).
-- **Carryover expiry**: date after which carryover is no longer usable (configured by your admin).
-- **Already taken**: approved vacation days that are today or in the past.
-- **Approved upcoming**: approved vacation days that are in the future.
+- **Carryover days**: unused days from the same account carried over from the
+  previous year (never below zero).
+- **Carryover expiry**: date after which that account's carryover is no longer
+  usable.
+- **Already taken**: approved account days that are today or in the past.
+- **Approved upcoming**: approved account days that are in the future.
 - **Requested**: days in `requested` or `cancellation_pending` status.
   Budget is still reserved.
 - **Available**: total usable budget − already taken − approved upcoming −
   requested.
 
-Cross-year requests are validated per year: days in year Y consume Y's budget,
-days in year Y+1 consume Y+1's budget separately.
+Cross-year requests are validated per year: days in year Y consume that
+account's budget for Y, while days in year Y+1 consume its budget for Y+1.
 
 ---
 
@@ -1286,10 +1205,11 @@ Approve or reject an absence in `requested` status.
 - Only `requested` absences can be approved or rejected.
 - Rejection requires a reason (non-empty, max 2000 characters).
 
-**Vacation re-validation at approval time:** When approving a vacation absence,
-the system re-validates the vacation balance against the employee's current
-entitlement. If another vacation was approved in the meantime that exhausted the
-budget, the approval is blocked.
+**Leave-account re-validation at approval time:** When approving an absence
+booked against a leave account, the system re-validates that account's balance
+against the employee's current entitlement. If another absence in the same
+account was approved in the meantime and exhausted the budget, approval is
+blocked.
 
 **Time-entry conflict check at approval:** For non-sick absences, the system
 re-checks that no time entries exist on the covered days at approval time. If
@@ -1467,20 +1387,19 @@ Required information:
 - Email address (must be unique)
 - First and last name (the combination must be unique)
 - Weekly hours and workdays per week
-- Base annual leave days, plus leave days for the current and next year
-  (overrides; see [Managing annual leave](#managing-annual-leave))
+- Leave-account entitlements and the current and next year's account overrides
+  (see [Managing leave accounts](#managing-leave-accounts))
 - Employment start date
 
 Role-specific rules:
 
 - Assistants must have zero weekly hours and no overtime start balance. The
   corresponding fields are hidden in the form.
-- When the assistant role is selected, all three leave-day fields are reset to
+- When the assistant role is selected, leave-account entitlements are reset to
   0. This is intentional: under German law, Minijob (assistant) leave
   entitlement is derived from the number of days actually worked, which varies
-  per person and per year. A pre-filled org-wide default would be misleading.
-  Enter the correct entitlement for each year manually. If you switch back to
-  a different role without saving, the previous leave values are restored.
+  per person and per year. Enter the correct entitlement for each account and
+  year manually.
 
 Optional: an initial flextime balance to carry in from before the user was
 created in the system.
@@ -1488,9 +1407,9 @@ created in the system.
 Optional: a hire date — the date the person actually joined the company, if it
 differs from their start date in Zerf. This matters when introducing Zerf to an
 existing team: someone who already worked the full year before adopting Zerf
-should see their full annual leave entitlement, not one pro-rated from the day
-they started using Zerf. Set the hire date to their real employment start, and
-their leave entitlement is pro-rated from that date instead. Leave it empty to
+should see their full account entitlement, not one pro-rated from the day they
+started using Zerf. Set the hire date to their real employment start, and each
+account entitlement is pro-rated from that date instead. Leave it empty to
 pro-rate from the start date, which is correct when employment and Zerf usage
 begin on the same day.
 
@@ -1656,33 +1575,28 @@ Admins editing their *own* submitted or approved entries must instead go through
 the regular reopen workflow — the admin correction path only applies to other
 users' entries.
 
-### Managing annual leave
+### Managing leave accounts
 
-Every user has a base annual leave entitlement (days/year), plus optional
-per-year overrides:
+Every category configured as a leave account has an independent base
+entitlement and optional per-year overrides for each user:
 
-- **Base annual leave days**: the user's standing entitlement, used for any
-  year that has no explicit override. Required when creating a user — the
-  field is pre-filled with the org-wide default (configured in
-  [System settings](#system-settings)) but can be changed, for example when a
-  special agreement was made with the employee.
-- **Per-year overrides**: explicit leave days for a specific year (currently
-  the user dialog exposes the current and next year). When set, the override
-  takes precedence over the base value for that year only.
-- For any other year, the base annual leave days value applies.
-- Valid range: 0 to 366 days, for both the base value and overrides.
+- **Base days**: the user's standing entitlement for that account, used for any
+  year that has no explicit override.
+- **Per-year overrides**: explicit account days for a specific year. When set,
+  an override takes precedence over that account's base value for that year.
+- Valid range: 0 to 366 days for both base values and overrides.
 - **Assistants (Minijob)**: leave entitlement must be set manually each year
   because it is calculated from the actual number of days worked, which
-  changes from year to year. All leave fields default to 0 when the assistant
+  changes from year to year. Account values default to 0 when the assistant
   role is selected. Update the current-year and next-year overrides each
   January once the number of worked days for the previous year is known.
   Assistants have no fixed contract workdays (they are configured with all 7
-  days as potential working days), so every calendar day in a vacation
+  days as potential working days), so every calendar day in a leave-account
   request — weekends included, public holidays excluded — counts as one leave
   day against their entitlement.
 - Changes take effect immediately for balance calculations. If you reduce a
-  user's entitlement after they have already used vacation, their available
-  balance may go negative.
+  user's account entitlement after they have already used account days, their
+  available balance may go negative.
 - When onboarding someone who already worked for the company before adopting
   Zerf, set their hire date (in the user's edit dialog) to their real
   employment start. This anchors leave proration on that date instead of their
@@ -1710,7 +1624,6 @@ Admins configure system-wide behavior in the Settings panel (Settings → Genera
 | Setting | Description |
 | --- | --- |
 | App timezone | Timezone name (e.g. `Europe/Berlin`). All date logic uses this timezone. |
-| Carryover expiry | Vacation carryover from the previous year expires on this date each year (enter as month-day, e.g. 03-31). Defaults to 03-31 until explicitly changed; the field cannot be cleared to disable expiry entirely. |
 | Submission deadline day | Day of the month (1–28) when the monthly submission reminder is sent. |
 | Submission reminders enabled | Enable or disable the monthly submission reminder. |
 | Approval reminders enabled | Enable or disable the weekly approval reminder. |
@@ -1904,17 +1817,22 @@ Absence categories define what types of absences employees can request. Each cat
 
 | Field | Effect |
 | --- | --- |
-| **Cost type** | A single 3-state field that determines the balance impact of approved days. `none` — no balance impact (e.g. unpaid leave, general absence): the day is removed from the daily work target but neither annual leave nor flextime is debited. `vacation` — deducts from the employee's annual leave balance, honouring per-year carryover and expiry rules. `flextime` — keeps the daily work target intact so the absence costs flextime balance. The flextime balance is checked at BOTH request and approval time against the configured floor (default 0 minutes; admin can override via the `flextime_min_balance_min` setting); the check accounts for other already-pending/approved flextime-cost absences so multiple requests that each individually fit cannot together breach the floor, and the approver's re-check catches the case where the user spent balance between request and approval. A `none` category can be a paid day off (special leave, paid training) or an unpaid one — that distinction is what the **Unpaid** field below is for. |
+| **Cost type** | A single 3-state field that determines the balance impact of approved days. `none` — no balance impact (e.g. unpaid leave, general absence): the day is removed from the daily work target but neither leave account nor flextime is debited. `vacation` — creates a separate leave account for this category and deducts from that account, using its own per-user entitlements, carryover, and expiry. `flextime` — keeps the daily work target intact so the absence costs flextime balance. The flextime balance is checked at BOTH request and approval time against the configured floor (default 0 minutes; admin can override via the `flextime_min_balance_min` setting); the check accounts for other already-pending/approved flextime-cost absences so multiple requests that each individually fit cannot together breach the floor, and the approver's re-check catches the case where the user spent balance between request and approval. A `none` category can be a paid day off (special leave, paid training) or an unpaid one — that distinction is what the **Unpaid** field below is for. |
 | **Auto-approve past dates** | Absences with a start date on or before today are approved automatically. Approvers receive an informational notice, in-app and by email. This flag also disables the time-entry conflict check at creation, so partial-day overlaps are allowed (e.g. employee worked the morning and then called in sick). Auto-approved absences that start today may extend at most 60 days into the future; longer ongoing absences require a new submission. |
 | **Unpaid** | Only available when cost type is `none`. Marks days in this category as actually reducing the employee's salary — as opposed to a `none`-cost category that is still fully paid, such as special leave or paid training. This is what drives which categories show up automatically in the monthly [Payroll Report](#payroll-report): sick-like categories and anything marked Unpaid. Unlike Cost type and Auto-approve past dates, this field is not locked once the category has existing absences — it can be changed at any time. |
 
 Constraints:
 - A category slug is auto-generated from the name and must be unique. Existing absences are not affected when a category is deactivated or renamed.
 - Inactive categories are hidden from the absence request dialog but remain attached to existing absence records.
+- A category with cost type `vacation` has leave-account settings: default days
+  for newly created users, a carryover expiry month/day, and an internal start
+  year. The start year stops a newly introduced account from generating
+  entitlements or carryover for older years. The values are independent for
+  every leave-account category.
 - Changing the cost type of an absence (e.g. from a vacation category to a flextime category) after submission is not allowed. Cancel the existing request and re-submit with the correct category.
 - Once a category has at least one referencing absence (any status), the **Cost type** and **Auto-approve past dates** fields are locked. Toggling them would retroactively change the financial or approval meaning of existing rows — past balance recomputations would suddenly debit or credit different ledgers and approval workflow guards would relax or tighten without the affected employees seeing it. To change a field, deactivate the existing category and create a new one with the desired settings. Cosmetic changes (name, color, sort order, active flag) are always allowed.
-- **Cost type `vacation` and Auto-approve past dates cannot both be enabled on the same category.** Setting both would let employees bypass approver review for vacation balance deductions and would cause vacation days to appear in both the vacation and the sick-days columns of the team report. Use separate categories: one with `vacation` cost type (requires approval) and one with auto-approve enabled (cost type `none` or `flextime`).
-- **Unpaid can only be enabled together with cost type `none`.** Vacation and flextime categories are always paid through their own balance mechanics.
+- **Cost type `vacation` and Auto-approve past dates cannot both be enabled on the same category.** Setting both would let employees bypass approver review for leave-account deductions and would cause account days to appear in both a leave-account and the sick-days report columns. Use separate categories: one with `vacation` cost type (requires approval) and one with auto-approve enabled (cost type `none` or `flextime`).
+- **Unpaid can only be enabled together with cost type `none`.** Leave-account and flextime categories are always paid through their own balance mechanics.
 - Like time categories, each absence category can be enabled or disabled per
   employee from the same creation and edit dialogs. Only checked employees can
   request the category going forward; existing absences already in that

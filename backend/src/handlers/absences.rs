@@ -2,7 +2,7 @@ use crate::error::AppResult;
 use crate::middleware::auth::User;
 use crate::services::absences::{
     approve_absence, approve_cancellation_absence, assert_can_access_user, cancel_absence,
-    compute_balance, create_absence, enrich_absence_with_metadata, reject_absence,
+    compute_balances, create_absence, enrich_absence_with_metadata, reject_absence,
     reject_cancellation_absence, repo_absence_to_service, require_tracks_time, revoke_absence,
     update_absence, Absence, LeaveBalance, NewAbsence,
 };
@@ -316,7 +316,7 @@ pub async fn balance(
     requester: User,
     Path(target_user_id): Path<i64>,
     Query(query): Query<BalanceQuery>,
-) -> AppResult<Json<LeaveBalance>> {
+) -> AppResult<Json<Vec<LeaveBalance>>> {
     assert_can_access_user(&app_state, &requester, target_user_id).await?;
     // Pure-admin users (tracks_time=false) have no absences or leave balance.
     if target_user_id != requester.id {
@@ -343,6 +343,6 @@ pub async fn balance(
         }
         None => crate::services::settings::app_current_year(&app_state.pool).await,
     };
-    let balance = compute_balance(&app_state, &requester, target_user_id, year).await?;
-    Ok(Json(balance))
+    let balances = compute_balances(&app_state, &requester, target_user_id, year).await?;
+    Ok(Json(balances))
 }

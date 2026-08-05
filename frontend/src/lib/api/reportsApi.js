@@ -29,8 +29,8 @@ export function getMonthReport({ userId, month }) {
   return api(`/reports/month?${paramsFrom({ user_id: userId, month })}`);
 }
 
-export function getLeaveBalance({ userId, year }) {
-  return api(`/leave-balance/${userId}?${paramsFrom({ year })}`);
+export function getLeaveBalances({ userId, year }) {
+  return api(`/leave-balances/${userId}?${paramsFrom({ year })}`);
 }
 
 export function getFlextimeReport({ userId, from, to }) {

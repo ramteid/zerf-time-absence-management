@@ -4,12 +4,22 @@
 use std::collections::HashSet;
 
 use reqwest::StatusCode;
-use serde_json::json;
+use serde_json::{json, Value};
 
 use crate::common::TestApp;
 use crate::helpers::{
     admin_login, bootstrap_team, id, login_change_pw, next_monday, reference_date, temp_pw,
 };
+
+fn vacation_balance(balances: &Value) -> &Value {
+    balances
+        .as_array()
+        .and_then(|rows| {
+            rows.iter()
+                .find(|row| row["category_name"].as_str() == Some("Vacation"))
+        })
+        .unwrap_or_else(|| panic!("Vacation leave-account balance missing: {balances}"))
+}
 
 #[tokio::test]
 async fn absences_full_workflow() {
@@ -352,7 +362,6 @@ async fn absences_full_workflow() {
                     "last_name":"Peer",
                     "role":"employee",
                     "weekly_hours":39,
-                    "leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,
                     "start_date":"2024-01-01",
                     "approver_ids": [lead_id],
                 }),
@@ -371,7 +380,6 @@ async fn absences_full_workflow() {
                     "last_name":"OtherLead",
                     "role":"team_lead",
                     "weekly_hours":39,
-                    "leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,
                     "start_date":"2024-01-01",
                     "approver_ids":[1],
                 }),
@@ -389,7 +397,6 @@ async fn absences_full_workflow() {
                     "last_name":"Outsider",
                     "role":"employee",
                     "weekly_hours":39,
-                    "leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,
                     "start_date":"2024-01-01",
                     "approver_ids": [other_lead_id],
                 }),
@@ -545,7 +552,7 @@ async fn absences_full_workflow() {
     // -- Leave balance rejects invalid year query --
     {
         let (st, body) = emp
-            .get(&format!("/api/v1/leave-balance/{emp_id}?year=2147483647"))
+            .get(&format!("/api/v1/leave-balances/{emp_id}?year=2147483647"))
             .await;
         assert_eq!(st, StatusCode::BAD_REQUEST, "invalid year must be rejected");
         assert!(
@@ -560,7 +567,7 @@ async fn absences_full_workflow() {
         let year = &target_day[..4];
 
         let (st, balance_before) = emp
-            .get(&format!("/api/v1/leave-balance/{emp_id}?year={year}"))
+            .get(&format!("/api/v1/leave-balances/{emp_id}?year={year}"))
             .await;
         assert_eq!(st, StatusCode::OK, "load baseline leave balance");
 
@@ -586,16 +593,22 @@ async fn absences_full_workflow() {
         );
 
         let (st, balance_after_approval) = emp
-            .get(&format!("/api/v1/leave-balance/{emp_id}?year={year}"))
+            .get(&format!("/api/v1/leave-balances/{emp_id}?year={year}"))
             .await;
         assert_eq!(st, StatusCode::OK, "load leave balance after approval");
 
-        let approved_before = balance_before["approved_upcoming"].as_f64().unwrap_or(0.0);
-        let requested_before = balance_before["requested"].as_f64().unwrap_or(0.0);
-        let approved_after = balance_after_approval["approved_upcoming"]
+        let approved_before = vacation_balance(&balance_before)["approved_upcoming"]
             .as_f64()
             .unwrap_or(0.0);
-        let requested_after = balance_after_approval["requested"].as_f64().unwrap_or(0.0);
+        let requested_before = vacation_balance(&balance_before)["requested"]
+            .as_f64()
+            .unwrap_or(0.0);
+        let approved_after = vacation_balance(&balance_after_approval)["approved_upcoming"]
+            .as_f64()
+            .unwrap_or(0.0);
+        let requested_after = vacation_balance(&balance_after_approval)["requested"]
+            .as_f64()
+            .unwrap_or(0.0);
         let booked_days = approved_after - approved_before;
         assert!(
             booked_days > 0.0,
@@ -618,7 +631,7 @@ async fn absences_full_workflow() {
         );
 
         let (st, balance_after_cancellation_request) = emp
-            .get(&format!("/api/v1/leave-balance/{emp_id}?year={year}"))
+            .get(&format!("/api/v1/leave-balances/{emp_id}?year={year}"))
             .await;
         assert_eq!(
             st,
@@ -626,14 +639,17 @@ async fn absences_full_workflow() {
             "load leave balance after cancellation request"
         );
 
-        let approved_pending = balance_after_cancellation_request["approved_upcoming"]
+        let approved_pending = vacation_balance(&balance_after_cancellation_request)
+            ["approved_upcoming"]
             .as_f64()
             .unwrap_or(0.0);
-        let requested_pending = balance_after_cancellation_request["requested"]
+        let requested_pending = vacation_balance(&balance_after_cancellation_request)["requested"]
             .as_f64()
             .unwrap_or(0.0);
-        let available_after_approval = balance_after_approval["available"].as_f64().unwrap_or(0.0);
-        let available_pending = balance_after_cancellation_request["available"]
+        let available_after_approval = vacation_balance(&balance_after_approval)["available"]
+            .as_f64()
+            .unwrap_or(0.0);
+        let available_pending = vacation_balance(&balance_after_cancellation_request)["available"]
             .as_f64()
             .unwrap_or(0.0);
 
@@ -741,7 +757,7 @@ async fn absences_full_workflow() {
         assert_eq!(rejection_restored["status"], "approved");
 
         let (st, body) = emp
-            .get(&format!("/api/v1/leave-balance/{emp_id}?year={year}"))
+            .get(&format!("/api/v1/leave-balances/{emp_id}?year={year}"))
             .await;
         assert_eq!(
             st,
@@ -749,7 +765,10 @@ async fn absences_full_workflow() {
             "load balance after cancellation decisions"
         );
         assert!(
-            body["approved_upcoming"].as_f64().unwrap_or(0.0) >= 1.0,
+            vacation_balance(&body)["approved_upcoming"]
+                .as_f64()
+                .unwrap_or(0.0)
+                >= 1.0,
             "rejected cancellation keeps approved future vacation reserved"
         );
     }
@@ -1018,9 +1037,6 @@ async fn assistant_absence_any_weekday() {
                 "last_name": "AnyDay",
                 "role": "assistant",
                 "weekly_hours": 0,
-                "leave_days_current_year": 0,
-                "leave_days_next_year": 0,
-                "annual_leave_days": 0,
                 "start_date": "2024-01-01",
                 "approver_ids": [1]
             }),

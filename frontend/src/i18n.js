@@ -37,18 +37,46 @@ const TRANSLATIONS = {
     "Show explanation": "Show explanation",
     label_cost_type_none: "Uses nothing (no vacation, no flextime)",
     help_cost_type_none:
-      "The day is excused: no time has to be logged and the work target for that day falls away. Nothing is taken from the vacation balance and no flextime is used, so the hours never have to be made up. If time is logged on such a day anyway (possible for categories with auto-approval, e.g. worked the morning and called in sick at noon), those hours count in full as a flextime gain. Whether the day is paid is decided in payroll, not by the application: training is normally paid, unpaid leave is not.",
-    label_cost_type_vacation: "Uses vacation days",
+      "The day is excused: no time has to be logged and the work target for that day falls away. No leave account or flextime is used, so the hours never have to be made up. If time is logged on such a day anyway (possible for categories with auto-approval, e.g. worked the morning and called in sick at noon), those hours count in full as a flextime gain. Whether the day is paid is decided in payroll, not by the application: training is normally paid, unpaid leave is not.",
+    label_cost_type_vacation: "Uses a leave account",
     help_cost_type_vacation:
-      "Every approved day is deducted from the employee's annual leave, including any carryover from the previous year and its expiry date. The work target for that day falls away, so the flextime balance is unaffected.",
+      "Every approved day is deducted from this category's leave account, including any carryover from the previous year and its expiry date. The work target for that day falls away, so the flextime balance is unaffected.",
     label_cost_type_flextime: "Uses flextime hours",
     help_cost_type_flextime:
-      "Employees have the day off, but the work target for that day stays in place. The day therefore lowers the flextime balance by one daily target — this is how time off in lieu is taken. No vacation days are used. The application checks the flextime balance when the request is made and again when it is approved, so the balance cannot drop below the configured minimum.",
+      "Employees have the day off, but the work target for that day stays in place. The day therefore lowers the flextime balance by one daily target — this is how time off in lieu is taken. No leave-account days are used. The application checks the flextime balance when the request is made and again when it is approved, so the balance cannot drop below the configured minimum.",
     help_auto_approve_past:
       'Requests with a start date on or before today are approved automatically (no approver review). Time entries can coexist with the absence on the same day (allows partial-day overlap like "worked the morning, called in sick at noon"). Backdating is limited to 30 days. Typical use: sick leave.',
     label_unpaid: "Unpaid (reduces salary)",
     help_unpaid:
       "Only available when the category uses nothing: marks days in this category as unpaid, so they reduce the salary payout. Leave unchecked for paid days off that happen to use neither vacation nor flextime, such as special leave or paid training — those don't affect pay and must not appear in the monthly payroll report. Sick leave is always included in the payroll report regardless of this setting, since it needs separate handling for health-insurance reimbursement.",
+    "Leave accounts": "Leave accounts",
+    "Leave account default days": "Leave account default days",
+    "Leave account default days must be between 0 and 366.":
+      "Leave account default days must be between 0 and 366.",
+    "Please enter a valid carryover expiry date (MM-DD).":
+      "Please enter a valid carryover expiry date (MM-DD).",
+    "Changes to this default apply only to users created in the future. Existing individual values stay unchanged.":
+      "Changes to this default apply only to users created in the future. Existing individual values stay unchanged.",
+    "Changing this date recalculates carryover balances immediately, including for past years.":
+      "Changing this date recalculates carryover balances immediately, including for past years.",
+    "Base entitlement": "Base entitlement",
+    "Loading leave accounts...": "Loading leave accounts...",
+    "Leave accounts are still loading.": "Leave accounts are still loading.",
+    "Leave accounts could not be loaded.":
+      "Leave accounts could not be loaded.",
+    "No leave accounts are configured.": "No leave accounts are configured.",
+    "Leave account values must be between 0 and 366.":
+      "Leave account values must be between 0 and 366.",
+    "Taken / planned": "Taken / planned",
+    "Approved planned": "Approved planned",
+    "Not enough remaining leave-account days.":
+      "Not enough remaining leave-account days.",
+    "Please configure the country and default weekly hours before using the application.":
+      "Please configure the country and default weekly hours before using the application.",
+    "Please enter your name and configure the country and default weekly hours before using the application.":
+      "Please enter your name and configure the country and default weekly hours before using the application.",
+    "Used to calculate the prorated leave-account entitlement for employees who already worked before they started using the application. Leave empty to use the start date.":
+      "Used to calculate the prorated leave-account entitlement for employees who already worked before they started using the application. Leave empty to use the start date.",
     "Counts as work": "Counts as work",
     help_submission_status:
       "Whether all required weeks in the selected month have been submitted.",
@@ -152,14 +180,6 @@ const TRANSLATIONS = {
       "Conflict: Overlap with existing absence.",
     "Overlap with existing absence": "Overlap with existing absence.",
     "Yes, cancel absence": "Yes, cancel absence",
-    "Vacation days ({year})": "Vacation days ({year})",
-    "Vacation used ({year})": "Vacation used ({year})",
-    "Approved upcoming ({year})": "Approved upcoming ({year})",
-    "Approved days not yet taken": "Approved days not yet taken",
-    "Vacation pending ({year})": "Vacation pending ({year})",
-    "Vacation remaining ({year})": "Vacation remaining ({year})",
-    "Vacation requests awaiting approval":
-      "Vacation requests awaiting approval",
     you: "you",
     "Public holiday": "Public holiday",
     Holiday: "Holiday",
@@ -176,20 +196,13 @@ const TRANSLATIONS = {
     "Carryover from {year}": "Carryover from {year}",
     "Expired on {date}": "Expired on {date}",
     "Expires on {date}": "Expires on {date}",
-    "Vacation carryover": "Vacation carryover",
     "Carryover expiry date (MM-DD)": "Carryover expiry date (MM-DD)",
-    "Unused vacation from the previous year expires on this date.":
-      "Unused vacation from the previous year expires on this date.",
     "Shown on the login screen and in the navigation.":
       "Shown on the login screen and in the navigation.",
     "Users will be notified on this day of each month if they have unsubmitted time entries for previous months. Leave empty to disable. (1\u201328)":
       "Users will be notified on this day of each month if they have unsubmitted weeks from previous months. Leave empty to disable. (1\u201328)",
     "All draft entries of this week will be submitted for approval.":
       "All draft days of this week will be submitted for approval.",
-    "Vacation days per year": "Vacation days per year",
-    "Annual leave days (base)": "Annual leave days (base)",
-    "Default entitlement used for every year unless overridden below (e.g. for special agreements).":
-      "Default entitlement used for every year unless overridden below (e.g. for special agreements).",
     Override: "Override",
     "Workdays per week": "Workdays per week",
     "Workdays per week must be between 1 and 7.":
@@ -200,15 +213,10 @@ const TRANSLATIONS = {
     workday: "workday",
     workdays: "workdays",
     Set: "Set",
-    "Overrides the default annual leave days for this user in the selected year.":
-      "Overrides the default annual leave days for this user in the selected year.",
-    "Not enough remaining vacation days.":
-      "Not enough remaining vacation days.",
     "Not enough flextime balance for this absence.":
       "Not enough flextime balance for this absence.",
     "Cannot change absence category cost type (vacation ↔ flextime). Cancel and re-request with the new category.":
       "Cannot change absence category cost type (vacation ↔ flextime). Cancel and re-request with the new category.",
-    "Please enter vacation days.": "Please enter vacation days.",
     "Absence Request Details": "Absence Request Details",
     "Show details": "Show details",
     "Requested at": "Requested at",
@@ -254,8 +262,6 @@ const TRANSLATIONS = {
     Weekend: "Weekend",
     Weekends: "Weekends",
     "Sick days": "Sick days",
-    "Vacation taken": "Vacation taken",
-    "Vacation planned": "Vacation planned",
     "All weeks submitted": "All weeks submitted",
     "Note: current month - data up to yesterday":
       "Note: current month - data including today",
@@ -512,8 +518,8 @@ const TRANSLATIONS = {
       "Anfangssaldo der Überstunden in Stunden zum Startdatum. Negativ = Defizit.",
     "Start date": "Startdatum",
     "Hire date": "Eintrittsdatum",
-    "Used to calculate the prorated annual leave entitlement for employees who already worked before they started using the application. Leave empty to use the start date.":
-      "Wird verwendet, um den anteiligen Urlaubsanspruch für Mitarbeitende zu berechnen, die bereits vor der Nutzung der Anwendung gearbeitet haben. Leer lassen, um das Startdatum zu verwenden.",
+    "Used to calculate the prorated leave-account entitlement for employees who already worked before they started using the application. Leave empty to use the start date.":
+      "Wird verwendet, um den anteiligen Anspruch der Tageskonten für Mitarbeitende zu berechnen, die bereits vor der Nutzung der Anwendung gearbeitet haben. Leer lassen, um das Startdatum zu verwenden.",
     Clear: "Löschen",
     Settings: "Einstellungen",
     "Language settings": "Spracheinstellungen",
@@ -718,13 +724,36 @@ const TRANSLATIONS = {
     "Add Absence Category": "Abwesenheitskategorie hinzufügen",
     "Edit Absence Category": "Abwesenheitskategorie bearbeiten",
     label_cost_type_none: "Verbraucht nichts (kein Urlaub, keine Gleitzeit)",
-    label_cost_type_vacation: "Verbraucht Urlaubstage",
+    label_cost_type_vacation: "Verwendet ein Tageskonto",
     label_cost_type_flextime: "Verbraucht Gleitzeitstunden",
     label_unpaid: "Unbezahlt (mindert das Gehalt)",
     "Auto-approve past dates": "Vergangene Daten automatisch genehmigen",
     "Type is required.": "Typ ist erforderlich.",
     "Not enough flextime balance for this absence.":
       "Nicht genügend Gleitzeitguthaben für diese Abwesenheit.",
+    "Leave accounts": "Tageskonten",
+    "Leave account default days": "Standardtage des Tageskontos",
+    "Leave account default days must be between 0 and 366.":
+      "Die Standardtage des Tageskontos müssen zwischen 0 und 366 liegen.",
+    "Please enter a valid carryover expiry date (MM-DD).":
+      "Bitte geben Sie ein gültiges Verfallsdatum für den Übertrag ein (MM-TT).",
+    "Changes to this default apply only to users created in the future. Existing individual values stay unchanged.":
+      "Änderungen dieses Standards gelten nur für künftig angelegte Benutzer. Bestehende individuelle Werte bleiben unverändert.",
+    "Changing this date recalculates carryover balances immediately, including for past years.":
+      "Eine Änderung dieses Datums berechnet Überträge sofort neu, auch für vergangene Jahre.",
+    "Base entitlement": "Basisanspruch",
+    "Loading leave accounts...": "Tageskonten werden geladen...",
+    "Leave accounts are still loading.": "Tageskonten werden noch geladen.",
+    "Leave accounts could not be loaded.":
+      "Tageskonten konnten nicht geladen werden.",
+    "No leave accounts are configured.":
+      "Es sind keine Tageskonten eingerichtet.",
+    "Leave account values must be between 0 and 366.":
+      "Die Werte des Tageskontos müssen zwischen 0 und 366 liegen.",
+    "Taken / planned": "genommen / geplant",
+    "Approved planned": "Genehmigt geplant",
+    "Not enough remaining leave-account days.":
+      "Nicht genügend verfügbare Tage im Tageskonto.",
     "Cannot change absence category cost type (vacation ↔ flextime). Cancel and re-request with the new category.":
       "Der Kostentyp der Abwesenheitskategorie (Urlaub ↔ Gleitzeit) kann nicht geändert werden. Bitte Abwesenheit stornieren und neu beantragen.",
     "Absence category slug already exists.":
@@ -771,10 +800,10 @@ const TRANSLATIONS = {
     "Not tested": "Nicht getestet",
     "SMTP connection test failed": "SMTP-Verbindungstest fehlgeschlagen",
     "Initial setup required.": "Ersteinrichtung erforderlich.",
-    "Please configure the country, default weekly hours and default annual leave days before using the application.":
-      "Bitte Land, Standard-Wochenstunden und Standard-Urlaubstage konfigurieren, bevor die Anwendung genutzt wird.",
-    "Please enter your name and configure the country, default weekly hours and default annual leave days before using the application.":
-      "Bitte geben Sie Ihren Namen ein und konfigurieren Sie Land, Standard-Wochenstunden und Standard-Urlaubstage, bevor die Anwendung genutzt wird.",
+    "Please configure the country and default weekly hours before using the application.":
+      "Bitte konfigurieren Sie Land und Standard-Wochenstunden, bevor Sie die Anwendung nutzen.",
+    "Please enter your name and configure the country and default weekly hours before using the application.":
+      "Bitte geben Sie Ihren Namen ein und konfigurieren Sie Land und Standard-Wochenstunden, bevor Sie die Anwendung nutzen.",
     "Please select a country.": "Bitte ein Land auswählen.",
     "Please select a region.": "Bitte eine Region auswählen.",
     "Please wait for regions to load.":
@@ -784,8 +813,6 @@ const TRANSLATIONS = {
     "Clear stored password": "Gespeichertes Passwort löschen",
     "Please enter default weekly hours.":
       "Bitte Standard-Wochenstunden eingeben.",
-    "Please enter default annual leave days.":
-      "Bitte Standard-Urlaubstage eingeben.",
     "- Please select -": "- Bitte auswählen -",
     Country: "Land",
     Region: "Region",
@@ -904,7 +931,6 @@ const TRANSLATIONS = {
     "Region code must be at most 20 characters.":
       "Regionscode darf höchstens 20 Zeichen lang sein.",
     "Invalid default_weekly_hours.": "Ungültige Standard-Wochenstunden.",
-    "Invalid default_annual_leave_days.": "Ungültige Standard-Urlaubstage.",
     "Invalid role": "Ungültige Rolle.",
     "Invalid email.": "Ungültige E-Mail-Adresse.",
     "Invalid name.": "Ungültiger Name.",
@@ -1101,14 +1127,6 @@ const TRANSLATIONS = {
     // Reopen request errors
     "Request is not pending.": "Anfrage ist nicht ausstehend.",
     "Yes, cancel absence": "Ja, Abwesenheit stornieren",
-    "Vacation days ({year})": "Urlaubstage ({year})",
-    "Vacation used ({year})": "Genommene Urlaubstage ({year})",
-    "Approved upcoming ({year})": "Genehmigte bevorstehende ({year})",
-    "Approved days not yet taken": "Genehmigte Tage noch nicht genommen",
-    "Vacation pending ({year})": "Offene Urlaubstage ({year})",
-    "Vacation remaining ({year})": "Verbleibende Urlaubstage ({year})",
-    "Vacation requests awaiting approval":
-      "Urlaubsanträge warten auf Genehmigung",
     // Calendar: work-time categories + public holiday
     "Public holiday": "Feiertag",
     Absent: "Abwesend",
@@ -1130,11 +1148,11 @@ const TRANSLATIONS = {
       "Verlauf deines kumulierten Gleitzeitkontostands über den gewählten Zeitraum. Der Gleitzeitstand wird bis einschließlich gestern berechnet; die heute geleisteten Stunden werden noch nicht mitgezählt.",
     "Show explanation": "Erklärung anzeigen",
     help_cost_type_none:
-      "Der Tag ist entschuldigt: Es muss keine Zeit erfasst werden, das Arbeitssoll für den Tag entfällt. Vom Urlaubskonto wird nichts abgezogen und es wird keine Gleitzeit verbraucht — die Stunden müssen also nicht nachgearbeitet werden. Wird an einem solchen Tag trotzdem Zeit gebucht (möglich bei Kategorien mit automatischer Genehmigung, z. B. vormittags gearbeitet, mittags krankgemeldet), zählen diese Stunden voll als Plus auf dem Gleitzeitkonto. Ob der Tag bezahlt wird, entscheidet die Lohnabrechnung und nicht die Anwendung: Fortbildung ist normalerweise bezahlt, unbezahlter Urlaub nicht.",
+      "Der Tag ist entschuldigt: Es muss keine Zeit erfasst werden, das Arbeitssoll für den Tag entfällt. Es wird weder ein Tageskonto noch Gleitzeit verbraucht — die Stunden müssen also nicht nachgearbeitet werden. Wird an einem solchen Tag trotzdem Zeit gebucht (möglich bei Kategorien mit automatischer Genehmigung, z. B. vormittags gearbeitet, mittags krankgemeldet), zählen diese Stunden voll als Plus auf dem Gleitzeitkonto. Ob der Tag bezahlt wird, entscheidet die Lohnabrechnung und nicht die Anwendung: Fortbildung ist normalerweise bezahlt, unbezahlter Urlaub nicht.",
     help_cost_type_vacation:
-      "Jeder genehmigte Tag wird vom Jahresurlaub der Mitarbeitenden abgezogen — inklusive Resturlaub aus dem Vorjahr und dessen Verfallsfrist. Das Arbeitssoll für den Tag entfällt, der Gleitzeitstand bleibt unverändert.",
+      "Jeder genehmigte Tag wird vom Tageskonto dieser Kategorie abgezogen — einschließlich eines Übertrags aus dem Vorjahr und dessen Verfallsfrist. Das Arbeitssoll für den Tag entfällt, der Gleitzeitstand bleibt unverändert.",
     help_cost_type_flextime:
-      "Mitarbeitende haben frei, das Arbeitssoll für den Tag bleibt aber bestehen. Der Tag senkt den Gleitzeitstand dadurch um ein Tagessoll — so wird Gleitzeit abgebaut. Urlaubstage werden nicht verbraucht. Die Anwendung prüft den Gleitzeitstand bei der Beantragung und noch einmal bei der Genehmigung, damit der eingestellte Mindeststand nicht unterschritten wird.",
+      "Mitarbeitende haben frei, das Arbeitssoll für den Tag bleibt aber bestehen. Der Tag senkt den Gleitzeitstand dadurch um ein Tagessoll — so wird Gleitzeit abgebaut. Es werden keine Tage eines Tageskontos verbraucht. Die Anwendung prüft den Gleitzeitstand bei der Beantragung und noch einmal bei der Genehmigung, damit der eingestellte Mindeststand nicht unterschritten wird.",
     help_auto_approve_past:
       "Anträge mit Startdatum heute oder in der Vergangenheit werden automatisch genehmigt (ohne Freigabe durch eine vorgesetzte Person). Zeitbuchungen am selben Tag bleiben erlaubt (z. B. „vormittags gearbeitet, mittags krankgemeldet“). Rückdatieren ist auf 30 Tage begrenzt. Typische Verwendung: Krankmeldung.",
     help_unpaid:
@@ -1200,7 +1218,6 @@ const TRANSLATIONS = {
     // Admin settings
     "Time format": "Uhrzeitformat",
     "Default weekly hours": "Standard-Wochenstunden",
-    "Default annual leave days": "Standard-Urlaubstage",
     "Generate password": "Passwort generieren",
     "Password (min 12 chars)": "Passwort (mind. 12 Zeichen)",
     "Registration email will be sent.":
@@ -1211,8 +1228,6 @@ const TRANSLATIONS = {
       "Es wurde keine E-Mail gesendet! E-Mail / SMTP ist nicht konfiguriert.",
     "You must deliver this password to the user in person!":
       "Sie müssen dieses Passwort persönlich an den Benutzer übergeben!",
-    "Default (all years without override)":
-      "Standard (alle Jahre ohne Ausnahme)",
     "User created.": "Benutzer erstellt.",
     "Password reset.": "Passwort zurückgesetzt.",
     "Temporary password:": "Temporäres Passwort:",
@@ -1226,14 +1241,10 @@ const TRANSLATIONS = {
     "Auto-approve submissions": "Einreichungen automatisch genehmigen",
     // Notification polling
     // (no new keys needed)
-    // Vacation carryover
     "Carryover from {year}": "Übertrag aus {year}",
     "Expired on {date}": "Verfallen am {date}",
     "Expires on {date}": "Verfällt am {date}",
-    "Vacation carryover": "Urlaubsübertrag",
-    "Carryover expiry date (MM-DD)": "Stichtag Urlaubsverfall (MM-TT)",
-    "Unused vacation from the previous year expires on this date.":
-      "Nicht genommener Urlaub aus dem Vorjahr verfällt an diesem Stichtag.",
+    "Carryover expiry date (MM-DD)": "Verfallsdatum für den Übertrag (MM-TT)",
     "Time submission deadline": "Einreichungsfrist",
     "Submission deadline day of month": "Stichtag (Tag des Monats)",
     "e.g. 5": "z.B. 5",
@@ -1265,23 +1276,14 @@ const TRANSLATIONS = {
     "Please enter both second threshold and second deduction, or leave both empty.":
       "Bitte beide Felder der zweiten Stufe ausfüllen oder beide leer lassen.",
     Break: "Pause",
-    "Vacation days per year": "Urlaubstage pro Jahr",
-    "Annual leave days (base)": "Urlaubstage allgemein",
-    "Default entitlement used for every year unless overridden below (e.g. for special agreements).":
-      "Grundsätzlicher Anspruch, der für jedes Jahr gilt, sofern unten nicht überschrieben (z. B. bei Sonderregelungen).",
     Override: "Abweichung",
     days: "Tage",
     workday: "Arbeitstag",
     workdays: "Arbeitstage",
     Set: "Setzen",
-    "Overrides the default annual leave days for this user in the selected year.":
-      "Überschreibt die Standard-Urlaubstage für diesen Benutzer im gewählten Jahr.",
-    "Not enough remaining vacation days.":
-      "Nicht genügend verbleibende Urlaubstage.",
     // "Not enough flextime balance..." and "Cannot change absence category
     // cost type..." are translated earlier in this block (near the absence
     // category dialog strings). Don't re-declare them — eslint no-dupe-keys.
-    "Please enter vacation days.": "Bitte Urlaubstage eingeben.",
     "Absence Request Details": "Details des Abwesenheitsantrags",
     "Show details": "Details anzeigen",
     "Requested at": "Beantragt am",
@@ -1322,8 +1324,6 @@ const TRANSLATIONS = {
     "Current flextime balance": "Aktueller Gleitzeitkontostand",
     "Monthly diff": "Monatsdifferenz",
     "Sick days": "Krankheitstage",
-    "Vacation taken": "Urlaub genommen",
-    "Vacation planned": "Urlaub geplant",
     "All weeks submitted": "Alle Wochen eingereicht",
     "Note: current month - data up to yesterday":
       "Hinweis: Laufender Monat - Daten inklusive heute",

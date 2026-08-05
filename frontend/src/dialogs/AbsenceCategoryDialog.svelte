@@ -19,6 +19,9 @@
   // The two booleans were always mutually exclusive; the enum makes that
   // impossible to violate in either direction.
   let cost_type = template.cost_type ?? "none";
+  let leave_account_default_days = template.leave_account_default_days ?? 0;
+  let leave_account_carryover_expiry =
+    template.leave_account_carryover_expiry ?? "";
   let auto_approve_past = template.auto_approve_past ?? false;
   // Only meaningful when cost_type is "none" — see help_unpaid. The backend
   // rejects unpaid=true paired with any other cost_type, so keep the two in
@@ -26,6 +29,10 @@
   // and its value resets alongside it.
   let unpaid = template.unpaid ?? false;
   $: if (cost_type !== "none") unpaid = false;
+  $: hasLeaveAccount = cost_type === "vacation";
+  $: existingLeaveAccount = !isNew && template.cost_type === "vacation";
+  $: existingNonLeaveAccount = !isNew && template.cost_type !== "vacation";
+  $: if (hasLeaveAccount) auto_approve_past = false;
   let error = "";
   let saving = false;
 
@@ -65,9 +72,38 @@
     openHelp = openHelp === key ? null : key;
   }
 
+  function validCarryoverExpiry(value) {
+    if (!/^\d{2}-\d{2}$/.test(value)) return false;
+    const [month, day] = value.split("-").map(Number);
+    const daysInMonth = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    return (
+      month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth[month - 1]
+    );
+  }
+
+  function validateLeaveAccountFields() {
+    if (!hasLeaveAccount) return true;
+    const defaultDays = Number(leave_account_default_days);
+    if (
+      leave_account_default_days === "" ||
+      !Number.isInteger(defaultDays) ||
+      defaultDays < 0 ||
+      defaultDays > 366
+    ) {
+      error = $t("Leave account default days must be between 0 and 366.");
+      return false;
+    }
+    if (!validCarryoverExpiry(leave_account_carryover_expiry.trim())) {
+      error = $t("Please enter a valid carryover expiry date (MM-DD).");
+      return false;
+    }
+    return true;
+  }
+
   async function save() {
     if (saving) return;
     error = "";
+    if (!validateLeaveAccountFields()) return;
     saving = true;
     try {
       const body = {
@@ -78,6 +114,11 @@
         auto_approve_past,
         unpaid,
       };
+      if (hasLeaveAccount) {
+        body.leave_account_default_days = Number(leave_account_default_days);
+        body.leave_account_carryover_expiry =
+          leave_account_carryover_expiry.trim();
+      }
       if (!isNew) {
         body.active = active;
       }
@@ -161,10 +202,12 @@
     <div>
       <label class="zf-check-label">
         <input
+          id="abscat-cost-type-vacation"
           type="radio"
           name="cost_type"
           value="none"
           bind:group={cost_type}
+          disabled={existingLeaveAccount}
         />
         <span>{$t("label_cost_type_none")}</span>
         <button
@@ -206,6 +249,7 @@
           name="cost_type"
           value="vacation"
           bind:group={cost_type}
+          disabled={existingNonLeaveAccount}
         />
         <span>{$t("label_cost_type_vacation")}</span>
         <button
@@ -221,6 +265,48 @@
       {#if openHelp === "cost_type_vacation"}
         <div class="abscat-help">{$t("help_cost_type_vacation")}</div>
       {/if}
+      {#if hasLeaveAccount}
+        <div class="abscat-leave-account-fields">
+          <div>
+            <label class="zf-label" for="abscat-leave-account-default-days"
+              >{$t("Leave account default days")}</label
+            >
+            <input
+              id="abscat-leave-account-default-days"
+              class="zf-input"
+              type="number"
+              min="0"
+              max="366"
+              required
+              bind:value={leave_account_default_days}
+            />
+            <div class="field-hint">
+              {$t(
+                "Changes to this default apply only to users created in the future. Existing individual values stay unchanged.",
+              )}
+            </div>
+          </div>
+          <div>
+            <label class="zf-label" for="abscat-leave-account-carryover-expiry"
+              >{$t("Carryover expiry date (MM-DD)")}</label
+            >
+            <input
+              id="abscat-leave-account-carryover-expiry"
+              class="zf-input"
+              type="text"
+              maxlength="5"
+              placeholder="03-31"
+              required
+              bind:value={leave_account_carryover_expiry}
+            />
+            <div class="field-hint">
+              {$t(
+                "Changing this date recalculates carryover balances immediately, including for past years.",
+              )}
+            </div>
+          </div>
+        </div>
+      {/if}
     </div>
     <div>
       <label class="zf-check-label">
@@ -229,6 +315,7 @@
           name="cost_type"
           value="flextime"
           bind:group={cost_type}
+          disabled={existingLeaveAccount}
         />
         <span>{$t("label_cost_type_flextime")}</span>
         <button
@@ -247,7 +334,12 @@
     </div>
     <div>
       <label class="zf-check-label">
-        <input type="checkbox" bind:checked={auto_approve_past} />
+        <input
+          id="abscat-auto-approve-past"
+          type="checkbox"
+          bind:checked={auto_approve_past}
+          disabled={hasLeaveAccount}
+        />
         <span>{$t("Auto-approve past dates")}</span>
         <button
           type="button"
@@ -342,5 +434,18 @@
     background: var(--surface-muted, #f1f5f9);
     border-left: 3px solid var(--border, #cbd5e1);
     border-radius: 4px;
+  }
+
+  .abscat-leave-account-fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin: 8px 0 8px 26px;
+  }
+
+  @media (max-width: 560px) {
+    .abscat-leave-account-fields {
+      grid-template-columns: 1fr;
+    }
   }
 </style>

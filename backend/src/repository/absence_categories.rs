@@ -61,14 +61,24 @@ pub struct AbsenceCategory {
     /// (enforced by the `abs_cat_unpaid_requires_none_cost` CHECK): vacation
     /// and flextime categories are always paid through their own mechanics.
     pub unpaid: bool,
+    /// Default annual entitlement for this category's leave account. Present
+    /// exactly when `cost_type == "vacation"` (enforced by migration 039).
+    pub leave_account_default_days: Option<i64>,
+    /// MM-DD date on which carryover from this account expires. Present
+    /// exactly when this category owns a leave account.
+    pub leave_account_carryover_expiry: Option<String>,
+    /// Internal first entitlement year for the account. It is used only by
+    /// balance calculations and is intentionally omitted from public DTOs.
+    #[serde(skip_serializing)]
+    pub leave_account_start_year: Option<i32>,
 }
 
 impl AbsenceCategory {
-    /// True when an approved absence in this category deducts from the
-    /// employee's annual vacation balance (carryover + expiry rules apply).
-    pub fn is_vacation_cost(&self) -> bool {
+    /// True when this category owns an independent leave account.
+    pub fn has_leave_account(&self) -> bool {
         self.cost_type == COST_TYPE_VACATION
     }
+
     /// True when an approved absence in this category keeps the day's work
     /// target — the absence "costs" the employee's flextime balance.
     pub fn is_flextime_cost(&self) -> bool {
@@ -88,7 +98,8 @@ impl AbsenceCategory {
 }
 
 const ABS_CAT_COLUMNS: &str =
-    "id, slug, name, color, sort_order, active, cost_type, auto_approve_past, unpaid";
+    "id, slug, name, color, sort_order, active, cost_type, auto_approve_past, unpaid, \
+     leave_account_default_days, leave_account_carryover_expiry, leave_account_start_year";
 
 #[derive(Clone)]
 pub struct AbsenceCategoryDb {
@@ -162,12 +173,18 @@ impl AbsenceCategoryDb {
         )
     }
 
-    pub async fn create(&self, input: NewAbsenceCategory<'_>) -> AppResult<i64> {
-        let mut tx = self.pool.begin().await?;
+    /// Insert a category in the caller-owned transaction. Category access and
+    /// leave-account seeding are intentionally separate repository operations:
+    /// services own the complete transaction boundary and shared advisory lock.
+    pub async fn create_tx(
+        tx: &mut sqlx::PgConnection,
+        input: NewAbsenceCategory<'_>,
+    ) -> AppResult<i64> {
         let new_id: i64 = sqlx::query_scalar(
             "INSERT INTO absence_categories \
-             (slug, name, color, sort_order, active, cost_type, auto_approve_past, unpaid) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id",
+             (slug, name, color, sort_order, active, cost_type, auto_approve_past, unpaid, \
+              leave_account_default_days, leave_account_carryover_expiry, leave_account_start_year) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id",
         )
         .bind(input.slug)
         .bind(input.name)
@@ -177,20 +194,30 @@ impl AbsenceCategoryDb {
         .bind(input.cost_type)
         .bind(input.auto_approve_past)
         .bind(input.unpaid)
-        .fetch_one(&mut *tx)
+        .bind(input.leave_account_default_days)
+        .bind(input.leave_account_carryover_expiry)
+        .bind(input.leave_account_start_year)
+        .fetch_one(tx)
         .await
         .map_err(map_constraint_error)?;
-        // New absence categories default to enabled for every existing
-        // employee. Same transaction as the insert above so a failure here
-        // cannot leave a category with zero employees able to use it.
-        sqlx::query(
-            "INSERT INTO user_absence_category_access (user_id, category_id) SELECT id, $1 FROM users",
-        )
-        .bind(new_id)
-        .execute(&mut *tx)
-        .await?;
-        tx.commit().await?;
         Ok(new_id)
+    }
+
+    /// Grant a newly created category to every existing user in the caller's
+    /// transaction. ON CONFLICT makes retries harmless.
+    pub async fn grant_default_access_to_all_users_tx(
+        tx: &mut sqlx::PgConnection,
+        category_id: i64,
+    ) -> AppResult<()> {
+        sqlx::query(
+            "INSERT INTO user_absence_category_access (user_id, category_id)
+             SELECT id, $1 FROM users
+             ON CONFLICT (user_id, category_id) DO NOTHING",
+        )
+        .bind(category_id)
+        .execute(tx)
+        .await?;
+        Ok(())
     }
 
     /// Enabled employee ids for an absence category (regardless of category.active).
@@ -242,7 +269,8 @@ impl AbsenceCategoryDb {
     /// Active absence categories enabled for a specific employee, for absence-request dropdowns.
     pub async fn list_active_for_user(&self, user_id: i64) -> AppResult<Vec<AbsenceCategory>> {
         Ok(sqlx::query_as::<_, AbsenceCategory>(
-            "SELECT c.id, c.slug, c.name, c.color, c.sort_order, c.active, c.cost_type, c.auto_approve_past, c.unpaid \
+            "SELECT c.id, c.slug, c.name, c.color, c.sort_order, c.active, c.cost_type, c.auto_approve_past, c.unpaid, \
+                    c.leave_account_default_days, c.leave_account_carryover_expiry, c.leave_account_start_year \
              FROM absence_categories c \
              JOIN user_absence_category_access uaca ON uaca.category_id = c.id AND uaca.user_id = $1 \
              WHERE c.active = TRUE ORDER BY c.sort_order, c.name",
@@ -262,7 +290,8 @@ impl AbsenceCategoryDb {
         Ok(sqlx::query_as::<_, AbsenceCategory>(
             "SELECT c.id, c.slug, c.name, c.color, c.sort_order, \
                     (c.active AND uaca.user_id IS NOT NULL) AS active, \
-                    c.cost_type, c.auto_approve_past, c.unpaid \
+                    c.cost_type, c.auto_approve_past, c.unpaid, \
+                    c.leave_account_default_days, c.leave_account_carryover_expiry, c.leave_account_start_year \
              FROM absence_categories c \
              LEFT JOIN user_absence_category_access uaca \
                     ON uaca.category_id = c.id AND uaca.user_id = $1 \
@@ -279,7 +308,12 @@ impl AbsenceCategoryDb {
         .await?)
     }
 
-    pub async fn update(&self, id: i64, input: UpdateAbsenceCategory<'_>) -> AppResult<()> {
+    /// Update a category in the caller-owned transaction.
+    pub async fn update_tx(
+        tx: &mut sqlx::PgConnection,
+        id: i64,
+        input: UpdateAbsenceCategory<'_>,
+    ) -> AppResult<()> {
         let result = sqlx::query(
             "UPDATE absence_categories SET \
                 name=COALESCE($1,name), \
@@ -288,8 +322,11 @@ impl AbsenceCategoryDb {
                 active=COALESCE($4,active), \
                 cost_type=COALESCE($5,cost_type), \
                 auto_approve_past=COALESCE($6,auto_approve_past), \
-                unpaid=COALESCE($7,unpaid) \
-             WHERE id=$8",
+                unpaid=COALESCE($7,unpaid), \
+                leave_account_default_days=COALESCE($8,leave_account_default_days), \
+                leave_account_carryover_expiry=COALESCE($9,leave_account_carryover_expiry), \
+                leave_account_start_year=COALESCE($10,leave_account_start_year) \
+             WHERE id=$11",
         )
         .bind(input.name)
         .bind(input.color)
@@ -298,14 +335,34 @@ impl AbsenceCategoryDb {
         .bind(input.cost_type)
         .bind(input.auto_approve_past)
         .bind(input.unpaid)
+        .bind(input.leave_account_default_days)
+        .bind(input.leave_account_carryover_expiry)
+        .bind(input.leave_account_start_year)
         .bind(id)
-        .execute(&self.pool)
+        .execute(tx)
         .await
         .map_err(map_constraint_error)?;
         if result.rows_affected() == 0 {
             return Err(AppError::NotFound);
         }
         Ok(())
+    }
+
+    /// Lock and return a category as part of a broader category/user graph
+    /// mutation. The service uses this to evaluate valid cost-type transitions
+    /// against a stable current row before updating it.
+    pub async fn find_by_id_tx(
+        tx: &mut sqlx::PgConnection,
+        id: i64,
+    ) -> AppResult<Option<AbsenceCategory>> {
+        Ok(
+            sqlx::query_as::<_, AbsenceCategory>(sqlx::AssertSqlSafe(format!(
+                "SELECT {ABS_CAT_COLUMNS} FROM absence_categories WHERE id=$1 FOR UPDATE"
+            )))
+            .bind(id)
+            .fetch_optional(tx)
+            .await?,
+        )
     }
 
     /// Count absences referencing a category. Used to decide whether a
@@ -335,6 +392,13 @@ pub struct NewAbsenceCategory<'a> {
     /// `abs_cat_unpaid_requires_none_cost` CHECK); service-layer code
     /// validates this before passing it through.
     pub unpaid: bool,
+    /// Required for `cost_type = 'vacation'`; otherwise it must be `None`.
+    pub leave_account_default_days: Option<i64>,
+    /// Required MM-DD carryover expiry for `cost_type = 'vacation'`.
+    pub leave_account_carryover_expiry: Option<&'a str>,
+    /// Internal first entitlement year. The service determines this from the
+    /// application timezone and never accepts it from a public request.
+    pub leave_account_start_year: Option<i32>,
 }
 
 pub struct UpdateAbsenceCategory<'a> {
@@ -345,6 +409,9 @@ pub struct UpdateAbsenceCategory<'a> {
     pub cost_type: Option<&'a str>,
     pub auto_approve_past: Option<bool>,
     pub unpaid: Option<bool>,
+    pub leave_account_default_days: Option<i64>,
+    pub leave_account_carryover_expiry: Option<&'a str>,
+    pub leave_account_start_year: Option<i32>,
 }
 
 /// Translate the database constraints we care about into client-facing errors.
@@ -372,6 +439,19 @@ fn map_constraint_error(e: sqlx::Error) -> AppError {
         }
         if code == "23514" && constraint == "abs_cat_unpaid_requires_none_cost" {
             return AppError::bad_request("Unpaid can only be set when cost_type is 'none'.");
+        }
+        if code == "23514" && constraint == "abs_cat_leave_account_default_days_range" {
+            return AppError::bad_request("Leave-account default days must be between 0 and 366.");
+        }
+        if code == "23514" && constraint == "abs_cat_leave_account_carryover_expiry_format" {
+            return AppError::bad_request(
+                "Leave-account carryover expiry must be a real MM-DD date.",
+            );
+        }
+        if code == "23514" && constraint == "abs_cat_leave_account_fields_match_cost_type" {
+            return AppError::bad_request(
+                "Leave-account fields are required only for cost_type 'vacation'.",
+            );
         }
     }
     AppError::from(e)
@@ -404,6 +484,10 @@ mod tests {
             cost_type: cost_type.to_string(),
             auto_approve_past,
             unpaid,
+            leave_account_default_days: (cost_type == COST_TYPE_VACATION).then_some(30),
+            leave_account_carryover_expiry: (cost_type == COST_TYPE_VACATION)
+                .then_some("03-31".to_string()),
+            leave_account_start_year: (cost_type == COST_TYPE_VACATION).then_some(2026),
         }
     }
 

@@ -24,10 +24,11 @@
   import StatCard from "../../lib/ui/StatCard.svelte";
   import DataTable from "../../lib/ui/DataTable.svelte";
   import LoadingState from "../../lib/ui/LoadingState.svelte";
+  import LeaveAccountCard from "../../lib/ui/LeaveAccountCard.svelte";
   import { hasFlextimeAccount, isAssistantUser } from "../../rolePolicy.js";
   import {
     getFlextimeReport,
-    getLeaveBalance,
+    getLeaveBalances,
     getMonthReport,
     getRangeReport,
     getAbsenceReport,
@@ -153,7 +154,7 @@
 
       const [monthRaw, leaveRaw, flextimeRaw, absences] = await Promise.all([
         getMonthReport({ userId: id, month: m }),
-        getLeaveBalance({ userId: id, year: leaveYear }).catch(() => null),
+        getLeaveBalances({ userId: id, year: leaveYear }).catch(() => []),
         canFetchChart && flexAccount
           ? getFlextimeReport({
               userId: id,
@@ -168,7 +169,7 @@
       return {
         periodMode: mode,
         monthReport,
-        leaveBalance: leaveRaw,
+        leaveBalances: Array.isArray(leaveRaw) ? leaveRaw : [],
         flextimeBalance: flextimeRaw.length
           ? flextimeRaw[flextimeRaw.length - 1].cumulative_min
           : null,
@@ -195,8 +196,8 @@
         ? getRangeReport({ userId: id, from: rangeFrom, to: cappedTo })
         : Promise.resolve(null),
       leaveYear
-        ? getLeaveBalance({ userId: id, year: leaveYear }).catch(() => null)
-        : Promise.resolve(null),
+        ? getLeaveBalances({ userId: id, year: leaveYear }).catch(() => [])
+        : Promise.resolve([]),
       active && flexAccount
         ? getFlextimeReport({
             userId: id,
@@ -213,7 +214,7 @@
     return {
       periodMode: mode,
       monthReport,
-      leaveBalance: leaveRaw,
+      leaveBalances: Array.isArray(leaveRaw) ? leaveRaw : [],
       flextimeBalance: flextimeRaw.length
         ? flextimeRaw[flextimeRaw.length - 1].cumulative_min
         : null,
@@ -274,15 +275,10 @@
     ? absenceKindTotals(reportData.absences)
     : {};
 
-  // Assistants (Aushilfen) normally have no weekly target and no vacation
-  // entitlement — hide those cards rather than show a meaningless "0".
-  // Admins can still assign an assistant real leave days, so the vacation
-  // card only disappears when the entitlement is actually 0.
+  // Assistants (Aushilfen) normally have no weekly target, so avoid an
+  // artificial target subtext in their time summary.
   $: hideTargetSub =
     reportData?.isAssistant && (reportData.targetForSub || 0) === 0;
-  $: showVacation =
-    reportData?.leaveBalance &&
-    !(reportData.isAssistant && !reportData.leaveBalance.annual_entitlement);
 </script>
 
 <SectionCard>
@@ -395,36 +391,15 @@
       {/if}
     {/if}
 
-    {#if showVacation}
-      <div class="report-subheading">{$t("Vacation")}</div>
-      <div class="stat-cards mb-16">
-        <StatCard
-          label={$t("Entitlement")}
-          value={formatDayCount(reportData.leaveBalance.annual_entitlement)}
-        />
-        <StatCard
-          label={$t("Taken")}
-          value={formatDayCount(reportData.leaveBalance.already_taken)}
-        />
-        {#if reportData.leaveBalance.approved_upcoming > 0}
-          <StatCard
-            label={$t("Planned")}
-            value={formatDayCount(reportData.leaveBalance.approved_upcoming)}
+    {#if reportData.leaveBalances.length > 0}
+      <div class="report-subheading">{$t("Leave accounts")}</div>
+      <div class="leave-account-cards mb-16">
+        {#each reportData.leaveBalances as leaveBalance (leaveBalance.category_id)}
+          <LeaveAccountCard
+            balance={leaveBalance}
+            year={leaveYearForPeriod({ mode: periodMode, month, from, to })}
           />
-        {/if}
-        {#if reportData.leaveBalance.requested > 0}
-          <StatCard
-            label={$t("Requested")}
-            value={formatDayCount(reportData.leaveBalance.requested)}
-          />
-        {/if}
-        <StatCard
-          label={$t("Remaining")}
-          value={formatDayCount(reportData.leaveBalance.available)}
-          color={reportData.leaveBalance.available < 0
-            ? "var(--danger-text)"
-            : "var(--success-text)"}
-        />
+        {/each}
       </div>
     {/if}
 
@@ -576,6 +551,12 @@
     text-transform: uppercase;
     letter-spacing: 0.05em;
     margin-bottom: 6px;
+  }
+
+  .leave-account-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 12px;
   }
 
   .report-subheading-help {

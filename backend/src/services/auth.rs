@@ -221,22 +221,10 @@ pub async fn create_initial_admin(
         tracks_time,
     )
     .await?;
-    let current_year = crate::services::settings::app_current_year(&app_state.pool).await;
-    let default_leave_days = UserDb::get_default_leave_days_tx(&mut transaction).await?;
-    UserDb::set_leave_days_tx(
-        &mut transaction,
-        new_user_id,
-        current_year,
-        default_leave_days,
-    )
-    .await?;
-    UserDb::set_leave_days_tx(
-        &mut transaction,
-        new_user_id,
-        current_year + 1,
-        default_leave_days,
-    )
-    .await?;
+    // Account definitions are category-owned. Seeding inside the same
+    // transaction guarantees a first administrator can never exist without
+    // the leave-account rows that were already configured for the instance.
+    UserDb::seed_leave_accounts_for_user_tx(&mut transaction, new_user_id, "admin").await?;
     transaction.commit().await?;
     Ok(())
 }

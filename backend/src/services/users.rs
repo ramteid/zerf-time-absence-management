@@ -7,7 +7,80 @@ use crate::roles::{
     is_admin_role, is_assistant_role, is_team_lead_role, normalize_role, ROLE_ASSISTANT,
 };
 use crate::AppState;
+use serde::Serialize;
 use std::collections::{HashMap, HashSet};
+
+/// Values supplied for one category-specific leave account. The repository
+/// validates category identity, duplicate ids, and day ranges while applying
+/// these values inside the caller-owned transaction.
+#[derive(Clone, Debug)]
+pub struct LeaveAccountInput {
+    pub category_id: i64,
+    pub base_days: i64,
+    pub current_year_days: i64,
+    pub next_year_days: i64,
+}
+
+/// A leave-account category available to the requester when configuring a
+/// user. The public API deliberately uses `default_base_days` to distinguish
+/// this category default from a user's `base_days` value.
+#[derive(Clone, Serialize)]
+pub struct LeaveAccountDefinition {
+    pub category_id: i64,
+    pub category_name: String,
+    pub color: String,
+    pub default_base_days: i64,
+    pub active: bool,
+    pub carryover_expiry: String,
+}
+
+/// One user's category-specific leave-account values for the current and next
+/// app-local calendar year.
+#[derive(Clone, Serialize)]
+pub struct UserLeaveAccountDetails {
+    pub category_id: i64,
+    pub category_name: String,
+    pub color: String,
+    pub active: bool,
+    pub base_days: i64,
+    pub current_year: i32,
+    pub current_year_days: i64,
+    pub next_year: i32,
+    pub next_year_days: i64,
+    pub carryover_expiry: String,
+}
+
+/// The account-specific portion of a user audit record. Category metadata is
+/// deliberately omitted because `category_id` is the stable identity and the
+/// metadata is already audited with the category itself.
+#[derive(Serialize)]
+struct UserLeaveAccountAuditDetails {
+    category_id: i64,
+    base_days: i64,
+    current_year: i32,
+    current_year_days: i64,
+    next_year: i32,
+    next_year_days: i64,
+}
+
+#[derive(Serialize)]
+struct UserAuditSnapshot<'a> {
+    user: &'a User,
+    leave_accounts: Vec<UserLeaveAccountAuditDetails>,
+}
+
+fn leave_account_definition_from_repo(
+    definition: crate::repository::LeaveAccountDefinition,
+) -> LeaveAccountDefinition {
+    LeaveAccountDefinition {
+        category_id: definition.category_id,
+        category_name: definition.category_name,
+        color: definition.color,
+        default_base_days: definition.default_days,
+        active: definition.active,
+        carryover_expiry: definition.carryover_expiry,
+    }
+}
 
 pub struct NewUser {
     pub email: String,
@@ -16,11 +89,7 @@ pub struct NewUser {
     pub role: String,
     pub weekly_hours: f64,
     pub workdays_per_week: Option<i16>,
-    pub leave_days_current_year: i64,
-    pub leave_days_next_year: i64,
-    /// Base annual leave entitlement (days/year), used whenever no explicit
-    /// per-year override exists for this user.
-    pub annual_leave_days: i64,
+    pub leave_accounts: Option<Vec<LeaveAccountInput>>,
     pub start_date: chrono::NaiveDate,
     pub hire_date: Option<chrono::NaiveDate>,
     pub overtime_start_balance_min: Option<i64>,
@@ -64,7 +133,6 @@ pub fn repo_user_to_auth_user(u: crate::repository::User) -> User {
         dark_mode: u.dark_mode,
         overtime_start_balance_min: u.overtime_start_balance_min,
         tracks_time: u.tracks_time,
-        annual_leave_days: u.annual_leave_days,
         archived_at: u.archived_at,
         receives_error_notifications: u.receives_error_notifications,
     }
@@ -99,6 +167,105 @@ pub async fn assert_can_access_user(
         return Err(AppError::Forbidden);
     }
     Ok(())
+}
+
+/// List leave-account definitions the requester may use in a user form.
+/// Admins and team leads with delegated assistant management need every
+/// category so they can configure a newly created person; other users only
+/// receive categories for which their own account row exists.
+pub async fn leave_account_definitions(
+    app_state: &AppState,
+    requester: &User,
+) -> AppResult<Vec<LeaveAccountDefinition>> {
+    let may_manage_all_accounts = requester.is_admin()
+        || (requester.is_lead()
+            && crate::services::settings::team_lead_assistant_management_enabled(&app_state.pool)
+                .await?);
+    if may_manage_all_accounts {
+        return Ok(app_state
+            .db
+            .users
+            .list_leave_account_definitions()
+            .await?
+            .into_iter()
+            .map(leave_account_definition_from_repo)
+            .collect());
+    }
+
+    Ok(app_state
+        .db
+        .users
+        .leave_account_definitions_for_user(requester.id)
+        .await?
+        .into_iter()
+        .map(leave_account_definition_from_repo)
+        .collect())
+}
+
+/// Read the category-specific leave accounts for a target user. The existing
+/// admin/self/direct-report authorization rule is shared with the normal user
+/// detail endpoint.
+pub async fn leave_accounts_for_user(
+    app_state: &AppState,
+    requester: &User,
+    target_id: i64,
+) -> AppResult<Vec<UserLeaveAccountDetails>> {
+    assert_can_access_user(app_state, requester, target_id).await?;
+    app_state
+        .db
+        .users
+        .find_by_id(target_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let current_year = crate::services::settings::app_current_year(&app_state.pool).await;
+    Ok(app_state
+        .db
+        .users
+        .user_leave_accounts_for_years(target_id, current_year, current_year + 1)
+        .await?
+        .into_iter()
+        .map(|account| UserLeaveAccountDetails {
+            category_id: account.category_id,
+            category_name: account.category_name,
+            color: account.color,
+            active: account.active,
+            base_days: account.base_days,
+            current_year: account.current_year,
+            current_year_days: account.current_year_days,
+            next_year: account.next_year,
+            next_year_days: account.next_year_days,
+            carryover_expiry: account.carryover_expiry,
+        })
+        .collect())
+}
+
+/// Build an audit payload for a user together with the values of every leave
+/// account. Audit delivery is best-effort after a committed mutation, so a
+/// failed read returns `None` and lets the caller retain the normal user-only
+/// audit record instead of turning a successful write into an API failure.
+pub async fn user_audit_snapshot(app_state: &AppState, user: &User) -> Option<serde_json::Value> {
+    let current_year = crate::services::settings::app_current_year(&app_state.pool).await;
+    let leave_accounts = app_state
+        .db
+        .users
+        .user_leave_accounts_for_years(user.id, current_year, current_year + 1)
+        .await
+        .ok()?
+        .into_iter()
+        .map(|account| UserLeaveAccountAuditDetails {
+            category_id: account.category_id,
+            base_days: account.base_days,
+            current_year: account.current_year,
+            current_year_days: account.current_year_days,
+            next_year: account.next_year,
+            next_year_days: account.next_year_days,
+        })
+        .collect();
+    serde_json::to_value(UserAuditSnapshot {
+        user,
+        leave_accounts,
+    })
+    .ok()
 }
 
 /// Guard for the `/team-users` list/create endpoints: only active, non-admin
@@ -290,58 +457,10 @@ pub fn user_unique_conflict(error: &crate::db::SqlxError) -> Option<AppError> {
     }
 }
 
-/// Get the leave days for `user_id` in `year`.
-/// If no row exists yet, one is created lazily using the global default.
-pub async fn get_leave_days(
-    pool: &crate::db::DatabasePool,
-    user_id: i64,
-    year: i32,
-) -> AppResult<i64> {
-    let db = UserDb::new(pool.clone());
-    db.get_leave_days(user_id, year).await
-}
-
 pub async fn fetch_for_update(tx: &mut crate::db::PgConnection, user_id: i64) -> AppResult<User> {
     UserDb::fetch_for_update(tx, user_id)
         .await
         .map(repo_user_to_auth_user)
-}
-
-#[allow(clippy::too_many_arguments)]
-pub async fn create_repo_user(
-    tx: &mut crate::db::PgConnection,
-    email: &str,
-    password_hash: &str,
-    first_name: &str,
-    last_name: &str,
-    role: &str,
-    weekly_hours: f64,
-    workdays_per_week: i16,
-    start_date: chrono::NaiveDate,
-    hire_date: Option<chrono::NaiveDate>,
-    overtime_start_balance_min: i64,
-    tracks_time: bool,
-) -> AppResult<i64> {
-    let default_leave_days = UserDb::get_default_leave_days_tx(&mut *tx).await?;
-    Ok(UserDb::create(
-        tx,
-        email,
-        password_hash,
-        first_name,
-        last_name,
-        role,
-        weekly_hours,
-        workdays_per_week,
-        start_date,
-        hire_date,
-        true,
-        overtime_start_balance_min,
-        tracks_time,
-        None,
-        None,
-        default_leave_days,
-    )
-    .await?)
 }
 
 pub async fn insert_approver_tx(
@@ -350,15 +469,6 @@ pub async fn insert_approver_tx(
     approver_id: i64,
 ) -> AppResult<()> {
     UserDb::insert_approver_tx(tx, user_id, approver_id).await
-}
-
-pub async fn set_leave_days_tx(
-    tx: &mut crate::db::PgConnection,
-    user_id: i64,
-    year: i32,
-    days: i64,
-) -> AppResult<()> {
-    UserDb::set_leave_days_tx(tx, user_id, year, days).await
 }
 
 pub async fn get_approver_ids_tx(
@@ -417,7 +527,6 @@ pub async fn update_basic_tx(
     allow_submission_without_approval: Option<bool>,
     overtime_start_balance_min: Option<i64>,
     tracks_time: Option<bool>,
-    annual_leave_days: Option<i64>,
 ) -> Result<(), crate::db::SqlxError> {
     UserDb::update_basic(
         tx,
@@ -434,9 +543,40 @@ pub async fn update_basic_tx(
         allow_submission_without_approval,
         overtime_start_balance_min,
         tracks_time,
-        annual_leave_days,
     )
     .await
+}
+
+/// Create missing category-specific leave-account rows for a user. This is
+/// idempotent so callers can safely invoke it before applying a partial form
+/// payload while holding the shared user/category graph lock.
+pub async fn seed_leave_accounts_for_user_tx(
+    tx: &mut crate::db::PgConnection,
+    user_id: i64,
+    role: &str,
+) -> AppResult<()> {
+    UserDb::seed_leave_accounts_for_user_tx(tx, user_id, role).await
+}
+
+/// Persist all supplied leave-account values atomically. The repository owns
+/// the SQL validation for duplicate, unknown, or non-account category ids so
+/// every caller receives the same client-facing error.
+pub async fn apply_leave_account_values_tx(
+    tx: &mut crate::db::PgConnection,
+    user_id: i64,
+    current_year: i32,
+    values: &[LeaveAccountInput],
+) -> AppResult<()> {
+    let repository_values: Vec<crate::repository::UserLeaveAccountInput> = values
+        .iter()
+        .map(|value| crate::repository::UserLeaveAccountInput {
+            category_id: value.category_id,
+            base_days: value.base_days,
+            current_year_days: value.current_year_days,
+            next_year_days: value.next_year_days,
+        })
+        .collect();
+    UserDb::apply_leave_account_values_tx(tx, user_id, current_year, &repository_values).await
 }
 
 pub async fn set_approvers_tx(
@@ -573,7 +713,6 @@ pub async fn team_settings_update(
         Some(allow_submission_without_approval),
         None, // overtime_start_balance_min
         None, // tracks_time
-        None, // annual_leave_days
     )
     .await?;
     tx.commit().await?;
@@ -629,12 +768,6 @@ pub async fn create(
     let (first_name, last_name) = normalize_user_name(&body.first_name, &body.last_name)?;
     if !(0.0..=168.0).contains(&body.weekly_hours) {
         return Err(AppError::BadRequest("Invalid weekly_hours.".into()));
-    }
-    if !(0..=366).contains(&body.leave_days_current_year)
-        || !(0..=366).contains(&body.leave_days_next_year)
-        || !(0..=366).contains(&body.annual_leave_days)
-    {
-        return Err(AppError::BadRequest("Invalid leave_days.".into()));
     }
     let effective_workdays: i16 = if is_assistant_role(&body.role) {
         if body.weekly_hours != 0.0 {
@@ -707,7 +840,6 @@ pub async fn create(
         body.tracks_time,
         body.category_ids.as_deref(),
         body.absence_category_ids.as_deref(),
-        body.annual_leave_days,
     )
     .await
     .map_err(|e| {
@@ -718,21 +850,11 @@ pub async fn create(
     for approver_id in &body.approver_ids {
         UserDb::insert_approver_tx(&mut transaction, new_user_id, *approver_id).await?;
     }
-    let current_year = crate::services::settings::app_current_year(&app_state.pool).await;
-    UserDb::set_leave_days_tx(
-        &mut transaction,
-        new_user_id,
-        current_year,
-        body.leave_days_current_year,
-    )
-    .await?;
-    UserDb::set_leave_days_tx(
-        &mut transaction,
-        new_user_id,
-        current_year + 1,
-        body.leave_days_next_year,
-    )
-    .await?;
+    if let Some(leave_accounts) = &body.leave_accounts {
+        let current_year = crate::services::settings::app_current_year(&app_state.pool).await;
+        apply_leave_account_values_tx(&mut transaction, new_user_id, current_year, leave_accounts)
+            .await?;
+    }
     // Admin-only opt-in for technical error notifications; forced off otherwise.
     let receives_error_notifications =
         body.receives_error_notifications && crate::roles::is_admin_role(&body.role);
@@ -750,6 +872,9 @@ pub async fn create(
         .await?
         .ok_or(AppError::NotFound)?;
     let created_auth_user = repo_user_to_auth_user(created_user);
+    let created_audit_snapshot = user_audit_snapshot(app_state, &created_auth_user)
+        .await
+        .or_else(|| serde_json::to_value(&created_auth_user).ok());
     audit::log(
         &app_state.pool,
         requester.id,
@@ -757,7 +882,7 @@ pub async fn create(
         "users",
         new_user_id,
         None,
-        serde_json::to_value(&created_auth_user).ok(),
+        created_audit_snapshot,
     )
     .await;
     let language = i18n::load_ui_language(&app_state.pool)
@@ -1178,7 +1303,6 @@ mod tests {
             dark_mode: false,
             overtime_start_balance_min: 0,
             tracks_time: true,
-            annual_leave_days: 30,
             archived_at: None,
             receives_error_notifications: false,
         }

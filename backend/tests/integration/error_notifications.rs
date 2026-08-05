@@ -17,8 +17,7 @@ async fn error_notifications_opt_in_and_delivery() {
         .post(
             "/api/v1/users",
             &json!({"email":"opted-in@example.com","first_name":"Opt","last_name":"In",
-                "role":"admin","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
-                "annual_leave_days":30,"start_date":"2024-01-01","approver_ids":[],
+                "role":"admin","weekly_hours":39,"start_date":"2024-01-01","approver_ids":[],
                 "receives_error_notifications":true}),
         )
         .await;
@@ -38,8 +37,7 @@ async fn error_notifications_opt_in_and_delivery() {
         .post(
             "/api/v1/users",
             &json!({"email":"opted-out@example.com","first_name":"Opt","last_name":"Out",
-                "role":"admin","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
-                "annual_leave_days":30,"start_date":"2024-01-01","approver_ids":[]}),
+                "role":"admin","weekly_hours":39,"start_date":"2024-01-01","approver_ids":[]}),
         )
         .await;
     assert_eq!(st, StatusCode::OK, "create opted-out admin");
@@ -50,8 +48,7 @@ async fn error_notifications_opt_in_and_delivery() {
         .post(
             "/api/v1/users",
             &json!({"email":"emp-flag@example.com","first_name":"Emp","last_name":"Flag",
-                "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
-                "annual_leave_days":30,"start_date":"2024-01-01","approver_ids":[1],
+                "role":"employee","weekly_hours":39,"start_date":"2024-01-01","approver_ids":[1],
                 "receives_error_notifications":true}),
         )
         .await;

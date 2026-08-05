@@ -49,9 +49,6 @@ pub struct User {
     /// When FALSE (admin only), this user has no time/absence tracking.
     /// All related endpoints are blocked; navigation items are hidden.
     pub tracks_time: bool,
-    /// Base annual leave entitlement (days/year), used whenever no explicit
-    /// `user_annual_leave` override exists for a given year.
-    pub annual_leave_days: i64,
     /// Set when the user is archived. Archived users cannot log in and are
     /// excluded from active user lists. Restore clears this field.
     pub archived_at: Option<DateTime<Utc>>,
@@ -73,7 +70,7 @@ const USER_SELECT: &str =
     "SELECT id, email, password_hash, first_name, last_name, role, weekly_hours, workdays_per_week, \
      start_date, hire_date, active, must_change_password, created_at, \
      allow_reopen_without_approval, allow_submission_without_approval, dark_mode, \
-     overtime_start_balance_min, tracks_time, annual_leave_days, archived_at, \
+     overtime_start_balance_min, tracks_time, archived_at, \
      receives_error_notifications \
      FROM users";
 
@@ -94,11 +91,44 @@ pub struct ActiveUserRow {
 /// Approval reminder row (approver_id, total_pending_count).
 pub type PendingApproverReminderRow = (i64, i64);
 
-#[derive(Serialize, sqlx::FromRow)]
-pub struct AnnualLeaveRow {
-    pub user_id: i64,
-    pub year: i32,
-    pub days: i64,
+/// Values submitted when creating or updating one user's leave account.
+/// The service supplies the current application year; the repository writes
+/// the two yearly values as explicit overrides in the caller's transaction.
+#[derive(Clone, Debug)]
+pub struct UserLeaveAccountInput {
+    pub category_id: i64,
+    pub base_days: i64,
+    pub current_year_days: i64,
+    pub next_year_days: i64,
+}
+
+/// Category-owned account metadata used when a user form needs account
+/// definitions but not another user's individual entitlements.
+#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
+pub struct LeaveAccountDefinition {
+    pub category_id: i64,
+    pub category_name: String,
+    pub color: String,
+    pub active: bool,
+    pub default_days: i64,
+    pub carryover_expiry: String,
+    pub start_year: i32,
+}
+
+/// One user's values for a leave-account category, including the effective
+/// current and next-year entitlement after yearly overrides are applied.
+#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
+pub struct UserLeaveAccountDetails {
+    pub category_id: i64,
+    pub category_name: String,
+    pub color: String,
+    pub active: bool,
+    pub base_days: i64,
+    pub current_year: i32,
+    pub current_year_days: i64,
+    pub next_year: i32,
+    pub next_year_days: i64,
+    pub carryover_expiry: String,
 }
 
 #[derive(Clone)]
@@ -615,13 +645,12 @@ impl UserDb {
         tracks_time: bool,
         category_ids: Option<&[i64]>,
         absence_category_ids: Option<&[i64]>,
-        annual_leave_days: i64,
     ) -> Result<i64, sqlx::Error> {
         let new_user_id: i64 = sqlx::query_scalar(
             "INSERT INTO users(email, password_hash, first_name, last_name, role, \
              weekly_hours, workdays_per_week, start_date, hire_date, must_change_password, \
-             overtime_start_balance_min, tracks_time, annual_leave_days) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id",
+             overtime_start_balance_min, tracks_time) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id",
         )
         .bind(email)
         .bind(password_hash)
@@ -635,7 +664,6 @@ impl UserDb {
         .bind(must_change_password)
         .bind(overtime_start_balance_min)
         .bind(tracks_time)
-        .bind(annual_leave_days)
         .fetch_one(&mut *tx)
         .await?;
         match category_ids {
@@ -682,6 +710,7 @@ impl UserDb {
                 }
             }
         }
+        Self::seed_leave_accounts_for_user_sql_tx(tx, new_user_id, role).await?;
         Ok(new_user_id)
     }
 
@@ -701,7 +730,6 @@ impl UserDb {
         allow_submission_without_approval: Option<bool>,
         overtime_start_balance_min: Option<i64>,
         tracks_time: Option<bool>,
-        annual_leave_days: Option<i64>,
     ) -> Result<(), sqlx::Error> {
         // hire_date is nullable, so a plain COALESCE cannot express "clear it
         // back to NULL". Use an explicit flag + CASE, mirroring
@@ -721,8 +749,7 @@ impl UserDb {
                  allow_reopen_without_approval=COALESCE($10,allow_reopen_without_approval), \
                  overtime_start_balance_min=COALESCE($11,overtime_start_balance_min), \
                  tracks_time=COALESCE($12,tracks_time), \
-                 allow_submission_without_approval=COALESCE($14,allow_submission_without_approval), \
-                 annual_leave_days=COALESCE($15,annual_leave_days) \
+                 allow_submission_without_approval=COALESCE($14,allow_submission_without_approval) \
              WHERE id=$13",
         )
         .bind(email)
@@ -739,7 +766,6 @@ impl UserDb {
         .bind(tracks_time)
         .bind(id)
         .bind(allow_submission_without_approval)
-        .bind(annual_leave_days)
         .execute(tx)
         .await?;
         Ok(())
@@ -1081,53 +1107,307 @@ impl UserDb {
         .await?)
     }
 
-    // ── Annual leave ───────────────────────────────────────────────────────
+    // Leave accounts.
 
-    /// Annual leave entitlement for `user_id` in `year`: an explicit
-    /// `user_annual_leave` override for that year takes precedence; otherwise
-    /// the user's own base `annual_leave_days` is used.
-    pub async fn get_leave_days(&self, user_id: i64, year: i32) -> AppResult<i64> {
-        let existing: Option<i64> =
-            sqlx::query_scalar("SELECT days FROM user_annual_leave WHERE user_id=$1 AND year=$2")
-                .bind(user_id)
-                .bind(year)
-                .fetch_optional(&self.pool)
-                .await?;
-        if let Some(days) = existing {
-            return Ok(days);
-        }
-        Ok(
-            sqlx::query_scalar("SELECT annual_leave_days FROM users WHERE id=$1")
-                .bind(user_id)
-                .fetch_one(&self.pool)
-                .await?,
+    /// Return every category that owns a leave account. This is the account
+    /// definition source for administrators and for balance calculations; it
+    /// intentionally includes inactive categories so historical reports keep
+    /// their account metadata.
+    pub async fn list_leave_account_definitions(&self) -> AppResult<Vec<LeaveAccountDefinition>> {
+        Ok(sqlx::query_as::<_, LeaveAccountDefinition>(
+            "SELECT
+                category.id AS category_id,
+                category.name AS category_name,
+                category.color,
+                category.active,
+                category.leave_account_default_days AS default_days,
+                category.leave_account_carryover_expiry AS carryover_expiry,
+                category.leave_account_start_year AS start_year
+             FROM absence_categories AS category
+             WHERE category.cost_type = 'vacation'
+             ORDER BY category.active DESC, category.sort_order, category.name, category.id",
         )
+        .fetch_all(&self.pool)
+        .await?)
     }
 
-    pub async fn set_leave_days(&self, user_id: i64, year: i32, days: i64) -> AppResult<()> {
-        sqlx::query(
-            "INSERT INTO user_annual_leave(user_id, year, days) VALUES ($1,$2,$3) \
-             ON CONFLICT (user_id, year) DO UPDATE SET days = EXCLUDED.days",
+    /// Return account definitions for the accounts that already belong to one
+    /// user. Inactive or access-revoked categories remain present because their
+    /// accounts and historical balances must stay visible.
+    pub async fn leave_account_definitions_for_user(
+        &self,
+        user_id: i64,
+    ) -> AppResult<Vec<LeaveAccountDefinition>> {
+        Ok(sqlx::query_as::<_, LeaveAccountDefinition>(
+            "SELECT
+                category.id AS category_id,
+                category.name AS category_name,
+                category.color,
+                category.active,
+                category.leave_account_default_days AS default_days,
+                category.leave_account_carryover_expiry AS carryover_expiry,
+                category.leave_account_start_year AS start_year
+             FROM user_leave_accounts AS account
+             JOIN absence_categories AS category ON category.id = account.category_id
+             WHERE account.user_id = $1
+             ORDER BY category.active DESC, category.sort_order, category.name, category.id",
         )
         .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// Return a user's base and current/next effective leave-account values.
+    /// The only yearly override lookup is folded into this query, avoiding one
+    /// database round trip per category.
+    pub async fn user_leave_accounts_for_years(
+        &self,
+        user_id: i64,
+        current_year: i32,
+        next_year: i32,
+    ) -> AppResult<Vec<UserLeaveAccountDetails>> {
+        Ok(sqlx::query_as::<_, UserLeaveAccountDetails>(
+            "SELECT
+                account.category_id,
+                category.name AS category_name,
+                category.color,
+                category.active,
+                account.base_days,
+                $2::INTEGER AS current_year,
+                COALESCE(current_override.days, account.base_days) AS current_year_days,
+                $3::INTEGER AS next_year,
+                COALESCE(next_override.days, account.base_days) AS next_year_days,
+                category.leave_account_carryover_expiry AS carryover_expiry
+             FROM user_leave_accounts AS account
+             JOIN absence_categories AS category ON category.id = account.category_id
+             LEFT JOIN user_leave_account_year_overrides AS current_override
+               ON current_override.user_id = account.user_id
+              AND current_override.category_id = account.category_id
+              AND current_override.year = $2
+             LEFT JOIN user_leave_account_year_overrides AS next_override
+               ON next_override.user_id = account.user_id
+              AND next_override.category_id = account.category_id
+              AND next_override.year = $3
+             WHERE account.user_id = $1
+             ORDER BY category.active DESC, category.sort_order, category.name, category.id",
+        )
+        .bind(user_id)
+        .bind(current_year)
+        .bind(next_year)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// Return the effective entitlement for one user, account and year. A
+    /// per-year override wins over the user's stored base value.
+    pub async fn effective_leave_account_days(
+        &self,
+        user_id: i64,
+        category_id: i64,
+        year: i32,
+    ) -> AppResult<i64> {
+        let days = sqlx::query_scalar::<_, i64>(
+            "SELECT COALESCE(year_override.days, account.base_days)
+             FROM user_leave_accounts AS account
+             LEFT JOIN user_leave_account_year_overrides AS year_override
+               ON year_override.user_id = account.user_id
+              AND year_override.category_id = account.category_id
+              AND year_override.year = $3
+             WHERE account.user_id = $1 AND account.category_id = $2",
+        )
+        .bind(user_id)
+        .bind(category_id)
         .bind(year)
-        .bind(days)
-        .execute(&self.pool)
+        .fetch_optional(&self.pool)
+        .await?;
+        days.ok_or(AppError::NotFound)
+    }
+
+    /// Transaction-bound form of [`Self::effective_leave_account_days`].
+    pub async fn effective_leave_account_days_tx(
+        tx: &mut sqlx::PgConnection,
+        user_id: i64,
+        category_id: i64,
+        year: i32,
+    ) -> AppResult<i64> {
+        let days = sqlx::query_scalar::<_, i64>(
+            "SELECT COALESCE(year_override.days, account.base_days)
+             FROM user_leave_accounts AS account
+             LEFT JOIN user_leave_account_year_overrides AS year_override
+               ON year_override.user_id = account.user_id
+              AND year_override.category_id = account.category_id
+              AND year_override.year = $3
+             WHERE account.user_id = $1 AND account.category_id = $2",
+        )
+        .bind(user_id)
+        .bind(category_id)
+        .bind(year)
+        .fetch_optional(tx)
+        .await?;
+        days.ok_or(AppError::NotFound)
+    }
+
+    /// Seed all current leave-account categories for a just-created user. The
+    /// caller owns the surrounding transaction and user-graph advisory lock.
+    /// Existing rows are never overwritten, making the operation safe during
+    /// a retry or after a concurrent category was created before the lock.
+    pub async fn seed_leave_accounts_for_user_tx(
+        tx: &mut sqlx::PgConnection,
+        user_id: i64,
+        role: &str,
+    ) -> AppResult<()> {
+        Self::seed_leave_accounts_for_user_sql_tx(tx, user_id, role).await?;
+        Ok(())
+    }
+
+    /// Seed a newly created leave-account category for every existing user.
+    /// Assistants receive zero days; all other users receive the category's
+    /// current default. The service must call this under the shared user-graph
+    /// advisory lock together with category creation and access seeding.
+    pub async fn seed_leave_accounts_for_category_tx(
+        tx: &mut sqlx::PgConnection,
+        category_id: i64,
+    ) -> AppResult<()> {
+        sqlx::query(
+            "INSERT INTO user_leave_accounts (user_id, category_id, base_days)
+             SELECT
+                users.id,
+                category.id,
+                CASE
+                    WHEN lower(trim(users.role)) = $2 THEN 0
+                    ELSE category.leave_account_default_days
+                END
+             FROM users
+             JOIN absence_categories AS category ON category.id = $1
+             WHERE category.cost_type = 'vacation'
+             ON CONFLICT (user_id, category_id) DO NOTHING",
+        )
+        .bind(category_id)
+        .bind(ROLE_ASSISTANT)
+        .execute(tx)
         .await?;
         Ok(())
     }
 
-    pub async fn set_leave_days_tx(
+    /// Apply submitted base/current/next-year values atomically. Before
+    /// writing explicit values, ensure categories created between form load and
+    /// save receive their default account row as well.
+    pub async fn apply_leave_account_values_tx(
         tx: &mut sqlx::PgConnection,
         user_id: i64,
+        current_year: i32,
+        values: &[UserLeaveAccountInput],
+    ) -> AppResult<()> {
+        let next_year = current_year.checked_add(1).ok_or_else(|| {
+            AppError::bad_request("Current year cannot be incremented for leave accounts.")
+        })?;
+        if !(2000..=2100).contains(&current_year) || !(2000..=2100).contains(&next_year) {
+            return Err(AppError::bad_request(
+                "Leave-account overrides support years from 2000 to 2100.",
+            ));
+        }
+
+        let user_exists: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE id=$1)")
+                .bind(user_id)
+                .fetch_one(&mut *tx)
+                .await?;
+        if !user_exists {
+            return Err(AppError::NotFound);
+        }
+
+        let mut category_ids = std::collections::HashSet::with_capacity(values.len());
+        for value in values {
+            if !category_ids.insert(value.category_id) {
+                return Err(AppError::bad_request(
+                    "Each leave-account category may only be supplied once.",
+                ));
+            }
+            if !(0..=366).contains(&value.base_days)
+                || !(0..=366).contains(&value.current_year_days)
+                || !(0..=366).contains(&value.next_year_days)
+            {
+                return Err(AppError::bad_request(
+                    "Leave-account days must be between 0 and 366.",
+                ));
+            }
+        }
+
+        if !category_ids.is_empty() {
+            let supplied_ids: Vec<i64> = category_ids.iter().copied().collect();
+            let matching_ids: Vec<i64> = sqlx::query_scalar(
+                "SELECT id FROM absence_categories
+                 WHERE id = ANY($1) AND cost_type = 'vacation'",
+            )
+            .bind(&supplied_ids)
+            .fetch_all(&mut *tx)
+            .await?;
+            if matching_ids.len() != supplied_ids.len() {
+                return Err(AppError::bad_request(
+                    "Every leave-account value must reference an existing leave-account category.",
+                ));
+            }
+        }
+
+        Self::seed_leave_accounts_for_existing_user_tx(tx, user_id).await?;
+
+        for value in values {
+            sqlx::query(
+                "INSERT INTO user_leave_accounts (user_id, category_id, base_days)
+                 VALUES ($1, $2, $3)
+                 ON CONFLICT (user_id, category_id)
+                 DO UPDATE SET base_days = EXCLUDED.base_days",
+            )
+            .bind(user_id)
+            .bind(value.category_id)
+            .bind(value.base_days)
+            .execute(&mut *tx)
+            .await?;
+
+            Self::set_leave_account_year_days_tx(
+                tx,
+                user_id,
+                value.category_id,
+                current_year,
+                value.current_year_days,
+            )
+            .await?;
+            Self::set_leave_account_year_days_tx(
+                tx,
+                user_id,
+                value.category_id,
+                next_year,
+                value.next_year_days,
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
+    /// Set one explicit yearly override. This low-level helper is public for
+    /// service flows that need to update a single year under their existing
+    /// transaction; normal user-form writes should use
+    /// [`Self::apply_leave_account_values_tx`] instead.
+    pub async fn set_leave_account_year_days_tx(
+        tx: &mut sqlx::PgConnection,
+        user_id: i64,
+        category_id: i64,
         year: i32,
         days: i64,
     ) -> AppResult<()> {
+        if !(2000..=2100).contains(&year) || !(0..=366).contains(&days) {
+            return Err(AppError::bad_request(
+                "Leave-account override values are outside their allowed range.",
+            ));
+        }
         sqlx::query(
-            "INSERT INTO user_annual_leave(user_id, year, days) VALUES ($1,$2,$3) \
-             ON CONFLICT (user_id, year) DO UPDATE SET days = EXCLUDED.days",
+            "INSERT INTO user_leave_account_year_overrides (user_id, category_id, year, days)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT (user_id, category_id, year)
+             DO UPDATE SET days = EXCLUDED.days",
         )
         .bind(user_id)
+        .bind(category_id)
         .bind(year)
         .bind(days)
         .execute(tx)
@@ -1135,30 +1415,56 @@ impl UserDb {
         Ok(())
     }
 
-    pub async fn annual_days_or_default(
-        &self,
+    async fn seed_leave_accounts_for_user_sql_tx(
+        tx: &mut sqlx::PgConnection,
         user_id: i64,
-        year: i32,
-        default_days: i64,
-    ) -> AppResult<i64> {
-        Ok(sqlx::query_scalar::<_, i64>(
-            "SELECT days FROM user_annual_leave WHERE user_id=$1 AND year=$2",
+        role: &str,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "INSERT INTO user_leave_accounts (user_id, category_id, base_days)
+             SELECT
+                $1,
+                category.id,
+                CASE
+                    WHEN lower(trim($2)) = $3 THEN 0
+                    ELSE category.leave_account_default_days
+                END
+             FROM absence_categories AS category
+             WHERE category.cost_type = 'vacation'
+             ON CONFLICT (user_id, category_id) DO NOTHING",
         )
         .bind(user_id)
-        .bind(year)
-        .fetch_optional(&self.pool)
-        .await?
-        .unwrap_or(default_days))
+        .bind(role)
+        .bind(ROLE_ASSISTANT)
+        .execute(tx)
+        .await?;
+        Ok(())
     }
 
-    pub async fn get_default_leave_days_tx(tx: &mut sqlx::PgConnection) -> AppResult<i64> {
-        Ok(sqlx::query_scalar(
-            "SELECT COALESCE(value::BIGINT, 30) \
-             FROM app_settings WHERE key='default_annual_leave_days'",
+    async fn seed_leave_accounts_for_existing_user_tx(
+        tx: &mut sqlx::PgConnection,
+        user_id: i64,
+    ) -> AppResult<()> {
+        sqlx::query(
+            "INSERT INTO user_leave_accounts (user_id, category_id, base_days)
+             SELECT
+                users.id,
+                category.id,
+                CASE
+                    WHEN lower(trim(users.role)) = $2 THEN 0
+                    ELSE category.leave_account_default_days
+                END
+             FROM users
+             CROSS JOIN absence_categories AS category
+             WHERE users.id = $1
+               AND category.cost_type = 'vacation'
+             ON CONFLICT (user_id, category_id) DO NOTHING",
         )
-        .fetch_optional(tx)
-        .await?
-        .unwrap_or(30))
+        .bind(user_id)
+        .bind(ROLE_ASSISTANT)
+        .execute(tx)
+        .await?;
+        Ok(())
     }
 
     // ── Submission reminder helper ─────────────────────────────────────────

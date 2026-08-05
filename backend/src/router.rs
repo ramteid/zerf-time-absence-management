@@ -109,7 +109,8 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                     "/absences/{id}/reject-cancellation",
                     post(handlers::absences::reject_cancellation),
                 )
-                .route("/leave-balance/{uid}", get(handlers::absences::balance))
+                .route("/leave-balances/{uid}", get(handlers::absences::balance))
+                .route("/leave-accounts", get(handlers::users::list_leave_accounts))
                 .route(
                     "/users/earliest-start-date",
                     get(handlers::users::earliest_start_date),
@@ -132,9 +133,8 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                     post(handlers::users::reset_password),
                 )
                 .route(
-                    "/users/{id}/leave-days",
-                    get(handlers::users::get_leave_days_handler)
-                        .put(handlers::users::set_leave_days_handler),
+                    "/users/{id}/leave-accounts",
+                    get(handlers::users::get_user_leave_accounts),
                 )
                 .route(
                     "/team-users",

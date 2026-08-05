@@ -45,7 +45,7 @@ source "$ENV_FILE"
 # (the only thing that touches it during a backup cycle) is called from
 # main()'s loop, not from run_backup_once itself, so triggering just the
 # latter -- as this script does -- never mutates it.
-TABLES="users time_entries absences categories absence_categories holidays audit_log reopen_requests user_annual_leave app_settings"
+TABLES="users time_entries absences categories absence_categories holidays audit_log reopen_requests user_leave_accounts user_leave_account_year_overrides app_settings"
 
 psql_count() {
   docker exec -e PGPASSWORD="$ZERF_POSTGRES_PASSWORD" "$POSTGRES_CONTAINER" \

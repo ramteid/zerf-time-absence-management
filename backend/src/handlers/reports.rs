@@ -7,8 +7,8 @@ use crate::services::reports::{
     build_flextime_for_user, build_month, build_month_without_submission_status,
     build_overtime_rows_for_year, build_range, build_team_timesheet_sections,
     build_timesheet_section, csv_response, month_bounds, parse_report_time, pdf_response,
-    sort_categories_desc, validate_range, CategoryTotal, FlextimeDay, MonthReport, MonthRow,
-    TeamRow, UserCategoryRow,
+    sort_categories_desc, validate_range, CategoryTotal, FlextimeDay, LeaveAccountCategory,
+    LeaveAccountUsage, MonthReport, MonthRow, TeamReport, TeamRow, UserCategoryRow,
 };
 use crate::AppState;
 use axum::{
@@ -161,7 +161,7 @@ pub async fn team(
     State(app_state): State<AppState>,
     requester: User,
     Query(query): Query<TeamQuery>,
-) -> AppResult<Json<Vec<TeamRow>>> {
+) -> AppResult<Json<TeamReport>> {
     if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
@@ -173,12 +173,59 @@ pub async fn team(
     let today = crate::services::settings::app_today(&app_state.pool).await;
     let (month_start, month_end) = month_bounds(&query.month)?;
 
-    // Vacation split for the selected month:
-    // - taken includes today
-    // - planned starts tomorrow
-    let vacation_taken_end = today.min(month_end);
+    // Load account columns and every account-booked absence range in two
+    // bounded queries before fan-out. This avoids a user × account query
+    // pattern as categories are added over time.
+    let leave_account_definitions: Vec<_> = app_state
+        .db
+        .users
+        .list_leave_account_definitions()
+        .await?
+        .into_iter()
+        .filter(|definition| definition.start_year <= month_start.year())
+        .collect();
+    let leave_account_categories: Vec<_> = leave_account_definitions
+        .iter()
+        .map(|definition| LeaveAccountCategory {
+            category_id: definition.category_id,
+            name: definition.category_name.clone(),
+            color: definition.color.clone(),
+        })
+        .collect();
+    let account_ids: Vec<_> = leave_account_definitions
+        .iter()
+        .map(|definition| definition.category_id)
+        .collect();
+    let team_member_ids: Vec<_> = team_members.iter().map(|member| member.id).collect();
+    let account_ranges = if team_member_ids.is_empty() || account_ids.is_empty() {
+        Vec::new()
+    } else {
+        app_state
+            .db
+            .absences
+            .leave_account_absence_ranges_for_users(
+                &team_member_ids,
+                &account_ids,
+                month_start,
+                month_end,
+            )
+            .await?
+    };
+    let mut account_ranges_by_user: HashMap<(i64, i64), Vec<(NaiveDate, NaiveDate)>> =
+        HashMap::new();
+    for range in account_ranges {
+        account_ranges_by_user
+            .entry((range.user_id, range.leave_account_category_id))
+            .or_default()
+            .push((range.start_date, range.end_date));
+    }
+    let leave_account_definitions = Arc::new(leave_account_definitions);
+    let account_ranges_by_user = Arc::new(account_ranges_by_user);
+
+    // Taken includes today; planned starts tomorrow.
+    let leave_taken_end = today.min(month_end);
     let tomorrow = today + Duration::days(1);
-    let vacation_planned_start = tomorrow.max(month_start);
+    let leave_planned_start = tomorrow.max(month_start);
 
     // Spawn one Tokio task per team member so all per-user DB round-trips
     // run concurrently.  A semaphore caps simultaneous DB-holding tasks at 8
@@ -190,6 +237,8 @@ pub async fn team(
             let pool = app_state.pool.clone();
             let query_month = query.month.clone();
             let sem = semaphore.clone();
+            let account_definitions = leave_account_definitions.clone();
+            let account_ranges = account_ranges_by_user.clone();
             tokio::spawn(async move {
                 let _permit = sem.acquire().await.expect("semaphore closed");
                 let team_member_is_assistant = is_assistant_role(&team_member.role);
@@ -207,31 +256,43 @@ pub async fn team(
 
                 let absence_count_start = month_start.max(team_member.start_date);
 
-                let vacation_taken = if absence_count_start <= vacation_taken_end {
-                    crate::services::absence_balance::vacation_workdays(
-                        &pool,
-                        team_member.id,
-                        absence_count_start,
-                        vacation_taken_end,
-                    )
-                    .await?
-                } else {
-                    0.0
-                };
-
-                let vacation_planned_start_user =
-                    vacation_planned_start.max(team_member.start_date);
-                let vacation_planned = if vacation_planned_start_user <= month_end {
-                    crate::services::absence_balance::vacation_workdays(
-                        &pool,
-                        team_member.id,
-                        vacation_planned_start_user,
-                        month_end,
-                    )
-                    .await?
-                } else {
-                    0.0
-                };
+                let mut leave_account_usage = Vec::with_capacity(account_definitions.len());
+                for definition in account_definitions.iter() {
+                    let ranges = account_ranges
+                        .get(&(team_member.id, definition.category_id))
+                        .map(Vec::as_slice)
+                        .unwrap_or(&[]);
+                    let taken_days = if absence_count_start <= leave_taken_end {
+                        crate::services::absence_balance::workdays_for_ranges_in_window(
+                            &pool,
+                            team_member.id,
+                            ranges,
+                            absence_count_start,
+                            leave_taken_end,
+                        )
+                        .await?
+                    } else {
+                        0.0
+                    };
+                    let planned_start = leave_planned_start.max(team_member.start_date);
+                    let planned_days = if planned_start <= month_end {
+                        crate::services::absence_balance::workdays_for_ranges_in_window(
+                            &pool,
+                            team_member.id,
+                            ranges,
+                            planned_start,
+                            month_end,
+                        )
+                        .await?
+                    } else {
+                        0.0
+                    };
+                    leave_account_usage.push(LeaveAccountUsage {
+                        category_id: definition.category_id,
+                        taken_days,
+                        planned_days,
+                    });
+                }
 
                 let sick_end = today.min(month_end);
                 let sick_workdays = if absence_count_start <= sick_end {
@@ -280,8 +341,7 @@ pub async fn team(
                     } else {
                         Some(month_report.diff_min)
                     },
-                    vacation_days: vacation_taken,
-                    vacation_planned_days: vacation_planned,
+                    leave_account_usage,
                     sick_days: sick_workdays,
                     flextime_balance_min,
                     weeks_all_submitted,
@@ -306,7 +366,10 @@ pub async fn team(
         }
     }
 
-    Ok(Json(result?))
+    Ok(Json(TeamReport {
+        leave_account_categories,
+        rows: result?,
+    }))
 }
 
 #[derive(Deserialize)]

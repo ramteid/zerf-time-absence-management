@@ -22,9 +22,6 @@ async fn sessions_repository_workflow() {
                 "last_name":"Sessions",
                 "role":"employee",
                 "weekly_hours":39,
-                "leave_days_current_year":30,
-                "leave_days_next_year":30,
-                "annual_leave_days": 30,
                 "start_date":"2024-01-01",
                 "approver_ids":[1]
             }),
@@ -378,6 +375,7 @@ async fn users_repository_workflow() {
         bootstrap_team_with_suffix(&app, &admin, false, "repo-users").await;
 
     let users = zerf::repository::UserDb::new(app.state.pool.clone());
+    let vacation_account_category_id = absence_cat(&app.state.pool, "vacation").await.id;
     assert!(users.count().await.expect("count users") >= 3);
     assert_eq!(users.count_active_admins().await.expect("count admins"), 1);
 
@@ -536,33 +534,56 @@ async fn users_repository_workflow() {
         .expect("hash exists");
     assert_eq!(stored_hash, new_hash);
 
+    let account_year = reference_date().year();
     assert_eq!(
         users
-            .get_leave_days(emp_id, 2030)
+            .effective_leave_account_days(emp_id, vacation_account_category_id, account_year)
             .await
-            .expect("leave days fall back to the user's base annual_leave_days"),
+            .expect("leave account falls back to the user's category-specific base days"),
         30
     );
-    users
-        .set_leave_days(emp_id, 2030, 27)
+    let mut entitlement_connection = app
+        .state
+        .pool
+        .acquire()
         .await
-        .expect("set leave days");
+        .expect("acquire leave-account connection");
+    zerf::repository::UserDb::set_leave_account_year_days_tx(
+        &mut entitlement_connection,
+        emp_id,
+        vacation_account_category_id,
+        account_year,
+        27,
+    )
+    .await
+    .expect("set leave-account year override");
+    drop(entitlement_connection);
     assert_eq!(
         users
-            .get_leave_days(emp_id, 2030)
+            .effective_leave_account_days(emp_id, vacation_account_category_id, account_year)
             .await
-            .expect("stored leave days"),
+            .expect("stored leave-account year override"),
         27
     );
-    // Use a year far enough in the future that no row is auto-created during user seeding
-    let far_future_year = reference_date().year() + 5;
+    // A future year without an override uses the per-category base entitlement.
+    let far_future_year = account_year + 5;
     assert_eq!(
         users
-            .annual_days_or_default(emp_id, far_future_year, 33)
+            .effective_leave_account_days(emp_id, vacation_account_category_id, far_future_year)
             .await
-            .expect("annual days or default"),
-        33
+            .expect("leave-account base entitlement"),
+        30
     );
+
+    let vacation_definition = users
+        .list_leave_account_definitions()
+        .await
+        .expect("list leave-account definitions")
+        .into_iter()
+        .find(|definition| definition.category_id == vacation_account_category_id)
+        .expect("canonical vacation leave-account definition");
+    assert_eq!(vacation_definition.default_days, 30);
+    assert_eq!(vacation_definition.carryover_expiry, "03-31");
 
     let mut tx_conn = app
         .state
@@ -579,13 +600,6 @@ async fn users_repository_workflow() {
             .expect("count users in tx")
             >= 3
     );
-    assert_eq!(
-        zerf::repository::UserDb::get_default_leave_days_tx(&mut tx_conn)
-            .await
-            .expect("default leave days tx"),
-        30
-    );
-
     let seeded_hash =
         zerf::services::auth::hash_password("RepoSeedAdmin!234").expect("hash seeded admin");
     let seeded_admin_id = zerf::repository::UserDb::create_initial_admin(
@@ -624,9 +638,6 @@ async fn users_repository_workflow() {
                 "last_name":"Repo",
                 "role":"assistant",
                 "weekly_hours":0,
-                "leave_days_current_year":0,
-                "leave_days_next_year":0,
-                "annual_leave_days": 0,
                 "start_date":"2024-01-01",
                 "approver_ids":[lead_id]
             }),
@@ -1206,6 +1217,7 @@ async fn absences_repository_workflow() {
         bootstrap_team_with_suffix(&app, &admin, false, "repo-absences").await;
     let absences = zerf::repository::AbsenceDb::new(app.state.pool.clone());
     let time_entries = zerf::repository::TimeEntryDb::new(app.state.pool.clone());
+    let users = zerf::repository::UserDb::new(app.state.pool.clone());
     let monday = NaiveDate::parse_from_str(&monday_iso, "%Y-%m-%d").unwrap();
     let tuesday = monday + Duration::days(1);
     let wednesday = monday + Duration::days(2);
@@ -1345,6 +1357,7 @@ async fn absences_repository_workflow() {
         &mut tx,
         requested.id,
         training_cat.id,
+        None,
         monday,
         wednesday,
         Some("repo updated absence"),
@@ -1400,23 +1413,35 @@ async fn absences_repository_workflow() {
         1
     );
 
-    let approved_vacation = absences
-        .create(
-            emp_id,
-            vacation_cat.id,
-            vacation_cat.auto_approve_past,
-            friday,
-            friday,
-            Some("approved vacation"),
-            "approved",
-        )
+    let mut approved_leave_account_transaction = absences
+        .begin()
         .await
-        .expect("create approved vacation");
+        .expect("begin approved leave-account transaction");
+    let approved_vacation_id = zerf::repository::AbsenceDb::insert_tx(
+        &mut approved_leave_account_transaction,
+        emp_id,
+        vacation_cat.id,
+        Some(vacation_cat.id),
+        friday,
+        friday,
+        Some("approved vacation"),
+        "approved",
+    )
+    .await
+    .expect("create approved leave-account absence");
+    approved_leave_account_transaction
+        .commit()
+        .await
+        .expect("commit approved leave-account absence");
+    let approved_vacation = absences
+        .find_by_id(approved_vacation_id)
+        .await
+        .expect("load approved leave-account absence");
     assert_eq!(
         absences
-            .vacation_absences_in_year(emp_id, monday, friday)
+            .leave_account_absences_in_year(emp_id, vacation_cat.id, monday, friday)
             .await
-            .expect("vacation absences in year")
+            .expect("leave-account absences in year")
             .len(),
         1
     );
@@ -1501,6 +1526,7 @@ async fn absences_repository_workflow() {
         &mut tx,
         emp_id,
         vacation_cat.id,
+        Some(vacation_cat.id),
         friday + Duration::days(4),
         friday + Duration::days(4),
         Some("insert tx absence"),
@@ -1512,6 +1538,7 @@ async fn absences_repository_workflow() {
         &mut tx,
         inserted_id,
         special_cat.id,
+        None,
         friday + Duration::days(4),
         friday + Duration::days(5),
         Some("updated in tx"),
@@ -1522,15 +1549,16 @@ async fn absences_repository_workflow() {
     zerf::repository::AbsenceDb::cancel_requested_tx(&mut tx, requested_cancel.id)
         .await
         .expect("cancel requested tx");
-    let vacation_ranges = zerf::repository::AbsenceDb::vacation_ranges_in_year_tx(
+    let vacation_ranges = zerf::repository::AbsenceDb::leave_account_ranges_in_year_tx(
         &mut tx,
         emp_id,
+        vacation_cat.id,
         monday,
         friday + Duration::days(7),
         None,
     )
     .await
-    .expect("vacation ranges in year tx");
+    .expect("leave-account ranges in year tx");
     assert_eq!(vacation_ranges.len(), 1);
     tx.commit().await.expect("commit absence tx");
 
@@ -1590,34 +1618,34 @@ async fn absences_repository_workflow() {
     assert!(batch_before.contains_key(&approved_vacation.id));
 
     assert_eq!(
-        absences
-            .carryover_expiry_setting()
-            .await
-            .expect("carryover expiry"),
-        "03-31"
+        vacation_cat.leave_account_carryover_expiry.as_deref(),
+        Some("03-31"),
+        "the canonical leave account owns its carryover expiry"
     );
     assert_eq!(
-        absences
-            .effective_annual_days(emp_id, 2032)
+        users
+            .effective_leave_account_days(emp_id, vacation_cat.id, 2032)
             .await
-            .expect("default annual days"),
+            .expect("default leave-account days"),
         30
     );
     sqlx::query(
-        "INSERT INTO user_annual_leave(user_id, year, days) VALUES ($1,$2,$3) \
-         ON CONFLICT (user_id, year) DO UPDATE SET days=EXCLUDED.days",
+        "INSERT INTO user_leave_account_year_overrides(user_id, category_id, year, days) \
+         VALUES ($1, $2, $3, $4) \
+         ON CONFLICT (user_id, category_id, year) DO UPDATE SET days=EXCLUDED.days",
     )
     .bind(emp_id)
+    .bind(vacation_cat.id)
     .bind(2032)
     .bind(26_i64)
     .execute(&app.state.pool)
     .await
-    .expect("seed annual leave override");
+    .expect("seed leave-account year override");
     assert_eq!(
-        absences
-            .effective_annual_days(emp_id, 2032)
+        users
+            .effective_leave_account_days(emp_id, vacation_cat.id, 2032)
             .await
-            .expect("overridden annual days"),
+            .expect("overridden leave-account days"),
         26
     );
 
@@ -2059,9 +2087,6 @@ async fn notifications_repository_workflow() {
                 "last_name":"Repo",
                 "role":"employee",
                 "weekly_hours":39,
-                "leave_days_current_year":30,
-                "leave_days_next_year":30,
-                "annual_leave_days": 30,
                 "start_date":"2024-01-01",
                 "approver_ids":[1]
             }),

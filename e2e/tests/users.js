@@ -42,6 +42,12 @@ export const ASSISTANT = {
 // cost_type a fresh user can always request regardless of their balance.
 export const NO_COST_ABSENCE_CATEGORY = "E2E Day Off";
 
+// A second, independent leave account created through the category UI after
+// the initial users exist. The later employee workflow verifies that this
+// account is seeded for existing users and is charged independently from the
+// canonical Vacation account.
+export const LEAVE_ACCOUNT_CATEGORY = "E2E Educational Leave";
+
 // Created last, by 13-payroll-report.spec.js. Their contract start is
 // backdated far enough (see PAYROLL_START_OFFSET_DAYS) that they always fall
 // inside the previous calendar month, which is what the payroll report and

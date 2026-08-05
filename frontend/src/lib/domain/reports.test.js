@@ -4,6 +4,7 @@ import {
   dedupeAbsences,
   filterCategories,
   filterTeamCategoryColumns,
+  leaveAccountUsage,
   absenceKindTotals,
   summarizeAbsences,
   teamCategoryMinutes,
@@ -45,6 +46,25 @@ describe("reports domain helpers", () => {
       { id: 1 },
       { id: 2 },
     ]);
+  });
+
+  it("matches leave-account report usage by category id, not display name", () => {
+    const row = {
+      leave_account_usage: [
+        { category_id: 1, taken_days: 2, planned_days: 1 },
+        { category_id: 8, taken_days: 4, planned_days: 0 },
+      ],
+    };
+
+    expect(leaveAccountUsage(row, 8)).toEqual({
+      category_id: 8,
+      taken_days: 4,
+      planned_days: 0,
+    });
+    expect(leaveAccountUsage(row, 99)).toEqual({
+      taken_days: 0,
+      planned_days: 0,
+    });
   });
 
   it("sorts team category columns by total minutes", () => {

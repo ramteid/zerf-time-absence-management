@@ -71,9 +71,6 @@ async fn create_assistant(admin: &TestClient, approver_id: i64, suffix: &str) ->
                 "last_name": format!("Assist{suffix}"),
                 "role": "assistant",
                 "weekly_hours": 0,
-                "leave_days_current_year": 0,
-                "leave_days_next_year": 0,
-                "annual_leave_days": 0,
                 "start_date": "2024-01-01",
                 "approver_ids": [approver_id],
             }),
@@ -748,7 +745,6 @@ async fn payroll_status_counts_everyone_but_anonymizes_outside_a_leads_team() {
             "/api/v1/users",
             &json!({"email": "lead2-payroll-status@example.com", "first_name": "Otto",
                 "last_name": "Other", "role": "team_lead", "weekly_hours": 39,
-                "leave_days_current_year": 30, "leave_days_next_year": 30, "annual_leave_days": 30,
                 "start_date": "2024-01-01", "approver_ids": [1]}),
         )
         .await;
@@ -1024,7 +1020,6 @@ async fn payroll_status_requires_approval_even_when_hours_are_not_in_the_report(
                 "email": "zero-hours-payroll-approval-gate@example.com",
                 "first_name": "Zoe", "last_name": "ZeroHours",
                 "role": "employee", "weekly_hours": 0,
-                "leave_days_current_year": 0, "leave_days_next_year": 0, "annual_leave_days": 0,
                 "start_date": "2024-01-01", "approver_ids": [lead_id],
             }),
         )

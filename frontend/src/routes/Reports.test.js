@@ -13,10 +13,10 @@ const mockState = vi.hoisted(() => ({
   monthReport: null,
   rangeReport: null,
   flextimeRows: [],
-  leaveBalance: null,
+  leaveBalances: [],
   users: [],
   usersQueue: [],
-  teamReport: [],
+  teamReport: { leave_account_categories: [], rows: [] },
   teamCategoryReport: [],
   teamAbsences: [],
   ownAbsencesByYear: {},
@@ -41,7 +41,7 @@ const defaultApiImpl = vi.hoisted(
     async function defaultApiImpl(path) {
       if (path.startsWith("/reports/month?")) return mockState.monthReport;
       if (path.startsWith("/reports/range?")) return mockState.rangeReport;
-      if (path.startsWith("/leave-balance/")) return mockState.leaveBalance;
+      if (path.startsWith("/leave-balances/")) return mockState.leaveBalances;
       if (path.startsWith("/reports/flextime?")) return mockState.flextimeRows;
       if (path.startsWith("/reports/team-categories?"))
         return mockState.teamCategoryReport;
@@ -170,11 +170,11 @@ describe("Reports", () => {
 
     mockState.monthReport = monthReportFixture();
     mockState.rangeReport = null;
-    mockState.leaveBalance = null;
+    mockState.leaveBalances = [];
     mockState.flextimeRows = [];
     mockState.users = [];
     mockState.usersQueue = [];
-    mockState.teamReport = [];
+    mockState.teamReport = { leave_account_categories: [], rows: [] };
     mockState.teamCategoryReport = [];
     mockState.teamAbsences = [];
     mockState.ownAbsencesByYear = {};
@@ -361,7 +361,7 @@ describe("Reports", () => {
       if (path === "/users") return mockState.users;
       if (path.startsWith("/reports/month?")) return monthReportFixture();
       if (path.startsWith("/reports/flextime?")) return [];
-      if (path.startsWith("/leave-balance/")) return null;
+      if (path.startsWith("/leave-balances/")) return [];
       if (path.startsWith("/absences?year=")) return [];
       if (path.startsWith("/absences/all?")) return [];
       if (path.startsWith("/holidays?year=")) return [];

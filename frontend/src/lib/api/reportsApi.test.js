@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getUsersForReports } from "./reportsApi.js";
+import { getLeaveBalances, getUsersForReports } from "./reportsApi.js";
 
 vi.mock("../../api.js", () => ({
   api: vi.fn(),
@@ -103,5 +103,19 @@ describe("getUsersForReports", () => {
       expect(result).toEqual([]);
       expect(api).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("getLeaveBalances", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("uses the plural leave-balances route", async () => {
+    api.mockResolvedValue([]);
+
+    await getLeaveBalances({ userId: 7, year: 2026 });
+
+    expect(api).toHaveBeenCalledWith("/leave-balances/7?year=2026");
   });
 });

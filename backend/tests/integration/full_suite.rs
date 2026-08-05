@@ -8,10 +8,21 @@
 //! the test runner to execute them in parallel.
 
 use reqwest::StatusCode;
-use serde_json::json;
+use serde_json::{json, Value};
 
 use crate::common::TestApp;
 use crate::helpers::*;
+
+fn leave_account_balance<'a>(balances: &'a Value, category_name: &str) -> &'a Value {
+    balances
+        .as_array()
+        .and_then(|accounts| {
+            accounts
+                .iter()
+                .find(|account| account["category_name"] == category_name)
+        })
+        .unwrap_or_else(|| panic!("missing leave-account balance for {category_name}"))
+}
 
 // ============================================================================
 // 1. Auth, user-management and RBAC
@@ -77,7 +88,7 @@ async fn auth_and_rbac_workflow() {
         let (st, body) = admin
             .post(
                 "/api/v1/users",
-                &json!({"email":"lead@example.com","first_name":"Lea","last_name":"Lead","role":"team_lead","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,"start_date":"2024-01-01","approver_ids":[1]}),
+                &json!({"email":"lead@example.com","first_name":"Lea","last_name":"Lead","role":"team_lead","weekly_hours":39,"start_date":"2024-01-01","approver_ids":[1]}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "create team_lead");
@@ -87,7 +98,7 @@ async fn auth_and_rbac_workflow() {
         let (st, body) = admin
             .post(
                 "/api/v1/users",
-                &json!({"email":"erin@example.com","first_name":"Erin","last_name":"Worker","role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,"start_date":"2024-01-01","approver_ids": [lead_id]}),
+                &json!({"email":"erin@example.com","first_name":"Erin","last_name":"Worker","role":"employee","weekly_hours":39,"start_date":"2024-01-01","approver_ids": [lead_id]}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "create employee");
@@ -97,7 +108,7 @@ async fn auth_and_rbac_workflow() {
         let (st, _) = admin
             .post(
                 "/api/v1/users",
-                &json!({"email":"erin@example.com","first_name":"Dup","last_name":"Dup","role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,"start_date":"2024-01-01"}),
+                &json!({"email":"erin@example.com","first_name":"Dup","last_name":"Dup","role":"employee","weekly_hours":39,"start_date":"2024-01-01"}),
             )
             .await;
         assert!(
@@ -162,7 +173,7 @@ async fn auth_and_rbac_workflow() {
         let (st, _) = lead
             .post(
                 "/api/v1/users",
-                &json!({"email":"x@example.com","first_name":"X","last_name":"X","role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,"start_date":"2024-01-01"}),
+                &json!({"email":"x@example.com","first_name":"X","last_name":"X","role":"employee","weekly_hours":39,"start_date":"2024-01-01"}),
             )
             .await;
         assert_eq!(st, StatusCode::FORBIDDEN, "lead create user 403");
@@ -379,7 +390,7 @@ async fn absence_and_report_workflow() {
     let v_from = next_monday(10);
     let v_to = v_from + chrono::Duration::days(2);
     let abs_id: i64;
-    let balance_after_vacation: serde_json::Value;
+    let balance_after_vacation: Value;
     {
         let (st, body) = emp
             .post(
@@ -432,10 +443,14 @@ async fn absence_and_report_workflow() {
             .await;
         assert_eq!(st, StatusCode::OK, "approve vacation");
 
-        let (_, bal) = emp
-            .get(&format!("/api/v1/leave-balance/{}?year={}", emp_id, year()))
+        let (_, balances) = emp
+            .get(&format!(
+                "/api/v1/leave-balances/{}?year={}",
+                emp_id,
+                year()
+            ))
             .await;
-        balance_after_vacation = bal;
+        balance_after_vacation = leave_account_balance(&balances, "Vacation").clone();
     }
 
     // -- Special leave: happy path ------------------------------------------
@@ -521,10 +536,15 @@ async fn absence_and_report_workflow() {
             "calendar shows special_leave"
         );
 
-        // Vacation balance unchanged by special leave.
-        let (_, body) = emp
-            .get(&format!("/api/v1/leave-balance/{}?year={}", emp_id, year()))
+        // The Vacation account is unchanged by special leave.
+        let (_, balances) = emp
+            .get(&format!(
+                "/api/v1/leave-balances/{}?year={}",
+                emp_id,
+                year()
+            ))
             .await;
+        let body = leave_account_balance(&balances, "Vacation");
         assert_eq!(body["annual_entitlement"], 30);
         assert_eq!(
             body["available"], balance_after_vacation["available"],
@@ -771,12 +791,17 @@ async fn absence_and_report_workflow() {
         );
     }
 
-    // -- Vacation balance matches captured value ------------------------------
+    // -- Vacation account matches captured value ------------------------------
     {
-        let (st, body) = emp
-            .get(&format!("/api/v1/leave-balance/{}?year={}", emp_id, year()))
+        let (st, balances) = emp
+            .get(&format!(
+                "/api/v1/leave-balances/{}?year={}",
+                emp_id,
+                year()
+            ))
             .await;
-        assert_eq!(st, StatusCode::OK, "leave balance");
+        assert_eq!(st, StatusCode::OK, "leave-account balances");
+        let body = leave_account_balance(&balances, "Vacation");
         assert_eq!(body["annual_entitlement"], 30);
         assert_eq!(
             body["approved_upcoming"],
@@ -871,7 +896,7 @@ async fn tina_time_tracking_journey() {
         let (st, body) = admin
             .post(
                 "/api/v1/users",
-                &json!({"email":"tina@example.com","first_name":"Tina","last_name":"Timekeeper","role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30, "annual_leave_days": 30,"start_date":"2024-01-01","approver_ids": [lead_id]}),
+                &json!({"email":"tina@example.com","first_name":"Tina","last_name":"Timekeeper","role":"employee","weekly_hours":39,"start_date":"2024-01-01","approver_ids": [lead_id]}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "create Tina");

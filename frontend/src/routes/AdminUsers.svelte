@@ -54,11 +54,8 @@
     try {
       // Load the full current settings first so we only change this one field.
       const current = await api("/settings");
-      // Normalize carryover_expiry_date: the backend requires null (not empty string) when
-      // no date is set. Matches the same normalization done in AdminSettings.svelte.
       const body = {
         ...current,
-        carryover_expiry_date: current.carryover_expiry_date?.trim() || null,
         allow_team_lead_manage_assistants: allowTeamLeadManageAssistants,
       };
       const saved = await api("/settings", { method: "PUT", body });

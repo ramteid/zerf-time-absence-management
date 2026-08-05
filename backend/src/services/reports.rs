@@ -1089,6 +1089,22 @@ pub fn pdf_response(bytes: Vec<u8>, file_label: &str) -> AppResult<Response> {
     Ok(response)
 }
 
+/// One account's approved absence usage for a member in the selected month.
+#[derive(Serialize, Clone)]
+pub struct LeaveAccountUsage {
+    pub category_id: i64,
+    pub taken_days: f64,
+    pub planned_days: f64,
+}
+
+/// Metadata for one dynamically generated leave-account column.
+#[derive(Serialize, Clone)]
+pub struct LeaveAccountCategory {
+    pub category_id: i64,
+    pub name: String,
+    pub color: String,
+}
+
 /// One row in the team report - one record per active team member.
 #[derive(Serialize)]
 pub struct TeamRow {
@@ -1100,10 +1116,9 @@ pub struct TeamRow {
     pub actual_min: i64,
     /// Diff = actual - target for the report month. None for assistants.
     pub diff_min: Option<i64>,
-    /// Vacation working-days taken in the report month (including today).
-    pub vacation_days: f64,
-    /// Vacation working-days planned but not yet started in the report month (from tomorrow).
-    pub vacation_planned_days: f64,
+    /// Usage is keyed by account category id so duplicate names cannot merge
+    /// unrelated account values in clients.
+    pub leave_account_usage: Vec<LeaveAccountUsage>,
     /// Sick working-days in the report month.
     pub sick_days: f64,
     /// Current cumulative flextime balance up to and including yesterday
@@ -1112,6 +1127,14 @@ pub struct TeamRow {
     /// True if all fully elapsed weeks (Sunday < today) overlapping the report month
     /// have been fully submitted.
     pub weeks_all_submitted: bool,
+}
+
+/// Explicitly structured team-report response. The client receives category
+/// metadata once and binds every cell through `category_id`.
+#[derive(Serialize)]
+pub struct TeamReport {
+    pub leave_account_categories: Vec<LeaveAccountCategory>,
+    pub rows: Vec<TeamRow>,
 }
 
 #[derive(Serialize)]

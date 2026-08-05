@@ -53,8 +53,6 @@ pub struct UpdateSettings {
     pub country: String,
     pub region: String,
     pub default_weekly_hours: Option<f64>,
-    pub default_annual_leave_days: Option<i32>,
-    pub carryover_expiry_date: Option<String>,
     pub submission_deadline_day: Option<u8>,
     pub organization_name: Option<String>,
     pub auto_break_enabled: Option<bool>,
@@ -131,47 +129,6 @@ pub async fn update_admin_settings(
             return Err(AppError::BadRequest("Invalid default_weekly_hours.".into()));
         }
     }
-    if let Some(dal) = body.default_annual_leave_days {
-        if !(0..=366).contains(&dal) {
-            return Err(AppError::BadRequest(
-                "Invalid default_annual_leave_days.".into(),
-            ));
-        }
-    }
-
-    // Validate carryover expiry date (MM-DD format).
-    let validated_carryover_date: Option<String> =
-        if let Some(ref carryover_date) = body.carryover_expiry_date {
-            let carryover_date = carryover_date.trim();
-            let parts: Vec<&str> = carryover_date.split('-').collect();
-            if parts.len() != 2 {
-                return Err(AppError::BadRequest(
-                    "carryover_expiry_date must be MM-DD.".into(),
-                ));
-            }
-            let month: u32 = parts[0].parse().map_err(|_| {
-                AppError::BadRequest("Invalid month in carryover_expiry_date.".into())
-            })?;
-            let day: u32 = parts[1].parse().map_err(|_| {
-                AppError::BadRequest("Invalid day in carryover_expiry_date.".into())
-            })?;
-            if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
-                return Err(AppError::BadRequest(
-                    "Invalid carryover_expiry_date.".into(),
-                ));
-            }
-            // Validate that the MM-DD combination exists on a calendar.
-            // Use a leap year baseline so 02-29 can be configured.
-            if chrono::NaiveDate::from_ymd_opt(2024, month, day).is_none() {
-                return Err(AppError::BadRequest(
-                    "Invalid carryover_expiry_date.".into(),
-                ));
-            }
-            Some(carryover_date.to_string())
-        } else {
-            None
-        };
-
     if let Some(day) = body.submission_deadline_day {
         if !(1..=28).contains(&day) {
             return Err(AppError::BadRequest(
@@ -251,11 +208,6 @@ pub async fn update_admin_settings(
         .default_weekly_hours
         .map(|v| v.to_string())
         .unwrap_or_default();
-    let default_annual_leave_days_str = body
-        .default_annual_leave_days
-        .map(|v| v.to_string())
-        .unwrap_or_default();
-
     // Refresh holidays when the country/region changes.
     let prepared_holidays = if setting_value_changed(previous_country.as_deref(), &country)
         || setting_value_changed(previous_region.as_deref(), &region)
@@ -270,14 +222,6 @@ pub async fn update_admin_settings(
 
     // Save all settings atomically within a transaction.
     let mut transaction = app_state.db.settings.begin().await?;
-
-    let carryover_date_to_store = validated_carryover_date.as_deref().unwrap_or("");
-    save_setting_tx(
-        &mut transaction,
-        "carryover_expiry_date",
-        carryover_date_to_store,
-    )
-    .await?;
 
     if let Some(day) = body.submission_deadline_day {
         save_setting_tx(
@@ -299,12 +243,6 @@ pub async fn update_admin_settings(
         &mut transaction,
         "default_weekly_hours",
         &default_weekly_hours_str,
-    )
-    .await?;
-    save_setting_tx(
-        &mut transaction,
-        "default_annual_leave_days",
-        &default_annual_leave_days_str,
     )
     .await?;
     save_setting_tx(&mut transaction, "organization_name", &org_name).await?;

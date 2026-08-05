@@ -41,17 +41,23 @@ test("team lead: approve the employee's week", async ({ page }) => {
   await expect(page.getByText("All caught up!")).toBeVisible();
 });
 
-test("team lead: approve one absence and reject another", async ({ page }) => {
+test("team lead: approve leave-account absences and reject another", async ({ page }) => {
   await page.goto("/dashboard");
-  // Two pending absences are expected here: "E2E vacation" and "E2E day
-  // off" from 05 ("E2E training" was self-cancelled by Eve before it ever
-  // reached this queue, so it never shows up here).
-  await expect(page.locator(".absence-row")).toHaveCount(2);
+  // Three pending absences are expected here: Vacation, the independent
+  // leave-account request, and the free day. "E2E training" was cancelled
+  // by Eve before it ever reached this queue.
+  await expect(page.locator(".absence-row")).toHaveCount(3);
 
   // Each absence row has two icon buttons: Approve (Check, first) and Reject
   // (X, second) — see ApprovalQueues.svelte. Approve the vacation request...
   const vacationRow = page.locator(".absence-row", { hasText: "E2E vacation" });
   await vacationRow.locator("button").first().click();
+  await expect(page.getByText("Approved.")).toBeVisible();
+
+  const educationRow = page.locator(".absence-row", {
+    hasText: "E2E educational leave",
+  });
+  await educationRow.locator("button").first().click();
   await expect(page.getByText("Approved.")).toBeVisible();
 
   // ...and reject the other one, to exercise both outcomes of a review (not
@@ -65,7 +71,7 @@ test("team lead: approve one absence and reject another", async ({ page }) => {
   await confirm.getByRole("button", { name: "Reject" }).click();
   await expect(page.getByText("Rejected.")).toBeVisible();
 
-  // Both pending absences are now resolved (one approved, one rejected) —
+  // All pending absences are now resolved (two approved, one rejected) —
   // the queue should be empty.
   await expect(page.locator(".absence-row")).toHaveCount(0);
   await expect(page.getByText("No pending requests")).toBeVisible();

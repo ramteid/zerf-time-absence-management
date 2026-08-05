@@ -12,13 +12,13 @@
 
 use crate::audit;
 use crate::error::{AppError, AppResult};
-use crate::handlers::users::CreateResponse;
+use crate::handlers::users::{CreateResponse, LeaveAccountRequest};
 use crate::middleware::auth::User;
 use crate::roles::{is_assistant_role, ROLE_ASSISTANT};
 use crate::services::users::{
     assert_team_lead_assistant_list_access, assert_team_lead_can_manage_assistant,
     ensure_email_available, ensure_user_name_available, normalize_optional_user_name,
-    repo_user_to_auth_user, set_leave_days_tx, update_basic_tx, user_unique_conflict,
+    repo_user_to_auth_user, update_basic_tx, user_unique_conflict, LeaveAccountInput,
 };
 use crate::AppState;
 use axum::{
@@ -90,7 +90,6 @@ pub async fn get_one(
         "start_date": target.start_date,
         "hire_date": target.hire_date,
         "archived_at": target.archived_at,
-        "annual_leave_days": target.annual_leave_days,
     })))
 }
 
@@ -99,9 +98,8 @@ pub struct NewTeamAssistant {
     pub email: String,
     pub first_name: String,
     pub last_name: String,
-    pub leave_days_current_year: i64,
-    pub leave_days_next_year: i64,
-    pub annual_leave_days: i64,
+    #[serde(default)]
+    pub leave_accounts: Option<Vec<LeaveAccountRequest>>,
     pub start_date: NaiveDate,
     #[serde(default)]
     pub hire_date: Option<NaiveDate>,
@@ -128,9 +126,9 @@ pub async fn create(
         role: ROLE_ASSISTANT.to_string(),
         weekly_hours: 0.0,
         workdays_per_week: None,
-        leave_days_current_year: body.leave_days_current_year,
-        leave_days_next_year: body.leave_days_next_year,
-        annual_leave_days: body.annual_leave_days,
+        leave_accounts: body
+            .leave_accounts
+            .map(|accounts| accounts.into_iter().map(Into::into).collect()),
         start_date: body.start_date,
         hire_date: body.hire_date,
         overtime_start_balance_min: None,
@@ -155,9 +153,8 @@ pub struct UpdateTeamAssistant {
     pub email: Option<String>,
     pub first_name: Option<String>,
     pub last_name: Option<String>,
-    pub leave_days_current_year: Option<i64>,
-    pub leave_days_next_year: Option<i64>,
-    pub annual_leave_days: Option<i64>,
+    #[serde(default)]
+    pub leave_accounts: Option<Vec<LeaveAccountRequest>>,
     pub start_date: Option<NaiveDate>,
     /// Absent/null = leave unchanged, value = set explicitly. Unlike the admin
     /// endpoint there is no separate "clear back to start_date" sentinel here
@@ -175,21 +172,6 @@ pub async fn update(
     let previous_user =
         assert_team_lead_can_manage_assistant(&app_state, &requester, user_id).await?;
 
-    if let Some(d) = body.leave_days_current_year {
-        if !(0..=366).contains(&d) {
-            return Err(AppError::BadRequest("Invalid leave_days.".into()));
-        }
-    }
-    if let Some(d) = body.leave_days_next_year {
-        if !(0..=366).contains(&d) {
-            return Err(AppError::BadRequest("Invalid leave_days.".into()));
-        }
-    }
-    if let Some(d) = body.annual_leave_days {
-        if !(0..=366).contains(&d) {
-            return Err(AppError::BadRequest("Invalid annual_leave_days.".into()));
-        }
-    }
     let normalized_email = body.email.as_ref().map(|email| email.trim().to_lowercase());
     if let Some(email) = &normalized_email {
         if email.is_empty() || email.len() > 254 || !email.contains('@') {
@@ -200,6 +182,11 @@ pub async fn update(
     let last_name = normalize_optional_user_name(body.last_name.as_ref())?;
 
     let mut transaction = app_state.db.users.begin().await?;
+    crate::services::auth::lock_user_graph(&mut transaction).await?;
+    let previous_audit_snapshot =
+        crate::services::users::user_audit_snapshot(&app_state, &previous_user)
+            .await
+            .or_else(|| serde_json::to_value(&previous_user).ok());
     if let Some(email) = &normalized_email {
         ensure_email_available(&app_state, email, Some(user_id)).await?;
     }
@@ -233,7 +220,6 @@ pub async fn update(
         None,
         None, // overtime_start_balance_min: locked to 0 for assistants
         None, // tracks_time: locked to true for assistants
-        body.annual_leave_days,
     )
     .await
     .map_err(|e| {
@@ -241,12 +227,23 @@ pub async fn update(
         user_unique_conflict(&e)
             .unwrap_or_else(|| AppError::Conflict("Could not update user.".into()))
     })?;
-    let current_year = crate::services::settings::app_current_year(&app_state.pool).await;
-    if let Some(d) = body.leave_days_current_year {
-        set_leave_days_tx(&mut transaction, user_id, current_year, d).await?;
-    }
-    if let Some(d) = body.leave_days_next_year {
-        set_leave_days_tx(&mut transaction, user_id, current_year + 1, d).await?;
+    crate::services::users::seed_leave_accounts_for_user_tx(
+        &mut transaction,
+        user_id,
+        ROLE_ASSISTANT,
+    )
+    .await?;
+    if let Some(leave_accounts) = body.leave_accounts {
+        let current_year = crate::services::settings::app_current_year(&app_state.pool).await;
+        let leave_account_inputs: Vec<LeaveAccountInput> =
+            leave_accounts.into_iter().map(Into::into).collect();
+        crate::services::users::apply_leave_account_values_tx(
+            &mut transaction,
+            user_id,
+            current_year,
+            &leave_account_inputs,
+        )
+        .await?;
     }
     transaction.commit().await?;
     if let Some(new_start_date) = body
@@ -268,14 +265,18 @@ pub async fn update(
         .await?
         .ok_or(AppError::NotFound)?;
     let updated_auth_user = repo_user_to_auth_user(updated_user);
+    let updated_audit_snapshot =
+        crate::services::users::user_audit_snapshot(&app_state, &updated_auth_user)
+            .await
+            .or_else(|| serde_json::to_value(&updated_auth_user).ok());
     audit::log(
         &app_state.pool,
         requester.id,
         "updated",
         "users",
         user_id,
-        serde_json::to_value(&previous_user).ok(),
-        serde_json::to_value(&updated_auth_user).ok(),
+        previous_audit_snapshot,
+        updated_audit_snapshot,
     )
     .await;
     Ok(Json(updated_auth_user))

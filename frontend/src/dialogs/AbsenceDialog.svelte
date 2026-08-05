@@ -132,8 +132,8 @@
     if (text.includes("Failed to deserialize")) {
       return $t("Invalid date.");
     }
-    if (text.includes("Not enough remaining vacation days")) {
-      return $t("Not enough remaining vacation days.");
+    if (text.includes("Not enough remaining leave-account days")) {
+      return $t("Not enough remaining leave-account days.");
     }
 
     const translated = $t(text);

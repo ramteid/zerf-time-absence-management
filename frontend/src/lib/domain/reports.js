@@ -4,7 +4,7 @@ import { absenceCategories } from "../../stores.js";
 // Build a slug→cost_type lookup map from the absenceCategories store.
 // Used to identify flextime-cost categories that must be excluded from
 // leave-day statistics (their days still require hours, so they are not
-// "absences" in the leave-balance sense).
+// "absences" in the leave-account sense).
 function slugToCostType() {
   const costTypeBySlug = new Map();
   for (const category of get(absenceCategories)) {
@@ -75,6 +75,17 @@ export function teamCategoryRowTotal(row, selectedCategories = null) {
         ? total
         : total + (category.minutes || 0),
     0,
+  );
+}
+
+// Leave-account report data is keyed solely by category_id. Names are display
+// metadata and are deliberately not used to join a row to its account column:
+// two categories may legitimately have the same visible name.
+export function leaveAccountUsage(row, categoryId) {
+  return (
+    (row?.leave_account_usage || []).find(
+      (usage) => usage.category_id === categoryId,
+    ) || { taken_days: 0, planned_days: 0 }
   );
 }
 

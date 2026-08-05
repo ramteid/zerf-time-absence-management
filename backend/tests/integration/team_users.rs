@@ -50,7 +50,6 @@ async fn team_users_scoped_assistant_management() {
             .post(
                 "/api/v1/team-users",
                 &json!({"email":"asst-disabled@example.com","first_name":"Ash","last_name":"Disabled",
-                    "leave_days_current_year":10,"leave_days_next_year":10,"annual_leave_days":10,
                     "start_date":"2024-01-01"}),
             )
             .await;
@@ -92,11 +91,22 @@ async fn team_users_scoped_assistant_management() {
     // -- Create: role and approver are always forced, client overrides ignored --
     let assistant_id;
     {
+        let (st, definitions) = lead.get("/api/v1/leave-accounts").await;
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "lead can load leave-account definitions"
+        );
+        let leave_account_category_id = definitions
+            .as_array()
+            .and_then(|accounts| accounts.first())
+            .and_then(|account| account["category_id"].as_i64())
+            .expect("seeded leave account");
         let (st, body) = lead
             .post(
                 "/api/v1/team-users",
                 &json!({"email":"asst-tu1@example.com","first_name":"Ash","last_name":"Helper",
-                    "leave_days_current_year":10,"leave_days_next_year":10,"annual_leave_days":10,
+                    "leave_accounts":[{"category_id":leave_account_category_id,"base_days":10,"current_year_days":9,"next_year_days":8}],
                     "start_date":"2024-01-01",
                     "role":"admin","approver_ids":[1]}),
             )
@@ -107,6 +117,23 @@ async fn team_users_scoped_assistant_management() {
             body["user"]["role"], "assistant",
             "role forced to assistant"
         );
+        let (st, accounts) = lead
+            .get(&format!("/api/v1/users/{assistant_id}/leave-accounts"))
+            .await;
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "lead can inspect assistant leave accounts"
+        );
+        let account = accounts
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|account| account["category_id"] == leave_account_category_id)
+            .expect("explicit assistant leave account");
+        assert_eq!(account["base_days"], 10);
+        assert_eq!(account["current_year_days"], 9);
+        assert_eq!(account["next_year_days"], 8);
     }
 
     // -- List now includes the assistant with full fields --
@@ -240,8 +267,7 @@ async fn team_users_scoped_assistant_management() {
             .post(
                 "/api/v1/users",
                 &json!({"email":"admin-created-employee@example.com","first_name":"Reg","last_name":"Ular",
-                    "role":"employee","weekly_hours":39,"leave_days_current_year":30,"leave_days_next_year":30,
-                    "annual_leave_days":30,"start_date":"2024-01-01","approver_ids":[lead_id]}),
+                    "role":"employee","weekly_hours":39,"start_date":"2024-01-01","approver_ids":[lead_id]}),
             )
             .await;
         assert_eq!(st, StatusCode::OK, "admin still creates any role");
