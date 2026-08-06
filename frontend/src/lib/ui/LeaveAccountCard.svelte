@@ -131,15 +131,15 @@
     align-items: baseline;
     gap: 4px;
     flex: 0 0 auto;
-    font-size: 0.9375rem;
-    font-weight: 500;
+    font-size: 1.0625rem;
+    font-weight: 600;
     white-space: nowrap;
   }
 
   .leave-account-card-count-total {
     color: var(--text-tertiary);
-    font-size: 0.8125rem;
-    font-weight: 400;
+    font-size: 0.9375rem;
+    font-weight: 600;
   }
 
   .leave-account-card-details {
