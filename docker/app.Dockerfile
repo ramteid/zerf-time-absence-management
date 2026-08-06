@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 #
 # ---------- Frontend build stage ----------
-FROM node:26-trixie-slim AS frontend-builder
+FROM node:26-alpine AS frontend-builder
 WORKDIR /build
 ARG ZERF_FRONTEND_DEBUG_BUILD=false
 ENV CI=1
@@ -17,7 +17,10 @@ COPY frontend/ ./
 RUN npm run build
 
 # ---------- Backend build stage ----------
-FROM rust:1-trixie AS backend-builder
+# The slim variant still ships a C toolchain (needed to build `ring`, a
+# transitive rustls dependency) but is ~750 MB smaller than the full image --
+# it just drops extras (docs, extra target platforms) neither stage needs.
+FROM rust:1-slim-trixie AS backend-builder
 WORKDIR /build
 ARG ZERF_BUILD_PROFILE=release
 ENV CARGO_TERM_COLOR=always

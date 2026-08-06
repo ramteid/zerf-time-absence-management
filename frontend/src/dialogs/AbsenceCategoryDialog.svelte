@@ -30,8 +30,12 @@
   let unpaid = template.unpaid ?? false;
   $: if (cost_type !== "none") unpaid = false;
   $: hasLeaveAccount = cost_type === "vacation";
+  // cost_type is immutable once a category exists at all: "none" and
+  // "flextime" stay freely interchangeable for an existing category (no
+  // data implications), but entering or leaving "vacation" is a one-way
+  // door — the backend won't let a leave-account category be un-set once
+  // balances may depend on it, nor let one be created retroactively.
   $: existingLeaveAccount = !isNew && template.cost_type === "vacation";
-  $: existingNonLeaveAccount = !isNew && template.cost_type !== "vacation";
   $: if (hasLeaveAccount) auto_approve_past = false;
   let error = "";
   let saving = false;
@@ -202,7 +206,6 @@
     <div>
       <label class="zf-check-label">
         <input
-          id="abscat-cost-type-vacation"
           type="radio"
           name="cost_type"
           value="none"
@@ -245,11 +248,12 @@
     <div>
       <label class="zf-check-label">
         <input
+          id="abscat-cost-type-vacation"
           type="radio"
           name="cost_type"
           value="vacation"
           bind:group={cost_type}
-          disabled={existingNonLeaveAccount}
+          disabled={!isNew}
         />
         <span>{$t("label_cost_type_vacation")}</span>
         <button
