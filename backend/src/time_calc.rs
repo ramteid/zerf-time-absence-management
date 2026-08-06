@@ -1,23 +1,31 @@
 use crate::error::{AppError, AppResult};
 use chrono::{Datelike, Duration, NaiveDate, NaiveTime};
 
-/// Computes the total break deduction in minutes for a set of work entries within one day.
+/// Computes the automatic break deduction in minutes for a set of work entries within one day.
 ///
 /// `rules` is a slice of `(threshold_min, deduction_min)` pairs representing break tiers.
-/// For each merged continuous work block the **highest applicable rule** — the one with the
-/// greatest threshold that the block strictly exceeds — is selected and its deduction
-/// is applied exactly once. Rules are **not** cumulative: only one rule fires per block.
+/// This matches German labor law (ArbZG §4: a break is required for a day's work of
+/// "mehr als sechs [neun] Stunden **insgesamt**" — more than six/nine hours **in total**).
+/// The **highest applicable rule** — the one with the greatest threshold that the day's
+/// *total* worked time strictly exceeds — determines how many minutes of break the day
+/// requires; rules are **not** cumulative. Thresholds are exclusive: a day of exactly
+/// 6h00m worked does not trigger the 6-hour rule; only 6h01m or more does.
 ///
-/// Thresholds are exclusive, matching German labor law (ArbZG §4: a break is required for
-/// work of "mehr als sechs Stunden" — more than six hours). A block of exactly 6h00m does
-/// not trigger the 6-hour rule; only 6h01m or more does.
+/// Any real gap between logged entries (there is no separate "break" category in this
+/// app — a break is always just unlogged time) counts as break already taken and is
+/// credited against the requirement. Only the shortfall, if any, is deducted from the
+/// credited work minutes. A day with one continuous entry span (no gaps) has nothing to
+/// credit, so the full requirement is deducted — unchanged from a naive per-block reading.
 ///
-/// Example: rules = [(360, 30), (540, 45)]. A 10-hour block triggers the
-/// 9-hour rule (45 min), not both rules (75 min would be wrong).
+/// Example: rules = [(360, 30), (540, 45)], a day worked 08:00-18:00 with a 14:00-14:30
+/// gap (9h30m worked, 30 min already taken as a real gap): the day's total (570 min)
+/// exceeds the 9-hour tier, requiring 45 min of break; 30 min was already taken, so only
+/// 15 min more is deducted from the credited total.
 ///
 /// Entries that are directly adjacent (one ends exactly when the next begins) are merged
-/// into a single continuous work block. A gap of even one minute breaks continuity.
-/// Overlapping entries are merged as well (handled defensively).
+/// into a single continuous work block for the purposes of computing the day's total
+/// worked time and the wall-clock span; overlapping entries are merged as well (handled
+/// defensively). A gap of even one minute between blocks counts toward the taken break.
 pub fn compute_day_auto_break(entries: &[(NaiveTime, NaiveTime)], rules: &[(i64, i64)]) -> i64 {
     if entries.is_empty() || rules.is_empty() {
         return 0;
@@ -40,19 +48,27 @@ pub fn compute_day_auto_break(entries: &[(NaiveTime, NaiveTime)], rules: &[(i64,
         blocks.push((start, end));
     }
 
-    blocks
-        .into_iter()
-        .map(|(s, e)| {
-            let duration = (e - s).num_minutes();
-            // Highest applicable rule wins; 0 when no rule threshold is strictly exceeded.
-            rules
-                .iter()
-                .filter(|(threshold, _)| duration > *threshold)
-                .map(|(_, deduction)| *deduction)
-                .max()
-                .unwrap_or(0)
-        })
-        .sum()
+    // Day total worked time, summed across all blocks (this is the "insgesamt" ArbZG §4
+    // tests against — not each block's own duration).
+    let worked_minutes: i64 = blocks.iter().map(|(s, e)| (*e - *s).num_minutes()).sum();
+
+    // Wall-clock span from the first entry's start to the last entry's end, minus the
+    // worked time, is the total real rest time already taken between blocks today.
+    // Safe to unwrap: `blocks` is non-empty because `entries` was checked non-empty above.
+    let first_start = blocks.first().unwrap().0;
+    let last_end = blocks.last().unwrap().1;
+    let taken_minutes = ((last_end - first_start).num_minutes() - worked_minutes).max(0);
+
+    // Highest applicable rule wins; 0 when no rule threshold is strictly exceeded by the
+    // day's total worked time.
+    let required_minutes = rules
+        .iter()
+        .filter(|(threshold, _)| worked_minutes > *threshold)
+        .map(|(_, deduction)| *deduction)
+        .max()
+        .unwrap_or(0);
+
+    (required_minutes - taken_minutes).max(0)
 }
 
 /// Compute the Monday of the ISO week that contains `date`.
@@ -284,20 +300,28 @@ mod tests {
     }
 
     #[test]
-    fn compute_day_auto_break_one_minute_gap_breaks_continuity() {
-        // 8:00–12:00, then 12:01–16:00 → two separate blocks (4 h each, both < 6 h)
+    fn compute_day_auto_break_one_minute_gap_credits_only_that_minute() {
+        // 8:00–12:00, then 12:01–16:00 → two blocks, but the day's total worked time
+        // (479 min) still exceeds the 6 h threshold, so 30 min break is required. Only
+        // the 1-minute real gap is credited against it, leaving a 29-minute deduction.
+        // (Splitting entries with a token 1-minute gap does NOT void the break rule the
+        // way it did under the old per-block logic — that was a loophole.)
         assert_eq!(
             compute_day_auto_break(&[(t(8, 0), t(12, 0)), (t(12, 1), t(16, 0))], &[(360, 30)]),
-            0
+            29
         );
     }
 
     #[test]
-    fn compute_day_auto_break_two_independent_long_blocks_deducts_twice() {
-        // morning 7:00–13:01 (6h01m), afternoon 14:00–20:01 (6h01m) → two deductions
+    fn compute_day_auto_break_gap_between_blocks_covers_the_days_requirement() {
+        // morning 7:00–13:01 (6h01m), afternoon 14:00–20:01 (6h01m), 59-min gap between.
+        // Day total worked = 722 min > 6 h → 30 min required. The 59-minute real gap
+        // already taken between the blocks more than covers that → 0 deduction.
+        // (The old per-block logic deducted 30+30=60 min here — double-counting, since
+        // the person already rested far more than the law requires for the day.)
         assert_eq!(
             compute_day_auto_break(&[(t(7, 0), t(13, 1)), (t(14, 0), t(20, 1))], &[(360, 30)]),
-            60
+            0
         );
     }
 
@@ -342,13 +366,54 @@ mod tests {
     }
 
     #[test]
-    fn compute_day_auto_break_two_tier_each_block_independent() {
-        // Two separate long blocks: first is 10 h (tier 2), second is 7 h (tier 1).
-        // Total deduction: 45 + 30 = 75.
+    fn compute_day_auto_break_gap_between_blocks_covers_two_tier_requirement() {
+        // Two separate long blocks: 10 h and 7 h, with a 60-min gap between them.
+        // Day total worked = 17 h → tier 2 (45 min) required. The 60-min gap already
+        // taken more than covers it → 0 deduction (not 45+30=75, the old per-block sum).
         let rules: &[(i64, i64)] = &[(360, 30), (540, 45)];
         assert_eq!(
             compute_day_auto_break(&[(t(0, 0), t(10, 0)), (t(11, 0), t(18, 0))], rules),
-            75
+            0
+        );
+    }
+
+    #[test]
+    fn compute_day_auto_break_johanna_case_gap_falls_short_of_requirement() {
+        // Real production scenario that exposed the per-block bug: 08:00–14:00
+        // (exactly 6 h, doesn't itself trigger anything) + 14:30–18:00 (3.5 h), with a
+        // 30-min logged gap. Day total worked = 9.5 h > 9 h → 45 min required. Only 30
+        // min was actually taken as a break, so 15 min is deducted from the credited
+        // total (570 → 555 min). The old per-block logic deducted 0, silently crediting
+        // the full 9.5 h despite an insufficient break.
+        let rules: &[(i64, i64)] = &[(360, 30), (540, 45)];
+        assert_eq!(
+            compute_day_auto_break(&[(t(8, 0), t(14, 0)), (t(14, 30), t(18, 0))], rules),
+            15
+        );
+    }
+
+    #[test]
+    fn compute_day_auto_break_orell_case_generous_gap_needs_no_extra_deduction() {
+        // Real production scenario, the mirror-image bug: 07:15–14:00 (6h45m) +
+        // 18:00–23:45 (5h45m), with a real 4-hour gap. Day total worked = 12.5 h > 9 h
+        // → 45 min required, but the 4-hour gap already taken far exceeds that → 0
+        // deduction. The old per-block logic deducted 30 min (from the first block
+        // alone) even though the person had already rested plenty that day.
+        let rules: &[(i64, i64)] = &[(360, 30), (540, 45)];
+        assert_eq!(
+            compute_day_auto_break(&[(t(7, 15), t(14, 0)), (t(18, 0), t(23, 45))], rules),
+            0
+        );
+    }
+
+    #[test]
+    fn compute_day_auto_break_partial_gap_deducts_only_the_shortfall() {
+        // 7 h block + 1 h block with a 20-min gap. Day total worked = 8 h > 6 h → 30 min
+        // required. 20 min was already taken, so only the 10-minute shortfall is
+        // deducted — not the full 30 min again.
+        assert_eq!(
+            compute_day_auto_break(&[(t(8, 0), t(15, 0)), (t(15, 20), t(16, 20))], &[(360, 30)]),
+            10
         );
     }
 }

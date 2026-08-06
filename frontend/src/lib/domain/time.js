@@ -128,19 +128,23 @@ export function buildBreakRules(settings) {
 }
 
 /**
- * Computes the total automatic break deduction in minutes for all entries on a
- * single day. Mirrors the backend `compute_day_auto_break` Rust function exactly.
+ * Computes the day's break requirement and how much of it is already covered.
+ * Mirrors the backend `compute_day_auto_break` (`backend/src/time_calc.rs`) exactly.
  *
  * Adjacent entries (end time == start time of next) are treated as one continuous
- * work block. Even a one-minute gap breaks continuity. Overlapping entries are merged.
+ * work block; overlapping entries are merged too. The day's *total* worked time
+ * (summed across all blocks) — not each block independently — is what's tested
+ * against the rule tiers, matching German labor law (ArbZG §4: a break is required
+ * for a day's work of "mehr als sechs Stunden insgesamt" — more than six hours **in
+ * total**). Thresholds are exclusive: a day of exactly 6h00m worked does not trigger
+ * the 6-hour rule; only 6h01m or more does. The **highest applicable rule** is
+ * selected — rules are not cumulative.
  *
- * For each block, the **highest applicable rule** is selected and its deduction applied
- * exactly once — rules are not cumulative. A 10-hour block with rules [(6h→30min),
- * (9h→45min)] deducts 45 min, not 75 min.
- *
- * Thresholds are exclusive, matching German labor law (ArbZG §4: a break is required
- * for work of "mehr als sechs Stunden" — more than six hours). A block of exactly
- * 6h00m does not trigger the 6-hour rule; only 6h01m or more does.
+ * There is no separate "break" category in this app — a break is always just
+ * unlogged time between entries. Any such real gap within the day's overall span is
+ * credited against the requirement; only the shortfall (if any) is deducted. A day
+ * with a single continuous block (no gaps) has nothing to credit, so the full
+ * requirement is deducted.
  *
  * Applies to all non-rejected entries (including drafts) so the time tracking page
  * shows the expected deduction before entries are approved.
@@ -149,10 +153,25 @@ export function buildBreakRules(settings) {
  * @param {Array}  categories  - Full category list for counts-as-work lookup.
  * @param {{thresholdHours: number, thresholdMinutes?: number, deductionMinutes: number}[]} rules
  *   Break rules sorted ascending by thresholdHours.
- * @returns {number} Total break deduction in minutes (>= 0).
+ * @returns {{
+ *   blocks: {start: number, end: number}[],
+ *   workedMin: number,
+ *   requiredMin: number,
+ *   takenMin: number,
+ *   deductionMin: number,
+ *   appliedRule: {thresholdHours: number, thresholdMinutes?: number, deductionMinutes: number}|null,
+ * }}
  */
-export function computeDayBreakDeduction(items, categories, rules) {
-  if (!items?.length || !rules?.length) return 0;
+export function computeDayBreakInfo(items, categories, rules) {
+  const empty = {
+    blocks: [],
+    workedMin: 0,
+    requiredMin: 0,
+    takenMin: 0,
+    deductionMin: 0,
+    appliedRule: null,
+  };
+  if (!items?.length || !rules?.length) return empty;
 
   // Only non-rejected entries that count as work, sorted by start time.
   const eligible = items
@@ -163,7 +182,7 @@ export function computeDayBreakDeduction(items, categories, rules) {
     }))
     .sort((a, b) => a.start - b.start);
 
-  if (!eligible.length) return 0;
+  if (!eligible.length) return empty;
 
   // Merge adjacent (start == last.end) and overlapping intervals into continuous blocks.
   const blocks = [];
@@ -176,20 +195,41 @@ export function computeDayBreakDeduction(items, categories, rules) {
     }
   }
 
-  // For each block: highest applicable rule wins (not cumulative).
-  return blocks.reduce((total, block) => {
-    const duration = block.end - block.start;
-    const deduction = rules
-      .filter(
-        (r) =>
-          duration >
-          (Number.isFinite(r.thresholdMinutes)
-            ? r.thresholdMinutes
-            : exclusiveThresholdMinutes(r.thresholdHours)),
-      )
-      .reduce((max, r) => Math.max(max, r.deductionMinutes), 0);
-    return total + deduction;
-  }, 0);
+  // Day total worked time, summed across all blocks — this is what ArbZG §4 tests
+  // against, not each block's own duration.
+  const workedMin = blocks.reduce((sum, b) => sum + (b.end - b.start), 0);
+
+  // Wall-clock span from the first entry's start to the last entry's end, minus the
+  // worked time, is the total real rest time already taken between blocks today.
+  const spanMin = blocks[blocks.length - 1].end - blocks[0].start;
+  const takenMin = Math.max(0, spanMin - workedMin);
+
+  // Highest applicable rule wins; stays null when no rule threshold is strictly
+  // exceeded by the day's total worked time. Rules are sorted ascending, so the
+  // last match encountered is the highest one.
+  let appliedRule = null;
+  for (const rule of rules) {
+    const thresholdMinutes = Number.isFinite(rule.thresholdMinutes)
+      ? rule.thresholdMinutes
+      : exclusiveThresholdMinutes(rule.thresholdHours);
+    if (workedMin > thresholdMinutes) {
+      appliedRule = rule;
+    }
+  }
+  const requiredMin = appliedRule?.deductionMinutes ?? 0;
+  const deductionMin = Math.max(0, requiredMin - takenMin);
+
+  return { blocks, workedMin, requiredMin, takenMin, deductionMin, appliedRule };
+}
+
+/**
+ * Total automatic break deduction in minutes for all entries on a single day.
+ * Thin wrapper around `computeDayBreakInfo` for callers that only need the number.
+ *
+ * @returns {number} Total break deduction in minutes (>= 0).
+ */
+export function computeDayBreakDeduction(items, categories, rules) {
+  return computeDayBreakInfo(items, categories, rules).deductionMin;
 }
 
 // Look up the absence category by slug from the store. Any caller that already

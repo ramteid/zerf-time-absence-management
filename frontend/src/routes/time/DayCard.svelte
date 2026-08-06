@@ -9,7 +9,7 @@
     buildBreakRules,
     canAddEntryForDay,
     categoryById,
-    computeDayBreakDeduction,
+    computeDayBreakInfo,
     creditedEntryMinutes,
     entryCountsAsWork,
   } from "../../lib/domain/time.js";
@@ -43,10 +43,18 @@
     ? (currentUser?.weekly_hours || 0) / potentialWorkdays
     : 0;
   $: breakRules = buildBreakRules($settings);
-  // Automatic break deduction for this day (0 when the feature is off).
-  $: dailyBreakMinutes = breakRules.length
-    ? computeDayBreakDeduction(day?.items, categories, breakRules)
-    : 0;
+  // Break requirement/coverage for this day (day-total based, ArbZG §4 "insgesamt";
+  // see computeDayBreakInfo). Empty breakdown when the feature is off.
+  $: breakInfo = breakRules.length
+    ? computeDayBreakInfo(day?.items, categories, breakRules)
+    : {
+        blocks: [],
+        requiredMin: 0,
+        takenMin: 0,
+        deductionMin: 0,
+        appliedRule: null,
+      };
+  $: dailyBreakMinutes = breakInfo.deductionMin;
   // Daily total: sum of credited entry minutes minus the automatic break deduction,
   // matching the value the backend uses in the flextime account.
   $: dailyTotalMinutes = Math.max(
@@ -66,76 +74,48 @@
     return parseInt(parts[0], 10) * 60 + parseInt(parts[1] || "0", 10);
   }
 
-  /** Computes break marker positions for all entries in a day.
-   *  Adjacent entries (end == start of next) count as one continuous block.
-   *  For each block the highest applicable rule is used (not cumulative), placing
-   *  exactly one marker per qualifying block at the rule's threshold time point.
+  /** Places the existing in-entry hatch marker, but only for the common single-block
+   *  day (one continuous stretch, no gaps) where the deduction is unambiguously "at"
+   *  the moment the block crosses its rule's threshold. On multi-block days a
+   *  deduction (if any, once real gaps are credited) is no longer a single instant in
+   *  time — those days show the day-level shortfall indicator below instead.
    *  Returns a map from entry.id to { positionFraction, deductionFraction }. */
-  function computeBreakMarkers(items, cats, rules) {
-    if (!items?.length || !rules?.length) return {};
+  function computeSingleBlockMarker(items, cats, info) {
+    if (info.blocks.length !== 1 || !info.appliedRule) return {};
+    const block = info.blocks[0];
+    const breakTime = block.start + info.appliedRule.thresholdHours * 60;
 
-    // Only non-rejected entries that count as work — mirrors computeDayBreakDeduction exactly.
-    const eligible = items
-      .filter((e) => e.status !== "rejected" && entryCountsAsWork(e, cats))
-      .map((e) => ({
-        id: e.id,
-        _start: parseHHMM(e.start_time),
-        _end: parseHHMM(e.end_time),
-      }))
-      .sort((a, b) => a._start - b._start);
-
-    const markers = {};
-    let i = 0;
-    while (i < eligible.length) {
-      let blockStart = eligible[i]._start;
-      let blockEnd = eligible[i]._end;
-      const blockEntries = [eligible[i]];
-      i++;
-
-      // Extend the block while entries are directly adjacent or overlapping.
-      while (i < eligible.length && eligible[i]._start <= blockEnd) {
-        blockEnd = Math.max(blockEnd, eligible[i]._end);
-        blockEntries.push(eligible[i]);
-        i++;
-      }
-
-      const blockDuration = blockEnd - blockStart;
-
-      // Find the highest applicable rule for this block. Thresholds are exclusive
-      // (mirrors computeDayBreakDeduction / ArbZG §4 "more than six hours").
-      let applicableRule = null;
-      for (const rule of rules) {
-        if (blockDuration > rule.thresholdHours * 60) {
-          applicableRule = rule; // last (highest threshold strictly exceeded) wins
-        }
-      }
-      if (!applicableRule) continue;
-
-      // Wall-clock time at which the break marker is placed.
-      const breakTime = blockStart + applicableRule.thresholdHours * 60;
-
-      for (const entry of blockEntries) {
-        // Use <= so that when breakTime lands exactly on an entry boundary the
-        // marker still appears rather than being silently omitted.
-        if (breakTime >= entry._start && breakTime <= entry._end) {
-          const entryDuration = entry._end - entry._start;
-          markers[entry.id] = {
-            positionFraction: Math.min(
-              (breakTime - entry._start) / entryDuration,
-              1,
-            ),
-            deductionFraction: applicableRule.deductionMinutes / entryDuration,
-          };
-          break;
-        }
+    const eligible = (items || []).filter(
+      (e) => e.status !== "rejected" && entryCountsAsWork(e, cats),
+    );
+    for (const entry of eligible) {
+      const start = parseHHMM(entry.start_time);
+      const end = parseHHMM(entry.end_time);
+      // Use <= so that when breakTime lands exactly on an entry boundary the
+      // marker still appears rather than being silently omitted.
+      if (breakTime >= start && breakTime <= end) {
+        const entryDuration = end - start;
+        return {
+          [entry.id]: {
+            positionFraction: Math.min((breakTime - start) / entryDuration, 1),
+            deductionFraction: info.appliedRule.deductionMinutes / entryDuration,
+          },
+        };
       }
     }
-    return markers;
+    return {};
   }
 
-  $: breakMarkers = breakRules.length
-    ? computeBreakMarkers(day?.items, categories, breakRules)
-    : {};
+  $: breakMarkers = computeSingleBlockMarker(day?.items, categories, breakInfo);
+
+  // A real gap between blocks (the only way a "break" is ever logged in this app) that
+  // doesn't fully cover the day's legally required break minutes. Shown as a status
+  // pill so the shortfall is visible while the day is still editable, instead of only
+  // showing up later as a smaller-than-expected total.
+  $: breakShortfall =
+    breakInfo.blocks.length > 1 && breakInfo.deductionMin > 0
+      ? { takenMin: breakInfo.takenMin, requiredMin: breakInfo.requiredMin }
+      : null;
 </script>
 
 <div
@@ -173,6 +153,19 @@
           {day.absenceKind
             ? absenceKindLabel(day.absenceKind)
             : day.holidayName || $t("Public holiday")}
+        </span>
+      </div>
+    {:else if breakShortfall}
+      <div
+        class="day-status-indicator"
+        style:--status-color="var(--warning-text)"
+      >
+        <span class="day-status-dot" aria-hidden="true"></span>
+        <span class="day-status-text">
+          {$t("Break too short: {taken}/{required} min", {
+            taken: breakShortfall.takenMin,
+            required: breakShortfall.requiredMin,
+          })}
         </span>
       </div>
     {/if}

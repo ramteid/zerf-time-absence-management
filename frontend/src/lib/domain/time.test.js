@@ -5,6 +5,7 @@ import {
   buildBreakRules,
   buildWeekDays,
   computeDayBreakDeduction,
+  computeDayBreakInfo,
   creditedEntryMinutes,
   filterWeekAbsences,
   reopenableWeekEntries,
@@ -395,10 +396,44 @@ describe("computeDayBreakDeduction", () => {
     expect(computeDayBreakDeduction(items, workCat, rules1)).toBe(30);
   });
 
-  it("deducts once per qualifying block independently", () => {
-    // Morning: 08:00–14:30 (6.5 h). Gap. Afternoon: 15:00–21:30 (6.5 h). Two blocks.
+  it("credits a real gap between blocks against the day's total requirement", () => {
+    // Morning: 08:00–14:30 (6.5 h). 30-min gap. Afternoon: 15:00–21:30 (6.5 h).
+    // Day total worked = 13 h > 6 h → 30 min required; the 30-min gap already taken
+    // covers it exactly → 0 deduction (not 30+30=60, the old per-block sum).
     const items = [entry("08:00", "14:30"), entry("15:00", "21:30")];
-    expect(computeDayBreakDeduction(items, workCat, rules1)).toBe(60);
+    expect(computeDayBreakDeduction(items, workCat, rules1)).toBe(0);
+  });
+
+  it("deducts only the shortfall when the gap partially covers the requirement", () => {
+    // 7 h block + 1 h block with a 20-min gap. Day total worked = 8 h > 6 h → 30 min
+    // required. 20 min was already taken, so only the 10-min shortfall is deducted.
+    const items = [entry("08:00", "15:00"), entry("15:20", "16:20")];
+    expect(computeDayBreakDeduction(items, workCat, rules1)).toBe(10);
+  });
+
+  it("real production case (Johanna): gap falls short of the day's requirement", () => {
+    // 08:00–14:00 (exactly 6 h) + 14:30–18:00 (3.5 h), 30-min gap. Day total = 9.5 h
+    // > 9 h → 45 min required (two-tier). Only 30 min taken → 15-min deduction.
+    // The old per-block logic deducted 0 (neither block alone exceeded 6 h).
+    const items = [entry("08:00", "14:00"), entry("14:30", "18:00")];
+    expect(computeDayBreakDeduction(items, workCat, rules2)).toBe(15);
+  });
+
+  it("real production case (Orell): generous gap needs no extra deduction", () => {
+    // 07:15–14:00 (6h45m) + 18:00–23:45 (5h45m), 4-hour gap. Day total = 12.5 h > 9 h
+    // → 45 min required, already covered by the 4-hour gap → 0 deduction. The old
+    // per-block logic deducted 30 min (from the first block alone).
+    const items = [entry("07:15", "14:00"), entry("18:00", "23:45")];
+    expect(computeDayBreakDeduction(items, workCat, rules2)).toBe(0);
+  });
+
+  it("a token 1-minute gap no longer voids the day's requirement", () => {
+    // 08:00–12:00, 12:01–16:00. Day total worked = 479 min > 6 h → 30 min required.
+    // Only the 1-minute real gap is credited → 29-min deduction. Under the old
+    // per-block logic, splitting into two 4-hour blocks zeroed the deduction entirely
+    // — a loophole this fix closes.
+    const items = [entry("08:00", "12:00"), entry("12:01", "16:00")];
+    expect(computeDayBreakDeduction(items, workCat, rules1)).toBe(29);
   });
 
   it("excludes rejected entries from block computation", () => {
@@ -461,9 +496,73 @@ describe("computeDayBreakDeduction", () => {
     expect(computeDayBreakDeduction(items, workCat, rules2)).toBe(0);
   });
 
-  it("two-tier: each block applies its own highest rule independently", () => {
-    // Block 1 (10 h) → tier 2 → 45 min. Block 2 (7 h) → tier 1 → 30 min. Total = 75.
+  it("two-tier: a gap between blocks covers the day-total requirement", () => {
+    // Block 1 (10 h) + block 2 (7 h), 60-min gap. Day total worked = 17 h > 9 h →
+    // tier 2 (45 min) required. The 60-min gap already taken covers it → 0 deduction
+    // (not 45+30=75, the old per-block sum).
     const items = [entry("00:00", "10:00"), entry("11:00", "18:00")];
-    expect(computeDayBreakDeduction(items, workCat, rules2)).toBe(75);
+    expect(computeDayBreakDeduction(items, workCat, rules2)).toBe(0);
+  });
+});
+
+describe("computeDayBreakInfo", () => {
+  function entry(startTime, endTime, opts = {}) {
+    return {
+      id: Math.random(),
+      start_time: startTime,
+      end_time: endTime,
+      status: opts.status ?? "approved",
+      category_id: opts.category_id ?? 1,
+      counts_as_work: opts.counts_as_work,
+    };
+  }
+  const workCat = [{ id: 1, counts_as_work: true }];
+  const rules2 = [
+    { thresholdHours: 6, deductionMinutes: 30 },
+    { thresholdHours: 9, deductionMinutes: 45 },
+  ];
+
+  it("returns the empty breakdown when there are no items or rules", () => {
+    expect(computeDayBreakInfo([], workCat, rules2)).toEqual({
+      blocks: [],
+      workedMin: 0,
+      requiredMin: 0,
+      takenMin: 0,
+      deductionMin: 0,
+      appliedRule: null,
+    });
+    const items = [entry("08:00", "15:00")];
+    expect(computeDayBreakInfo(items, workCat, []).deductionMin).toBe(0);
+  });
+
+  it("reports required/taken/deduction for a single continuous block", () => {
+    // 7 h continuous, no gap → full 30-min requirement deducted, nothing taken.
+    const items = [entry("08:00", "15:00")];
+    const info = computeDayBreakInfo(items, workCat, rules2);
+    expect(info.blocks).toEqual([{ start: 480, end: 900 }]);
+    expect(info.workedMin).toBe(420);
+    expect(info.requiredMin).toBe(30);
+    expect(info.takenMin).toBe(0);
+    expect(info.deductionMin).toBe(30);
+    expect(info.appliedRule?.deductionMinutes).toBe(30);
+  });
+
+  it("reports the Johanna case breakdown (required 45, taken 30, deduction 15)", () => {
+    const items = [entry("08:00", "14:00"), entry("14:30", "18:00")];
+    const info = computeDayBreakInfo(items, workCat, rules2);
+    expect(info.blocks.length).toBe(2);
+    expect(info.workedMin).toBe(570);
+    expect(info.requiredMin).toBe(45);
+    expect(info.takenMin).toBe(30);
+    expect(info.deductionMin).toBe(15);
+  });
+
+  it("reports the Orell case breakdown (required 45, taken 240, deduction 0)", () => {
+    const items = [entry("07:15", "14:00"), entry("18:00", "23:45")];
+    const info = computeDayBreakInfo(items, workCat, rules2);
+    expect(info.blocks.length).toBe(2);
+    expect(info.requiredMin).toBe(45);
+    expect(info.takenMin).toBe(240);
+    expect(info.deductionMin).toBe(0);
   });
 });

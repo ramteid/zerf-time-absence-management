@@ -1286,6 +1286,8 @@ const TRANSLATIONS = {
     "Please enter both second threshold and second deduction, or leave both empty.":
       "Bitte beide Felder der zweiten Stufe ausfüllen oder beide leer lassen.",
     Break: "Pause",
+    "Break too short: {taken}/{required} min":
+      "Pause zu kurz: {taken}/{required} Min.",
     Override: "Abweichung",
     days: "Tage",
     workday: "Arbeitstag",
