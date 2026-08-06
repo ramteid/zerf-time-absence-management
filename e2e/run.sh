@@ -53,21 +53,8 @@ ZERF_POSTGRES_DB=zerf_e2e
 ZERF_POSTGRES_USER=zerf_e2e
 EOF
 
-echo "Building images…"
-# Build one service at a time rather than a single `up --build` (which lets
-# BuildKit run the Postgres image's layer extraction, the Rust compile, and
-# the Vite build fully in parallel). On the CPU/IO-constrained CI runner that
-# three-way contention has intermittently raced the app image's final layer
-# export, leaving /app/static/assets incomplete while index.html (copied in
-# the same instruction) still came through fine — surfacing as 404s on every
-# hashed JS/CSS asset in the very first browser test of the suite. Building
-# sequentially removes the contention window.
-compose build postgres
-compose build backup
-compose build app
-
 echo "Starting the production-like stack…"
-compose up --wait --wait-timeout 420 -d
+compose up --build --wait --wait-timeout 420 -d
 
 echo "Waiting for the API at $BASE_URL …"
 ready=0
