@@ -192,12 +192,23 @@ test("employee: request absences including an independent leave account", async 
   await requestAbsence("Training", 35, 35, "E2E training");
   await requestAbsence(NO_COST_ABSENCE_CATEGORY, 42, 42, "E2E day off");
 
+  // The card's numbers are split across two elements: the header fraction
+  // (".leave-account-card-count", Available / Entitlement) and the detail
+  // rows below it (".leave-account-card-details", Taken / Approved planned /
+  // Requested). Comparing both together is what proves requesting an
+  // absence on a *different* leave account left this one untouched.
+  async function cardStats(card) {
+    const count = await card.locator(".leave-account-card-count").innerText();
+    const details = await card
+      .locator(".leave-account-card-details")
+      .innerText();
+    return `${count}\n${details}`;
+  }
+
   const vacationCard = page.locator(".leave-account-card", {
     hasText: "Vacation",
   });
-  const vacationStatsBefore = await vacationCard
-    .locator(".leave-account-card-stats")
-    .innerText();
+  const vacationStatsBefore = await cardStats(vacationCard);
 
   await requestAbsence(
     LEAVE_ACCOUNT_CATEGORY,
@@ -210,12 +221,10 @@ test("employee: request absences including an independent leave account", async 
     hasText: LEAVE_ACCOUNT_CATEGORY,
   });
   await expect(educationCard).toBeVisible();
-  await expect(educationCard.locator(".leave-account-card-stats")).toContainText(
-    /Requested\s*1/,
-  );
-  await expect(vacationCard.locator(".leave-account-card-stats")).toHaveText(
-    vacationStatsBefore,
-  );
+  await expect(
+    educationCard.locator(".leave-account-card-details"),
+  ).toContainText(/Requested\s*1/);
+  await expect(await cardStats(vacationCard)).toBe(vacationStatsBefore);
 
   // Scoped to the absence-entry row, not a bare page-wide text search:
   // Playwright's getByText does a case-insensitive substring match, and the
