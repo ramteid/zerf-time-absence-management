@@ -73,10 +73,27 @@ pub const BACKUP_UPLOAD_PASSWORD_KEY: &str = "backup_upload_password";
 
 // Backup scheduling — migrated from env vars into app_settings.
 pub const BACKUP_INTERVAL_DAYS_KEY: &str = "backup_interval_days";
-/// UTC timestamp written by backup.sh after every successful backup.
+/// UTC timestamp written by backup.sh after every **scheduled** backup only.
 /// Persists across container restarts so the interval is measured from the
-/// last actual backup, not from when the container started.
+/// last actual backup, not from when the container started. A manual backup
+/// (see `BACKUP_REQUESTED_AT_KEY`) deliberately does NOT update this key:
+/// doing so would postpone the next scheduled run, and repeated manual runs
+/// could starve the schedule indefinitely.
 pub const BACKUP_LAST_SUCCESS_AT_KEY: &str = "backup_last_success_at";
+/// UTC timestamp written by the admin's "Back up now" button (see
+/// `request_backup_now`). The backup container's polling loop treats a
+/// non-empty value that it hasn't already handled as a request to back up
+/// immediately, regardless of `BACKUP_INTERVAL_DAYS_KEY`. Never cleared by
+/// the app — the backup container is solely responsible for tracking which
+/// requests it has already handled (`backup_last_request_handled_at`, a
+/// script-internal key with no Rust constant), so that a failed clear can
+/// never re-trigger a loop of repeated backups.
+pub const BACKUP_REQUESTED_AT_KEY: &str = "backup_requested_at";
+/// UTC timestamp written by backup.sh after every **manual** backup
+/// (triggered via `BACKUP_REQUESTED_AT_KEY`). Kept separate from
+/// `BACKUP_LAST_SUCCESS_AT_KEY` for the reason documented there. The admin
+/// settings UI shows the more recent of the two.
+pub const BACKUP_LAST_MANUAL_AT_KEY: &str = "backup_last_manual_at";
 
 pub async fn load_setting(
     pool: &crate::db::DatabasePool,
@@ -141,6 +158,21 @@ pub async fn save_setting_tx(
     SettingsDb::save_setting_tx(tx, key, value).await
 }
 
+/// Record an on-demand backup request for the backup container's polling loop
+/// to pick up (see `BACKUP_REQUESTED_AT_KEY`). The value only needs to be a
+/// unique, non-empty token — the shell script never parses it as a date, it
+/// just compares it for equality against what it has already handled — so an
+/// RFC 3339 timestamp is used purely for human-readable debugging when
+/// inspecting `app_settings` directly.
+pub async fn request_backup_now(pool: &crate::db::DatabasePool) -> AppResult<()> {
+    let db = SettingsDb::new(pool.clone());
+    let mut tx = db.begin().await?;
+    let now = chrono::Utc::now().to_rfc3339();
+    save_setting_tx(&mut tx, BACKUP_REQUESTED_AT_KEY, &now).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
 /// Load settings that are shown in the public (unauthenticated) settings response.
 pub async fn load_all_public_settings(
     pool: &crate::db::DatabasePool,
@@ -169,6 +201,16 @@ pub async fn load_all_public_settings(
         auto_break_deduction_minutes_2: auto_break_deduction_2_str.parse().ok(),
         smtp_enabled: load_setting(pool, SMTP_ENABLED_KEY, "false").await? == "true",
     })
+}
+
+/// `app_settings` stores "unset" as an empty string (the `load_setting`
+/// default); convert that to `None` for API responses that should omit it.
+fn non_empty(value: String) -> Option<String> {
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
 }
 
 /// Load the full admin settings response (public settings + SMTP + reminders + upload).
@@ -209,6 +251,9 @@ pub async fn load_admin_settings(pool: &crate::db::DatabasePool) -> AppResult<Ad
         .await?
         .parse()
         .unwrap_or(1);
+    let backup_last_success_at =
+        non_empty(load_setting(pool, BACKUP_LAST_SUCCESS_AT_KEY, "").await?);
+    let backup_last_manual_at = non_empty(load_setting(pool, BACKUP_LAST_MANUAL_AT_KEY, "").await?);
 
     let allow_team_lead_manage_assistants = team_lead_assistant_management_enabled(pool).await?;
 
@@ -234,6 +279,8 @@ pub async fn load_admin_settings(pool: &crate::db::DatabasePool) -> AppResult<Ad
         backup_upload_url,
         backup_upload_password_set,
         backup_interval_days,
+        backup_last_success_at,
+        backup_last_manual_at,
         allow_team_lead_manage_assistants,
         payroll_report_enabled: payroll_report.enabled,
         payroll_report_recipients: payroll_report.recipients,
@@ -388,6 +435,12 @@ pub struct AdminSettingsData {
     pub backup_upload_password_set: bool,
     /// Interval between backups in days (read by backup.sh from app_settings).
     pub backup_interval_days: u32,
+    /// UTC timestamp of the last successful *scheduled* backup, or `None` if
+    /// none has run yet. Does not reflect manual runs — see `backup_last_manual_at`.
+    pub backup_last_success_at: Option<String>,
+    /// UTC timestamp of the last successful *manual* ("Back up now") backup,
+    /// or `None` if none has run yet.
+    pub backup_last_manual_at: Option<String>,
     /// When TRUE, non-admin team leads may create/manage "assistant" users
     /// assigned to them (see `/team-users*`). On by default.
     pub allow_team_lead_manage_assistants: bool,

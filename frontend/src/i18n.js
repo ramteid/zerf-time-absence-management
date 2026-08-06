@@ -296,6 +296,14 @@ const TRANSLATIONS = {
     "Uploading...": "Uploading...",
     "Upload started.": "Upload started.",
     "Upload failed.": "Upload failed.",
+    "Back up now": "Back up now",
+    "Requesting...": "Requesting...",
+    "Backup requested.": "Backup requested.",
+    "Backup request failed.": "Backup request failed.",
+    "Last backup: {time}": "Last backup: {time}",
+    "No backup has run yet.": "No backup has run yet.",
+    "The backup runs in the background and usually starts within a few seconds.":
+      "The backup runs in the background and usually starts within a few seconds.",
     "The 10 latest backups stay on this server; older ones are deleted. Files in Nextcloud are not deleted automatically.":
       "The 10 latest backups stay on this server; older ones are deleted. Files in Nextcloud are not deleted automatically.",
     "Uploads the previous month's timesheets on the selected day. If submissions or approvals are missing, the upload happens later automatically.":
@@ -1356,6 +1364,14 @@ const TRANSLATIONS = {
     "Uploading...": "Wird hochgeladen...",
     "Upload started.": "Upload gestartet.",
     "Upload failed.": "Upload fehlgeschlagen.",
+    "Back up now": "Jetzt sichern",
+    "Requesting...": "Wird angefordert...",
+    "Backup requested.": "Sicherung angefordert.",
+    "Backup request failed.": "Anfrage fehlgeschlagen.",
+    "Last backup: {time}": "Letzte Sicherung: {time}",
+    "No backup has run yet.": "Es wurde noch keine Sicherung durchgeführt.",
+    "The backup runs in the background and usually starts within a few seconds.":
+      "Die Sicherung läuft im Hintergrund und startet normalerweise innerhalb weniger Sekunden.",
     "A Nextcloud share URL is required to enable database backup upload.":
       "Bitte einen Nextcloud-Link für die Backups eingeben.",
     "The 10 latest backups stay on this server; older ones are deleted. Files in Nextcloud are not deleted automatically.":

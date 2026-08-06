@@ -17,6 +17,11 @@ const BACKUP_KEYS: &[(&str, &str)] = &[
         "BACKUP_LAST_SUCCESS_AT_KEY",
         settings::BACKUP_LAST_SUCCESS_AT_KEY,
     ),
+    ("BACKUP_REQUESTED_AT_KEY", settings::BACKUP_REQUESTED_AT_KEY),
+    (
+        "BACKUP_LAST_MANUAL_AT_KEY",
+        settings::BACKUP_LAST_MANUAL_AT_KEY,
+    ),
     (
         "BACKUP_UPLOAD_ENABLED_KEY",
         settings::BACKUP_UPLOAD_ENABLED_KEY,
@@ -62,6 +67,8 @@ fn backup_key_constant_values_are_correct() {
         settings::BACKUP_LAST_SUCCESS_AT_KEY,
         "backup_last_success_at"
     );
+    assert_eq!(settings::BACKUP_REQUESTED_AT_KEY, "backup_requested_at");
+    assert_eq!(settings::BACKUP_LAST_MANUAL_AT_KEY, "backup_last_manual_at");
     assert_eq!(settings::BACKUP_UPLOAD_ENABLED_KEY, "backup_upload_enabled");
     assert_eq!(settings::BACKUP_UPLOAD_URL_KEY, "backup_upload_url");
     assert_eq!(

@@ -61,6 +61,10 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                     post(handlers::settings::run_report_upload_now),
                 )
                 .route(
+                    "/settings/uploads/backup/run-now",
+                    post(handlers::settings::run_backup_now),
+                )
+                .route(
                     "/settings/payroll-report",
                     put(handlers::settings::update_payroll_report_settings),
                 )

@@ -22,11 +22,23 @@
 # Hard-coded last-resort defaults (1 day) apply only when the database is not
 # yet available (bootstrap race on first start).
 #
-# Local retention: always keeps the 10 most recent backup archives.
-# Uploaded files in Nextcloud are never deleted automatically.
+# On-demand backups: the admin's "Back up now" button (Settings -> Nextcloud
+# Backups) writes app_settings.backup_requested_at. The daemon loop polls for
+# it roughly every 20s (rather than sleeping up to the full interval) and, on
+# seeing a new value, runs an immediate backup tagged as "manual". A manual
+# run intentionally does NOT reset the scheduled interval clock (it writes
+# backup_last_manual_at, not backup_last_success_at) so that on-demand backups
+# can never postpone or starve the regular schedule.
+#
+# Local retention: always keeps the 10 most recent SCHEDULED archives and,
+# separately, the 10 most recent MANUAL archives (see run_backup_once and
+# apply_retention) -- so clicking "Back up now" repeatedly can never evict
+# scheduled backup history. Uploaded files in Nextcloud are never deleted
+# automatically.
 #
 # Each backup cycle produces one zip archive in OUTPUT_DIR:
-#   zerf-<ts>.zip          contains the following entries:
+#   zerf-<ts>.zip          scheduled backup; zerf-<ts>-manual.zip for an
+#                          on-demand one. Both contain the same entries:
 #     dump.enc             AES-256-CBC encrypted pg_dump custom dump (logical restore)
 #     metadata             plaintext metadata (timestamp, git commit, keyring flag)
 #     keyring.enc          copy of the (already AES-encrypted) pg_tde keyring,
@@ -129,6 +141,67 @@ write_app_setting() {
 write_last_success_at() {
   _ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   write_app_setting "backup_last_success_at" "$_ts"
+}
+
+# Manual-run counterpart to write_last_success_at. Deliberately does NOT touch
+# backup_last_success_at: that key drives is_backup_due, and moving it on a
+# manual run would postpone -- and with frequent manual runs, could
+# indefinitely starve -- the scheduled backup.
+write_last_manual_at() {
+  _ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  write_app_setting "backup_last_manual_at" "$_ts"
+}
+
+# -- On-demand ("Back up now") request handling --------------------------------
+#
+# app_settings.backup_requested_at is written by the admin UI and is a bare
+# signal token (its value is never parsed as a date, only compared for
+# equality) -- see request_backup_now in the Rust backend. This script never
+# clears it. Instead, a request counts as "already handled" when its value
+# matches EITHER of two independent markers:
+#
+#   - backup_last_request_handled_at (in app_settings, survives container
+#     restarts) -- written by mark_request_handled after every attempt.
+#   - CONSUMED_REQUEST (a shell variable local to main(), survives within one
+#     process lifetime even if the app_settings write below fails).
+#
+# Both are best-effort: write_app_setting silently swallows errors, so
+# mark_request_handled's write can fail without raising anything. That is
+# tolerable only because CONSUMED_REQUEST also gets set in the same breath, so
+# a write failure costs at most one extra backup after the next container
+# restart -- never an unbounded retry loop. See main() for the full predicate.
+
+# Current value of the manual-request flag ("" when none has ever been made).
+read_backup_request() {
+  read_app_setting "backup_requested_at" | tr -d '[:space:]'
+}
+
+# Value of the most recently handled request, persisted across restarts.
+read_handled_request() {
+  read_app_setting "backup_last_request_handled_at" | tr -d '[:space:]'
+}
+
+# Record that the given request token has been handled (success or failure).
+mark_request_handled() {
+  write_app_setting "backup_last_request_handled_at" "$1"
+}
+
+# True (exit 0) when PENDING represents a manual request that neither of the
+# two "already handled" markers accounts for yet:
+#   $1 PENDING   current app_settings.backup_requested_at
+#   $2 HANDLED   app_settings.backup_last_request_handled_at (persisted)
+#   $3 CONSUMED  this process's own in-memory marker (survives a failed write
+#                of HANDLED, within this process's lifetime -- see the block
+#                comment above read_backup_request)
+# Pulled out as its own function so the exact idempotency condition -- the
+# crux of avoiding both a swallowed click and a runaway repeat-backup loop --
+# has direct test coverage instead of only being exercised inside main()'s
+# infinite loop.
+manual_backup_pending() {
+  _pending="$1"
+  _handled="$2"
+  _consumed="$3"
+  [ -n "$_pending" ] && [ "$_pending" != "$_handled" ] && [ "$_pending" != "$_consumed" ]
 }
 
 # Resolve backup interval in days from app_settings; fall back to 1 day when the
@@ -419,14 +492,23 @@ write_backup_metadata() {
 
 # -- Retention -----------------------------------------------------------------
 
-# Keep only the 10 most recent backup archives; delete all older ones.
-# Local retention is count-based (not time-based) so the volume stays bounded
-# regardless of backup frequency changes.
+# Keep only the 10 most recent archives of EACH class (scheduled, manual);
+# delete all older ones within that same class. The two classes are pruned
+# independently and never influence each other's count -- otherwise clicking
+# "Back up now" repeatedly would evict scheduled backup history (and vice
+# versa). Local retention is count-based (not time-based) so the volume stays
+# bounded regardless of backup frequency changes.
 apply_retention() {
-  # Filenames are always zerf-*.zip (no spaces/special chars); `ls -t` is the
-  # portable way to sort by mtime -- `find` has no portable -newer-than-nth.
+  # Filenames are always zerf-*.zip / zerf-*-manual.zip (no spaces/special
+  # chars); `ls -t` is the portable way to sort by mtime -- `find` has no
+  # portable -newer-than-nth.
   # shellcheck disable=SC2012
-  ls -1t "$OUT_DIR"/zerf-*.zip 2>/dev/null | tail -n +11 | while IFS= read -r f; do
+  ls -1t "$OUT_DIR"/zerf-*.zip 2>/dev/null | grep -v -- '-manual\.zip$' \
+    | tail -n +11 | while IFS= read -r f; do
+    rm -f "$f"
+  done
+  # shellcheck disable=SC2012
+  ls -1t "$OUT_DIR"/zerf-*-manual.zip 2>/dev/null | tail -n +11 | while IFS= read -r f; do
     rm -f "$f"
   done
 }
@@ -434,6 +516,12 @@ apply_retention() {
 # -- Core backup ---------------------------------------------------------------
 
 run_backup_once() {
+  # "scheduled" (default, used by the interval-based daemon loop and by every
+  # existing bats call site that passes no argument) or "manual" (an on-demand
+  # "Back up now" request). Only affects the archive's filename, which in turn
+  # is what apply_retention keys its two independent retention classes on.
+  _run_kind="${1:-scheduled}"
+
   # Sweep stale temp files and work directories from runs interrupted by SIGTERM/SIGKILL.
   find "$OUT_DIR" -maxdepth 1 \
     \( -type f -name 'zerf-*.zip.tmp' \
@@ -441,7 +529,11 @@ run_backup_once() {
     -exec rm -rf {} +
 
   ts="$(date -u +%Y%m%dT%H%M%SZ)"
-  archive_file="$OUT_DIR/zerf-$ts.zip"
+  if [ "$_run_kind" = "manual" ]; then
+    archive_file="$OUT_DIR/zerf-$ts-manual.zip"
+  else
+    archive_file="$OUT_DIR/zerf-$ts.zip"
+  fi
   temp_archive="$archive_file.tmp"
 
   # Create an isolated work directory on the same filesystem as OUT_DIR so the
@@ -604,12 +696,59 @@ main() {
 
   validate_encryption_key || exit 1
 
+  # Tracks (for this process's lifetime) the most recent backup_requested_at
+  # value already acted on. Combined with the app_settings-persisted
+  # backup_last_request_handled_at, this makes a manual request idempotent
+  # even if the persisted marker fails to write -- see the comment above
+  # read_backup_request for the full reasoning. Must be initialised once,
+  # outside the loop.
+  CONSUMED_REQUEST=""
+
+  # How often to poll for a manual "Back up now" request while otherwise
+  # idle. Short enough that the button feels responsive; a single indexed
+  # SELECT on a local, trusted Postgres connection is trivial load even at
+  # this cadence.
+  POLL_INTERVAL_SECS=20
+
   # Daemon mode: loop forever.  The backup interval is calculated from the
   # last successful backup timestamp stored in app_settings so the schedule
   # survives container restarts without running an unnecessary backup.
   while :; do
     INTERVAL_DAYS="$(resolve_interval_days)"
     LAST="$(read_app_setting "backup_last_success_at" | tr -d '[:space:]')"
+    PENDING_REQUEST="$(read_backup_request)"
+    HANDLED_REQUEST="$(read_handled_request)"
+
+    MANUAL=0
+    if manual_backup_pending "$PENDING_REQUEST" "$HANDLED_REQUEST" "$CONSUMED_REQUEST"; then
+      MANUAL=1
+    fi
+
+    # Manual requests are handled in their own branch, entirely separate from
+    # the scheduled path below: an on-demand backup must never write
+    # backup_last_success_at (that would postpone -- and with frequent manual
+    # runs, could indefinitely starve -- the schedule), and the two run kinds
+    # are bookkept differently (a manual request is always marked handled,
+    # win or lose; a scheduled failure instead backs off and retries).
+    if [ "$MANUAL" = 1 ]; then
+      if run_backup_once manual; then
+        write_last_manual_at
+        resolve_admins_backup_error "backup_failed"
+      else
+        notify_admins_backup_error "backup_failed"
+      fi
+      # Mark handled either way -- a failure already alerted admins above,
+      # and retrying the same click forever would reintroduce the runaway
+      # backup loop this bookkeeping exists to prevent.
+      CONSUMED_REQUEST="$PENDING_REQUEST"
+      mark_request_handled "$PENDING_REQUEST"
+      # Loop back immediately (no sleep): the request is marked handled
+      # either way, so this cannot hot-loop. Re-entering now, rather than
+      # falling into the schedule-based sleep below (computed from a clock
+      # this manual run never touched), means a scheduled backup that
+      # happens to be due on the very same tick isn't kept waiting behind it.
+      continue
+    fi
 
     if is_backup_due "$LAST" "$INTERVAL_DAYS"; then
       if run_backup_once; then
@@ -641,7 +780,26 @@ main() {
     if [ "$SLEEP_SECS" -gt 3600 ]; then
       SLEEP_SECS=3600
     fi
-    sleep "$SLEEP_SECS"
+
+    # Sleep in short chunks rather than one long sleep, so a fresh "Back up
+    # now" click is noticed within ~POLL_INTERVAL_SECS instead of waiting out
+    # the rest of the (up to one hour) computed sleep. HANDLED_REQUEST is not
+    # re-read from the database inside this inner loop: only this process
+    # writes it, and this process is asleep, so the value captured at the top
+    # of the outer iteration is still current.
+    _slept=0
+    while [ "$_slept" -lt "$SLEEP_SECS" ]; do
+      _chunk=$(( SLEEP_SECS - _slept ))
+      if [ "$_chunk" -gt "$POLL_INTERVAL_SECS" ]; then
+        _chunk=$POLL_INTERVAL_SECS
+      fi
+      sleep "$_chunk"
+      _slept=$(( _slept + _chunk ))
+      _r="$(read_backup_request)"
+      if manual_backup_pending "$_r" "$HANDLED_REQUEST" "$CONSUMED_REQUEST"; then
+        break
+      fi
+    done
   done
 }
 

@@ -783,6 +783,23 @@ pub async fn run_report_upload_now(
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
+/// Request an immediate database backup. The app cannot perform the backup
+/// itself (the backup container deliberately holds the only copy of
+/// `ZERF_DB_ENCRYPTION_KEY` and is network-isolated from `app` — see
+/// docker-compose); this just records the request in `app_settings` for the
+/// backup container's polling loop to pick up, typically within ~20s. Does
+/// not affect the scheduled interval-based backup.
+pub async fn run_backup_now(
+    State(app_state): State<AppState>,
+    user: User,
+) -> AppResult<Json<serde_json::Value>> {
+    if !user.is_admin() {
+        return Err(AppError::Forbidden);
+    }
+    settings::request_backup_now(&app_state.pool).await?;
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
 /// Test SMTP connection without saving. Builds a temporary SmtpConfig from
 /// the request body and attempts to connect.
 pub async fn test_smtp_connection(

@@ -462,3 +462,190 @@ exit 0
   [ "$status" -eq 0 ]
   [ "$output" -gt 3600 ]
 }
+
+# -- manual_backup_pending -----------------------------------------------------
+#
+# This is the idempotency predicate main() uses to decide whether an on-demand
+# "Back up now" click still needs acting on. It is tested directly (rather
+# than only via main()'s infinite loop, which bats cannot drive) because it is
+# the single piece of logic responsible for avoiding both failure modes a
+# naive implementation could hit: swallowing a click that arrives mid-run, and
+# looping forever if the "handled" marker fails to persist.
+
+@test "manual_backup_pending: false when PENDING is empty (no request ever made)" {
+  run manual_backup_pending "" "" ""
+  [ "$status" -ne 0 ]
+}
+
+@test "manual_backup_pending: true on a brand-new request (fresh boot, nothing handled yet)" {
+  run manual_backup_pending "T1" "" ""
+  [ "$status" -eq 0 ]
+}
+
+@test "manual_backup_pending: false once the persisted HANDLED marker catches up" {
+  run manual_backup_pending "T1" "T1" ""
+  [ "$status" -ne 0 ]
+}
+
+@test "manual_backup_pending: false once the in-memory CONSUMED marker catches up" {
+  # Regression: even if backup_last_request_handled_at never gets written
+  # (write_app_setting silently swallows errors), CONSUMED alone must still
+  # suppress a re-trigger for the rest of this process's lifetime.
+  run manual_backup_pending "T1" "" "T1"
+  [ "$status" -ne 0 ]
+}
+
+@test "manual_backup_pending: true for a new token even though an older one was already handled" {
+  run manual_backup_pending "T2" "T1" "T1"
+  [ "$status" -eq 0 ]
+}
+
+@test "manual_backup_pending: true when PENDING matches neither a stale HANDLED nor a stale CONSUMED" {
+  run manual_backup_pending "T3" "T1" "T2"
+  [ "$status" -eq 0 ]
+}
+
+# -- read_backup_request / read_handled_request / mark_request_handled --------
+
+@test "read_backup_request: returns the stored, whitespace-trimmed value" {
+  make_shim psql 'printf " T1 \n"'
+  run read_backup_request
+  [ "$status" -eq 0 ]
+  [ "$output" = "T1" ]
+}
+
+@test "read_backup_request: empty when no request has ever been made" {
+  make_shim psql 'printf ""'
+  run read_backup_request
+  [ "$status" -eq 0 ]
+  [ "$output" = "" ]
+}
+
+@test "read_handled_request: returns the stored, whitespace-trimmed value" {
+  make_shim psql 'printf " T1 \n"'
+  run read_handled_request
+  [ "$status" -eq 0 ]
+  [ "$output" = "T1" ]
+}
+
+@test "read_handled_request: empty before any request has been handled" {
+  make_shim psql 'printf ""'
+  run read_handled_request
+  [ "$status" -eq 0 ]
+  [ "$output" = "" ]
+}
+
+@test "mark_request_handled: writes backup_last_request_handled_at with the given token" {
+  mkdir -p "$BATS_TMPDIR/psql_capture"
+  make_shim psql '
+args_file="$BATS_TMPDIR/psql_capture/last_args"
+printf "%s\n" "$*" > "$args_file"
+exit 0
+'
+  mark_request_handled "T1"
+  grep -qF "backup_last_request_handled_at" "$BATS_TMPDIR/psql_capture/last_args"
+  grep -qF "'T1'" "$BATS_TMPDIR/psql_capture/last_args"
+}
+
+# -- write_last_manual_at: must never touch the scheduled clock ---------------
+
+@test "write_last_manual_at: writes backup_last_manual_at, never backup_last_success_at" {
+  # Regression for the schedule-starvation flaw: a manual backup must not
+  # move the clock that is_backup_due measures the scheduled interval from,
+  # or repeated manual runs would postpone -- and could indefinitely starve --
+  # the scheduled backup.
+  mkdir -p "$BATS_TMPDIR/psql_capture"
+  make_shim psql '
+args_file="$BATS_TMPDIR/psql_capture/last_args"
+printf "%s\n" "$*" > "$args_file"
+exit 0
+'
+  write_last_manual_at
+  grep -qF "backup_last_manual_at" "$BATS_TMPDIR/psql_capture/last_args"
+  ! grep -qF "backup_last_success_at" "$BATS_TMPDIR/psql_capture/last_args"
+}
+
+# -- run_backup_once: manual vs scheduled archive naming -----------------------
+
+@test "run_backup_once: manual run produces a -manual.zip archive" {
+  make_shim pg_dump 'printf "PGDMP"; head -c 4096 /dev/zero'
+  make_shim psql 'printf ""'
+  make_openssl_copy_shim
+
+  export OUT_DIR="$BATS_TMPDIR/out"
+  export KEYRING_SRC="$BATS_TMPDIR/does-not-exist.enc"
+
+  run run_backup_once manual
+  [ "$status" -eq 0 ]
+
+  archive="$(ls "$OUT_DIR"/zerf-*-manual.zip)"
+  [ -f "$archive" ]
+}
+
+@test "run_backup_once: no argument (scheduled default) never produces a -manual.zip archive" {
+  make_shim pg_dump 'printf "PGDMP"; head -c 4096 /dev/zero'
+  make_shim psql 'printf ""'
+  make_openssl_copy_shim
+
+  export OUT_DIR="$BATS_TMPDIR/out"
+  export KEYRING_SRC="$BATS_TMPDIR/does-not-exist.enc"
+
+  run run_backup_once
+  [ "$status" -eq 0 ]
+
+  archive="$(ls "$OUT_DIR"/zerf-*.zip)"
+  [ -f "$archive" ]
+  case "$archive" in
+    *-manual.zip) false ;;
+  esac
+}
+
+# -- apply_retention: scheduled and manual classes are pruned independently ---
+
+@test "apply_retention: manual archives can never evict scheduled ones, and vice versa" {
+  # Regression test for the original design flaw in this feature: a naive
+  # count-based retention over ALL zerf-*.zip files would let repeated manual
+  # "Back up now" clicks silently evict scheduled backup history. Ages are
+  # interleaved across both classes (rather than each class occupying its own
+  # time range) specifically so that a bug treating them as one combined pool
+  # of 10 is actually caught -- it would keep only 5 of each instead of 10 of
+  # each.
+  export OUT_DIR="$BATS_TMPDIR/out"
+  mkdir -p "$OUT_DIR"
+
+  # Scheduled archives at odd ages 1,3,5,...,23 seconds ago (12 files).
+  for i in $(seq 1 12); do
+    age=$(( i * 2 - 1 ))
+    f="$OUT_DIR/zerf-$(printf '%03d' "$age").zip"
+    printf 'archive' > "$f"
+    touch -d "$age seconds ago" "$f"
+  done
+  # Manual archives at even ages 2,4,6,...,24 seconds ago (12 files),
+  # interleaved with the scheduled ones above.
+  for i in $(seq 1 12); do
+    age=$(( i * 2 ))
+    f="$OUT_DIR/zerf-$(printf '%03d' "$age")-manual.zip"
+    printf 'archive' > "$f"
+    touch -d "$age seconds ago" "$f"
+  done
+
+  apply_retention
+
+  # wc -l (not grep -c) deliberately: it always exits 0 even for a zero count,
+  # which matters under this file's `set -eu` -- a bare `var="$(cmd)"` where
+  # cmd's last pipeline stage exits nonzero would abort the test right here,
+  # before the actual assertions below ever run.
+  scheduled_count="$(ls "$OUT_DIR"/zerf-*.zip 2>/dev/null | grep -v -- '-manual\.zip$' | wc -l | tr -d '[:space:]')"
+  manual_count="$(ls "$OUT_DIR"/zerf-*-manual.zip 2>/dev/null | wc -l | tr -d '[:space:]')"
+  [ "$scheduled_count" -eq 10 ]
+  [ "$manual_count" -eq 10 ]
+
+  # The 10 newest of each class survive: scheduled ages 1..19, manual ages 2..20.
+  [ -f "$OUT_DIR/zerf-019.zip" ]
+  [ -f "$OUT_DIR/zerf-020-manual.zip" ]
+  # The 2 oldest of each class are gone: scheduled ages 21/23, manual ages 22/24.
+  [ ! -f "$OUT_DIR/zerf-021.zip" ]
+  [ ! -f "$OUT_DIR/zerf-023.zip" ]
+  [ ! -f "$OUT_DIR/zerf-022-manual.zip" ]
+  [ ! -f "$OUT_DIR/zerf-024-manual.zip" ]
+}

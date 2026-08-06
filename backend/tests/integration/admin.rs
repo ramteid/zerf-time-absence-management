@@ -579,3 +579,73 @@ async fn upload_settings_save_and_keep_omitted_fields() {
 
     app.cleanup().await;
 }
+
+/// `POST /settings/uploads/backup/run-now` cannot trigger a real backup in
+/// this test (the backup container is a separate, network-isolated process
+/// that polls for the request -- see AGENTS.md's "Backup and upload
+/// settings" section) so this only guards the HTTP contract: admin-only,
+/// 200 + `{"ok": true}`, and a distinct token actually gets written to
+/// `app_settings.backup_requested_at` on every call.
+#[tokio::test]
+async fn backup_run_now_requires_admin_and_records_a_fresh_request_token() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+    let settings = zerf::repository::SettingsDb::new(app.state.pool.clone());
+
+    let before = settings
+        .load_setting("backup_requested_at", "")
+        .await
+        .expect("load backup_requested_at before request");
+
+    let (st, body) = admin
+        .post("/api/v1/settings/uploads/backup/run-now", &json!({}))
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::OK,
+        "admin can request a manual backup: {body}"
+    );
+    assert_eq!(body["ok"], true);
+
+    let after = settings
+        .load_setting("backup_requested_at", "")
+        .await
+        .expect("load backup_requested_at after request");
+    assert!(!after.is_empty(), "request token must be written");
+    assert_ne!(before, after, "request must write a new token");
+
+    // A second click must write a distinct token again: the app never
+    // de-duplicates requests itself -- it is the backup container's own
+    // handled-marker (backup_last_request_handled_at, not visible to the
+    // app) that decides whether a request is still pending.
+    let (st, _) = admin
+        .post("/api/v1/settings/uploads/backup/run-now", &json!({}))
+        .await;
+    assert_eq!(st, StatusCode::OK, "second manual request");
+    let after2 = settings
+        .load_setting("backup_requested_at", "")
+        .await
+        .expect("load backup_requested_at after second request");
+    assert_ne!(after, after2, "second click must write another new token");
+
+    let (st, body) = admin
+        .post(
+            "/api/v1/users",
+            &json!({"email":"lead-backup@example.com","first_name":"Bo","last_name":"Lead",
+                "role":"team_lead","weekly_hours":39,"start_date":"2024-01-01","approver_ids":[1]}),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "create lead");
+    let lead = login_change_pw(&app, "lead-backup@example.com", &temp_pw(&body)).await;
+
+    let (st, _) = lead
+        .post("/api/v1/settings/uploads/backup/run-now", &json!({}))
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::FORBIDDEN,
+        "non-admin cannot request a manual backup"
+    );
+
+    app.cleanup().await;
+}

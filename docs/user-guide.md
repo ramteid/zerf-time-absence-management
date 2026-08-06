@@ -1655,9 +1655,11 @@ When enabled, the backup container uploads the backup archive (a `.zip` file) to
 | Share password | Optional password protecting the share. Stored securely; never returned by the API. |
 | Backup interval (days) | How often the backup container runs a backup cycle. Default: 1 (daily). Changes take effect within one hour. |
 
+You can also create a backup immediately with **Back up now**, without waiting for the scheduled interval. It runs in the background and usually starts within a few seconds; a large database may take a few minutes to finish. The time of the last backup is shown next to the button so you can confirm it completed. A manual backup does not change the automatic schedule.
+
 The backup container tracks the last successful backup time in the database. This timestamp survives container restarts, so the interval is always measured from the last actual backup rather than from container start time. On a fresh install, migration 024 seeds the timestamp with the current time, so the first backup runs one full interval after setup (not immediately).
 
-The **10 most recent** local backup archives are kept in the backup volume; older ones are deleted automatically after each successful backup. Uploaded files in Nextcloud are **not** deleted automatically — manage the shared folder manually to avoid unlimited growth.
+The **10 most recent** local backup archives are kept in the backup volume, and the same limit applies separately to backups made with Back up now — so creating manual backups never pushes out older scheduled ones (or vice versa). Older archives beyond that limit are deleted automatically after each successful backup. Uploaded files in Nextcloud are **not** deleted automatically — manage the shared folder manually to avoid unlimited growth.
 
 The database dump inside the archive is AES-256-CBC encrypted, so a compromised share link does not expose plaintext data.
 

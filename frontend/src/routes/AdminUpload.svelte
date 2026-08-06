@@ -1,11 +1,15 @@
 <script>
+  import { onDestroy } from "svelte";
   import { api } from "../api.js";
   import { toast } from "../stores.js";
   import { t } from "../i18n.js";
+  import { fmtDateTime } from "../format.js";
 
   let uploadSettings = {};
   let saving = false;
   let uploading = false;
+  let requestingBackup = false;
+  let backupPollTimer = null;
 
   // Passwords are write-only; we track new values separately.
   let backupUploadPassword = "";
@@ -17,6 +21,50 @@
     uploadSettings = await api("/settings");
   }
   load();
+
+  // The more recent of the two backup timestamps -- a scheduled run
+  // (backup_last_success_at) and a manual "Back up now" run
+  // (backup_last_manual_at) are tracked separately on the backend (see
+  // AGENTS.md) so a manual click never postpones the schedule, but the admin
+  // just wants to know when a backup last actually happened.
+  $: lastBackupAt = laterOf(
+    uploadSettings.backup_last_success_at,
+    uploadSettings.backup_last_manual_at,
+  );
+
+  function laterOf(a, b) {
+    if (!a) return b || null;
+    if (!b) return a;
+    // Both are UTC timestamps in the same zero-padded ISO 8601 shape written
+    // by backup.sh (YYYY-MM-DDTHH:MM:SSZ), so lexicographic string comparison
+    // is also chronological order -- no need to parse them into Dates.
+    return a > b ? a : b;
+  }
+
+  function stopBackupPoll() {
+    if (backupPollTimer) {
+      clearInterval(backupPollTimer);
+      backupPollTimer = null;
+    }
+  }
+  onDestroy(stopBackupPoll);
+
+  // The backup itself happens in a separate, network-isolated container
+  // (see AGENTS.md's Deployment section, `backup_net`) that polls for the
+  // request rather than being called directly, so it is not done by the time
+  // this request returns. Poll briefly afterward so "Last backup" updates on
+  // its own once it lands, instead of requiring a manual page reload.
+  function pollForBackupCompletion(previousLastBackup) {
+    stopBackupPoll();
+    let attempts = 0;
+    backupPollTimer = setInterval(async () => {
+      attempts += 1;
+      await load();
+      if (lastBackupAt !== previousLastBackup || attempts >= 6) {
+        stopBackupPoll();
+      }
+    }, 10000);
+  }
 
   function backupPasswordPayload() {
     if (clearBackupPassword) return "";
@@ -78,6 +126,20 @@
       toast(e?.message || $t("Upload failed."), "error");
     } finally {
       uploading = false;
+    }
+  }
+
+  async function backupNow() {
+    requestingBackup = true;
+    const previousLastBackup = lastBackupAt;
+    try {
+      await api("/settings/uploads/backup/run-now", { method: "POST" });
+      toast($t("Backup requested."), "ok");
+      pollForBackupCompletion(previousLastBackup);
+    } catch (e) {
+      toast(e?.message || $t("Backup request failed."), "error");
+    } finally {
+      requestingBackup = false;
     }
   }
 </script>
@@ -171,6 +233,32 @@
           </div>
         </div>
       </div>
+
+      <div class="field-row">
+        <div>
+          <button
+            class="zf-btn zf-btn-accent-soft"
+            on:click={backupNow}
+            disabled={requestingBackup || saving}
+          >
+            {#if requestingBackup}
+              {$t("Requesting...")}
+            {:else}
+              {$t("Back up now")}
+            {/if}
+          </button>
+          <div class="field-hint">
+            {#if lastBackupAt}
+              {$t("Last backup: {time}", { time: fmtDateTime(lastBackupAt) })}
+            {:else}
+              {$t("No backup has run yet.")}
+            {/if}
+            {$t(
+              "The backup runs in the background and usually starts within a few seconds.",
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -257,23 +345,30 @@
           />
         </div>
       </div>
+
+      <div class="field-row">
+        <div>
+          <button
+            class="zf-btn zf-btn-accent-soft"
+            on:click={runNow}
+            disabled={uploading ||
+              saving ||
+              !uploadSettings.report_upload_enabled}
+          >
+            {#if uploading}
+              {$t("Uploading...")}
+            {:else}
+              {$t("Upload now")}
+            {/if}
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 
   <!-- Actions -->
   <div class="zf-card zf-card-section">
     <div class="form-actions">
-      <button
-        class="zf-btn zf-btn-accent-soft"
-        on:click={runNow}
-        disabled={uploading || saving || !uploadSettings.report_upload_enabled}
-      >
-        {#if uploading}
-          {$t("Uploading...")}
-        {:else}
-          {$t("Upload now")}
-        {/if}
-      </button>
       <button
         class="zf-btn zf-btn-primary"
         on:click={save}
