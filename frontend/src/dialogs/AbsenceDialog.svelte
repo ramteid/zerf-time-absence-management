@@ -251,6 +251,6 @@
   .selected-days-hint {
     font-size: 0.9rem;
     color: var(--text-secondary, #64748b);
-    margin-top: -0.25rem;
+    margin-top: -0.0rem;
   }
 </style>
