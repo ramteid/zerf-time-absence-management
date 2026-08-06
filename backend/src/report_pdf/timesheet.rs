@@ -2,8 +2,8 @@
 //! table of days/entries, a total row, and the flextime balance rows.
 //!
 //! Column layout (all 180 mm content width):
-//! Date 22 | Weekday 18 | Start 12 | End 12 | Category 36 | Duration 14 |
-//! Status 13 | Absence 25 | Holiday 28
+//! Date 18 | Weekday 18 | Start 12 | End 12 | Category 36 | Duration 14 |
+//! Status 17 | Absence 25 | Holiday 28
 //!
 //! The "Status" column is essential for reader reconciliation: the Total row
 //! counts only approved, work-crediting, break-adjusted minutes, while the
@@ -20,12 +20,12 @@ use crate::services::reports::{FlextimeDay, MonthReport};
 use chrono::NaiveDate;
 
 /// Column layout for the timesheet table. Widths sum to [`CONTENT_WIDTH_MM`].
-/// Date 22 | Weekday 18 | Start 12 | End 12 | Category 36 | Duration 14 |
-/// Status 13 | Absence 25 | Holiday 28 = 180 mm total.
+/// Date 18 | Weekday 18 | Start 12 | End 12 | Category 36 | Duration 14 |
+/// Status 17 | Absence 25 | Holiday 28 = 180 mm total.
 const COLUMNS: &[Column] = &[
     Column {
         header_key: "pdf_column_date",
-        width_mm: 22.0,
+        width_mm: 18.0,
         align: Align::Left,
     },
     Column {
@@ -51,11 +51,11 @@ const COLUMNS: &[Column] = &[
     Column {
         header_key: "pdf_column_duration",
         width_mm: 14.0,
-        align: Align::Right,
+        align: Align::Left,
     },
     Column {
         header_key: "pdf_column_status",
-        width_mm: 13.0,
+        width_mm: 17.0,
         align: Align::Left,
     },
     Column {
