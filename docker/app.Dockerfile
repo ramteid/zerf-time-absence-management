@@ -93,7 +93,13 @@ WORKDIR /app
 # RUN layer: a same-content RUN chmod after COPY doubles that content's size
 # in the image (the layer diff captures the files again under the new mode).
 COPY --from=backend-builder --chmod=0555 /out/zerf /app/zerf
-COPY --from=frontend-builder --chmod=a=rX /build/dist /app/static
+# Numeric mode, not the symbolic "a=rX" form: the BuildKit build on the
+# production host mishandles the conditional-execute "X" bit on a
+# directory COPY and silently zeroes every copied entry's permissions
+# (verified: /app/static and its contents ended up mode 000, causing the
+# app to 404 on all static assets). 0555 is safe for a static file tree —
+# the stray execute bit on regular files is harmless.
+COPY --from=frontend-builder --chmod=0555 /build/dist /app/static
 
 ENV ZERF_STATIC_DIR=/app/static \
     ZERF_BIND=0.0.0.0:3333 \
