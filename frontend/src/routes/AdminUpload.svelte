@@ -19,6 +19,7 @@
 
   async function load() {
     uploadSettings = await api("/settings");
+    return uploadSettings;
   }
   load();
 
@@ -27,10 +28,14 @@
   // (backup_last_manual_at) are tracked separately on the backend (see
   // AGENTS.md) so a manual click never postpones the schedule, but the admin
   // just wants to know when a backup last actually happened.
-  $: lastBackupAt = laterOf(
-    uploadSettings.backup_last_success_at,
-    uploadSettings.backup_last_manual_at,
-  );
+  function lastBackupFrom(settings) {
+    return laterOf(
+      settings?.backup_last_success_at,
+      settings?.backup_last_manual_at,
+    );
+  }
+
+  $: lastBackupAt = lastBackupFrom(uploadSettings);
 
   function laterOf(a, b) {
     if (!a) return b || null;
@@ -59,8 +64,19 @@
     let attempts = 0;
     backupPollTimer = setInterval(async () => {
       attempts += 1;
-      await load();
-      if (lastBackupAt !== previousLastBackup || attempts >= 6) {
+      // Compare against the value derived from THIS response rather than the
+      // reactive `lastBackupAt`: Svelte recomputes `$:` derivations in its own
+      // scheduled update pass, so reading it straight after `await load()` is
+      // not guaranteed to reflect the response we just received.
+      let fresh = previousLastBackup;
+      try {
+        fresh = lastBackupFrom(await load());
+      } catch {
+        // A failed refresh must still fall through to the attempt cap below,
+        // otherwise the rejection would skip the stop check and leave this
+        // interval running until the component is destroyed.
+      }
+      if (fresh !== previousLastBackup || attempts >= 6) {
         stopBackupPoll();
       }
     }, 10000);
@@ -131,7 +147,7 @@
 
   async function backupNow() {
     requestingBackup = true;
-    const previousLastBackup = lastBackupAt;
+    const previousLastBackup = lastBackupFrom(uploadSettings);
     try {
       await api("/settings/uploads/backup/run-now", { method: "POST" });
       toast($t("Backup requested."), "ok");

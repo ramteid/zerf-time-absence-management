@@ -23,10 +23,12 @@
 # yet available (bootstrap race on first start).
 #
 # On-demand backups: the admin's "Back up now" button (Settings -> Nextcloud
-# Backups) writes app_settings.backup_requested_at. The daemon loop polls for
-# it roughly every 20s (rather than sleeping up to the full interval) and, on
-# seeing a new value, runs an immediate backup tagged as "manual". A manual
-# run intentionally does NOT reset the scheduled interval clock (it writes
+# Backups) writes app_settings.backup_requested_at. Every sleep in the daemon
+# loop goes through sleep_until_deadline_or_request, which wakes roughly every
+# 20s to check for it -- including the hour-long backoff after a failed backup,
+# so the button keeps working even while backups are broken. On seeing a new
+# value the loop runs an immediate backup tagged as "manual". A manual run
+# intentionally does NOT reset the scheduled interval clock (it writes
 # backup_last_manual_at, not backup_last_success_at) so that on-demand backups
 # can never postpone or starve the regular schedule.
 #
@@ -73,6 +75,12 @@ ENCRYPTION_KEY="${ZERF_DB_ENCRYPTION_KEY:-}"
 # can still be recovered (physical recovery) even if the keyring volume itself
 # is later lost or overwritten.  Overridable for tests.
 KEYRING_SRC="${ZERF_KEYRING_SRC:-/keyring-src/pg_tde_keyring.enc}"
+
+# How often the daemon wakes from an otherwise long sleep to check for a manual
+# "Back up now" request.  Short enough that the button feels responsive; a
+# single indexed SELECT over a local, trusted Postgres connection is trivial
+# load even at this cadence.  Overridable so tests need not sleep for real.
+POLL_INTERVAL_SECS="${ZERF_BACKUP_POLL_INTERVAL_SECS:-20}"
 
 # -- Database connection -------------------------------------------------------
 
@@ -202,6 +210,35 @@ manual_backup_pending() {
   _handled="$2"
   _consumed="$3"
   [ -n "$_pending" ] && [ "$_pending" != "$_handled" ] && [ "$_pending" != "$_consumed" ]
+}
+
+# Sleep up to $1 seconds, returning early as soon as a manual backup request
+# appears that neither marker accounts for.
+#   $1 total seconds to sleep
+#   $2 HANDLED marker to compare against (see manual_backup_pending)
+#   $3 CONSUMED marker to compare against
+#
+# EVERY long sleep in main() must go through this rather than a bare `sleep`.
+# The post-failure retry backoff is the case that matters most: an admin whose
+# scheduled backups are failing is exactly the one likely to press "Back up
+# now" to check whether the problem is fixed, and a plain `sleep 3600` there
+# would silently ignore that click for up to an hour.
+sleep_until_deadline_or_request() {
+  _total="$1"
+  _handled="$2"
+  _consumed="$3"
+  _slept=0
+  while [ "$_slept" -lt "$_total" ]; do
+    _chunk=$(( _total - _slept ))
+    if [ "$_chunk" -gt "$POLL_INTERVAL_SECS" ]; then
+      _chunk="$POLL_INTERVAL_SECS"
+    fi
+    sleep "$_chunk"
+    _slept=$(( _slept + _chunk ))
+    if manual_backup_pending "$(read_backup_request)" "$_handled" "$_consumed"; then
+      return 0
+    fi
+  done
 }
 
 # Resolve backup interval in days from app_settings; fall back to 1 day when the
@@ -704,12 +741,6 @@ main() {
   # outside the loop.
   CONSUMED_REQUEST=""
 
-  # How often to poll for a manual "Back up now" request while otherwise
-  # idle. Short enough that the button feels responsive; a single indexed
-  # SELECT on a local, trusted Postgres connection is trivial load even at
-  # this cadence.
-  POLL_INTERVAL_SECS=20
-
   # Daemon mode: loop forever.  The backup interval is calculated from the
   # last successful backup timestamp stored in app_settings so the schedule
   # survives container restarts without running an unnecessary backup.
@@ -759,8 +790,10 @@ main() {
         resolve_admins_backup_error "backup_failed"
       else
         notify_admins_backup_error "backup_failed"
-        # On failure retry in 1 hour rather than waiting the full interval.
-        sleep 3600
+        # On failure retry in 1 hour rather than waiting the full interval --
+        # but stay responsive to "Back up now" throughout that hour (see
+        # sleep_until_deadline_or_request).
+        sleep_until_deadline_or_request 3600 "$HANDLED_REQUEST" "$CONSUMED_REQUEST"
         continue
       fi
     fi
@@ -781,25 +814,11 @@ main() {
       SLEEP_SECS=3600
     fi
 
-    # Sleep in short chunks rather than one long sleep, so a fresh "Back up
-    # now" click is noticed within ~POLL_INTERVAL_SECS instead of waiting out
-    # the rest of the (up to one hour) computed sleep. HANDLED_REQUEST is not
-    # re-read from the database inside this inner loop: only this process
-    # writes it, and this process is asleep, so the value captured at the top
-    # of the outer iteration is still current.
-    _slept=0
-    while [ "$_slept" -lt "$SLEEP_SECS" ]; do
-      _chunk=$(( SLEEP_SECS - _slept ))
-      if [ "$_chunk" -gt "$POLL_INTERVAL_SECS" ]; then
-        _chunk=$POLL_INTERVAL_SECS
-      fi
-      sleep "$_chunk"
-      _slept=$(( _slept + _chunk ))
-      _r="$(read_backup_request)"
-      if manual_backup_pending "$_r" "$HANDLED_REQUEST" "$CONSUMED_REQUEST"; then
-        break
-      fi
-    done
+    # Idle until the next scheduled backup, waking early for a manual request.
+    # HANDLED_REQUEST is not re-read from the database while sleeping: only
+    # this process writes it, and this process is asleep, so the value
+    # captured at the top of the iteration is still current.
+    sleep_until_deadline_or_request "$SLEEP_SECS" "$HANDLED_REQUEST" "$CONSUMED_REQUEST"
   done
 }
 

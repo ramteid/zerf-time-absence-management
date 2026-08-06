@@ -505,6 +505,56 @@ exit 0
   [ "$status" -eq 0 ]
 }
 
+# -- sleep_until_deadline_or_request ------------------------------------------
+#
+# Every long sleep in main() routes through this. The regression it guards:
+# the post-failure retry backoff used to be a bare `sleep 3600`, which ignored
+# a "Back up now" click for up to an hour -- exactly when an admin whose
+# backups are failing would be pressing it to test whether they work again.
+
+@test "sleep_until_deadline_or_request: returns early once a new request appears" {
+  export ZERF_BACKUP_POLL_INTERVAL_SECS=1
+  POLL_INTERVAL_SECS=1
+  # psql always reports a pending request token, so the very first poll fires.
+  make_shim psql 'printf "T1\n"'
+
+  _start="$(date +%s)"
+  run sleep_until_deadline_or_request 30 "" ""
+  _elapsed=$(( "$(date +%s)" - _start ))
+
+  [ "$status" -eq 0 ]
+  # Returned on the first poll rather than sleeping the full 30 s.
+  [ "$_elapsed" -lt 5 ]
+}
+
+@test "sleep_until_deadline_or_request: sleeps the full duration when no request appears" {
+  export ZERF_BACKUP_POLL_INTERVAL_SECS=1
+  POLL_INTERVAL_SECS=1
+  make_shim psql 'printf ""'
+
+  _start="$(date +%s)"
+  run sleep_until_deadline_or_request 3 "" ""
+  _elapsed=$(( "$(date +%s)" - _start ))
+
+  [ "$status" -eq 0 ]
+  [ "$_elapsed" -ge 3 ]
+}
+
+@test "sleep_until_deadline_or_request: ignores a request both markers already account for" {
+  export ZERF_BACKUP_POLL_INTERVAL_SECS=1
+  POLL_INTERVAL_SECS=1
+  # The stored token matches the HANDLED marker, so it is NOT a new request
+  # and must not cut the sleep short.
+  make_shim psql 'printf "T1\n"'
+
+  _start="$(date +%s)"
+  run sleep_until_deadline_or_request 3 "T1" ""
+  _elapsed=$(( "$(date +%s)" - _start ))
+
+  [ "$status" -eq 0 ]
+  [ "$_elapsed" -ge 3 ]
+}
+
 # -- read_backup_request / read_handled_request / mark_request_handled --------
 
 @test "read_backup_request: returns the stored, whitespace-trimmed value" {

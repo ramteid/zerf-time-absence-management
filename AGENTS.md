@@ -365,7 +365,7 @@ Backup frequency, Nextcloud upload, and payroll report settings are stored in `a
 |-----|---------|-------------|
 | `backup_interval_days` | 1 | Days between backup cycles |
 | `backup_last_success_at` | — | UTC timestamp of the last successful **scheduled** backup; `is_backup_due` measures the interval from this. Written only by `scripts/backup.sh`, never by a manual run |
-| `backup_requested_at` | — | Set by the admin's **Back up now** button (`request_backup_now`); the backup container's loop polls for a value it hasn't already handled (~every 20s) and runs an immediate backup. Never cleared by the app — the script tracks what it has handled itself (`backup_last_request_handled_at`, script-internal, no Rust constant), so a failed clear can't cause a repeat-backup loop. Not directly user-editable |
+| `backup_requested_at` | — | Set by the admin's **Back up now** button (`request_backup_now`); the backup container's loop polls for a value it hasn't already handled (~every 20s, via `sleep_until_deadline_or_request` — which every sleep in the loop routes through, including the post-failure backoff) and runs an immediate backup. Never cleared by the app — the script tracks what it has handled itself (`backup_last_request_handled_at`, script-internal, no Rust constant), so a failed clear can't cause a repeat-backup loop. Not directly user-editable |
 | `backup_last_manual_at` | — | UTC timestamp of the last successful **manual** backup, kept separate from `backup_last_success_at` so an on-demand backup never postpones or starves the schedule. The Admin UI shows the more recent of the two |
 | `backup_upload_enabled` | false | Enable upload to Nextcloud |
 | `backup_upload_url` | — | Nextcloud public share URL (`https://…/s/<token>`) |
