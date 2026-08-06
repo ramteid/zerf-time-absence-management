@@ -91,6 +91,20 @@ body {
   font-weight: 500;
 }
 
+/* Visually hidden but still readable by screen readers/tests — for labels
+   conveyed visually through layout (e.g. a value's position before "/"). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* Small tertiary hint text (field notes, table footnotes). */
 .text-hint {
   font-size: 0.78125rem;

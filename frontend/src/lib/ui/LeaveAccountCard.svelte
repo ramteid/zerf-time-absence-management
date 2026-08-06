@@ -14,27 +14,49 @@
   class="zf-card leave-account-card"
   data-testid={`leave-account-card-${balance.category_id}`}
 >
-  <div class="leave-account-card-title">
-    <span
-      class="leave-account-card-dot"
-      style:background={balance.color || "#64748b"}
-    ></span>
-    <span>{$t(balance.category_name)}</span>
+  <div class="leave-account-card-header">
+    <div class="leave-account-card-title">
+      <span
+        class="leave-account-card-dot"
+        style:background={balance.color || "#64748b"}
+      ></span>
+      <span>{$t(balance.category_name)}</span>
+    </div>
+    <div class="leave-account-card-count">
+      <span class="sr-only">{$t("Available")}</span>
+      <span
+        class="tab-num"
+        style:color={available < 0
+          ? "var(--danger-text)"
+          : "var(--success-text)"}
+        >{formatDayCount(available)}</span
+      >
+      <span class="leave-account-card-count-total tab-num"
+        ><span class="sr-only">{$t("Entitlement")}</span>/ {formatDayCount(
+          balance.annual_entitlement,
+        )}</span
+      >
+    </div>
   </div>
 
-  <div class="stat-card-label">{$t("Available")}</div>
-  <div
-    class="stat-card-value tab-num"
-    style:color={available < 0 ? "var(--danger-text)" : "var(--success-text)"}
-  >
-    {formatDayCount(available)}
-  </div>
-  <div class="stat-card-sub">
-    {$t("Entitlement")}
-    {formatDayCount(balance.annual_entitlement)} · {$t("Taken")}
-    {formatDayCount(balance.already_taken)} · {$t("Approved planned")}
-    {formatDayCount(balance.approved_upcoming)} · {$t("Requested")}
-    {formatDayCount(balance.requested)}
+  <div class="leave-account-card-details">
+    <div class="leave-account-card-detail">
+      <span class="leave-account-card-detail-dot"></span>
+      <span class="leave-account-card-detail-label">{$t("Taken")}</span>
+      <span class="tab-num">{formatDayCount(balance.already_taken)}</span>
+    </div>
+    <div class="leave-account-card-detail">
+      <span class="leave-account-card-detail-dot"></span>
+      <span class="leave-account-card-detail-label"
+        >{$t("Approved planned")}</span
+      >
+      <span class="tab-num">{formatDayCount(balance.approved_upcoming)}</span>
+    </div>
+    <div class="leave-account-card-detail">
+      <span class="leave-account-card-detail-dot"></span>
+      <span class="leave-account-card-detail-label">{$t("Requested")}</span>
+      <span class="tab-num">{formatDayCount(balance.requested)}</span>
+    </div>
   </div>
 
   {#if carryoverDays > 0}
@@ -74,6 +96,14 @@
     padding: 14px 16px;
   }
 
+  .leave-account-card-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+
   .leave-account-card-title {
     display: flex;
     align-items: flex-start;
@@ -82,8 +112,10 @@
     font-size: 0.9375rem;
     font-weight: 400;
     line-height: 1.3;
+    /* Reserve space for up to two lines so cards with long category names
+       don't push their details row out of alignment with shorter siblings
+       in the same grid row. */
     min-height: calc(1.3em * 2);
-    margin-bottom: 10px;
   }
 
   .leave-account-card-dot {
@@ -92,6 +124,48 @@
     border-radius: 50%;
     flex: 0 0 auto;
     margin-top: 5px;
+  }
+
+  .leave-account-card-count {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    flex: 0 0 auto;
+    font-size: 0.9375rem;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  .leave-account-card-count-total {
+    color: var(--text-tertiary);
+    font-size: 0.8125rem;
+    font-weight: 400;
+  }
+
+  .leave-account-card-details {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+  }
+
+  .leave-account-card-detail {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8125rem;
+  }
+
+  .leave-account-card-detail-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex: 0 0 auto;
+    background: var(--text-tertiary);
+    opacity: 0.5;
+  }
+
+  .leave-account-card-detail-label {
+    color: var(--text-tertiary);
   }
 
   .leave-account-card-carryover {
