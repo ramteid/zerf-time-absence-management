@@ -7,7 +7,11 @@ ARG ZERF_FRONTEND_DEBUG_BUILD=false
 ENV CI=1
 ENV ZERF_FRONTEND_DEBUG_BUILD=${ZERF_FRONTEND_DEBUG_BUILD}
 COPY frontend/package.json frontend/package-lock.json* ./
-RUN if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; \
+# npm's download cache is a BuildKit cache mount, not a layer: it speeds up
+# repeated builds but is never committed to the image, so it disappears with
+# the rest of the build cache on `docker builder prune` / `system prune -a`.
+RUN --mount=type=cache,target=/root/.npm,id=zerf-npm-cache \
+    if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; \
     else npm install --no-audit --no-fund; fi
 COPY frontend/ ./
 RUN npm run build
@@ -24,7 +28,17 @@ COPY backend/migrations ./migrations
 
 # Layer 2: compile all dependencies via a placeholder binary.
 # This expensive step is re-run only when the manifest/lock changes.
-RUN mkdir -p src && \
+#
+# The downloaded crate registry and the compiled `target/` directory are
+# BuildKit cache mounts, not image layers: cargo reuses them across builds to
+# skip re-downloading and re-compiling unchanged dependencies, but their
+# content is never baked into any committed layer. `docker builder prune` /
+# `docker system prune -a` reclaims them completely, so the next build after
+# a nightly prune simply starts from zero again instead of leaving a stale
+# multi-hundred-MB target/ directory on disk.
+RUN --mount=type=cache,target=/usr/local/cargo/registry,id=zerf-cargo-registry \
+    --mount=type=cache,target=/build/target,id=zerf-cargo-target \
+    mkdir -p src && \
         echo 'fn main() {}' > src/main.rs && \
         if [ "$ZERF_BUILD_PROFILE" = "debug" ]; then \
             cargo build --locked && \
@@ -36,9 +50,13 @@ RUN mkdir -p src && \
             rm -rf target/release/.fingerprint/zerf-*; \
         fi
 
-# Layer 3: compile the real application source.
+# Layer 3: compile the real application source, then copy the binary out of
+# the cache-mounted target/ into a normal (persisted) layer at /out -- the
+# mount and everything left in it disappear the moment this RUN ends.
 COPY backend/src ./src
-RUN touch src/main.rs && \
+RUN --mount=type=cache,target=/usr/local/cargo/registry,id=zerf-cargo-registry \
+    --mount=type=cache,target=/build/target,id=zerf-cargo-target \
+    touch src/main.rs && \
         if [ "$ZERF_BUILD_PROFILE" = "debug" ]; then \
             cargo build --locked && \
             install -D target/debug/zerf /out/zerf; \
@@ -68,10 +86,11 @@ RUN groupadd --gid ${APP_GID} zerf && \
     useradd --uid ${APP_UID} --gid ${APP_GID} --home /app --shell /usr/sbin/nologin zerf
 
 WORKDIR /app
-COPY --from=backend-builder /out/zerf /app/zerf
-COPY --from=frontend-builder /build/dist /app/static
-RUN chmod 0555 /app/zerf && \
-    chmod -R a=rX /app/static
+# --chmod sets permissions as part of the COPY itself instead of a separate
+# RUN layer: a same-content RUN chmod after COPY doubles that content's size
+# in the image (the layer diff captures the files again under the new mode).
+COPY --from=backend-builder --chmod=0555 /out/zerf /app/zerf
+COPY --from=frontend-builder --chmod=a=rX /build/dist /app/static
 
 ENV ZERF_STATIC_DIR=/app/static \
     ZERF_BIND=0.0.0.0:3333 \
