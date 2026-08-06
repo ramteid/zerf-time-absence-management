@@ -710,7 +710,8 @@ impl UserDb {
                 }
             }
         }
-        Self::seed_leave_accounts_for_user_sql_tx(tx, new_user_id, role).await?;
+        Self::seed_leave_accounts_for_user_sql_tx(tx, new_user_id, role, absence_category_ids)
+            .await?;
         Ok(new_user_id)
     }
 
@@ -1256,7 +1257,7 @@ impl UserDb {
         user_id: i64,
         role: &str,
     ) -> AppResult<()> {
-        Self::seed_leave_accounts_for_user_sql_tx(tx, user_id, role).await?;
+        Self::seed_leave_accounts_for_user_sql_tx(tx, user_id, role, None).await?;
         Ok(())
     }
 
@@ -1286,6 +1287,74 @@ impl UserDb {
         .bind(ROLE_ASSISTANT)
         .execute(tx)
         .await?;
+        Ok(())
+    }
+
+    /// Zero one user's leave account and delete its yearly overrides. Used
+    /// when access to a leave-account category is revoked so the balance
+    /// genuinely reflects "no entitlement" rather than a stale base value
+    /// kept alive by a leftover override. The account row itself is kept
+    /// (never deleted) so historical balances stay computable.
+    pub async fn revoke_leave_account_tx(
+        tx: &mut sqlx::PgConnection,
+        user_id: i64,
+        category_id: i64,
+    ) -> AppResult<()> {
+        sqlx::query(
+            "UPDATE user_leave_accounts SET base_days = 0
+             WHERE user_id = $1 AND category_id = $2",
+        )
+        .bind(user_id)
+        .bind(category_id)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "DELETE FROM user_leave_account_year_overrides
+             WHERE user_id = $1 AND category_id = $2",
+        )
+        .bind(user_id)
+        .bind(category_id)
+        .execute(tx)
+        .await?;
+        Ok(())
+    }
+
+    /// Restore one user's leave account to the category default after access
+    /// is granted (assistants still get zero). The current- and next-year
+    /// overrides are set to that same default so the account starts from an
+    /// unambiguous, fully specified state rather than depending on whatever
+    /// override rows happen to exist.
+    pub async fn grant_leave_account_tx(
+        tx: &mut sqlx::PgConnection,
+        user_id: i64,
+        category_id: i64,
+        current_year: i32,
+        next_year: i32,
+    ) -> AppResult<()> {
+        let default_days: i64 = sqlx::query_scalar(
+            "INSERT INTO user_leave_accounts (user_id, category_id, base_days)
+             SELECT
+                users.id,
+                category.id,
+                CASE
+                    WHEN lower(trim(users.role)) = $3 THEN 0
+                    ELSE category.leave_account_default_days
+                END
+             FROM users
+             JOIN absence_categories AS category ON category.id = $2
+             WHERE users.id = $1
+             ON CONFLICT (user_id, category_id) DO UPDATE SET base_days = EXCLUDED.base_days
+             RETURNING base_days",
+        )
+        .bind(user_id)
+        .bind(category_id)
+        .bind(ROLE_ASSISTANT)
+        .fetch_one(&mut *tx)
+        .await?;
+        Self::set_leave_account_year_days_tx(tx, user_id, category_id, current_year, default_days)
+            .await?;
+        Self::set_leave_account_year_days_tx(tx, user_id, category_id, next_year, default_days)
+            .await?;
         Ok(())
     }
 
@@ -1415,10 +1484,17 @@ impl UserDb {
         Ok(())
     }
 
+    /// `granted_category_ids`: `None` means every leave-account category is
+    /// granted (the pre-existing behavior, used by every caller except
+    /// initial user creation); `Some(ids)` restricts the non-zero default to
+    /// categories in `ids` — a leave-account category the new user was not
+    /// granted access to seeds at zero, the same as an assistant, so their
+    /// entitlement never outlives the access decision that grants it.
     async fn seed_leave_accounts_for_user_sql_tx(
         tx: &mut sqlx::PgConnection,
         user_id: i64,
         role: &str,
+        granted_category_ids: Option<&[i64]>,
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
             "INSERT INTO user_leave_accounts (user_id, category_id, base_days)
@@ -1427,6 +1503,7 @@ impl UserDb {
                 category.id,
                 CASE
                     WHEN lower(trim($2)) = $3 THEN 0
+                    WHEN $4::BIGINT[] IS NOT NULL AND NOT (category.id = ANY($4)) THEN 0
                     ELSE category.leave_account_default_days
                 END
              FROM absence_categories AS category
@@ -1436,6 +1513,7 @@ impl UserDb {
         .bind(user_id)
         .bind(role)
         .bind(ROLE_ASSISTANT)
+        .bind(granted_category_ids)
         .execute(tx)
         .await?;
         Ok(())

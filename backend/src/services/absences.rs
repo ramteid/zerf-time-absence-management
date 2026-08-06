@@ -1368,9 +1368,9 @@ pub async fn compute_balances(
     year: i32,
 ) -> AppResult<Vec<LeaveBalance>> {
     use crate::services::absence_balance::{
-        carryover_remaining_days, effective_leave_account_start_year, leave_account_year_context,
-        parse_expiry_date, total_entitlement_with_carryover, workdays_for_ranges_in_window,
-        CarryoverRemainingInput,
+        carryover_remaining_days, effective_leave_account_start_year,
+        leave_account_tile_is_visible, leave_account_year_context, parse_expiry_date,
+        total_entitlement_with_carryover, workdays_for_ranges_in_window, CarryoverRemainingInput,
     };
 
     assert_can_access_user(app_state, requester, target_user_id).await?;
@@ -1409,6 +1409,11 @@ pub async fn compute_balances(
                 AppError::Internal("User leave account refers to a missing category.".into())
             })?;
         if year < effective_leave_account_start_year(&target_user, category)? {
+            continue;
+        }
+        if !leave_account_tile_is_visible(&app_state.pool, target_user_id, category.id, today)
+            .await?
+        {
             continue;
         }
         let account_absences: Vec<Absence> = app_state

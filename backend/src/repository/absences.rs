@@ -513,6 +513,32 @@ impl AbsenceDb {
         .await?)
     }
 
+    /// True when the user has any non-cancelled/non-rejected absence charged
+    /// to this leave account that is still ongoing or in the future (i.e.
+    /// `end_date >= today`). Used to decide whether an access-revoked
+    /// account's tile must stay visible because it still has active or
+    /// upcoming usage.
+    pub async fn has_active_or_future_leave_account_usage(
+        &self,
+        user_id: i64,
+        leave_account_category_id: i64,
+        today: NaiveDate,
+    ) -> AppResult<bool> {
+        let exists: Option<i32> = sqlx::query_scalar(
+            "SELECT 1 FROM absences \
+             WHERE user_id = $1 AND leave_account_category_id = $2 \
+             AND status NOT IN ('cancelled', 'rejected') \
+             AND end_date >= $3 \
+             LIMIT 1",
+        )
+        .bind(user_id)
+        .bind(leave_account_category_id)
+        .bind(today)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(exists.is_some())
+    }
+
     /// Load account-booked absence ranges in a window. `statuses` is passed
     /// through to PostgreSQL as an array so callers can use the same query for
     /// taken, planned, requested, and reservation calculations.

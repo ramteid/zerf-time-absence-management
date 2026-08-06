@@ -267,6 +267,33 @@ pub fn effective_leave_account_start_year(
     Ok(user.start_date.year().max(account_start_year))
 }
 
+/// True when a leave-account tile should remain visible for this user.
+/// Access grants visibility unconditionally. When access has been revoked,
+/// the tile still stays visible if there is an active (not
+/// cancelled/rejected) absence charged to the account that is ongoing or in
+/// the future — so nobody loses sight of what is still consuming that
+/// balance. Once every active booking on a revoked account is fully in the
+/// past (or there never was one), the tile is hidden. This narrows the
+/// original "revoked accounts stay visible" rule (see `PLAN.md`'s
+/// leave-account access addendum) for this specific case.
+pub async fn leave_account_tile_is_visible(
+    pool: &crate::db::DatabasePool,
+    user_id: i64,
+    category_id: i64,
+    today: NaiveDate,
+) -> AppResult<bool> {
+    use crate::repository::{AbsenceCategoryDb, AbsenceDb};
+    if AbsenceCategoryDb::new(pool.clone())
+        .is_enabled_for_user(category_id, user_id)
+        .await?
+    {
+        return Ok(true);
+    }
+    AbsenceDb::new(pool.clone())
+        .has_active_or_future_leave_account_usage(user_id, category_id, today)
+        .await
+}
+
 /// Resolve a user's per-category base entitlement with a possible yearly
 /// override. Values are stored by immutable category id, never by name/slug.
 pub async fn effective_leave_account_days(

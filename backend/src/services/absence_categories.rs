@@ -132,7 +132,17 @@ pub async fn category_users(
         .await
 }
 
-/// Replace the full set of employees enabled for an absence category. Admin-only.
+/// Replace the full set of employees enabled for an absence category.
+/// Admin-only.
+///
+/// For a leave-account category, access changes are reconciled with each
+/// affected user's `user_leave_accounts` row in the same transaction as the
+/// access change: a user who loses access has their account zeroed (and its
+/// yearly overrides cleared); a user who gains access has it restored to the
+/// category default. This keeps a user's visible entitlement from ever
+/// outliving the access decision that grants it — see the leave-account
+/// access addendum in `PLAN.md`. Non-leave-account categories keep the
+/// original, simpler access-only replacement.
 pub async fn set_category_users(
     app_state: &AppState,
     requester: &User,
@@ -142,17 +152,53 @@ pub async fn set_category_users(
     if !requester.is_admin() {
         return Err(AppError::Forbidden);
     }
-    app_state
+    let category = app_state
         .db
         .absence_categories
         .find_by_id(category_id)
         .await?
         .ok_or(AppError::NotFound)?;
-    app_state
-        .db
-        .absence_categories
-        .set_enabled_user_ids(category_id, &user_ids)
-        .await
+
+    if !category.has_leave_account() {
+        let mut transaction = app_state.db.users.begin().await?;
+        AbsenceCategoryDb::set_enabled_user_ids_tx(&mut transaction, category_id, &user_ids)
+            .await?;
+        transaction.commit().await?;
+        return Ok(());
+    }
+
+    let current_year = crate::services::settings::app_current_year(&app_state.pool).await;
+    let next_year = current_year + 1;
+    let new_ids: std::collections::HashSet<i64> = user_ids.iter().copied().collect();
+
+    let mut transaction = app_state.db.users.begin().await?;
+    crate::services::auth::lock_user_graph(&mut transaction).await?;
+    // Read the current access set under the lock, not before it, so a
+    // concurrent access edit for the same category cannot make this diff
+    // stale between the read and the write below.
+    let previous_ids: std::collections::HashSet<i64> =
+        AbsenceCategoryDb::enabled_user_ids_tx(&mut transaction, category_id)
+            .await?
+            .into_iter()
+            .collect();
+    let removed_ids: Vec<i64> = previous_ids.difference(&new_ids).copied().collect();
+    let added_ids: Vec<i64> = new_ids.difference(&previous_ids).copied().collect();
+    AbsenceCategoryDb::set_enabled_user_ids_tx(&mut transaction, category_id, &user_ids).await?;
+    for user_id in removed_ids {
+        UserDb::revoke_leave_account_tx(&mut transaction, user_id, category_id).await?;
+    }
+    for user_id in added_ids {
+        UserDb::grant_leave_account_tx(
+            &mut transaction,
+            user_id,
+            category_id,
+            current_year,
+            next_year,
+        )
+        .await?;
+    }
+    transaction.commit().await?;
+    Ok(())
 }
 
 pub struct NewCategoryInput {

@@ -230,13 +230,38 @@ impl AbsenceCategoryDb {
         .await?)
     }
 
-    /// Replace the full set of employees enabled for an absence category.
-    /// Duplicate ids in `user_ids` are tolerated (deduplicated) rather than
-    /// raising a primary-key conflict; an id that doesn't correspond to a
-    /// real user raises a client-facing `BadRequest` instead of a generic 500.
-    pub async fn set_enabled_user_ids(&self, category_id: i64, user_ids: &[i64]) -> AppResult<()> {
+    /// Transaction-bound form of [`Self::enabled_user_ids`], for callers that
+    /// must read the current access set under the user-graph advisory lock
+    /// before diffing it against a new set (e.g. leave-account reconciliation
+    /// in `services::absence_categories::set_category_users`).
+    pub async fn enabled_user_ids_tx(
+        tx: &mut sqlx::PgConnection,
+        category_id: i64,
+    ) -> AppResult<Vec<i64>> {
+        Ok(sqlx::query_scalar(
+            "SELECT user_id FROM user_absence_category_access WHERE category_id = $1",
+        )
+        .bind(category_id)
+        .fetch_all(tx)
+        .await?)
+    }
+
+    /// Replace the full set of employees enabled for an absence category, in
+    /// the caller-owned transaction. Duplicate ids in `user_ids` are
+    /// tolerated (deduplicated) rather than raising a primary-key conflict;
+    /// an id that doesn't correspond to a real user raises a client-facing
+    /// `BadRequest` instead of a generic 500.
+    ///
+    /// The caller owns the transaction (rather than this method opening its
+    /// own, as it used to) because for leave-account categories the access
+    /// diff must be reconciled with `user_leave_accounts` atomically — see
+    /// `services::absence_categories::set_category_users`.
+    pub async fn set_enabled_user_ids_tx(
+        tx: &mut sqlx::PgConnection,
+        category_id: i64,
+        user_ids: &[i64],
+    ) -> AppResult<()> {
         let unique_ids: std::collections::HashSet<i64> = user_ids.iter().copied().collect();
-        let mut tx = self.pool.begin().await?;
         sqlx::query("DELETE FROM user_absence_category_access WHERE category_id = $1")
             .bind(category_id)
             .execute(&mut *tx)
@@ -251,7 +276,6 @@ impl AbsenceCategoryDb {
             .await
             .map_err(map_user_access_error)?;
         }
-        tx.commit().await?;
         Ok(())
     }
 

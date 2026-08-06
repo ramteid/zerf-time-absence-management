@@ -1845,6 +1845,17 @@ Constraints:
   category are unaffected. If an employee still has a live absence in a
   category that is later disabled for them, Zerf keeps that category's
   behavior for the existing absence but does not offer it for new requests.
+- For a leave-account category specifically, removing an employee's access
+  also removes their entitlement for that account: it drops to zero and its
+  balance card disappears from their Absences page and personal report,
+  unless they still have an approved, requested, or cancellation-pending
+  absence charged to that account that is not yet fully in the past — the
+  card stays visible until that absence's end date has passed. Restoring
+  access brings the card back with the category's standard entitlement for
+  the current and next year (an admin can still adjust these values
+  afterward, the same as for any employee). This lets an admin correct who
+  is meant to use a leave account without leaving a balance an employee can
+  see but not actually request.
 
 ### Managing holidays
 
