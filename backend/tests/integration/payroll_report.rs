@@ -412,6 +412,144 @@ async fn payroll_report_lists_absence_days_and_assistant_hours() {
     app.cleanup().await;
 }
 
+/// Absence rows must be grouped by category first, then by employee name
+/// within a category, then chronologically within one employee — never by
+/// employee name or date across categories. Also covers German category
+/// translation, since the report is emailed to a German-speaking accountant.
+#[tokio::test]
+async fn payroll_report_absence_rows_are_grouped_by_category_then_name_then_date() {
+    let app = TestApp::spawn().await;
+    let admin = admin_login(&app).await;
+
+    // Two independent employees whose last names sort "b" before "z", so an
+    // (incorrect) name-first sort would put employee B's row ahead of
+    // employee Z's row regardless of category.
+    let (_, _, emp_b_id, emp_b_pw, _, _) =
+        bootstrap_team_with_suffix(&app, &admin, false, "grp-b").await;
+    let (_, _, emp_z_id, emp_z_pw, _, _) =
+        bootstrap_team_with_suffix(&app, &admin, false, "grp-z").await;
+    let _emp_b = login_change_pw(&app, "emp-grp-b@example.com", &emp_b_pw).await;
+    let _emp_z = login_change_pw(&app, "emp-grp-z@example.com", &emp_z_pw).await;
+
+    let monday = anchor_monday();
+    let (from, to) = month_bounds(monday);
+
+    // Determine the actual category rank at runtime instead of assuming one,
+    // since the category order is driven by `sort_order`/name in the DB.
+    let relevant = payroll_report::payroll_relevant_categories(&app.state.pool)
+        .await
+        .expect("relevant categories");
+    let sick_rank = relevant
+        .iter()
+        .position(|c| c.slug == "sick")
+        .expect("sick is payroll-relevant");
+    let unpaid_rank = relevant
+        .iter()
+        .position(|c| c.slug == "unpaid")
+        .expect("unpaid is payroll-relevant");
+    let (low_cat, low_slug, high_cat, high_slug) = if sick_rank < unpaid_rank {
+        (
+            absence_cat(&app.state.pool, "sick").await,
+            "sick",
+            absence_cat(&app.state.pool, "unpaid").await,
+            "unpaid",
+        )
+    } else {
+        (
+            absence_cat(&app.state.pool, "unpaid").await,
+            "unpaid",
+            absence_cat(&app.state.pool, "sick").await,
+            "sick",
+        )
+    };
+
+    // Employee B (alphabetically first) is booked in the HIGHER-ranked
+    // category, so a correct category-first sort must still place employee
+    // Z's row(s) before employee B's row.
+    app.state
+        .db
+        .absences
+        .create(
+            emp_b_id,
+            high_cat.id,
+            true,
+            monday + Duration::days(1),
+            monday + Duration::days(1),
+            None,
+            "approved",
+        )
+        .await
+        .expect("create employee B absence");
+
+    // Employee Z gets two separate periods in the LOWER-ranked category,
+    // created out of chronological order, so a correct sort must still print
+    // the earlier one first purely by date, not by insertion order.
+    app.state
+        .db
+        .absences
+        .create(
+            emp_z_id,
+            low_cat.id,
+            true,
+            monday + Duration::days(2),
+            monday + Duration::days(2),
+            None,
+            "approved",
+        )
+        .await
+        .expect("create employee Z later absence");
+    app.state
+        .db
+        .absences
+        .create(emp_z_id, low_cat.id, true, monday, monday, None, "approved")
+        .await
+        .expect("create employee Z earlier absence");
+
+    let members = app
+        .state
+        .db
+        .reports
+        .timesheet_members_for_period(from, to)
+        .await
+        .expect("members");
+    let language = zerf::i18n::Language::from_setting("de");
+    let data = payroll_report::build_report_data(
+        &app.state,
+        from,
+        to,
+        &members,
+        &config(false, false),
+        &language,
+        None,
+    )
+    .await
+    .expect("build report data");
+
+    let rows = data.absence_rows.as_ref().expect("absence section enabled");
+    assert_eq!(rows.len(), 3, "one row for B, two for Z");
+
+    let de_label = |slug: &str| match slug {
+        "sick" => "Krankmeldung",
+        "unpaid" => "Unbezahlter Urlaub",
+        other => panic!("unexpected slug {other}"),
+    };
+
+    // Both of employee Z's low-category rows must come first, in date order,
+    // followed by employee B's high-category row.
+    assert_eq!(rows[0].category, de_label(low_slug));
+    assert!(rows[0].employee.contains("grp-z"), "{}", rows[0].employee);
+    assert_eq!(rows[0].from, monday);
+
+    assert_eq!(rows[1].category, de_label(low_slug));
+    assert!(rows[1].employee.contains("grp-z"), "{}", rows[1].employee);
+    assert_eq!(rows[1].from, monday + Duration::days(2));
+
+    assert_eq!(rows[2].category, de_label(high_slug));
+    assert!(rows[2].employee.contains("grp-b"), "{}", rows[2].employee);
+
+    app.cleanup().await;
+}
+
 /// An unfinished month is a normal business state, not a system fault. It must
 /// never reach admins through the technical-error channel — the dashboard tile
 /// is where an outstanding payroll report is surfaced now.
