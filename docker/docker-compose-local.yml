@@ -36,6 +36,23 @@ services:
       # TOC files.  256 MiB is the maximum restorable dump size; if your
       # encrypted dump exceeds this, increase the value and restart postgres.
       - /tmp:size=256m
+      # The Percona image declares VOLUME for these five paths (leftovers of
+      # its bundled pgBackRest tooling, which this project does not use --
+      # backups go through scripts/backup.sh instead). Without an explicit
+      # mount here, Docker creates a fresh anonymous volume for each of them
+      # on every container recreation, and the old ones are never cleaned up.
+      # Confirmed empty on a live container and never referenced by either
+      # our own entrypoint or Percona's upstream /entrypoint.sh (grepped the
+      # actual script content) -- pgBackRest's real default paths are
+      # /var/spool/pgbackrest, /var/lib/pgbackrest, /var/log/pgbackrest, not
+      # these, and nothing starts its systemd service inside the container
+      # anyway. WAL is unaffected: it lives at the ordinary /data/db/pg_wal
+      # (verified not a symlink), on the persistent postgres_db_data volume.
+      - /sshd:size=1m
+      - /pgconf:size=1m
+      - /pgdata:size=1m
+      - /pgwal:size=1m
+      - /backrestrepo:size=1m
     environment:
       - POSTGRES_DB=${ZERF_POSTGRES_DB:-zerf}
       - POSTGRES_USER=${ZERF_POSTGRES_USER:-zerf}
