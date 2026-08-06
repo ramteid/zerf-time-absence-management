@@ -14,41 +14,27 @@
   class="zf-card leave-account-card"
   data-testid={`leave-account-card-${balance.category_id}`}
 >
-  <header class="leave-account-card-header">
-    <div class="leave-account-card-name">
-      <span
-        class="leave-account-card-dot"
-        style:background={balance.color || "#64748b"}
-      ></span>
-      <span>{$t(balance.category_name)}</span>
-    </div>
-    <div class:negative={available < 0} class="leave-account-card-available">
-      <span class="leave-account-card-label">{$t("Available")}</span>
-      <strong class="tab-num">{formatDayCount(available)}</strong>
-    </div>
-  </header>
+  <div class="leave-account-card-title">
+    <span
+      class="leave-account-card-dot"
+      style:background={balance.color || "#64748b"}
+    ></span>
+    <span>{$t(balance.category_name)}</span>
+  </div>
 
-  <div class="leave-account-card-stats">
-    <div>
-      <span>{$t("Entitlement")}</span>
-      <strong class="tab-num"
-        >{formatDayCount(balance.annual_entitlement)}</strong
-      >
-    </div>
-    <div>
-      <span>{$t("Taken")}</span>
-      <strong class="tab-num">{formatDayCount(balance.already_taken)}</strong>
-    </div>
-    <div>
-      <span>{$t("Approved planned")}</span>
-      <strong class="tab-num"
-        >{formatDayCount(balance.approved_upcoming)}</strong
-      >
-    </div>
-    <div>
-      <span>{$t("Requested")}</span>
-      <strong class="tab-num">{formatDayCount(balance.requested)}</strong>
-    </div>
+  <div class="stat-card-label">{$t("Available")}</div>
+  <div
+    class="stat-card-value tab-num"
+    style:color={available < 0 ? "var(--danger-text)" : "var(--success-text)"}
+  >
+    {formatDayCount(available)}
+  </div>
+  <div class="stat-card-sub">
+    {$t("Entitlement")}
+    {formatDayCount(balance.annual_entitlement)} · {$t("Taken")}
+    {formatDayCount(balance.already_taken)} · {$t("Approved planned")}
+    {formatDayCount(balance.approved_upcoming)} · {$t("Requested")}
+    {formatDayCount(balance.requested)}
   </div>
 
   {#if carryoverDays > 0}
@@ -84,72 +70,28 @@
   .leave-account-card {
     display: flex;
     flex-direction: column;
-    gap: 14px;
     min-width: 0;
-    padding: 16px 20px;
+    padding: 14px 16px;
   }
 
-  .leave-account-card-header {
+  .leave-account-card-title {
     display: flex;
     align-items: flex-start;
-    justify-content: space-between;
-    gap: 16px;
-  }
-
-  .leave-account-card-name {
-    display: flex;
-    align-items: center;
     gap: 8px;
     min-width: 0;
-    font-weight: 600;
+    font-size: 0.9375rem;
+    font-weight: 400;
+    line-height: 1.3;
+    min-height: calc(1.3em * 2);
+    margin-bottom: 10px;
   }
 
   .leave-account-card-dot {
-    width: 12px;
-    height: 12px;
+    width: 10px;
+    height: 10px;
     border-radius: 50%;
     flex: 0 0 auto;
-  }
-
-  .leave-account-card-available {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    color: var(--success-text);
-  }
-
-  .leave-account-card-available.negative {
-    color: var(--danger-text);
-  }
-
-  .leave-account-card-available strong {
-    font-size: 1.375rem;
-    line-height: 1.1;
-  }
-
-  .leave-account-card-label,
-  .leave-account-card-stats span,
-  .leave-account-card-carryover-status {
-    color: var(--text-tertiary);
-    font-size: 0.8125rem;
-  }
-
-  .leave-account-card-stats {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 8px;
-  }
-
-  .leave-account-card-stats > div {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 0;
-  }
-
-  .leave-account-card-stats strong,
-  .leave-account-card-carryover strong {
-    font-weight: 600;
+    margin-top: 5px;
   }
 
   .leave-account-card-carryover {
@@ -158,6 +100,7 @@
     justify-content: space-between;
     gap: 8px;
     border-top: 1px solid var(--border);
+    margin-top: 12px;
     padding-top: 10px;
     color: var(--warning-text);
   }
@@ -166,6 +109,10 @@
     display: flex;
     flex-direction: column;
     gap: 2px;
+  }
+
+  .leave-account-card-carryover strong {
+    font-weight: 400;
   }
 
   .leave-account-card-carryover.expired {
@@ -178,12 +125,12 @@
     font-weight: 400;
   }
 
-  @media (max-width: 560px) {
-    .leave-account-card-stats {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 10px 16px;
-    }
+  .leave-account-card-carryover-status {
+    color: var(--text-tertiary);
+    font-size: 0.8125rem;
+  }
 
+  @media (max-width: 560px) {
     .leave-account-card-carryover {
       align-items: flex-start;
       flex-direction: column;
