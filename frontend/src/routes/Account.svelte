@@ -12,28 +12,7 @@
     nw2 = "",
     error = "";
   let savingTheme = false;
-  let leaveAccounts = [];
-  let loadedLeaveAccountsForUserId = null;
   $: isAssistantCurrentUser = isAssistantUser($currentUser);
-
-  // Re-fetch whenever the authenticated user changes. The response already
-  // carries the relevant current and next year, so this remains correct when
-  // the configured application timezone changes.
-  $: if ($currentUser?.id && loadedLeaveAccountsForUserId !== $currentUser.id) {
-    const userId = $currentUser.id;
-    loadedLeaveAccountsForUserId = userId;
-    api(`/users/${userId}/leave-accounts`)
-      .then((rows) => {
-        if (loadedLeaveAccountsForUserId !== userId) return;
-        // eslint-disable-next-line svelte/infinite-reactive-loop
-        leaveAccounts = Array.isArray(rows) ? rows : [];
-      })
-      .catch(() => {
-        if (loadedLeaveAccountsForUserId !== userId) return;
-        // eslint-disable-next-line svelte/infinite-reactive-loop
-        leaveAccounts = [];
-      });
-  }
 
   async function toggleDarkMode() {
     if (savingTheme) return;
@@ -177,40 +156,6 @@
     </div>
   </div>
 
-  {#if leaveAccounts.length > 0}
-    <div class="zf-card zf-card-section">
-      <div class="field-card-title">{$t("Leave accounts")}</div>
-      <div class="leave-account-list">
-        {#each leaveAccounts as leaveAccount (leaveAccount.category_id)}
-          <div
-            class="leave-account-row"
-            data-testid={`account-leave-account-${leaveAccount.category_id}`}
-          >
-            <div class="leave-account-name">
-              <span
-                class="leave-account-dot"
-                style:background={leaveAccount.color || "#64748b"}
-              ></span>
-              <span>{$t(leaveAccount.category_name)}</span>
-            </div>
-            <div class="leave-account-years">
-              <span
-                >{leaveAccount.current_year}:
-                <strong class="tab-num">{leaveAccount.current_year_days}</strong
-                ></span
-              >
-              <span
-                >{leaveAccount.next_year}:
-                <strong class="tab-num">{leaveAccount.next_year_days}</strong
-                ></span
-              >
-            </div>
-          </div>
-        {/each}
-      </div>
-    </div>
-  {/if}
-
   <!-- Password -->
   <div class="zf-card zf-card-section">
     <div class="field-card-title">{$t("Change password")}</div>
@@ -309,51 +254,4 @@
     justify-content: flex-end;
   }
 
-  .leave-account-list {
-    display: flex;
-    flex-direction: column;
-  }
-
-  .leave-account-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    padding: 10px 0;
-  }
-
-  .leave-account-row + .leave-account-row {
-    border-top: 1px solid var(--border);
-  }
-
-  .leave-account-name,
-  .leave-account-years {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .leave-account-name {
-    font-weight: 600;
-  }
-
-  .leave-account-years {
-    color: var(--text-secondary);
-    font-size: 0.875rem;
-  }
-
-  .leave-account-dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    flex: 0 0 auto;
-  }
-
-  @media (max-width: 560px) {
-    .leave-account-row,
-    .leave-account-years {
-      align-items: flex-start;
-      flex-direction: column;
-    }
-  }
 </style>

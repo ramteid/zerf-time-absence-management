@@ -128,7 +128,6 @@ describe("Account", () => {
   });
 
   it("calls API to change password successfully", async () => {
-    apiMock.mockResolvedValueOnce([]);
     apiMock.mockResolvedValueOnce({});
 
     component = mount(Account, { target });
@@ -191,7 +190,6 @@ describe("Account", () => {
   });
 
   it("shows API error on password change failure", async () => {
-    apiMock.mockResolvedValueOnce([]);
     apiMock.mockRejectedValueOnce({ message: "Wrong current password" });
 
     component = mount(Account, { target });
@@ -214,38 +212,6 @@ describe("Account", () => {
     expect(target.querySelector(".error-text").textContent).toContain(
       "Wrong current password",
     );
-  });
-
-  it("fetches and renders leave accounts on load", async () => {
-    apiMock.mockResolvedValue([
-      {
-        category_id: 1,
-        category_name: "Vacation",
-        color: "#3b82f6",
-        base_days: 30,
-        current_year: 2026,
-        current_year_days: 25,
-        next_year: 2027,
-        next_year_days: 30,
-      },
-      {
-        category_id: 8,
-        category_name: "Education leave",
-        color: "#14b8a6",
-        base_days: 5,
-        current_year: 2026,
-        current_year_days: 5,
-        next_year: 2027,
-        next_year_days: 5,
-      },
-    ]);
-    component = mount(Account, { target });
-    await settle();
-    expect(apiMock).toHaveBeenCalledWith(
-      expect.stringContaining("/users/1/leave-accounts"),
-    );
-    expect(target.textContent).toContain("Education leave");
-    expect(target.textContent).toContain("2026: 25");
   });
 
   it("renders dark mode toggle button", async () => {
