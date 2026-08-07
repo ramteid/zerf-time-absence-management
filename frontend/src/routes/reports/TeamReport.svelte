@@ -26,6 +26,7 @@
   import {
     categoryColumnsFromTeamReport,
     filterTeamCategoryColumns,
+    leaveAccountUsage,
     teamCategoryMinutes,
     teamCategoryRowTotal,
     dedupeAbsences,
@@ -47,6 +48,11 @@
 
   // --- Section 1: team month table (month mode only) ---
   let teamReport = null;
+  // One entry per leave-account category that has started by the report
+  // month (see handlers::reports::team) — independent leave accounts (e.g.
+  // Vacation, Bildungsurlaub) each get their own column, bound to row data
+  // by category_id via leaveAccountUsage().
+  let teamLeaveAccountColumns = [];
   let teamLoading = false;
   let lastTeamKey = "";
   async function loadTeam(key) {
@@ -55,14 +61,16 @@
       const loaded = await getTeamReport({ month });
       if (key === lastTeamKey) {
         // eslint-disable-next-line svelte/infinite-reactive-loop -- teamReport isn't read by the triggering $: block, so there's no cycle.
-        teamReport = (loaded || []).sort((a, b) =>
+        teamReport = (loaded?.rows || []).sort((a, b) =>
           a.name.localeCompare(b.name),
         );
+        teamLeaveAccountColumns = loaded?.leave_account_categories || [];
       }
     } catch (e) {
       if (key === lastTeamKey) {
         // eslint-disable-next-line svelte/infinite-reactive-loop -- see above.
         teamReport = null;
+        teamLeaveAccountColumns = [];
         toast($t(e?.message || "Error"), "error");
       }
     } finally {
@@ -234,8 +242,18 @@
             <th class="text-right team-report-header">{$t("Current flextime balance")}</th>
             <th class="text-right team-report-header">{$t("Monthly diff")}</th>
             <th class="text-right team-report-header">{$t("Sick days")}</th>
-            <th class="text-right team-report-header">{$t("Vacation taken")}</th>
-            <th class="text-right team-report-header">{$t("Vacation planned")}</th>
+            {#each teamLeaveAccountColumns as col (col.category_id)}
+              <th
+                class="text-right team-report-header"
+                data-testid={`team-leave-account-column-${col.category_id}`}
+              >
+                <span class="th-cat">
+                  <span class="cat-dot" style:background={col.color || "#999"}
+                  ></span>
+                  {$t(col.name)}
+                </span>
+              </th>
+            {/each}
             <th class="text-center team-report-header">{$t("All weeks submitted")}</th>
           </tr>
         </thead>
@@ -278,19 +296,18 @@
                 ? fmtDecimal(r.sick_days, r.sick_days % 1 === 0 ? 0 : 1)
                 : "-"}
             </td>
-            <td class="tab-num text-right text-tertiary">
-              {r.vacation_days > 0
-                ? fmtDecimal(r.vacation_days, r.vacation_days % 1 === 0 ? 0 : 1)
-                : "-"}
-            </td>
-            <td class="tab-num text-right text-tertiary">
-              {r.vacation_planned_days > 0
-                ? fmtDecimal(
-                    r.vacation_planned_days,
-                    r.vacation_planned_days % 1 === 0 ? 0 : 1,
-                  )
-                : "-"}
-            </td>
+            {#each teamLeaveAccountColumns as col (col.category_id)}
+              {@const usage = leaveAccountUsage(r, col.category_id)}
+              <td
+                class="tab-num text-right text-tertiary"
+                data-testid={`team-leave-account-${r.user_id}-${col.category_id}`}
+                title={`${$t("Taken")}: ${formatDayCount(usage.taken_days)} · ${$t("Approved planned")}: ${formatDayCount(usage.planned_days)}`}
+              >
+                {usage.taken_days > 0 || usage.planned_days > 0
+                  ? `${formatDayCount(usage.taken_days)} / ${formatDayCount(usage.planned_days)}`
+                  : "-"}
+              </td>
+            {/each}
             <td class="text-center">
               {#if r.weeks_all_submitted}
                 <span class="text-success">{$t("Yes")}</span>

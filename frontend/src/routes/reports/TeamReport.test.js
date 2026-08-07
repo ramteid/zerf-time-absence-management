@@ -63,7 +63,7 @@ describe("TeamReport", () => {
       permissions: { can_view_team_reports: true },
     });
     vi.clearAllMocks();
-    getTeamReport.mockResolvedValue([]);
+    getTeamReport.mockResolvedValue({ rows: [], leave_account_categories: [] });
     getTeamCategoryReport.mockResolvedValue([]);
     getAbsenceReport.mockResolvedValue([]);
     getUserAbsencesByYear.mockResolvedValue([]);
@@ -94,18 +94,20 @@ describe("TeamReport", () => {
   });
 
   it("renders the month table with wrapping-optimized headers", async () => {
-    getTeamReport.mockResolvedValueOnce([
-      {
-        user_id: 1,
-        name: "Alice Smith",
-        flextime_balance_min: 120,
-        diff_min: 30,
-        sick_days: 0,
-        vacation_days: 5,
-        vacation_planned_days: 0,
-        weeks_all_submitted: true,
-      },
-    ]);
+    getTeamReport.mockResolvedValueOnce({
+      leave_account_categories: [],
+      rows: [
+        {
+          user_id: 1,
+          name: "Alice Smith",
+          flextime_balance_min: 120,
+          diff_min: 30,
+          sick_days: 0,
+          leave_account_usage: [],
+          weeks_all_submitted: true,
+        },
+      ],
+    });
     component = mount(TeamReport, {
       target,
       props: { users, periodMode: "month", month: "2026-05", from: "", to: "" },
@@ -117,28 +119,29 @@ describe("TeamReport", () => {
   });
 
   it("renders employee rows once the month table resolves", async () => {
-    getTeamReport.mockResolvedValueOnce([
-      {
-        user_id: 1,
-        name: "Alice Smith",
-        flextime_balance_min: 120,
-        diff_min: 30,
-        sick_days: 0,
-        vacation_days: 5,
-        vacation_planned_days: 0,
-        weeks_all_submitted: true,
-      },
-      {
-        user_id: 2,
-        name: "Bob Jones",
-        flextime_balance_min: -60,
-        diff_min: -60,
-        sick_days: 1,
-        vacation_days: 0,
-        vacation_planned_days: 0,
-        weeks_all_submitted: false,
-      },
-    ]);
+    getTeamReport.mockResolvedValueOnce({
+      leave_account_categories: [],
+      rows: [
+        {
+          user_id: 1,
+          name: "Alice Smith",
+          flextime_balance_min: 120,
+          diff_min: 30,
+          sick_days: 0,
+          leave_account_usage: [],
+          weeks_all_submitted: true,
+        },
+        {
+          user_id: 2,
+          name: "Bob Jones",
+          flextime_balance_min: -60,
+          diff_min: -60,
+          sick_days: 1,
+          leave_account_usage: [],
+          weeks_all_submitted: false,
+        },
+      ],
+    });
     component = mount(TeamReport, {
       target,
       props: { users, periodMode: "month", month: "2026-05", from: "", to: "" },
@@ -146,6 +149,44 @@ describe("TeamReport", () => {
     await waitForText(target, "Alice Smith");
     expect(target.textContent).toContain("Bob Jones");
     expect(target.textContent).toContain("Yes"); // Alice: all weeks submitted
+  });
+
+  it("renders one column per independent leave-account category, bound by category_id", async () => {
+    getTeamReport.mockResolvedValueOnce({
+      leave_account_categories: [
+        { category_id: 9, name: "Bildungsurlaub", color: "#5b8def" },
+      ],
+      rows: [
+        {
+          user_id: 1,
+          name: "Alice Smith",
+          flextime_balance_min: 120,
+          diff_min: 30,
+          sick_days: 0,
+          leave_account_usage: [
+            { category_id: 9, taken_days: 2, planned_days: 1 },
+          ],
+          weeks_all_submitted: true,
+        },
+      ],
+    });
+    component = mount(TeamReport, {
+      target,
+      props: { users, periodMode: "month", month: "2026-05", from: "", to: "" },
+    });
+    await waitForText(target, "Alice Smith");
+
+    expect(target.textContent).toContain("Bildungsurlaub");
+    const column = target.querySelector(
+      '[data-testid="team-leave-account-column-9"]',
+    );
+    expect(column).not.toBeNull();
+    const cell = target.querySelector(
+      '[data-testid="team-leave-account-1-9"]',
+    );
+    expect(cell).not.toBeNull();
+    expect(cell.textContent).toContain("2");
+    expect(cell.textContent).toContain("1");
   });
 
   it("clears the table and shows nothing when the API call fails", async () => {

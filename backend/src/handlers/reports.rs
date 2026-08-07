@@ -7,8 +7,8 @@ use crate::services::reports::{
     build_flextime_for_user, build_month, build_month_without_submission_status,
     build_overtime_rows_for_year, build_range, build_team_timesheet_sections,
     build_timesheet_section, csv_response, month_bounds, parse_report_time, pdf_response,
-    sort_categories_desc, validate_range, CategoryTotal, FlextimeDay, LeaveAccountUsage,
-    MonthReport, MonthRow, TeamRow, UserCategoryRow,
+    sort_categories_desc, validate_range, CategoryTotal, FlextimeDay, LeaveAccountCategory,
+    LeaveAccountUsage, MonthReport, MonthRow, TeamReport, TeamRow, UserCategoryRow,
 };
 use crate::AppState;
 use axum::{
@@ -161,7 +161,7 @@ pub async fn team(
     State(app_state): State<AppState>,
     requester: User,
     Query(query): Query<TeamQuery>,
-) -> AppResult<Json<Vec<TeamRow>>> {
+) -> AppResult<Json<TeamReport>> {
     if !requester.is_lead() {
         return Err(AppError::Forbidden);
     }
@@ -211,6 +211,17 @@ pub async fn team(
             .or_default()
             .push((range.start_date, range.end_date));
     }
+    // Sent once at the top level rather than repeated per row — the client
+    // binds every row's `leave_account_usage` entries back to a column via
+    // `category_id`.
+    let leave_account_categories: Vec<LeaveAccountCategory> = leave_account_definitions
+        .iter()
+        .map(|definition| LeaveAccountCategory {
+            category_id: definition.category_id,
+            name: definition.category_name.clone(),
+            color: definition.color.clone(),
+        })
+        .collect();
     let leave_account_definitions = Arc::new(leave_account_definitions);
     let account_ranges_by_user = Arc::new(account_ranges_by_user);
 
@@ -358,7 +369,10 @@ pub async fn team(
         }
     }
 
-    Ok(Json(result?))
+    Ok(Json(TeamReport {
+        leave_account_categories,
+        rows: result?,
+    }))
 }
 
 #[derive(Deserialize)]

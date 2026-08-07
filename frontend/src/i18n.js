@@ -262,8 +262,6 @@ const TRANSLATIONS = {
     Weekend: "Weekend",
     Weekends: "Weekends",
     "Sick days": "Sick days",
-    "Vacation taken": "Vacation taken",
-    "Vacation planned": "Vacation planned",
     "All weeks submitted": "All weeks submitted",
     "Note: current month - data up to yesterday":
       "Note: current month - data including today",
@@ -1336,8 +1334,6 @@ const TRANSLATIONS = {
     "Current flextime balance": "Aktueller Gleitzeitkontostand",
     "Monthly diff": "Monatsdifferenz",
     "Sick days": "Krankheitstage",
-    "Vacation taken": "Genommener Urlaub",
-    "Vacation planned": "Geplanter Urlaub",
     "All weeks submitted": "Alle Wochen eingereicht",
     "Note: current month - data up to yesterday":
       "Hinweis: Laufender Monat - Daten inklusive heute",

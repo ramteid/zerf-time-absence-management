@@ -710,7 +710,7 @@ async fn report_export_gate_waits_for_pending_absence_decision() {
         .get(&format!("/api/v1/reports/team?month={month}"))
         .await;
     assert_eq!(status, StatusCode::OK, "team report while absence pending");
-    let employee_row = team_rows
+    let employee_row = team_rows["rows"]
         .as_array()
         .and_then(|rows| {
             rows.iter()
@@ -1568,7 +1568,7 @@ async fn reports_full_workflow() {
             .get(&format!("/api/v1/reports/team?month={month}"))
             .await;
         assert_eq!(st, StatusCode::OK, "team report for assistant checks");
-        let row = body
+        let row = body["rows"]
             .as_array()
             .unwrap()
             .iter()
@@ -1962,7 +1962,7 @@ async fn zero_weekly_hours_employee_exempt_from_week_completeness_checks() {
         .get(&format!("/api/v1/reports/team?month={month}"))
         .await;
     assert_eq!(st, StatusCode::OK, "team report");
-    let team_rows = team_rows.as_array().unwrap();
+    let team_rows = team_rows["rows"].as_array().unwrap();
     let zero_hours_row = team_rows
         .iter()
         .find(|row| row["user_id"].as_i64() == Some(zero_hours_id))

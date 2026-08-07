@@ -499,7 +499,7 @@ async fn pure_admin_team_report_accessible_and_excludes_pure_admin_rows() {
         "pure-admin should be able to access team report"
     );
 
-    let rows = body.as_array().expect("team report response array");
+    let rows = body["rows"].as_array().expect("team report response array");
     assert!(
         rows.iter()
             .any(|row| row["user_id"].as_i64() == Some(emp_id)),
