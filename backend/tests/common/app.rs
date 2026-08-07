@@ -123,6 +123,7 @@ impl TestApp {
             db,
             cfg: Arc::new(cfg),
             notifications: broadcaster,
+            email_circuit_breaker: Arc::new(zerf::email::CircuitBreaker::new()),
         };
 
         let app = build_app(state.clone());
@@ -250,6 +251,7 @@ impl TestApp {
             db,
             cfg: Arc::new(cfg),
             notifications: broadcaster,
+            email_circuit_breaker: Arc::new(zerf::email::CircuitBreaker::new()),
         };
 
         let app = build_app(state.clone());

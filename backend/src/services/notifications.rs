@@ -205,9 +205,10 @@ async fn write_in_app(state: &AppState, msg: &Outgoing<'_>) -> bool {
     }
 }
 
-/// Send a notification email best-effort (non-fatal). When `append_footer` is
-/// true the configured timestamp and public app URL are appended. Silent no-op
-/// when SMTP is not configured (the whole email feature is opt-in).
+/// Queue a notification email for delivery (non-fatal: enqueue failures are
+/// only logged). When `append_footer` is true the configured timestamp and
+/// public app URL are appended. No-op when SMTP is not enabled/configured
+/// (the whole email feature is opt-in) — nothing is queued in that case.
 async fn send_notification_email(
     state: &AppState,
     language: &Language,
@@ -220,12 +221,7 @@ async fn send_notification_email(
         state.db.notifications.get_user_email(user_id).await
     {
         let recipient_name = format!("{} {}", first_name, last_name);
-        let smtp = state
-            .db
-            .settings
-            .load_smtp_config()
-            .await
-            .map(std::sync::Arc::new);
+        let smtp_configured = state.db.settings.load_smtp_config().await.is_some();
         let email_body = if append_footer {
             let timezone = crate::services::settings::load_setting(
                 &state.pool,
@@ -245,7 +241,15 @@ async fn send_notification_email(
         } else {
             body.to_string()
         };
-        crate::email::send_async(smtp, email, recipient_name, subject, email_body);
+        crate::email::queue_email(
+            &state.db.email_queue,
+            smtp_configured,
+            &email,
+            &recipient_name,
+            &subject,
+            &email_body,
+        )
+        .await;
     }
 }
 

@@ -3,6 +3,7 @@ pub mod absences;
 pub mod app_logs;
 pub mod audit;
 pub mod categories;
+pub mod email_queue;
 pub mod error_notification_queue;
 pub mod facade;
 pub mod holidays;
@@ -25,6 +26,7 @@ pub use absences::{
 pub use app_logs::{AppLogDb, AppLogEntry};
 pub use audit::{AuditDb, LogEntry};
 pub use categories::{Category, CategoryDb};
+pub use email_queue::{EmailQueueDb, EmailQueueEntry};
 pub use error_notification_queue::{ErrorNotificationEntry, ErrorNotificationQueueDb};
 pub use facade::Db;
 pub use holidays::{Holiday, HolidayDb, PreparedHoliday};

@@ -32,6 +32,7 @@ mod audit;
 mod auth;
 mod carryover;
 mod categories;
+mod email_queue;
 mod error_notifications;
 mod full_suite;
 mod holidays;

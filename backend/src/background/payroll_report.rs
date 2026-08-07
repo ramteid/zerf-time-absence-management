@@ -294,6 +294,7 @@ async fn process_period(
     );
 
     crate::email::send_with_attachment(
+        &state.email_circuit_breaker,
         &smtp,
         &config.recipients,
         &text.title,

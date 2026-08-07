@@ -80,7 +80,7 @@ Additional modules:
 
 **Sub-repositories** (fields on `repository::Db`):
 
-`sessions`, `users`, `time_entries`, `absences`, `reopen_requests`, `categories`, `holidays`, `notifications`, `audit`, `settings`, `reports`, `export_queue`, `payroll_queue`, `error_queue`
+`sessions`, `users`, `time_entries`, `absences`, `reopen_requests`, `categories`, `holidays`, `notifications`, `audit`, `settings`, `reports`, `export_queue`, `payroll_queue`, `error_queue`, `email_queue`
 
 **Access patterns in services:**
 
@@ -115,11 +115,42 @@ let user = UserDb::new(pool.clone()).find_by_id(id).await?;
 - Submission reminder scheduler
 - Monthly timesheet PDF upload to Nextcloud (daily, after midnight)
 - Monthly payroll report email to the tax office (daily, after midnight)
+- Error-notification worker: drains `error_notification_queue` and alerts opted-in admins in-app + by email (poll every 10s)
+- Email queue worker: drains `email_queue` and delivers via SMTP, guarded by a shared circuit breaker (poll every 2 minutes)
 
 Both monthly jobs share `background/schedule.rs` (daily loop, `YYYY-MM` period
 math, queue backfill through the previous month, day-of-month deferral) and the
 `services::reports::month_export_readiness` gate, so they judge "this month is
 final" by the same rules.
+
+**Email delivery** (`email.rs`, `background/email_queue.rs`): almost every
+outbound email (password resets, absence decisions, reminders, error alerts)
+goes through `services::notifications::deliver` → `email::queue_email`, which
+persists the already-rendered subject/body to `email_queue` rather than
+sending it inline. The background worker above drains that table every 2 minutes (new messages
+first, then previously-failed ones least-recently-retried first — so one
+undeliverable message can't monopolize the circuit breaker's retry slot and
+starve everything queued behind it) and deletes a row only once SMTP
+confirmed delivery — a message that keeps failing simply stays queued and is
+retried indefinitely, so a transient SMTP outage can no longer silently lose
+an email. Enqueueing
+itself is gated on `SettingsDb::load_smtp_config()` returning `Some`
+(SMTP enabled and fully configured); if SMTP is disabled after messages are
+already queued, they are left in place untouched rather than dropped or
+warned about. A shared `email::CircuitBreaker` (5 consecutive failures opens
+it; a 5-minute cooldown then grants one half-open trial) guards every real
+SMTP attempt so a longer outage stops being retried on every poll; the
+breaker is shared with the payroll report's own `send_with_attachment` call so
+both paths back off together. A row is only logged as a system warning (not
+raised as an admin notification, to avoid emailing about email being broken)
+once it has failed 100 delivery attempts — logged once at that threshold, not
+repeated on every attempt after. The one exception that bypasses the queue
+entirely is the monthly payroll report PDF, which already has its own
+period-keyed retry queue (`payroll_report_queue`) with "stays queued until
+confirmed sent" semantics; it still routes its actual SMTP transaction
+through the same breaker-guarded sender. The admin's SMTP "test connection"
+probe also bypasses both the queue and the breaker deliberately — it never
+sends a real message and must not be blocked by unrelated breaker state.
 
 ### Configuration (environment variables)
 
@@ -152,6 +183,8 @@ final" by the same rules.
 | `holidays` | Public holidays (auto-fetched or manual) |
 | `reopen_requests` | Requests to reopen a submitted week |
 | `payroll_report_queue` | Months whose payroll report PDF still has to be emailed |
+| `error_notification_queue` | Technical-error events awaiting fan-out to opted-in admins |
+| `email_queue` | Outbound emails awaiting SMTP delivery (attempts, last error) |
 | `notifications` | Per-user in-app notifications |
 | `app_settings` | Key-value app settings |
 | `audit_log` | Before/after JSON snapshots of all mutations |

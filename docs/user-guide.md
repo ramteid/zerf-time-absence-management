@@ -1638,6 +1638,12 @@ Admins configure system-wide behavior in the Settings panel (Settings → Genera
 | Payroll Report | Email a monthly PDF with absence days and working hours to your payroll accountant or tax office. See [Payroll Report](#payroll-report). |
 | Allow team leads to create assistant users | Off by default. Only an admin can change it. When on, non-admin team leads get a scoped Users tab limited to creating/managing "Assistant" users assigned to them. See [Scoped assistant user management (optional)](#scoped-assistant-user-management-optional). |
 
+If the email server is temporarily unreachable, Zerf keeps every outgoing
+email queued and automatically retries delivery every few minutes until it
+succeeds — no email is silently lost. If SMTP is turned off while emails are
+still waiting to go out, they stay queued and are sent once it is turned back
+on.
+
 ### Nextcloud Upload
 
 Zerf can automatically upload two types of files to Nextcloud shared folders using public share links.

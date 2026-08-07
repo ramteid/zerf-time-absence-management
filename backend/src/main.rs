@@ -50,6 +50,7 @@ async fn main() -> Result<()> {
         db,
         cfg: Arc::new(config.clone()),
         notifications: broadcaster,
+        email_circuit_breaker: Arc::new(zerf::email::CircuitBreaker::new()),
     };
 
     // Background hygiene: clean expired sessions, old login attempts, and
@@ -110,6 +111,10 @@ async fn main() -> Result<()> {
     // Error-notification worker: drains the error queue (backend + backup
     // failures) and alerts opted-in admins in-app and by email.
     tokio::spawn(background::error_notifications::run_loop(state.clone()));
+
+    // Email queue worker: drains queued outbound emails every 2 minutes,
+    // guarded by the shared SMTP circuit breaker.
+    tokio::spawn(background::email_queue::run_loop(state.clone()));
 
     let app = build_app(state);
 
