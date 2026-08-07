@@ -18,6 +18,14 @@
   }
   load();
   loadAbsence();
+
+  // A brand-new category defaulting to sort_order 0 would jump ahead of
+  // every seeded category (Vacation is 1, Core Duties is 1, etc.) and
+  // silently become the pre-selected option everywhere the category
+  // appears in a dropdown. Default new categories to the end of the
+  // existing order instead; the admin can still override it in the dialog.
+  const nextSortOrder = (categories) =>
+    categories.reduce((max, cat) => Math.max(max, cat.sort_order ?? 0), 0) + 1;
 </script>
 
 <div class="top-bar page-narrow">
@@ -31,7 +39,11 @@
     <h2 class="section-title">
       {$t("Time Categories")}
     </h2>
-    <button class="zf-btn zf-btn-sm" on:click={() => (showDialog = {})}>
+    <button
+      class="zf-btn zf-btn-sm"
+      on:click={() =>
+        (showDialog = { sort_order: nextSortOrder(adminCategories) })}
+    >
       <Icon name="Plus" size={13} />{$t("Add")}
     </button>
   </div>
@@ -62,7 +74,13 @@
     <h2 class="section-title">
       {$t("Absence Categories")}
     </h2>
-    <button class="zf-btn zf-btn-sm" on:click={() => (showAbsenceDialog = {})}>
+    <button
+      class="zf-btn zf-btn-sm"
+      on:click={() =>
+        (showAbsenceDialog = {
+          sort_order: nextSortOrder(adminAbsenceCategories),
+        })}
+    >
       <Icon name="Plus" size={13} />{$t("Add")}
     </button>
   </div>
