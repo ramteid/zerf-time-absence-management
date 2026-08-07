@@ -14,6 +14,7 @@
 //! keeps failing simply stays queued — nothing is ever silently dropped, and
 //! it is retried indefinitely.
 
+use crate::error::AppResult;
 use crate::AppState;
 use std::time::Duration;
 
@@ -68,8 +69,18 @@ pub async fn process_pending(state: &AppState) {
         .await
         {
             Ok(()) => {
-                if let Err(e) = state.db.email_queue.delete_entry(entry.id).await {
-                    tracing::error!(target: "zerf::email_queue", "delete entry {} failed: {e}", entry.id);
+                // SMTP already confirmed delivery — a failure here must not
+                // leave the row looking untouched, or the next poll would
+                // send this exact message again. Retry the delete itself
+                // (idempotent: deleting an already-gone row is a no-op)
+                // before giving up.
+                if let Err(e) = delete_with_retry(&state.db.email_queue, entry.id).await {
+                    tracing::error!(
+                        target: "zerf::email_queue",
+                        "delete entry {} failed after retries; the email was already sent but \
+                         the row could not be removed, so it will be sent again next cycle: {e}",
+                        entry.id
+                    );
                 }
             }
             Err(crate::email::GuardedSendError::CircuitOpen) => {
@@ -112,4 +123,34 @@ pub async fn process_pending(state: &AppState) {
             }
         }
     }
+}
+
+/// Delay between delete attempts. Short: this only needs to ride out a
+/// momentary DB hiccup (a dropped connection, a pool exhausted for an
+/// instant), not a real outage.
+const DELETE_RETRY_DELAY: Duration = Duration::from_millis(200);
+
+/// Number of delete attempts before giving up and accepting the row will be
+/// re-sent next cycle.
+const DELETE_RETRY_ATTEMPTS: u32 = 3;
+
+/// Retry a confirmed-sent row's delete a few times. `DELETE ... WHERE id=$1`
+/// is idempotent (deleting an already-gone row is a harmless no-op), so
+/// retrying is always safe and never risks a double-delete — it only closes
+/// the window in which a transient DB failure would otherwise leave the row
+/// looking exactly like one that was never attempted, causing the same
+/// email to go out again on the next poll. Public so integration tests can
+/// exercise it directly (`process_pending`'s own success branch needs a real
+/// SMTP accept to reach it, which the test suite has no way to fake).
+pub async fn delete_with_retry(email_queue: &crate::repository::EmailQueueDb, id: i64) -> AppResult<()> {
+    // The first DELETE_RETRY_ATTEMPTS - 1 tries get a short backoff between
+    // them; the final try's Result is returned directly so the caller sees
+    // exactly why the delete kept failing.
+    for _ in 1..DELETE_RETRY_ATTEMPTS {
+        if email_queue.delete_entry(id).await.is_ok() {
+            return Ok(());
+        }
+        tokio::time::sleep(DELETE_RETRY_DELAY).await;
+    }
+    email_queue.delete_entry(id).await
 }

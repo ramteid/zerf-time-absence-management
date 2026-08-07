@@ -199,6 +199,38 @@ async fn a_previously_failed_row_is_demoted_behind_a_fresh_one() {
     app.cleanup().await;
 }
 
+/// `delete_with_retry` is what `process_pending` calls once SMTP confirms
+/// delivery. Verifies the happy path actually removes the row (the only
+/// path integration tests can drive, since faking a real SMTP accept isn't
+/// possible here) — the retry-on-failure behavior itself is exercised by
+/// construction: `DELETE ... WHERE id=$1` is idempotent, so a retry loop
+/// around it can never double-delete or corrupt state, only paper over a
+/// transient failure that would otherwise cause the same email to be
+/// resent.
+#[tokio::test]
+async fn delete_with_retry_removes_the_row() {
+    let app = TestApp::spawn().await;
+    app.state
+        .db
+        .email_queue
+        .enqueue("someone@example.com", "Someone", "subject", "body")
+        .await
+        .expect("enqueue");
+    let id = app.state.db.email_queue.list_pending(1).await.unwrap()[0].id;
+
+    zerf::background::email_queue::delete_with_retry(&app.state.db.email_queue, id)
+        .await
+        .expect("delete succeeds");
+
+    assert_eq!(
+        app.state.db.email_queue.count().await.unwrap(),
+        0,
+        "the row must be gone after a successful delete"
+    );
+
+    app.cleanup().await;
+}
+
 /// Repeated failures trip the shared circuit breaker: once it opens, further
 /// poll cycles stop attempting delivery altogether (no SMTP transaction, no
 /// attempt-count increment) until the cooldown elapses.

@@ -133,7 +133,11 @@ undeliverable message can't monopolize the circuit breaker's retry slot and
 starve everything queued behind it) and deletes a row only once SMTP
 confirmed delivery — a message that keeps failing simply stays queued and is
 retried indefinitely, so a transient SMTP outage can no longer silently lose
-an email. Enqueueing
+an email. That delete is itself retried a few times (idempotent — deleting an
+already-gone row is a no-op) before giving up, so a momentary DB hiccup right
+after a confirmed send can't leave the row looking untouched and cause the
+same email to go out again next cycle; the payroll report's own period
+delete gets the identical treatment for the same reason. Enqueueing
 itself is gated on `SettingsDb::load_smtp_config()` returning `Some`
 (SMTP enabled and fully configured); if SMTP is disabled after messages are
 already queued, they are left in place untouched rather than dropped or

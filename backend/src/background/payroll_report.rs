@@ -41,6 +41,7 @@ use crate::services::payroll_report::{self, PayrollReportConfig};
 use crate::services::settings;
 use crate::AppState;
 use chrono::NaiveDate;
+use std::time::Duration;
 
 /// Background loop: checks once per day (midnight in app timezone).
 pub async fn run_loop(state: AppState) {
@@ -320,14 +321,43 @@ async fn process_period(
         );
     } else {
         // Only drop the period once the SMTP server accepted the message.
-        // Removing it is also what tells the dashboard card the month is done.
-        state.db.payroll_queue.delete_entry(period).await?;
+        // Removing it is also what tells the dashboard card the month is
+        // done. The email is already gone at this point — a bare delete
+        // that gives up after one transient DB hiccup would leave the
+        // period looking un-sent and cause the whole report to go out to
+        // the tax office / payroll accountant a second time tomorrow, so
+        // retry the (idempotent) delete a few times before accepting that
+        // risk.
+        delete_payroll_period_with_retry(state, period).await?;
         tracing::info!(
             "Payroll report: sent period {period} to {}",
             config.recipients.join(", ")
         );
     }
     Ok(true)
+}
+
+/// Delay between delete attempts. Short: this only needs to ride out a
+/// momentary DB hiccup, not a real outage.
+const DELETE_RETRY_DELAY: Duration = Duration::from_secs(1);
+
+/// Number of delete attempts before giving up and accepting the period will
+/// be reported again on the next run.
+const DELETE_RETRY_ATTEMPTS: u32 = 3;
+
+/// Retry `payroll_queue.delete_entry` a few times. The DELETE is idempotent
+/// (removing an already-gone period is a harmless no-op), so retrying is
+/// always safe and never risks double-deleting — it only closes the window
+/// in which a transient DB failure would otherwise leave an already-sent
+/// period looking outstanding.
+async fn delete_payroll_period_with_retry(state: &AppState, period: &str) -> AppResult<()> {
+    for _ in 1..DELETE_RETRY_ATTEMPTS {
+        if state.db.payroll_queue.delete_entry(period).await.is_ok() {
+            return Ok(());
+        }
+        tokio::time::sleep(DELETE_RETRY_DELAY).await;
+    }
+    state.db.payroll_queue.delete_entry(period).await
 }
 
 /// Subject and body of the payroll report email.
