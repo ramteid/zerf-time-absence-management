@@ -192,19 +192,10 @@ pub async fn send_queued(
     subject: &str,
     body_text: &str,
 ) -> Result<(), GuardedSendError> {
-    if !breaker.allow_attempt() {
-        return Err(GuardedSendError::CircuitOpen);
-    }
-    match send_now(cfg, to, to_name, subject, body_text, None).await {
-        Ok(()) => {
-            breaker.record_success();
-            Ok(())
-        }
-        Err(e) => {
-            breaker.record_failure();
-            Err(GuardedSendError::Smtp(e))
-        }
-    }
+    guarded_send(breaker, QUEUED_EMAIL_SEND_TIMEOUT, || {
+        send_now(cfg, to, to_name, subject, body_text, None)
+    })
+    .await
 }
 
 /// Send an email to one or more equal recipients (all placed in the `To`
@@ -220,17 +211,33 @@ pub async fn send_with_attachment(
     body_text: &str,
     attachment: EmailAttachment,
 ) -> Result<(), GuardedSendError> {
+    guarded_send(breaker, ATTACHMENT_SEND_TIMEOUT, || {
+        send_now_multi(cfg, to, subject, body_text, Some(attachment))
+    })
+    .await
+}
+
+/// Shared breaker-and-timeout wrapper around one SMTP attempt. Both queued
+/// callers await this inside a background loop (the queue-drain worker and
+/// the payroll report scheduler), so an unresponsive SMTP server — one that
+/// accepts the connection but never finishes the conversation — must fail
+/// after `timeout` rather than hang the loop forever. Without this bound a
+/// single stuck server would silently stop *all* future email delivery for
+/// the lifetime of the process, which is strictly worse than the fire-and-
+/// forget design this module replaced.
+async fn guarded_send<F, Fut>(
+    breaker: &CircuitBreaker,
+    timeout: Duration,
+    send: F,
+) -> Result<(), GuardedSendError>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<(), Box<dyn std::error::Error + Send + Sync>>>,
+{
     if !breaker.allow_attempt() {
         return Err(GuardedSendError::CircuitOpen);
     }
-    // The caller awaits this inside a background loop, so an unresponsive SMTP
-    // server must fail rather than stall the loop until the process restarts.
-    let result = tokio::time::timeout(
-        ATTACHMENT_SEND_TIMEOUT,
-        send_now_multi(cfg, to, subject, body_text, Some(attachment)),
-    )
-    .await;
-    match result {
+    match tokio::time::timeout(timeout, send()).await {
         Ok(Ok(())) => {
             breaker.record_success();
             Ok(())
@@ -241,15 +248,15 @@ pub async fn send_with_attachment(
         }
         Err(_) => {
             breaker.record_failure();
-            let timeout_err: Box<dyn std::error::Error + Send + Sync> = format!(
-                "SMTP delivery timed out after {} seconds",
-                ATTACHMENT_SEND_TIMEOUT.as_secs()
-            )
-            .into();
+            let timeout_err: Box<dyn std::error::Error + Send + Sync> =
+                format!("SMTP delivery timed out after {} seconds", timeout.as_secs()).into();
             Err(GuardedSendError::Smtp(timeout_err))
         }
     }
 }
+
+/// Upper bound for one awaited plain-text queued delivery (no attachment).
+const QUEUED_EMAIL_SEND_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Upper bound for one awaited delivery including its attachment upload.
 const ATTACHMENT_SEND_TIMEOUT: Duration = Duration::from_secs(120);
