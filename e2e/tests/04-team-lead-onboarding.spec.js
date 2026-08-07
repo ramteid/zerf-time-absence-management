@@ -145,27 +145,6 @@ test("team lead: create an assistant", async () => {
   writeCredential("assistant", ASSISTANT.email, password);
 });
 
-test("team lead: edit the assistant", async () => {
-  await page.goto("/settings/team-users");
-  // Each user row is a direct child <div> of the .zf-card list; within a
-  // row the Edit button comes first (no accessible name), Archive second
-  // (has a title attribute) — so Edit is reached positionally.
-  const row = page.locator(".zf-card > div", { hasText: ASSISTANT.firstName });
-  await row.getByRole("button").first().click();
-
-  const dialog = page.getByRole("dialog");
-  await expect(dialog).toBeVisible();
-  // UserDialog forces weekly_hours/workdays_per_week/overtime to 0 and
-  // disables those inputs for the assistant role (assistants don't accrue
-  // contract hours or overtime), but individual leave-account values remain
-  // editable. Changing the first current-year account value proves the
-  // account-based update path works for a role-locked dialog too.
-  await dialog.locator('[id^="leave-account-"][id$="-current"]').first().fill("25");
-  await dialog.getByRole("button", { name: "Save" }).click();
-
-  await expect(page.getByText("User updated.")).toBeVisible();
-});
-
 // Discovered limitation, worked around here rather than silently ignored:
 // UserDialog's "Time Categories"/"Absence Categories" checklists (which
 // default a brand-new user to every active category) load their options via
@@ -181,6 +160,14 @@ test("team lead: edit the assistant", async () => {
 // "Available to employees" list. This block exercises exactly that surface,
 // as an admin would have to in practice, before the assistant can do
 // anything in 07-assistant-workflows.spec.js.
+//
+// This must run *before* "team lead: edit the assistant" below, not after:
+// per PLAN.md's 2026-08-06 "Zugriff koppelt jetzt an Guthaben" addendum,
+// granting access to a leave-account category now resets the user's
+// entitlement to the category default (0 for assistants) so a visible
+// balance can never outlive the access decision that grants it — see
+// `UserDb::grant_leave_account_tx`. Granting access after manually setting
+// an entitlement would silently wipe it back to 0.
 test.describe(() => {
   test.use({ storageState: storageStatePath("admin") });
 
@@ -222,4 +209,27 @@ test.describe(() => {
     await dialog.getByRole("button", { name: "Save" }).click();
     await expect(dialog).toBeHidden();
   });
+});
+
+test("team lead: edit the assistant", async () => {
+  await page.goto("/settings/team-users");
+  // Each user row is a direct child <div> of the .zf-card list; within a
+  // row the Edit button comes first (no accessible name), Archive second
+  // (has a title attribute) — so Edit is reached positionally.
+  const row = page.locator(".zf-card > div", { hasText: ASSISTANT.firstName });
+  await row.getByRole("button").first().click();
+
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  // UserDialog forces weekly_hours/workdays_per_week/overtime to 0 and
+  // disables those inputs for the assistant role (assistants don't accrue
+  // contract hours or overtime), but individual leave-account values remain
+  // editable. Changing the first current-year account value proves the
+  // account-based update path works for a role-locked dialog too. This must
+  // run *after* the admin grants absence-category access above — see the
+  // comment there — or the entitlement set here would be wiped back to 0.
+  await dialog.locator('[id^="leave-account-"][id$="-current"]').first().fill("25");
+  await dialog.getByRole("button", { name: "Save" }).click();
+
+  await expect(page.getByText("User updated.")).toBeVisible();
 });
