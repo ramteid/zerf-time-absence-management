@@ -27,6 +27,15 @@ test("admin: add a work category", async ({ page }) => {
   // Categories" then "Absence Categories" — each with its own "Add" button.
   // Both buttons have the same accessible name ("Add"), so the only way to
   // distinguish them is DOM order: the Time Categories one comes first.
+  //
+  // Wait for the seeded "Core Duties" category to render before clicking
+  // Add: the page's own list of existing categories (loaded async via
+  // GET /categories/all) is what the dialog uses to default a new
+  // category's sort order to the end of the list. Clicking Add before that
+  // fetch resolves would default the new category to sort_order 0 — tied
+  // with every category still sitting at its seeded default — instead of
+  // appending after them.
+  await expect(page.getByText("Core Duties")).toBeVisible();
   await page.getByRole("button", { name: "Add" }).first().click();
 
   const dialog = page.getByRole("dialog");
@@ -42,6 +51,13 @@ test("admin: add a work category", async ({ page }) => {
 
 test("admin: add an absence category", async ({ page }) => {
   await page.goto("/settings/categories");
+  // Same load-before-click reasoning as the work-category test above, but
+  // for the seeded "Vacation" absence category and GET /absence-categories/all.
+  // This matters even more here: a new category tied with Vacation at
+  // sort_order 0 would sort *before* it alphabetically ("E2E ..." < "Vacation"),
+  // making it the default pre-selected kind in every "Request Absence"
+  // dialog instead of Vacation.
+  await expect(page.getByText("Vacation")).toBeVisible();
   await page.getByRole("button", { name: "Add" }).nth(1).click();
 
   const dialog = page.getByRole("dialog");
@@ -64,6 +80,10 @@ test("admin: add an absence category", async ({ page }) => {
 
 test("admin: add a second leave-account category", async ({ page }) => {
   await page.goto("/settings/categories");
+  // Same load-before-click reasoning as "admin: add an absence category"
+  // above — wait for the list (and this file's own "E2E Day Off", already
+  // created above) so this category's sort order appends after both.
+  await expect(page.getByText(NO_COST_ABSENCE_CATEGORY)).toBeVisible();
   await page.getByRole("button", { name: "Add" }).nth(1).click();
 
   const dialog = page.getByRole("dialog");
