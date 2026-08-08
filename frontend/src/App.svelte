@@ -112,11 +112,8 @@
     currentUser.set(false);
     go("/", false);
     toast($t("Your session has expired. Please sign in again."), "error");
-    // Also call logout to clear the stale cookie.
-    fetch("/api/v1/auth/logout", {
-      method: "POST",
-      credentials: "same-origin",
-    }).catch(() => {});
+    // Also call logout to clear the stale cookie, via api wrapper so CSRF header is included.
+    api("/auth/logout", { method: "POST" }).catch(() => {});
     // Notify other tabs so they also return to login immediately.
     broadcastSession("session-expired");
     // NOTE: _sessionExpiredHandling is intentionally NOT reset here.

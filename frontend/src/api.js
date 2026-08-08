@@ -9,23 +9,16 @@ export const csrfToken = writable(null);
 let _csrf = null;
 csrfToken.subscribe((csrfValue) => (_csrf = csrfValue));
 
-// Session-expiry handler
-// App.svelte registers handleSessionExpired here.  We use a Promise-based
-// "in-flight" gate so that if many concurrent requests all return 401 at once
-// only the first one triggers the redirect; the rest resolve silently once
-// the handler has finished (preventing duplicate toasts, double-redirects, etc.)
+// Session-expiry handler – Promise-gate to avoid duplicate toasts/redirects and to avoid permanent deadlock.
 let _unauthorizedHandler = null;
 let _handlingUnauthorized = false;
+let _unauthorizedPromise = null;
 let _gateResetHandler = null;
 
 export function setUnauthorizedHandler(fn) {
   _unauthorizedHandler = fn;
 }
 
-/**
- * Register a callback that fires whenever resetUnauthorizedGate() is called.
- * App.svelte uses this to also reset its own local _sessionExpiredHandling flag.
- */
 export function setGateResetHandler(fn) {
   _gateResetHandler = fn;
 }
@@ -33,15 +26,23 @@ export function setGateResetHandler(fn) {
 /** Reset the gate (called by Login.svelte after a successful login). */
 export function resetUnauthorizedGate() {
   _handlingUnauthorized = false;
+  _unauthorizedPromise = null;
   if (_gateResetHandler) _gateResetHandler();
 }
 
 function handleUnauthorized() {
-  if (_handlingUnauthorized) return;
+  if (_handlingUnauthorized) return _unauthorizedPromise;
   _handlingUnauthorized = true;
-  if (_unauthorizedHandler) {
-    _unauthorizedHandler();
-  }
+  // Wrap handler in promise so concurrent 401s can await same handling and we can recover from throw.
+  _unauthorizedPromise = (async () => {
+    try {
+      if (_unauthorizedHandler) await _unauthorizedHandler();
+    } catch {
+      // Ensure gate doesn't stay stuck if handler throws – reset after short delay.
+      setTimeout(() => resetUnauthorizedGate(), 1000);
+    }
+  })();
+  return _unauthorizedPromise;
 }
 
 function apiError(message) {

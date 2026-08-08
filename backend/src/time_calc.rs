@@ -49,23 +49,29 @@ pub fn compute_day_auto_break(entries: &[(NaiveTime, NaiveTime)], rules: &[(i64,
     }
 
     // Day total worked time, summed across all blocks (this is the "insgesamt" ArbZG §4
-    // tests against — not each block's own duration).
-    let worked_minutes: i64 = blocks.iter().map(|(s, e)| (*e - *s).num_minutes()).sum();
+    // tests against — not each block's own duration). Use seconds then convert to
+    // minutes to avoid truncating HH:MM:SS inputs to zero.
+    let worked_minutes: i64 = blocks
+        .iter()
+        .map(|(s, e)| (*e - *s).num_seconds() / 60)
+        .sum();
 
     // Wall-clock span from the first entry's start to the last entry's end, minus the
     // worked time, is the total real rest time already taken between blocks today.
     // Safe to unwrap: `blocks` is non-empty because `entries` was checked non-empty above.
     let first_start = blocks.first().unwrap().0;
     let last_end = blocks.last().unwrap().1;
-    let taken_minutes = ((last_end - first_start).num_minutes() - worked_minutes).max(0);
+    let total_span_minutes = (last_end - first_start).num_seconds() / 60;
+    let taken_minutes = (total_span_minutes - worked_minutes).max(0);
 
     // Highest applicable rule wins; 0 when no rule threshold is strictly exceeded by the
-    // day's total worked time.
+    // day's total worked time. We pick the deduction belonging to the greatest
+    // threshold that is exceeded, not the greatest deduction value.
     let required_minutes = rules
         .iter()
         .filter(|(threshold, _)| worked_minutes > *threshold)
+        .max_by_key(|(threshold, _)| *threshold)
         .map(|(_, deduction)| *deduction)
-        .max()
         .unwrap_or(0);
 
     (required_minutes - taken_minutes).max(0)
@@ -126,14 +132,28 @@ pub fn is_potential_workday(date: NaiveDate, workdays_per_week: i16) -> bool {
 /// The range is split by ISO week; each week's effective days are capped by
 /// the configured `workdays_per_week`. This preserves the weekly day quota
 /// while allowing flexible distribution across the week's potential day pool.
+/// For irregular users (`workdays_per_week <= 0`), we count all calendar days
+/// excluding holidays (no weekly cap) to avoid unlimited leave.
 pub fn count_workdays(
     from: NaiveDate,
     to: NaiveDate,
     holidays: &std::collections::HashSet<NaiveDate>,
     workdays_per_week: i16,
 ) -> f64 {
-    if to < from || workdays_per_week <= 0 {
+    if to < from {
         return 0.0;
+    }
+    if workdays_per_week <= 0 {
+        // Irregular schedule: count calendar days minus holidays, no weekly cap.
+        let mut count = 0.0;
+        let mut day = from;
+        while day <= to {
+            if !holidays.contains(&day) {
+                count += 1.0;
+            }
+            day += Duration::days(1);
+        }
+        return count;
     }
 
     let mut effective_days_by_week: std::collections::HashMap<NaiveDate, i16> =

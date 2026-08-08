@@ -49,12 +49,13 @@ async fn sessions_repository_workflow() {
         .record_attempt("repo-sessions@example.com", true)
         .await
         .expect("record successful attempt");
+    // Success clears prior failures (avoid accumulating lockout after successful login)
     assert_eq!(
         sessions
             .count_recent_failures("repo-sessions@example.com", since)
             .await
             .expect("count failures after writes"),
-        1
+        0
     );
 
     sessions
@@ -222,7 +223,7 @@ async fn sessions_repository_workflow() {
     sessions.cleanup_login_attempts().await;
 
     sqlx::query(
-        "INSERT INTO password_reset_tokens(token_hash, user_id, expires_at) VALUES ($1, $2, CURRENT_TIMESTAMP - INTERVAL '1 hour') ON CONFLICT (user_id) DO UPDATE SET token_hash=EXCLUDED.token_hash, expires_at=EXCLUDED.expires_at",
+        "INSERT INTO password_reset_tokens(token_hash, user_id, expires_at) VALUES ($1, $2, CURRENT_TIMESTAMP - INTERVAL '1 hour') ON CONFLICT (token_hash) DO UPDATE SET expires_at=EXCLUDED.expires_at",
     )
     .bind("expired-cleanup-token")
     .bind(user_id)

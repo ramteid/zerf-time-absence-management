@@ -185,8 +185,13 @@ pub async fn fetch_available_regions(
         ));
     }
     let year = crate::services::settings::app_current_year(pool).await;
-    let holidays = fetch_nager_holidays(&normalized_country, year).await?;
-    Ok(collect_region_codes(&holidays))
+    let current = fetch_nager_holidays(&normalized_country, year).await?;
+    let next = fetch_nager_holidays(&normalized_country, year + 1)
+        .await
+        .unwrap_or_default();
+    let mut combined = current;
+    combined.extend(next);
+    Ok(collect_region_codes(&combined))
 }
 
 pub async fn prepare_holiday_refresh(
@@ -218,7 +223,13 @@ pub async fn prepare_holiday_refresh(
 
     let year = crate::services::settings::app_current_year(pool).await;
     let current_year_holidays = fetch_nager_holidays(&normalized_country, year).await?;
-    let available_regions = collect_region_codes(&current_year_holidays);
+    let next_year = year + 1;
+    let next_year_holidays = fetch_nager_holidays(&normalized_country, next_year).await?;
+
+    // Collect regions from both years to avoid rejecting a region that only exists next year.
+    let mut combined_for_regions = current_year_holidays.clone();
+    combined_for_regions.extend(next_year_holidays.clone());
+    let available_regions = collect_region_codes(&combined_for_regions);
     validate_region_selection(&normalized_region, &available_regions)?;
 
     let mut prepared: Vec<PreparedHoliday> =
@@ -227,14 +238,10 @@ pub async fn prepare_holiday_refresh(
             .map(|holiday| prepared_holiday_from_tuple(year, holiday))
             .collect();
 
-    let next_year = year + 1;
     prepared.extend(
-        filter_holidays_by_region(
-            fetch_nager_holidays(&normalized_country, next_year).await?,
-            &normalized_region,
-        )
-        .into_iter()
-        .map(|holiday| prepared_holiday_from_tuple(next_year, holiday)),
+        filter_holidays_by_region(next_year_holidays, &normalized_region)
+            .into_iter()
+            .map(|holiday| prepared_holiday_from_tuple(next_year, holiday)),
     );
 
     Ok(prepared)
@@ -365,8 +372,12 @@ pub async fn ensure_holidays(pool: &crate::db::DatabasePool, year: i32) -> AppRe
     let country = settings_db.get_raw("country").await?.unwrap_or_default();
     let region = settings_db.get_raw("region").await?.unwrap_or_default();
 
-    // Country not yet configured — skip silently until admin sets it up.
+    // Country not yet configured or cleared — remove stale auto holidays.
     if country.is_empty() {
+        // When admin clears country, stale auto rows would otherwise continue to affect workday counting.
+        let mut tx = db.begin().await?;
+        crate::repository::HolidayDb::replace_auto_tx(&mut tx, &[]).await?;
+        tx.commit().await?;
         return Ok(());
     }
 

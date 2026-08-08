@@ -3,10 +3,9 @@
 import { minToHM } from "../../format.js";
 import { absenceKindLabel, statusLabel } from "../../i18n.js";
 
-// Cells starting with =, +, -, @, etc. are prefixed with a leading single-quote
-// so spreadsheets treat them as text (CSV formula-injection guard).
+// Cells starting with =, +, -, @, tab, CR, or with leading spaces then those, get a leading single-quote guard.
 export function csvSafe(cellValue) {
-  if (cellValue && /^[=+\-@\t\r]/.test(cellValue)) return "'" + cellValue;
+  if (cellValue && /^ *[=+\-@\t\r]/.test(cellValue)) return "'" + cellValue;
   return cellValue;
 }
 

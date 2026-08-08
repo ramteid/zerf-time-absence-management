@@ -164,12 +164,18 @@ fn render_section(
                 // but not to Total.
                 let status_label =
                     entry_status_label(renderer.language, &entry.status, entry.counts_as_work);
+                // Format times as HH:MM, handling single-digit hour like "9:00" (slice would yield empty).
+                let fmt_time = |raw: &str| {
+                    crate::time_calc::parse_stored_time(raw)
+                        .map(|t| t.format("%H:%M").to_string())
+                        .unwrap_or_else(|_| raw.get(0..5).unwrap_or(raw).to_string())
+                };
                 renderer.draw_row(
                     &[
                         (0, day.date.to_string()),
                         (1, weekday.clone()),
-                        (2, entry.start_time.get(0..5).unwrap_or("").to_string()),
-                        (3, entry.end_time.get(0..5).unwrap_or("").to_string()),
+                        (2, fmt_time(&entry.start_time)),
+                        (3, fmt_time(&entry.end_time)),
                         (
                             4,
                             i18n::work_category_label(renderer.language, &entry.category),

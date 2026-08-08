@@ -161,6 +161,7 @@ pub async fn set_category_users(
 
     if !category.has_leave_account() {
         let mut transaction = app_state.db.users.begin().await?;
+        crate::services::auth::lock_user_graph(&mut transaction).await?;
         AbsenceCategoryDb::set_enabled_user_ids_tx(&mut transaction, category_id, &user_ids)
             .await?;
         transaction.commit().await?;
@@ -438,19 +439,37 @@ pub async fn update(
     }
     let cost_type_changed = final_cost_type != current.cost_type;
     let auto_changed = final_auto != current.auto_approve_past;
-    if cost_type_changed || auto_changed {
-        let usage = app_state
-            .db
-            .absence_categories
-            .usage_count(category_id)
-            .await?;
+    let unpaid_changed = final_unpaid != current.unpaid;
+    let default_days_changed = leave_account_default_days.is_some()
+        && leave_account_default_days != current.leave_account_default_days;
+    let expiry_changed = normalized_carryover_expiry.is_some()
+        && normalized_carryover_expiry.as_deref() != current.leave_account_carryover_expiry.as_deref();
+    // Use transaction-bound count to avoid TOCTOU between check and update.
+    if cost_type_changed
+        || auto_changed
+        || unpaid_changed
+        || default_days_changed
+        || expiry_changed
+    {
+        let usage: i64 =
+            AbsenceCategoryDb::usage_count_tx(&mut transaction, category_id).await?;
         if usage > 0 {
-            return Err(AppError::BadRequest(
-                "Cannot change the cost or approval behavior of a category that \
-                 already has absences. Deactivate this category and create a new one \
-                 with the desired flags instead."
-                    .into(),
-            ));
+            if cost_type_changed || auto_changed || unpaid_changed {
+                return Err(AppError::BadRequest(
+                    "Cannot change the cost, unpaid, or approval behavior of a category that \
+                     already has absences. Deactivate this category and create a new one \
+                     with the desired flags instead."
+                        .into(),
+                ));
+            }
+            if default_days_changed || expiry_changed {
+                return Err(AppError::BadRequest(
+                    "Cannot change leave-account default days or expiry for a category that already has \
+                     absences — existing users keep old entitlement and new users would get new \
+                     default, causing inconsistency. Deactivate and create a new category instead."
+                        .into(),
+                ));
+            }
         }
     }
     let normalized_name = name.map(|value| value.trim().to_string());

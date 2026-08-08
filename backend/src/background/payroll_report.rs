@@ -68,9 +68,8 @@ pub async fn run_once(state: &AppState) -> AppResult<()> {
 
     let today = settings::app_today(&state.pool).await;
     let process_through_period = schedule::process_through_period(today, config.day_of_month)?;
-    if process_through_period.is_none() {
-        queue_previous_month(state, today).await?;
-    }
+    // Always backfill missed months, even before configured day.
+    queue_previous_month(state, today).await?;
 
     process_pending_periods(state, &config, process_through_period.as_deref(), false).await;
     Ok(())
@@ -225,9 +224,8 @@ async fn process_period(
         // the period, or everyone in it was excluded. There is nothing to
         // report, so settle the period instead of retrying it every night
         // forever and leaving the dashboard card stuck on "0 of 0".
-        if !is_manual {
-            state.db.payroll_queue.delete_entry(period).await?;
-        }
+        // Always delete, even for manual runs – an empty month should not stay queued forever.
+        state.db.payroll_queue.delete_entry(period).await?;
         tracing::info!("Payroll report: period {period} covers nobody; nothing to send");
         return Ok(false);
     }
@@ -282,9 +280,12 @@ async fn process_period(
         )));
     }
 
-    let smtp = settings::load_smtp_config(&state.pool)
-        .await
-        .ok_or_else(|| AppError::Internal("SMTP is not configured".into()))?;
+    let Some(smtp) = settings::load_smtp_config(&state.pool).await else {
+        // SMTP disabled after queue listing – leave queued for next cycle
+        // (mirrors email_queue worker behavior).
+        tracing::info!("Payroll report: SMTP not configured at send time, deferring period {period}");
+        return Ok(false);
+    };
 
     let text = email_text(
         language,
@@ -388,6 +389,10 @@ fn email_text(
         ],
     );
     if let Some(notice) = provisional {
+        // Ensure newline separation even if translation lacks leading newlines.
+        if !text.body.ends_with('\n') {
+            text.body.push_str("\n\n");
+        }
         text.body.push_str(&crate::i18n::translate(
             language,
             "payroll_report_email_provisional_note",
@@ -413,6 +418,9 @@ fn email_text(
         ));
     }
     if manual {
+        if !text.body.ends_with('\n') {
+            text.body.push_str("\n\n");
+        }
         text.body.push_str(&crate::i18n::translate(
             language,
             "payroll_report_email_manual_note",

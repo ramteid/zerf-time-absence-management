@@ -1,6 +1,12 @@
 function parseIsoDate(value) {
-  const [year, month, day] = String(value).split("-").map(Number);
-  return new Date(year, month - 1, day);
+  if (!value) return new Date(NaN);
+  const parts = String(value).trim().split("-").map(Number);
+  if (parts.length < 3 || parts.some((n) => !Number.isFinite(n))) {
+    return new Date(NaN);
+  }
+  const [year, month, day] = parts;
+  if (month < 1 || month > 12 || day < 1 || day > 31) return new Date(NaN);
+  return new Date(year, month - 1, day, 12, 0, 0, 0);
 }
 
 function addCalendarDays(value, days) {
@@ -50,8 +56,8 @@ export function countWorkdays(
   workdaysPerWeek = 5,
 ) {
   // Count effective workdays in a date range without fixed weekdays.
-  // For 1-5 day schedules, days are flexible within Mon-Fri; we cap each
-  // week's counted days to workdaysPerWeek.
+  // For irregular (workdays <=0) count calendar days excluding holidays,
+  // matching backend's count_workdays irregular branch.
   const start = parseIsoDate(startDate);
   const end = parseIsoDate(endDate);
   const configuredDays = Number(workdaysPerWeek);
@@ -59,10 +65,21 @@ export function countWorkdays(
     Number.isNaN(start.getTime()) ||
     Number.isNaN(end.getTime()) ||
     end < start ||
-    !Number.isFinite(configuredDays) ||
-    configuredDays <= 0
+    !Number.isFinite(configuredDays)
   ) {
     return 0;
+  }
+  if (configuredDays <= 0) {
+    let total = 0;
+    for (
+      let current = new Date(start);
+      current <= end;
+      current = addCalendarDays(current, 1)
+    ) {
+      const currentDate = formatIsoDate(current);
+      if (!holidays.has(currentDate)) total += 1;
+    }
+    return total;
   }
 
   const countedByWeek = new Map();

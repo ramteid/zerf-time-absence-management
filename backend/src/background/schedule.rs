@@ -93,6 +93,17 @@ pub fn parse_year_month(period: &str) -> AppResult<(i32, u32)> {
     let month: u32 = month_part
         .parse()
         .map_err(|_| AppError::Internal(format!("invalid month in period: {period}")))?;
+    if !(1..=12).contains(&month) {
+        return Err(AppError::Internal(format!(
+            "invalid month in period: {period}"
+        )));
+    }
+    // Guard against i32 underflow in period_before.
+    if year == i32::MIN {
+        return Err(AppError::Internal(format!(
+            "year underflow in period: {period}"
+        )));
+    }
     Ok((year, month))
 }
 
@@ -123,14 +134,16 @@ pub fn periods_to_backfill(last_queued: &str, target: &str) -> Vec<String> {
     match parse_year_month(last_queued) {
         Err(_) => vec![target.to_string()], // Corrupt setting; just do the current period.
         Ok((mut year, mut month)) => {
-            // If last_queued is already at or past the target there is nothing to queue.
-            // We rely on the parsed (year, month) values rather than string comparison to
-            // avoid lexicographic ordering surprises with malformed data.
             let (target_year, target_month) = match parse_year_month(target) {
                 Ok(parsed) => parsed,
                 Err(_) => return vec![],
             };
-            if (year, month) >= (target_year, target_month) {
+            // Future/corrupt stored value – treat as if we need to re-queue target.
+            if (year, month) > (target_year, target_month) {
+                // Log warning via tracing? Can't easily here, but recover by queuing target.
+                return vec![target.to_string()];
+            }
+            if (year, month) == (target_year, target_month) {
                 return vec![];
             }
             let mut periods = Vec::new();
@@ -204,7 +217,9 @@ where
 /// month is still deferred while older, caught-up months are processed;
 /// `None` means "no restriction" (the day of month has been reached).
 pub fn process_through_period(today: NaiveDate, day_of_month: u8) -> AppResult<Option<String>> {
-    if today.day() >= u32::from(day_of_month) {
+    // Clamp day_of_month to 1..=28 as documented; 0 never defers, >31 would defer whole month.
+    let clamped_day = day_of_month.clamp(1, 28);
+    if today.day() >= u32::from(clamped_day) {
         return Ok(None);
     }
     Ok(Some(period_before(&previous_period(today))?))
@@ -294,10 +309,10 @@ mod tests {
 
     #[test]
     fn periods_to_backfill_future_last_queued_returns_empty() {
-        // Corrupt/future stored value — nothing to do.
+        // Corrupt/future stored value – previously returned empty causing permanent stall; now recovers by queuing target.
         assert_eq!(
             periods_to_backfill("2026-07", "2026-05"),
-            Vec::<String>::new()
+            vec!["2026-05".to_string()]
         );
     }
 

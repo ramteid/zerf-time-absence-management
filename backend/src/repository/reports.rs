@@ -84,7 +84,8 @@ impl ReportDb {
             "SELECT a.start_date, a.end_date, c.slug, c.name \
              FROM absences a JOIN absence_categories c ON c.id = a.category_id \
              WHERE a.user_id=$1 AND a.status IN ('approved','cancellation_pending') \
-             AND a.end_date >= $2 AND a.start_date <= $3",
+             AND a.end_date >= $2 AND a.start_date <= $3 \
+             ORDER BY a.start_date, a.id",
         )
         .bind(user_id)
         .bind(from)
@@ -266,6 +267,24 @@ impl ReportDb {
         .fetch_all(&self.pool)
         .await?;
         Ok(rows.into_iter().map(|(user_id,)| user_id).collect())
+    }
+
+    /// User IDs with payroll-relevant absences (auto_approve_past OR unpaid) in period.
+    pub async fn user_ids_with_payroll_absences_in_range(
+        &self,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> AppResult<HashSet<i64>> {
+        let rows: Vec<(i64,)> = sqlx::query_as(
+            "SELECT DISTINCT a.user_id FROM absences a JOIN absence_categories c ON c.id = a.category_id \
+             WHERE a.status IN ('approved','cancellation_pending') AND (c.auto_approve_past=TRUE OR c.unpaid=TRUE) \
+             AND a.end_date >= $1 AND a.start_date <= $2",
+        )
+        .bind(from)
+        .bind(to)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(|(id,)| id).collect())
     }
 
     /// Returns true when the current start date would cause the PDF renderer to

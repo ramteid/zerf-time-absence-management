@@ -306,8 +306,8 @@ async fn auth_full_workflow() {
         .execute(&app.state.pool)
         .await;
         assert!(
-            duplicate_result.is_err(),
-            "second reset token for one user is rejected"
+            duplicate_result.is_ok(),
+            "multiple reset tokens per user are now allowed to prevent overwrite DoS"
         );
 
         let token_count: i64 =
@@ -315,8 +315,8 @@ async fn auth_full_workflow() {
                 .bind(user_id)
                 .fetch_one(&app.state.pool)
                 .await
-                .expect("count unique reset tokens");
-        assert_eq!(token_count, 1, "only one reset token remains");
+                .expect("count reset tokens");
+        assert_eq!(token_count, 2, "both tokens remain");
     }
 
     // -- Forgot password requires public url when SMTP is enabled --
@@ -463,7 +463,8 @@ async fn forgot_password_rate_limit_and_generic_responses() {
             .fetch_one(&app.state.pool)
             .await
             .expect("count admin reset tokens");
-    assert_eq!(token_count, 1, "tokens are upserted, not multiplied");
+    // Multiple tokens allowed to prevent overwrite DoS – each forgot request creates new token.
+    assert_eq!(token_count, 3, "tokens are multiplied, not upserted");
 
     let (st, body) = anon
         .post(

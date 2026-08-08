@@ -154,6 +154,8 @@ pub async fn deliver(state: &AppState, msg: &Outgoing<'_>) -> bool {
 /// Write the in-app row using the cheapest repository method for the request:
 /// pinned+dedupe → re-alert upsert; dedupe only → idempotent insert; otherwise
 /// a plain insert. Returns whether a new/re-alerted row resulted.
+/// If pinned is set without a dedupe_key we fallback to using title as key
+/// and log a warning instead of silently degrading to unpinned.
 async fn write_in_app(state: &AppState, msg: &Outgoing<'_>) -> bool {
     let result = match (msg.pinned, msg.dedupe_key) {
         (true, Some(key)) => {
@@ -161,6 +163,19 @@ async fn write_in_app(state: &AppState, msg: &Outgoing<'_>) -> bool {
                 .db
                 .notifications
                 .upsert_system_error(msg.user_id, msg.kind, key, msg.title, msg.body)
+                .await
+        }
+        (true, None) => {
+            tracing::warn!(
+                target: "zerf::notifications",
+                "pinned notification without dedupe_key for user {} kind {} – using title as fallback",
+                msg.user_id,
+                msg.kind
+            );
+            state
+                .db
+                .notifications
+                .upsert_system_error(msg.user_id, msg.kind, msg.title, msg.title, msg.body)
                 .await
         }
         (false, Some(key)) => state

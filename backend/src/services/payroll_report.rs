@@ -82,8 +82,9 @@ pub async fn load_config(pool: &crate::db::DatabasePool) -> AppResult<PayrollRep
         ),
         day_of_month: settings::load_setting(pool, settings::PAYROLL_REPORT_DAY_OF_MONTH_KEY, "5")
             .await?
-            .parse()
-            .unwrap_or(5),
+            .parse::<u8>()
+            .unwrap_or(5)
+            .clamp(1, 28),
         include_assistant_hours: settings::load_setting(
             pool,
             settings::PAYROLL_REPORT_ASSISTANT_HOURS_KEY,
@@ -128,6 +129,12 @@ pub async fn payroll_members(
         .reports
         .user_ids_with_time_entries_in_range(from, to)
         .await?;
+    // Also include assistants who have only payroll-relevant absences (e.g., sick whole month) – otherwise sick days vanish.
+    let assistants_with_payroll_absences = app_state
+        .db
+        .reports
+        .user_ids_with_payroll_absences_in_range(from, to)
+        .await?;
     let members = app_state
         .db
         .reports
@@ -140,7 +147,8 @@ pub async fn payroll_members(
             !crate::roles::is_admin_role(&member.role)
                 && !excluded_user_ids.contains(&member.id)
                 && (!is_assistant_role(&member.role)
-                    || assistants_with_entries.contains(&member.id))
+                    || assistants_with_entries.contains(&member.id)
+                    || assistants_with_payroll_absences.contains(&member.id))
         })
         .collect())
 }
@@ -660,11 +668,16 @@ async fn build_hours_rows(
             "",
         )
         .await?;
+        let work_days = report.days.iter().filter(|day| day.actual_min > 0).count() as i64;
+        let minutes = report.actual_min;
+        // Skip assistants/employees with zero worked time (e.g., only rejected entries) – avoids 0-hour rows.
+        if assistants && work_days == 0 && minutes == 0 {
+            continue;
+        }
         rows.push(PayrollHoursRow {
             employee: employee_name(member),
-            // A day counts as worked when it carries approved working time.
-            work_days: report.days.iter().filter(|day| day.actual_min > 0).count() as i64,
-            minutes: report.actual_min,
+            work_days,
+            minutes,
         });
     }
     // `members` already arrives ordered by last name; keep that order explicit

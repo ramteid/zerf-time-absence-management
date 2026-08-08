@@ -243,13 +243,16 @@ impl AbsenceDb {
         .await?;
         let workdays_per_week = self.user_workdays_per_week(user_id).await?;
         let holidays = self.holidays_set(from, to).await?;
-        let mut total = 0.0;
-        for (s, e) in ranges {
-            let cs = std::cmp::max(s, from);
-            let ce = std::cmp::min(e, to);
-            total += Self::workdays_in_window(cs, ce, &holidays, workdays_per_week);
-        }
-        Ok(total)
+        // Union counting with weekly cap to avoid double count when separate ranges fall in same week.
+        let clamped: Vec<(NaiveDate, NaiveDate)> = ranges
+            .into_iter()
+            .map(|(s, e)| (std::cmp::max(s, from), std::cmp::min(e, to)))
+            .filter(|(s, e)| s <= e)
+            .collect();
+        // Delegate to shared counting logic (union).
+        Ok(crate::services::absence_balance::workdays_for_ranges_in_window_with_calendar(
+            &clamped, from, to, &holidays, workdays_per_week,
+        ))
     }
 
     /// Sum of workdays for absences whose category has `auto_approve_past=TRUE`
@@ -275,13 +278,14 @@ impl AbsenceDb {
         .await?;
         let workdays_per_week = self.user_workdays_per_week(user_id).await?;
         let holidays = self.holidays_set(from, to).await?;
-        let mut total = 0.0;
-        for (s, e) in ranges {
-            let cs = std::cmp::max(s, from);
-            let ce = std::cmp::min(e, to);
-            total += Self::workdays_in_window(cs, ce, &holidays, workdays_per_week);
-        }
-        Ok(total)
+        let clamped: Vec<(NaiveDate, NaiveDate)> = ranges
+            .into_iter()
+            .map(|(s, e)| (std::cmp::max(s, from), std::cmp::min(e, to)))
+            .filter(|(s, e)| s <= e)
+            .collect();
+        Ok(crate::services::absence_balance::workdays_for_ranges_in_window_with_calendar(
+            &clamped, from, to, &holidays, workdays_per_week,
+        ))
     }
 
     /// Sum of workdays booked against one leave account in the requested
@@ -306,7 +310,7 @@ impl AbsenceDb {
     }
 
     /// Sum of workdays booked against one leave account and whose status is in
-    /// `statuses`, clamped to [from, to].
+    /// `statuses`, clamped to [from, to]. Uses union counting with weekly cap.
     pub async fn leave_account_workdays_total_filtered(
         &self,
         user_id: i64,
@@ -326,13 +330,14 @@ impl AbsenceDb {
             .await?;
         let workdays_per_week = self.user_workdays_per_week(user_id).await?;
         let holidays = self.holidays_set(from, to).await?;
-        let mut total = 0.0;
-        for (s, e) in ranges {
-            let cs = std::cmp::max(s, from);
-            let ce = std::cmp::min(e, to);
-            total += Self::workdays_in_window(cs, ce, &holidays, workdays_per_week);
-        }
-        Ok(total)
+        let clamped: Vec<(NaiveDate, NaiveDate)> = ranges
+            .into_iter()
+            .map(|(s, e)| (std::cmp::max(s, from), std::cmp::min(e, to)))
+            .filter(|(s, e)| s <= e)
+            .collect();
+        Ok(crate::services::absence_balance::workdays_for_ranges_in_window_with_calendar(
+            &clamped, from, to, &holidays, workdays_per_week,
+        ))
     }
 
     // ── Queries ────────────────────────────────────────────────────────────
@@ -659,12 +664,27 @@ impl AbsenceDb {
             return Err(AppError::conflict("Overlap with existing absence."));
         }
 
+        // Resolve leave_account_category_id from the category's own config
+        let category_has_account: Option<bool> = sqlx::query_scalar(
+            "SELECT (leave_account_default_days IS NOT NULL) FROM absence_categories WHERE id=$1",
+        )
+        .bind(category_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .flatten();
+        let leave_account_id = if category_has_account.unwrap_or(false) {
+            Some(category_id)
+        } else {
+            None
+        };
+
         let new_id: i64 = sqlx::query_scalar(
-            "INSERT INTO absences(user_id, category_id, start_date, end_date, comment, status) \
-             VALUES ($1,$2,$3,$4,$5,$6) RETURNING id",
+            "INSERT INTO absences(user_id, category_id, leave_account_category_id, start_date, end_date, comment, status) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id",
         )
         .bind(user_id)
         .bind(category_id)
+        .bind(leave_account_id)
         .bind(start_date)
         .bind(end_date)
         .bind(comment)

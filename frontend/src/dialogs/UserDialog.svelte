@@ -388,9 +388,21 @@
       if (!secondConfirmed) return;
     }
     try {
-      const normalizedWeeklyHours = isAssistantRole
-        ? 0
-        : parseDecimal(weekly_hours) || 0;
+      let normalizedWeeklyHours;
+      if (isAssistantRole) {
+        normalizedWeeklyHours = 0;
+      } else {
+        const parsed = parseDecimal(weekly_hours);
+        if (!Number.isFinite(parsed)) {
+          error = $t("Weekly hours are required.");
+          return;
+        }
+        if (parsed <= 0) {
+          error = $t("Weekly hours must be greater than 0 for this role.");
+          return;
+        }
+        normalizedWeeklyHours = parsed;
+      }
       const normalizedOvertimeStartBalanceMin = isAssistantRole
         ? 0
         : Math.round(

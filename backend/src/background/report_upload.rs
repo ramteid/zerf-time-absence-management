@@ -75,7 +75,7 @@ pub async fn run_now(state: &AppState) -> AppResult<()> {
     Ok(())
 }
 
-/// Daily scheduled run: populate queue if Stichtag is reached, then process pending entries.
+/// Daily scheduled run: always backfill queue, then process pending entries with deferral for previous month.
 async fn run_once(state: &AppState) -> AppResult<()> {
     let (enabled, url, day_of_month, password) = load_upload_settings(state).await?;
     if !enabled || url.is_empty() {
@@ -84,11 +84,9 @@ async fn run_once(state: &AppState) -> AppResult<()> {
 
     let today = settings::app_today(&state.pool).await;
     let process_through_period = schedule::process_through_period(today, day_of_month)?;
-    if process_through_period.is_none() {
-        // The configured upload day has been reached — queue the months that
-        // are still missing before processing.
-        populate_queue_for_prev_month(state, today).await?;
-    }
+    // Always populate queue for missed months (backfill), even before configured day.
+    // The just-finished previous month will be deferred by process_pending_entries when before day.
+    populate_queue_for_prev_month(state, today).await?;
 
     let (base, token) = nextcloud::parse_share_url(&url)?;
     let pw = if password.is_empty() {
@@ -319,11 +317,32 @@ async fn process_one_entry(
         )));
     }
 
-    // Build path: <period>/<period>_Stundenzettel_<First>_<Last>.pdf  (spaces → underscores)
-    let first = user.first_name.replace(' ', "_");
-    let last = user.last_name.replace(' ', "_");
+    // Build path: <period>/<period>_Stundenzettel_<First>_<Last>_<Id>.pdf
+    // Sanitize names to prevent path traversal and include user_id to avoid
+    // collisions (e.g. "John O'Neil" vs "John O-Neil" both become John_O_Neil).
+    fn sanitize_name(s: &str) -> String {
+        s.chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+            .collect::<String>()
+            .chars()
+            .fold(String::new(), |mut acc, c| {
+                if !(acc.ends_with('_') && c == '_') {
+                    acc.push(c);
+                }
+                acc
+            })
+            .trim_matches('_')
+            .to_string()
+    }
+    let first_raw = sanitize_name(&user.first_name);
+    let last_raw = sanitize_name(&user.last_name);
+    let first = if first_raw.is_empty() { "user".to_string() } else { first_raw };
+    let last = if last_raw.is_empty() { "unknown".to_string() } else { last_raw };
     let folder = entry.period.clone();
-    let filename = format!("{}_Stundenzettel_{}_{}.pdf", entry.period, first, last);
+    let filename = format!(
+        "{}_Stundenzettel_{}_{}_{}.pdf",
+        entry.period, first, last, user.id
+    );
     let path = format!("{folder}/{filename}");
 
     // Create the per-month subfolder (MKCOL; 405 = already exists is fine for
@@ -352,11 +371,15 @@ async fn load_upload_settings(state: &AppState) -> AppResult<(bool, String, u8, 
         .await?
         == "true";
     let url = settings::load_setting(&state.pool, settings::REPORT_UPLOAD_URL_KEY, "").await?;
-    let day_of_month: u8 =
-        settings::load_setting(&state.pool, settings::REPORT_UPLOAD_DAY_OF_MONTH_KEY, "5")
-            .await?
-            .parse()
-            .unwrap_or(5);
+    let day_of_month: u8 = settings::load_setting(
+        &state.pool,
+        settings::REPORT_UPLOAD_DAY_OF_MONTH_KEY,
+        "5",
+    )
+    .await?
+    .parse()
+    .unwrap_or(5)
+    .clamp(1, 28);
     let password =
         settings::load_setting(&state.pool, settings::REPORT_UPLOAD_PASSWORD_KEY, "").await?;
     Ok((enabled, url, day_of_month, password))

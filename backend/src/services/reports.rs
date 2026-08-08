@@ -566,23 +566,31 @@ pub async fn build_flextime_for_user(
         .approved_absence_rows(target_user_id, from, to)
         .await?;
 
+    // Category flag lookup so each day can decide whether an approved absence
+    // removes that day's work target.
+    let category_flags = AbsenceCategoryFlags::load(pool).await?;
+
     // Expand absence ranges into a per-day map so each day can look up its kind in O(1).
-    // The category `name` is also tracked, but FlextimeDay only carries the slug
-    // (frontend resolves the display name from its store) so the name is ignored here.
+    // If two absences overlap (possible via race/manual DB), prioritize the one that removes target.
     let mut absence_by_day: HashMap<NaiveDate, String> = HashMap::new();
     for (absence_start, absence_end, absence_kind, _absence_name) in approved_absences {
         let mut day = absence_start.max(from);
         while day <= absence_end.min(to) {
-            absence_by_day
-                .entry(day)
-                .or_insert_with(|| absence_kind.clone());
+            let existing = absence_by_day.get(&day);
+            let should_replace = match existing {
+                None => true,
+                Some(existing_kind) => {
+                    let new_removes = absence_removes_target(&category_flags, &absence_kind);
+                    let old_removes = absence_removes_target(&category_flags, existing_kind);
+                    new_removes && !old_removes
+                }
+            };
+            if should_replace {
+                absence_by_day.insert(day, absence_kind.clone());
+            }
             day += Duration::days(1);
         }
     }
-
-    // Category flag lookup so each day can decide whether an approved absence
-    // removes that day's work target.
-    let category_flags = AbsenceCategoryFlags::load(pool).await?;
 
     let language = i18n::load_ui_language(pool).await.unwrap_or_default();
 
@@ -775,8 +783,13 @@ pub fn check_weeks_all_submitted(
     workdays_per_week: i16,
 ) -> bool {
     for &week_monday in complete_week_mondays {
-        let has_incomplete =
-            (0..7i64).any(|d| incomplete_dates.contains(&(week_monday + Duration::days(d))));
+        let has_incomplete = (0..7i64).any(|d| {
+            let day = week_monday + Duration::days(d);
+            if day < user_start_date {
+                return false;
+            }
+            incomplete_dates.contains(&day)
+        });
         if has_incomplete {
             return false;
         }
@@ -959,7 +972,8 @@ pub fn validate_range(from: NaiveDate, to: NaiveDate) -> AppResult<()> {
     if from > to {
         return Err(AppError::BadRequest("from must not be after to.".into()));
     }
-    if (to - from).num_days() > 366 {
+    // Inclusive range length = diff + 1. Max inclusive 366 days => diff <= 365.
+    if (to - from).num_days() > 365 {
         return Err(AppError::BadRequest(
             "Date range must not exceed 366 days.".into(),
         ));
@@ -968,10 +982,10 @@ pub fn validate_range(from: NaiveDate, to: NaiveDate) -> AppResult<()> {
 }
 
 pub fn csv_response(r: MonthReport, uid: i64, file_label: &str) -> AppResult<Response> {
-    // CSV formula-injection guard: prefix any cell that begins with =, +, -, @ or
-    // a tab/CR with a leading single-quote so spreadsheets treat it as text.
+    // CSV formula-injection guard: bypass via leading spaces "  =cmd" – trim spaces then check.
     fn safe(s: &str) -> String {
-        if s.starts_with(['=', '+', '-', '@', '\t', '\r']) {
+        let trimmed_spaces = s.trim_start_matches(' ');
+        if trimmed_spaces.starts_with(['=', '+', '-', '@', '\t', '\r']) {
             format!("'{}", s)
         } else {
             s.to_string()
@@ -1560,7 +1574,7 @@ pub async fn month_export_readiness(
         return Ok(MonthExportReadiness::PreStartContent);
     }
 
-    let is_historical_only = user.archived_at.is_some() || !user.tracks_time;
+    let is_historical_only = user.archived_at.is_some() || !user.active || !user.tracks_time;
     if is_historical_only {
         if reports_db
             .has_unresolved_time_entries_in_range(user.id, from, to)
@@ -1571,15 +1585,16 @@ pub async fn month_export_readiness(
         return Ok(MonthExportReadiness::Ready);
     }
 
-    let submission_exempt = !crate::roles::has_submission_obligation(&user.role, user.weekly_hours);
-    if !submission_exempt
-        && reports_db
-            .has_requested_absences_in_period(user.id, from, to)
-            .await?
+    // Pending absences block export regardless of submission obligation – a payroll-relevant
+    // requested absence means the month is not settled, even for assistants/zero-hour users.
+    if reports_db
+        .has_requested_absences_in_period(user.id, from, to)
+        .await?
     {
         return Ok(MonthExportReadiness::PendingAbsenceRequests);
     }
 
+    let submission_exempt = !crate::roles::has_submission_obligation(&user.role, user.weekly_hours);
     let submitted = all_weeks_ready_for_timesheet_export(
         pool,
         user.id,
@@ -2244,12 +2259,12 @@ mod tests {
         assert!(validate_range(d, d).is_ok());
     }
 
-    /// `validate_range` accepts exactly 366 days (the maximum allowed).
+    /// `validate_range` accepts exactly 366 days inclusive (365 diff) – the maximum allowed.
     #[test]
     fn validate_range_accepts_exactly_366_days() {
         let from = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
-        let to = NaiveDate::from_ymd_opt(2027, 1, 2).unwrap(); // 366 days
-        assert_eq!((to - from).num_days(), 366);
+        let to = NaiveDate::from_ymd_opt(2027, 1, 1).unwrap(); // 365 diff = 366 inclusive
+        assert_eq!((to - from).num_days(), 365);
         assert!(validate_range(from, to).is_ok());
     }
 
@@ -2384,12 +2399,12 @@ mod tests {
         assert!(validate_range(from, long_to).is_err());
     }
 
-    /// `validate_range` accepts a range that is exactly at the 366-day boundary.
+    /// `validate_range` accepts a range that is exactly at the 366-day inclusive boundary (365 diff).
     #[test]
     fn validate_range_accepts_366_day_flextime_window() {
         let from = NaiveDate::from_ymd_opt(2025, 5, 1).unwrap();
-        let to = NaiveDate::from_ymd_opt(2026, 5, 2).unwrap(); // 366 days
-        assert_eq!((to - from).num_days(), 366);
+        let to = NaiveDate::from_ymd_opt(2026, 5, 1).unwrap(); // 365 diff = 366 inclusive
+        assert_eq!((to - from).num_days(), 365);
         assert!(validate_range(from, to).is_ok());
     }
 }

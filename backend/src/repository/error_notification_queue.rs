@@ -39,6 +39,22 @@ impl ErrorNotificationQueueDb {
         body: Option<&str>,
         source: &str,
     ) -> Result<(), sqlx::Error> {
+        // Avoid spamming the queue with the same dedupe_key every poll while
+        // the underlying condition (e.g. start_date review) remains blocked.
+        // If a row with this dedupe_key already waits in the queue, keep the
+        // existing one – the pinned upsert downstream will already keep it at
+        // the top without sending duplicate emails.
+        if let Some(key) = dedupe_key {
+            let exists: Option<i64> = sqlx::query_scalar(
+                "SELECT id FROM error_notification_queue WHERE dedupe_key=$1 LIMIT 1",
+            )
+            .bind(key)
+            .fetch_optional(&self.pool)
+            .await?;
+            if exists.is_some() {
+                return Ok(());
+            }
+        }
         sqlx::query(
             "INSERT INTO error_notification_queue (dedupe_key, title, body, source) \
              VALUES ($1, $2, $3, $4)",

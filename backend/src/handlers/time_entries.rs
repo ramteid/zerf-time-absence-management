@@ -172,15 +172,16 @@ pub async fn update(
     Ok(Json(updated))
 }
 
-/// Delete a draft time entry. Only the owner may delete their own entries.
+/// Delete a draft time entry. Owners may delete own drafts; admins may delete other's drafts as part of correction (tracks_time check only for own).
 pub async fn delete(
     State(app_state): State<AppState>,
     requester: User,
     Path(entry_id): Path<i64>,
 ) -> AppResult<Json<serde_json::Value>> {
-    require_tracks_time(&requester)?;
     let owner_id = app_state.db.time_entries.get_user_id(entry_id).await?;
-    if owner_id != requester.id {
+    if owner_id == requester.id {
+        require_tracks_time(&requester)?;
+    } else if !requester.is_admin() {
         return Err(AppError::Forbidden);
     }
     let deleted = app_state.db.time_entries.delete(entry_id).await?;

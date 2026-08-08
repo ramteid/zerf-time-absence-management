@@ -83,8 +83,18 @@ pub async fn process_pending(state: &AppState) {
         if !handled {
             continue;
         }
-        if let Err(e) = state.db.error_queue.delete_entry(entry.id).await {
-            tracing::error!(target: "zerf::error_notify", "delete entry {} failed: {e}", entry.id);
+        // Retry delete a few times (idempotent) to avoid duplicate alerts after transient DB hiccup.
+        for attempt in 1..=3 {
+            match state.db.error_queue.delete_entry(entry.id).await {
+                Ok(_) => break,
+                Err(e) => {
+                    if attempt == 3 {
+                        tracing::error!(target: "zerf::error_notify", "delete entry {} failed after {} attempts: {e}", entry.id, attempt);
+                    } else {
+                        tokio::time::sleep(Duration::from_millis(200 * attempt as u64)).await;
+                    }
+                }
+            }
         }
     }
 }

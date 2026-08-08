@@ -34,11 +34,25 @@ impl SessionDb {
     }
 
     pub async fn record_attempt(&self, email: &str, success: bool) -> AppResult<()> {
-        sqlx::query("INSERT INTO login_attempts(email, success) VALUES ($1, $2)")
-            .bind(email)
-            .bind(success)
-            .execute(&self.pool)
-            .await?;
+        if success {
+            // On successful login, clear past failures to avoid accumulating lockout after success.
+            // Keep only the success entry for audit, delete prior failures.
+            let mut tx = self.pool.begin().await?;
+            sqlx::query("DELETE FROM login_attempts WHERE email = $1 AND success = FALSE")
+                .bind(email)
+                .execute(&mut *tx)
+                .await?;
+            sqlx::query("INSERT INTO login_attempts(email, success) VALUES ($1, TRUE)")
+                .bind(email)
+                .execute(&mut *tx)
+                .await?;
+            tx.commit().await?;
+        } else {
+            sqlx::query("INSERT INTO login_attempts(email, success) VALUES ($1, FALSE)")
+                .bind(email)
+                .execute(&self.pool)
+                .await?;
+        }
         Ok(())
     }
 
@@ -218,6 +232,9 @@ impl SessionDb {
         .await?)
     }
 
+    /// Create a new reset token row. Multiple active tokens per user are allowed,
+    /// so triggering a new reset does not invalidate a previously issued link (preventing DoS).
+    /// Expired tokens are cleaned up by the background loop.
     pub async fn upsert_reset_token(
         &self,
         token_hash: &str,
@@ -226,11 +243,7 @@ impl SessionDb {
     ) -> AppResult<()> {
         sqlx::query(
             "INSERT INTO password_reset_tokens(token_hash, user_id, expires_at) \
-             VALUES ($1, $2, $3) \
-             ON CONFLICT (user_id) DO UPDATE SET \
-                 token_hash = EXCLUDED.token_hash, \
-                 expires_at = EXCLUDED.expires_at, \
-                 created_at = CURRENT_TIMESTAMP",
+             VALUES ($1, $2, $3)",
         )
         .bind(token_hash)
         .bind(user_id)

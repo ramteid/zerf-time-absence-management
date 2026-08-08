@@ -148,6 +148,8 @@ pub async fn clear_submission_pending_for_weeks(
 
 /// Enrich entries with the `counts_as_work` flag from their category.
 /// Fetches each distinct category only once to minimise DB round-trips.
+/// Missing categories (deleted or race) default to false so we never
+/// inflate credited hours.
 pub async fn attach_counts_as_work(
     app_state: &AppState,
     entries: &mut [TimeEntry],
@@ -161,11 +163,11 @@ pub async fn attach_counts_as_work(
             .find_by_id(cat_id)
             .await?
             .map(|c| c.counts_as_work)
-            .unwrap_or(true);
+            .unwrap_or(false);
         map.insert(cat_id, flag);
     }
     for entry in entries {
-        entry.counts_as_work = Some(*map.get(&entry.category_id).unwrap_or(&true));
+        entry.counts_as_work = Some(*map.get(&entry.category_id).unwrap_or(&false));
     }
     Ok(())
 }
@@ -402,18 +404,31 @@ pub async fn update(
     input: TimeEntryInput,
 ) -> AppResult<TimeEntry> {
     let owner_id = app_state.db.time_entries.get_user_id(entry_id).await?;
+    // Always validate against the entry owner, not just the requester.
+    // For self-edits this is the requester, for admin corrections it is the target user.
+    let owner = app_state
+        .db
+        .users
+        .find_by_id(owner_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    if !owner.tracks_time {
+        return Err(AppError::Forbidden);
+    }
+    if !app_state
+        .db
+        .categories
+        .is_enabled_for_user(input.category_id, owner_id)
+        .await?
+    {
+        return Err(AppError::BadRequest(
+            "Category not available for you.".into(),
+        ));
+    }
+    // For self-edits additionally enforce the requester's own tracking guard
+    // (mirrors create path); admin path already covered by owner check above.
     if owner_id == requester.id {
         require_tracks_time(requester)?;
-        if !app_state
-            .db
-            .categories
-            .is_enabled_for_user(input.category_id, requester.id)
-            .await?
-        {
-            return Err(AppError::BadRequest(
-                "Category not available for you.".into(),
-            ));
-        }
     }
     let entry_data = crate::repository::NewEntryData {
         entry_date: input.entry_date,
@@ -439,7 +454,10 @@ pub async fn update(
         serde_json::to_value(&updated_entry).ok(),
     )
     .await;
-    if previous_entry.status != "draft" {
+    // Requeue when the entry was already report-relevant (non-draft) or when
+    // its date changed – a draft moving months can affect the pre-start-content
+    // gate which counts draft entries as blocking.
+    if previous_entry.status != "draft" || previous_entry.entry_date != updated_entry.entry_date {
         crate::services::reports::requeue_export_for_dates(
             &app_state.pool,
             &[

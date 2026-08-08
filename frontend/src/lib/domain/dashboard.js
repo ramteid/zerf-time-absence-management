@@ -67,7 +67,9 @@ export function entryMinutes(entry, categories = []) {
   }
   const start = entry.start_time.slice(0, 5);
   const end = entry.end_time.slice(0, 5);
-  return Math.max(0, durMin(start, end));
+  const minutes = durMin(start, end);
+  if (!Number.isFinite(minutes) || minutes < 0) return 0;
+  return Math.max(0, minutes);
 }
 
 export function weekStartOf(entryDate) {
@@ -103,13 +105,14 @@ export function buildPendingWeeks(
   // Subtract per-day auto-break deductions from the week totals so the
   // displayed minutes match what will actually be credited. The deduction
   // mirrors the backend `compute_day_auto_break` logic: entries are grouped
-  // by date and the break for each day is subtracted once.
+  // by date (normalized via dateKey to handle datetime strings).
   if (breakRules.length > 0) {
     for (const group of weekGroupsByKey.values()) {
-      // Group entries by date.
+      // Group entries by normalized date key.
       const byDate = new Map();
       for (const entry of group.entries) {
-        const d = entry.entry_date;
+        const d = dateKey(entry.entry_date) || String(entry.entry_date);
+        if (!d) continue;
         if (!byDate.has(d)) byDate.set(d, []);
         byDate.get(d).push(entry);
       }
@@ -206,27 +209,37 @@ export function notificationTarget(notification, now = Date.now()) {
   const query = `n=${notification.id}-${now}`;
   if (
     notification.kind === "timesheet_submitted" ||
+    notification.kind === "timesheet_approved" ||
+    notification.kind === "timesheet_rejected" ||
     notification.reference_type === "time_entries"
   ) {
     return `/dashboard?focus=timesheets&${query}`;
   }
   if (
     notification.kind === "reopen_request_created" ||
-    notification.reference_type === "reopen_request"
+    notification.kind === "reopen_request_approved" ||
+    notification.kind === "reopen_request_rejected" ||
+    notification.reference_type === "reopen_request" ||
+    notification.reference_type === "reopen_requests"
   ) {
     return `/dashboard?focus=reopen&${query}`;
   }
   if (
     notification.kind === "absence_requested" ||
+    notification.kind === "absence_approved" ||
+    notification.kind === "absence_rejected" ||
+    notification.kind === "absence_cancelled" ||
+    notification.kind === "absence_updated" ||
     notification.reference_type === "absences"
   ) {
     return `/dashboard?focus=absences&${query}`;
   }
   if (
     notification.kind === "submission_reminder" ||
-    notification.kind === "approval_reminder"
+    notification.kind === "approval_reminder" ||
+    notification.kind === "system_error"
   ) {
     return `/dashboard?${query}`;
   }
-  return "";
+  return "/dashboard";
 }

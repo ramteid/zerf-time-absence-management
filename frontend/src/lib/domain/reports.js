@@ -2,13 +2,14 @@ import { get } from "svelte/store";
 import { absenceCategories } from "../../stores.js";
 
 // Build a slug→cost_type lookup map from the absenceCategories store.
-// Used to identify flextime-cost categories that must be excluded from
-// leave-day statistics (their days still require hours, so they are not
-// "absences" in the leave-account sense).
+// When store empty (not loaded) we return empty map so callers don't
+// mis-classify flextime as vacation.
 function slugToCostType() {
+  const cats = get(absenceCategories);
   const costTypeBySlug = new Map();
-  for (const category of get(absenceCategories)) {
-    costTypeBySlug.set(category.slug, category.cost_type);
+  if (!cats?.length) return costTypeBySlug;
+  for (const category of cats) {
+    if (category?.slug) costTypeBySlug.set(category.slug, category.cost_type);
   }
   return costTypeBySlug;
 }
@@ -22,7 +23,9 @@ export function categoryNamesFromTeamReport(rows) {
   return [
     ...new Set(
       (rows || []).flatMap((row) =>
-        (row.categories || []).map((category) => category.category),
+        (row.categories || [])
+          .map((category) => category.category)
+          .filter(Boolean),
       ),
     ),
   ];
@@ -32,6 +35,7 @@ export function categoryColumnsFromTeamReport(rows) {
   const totals = new Map();
   for (const row of rows || []) {
     for (const categoryEntry of row.categories || []) {
+      if (!categoryEntry?.category) continue;
       const entryTotals = totals.get(categoryEntry.category) || {
         color: categoryEntry.color,
         total: 0,
@@ -47,7 +51,7 @@ export function categoryColumnsFromTeamReport(rows) {
 
 export function filterCategories(rows, selectedCategories) {
   if (!Array.isArray(selectedCategories)) return rows || [];
-  if (selectedCategories.length === 0) return [];
+  if (selectedCategories.length === 0) return rows || [];
   return (rows || []).filter((row) =>
     selectedCategories.includes(row.category),
   );
@@ -55,7 +59,7 @@ export function filterCategories(rows, selectedCategories) {
 
 export function filterTeamCategoryColumns(columns, selectedCategories) {
   if (!Array.isArray(selectedCategories)) return columns || [];
-  if (selectedCategories.length === 0) return [];
+  if (selectedCategories.length === 0) return columns || [];
   return (columns || []).filter((column) =>
     selectedCategories.includes(column.category),
   );

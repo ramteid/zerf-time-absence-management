@@ -77,7 +77,9 @@ impl NotificationDb {
     }
 
     /// Insert with ON CONFLICT DO NOTHING; returns `true` when the row was
-    /// actually inserted (idempotency guard for submission reminders).
+    /// actually inserted. When called without an explicit dedupe_key we generate
+    /// a deterministic key from title+body so the operation is actually idempotent
+    /// (previous implementation passed NULL and never conflicted).
     pub async fn insert_idempotent(
         &self,
         user_id: i64,
@@ -87,6 +89,8 @@ impl NotificationDb {
         reference_type: Option<&str>,
         reference_id: Option<i64>,
     ) -> AppResult<bool> {
+        // Generate a stable dedupe key from title+body when caller doesn't provide one.
+        let generated_key = format!("{}:{}", title, body);
         self.insert_idempotent_with_dedupe_key(
             user_id,
             kind,
@@ -94,7 +98,7 @@ impl NotificationDb {
             body,
             reference_type,
             reference_id,
-            None,
+            Some(&generated_key),
         )
         .await
     }
@@ -110,20 +114,41 @@ impl NotificationDb {
         reference_id: Option<i64>,
         dedupe_key: Option<&str>,
     ) -> AppResult<bool> {
-        let result = sqlx::query(
-            "INSERT INTO notifications(user_id,kind,title,body,reference_type,reference_id,dedupe_key) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7) \
-             ON CONFLICT DO NOTHING",
-        )
-        .bind(user_id)
-        .bind(kind)
-        .bind(title)
-        .bind(body)
-        .bind(reference_type)
-        .bind(reference_id)
-        .bind(dedupe_key)
-        .execute(&self.pool)
-        .await?;
+        // When dedupe_key is None, the unique index WHERE dedupe_key IS NOT NULL
+        // never matches, so ON CONFLICT DO NOTHING would never trigger. We ensure
+        // a key is always present – caller without key goes through insert_idempotent
+        // which generates one.
+        let effective_key = dedupe_key.unwrap_or("");
+        let result = if effective_key.is_empty() {
+            // Fallback: plain insert (no dedupe) – used only if caller explicitly passes empty.
+            sqlx::query(
+                "INSERT INTO notifications(user_id,kind,title,body,reference_type,reference_id) \
+                 VALUES ($1,$2,$3,$4,$5,$6)",
+            )
+            .bind(user_id)
+            .bind(kind)
+            .bind(title)
+            .bind(body)
+            .bind(reference_type)
+            .bind(reference_id)
+            .execute(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                "INSERT INTO notifications(user_id,kind,title,body,reference_type,reference_id,dedupe_key) \
+                 VALUES ($1,$2,$3,$4,$5,$6,$7) \
+                 ON CONFLICT (user_id, kind, dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING",
+            )
+            .bind(user_id)
+            .bind(kind)
+            .bind(title)
+            .bind(body)
+            .bind(reference_type)
+            .bind(reference_id)
+            .bind(effective_key)
+            .execute(&self.pool)
+            .await?
+        };
         Ok(result.rows_affected() > 0)
     }
 

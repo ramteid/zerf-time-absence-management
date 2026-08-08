@@ -4,8 +4,8 @@
 use crate::error::{AppError, AppResult};
 use crate::i18n;
 use crate::middleware::auth::{
-    build_session_cookie, enforce_same_origin_headers, extract_token, hash_token, User,
-    ABSOLUTE_TIMEOUT_HOURS,
+    build_session_cookie, enforce_same_origin_headers, extract_token_from_cookie_str_secure,
+    hash_token, User, ABSOLUTE_TIMEOUT_HOURS,
 };
 use crate::services::auth::{
     hash_password_async, new_token, validate_password_strength, verify_password,
@@ -112,7 +112,8 @@ pub async fn login(
         return Err(AppError::BadRequest("Invalid email or password.".into()));
     }
     if !user.active {
-        return Err(AppError::BadRequest("account_archived".into()));
+        // Generic message to avoid account enumeration (archived vs unknown).
+        return Err(AppError::BadRequest("Invalid email or password.".into()));
     }
 
     // Session fixation defence: any pre-existing session token sent in the request
@@ -147,7 +148,15 @@ pub async fn login(
 }
 
 pub async fn logout(State(app_state): State<AppState>, req: Request) -> AppResult<Response> {
-    if let Some(token) = extract_token(&req) {
+    let cookie_header = req
+        .headers()
+        .get(header::COOKIE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if let Some(token) = extract_token_from_cookie_str_secure(
+        cookie_header,
+        app_state.cfg.secure_cookies,
+    ) {
         // Per security policy: on logout, all sessions of the affected user are
         // deleted — not just the current one — so a user logging out from one
         // device invalidates all other open sessions too.
@@ -178,7 +187,16 @@ pub async fn me(
 ) -> AppResult<Json<serde_json::Value>> {
     // Expose the CSRF token to the SPA so it can include it on subsequent
     // state-changing requests as `X-CSRF-Token`.
-    let raw_token = extract_token(&req).unwrap_or_default();
+    let cookie_header = req
+        .headers()
+        .get(header::COOKIE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let raw_token = extract_token_from_cookie_str_secure(
+        cookie_header,
+        app_state.cfg.secure_cookies,
+    )
+    .unwrap_or_default();
     let csrf_token = app_state
         .db
         .sessions
@@ -326,7 +344,16 @@ pub async fn change_password(
     user: User,
     req: Request,
 ) -> AppResult<Response> {
-    let raw_token = extract_token(&req).ok_or(AppError::Unauthorized)?;
+    let cookie_header = req
+        .headers()
+        .get(header::COOKIE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let raw_token = extract_token_from_cookie_str_secure(
+        cookie_header,
+        app_state.cfg.secure_cookies,
+    )
+    .ok_or(AppError::Unauthorized)?;
     let (_, raw_body) = req.into_parts();
     let body_bytes = axum::body::to_bytes(raw_body, 1024 * 1024)
         .await

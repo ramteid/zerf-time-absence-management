@@ -29,9 +29,17 @@ pub fn duration_until_next_monday_7am(now: chrono::DateTime<chrono_tz::Tz>) -> S
         chrono::LocalResult::Single(dt) => dt,
         chrono::LocalResult::Ambiguous(earliest, _) => earliest,
         chrono::LocalResult::None => {
-            // Hour falls in DST gap; try one hour later
-            let fallback = target_date.and_hms_opt(8, 0, 0).unwrap();
-            match now.timezone().from_local_datetime(&fallback).earliest() {
+            // Hour falls in DST gap; try later hours up to 23, like submission_reminders does.
+            let mut resolved = None;
+            for hour in 8..=23 {
+                if let Some(naive) = target_date.and_hms_opt(hour, 0, 0) {
+                    if let Some(dt) = now.timezone().from_local_datetime(&naive).earliest() {
+                        resolved = Some(dt);
+                        break;
+                    }
+                }
+            }
+            match resolved {
                 Some(dt) => dt,
                 None => return StdDuration::from_secs(3600),
             }
@@ -103,9 +111,10 @@ pub async fn run_check(state: &crate::AppState) {
             &[("count", count_str)],
         );
 
-        // Idempotent per approver per local day. `deliver` owns the in-app row,
-        // the SSE broadcast, the email, and its shared footer.
-        let dedupe_key = format!("approval_reminder:{}", today_local);
+        // Dedupe per approver per day. Including pending_count alone would suppress
+        // a notification when one item is approved and another arrives same day keeping count identical.
+        // The job runs once per Monday, so per-day dedupe is sufficient.
+        let dedupe_key = format!("approval_reminder:{}:{}", today_local, approver_id);
         crate::services::notifications::deliver(
             state,
             &crate::services::notifications::Outgoing::new(
@@ -123,6 +132,7 @@ pub async fn run_check(state: &crate::AppState) {
 }
 
 /// Background loop: sleep until the next Monday at 07:00 local time, then run check.
+/// Fixed due-first so restart after 07:00 on Monday still fires.
 pub async fn run_loop(state: crate::AppState) {
     loop {
         let timezone = load_setting(&state.pool, TIMEZONE_KEY, DEFAULT_TIMEZONE)
@@ -131,6 +141,11 @@ pub async fn run_loop(state: crate::AppState) {
         let tz = timezone
             .parse::<chrono_tz::Tz>()
             .unwrap_or(chrono_tz::Europe::Berlin);
+        let now_local = Utc::now().with_timezone(&tz);
+        if approval_reminder_is_due_now(now_local) {
+            tracing::info!(target:"zerf::approval_reminders", "Running approval reminder check");
+            run_check(&state).await;
+        }
         let wait = duration_until_next_monday_7am(Utc::now().with_timezone(&tz));
         let sleep_for = scheduler_sleep_duration(wait);
         tracing::info!(
@@ -139,20 +154,6 @@ pub async fn run_loop(state: crate::AppState) {
             wait
         );
         tokio::time::sleep(sleep_for).await;
-        if wait > SETTINGS_POLL_INTERVAL {
-            continue;
-        }
-        let current_timezone = load_setting(&state.pool, TIMEZONE_KEY, DEFAULT_TIMEZONE)
-            .await
-            .unwrap_or_else(|_| DEFAULT_TIMEZONE.to_string());
-        let current_tz = current_timezone
-            .parse::<chrono_tz::Tz>()
-            .unwrap_or(chrono_tz::Europe::Berlin);
-        if !approval_reminder_is_due_now(Utc::now().with_timezone(&current_tz)) {
-            continue;
-        }
-        tracing::info!(target:"zerf::approval_reminders", "Running approval reminder check");
-        run_check(&state).await;
     }
 }
 

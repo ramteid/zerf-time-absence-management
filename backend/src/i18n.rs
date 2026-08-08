@@ -855,18 +855,20 @@ pub fn translate(language: &Language, key: &str, params: &[(&str, String)]) -> S
 
 fn required_translation(language: &Language, key: &str, params: &[(&str, String)]) -> String {
     let language_definition = lang_def(language);
-    let template = language_definition
+    let Some(template) = language_definition
         .translations
         .iter()
         .find(|(translation_key, _)| *translation_key == key)
         .map(|(_, translation_value)| *translation_value)
-        .unwrap_or_else(|| panic!("missing required translation key: {key}"));
+    else {
+        tracing::warn!(target:"zerf::i18n", "missing required translation key: {key}");
+        return key.to_string();
+    };
 
     for placeholder in template_placeholder_names(template) {
-        assert!(
-            params.iter().any(|(name, _)| *name == placeholder),
-            "missing template parameter {placeholder:?} for translation key {key:?}"
-        );
+        if !params.iter().any(|(name, _)| *name == placeholder) {
+            tracing::warn!(target:"zerf::i18n", "missing template parameter {placeholder:?} for key {key:?}");
+        }
     }
 
     render_template(template, params)

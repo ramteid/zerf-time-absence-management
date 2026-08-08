@@ -52,15 +52,17 @@ pub async fn verify_password_async(password: String, hash: String) -> bool {
 }
 
 /// Reject obviously weak passwords (length, character classes).
-/// Spec asks for "stark gehasht" + admin-controlled passwords; we still
-/// enforce a sensible minimum policy to protect users when they self-service.
+/// Uses char count, not byte length, so multi-byte passwords are evaluated
+/// by user-visible length. Symbol class counts only ASCII non-alphanum
+/// to avoid treating umlauts as symbols.
 pub fn validate_password_strength(pw: &str) -> AppResult<()> {
-    if pw.len() < MIN_PW_LEN {
+    let char_count = pw.chars().count();
+    if char_count < MIN_PW_LEN {
         return Err(AppError::BadRequest(format!(
             "Password must be at least {MIN_PW_LEN} characters."
         )));
     }
-    if pw.len() > 256 {
+    if char_count > 256 {
         return Err(AppError::BadRequest(
             "Password is too long (max 256 chars).".into(),
         ));
@@ -69,7 +71,7 @@ pub fn validate_password_strength(pw: &str) -> AppResult<()> {
         pw.chars().any(|c| c.is_ascii_lowercase()),
         pw.chars().any(|c| c.is_ascii_uppercase()),
         pw.chars().any(|c| c.is_ascii_digit()),
-        pw.chars().any(|c| !c.is_ascii_alphanumeric()),
+        pw.chars().any(|c| c.is_ascii() && !c.is_ascii_alphanumeric()),
     ]
     .iter()
     .filter(|&&present| present)
@@ -185,7 +187,17 @@ pub async fn create_initial_admin(
     tracks_time: bool,
 ) -> AppResult<()> {
     let email = email.trim().to_lowercase();
-    if email.is_empty() || email.len() > 254 || !email.contains('@') {
+    if email.is_empty()
+        || email.len() > 254
+        || email.contains(' ')
+        || email.matches('@').count() != 1
+        || email.starts_with('@')
+        || email.ends_with('@')
+    {
+        return Err(AppError::BadRequest("Invalid email address.".into()));
+    }
+    let domain_part = email.split('@').nth(1).unwrap_or("");
+    if !domain_part.contains('.') || domain_part.starts_with('.') || domain_part.ends_with('.') {
         return Err(AppError::BadRequest("Invalid email address.".into()));
     }
     let first_name = first_name.trim().to_string();

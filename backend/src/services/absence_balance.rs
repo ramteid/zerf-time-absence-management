@@ -108,15 +108,28 @@ pub fn has_effective_workday(
 }
 
 /// Validate that the absence range includes at least one effective workday.
+/// For irregular users (workdays_per_week==0) we count calendar days excluding
+/// holidays, so a pure-holiday range must still be rejected.
 pub async fn validate_absence_has_workday(
     pool: &crate::db::DatabasePool,
     workdays_per_week: i16,
     start_date: NaiveDate,
     end_date: NaiveDate,
 ) -> AppResult<()> {
-    // Irregular-schedule users have no fixed workdays; allow any range.
+    let holidays = crate::repository::HolidayDb::new(pool.clone())
+        .get_dates_in_range(start_date, end_date)
+        .await?;
     if workdays_per_week == 0 {
-        return Ok(());
+        let mut day = start_date;
+        while day <= end_date {
+            if !holidays.contains(&day) {
+                return Ok(());
+            }
+            day += Duration::days(1);
+        }
+        return Err(AppError::BadRequest(
+            "Absence must include at least one workday.".into(),
+        ));
     }
     let holidays = crate::repository::HolidayDb::new(pool.clone())
         .get_dates_in_range(start_date, end_date)
@@ -143,7 +156,9 @@ pub fn clamp_range_to_window(
 }
 
 /// Sum workdays for a list of date ranges after clamping each range to the
-/// provided inclusive window.
+/// provided inclusive window. Ranges are treated as a union, not summed independently,
+/// so the weekly cap (`workdays_per_week`) is applied once per week across all ranges
+/// (fixing the double-count bug where Mon-Tue + Wed-Fri with quota 4 counted as 5).
 pub async fn workdays_for_ranges_in_window(
     pool: &crate::db::DatabasePool,
     user_id: i64,
@@ -151,21 +166,37 @@ pub async fn workdays_for_ranges_in_window(
     window_start: NaiveDate,
     window_end: NaiveDate,
 ) -> AppResult<f64> {
-    let mut total = 0.0;
+    if ranges.is_empty() {
+        return Ok(0.0);
+    }
+    // Collect clamped ranges.
+    let mut clamped: Vec<(NaiveDate, NaiveDate)> = Vec::new();
     for (start_date, end_date) in ranges {
-        if let Some((clamped_start, clamped_end)) =
-            clamp_range_to_window(*start_date, *end_date, window_start, window_end)
+        if let Some((cs, ce)) = clamp_range_to_window(*start_date, *end_date, window_start, window_end)
         {
-            total += workdays(pool, user_id, clamped_start, clamped_end).await?;
+            clamped.push((cs, ce));
         }
     }
-    Ok(total)
+    if clamped.is_empty() {
+        return Ok(0.0);
+    }
+    // Single DB round-trip for holidays and workdays config.
+    let absence_db = crate::repository::AbsenceDb::new(pool.clone());
+    let holidays = absence_db.holidays_set(window_start, window_end).await?;
+    let workdays_per_week = absence_db.user_workdays_per_week(user_id).await?;
+    Ok(workdays_for_ranges_in_window_with_calendar(
+        &clamped,
+        window_start,
+        window_end,
+        &holidays,
+        workdays_per_week,
+    ))
 }
 
 /// Count workdays for already-loaded absence ranges with a caller-provided
 /// calendar. Team reports use this after loading every account range and the
 /// month's holidays in bulk, avoiding a database round trip for every
-/// user/account cell.
+/// user/account cell. Implements union + weekly cap to avoid double counting.
 pub fn workdays_for_ranges_in_window_with_calendar(
     ranges: &[(NaiveDate, NaiveDate)],
     window_start: NaiveDate,
@@ -173,14 +204,56 @@ pub fn workdays_for_ranges_in_window_with_calendar(
     holidays: &std::collections::HashSet<NaiveDate>,
     workdays_per_week: i16,
 ) -> f64 {
-    ranges
-        .iter()
-        .filter_map(|(start_date, end_date)| {
-            clamp_range_to_window(*start_date, *end_date, window_start, window_end)
-        })
-        .map(|(start_date, end_date)| {
-            crate::time_calc::count_workdays(start_date, end_date, holidays, workdays_per_week)
-        })
+    // Clamp and collect.
+    let mut clamped: Vec<(NaiveDate, NaiveDate)> = Vec::new();
+    for (s, e) in ranges {
+        if let Some((cs, ce)) = clamp_range_to_window(*s, *e, window_start, window_end) {
+            clamped.push((cs, ce));
+        }
+    }
+    if clamped.is_empty() {
+        return 0.0;
+    }
+    // Sort for efficient coverage check.
+    clamped.sort_by_key(|(s, _)| *s);
+
+    if workdays_per_week <= 0 {
+        // Irregular: count calendar days (excluding holidays) in union.
+        let mut count = 0.0;
+        let mut day = window_start;
+        while day <= window_end {
+            if holidays.contains(&day) {
+                day += Duration::days(1);
+                continue;
+            }
+            if clamped.iter().any(|(s, e)| day >= *s && day <= *e) {
+                count += 1.0;
+            }
+            day += Duration::days(1);
+        }
+        return count;
+    }
+
+    // Count effective days per ISO week for the union of ranges.
+    let mut effective_days_by_week: std::collections::HashMap<NaiveDate, i16> =
+        std::collections::HashMap::new();
+    let mut day = window_start;
+    while day <= window_end {
+        if !crate::time_calc::is_potential_workday(day, workdays_per_week) || holidays.contains(&day) {
+            day += Duration::days(1);
+            continue;
+        }
+        // Is day covered by any clamped range?
+        let covered = clamped.iter().any(|(s, e)| day >= *s && day <= *e);
+        if covered {
+            let monday = crate::time_calc::week_monday(day);
+            *effective_days_by_week.entry(monday).or_insert(0) += 1;
+        }
+        day += Duration::days(1);
+    }
+    effective_days_by_week
+        .into_values()
+        .map(|days| std::cmp::min(days, workdays_per_week) as f64)
         .sum()
 }
 
@@ -198,14 +271,17 @@ pub fn leave_entitlement_anchor(user: &crate::middleware::auth::User) -> NaiveDa
 }
 
 /// Pro-rate annual leave entitlement for a user who started mid-year.
+/// Uses day-granular proration (remaining days in year / total days in year)
+/// rather than month-only, so Dec 31 start does not grant 3 days for 1 day.
 pub fn pro_rate_entitlement(user_start_date: NaiveDate, year: i32, entitled: i64) -> i64 {
     let year_start = NaiveDate::from_ymd_opt(year, 1, 1).unwrap();
     let year_end = NaiveDate::from_ymd_opt(year, 12, 31).unwrap();
     if user_start_date > year_end {
         0
     } else if user_start_date > year_start {
-        let months_remaining = (13 - Datelike::month(&user_start_date)) as f64;
-        ((entitled as f64) * months_remaining / 12.0).ceil() as i64
+        let total_days = (year_end - year_start).num_days() + 1;
+        let remaining_days = (year_end - user_start_date).num_days() + 1;
+        ((entitled as f64) * (remaining_days as f64) / (total_days as f64)).ceil() as i64
     } else {
         entitled
     }
@@ -726,6 +802,7 @@ pub async fn validate_leave_account_balance(
 ) -> AppResult<()> {
     let (_, expiry_setting, _) = leave_account_configuration(category)?;
     let first_year = effective_leave_account_start_year(user, category)?;
+    let today = crate::services::settings::app_today(pool).await;
     for year in start_date.year()..=end_date.year() {
         if year < first_year {
             return Err(AppError::BadRequest(
@@ -763,6 +840,7 @@ pub async fn validate_leave_account_balance(
             year_from,
             year_to,
             expiry,
+            today,
             effective_entitlement,
             carryover_days,
             &existing_ranges,
@@ -781,30 +859,18 @@ async fn validate_leave_account_year(
     year_from: NaiveDate,
     year_to: NaiveDate,
     expiry: NaiveDate,
+    today: NaiveDate,
     effective_entitlement: i64,
     carryover_days: i64,
     existing_ranges: &[(NaiveDate, NaiveDate)],
 ) -> AppResult<()> {
-    let used_days =
-        workdays_for_ranges_in_window(pool, user_id, existing_ranges, year_from, year_to).await?;
-    let proposed_days = if let Some(range) =
-        clamp_range_to_window(proposed_start, proposed_end, year_from, year_to)
-    {
-        workdays(pool, user_id, range.0, range.1).await?
-    } else {
-        0.0
-    };
-    let total_budget = effective_entitlement as f64 + carryover_days as f64;
-    if exceeds_leave_account_budget(used_days + proposed_days, total_budget) {
-        return Err(AppError::BadRequest(
-            "Not enough remaining leave-account days.".into(),
-        ));
-    }
-
-    // Carryover can only pay for days on or before the category-specific
-    // expiry. Any later days must fit into the remaining annual entitlement.
+    // Split existing and proposed ranges into pre-expiry and post-expiry windows.
+    // Carryover, when present, may only cover pre-expiry consumption, even after
+    // it has expired – past absences that used it while it was valid keep that
+    // coverage (mirrors compute_balances display logic).
     let pre_window_end = std::cmp::min(expiry, year_to);
     let post_window_start = expiry + Duration::days(1);
+
     let pre_existing = if year_from <= pre_window_end {
         workdays_for_ranges_in_window(pool, user_id, existing_ranges, year_from, pre_window_end)
             .await?
@@ -831,8 +897,49 @@ async fn validate_leave_account_year(
     } else {
         0.0
     };
+
+    // Whether carryover is still usable for new pre-expiry bookings.
+    let effective_carryover = if today > expiry { 0 } else { carryover_days };
+
+    // For availability we must consider that pre-expiry consumption may have
+    // been covered by carryover even after expiry.
     let base_used_before_expiry = (pre_existing + pre_proposed - carryover_days as f64).max(0.0);
     let base_remaining = (effective_entitlement as f64 - base_used_before_expiry).max(0.0);
+
+    if today > expiry {
+        // Expired: only post-expiry days count against base entitlement,
+        // but base consumption includes pre-expiry minus original carryover.
+        if exceeds_leave_account_budget(base_used_before_expiry + post_existing + post_proposed, effective_entitlement as f64) {
+            return Err(AppError::BadRequest(
+                "Not enough remaining leave-account days.".into(),
+            ));
+        }
+    } else {
+        // Not expired: total budget includes carryover, and post-expiry
+        // portion must still fit into remaining base.
+        let used_days = pre_existing + post_existing;
+        let proposed_days = pre_proposed + post_proposed;
+        let total_budget = effective_entitlement as f64 + effective_carryover as f64;
+        if exceeds_leave_account_budget(used_days + proposed_days, total_budget) {
+            return Err(AppError::BadRequest(
+                "Not enough remaining leave-account days.".into(),
+            ));
+        }
+        let base_used_for_remaining_check =
+            (pre_existing + pre_proposed - effective_carryover as f64).max(0.0);
+        let base_remaining_for_post =
+            (effective_entitlement as f64 - base_used_for_remaining_check).max(0.0);
+        if exceeds_leave_account_budget(post_existing + post_proposed, base_remaining_for_post) {
+            return Err(AppError::BadRequest(
+                "Not enough remaining leave-account days.".into(),
+            ));
+        }
+        // For non-expired path we already validated total; still need to ensure
+        // post fits base. Return early.
+        return Ok(());
+    }
+
+    // Expired path: also validate post-expiry portion fits remaining base.
     if exceeds_leave_account_budget(post_existing + post_proposed, base_remaining) {
         return Err(AppError::BadRequest(
             "Not enough remaining leave-account days.".into(),
@@ -1051,21 +1158,17 @@ mod tests {
         assert_eq!(pro_rate_entitlement(start, 2026, 30), 30);
     }
 
-    /// A user who started on July 1 (month 7) has 6 remaining months:
-    /// ceil(30 * 6 / 12) = 15.
+    /// Day-granular proration: July 1 has 184 days left in non-leap year => ceil(30*184/365)=16
     #[test]
     fn pro_rate_entitlement_mid_year_rounds_up() {
         let start = NaiveDate::from_ymd_opt(2026, 7, 1).unwrap();
-        // months_remaining = 13 - 7 = 6; ceil(30 * 6 / 12) = ceil(15.0) = 15
-        assert_eq!(pro_rate_entitlement(start, 2026, 30), 15);
+        assert_eq!(pro_rate_entitlement(start, 2026, 30), 16);
     }
 
-    /// A user who started on December 1 has 1 remaining month:
-    /// ceil(30 * 1 / 12) = ceil(2.5) = 3.
+    /// December 1 has 31 days left => ceil(30*31/365)=3
     #[test]
     fn pro_rate_entitlement_december_start_rounds_up_to_minimum() {
         let start = NaiveDate::from_ymd_opt(2026, 12, 1).unwrap();
-        // months_remaining = 13 - 12 = 1; ceil(30 * 1 / 12) = ceil(2.5) = 3
         assert_eq!(pro_rate_entitlement(start, 2026, 30), 3);
     }
 

@@ -383,9 +383,8 @@ upload_backup() {
   _filename="$(basename "$_file")"
   _target="$(build_upload_target "$_base" "$_token" "$_filename")"
 
-  # Escape both token and password before interpolating into the config file.
-  # curl_config_escape returns 1 (and prints a message) if either contains a
-  # newline, which would be treated as a directive separator by curl.
+  # Escape URL, token and password to prevent curl config injection.
+  _esc_target="$(curl_config_escape "$_target")" || return 1
   _esc_token="$(curl_config_escape "$_token")" || return 1
   _esc_pw="$(curl_config_escape "$_password")" || return 1
 
@@ -398,7 +397,7 @@ upload_backup() {
     --retry-delay 5 \
     --upload-file "$_file" \
     <<EOF
-url = "$_target"
+url = "$_esc_target"
 user = "$_esc_token:$_esc_pw"
 header = "Content-Type: application/octet-stream"
 EOF
@@ -530,22 +529,18 @@ write_backup_metadata() {
 # -- Retention -----------------------------------------------------------------
 
 # Keep only the 10 most recent archives of EACH class (scheduled, manual);
-# delete all older ones within that same class. The two classes are pruned
-# independently and never influence each other's count -- otherwise clicking
-# "Back up now" repeatedly would evict scheduled backup history (and vice
-# versa). Local retention is count-based (not time-based) so the volume stays
-# bounded regardless of backup frequency changes.
+# delete all older ones within that same class. Sorted by filename (timestamp lexicographically)
+# not mtime, so restored/copied files with old mtime don't cause newest to be evicted.
 apply_retention() {
-  # Filenames are always zerf-*.zip / zerf-*-manual.zip (no spaces/special
-  # chars); `ls -t` is the portable way to sort by mtime -- `find` has no
-  # portable -newer-than-nth.
+  # Scheduled
   # shellcheck disable=SC2012
-  ls -1t "$OUT_DIR"/zerf-*.zip 2>/dev/null | grep -v -- '-manual\.zip$' \
+  ls -1 "$OUT_DIR"/zerf-*.zip 2>/dev/null | grep -v -- '-manual\.zip$' | sort -r \
     | tail -n +11 | while IFS= read -r f; do
     rm -f "$f"
   done
+  # Manual
   # shellcheck disable=SC2012
-  ls -1t "$OUT_DIR"/zerf-*-manual.zip 2>/dev/null | tail -n +11 | while IFS= read -r f; do
+  ls -1 "$OUT_DIR"/zerf-*-manual.zip 2>/dev/null | sort -r | tail -n +11 | while IFS= read -r f; do
     rm -f "$f"
   done
 }
@@ -702,14 +697,13 @@ run_backup_once() {
     _upload_url="$(printf '%s' "$_upload_url" | tr -d '[:space:]')"
     _upload_pw="$(read_app_setting "backup_upload_password")"
 
-    # An empty or invalid URL when upload is enabled is a misconfiguration:
-    # the admin has activated the feature but forgotten to save a valid link.
-    # Both cases below are rejected at save time by update_upload_settings in
-    # the Rust API; kept here as a defensive silent skip.
+    # An empty or invalid URL when upload is enabled is a misconfiguration – now alerts admins (previously silent).
     if [ -z "$_upload_url" ]; then
       printf 'WARNING: backup_upload_enabled=true but backup_upload_url is empty -- no upload performed.\n' >&2
+      notify_admins_backup_error "backup_upload_failed"
     elif ! parse_share_url "$_upload_url"; then
       printf 'WARNING: Invalid backup_upload_url in app_settings -- skipping upload.\n' >&2
+      notify_admins_backup_error "backup_upload_failed"
     else
       if upload_backup "$archive_file" "$UPLOAD_BASE" "$UPLOAD_TOKEN" "$_upload_pw"; then
         printf 'Backup archive uploaded: %s\n' "$(basename "$archive_file")"

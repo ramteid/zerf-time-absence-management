@@ -11,15 +11,21 @@ export { hasFlextimeAccount, isAssistantUser, isPureAdminUser, tracksOwnTime };
 // any employee-selection dropdown that drives a report about a single user's
 // own time or absences.
 export function timeTrackingUsers(users) {
-  return (users || []).filter(tracksOwnTime);
+  return (users || []).filter((u) => {
+    // tracksOwnTime treats tracks_time===undefined as tracking; we want to exclude undefined for dropdowns.
+    if (u?.tracks_time === undefined) return false;
+    return tracksOwnTime(u);
+  });
 }
 
 export function findUserById(users, userId, fallbackUser = null) {
   const id = Number(userId);
-  return (
-    (users || []).find((user) => Number(user?.id) === id) ||
-    (Number(fallbackUser?.id) === id ? fallbackUser : null)
-  );
+  if (!Number.isFinite(id)) return fallbackUser || null;
+  const found = (users || []).find((user) => Number(user?.id) === id);
+  if (found) return found;
+  const fallbackId = Number(fallbackUser?.id);
+  if (Number.isFinite(fallbackId) && fallbackId === id) return fallbackUser;
+  return null;
 }
 
 export function hasUserId(users, userId) {

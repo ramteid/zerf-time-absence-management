@@ -279,13 +279,14 @@ pub async fn auth_middleware(
 
     enforce_csrf(&parts, &app_state, &csrf_token).await?;
 
-    app_state.db.sessions.touch(&token_hash).await?;
     let repo_user = app_state
         .db
         .users
         .find_by_id_active(user_id)
         .await?
         .ok_or(AppError::Unauthorized)?;
+    // Only touch after confirming active, so deactivated/archived sessions do not stay alive.
+    app_state.db.sessions.touch(&token_hash).await?;
     let user = User {
         id: repo_user.id,
         email: repo_user.email,

@@ -98,13 +98,14 @@ describe("reports domain helpers", () => {
     ).toBe(120);
   });
 
-  it("keeps an empty category filter empty", () => {
+  it("shows all when category filter is empty (no filter applied)", () => {
+    // Empty filter means "no filtering" – show all rather than empty table
     expect(
       filterCategories([{ category: "Project", minutes: 60 }], []),
-    ).toEqual([]);
+    ).toEqual([{ category: "Project", minutes: 60 }]);
     expect(
       filterTeamCategoryColumns([{ category: "Project", color: "#222" }], []),
-    ).toEqual([]);
+    ).toEqual([{ category: "Project", color: "#222" }]);
   });
 
   it("uses unknown for missing absence kinds", () => {

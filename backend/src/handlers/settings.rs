@@ -53,7 +53,8 @@ pub struct UpdateSettings {
     pub country: String,
     pub region: String,
     pub default_weekly_hours: Option<f64>,
-    pub submission_deadline_day: Option<u8>,
+    #[serde(default, deserialize_with = "deserialize_double_option_u8")]
+    pub submission_deadline_day: Option<Option<u8>>,
     pub organization_name: Option<String>,
     pub auto_break_enabled: Option<bool>,
     pub auto_break_threshold_hours: Option<f64>,
@@ -61,6 +62,15 @@ pub struct UpdateSettings {
     pub auto_break_threshold_hours_2: Option<f64>,
     pub auto_break_deduction_minutes_2: Option<i32>,
     pub allow_team_lead_manage_assistants: Option<bool>,
+}
+
+fn deserialize_double_option_u8<'de, D>(deserializer: D) -> Result<Option<Option<u8>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    // Option<u8> will be None for null, Some for number. We wrap it in Some to indicate field presence.
+    let opt = Option::<u8>::deserialize(deserializer)?;
+    Ok(Some(opt))
 }
 
 #[derive(Deserialize)]
@@ -129,7 +139,7 @@ pub async fn update_admin_settings(
             return Err(AppError::BadRequest("Invalid default_weekly_hours.".into()));
         }
     }
-    if let Some(day) = body.submission_deadline_day {
+    if let Some(Some(day)) = body.submission_deadline_day {
         if !(1..=28).contains(&day) {
             return Err(AppError::BadRequest(
                 "submission_deadline_day must be between 1 and 28.".into(),
@@ -149,65 +159,59 @@ pub async fn update_admin_settings(
         ));
     }
 
-    // Validate automatic break deduction settings.
-    let auto_break_enabled = body.auto_break_enabled.unwrap_or(false);
-    if auto_break_enabled {
-        // Tier 1 is always required when the feature is enabled.
-        let threshold1 = body.auto_break_threshold_hours.ok_or_else(|| {
-            AppError::BadRequest(
-                "auto_break_threshold_hours is required when auto_break_enabled.".into(),
-            )
-        })?;
-        let deduction1 = body.auto_break_deduction_minutes.ok_or_else(|| {
-            AppError::BadRequest(
-                "auto_break_deduction_minutes is required when auto_break_enabled.".into(),
-            )
-        })?;
-        if threshold1 <= 0.0 || threshold1 > 24.0 {
-            return Err(AppError::BadRequest(
-                "auto_break_threshold_hours must be between 0 and 24.".into(),
-            ));
-        }
-        if deduction1 <= 0 || deduction1 > 480 {
-            return Err(AppError::BadRequest(
-                "auto_break_deduction_minutes must be between 1 and 480.".into(),
-            ));
-        }
-
-        // Tier 2 is optional, but when provided both fields must be present and valid.
-        let has_tier2_threshold = body.auto_break_threshold_hours_2.is_some();
-        let has_tier2_deduction = body.auto_break_deduction_minutes_2.is_some();
-        if has_tier2_threshold != has_tier2_deduction {
-            return Err(AppError::BadRequest(
-                "Both auto_break_threshold_hours_2 and auto_break_deduction_minutes_2 must be provided together.".into(),
-            ));
-        }
-        if has_tier2_threshold {
-            let threshold2 = body.auto_break_threshold_hours_2.unwrap();
-            let deduction2 = body.auto_break_deduction_minutes_2.unwrap();
-            if threshold2 <= threshold1 {
+    // Validate automatic break deduction settings only when the flag is explicitly provided.
+    if let Some(enabled) = body.auto_break_enabled {
+        if enabled {
+            let threshold1 = body.auto_break_threshold_hours.ok_or_else(|| {
+                AppError::BadRequest(
+                    "auto_break_threshold_hours is required when auto_break_enabled.".into(),
+                )
+            })?;
+            let deduction1 = body.auto_break_deduction_minutes.ok_or_else(|| {
+                AppError::BadRequest(
+                    "auto_break_deduction_minutes is required when auto_break_enabled.".into(),
+                )
+            })?;
+            if threshold1 <= 0.0 || threshold1 > 24.0 {
                 return Err(AppError::BadRequest(
-                    "auto_break_threshold_hours_2 must be greater than auto_break_threshold_hours."
-                        .into(),
+                    "auto_break_threshold_hours must be between 0 and 24.".into(),
                 ));
             }
-            if threshold2 > 24.0 {
+            if deduction1 <= 0 || deduction1 > 480 {
                 return Err(AppError::BadRequest(
-                    "auto_break_threshold_hours_2 must be between 0 and 24.".into(),
+                    "auto_break_deduction_minutes must be between 1 and 480.".into(),
                 ));
             }
-            if deduction2 <= 0 || deduction2 > 480 {
+            let has_tier2_threshold = body.auto_break_threshold_hours_2.is_some();
+            let has_tier2_deduction = body.auto_break_deduction_minutes_2.is_some();
+            if has_tier2_threshold != has_tier2_deduction {
                 return Err(AppError::BadRequest(
-                    "auto_break_deduction_minutes_2 must be between 1 and 480.".into(),
+                    "Both auto_break_threshold_hours_2 and auto_break_deduction_minutes_2 must be provided together.".into(),
                 ));
+            }
+            if has_tier2_threshold {
+                let threshold2 = body.auto_break_threshold_hours_2.unwrap();
+                let deduction2 = body.auto_break_deduction_minutes_2.unwrap();
+                if threshold2 <= threshold1 {
+                    return Err(AppError::BadRequest(
+                        "auto_break_threshold_hours_2 must be greater than auto_break_threshold_hours."
+                            .into(),
+                    ));
+                }
+                if threshold2 > 24.0 {
+                    return Err(AppError::BadRequest(
+                        "auto_break_threshold_hours_2 must be between 0 and 24.".into(),
+                    ));
+                }
+                if deduction2 <= 0 || deduction2 > 480 {
+                    return Err(AppError::BadRequest(
+                        "auto_break_deduction_minutes_2 must be between 1 and 480.".into(),
+                    ));
+                }
             }
         }
     }
 
-    let default_weekly_hours_str = body
-        .default_weekly_hours
-        .map(|v| v.to_string())
-        .unwrap_or_default();
     // Refresh holidays when the country/region changes.
     let prepared_holidays = if setting_value_changed(previous_country.as_deref(), &country)
         || setting_value_changed(previous_region.as_deref(), &region)
@@ -220,93 +224,83 @@ pub async fn update_admin_settings(
         None
     };
 
-    // Save all settings atomically within a transaction.
+    // Save settings atomically – only touch optional fields when they are explicitly provided (boyscout: partial update must not wipe).
     let mut transaction = app_state.db.settings.begin().await?;
-
-    if let Some(day) = body.submission_deadline_day {
-        save_setting_tx(
-            &mut transaction,
-            "submission_deadline_day",
-            &day.to_string(),
-        )
-        .await?;
-    } else {
-        save_setting_tx(&mut transaction, "submission_deadline_day", "").await?;
-    }
 
     save_setting_tx(&mut transaction, "ui_language", &language).await?;
     save_setting_tx(&mut transaction, "time_format", time_format).await?;
     save_setting_tx(&mut transaction, "timezone", &timezone).await?;
     save_setting_tx(&mut transaction, "country", &country).await?;
     save_setting_tx(&mut transaction, "region", &region).await?;
-    save_setting_tx(
-        &mut transaction,
-        "default_weekly_hours",
-        &default_weekly_hours_str,
-    )
-    .await?;
-    save_setting_tx(&mut transaction, "organization_name", &org_name).await?;
 
-    // Save auto break settings; clear all tier values when the feature is disabled.
-    save_setting_tx(
-        &mut transaction,
-        "auto_break_enabled",
-        if auto_break_enabled { "true" } else { "false" },
-    )
-    .await?;
-    if auto_break_enabled {
+    save_if_some!(
+        transaction,
+        "default_weekly_hours",
+        body.default_weekly_hours.map(|v| v.to_string())
+    );
+    if let Some(inner) = body.submission_deadline_day {
+        match inner {
+            Some(v) => {
+                save_setting_tx(&mut transaction, "submission_deadline_day", &v.to_string())
+                    .await?;
+            }
+            None => {
+                save_setting_tx(&mut transaction, "submission_deadline_day", "").await?;
+            }
+        }
+    }
+    save_if_some!(
+        transaction,
+        "organization_name",
+        body.organization_name.map(|v| v.trim().to_string())
+    );
+
+    // Auto break: only save when flag is provided; otherwise keep existing values.
+    if let Some(enabled) = body.auto_break_enabled {
         save_setting_tx(
             &mut transaction,
-            "auto_break_threshold_hours",
-            &body.auto_break_threshold_hours.unwrap().to_string(),
+            "auto_break_enabled",
+            if enabled { "true" } else { "false" },
         )
         .await?;
-        save_setting_tx(
-            &mut transaction,
-            "auto_break_deduction_minutes",
-            &body.auto_break_deduction_minutes.unwrap().to_string(),
-        )
-        .await?;
-        // Tier 2: save when provided, clear when omitted.
-        save_setting_tx(
-            &mut transaction,
-            AUTO_BREAK_THRESHOLD_HOURS_2_KEY,
-            &body
-                .auto_break_threshold_hours_2
-                .map(|v| v.to_string())
-                .unwrap_or_default(),
-        )
-        .await?;
-        save_setting_tx(
-            &mut transaction,
-            AUTO_BREAK_DEDUCTION_MINUTES_2_KEY,
-            &body
-                .auto_break_deduction_minutes_2
-                .map(|v| v.to_string())
-                .unwrap_or_default(),
-        )
-        .await?;
-    } else {
-        save_setting_tx(&mut transaction, "auto_break_threshold_hours", "").await?;
-        save_setting_tx(&mut transaction, "auto_break_deduction_minutes", "").await?;
-        save_setting_tx(&mut transaction, AUTO_BREAK_THRESHOLD_HOURS_2_KEY, "").await?;
-        save_setting_tx(&mut transaction, AUTO_BREAK_DEDUCTION_MINUTES_2_KEY, "").await?;
+        if enabled {
+            save_if_some!(
+                transaction,
+                "auto_break_threshold_hours",
+                body.auto_break_threshold_hours.map(|v| v.to_string())
+            );
+            save_if_some!(
+                transaction,
+                "auto_break_deduction_minutes",
+                body.auto_break_deduction_minutes.map(|v| v.to_string())
+            );
+            save_if_some!(
+                transaction,
+                AUTO_BREAK_THRESHOLD_HOURS_2_KEY,
+                body.auto_break_threshold_hours_2.map(|v| v.to_string())
+            );
+            save_if_some!(
+                transaction,
+                AUTO_BREAK_DEDUCTION_MINUTES_2_KEY,
+                body.auto_break_deduction_minutes_2.map(|v| v.to_string())
+            );
+        } else {
+            save_setting_tx(&mut transaction, "auto_break_threshold_hours", "").await?;
+            save_setting_tx(&mut transaction, "auto_break_deduction_minutes", "").await?;
+            save_setting_tx(&mut transaction, AUTO_BREAK_THRESHOLD_HOURS_2_KEY, "").await?;
+            save_setting_tx(&mut transaction, AUTO_BREAK_DEDUCTION_MINUTES_2_KEY, "").await?;
+        }
     }
 
     if let Some(ref holidays) = prepared_holidays {
         crate::services::holidays::replace_auto_holidays_exec(&mut transaction, holidays).await?;
     }
 
-    save_setting_tx(
-        &mut transaction,
+    save_if_some!(
+        transaction,
         settings::ALLOW_TEAM_LEAD_MANAGE_ASSISTANTS_KEY,
-        if body.allow_team_lead_manage_assistants.unwrap_or(false) {
-            "true"
-        } else {
-            "false"
-        },
-    )
-    .await?;
+        body.allow_team_lead_manage_assistants.map(|v| if v { "true" } else { "false" }.to_string())
+    );
 
     transaction.commit().await?;
 
@@ -509,13 +503,7 @@ pub async fn update_upload_settings(
         }
     }
 
-    // Cross-field: if database backup upload will end up enabled after this
-    // update, it needs a non-empty, valid share URL. Each field can be saved
-    // independently, so compute the *effective* state by falling back to the
-    // currently stored value for whichever field this request doesn't touch.
-    // Without this check, the only place that ever caught the misconfiguration
-    // was backup.sh at 2 a.m., which had to page the admins about it instead of
-    // the save simply being rejected here.
+    // Cross-field: backup upload enabled requires URL.
     let effective_backup_upload_enabled = match body.backup_upload_enabled {
         Some(v) => v,
         None => {
@@ -539,6 +527,31 @@ pub async fn update_upload_settings(
             ));
         }
         crate::services::nextcloud::parse_share_url(&effective_backup_upload_url)?;
+    }
+    // Same validation for report upload (previously missing – admin could enable without URL).
+    let effective_report_upload_enabled = match body.report_upload_enabled {
+        Some(v) => v,
+        None => {
+            load_setting(
+                &app_state.pool,
+                settings::REPORT_UPLOAD_ENABLED_KEY,
+                "false",
+            )
+            .await?
+                == "true"
+        }
+    };
+    if effective_report_upload_enabled {
+        let effective_report_upload_url = match &body.report_upload_url {
+            Some(v) => v.clone(),
+            None => load_setting(&app_state.pool, settings::REPORT_UPLOAD_URL_KEY, "").await?,
+        };
+        if effective_report_upload_url.trim().is_empty() {
+            return Err(AppError::BadRequest(
+                "A Nextcloud share URL is required to enable report PDF upload.".into(),
+            ));
+        }
+        crate::services::nextcloud::parse_share_url(&effective_report_upload_url)?;
     }
 
     let mut transaction = app_state.db.settings.begin().await?;

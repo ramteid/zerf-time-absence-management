@@ -106,34 +106,55 @@ impl HolidayDb {
         .fetch_all(&self.pool)
         .await?;
 
-        let mut seen: HashSet<NaiveDate> = literal.iter().map(|h| h.holiday_date).collect();
-        let mut result = literal;
+        // Manual holidays must shadow auto holidays. Build map with priority: manual > auto, literal manual > projected.
+        use std::collections::HashMap;
+        let mut map: HashMap<NaiveDate, Holiday> = HashMap::new();
+        // First insert manual literals (highest priority for literal).
+        for h in literal.iter().filter(|h| !h.is_auto) {
+            map.insert(h.holiday_date, h.clone());
+        }
+        // Then auto literals only if not already shadowed by manual.
+        for h in literal.iter().filter(|h| h.is_auto) {
+            map.entry(h.holiday_date).or_insert_with(|| h.clone());
+        }
+        // Recurring candidates are manual – they should shadow auto but not literal manual.
         for candidate in &candidates {
+            // Recurring definitions are always manual (is_auto never true for recurring).
             for target_year in from.year()..=to.year() {
                 if !recurs_in_year(candidate.year, candidate.recurrence_end_year, target_year) {
                     continue;
                 }
                 let Some(projected) = project_occurrence(candidate.holiday_date, target_year)
                 else {
+                    // Feb 29 on non-leap year simply does not occur – no fallback.
                     continue;
                 };
-                // Two different recurring holidays (or a recurring holiday
-                // and an unrelated one-off) can coincidentally project onto
-                // the same future date; `seen` keeps whichever is fetched
-                // first and silently drops the other. Both agree the day is
-                // a holiday, so exclusion-from-workday correctness is
-                // unaffected — only the cosmetic name/id shown for that slot
-                // could differ, mirroring how a manual holiday already
-                // silently shadows an auto-imported one on the same date.
-                if projected >= from && projected <= to && seen.insert(projected) {
-                    result.push(Holiday {
-                        holiday_date: projected,
-                        year: target_year,
-                        ..candidate.clone()
-                    });
+                if projected < from || projected > to {
+                    continue;
+                }
+                let entry = map.entry(projected);
+                match entry {
+                    std::collections::hash_map::Entry::Vacant(v) => {
+                        v.insert(Holiday {
+                            holiday_date: projected,
+                            year: target_year,
+                            ..candidate.clone()
+                        });
+                    }
+                    std::collections::hash_map::Entry::Occupied(mut o) => {
+                        // Manual recurring should replace auto literal/projection, but not manual literal.
+                        if o.get().is_auto {
+                            o.insert(Holiday {
+                                holiday_date: projected,
+                                year: target_year,
+                                ..candidate.clone()
+                            });
+                        }
+                    }
                 }
             }
         }
+        let mut result: Vec<Holiday> = map.into_values().collect();
         result.sort_by_key(|h| h.holiday_date);
         Ok(result)
     }
@@ -255,26 +276,14 @@ impl HolidayDb {
     }
 
     /// Delete all auto-imported holidays and bulk-insert new ones (within a tx).
+    /// Deletes all auto rows to avoid stale data when country changes (old auto for year+2 etc. would otherwise remain).
     pub async fn replace_auto_tx(
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         holidays: &[PreparedHoliday],
     ) -> AppResult<()> {
-        if holidays.is_empty() {
-            sqlx::query("DELETE FROM holidays WHERE is_auto = TRUE")
-                .execute(&mut **tx)
-                .await?;
-        } else {
-            let years: Vec<i32> = holidays
-                .iter()
-                .map(|holiday| holiday.year)
-                .collect::<HashSet<_>>()
-                .into_iter()
-                .collect();
-            sqlx::query("DELETE FROM holidays WHERE is_auto = TRUE AND year = ANY($1)")
-                .bind(&years)
-                .execute(&mut **tx)
-                .await?;
-        }
+        sqlx::query("DELETE FROM holidays WHERE is_auto = TRUE")
+            .execute(&mut **tx)
+            .await?;
         for h in holidays {
             sqlx::query(
                 "INSERT INTO holidays(holiday_date, name, local_name, year, is_auto) \

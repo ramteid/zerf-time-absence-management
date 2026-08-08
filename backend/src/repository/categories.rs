@@ -159,11 +159,9 @@ impl CategoryDb {
         .fetch_one(&mut *tx)
         .await
         .map_err(|_| AppError::conflict("Name already exists"))?;
-        // New categories default to enabled for every existing employee. Same
-        // transaction as the insert above so a failure here cannot leave a
-        // category with zero employees able to use it.
+        // New categories default to enabled for every active, non-archived, time-tracking employee.
         sqlx::query(
-            "INSERT INTO user_category_access (user_id, category_id) SELECT id, $1 FROM users",
+            "INSERT INTO user_category_access (user_id, category_id) SELECT id, $1 FROM users WHERE active=TRUE AND archived_at IS NULL AND tracks_time=TRUE",
         )
         .bind(new_id)
         .execute(&mut *tx)
@@ -207,7 +205,7 @@ impl CategoryDb {
 
     pub async fn is_enabled_for_user(&self, category_id: i64, user_id: i64) -> AppResult<bool> {
         let exists: Option<i32> = sqlx::query_scalar(
-            "SELECT 1 FROM user_category_access WHERE category_id = $1 AND user_id = $2",
+            "SELECT 1 FROM user_category_access uca JOIN categories c ON c.id = uca.category_id WHERE uca.category_id = $1 AND uca.user_id = $2 AND c.active=TRUE",
         )
         .bind(category_id)
         .bind(user_id)

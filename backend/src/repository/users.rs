@@ -211,7 +211,7 @@ impl UserDb {
             "{USER_SELECT} WHERE active=TRUE AND (id=$1 \
              OR id IN (SELECT ua.user_id FROM user_approvers ua \
                        JOIN users u ON u.id=ua.user_id \
-                       WHERE ua.approver_id=$1 AND u.active=TRUE AND u.role != 'admin')) \
+                       WHERE ua.approver_id=$1 AND u.active=TRUE AND lower(trim(u.role)) != 'admin')) \
              ORDER BY last_name, first_name"
         ))
         .build_query_as::<User>()
@@ -234,7 +234,7 @@ impl UserDb {
             "{USER_SELECT} WHERE (id=$1 AND archived_at IS NULL) \
              OR id IN (SELECT ua.user_id FROM user_approvers ua \
                        JOIN users u ON u.id = ua.user_id \
-                       WHERE ua.approver_id=$1 AND u.role != 'admin') \
+                       WHERE ua.approver_id=$1 AND lower(trim(u.role)) != 'admin') \
              ORDER BY last_name, first_name"
         ))
         .build_query_as::<User>()
@@ -412,9 +412,10 @@ impl UserDb {
         last_name: &str,
         exclude_id: Option<i64>,
     ) -> AppResult<()> {
+        // Case-insensitive check so "Alice Smith" vs "alice smith" are considered duplicate.
         let existing: Option<i64> = sqlx::query_scalar(
             "SELECT id FROM users \
-             WHERE first_name=$1 AND last_name=$2 \
+             WHERE lower(trim(first_name))=lower(trim($1)) AND lower(trim(last_name))=lower(trim($2)) \
              AND ($3::BIGINT IS NULL OR id<>$3) LIMIT 1",
         )
         .bind(first_name)
@@ -669,7 +670,7 @@ impl UserDb {
         match category_ids {
             None => {
                 sqlx::query(
-                    "INSERT INTO user_category_access (user_id, category_id) SELECT $1, id FROM categories",
+                    "INSERT INTO user_category_access (user_id, category_id) SELECT $1, id FROM categories WHERE active=TRUE",
                 )
                 .bind(new_user_id)
                 .execute(&mut *tx)
@@ -691,7 +692,7 @@ impl UserDb {
         match absence_category_ids {
             None => {
                 sqlx::query(
-                    "INSERT INTO user_absence_category_access (user_id, category_id) SELECT $1, id FROM absence_categories",
+                    "INSERT INTO user_absence_category_access (user_id, category_id) SELECT $1, id FROM absence_categories WHERE active=TRUE",
                 )
                 .bind(new_user_id)
                 .execute(&mut *tx)
@@ -801,24 +802,47 @@ impl UserDb {
                 .await?
                 .ok_or(AppError::NotFound)?;
         let requires_admin_approver = is_admin_role(&subject_role);
+        // Check if relationship already exists – idempotent restore should not error.
+        let existing: Option<i64> = sqlx::query_scalar(
+            "SELECT 1 FROM user_approvers WHERE user_id=$1 AND approver_id=$2",
+        )
+        .bind(user_id)
+        .bind(approver_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if existing.is_some() {
+            return Ok(());
+        }
         let rows = sqlx::query(
             "INSERT INTO user_approvers(user_id, approver_id) \
              SELECT $1, $2 \
              WHERE EXISTS ( \
                 SELECT 1 FROM users approver \
                 WHERE approver.id = $2 \
-                AND ( \
-                    ($3::bool = TRUE AND approver.active = TRUE AND approver.role = 'admin') OR \
-                    ($3::bool = FALSE AND approver.active = TRUE AND approver.role IN ('team_lead', 'admin')) \
+                AND approver.active = TRUE \
+                AND lower(trim(approver.role)) IN ( \
+                    CASE WHEN $3::bool THEN 'admin' ELSE 'team_lead' END, 'admin' \
                 ) \
-             )",
+             ) \
+             ON CONFLICT DO NOTHING",
         )
         .bind(user_id)
         .bind(approver_id)
         .bind(requires_admin_approver)
-        .execute(tx)
+        .execute(&mut *tx)
         .await?;
         if rows.rows_affected() == 0 {
+            // Could be duplicate (handled above) or invalid approver
+            let still_exists: Option<i64> = sqlx::query_scalar(
+                "SELECT 1 FROM user_approvers WHERE user_id=$1 AND approver_id=$2",
+            )
+            .bind(user_id)
+            .bind(approver_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+            if still_exists.is_some() {
+                return Ok(());
+            }
             return Err(AppError::bad_request(
                 "Approver must be an active Team lead or Admin (admins may only report to active admins).",
             ));
@@ -852,9 +876,19 @@ impl UserDb {
              JOIN users subject ON subject.id = ua.user_id \
              WHERE ua.user_id = $1 AND approver.active = TRUE \
              AND ( \
-                 (lower(trim(subject.role)) = 'admin' AND approver.role = 'admin') OR \
-                 (lower(trim(subject.role)) != 'admin' AND approver.role IN ('team_lead', 'admin')) \
+                 (lower(trim(subject.role)) = 'admin' AND lower(trim(approver.role)) = 'admin') OR \
+                 (lower(trim(subject.role)) != 'admin' AND lower(trim(approver.role)) IN ('team_lead', 'admin')) \
              )",
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// Unfiltered approver ids (includes inactive) – used for cycle detection.
+    pub async fn get_all_approver_ids_for_user(&self, user_id: i64) -> AppResult<Vec<i64>> {
+        Ok(sqlx::query_scalar::<_, i64>(
+            "SELECT approver_id FROM user_approvers WHERE user_id=$1 ORDER BY approver_id",
         )
         .bind(user_id)
         .fetch_all(&self.pool)
@@ -916,6 +950,7 @@ impl UserDb {
 
     /// Check if a given user is a valid active approver for a subject whose
     /// `requires_admin_approver` flag is known. Returns true if valid.
+    /// Uses lower(trim(role)) to match legacy data.
     pub async fn is_valid_replacement_approver_tx(
         tx: &mut sqlx::PgConnection,
         approver_id: i64,
@@ -923,8 +958,8 @@ impl UserDb {
     ) -> AppResult<bool> {
         let valid: Option<bool> = sqlx::query_scalar(
             "SELECT TRUE FROM users WHERE id=$1 AND active=TRUE AND archived_at IS NULL \
-             AND (($2::bool = TRUE AND role='admin') OR \
-                  ($2::bool = FALSE AND role IN ('team_lead','admin')))",
+             AND (($2::bool = TRUE AND lower(trim(role))='admin') OR \
+                  ($2::bool = FALSE AND lower(trim(role)) IN ('team_lead','admin')))",
         )
         .bind(approver_id)
         .bind(requires_admin_approver)

@@ -57,7 +57,8 @@ export function entryCountsAsWork(entry, categoryRows) {
     const byName = (categoryRows || []).find((c) => c.name === entry.category);
     if (byName) return byName.counts_as_work !== false;
   }
-  return true;
+  // Missing category (store not loaded or deleted) must not inflate hours.
+  return false;
 }
 
 export function creditedEntryMinutes(entry, categoryRows) {
@@ -69,20 +70,33 @@ export function creditedEntryMinutes(entry, categoryRows) {
   ) {
     return 0;
   }
-  return Math.max(
-    0,
-    durMin(entry.start_time.slice(0, 5), entry.end_time.slice(0, 5)),
+  const minutes = durMin(
+    entry.start_time.slice(0, 5),
+    entry.end_time.slice(0, 5),
   );
+  if (!Number.isFinite(minutes) || minutes < 0) return 0;
+  return Math.max(0, minutes);
 }
 
 /**
  * Parses an "HH:MM" or "HH:MM:SS" time string into total minutes since midnight.
- * Returns 0 for null/undefined/empty input.
+ * Returns NaN for invalid input, 0 for null/empty.
  */
 function parseHHMM(s) {
   if (!s) return 0;
-  const parts = s.split(":");
-  return parseInt(parts[0], 10) * 60 + parseInt(parts[1] || "0", 10);
+  const parts = String(s).trim().split(":");
+  if (parts.length < 2 || parts.length > 3) return NaN;
+  const h = Number(parts[0]);
+  const m = Number(parts[1]);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return NaN;
+  if (h < 0 || h > 23 || m < 0 || m > 59) return NaN;
+  if (parts[2] !== undefined) {
+    const sec = Number(parts[2]);
+    if (!Number.isFinite(sec) || sec < 0 || sec > 59) return NaN;
+    // Include seconds as fraction? Use floor of minutes for compatibility.
+    return h * 60 + m + Math.floor(sec / 60);
+  }
+  return h * 60 + m;
 }
 
 function exclusiveThresholdMinutes(thresholdHours) {
@@ -101,30 +115,33 @@ function exclusiveThresholdMinutes(thresholdHours) {
 export function buildBreakRules(settings) {
   if (!settings?.auto_break_enabled) return [];
   const rules = [];
-  if (
-    settings.auto_break_threshold_hours &&
-    settings.auto_break_deduction_minutes
-  ) {
-    const thresholdHours = Number(settings.auto_break_threshold_hours);
+  const t1 = Number(settings.auto_break_threshold_hours);
+  const d1 = Number(settings.auto_break_deduction_minutes);
+  if (Number.isFinite(t1) && t1 > 0 && Number.isFinite(d1) && d1 > 0) {
     rules.push({
-      thresholdHours,
-      thresholdMinutes: exclusiveThresholdMinutes(thresholdHours),
-      deductionMinutes: Number(settings.auto_break_deduction_minutes),
+      thresholdHours: t1,
+      thresholdMinutes: exclusiveThresholdMinutes(t1),
+      deductionMinutes: d1,
     });
   }
-  if (
-    settings.auto_break_threshold_hours_2 &&
-    settings.auto_break_deduction_minutes_2
-  ) {
-    const thresholdHours = Number(settings.auto_break_threshold_hours_2);
-    rules.push({
-      thresholdHours,
-      thresholdMinutes: exclusiveThresholdMinutes(thresholdHours),
-      deductionMinutes: Number(settings.auto_break_deduction_minutes_2),
-    });
+  const t2 = Number(settings.auto_break_threshold_hours_2);
+  const d2 = Number(settings.auto_break_deduction_minutes_2);
+  if (Number.isFinite(t2) && t2 > 0 && Number.isFinite(d2) && d2 > 0) {
+    // Avoid duplicate thresholds – last wins would be surprising.
+    if (!rules.some((r) => r.thresholdHours === t2)) {
+      rules.push({
+        thresholdHours: t2,
+        thresholdMinutes: exclusiveThresholdMinutes(t2),
+        deductionMinutes: d2,
+      });
+    }
   }
   rules.sort((a, b) => a.thresholdHours - b.thresholdHours);
-  return rules;
+  // Ensure strictly increasing thresholds and positive deductions
+  return rules.filter((r, idx) => {
+    if (idx === 0) return true;
+    return r.thresholdHours > rules[idx - 1].thresholdHours;
+  });
 }
 
 /**
@@ -174,12 +191,21 @@ export function computeDayBreakInfo(items, categories, rules) {
   if (!items?.length || !rules?.length) return empty;
 
   // Only non-rejected entries that count as work, sorted by start time.
+  // Filter invalid intervals (NaN, end <= start, negative).
   const eligible = items
     .filter((e) => e.status !== "rejected" && entryCountsAsWork(e, categories))
     .map((e) => ({
       start: parseHHMM(e.start_time),
       end: parseHHMM(e.end_time),
     }))
+    .filter(
+      (r) =>
+        Number.isFinite(r.start) &&
+        Number.isFinite(r.end) &&
+        r.end > r.start &&
+        r.start >= 0 &&
+        r.end <= 24 * 60,
+    )
     .sort((a, b) => a.start - b.start);
 
   if (!eligible.length) return empty;
@@ -195,6 +221,8 @@ export function computeDayBreakInfo(items, categories, rules) {
     }
   }
 
+  if (!blocks.length) return empty;
+
   // Day total worked time, summed across all blocks — this is what ArbZG §4 tests
   // against, not each block's own duration.
   const workedMin = blocks.reduce((sum, b) => sum + (b.end - b.start), 0);
@@ -203,6 +231,7 @@ export function computeDayBreakInfo(items, categories, rules) {
   // worked time, is the total real rest time already taken between blocks today.
   const spanMin = blocks[blocks.length - 1].end - blocks[0].start;
   const takenMin = Math.max(0, spanMin - workedMin);
+  if (!Number.isFinite(takenMin) || !Number.isFinite(workedMin)) return empty;
 
   // Highest applicable rule wins; stays null when no rule threshold is strictly
   // exceeded by the day's total worked time. Rules are sorted ascending, so the
@@ -234,24 +263,28 @@ export function computeDayBreakDeduction(items, categories, rules) {
 
 // Look up the absence category by slug from the store. Any caller that already
 // has access to the categories array should pass it in to avoid the store read.
+// When store is empty (not loaded yet) we default to non-blocking to avoid
+// false UI disabling.
 function categoryFor(kind) {
-  return get(absenceCategories).find((c) => c.slug === kind);
+  const cats = get(absenceCategories);
+  if (!cats?.length) return null;
+  return cats.find((c) => c.slug === kind) || null;
 }
 
 export function absenceRemovesTarget(absence) {
   if (!absence) return false;
   if (!TARGET_REMOVING_ABSENCE_STATUSES.includes(absence.status)) return false;
-  // cost_type="flextime" categories (e.g. flextime reduction) preserve the day's
-  // work target — the absence "costs" flextime rather than removing the target.
-  return categoryFor(absence.kind)?.cost_type !== "flextime";
+  const cat = categoryFor(absence.kind);
+  if (!cat) return false; // store not loaded → don't remove target
+  return cat.cost_type !== "flextime";
 }
 
 export function absenceBlocksEntry(absence) {
   if (!absence) return false;
   if (!ENTRY_BLOCKING_ABSENCE_STATUSES.includes(absence.status)) return false;
-  // auto_approve_past categories (sick-like) coexist with logged time on the
-  // same day, so they must NOT block entry creation.
-  return categoryFor(absence.kind)?.auto_approve_past !== true;
+  const cat = categoryFor(absence.kind);
+  if (!cat) return false; // store not loaded → don't block entry
+  return cat.auto_approve_past !== true;
 }
 
 export function filterWeekAbsences(absenceRowsByYear, from, to) {
@@ -336,8 +369,14 @@ export function weekTargetMinutes({
   const workdaysPerWeek = Number(currentUser?.workdays_per_week || 5);
   const potentialDays = potentialWorkdaysPerWeek(workdaysPerWeek);
   if (potentialDays <= 0 || workdaysPerWeek <= 0) return 0;
-  const perDayMinutes = Math.round((weeklyHours / potentialDays) * 60);
-  if (perDayMinutes <= 0) return 0;
+  // Daily target is weekly_hours / workdays_per_week for 1-5 day schedules
+  // (so 8h for 1-day at 8h weekly), not weekly / potential (which would be 1.6h).
+  const divisor =
+    workdaysPerWeek >= 1 && workdaysPerWeek <= 5
+      ? workdaysPerWeek
+      : potentialDays;
+  const perDayMinutes = (weeklyHours / divisor) * 60;
+  if (!Number.isFinite(perDayMinutes) || perDayMinutes <= 0) return 0;
   const eligibleDays = [...(weekdays || []), ...(weekendDays || [])]
     .filter((day) => isPotentialDay(day.dayName, workdaysPerWeek))
     .filter((day) => {
@@ -347,7 +386,9 @@ export function weekTargetMinutes({
       return !(day.absentForTarget || day.holiday || isBeforeStart || isFuture);
     });
 
-  return Math.min(eligibleDays.length, workdaysPerWeek) * perDayMinutes;
+  // Use floor to avoid systematic +1 minute per day accumulation from rounding.
+  const eligibleCount = Math.min(eligibleDays.length, workdaysPerWeek);
+  return Math.floor(eligibleCount * perDayMinutes);
 }
 
 export function entryDurationHours(startTime, endTime) {

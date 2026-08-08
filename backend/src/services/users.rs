@@ -391,6 +391,32 @@ pub async fn validate_approver_ids(
             }
         }
     }
+    // Cycle detection: ensure no approver transitively reports to the user themselves.
+    // Use unfiltered graph so a cycle hidden by an inactive intermediate is still caught.
+    if let Some(self_id) = user_self_id {
+        let mut visited: HashSet<i64> = HashSet::new();
+        let mut queue: Vec<i64> = approver_ids.to_vec();
+        while let Some(current) = queue.pop() {
+            if !visited.insert(current) {
+                continue;
+            }
+            if current == self_id {
+                return Err(AppError::BadRequest(
+                    "Approver assignment would create a cycle.".into(),
+                ));
+            }
+            let parents = app_state
+                .db
+                .users
+                .get_all_approver_ids_for_user(current)
+                .await?;
+            for p in parents {
+                if !visited.contains(&p) {
+                    queue.push(p);
+                }
+            }
+        }
+    }
     Ok(())
 }
 
@@ -761,8 +787,16 @@ pub async fn create(
     let normalized_email = body.email.trim().to_lowercase();
     if normalized_email.is_empty()
         || normalized_email.len() > 254
-        || !normalized_email.contains('@')
+        || normalized_email.contains(' ')
+        || normalized_email.matches('@').count() != 1
+        || normalized_email.starts_with('@')
+        || normalized_email.ends_with('@')
     {
+        return Err(AppError::BadRequest("Invalid email.".into()));
+    }
+    // Basic format check: local@domain with at least one dot in domain
+    let domain_part = normalized_email.split('@').nth(1).unwrap_or("");
+    if !domain_part.contains('.') || domain_part.starts_with('.') || domain_part.ends_with('.') {
         return Err(AppError::BadRequest("Invalid email.".into()));
     }
     let (first_name, last_name) = normalize_user_name(&body.first_name, &body.last_name)?;
@@ -986,6 +1020,14 @@ pub async fn archive(
     // Enumerate active dependents (users for whom target is an approver).
     let dependents = UserDb::find_active_dependents_tx(&mut tx, target_id).await?;
 
+    // If the archived user is an assistant, they should never be an approver.
+    // Guard against corrupt data where they still are.
+    if is_assistant_role(&target.role) && !dependents.is_empty() {
+        return Err(AppError::BadRequest(
+            "Assistant user is still an approver for active users; reassign them first.".into(),
+        ));
+    }
+
     for (dep_id, dep_first, dep_last, dep_role) in &dependents {
         let new_approver_id = req
             .approver_replacements
@@ -997,6 +1039,19 @@ pub async fn archive(
                     dep_first, dep_last, dep_id
                 ))
             })?;
+        // Prevent self-assignment and re-assigning the user being archived.
+        if new_approver_id == *dep_id {
+            return Err(AppError::BadRequest(format!(
+                "Replacement approver for user {} {} (id={}) cannot be themselves.",
+                dep_first, dep_last, dep_id
+            )));
+        }
+        if new_approver_id == target_id {
+            return Err(AppError::BadRequest(format!(
+                "Replacement approver id={} is the user being archived.",
+                new_approver_id
+            )));
+        }
         // Validate the replacement approver based on the dependent's role.
         let requires_admin_approver = is_admin_role(dep_role);
         let valid = UserDb::is_valid_replacement_approver_tx(
@@ -1010,6 +1065,28 @@ pub async fn archive(
                 "Replacement approver id={} is not a valid active approver.",
                 new_approver_id
             )));
+        }
+        // Cycle detection: new approver must not transitively report to dependent.
+        {
+            let mut visited: HashSet<i64> = HashSet::new();
+            let mut queue: Vec<i64> = vec![new_approver_id];
+            while let Some(current) = queue.pop() {
+                if !visited.insert(current) {
+                    continue;
+                }
+                if current == *dep_id {
+                    return Err(AppError::BadRequest(format!(
+                        "Replacement approver for user {} {} would create a cycle.",
+                        dep_first, dep_last
+                    )));
+                }
+                let parents = UserDb::get_approver_ids_tx(&mut tx, current).await?;
+                for p in parents {
+                    if !visited.contains(&p) {
+                        queue.push(p);
+                    }
+                }
+            }
         }
         // Reassign: remove old approver link, add new one atomically.
         UserDb::reassign_approver_tx(&mut tx, *dep_id, target_id, new_approver_id).await?;
@@ -1170,6 +1247,14 @@ pub async fn archive_assistant(
         return Err(AppError::BadRequest("User is already archived.".into()));
     }
 
+    // Even assistants should not be archived if they are still an approver (corrupt data guard).
+    let dependents = UserDb::find_active_dependents_tx(&mut tx, target_id).await?;
+    if !dependents.is_empty() {
+        return Err(AppError::BadRequest(
+            "User is still an approver for active users; reassign them first.".into(),
+        ));
+    }
+
     let submitted_weeks_to_clear =
         TimeEntryDb::revert_submitted_to_draft_tx(&mut tx, target_id).await?;
 
@@ -1227,7 +1312,30 @@ pub async fn restore_assistant(
 ) -> AppResult<User> {
     // Use assert_team_lead_can_manage_assistant — it also fetches by id without an
     // active filter so archived assistants are reachable.
-    assert_team_lead_can_manage_assistant(app_state, requester, target_id).await?;
+    let _target_user = assert_team_lead_can_manage_assistant(app_state, requester, target_id).await?;
+
+    // Extra validation: lead must still be active and valid approver (covers case where lead archived in meantime)
+    if !requester.active {
+        return Err(AppError::BadRequest(
+            "Restoring lead is not active.".into(),
+        ));
+    }
+    if !is_team_lead_role(&requester.role) && !is_admin_role(&requester.role) {
+        return Err(AppError::BadRequest(
+            "Restoring lead must be an active team lead or admin.".into(),
+        ));
+    }
+    // Ensure unfiltered approver relationship still exists
+    let all_approvers = app_state
+        .db
+        .users
+        .get_all_approver_ids_for_user(target_id)
+        .await?;
+    if !all_approvers.contains(&requester.id) {
+        return Err(AppError::BadRequest(
+            "Lead is no longer assigned as approver for this assistant.".into(),
+        ));
+    }
 
     let mut tx = app_state.db.users.begin().await?;
     UserDb::lock_user_graph_tx(&mut tx).await?;
@@ -1241,6 +1349,7 @@ pub async fn restore_assistant(
         new_start_date.filter(|new_start_date| *new_start_date != target.start_date);
 
     // Restore the user; keep the existing approver relationship (the lead is still their approver).
+    // No need to re-insert approver if it already exists – original code didn't, but we ensure idempotency.
     UserDb::restore_tx(&mut tx, target_id, new_start_date).await?;
 
     tx.commit().await?;

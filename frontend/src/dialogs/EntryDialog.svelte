@@ -63,7 +63,13 @@
   $: if (isNew && start_time >= end_time) {
     const [h, m] = start_time.split(":").map(Number);
     if (h >= 23) {
-      end_time = "23:59";
+      // Edge case 23:xx – ensure end after start.
+      if (start_time >= "23:59") {
+        start_time = "23:00";
+        end_time = "23:59";
+      } else {
+        end_time = "23:59";
+      }
     } else {
       end_time =
         String(h + 1).padStart(2, "0") + ":" + String(m).padStart(2, "0");
@@ -83,6 +89,10 @@
       await showError($t("Invalid date."));
       return;
     }
+    if (entry_date > todayIso) {
+      await showError($t("Entries in the future are not allowed."));
+      return;
+    }
     if (start_time >= end_time) {
       await showError($t("End time must be after start time."));
       return;
@@ -91,6 +101,10 @@
       const currentTime = appCurrentTimeHM($settings?.timezone);
       if (end_time > currentTime) {
         await showError($t("End time cannot be in the future."));
+        return;
+      }
+      if (start_time > currentTime) {
+        await showError($t("Start time cannot be in the future."));
         return;
       }
     }

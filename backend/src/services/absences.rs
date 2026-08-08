@@ -231,7 +231,7 @@ impl Absence {
 /// later once the category has been resolved.
 pub fn validate_new_absence_shape(input: &NewAbsence) -> AppResult<()> {
     if let Some(comment) = &input.comment {
-        if comment.len() > 2000 {
+        if comment.chars().count() > 2000 {
             return Err(AppError::BadRequest("Comment too long (max 2000).".into()));
         }
     }
@@ -1470,7 +1470,9 @@ pub async fn compute_balances(
         let carryover_ranges: Vec<_> = account_absences
             .iter()
             .filter(|absence| {
-                absence.status == "approved" || absence.status == "cancellation_pending"
+                absence.status == "approved"
+                    || absence.status == "cancellation_pending"
+                    || absence.status == "requested"
             })
             .map(|absence| (absence.start_date, absence.end_date))
             .collect();

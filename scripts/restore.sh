@@ -68,13 +68,11 @@ resolve_selection_index() {
 
     [[ "$choice" =~ ^[1-9][0-9]*$ ]] || return 1
     [[ "$option_count" =~ ^[1-9][0-9]*$ ]] || return 1
+    [ "${#choice}" -le "$max_safe_digits" ] || return 1
     [ "${#option_count}" -le "$max_safe_digits" ] || return 1
 
-    # Compare decimal strings before arithmetic so oversized input cannot wrap.
-    if [ "${#choice}" -gt "${#option_count}" ]; then
-        return 1
-    fi
-    if [ "${#choice}" -eq "${#option_count}" ] && [[ "$choice" > "$option_count" ]]; then
+    # Numeric comparison (not lexicographic) to avoid "19" > "20" via string compare.
+    if ((10#$choice > 10#$option_count)); then
         return 1
     fi
 
@@ -112,14 +110,14 @@ extract_keyring() {
     docker volume inspect "$BACKUP_VOLUME" >/dev/null 2>&1 \
         || die "Docker volume $BACKUP_VOLUME not found. Is the stack running?"
 
-    # List all backup archives (new zip format) and legacy .keyring.enc sidecars.
+    # List all backup archives (new zip format) and legacy .keyring.enc sidecars. Sort by name reverse (newest timestamp first) not mtime.
     local keyrings=()
     mapfile -t keyrings < <(
         docker run --rm \
             -v "$BACKUP_VOLUME:/backups:ro" \
             --entrypoint sh \
             "$HELPER_IMAGE" \
-            -c 'ls -1t /backups/zerf-*.zip /backups/zerf-*.keyring.enc 2>/dev/null' \
+            -c 'ls -1 /backups/zerf-*.zip /backups/zerf-*.keyring.enc 2>/dev/null | sort -r' \
         | sed 's|/backups/||'
     )
 
@@ -146,18 +144,22 @@ extract_keyring() {
 
     case "$selected" in
         *.zip)
-            # Download zip to host temp file, extract keyring.enc entry from it.
+            # Download zip to host temp file, extract keyring.enc entry from it. Use positional $1 to avoid shell injection via filename.
             local tmp_zip
             tmp_zip="$(mktemp -t zerf-keyring-XXXXXX.zip)"
             docker run --rm \
                 -v "$BACKUP_VOLUME:/backups:ro" \
-                -e "SRC=$selected" \
                 --entrypoint sh \
                 "$HELPER_IMAGE" \
-                -c 'cat "/backups/$SRC"' > "$tmp_zip" \
+                -c 'cat -- "/backups/$1"' -- "$selected" > "$tmp_zip" \
                 || { rm -f "$tmp_zip"; die "Could not read $selected from backup volume."; }
 
-            local out_name="${selected%.zip}.keyring.enc"
+            # Sanitize output name via basename to prevent path traversal.
+            local safe_base
+            safe_base="$(basename "$selected")"
+            local out_name="${safe_base%.zip}.keyring.enc"
+            # Ensure out_name is safe.
+            out_name="$(basename "$out_name")"
             unzip -p "$tmp_zip" keyring.enc > "$out_dir/$out_name" 2>/dev/null \
                 || { rm -f "$tmp_zip" "$out_dir/$out_name"; die "Archive $selected does not contain a keyring.enc entry."; }
             rm -f "$tmp_zip"
@@ -166,18 +168,19 @@ extract_keyring() {
             echo "Keyring extracted to: $out_dir/$out_name"
             ;;
         *.keyring.enc)
-            # Legacy sidecar: copy it out of the volume directly.
+            # Legacy sidecar: copy it out safely via basename.
+            local safe_kr
+            safe_kr="$(basename "$selected")"
             docker run --rm \
                 -v "$BACKUP_VOLUME:/backups:ro" \
                 -v "$out_dir:/out" \
-                -e "SRC=$selected" \
                 --entrypoint sh \
                 "$HELPER_IMAGE" \
-                -c 'cp "/backups/$SRC" "/out/$SRC" && chmod 0644 "/out/$SRC"' \
+                -c 'cp -- "/backups/$1" "/out/$1" && chmod 0644 "/out/$1"' -- "$safe_kr" \
                 || die "Could not copy $selected out of the backup volume."
-            chmod 600 "$out_dir/$selected" 2>/dev/null || true
+            chmod 600 "$out_dir/$safe_kr" 2>/dev/null || true
             echo ""
-            echo "Keyring extracted to: $out_dir/$selected"
+            echo "Keyring extracted to: $out_dir/$safe_kr"
             ;;
     esac
 
@@ -248,14 +251,13 @@ if [ -z "$BACKUP_FILE" ]; then
     docker volume inspect "$BACKUP_VOLUME" >/dev/null 2>&1 \
         || die "Docker volume $BACKUP_VOLUME not found. Is the stack running?"
 
-    # List both new zip archives and legacy .dump.enc files so backups created
-    # before this script version remain accessible.
+    # List both new zip archives and legacy .dump.enc files, sorted by name reverse (newest first).
     mapfile -t BACKUPS < <(
         docker run --rm \
             -v "$BACKUP_VOLUME:/backups:ro" \
             --entrypoint sh \
             "$HELPER_IMAGE" \
-            -c 'ls -1t /backups/zerf-*.zip /backups/zerf-*.dump.enc 2>/dev/null' \
+            -c 'ls -1 /backups/zerf-*.zip /backups/zerf-*.dump.enc 2>/dev/null | sort -r' \
         | sed 's|/backups/||'
     )
 
@@ -296,16 +298,12 @@ echo "Reading backup..."
 case "$SELECTED" in
     *.zip)
         if [ "$BACKUP_CAME_FROM_VOLUME" = "1" ]; then
-            # Stream the zip out of the Docker volume into a host temp file.
-            # unzip -p requires seekable input; a streaming docker pipe is not
-            # seekable, so we must land the zip on the local filesystem first.
             TMP_ZIP="$(mktemp -t zerf-restore-XXXXXX.zip)"
             docker run --rm \
                 -v "$BACKUP_VOLUME:/backups:ro" \
-                -e "SRC=$SELECTED" \
                 --entrypoint sh \
                 "$HELPER_IMAGE" \
-                -c 'cat "/backups/$SRC"' > "$TMP_ZIP" \
+                -c 'cat -- "/backups/$1"' -- "$SELECTED" > "$TMP_ZIP" \
                 || die "Could not read $SELECTED from backup volume."
             unzip -p "$TMP_ZIP" dump.enc \
                 | docker exec -i "$POSTGRES_CONTAINER" sh -c 'cat > /tmp/zerf-restore.enc' \
@@ -322,10 +320,9 @@ case "$SELECTED" in
         if [ "$BACKUP_CAME_FROM_VOLUME" = "1" ]; then
             docker run --rm \
                 -v "$BACKUP_VOLUME:/backups:ro" \
-                -e "SRC=$SELECTED" \
                 --entrypoint sh \
                 "$HELPER_IMAGE" \
-                -c 'cat "/backups/$SRC"' \
+                -c 'cat -- "/backups/$1"' -- "$SELECTED" \
             | docker exec -i "$POSTGRES_CONTAINER" sh -c 'cat > /tmp/zerf-restore.enc' \
                 || die "Could not copy $SELECTED into the restore container."
         else
@@ -356,15 +353,16 @@ case "$SELECTED" in
         # Metadata may be a sibling .metadata file next to the .dump.enc.
         if [ "$BACKUP_CAME_FROM_VOLUME" = "1" ]; then
             META_NAME="${SELECTED%.dump.enc}.metadata"
+            # Sanitize metadata name via basename.
+            META_NAME="$(basename "$META_NAME")"
             META_TMP_DIR="$(mktemp -d)"
             META_TMP="$META_TMP_DIR/metadata"
             docker run --rm \
                 -v "$BACKUP_VOLUME:/backups:ro" \
                 -v "$META_TMP_DIR:/out" \
-                -e "SRC=$META_NAME" \
                 --entrypoint sh \
                 "$HELPER_IMAGE" \
-                -c 'cp "/backups/$SRC" "/out/metadata" && chmod 0644 "/out/metadata"' \
+                -c 'cp -- "/backups/$1" "/out/metadata" && chmod 0644 "/out/metadata"' -- "$META_NAME" \
                 2>/dev/null || true
             if [ ! -s "$META_TMP" ]; then
                 rm -rf "$META_TMP_DIR"; META_TMP_DIR=""; META_TMP=""

@@ -203,15 +203,14 @@ impl AbsenceCategoryDb {
         Ok(new_id)
     }
 
-    /// Grant a newly created category to every existing user in the caller's
-    /// transaction. ON CONFLICT makes retries harmless.
+    /// Grant a newly created category to every active, non-archived, time-tracking user.
     pub async fn grant_default_access_to_all_users_tx(
         tx: &mut sqlx::PgConnection,
         category_id: i64,
     ) -> AppResult<()> {
         sqlx::query(
             "INSERT INTO user_absence_category_access (user_id, category_id)
-             SELECT id, $1 FROM users
+             SELECT id, $1 FROM users WHERE active=TRUE AND archived_at IS NULL AND tracks_time=TRUE
              ON CONFLICT (user_id, category_id) DO NOTHING",
         )
         .bind(category_id)
@@ -281,7 +280,7 @@ impl AbsenceCategoryDb {
 
     pub async fn is_enabled_for_user(&self, category_id: i64, user_id: i64) -> AppResult<bool> {
         let exists: Option<i32> = sqlx::query_scalar(
-            "SELECT 1 FROM user_absence_category_access WHERE category_id = $1 AND user_id = $2",
+            "SELECT 1 FROM user_absence_category_access uaca JOIN absence_categories c ON c.id = uaca.category_id WHERE uaca.category_id = $1 AND uaca.user_id = $2 AND c.active=TRUE",
         )
         .bind(category_id)
         .bind(user_id)
@@ -397,6 +396,16 @@ impl AbsenceCategoryDb {
             sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM absences WHERE category_id=$1")
                 .bind(id)
                 .fetch_one(&self.pool)
+                .await?,
+        )
+    }
+
+    /// Transaction-bound variant for TOCTOU-safe checks inside a lock.
+    pub async fn usage_count_tx(tx: &mut sqlx::PgConnection, id: i64) -> AppResult<i64> {
+        Ok(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM absences WHERE category_id=$1")
+                .bind(id)
+                .fetch_one(&mut *tx)
                 .await?,
         )
     }

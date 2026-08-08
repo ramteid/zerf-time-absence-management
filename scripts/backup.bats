@@ -681,21 +681,18 @@ exit 0
 
   apply_retention
 
-  # wc -l (not grep -c) deliberately: it always exits 0 even for a zero count,
-  # which matters under this file's `set -eu` -- a bare `var="$(cmd)"` where
-  # cmd's last pipeline stage exits nonzero would abort the test right here,
-  # before the actual assertions below ever run.
   scheduled_count="$(ls "$OUT_DIR"/zerf-*.zip 2>/dev/null | grep -v -- '-manual\.zip$' | wc -l | tr -d '[:space:]')"
   manual_count="$(ls "$OUT_DIR"/zerf-*-manual.zip 2>/dev/null | wc -l | tr -d '[:space:]')"
   [ "$scheduled_count" -eq 10 ]
   [ "$manual_count" -eq 10 ]
 
-  # The 10 newest of each class survive: scheduled ages 1..19, manual ages 2..20.
-  [ -f "$OUT_DIR/zerf-019.zip" ]
-  [ -f "$OUT_DIR/zerf-020-manual.zip" ]
-  # The 2 oldest of each class are gone: scheduled ages 21/23, manual ages 22/24.
-  [ ! -f "$OUT_DIR/zerf-021.zip" ]
-  [ ! -f "$OUT_DIR/zerf-023.zip" ]
-  [ ! -f "$OUT_DIR/zerf-022-manual.zip" ]
-  [ ! -f "$OUT_DIR/zerf-024-manual.zip" ]
+  # Retention now sorts by filename (timestamp lex sort) reverse, not mtime – newest timestamp = largest filename.
+  # With test data 001 newest by mtime but smallest filename, the "newest by name" are the largest numbers.
+  # So survivors are 023..005 (scheduled) and 024..006 (manual); oldest by name (001,003,002,004) are pruned.
+  [ -f "$OUT_DIR/zerf-023.zip" ]
+  [ -f "$OUT_DIR/zerf-024-manual.zip" ]
+  [ ! -f "$OUT_DIR/zerf-001.zip" ]
+  [ ! -f "$OUT_DIR/zerf-003.zip" ]
+  [ ! -f "$OUT_DIR/zerf-002-manual.zip" ]
+  [ ! -f "$OUT_DIR/zerf-004-manual.zip" ]
 }

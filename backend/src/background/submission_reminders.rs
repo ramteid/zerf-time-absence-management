@@ -262,10 +262,22 @@ pub async fn run_check(state: &crate::AppState) {
             &[("weeks", missing_labels.join("\n"))],
         );
 
-        // Idempotent per user per local day (configured timezone, not UTC).
-        // `deliver` owns the in-app row, the SSE broadcast, and the best-effort
-        // email, including its shared footer.
-        let dedupe_key = format!("submission_reminder:{}", today);
+        // Dedupe per user per day plus content hash, so updated missing-weeks list after partial submission still goes out.
+        // Use stable FNV-1a hash instead of DefaultHasher which is non-deterministic across restarts.
+        let weeks_hash = {
+            let mut hash: u64 = 14695981039346656037;
+            for week in &missing_weeks {
+                let s = week.format("%Y-%m-%d").to_string();
+                for b in s.as_bytes() {
+                    hash ^= *b as u64;
+                    hash = hash.wrapping_mul(1099511628211);
+                }
+                hash ^= 0xFF;
+                hash = hash.wrapping_mul(1099511628211);
+            }
+            hash
+        };
+        let dedupe_key = format!("submission_reminder:{}:{:x}", today, weeks_hash);
         crate::services::notifications::deliver(
             state,
             &crate::services::notifications::Outgoing::new(
@@ -283,6 +295,7 @@ pub async fn run_check(state: &crate::AppState) {
 }
 
 /// Background loop: sleep until the next deadline day at 07:00 then run check.
+/// Fixed to not miss deadline when restarting after 07:00 – we check due-first.
 pub async fn run_loop(pool: DatabasePool, state: crate::AppState) {
     loop {
         let day_str = load_setting(&pool, SUBMISSION_DEADLINE_DAY_KEY, "")
@@ -297,6 +310,32 @@ pub async fn run_loop(pool: DatabasePool, state: crate::AppState) {
             let tz = timezone
                 .parse::<chrono_tz::Tz>()
                 .unwrap_or(chrono_tz::Europe::Berlin);
+            let now_local = Utc::now().with_timezone(&tz);
+            // Due check first – catches restart after 07:00 on deadline day.
+            if deadline_is_due_now(now_local, d) {
+                let current_day_str = load_setting(&pool, SUBMISSION_DEADLINE_DAY_KEY, "")
+                    .await
+                    .unwrap_or_default();
+                if let Some(current_day) = current_day_str
+                    .parse()
+                    .ok()
+                    .filter(|&day: &u8| (1..=28).contains(&day))
+                {
+                    let current_timezone =
+                        load_setting(&pool, TIMEZONE_KEY, DEFAULT_TIMEZONE)
+                            .await
+                            .unwrap_or_else(|_| DEFAULT_TIMEZONE.to_string());
+                    let current_tz = current_timezone
+                        .parse::<chrono_tz::Tz>()
+                        .unwrap_or(chrono_tz::Europe::Berlin);
+                    let now_check = Utc::now().with_timezone(&current_tz);
+                    if deadline_is_due_now(now_check, current_day) {
+                        tracing::info!(target:"zerf::submission_reminders", "Running submission reminder check");
+                        run_check(&state).await;
+                    }
+                }
+            }
+
             let wait = duration_until_next_deadline(Utc::now().with_timezone(&tz), d);
             let sleep_for = scheduler_sleep_duration(wait);
             tracing::info!(
@@ -305,30 +344,6 @@ pub async fn run_loop(pool: DatabasePool, state: crate::AppState) {
                 wait
             );
             tokio::time::sleep(sleep_for).await;
-            if wait > SETTINGS_POLL_INTERVAL {
-                continue;
-            }
-            let current_day_str = load_setting(&pool, SUBMISSION_DEADLINE_DAY_KEY, "")
-                .await
-                .unwrap_or_default();
-            let current_day: Option<u8> = current_day_str
-                .parse()
-                .ok()
-                .filter(|&day: &u8| (1..=28).contains(&day));
-            let Some(current_day) = current_day else {
-                continue;
-            };
-            let current_timezone = load_setting(&pool, TIMEZONE_KEY, DEFAULT_TIMEZONE)
-                .await
-                .unwrap_or_else(|_| DEFAULT_TIMEZONE.to_string());
-            let current_tz = current_timezone
-                .parse::<chrono_tz::Tz>()
-                .unwrap_or(chrono_tz::Europe::Berlin);
-            if !deadline_is_due_now(Utc::now().with_timezone(&current_tz), current_day) {
-                continue;
-            }
-            tracing::info!(target:"zerf::submission_reminders", "Running submission reminder check");
-            run_check(&state).await;
         } else {
             // No deadline configured – poll every hour
             tokio::time::sleep(Duration::from_secs(3600)).await;

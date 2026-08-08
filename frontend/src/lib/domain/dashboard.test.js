@@ -122,8 +122,11 @@ describe("dashboard domain helpers", () => {
     ).not.toContain("focus=");
   });
 
-  it("returns empty string for unrecognised notification kinds", () => {
-    expect(notificationTarget({ id: 8, kind: "unknown" }, 0)).toBe("");
+  it("returns dashboard fallback for unrecognised notification kinds", () => {
+    // Previously returned empty string, now returns /dashboard so click always navigates somewhere
+    expect(notificationTarget({ id: 8, kind: "unknown" }, 0)).toBe(
+      "/dashboard",
+    );
   });
 
   it("monthFullySubmitted returns true only when weeks_all_submitted is true", () => {

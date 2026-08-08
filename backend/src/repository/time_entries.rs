@@ -19,12 +19,16 @@ async fn app_now(conn: &mut sqlx::PgConnection) -> AppResult<chrono::DateTime<ch
     if let Some(d) = crate::services::settings::pinned_test_date() {
         // Pin to end-of-day on the reference date so entries for that date
         // are never rejected for having an end_time in the "future".
+        // Use earliest()/latest() to handle DST gaps/ambiguous times
+        // deterministically instead of falling back to Utc::now().
         use chrono::TimeZone;
-        let dt = tz
-            .from_local_datetime(&d.and_hms_opt(23, 59, 59).unwrap())
-            .single()
+        let naive = d.and_hms_opt(23, 59, 59).unwrap();
+        let resolved = tz
+            .from_local_datetime(&naive)
+            .earliest()
+            .or_else(|| tz.from_local_datetime(&naive).latest())
             .unwrap_or_else(|| Utc::now().with_timezone(&tz));
-        return Ok(dt);
+        return Ok(resolved);
     }
     Ok(Utc::now().with_timezone(&tz))
 }
@@ -109,7 +113,7 @@ pub(crate) async fn validate_entry(
     exclude_id: Option<i64>,
 ) -> AppResult<()> {
     if let Some(c) = &te.comment {
-        if c.len() > 2000 {
+        if c.chars().count() > 2000 {
             return Err(AppError::bad_request("Comment too long (max 2000)."));
         }
     }
@@ -151,8 +155,14 @@ pub(crate) async fn validate_entry(
     let _ = duration_min(&te.start_time, &te.end_time)?;
     let start_n = parse_time(&te.start_time)?;
     let end_n = parse_time(&te.end_time)?;
-    if te.entry_date == today && end_n > app_now.time() {
-        return Err(AppError::bad_request("End time cannot be in the future."));
+    if te.entry_date == today {
+        let now_time = app_now.time();
+        if start_n > now_time {
+            return Err(AppError::bad_request("Start time cannot be in the future."));
+        }
+        if end_n > now_time {
+            return Err(AppError::bad_request("End time cannot be in the future."));
+        }
     }
 
     // Overlap check: an entry may not share wall-clock minutes with any other
@@ -220,6 +230,7 @@ struct ReopenValidationEntry {
     start_time: String,
     end_time: String,
     status: String,
+    rejection_resolved_at: Option<DateTime<Utc>>,
 }
 
 pub(crate) async fn validate_entries_after_reopen(
@@ -233,7 +244,7 @@ pub(crate) async fn validate_entries_after_reopen(
 
     let affected_id_set: HashSet<i64> = affected_entry_ids.iter().copied().collect();
     let affected_entries: Vec<ReopenValidationEntry> = sqlx::query_as(
-        "SELECT te.id, te.entry_date, te.start_time, te.end_time, te.status \
+        "SELECT te.id, te.entry_date, te.start_time, te.end_time, te.status, te.rejection_resolved_at \
          FROM time_entries te \
          WHERE te.user_id=$1 AND te.id = ANY($2) \
          FOR UPDATE OF te",
@@ -272,7 +283,7 @@ pub(crate) async fn validate_entries_after_reopen(
     }
 
     let date_entries: Vec<ReopenValidationEntry> = sqlx::query_as(
-        "SELECT te.id, te.entry_date, te.start_time, te.end_time, te.status \
+        "SELECT te.id, te.entry_date, te.start_time, te.end_time, te.status, te.rejection_resolved_at \
          FROM time_entries te \
          WHERE te.user_id=$1 AND te.entry_date = ANY($2) \
          ORDER BY te.entry_date, te.start_time, te.id",
@@ -284,8 +295,16 @@ pub(crate) async fn validate_entries_after_reopen(
 
     let mut entries_by_date: BTreeMap<NaiveDate, Vec<(NaiveTime, NaiveTime)>> = BTreeMap::new();
     for entry in date_entries {
-        if entry.status == "rejected" && !affected_id_set.contains(&entry.id) {
-            continue;
+        if entry.status == "rejected" {
+            // Resolved rejected are pure history and never block.
+            if entry.rejection_resolved_at.is_some() {
+                continue;
+            }
+            // Unresolved rejected that are not being reopened remain rejected and are allowed to overlap drafts
+            // (validate_entry skips rejected). They must not poison a reopen of other weeks.
+            if !affected_id_set.contains(&entry.id) {
+                continue;
+            }
         }
         entries_by_date
             .entry(entry.entry_date)
@@ -443,8 +462,9 @@ impl TimeEntryDb {
         // surface in any team or approval view (the handler already rejects
         // explicit user_id filters targeting inactive users; this keeps the
         // unfiltered listing consistent with that rule).
+        // Also hide entries before the owner's start_date (same as list_for_user) so re-enabled tracking doesn't leak history.
         let mut builder = QueryBuilder::<Postgres>::new(format!(
-            "{TE_SELECT} WHERE user_id IN (SELECT id FROM users WHERE tracks_time=TRUE AND active=TRUE)"
+            "{TE_SELECT} WHERE user_id IN (SELECT id FROM users WHERE tracks_time=TRUE AND active=TRUE) AND entry_date >= (SELECT start_date FROM users WHERE id = time_entries.user_id)"
         ));
         if !is_admin {
             // Non-admin leads: team members only (active, non-admin direct reports).
@@ -621,10 +641,13 @@ impl TimeEntryDb {
         week_start: NaiveDate,
         week_end: NaiveDate,
     ) -> AppResult<i64> {
+        // Exclude resolved rejected entries – they are pure history and must not
+        // make a week count as non-draft.
         Ok(sqlx::query_scalar(
             "SELECT COUNT(*) FROM time_entries te \
                          WHERE te.user_id=$1 AND te.entry_date BETWEEN $2 AND $3 \
-                         AND te.status IN ('submitted','approved','rejected')",
+                         AND (te.status IN ('submitted','approved') \
+                              OR (te.status='rejected' AND te.rejection_resolved_at IS NULL))",
         )
         .bind(user_id)
         .bind(week_start)
@@ -975,6 +998,28 @@ impl TimeEntryDb {
         let mut ordered_ids = ids.to_vec();
         ordered_ids.sort_unstable();
         ordered_ids.dedup();
+
+        // Mirroring batch_approve: collect distinct owners and lock in ascending order to prevent deadlocks.
+        let owner_ids: Vec<i64> = if ordered_ids.is_empty() {
+            Vec::new()
+        } else {
+            let mut ids_sorted: Vec<i64> = sqlx::query_scalar(
+                "SELECT DISTINCT user_id FROM time_entries WHERE id = ANY($1) ORDER BY user_id",
+            )
+            .bind(&ordered_ids)
+            .fetch_all(&mut *tx)
+            .await?;
+            ids_sorted.sort_unstable();
+            ids_sorted.dedup();
+            ids_sorted
+        };
+        for owner_id in owner_ids {
+            sqlx::query("SELECT pg_advisory_xact_lock($1)")
+                .bind(owner_id)
+                .execute(&mut *tx)
+                .await?;
+        }
+
         for id in ordered_ids {
             let Some(entry) =
                 QueryBuilder::<Postgres>::new(format!("{TE_SELECT} WHERE id=$1 FOR UPDATE"))

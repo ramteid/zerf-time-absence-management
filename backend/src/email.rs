@@ -304,14 +304,37 @@ async fn send_now(
     attachment: Option<EmailAttachment>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let from: Mailbox = cfg.from.parse()?;
-    // Build a properly quoted RFC 5322 display-name when a name is provided.
+    // Build mailbox with display name safely: lettre handles quoting, but we
+    // still strip CR/LF and control chars to prevent header injection and
+    // remove characters that would make Mailbox::parse fail (e.g. ()<>).
     let to_box: Mailbox = if to_name.trim().is_empty() {
         to.parse()?
     } else {
-        let quoted_name = to_name.trim().replace('\\', "\\\\").replace('"', "\\\"");
-        format!("\"{}\" <{}>", quoted_name, to).parse()?
+        let sanitized: String = to_name
+            .trim()
+            .replace(['\r', '\n'], "")
+            .chars()
+            .filter(|c| !c.is_control())
+            .collect::<String>()
+            .chars()
+            .map(|c| match c {
+                '<' | '>' | '(' | ')' | '[' | ']' | ':' | ';' | '@' | ',' | '.' | '"' => '_',
+                _ => c,
+            })
+            .collect();
+        let sanitized = sanitized.trim().to_string();
+        if sanitized.is_empty() {
+            to.parse()?
+        } else {
+            // Use lettre's structured constructor instead of manual quoting.
+            let address = to
+                .parse::<lettre::Address>()
+                .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?;
+            Mailbox::new(Some(sanitized), address)
+        }
     };
-    let builder = Message::builder().from(from).to(to_box).subject(subject);
+    let clean_subject = subject.replace(['\r', '\n'], "");
+    let builder = Message::builder().from(from).to(to_box).subject(clean_subject);
     let email = finish_message(builder, body_text, attachment)?;
     build_mailer(cfg, None)?.send(email).await?;
     Ok(())
@@ -328,7 +351,8 @@ async fn send_now_multi(
     attachment: Option<EmailAttachment>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let from: Mailbox = cfg.from.parse()?;
-    let mut builder = Message::builder().from(from).subject(subject);
+    let clean_subject = subject.replace(['\r', '\n'], "");
+    let mut builder = Message::builder().from(from).subject(clean_subject);
     for address in to {
         builder = builder.to(address.parse()?);
     }

@@ -35,7 +35,10 @@ export function appTodayDate(timezoneOverride) {
     new Date(),
     timezoneOverride,
   );
-  return new Date(year, month - 1, day);
+  // Create a Date at noon in browser TZ to avoid DST midnight shifts,
+  // but with same Y-M-D as configured TZ – comparison uses iso string anyway.
+  const d = new Date(year, month - 1, day, 12, 0, 0, 0);
+  return d;
 }
 
 export function appTodayIsoDate(timezoneOverride) {
@@ -54,14 +57,6 @@ export function appCurrentTimeHM(timezoneOverride) {
   return `${hour}:${minute}`;
 }
 
-function shouldApplyConfiguredTimeZone(value) {
-  return (
-    typeof value === "string" &&
-    !ISO_DATE_RE.test(value) &&
-    UTC_ISO_DATETIME_RE.test(value)
-  );
-}
-
 export function parseDate(value) {
   if (value instanceof Date) {
     return new Date(value);
@@ -69,7 +64,21 @@ export function parseDate(value) {
 
   if (typeof value === "string" && ISO_DATE_RE.test(value)) {
     const [year, month, day] = value.split("-").map(Number);
-    return new Date(year, month - 1, day);
+    // Noon avoids DST midnight gaps
+    return new Date(year, month - 1, day, 12, 0, 0, 0);
+  }
+
+  // For UTC ISO datetime, parse then convert to configured-TZ date parts
+  // to avoid browser-TZ offset shifting the day.
+  if (typeof value === "string" && UTC_ISO_DATETIME_RE.test(value)) {
+    const utcDate = new Date(value);
+    if (!Number.isNaN(utcDate.getTime())) {
+      const { year, month, day } = datePartsInConfiguredTimeZone(
+        utcDate,
+        undefined,
+      );
+      return new Date(year, month - 1, day, 12, 0, 0, 0);
+    }
   }
 
   return new Date(value);
@@ -82,19 +91,16 @@ export function fmtDate(d) {
     month: "2-digit",
     year: "numeric",
   };
-  if (shouldApplyConfiguredTimeZone(d)) {
-    options.timeZone = getConfiguredTimeZone();
-  }
+  // Always apply configured TZ – fmtDate may receive Date objects derived from UTC strings.
+  options.timeZone = getConfiguredTimeZone();
   return parseDate(d).toLocaleDateString(getLocale(), options);
 }
 export function fmtDateShort(d) {
   const options = {
     day: "2-digit",
     month: "2-digit",
+    timeZone: getConfiguredTimeZone(),
   };
-  if (shouldApplyConfiguredTimeZone(d)) {
-    options.timeZone = getConfiguredTimeZone();
-  }
   return parseDate(d).toLocaleDateString(getLocale(), options);
 }
 export function fmtDateWeekday(d) {
@@ -102,10 +108,8 @@ export function fmtDateWeekday(d) {
     weekday: "short",
     day: "2-digit",
     month: "2-digit",
+    timeZone: getConfiguredTimeZone(),
   };
-  if (shouldApplyConfiguredTimeZone(d)) {
-    options.timeZone = getConfiguredTimeZone();
-  }
   return parseDate(d).toLocaleDateString(getLocale(), options);
 }
 export function fmtMonthYear(d) {
@@ -210,8 +214,9 @@ export function addDays(d, n) {
   return parsedDate;
 }
 export function minToHM(min) {
+  if (!Number.isFinite(min)) return "0:00";
   const sign = min < 0 ? "-" : "";
-  const absoluteMinutes = Math.abs(min);
+  const absoluteMinutes = Math.abs(Math.trunc(min));
   return (
     sign +
     Math.floor(absoluteMinutes / 60) +
@@ -220,9 +225,16 @@ export function minToHM(min) {
   );
 }
 export function durMin(start, end) {
-  const [bh, bm] = start.split(":").map(Number);
-  const [eh, em] = end.split(":").map(Number);
-  return eh * 60 + em - (bh * 60 + bm);
+  const parse = (s) => {
+    if (!s) return NaN;
+    const parts = String(s).trim().split(":").map(Number);
+    if (parts.length < 2 || parts.some((n) => !Number.isFinite(n))) return NaN;
+    return parts[0] * 60 + (parts[1] || 0);
+  };
+  const bh = parse(start);
+  const eh = parse(end);
+  if (!Number.isFinite(bh) || !Number.isFinite(eh)) return NaN;
+  return eh - bh;
 }
 export function isoWeek(d) {
   const utcDate = new Date(
