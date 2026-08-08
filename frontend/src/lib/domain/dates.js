@@ -5,7 +5,12 @@ export function monthKey(dateValue) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 }
 
+// Returns "" for anything that isn't a real "YYYY-MM", mirroring monthEnd().
+// Without this an empty month produced the string "-01", which JavaScript's
+// Date parser silently accepts as the 1st of January 2001 — turning "no month
+// selected yet" into a date 25 years in the past.
 export function monthStart(month) {
+  if (typeof month !== "string" || !/^\d{4}-\d{2}$/.test(month)) return "";
   return `${month}-01`;
 }
 
@@ -24,15 +29,24 @@ export function isoMonthStart(dateValue) {
   return `${monthKey(dateValue)}-01`;
 }
 
+// Callers fan out one API request per returned year, so a bogus bound must
+// never widen this list: an unparseable date used to fall back to String(),
+// yielding year 0 and a two-thousand-entry span. Three is the widest a
+// legitimate range reaches — the 366-day cap can straddle three calendar
+// years (e.g. 2025-12-31 → 2027-01-01).
+const MAX_YEAR_SPAN = 3;
+
 export function yearsBetweenDates(from, to) {
   // Accept YYYY-MM-DD strings or Date objects – extract year robustly via dateKey/parseDate
-  const fromKey = dateKey(from) || String(from);
-  const toKey = dateKey(to) || String(to);
+  const fromKey = dateKey(from);
+  const toKey = dateKey(to);
+  if (!fromKey || !toKey) return [];
   const startYear = Number(String(fromKey).slice(0, 4));
   const endYear = Number(String(toKey).slice(0, 4));
   if (!Number.isFinite(startYear) || !Number.isFinite(endYear)) return [];
   const minYear = Math.min(startYear, endYear);
   const maxYear = Math.max(startYear, endYear);
+  if (maxYear - minYear + 1 > MAX_YEAR_SPAN) return [];
   return Array.from(
     { length: maxYear - minYear + 1 },
     (_, index) => minYear + index,
@@ -55,9 +69,12 @@ export function daysBetweenIsoDates(from, to) {
   return Math.round((endUtc - startUtc) / 86400000);
 }
 
+// Unparseable bounds count as "too long": callers use this to decide whether
+// it is safe to fan out per-year requests, and a range they cannot even
+// measure is never safe to expand.
 export function isReportRangeTooLong(from, to, maxDays = 366) {
   const days = daysBetweenIsoDates(from, to);
-  return days != null && days > maxDays;
+  return days == null || days > maxDays;
 }
 
 export function yearsInWeek(weekStart) {

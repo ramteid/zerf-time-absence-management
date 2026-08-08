@@ -238,9 +238,14 @@
 
   // --- Auto-load with a race guard: only the most recent (userId, period)
   // combination's response is ever committed to `reportData`. ---
+  // An empty key means "not ready" and suppresses the fetch entirely. The
+  // period arrives one reactive pass after the component mounts, so without
+  // these guards the first pass would fire a load for a blank month/range and
+  // query nonsense bounds.
   function loadKey(id, mode, m, f, t2) {
     if (id == null) return "";
-    return mode === "month" ? `${id}:month:${m}` : `${id}:range:${f}:${t2}`;
+    if (mode === "month") return m ? `${id}:month:${m}` : "";
+    return f && t2 ? `${id}:range:${f}:${t2}` : "";
   }
 
   let lastLoadKey = "";

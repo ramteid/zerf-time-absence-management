@@ -86,11 +86,15 @@
   $: isSelfOnlyReportsView = !canViewTeamReports && currentUserTracksTime;
 
   // --- Shared filter state ---
+  function isoMonthOf(date) {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+  }
+
   let today = appTodayDate();
   let todayIso = isoDate(today);
   $: today = appTodayDate($settings?.timezone);
   $: todayIso = isoDate(today);
-  $: currentMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+  $: currentMonthStr = isoMonthOf(today);
   // Custom-range upper bound: keeps the calendar from reaching a date so far
   // out that the absence/holiday lookups below (one API call per calendar
   // year in the selected range) would balloon into a request flood.
@@ -98,7 +102,10 @@
 
   let activeTab = "employee"; // "employee" | "team"
   let periodMode = "month";
-  let month = currentMonthStr;
+  // Derived from `today` directly rather than from the reactive
+  // `currentMonthStr`, which is still undefined while these initialisers run —
+  // seeding `month` from it left the first render with a blank period.
+  let month = isoMonthOf(today);
   let from = "";
   let to = "";
   let selectedUserId = tracksOwnTime($currentUser) ? $currentUser.id : null;
