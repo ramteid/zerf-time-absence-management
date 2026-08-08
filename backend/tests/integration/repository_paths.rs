@@ -141,11 +141,33 @@ async fn sessions_repository_workflow() {
         .upsert_reset_token(&reset_hash, user_id, Utc::now() + Duration::hours(1))
         .await
         .expect("insert valid reset token");
+    // A second, still-unused reset link for the same user (e.g. they clicked
+    // "forgot password" twice). Migration 041 lets both coexist so the first
+    // request doesn't get invalidated by the second — but consuming either
+    // one must still retire *all* of that user's outstanding links, or the
+    // other one could reset the password again later.
+    let sibling_hash = zerf::middleware::auth::hash_token("repo-sibling-token");
+    sessions
+        .upsert_reset_token(&sibling_hash, user_id, Utc::now() + Duration::hours(1))
+        .await
+        .expect("insert sibling reset token");
 
     sessions
         .consume_reset_token_and_update_password_checked(&reset_hash, &new_hash, Some(&|_| false))
         .await
         .expect("consume valid token and update password");
+
+    let sibling_still_valid: Option<i64> =
+        sqlx::query_scalar("SELECT user_id FROM password_reset_tokens WHERE token_hash=$1")
+            .bind(&sibling_hash)
+            .fetch_optional(&app.state.pool)
+            .await
+            .expect("query sibling reset token");
+    assert!(
+        sibling_still_valid.is_none(),
+        "consuming one reset token must invalidate every other outstanding \
+         token for the same user, not just the one that was used"
+    );
 
     let must_change: bool =
         sqlx::query_scalar("SELECT must_change_password FROM users WHERE id=$1")

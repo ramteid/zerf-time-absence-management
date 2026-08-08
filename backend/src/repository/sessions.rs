@@ -368,6 +368,16 @@ impl SessionDb {
             .execute(&mut *tx)
             .await?;
 
+        // Multiple reset tokens can exist for one user (migration 041, to
+        // stop a second "forgot password" request from invalidating the
+        // first link). Once any one of them is used, all the rest must die
+        // with it — otherwise an old, still-valid link can reset the
+        // password again later, silently undoing this change.
+        sqlx::query("DELETE FROM password_reset_tokens WHERE user_id=$1")
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await?;
+
         tx.commit().await?;
         Ok(())
     }

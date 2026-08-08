@@ -295,6 +295,20 @@ fn build_mailer(
     Ok(builder.timeout(timeout).build())
 }
 
+/// Strip characters from an email display name that could inject extra
+/// header lines (CR/LF and other control characters). Nothing else is
+/// touched: ordinary punctuation like '.', ',', '"' or ':' is valid in a
+/// person's name and `Mailbox::new` (see `send_now` below) quotes/escapes it
+/// for the header as needed, so it must survive here unchanged.
+fn sanitize_display_name(name: &str) -> String {
+    name.trim()
+        .chars()
+        .filter(|c| !c.is_control())
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
 async fn send_now(
     cfg: &SmtpConfig,
     to: &str,
@@ -304,29 +318,17 @@ async fn send_now(
     attachment: Option<EmailAttachment>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let from: Mailbox = cfg.from.parse()?;
-    // Build mailbox with display name safely: lettre handles quoting, but we
-    // still strip CR/LF and control chars to prevent header injection and
-    // remove characters that would make Mailbox::parse fail (e.g. ()<>).
+    // Build the mailbox via lettre's structured constructor rather than
+    // hand-quoting a "Name" <addr> string: Mailbox::new takes the display
+    // name as a plain String next to an already-parsed Address, so it never
+    // re-parses the name and can't choke on punctuation in it.
     let to_box: Mailbox = if to_name.trim().is_empty() {
         to.parse()?
     } else {
-        let sanitized: String = to_name
-            .trim()
-            .replace(['\r', '\n'], "")
-            .chars()
-            .filter(|c| !c.is_control())
-            .collect::<String>()
-            .chars()
-            .map(|c| match c {
-                '<' | '>' | '(' | ')' | '[' | ']' | ':' | ';' | '@' | ',' | '.' | '"' => '_',
-                _ => c,
-            })
-            .collect();
-        let sanitized = sanitized.trim().to_string();
+        let sanitized = sanitize_display_name(to_name);
         if sanitized.is_empty() {
             to.parse()?
         } else {
-            // Use lettre's structured constructor instead of manual quoting.
             let address = to
                 .parse::<lettre::Address>()
                 .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?;
@@ -395,6 +397,29 @@ fn finish_message(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Ordinary punctuation in a person's name must survive unchanged —
+    /// `Mailbox::new` quotes/escapes it for the header, so mangling it here
+    /// would be both unnecessary and visibly wrong to the recipient.
+    #[test]
+    fn sanitize_display_name_keeps_ordinary_punctuation() {
+        assert_eq!(sanitize_display_name("Dr. Meier"), "Dr. Meier");
+        assert_eq!(sanitize_display_name("Smith, John"), "Smith, John");
+        assert_eq!(sanitize_display_name(r#"O"Brien"#), r#"O"Brien"#);
+    }
+
+    /// CR/LF and other control characters could inject extra header lines
+    /// into the raw SMTP message and must be stripped.
+    #[test]
+    fn sanitize_display_name_strips_control_characters() {
+        assert_eq!(sanitize_display_name("Jane\r\nBcc: evil@example.com"), "JaneBcc: evil@example.com");
+        assert_eq!(sanitize_display_name("Jane\tDoe"), "JaneDoe");
+    }
+
+    #[test]
+    fn sanitize_display_name_trims_surrounding_whitespace() {
+        assert_eq!(sanitize_display_name("  Jane Doe  "), "Jane Doe");
+    }
 
     /// Guards the assumption `send_now_multi` relies on: repeated `.to()`
     /// calls append to the same `To` header instead of overwriting it, so

@@ -57,8 +57,14 @@ export function entryCountsAsWork(entry, categoryRows) {
     const byName = (categoryRows || []).find((c) => c.name === entry.category);
     if (byName) return byName.counts_as_work !== false;
   }
-  // Missing category (store not loaded or deleted) must not inflate hours.
-  return false;
+  // Category not found in the caller's rows — e.g. the categories store only
+  // ever holds the current user's *active, assigned* categories, so an entry
+  // booked before a reassignment or deactivation won't resolve here even
+  // though the backend still counts it as work. Default to true, matching
+  // categoryCountsAsWork()'s default above: understating someone's logged
+  // hours (silently dropping real worked time from the total) is a worse
+  // failure than occasionally crediting a non-work category shown as "?".
+  return true;
 }
 
 export function creditedEntryMinutes(entry, categoryRows) {
@@ -91,10 +97,12 @@ function parseHHMM(s) {
   if (!Number.isFinite(h) || !Number.isFinite(m)) return NaN;
   if (h < 0 || h > 23 || m < 0 || m > 59) return NaN;
   if (parts[2] !== undefined) {
+    // Entries are minute-granular (the UI only ever offers HH:MM); a
+    // trailing ":SS" only shows up because the backend's TIME column
+    // serializes with seconds. Validate it's a real time, then discard it —
+    // there's no fraction-of-a-minute to add, seconds don't round up here.
     const sec = Number(parts[2]);
     if (!Number.isFinite(sec) || sec < 0 || sec > 59) return NaN;
-    // Include seconds as fraction? Use floor of minutes for compatibility.
-    return h * 60 + m + Math.floor(sec / 60);
   }
   return h * 60 + m;
 }
