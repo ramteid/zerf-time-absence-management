@@ -274,16 +274,25 @@ pub async fn update_admin_settings(
                 "auto_break_deduction_minutes",
                 body.auto_break_deduction_minutes.map(|v| v.to_string())
             );
-            save_if_some!(
-                transaction,
+            // Tier2: explicit null clears, so save empty when None (allows UI to remove tier2).
+            save_setting_tx(
+                &mut transaction,
                 AUTO_BREAK_THRESHOLD_HOURS_2_KEY,
-                body.auto_break_threshold_hours_2.map(|v| v.to_string())
-            );
-            save_if_some!(
-                transaction,
+                &body
+                    .auto_break_threshold_hours_2
+                    .map(|v| v.to_string())
+                    .unwrap_or_default(),
+            )
+            .await?;
+            save_setting_tx(
+                &mut transaction,
                 AUTO_BREAK_DEDUCTION_MINUTES_2_KEY,
-                body.auto_break_deduction_minutes_2.map(|v| v.to_string())
-            );
+                &body
+                    .auto_break_deduction_minutes_2
+                    .map(|v| v.to_string())
+                    .unwrap_or_default(),
+            )
+            .await?;
         } else {
             save_setting_tx(&mut transaction, "auto_break_threshold_hours", "").await?;
             save_setting_tx(&mut transaction, "auto_break_deduction_minutes", "").await?;

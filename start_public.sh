@@ -17,11 +17,9 @@ else
 fi
 
 if [ "$ZERF_VERSION" = "dev" ]; then
-  build_flag="--build"
+  docker compose -f docker/docker-compose-local.yml -f docker/docker-compose-public.yml --env-file .env up -d --build
 else
   # --pull always: refresh the registry image even when a local copy is cached.
   # --no-build: do not fall back to building from local Dockerfiles.
-  build_flag="--no-build --pull always"
+  docker compose -f docker/docker-compose-local.yml -f docker/docker-compose-public.yml --env-file .env up -d --no-build --pull always
 fi
-
-docker compose -f docker/docker-compose-local.yml -f docker/docker-compose-public.yml --env-file .env up -d "$build_flag"

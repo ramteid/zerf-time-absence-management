@@ -22,14 +22,6 @@ else
   export ZERF_VERSION="${ZERF_VERSION:-latest}"
 fi
 
-if [ "$ZERF_VERSION" = "dev" ]; then
-  build_flag="--build"
-else
-  # --pull always: refresh the registry image even when a local copy is cached.
-  # --no-build: do not fall back to building from local Dockerfiles.
-  build_flag="--no-build --pull always"
-fi
-
 # DEBUG=true → debug build profile, unminified frontend, RUST_BACKTRACE=1.
 debug="$(grep -E '^DEBUG=' .env 2>/dev/null | cut -d= -f2 || true)"
 if [ "${debug:-false}" = "true" ]; then
@@ -38,6 +30,10 @@ if [ "${debug:-false}" = "true" ]; then
   export RUST_BACKTRACE=1
 fi
 
-docker compose -f docker/docker-compose-local.yml --env-file .env up -d "$build_flag"
+if [ "$ZERF_VERSION" = "dev" ]; then
+  docker compose -f docker/docker-compose-local.yml --env-file .env up -d --build
+else
+  docker compose -f docker/docker-compose-local.yml --env-file .env up -d --no-build --pull always
+fi
 
 echo "App is running at http://localhost:3333 (also reachable from the LAN on port 3333)"
