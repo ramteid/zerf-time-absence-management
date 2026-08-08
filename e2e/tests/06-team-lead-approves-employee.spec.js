@@ -8,7 +8,10 @@
 // 11's admin-driven user-management operations.
 
 import { test, expect } from "@playwright/test";
-import { storageStatePath } from "./helpers.js";
+import {
+  storageStatePath,
+  expectToastAndWaitForItToClear,
+} from "./helpers.js";
 import { EMPLOYEE } from "./users.js";
 
 // Resumes Tom's session saved in 04-team-lead-onboarding.spec.js.
@@ -52,13 +55,18 @@ test("team lead: approve leave-account absences and reject another", async ({ pa
   // (X, second) — see ApprovalQueues.svelte. Approve the vacation request...
   const vacationRow = page.locator(".absence-row", { hasText: "E2E vacation" });
   await vacationRow.locator("button").first().click();
-  await expect(page.getByText("Approved.")).toBeVisible();
+  // UI-state confirmation: the approved request leaves the pending queue.
+  await expect(vacationRow).toHaveCount(0);
+  // The education approval below raises the very same "Approved." toast, so
+  // this one has to be gone before it fires.
+  await expectToastAndWaitForItToClear(page, "Approved.");
 
   const educationRow = page.locator(".absence-row", {
     hasText: "E2E educational leave",
   });
   await educationRow.locator("button").first().click();
-  await expect(page.getByText("Approved.")).toBeVisible();
+  await expect(educationRow).toHaveCount(0);
+  await expectToastAndWaitForItToClear(page, "Approved.");
 
   // ...and reject the other one, to exercise both outcomes of a review (not
   // just "approve everything", which 06's first test and 08 already cover

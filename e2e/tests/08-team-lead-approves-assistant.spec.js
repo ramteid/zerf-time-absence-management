@@ -6,7 +6,10 @@
 // implicit relationship actually grants Tom approval rights over Amy.
 
 import { test, expect } from "@playwright/test";
-import { storageStatePath } from "./helpers.js";
+import {
+  storageStatePath,
+  expectToastAndWaitForItToClear,
+} from "./helpers.js";
 import { ASSISTANT } from "./users.js";
 
 test.use({ storageState: storageStatePath("team_lead") });
@@ -21,13 +24,11 @@ test("team lead: approve the assistant's week and absence", async ({ page }) => 
     .filter({ hasText: `${ASSISTANT.firstName} ${ASSISTANT.lastName}` });
   await expect(weekRow).toHaveCount(1);
   await weekRow.locator("button").first().click();
-  await expect(page.getByText("Approved.")).toBeVisible();
   // UI-state confirmation: the approved week leaves the pending queue.
   await expect(weekRow).toHaveCount(0);
-  // Wait for the week-approval toast to clear before the absence approval
-  // triggers its own "Approved." toast — otherwise both are on-screen
-  // simultaneously and the strict-mode locator below throws a multi-match error.
-  await expect(page.getByText("Approved.")).not.toBeVisible();
+  // The absence approval below raises the same "Approved." toast, so this one
+  // has to be gone before it fires.
+  await expectToastAndWaitForItToClear(page, "Approved.");
 
   const absenceRow = page.locator(".absence-row", {
     hasText: "E2E assistant absence",

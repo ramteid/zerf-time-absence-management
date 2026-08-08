@@ -154,6 +154,21 @@ export async function freeHolidayDate(request, minOffsetDays) {
   );
 }
 
+// Asserts that a toast with `text` appeared, then waits for it to disappear
+// again.
+//
+// Toasts linger ~3.5s (lib/app/toast.js). Two actions that raise the *same*
+// message back-to-back therefore put two identical toasts on screen at once,
+// and any `getByText(...)` assertion against it fails Playwright's strict mode
+// with a multi-match error. Draining the toast between such actions keeps the
+// assertion unambiguous — use this instead of asserting the toast inline
+// whenever another action raising the same message follows.
+export async function expectToastAndWaitForItToClear(page, text) {
+  const toast = page.getByText(text);
+  await expect(toast).toBeVisible();
+  await expect(toast).not.toBeVisible();
+}
+
 // Fills the Login form and submits it. Does not wait for the post-login
 // redirect — callers should immediately assert on whatever the login lands
 // on (the forced /account password-change screen for a temporary password,
