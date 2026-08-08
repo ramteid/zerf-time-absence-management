@@ -9,6 +9,7 @@ import {
   durMin,
   isoWeek,
   formatTimeValue,
+  fmtDateTime,
 } from "./format.js";
 
 describe("parseDate", () => {
@@ -30,6 +31,18 @@ describe("parseDate", () => {
     const ts = new Date(2024, 0, 1).getTime();
     const d = parseDate(ts);
     expect(d.getFullYear()).toBe(2024);
+  });
+});
+
+describe("fmtDateTime", () => {
+  it("preserves the actual time of day instead of collapsing to noon", () => {
+    // Default configured timezone is Europe/Berlin (CEST, UTC+2 in May).
+    expect(fmtDateTime("2026-05-05T09:00:00Z")).toContain("11:00:00");
+    expect(fmtDateTime("2026-05-05T22:15:30Z")).toContain("00:15:30");
+  });
+
+  it("renders in 24-hour format by default", () => {
+    expect(fmtDateTime("2026-05-05T22:15:00Z")).not.toMatch(/AM|PM/);
   });
 });
 

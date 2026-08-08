@@ -25,6 +25,15 @@ use tracing_subscriber::layer::{Context, Layer};
 /// channel and loop forever (it still appears on stdout via the fmt layer).
 pub const WRITER_TARGET: &str = "zerf::log_capture";
 
+/// Tracing target sqlx's own query logger uses for every "query took Nms"
+/// event (see `sqlx-core`'s `QueryLogger::finish`), including the "slow
+/// statement: execution time exceeded alert threshold" message once a query
+/// crosses its 1s default threshold. It is always a driver-level timing
+/// diagnostic, never an application concern — app code only ever logs under
+/// `zerf::*` targets — so it is excluded from the admin-facing System Log.
+/// It still reaches stdout via the fmt layer in main.rs.
+const SQLX_QUERY_TARGET: &str = "sqlx::query";
+
 /// Upper bound on buffered records while the writer is busy or the pool is
 /// not up yet (records emitted during startup are held here until `run_writer`
 /// starts draining).
@@ -59,7 +68,10 @@ impl<S: Subscriber> Layer<S> for DbLogLayer {
         let metadata = event.metadata();
         // Defensive re-check: the layer is composed with a WARN level filter
         // in main.rs, but must never rely on that for correctness.
-        if *metadata.level() > Level::WARN || metadata.target() == WRITER_TARGET {
+        if *metadata.level() > Level::WARN
+            || metadata.target() == WRITER_TARGET
+            || metadata.target() == SQLX_QUERY_TARGET
+        {
             return;
         }
 
@@ -249,6 +261,17 @@ mod tests {
     fn skips_writer_target_to_prevent_feedback_loops() {
         let records = capture_events(|| {
             tracing::error!(target: WRITER_TARGET, "db write failed");
+        });
+        assert!(records.is_empty());
+    }
+
+    #[test]
+    fn skips_sqlx_query_target_as_driver_noise() {
+        let records = capture_events(|| {
+            tracing::warn!(
+                target: "sqlx::query",
+                "slow statement: execution time exceeded alert threshold"
+            );
         });
         assert!(records.is_empty());
     }

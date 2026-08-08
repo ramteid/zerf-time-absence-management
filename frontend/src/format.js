@@ -126,8 +126,16 @@ export function fmtMonthLabel(yearMonth) {
   return fmtMonthYear(yearMonth + "-01");
 }
 export function fmtDateTime(d) {
-  return parseDate(d).toLocaleString(getLocale(), {
+  // Unlike parseDate(), this must preserve the real time-of-day: parseDate's
+  // UTC-ISO-datetime branch anchors to local noon to keep pure calendar-date
+  // fields (e.g. an absence's start_date) from shifting a day near DST, but
+  // occurred_at/created_at timestamps carry a meaningful hour/minute/second
+  // that anchoring would silently discard.
+  const value = new Date(d);
+  if (Number.isNaN(value.getTime())) return "";
+  return value.toLocaleString(getLocale(), {
     timeZone: getConfiguredTimeZone(),
+    hour12: getTimeFormat() === "12h",
   });
 }
 export function weekdayLabels() {
