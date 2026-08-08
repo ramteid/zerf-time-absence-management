@@ -874,7 +874,8 @@ Zerf distinguishes between workflow coverage and work-credit math.
 - A single toolbar above the report controls both tabs: pick a month with the
   ◀ / ▶ arrows, or switch to **Custom range** to pick any from/to date span
   (useful for a quarter, or for looking ahead at planned absences beyond the
-  current month). Switching tabs keeps the selected person and period.
+  current month) — up to one year at a time. Switching tabs keeps the
+  selected person and period.
 - Everything loads automatically as soon as you change the employee or the
   period — there is no separate "Show" button.
 - **CSV** and **PDF** export buttons in the toolbar export exactly what is

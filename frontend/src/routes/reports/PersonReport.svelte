@@ -39,6 +39,7 @@
     monthEnd,
     monthStart,
     yearsBetweenDates,
+    isReportRangeTooLong,
   } from "../../lib/domain/dates.js";
   import {
     leaveYearForPeriod,
@@ -79,6 +80,14 @@
   // --- Absences (always the full selected period — unlike hours/flextime,
   // planned absences are shown even when they fall in the future). ---
   async function loadAbsencesFor(targetUserId, absenceFrom, absenceTo) {
+    // A custom range with no sane upper bound (picked via the calendar, or
+    // supplied unvalidated through a "View in report" deep link) would
+    // otherwise expand into one API call per calendar year below — capping
+    // here keeps that expansion bounded instead of flooding the API.
+    if (isReportRangeTooLong(absenceFrom, absenceTo)) {
+      toast($t("report_range_too_long"), "error");
+      return [];
+    }
     let raw;
     if (targetUserId === $currentUser?.id) {
       const years = yearsBetweenDates(absenceFrom, absenceTo);

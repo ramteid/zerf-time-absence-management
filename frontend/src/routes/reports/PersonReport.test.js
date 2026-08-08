@@ -515,6 +515,28 @@ describe("PersonReport", () => {
     expect(target.textContent).not.toContain("Entitlement");
   });
 
+  it("caps an absurdly long custom range instead of firing one absence/holiday request per year", async () => {
+    // Regression test: an unvalidated custom range (e.g. from a stray
+    // deep-link value) used to expand into one getUserAbsencesByYear +
+    // getHolidaysByYear call per calendar year in the range via
+    // Promise.all — a multi-century span would flood the API with
+    // thousands of requests. It must now be rejected up front.
+    component = mount(PersonReport, {
+      target,
+      props: {
+        userId: 1,
+        users,
+        periodMode: "range",
+        from: "1926-01-01",
+        to: "2026-06-15",
+      },
+    });
+    await settle();
+
+    expect(getUserAbsencesByYear).not.toHaveBeenCalled();
+    expect(getHolidaysByYear).not.toHaveBeenCalled();
+  });
+
   it("shows a loading state while the request is in flight, not stale content", async () => {
     let resolveMonth;
     getMonthReport.mockImplementation(

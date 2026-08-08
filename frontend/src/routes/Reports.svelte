@@ -11,7 +11,7 @@
   } from "../stores.js";
   import { t } from "../i18n.js";
   import { tracksOwnTime } from "../rolePolicy.js";
-  import { isoDate, appTodayDate } from "../format.js";
+  import { isoDate, appTodayDate, addDays } from "../format.js";
   import Icon from "../Icons.svelte";
   import PeriodPicker from "../lib/ui/PeriodPicker.svelte";
   import PersonReport from "./reports/PersonReport.svelte";
@@ -24,6 +24,7 @@
   } from "../lib/api/reportsApi.js";
   import { findUserById, hasUserId } from "../lib/domain/users.js";
   import { timeQueryRange } from "../lib/domain/reportPeriod.js";
+  import { isReportRangeTooLong } from "../lib/domain/dates.js";
   import {
     buildTimesheetCsv,
     timesheetCsvBlob,
@@ -90,6 +91,10 @@
   $: today = appTodayDate($settings?.timezone);
   $: todayIso = isoDate(today);
   $: currentMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+  // Custom-range upper bound: keeps the calendar from reaching a date so far
+  // out that the absence/holiday lookups below (one API call per calendar
+  // year in the selected range) would balloon into a request flood.
+  $: maxDate = isoDate(addDays(today, 366));
 
   let activeTab = "employee"; // "employee" | "team"
   let periodMode = "month";
@@ -112,7 +117,16 @@
     const user = params.get("user");
     const fromParam = params.get("from");
     const toParam = params.get("to");
-    if (user && fromParam && toParam) {
+    const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/;
+    if (
+      user &&
+      fromParam &&
+      toParam &&
+      isoDatePattern.test(fromParam) &&
+      isoDatePattern.test(toParam) &&
+      fromParam <= toParam &&
+      !isReportRangeTooLong(fromParam, toParam)
+    ) {
       selectedUserId = Number(user);
       periodMode = "range";
       from = fromParam;
@@ -306,6 +320,7 @@
         {minMonth}
         maxMonth={currentMonthStr}
         {minDate}
+        {maxDate}
       />
 
       <div class="reports-export-actions">

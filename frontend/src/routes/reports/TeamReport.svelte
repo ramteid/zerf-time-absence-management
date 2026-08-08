@@ -22,7 +22,10 @@
     getHolidaysByYear,
   } from "../../lib/api/reportsApi.js";
   import { periodBounds } from "../../lib/domain/reportPeriod.js";
-  import { yearsBetweenDates } from "../../lib/domain/dates.js";
+  import {
+    yearsBetweenDates,
+    isReportRangeTooLong,
+  } from "../../lib/domain/dates.js";
   import {
     categoryColumnsFromTeamReport,
     filterTeamCategoryColumns,
@@ -146,6 +149,15 @@
   let absencesLoading = false;
   let lastAbsenceKey = "";
   async function loadAbsences(key, absenceFrom, absenceTo) {
+    // See PersonReport's identical guard: an unbounded custom range would
+    // otherwise expand into one API call per calendar year further down.
+    if (isReportRangeTooLong(absenceFrom, absenceTo)) {
+      if (key === lastAbsenceKey) {
+        teamAbsences = [];
+        toast($t("report_range_too_long"), "error");
+      }
+      return;
+    }
     absencesLoading = true;
     try {
       const [teamRaw, ownRaw] = await Promise.all([

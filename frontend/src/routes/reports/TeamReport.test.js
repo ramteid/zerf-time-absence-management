@@ -302,6 +302,33 @@ describe("TeamReport", () => {
     expect(target.textContent).toContain("Ada Lead");
   });
 
+  it("caps an absurdly long custom range instead of firing one absence/holiday request per year", async () => {
+    // Regression test: an unvalidated custom range used to expand into one
+    // getUserAbsencesByYear + getHolidaysByYear call per calendar year via
+    // Promise.all — a multi-century span would flood the API with
+    // thousands of requests. It must now be rejected up front.
+    currentUser.set({
+      id: 7,
+      role: "team_lead",
+      tracks_time: true,
+      permissions: { can_view_team_reports: true },
+    });
+    component = mount(TeamReport, {
+      target,
+      props: {
+        users,
+        periodMode: "range",
+        month: "2026-05",
+        from: "1926-01-01",
+        to: "2026-06-15",
+      },
+    });
+    await settle();
+
+    expect(getUserAbsencesByYear).not.toHaveBeenCalled();
+    expect(getHolidaysByYear).not.toHaveBeenCalled();
+  });
+
   it("does not fetch the lead's own absences when they don't track time", async () => {
     component = mount(TeamReport, {
       target,

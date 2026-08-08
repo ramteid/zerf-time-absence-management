@@ -483,4 +483,36 @@ describe("Reports", () => {
     );
     expect(target.querySelector("#reports-user-select").value).toBe("8");
   }, 20000);
+
+  it("ignores a malformed ?user/from/to deep link (multi-century range) instead of querying it", async () => {
+    // Regression test: applyDeepLink used to trust from/to straight from the
+    // URL with no validation. A stray or malformed link could set an
+    // absurdly long range, which the absence-loading code would then expand
+    // into one request per calendar year — flooding the API. It must be
+    // rejected up front and the page must fall back to its normal default
+    // (month view for the current user) instead.
+    currentUser.set({
+      id: 7,
+      role: "team_lead",
+      first_name: "Ada",
+      last_name: "Lead",
+      weekly_hours: 40,
+      start_date: "2020-01-01",
+      permissions: { can_view_team_reports: true },
+    });
+    mockState.users = [
+      { id: 7, first_name: "Ada", last_name: "Lead", role: "team_lead" },
+      { id: 8, first_name: "Ben", last_name: "Employee", role: "employee" },
+    ];
+
+    path.set("/reports?user=8&from=1926-01-01&to=2030-01-12");
+    component = mount(Reports, { target });
+
+    await waitFor(
+      () => target.querySelector("#reports-user-select")?.value === "7",
+    );
+    expect(
+      api.mock.calls.some(([p]) => p.startsWith("/reports/range?")),
+    ).toBe(false);
+  }, 20000);
 });
