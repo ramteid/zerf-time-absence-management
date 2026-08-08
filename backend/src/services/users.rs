@@ -1020,12 +1020,17 @@ pub async fn archive(
     // Enumerate active dependents (users for whom target is an approver).
     let dependents = UserDb::find_active_dependents_tx(&mut tx, target_id).await?;
 
-    // If the archived user is an assistant, they should never be an approver.
-    // Guard against corrupt data where they still are.
+    // An assistant should never be an approver. If corrupt data says otherwise,
+    // log it and let the loop below reassign the dependents like for any other
+    // role — refusing outright would leave the admin with no way out, because
+    // the replacement mechanism is exactly the tool for this situation.
     if is_assistant_role(&target.role) && !dependents.is_empty() {
-        return Err(AppError::BadRequest(
-            "Assistant user is still an approver for active users; reassign them first.".into(),
-        ));
+        tracing::warn!(
+            target: "zerf::assistant_role",
+            assistant_id = target_id,
+            dependent_count = dependents.len(),
+            "archiving an assistant that is still an approver; reassigning dependents"
+        );
     }
 
     for (dep_id, dep_first, dep_last, dep_role) in &dependents {

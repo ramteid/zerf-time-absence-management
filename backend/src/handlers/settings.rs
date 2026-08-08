@@ -52,8 +52,9 @@ pub struct UpdateSettings {
     pub timezone: Option<String>,
     pub country: String,
     pub region: String,
-    pub default_weekly_hours: Option<f64>,
-    #[serde(default, deserialize_with = "deserialize_double_option_u8")]
+    #[serde(default, deserialize_with = "deserialize_double_option")]
+    pub default_weekly_hours: Option<Option<f64>>,
+    #[serde(default, deserialize_with = "deserialize_double_option")]
     pub submission_deadline_day: Option<Option<u8>>,
     pub organization_name: Option<String>,
     pub auto_break_enabled: Option<bool>,
@@ -64,13 +65,19 @@ pub struct UpdateSettings {
     pub allow_team_lead_manage_assistants: Option<bool>,
 }
 
-fn deserialize_double_option_u8<'de, D>(deserializer: D) -> Result<Option<Option<u8>>, D::Error>
+/// Tell "field omitted" apart from "field explicitly null" for a partial update.
+///
+/// Serde only calls this when the key is present in the payload, so wrapping the
+/// result in `Some` marks presence: `None` means the client left the field out
+/// and the stored value must survive, while `Some(None)` is an explicit JSON
+/// `null` and means "clear it". A plain `Option<T>` collapses both into `None`,
+/// which is why clearing such a field silently did nothing.
+fn deserialize_double_option<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
 where
     D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
 {
-    // Option<u8> will be None for null, Some for number. We wrap it in Some to indicate field presence.
-    let opt = Option::<u8>::deserialize(deserializer)?;
-    Ok(Some(opt))
+    Ok(Some(Option::<T>::deserialize(deserializer)?))
 }
 
 #[derive(Deserialize)]
@@ -134,7 +141,7 @@ pub async fn update_admin_settings(
             "Region code must be at most 20 characters.".into(),
         ));
     }
-    if let Some(dwh) = body.default_weekly_hours {
+    if let Some(Some(dwh)) = body.default_weekly_hours {
         if !(0.0..=168.0).contains(&dwh) {
             return Err(AppError::BadRequest("Invalid default_weekly_hours.".into()));
         }
@@ -233,11 +240,11 @@ pub async fn update_admin_settings(
     save_setting_tx(&mut transaction, "country", &country).await?;
     save_setting_tx(&mut transaction, "region", &region).await?;
 
-    save_if_some!(
-        transaction,
-        "default_weekly_hours",
-        body.default_weekly_hours.map(|v| v.to_string())
-    );
+    // Present-but-null clears the setting; absent leaves it untouched.
+    if let Some(inner) = body.default_weekly_hours {
+        let stored = inner.map(|v| v.to_string()).unwrap_or_default();
+        save_setting_tx(&mut transaction, "default_weekly_hours", &stored).await?;
+    }
     if let Some(inner) = body.submission_deadline_day {
         match inner {
             Some(v) => {

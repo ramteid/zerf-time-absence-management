@@ -77,32 +77,8 @@ impl NotificationDb {
     }
 
     /// Insert with ON CONFLICT DO NOTHING; returns `true` when the row was
-    /// actually inserted. When called without an explicit dedupe_key we generate
-    /// a deterministic key from title+body so the operation is actually idempotent
-    /// (previous implementation passed NULL and never conflicted).
-    pub async fn insert_idempotent(
-        &self,
-        user_id: i64,
-        kind: &str,
-        title: &str,
-        body: &str,
-        reference_type: Option<&str>,
-        reference_id: Option<i64>,
-    ) -> AppResult<bool> {
-        // Generate a stable dedupe key from title+body when caller doesn't provide one.
-        let generated_key = format!("{}:{}", title, body);
-        self.insert_idempotent_with_dedupe_key(
-            user_id,
-            kind,
-            title,
-            body,
-            reference_type,
-            reference_id,
-            Some(&generated_key),
-        )
-        .await
-    }
-
+    /// actually inserted, so reminder jobs can tell a fresh notification from a
+    /// suppressed duplicate and only send the email sidecar for the former.
     #[allow(clippy::too_many_arguments)]
     pub async fn insert_idempotent_with_dedupe_key(
         &self,

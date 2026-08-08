@@ -131,9 +131,6 @@ pub async fn validate_absence_has_workday(
             "Absence must include at least one workday.".into(),
         ));
     }
-    let holidays = crate::repository::HolidayDb::new(pool.clone())
-        .get_dates_in_range(start_date, end_date)
-        .await?;
     if !has_effective_workday(start_date, end_date, workdays_per_week, &holidays) {
         return Err(AppError::BadRequest(
             "Absence must include at least one workday.".into(),
@@ -271,17 +268,19 @@ pub fn leave_entitlement_anchor(user: &crate::middleware::auth::User) -> NaiveDa
 }
 
 /// Pro-rate annual leave entitlement for a user who started mid-year.
-/// Uses day-granular proration (remaining days in year / total days in year)
-/// rather than month-only, so Dec 31 start does not grant 3 days for 1 day.
+///
+/// Counts in twelfths — the month of entry counts as a whole month — which is
+/// how German leave law (BUrlG §5) apportions a partial year. A day-granular
+/// variant was tried and reverted: it silently changed every mid-year joiner's
+/// entitlement and does not match the twelfths rule employees are used to.
 pub fn pro_rate_entitlement(user_start_date: NaiveDate, year: i32, entitled: i64) -> i64 {
     let year_start = NaiveDate::from_ymd_opt(year, 1, 1).unwrap();
     let year_end = NaiveDate::from_ymd_opt(year, 12, 31).unwrap();
     if user_start_date > year_end {
         0
     } else if user_start_date > year_start {
-        let total_days = (year_end - year_start).num_days() + 1;
-        let remaining_days = (year_end - user_start_date).num_days() + 1;
-        ((entitled as f64) * (remaining_days as f64) / (total_days as f64)).ceil() as i64
+        let months_remaining = (13 - Datelike::month(&user_start_date)) as f64;
+        ((entitled as f64) * months_remaining / 12.0).ceil() as i64
     } else {
         entitled
     }
@@ -1158,14 +1157,15 @@ mod tests {
         assert_eq!(pro_rate_entitlement(start, 2026, 30), 30);
     }
 
-    /// Day-granular proration: July 1 has 184 days left in non-leap year => ceil(30*184/365)=16
+    /// Twelfths: a July 1 start leaves 6 of 12 months => ceil(30 * 6 / 12) = 15.
     #[test]
     fn pro_rate_entitlement_mid_year_rounds_up() {
         let start = NaiveDate::from_ymd_opt(2026, 7, 1).unwrap();
-        assert_eq!(pro_rate_entitlement(start, 2026, 30), 16);
+        assert_eq!(pro_rate_entitlement(start, 2026, 30), 15);
     }
 
-    /// December 1 has 31 days left => ceil(30*31/365)=3
+    /// The month of entry counts in full, so a December start still yields
+    /// one twelfth => ceil(30 * 1 / 12) = 3.
     #[test]
     fn pro_rate_entitlement_december_start_rounds_up_to_minimum() {
         let start = NaiveDate::from_ymd_opt(2026, 12, 1).unwrap();

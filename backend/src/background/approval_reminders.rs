@@ -111,10 +111,11 @@ pub async fn run_check(state: &crate::AppState) {
             &[("count", count_str)],
         );
 
-        // Dedupe per approver per day. Including pending_count alone would suppress
-        // a notification when one item is approved and another arrives same day keeping count identical.
-        // The job runs once per Monday, so per-day dedupe is sufficient.
-        let dedupe_key = format!("approval_reminder:{}:{}", today_local, approver_id);
+        // Idempotent per approver per local day. The uniqueness index is
+        // (user_id, kind, dedupe_key), so the recipient is already part of the
+        // key — and the count must stay out of it, or every approval during the
+        // day would mint a new key and re-send the reminder.
+        let dedupe_key = format!("approval_reminder:{}", today_local);
         crate::services::notifications::deliver(
             state,
             &crate::services::notifications::Outgoing::new(

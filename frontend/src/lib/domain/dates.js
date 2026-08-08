@@ -72,7 +72,11 @@ export function daysBetweenIsoDates(from, to) {
 // Unparseable bounds count as "too long": callers use this to decide whether
 // it is safe to fan out per-year requests, and a range they cannot even
 // measure is never safe to expand.
-export function isReportRangeTooLong(from, to, maxDays = 366) {
+//
+// The default matches the backend's `validate_range`, which caps an inclusive
+// range at 366 days — a difference of 365. Allowing one day more here made the
+// frontend wave through a period the API then rejected.
+export function isReportRangeTooLong(from, to, maxDays = 365) {
   const days = daysBetweenIsoDates(from, to);
   return days == null || days > maxDays;
 }

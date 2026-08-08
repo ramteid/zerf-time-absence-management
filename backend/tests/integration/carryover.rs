@@ -678,10 +678,10 @@ async fn hire_date_anchors_proration_independent_of_start_date() {
     );
 
     let balance = leave_account_balance(&admin, user_id, vacation_account_id, current_year).await;
-    // start_date = July 1st → day-granular 184 days left in non-leap year → ceil(30*184/365)=16
+    // start_date = July 1st → 6 of 12 months remaining → ceil(30 * 6 / 12) = 15
     assert_eq!(
         json_i64(&balance, "annual_entitlement"),
-        16,
+        15,
         "clearing hire_date should resume proration anchored on start_date: {balance}"
     );
 

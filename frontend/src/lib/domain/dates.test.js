@@ -26,10 +26,13 @@ describe("date domain helpers", () => {
     expect(yearsBetweenDates("2025-12-31", "2026-01-01")).toEqual([2025, 2026]);
   });
 
-  it("calculates report range spans for the 366-day backend limit", () => {
-    expect(daysBetweenIsoDates("2026-01-01", "2027-01-02")).toBe(366);
-    expect(isReportRangeTooLong("2026-01-01", "2027-01-02")).toBe(false);
-    expect(isReportRangeTooLong("2026-01-01", "2027-01-03")).toBe(true);
+  it("matches the backend's 366-day-inclusive report range limit", () => {
+    // The backend caps an *inclusive* range at 366 days, i.e. a difference of
+    // 365. Anything past that is rejected by the API, so the guard must not
+    // wave it through.
+    expect(daysBetweenIsoDates("2026-01-01", "2027-01-01")).toBe(365);
+    expect(isReportRangeTooLong("2026-01-01", "2027-01-01")).toBe(false);
+    expect(isReportRangeTooLong("2026-01-01", "2027-01-02")).toBe(true);
   });
 
   it("treats an unmeasurable range as too long so callers never fan out on it", () => {

@@ -80,7 +80,11 @@ pub async fn list_all(
                 "from must not be after to.".into(),
             ));
         }
-        if (to - from).num_days() > 366 {
+        // Same bound as `services::reports::validate_range`: an inclusive range
+        // of 366 days means a difference of 365. Keeping the two in lockstep
+        // stops one section of the Reports page from loading while another
+        // rejects the very same period.
+        if (to - from).num_days() > 365 {
             return Err(crate::error::AppError::BadRequest(
                 "Date range must not exceed 366 days.".into(),
             ));

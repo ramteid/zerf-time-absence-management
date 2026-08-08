@@ -2183,13 +2183,6 @@ async fn notifications_repository_workflow() {
         0
     );
 
-    // insert_idempotent returns true on first insert, false on duplicate.
-    let first_insert = notifications
-        .insert_idempotent(user_id, "idem_kind", "Idem Title", "idem body", None, None)
-        .await
-        .expect("idempotent first insert");
-    assert!(first_insert, "first idempotent insert should return true");
-
     // insert_idempotent_with_dedupe_key uses an explicit dedupe key.
     let key_first = notifications
         .insert_idempotent_with_dedupe_key(

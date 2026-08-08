@@ -224,8 +224,14 @@ async fn process_period(
         // the period, or everyone in it was excluded. There is nothing to
         // report, so settle the period instead of retrying it every night
         // forever and leaving the dashboard card stuck on "0 of 0".
-        // Always delete, even for manual runs – an empty month should not stay queued forever.
-        state.db.payroll_queue.delete_entry(period).await?;
+        //
+        // Only the scheduled run may settle it. A manual "Send now" pressed
+        // before anyone has booked the month would otherwise drop the period
+        // from the queue for good, and the scheduled run would never deliver
+        // it once the data did arrive.
+        if !is_manual {
+            state.db.payroll_queue.delete_entry(period).await?;
+        }
         tracing::info!("Payroll report: period {period} covers nobody; nothing to send");
         return Ok(false);
     }
