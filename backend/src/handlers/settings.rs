@@ -193,7 +193,7 @@ pub async fn update_admin_settings(
             let has_tier2_deduction = body.auto_break_deduction_minutes_2.is_some();
             if has_tier2_threshold != has_tier2_deduction {
                 return Err(AppError::BadRequest(
-                    "Both auto_break_threshold_hours_2 and auto_break_deduction_minutes_2 must be provided together.".into(),
+                    "Please enter both second threshold and second deduction, or leave both empty.".into(),
                 ));
             }
             if has_tier2_threshold {

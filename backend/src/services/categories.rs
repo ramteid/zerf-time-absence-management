@@ -169,11 +169,7 @@ pub async fn update(
             let usage = app_state.db.categories.entries_count(category_id).await?;
             if usage > 0 {
                 return Err(AppError::BadRequest(
-                    "Cannot change counts_as_work for a category that already has \
-                     time entries — doing so would retroactively rewrite every \
-                     user's flextime and overtime history. Deactivate this category \
-                     and create a new one with the desired setting instead."
-                        .into(),
+                    "This category is already in use. Create a new one instead.".into(),
                 ));
             }
         }

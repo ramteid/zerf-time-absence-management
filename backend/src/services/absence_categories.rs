@@ -273,9 +273,7 @@ pub async fn create(
         && input.auto_approve_past
     {
         return Err(AppError::BadRequest(
-            "A category cannot both deduct vacation days and auto-approve past dates. \
-             Use separate categories for vacation (reviewed) and sick leave (auto-approved)."
-                .into(),
+            "A category cannot deduct leave days and auto-approve at the same time.".into(),
         ));
     }
     // "Unpaid" only makes sense for cost_type='none': vacation and flextime
@@ -427,9 +425,7 @@ pub async fn update(
     };
     if final_cost_type == crate::repository::absence_categories::COST_TYPE_VACATION && final_auto {
         return Err(AppError::BadRequest(
-            "A category cannot both deduct vacation days and auto-approve past dates. \
-             Use separate categories for vacation (reviewed) and sick leave (auto-approved)."
-                .into(),
+            "A category cannot deduct leave days and auto-approve at the same time.".into(),
         ));
     }
     if final_unpaid && final_cost_type != crate::repository::absence_categories::COST_TYPE_NONE {
@@ -440,36 +436,20 @@ pub async fn update(
     let cost_type_changed = final_cost_type != current.cost_type;
     let auto_changed = final_auto != current.auto_approve_past;
     let unpaid_changed = final_unpaid != current.unpaid;
-    let default_days_changed = leave_account_default_days.is_some()
-        && leave_account_default_days != current.leave_account_default_days;
-    let expiry_changed = normalized_carryover_expiry.is_some()
-        && normalized_carryover_expiry.as_deref() != current.leave_account_carryover_expiry.as_deref();
-    // Use transaction-bound count to avoid TOCTOU between check and update.
-    if cost_type_changed
-        || auto_changed
-        || unpaid_changed
-        || default_days_changed
-        || expiry_changed
-    {
-        let usage: i64 =
-            AbsenceCategoryDb::usage_count_tx(&mut transaction, category_id).await?;
+    // The default day count and the carryover expiry stay editable for a
+    // category that is already in use. The default only seeds the per-user
+    // entitlement when an account is first granted, so changing it never
+    // rewrites anyone's existing balance — it just applies to whoever is
+    // onboarded next. Cost type, unpaid and auto-approval are different:
+    // those *would* re-interpret absences that were already booked, so they
+    // remain locked once the category has been used.
+    // Counted inside the transaction so the check cannot race the update.
+    if cost_type_changed || auto_changed || unpaid_changed {
+        let usage: i64 = AbsenceCategoryDb::usage_count_tx(&mut transaction, category_id).await?;
         if usage > 0 {
-            if cost_type_changed || auto_changed || unpaid_changed {
-                return Err(AppError::BadRequest(
-                    "Cannot change the cost, unpaid, or approval behavior of a category that \
-                     already has absences. Deactivate this category and create a new one \
-                     with the desired flags instead."
-                        .into(),
-                ));
-            }
-            if default_days_changed || expiry_changed {
-                return Err(AppError::BadRequest(
-                    "Cannot change leave-account default days or expiry for a category that already has \
-                     absences — existing users keep old entitlement and new users would get new \
-                     default, causing inconsistency. Deactivate and create a new category instead."
-                        .into(),
-                ));
-            }
+            return Err(AppError::BadRequest(
+                "This category is already in use. Create a new one instead.".into(),
+            ));
         }
     }
     let normalized_name = name.map(|value| value.trim().to_string());

@@ -78,10 +78,7 @@ pub fn validate_auto_approve_end_date(
     let latest_end = today + Duration::days(60);
     if end_date > latest_end {
         return Err(AppError::BadRequest(
-            "Auto-approved absences may not extend more than 60 days into the future. \
-             Submit a shorter range now and re-submit for any extension that still requires \
-             cover — longer durations require approver review."
-                .into(),
+            "This absence type can be requested at most 60 days ahead.".into(),
         ));
     }
     Ok(())

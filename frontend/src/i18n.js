@@ -770,8 +770,14 @@ const TRANSLATIONS = {
       "Abwesenheitskategorie-Slug existiert bereits.",
     "A category cannot both deduct vacation and reduce flextime.":
       "Eine Kategorie kann nicht gleichzeitig Urlaub abziehen und Gleitzeit reduzieren.",
-    "Cannot change the cost or approval behavior of a category that already has absences. Deactivate this category and create a new one with the desired flags instead.":
-      "Die Kosten- oder Genehmigungs-Logik einer Kategorie mit bereits vorhandenen Abwesenheiten kann nicht geändert werden. Bitte diese Kategorie deaktivieren und eine neue mit den gewünschten Eigenschaften anlegen.",
+    "This category is already in use. Create a new one instead.":
+      "Diese Kategorie wird bereits verwendet. Bitte eine neue anlegen.",
+    "A category cannot deduct leave days and auto-approve at the same time.":
+      "Eine Kategorie kann nicht gleichzeitig Urlaubstage abziehen und automatisch genehmigen.",
+    "This absence type can be requested at most 60 days ahead.":
+      "Diese Abwesenheitsart kann höchstens 60 Tage im Voraus beantragt werden.",
+    "Auto-approved absences cannot be backdated more than 30 days.":
+      "Automatisch genehmigte Abwesenheiten können höchstens 30 Tage rückwirkend eingetragen werden.",
     "General Settings": "Allgemeine Einstellungen",
     General: "Allgemein",
     Organization: "Organisation",
