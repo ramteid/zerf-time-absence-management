@@ -1157,8 +1157,8 @@ pub struct TeamRow {
     pub leave_account_usage: Vec<LeaveAccountUsage>,
     /// Sick working-days in the report month.
     pub sick_days: f64,
-    /// Current cumulative flextime balance up to and including yesterday
-    /// (today never contributes to the balance). None for assistants.
+    /// Cumulative flextime balance at the end of the report month (or up to
+    /// and including yesterday for the current month). None for assistants.
     pub flextime_balance_min: Option<i64>,
     /// True if all fully elapsed weeks (Sunday < today) overlapping the report month
     /// have been fully submitted.

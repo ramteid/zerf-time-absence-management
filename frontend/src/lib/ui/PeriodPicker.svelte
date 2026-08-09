@@ -120,9 +120,11 @@
     flex-wrap: wrap;
   }
 
-  /* Keep the month input compact — it only ever shows e.g. "July 2026". */
+  /* Keep the month input compact — it only ever shows e.g. "July 2026".
+     On mobile the width is reduced so it fits next to the employee selector. */
   .period-month-input {
     width: 150px;
+    min-width: 100px;
   }
 
   /* Keep the toggle button aligned with the date inputs, not their labels. */

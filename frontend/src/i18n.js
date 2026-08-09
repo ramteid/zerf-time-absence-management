@@ -259,7 +259,7 @@ const TRANSLATIONS = {
       "The team overview table is only available in month view.",
     report_range_too_long:
       "The selected period is too long. Please choose a range of one year or less.",
-    "Current flextime balance": "Current flextime balance",
+    "Flextime balance (end of month)": "Flextime balance (end of month)",
     "Monthly diff": "Monthly diff",
     Weekend: "Weekend",
     Weekends: "Weekends",
@@ -1341,7 +1341,7 @@ const TRANSLATIONS = {
       "Die Teamübersichtstabelle ist nur in der Monatsansicht verfügbar.",
     report_range_too_long:
       "Der gewählte Zeitraum ist zu lang. Bitte wählen Sie einen Zeitraum von einem Jahr oder weniger.",
-    "Current flextime balance": "Aktueller Gleitzeitkontostand",
+    "Flextime balance (end of month)": "Gleitzeitkontostand (Monatsende)",
     "Monthly diff": "Monatsdifferenz",
     "Sick days": "Krankheitstage",
     "All weeks submitted": "Alle Wochen eingereicht",

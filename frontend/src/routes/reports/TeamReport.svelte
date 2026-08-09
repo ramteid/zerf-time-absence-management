@@ -58,15 +58,35 @@
   let teamLeaveAccountColumns = [];
   let teamLoading = false;
   let lastTeamKey = "";
+
+  // Group rank for the team report: employees and team leads share rank 0 (one
+  // combined group at the top), assistants rank 1, admins rank 2. Unknown roles
+  // sort last. This differs from the global ROLE_ORDER where team_lead < employee;
+  // here they are intentionally merged into a single group.
+  function teamReportRoleRank(userId) {
+    const role = users.find((u) => u.id === userId)?.role;
+    if (role === "employee" || role === "team_lead") return 0;
+    if (role === "assistant") return 1;
+    if (role === "admin") return 2;
+    return 3;
+  }
+
+  $: sortedTeamReport = teamReport
+    ? [...teamReport].sort((a, b) => {
+        const rankDiff =
+          teamReportRoleRank(a.user_id) - teamReportRoleRank(b.user_id);
+        if (rankDiff !== 0) return rankDiff;
+        return a.name.localeCompare(b.name);
+      })
+    : null;
+
   async function loadTeam(key) {
     teamLoading = true;
     try {
       const loaded = await getTeamReport({ month });
       if (key === lastTeamKey) {
         // eslint-disable-next-line svelte/infinite-reactive-loop -- teamReport isn't read by the triggering $: block, so there's no cycle.
-        teamReport = (loaded?.rows || []).sort((a, b) =>
-          a.name.localeCompare(b.name),
-        );
+        teamReport = loaded?.rows || [];
         teamLeaveAccountColumns = loaded?.leave_account_categories || [];
       }
     } catch (e) {
@@ -90,6 +110,7 @@
       }
     } else {
       lastTeamKey = "";
+      // eslint-disable-next-line no-useless-assignment -- teamReport is read by $: sortedTeamReport; ESLint cannot see cross-reactive-statement usage.
       teamReport = null;
     }
   }
@@ -243,15 +264,15 @@
 >
   {#if periodMode !== "month"}
     <div class="report-note">{$t("team_table_month_only")}</div>
-  {:else if teamLoading && !teamReport}
+  {:else if teamLoading && !sortedTeamReport}
     <LoadingState />
-  {:else if teamReport}
+  {:else if sortedTeamReport}
     <div class="team-report-table">
       <DataTable fit>
         <thead>
           <tr>
             <th class="col-employee team-report-header">{$t("Employee")}</th>
-            <th class="text-right team-report-header">{$t("Current flextime balance")}</th>
+            <th class="text-right team-report-header">{$t("Flextime balance (end of month)")}</th>
             <th class="text-right team-report-header">{$t("Monthly diff")}</th>
             <th class="text-right team-report-header">{$t("Sick days")}</th>
             {#each teamLeaveAccountColumns as col (col.category_id)}
@@ -270,7 +291,7 @@
           </tr>
         </thead>
       <tbody>
-        {#each teamReport as r (r.user_id)}
+        {#each sortedTeamReport as r (r.user_id)}
           <tr>
             <td class="fw-500">{r.name}</td>
             <td

@@ -313,11 +313,19 @@ pub async fn team(
                 let flextime_balance_min = if team_member_is_assistant {
                     None
                 } else {
+                    // Build the overtime rows for the selected month's year so
+                    // the balance reflects the end of the selected period, not
+                    // today. For the current month, build_overtime_rows_for_year
+                    // already caps at yesterday, matching the "up to and
+                    // including yesterday" semantics. For past months the row for
+                    // query_month holds the balance at the end of that month.
                     let overtime_rows =
-                        build_overtime_rows_for_year(&pool, team_member.id, today.year()).await?;
+                        build_overtime_rows_for_year(&pool, team_member.id, month_start.year())
+                            .await?;
                     Some(
                         overtime_rows
-                            .last()
+                            .iter()
+                            .find(|r| r.month == query_month)
                             .map(|r| r.cumulative_min)
                             .unwrap_or(team_member.overtime_start_balance_min),
                     )

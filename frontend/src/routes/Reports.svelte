@@ -301,34 +301,36 @@
 <div class="content-area">
   <div class="zf-card reports-toolbar">
     <div class="zf-toolbar-row">
-      {#if activeTab === "employee" && !isSelfOnlyReportsView}
-        <div>
-          <label class="zf-label" for="reports-user-select"
-            >{$t("Employee")}</label
-          >
-          <select
-            id="reports-user-select"
-            class="zf-select"
-            bind:value={selectedUserId}
-          >
-            {#each users as u (u.id)}
-              <option value={u.id}>{u.first_name} {u.last_name}</option>
-            {/each}
-          </select>
-        </div>
-      {/if}
+      <div class="reports-filter-pair">
+        {#if activeTab === "employee" && !isSelfOnlyReportsView}
+          <div class="reports-user-filter">
+            <label class="zf-label" for="reports-user-select"
+              >{$t("Employee")}</label
+            >
+            <select
+              id="reports-user-select"
+              class="zf-select"
+              bind:value={selectedUserId}
+            >
+              {#each users as u (u.id)}
+                <option value={u.id}>{u.first_name} {u.last_name}</option>
+              {/each}
+            </select>
+          </div>
+        {/if}
 
-      <PeriodPicker
-        id="reports-period"
-        bind:mode={periodMode}
-        bind:month
-        bind:from
-        bind:to
-        {minMonth}
-        maxMonth={currentMonthStr}
-        {minDate}
-        {maxDate}
-      />
+        <PeriodPicker
+          id="reports-period"
+          bind:mode={periodMode}
+          bind:month
+          bind:from
+          bind:to
+          {minMonth}
+          maxMonth={currentMonthStr}
+          {minDate}
+          {maxDate}
+        />
+      </div>
 
       <div class="reports-export-actions">
         {#if activeTab === "employee"}
@@ -380,6 +382,22 @@
   .reports-toolbar {
     padding: 16px 20px;
     margin-bottom: 16px;
+  }
+
+  /* Keeps the employee selector and period picker on one row at all widths.
+     Each child gets flex: 1 so they share available space; min-width: 0 lets
+     them shrink below their content size on narrow screens. */
+  .reports-filter-pair {
+    display: flex;
+    align-items: flex-end;
+    gap: 12px;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .reports-user-filter {
+    flex: 1;
+    min-width: 0;
   }
 
   .reports-export-actions {
