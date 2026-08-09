@@ -131,4 +131,25 @@
   .period-mode-toggle {
     height: 34px;
   }
+
+  /* Mobile: the Reports toolbar sits the employee dropdown and this picker
+     side by side. To leave room for the dropdown, the picker must stay as
+     narrow as the ◀ month ▶ nav. Force the "Custom range" toggle onto its own
+     line below the nav (flex-basis: 100%) and let its long label wrap
+     (white-space: normal) so it no longer widens the picker to fit beside the
+     nav. Also trim the month input so the nav itself is a bit more compact. */
+  @media (max-width: 768px) {
+    .period-month-input {
+      width: 130px;
+      min-width: 100px;
+    }
+
+    .period-mode-toggle {
+      flex-basis: 100%;
+      white-space: normal;
+      height: auto;
+      min-height: 34px;
+      line-height: 1.2;
+    }
+  }
 </style>

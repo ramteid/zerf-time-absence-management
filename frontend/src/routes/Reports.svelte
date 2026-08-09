@@ -388,9 +388,12 @@
      mobile. flex: 1 1 auto gives the pair a content-sized basis so the
      toolbar-row wraps the export buttons down to their own line rather than
      squeezing the pair. flex-wrap: nowrap keeps the two controls side by side;
-     min-width: 0 lets them shrink so they fit the narrow width instead of
-     stacking. The period picker holds its ~180px min-content; the employee
-     select absorbs the remaining space and shrinks first. */
+     min-width: 0 lets the pair shrink to the viewport instead of stacking.
+
+     For this to work the period picker must NOT claim the whole row: on mobile
+     its "Custom range" toggle wraps onto its own line (see PeriodPicker), so
+     the picker's natural width collapses to just the ◀ month ▶ nav (~220px)
+     and the employee select below grows into the remaining space. */
   .reports-filter-pair {
     display: flex;
     align-items: flex-end;
@@ -401,8 +404,10 @@
   }
 
   .reports-user-filter {
-    /* basis 0 + grow 1: take whatever space the period picker leaves, and
-       shrink freely (min-width: 0) so it never forces a wrap. */
+    /* Grow into whatever the period picker leaves. Basis 0 is safe here
+       because the picker's natural width (month nav only, ~220px) is smaller
+       than any real phone width, so free space stays positive and the select
+       never collapses. min-width: 0 lets it shrink rather than force a wrap. */
     flex: 1 1 0;
     min-width: 0;
   }
