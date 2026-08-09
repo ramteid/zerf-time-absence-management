@@ -132,20 +132,32 @@
     height: 34px;
   }
 
-  /* Mobile: the Reports toolbar sits the employee dropdown and this picker
-     side by side. To leave room for the dropdown, the picker must stay as
-     narrow as the ◀ month ▶ nav. Force the "Custom range" toggle onto its own
-     line below the nav (flex-basis: 100%) and let its long label wrap
-     (white-space: normal) so it no longer widens the picker to fit beside the
-     nav. Also trim the month input so the nav itself is a bit more compact. */
+  /* Mobile: the Reports toolbar puts the employee dropdown and this picker side
+     by side, and the picker is used ONLY there. `display: contents` dissolves
+     the picker's own box so its children — the ◀ month ▶ nav and the
+     "Custom range" toggle — become flex items of the parent `.reports-filter-pair`
+     directly. That lets the nav sit next to the employee dropdown while the
+     toggle (flex: 1 1 100%) wraps to a full-width line beneath both, instead of
+     being trapped in a picker column that forced the jumbled 2×2 layout.
+     Verified across 320–412px with a headless browser before shipping. */
   @media (max-width: 768px) {
+    .period-picker {
+      display: contents;
+    }
+
+    .zf-nav-slider {
+      flex: 0 1 auto;
+      min-width: 0;
+    }
+
     .period-month-input {
       width: 130px;
-      min-width: 100px;
+      min-width: 90px;
+      flex: 1 1 auto;
     }
 
     .period-mode-toggle {
-      flex-basis: 100%;
+      flex: 1 1 100%;
       white-space: normal;
       height: auto;
       min-height: 34px;

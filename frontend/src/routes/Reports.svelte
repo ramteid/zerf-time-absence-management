@@ -384,32 +384,37 @@
     margin-bottom: 16px;
   }
 
-  /* Keeps the employee selector and period picker on ONE row together, even on
-     mobile. flex: 1 1 auto gives the pair a content-sized basis so the
-     toolbar-row wraps the export buttons down to their own line rather than
-     squeezing the pair. flex-wrap: nowrap keeps the two controls side by side;
-     min-width: 0 lets the pair shrink to the viewport instead of stacking.
-
-     For this to work the period picker must NOT claim the whole row: on mobile
-     its "Custom range" toggle wraps onto its own line (see PeriodPicker), so
-     the picker's natural width collapses to just the ◀ month ▶ nav (~220px)
-     and the employee select below grows into the remaining space. */
+  /* Groups the employee selector and the period picker. On desktop they sit at
+     their natural sizes on one line (the toolbar-row wraps the export buttons
+     below when space is tight). The mobile side-by-side behaviour lives in the
+     media query at the bottom of this block and in PeriodPicker.svelte. */
   .reports-filter-pair {
     display: flex;
     align-items: flex-end;
     gap: 12px;
     flex: 1 1 auto;
-    flex-wrap: nowrap;
     min-width: 0;
   }
 
   .reports-user-filter {
-    /* Grow into whatever the period picker leaves. Basis 0 is safe here
-       because the picker's natural width (month nav only, ~220px) is smaller
-       than any real phone width, so free space stays positive and the select
-       never collapses. min-width: 0 lets it shrink rather than force a wrap. */
-    flex: 1 1 0;
+    flex: 0 1 auto;
     min-width: 0;
+  }
+
+  /* Mobile: keep the employee dropdown and the month nav on one row, with the
+     period picker's "Custom range" toggle dropping to a full-width line below
+     them (see PeriodPicker.svelte, which uses `display: contents` to promote
+     its nav + toggle into THIS flex container). flex-wrap lets the toggle wrap;
+     the employee select takes flex: 1 1 0 so it shrinks to share the row with
+     the ~200px month nav instead of forcing a stack. */
+  @media (max-width: 768px) {
+    .reports-filter-pair {
+      flex-wrap: wrap;
+    }
+
+    .reports-user-filter {
+      flex: 1 1 0;
+    }
   }
 
   .reports-export-actions {
