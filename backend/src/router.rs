@@ -214,6 +214,7 @@ pub fn build_api_router(state: AppState) -> Router<AppState> {
                     "/reports/payroll-status",
                     get(handlers::reports::payroll_status),
                 )
+                .route("/reports/users", get(handlers::reports::report_users))
                 .route("/audit-log", get(handlers::audit_log::list))
                 .route("/logs", get(handlers::app_logs::list))
                 .route(

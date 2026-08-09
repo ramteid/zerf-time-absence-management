@@ -587,3 +587,18 @@ pub async fn payroll_status(
         crate::services::payroll_report::build_status(&app_state, &requester, &language).await?,
     ))
 }
+
+/// Returns the list of users whose reports the requester is allowed to access.
+/// Scoping mirrors the team report: leads see their direct reports + themselves,
+/// admins see all active time-tracking users. Pure-admin users (tracks_time=false)
+/// are excluded; inactive users are excluded.
+pub async fn report_users(
+    State(app_state): State<AppState>,
+    requester: User,
+) -> AppResult<Json<Vec<User>>> {
+    if !requester.is_lead() {
+        return Err(AppError::Forbidden);
+    }
+    let users = active_reportable_team_members(&app_state, &requester).await?;
+    Ok(Json(users))
+}

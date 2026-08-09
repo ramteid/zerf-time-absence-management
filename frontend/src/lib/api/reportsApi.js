@@ -16,13 +16,12 @@ export async function getUsersForReports(canViewTeamReports, currentUser) {
   if (!canViewTeamReports) {
     return tracksOwnTime(currentUser) ? [currentUser] : [];
   }
-  // Pure-admin users (tracks_time=false) have no time/absence data of their own,
-  // so they are excluded from any per-user employee dropdown.
-  // Inactive users are also excluded — they no longer participate in time tracking.
-  const allUsers = await api("/users");
-  return sortUsersByRoleThenName(
-    (allUsers || []).filter((u) => tracksOwnTime(u) && u.active !== false),
-  );
+  // Use /reports/users which scopes the list to users the requester can access
+  // reports for: team leads see their direct reports + themselves; admins see
+  // all active time-tracking users. This matches the team report table scope
+  // exactly, so the employee dropdown and team table always show the same set.
+  const reportUsers = await api("/reports/users");
+  return sortUsersByRoleThenName(reportUsers || []);
 }
 
 export function getMonthReport({ userId, month }) {
