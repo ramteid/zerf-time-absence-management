@@ -384,19 +384,22 @@
     margin-bottom: 16px;
   }
 
-  /* Keeps the employee selector and period picker on one row at all widths.
-     Each child gets flex: 1 so they share available space; min-width: 0 lets
-     them shrink below their content size on narrow screens. */
+  /* Keeps the employee selector and period picker together. Uses
+     flex: 1 1 auto (not flex: 1 = flex: 1 1 0) so the pair's flex-basis is its
+     content size. That way the toolbar-row wraps the export buttons down to a
+     second line on mobile instead of squeezing the pair to ~148px — too narrow
+     for the period picker (≥180px), which then overflowed its container and
+     overlapped the buttons. */
   .reports-filter-pair {
     display: flex;
     align-items: flex-end;
     gap: 12px;
-    flex: 1;
-    min-width: 0;
+    flex: 1 1 auto;
+    flex-wrap: wrap;
   }
 
   .reports-user-filter {
-    flex: 1;
+    flex: 1 1 200px;
     min-width: 0;
   }
 
