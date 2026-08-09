@@ -112,10 +112,6 @@
     font-size: 0.9375rem;
     font-weight: 400;
     line-height: 1.3;
-    /* Reserve space for up to two lines so cards with long category names
-       don't push their details row out of alignment with shorter siblings
-       in the same grid row. */
-    min-height: calc(1.3em * 2);
   }
 
   .leave-account-card-dot {
