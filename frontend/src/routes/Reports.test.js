@@ -51,7 +51,7 @@ const defaultApiImpl = vi.hoisted(
           blob: async () => new Blob(["pdf"], { type: "application/pdf" }),
         };
       }
-      if (path === "/users") {
+      if (path === "/reports/users") {
         if (mockState.usersQueue.length > 0)
           return await mockState.usersQueue.shift();
         return mockState.users;
@@ -358,7 +358,7 @@ describe("Reports", () => {
       if (path.startsWith("/reports/month?") && path.includes("user_id=9")) {
         return fast.promise;
       }
-      if (path === "/users") return mockState.users;
+      if (path === "/reports/users") return mockState.users;
       if (path.startsWith("/reports/month?")) return monthReportFixture();
       if (path.startsWith("/reports/flextime?")) return [];
       if (path.startsWith("/leave-balances/")) return [];

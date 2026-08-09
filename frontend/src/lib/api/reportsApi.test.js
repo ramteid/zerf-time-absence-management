@@ -40,54 +40,31 @@ describe("getUsersForReports", () => {
     tracks_time: true,
     active: true,
   };
-  const inactiveEmployee = {
-    id: 5,
-    first_name: "Ines",
-    last_name: "Inaktiv",
-    role: "employee",
-    tracks_time: true,
-    active: false,
-  };
-
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   describe("when canViewTeamReports is true (admin/lead view)", () => {
-    it("excludes pure-admin user from the list", async () => {
-      api.mockResolvedValue([pureAdmin, teamLead, employee, assistant]);
+    // Filtering (pure-admins, inactive) is done by the backend /reports/users
+    // endpoint. The client just returns what the backend sends, sorted by role
+    // then name. Mock returns only the already-filtered set the backend would
+    // return.
+    it("calls /reports/users and returns the result sorted by role then name", async () => {
+      api.mockResolvedValue([assistant, employee, teamLead]);
       const result = await getUsersForReports(true, pureAdmin);
-      expect(result.map((u) => u.id)).not.toContain(pureAdmin.id);
-      expect(result.map((u) => u.id)).toEqual(
-        expect.arrayContaining([teamLead.id, employee.id, assistant.id]),
-      );
+      expect(api).toHaveBeenCalledWith("/reports/users");
+      // team_lead and employee rank above assistant
+      expect(result.map((u) => u.id)).toEqual([
+        teamLead.id,
+        employee.id,
+        assistant.id,
+      ]);
     });
 
-    it("excludes inactive users from the list", async () => {
-      api.mockResolvedValue([
-        pureAdmin,
-        teamLead,
-        employee,
-        assistant,
-        inactiveEmployee,
-      ]);
+    it("returns an empty array when the backend returns null or empty", async () => {
+      api.mockResolvedValue(null);
       const result = await getUsersForReports(true, pureAdmin);
-      expect(result.map((u) => u.id)).not.toContain(inactiveEmployee.id);
-    });
-
-    it("returns only active users who track time", async () => {
-      api.mockResolvedValue([
-        pureAdmin,
-        teamLead,
-        employee,
-        assistant,
-        inactiveEmployee,
-      ]);
-      const result = await getUsersForReports(true, pureAdmin);
-      for (const user of result) {
-        expect(user.tracks_time).not.toBe(false);
-        expect(user.active).not.toBe(false);
-      }
+      expect(result).toEqual([]);
     });
   });
 
