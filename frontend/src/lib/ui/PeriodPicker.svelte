@@ -51,7 +51,7 @@
 </script>
 
 {#if mode === "month"}
-  <div class="period-picker">
+  <div class="period-picker period-picker-month">
     <div class="zf-nav-slider">
       <button
         type="button"
@@ -90,7 +90,7 @@
     </button>
   </div>
 {:else}
-  <div class="period-picker">
+  <div class="period-picker period-picker-range">
     <DateRangeFields
       bind:from
       bind:to
@@ -133,15 +133,25 @@
   }
 
   /* Mobile: the Reports toolbar puts the employee dropdown and this picker side
-     by side, and the picker is used ONLY there. `display: contents` dissolves
-     the picker's own box so its children — the ◀ month ▶ nav and the
-     "Custom range" toggle — become flex items of the parent `.reports-filter-pair`
-     directly. That lets the nav sit next to the employee dropdown while the
-     toggle (flex: 1 1 100%) wraps to a full-width line beneath both, instead of
-     being trapped in a picker column that forced the jumbled 2×2 layout.
-     Verified across 320–412px with a headless browser before shipping. */
+     by side, and the picker is used ONLY there. The two picker modes need
+     different treatment because the month nav is narrow enough to sit beside
+     the dropdown but the From/To pair is not. Verified across 320–412px with a
+     headless browser before shipping.
+
+     MONTH mode: `display: contents` dissolves the picker's box so its children —
+     the ◀ month ▶ nav and the "Custom range" toggle — become flex items of the
+     parent `.reports-filter-pair` directly. The nav then sits next to the
+     employee dropdown while the toggle (flex: 1 1 100%) wraps to a full-width
+     line beneath both, instead of being trapped in a picker column that forced
+     a jumbled 2×2 layout.
+
+     RANGE mode: the picker stays a normal box but is pushed onto its own
+     full-width row below the employee dropdown (flex: 1 1 100%), so "Mitarbeitende"
+     gets the first row to itself and the From/To fields sit on the row beneath
+     it — kept two-up (grid 1fr 1fr) rather than the global mobile single-column
+     collapse, since the full-width row has room for both. */
   @media (max-width: 768px) {
-    .period-picker {
+    .period-picker-month {
       display: contents;
     }
 
@@ -154,6 +164,15 @@
       width: 130px;
       min-width: 90px;
       flex: 1 1 auto;
+    }
+
+    .period-picker-range {
+      flex: 1 1 100%;
+    }
+
+    .period-picker-range :global(.field-row) {
+      grid-template-columns: 1fr 1fr;
+      flex: 1 1 100%;
     }
 
     .period-mode-toggle {
