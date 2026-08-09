@@ -354,8 +354,14 @@
                 : "var(--success-text)"}
           >
             {#if reportData.flextimeBalance !== null}
-              {reportData.flextimeBalance >= 0 ? "+" : ""}{minToHM(
-                reportData.flextimeBalance,
+              <!-- Route the signed HH:MM balance through formatHours so it
+                   carries the hours unit ("Std.") like every other hour tile
+                   (dashboard overtime, logged hours). formatHours passes a
+                   pre-formatted string through untouched and just appends the
+                   unit. -->
+              {formatHours(
+                (reportData.flextimeBalance >= 0 ? "+" : "") +
+                  minToHM(reportData.flextimeBalance),
               )}
             {:else}
               –
