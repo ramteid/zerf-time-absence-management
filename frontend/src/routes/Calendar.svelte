@@ -337,31 +337,39 @@
     >
       {#each visibleEventCells as c (c.ds)}
         {@const evts = c.events}
-        <button
-          type="button"
-          class="cal-day"
-          class:has-events={evts.length > 0}
-          class:today={c.today}
-          class:weekend={c.weekend && !c.today}
-          class:other-month={c.other}
-          style:border-left={evts.length ? `3px solid ${evts[0].color}` : null}
-          on:click={() => clickDay(c)}
-          disabled={evts.length === 0}
-        >
-          <div class="cal-day-number tab-num">{c.d.getDate()}</div>
-          {#if evts.length}
-            <div class="cal-events">
-              {#each evts.slice(0, 3) as ev (ev.key)}
-                <div class="cal-event" style:background={ev.color}>
-                  {calendarEventTitle(ev)}
-                </div>
-              {/each}
-              {#if evts.length > 3}
-                <div class="cal-more">+{evts.length - 3}</div>
-              {/if}
-            </div>
-          {/if}
-        </button>
+        {#if c.weekend && evts.length === 0}
+          <!-- Keeps the grid slot so the shared 7-column grid stays aligned,
+               without showing a visible box for a weekend day with no
+               entries. Saturday and Sunday are hidden independently: one
+               can be shown while the other stays hidden in the same week. -->
+          <div class="cal-day-spacer" aria-hidden="true"></div>
+        {:else}
+          <button
+            type="button"
+            class="cal-day"
+            class:has-events={evts.length > 0}
+            class:today={c.today}
+            class:weekend={c.weekend && !c.today}
+            class:other-month={c.other}
+            style:border-left={evts.length ? `3px solid ${evts[0].color}` : null}
+            on:click={() => clickDay(c)}
+            disabled={evts.length === 0}
+          >
+            <div class="cal-day-number tab-num">{c.d.getDate()}</div>
+            {#if evts.length}
+              <div class="cal-events">
+                {#each evts.slice(0, 3) as ev (ev.key)}
+                  <div class="cal-event" style:background={ev.color}>
+                    {calendarEventTitle(ev)}
+                  </div>
+                {/each}
+                {#if evts.length > 3}
+                  <div class="cal-more">+{evts.length - 3}</div>
+                {/if}
+              </div>
+            {/if}
+          </button>
+        {/if}
       {/each}
     </div>
   </div>
